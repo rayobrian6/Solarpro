@@ -1,0 +1,192 @@
+# Database Table Evidence
+
+## Tables from SQL migrations
+
+- `acquisition_campaigns`
+- `admin_activity_log`
+- `admin_impersonation_tokens`
+- `auto_config_log`
+- `campaign_analytics`
+- `client_notes`
+- `clients`
+- `contractor_profiles`
+- `county_environmental_data`
+- `crew_members`
+- `distributor_prices`
+- `engineering_runs`
+- `enrichment_queue`
+- `feedback`
+- `hardware_components`
+- `inside`
+- `intake_events`
+- `intake_funnels`
+- `intelligence_observations`
+- `layouts`
+- `leads`
+- `mobile_sso_used_jtis`
+- `network_events`
+- `network_opportunities`
+- `opportunities`
+- `opportunity_assignments`
+- `opportunity_claims`
+- `opportunity_intelligence`
+- `opportunity_screening_queue`
+- `opportunity_sources`
+- `org_invites`
+- `organizations`
+- `password_reset_tokens`
+- `portal_otp_tokens`
+- `pricing_config`
+- `productions`
+- `project_files`
+- `project_hardware`
+- `project_homeowner_stage_history`
+- `project_micro_stages`
+- `project_physical_data`
+- `project_versions`
+- `projects`
+- `proposal_signatures`
+- `proposals`
+- `site_aliases`
+- `site_conditions`
+- `site_survey_files`
+- `site_surveys`
+- `solardog_conversations`
+- `solarpro_knowledge_items`
+- `state_nec_mapping`
+- `user_equipment_batteries`
+- `user_equipment_inverters`
+- `user_equipment_mounting`
+- `user_equipment_panels`
+- `users`
+- `utility_policies`
+- `webhook_deliveries`
+- `webhook_ingestion_log`
+
+## SQL route/source table references sample
+
+    243 users
+    210 projects
+    146 network_opportunities
+     70 project_files
+     60 proposals
+     52 IF
+     50 clients
+     40 enrichment_queue
+     33 utility_policies
+     31 SET
+     26 opportunity_intelligence
+     26 intake_events
+     25 opportunity_screening_queue
+     21 opportunity_assignments
+     19 layouts
+     19 information_schema
+     15 webhook_deliveries
+     15 opportunities
+     14 webhook_ingestion_log
+     14 leads
+     12 site_surveys
+     12 opportunity_sources
+     10 project_physical_data
+     10 productions
+     10 contractor_profiles
+      9 project_micro_stages
+      9 crews
+      9 acquisition_campaigns
+      8 solarpro_knowledge_items
+      8 password_reset_tokens
+      8 feedback
+      8 crew_members
+      7 solardog_conversations
+      7 project_tasks
+      7 project_homeowner_stage_history
+      7 engineering_reports
+      7 distributor_prices
+      7 command_center_actions
+      7 LATERAL
+      6 site_survey_files
+      6 project_versions
+      6 project_milestones
+      6 project_activity
+      6 opportunity_claims
+      5 organizations
+      5 org_invites
+      5 network_events
+      5 auto_config_log
+      4 pricing_config
+      4 portal_otp_tokens
+      4 intake_funnels
+      4 incentive_overrides
+      4 admin_impersonation_tokens
+      4 admin_activity_log
+      3 so
+      3 site_conditions
+      3 site_aliases
+      3 pg_catalog
+      3 hardware_components
+      3 existing
+      3 engineering_runs
+      3 combined
+      3 client_notes
+      3 bills
+      3 RAFTER
+      2 strongback
+      2 pylon
+      2 project_schedule
+      2 pg_constraint
+      2 mobile_sso_used_jtis
+      2 intelligence_observations
+      2 inserted
+      2 assignment_summary
+      2 RETURNING
+      2 COMBINER
+      2 CANONICAL
+      2 ASCE
+      1 with
+      1 warning
+      1 user_equipment_panels
+      1 unnest
+      1 to
+      1 this
+      1 surveys
+      1 survey_photos
+      1 sun
+      1 statement
+      1 proposal_signatures
+      1 project_roof_faces
+      1 project_productions
+      1 project_layouts
+      1 project_cost_estimates
+      1 pg_stat_user_tables
+      1 pg_stat_user_indexes
+      1 pg_policies
+      1 pg_namespace
+      1 pg_indexes
+      1 pg_class
+      1 optimizer
+      1 opportunity_rows
+      1 must
+      1 micro
+      1 its
+      1 is
+      1 in
+      1 fired
+      1 filtered
+      1 fails
+      1 failed
+      1 event_summary
+      1 event_rows
+      1 enterprise_leads
+      1 county_environmental_data
+      1 branding_settings
+      1 brand
+      1 at
+      1 aliases
+      1 WHERE
+      1 THE
+      1 STRING
+      1 PHYSICAL
+      1 PAGE
+      1 ON
+      1 DRAWINGS
+      1 COURSE

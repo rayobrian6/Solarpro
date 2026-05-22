@@ -515,10 +515,12 @@ function scoreIntent(input: OpportunityInput): DimensionScore {
   // Financing preference signal (bonus)
   if (input.financing_preference != null) {
     const prefScores: Record<string, number> = {
-      cash:    92,
-      loan:    80,
-      lease:   65,
-      ppa:     60,
+      cash: 92,
+      loan: 80,
+      financing: 80,
+      lease: 65,
+      ppa: 60,
+      ppa_or_lease: 62,
       unknown: 55,
     }
     const s = prefScores[input.financing_preference.toLowerCase()] ?? 55

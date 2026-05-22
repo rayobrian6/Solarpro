@@ -7,7 +7,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { getDbReady, handleRouteDbError, isValidUUID } from "@/lib/db-neon";
 import { checkRateLimit, getClientIp } from "@/lib/rateLimiter";
-import { logMarketplaceGate } from "@/lib/network/marketplaceReleaseGate";
+import { evaluateContractorEligibility } from "@/lib/network/contractorEligibility";
+import { logNetworkEvent } from "@/lib/network/attributionTracker";
 
 type Params = { params: { id: string } };
 
@@ -42,84 +43,163 @@ export async function POST(req: NextRequest, { params }: Params) {
     `;
 
     if (!oppRows.length) {
-      const assignmentRows = await sql`
+      const networkRows = await sql`
         SELECT
-          oa.id AS assignment_id,
-          oa.status AS assignment_status,
-          no.id AS opportunity_id,
-          no.status AS opportunity_status,
-          no.asking_price,
-          no.intake_metadata,
-          no.raw_payload,
-          no.screening_status,
-          osq.auto_decision,
-          osq.override_decision
-        FROM opportunity_assignments oa
-        JOIN network_opportunities no ON no.id = oa.opportunity_id
-        LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id
+          no.id,
+          no.status,
+          COALESCE(no.marketplace_status, 'live') AS marketplace_status,
+          no.claim_mode,
+          no.max_claims,
+          no.claim_count,
+          no.asking_price
+        FROM network_opportunities no
         WHERE no.id = ${id}
-          AND oa.contractor_id = ${user.id}
-          AND oa.status IN ('offered','viewed')
-          AND no.status IN ('live','claimed')
-          AND (oa.offer_expires_at IS NULL OR oa.offer_expires_at > NOW())
         LIMIT 1
       `;
 
-      if (!assignmentRows.length) {
+      if (!networkRows.length) {
         return NextResponse.json(
           { error: "Opportunity not found" },
           { status: 404 },
         );
       }
 
-      const assignment = assignmentRows[0] as Record<string, unknown>;
-      const claimGate = logMarketplaceGate(
-        "[CONTRACTOR CLAIM FLOW]",
-        {
-          id: assignment.opportunity_id,
-          status: assignment.opportunity_status,
-          screening_status: assignment.screening_status,
-          auto_decision: assignment.auto_decision,
-          override_decision: assignment.override_decision,
-          intake_metadata: assignment.intake_metadata,
-          raw_payload: assignment.raw_payload,
-        },
-        "contractor_claim",
-      );
-      if (!claimGate.ok) {
+      const networkOpportunity = networkRows[0] as Record<string, unknown>;
+      const eligibility = await evaluateContractorEligibility({
+        sql,
+        contractorId: user.id,
+        opportunityId: id,
+      });
+
+      if (!eligibility.eligible) {
+        await logNetworkEvent({
+          event_type: "assignment.claim_blocked",
+          event_category: "assignment",
+          opportunity_id: id,
+          contractor_id: user.id,
+          data: { source: "contractor_claim_flow_v1", eligibility },
+          triggered_by: "contractor",
+        });
         return NextResponse.json(
           {
-            error: "Opportunity is not approved for marketplace claim.",
-            missing: claimGate.missing,
+            error: "Contractor is not eligible to claim this marketplace opportunity.",
+            eligibility,
           },
           { status: 409 },
         );
       }
-      const updated = await sql`
+
+      const claimMode = typeof networkOpportunity.claim_mode === "string" && networkOpportunity.claim_mode === "shared" ? "shared" : "exclusive";
+      const maxClaims = Math.max(1, Math.floor(Number(networkOpportunity.max_claims ?? 1)));
+
+      let updated = await sql`
         UPDATE opportunity_assignments
            SET status = 'claimed',
                claimed_at = NOW(),
-               claim_amount = ${assignment.asking_price as number | null},
+               claim_amount = ${networkOpportunity.asking_price as number | null},
                updated_at = NOW()
-         WHERE id = ${assignment.assignment_id as string}
+         WHERE opportunity_id = ${id}
            AND contractor_id = ${user.id}
            AND status IN ('offered','viewed')
+           AND (offer_expires_at IS NULL OR offer_expires_at > NOW())
         RETURNING *
       `;
 
       if (!updated.length) {
-        return NextResponse.json(
-          { error: "This opportunity is no longer available." },
-          { status: 409 },
-        );
+        try {
+          updated = await sql`
+            INSERT INTO opportunity_assignments (
+              opportunity_id,
+              contractor_id,
+              status,
+              assignment_type,
+              assignment_rank,
+              match_score,
+              match_factors,
+              offered_at,
+              claimed_at,
+              claim_amount
+            ) VALUES (
+              ${id},
+              ${user.id},
+              'claimed',
+              'marketplace',
+              NULL,
+              NULL,
+              ${JSON.stringify({ source: "contractor_claim_flow_v1", eligibility })},
+              NOW(),
+              NOW(),
+              ${networkOpportunity.asking_price as number | null}
+            )
+            ON CONFLICT DO NOTHING
+            RETURNING *
+          `;
+        } catch (insertErr: unknown) {
+          const msg = (insertErr as Error)?.message ?? "";
+          if (msg.includes("unique") || msg.includes("duplicate") || msg.includes("23505")) {
+            return NextResponse.json({ error: "This marketplace opportunity was just claimed." }, { status: 409 });
+          }
+          throw insertErr;
+        }
       }
 
-      await sql`
+      if (!updated.length) {
+        return NextResponse.json({ error: "This opportunity is no longer available." }, { status: 409 });
+      }
+
+      const updatedOpportunity = await sql`
         UPDATE network_opportunities
-           SET status = 'claimed', claimed_at = NOW()
+           SET status = CASE WHEN ${claimMode} = 'exclusive' THEN 'claimed' ELSE status END,
+               marketplace_status = CASE WHEN ${claimMode} = 'exclusive' THEN 'claimed' ELSE marketplace_status END,
+               claimed_at = COALESCE(claimed_at, NOW()),
+               claim_count = LEAST(COALESCE(claim_count, 0) + 1, ${maxClaims}),
+               updated_at = NOW()
          WHERE id = ${id}
            AND status = 'live'
+           AND COALESCE(marketplace_status, 'live') = 'live'
+           AND (
+             (${claimMode} = 'exclusive' AND COALESCE(claim_count, 0) = 0)
+             OR (${claimMode} = 'shared' AND COALESCE(claim_count, 0) < ${maxClaims})
+           )
+        RETURNING id, status, marketplace_status, claim_count
       `;
+
+      if (!updatedOpportunity.length) {
+        await logNetworkEvent({
+          event_type: "assignment.claim_blocked",
+          event_category: "assignment",
+          opportunity_id: id,
+          assignment_id: (updated[0] as Record<string, unknown>).id as string,
+          contractor_id: user.id,
+          data: {
+            source: "contractor_claim_flow_v1",
+            reason: "claim_capacity_or_status_changed",
+            claim_mode: claimMode,
+            max_claims: maxClaims,
+            eligibility,
+          },
+          triggered_by: "contractor",
+        });
+        await sql`
+          UPDATE opportunity_assignments
+             SET status = 'released', updated_at = NOW()
+           WHERE id = ${(updated[0] as Record<string, unknown>).id as string}
+             AND status = 'claimed'
+        `;
+        return NextResponse.json({ error: "This opportunity is no longer available." }, { status: 409 });
+      }
+
+      await logNetworkEvent({
+        event_type: "assignment.claimed",
+        event_category: "assignment",
+        opportunity_id: id,
+        assignment_id: (updated[0] as Record<string, unknown>).id as string,
+        contractor_id: user.id,
+        from_status: "live",
+        to_status: claimMode === "exclusive" ? "claimed" : "live",
+        data: { source: "contractor_claim_flow_v1", claim_mode: claimMode, max_claims: maxClaims, eligibility },
+        triggered_by: "contractor",
+      });
 
       const fullOpp = await sql`
         SELECT
@@ -162,6 +242,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         JOIN opportunity_assignments oa
           ON oa.opportunity_id = no.id
          AND oa.contractor_id = ${user.id}
+         AND oa.status IN ('claimed','contacted','appointment','proposal','won')
         WHERE no.id = ${id}
         LIMIT 1
       `;
@@ -171,8 +252,10 @@ export async function POST(req: NextRequest, { params }: Params) {
           success: true,
           claim: updated[0],
           opportunity: fullOpp[0],
-          message:
-            "You have exclusively claimed this assigned SolarPro Network opportunity. The homeowner's full address is now visible.",
+          eligibility,
+          message: claimMode === "exclusive"
+            ? "You have exclusively claimed this SolarPro Network opportunity. The homeowner's full address is now visible."
+            : "You have claimed this shared SolarPro Network opportunity. The homeowner's full address is now visible.",
         },
         { status: 201 },
       );

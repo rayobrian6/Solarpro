@@ -1,0 +1,5885 @@
+{
+  "pages": [
+    {
+      "route": "/",
+      "file": "app/page.tsx",
+      "domain": "general/platform",
+      "fetches": [],
+      "imports": [
+        "@/lib/pricing.config"
+      ]
+    },
+    {
+      "route": "/account/billing",
+      "file": "app/account/billing/page.tsx",
+      "domain": "intake/bill/lead",
+      "fetches": [
+        "/api/stripe/customer-status",
+        "/api/stripe/portal"
+      ],
+      "imports": [
+        "@/components/ui/AppShell",
+        "@/contexts/UserContext"
+      ]
+    },
+    {
+      "route": "/admin",
+      "file": "app/admin/page.tsx",
+      "domain": "general/platform",
+      "fetches": [
+        "/api/admin/stats"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/admin/activity-log",
+      "file": "app/admin/activity-log/page.tsx",
+      "domain": "admin/system",
+      "fetches": [
+        "/api/admin/activity-log?${params.toString()}"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/admin/companies",
+      "file": "app/admin/companies/page.tsx",
+      "domain": "general/platform",
+      "fetches": [
+        "/api/admin/companies",
+        "/api/admin/companies?company=${encodeURIComponent(companyName)}",
+        "/api/admin/users?limit=500"
+      ],
+      "imports": [
+        "@/contexts/UserContext"
+      ]
+    },
+    {
+      "route": "/admin/database",
+      "file": "app/admin/database/page.tsx",
+      "domain": "general/platform",
+      "fetches": [
+        "/api/admin/health",
+        "/api/migrate"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/admin/distributor-prices",
+      "file": "app/admin/distributor-prices/page.tsx",
+      "domain": "general/platform",
+      "fetches": [
+        "/api/admin/distributor-prices",
+        "/api/admin/distributor-prices?id=${id}"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/admin/engineering",
+      "file": "app/admin/engineering/page.tsx",
+      "domain": "engineering/equipment",
+      "fetches": [
+        "/api/admin/stats"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/admin/feedback",
+      "file": "app/admin/feedback/page.tsx",
+      "domain": "admin/system",
+      "fetches": [
+        "/api/admin/feedback",
+        "/api/admin/feedback?${params}"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/admin/files",
+      "file": "app/admin/files/page.tsx",
+      "domain": "core-project-docs",
+      "fetches": [
+        "/api/admin/files?id=${id}",
+        "/api/admin/files?page=${page}&limit=${LIMIT}&fileType=${fileType}"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/admin/hardware",
+      "file": "app/admin/hardware/page.tsx",
+      "domain": "engineering/equipment",
+      "fetches": [
+        "/api/equipment/save",
+        "/api/hardware"
+      ],
+      "imports": [
+        "@/types"
+      ]
+    },
+    {
+      "route": "/admin/health",
+      "file": "app/admin/health/page.tsx",
+      "domain": "admin/system",
+      "fetches": [
+        "/api/admin/health"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/admin/incentives",
+      "file": "app/admin/incentives/page.tsx",
+      "domain": "general/platform",
+      "fetches": [
+        "/api/admin/incentives",
+        "/api/admin/incentives?id=${id}"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/admin/leads",
+      "file": "app/admin/leads/page.tsx",
+      "domain": "intake/bill/lead",
+      "fetches": [
+        "/api/admin/leads",
+        "/api/admin/leads?search=${encodeURIComponent(search)}&status=${status}&page=${page}&limit=${LIMIT}"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/admin/leads/[id]",
+      "file": "app/admin/leads/[id]/page.tsx",
+      "domain": "intake/bill/lead",
+      "fetches": [
+        "/api/admin/leads/${id}",
+        "/api/admin/leads/${id}/assign-user",
+        "/api/admin/leads/${id}/convert",
+        "/api/admin/staff"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/admin/network",
+      "file": "app/admin/network/page.tsx",
+      "domain": "marketplace/network",
+      "fetches": [
+        "/api/admin/network/analytics?days=30",
+        "/api/admin/network/campaigns",
+        "/api/admin/network/campaigns?${params}",
+        "/api/admin/network/contractor-match/${oppId}",
+        "/api/admin/network/enrichment",
+        "/api/admin/network/funnels?include_inactive=true",
+        "/api/admin/network/health",
+        "/api/admin/network/intake",
+        "/api/admin/network/intake/bill-intelligence",
+        "/api/admin/network/intake?${params}",
+        "/api/admin/network/marketplace",
+        "/api/admin/network/marketplace?limit=50",
+        "/api/admin/network/opportunities?limit=50&sort=created_at&dir=desc",
+        "/api/admin/network/screening",
+        "/api/admin/network/screening?limit=15",
+        "/api/admin/network/simulator",
+        "/api/admin/network/webhooks",
+        "/api/admin/network/webhooks?${params}",
+        "/api/auth/me"
+      ],
+      "imports": [
+        "@/lib/intake/operationalQueues",
+        "@/lib/network/opportunityEnrichmentDisplay"
+      ]
+    },
+    {
+      "route": "/admin/network/intelligence",
+      "file": "app/admin/network/intelligence/page.tsx",
+      "domain": "marketplace/network",
+      "fetches": [],
+      "imports": [
+        "./IntelligenceRunnerPanel",
+        "@/lib/adminAuth",
+        "@/lib/intelligence/registry"
+      ]
+    },
+    {
+      "route": "/admin/portal-dashboard",
+      "file": "app/admin/portal-dashboard/page.tsx",
+      "domain": "homeowner-portal",
+      "fetches": [
+        "/api/admin/projects/${projectId}",
+        "/api/admin/projects?limit=100"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/admin/pricing",
+      "file": "app/admin/pricing/page.tsx",
+      "domain": "general/platform",
+      "fetches": [
+        "/api/pricing"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/admin/projects",
+      "file": "app/admin/projects/page.tsx",
+      "domain": "core-project-docs",
+      "fetches": [
+        "/api/admin/projects",
+        "/api/admin/projects?search=${encodeURIComponent(search)}&page=${page}&limit=${LIMIT}&origin=${originFilter}"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/admin/projects/[id]",
+      "file": "app/admin/projects/[id]/page.tsx",
+      "domain": "core-project-docs",
+      "fetches": [
+        "/api/activity?project_id=${id}&limit=20",
+        "/api/admin/projects/${id}",
+        "/api/admin/projects/${project.id}/send-portal-invite"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/admin/projects/[id]/portal-preview",
+      "file": "app/admin/projects/[id]/portal-preview/page.tsx",
+      "domain": "homeowner-portal",
+      "fetches": [
+        "/api/admin/projects/${id}"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/admin/roadmap",
+      "file": "app/admin/roadmap/page.tsx",
+      "domain": "general/platform",
+      "fetches": [],
+      "imports": [
+        "@/lib/roadmapRE26"
+      ]
+    },
+    {
+      "route": "/admin/sld-emblems",
+      "file": "app/admin/sld-emblems/page.tsx",
+      "domain": "engineering/equipment",
+      "fetches": [],
+      "imports": [
+        "@/lib/sld-brand-emblems",
+        "@/lib/sld-device-illustrations",
+        "@/lib/sld-symbols",
+        "@/lib/system/brandProfiles/resolveBrandEquipment"
+      ]
+    },
+    {
+      "route": "/admin/system-tools",
+      "file": "app/admin/system-tools/page.tsx",
+      "domain": "admin/system",
+      "fetches": [
+        "/api/admin/system-tools"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/admin/topography",
+      "file": "app/admin/topography/page.tsx",
+      "domain": "3d/topography/maps",
+      "fetches": [
+        "/api/admin/survey-reassign",
+        "/api/debug/force-ingest",
+        "/api/topography/state?projectId=${encodeURIComponent(pid)}"
+      ],
+      "imports": [
+        "@/lib/topography/getTopographyState"
+      ]
+    },
+    {
+      "route": "/admin/users",
+      "file": "app/admin/users/page.tsx",
+      "domain": "general/platform",
+      "fetches": [
+        "/api/admin/impersonate",
+        "/api/admin/users",
+        "/api/admin/users?id=${userId}",
+        "/api/admin/users?search=${encodeURIComponent(search)}&page=${page}&limit=${LIMIT}"
+      ],
+      "imports": [
+        "@/contexts/UserContext"
+      ]
+    },
+    {
+      "route": "/admin/utilities",
+      "file": "app/admin/utilities/page.tsx",
+      "domain": "general/platform",
+      "fetches": [
+        "/api/admin/utilities"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/analytics",
+      "file": "app/analytics/page.tsx",
+      "domain": "general/platform",
+      "fetches": [
+        "/api/clients",
+        "/api/projects"
+      ],
+      "imports": [
+        "@/components/ui/AppShell",
+        "@/types"
+      ]
+    },
+    {
+      "route": "/auth/forgot-password",
+      "file": "app/auth/forgot-password/page.tsx",
+      "domain": "auth",
+      "fetches": [
+        "/api/auth/request-password-reset"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/auth/login",
+      "file": "app/auth/login/page.tsx",
+      "domain": "auth",
+      "fetches": [
+        "/api/auth/login",
+        "/api/debug/auth"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/auth/register",
+      "file": "app/auth/register/page.tsx",
+      "domain": "auth",
+      "fetches": [
+        "/api/auth/register"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/auth/reset-password",
+      "file": "app/auth/reset-password/page.tsx",
+      "domain": "auth",
+      "fetches": [
+        "/api/auth/reset-password",
+        "/api/auth/reset-password?token=${encodeURIComponent(token)}"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/auth/subscribe",
+      "file": "app/auth/subscribe/page.tsx",
+      "domain": "auth",
+      "fetches": [
+        "/api/stripe/checkout"
+      ],
+      "imports": [
+        "@/lib/pricing.config"
+      ]
+    },
+    {
+      "route": "/clients",
+      "file": "app/clients/page.tsx",
+      "domain": "core-project-docs",
+      "fetches": [],
+      "imports": [
+        "@/components/ui/AppShell",
+        "@/components/ui/PageHeader",
+        "@/components/ui/Toast",
+        "@/components/ui/UpgradeModal",
+        "@/contexts/UserContext",
+        "@/hooks/useSubscription",
+        "@/lib/permissions",
+        "@/store/appStore",
+        "@/types"
+      ]
+    },
+    {
+      "route": "/clients/[id]",
+      "file": "app/clients/[id]/page.tsx",
+      "domain": "core-project-docs",
+      "fetches": [
+        "/api/clients/${clientId}/notes",
+        "/api/clients/${clientId}/notes?noteId=${noteId}",
+        "/api/clients/${clientId}/proposals",
+        "/api/clients/${clientId}/site-surveys",
+        "/api/clients/${id}"
+      ],
+      "imports": [
+        "@/components/ui/AppShell",
+        "@/lib/db-neon",
+        "@/store/appStore",
+        "@/types"
+      ]
+    },
+    {
+      "route": "/clients/[id]/edit",
+      "file": "app/clients/[id]/edit/page.tsx",
+      "domain": "core-project-docs",
+      "fetches": [
+        "/api/clients/${id}",
+        "/api/geocode"
+      ],
+      "imports": [
+        "@/components/ui/AddressAutocomplete",
+        "@/components/ui/AppShell",
+        "@/store/appStore",
+        "@/types"
+      ]
+    },
+    {
+      "route": "/clients/new",
+      "file": "app/clients/new/page.tsx",
+      "domain": "core-project-docs",
+      "fetches": [
+        "/api/geocode?q=${encodeURIComponent(query)}&mode=autocomplete",
+        "/api/geocode?q=${encodeURIComponent(query)}&mode=search"
+      ],
+      "imports": [
+        "@/components/ui/AppShell",
+        "@/components/ui/Toast",
+        "@/store/appStore"
+      ]
+    },
+    {
+      "route": "/dashboard",
+      "file": "app/dashboard/page.tsx",
+      "domain": "general/platform",
+      "fetches": [
+        "/api/activity",
+        "/api/commands/${id}",
+        "/api/commands/generate",
+        "/api/commands?status=pending&limit=10",
+        "/api/operations/projects",
+        "/api/projects/${p.id}",
+        "/api/projects/${projectId}/operations",
+        "/api/projects/update-status",
+        "/api/schedule?days=14&limit=8"
+      ],
+      "imports": [
+        "@/components/commands/EngineeringReviewModal",
+        "@/components/commands/FollowUpModal",
+        "@/components/commands/ScheduleInstallModal",
+        "@/components/deals/DealDecisionModal",
+        "@/components/onboarding/BillUploadModal",
+        "@/components/ui/AppShell",
+        "@/contexts/UserContext",
+        "@/lib/commands/types",
+        "@/lib/data/getPipelineMetrics",
+        "@/lib/operations/getNextStep",
+        "@/lib/operations/pipeline",
+        "@/lib/utils/safeArray",
+        "@/store/appStore",
+        "@/types"
+      ]
+    },
+    {
+      "route": "/debug/project",
+      "file": "app/debug/project/page.tsx",
+      "domain": "core-project-docs",
+      "fetches": [
+        "/api/debug/layout?projectId=${pid}",
+        "/api/engineering/sync-pipeline?projectId=${pid}",
+        "/api/projects/${pid}/layout"
+      ],
+      "imports": [
+        "@/lib/version"
+      ]
+    },
+    {
+      "route": "/design",
+      "file": "app/design/page.tsx",
+      "domain": "general/platform",
+      "fetches": [
+        "/api/geocode?q=${encodeURIComponent(target)}&mode=autocomplete",
+        "/api/maps-session"
+      ],
+      "imports": [
+        "@/components/design/DesignStudio",
+        "@/components/ui/AddressAutocomplete",
+        "@/components/ui/AppShell",
+        "@/store/appStore",
+        "@/types"
+      ]
+    },
+    {
+      "route": "/engineering",
+      "file": "app/engineering/page.tsx",
+      "domain": "engineering/equipment",
+      "fetches": [
+        "/api/debug/project?projectId=${currentProjectId}",
+        "/api/engineering/bom",
+        "/api/engineering/calculate",
+        "/api/engineering/enphase",
+        "/api/engineering/ironridge",
+        "/api/engineering/permit?format=html",
+        "/api/engineering/permit?format=pdf",
+        "/api/engineering/plan-set",
+        "/api/engineering/pvwatts",
+        "/api/engineering/rules",
+        "/api/engineering/run-from-file?fileId=${fileId}",
+        "/api/engineering/save-config",
+        "/api/engineering/save-outputs",
+        "/api/engineering/sld",
+        "/api/engineering/sld/pdf",
+        "/api/engineering/structural-v2",
+        "/api/engineering/sync-pipeline?projectId=${currentProjectId}",
+        "/api/engineering/topology",
+        "/api/pipeline/run",
+        "/api/project-files",
+        "/api/project-files/download?id=${data.fileId}",
+        "/api/project-files?id=${fileId}",
+        "/api/project-files?projectId=${currentProjectId}",
+        "/api/projects",
+        "/api/projects/${currentProjectId}",
+        "/api/projects/${currentProjectId}/layout",
+        "/api/projects/${projectId}",
+        "/api/projects/${projectId}/layout"
+      ],
+      "imports": [
+        "@/components/engineering/ControlModeBanner",
+        "@/components/engineering/EcosystemPicker",
+        "@/components/engineering/PanelCompatibilityBanner",
+        "@/components/engineering/SizingRecommendation",
+        "@/components/engineering/SuggestionCard",
+        "@/components/engineering/ValidationPanel",
+        "@/components/ui/AppShell",
+        "@/components/ui/PlanGate",
+        "@/hooks/useSubscription",
+        "@/lib/computed-plan",
+        "@/lib/computed-system",
+        "@/lib/equipment-db",
+        "@/lib/jurisdictions/ahj",
+        "@/lib/jurisdictions/ahj-national",
+        "@/lib/mounting-hardware-db",
+        "@/lib/proposalTruthEngine",
+        "@/lib/solardog/controlMode",
+        "@/lib/system/brandProfiles",
+        "@/lib/system/buildInverterConfig",
+        "@/lib/system/calcDcAcRatio",
+        "@/lib/system/dcAcConstants",
+        "@/lib/system/electricalNormalize",
+        "@/lib/system/fixEngine",
+        "@/lib/system/normalizedInverter",
+        "@/lib/system/panelCountSource"
+      ]
+    },
+    {
+      "route": "/engineering/[projectId]",
+      "file": "app/engineering/[projectId]/page.tsx",
+      "domain": "engineering/equipment",
+      "fetches": [],
+      "imports": []
+    },
+    {
+      "route": "/engineering/assist",
+      "file": "app/engineering/assist/page.tsx",
+      "domain": "engineering/equipment",
+      "fetches": [],
+      "imports": []
+    },
+    {
+      "route": "/engineering/permit",
+      "file": "app/engineering/permit/page.tsx",
+      "domain": "engineering/equipment",
+      "fetches": [
+        "/api/engineering/latest-run?projectId=${projectId}",
+        "/api/engineering/permit?projectId=${projectId}&format=pdf"
+      ],
+      "imports": [
+        "@/components/ui/AppShell",
+        "@/lib/permit/types"
+      ]
+    },
+    {
+      "route": "/enterprise",
+      "file": "app/enterprise/page.tsx",
+      "domain": "general/platform",
+      "fetches": [
+        "/api/enterprise/contact"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/free-solar-estimate",
+      "file": "app/free-solar-estimate/page.tsx",
+      "domain": "general/platform",
+      "fetches": [
+        "/api/intake/homeowner",
+        "/api/intake/homeowner/qualification"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/get-a-quote",
+      "file": "app/get-a-quote/page.tsx",
+      "domain": "general/platform",
+      "fetches": [
+        "/api/leads/public"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/hardware",
+      "file": "app/hardware/page.tsx",
+      "domain": "engineering/equipment",
+      "fetches": [],
+      "imports": [
+        "@/app/admin/hardware/page"
+      ]
+    },
+    {
+      "route": "/mobile-login",
+      "file": "app/mobile-login/page.tsx",
+      "domain": "survey/mobile",
+      "fetches": [],
+      "imports": []
+    },
+    {
+      "route": "/network",
+      "file": "app/network/page.tsx",
+      "domain": "marketplace/network",
+      "fetches": [
+        "/api/network/contractor-profile",
+        "/api/network/my-claims",
+        "/api/network/my-opportunities",
+        "/api/network/opportunities/${claimTarget}/claim",
+        "/api/network/opportunities?${params}"
+      ],
+      "imports": [
+        "@/components/ui/AppShell",
+        "@/lib/network/opportunityEnrichmentDisplay"
+      ]
+    },
+    {
+      "route": "/onboarding",
+      "file": "app/onboarding/page.tsx",
+      "domain": "general/platform",
+      "fetches": [
+        "/api/auth/me",
+        "/api/settings/branding"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/operations",
+      "file": "app/operations/page.tsx",
+      "domain": "general/platform",
+      "fetches": [],
+      "imports": []
+    },
+    {
+      "route": "/portal",
+      "file": "app/portal/page.tsx",
+      "domain": "homeowner-portal",
+      "fetches": [],
+      "imports": []
+    },
+    {
+      "route": "/portal/dashboard",
+      "file": "app/portal/dashboard/page.tsx",
+      "domain": "homeowner-portal",
+      "fetches": [
+        "/api/portal/bill-upload",
+        "/api/portal/dashboard",
+        "/api/portal/logout"
+      ],
+      "imports": [
+        "@/lib/utilityInterconnection"
+      ]
+    },
+    {
+      "route": "/portal/login",
+      "file": "app/portal/login/page.tsx",
+      "domain": "homeowner-portal",
+      "fetches": [
+        "/api/portal/dashboard",
+        "/api/portal/login",
+        "/api/portal/verify-otp"
+      ],
+      "imports": []
+    },
+    {
+      "route": "/pricing",
+      "file": "app/pricing/page.tsx",
+      "domain": "general/platform",
+      "fetches": [],
+      "imports": [
+        "@/app/admin/pricing/page"
+      ]
+    },
+    {
+      "route": "/projects",
+      "file": "app/projects/page.tsx",
+      "domain": "core-project-docs",
+      "fetches": [
+        "/api/projects",
+        "/api/projects/${id}",
+        "/api/projects/bulk-delete"
+      ],
+      "imports": [
+        "@/components/ui/AppShell",
+        "@/components/ui/PageHeader",
+        "@/components/ui/UpgradeModal",
+        "@/contexts/UserContext",
+        "@/hooks/useSubscription",
+        "@/lib/permissions",
+        "@/store/appStore",
+        "@/types"
+      ]
+    },
+    {
+      "route": "/projects/[id]",
+      "file": "app/projects/[id]/page.tsx",
+      "domain": "core-project-docs",
+      "fetches": [
+        "/api/clients/${project.clientId}",
+        "/api/network/opportunities",
+        "/api/projects/${project.id}",
+        "/api/projects/${project.id}/repair-system-type"
+      ],
+      "imports": [
+        "@/components/engineering/EngineeringTab",
+        "@/components/onboarding/BillUploadFlow",
+        "@/components/project/BillTab",
+        "@/components/project/DesignTab",
+        "@/components/project/FieldSurveyCard",
+        "@/components/project/FieldSurveyPanel",
+        "@/components/project/OperationsTab",
+        "@/components/project/ProposalTab",
+        "@/components/project/SystemSizeTab",
+        "@/components/project/TutorialPanel",
+        "@/components/ui/AppShell",
+        "@/store/appStore",
+        "@/types"
+      ]
+    },
+    {
+      "route": "/projects/[id]/survey/[surveyId]",
+      "file": "app/projects/[id]/survey/[surveyId]/page.tsx",
+      "domain": "survey/mobile",
+      "fetches": [
+        "/api/site-surveys/${surveyId}"
+      ],
+      "imports": [
+        "@/components/ui/AppShell",
+        "@/lib/db-neon",
+        "@/lib/survey/v2/types"
+      ]
+    },
+    {
+      "route": "/projects/new",
+      "file": "app/projects/new/page.tsx",
+      "domain": "core-project-docs",
+      "fetches": [
+        "/api/geocode",
+        "/api/utility-detect"
+      ],
+      "imports": [
+        "@/components/onboarding/BillUploadFlow",
+        "@/components/ui/AddressAutocomplete",
+        "@/components/ui/AppShell",
+        "@/components/ui/PageHeader",
+        "@/components/ui/Toast",
+        "@/store/appStore",
+        "@/types"
+      ]
+    },
+    {
+      "route": "/proposals",
+      "file": "app/proposals/page.tsx",
+      "domain": "core-project-docs",
+      "fetches": [
+        "/api/pricing",
+        "/api/projects/${activeProposal.projectId}",
+        "/api/projects/${projectId}",
+        "/api/projects/${proposal.projectId}",
+        "/api/proposals",
+        "/api/proposals/${ids[0]}",
+        "/api/proposals/${id}",
+        "/api/proposals/${proposal.id}",
+        "/api/proposals/${proposal.id}/send-email",
+        "/api/proposals/${proposal.id}/share",
+        "/api/proposals/bulk",
+        "/api/proposals?projectId=${projectId}",
+        "/api/settings/branding"
+      ],
+      "imports": [
+        "@/components/proposal/UtilityCostProjectionChart",
+        "@/components/proposal/UtilityRateGraph",
+        "@/components/ui/AppShell",
+        "@/components/ui/UpgradeModal",
+        "@/hooks/useSubscription",
+        "@/lib/incentives/stateIncentives",
+        "@/lib/incentivesConfig",
+        "@/lib/multiArrayEngine",
+        "@/lib/proposal/buildCanonicalProposal",
+        "@/lib/proposal/deriveEcosystemSummary",
+        "@/lib/proposalSystemType",
+        "@/lib/proposalTruthEngine",
+        "@/lib/systemEquipmentResolver",
+        "@/types"
+      ]
+    },
+    {
+      "route": "/proposals/view/[id]",
+      "file": "app/proposals/view/[id]/page.tsx",
+      "domain": "core-project-docs",
+      "fetches": [
+        "/api/pricing",
+        "/api/proposals/${id}?token=${encodeURIComponent(token)}",
+        "/api/proposals/${id}?track=1",
+        "/api/settings/branding?proposalId=${id}"
+      ],
+      "imports": [
+        "@/components/SignatureModal",
+        "@/components/proposal/UtilityCostProjectionChart",
+        "@/components/proposal/UtilityRateGraph",
+        "@/lib/incentives/stateIncentives",
+        "@/lib/incentivesConfig",
+        "@/lib/multiArrayEngine",
+        "@/lib/proposal/buildCanonicalProposal",
+        "@/lib/proposal/deriveEcosystemSummary",
+        "@/lib/proposalSystemType",
+        "@/lib/proposalTruthEngine",
+        "@/lib/systemEquipmentResolver",
+        "@/lib/utilityInterconnection",
+        "@/types"
+      ]
+    },
+    {
+      "route": "/settings",
+      "file": "app/settings/page.tsx",
+      "domain": "general/platform",
+      "fetches": [
+        "/api/migrate",
+        "/api/settings/branding",
+        "/api/settings/logo",
+        "/api/settings/notifications",
+        "/api/settings/profile",
+        "/api/stripe/portal"
+      ],
+      "imports": [
+        "@/components/settings/CrewMembersPanel",
+        "@/components/settings/OrganizationPanel",
+        "@/components/ui/AppShell",
+        "@/components/ui/PageHeader",
+        "@/contexts/ThemeContext",
+        "@/contexts/UserContext",
+        "@/lib/permissions"
+      ]
+    },
+    {
+      "route": "/subscribe",
+      "file": "app/subscribe/page.tsx",
+      "domain": "general/platform",
+      "fetches": [
+        "/api/auth/me",
+        "/api/stripe/checkout"
+      ],
+      "imports": [
+        "@/lib/pricing.config"
+      ]
+    },
+    {
+      "route": "/survey/[token]",
+      "file": "app/survey/[token]/page.tsx",
+      "domain": "survey/mobile",
+      "fetches": [
+        "/api/survey/lookup-data?token=${encodeURIComponent(token)}",
+        "/api/survey/submit"
+      ],
+      "imports": [
+        "../../../components/survey/StepElectrical",
+        "../../../components/survey/StepObstructions",
+        "../../../components/survey/StepPhotos",
+        "../../../components/survey/StepReview",
+        "../../../components/survey/StepRoof",
+        "../../../components/survey/StepSiteOverview",
+        "../../../components/survey/SurveyShell",
+        "../../../lib/survey/v2/defaults",
+        "../../../lib/survey/v2/types"
+      ]
+    },
+    {
+      "route": "/terms",
+      "file": "app/terms/page.tsx",
+      "domain": "general/platform",
+      "fetches": [],
+      "imports": []
+    }
+  ],
+  "apis": [
+    {
+      "route": "/api/activity",
+      "file": "app/api/activity/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "project_activity",
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/activity-log",
+      "file": "app/api/admin/activity-log/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "admin_activity_log",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/companies",
+      "file": "app/api/admin/companies/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET",
+        "PATCH"
+      ],
+      "tables": [
+        "projects",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminActivityLog",
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/debug",
+      "file": "app/api/admin/debug/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/auth",
+        "@/lib/security"
+      ],
+      "externalHints": []
+    },
+    {
+      "route": "/api/admin/debug-role",
+      "file": "app/api/admin/debug-role/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/auth",
+        "@/lib/security"
+      ],
+      "externalHints": []
+    },
+    {
+      "route": "/api/admin/debug/account-state",
+      "file": "app/api/admin/debug/account-state/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/debug/auth-loop",
+      "file": "app/api/admin/debug/auth-loop/route.ts",
+      "domain": "auth",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/auth"
+      ],
+      "externalHints": [
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/admin/debug/auth-status",
+      "file": "app/api/admin/debug/auth-status/route.ts",
+      "domain": "auth",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "solardog_conversations",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "DATABASE_URL",
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/debug/db-identity",
+      "file": "app/api/admin/debug/db-identity/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "projects",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "DATABASE_URL",
+        "NEON",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/admin/debug/env-fingerprint",
+      "file": "app/api/admin/debug/env-fingerprint/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth"
+      ],
+      "externalHints": [
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/admin/debug/owner-resolver-probe",
+      "file": "app/api/admin/debug/owner-resolver-probe/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/survey/ingest/ownerResolver"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/debug/user-audit",
+      "file": "app/api/admin/debug/user-audit/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/distributor-prices",
+      "file": "app/api/admin/distributor-prices/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET",
+        "POST",
+        "DELETE",
+        "PATCH"
+      ],
+      "tables": [
+        "distributor_prices"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminActivityLog",
+        "@/lib/adminAuth",
+        "@/lib/bom/distributorPricing",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/feedback",
+      "file": "app/api/admin/feedback/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "feedback"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/feedback/count",
+      "file": "app/api/admin/feedback/count/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "feedback"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/feedback/screenshot",
+      "file": "app/api/admin/feedback/screenshot/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "feedback"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/files",
+      "file": "app/api/admin/files/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "DELETE"
+      ],
+      "tables": [
+        "project_files",
+        "projects",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/free-pass",
+      "file": "app/api/admin/free-pass/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST",
+        "GET"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/health",
+      "file": "app/api/admin/health/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "clients",
+        "layouts",
+        "project_files",
+        "projects",
+        "proposals",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-ready"
+      ],
+      "externalHints": [
+        "NEON",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/admin/impersonate",
+      "file": "app/api/admin/impersonate/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "admin_impersonation_tokens",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/incentives",
+      "file": "app/api/admin/incentives/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET",
+        "POST",
+        "PATCH",
+        "DELETE"
+      ],
+      "tables": [
+        "incentive_overrides"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/leads",
+      "file": "app/api/admin/leads/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "leads",
+        "projects",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/leads/[id]",
+      "file": "app/api/admin/leads/[id]/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "GET",
+        "PATCH"
+      ],
+      "tables": [
+        "clients",
+        "leads",
+        "projects",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/leads/[id]/assign-user",
+      "file": "app/api/admin/leads/[id]/assign-user/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "leads",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/leads/[id]/convert",
+      "file": "app/api/admin/leads/[id]/convert/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "clients",
+        "leads",
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/me-debug",
+      "file": "app/api/admin/me-debug/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/auth",
+        "@/lib/security"
+      ],
+      "externalHints": []
+    },
+    {
+      "route": "/api/admin/me-exact-debug",
+      "file": "app/api/admin/me-exact-debug/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "DATABASE_URL",
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/me-ultra-debug",
+      "file": "app/api/admin/me-ultra-debug/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/auth",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "DATABASE_URL",
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/network/analytics",
+      "file": "app/api/admin/network/analytics/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "network_opportunities",
+        "opportunity_intelligence",
+        "opportunity_screening_queue",
+        "opportunity_sources"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/network/attributionTracker"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/network/campaigns",
+      "file": "app/api/admin/network/campaigns/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "GET",
+        "POST",
+        "PATCH",
+        "DELETE"
+      ],
+      "tables": [
+        "acquisition_campaigns",
+        "intake_funnels"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/network/contractor-match/[id]",
+      "file": "app/api/admin/network/contractor-match/[id]/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "contractor_profiles",
+        "network_opportunities",
+        "opportunity_assignments",
+        "opportunity_intelligence",
+        "opportunity_screening_queue",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/network/attributionTracker",
+        "@/lib/network/contractorMatcher",
+        "@/lib/network/marketplaceReleaseGate"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/network/enrichment",
+      "file": "app/api/admin/network/enrichment/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "GET",
+        "POST",
+        "PATCH"
+      ],
+      "tables": [
+        "enrichment_queue",
+        "network_opportunities"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/enrichment/enrichmentOrchestrator",
+        "@/lib/intake/enrichmentQueue"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/network/funnels",
+      "file": "app/api/admin/network/funnels/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "acquisition_campaigns",
+        "intake_events",
+        "intake_funnels"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/intake/funnelUrls"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/network/health",
+      "file": "app/api/admin/network/health/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "contractor_profiles",
+        "network_events",
+        "network_opportunities",
+        "opportunity_assignments",
+        "opportunity_screening_queue"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/network/intake",
+      "file": "app/api/admin/network/intake/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "enrichment_queue",
+        "event_rows",
+        "filtered",
+        "intake_events",
+        "network_opportunities",
+        "opportunity_rows"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/intake/operationalLifecycle"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/network/intake/bill-intelligence",
+      "file": "app/api/admin/network/intake/bill-intelligence/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/intake/utilityBillIntelligence"
+      ],
+      "externalHints": []
+    },
+    {
+      "route": "/api/admin/network/intelligence/runner",
+      "file": "app/api/admin/network/intelligence/runner/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "network_opportunities",
+        "opportunity_assignments",
+        "project_activity"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminActivityLog",
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/intelligence/observations",
+        "@/lib/intelligence/producers",
+        "@/lib/intelligence/registry",
+        "@/lib/intelligence/runner"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/network/marketplace",
+      "file": "app/api/admin/network/marketplace/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "assignment_summary",
+        "network_opportunities",
+        "opportunity_assignments",
+        "opportunity_intelligence",
+        "opportunity_screening_queue"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/network/attributionTracker",
+        "@/lib/network/contractorMatcher",
+        "@/lib/network/marketplaceInventory",
+        "@/lib/network/marketplaceReleaseGate"
+      ],
+      "externalHints": [
+        "NEON",
+        "NREL"
+      ]
+    },
+    {
+      "route": "/api/admin/network/opportunities",
+      "file": "app/api/admin/network/opportunities/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "GET",
+        "POST",
+        "PATCH"
+      ],
+      "tables": [
+        "network_opportunities",
+        "opportunity_intelligence",
+        "opportunity_screening_queue",
+        "opportunity_sources"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/network/attributionTracker",
+        "@/lib/network/marketplaceReleaseGate",
+        "@/lib/network/opportunityEnrichment",
+        "@/lib/network/opportunityScorer"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/network/screening",
+      "file": "app/api/admin/network/screening/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "GET",
+        "POST",
+        "PATCH"
+      ],
+      "tables": [
+        "network_opportunities",
+        "opportunity_intelligence",
+        "opportunity_screening_queue"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/network/attributionTracker",
+        "@/lib/network/marketplaceReleaseGate",
+        "@/lib/network/opportunityEnrichment",
+        "@/lib/network/opportunityScorer",
+        "@/lib/network/screeningPipeline"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/network/simulator",
+      "file": "app/api/admin/network/simulator/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "assignment_summary",
+        "event_summary",
+        "intake_events",
+        "network_events",
+        "network_opportunities",
+        "opportunity_assignments",
+        "opportunity_intelligence",
+        "opportunity_screening_queue"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/network/attributionTracker",
+        "@/lib/network/contractorMatcher",
+        "@/lib/network/opportunityEnrichment",
+        "@/lib/network/opportunityScorer",
+        "@/lib/network/screeningPipeline"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/network/webhooks",
+      "file": "app/api/admin/network/webhooks/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "network_opportunities",
+        "webhook_ingestion_log"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/intake/intakePipeline",
+        "@/lib/intake/webhookVerifier"
+      ],
+      "externalHints": [
+        "DATABASE_URL",
+        "GOOGLE",
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/perf-diag",
+      "file": "app/api/admin/perf-diag/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "clients",
+        "layouts",
+        "project_files",
+        "projects",
+        "proposals",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/auth",
+        "@/lib/db-ready"
+      ],
+      "externalHints": [
+        "NEON",
+        "S3"
+      ]
+    },
+    {
+      "route": "/api/admin/projects",
+      "file": "app/api/admin/projects/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "PATCH"
+      ],
+      "tables": [
+        "clients",
+        "projects",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/projects/[id]",
+      "file": "app/api/admin/projects/[id]/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "PATCH"
+      ],
+      "tables": [
+        "clients",
+        "project_files",
+        "project_homeowner_stage_history",
+        "project_micro_stages",
+        "projects",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/email",
+        "@/lib/env",
+        "@/lib/microStage",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/projects/[id]/send-portal-invite",
+      "file": "app/api/admin/projects/[id]/send-portal-invite/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "clients",
+        "organizations",
+        "projects",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/email",
+        "@/lib/env",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/repair-account",
+      "file": "app/api/admin/repair-account/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/set-roles",
+      "file": "app/api/admin/set-roles/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/staff",
+      "file": "app/api/admin/staff/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/stats",
+      "file": "app/api/admin/stats/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "layouts",
+        "project_files",
+        "projects",
+        "proposals",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/survey-reassign",
+      "file": "app/api/admin/survey-reassign/route.ts",
+      "domain": "survey/mobile",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "projects",
+        "users",
+        "webhook_deliveries"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/survey-webhook-log",
+      "file": "app/api/admin/survey-webhook-log/route.ts",
+      "domain": "survey/mobile",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "webhook_deliveries"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/survey-webhook-log/[id]/replay",
+      "file": "app/api/admin/survey-webhook-log/[id]/replay/route.ts",
+      "domain": "survey/mobile",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "webhook_deliveries"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter",
+        "@/lib/survey/envelopeValidator",
+        "@/lib/survey/ingest/ingestPipeline",
+        "@/lib/survey/ingest/ownerResolver",
+        "@/lib/survey/ingest/types"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/system-tools",
+      "file": "app/api/admin/system-tools/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "admin_activity_log",
+        "admin_impersonation_tokens",
+        "clients",
+        "in",
+        "layouts",
+        "project_versions",
+        "projects",
+        "proposals",
+        "users",
+        "utility_policies"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminActivityLog",
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "DATABASE_URL",
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/users",
+      "file": "app/api/admin/users/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET",
+        "PATCH",
+        "DELETE"
+      ],
+      "tables": [
+        "admin_impersonation_tokens",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminActivityLog",
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/admin/utilities",
+      "file": "app/api/admin/utilities/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET",
+        "POST",
+        "PATCH",
+        "DELETE"
+      ],
+      "tables": [
+        "utility_policies"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/assistant",
+      "file": "app/api/assistant/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/solardog/actionRegistry",
+        "@/lib/solardog/buildContext",
+        "@/lib/solardog/detectMode",
+        "@/lib/solardog/resolveRoute",
+        "@/lib/solardog/siteMap"
+      ],
+      "externalHints": [
+        "NEON",
+        "OPENAI"
+      ]
+    },
+    {
+      "route": "/api/auth/authorize",
+      "file": "app/api/auth/authorize/route.ts",
+      "domain": "auth",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "mobile_sso_used_jtis"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "BLOB",
+        "NEON",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/auth/delete-account",
+      "file": "app/api/auth/delete-account/route.ts",
+      "domain": "auth",
+      "methods": [
+        "DELETE"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/auth/login",
+      "file": "app/api/auth/login/route.ts",
+      "domain": "auth",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-ready",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "DATABASE_URL",
+        "NEON",
+        "NREL",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/auth/logout",
+      "file": "app/api/auth/logout/route.ts",
+      "domain": "auth",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth"
+      ],
+      "externalHints": []
+    },
+    {
+      "route": "/api/auth/me",
+      "file": "app/api/auth/me/route.ts",
+      "domain": "auth",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/db-ready"
+      ],
+      "externalHints": [
+        "DATABASE_URL",
+        "NEON",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/auth/mobile-session",
+      "file": "app/api/auth/mobile-session/route.ts",
+      "domain": "survey/mobile",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [],
+      "externalHints": []
+    },
+    {
+      "route": "/api/auth/register",
+      "file": "app/api/auth/register/route.ts",
+      "domain": "auth",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/db-ready",
+        "@/lib/rateLimiter",
+        "@/lib/signupGuard"
+      ],
+      "externalHints": [
+        "DATABASE_URL",
+        "NEON",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/auth/request-password-reset",
+      "file": "app/api/auth/request-password-reset/route.ts",
+      "domain": "auth",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "password_reset_tokens",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/email",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/auth/reset-password",
+      "file": "app/api/auth/reset-password/route.ts",
+      "domain": "auth",
+      "methods": [
+        "POST",
+        "GET"
+      ],
+      "tables": [
+        "password_reset_tokens",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/auth/tour-complete",
+      "file": "app/api/auth/tour-complete/route.ts",
+      "domain": "auth",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/auto-design",
+      "file": "app/api/auto-design/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/autoDesign",
+        "@/lib/db-neon",
+        "@/lib/locationEngine",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/auto-size",
+      "file": "app/api/auto-size/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/autoSizing",
+        "@/lib/db-neon",
+        "@/lib/locationEngine",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/bill-upload",
+      "file": "app/api/bill-upload/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/billClaudeExtractor",
+        "@/lib/billConfidence",
+        "@/lib/billEnrichment",
+        "@/lib/billInsights",
+        "@/lib/billOcr",
+        "@/lib/billPipeline",
+        "@/lib/env-check",
+        "@/lib/logger",
+        "@/lib/pdfExtract",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "ANTHROPIC",
+        "BLOB",
+        "CLAUDE",
+        "GOOGLE",
+        "OPENAI",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/bill-upload/provision",
+      "file": "app/api/bill-upload/provision/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "project_files"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/engineering/syncPipeline",
+        "@/lib/rateLimiter",
+        "@/lib/utility-rules"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/bill-upload/test",
+      "file": "app/api/bill-upload/test/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "BLOB",
+        "GOOGLE",
+        "OPENAI",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/bills",
+      "file": "app/api/bills/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/clients",
+      "file": "app/api/clients/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "clients",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter",
+        "@/lib/stripe"
+      ],
+      "externalHints": [
+        "NEON",
+        "STRIPE"
+      ]
+    },
+    {
+      "route": "/api/clients/[id]",
+      "file": "app/api/clients/[id]/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON",
+        "PUT("
+      ]
+    },
+    {
+      "route": "/api/clients/[id]/notes",
+      "file": "app/api/clients/[id]/notes/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "POST",
+        "DELETE"
+      ],
+      "tables": [
+        "client_notes",
+        "clients"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/clients/[id]/projects",
+      "file": "app/api/clients/[id]/projects/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "clients",
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/clients/[id]/proposals",
+      "file": "app/api/clients/[id]/proposals/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "clients",
+        "projects",
+        "proposals"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/clients/[id]/site-surveys",
+      "file": "app/api/clients/[id]/site-surveys/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/commands",
+      "file": "app/api/commands/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "clients",
+        "command_center_actions",
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/commands/[id]",
+      "file": "app/api/commands/[id]/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "PATCH",
+        "DELETE"
+      ],
+      "tables": [
+        "command_center_actions"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/commands/generate",
+      "file": "app/api/commands/generate/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "clients",
+        "command_center_actions",
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/commands/generateActions",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/crew-members/[memberId]",
+      "file": "app/api/crew-members/[memberId]/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "PATCH",
+        "DELETE"
+      ],
+      "tables": [
+        "crew_members",
+        "crews",
+        "statement"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/crews",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/crew-schedule",
+      "file": "app/api/crew-schedule/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/crews",
+      "file": "app/api/crews/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET",
+        "POST",
+        "DELETE"
+      ],
+      "tables": [
+        "crews"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/crews/[id]/members",
+      "file": "app/api/crews/[id]/members/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "crew_members",
+        "crews"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/crews",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/crews/[id]/members/[memberId]",
+      "file": "app/api/crews/[id]/members/[memberId]/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "DELETE",
+        "PATCH"
+      ],
+      "tables": [
+        "crew_members",
+        "crews"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/crews",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/cron/proposal-expiry",
+      "file": "app/api/cron/proposal-expiry/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "clients",
+        "projects",
+        "proposals",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/email",
+        "@/lib/env"
+      ],
+      "externalHints": [
+        "NEON",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/debug/aerial",
+      "file": "app/api/debug/aerial/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "DATABASE_URL",
+        "GOOGLE",
+        "OPENAI"
+      ]
+    },
+    {
+      "route": "/api/debug/auth",
+      "file": "app/api/debug/auth/route.ts",
+      "domain": "auth",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/dev-auth",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "DATABASE_URL",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/debug/backfill-site-surveys",
+      "file": "app/api/debug/backfill-site-surveys/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "clients",
+        "project_files",
+        "project_physical_data",
+        "projects",
+        "site_surveys",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/debug/bill",
+      "file": "app/api/debug/bill/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/billOcr",
+        "@/lib/billParser",
+        "@/lib/security",
+        "@/lib/utility-rules"
+      ],
+      "externalHints": [
+        "OPENAI"
+      ]
+    },
+    {
+      "route": "/api/debug/force-ingest",
+      "file": "app/api/debug/force-ingest/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "clients",
+        "project_files",
+        "project_physical_data",
+        "projects",
+        "survey_photos",
+        "surveys",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter",
+        "@/lib/survey/ingest/ownerResolver"
+      ],
+      "externalHints": [
+        "NEON",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/debug/layout",
+      "file": "app/api/debug/layout/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "layouts",
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/debug/ocr",
+      "file": "app/api/debug/ocr/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "GOOGLE",
+        "OPENAI"
+      ]
+    },
+    {
+      "route": "/api/debug/project",
+      "file": "app/api/debug/project/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "project_files"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/engineering/db-engineering",
+        "@/lib/engineering/designSnapshot",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/debug/rate",
+      "file": "app/api/debug/rate/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/security",
+        "@/lib/utility-rules"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/dev-check",
+      "file": "app/api/dev-check/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [],
+      "externalHints": [
+        "DATABASE_URL",
+        "GOOGLE",
+        "NEON",
+        "OPENAI",
+        "STRIPE"
+      ]
+    },
+    {
+      "route": "/api/dsm",
+      "file": "app/api/dsm/route.ts",
+      "domain": "3d/topography/maps",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/rateLimiter",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "GOOGLE"
+      ]
+    },
+    {
+      "route": "/api/elevation",
+      "file": "app/api/elevation/route.ts",
+      "domain": "3d/topography/maps",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/rateLimiter",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "GOOGLE"
+      ]
+    },
+    {
+      "route": "/api/engineering/ahj-lookup",
+      "file": "app/api/engineering/ahj-lookup/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/jurisdictions/ahj-national",
+        "@/lib/rateLimiter",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/assist",
+      "file": "app/api/engineering/assist/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/engineering-automation",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/auto-configure",
+      "file": "app/api/engineering/auto-configure/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/engineering-automation",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/bom",
+      "file": "app/api/engineering/bom/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "distributor_prices"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/bom-engine-v4",
+        "@/lib/bom-system-profiles",
+        "@/lib/bom-validation",
+        "@/lib/bom/distributorPricing",
+        "@/lib/db-neon",
+        "@/lib/ecoflow-bom",
+        "@/lib/ecoflow-system",
+        "@/lib/rateLimiter",
+        "@/lib/security",
+        "@/lib/system/sizingEngine",
+        "@/lib/system/sizingToBom"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/calculate",
+      "file": "app/api/engineering/calculate/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/electrical-calc",
+        "@/lib/jurisdiction",
+        "@/lib/rateLimiter",
+        "@/lib/security",
+        "@/lib/string-generator",
+        "@/lib/structural-engine-v4",
+        "@/lib/system/calcDcAcRatio"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/enphase",
+      "file": "app/api/engineering/enphase/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST",
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/equipment-db",
+        "@/lib/rateLimiter",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/equipment",
+      "file": "app/api/engineering/equipment/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/equipment-db",
+        "@/lib/rateLimiter",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "NEON",
+        "NREL"
+      ]
+    },
+    {
+      "route": "/api/engineering/generate",
+      "file": "app/api/engineering/generate/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/engineering/db-engineering",
+        "@/lib/engineering/designSnapshot",
+        "@/lib/engineering/reportGenerator",
+        "@/lib/rateLimiter",
+        "@/lib/siteSurvey/applyToSystemDefinition",
+        "@/lib/siteSurvey/enrichSurvey",
+        "@/lib/siteSurvey/fromPhysicalData",
+        "@/lib/siteSurvey/normalizeSurvey",
+        "@/lib/siteSurvey/types",
+        "@/lib/system/systemDefinition"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/ironridge",
+      "file": "app/api/engineering/ironridge/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST",
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/equipment-db",
+        "@/lib/rateLimiter",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/latest-run",
+      "file": "app/api/engineering/latest-run/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "engineering_runs",
+        "project_files",
+        "projects",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/override",
+      "file": "app/api/engineering/override/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/engineering-automation",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/permit",
+      "file": "app/api/engineering/permit/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "layouts",
+        "project_files",
+        "project_physical_data",
+        "projects",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/engineering/pipelineGuard",
+        "@/lib/mounting-hardware-db",
+        "@/lib/pdf/generatePdf",
+        "@/lib/permit",
+        "@/lib/permit/sections/sitePlan",
+        "@/lib/rateLimiter",
+        "@/lib/siteSurvey/enrichSurvey",
+        "@/lib/siteSurvey/fromPhysicalData",
+        "@/lib/siteSurvey/normalizeSurvey",
+        "@/lib/siteSurvey/permitIntegration"
+      ],
+      "externalHints": [
+        "NEON",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/engineering/permit-preview",
+      "file": "app/api/engineering/permit-preview/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "project_files",
+        "projects",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/plan-set",
+      "file": "app/api/engineering/plan-set/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "project_files",
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/computed-system",
+        "@/lib/db-neon",
+        "@/lib/engineering/fire-setbacks",
+        "@/lib/jurisdictions/ahj-national",
+        "@/lib/pdf/generatePdf",
+        "@/lib/plan-set/compliance-sheet",
+        "@/lib/plan-set/cover-sheet",
+        "@/lib/plan-set/electrical-sheet",
+        "@/lib/plan-set/equipment-schedule",
+        "@/lib/plan-set/mounting-details-sheet",
+        "@/lib/plan-set/permit-system-model",
+        "@/lib/plan-set/site-layout-sheet",
+        "@/lib/plan-set/structural-sheet",
+        "@/lib/plan-set/title-block",
+        "@/lib/rateLimiter",
+        "@/lib/version"
+      ],
+      "externalHints": [
+        "DEL(",
+        "NEON",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/engineering/preliminary",
+      "file": "app/api/engineering/preliminary/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "project_files",
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/bom-engine-v4",
+        "@/lib/db-neon",
+        "@/lib/engineering/db-engineering",
+        "@/lib/engineering/reportGenerator",
+        "@/lib/rateLimiter",
+        "@/lib/siteSurvey/enrichSurvey",
+        "@/lib/siteSurvey/fromPhysicalData",
+        "@/lib/siteSurvey/normalizeSurvey",
+        "@/lib/siteSurvey/types",
+        "@/lib/sld-professional-renderer"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/pvwatts",
+      "file": "app/api/engineering/pvwatts/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST",
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/rateLimiter",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "NEON",
+        "NREL",
+        "PVWATTS"
+      ]
+    },
+    {
+      "route": "/api/engineering/report",
+      "file": "app/api/engineering/report/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/engineering/db-engineering",
+        "@/lib/engineering/designSnapshot",
+        "@/lib/engineering/reportGenerator",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/rules",
+      "file": "app/api/engineering/rules/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter",
+        "@/lib/rules-engine"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/run-from-file",
+      "file": "app/api/engineering/run-from-file/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "engineering_runs",
+        "project_files",
+        "projects",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/save-config",
+      "file": "app/api/engineering/save-config/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/save-outputs",
+      "file": "app/api/engineering/save-outputs/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "engineering_runs",
+        "project_files",
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/sld",
+      "file": "app/api/engineering/sld/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/computed-system",
+        "@/lib/db-neon",
+        "@/lib/equipment-db",
+        "@/lib/plan-set/permit-system-model",
+        "@/lib/rateLimiter",
+        "@/lib/security",
+        "@/lib/sld-professional-renderer",
+        "@/lib/string-generator",
+        "@/lib/system/calcDcAcRatio",
+        "@/lib/system/inverterCapabilities",
+        "@/lib/system/sizingEngine"
+      ],
+      "externalHints": [
+        "DEL(",
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/sld/pdf",
+      "file": "app/api/engineering/sld/pdf/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/pdf/generatePdf",
+        "@/lib/rateLimiter",
+        "@/lib/sld-professional-renderer"
+      ],
+      "externalHints": [
+        "NEON",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/engineering/slg/generate",
+      "file": "app/api/engineering/slg/generate/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/engineering-automation",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/structural",
+      "file": "app/api/engineering/structural/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/rateLimiter",
+        "@/lib/security",
+        "@/lib/structural-calc"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/structural-v2",
+      "file": "app/api/engineering/structural-v2/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/rateLimiter",
+        "@/lib/security",
+        "@/lib/structural-engine-v3"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/sync-pipeline",
+      "file": "app/api/engineering/sync-pipeline/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/engineering/syncPipeline",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/engineering/topology",
+      "file": "app/api/engineering/topology/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/equipment-registry-v4",
+        "@/lib/rateLimiter",
+        "@/lib/security",
+        "@/lib/topology-manager"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/enterprise/contact",
+      "file": "app/api/enterprise/contact/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "enterprise_leads"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/equipment",
+      "file": "app/api/equipment/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/equipment-db"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/equipment/save",
+      "file": "app/api/equipment/save/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "user_equipment_panels"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter",
+        "@/types"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/feedback",
+      "file": "app/api/feedback/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "feedback"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter",
+        "@/lib/version"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/geocode",
+      "file": "app/api/geocode/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST",
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/locationEngine",
+        "@/lib/rateLimiter",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "GOOGLE"
+      ]
+    },
+    {
+      "route": "/api/hardware",
+      "file": "app/api/hardware/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db",
+        "@/lib/db-neon",
+        "@/lib/equipment-library",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON",
+        "PUT("
+      ]
+    },
+    {
+      "route": "/api/health",
+      "file": "app/api/health/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/env-check"
+      ],
+      "externalHints": [
+        "DATABASE_URL",
+        "NEON",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/health/auth",
+      "file": "app/api/health/auth/route.ts",
+      "domain": "auth",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [],
+      "externalHints": [
+        "DATABASE_URL",
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/health/database",
+      "file": "app/api/health/database/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/env-check"
+      ],
+      "externalHints": [
+        "DATABASE_URL",
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/health/env",
+      "file": "app/api/health/env/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "CESIUM",
+        "DATABASE_URL",
+        "GOOGLE",
+        "OPENAI",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/incentives",
+      "file": "app/api/incentives/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/incentives/incentiveEngine",
+        "@/lib/incentives/stateIncentives",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/intake",
+      "file": "app/api/intake/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/intake/intakePipeline"
+      ],
+      "externalHints": []
+    },
+    {
+      "route": "/api/intake/homeowner",
+      "file": "app/api/intake/homeowner/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "intake_funnels"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/intake/homeownerEventIntake",
+        "@/lib/intake/utilityBillAttachment",
+        "@/lib/intake/utilityBillIntelligence"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/intake/homeowner/qualification",
+      "file": "app/api/intake/homeowner/qualification/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "intake_events",
+        "opportunity_intelligence"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/intake/homeownerQualification"
+      ],
+      "externalHints": [
+        "NEON",
+        "PUT("
+      ]
+    },
+    {
+      "route": "/api/intake/webhook/generic",
+      "file": "app/api/intake/webhook/generic/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "webhook_ingestion_log"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/intake/intakePipeline",
+        "@/lib/intake/webhookVerifier"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/intake/webhook/google",
+      "file": "app/api/intake/webhook/google/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "webhook_ingestion_log"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/intake/intakePipeline",
+        "@/lib/intake/webhookVerifier"
+      ],
+      "externalHints": [
+        "GOOGLE",
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/intake/webhook/meta",
+      "file": "app/api/intake/webhook/meta/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "webhook_ingestion_log"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/intake/intakePipeline",
+        "@/lib/intake/webhookVerifier"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/leads/public",
+      "file": "app/api/leads/public/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "POST",
+        "OPTIONS"
+      ],
+      "tables": [
+        "leads"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/maps-session",
+      "file": "app/api/maps-session/route.ts",
+      "domain": "3d/topography/maps",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/rateLimiter",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "GOOGLE",
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/migrate",
+      "file": "app/api/migrate/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "intake_funnels",
+        "productions",
+        "to",
+        "users",
+        "utility_policies"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "BLOB",
+        "NEON",
+        "STRIPE"
+      ]
+    },
+    {
+      "route": "/api/mobile/clients",
+      "file": "app/api/mobile/clients/route.ts",
+      "domain": "survey/mobile",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "clients"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/mobile/auth",
+        "@/lib/rateLimiter",
+        "@/lib/survey/v2/types"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/mobile/clients/[clientId]/projects",
+      "file": "app/api/mobile/clients/[clientId]/projects/route.ts",
+      "domain": "survey/mobile",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "clients",
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/mobile/auth",
+        "@/lib/rateLimiter",
+        "@/lib/survey/v2/types"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/mobile/debug-auth",
+      "file": "app/api/mobile/debug-auth/route.ts",
+      "domain": "survey/mobile",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/security",
+        "@/lib/survey/handoff/tokenMinter"
+      ],
+      "externalHints": [
+        "DATABASE_URL",
+        "NEON",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/network/contractor-profile",
+      "file": "app/api/network/contractor-profile/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "GET",
+        "PATCH"
+      ],
+      "tables": [
+        "contractor_profiles"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/network/my-claims",
+      "file": "app/api/network/my-claims/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "network_opportunities",
+        "opportunities",
+        "opportunity_assignments",
+        "opportunity_claims",
+        "opportunity_intelligence"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/network/my-opportunities",
+      "file": "app/api/network/my-opportunities/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "opportunities",
+        "opportunity_claims",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/network/opportunities",
+      "file": "app/api/network/opportunities/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "contractor_profiles",
+        "network_opportunities",
+        "opportunities",
+        "opportunity_assignments",
+        "opportunity_intelligence",
+        "opportunity_screening_queue",
+        "project_physical_data",
+        "projects",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/network/contractorEligibility",
+        "@/lib/network/marketplaceIntelligence",
+        "@/lib/network/marketplaceReleaseGate",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/network/opportunities/[id]",
+      "file": "app/api/network/opportunities/[id]/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "GET",
+        "PATCH"
+      ],
+      "tables": [
+        "opportunities",
+        "opportunity_claims",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/network/opportunities/[id]/claim",
+      "file": "app/api/network/opportunities/[id]/claim/route.ts",
+      "domain": "marketplace/network",
+      "methods": [
+        "POST",
+        "DELETE"
+      ],
+      "tables": [
+        "network_opportunities",
+        "opportunities",
+        "opportunity_assignments",
+        "opportunity_claims"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/network/attributionTracker",
+        "@/lib/network/contractorEligibility",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/ocr",
+      "file": "app/api/ocr/route.ts",
+      "domain": "intake/bill/lead",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/rateLimiter",
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "GOOGLE",
+        "OPENAI",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/operations/projects",
+      "file": "app/api/operations/projects/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "at",
+        "clients",
+        "failed",
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/organizations",
+      "file": "app/api/organizations/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET",
+        "POST",
+        "DELETE"
+      ],
+      "tables": [
+        "org_invites",
+        "organizations",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/organizations/invite",
+      "file": "app/api/organizations/invite/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST",
+        "DELETE"
+      ],
+      "tables": [
+        "org_invites",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/organizations/member",
+      "file": "app/api/organizations/member/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "DELETE"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/pipeline/run",
+      "file": "app/api/pipeline/run/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "project_files"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/engineering/syncPipeline",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/portal/bill-upload",
+      "file": "app/api/portal/bill-upload/route.ts",
+      "domain": "homeowner-portal",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "project_files",
+        "project_homeowner_stage_history",
+        "projects"
+      ],
+      "fetches": [
+        "${req.nextUrl.origin}/api/bill-upload"
+      ],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/microStage",
+        "@/lib/portalAuth",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/portal/dashboard",
+      "file": "app/api/portal/dashboard/route.ts",
+      "domain": "homeowner-portal",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "clients",
+        "project_files",
+        "project_homeowner_stage_history",
+        "project_micro_stages",
+        "projects",
+        "proposals",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/normalizeDocumentLabel",
+        "@/lib/portalAuth",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/portal/login",
+      "file": "app/api/portal/login/route.ts",
+      "domain": "homeowner-portal",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "clients",
+        "portal_otp_tokens"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/email",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON",
+        "RESEND"
+      ]
+    },
+    {
+      "route": "/api/portal/logout",
+      "file": "app/api/portal/logout/route.ts",
+      "domain": "homeowner-portal",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/portalAuth"
+      ],
+      "externalHints": []
+    },
+    {
+      "route": "/api/portal/verify-otp",
+      "file": "app/api/portal/verify-otp/route.ts",
+      "domain": "homeowner-portal",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "clients",
+        "portal_otp_tokens"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/portalAuth",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/pricing",
+      "file": "app/api/pricing/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/adminAuth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/production",
+      "file": "app/api/production/route.ts",
+      "domain": "engineering/equipment",
+      "methods": [
+        "POST",
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/multiArrayEngine",
+        "@/lib/pricingEngine",
+        "@/lib/pvwatts",
+        "@/lib/rateLimiter",
+        "@/types"
+      ],
+      "externalHints": [
+        "NEON",
+        "PVWATTS"
+      ]
+    },
+    {
+      "route": "/api/project-files",
+      "file": "app/api/project-files/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "POST",
+        "DELETE"
+      ],
+      "tables": [
+        "project_files",
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/project-files/download",
+      "file": "app/api/project-files/download/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "project_files"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/projects",
+      "file": "app/api/projects/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/geocode",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/projects/[id]",
+      "file": "app/api/projects/[id]/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "PUT",
+        "PATCH",
+        "DELETE"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON",
+        "PUT("
+      ]
+    },
+    {
+      "route": "/api/projects/[id]/homeowner-stage",
+      "file": "app/api/projects/[id]/homeowner-stage/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "PATCH"
+      ],
+      "tables": [
+        "project_homeowner_stage_history",
+        "project_micro_stages",
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/projects/[id]/layout",
+      "file": "app/api/projects/[id]/layout/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "POST",
+        "GET"
+      ],
+      "tables": [
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/engineering/syncPipeline",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/projects/[id]/milestones",
+      "file": "app/api/projects/[id]/milestones/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "POST",
+        "PATCH"
+      ],
+      "tables": [
+        "project_milestones",
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/projects/[id]/operations",
+      "file": "app/api/projects/[id]/operations/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "PATCH"
+      ],
+      "tables": [
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/projects/[id]/physical-data",
+      "file": "app/api/projects/[id]/physical-data/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/projects/[id]/repair-system-type",
+      "file": "app/api/projects/[id]/repair-system-type/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "POST",
+        "GET"
+      ],
+      "tables": [
+        "layouts",
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/projects/[id]/site-conditions",
+      "file": "app/api/projects/[id]/site-conditions/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "auto_config_log",
+        "projects",
+        "site_conditions"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON",
+        "NREL"
+      ]
+    },
+    {
+      "route": "/api/projects/[id]/site-surveys",
+      "file": "app/api/projects/[id]/site-surveys/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/projects/[id]/survey-context",
+      "file": "app/api/projects/[id]/survey-context/route.ts",
+      "domain": "survey/mobile",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/survey/getProjectSurveyContext"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/projects/[id]/survey-handoff",
+      "file": "app/api/projects/[id]/survey-handoff/route.ts",
+      "domain": "survey/mobile",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [],
+      "externalHints": []
+    },
+    {
+      "route": "/api/projects/[id]/tasks",
+      "file": "app/api/projects/[id]/tasks/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "PATCH"
+      ],
+      "tables": [
+        "project_tasks",
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/projects/[id]/versions",
+      "file": "app/api/projects/[id]/versions/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/projects/[id]/versions/[versionId]",
+      "file": "app/api/projects/[id]/versions/[versionId]/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter",
+        "@/types"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/projects/bulk-delete",
+      "file": "app/api/projects/bulk-delete/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/projects/transition",
+      "file": "app/api/projects/transition/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "project_activity",
+        "projects"
+      ],
+      "fetches": [
+        "${req.nextUrl.origin}/api/commands/generate"
+      ],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/deals/transitions",
+        "@/lib/homeownerStageSync",
+        "@/lib/microStage",
+        "@/lib/operations/generateTasksForStage",
+        "@/lib/operations/pipeline",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/projects/update-status",
+      "file": "app/api/projects/update-status/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/operations/generateTasksForStage",
+        "@/lib/operations/pipeline",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/proposals",
+      "file": "app/api/proposals/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "projects",
+        "proposals"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/proposal/buildCanonicalProposal",
+        "@/lib/rateLimiter",
+        "@/types"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/proposals/[id]",
+      "file": "app/api/proposals/[id]/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "PUT",
+        "PATCH",
+        "DELETE"
+      ],
+      "tables": [
+        "aliases",
+        "clients",
+        "project_cost_estimates",
+        "project_layouts",
+        "project_micro_stages",
+        "project_productions",
+        "projects",
+        "proposals",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/email",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON",
+        "PUT("
+      ]
+    },
+    {
+      "route": "/api/proposals/[id]/pdf",
+      "file": "app/api/proposals/[id]/pdf/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "branding_settings",
+        "const",
+        "projects",
+        "proposals"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/pdf/generatePdf",
+        "@/lib/proposal/buildCanonicalProposal",
+        "@/lib/proposal/renderProposalHTML",
+        "@/lib/rateLimiter",
+        "@/types"
+      ],
+      "externalHints": [
+        "NEON",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/proposals/[id]/send-email",
+      "file": "app/api/proposals/[id]/send-email/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "clients",
+        "organizations",
+        "projects",
+        "proposals",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/email",
+        "@/lib/env",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON",
+        "RESEND"
+      ]
+    },
+    {
+      "route": "/api/proposals/[id]/share",
+      "file": "app/api/proposals/[id]/share/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "POST",
+        "GET"
+      ],
+      "tables": [
+        "project_micro_stages",
+        "projects",
+        "proposals"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/env",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/proposals/[id]/sign",
+      "file": "app/api/proposals/[id]/sign/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "projects",
+        "proposal_signatures",
+        "proposals",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/email",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/proposals/[id]/signature",
+      "file": "app/api/proposals/[id]/signature/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "proposals"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/proposals/bulk",
+      "file": "app/api/proposals/bulk/route.ts",
+      "domain": "core-project-docs",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "proposals"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/schedule",
+      "file": "app/api/schedule/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [
+        "clients",
+        "crews",
+        "project_schedule",
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/settings/branding",
+      "file": "app/api/settings/branding/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "PUT",
+        "GET"
+      ],
+      "tables": [
+        "projects",
+        "proposals",
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON",
+        "PUT("
+      ]
+    },
+    {
+      "route": "/api/settings/logo",
+      "file": "app/api/settings/logo/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST",
+        "DELETE"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "BLOB",
+        "NEON",
+        "S3",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/settings/notifications",
+      "file": "app/api/settings/notifications/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET",
+        "PATCH"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/settings/onboarding-complete",
+      "file": "app/api/settings/onboarding-complete/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/settings/profile",
+      "file": "app/api/settings/profile/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "PUT"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON",
+        "PUT("
+      ]
+    },
+    {
+      "route": "/api/site-surveys/[surveyId]",
+      "file": "app/api/site-surveys/[surveyId]/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET",
+        "PATCH"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/solar",
+      "file": "app/api/solar/route.ts",
+      "domain": "3d/topography/maps",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/rateLimiter",
+        "@/lib/security",
+        "@/types"
+      ],
+      "externalHints": [
+        "GOOGLE",
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/solar-tile",
+      "file": "app/api/solar-tile/route.ts",
+      "domain": "3d/topography/maps",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "GOOGLE"
+      ]
+    },
+    {
+      "route": "/api/solardog/aliases",
+      "file": "app/api/solardog/aliases/route.ts",
+      "domain": "3d/topography/maps",
+      "methods": [
+        "GET",
+        "DELETE"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/solardog/debug",
+      "file": "app/api/solardog/debug/route.ts",
+      "domain": "3d/topography/maps",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "solardog_conversations"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/solardog/learn",
+      "file": "app/api/solardog/learn/route.ts",
+      "domain": "3d/topography/maps",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/solardog/resolveRoute",
+        "@/lib/solardog/siteMap"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/stats",
+      "file": "app/api/stats/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/stripe/checkout",
+      "file": "app/api/stripe/checkout/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter",
+        "@/lib/stripe"
+      ],
+      "externalHints": [
+        "NEON",
+        "STRIPE"
+      ]
+    },
+    {
+      "route": "/api/stripe/customer-status",
+      "file": "app/api/stripe/customer-status/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon"
+      ],
+      "externalHints": [
+        "NEON",
+        "STRIPE"
+      ]
+    },
+    {
+      "route": "/api/stripe/portal",
+      "file": "app/api/stripe/portal/route.ts",
+      "domain": "homeowner-portal",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter",
+        "@/lib/stripe"
+      ],
+      "externalHints": [
+        "NEON",
+        "STRIPE"
+      ]
+    },
+    {
+      "route": "/api/stripe/webhook",
+      "file": "app/api/stripe/webhook/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/stripe"
+      ],
+      "externalHints": [
+        "NEON",
+        "STRIPE"
+      ]
+    },
+    {
+      "route": "/api/survey/lookup-data",
+      "file": "app/api/survey/lookup-data/route.ts",
+      "domain": "survey/mobile",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [],
+      "externalHints": []
+    },
+    {
+      "route": "/api/survey/standalone-handoff",
+      "file": "app/api/survey/standalone-handoff/route.ts",
+      "domain": "survey/mobile",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [],
+      "externalHints": []
+    },
+    {
+      "route": "/api/survey/submit",
+      "file": "app/api/survey/submit/route.ts",
+      "domain": "survey/mobile",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "../../../../lib/survey/handoff/tokenMinter",
+        "../../../../lib/survey/v2/types",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": []
+    },
+    {
+      "route": "/api/survey/upload-photo",
+      "file": "app/api/survey/upload-photo/route.ts",
+      "domain": "survey/mobile",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "../../../../lib/survey/handoff/tokenMinter",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "BLOB",
+        "PUT(",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/system-size",
+      "file": "app/api/system-size/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/env-check",
+        "@/lib/locationEngine",
+        "@/lib/rateLimiter",
+        "@/lib/utility-rules",
+        "@/lib/utilityDetector",
+        "@/lib/utilityMatcher",
+        "@/lib/utilityNormalizer"
+      ],
+      "externalHints": [
+        "NEON",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/system/capabilities",
+      "file": "app/api/system/capabilities/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/system/capabilities",
+        "@/lib/version"
+      ],
+      "externalHints": []
+    },
+    {
+      "route": "/api/system/env",
+      "file": "app/api/system/env/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/security",
+        "@/lib/version"
+      ],
+      "externalHints": [
+        "DATABASE_URL",
+        "GOOGLE",
+        "NEON",
+        "OPENAI",
+        "RESEND",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/system/health",
+      "file": "app/api/system/health/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/env",
+        "@/lib/version"
+      ],
+      "externalHints": [
+        "DATABASE_URL",
+        "GOOGLE",
+        "NEON",
+        "OPENAI",
+        "RESEND",
+        "STRIPE",
+        "VERCEL"
+      ]
+    },
+    {
+      "route": "/api/system/release",
+      "file": "app/api/system/release/route.ts",
+      "domain": "admin/system",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/system/releaseHistory",
+        "@/lib/version"
+      ],
+      "externalHints": []
+    },
+    {
+      "route": "/api/tile",
+      "file": "app/api/tile/route.ts",
+      "domain": "3d/topography/maps",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/security"
+      ],
+      "externalHints": [
+        "GOOGLE"
+      ]
+    },
+    {
+      "route": "/api/topography/state",
+      "file": "app/api/topography/state/route.ts",
+      "domain": "3d/topography/maps",
+      "methods": [
+        "GET"
+      ],
+      "tables": [
+        "projects"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/topography/getTopographyState"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/tos-accept",
+      "file": "app/api/tos-accept/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST",
+        "GET"
+      ],
+      "tables": [
+        "users"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/rateLimiter"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/tts",
+      "file": "app/api/tts/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth"
+      ],
+      "externalHints": []
+    },
+    {
+      "route": "/api/utility-detect",
+      "file": "app/api/utility-detect/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "POST",
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/auth",
+        "@/lib/db-neon",
+        "@/lib/locationEngine",
+        "@/lib/rateLimiter",
+        "@/lib/utilityDetector"
+      ],
+      "externalHints": [
+        "NEON"
+      ]
+    },
+    {
+      "route": "/api/utility-rates",
+      "file": "app/api/utility-rates/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [],
+      "externalHints": [
+        "NREL"
+      ]
+    },
+    {
+      "route": "/api/version",
+      "file": "app/api/version/route.ts",
+      "domain": "general/platform",
+      "methods": [
+        "GET"
+      ],
+      "tables": [],
+      "fetches": [],
+      "imports": [
+        "@/lib/version"
+      ],
+      "externalHints": []
+    },
+    {
+      "route": "/api/webhooks/survey-complete",
+      "file": "app/api/webhooks/survey-complete/route.ts",
+      "domain": "survey/mobile",
+      "methods": [
+        "POST"
+      ],
+      "tables": [
+        "webhook_deliveries"
+      ],
+      "fetches": [],
+      "imports": [
+        "@/lib/db-neon",
+        "@/lib/survey/envelopeValidator",
+        "@/lib/survey/ingest/ingestPipeline",
+        "@/lib/survey/ingest/ownerResolver",
+        "@/lib/survey/ingest/types",
+        "@/lib/survey/types",
+        "@/lib/survey/verifyWebhookSignature",
+        "@/lib/version"
+      ],
+      "externalHints": [
+        "NEON",
+        "VERCEL"
+      ]
+    }
+  ]
+}

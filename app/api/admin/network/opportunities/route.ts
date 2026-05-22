@@ -276,8 +276,11 @@ export async function PATCH(req: NextRequest) {
         await sql`
           UPDATE network_opportunities SET
             status = 'live',
+            marketplace_status = 'live',
             published_at = NOW(),
             live_at = COALESCE(live_at, NOW()),
+            released_at = COALESCE(released_at, NOW()),
+            released_by = COALESCE(released_by, ${admin.id}),
             expires_at = NOW() + INTERVAL '30 days',
             updated_at = NOW()
           WHERE id = ${id}

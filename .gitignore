@@ -82,3 +82,4 @@ scripts/patch_*.py
 scripts/preview_*.py
 build-output.log
 .commit-msg-*.txt
+.env*.local

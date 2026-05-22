@@ -6,11 +6,17 @@ const mockRequireAdminApi = vi.fn();
 const mockGetDbReady = vi.fn();
 const mockMatchContractors = vi.fn();
 const mockLogNetworkEvent = vi.fn();
+const mockReleaseMarketplaceInventoryFromIntake = vi.fn();
+const mockTransitionMarketplaceInventory = vi.fn();
 
 vi.mock("@/lib/adminAuth", () => ({ requireAdminApi: mockRequireAdminApi }));
 vi.mock("@/lib/db-neon", () => ({ getDbReady: mockGetDbReady }));
 vi.mock("@/lib/network/contractorMatcher", () => ({
   matchContractors: mockMatchContractors,
+}));
+vi.mock("@/lib/network/marketplaceInventory", () => ({
+  releaseMarketplaceInventoryFromIntake: mockReleaseMarketplaceInventoryFromIntake,
+  transitionMarketplaceInventory: mockTransitionMarketplaceInventory,
 }));
 vi.mock("@/lib/network/attributionTracker", () => ({
   logNetworkEvent: mockLogNetworkEvent,
@@ -149,6 +155,20 @@ describe("/api/admin/network/marketplace", () => {
       matched_at: "2025-01-01T00:00:00Z",
     });
     mockLogNetworkEvent.mockReset().mockResolvedValue(undefined);
+    mockReleaseMarketplaceInventoryFromIntake.mockReset().mockResolvedValue({
+      ok: true,
+      status: 201,
+      action: "release",
+      opportunity: { id: "released-1", status: "live", marketplace_status: "live" },
+      release_gate_result: { ok: true, missing: [] },
+    });
+    mockTransitionMarketplaceInventory.mockReset().mockResolvedValue({
+      ok: true,
+      status: 200,
+      action: "pause",
+      opportunity: { id: "live-1", status: "scored", marketplace_status: "paused" },
+      release_gate_result: { ok: true, missing: [] },
+    });
   });
 
   it("rejects unauthenticated callers", async () => {
@@ -220,13 +240,13 @@ describe("/api/admin/network/marketplace", () => {
       path.join(process.cwd(), "app/api/admin/network/simulator/route.ts"),
       "utf8",
     );
-    const readyGate =
-      "no.status = 'live' AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')";
-    expect(simulatorSource).toContain(readyGate);
+    const screeningGate =
+      "no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass'";
+    expect(simulatorSource).toContain("no.status = 'live'");
+    expect(simulatorSource).toContain("COALESCE(no.marketplace_status, 'live') = 'live'");
+    expect(simulatorSource).toContain(screeningGate);
     expect(marketplaceSource).toContain("WHERE no.status = 'live'");
-    expect(marketplaceSource).toContain(
-      "AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')",
-    );
+    expect(marketplaceSource).toContain(screeningGate);
     expect(marketplaceSource).toContain("approved_for_marketplace");
   });
 
@@ -252,6 +272,84 @@ describe("/api/admin/network/marketplace", () => {
       details: { column: "enrichment_payload" },
     });
     expect(JSON.stringify(json)).not.toMatch(/DATABASE_URL|JWT_SECRET|ghp_/);
+  });
+
+  it("releases approved intake events through the inventory helper", async () => {
+    const { POST } = await importRoute();
+    const res = await POST(
+      req({
+        action: "release_from_intake",
+        intake_event_id: "intake-1",
+        asking_price: 250,
+        listing_notes: "Ready for marketplace",
+        expires_days: 14,
+        claim_mode: "shared",
+        max_claims: 3,
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({
+      success: true,
+      ok: true,
+      opportunity_id: "released-1",
+      opportunity: { id: "released-1", marketplace_status: "live" },
+    });
+    expect(mockReleaseMarketplaceInventoryFromIntake).toHaveBeenCalledWith({
+      sql: expect.any(Function),
+      intakeEventId: "intake-1",
+      adminUserId: "admin-1",
+      askingPrice: 250,
+      listingNotes: "Ready for marketplace",
+      expiresDays: 14,
+      claimMode: "shared",
+      maxClaims: 3,
+    });
+    expect(mockMatchContractors).not.toHaveBeenCalled();
+  });
+
+  it("returns explainable release gate failures from inventory release", async () => {
+    mockReleaseMarketplaceInventoryFromIntake.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      error: "Intake event is not ready for marketplace release",
+      release_gate_result: {
+        ok: false,
+        missing: ["homeowner_contacted", "approved_for_marketplace"],
+      },
+    });
+    const { POST } = await importRoute();
+    const res = await POST(
+      req({ action: "release_from_intake", intake_event_id: "intake-blocked" }),
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      success: false,
+      error: "Intake event is not ready for marketplace release",
+      details: {
+        release_gate_result: {
+          ok: false,
+          missing: ["homeowner_contacted", "approved_for_marketplace"],
+        },
+      },
+    });
+  });
+
+  it("routes pause, unrelease, archive, and release through inventory transition helper", async () => {
+    const { POST } = await importRoute();
+    for (const action of ["pause", "unrelease", "archive", "release"] as const) {
+      mockTransitionMarketplaceInventory.mockClear();
+      const res = await POST(
+        req({ action, opportunity_id: "live-1", reason: `${action} reason` }),
+      );
+      expect(res.status).toBe(200);
+      expect(mockTransitionMarketplaceInventory).toHaveBeenCalledWith({
+        sql: expect.any(Function),
+        opportunityId: "live-1",
+        adminUserId: "admin-1",
+        action,
+        reason: `${action} reason`,
+      });
+    }
   });
 
   it("blocks assignment actions for non-live or unapproved opportunities", async () => {

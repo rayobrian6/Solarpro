@@ -153,8 +153,9 @@ const nextConfig = {
   async headers() {
     return [
       {
-        // Security headers for ALL routes (pages + API)
-        source: '/(.*)',
+        // Security headers for ALL routes (pages + API), except the vendored
+        // topography artifact that must render inside /admin/topography's iframe.
+        source: '/((?!solarpro-mission-control-topography\.html$).*)',
         headers: [
           // Prevent MIME-type sniffing
           { key: 'X-Content-Type-Options', value: 'nosniff' },
@@ -165,6 +166,17 @@ const nextConfig = {
           // Disable browser features not needed by the app
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()' },
           // HSTS -- enforce HTTPS (max-age=1 year, includeSubDomains)
+          { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
+        ],
+      },
+      {
+        // Same security headers for the iframeable topography artifact, minus
+        // X-Frame-Options so the app does not block its own same-origin iframe.
+        source: '/solarpro-mission-control-topography.html',
+        headers: [
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()' },
           { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
         ],
       },

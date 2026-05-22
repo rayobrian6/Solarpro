@@ -28,6 +28,7 @@ import { requireAdminApi } from "@/lib/adminAuth";
 import { randomUUID } from "crypto";
 import {
   applyOperatorReviewAction,
+  deriveLeadOpsSummary,
   deriveReleaseReadiness,
   isOperatorReviewAction,
   operationalIntelligence,
@@ -73,6 +74,171 @@ function intakeFeedError(stage: IntakeFeedStage, error: unknown) {
   );
 }
 
+function bodyString(
+  body: Record<string, unknown>,
+  key: string,
+  max = 2000,
+): string | null {
+  const value = body[key];
+  return typeof value === "string" && value.trim()
+    ? value.trim().slice(0, max)
+    : null;
+}
+
+function bodyBoolean(
+  body: Record<string, unknown>,
+  key: string,
+): boolean | null {
+  const value = body[key];
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
+    if (["true", "yes", "1", "on"].includes(normalized)) return true;
+    if (["false", "no", "0", "off"].includes(normalized)) return false;
+  }
+  return null;
+}
+
+function sanitizeOperatorDetails(
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    contact_method: bodyString(body, "contact_method", 80),
+    reached_homeowner: bodyBoolean(body, "reached_homeowner"),
+    voicemail_left: bodyBoolean(body, "voicemail_left"),
+    next_step: bodyString(body, "next_step", 500),
+    follow_up_at: bodyString(body, "follow_up_at", 80),
+    callback_at: bodyString(body, "callback_at", 80),
+    requested_callback_at: bodyString(body, "requested_callback_at", 80),
+    callback_reason: bodyString(body, "callback_reason", 500),
+    workflow_reason: bodyString(body, "workflow_reason", 1000),
+    dormant_until: bodyString(body, "dormant_until", 80),
+    dormant_reason: bodyString(body, "dormant_reason", 1000),
+    financing_path: bodyString(body, "financing_path", 120),
+    credit_band: bodyString(body, "credit_band", 120),
+    income_band: bodyString(body, "income_band", 120),
+    financing_notes: bodyString(body, "financing_notes", 2000),
+    qualification_reason: bodyString(body, "qualification_reason", 1000),
+    operator_confidence: bodyString(body, "operator_confidence", 80),
+    missing_items_resolved: bodyBoolean(body, "missing_items_resolved"),
+    final_approval_note: bodyString(body, "final_approval_note", 2000),
+    contractor_facing_notes: bodyString(body, "contractor_facing_notes", 2000),
+    rejection_reason: bodyString(body, "rejection_reason", 500),
+    archive_reason: bodyString(body, "archive_reason", 500),
+    is_test_lead: bodyBoolean(body, "is_test_lead"),
+    utility_bill_review: bodyString(body, "utility_bill_review", 120),
+    assigned_operator_id: bodyString(body, "assigned_operator_id", 120),
+    assigned_operator_name: bodyString(body, "assigned_operator_name", 160),
+    follow_up_reason: bodyString(body, "follow_up_reason", 500),
+    follow_up_priority: bodyString(body, "follow_up_priority", 80),
+    follow_up_channel: bodyString(body, "follow_up_channel", 80),
+    follow_up_completed_at: bodyString(body, "follow_up_completed_at", 80),
+    snooze_until: bodyString(body, "snooze_until", 80),
+    note_type: bodyString(body, "note_type", 80),
+    contact_result: bodyString(body, "contact_result", 80),
+    contact_duration_seconds: bodyString(body, "contact_duration_seconds", 40),
+    task_id: bodyString(body, "task_id", 160),
+    task_title: bodyString(body, "task_title", 240),
+    task_owner_id: bodyString(body, "task_owner_id", 120),
+    task_owner_name: bodyString(body, "task_owner_name", 160),
+    task_due_at: bodyString(body, "task_due_at", 80),
+    task_priority: bodyString(body, "task_priority", 80),
+    financing_stage: bodyString(body, "financing_stage", 120),
+    proposal_stage: bodyString(body, "proposal_stage", 120),
+    release_checklist:
+      body.release_checklist && typeof body.release_checklist === "object"
+        ? body.release_checklist
+        : null,
+  };
+}
+
+function requiredOperatorFields(
+  action: unknown,
+  details: Record<string, unknown>,
+  notes: string | null,
+): string[] {
+  const missing: string[] = [];
+  const has = (key: string) =>
+    typeof details[key] === "string" && !!String(details[key]).trim();
+  if (action === "mark_no_answer") {
+    if (!has("contact_method")) missing.push("contact_method");
+    if (!has("follow_up_at") && !has("requested_callback_at"))
+      missing.push("follow_up_at");
+  }
+  if (action === "mark_needs_follow_up") {
+    if (
+      !has("follow_up_at") &&
+      !has("callback_at") &&
+      !has("requested_callback_at")
+    )
+      missing.push("requested_callback_at");
+    if (!has("callback_reason")) missing.push("callback_reason");
+  }
+  if (action === "reopen_callback") {
+    if (
+      !has("callback_at") &&
+      !has("follow_up_at") &&
+      !has("requested_callback_at")
+    )
+      missing.push("callback_at");
+    if (!has("callback_reason") && !has("workflow_reason") && !notes)
+      missing.push("callback_reason");
+  }
+  if (
+    action === "reopen_qualification" ||
+    action === "reopen_financing" ||
+    action === "reopen_documents"
+  ) {
+    if (!has("workflow_reason") && !notes) missing.push("workflow_reason");
+  }
+  if (action === "mark_dormant") {
+    if (!has("dormant_reason") && !notes) missing.push("dormant_reason");
+  }
+  if (action === "mark_financing_ready") {
+    if (!has("financing_path")) missing.push("financing_path");
+  }
+  if (action === "mark_qualified") {
+    if (!has("qualification_reason")) missing.push("qualification_reason");
+    if (!has("operator_confidence")) missing.push("operator_confidence");
+  }
+  if (action === "approve_for_marketplace") {
+    if (!has("final_approval_note") && !notes)
+      missing.push("final_approval_note");
+  }
+  if (action === "reject_lead") {
+    if (!has("rejection_reason")) missing.push("rejection_reason");
+  }
+  if (action === "archive_lead") {
+    if (!has("archive_reason")) missing.push("archive_reason");
+  }
+  if (action === "assign_operator" || action === "transfer_operator") {
+    if (!has("assigned_operator_id")) missing.push("assigned_operator_id");
+    if (!has("assigned_operator_name")) missing.push("assigned_operator_name");
+  }
+  if (action === "add_internal_note") {
+    if (!notes) missing.push("notes");
+  }
+  if (action === "log_contact_attempt") {
+    if (!has("contact_method")) missing.push("contact_method");
+    if (!has("contact_result")) missing.push("contact_result");
+  }
+  if (action === "create_follow_up_task") {
+    if (!has("task_title")) missing.push("task_title");
+    if (!has("task_due_at") && !has("follow_up_at"))
+      missing.push("task_due_at");
+  }
+  if (action === "complete_follow_up_task") {
+    if (!has("task_id")) missing.push("task_id");
+  }
+  if (action === "update_financing_stage") {
+    if (!has("financing_stage")) missing.push("financing_stage");
+  }
+  if (action === "update_proposal_stage") {
+    if (!has("proposal_stage")) missing.push("proposal_stage");
+  }
+  return missing;
+}
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   let stage: IntakeFeedStage = "auth";
 
@@ -112,26 +278,33 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           no.id::text AS opportunity_id,
           NULL::text AS event_id,
           NULL::text AS event_type,
-          'converted_opportunity'::text AS review_status,
+          CASE WHEN no.status = 'live' AND COALESCE(no.marketplace_status, 'not_released') = 'live' THEN 'marketplace_live' ELSE 'converted_opportunity' END AS review_status,
           no.created_at AS received_at,
-          no.source_system::text AS source_funnel,
+          COALESCE(no.source_system, no.source_type)::text AS source_funnel,
           true AS ready_for_review,
           '[]'::jsonb AS needs_missing_data,
           false AS qualification_skipped,
           false AS bill_attachment_metadata_only,
           '[]'::jsonb AS validation_warning,
           no.status::text AS status,
-          no.first_name,
-          no.last_name,
-          no.email,
-          no.phone,
-          no.address_line1,
+          COALESCE(no.first_name, SPLIT_PART(no.homeowner_name, ' ', 1)) AS first_name,
+          COALESCE(no.last_name, NULLIF(BTRIM(REGEXP_REPLACE(COALESCE(no.homeowner_name, ''), '^[^[:space:]]+[[:space:]]*', '')), '')) AS last_name,
+          COALESCE(no.email, no.homeowner_email) AS email,
+          COALESCE(no.phone, no.homeowner_phone) AS phone,
+          COALESCE(no.address_line1, no.address) AS address_line1,
           no.location_city AS city,
           no.location_state AS state,
           COALESCE(no.location_zip, no.zip) AS zip,
           no.source_system,
           no.source_channel,
-          no.monthly_bill_amount,
+          COALESCE(
+            no.monthly_bill_amount,
+            CASE
+              WHEN COALESCE(no.raw_payload->>'monthly_bill_amount', no.raw_payload->>'monthly_bill', '') ~ '^[0-9]+(\\.[0-9]+)?$'
+                THEN COALESCE(no.raw_payload->>'monthly_bill_amount', no.raw_payload->>'monthly_bill')::numeric
+              ELSE NULL
+            END
+          ) AS monthly_bill_amount,
           no.utm_source,
           no.utm_medium,
           no.utm_campaign,
@@ -168,30 +341,41 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           NULL::text AS error_message,
           '{}'::jsonb AS validation_result,
           '{}'::jsonb AS duplicate_result,
-          '{}'::jsonb AS pipeline_result,
-          '{}'::jsonb AS intake_metadata,
-          '{}'::jsonb AS qualification_payload,
-          '{}'::jsonb AS qualification_intelligence,
-          NULL::text AS qualification_event_id,
-          NULL::text AS qualification_status,
-          NULL::text AS lead_grade,
-          NULL::boolean AS finance_readiness,
-          NULL::boolean AS battery_readiness,
-          NULL::text AS estimated_income_band,
-          NULL::text AS estimated_credit_band,
-          NULL::text AS sunlight_confidence,
-          NULL::text AS property_type,
-          NULL::text AS utility_provider,
-          NULL::text AS battery_interest,
-          no.home_ownership::text AS homeowner_status,
-          NULL::text AS preferred_contact_method,
-          NULL::text AS timeline,
+          jsonb_build_object(
+            'review_status', CASE WHEN no.status = 'live' AND COALESCE(no.marketplace_status, 'not_released') = 'live' THEN 'marketplace_live' ELSE 'converted_opportunity' END,
+            'operational', COALESCE(no.intake_metadata->'operational', '{}'::jsonb)
+          ) AS pipeline_result,
+          COALESCE(no.intake_metadata, '{}'::jsonb) AS intake_metadata,
+          COALESCE(no.intake_metadata->'qualification', '{}'::jsonb) AS qualification_payload,
+          COALESCE(no.intake_metadata->'qualification', '{}'::jsonb) AS qualification_intelligence,
+          COALESCE(no.intake_metadata->>'source_event_id', no.intake_event_id::text) AS qualification_event_id,
+          COALESCE(no.intake_metadata->'qualification'->>'qualification_status', no.intake_metadata->'qualification'->>'lead_grade') AS qualification_status,
+          COALESCE(no.opportunity_grade, no.intake_metadata->'qualification'->>'lead_grade') AS lead_grade,
+          COALESCE(
+            no.homeowner_financing_interest,
+            CASE WHEN LOWER(COALESCE(no.intake_metadata->'qualification'->>'finance_readiness', '')) IN ('true', '1', 'yes', 'y') THEN true ELSE NULL END
+          ) AS finance_readiness,
+          COALESCE(
+            no.battery_candidate,
+            CASE WHEN LOWER(COALESCE(no.intake_metadata->'qualification'->>'battery_readiness', '')) IN ('true', '1', 'yes', 'y') THEN true ELSE NULL END
+          ) AS battery_readiness,
+          COALESCE(no.intake_metadata->'qualification'->'normalized'->>'estimated_income_band', no.intake_metadata->'qualification'->>'estimated_income_band') AS estimated_income_band,
+          COALESCE(no.intake_metadata->'qualification'->'normalized'->>'estimated_credit_band', no.intake_metadata->'qualification'->>'estimated_credit_band') AS estimated_credit_band,
+          COALESCE(no.intake_metadata->'qualification'->'normalized'->>'sunlight_confidence', no.intake_metadata->'qualification'->>'sunlight_confidence') AS sunlight_confidence,
+          COALESCE(no.intake_metadata->'qualification'->'normalized'->>'property_type', no.intake_metadata->'qualification'->>'property_type') AS property_type,
+          no.utility_provider::text AS utility_provider,
+          COALESCE(no.raw_payload->>'battery_interest', no.intake_metadata->>'battery_interest', CASE WHEN no.battery_candidate THEN 'yes' ELSE NULL END) AS battery_interest,
+          COALESCE(no.home_ownership, no.homeowner_ownership)::text AS homeowner_status,
+          COALESCE(no.raw_payload->>'preferred_contact_method', no.intake_metadata->>'preferred_contact_method') AS preferred_contact_method,
+          COALESCE(no.homeowner_timeline, no.raw_payload->>'timeline', no.intake_metadata->>'timeline') AS timeline,
           no.roof_age_years::text AS roof_age,
           '{}'::jsonb AS bill_metadata,
+          COALESCE(no.raw_payload->'bill_intelligence', no.intake_metadata->'bill_intelligence', '{}'::jsonb) AS bill_intelligence,
+          COALESCE(no.raw_payload->'bill_marketplace_projection', no.intake_metadata->'bill_marketplace_projection', '{}'::jsonb) AS bill_marketplace_projection,
           false AS debug_visible
         FROM network_opportunities no
         LEFT JOIN enrichment_queue eq ON eq.opportunity_id = no.id
-        WHERE no.source_system IS NOT NULL
+        WHERE (no.source_system IS NOT NULL OR no.source_type IS NOT NULL)
       ),
       event_rows AS (
         SELECT
@@ -312,6 +496,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           ie.payload->>'timeline' AS timeline,
           COALESCE(ie.payload->>'roof_age', ie.payload->>'roof_age_years') AS roof_age,
           COALESCE(ie.payload->'bill_metadata', '{}'::jsonb) AS bill_metadata,
+          COALESCE(ie.payload->'bill_intelligence', '{}'::jsonb) AS bill_intelligence,
+          COALESCE(ie.payload->'bill_marketplace_projection', '{}'::jsonb) AS bill_marketplace_projection,
           (
             ie.action IN ('validation_failed', 'malformed', 'error', 'archived', 'rejected', 'bad_lead')
             OR COALESCE((ie.pipeline_result->'operational'->>'archived')::boolean, false) = true
@@ -376,8 +562,61 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         validation: rest.validation_result,
         receivedAt: rest.received_at ?? rest.created_at,
       });
-      const billMetadata = rest.bill_metadata && typeof rest.bill_metadata === "object" ? rest.bill_metadata as Record<string, unknown> : {};
-      const qualificationPayload = rest.qualification_payload && typeof rest.qualification_payload === "object" ? rest.qualification_payload as Record<string, unknown> : {};
+      const billMetadata =
+        rest.bill_metadata && typeof rest.bill_metadata === "object"
+          ? (rest.bill_metadata as Record<string, unknown>)
+          : {};
+      const billIntelligence =
+        rest.bill_intelligence && typeof rest.bill_intelligence === "object"
+          ? (rest.bill_intelligence as Record<string, unknown>)
+          : {};
+      const billParserResult =
+        billIntelligence.parser_result && typeof billIntelligence.parser_result === "object"
+          ? (billIntelligence.parser_result as Record<string, unknown>)
+          : {};
+      const billParserData =
+        billParserResult.billData && typeof billParserResult.billData === "object"
+          ? (billParserResult.billData as Record<string, unknown>)
+          : {};
+      console.info("[ADMIN_BILL_FEED_PROJECTION]", {
+        intake_event_id: rest.event_id ?? rest.id,
+        record_type: rest.intake_record_type,
+        has_bill_intelligence: Object.keys(billIntelligence).length > 0,
+        bill_intelligence_keys: Object.keys(billIntelligence).sort(),
+        has_parser_result: Object.keys(billParserResult).length > 0,
+        parser_result_keys: Object.keys(billParserResult).sort(),
+        parser_bill_data_keys: Object.keys(billParserData).sort(),
+        extraction_keys: billIntelligence.extraction && typeof billIntelligence.extraction === "object"
+          ? Object.keys(billIntelligence.extraction as Record<string, unknown>).sort()
+          : [],
+        extracted_field_count: Array.isArray(billParserData.extractedFields)
+          ? billParserData.extractedFields.length
+          : Array.isArray((billIntelligence.extraction as Record<string, unknown> | undefined)?.extracted_fields)
+            ? ((billIntelligence.extraction as Record<string, unknown>).extracted_fields as unknown[]).length
+            : 0,
+      });
+      const qualificationPayload =
+        rest.qualification_payload &&
+        typeof rest.qualification_payload === "object"
+          ? (rest.qualification_payload as Record<string, unknown>)
+          : {};
+      const attachmentCompleteness =
+        billMetadata.storage_status === "stored"
+          ? "complete"
+          : billMetadata.filename
+            ? "metadata_only"
+            : "missing";
+      const qualificationCompleteness =
+        Object.keys(qualificationPayload).length > 0 ? "complete" : "missing";
+      const leadOpsSummary = deriveLeadOpsSummary({
+        operational,
+        reviewStatus: rest.review_status,
+        readyForReview: rest.ready_for_review,
+        qualificationCompleteness,
+        attachmentCompleteness,
+        releaseReadiness: intelligence.release_readiness as any,
+        receivedAt: rest.received_at ?? rest.created_at,
+      });
       return {
         ...rest,
         operational_lifecycle_status: operational.lifecycle_status,
@@ -391,13 +630,107 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         operator_notes: intelligence.operator_notes,
         last_contact_timestamp: intelligence.last_contact_timestamp,
         release_readiness: intelligence.release_readiness,
-        attachment_completeness: billMetadata.storage_status === "stored" ? "complete" : (billMetadata.filename ? "metadata_only" : "missing"),
-        qualification_completeness: Object.keys(qualificationPayload).length > 0 ? "complete" : "missing",
+        attachment_completeness: attachmentCompleteness,
+        qualification_completeness: qualificationCompleteness,
         contact_attempts: operational.no_answer_count ?? 0,
         operator_action_history: operational.action_history ?? [],
-        last_updated_timestamp: operational.last_reviewed_at ?? rest.updated_at ?? rest.created_at,
+        current_queue: leadOpsSummary.current_queue,
+        next_action: leadOpsSummary.next_action,
+        next_follow_up_at: leadOpsSummary.next_follow_up_at,
+        callback_at: leadOpsSummary.callback_at,
+        dormant_until: leadOpsSummary.dormant_until,
+        dormant_reason: leadOpsSummary.dormant_reason,
+        workflow_timeline: leadOpsSummary.workflow_timeline,
+        reopen_history: leadOpsSummary.reopen_history,
+        callback_history: leadOpsSummary.callback_history,
+        financing_reopen_history: leadOpsSummary.financing_reopen_history,
+        dormant_history: leadOpsSummary.dormant_history,
+        reactivation_history: leadOpsSummary.reactivation_history,
+        assigned_operator: leadOpsSummary.assigned_operator,
+        last_contacted_at: leadOpsSummary.last_contacted_at,
+        contact_attempt_count: leadOpsSummary.contact_attempt_count,
+        last_operator_action: leadOpsSummary.last_operator_action,
+        financing_status: leadOpsSummary.financing_status,
+        qualification_summary_status: leadOpsSummary.qualification_status,
+        assigned_operator_id: leadOpsSummary.assigned_operator_id,
+        assigned_operator_name: leadOpsSummary.assigned_operator_name,
+        assigned_at: leadOpsSummary.assigned_at,
+        ownership_age_hours: leadOpsSummary.ownership_age_hours,
+        last_touched_by: leadOpsSummary.last_touched_by,
+        follow_up_reason: leadOpsSummary.follow_up_reason,
+        follow_up_priority: leadOpsSummary.follow_up_priority,
+        follow_up_channel: leadOpsSummary.follow_up_channel,
+        follow_up_completed_at: leadOpsSummary.follow_up_completed_at,
+        snooze_until: leadOpsSummary.snooze_until,
+        callback_bucket: leadOpsSummary.callback_bucket,
+        callback_countdown: leadOpsSummary.callback_countdown,
+        overdue: leadOpsSummary.overdue,
+        latest_note: leadOpsSummary.latest_note,
+        last_contact_result: leadOpsSummary.last_contact_result,
+        successful_contact_count: leadOpsSummary.successful_contact_count,
+        days_since_last_contact: leadOpsSummary.days_since_last_contact,
+        open_task_count: leadOpsSummary.open_task_count,
+        overdue_task_count: leadOpsSummary.overdue_task_count,
+        financing_stage: leadOpsSummary.financing_stage,
+        proposal_stage: leadOpsSummary.proposal_stage,
+        proposal_readiness: leadOpsSummary.proposal_readiness,
+        contractor_readiness: leadOpsSummary.contractor_readiness,
+        lead_health: leadOpsSummary.lead_health,
+        lead_health_reasons: leadOpsSummary.lead_health_reasons,
+        time_since_intake_hours: leadOpsSummary.time_since_intake_hours,
+        time_since_last_contact_hours:
+          leadOpsSummary.time_since_last_contact_hours,
+        time_waiting_on_follow_up_hours:
+          leadOpsSummary.time_waiting_on_follow_up_hours,
+        last_updated_timestamp:
+          operational.last_reviewed_at ?? rest.updated_at ?? rest.created_at,
       };
     });
+
+    const dashboard = opportunities.reduce(
+      (acc: Record<string, number | null>, row: Record<string, unknown>) => {
+        if (row.assigned_operator_id) acc.leads_assigned += 1;
+        if (row.callback_bucket === "today") acc.callbacks_today += 1;
+        if (row.overdue === true) acc.overdue_callbacks += 1;
+        if (row.current_queue === "financing_review")
+          acc.financing_reviews_pending += 1;
+        if (row.current_queue === "marketplace_ready")
+          acc.marketplace_ready_leads += 1;
+        if (
+          row.current_queue === "stale_leads" ||
+          row.current_queue === "dormant_leads"
+        )
+          acc.stale_leads += 1;
+        if (
+          typeof row.proposal_stage === "string" &&
+          !["not_started", "proposal_accepted"].includes(row.proposal_stage)
+        )
+          acc.proposal_follow_ups += 1;
+        if ((Number(row.contact_attempt_count) || 0) > 0)
+          acc.contact_attempts += Number(row.contact_attempt_count) || 0;
+        if ((Number(row.successful_contact_count) || 0) > 0)
+          acc.successful_contacts += Number(row.successful_contact_count) || 0;
+        const responseHours = Number(row.time_since_intake_hours);
+        if (Number.isFinite(responseHours) && row.last_contacted_at) {
+          acc.response_hour_total += responseHours;
+          acc.response_hour_count += 1;
+        }
+        return acc;
+      },
+      {
+        leads_assigned: 0,
+        callbacks_today: 0,
+        overdue_callbacks: 0,
+        financing_reviews_pending: 0,
+        marketplace_ready_leads: 0,
+        stale_leads: 0,
+        proposal_follow_ups: 0,
+        contact_attempts: 0,
+        successful_contacts: 0,
+        response_hour_total: 0,
+        response_hour_count: 0,
+      },
+    );
 
     console.info("[ADMIN INTAKE PROJECTION]", {
       count: opportunities.length,
@@ -426,7 +759,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           'created'::text AS action,
           false AS debug_visible
         FROM network_opportunities no
-        WHERE no.source_system IS NOT NULL
+        WHERE (no.source_system IS NOT NULL OR no.source_type IS NOT NULL)
         UNION ALL
         SELECT
           ie.source_system,
@@ -540,6 +873,31 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           totalEvents > 0
             ? Math.round((Number(vs.created) / totalEvents) * 100) / 100
             : 0,
+        operator_dashboard: {
+          leads_assigned_to_me: dashboard.leads_assigned,
+          callbacks_today: dashboard.callbacks_today,
+          overdue_callbacks: dashboard.overdue_callbacks,
+          financing_reviews_pending: dashboard.financing_reviews_pending,
+          marketplace_ready_leads: dashboard.marketplace_ready_leads,
+          stale_leads: dashboard.stale_leads,
+          proposal_follow_ups: dashboard.proposal_follow_ups,
+          average_response_time_hours:
+            dashboard.response_hour_count && dashboard.response_hour_count > 0
+              ? Math.round(
+                  (Number(dashboard.response_hour_total) /
+                    Number(dashboard.response_hour_count)) *
+                    10,
+                ) / 10
+              : null,
+          contact_conversion_rate:
+            dashboard.contact_attempts && dashboard.contact_attempts > 0
+              ? Math.round(
+                  (Number(dashboard.successful_contacts) /
+                    Number(dashboard.contact_attempts)) *
+                    100,
+                ) / 100
+              : 0,
+        },
         ...vs,
       },
     });
@@ -559,11 +917,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     stage = "request_parse";
     const body = await req.json().catch(() => ({}));
+    const requestBody =
+      body && typeof body === "object" && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : {};
     const eventId =
-      typeof body.event_id === "string" ? body.event_id.trim() : "";
-    const action = body.action;
-    const notes =
-      typeof body.notes === "string" ? body.notes.trim().slice(0, 2000) : null;
+      typeof requestBody.event_id === "string"
+        ? requestBody.event_id.trim()
+        : "";
+    const action = requestBody.action;
+    const notes = bodyString(requestBody, "notes");
+    const operatorDetails = sanitizeOperatorDetails(requestBody);
 
     if (!eventId) {
       return NextResponse.json(
@@ -574,6 +938,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (!isOperatorReviewAction(action)) {
       return NextResponse.json(
         { error: "Unsupported operator review action" },
+        { status: 400 },
+      );
+    }
+    const missingFields = requiredOperatorFields(
+      action,
+      operatorDetails,
+      notes,
+    );
+    if (missingFields.length > 0) {
+      return NextResponse.json(
+        {
+          error: "Missing required operator review fields",
+          missing_fields: missingFields,
+        },
         { status: 400 },
       );
     }
@@ -597,11 +975,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
 
     const currentState = stateFromPipelineResult(original.pipeline_result);
-    if (currentState.archived || currentState.rejected) {
+    if (
+      (currentState.archived || currentState.rejected) &&
+      action !== "reactivate_lead"
+    ) {
       return NextResponse.json(
         {
           error:
-            "Archived or rejected leads cannot be moved without a new intake event",
+            "Archived or rejected leads must be reactivated before ordinary workflow actions",
         },
         { status: 409 },
       );
@@ -610,6 +991,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const nextState = applyOperatorReviewAction(currentState, action, {
       adminId: admin.id,
       notes,
+      details: operatorDetails,
     });
     const qualificationRows = await sql`
       SELECT payload
@@ -633,6 +1015,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       validation: original.validation_result,
     });
     nextState.release_readiness = releaseReadiness;
+    if (action === "approve_for_marketplace" && !releaseReadiness.ready) {
+      return NextResponse.json(
+        {
+          error: "Marketplace release readiness is incomplete",
+          release_readiness: releaseReadiness,
+        },
+        { status: 409 },
+      );
+    }
 
     const reviewEventId = `review_${randomUUID()}`;
     const pipelineResult = {
@@ -648,6 +1039,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       original_event_id: eventId,
       action,
       notes,
+      details: operatorDetails,
       operational: nextState,
       release_readiness: releaseReadiness,
     };

@@ -8,6 +8,8 @@ import { getUserFromRequest } from "@/lib/auth";
 import { getDbReady, handleRouteDbError, isValidUUID } from "@/lib/db-neon";
 import { checkRateLimit, getClientIp } from "@/lib/rateLimiter";
 import { logMarketplaceGate } from "@/lib/network/marketplaceReleaseGate";
+import { evaluateContractorEligibility } from "@/lib/network/contractorEligibility";
+import { buildMarketplaceIntelligence } from "@/lib/network/marketplaceIntelligence";
 
 // ---------------------------------------------------------------------------
 // GET /api/network/opportunities
@@ -88,11 +90,11 @@ export async function GET(req: NextRequest) {
       LIMIT ${limit} OFFSET ${offset}
     `;
 
-    const assignedRows = await sql`
+    const canonicalCandidateRows = await sql`
       SELECT
         no.id,
         no.source_type AS source,
-        CASE WHEN oa.status IN ('offered','viewed') THEN 'open' ELSE no.status END AS status,
+        'open'::text AS status,
         NULL::text AS site_name,
         no.location_city AS city,
         no.location_state AS state_code,
@@ -103,7 +105,57 @@ export async function GET(req: NextRequest) {
         no.utility_provider AS utility_name,
         no.utility_rate_per_kwh,
         no.estimated_project_value AS estimated_system_cost,
+        no.estimated_annual_savings,
+        COALESCE(
+          no.raw_payload->'bill_marketplace_projection'->>'offset_percentage',
+          no.intake_metadata->'bill_marketplace_projection'->>'offset_percentage',
+          no.raw_payload->'solar'->>'offset_percentage',
+          no.intake_metadata->'solar'->>'offset_percentage',
+          no.raw_payload->>'estimated_offset_pct',
+          no.intake_metadata->>'estimated_offset_pct'
+        ) AS estimated_offset_pct,
         no.estimated_payback_yrs,
+        no.monthly_bill_amount,
+        no.homeowner_ownership AS homeowner_status,
+        no.homeowner_timeline AS timeline,
+        no.homeowner_financing_interest AS finance_readiness,
+        no.opportunity_grade AS lead_grade,
+        COALESCE(
+          no.intake_metadata->'qualification'->>'qualification_status',
+          no.intake_metadata->'qualification'->>'lead_grade'
+        ) AS qualification_status,
+        COALESCE(
+          no.intake_metadata->'qualification'->'normalized'->>'estimated_income_band',
+          no.intake_metadata->'qualification'->>'estimated_income_band',
+          no.intake_metadata->'qualification'->>'income_band'
+        ) AS estimated_income_band,
+        COALESCE(
+          no.intake_metadata->'qualification'->'normalized'->>'estimated_credit_band',
+          no.intake_metadata->'qualification'->>'estimated_credit_band'
+        ) AS estimated_credit_band,
+        COALESCE(
+          no.intake_metadata->'qualification'->'normalized'->>'purchase_intent',
+          no.intake_metadata->'qualification'->>'purchase_intent',
+          no.intake_metadata->'qualification'->'scoring_input'->>'financing_preference'
+        ) AS purchase_intent,
+        COALESCE(
+          no.intake_metadata->'qualification'->'normalized'->>'sunlight_confidence',
+          no.intake_metadata->'qualification'->>'sunlight_confidence'
+        ) AS sunlight_confidence,
+        COALESCE(
+          no.intake_metadata->'qualification'->'normalized'->>'property_type',
+          no.intake_metadata->'qualification'->>'property_type',
+          no.raw_payload->>'property_type'
+        ) AS property_type,
+        COALESCE(
+          no.raw_payload->>'battery_interest',
+          no.intake_metadata->>'battery_interest',
+          CASE WHEN no.battery_candidate THEN 'yes' ELSE NULL END
+        ) AS battery_interest,
+        COALESCE(
+          no.raw_payload->>'preferred_contact_method',
+          no.intake_metadata->>'preferred_contact_method'
+        ) AS preferred_contact_method,
         no.roof_material,
         no.roof_pitch,
         no.roof_condition,
@@ -117,52 +169,75 @@ export async function GET(req: NextRequest) {
         no.ahj_name,
         NULL::text AS equipment_ecosystem,
         no.asking_price,
-        no.screening_notes AS listing_notes,
+        COALESCE(no.listing_notes, no.screening_notes) AS listing_notes,
         no.expires_at,
         no.created_at,
+        no.released_at,
         'SolarPro'::text AS creator_company,
-        oa.id AS claim_id,
-        oa.status AS claim_status,
-        oa.contractor_id AS claimed_by_user_id,
+        offer.id AS claim_id,
+        offer.status AS claim_status,
+        offer.contractor_id AS claimed_by_user_id,
         oi.enrichment_payload,
         oi.enrichment_completeness,
         oi.enrichment_warnings,
         oi.enriched_at,
-        no.status AS marketplace_status,
+        no.status AS marketplace_lifecycle_status,
+        COALESCE(no.marketplace_status, no.status) AS marketplace_status,
+        no.claim_mode,
+        no.claim_count,
+        no.max_claims,
         no.screening_status AS marketplace_screening_status,
         no.intake_metadata AS marketplace_intake_metadata,
         no.raw_payload AS marketplace_raw_payload,
         (
-          SELECT osq.auto_decision
+          SELECT CASE
+            WHEN BOOL_OR(osq.auto_decision = 'pass') THEN 'pass'
+            ELSE (ARRAY_AGG(osq.auto_decision ORDER BY osq.created_at DESC NULLS LAST) FILTER (WHERE osq.auto_decision IS NOT NULL))[1]
+          END
           FROM opportunity_screening_queue osq
           WHERE osq.opportunity_id = no.id
-          LIMIT 1
         ) AS marketplace_auto_decision,
         (
-          SELECT osq.override_decision
+          SELECT CASE
+            WHEN BOOL_OR(osq.override_decision = 'pass') THEN 'pass'
+            ELSE (ARRAY_AGG(osq.override_decision ORDER BY osq.created_at DESC NULLS LAST) FILTER (WHERE osq.override_decision IS NOT NULL))[1]
+          END
           FROM opportunity_screening_queue osq
           WHERE osq.opportunity_id = no.id
-          LIMIT 1
         ) AS marketplace_override_decision
-      FROM opportunity_assignments oa
-      JOIN network_opportunities no ON no.id = oa.opportunity_id
+      FROM network_opportunities no
       LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id
-      WHERE oa.contractor_id = ${user.id}
-        AND oa.status IN ('offered','viewed')
-        AND no.status IN ('live','claimed')
-        AND no.intake_metadata->'operational'->>'approved_for_marketplace' = 'true'
-        AND EXISTS (
-          SELECT 1 FROM opportunity_screening_queue osq
-          WHERE osq.opportunity_id = no.id
-            AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')
+      LEFT JOIN opportunity_assignments offer
+        ON offer.opportunity_id = no.id
+       AND offer.contractor_id = ${user.id}
+       AND offer.status IN ('offered','viewed')
+       AND (offer.offer_expires_at IS NULL OR offer.offer_expires_at > NOW())
+      WHERE no.status = 'live'
+        AND COALESCE(no.marketplace_status, 'live') NOT IN ('claimed','paused','archived','withdrawn','rejected')
+        AND COALESCE((no.intake_metadata->'operational'->>'archived')::boolean, false) = false
+        AND COALESCE((no.intake_metadata->'operational'->>'rejected')::boolean, false) = false
+        AND COALESCE((no.intake_metadata->>'is_test')::boolean, false) = false
+        AND COALESCE((no.intake_metadata->>'is_simulated')::boolean, false) = false
+        AND (
+          no.screening_status = 'approved'
+          OR EXISTS (
+            SELECT 1 FROM opportunity_screening_queue osq
+            WHERE osq.opportunity_id = no.id
+              AND (osq.auto_decision = 'pass' OR osq.override_decision = 'pass')
+          )
         )
-        AND (oa.offer_expires_at IS NULL OR oa.offer_expires_at > NOW())
+        AND NOT EXISTS (
+          SELECT 1 FROM opportunity_assignments claimed
+          WHERE claimed.opportunity_id = no.id
+            AND claimed.contractor_id = ${user.id}
+            AND claimed.status IN ('claimed','contacted','appointment','proposal','won')
+        )
         AND (${filterState}::text IS NULL OR no.location_state = ${filterState})
         AND (${filterBattery} = FALSE OR no.battery_candidate = TRUE)
         AND (${filterMinKw}::numeric IS NULL OR no.estimated_system_size_kw >= ${filterMinKw})
         AND (${filterMaxKw}::numeric IS NULL OR no.estimated_system_size_kw <= ${filterMaxKw})
-      ORDER BY oa.offered_at DESC NULLS LAST
-      LIMIT ${limit} OFFSET ${offset}
+      ORDER BY no.released_at DESC NULLS LAST, no.created_at DESC
+      LIMIT ${Math.max(limit + offset, limit)}
     `;
 
     const countRows = await sql`
@@ -177,36 +252,50 @@ export async function GET(req: NextRequest) {
          AND (${filterMaxKw}::numeric IS NULL OR o.system_size_kw <= ${filterMaxKw})
     `;
 
-    const assignedCountRows = await sql`
-      SELECT COUNT(*) AS total
-      FROM opportunity_assignments oa
-      JOIN network_opportunities no ON no.id = oa.opportunity_id
-      WHERE oa.contractor_id = ${user.id}
-        AND oa.status IN ('offered','viewed')
-        AND no.status IN ('live','claimed')
-        AND no.intake_metadata->'operational'->>'approved_for_marketplace' = 'true'
-        AND EXISTS (
-          SELECT 1 FROM opportunity_screening_queue osq
-          WHERE osq.opportunity_id = no.id
-            AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')
-        )
-        AND (oa.offer_expires_at IS NULL OR oa.offer_expires_at > NOW())
-        AND (${filterState}::text IS NULL OR no.location_state = ${filterState})
-        AND (${filterBattery} = FALSE OR no.battery_candidate = TRUE)
-        AND (${filterMinKw}::numeric IS NULL OR no.estimated_system_size_kw >= ${filterMinKw})
-        AND (${filterMaxKw}::numeric IS NULL OR no.estimated_system_size_kw <= ${filterMaxKw})
-    `;
-
     const legacyTotal = parseInt(String(countRows[0]?.total ?? "0"));
-    const assignedTotal = parseInt(String(assignedCountRows[0]?.total ?? "0"));
 
-    const assignedOpportunityRows = assignedRows as Array<Record<string, unknown>>;
-    assignedOpportunityRows.slice(0, 5).forEach((row) => {
+    const canonicalCandidateOpportunityRows = canonicalCandidateRows as Array<Record<string, unknown>>;
+    const eligibleCanonicalRows: Array<Record<string, unknown>> = [];
+    for (const row of canonicalCandidateOpportunityRows) {
+      const eligibility = await evaluateContractorEligibility({
+        sql,
+        contractorId: user.id,
+        opportunityId: String(row.id),
+      });
+      if (!eligibility.eligible) {
+        console.info("[MARKETPLACE VISIBILITY DENIED]", {
+          id: row.id,
+          contractor_id: user.id,
+          denials: eligibility.denials,
+          reasons: eligibility.reasons,
+          warnings: eligibility.warnings,
+          claim_state: eligibility.claim_state,
+          release_gate_result: eligibility.release_gate_result,
+          status: row.marketplace_lifecycle_status,
+          marketplace_status: row.marketplace_status,
+          screening_status: row.marketplace_screening_status,
+          auto_decision: row.marketplace_auto_decision,
+          override_decision: row.marketplace_override_decision,
+        });
+        continue;
+      }
+      eligibleCanonicalRows.push({
+        ...row,
+        eligibility_summary: {
+          reasons: eligibility.reasons,
+          warnings: eligibility.warnings,
+          claim_state: eligibility.claim_state,
+        },
+      });
+    }
+
+    eligibleCanonicalRows.slice(0, 5).forEach((row) => {
       logMarketplaceGate(
         "[MARKETPLACE VISIBILITY]",
         {
           id: row.id,
-          status: row.marketplace_status,
+          status: row.marketplace_lifecycle_status,
+          marketplace_status: row.marketplace_status,
           screening_status: row.marketplace_screening_status,
           auto_decision: row.marketplace_auto_decision,
           override_decision: row.marketplace_override_decision,
@@ -216,22 +305,66 @@ export async function GET(req: NextRequest) {
         "contractor_discovery_feed",
       );
     });
-    const visibleAssignedRows = assignedOpportunityRows.map(
-      ({
-        marketplace_status,
-        marketplace_screening_status,
-        marketplace_intake_metadata,
-        marketplace_raw_payload,
-        marketplace_auto_decision,
-        marketplace_override_decision,
-        ...row
-      }) => row,
-    );
+    const visibleLegacyRows = (rows as Array<Record<string, unknown>>).map((legacyRow) => ({
+      ...legacyRow,
+      marketplace_intelligence: buildMarketplaceIntelligence({
+        ...legacyRow,
+        marketplace_lifecycle_status: legacyRow.status,
+        marketplace_status: legacyRow.status,
+      }),
+    }));
+
+    const visibleCanonicalRows = eligibleCanonicalRows
+      .slice(offset, offset + limit)
+      .map((candidateRow) => {
+        const marketplace_intelligence = buildMarketplaceIntelligence(candidateRow);
+        const intakeMetadata = candidateRow.marketplace_intake_metadata as Record<string, unknown> | null | undefined;
+        const rawPayload = candidateRow.marketplace_raw_payload as Record<string, unknown> | null | undefined;
+        console.info("[NETWORK_DISCOVER_PAYLOAD_SHAPE]", {
+          id: candidateRow.id,
+          source: candidateRow.source,
+          has_intake_metadata: Boolean(intakeMetadata && Object.keys(intakeMetadata).length),
+          has_raw_payload: Boolean(rawPayload && Object.keys(rawPayload).length),
+          has_intake_bill_intelligence: Boolean(intakeMetadata?.bill_intelligence),
+          has_raw_bill_intelligence: Boolean(rawPayload?.bill_intelligence),
+          has_bill_marketplace_projection: Boolean(rawPayload?.bill_marketplace_projection || intakeMetadata?.bill_marketplace_projection),
+          has_release_readiness: Boolean((intakeMetadata?.operational as Record<string, unknown> | undefined)?.release_readiness || (rawPayload?.operational as Record<string, unknown> | undefined)?.release_readiness),
+          has_estimated_system_kw: candidateRow.system_size_kw != null || Boolean(marketplace_intelligence.revenue.estimated_system_size_kw?.value),
+          has_annual_usage_kwh: candidateRow.annual_kwh != null || Boolean(marketplace_intelligence.revenue.annual_usage_kwh?.value),
+          has_monthly_bill: candidateRow.monthly_bill_amount != null || Boolean(marketplace_intelligence.revenue.monthly_bill_amount?.value),
+          has_utility_rate: candidateRow.utility_rate_per_kwh != null || Boolean(marketplace_intelligence.revenue.utility_rate_per_kwh?.value),
+          has_lead_grade: candidateRow.lead_grade != null || Boolean((marketplace_intelligence.evidence.qualification as Record<string, unknown>).lead_grade),
+          has_qualification: Boolean(candidateRow.qualification_status || Object.keys(marketplace_intelligence.evidence.qualification).length),
+          has_badges: marketplace_intelligence.badges.length > 0,
+          badge_labels: marketplace_intelligence.badges.map((badge) => badge.label),
+          has_narrative: Boolean(marketplace_intelligence.narrative?.summary || marketplace_intelligence.narrative?.headline),
+          has_bill_visuals: Boolean(marketplace_intelligence.bill_visuals),
+          bill_visual_months_found: marketplace_intelligence.bill_visuals?.months_found ?? 0,
+          release_ok: marketplace_intelligence.release.ok,
+          release_missing_count: marketplace_intelligence.release.missing.length,
+        });
+        const {
+          marketplace_lifecycle_status,
+          marketplace_screening_status,
+          marketplace_intake_metadata,
+          marketplace_raw_payload,
+          marketplace_auto_decision,
+          marketplace_override_decision,
+          ...row
+        } = candidateRow;
+        void marketplace_lifecycle_status;
+        void marketplace_screening_status;
+        void marketplace_intake_metadata;
+        void marketplace_raw_payload;
+        void marketplace_auto_decision;
+        void marketplace_override_decision;
+        return { ...row, marketplace_intelligence };
+      });
 
     return NextResponse.json({
       success: true,
-      opportunities: [...visibleAssignedRows, ...rows],
-      total: legacyTotal + assignedTotal,
+      opportunities: [...visibleCanonicalRows, ...visibleLegacyRows],
+      total: legacyTotal + eligibleCanonicalRows.length,
       page,
       limit,
       profile_states: (profile?.service_states as string[] | undefined) ?? [],

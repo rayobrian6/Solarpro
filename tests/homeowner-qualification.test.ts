@@ -119,6 +119,43 @@ describe("homeowner post-submit qualification intelligence", () => {
     });
   });
 
+  it("captures PPA or lease as a third-party-owned purchase preference", () => {
+    const intelligence = deriveQualificationIntelligence(
+      {
+        purchase_intent: "ppa_or_lease",
+        estimated_credit_band: "unsure",
+        estimated_income_band: "prefer_not_to_say",
+        property_type: "single_family",
+        electrical_panel_size: "unsure",
+        sunlight_confidence: "full_sun",
+        prior_quotes: "no",
+      },
+      {
+        monthly_bill_amount: 240,
+        homeowner_status: "own",
+        timeline: "1_3_months",
+      },
+      "2025-01-01T00:00:00Z",
+    );
+
+    expect(intelligence.normalized.purchase_intent).toBe("ppa_or_lease");
+    expect(intelligence.labels.purchase_intent).toBe(
+      "interested in PPA/lease third-party ownership",
+    );
+    expect(intelligence.finance_readiness).toBe(false);
+    expect(intelligence.scoring_input).toMatchObject({
+      financing_preference: "ppa_or_lease",
+      purchase_intent: "ppa_or_lease",
+    });
+    expect(intelligence.enrichment).toMatchObject({
+      purchase_intent: "ppa_or_lease",
+      purchase_intent_label: "interested in PPA/lease third-party ownership",
+    });
+    expect(intelligence.contractor_summary).toContain(
+      "interested in PPA/lease third-party ownership",
+    );
+  });
+
   it("normalizes invasive or invalid exact financial answers into safe qualification bands", () => {
     const intelligence = deriveQualificationIntelligence({
       purchase_intent: "exact_score_742",
@@ -247,15 +284,19 @@ describe("homeowner post-submit qualification intelligence", () => {
     );
   });
 
-
   it("logs qualification submit and persisted stages for temporary audit tracing", () => {
     const routeSource = fs.readFileSync(
-      path.join(process.cwd(), "app/api/intake/homeowner/qualification/route.ts"),
+      path.join(
+        process.cwd(),
+        "app/api/intake/homeowner/qualification/route.ts",
+      ),
       "utf8",
     );
     expect(routeSource).toContain("[QUALIFICATION SUBMIT]");
     expect(routeSource).toContain("[QUALIFICATION PERSISTED]");
-    expect(routeSource).toContain("body.qualification && typeof body.qualification === 'object'");
+    expect(routeSource).toContain(
+      "body.qualification && typeof body.qualification === 'object'",
+    );
   });
 
   it("feeds qualification intelligence into opportunity scoring dimensions", () => {
@@ -360,10 +401,10 @@ describe("homeowner post-submit qualification intelligence", () => {
     );
     expect(uiSource).toContain("Qualification intelligence");
     expect(uiSource).toContain("qualificationDetailsFor");
-    expect(uiSource).toContain("['Qualification Status'");
-    expect(uiSource).toContain("['Lead Grade'");
-    expect(uiSource).toContain("['Finance Ready'");
-    expect(uiSource).toContain("['Battery Ready'");
+    expect(uiSource).toContain("Qualification Status");
+    expect(uiSource).toContain("Lead Grade");
+    expect(uiSource).toContain("Finance Ready");
+    expect(uiSource).toContain("Battery Ready");
     expect(uiSource).toContain("Contractor Summary");
     expect(uiSource).toContain("Purchase Intent");
     expect(uiSource).toContain("Electrical Panel");

@@ -1,17 +1,13 @@
-# SolarPro Utility Bill Upload Functional Fix
+# Diagnose Topography Screenshot Issue
 
-## Implement
-- [x] Update storage helper to store arbitrary utility bill files safely.
-- [x] Add best-effort type detection for known PDFs/images without blocking unknown file types.
-- [x] Update homeowner form file input hint to allow any file type.
-- [x] Fix diagnostics so file-bytes-received storage failures are not labeled JSON metadata-only.
+## Diagnose
+- [x] Confirm repository location and current working state.
+- [x] Inspect the Admin iframe source and vendored map artifact paths.
+- [x] Reproduce the Admin page/map render locally and capture browser errors if any.
+- [x] Determine whether the blank screenshot is code-related, route/path-related, or deployment/cache-related.
 
-## Tests
-- [x] Add/update tests for .jiff/.jfif, unknown MIME, octet-stream, and arbitrary file upload behavior.
-- [x] Add/update route coverage proving multipart file bytes can persist stored metadata.
-
-## Validate + Deliver
-- [x] Run targeted tests and typecheck.
-- [ ] Commit directly on `dev`.
-- [ ] Push `dev`.
-- [ ] Report exact fix and QA evidence.
+## Fix If Needed
+- [x] Patch only if a reproducible code/render issue is found.
+- [x] Validate locally before any commit/push.
+- [ ] If patched, make exactly one scoped commit/push to dev.
+- [ ] Report the result clearly.

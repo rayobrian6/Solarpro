@@ -28,6 +28,7 @@ import {
   metadataOnlyUtilityBill,
   storeUtilityBillAttachment,
 } from '@/lib/intake/utilityBillAttachment';
+import { runUtilityBillIntelligenceAsync } from '@/lib/intake/utilityBillIntelligence';
 
 async function sql(strings: TemplateStringsArray, ...values: unknown[]) {
   const db = await getDbReady();
@@ -237,6 +238,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       { error: 'Something went wrong. Please try again.', event_id: result.event_id },
       { status: 500 }
     );
+  }
+
+  const storedBillMetadata =
+    body.bill_metadata &&
+    typeof body.bill_metadata === 'object' &&
+    !Array.isArray(body.bill_metadata) &&
+    (body.bill_metadata as Record<string, unknown>).storage_status === 'stored'
+      ? (body.bill_metadata as Record<string, unknown>)
+      : null;
+  if (storedBillMetadata) {
+    console.info('[UTILITY BILL INTELLIGENCE] homeowner_intake_queued', {
+      event_id: result.event_id,
+      filename: storedBillMetadata.filename,
+      storage_provider: storedBillMetadata.storage_provider,
+    });
+    runUtilityBillIntelligenceAsync({
+      eventId: result.event_id,
+      billMetadata: storedBillMetadata,
+      trigger: 'homeowner_intake',
+    });
   }
 
   // Return 200 for all success cases (including duplicates — don't reveal to user)
