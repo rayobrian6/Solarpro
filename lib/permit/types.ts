@@ -5,6 +5,7 @@
 
 import type { CADModel } from '@/lib/cad/types';
 import type { RenderContext } from '@/lib/drafting/renderContext';
+import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -203,6 +204,9 @@ export interface PermitInput {
       overrideRecommended:     boolean;
     } | null;
   };
+  // Survey photo/physical-data evidence used to trace permit and CAD assumptions.
+  // Optional and additive: missing evidence is rendered as warnings, not as a generation blocker.
+  surveyEvidence?: EngineeringSurveyEvidence;
   aerialData?: {
     imageBase64?: string;
     imageWidth?: number;

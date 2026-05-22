@@ -23,6 +23,7 @@ import { fromPhysicalData, type ProjectPhysicalDataRow } from '@/lib/siteSurvey/
 import { normalizeSurvey } from '@/lib/siteSurvey/normalizeSurvey';
 import { enrichSurvey } from '@/lib/siteSurvey/enrichSurvey';
 import { permitIntegration } from '@/lib/siteSurvey/permitIntegration';
+import { collectEngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
@@ -534,7 +535,16 @@ export async function POST(req: NextRequest) {
             // 3. Normalize → Enrich → Integrate
             const normalized = normalizeSurvey(rawSurvey);
             const enriched   = enrichSurvey(normalized);
+            const surveyEvidence = collectEngineeringSurveyEvidence(enriched);
+            enrichedBody.surveyEvidence = surveyEvidence;
             const { patch, sheetData, permitLog, warnings } = permitIntegration(enriched);
+
+            console.log('[permit/survey] evidence completeness:', surveyEvidence.completeness, {
+              photos: surveyEvidence.photos.length,
+              missingCategories: surveyEvidence.missingCategories,
+              warnings: surveyEvidence.warnings.length,
+              blockers: surveyEvidence.blockers.length,
+            });
 
             // Log pipeline results
             permitLog.forEach(l => console.log('[permit/survey]', l));

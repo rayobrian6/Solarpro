@@ -148,6 +148,55 @@ export function pageValidationSummary(
   const overallStatus = failCount === 0 ? 'ALL CHECKS PASSED' : `${failCount} CHECK(S) FAILED`;
   const overallColor  = failCount === 0 ? '#006600' : '#cc0000';
 
+  function esc(value: unknown): string {
+    return String(value ?? '—')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  const surveyEvidence = input.surveyEvidence;
+  const surveyEvidenceStatus: CheckStatus = surveyEvidence?.completeness === 'sufficient'
+    ? 'PASS'
+    : surveyEvidence
+      ? 'N/A'
+      : 'N/A';
+  const surveyEvidenceColor = surveyEvidence?.completeness === 'sufficient'
+    ? '#006600'
+    : surveyEvidence?.completeness === 'partial'
+      ? '#b45309'
+      : '#cc0000';
+  const surveyEvidenceSummary = surveyEvidence
+    ? `${surveyEvidence.photos.length} photo(s) | completeness: ${surveyEvidence.completeness.toUpperCase()} | normalized: ${surveyEvidence.source.normalizedAt}`
+    : 'No survey evidence attached to this permit run';
+  const surveyPhotoCategoryRows = surveyEvidence?.photos.length
+    ? Object.entries(surveyEvidence.photos.reduce<Record<string, number>>((acc, photo) => {
+        acc[photo.category] = (acc[photo.category] ?? 0) + 1;
+        return acc;
+      }, {})).map(([category, count]) => `${category}: ${count}`).join(' | ')
+    : 'No survey photos available';
+  const missingSurveyEvidence = surveyEvidence?.missingCategories.length
+    ? surveyEvidence.missingCategories.join(', ')
+    : surveyEvidence
+      ? 'None'
+      : 'main_service_panel, utility_meter, roof_plane, site_exterior';
+  const surveyWarningRows = surveyEvidence
+    ? [...surveyEvidence.blockers, ...surveyEvidence.warnings].slice(0, 6)
+    : ['No normalized survey evidence object was provided; plan-set assumptions are based on design/canonical inputs only.'];
+  const surveyFieldEvidenceRows = surveyEvidence ? [
+    ['Physical Data', surveyEvidence.fieldEvidence.hasPhysicalData ? 'present' : 'missing'],
+    ['Roof Geometry', `${surveyEvidence.fieldEvidence.hasRoofGeometry ? 'present' : 'missing'} | planes: ${surveyEvidence.fieldEvidence.roofPlaneCount} | usable area: ${surveyEvidence.fieldEvidence.usableAreaSqFt ?? '—'} sq ft`],
+    ['Electrical', `${surveyEvidence.fieldEvidence.hasElectricalData ? 'present' : 'missing'} | MSP: ${surveyEvidence.fieldEvidence.mainPanelRatingAmps ?? '—'}A | Busbar: ${surveyEvidence.fieldEvidence.busbarRatingAmps ?? '—'}A`],
+    ['Structural', `${surveyEvidence.fieldEvidence.hasStructuralData ? 'present' : 'missing'} | ${surveyEvidence.fieldEvidence.rafterSize ?? '—'} @ ${surveyEvidence.fieldEvidence.rafterSpacingInches ?? '—'} in O.C. | ${surveyEvidence.fieldEvidence.roofMaterial ?? '—'}`],
+  ] : [
+    ['Physical Data', 'No survey evidence attached'],
+    ['Roof Geometry', 'Not traceable to survey evidence in this permit run'],
+    ['Electrical', 'Not traceable to survey evidence in this permit run'],
+    ['Structural', 'Not traceable to survey evidence in this permit run'],
+  ];
+
   return `
   <div class="page">
     ${titleBlock(input, 'VAL-1', 'ENGINEERING VALIDATION SUMMARY', pageNum, totalPages)}
@@ -181,6 +230,48 @@ export function pageValidationSummary(
             <td style="font-family:monospace;font-size:7px;color:#000;">${c.value}</td>
             <td style="text-align:center;">${statusBadge(c.status)}</td>
             <td style="font-size:6.5px;color:#555;">${c.note}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+
+      <div class="section-title" style="margin-top:var(--sm);">Survey Evidence Audit — Photo & Field Traceability</div>
+      <table class="equip-table" style="width:100%;">
+        <thead>
+          <tr>
+            <th style="width:24%;">Evidence Check</th>
+            <th style="width:48%;">Traceable Source Detail</th>
+            <th style="width:8%;text-align:center;">Status</th>
+            <th style="width:20%;">Plan-Set Impact</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="font-weight:900;color:${surveyEvidenceColor};font-size:7.5px;">Survey Evidence Completeness</td>
+            <td style="font-family:monospace;font-size:7px;color:#000;">${esc(surveyEvidenceSummary)}</td>
+            <td style="text-align:center;">${statusBadge(surveyEvidenceStatus)}</td>
+            <td style="font-size:6.5px;color:#555;">Evidence is advisory/traceability metadata; canonical validation remains authoritative.</td>
+          </tr>
+          <tr style="background:#f9f9f9;">
+            <td style="font-weight:600;font-size:7.5px;">Photo Evidence Categories</td>
+            <td style="font-family:monospace;font-size:7px;color:#000;">${esc(surveyPhotoCategoryRows)}</td>
+            <td style="text-align:center;">${statusBadge(surveyEvidence?.photos.length ? 'PASS' : 'N/A')}</td>
+            <td style="font-size:6.5px;color:#555;">Links real survey photo records to permit/CAD assumptions without image-recognition overclaiming.</td>
+          </tr>
+          <tr>
+            <td style="font-weight:600;font-size:7.5px;">Missing Required Evidence</td>
+            <td style="font-family:monospace;font-size:7px;color:${surveyEvidence?.missingCategories.length ? '#b45309' : '#006600'};">${esc(missingSurveyEvidence)}</td>
+            <td style="text-align:center;">${statusBadge(surveyEvidence && surveyEvidence.missingCategories.length === 0 ? 'PASS' : 'N/A')}</td>
+            <td style="font-size:6.5px;color:#555;">Missing categories become engineer-verification warnings, not silent assumptions.</td>
+          </tr>
+          ${surveyFieldEvidenceRows.map(([label, value], i) => `
+          <tr style="background:${i%2===0?'#f9f9f9':'#fff'};">
+            <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
+            <td colspan="3" style="font-family:monospace;font-size:7px;color:#000;">${esc(value)}</td>
+          </tr>`).join('')}
+          ${surveyWarningRows.map((warning, i) => `
+          <tr style="background:${i%2===0?'#fff7ed':'#fff'};">
+            <td style="font-weight:600;font-size:7.5px;color:#b45309;">Evidence Note ${i + 1}</td>
+            <td colspan="3" style="font-size:6.5px;color:#7c2d12;">${esc(warning)}</td>
           </tr>`).join('')}
         </tbody>
       </table>
