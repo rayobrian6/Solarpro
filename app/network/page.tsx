@@ -139,6 +139,19 @@ interface MarketplaceRevenueProjectionDetail {
   financed_payment_range: IntelligenceRange | null;
   ppa_lease_payment_range: IntelligenceRange | null;
   battery_attachment_value: IntelligenceRange | null;
+  battery_inclusive_value_range: IntelligenceRange | null;
+  install_complexity_modifier: {
+    factor: number;
+    label: string;
+    applied: boolean;
+  };
+  project_value_display_label: string;
+  battery_inclusive_display_label: string;
+  financed_payment_label: string;
+  ppa_lease_payment_label: string;
+  payment_replacement_label: string;
+  utility_arbitrage_label: string;
+  estimated_monthly_utility_reduction: number | null;
   gross_opportunity_tier:
     | "premium"
     | "high"
@@ -197,6 +210,48 @@ interface OpportunityScoreProjection {
   cautions: string[];
 }
 
+interface MarketplaceHeroMetricProjection {
+  key:
+    | "project_value"
+    | "payment_estimate"
+    | "system_size"
+    | "opportunity_score";
+  label: string;
+  value: string;
+  subtext: string;
+  tone: MarketplaceBadge["tone"];
+  priority: number;
+}
+
+interface MarketplaceTrustSignalProjection {
+  label: string;
+  verified: boolean;
+  tone: MarketplaceBadge["tone"];
+  reason: string;
+  source: string;
+}
+
+interface MarketplacePaymentPathProjection {
+  key: "financed" | "lease_ppa" | "utility_replacement";
+  label: string;
+  value: string;
+  sales_copy: string;
+  tone: MarketplaceBadge["tone"];
+}
+
+interface MarketplaceExperienceProjection {
+  hero_metrics: MarketplaceHeroMetricProjection[];
+  trust_signals: MarketplaceTrustSignalProjection[];
+  why_this_scores_high: string[];
+  economic_story: string[];
+  payment_paths: MarketplacePaymentPathProjection[];
+  acquisition_tags: string[];
+  deal_attractiveness: string[];
+  liquidity_label: string;
+  confidence_story: string;
+  source_note: string;
+}
+
 interface MarketplaceIntelligenceProjection {
   confidence: MarketplaceConfidenceProjection;
   badges: MarketplaceBadge[];
@@ -221,6 +276,7 @@ interface MarketplaceIntelligenceProjection {
   sales_complexity?: ComplexityProjection;
   install_complexity?: ComplexityProjection;
   opportunity_score?: OpportunityScoreProjection;
+  experience?: MarketplaceExperienceProjection;
   bill_visuals?: MarketplaceBillVisualsProjection;
   evidence: {
     homeowner_intake: Record<string, unknown>;
@@ -864,6 +920,20 @@ function OpportunityCard({
   const salesComplexity = intelligence?.sales_complexity;
   const installComplexity = intelligence?.install_complexity;
   const opportunityScore = intelligence?.opportunity_score;
+  const experience = intelligence?.experience;
+  const heroMetrics = experience?.hero_metrics ?? [];
+  const projectHero = heroMetrics.find(
+    (metric) => metric.key === "project_value",
+  );
+  const paymentHero = heroMetrics.find(
+    (metric) => metric.key === "payment_estimate",
+  );
+  const systemHero = heroMetrics.find((metric) => metric.key === "system_size");
+  const scoreHero = heroMetrics.find(
+    (metric) => metric.key === "opportunity_score",
+  );
+  const verifiedTrust =
+    experience?.trust_signals?.filter((signal) => signal.verified) ?? [];
   const marketplaceBadges = intelligence?.badges ?? [];
   const visibleBadges = marketplaceBadges.length
     ? marketplaceBadges.slice(0, 6)
@@ -930,123 +1000,152 @@ function OpportunityCard({
           </p>
         )}
 
-        <div className="grid grid-cols-2 gap-2 mb-3">
-          <RevenueMetric
-            label="Project value"
-            value={
+        <div className="mb-4 rounded-3xl border border-emerald-400/25 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.24),transparent_36%),rgba(6,78,59,0.16)] p-4 shadow-lg shadow-emerald-950/20">
+          <div className="mb-1 flex items-center justify-between gap-3">
+            <div className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">
+              {projectHero?.label ?? "Project value"}
+            </div>
+            <div className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-emerald-200">
+              {experience?.liquidity_label ?? "Marketplace claim signal"}
+            </div>
+          </div>
+          <div className="text-4xl font-black leading-none tracking-tight text-white tabular-nums drop-shadow-[0_0_18px_rgba(16,185,129,0.2)]">
+            {projectHero?.value ??
               projectIntelligence?.value_label ??
               compactRange(
                 revenueProjection?.project_value_range,
-                sourcedNumber(
-                  projectValue,
-                  fmtCurrency,
-                  "Project value awaiting validation",
-                ),
+                sourcedNumber(projectValue, fmtCurrency, "Value pending"),
+              )}
+          </div>
+          <div className="mt-2 text-xs font-semibold text-emerald-100/80">
+            {projectHero?.subtext ??
+              revenueProjection?.project_value_display_label ??
+              "Estimated marketplace value only"}
+          </div>
+        </div>
+
+        <div className="mb-4 grid grid-cols-3 gap-2">
+          <RevenueMetric
+            label={paymentHero?.label ?? "Payment estimate"}
+            value={
+              paymentHero?.value ??
+              compactRange(
+                revenueProjection?.financed_payment_range,
+                financing?.likelihood_label ?? "Payment pending",
               )
             }
             source={
-              projectIntelligence?.basis ??
-              revenueProjection?.basis ??
-              (projectValue
-                ? sourceLabel(projectValue.source)
-                : "Limited bill intelligence")
+              paymentHero?.subtext ?? revenueProjection?.financed_payment_label
             }
             accent="text-emerald-300"
           />
           <RevenueMetric
-            label="Opportunity score"
-            value={opportunityScore?.label ?? "Score awaiting validation"}
-            source={
-              opportunityScore
-                ? `${opportunityScore.tier} opportunity`
-                : "Requires more evidence"
+            label={systemHero?.label ?? "System size"}
+            value={
+              systemHero?.value ??
+              sourcedNumber(systemSize, fmtKw, "System pending")
             }
-            accent={
-              opportunityScore
-                ? intelligenceTone(opportunityScore.tier)
-                : "text-slate-500"
-            }
-          />
-          <RevenueMetric
-            label="Monthly bill"
-            value={sourcedNumber(
-              monthlyBill,
-              fmtCurrency,
-              "Monthly bill awaiting validation",
-            )}
-            source={
-              monthlyBill
-                ? sourceLabel(monthlyBill.source)
-                : "Homeowner intake pending"
-            }
-          />
-          <RevenueMetric
-            label="System size"
-            value={sourcedNumber(
-              systemSize,
-              fmtKw,
-              "System size awaiting validation",
-            )}
-            source={
-              systemSize
-                ? sourceLabel(systemSize.source)
-                : "Bill intelligence pending"
-            }
+            source={systemHero?.subtext ?? sourceLabel(systemSize?.source)}
             accent="text-amber-300"
           />
-        </div>
-
-        <div className="grid grid-cols-3 gap-2 mb-4">
           <RevenueMetric
-            label="Financed pmt"
-            value={compactRange(
-              revenueProjection?.financed_payment_range,
-              financing?.likelihood_label ?? "Financing awaiting validation",
-            )}
-            source={
-              revenueProjection?.financed_payment_range
-                ? "Estimated monthly range"
-                : financing?.payment_readiness_label
-            }
-            accent={intelligenceTone(financing?.likelihood)}
-          />
-          <RevenueMetric
-            label="PPA / Lease"
-            value={compactRange(
-              revenueProjection?.ppa_lease_payment_range,
-              "PPA/lease estimate pending",
-            )}
-            source={revenueProjection?.payment_profile_label}
-            accent={
-              purchaseProfile?.likely_purchase_method === "lease_or_ppa"
-                ? "text-blue-300"
-                : undefined
-            }
-          />
-          <RevenueMetric
-            label="Battery"
+            label={scoreHero?.label ?? "Opportunity score"}
             value={
-              opp.battery_candidate
-                ? "Attachment signal present"
-                : graceful(opp.battery_interest, "Battery interest pending")
+              scoreHero?.value ?? opportunityScore?.label ?? "Score pending"
             }
-            source={
-              opp.battery_interest ? "Homeowner intake" : "Marketplace signal"
-            }
-            accent={opp.battery_candidate ? "text-amber-300" : undefined}
-          />
-          <RevenueMetric
-            label="Offset"
-            value={offset ? fmtPct(offset.value) : "Offset awaiting validation"}
-            source={
-              offset ? sourceLabel(offset.source) : "Derived estimate pending"
-            }
+            source={scoreHero?.subtext ?? opportunityScore?.tier}
+            accent={intelligenceTone(opportunityScore?.tier)}
           />
         </div>
 
-        {(revenueProjection || purchaseBehavior) && (
-          <div className="mb-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/8 p-3 text-xs">
-            <div className="mb-1 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">
+        {experience?.payment_paths?.length ? (
+          <div className="mb-4 grid grid-cols-3 gap-2">
+            {experience.payment_paths.slice(0, 3).map((path) => (
+              <RevenueMetric
+                key={path.key}
+                label={path.label}
+                value={path.value}
+                source={path.sales_copy}
+                accent={
+                  intelligenceBadgeTone(path.tone).includes("blue")
+                    ? "text-blue-300"
+                    : path.tone === "amber"
+                      ? "text-amber-300"
+                      : path.tone === "emerald"
+                        ? "text-emerald-300"
+                        : undefined
+                }
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            <RevenueMetric
+              label="Financed pmt"
+              value={compactRange(
+                revenueProjection?.financed_payment_range,
+                financing?.likelihood_label ?? "Financing awaiting validation",
+              )}
+              source={revenueProjection?.financed_payment_label}
+              accent={intelligenceTone(financing?.likelihood)}
+            />
+            <RevenueMetric
+              label="PPA / Lease"
+              value={compactRange(
+                revenueProjection?.ppa_lease_payment_range,
+                "PPA/lease estimate pending",
+              )}
+              source={revenueProjection?.ppa_lease_payment_label}
+              accent={
+                purchaseProfile?.likely_purchase_method === "lease_or_ppa"
+                  ? "text-blue-300"
+                  : undefined
+              }
+            />
+            <RevenueMetric
+              label="Offset"
+              value={
+                offset ? fmtPct(offset.value) : "Offset awaiting validation"
+              }
+              source={
+                offset ? sourceLabel(offset.source) : "Derived estimate pending"
+              }
+            />
+          </div>
+        )}
+
+        {experience && (
+          <div className="mb-4 rounded-2xl border border-emerald-500/25 bg-emerald-500/8 p-3 text-xs">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">
+                Why this scores high
+              </div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                {experience.confidence_story}
+              </div>
+            </div>
+            <div className="grid gap-1.5">
+              {experience.why_this_scores_high.slice(0, 4).map((reason) => (
+                <div
+                  key={reason}
+                  className="flex items-start gap-2 text-slate-200"
+                >
+                  <CheckCircle
+                    size={12}
+                    className="mt-0.5 flex-shrink-0 text-emerald-300"
+                  />
+                  <span>{reason}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {(experience?.acquisition_tags?.length ||
+          revenueProjection ||
+          purchaseBehavior) && (
+          <div className="mb-4 rounded-2xl border border-amber-500/25 bg-amber-500/8 p-3 text-xs">
+            <div className="mb-1 text-[10px] font-black uppercase tracking-[0.2em] text-amber-300">
               Estimated acquisition fit
             </div>
             <div className="font-semibold text-white">
@@ -1054,13 +1153,34 @@ function OpportunityCard({
                 purchaseBehavior?.behavior_label ??
                 "Opportunity economics awaiting validation"}
             </div>
-            <div className="mt-1 text-slate-500">
-              {purchaseBehavior?.tags?.slice(0, 3).join(" · ") ||
-                revenueProjection?.basis ||
-                "Estimated values remain separate from verified bill evidence."}
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {(experience?.acquisition_tags ?? purchaseBehavior?.tags ?? [])
+                .slice(0, 6)
+                .map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-lg border border-amber-400/25 bg-amber-400/10 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-amber-200"
+                  >
+                    {tag}
+                  </span>
+                ))}
             </div>
           </div>
         )}
+
+        {verifiedTrust.length ? (
+          <div className="mb-4 flex flex-wrap gap-1.5">
+            {verifiedTrust.slice(0, 5).map((signal) => (
+              <span
+                key={signal.label}
+                title={signal.reason}
+                className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-200"
+              >
+                {signal.label}
+              </span>
+            ))}
+          </div>
+        ) : null}
 
         <div className="mb-4 grid grid-cols-2 gap-2 text-xs">
           <div className="rounded-xl border border-slate-800/80 bg-slate-950/30 p-3">
@@ -1340,6 +1460,7 @@ function DetailModal({
   const salesComplexity = intelligence?.sales_complexity;
   const installComplexity = intelligence?.install_complexity;
   const opportunityScore = intelligence?.opportunity_score;
+  const experience = intelligence?.experience;
   const revenueItems = [
     {
       label: "Project Value",
@@ -1477,6 +1598,70 @@ function DetailModal({
             </div>
           )}
 
+          {experience?.deal_attractiveness?.length ? (
+            <section className="mb-4 rounded-2xl border border-emerald-400/25 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.18),transparent_36%),rgba(16,185,129,0.08)] p-4">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-emerald-300 text-[10px] uppercase tracking-[0.2em] font-black">
+                    Why this deal is attractive
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Canonical acquisition story derived from verified evidence
+                    and estimated marketplaceRevenueProjection outputs.
+                  </p>
+                </div>
+                <span className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-200">
+                  {experience.liquidity_label}
+                </span>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                {experience.deal_attractiveness.map((reason) => (
+                  <div
+                    key={reason}
+                    className="flex items-start gap-2 rounded-xl border border-slate-800/70 bg-slate-950/30 p-3 text-xs text-slate-200"
+                  >
+                    <CheckCircle
+                      size={13}
+                      className="mt-0.5 flex-shrink-0 text-emerald-300"
+                    />
+                    {reason}
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 text-[10px] text-slate-600">
+                {experience.source_note}
+              </p>
+            </section>
+          ) : null}
+
+          {experience?.trust_signals?.length ? (
+            <section className="mb-4 rounded-2xl border border-slate-800 bg-slate-950/25 p-4">
+              <p className="text-slate-400 text-[10px] uppercase tracking-[0.2em] font-black mb-3">
+                Verified trust system
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {experience.trust_signals.map((signal) => (
+                  <div
+                    key={signal.label}
+                    className={`rounded-xl border p-3 ${signal.verified ? "border-emerald-500/30 bg-emerald-500/10" : "border-slate-800 bg-slate-900/50"}`}
+                  >
+                    <div
+                      className={`text-[10px] font-black uppercase tracking-wider ${signal.verified ? "text-emerald-300" : "text-slate-500"}`}
+                    >
+                      {signal.label}
+                    </div>
+                    <div className="mt-1 text-[11px] text-slate-400">
+                      {signal.reason}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 text-[10px] text-slate-600">
+                {experience.confidence_story}
+              </p>
+            </section>
+          ) : null}
+
           <section className="mb-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/8 p-4">
             <p className="text-emerald-300 text-[10px] uppercase tracking-[0.2em] font-black mb-3">
               AI-ranked acquisition snapshot
@@ -1575,6 +1760,19 @@ function DetailModal({
                 accent: "text-amber-300",
               },
               {
+                label: "Value With Battery",
+                value:
+                  revenueProjection?.battery_inclusive_display_label ??
+                  "Battery-inclusive range not signaled",
+                accent: "text-emerald-300",
+              },
+              {
+                label: "Install Modifier",
+                value:
+                  revenueProjection?.install_complexity_modifier?.label ??
+                  "Install complexity awaiting site validation",
+              },
+              {
                 label: "Gross Opportunity",
                 value:
                   revenueProjection?.gross_opportunity_label ??
@@ -1601,8 +1799,68 @@ function DetailModal({
                   revenueProjection?.payment_profile_label ??
                   "Payment profile awaiting evidence",
               },
+              {
+                label: "Payment Replacement",
+                value:
+                  revenueProjection?.payment_replacement_label ??
+                  "Payment replacement awaiting evidence",
+                accent: "text-blue-300",
+              },
+              {
+                label: "Utility Arbitrage",
+                value:
+                  revenueProjection?.utility_arbitrage_label ??
+                  "Utility arbitrage awaiting rate evidence",
+                accent: "text-amber-300",
+              },
             ]}
           />
+
+          {experience?.economic_story?.length ||
+          experience?.payment_paths?.length ? (
+            <section className="mb-4 rounded-2xl border border-blue-500/20 bg-blue-500/8 p-4">
+              <p className="text-blue-300 text-[10px] uppercase tracking-[0.2em] font-black mb-3">
+                Economic storytelling + payment paths
+              </p>
+              {experience?.economic_story?.length ? (
+                <div className="mb-3 grid gap-2">
+                  {experience.economic_story.map((line) => (
+                    <div
+                      key={line}
+                      className="flex items-start gap-2 text-xs text-slate-200"
+                    >
+                      <TrendingUp
+                        size={12}
+                        className="mt-0.5 flex-shrink-0 text-blue-300"
+                      />
+                      {line}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {experience?.payment_paths?.length ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  {experience.payment_paths.map((path) => (
+                    <RevenueMetric
+                      key={path.key}
+                      label={path.label}
+                      value={path.value}
+                      source={path.sales_copy}
+                      accent={
+                        path.tone === "blue"
+                          ? "text-blue-300"
+                          : path.tone === "amber"
+                            ? "text-amber-300"
+                            : path.tone === "emerald"
+                              ? "text-emerald-300"
+                              : undefined
+                      }
+                    />
+                  ))}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
 
           <EvidencePanel
             title="Purchase behavior"

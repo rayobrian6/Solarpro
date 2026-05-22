@@ -30,6 +30,13 @@ export interface MarketplaceRevenueProjectionInput {
   estimatedOffsetPct?: number | null;
   estimatedAnnualSavings?: number | null;
   verifiedProjectValue?: number | null;
+  installComplexityLevel?: IntelligenceLevel | null;
+  installProfitabilitySignal?:
+    | "favorable"
+    | "standard"
+    | "margin_watch"
+    | "unknown"
+    | null;
 }
 
 export interface MarketplaceRevenueProjectionResult {
@@ -47,6 +54,19 @@ export interface MarketplaceRevenueProjectionResult {
   financed_payment_range: IntelligenceRange | null;
   ppa_lease_payment_range: IntelligenceRange | null;
   battery_attachment_value: IntelligenceRange | null;
+  battery_inclusive_value_range: IntelligenceRange | null;
+  install_complexity_modifier: {
+    factor: number;
+    label: string;
+    applied: boolean;
+  };
+  project_value_display_label: string;
+  battery_inclusive_display_label: string;
+  financed_payment_label: string;
+  ppa_lease_payment_label: string;
+  payment_replacement_label: string;
+  utility_arbitrage_label: string;
+  estimated_monthly_utility_reduction: number | null;
   gross_opportunity_tier:
     | "premium"
     | "high"
@@ -243,6 +263,89 @@ function tierLabel(
   }
 }
 
+function installComplexityModifier(
+  level: IntelligenceLevel | null | undefined,
+  profitability: MarketplaceRevenueProjectionInput["installProfitabilitySignal"],
+): MarketplaceRevenueProjectionResult["install_complexity_modifier"] {
+  if (level === "low" || profitability === "favorable") {
+    return {
+      factor: 0.98,
+      label: "Low-friction install modifier",
+      applied: true,
+    };
+  }
+  if (level === "high" || profitability === "margin_watch") {
+    return {
+      factor: 1.08,
+      label: "Install complexity margin-watch modifier",
+      applied: true,
+    };
+  }
+  if (level === "medium") {
+    return {
+      factor: 1.03,
+      label: "Moderate install complexity modifier",
+      applied: true,
+    };
+  }
+  return {
+    factor: 1,
+    label: "Install complexity awaiting site validation",
+    applied: false,
+  };
+}
+
+function applyModifier(value: number | null, factor: number): number | null {
+  return value ? roundToNearest(value * factor, 100) : null;
+}
+
+function combineRanges(
+  base: IntelligenceRange | null,
+  attachment: IntelligenceRange | null,
+  label: string,
+): IntelligenceRange | null {
+  if (!base || !attachment) return null;
+  return {
+    min: base.min + attachment.min,
+    max: base.max + attachment.max,
+    midpoint: base.midpoint + attachment.midpoint,
+    unit: "usd",
+    label,
+  };
+}
+
+function compactMoney(value: number | null | undefined): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+    return null;
+  return `$${Math.round(value / 1000)}k`;
+}
+
+function compactRange(
+  range: IntelligenceRange | null,
+  fallback: string,
+): string {
+  if (!range) return fallback;
+  const min = compactMoney(range.min);
+  const max = compactMoney(range.max);
+  return min && max ? `${min}–${max}` : fallback;
+}
+
+function monthlyMoney(value: number | null | undefined): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+    return null;
+  return `$${Math.round(value).toLocaleString("en-US")}`;
+}
+
+function monthlyRange(
+  range: IntelligenceRange | null,
+  fallback: string,
+): string {
+  if (!range) return fallback;
+  const min = monthlyMoney(range.min);
+  const max = monthlyMoney(range.max);
+  return min && max ? `${min}–${max}/mo` : fallback;
+}
+
 function scoreContribution(
   tier: MarketplaceRevenueProjectionResult["gross_opportunity_tier"],
   hasPayment: boolean,
@@ -338,15 +441,39 @@ export function deriveMarketplaceRevenueProjection(
     });
   } else pushUnique(missing, "Purchase or payment preference pending");
 
-  const lowInstallEstimate = systemSizeKw
+  const modifier = installComplexityModifier(
+    input.installComplexityLevel,
+    input.installProfitabilitySignal,
+  );
+  const baseLowInstallEstimate = systemSizeKw
     ? roundToNearest(systemSizeKw * 1000 * pricing.lowPricePerWatt, 100)
     : null;
-  const marketAverageEstimate = systemSizeKw
+  const baseMarketAverageEstimate = systemSizeKw
     ? roundToNearest(systemSizeKw * 1000 * pricing.marketPricePerWatt, 100)
     : null;
-  const premiumInstallEstimate = systemSizeKw
+  const basePremiumInstallEstimate = systemSizeKw
     ? roundToNearest(systemSizeKw * 1000 * pricing.premiumPricePerWatt, 100)
     : null;
+  const lowInstallEstimate = applyModifier(
+    baseLowInstallEstimate,
+    modifier.factor,
+  );
+  const marketAverageEstimate = applyModifier(
+    baseMarketAverageEstimate,
+    modifier.factor,
+  );
+  const premiumInstallEstimate = applyModifier(
+    basePremiumInstallEstimate,
+    modifier.factor,
+  );
+
+  if (modifier.applied) {
+    evidence.push({
+      label: "Install complexity modifier",
+      value: `${modifier.label} (${modifier.factor.toFixed(2)}x)`,
+      source: "derived",
+    });
+  }
   const verifiedProjectValue = positive(input.verifiedProjectValue);
 
   const projectValueRange =
@@ -447,6 +574,20 @@ export function deriveMarketplaceRevenueProjection(
     });
   }
 
+  const batteryInclusiveValueRange = combineRanges(
+    projectValueRange,
+    batteryAttachmentValue,
+    "Estimated installed value including battery attachment",
+  );
+  const estimatedMonthlyUtilityReduction = input.estimatedAnnualSavings
+    ? roundToNearest(input.estimatedAnnualSavings / 12, 5)
+    : monthlyBill && ppaLeasePaymentRange
+      ? roundToNearest(
+          Math.max(0, monthlyBill - ppaLeasePaymentRange.midpoint),
+          5,
+        )
+      : null;
+
   const tier = deriveTier(
     projectValueRange,
     batteryAttachmentValue,
@@ -461,8 +602,37 @@ export function deriveMarketplaceRevenueProjection(
         ? "Cash-oriented project value intelligence"
         : `${formatRange(financedPaymentRange, "Financed payment awaiting project value")} estimated financed payment`;
 
+  const projectValueDisplayLabel = projectValueRange
+    ? `${compactRange(projectValueRange, "Value pending")} estimated install opportunity`
+    : "Project value awaiting system size";
+  const batteryInclusiveDisplayLabel = batteryInclusiveValueRange
+    ? `${compactRange(batteryInclusiveValueRange, "Value pending")} with battery`
+    : batteryAttachmentValue
+      ? "Battery value awaiting base system sizing"
+      : "Battery attachment not signaled";
+  const financedPaymentLabel = financedPaymentRange
+    ? `${monthlyRange(financedPaymentRange, "Financing pending")} broad financed estimate`
+    : "Financed payment awaiting project value";
+  const ppaLeasePaymentLabel = ppaLeasePaymentRange
+    ? `${monthlyRange(ppaLeasePaymentRange, "PPA/lease pending")} estimated utility replacement path`
+    : "PPA/lease path awaiting bill or savings data";
+  const paymentReplacementLabel =
+    monthlyBill && financedPaymentRange
+      ? financedPaymentRange.midpoint <= monthlyBill
+        ? "Likely cash-flow neutral financing path"
+        : "Payment replacement may require contractor pricing validation"
+      : ppaLeasePaymentRange
+        ? "Utility replacement estimate available"
+        : "Payment replacement awaiting bill and project value";
+  const utilityArbitrageLabel =
+    utilityRate && utilityRate >= 0.18
+      ? "Strong utility arbitrage opportunity"
+      : utilityRate
+        ? "Utility arbitrage opportunity present"
+        : "Utility arbitrage awaiting rate evidence";
+
   const basis = projectValueRange
-    ? `${pricing.sourceLabel}; ${systemSizeKw?.toLocaleString("en-US")} kW × ${pricing.lowPricePerWatt.toFixed(2)}–${pricing.premiumPricePerWatt.toFixed(2)}/W`
+    ? `${pricing.sourceLabel}; ${systemSizeKw?.toLocaleString("en-US")} kW × ${pricing.lowPricePerWatt.toFixed(2)}–${pricing.premiumPricePerWatt.toFixed(2)}/W; ${modifier.label}`
     : "Revenue projection awaiting system size or usage evidence";
 
   return {
@@ -480,6 +650,15 @@ export function deriveMarketplaceRevenueProjection(
     financed_payment_range: financedPaymentRange,
     ppa_lease_payment_range: ppaLeasePaymentRange,
     battery_attachment_value: batteryAttachmentValue,
+    battery_inclusive_value_range: batteryInclusiveValueRange,
+    install_complexity_modifier: modifier,
+    project_value_display_label: projectValueDisplayLabel,
+    battery_inclusive_display_label: batteryInclusiveDisplayLabel,
+    financed_payment_label: financedPaymentLabel,
+    ppa_lease_payment_label: ppaLeasePaymentLabel,
+    payment_replacement_label: paymentReplacementLabel,
+    utility_arbitrage_label: utilityArbitrageLabel,
+    estimated_monthly_utility_reduction: estimatedMonthlyUtilityReduction,
     gross_opportunity_tier: tier,
     gross_opportunity_label: tierLabel(tier),
     opportunity_score_contribution: scoreContribution(

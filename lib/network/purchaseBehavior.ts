@@ -11,6 +11,7 @@ import type { MarketplaceRevenueProjectionResult } from "@/lib/network/marketpla
 import type { PurchaseProfileResult } from "@/lib/network/purchaseProfile";
 
 export type PurchaseBehaviorTag =
+  | "premium homeowner"
   | "cash-friendly"
   | "financing-friendly"
   | "payment-sensitive"
@@ -18,6 +19,7 @@ export type PurchaseBehaviorTag =
   | "lease-friendly"
   | "battery-ready"
   | "resilience-motivated"
+  | "resilience-focused"
   | "fast-close"
   | "premium-upgrade candidate";
 
@@ -102,6 +104,8 @@ function scoreFromTags(
 
 function labelFor(tag: PurchaseBehaviorTag | "undetermined"): string {
   switch (tag) {
+    case "premium homeowner":
+      return "Premium homeowner acquisition signal";
     case "cash-friendly":
       return "Cash-friendly acquisition path";
     case "financing-friendly":
@@ -243,12 +247,15 @@ export function derivePurchaseBehavior(
     addTag(tags, "resilience-motivated");
   if (normalizedTimelineUrgent(timeline) && qualified)
     addTag(tags, "fast-close");
+  if (input.revenueProjection?.gross_opportunity_tier === "premium")
+    addTag(tags, "premium homeowner");
   if (
     input.revenueProjection?.gross_opportunity_tier === "premium" ||
     input.revenueProjection?.battery_attachment_value ||
     (annualUsage && annualUsage >= 15000)
   )
     addTag(tags, "premium-upgrade candidate");
+  if (tags.includes("resilience-motivated")) addTag(tags, "resilience-focused");
 
   if (!annualUsage) pushUnique(missing, "Annual usage pending");
   if (!utilityRate) pushUnique(missing, "Utility rate pending");

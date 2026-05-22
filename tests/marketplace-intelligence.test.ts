@@ -291,11 +291,28 @@ describe("marketplace purchase and revenue expansion", () => {
       "Project value range available",
     );
     expect(projection.revenue.projection.project_value_range).toMatchObject({
-      min: 36000,
-      max: 46000,
-      midpoint: 40700,
+      min: 35300,
+      max: 45100,
+      midpoint: 39900,
       unit: "usd",
     });
+    expect(
+      projection.revenue.projection.install_complexity_modifier,
+    ).toMatchObject({
+      factor: 0.98,
+      label: "Low-friction install modifier",
+      applied: true,
+    });
+    expect(
+      projection.revenue.projection.battery_inclusive_value_range,
+    ).toMatchObject({
+      min: 47300,
+      max: 63100,
+      unit: "usd",
+    });
+    expect(projection.revenue.projection.project_value_display_label).toContain(
+      "estimated install opportunity",
+    );
     expect(projection.revenue.projection.financed_payment_range?.label).toBe(
       "Estimated financed monthly payment range",
     );
@@ -321,6 +338,48 @@ describe("marketplace purchase and revenue expansion", () => {
         "payment-sensitive",
         "battery-ready",
         "fast-close",
+        "premium-upgrade candidate",
+      ]),
+    );
+    expect(projection.experience.hero_metrics[0]).toMatchObject({
+      key: "project_value",
+      priority: 1,
+    });
+    expect(
+      projection.experience.trust_signals.map((signal) => signal.label),
+    ).toEqual(
+      expect.arrayContaining([
+        "VERIFIED BILL",
+        "UTILITY VERIFIED",
+        "AI QUALIFIED",
+        "OPERATOR VERIFIED",
+        "BILL PARSED",
+        "STORED ATTACHMENT VERIFIED",
+      ]),
+    );
+    expect(projection.experience.why_this_scores_high).toEqual(
+      expect.arrayContaining([
+        "Verified utility bill evidence",
+        "High utility inflation territory",
+        "Large offset opportunity",
+        "Financing-friendly homeowner",
+        "Battery attachment signal",
+        "Low install complexity",
+        "Fast homeowner timeline",
+      ]),
+    );
+    expect(projection.experience.economic_story.join(" ")).toContain(
+      "estimated homeowner utility reduction",
+    );
+    expect(
+      projection.experience.payment_paths.map((path) => path.label),
+    ).toEqual(["FINANCED PMT", "PPA / LEASE", "UTILITY REPLACEMENT"]);
+    expect(projection.experience.acquisition_tags).toEqual(
+      expect.arrayContaining([
+        "financing friendly",
+        "battery ready",
+        "low-friction install",
+        "high utility pain",
       ]),
     );
     expect(projection.purchase_behavior.disclaimers[0]).toContain(
@@ -412,6 +471,13 @@ describe("marketplace purchase and revenue expansion", () => {
       ]),
     );
     expect(projection.purchase_behavior.primary_behavior).toBe("undetermined");
+    expect(projection.experience.hero_metrics[0]).toMatchObject({
+      key: "project_value",
+      value: "Value awaiting sizing",
+    });
+    expect(
+      projection.experience.trust_signals.every((signal) => !signal.verified),
+    ).toBe(true);
     expect(projection.project_value.value_label).toBe(
       "Project value awaiting validation",
     );
@@ -462,6 +528,17 @@ describe("canonical marketplace revenue projection engine", () => {
       min: 12000,
       max: 18000,
     });
+    expect(projection.battery_inclusive_value_range).toMatchObject({
+      min: 54000,
+      midpoint: 60000,
+      max: 66000,
+    });
+    expect(projection.battery_inclusive_display_label).toBe(
+      "$54k–$66k with battery",
+    );
+    expect(projection.utility_arbitrage_label).toBe(
+      "Strong utility arbitrage opportunity",
+    );
     expect(projection.disclaimers.join(" ")).toContain(
       "not a contractor quote",
     );

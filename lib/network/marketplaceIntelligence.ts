@@ -35,6 +35,10 @@ import {
   type PurchaseBehaviorResult,
 } from "@/lib/network/purchaseBehavior";
 import {
+  deriveMarketplaceExperience,
+  type MarketplaceExperienceProjection,
+} from "@/lib/network/marketplaceExperience";
+import {
   derivePurchaseProfile,
   type PurchaseProfileResult,
 } from "@/lib/network/purchaseProfile";
@@ -119,6 +123,7 @@ export interface MarketplaceIntelligenceProjection {
   sales_complexity: SalesComplexityResult;
   install_complexity: InstallComplexityResult;
   opportunity_score: OpportunityScoreResult;
+  experience: MarketplaceExperienceProjection;
   bill_visuals: MarketplaceBillVisualsProjection;
   evidence: MarketplaceEvidenceSummary;
   release: MarketplaceReleaseSummary;
@@ -398,6 +403,20 @@ export function buildMarketplaceIntelligence(
     estimatedOffsetPct: estimatedOffset,
   });
 
+  const installComplexity = deriveInstallComplexity({
+    roofMaterial: stringValue(row.roof_material),
+    roofPitch: stringValue(row.roof_pitch),
+    roofCondition: stringValue(row.roof_condition),
+    roofAgeYears: numberValue(row.roof_age_years),
+    stories: numberValue(row.stories),
+    structureType: stringValue(row.structure_type),
+    usableRoofPct: numberValue(row.usable_roof_pct),
+    steepRoof: boolValue(row.steep_roof),
+    complexAhj: boolValue(row.complex_ahj),
+    ahjName: stringValue(row.ahj_name),
+    batteryCandidate: boolValue(row.battery_candidate),
+  });
+
   const revenueProjection = deriveMarketplaceRevenueProjection({
     stateCode: stringValue(row.state_code),
     estimatedSystemSizeKw: estimatedSystemSize,
@@ -412,6 +431,8 @@ export function buildMarketplaceIntelligence(
     estimatedOffsetPct: estimatedOffset,
     estimatedAnnualSavings,
     verifiedProjectValue: estimatedProjectValue,
+    installComplexityLevel: installComplexity.level,
+    installProfitabilitySignal: installComplexity.profitability_signal,
   });
 
   const financing = deriveFinancingIntelligence({
@@ -424,20 +445,6 @@ export function buildMarketplaceIntelligence(
     purchaseIntent,
     qualificationStatus: stringValue(row.qualification_status),
     leadGrade: stringValue(row.lead_grade),
-  });
-
-  const installComplexity = deriveInstallComplexity({
-    roofMaterial: stringValue(row.roof_material),
-    roofPitch: stringValue(row.roof_pitch),
-    roofCondition: stringValue(row.roof_condition),
-    roofAgeYears: numberValue(row.roof_age_years),
-    stories: numberValue(row.stories),
-    structureType: stringValue(row.structure_type),
-    usableRoofPct: numberValue(row.usable_roof_pct),
-    steepRoof: boolValue(row.steep_roof),
-    complexAhj: boolValue(row.complex_ahj),
-    ahjName: stringValue(row.ahj_name),
-    batteryCandidate: boolValue(row.battery_candidate),
   });
 
   const purchaseBehavior = derivePurchaseBehavior({
@@ -481,6 +488,35 @@ export function buildMarketplaceIntelligence(
     revenueProjection,
     batteryCandidate: boolValue(row.battery_candidate),
     releaseOk: releaseGate.ok,
+  });
+
+  const experience = deriveMarketplaceExperience({
+    revenueProjection,
+    confidence,
+    badges,
+    opportunityScore,
+    purchaseProfile,
+    purchaseBehavior,
+    financing,
+    installComplexity,
+    billVisuals,
+    evidence: {
+      homeowner_intake: evidence.homeowner_intake,
+      bill_evidence: evidence.bill_evidence,
+      parsed_bill: evidence.parsed_bill,
+      qualification: evidence.qualification,
+      operator_review: evidence.operator_review,
+      screening: evidence.screening,
+      source_separation: evidence.source_separation,
+    },
+    estimatedSystemSizeKw: estimatedSystemSize,
+    monthlyBillAmount: monthlyBill,
+    annualUsageKwh: annualUsage,
+    utilityRatePerKwh: utilityRate,
+    estimatedAnnualSavings,
+    estimatedOffsetPct: estimatedOffset,
+    utilityProvider,
+    timeline: stringValue(row.timeline),
   });
 
   const narrative = buildMarketplaceNarrative({
@@ -578,6 +614,7 @@ export function buildMarketplaceIntelligence(
     sales_complexity: salesComplexity,
     install_complexity: installComplexity,
     opportunity_score: opportunityScore,
+    experience,
     bill_visuals: billVisuals,
     evidence: {
       homeowner_intake: evidence.homeowner_intake,
