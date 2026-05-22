@@ -746,104 +746,131 @@ function ArchitectureEdgesView() {
 }
 
 function ArchitectureMapView({ onOpenLegacy }: { onOpenLegacy: () => void }) {
-  const columns: Array<{ title: string; nodeIds: string[] }> = [
-    { title: 'Acquire', nodeIds: ['intake', 'qualification', 'bill'] },
-    { title: 'Operate', nodeIds: ['leadops', 'marketplace', 'intelligence'] },
-    { title: 'Fulfill', nodeIds: ['contractor', 'core', 'portal'] },
-    { title: 'Design', nodeIds: ['survey', 'survey-partial', 'maps3d'] },
-    { title: 'Generate', nodeIds: ['equipment', 'engineering'] },
-    { title: 'Observe', nodeIds: ['health', 'external'] },
+  const nodeById: Record<string, ArchitectureNode> = Object.fromEntries(ARCHITECTURE_NODES.map(node => [node.id, node]));
+
+  const rows: Array<{ label: string; nodeIds: string[] }> = [
+    { label: 'ENTRY + BILL INTELLIGENCE', nodeIds: ['intake', 'qualification', 'bill'] },
+    { label: 'ADMIN LEAD OPS + MARKETPLACE', nodeIds: ['leadops', 'marketplace', 'intelligence'] },
+    { label: 'CONTRACTOR + CORE + PORTAL', nodeIds: ['contractor', 'core', 'portal'] },
+    { label: 'SURVEY + 3D / MAPS', nodeIds: ['survey', 'survey-partial', 'maps3d'] },
+    { label: 'EQUIPMENT + ENGINEERING DOCS', nodeIds: ['equipment', 'engineering'] },
+    { label: 'OBSERVABILITY + EXTERNAL SERVICES', nodeIds: ['health', 'external'] },
   ];
 
-  const nodeById: Record<string, ArchitectureNode> = Object.fromEntries(ARCHITECTURE_NODES.map(node => [node.id, node]));
   const primaryFlow = ['intake', 'qualification', 'bill', 'leadops', 'marketplace', 'intelligence', 'contractor', 'core', 'engineering', 'portal'];
-  const secondaryFlow = ['survey', 'survey-partial', 'maps3d', 'core', 'engineering'];
+  const surveyFlow = ['survey', 'survey-partial', 'maps3d', 'core', 'engineering'];
+
+  const MiniNode = ({ id, compact = false }: { id: string; compact?: boolean }) => {
+    const node = nodeById[id];
+    const c = COLOR[node.layer];
+    return (
+      <div className={`relative rounded-md border ${c.border} ${c.bg} ${compact ? 'w-[148px] min-h-[58px] p-2' : 'w-[176px] min-h-[76px] p-2.5'} shadow-[0_0_16px_rgba(0,0,0,0.22)]`}>
+        <div className="flex items-center justify-between gap-1 mb-1">
+          <span className={`text-[8px] font-black uppercase tracking-wider truncate ${c.text}`}>{node.group}</span>
+          {architectureStatusBadge(node.status)}
+        </div>
+        <div className={`font-bold leading-tight ${compact ? 'text-[10px]' : 'text-[11px]'} ${c.text}`}>{node.title}</div>
+        <p className={`mt-1 text-slate-400 leading-snug ${compact ? 'text-[8px] line-clamp-2' : 'text-[9px] line-clamp-3'}`}>{node.detail}</p>
+        {node.tables && (
+          <p className="mt-1 text-[7px] font-mono text-[#fbbf24]/75 truncate">{node.tables.slice(0, 2).join(' · ')}{node.tables.length > 2 ? ' · …' : ''}</p>
+        )}
+      </div>
+    );
+  };
+
+  const FlowStrip = ({ title, ids, tone }: { title: string; ids: string[]; tone: 'green' | 'amber' }) => {
+    const border = tone === 'green' ? 'border-emerald-500/20' : 'border-amber-500/20';
+    const bg = tone === 'green' ? 'bg-emerald-500/5' : 'bg-amber-500/5';
+    const text = tone === 'green' ? 'text-emerald-300' : 'text-amber-300';
+    const arrow = tone === 'green' ? 'text-emerald-500/80' : 'text-amber-500/80';
+    return (
+      <div className={`rounded-lg border ${border} ${bg} p-3`}>
+        <h3 className={`text-[10px] font-black uppercase tracking-[0.16em] mb-2 ${text}`}>{title}</h3>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {ids.map((id, i) => (
+            <React.Fragment key={id}>
+              <span className="px-2 py-1 rounded-md bg-[#07111f] border border-white/10 text-[9px] text-slate-200 whitespace-nowrap">{nodeById[id].title}</span>
+              {i < ids.length - 1 && <ArrowRight size={11} className={arrow} />}
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <div className="h-full overflow-y-auto bg-[#050a17] text-slate-100">
-      <div className="min-h-full p-5 xl:p-6">
-        <div className="mb-5 rounded-2xl border border-cyan-500/20 bg-gradient-to-r from-cyan-500/10 via-[#7aa2ff]/10 to-[#f472b6]/10 p-4 shadow-[0_0_30px_rgba(34,211,238,0.08)]">
-          <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
+    <div className="h-full overflow-auto bg-[#050814] text-slate-100">
+      <div className="min-w-[1180px] min-h-full p-4">
+        <div className="relative rounded-2xl border border-slate-800 bg-[#071024] overflow-hidden shadow-[inset_0_0_80px_rgba(34,211,238,0.04)]">
+          <div className="absolute inset-0 opacity-30 pointer-events-none" style={{ backgroundImage: 'linear-gradient(rgba(148,163,184,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.08) 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
+          <div className="relative p-4 border-b border-slate-800/80 bg-[#071024]/95 flex items-start justify-between gap-4">
             <div>
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-9 h-9 rounded-xl bg-cyan-500/15 border border-cyan-400/30 flex items-center justify-center">
-                  <Network size={17} className="text-cyan-300" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-black text-white tracking-tight">SolarPro Mission Control Topography</h2>
-                  <p className="text-[11px] text-cyan-100/70">Canonical architecture map generated from audited routes, APIs, migrations, and libraries.</p>
-                </div>
+              <div className="flex items-center gap-2 mb-1">
+                <Network size={16} className="text-cyan-300" />
+                <h2 className="text-sm font-black text-white tracking-tight">SolarPro Mission Control Topography</h2>
+                <span className="text-[8px] font-black px-2 py-0.5 rounded-full border border-cyan-500/30 bg-cyan-500/10 text-cyan-300">UPDATED MAP</span>
               </div>
-              <p className="text-xs text-slate-300 leading-relaxed max-w-4xl">
-                Homeowner Intake → Bill Intelligence → Lead Operations → Marketplace Release → Contractor Claim → Core Project/Portal/Engineering, with Survey, 3D/Maps, Equipment, Health, and External Services marked by verified wiring status.
+              <p className="text-[10px] text-slate-400 max-w-4xl">
+                Preferred pipeline map style preserved. Missing audited systems have been added: Intake, Bill Intelligence, Lead Ops, Marketplace, Contractor Network, Portal, Core CRM, Survey, 3D/Maps, Engineering Docs, Equipment/Pricing/Utility, Health/Logging, and External Services.
               </p>
             </div>
             <button
               onClick={onOpenLegacy}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-700 bg-slate-900/70 hover:border-slate-500 text-[11px] text-slate-300 hover:text-white transition-all"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#c084fc]/30 bg-[#c084fc]/10 hover:border-[#c084fc]/60 text-[10px] text-[#d8b4fe] hover:text-white transition-all"
             >
-              <ExternalLink size={12} /> Legacy iframe reference
+              <ExternalLink size={11} /> Legacy reference
             </button>
           </div>
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            {(['live', 'partial', 'external', 'legacy', 'blocked'] as ArchitectureStatus[]).map(s => <div key={s}>{architectureStatusBadge(s)}</div>)}
-            <span className="text-[10px] text-slate-500">{ARCHITECTURE_NODES.length} nodes · {ARCHITECTURE_EDGES.length} audited edges · default map replaces stale external-only diagram</span>
-          </div>
-        </div>
 
-        <div className="grid grid-cols-1 2xl:grid-cols-6 xl:grid-cols-3 gap-3 mb-5">
-          {columns.map((column) => (
-            <section key={column.title} className="rounded-2xl border border-slate-800/80 bg-[#081024] p-3 min-h-[260px]">
-              <h3 className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500 mb-3">{column.title}</h3>
-              <div className="space-y-3">
-                {column.nodeIds.map((id) => {
-                  const node = nodeById[id];
-                  const c = COLOR[node.layer];
-                  return (
-                    <div key={node.id} className={`relative rounded-xl border ${c.border} ${c.bg} p-3 shadow-sm`}>
-                      <div className="flex items-start justify-between gap-2 mb-1.5">
-                        <div className={`text-[11px] font-bold leading-snug ${c.text}`}>{node.title}</div>
-                        {architectureStatusBadge(node.status)}
-                      </div>
-                      <p className="text-[10px] text-slate-400 leading-relaxed line-clamp-3">{node.detail}</p>
-                      {node.tables && (
-                        <p className="mt-2 text-[9px] font-mono text-[#fbbf24]/80 truncate">{node.tables.slice(0, 3).join(' · ')}{node.tables.length > 3 ? ' · …' : ''}</p>
-                      )}
-                    </div>
-                  );
-                })}
+          <div className="relative p-5">
+            <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-70" viewBox="0 0 1180 760" preserveAspectRatio="none" aria-hidden="true">
+              <defs>
+                <linearGradient id="topoPrimary" x1="0" x2="1"><stop offset="0%" stopColor="#22d3ee"/><stop offset="45%" stopColor="#f472b6"/><stop offset="100%" stopColor="#34d399"/></linearGradient>
+                <linearGradient id="topoSurvey" x1="0" x2="1"><stop offset="0%" stopColor="#4fd1c5"/><stop offset="55%" stopColor="#fbbf24"/><stop offset="100%" stopColor="#34d399"/></linearGradient>
+              </defs>
+              <path d="M105 140 C260 140 300 140 455 140 S690 140 845 140 S950 235 950 315" fill="none" stroke="url(#topoPrimary)" strokeWidth="2" strokeDasharray="6 5" />
+              <path d="M105 380 C285 380 330 380 505 380 S675 380 845 380 S950 360 950 315" fill="none" stroke="url(#topoSurvey)" strokeWidth="2" strokeDasharray="5 6" />
+              <path d="M250 215 C250 250 350 260 455 260" fill="none" stroke="#7aa2ff" strokeWidth="1.5" strokeDasharray="4 5" opacity="0.65" />
+              <path d="M660 260 C735 260 790 315 845 315" fill="none" stroke="#f472b6" strokeWidth="1.5" strokeDasharray="4 5" opacity="0.65" />
+              <path d="M660 495 C770 495 800 435 900 435" fill="none" stroke="#fbbf24" strokeWidth="1.5" strokeDasharray="4 5" opacity="0.65" />
+              <path d="M170 610 C360 610 430 575 590 575 S830 575 1010 575" fill="none" stroke="#c084fc" strokeWidth="1.5" strokeDasharray="4 6" opacity="0.6" />
+            </svg>
+
+            <div className="relative space-y-5">
+              {rows.map((row, rowIndex) => (
+                <div key={row.label} className="grid grid-cols-[170px_1fr] gap-4 items-center">
+                  <div className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500 text-right pr-2">{row.label}</div>
+                  <div className="flex flex-wrap gap-3 items-stretch">
+                    {row.nodeIds.map(id => <MiniNode key={id} id={id} compact={rowIndex >= 4} />)}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="relative mt-6 grid grid-cols-2 gap-3">
+              <FlowStrip title="Primary Revenue / Operations Flow" ids={primaryFlow} tone="green" />
+              <FlowStrip title="Survey / Design / Engineering Flow" ids={surveyFlow} tone="amber" />
+            </div>
+
+            <div className="relative mt-3 rounded-lg border border-slate-700/40 bg-[#081024]/90 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-300">Canonical Data Flow Edges</h3>
+                <div className="flex items-center gap-2">{(['live', 'partial', 'external', 'blocked'] as ArchitectureStatus[]).map(s => <div key={s}>{architectureStatusBadge(s)}</div>)}</div>
               </div>
-            </section>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-5">
-          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
-            <h3 className="text-xs font-bold text-emerald-300 uppercase tracking-wide mb-3">Primary Revenue / Operations Flow</h3>
-            <div className="flex flex-wrap items-center gap-2">
-              {primaryFlow.map((id, i) => (
-                <React.Fragment key={id}>
-                  <span className="px-2.5 py-1 rounded-lg bg-[#07111f] border border-emerald-500/20 text-[10px] text-emerald-100">{nodeById[id].title}</span>
-                  {i < primaryFlow.length - 1 && <ArrowRight size={12} className="text-emerald-500/70" />}
-                </React.Fragment>
-              ))}
+              <div className="grid grid-cols-3 gap-1.5">
+                {ARCHITECTURE_EDGES.map((edge, i) => (
+                  <div key={`${edge.from}-${edge.to}-${i}`} className="rounded-md border border-slate-800 bg-[#050814] px-2 py-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[8px] font-mono text-slate-300 truncate">{edge.from} <span className="text-cyan-400">→</span> {edge.to}</span>
+                      {architectureStatusBadge(edge.status)}
+                    </div>
+                    <p className="text-[8px] text-slate-500 truncate mt-0.5">{edge.label}</p>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
-            <h3 className="text-xs font-bold text-amber-300 uppercase tracking-wide mb-3">Survey / Design / Engineering Flow</h3>
-            <div className="flex flex-wrap items-center gap-2">
-              {secondaryFlow.map((id, i) => (
-                <React.Fragment key={id}>
-                  <span className="px-2.5 py-1 rounded-lg bg-[#07111f] border border-amber-500/20 text-[10px] text-amber-100">{nodeById[id].title}</span>
-                  {i < secondaryFlow.length - 1 && <ArrowRight size={12} className="text-amber-500/70" />}
-                </React.Fragment>
-              ))}
-            </div>
-            <p className="mt-3 text-[10px] text-amber-200/70">Survey → engineering remains explicitly partial: engineering report consumes 4/20 physical-data fields; survey auto-apply to SystemDefinition/CAD/Permit/Proposal is not production-wired.</p>
-          </div>
         </div>
-
-        <ArchitectureEdgesView />
       </div>
     </div>
   );

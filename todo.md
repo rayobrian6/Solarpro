@@ -1,15 +1,16 @@
-# Topography Map Visibility Correction
+# Topography Map Style Correction
 
 ## Diagnose
-- [x] Inspect uploaded screenshot and identify what surface is unchanged.
-- [x] Inspect current dev Topography source to confirm whether canonical topology was only in Pipeline tab while Map still used the stale iframe.
+- [x] Inspect screenshot and confirm desired surface/style.
+- [x] Locate any in-repo source for the existing node-and-connector Topography map; none found beyond external TOPO_URL iframe.
+- [x] Inspect current /admin/topography wiring after the previous correction.
 
-## Fix
-- [x] Update the visible Topography map experience so canonical architecture appears without relying on the stale external iframe.
-- [x] Preserve existing tabs and legacy/external map reference explicitly.
-- [x] Validate TypeScript, lint, build, and source markers.
+## Correct Implementation
+- [x] Restore the preferred node-and-connector map as the primary map style.
+- [x] Add missing audited SolarPro pipelines to that map: intake, bill intelligence, lead ops, marketplace, contractor, portal, core project/CRM, survey, 3D/maps, engineering/docs, equipment/pricing/utility, health/logging, external services.
+- [x] Preserve existing pipeline/detail, partner, surveys, and integration panel behavior.
 
-## Git
-- [x] Commit correction directly on dev.
-- [x] Push dev.
-- [x] Report exact correction and validation evidence.
+## Validation + Git
+- [x] Run TypeScript/lint/build validation.
+- [ ] Commit directly on dev and push dev.
+- [ ] Report correction and any limitations.
