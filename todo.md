@@ -1,12 +1,13 @@
-# Restore Original Topography Map
+# Diagnose Topography Screenshot Issue
 
-## Restore
-- [x] Confirm repository branch and current working state.
-- [x] Restore original TOPO_URL iframe as the primary Map tab.
-- [x] Remove new primary ArchitectureMapView / Legacy tab behavior.
-- [x] Preserve existing Pipeline, Partner, Surveys, and Integration Panel behavior.
+## Diagnose
+- [x] Confirm repository location and current working state.
+- [x] Inspect the Admin iframe source and vendored map artifact paths.
+- [x] Reproduce the Admin page/map render locally and capture browser errors if any.
+- [x] Determine whether the blank screenshot is code-related, route/path-related, or deployment/cache-related.
 
-## Validate + Ship
-- [x] Run TypeScript and build validation.
-- [x] Commit directly on dev and push dev.
-- [x] Report exact result and limitation about external hosted map source.
+## Fix If Needed
+- [x] Patch only if a reproducible code/render issue is found.
+- [x] Validate locally before any commit/push.
+- [ ] If patched, make exactly one scoped commit/push to dev.
+- [ ] Report the result clearly.
