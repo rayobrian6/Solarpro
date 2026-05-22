@@ -6,7 +6,7 @@
 //           | "Pipeline" (evidence detail) | "Partner" | "Surveys"
 //   RIGHT — System Integration Panel (live audit, unchanged from v2)
 //
-// Map tab restores the original hosted SolarPro topography map iframe.
+// Map tab serves the original SolarPro topography artifact vendored locally and merged with audit-backed missing pipelines.
 // Pipeline tab keeps the evidence-backed canonical SolarPro architecture audit:
 //   Homeowner Intake → Bill Intelligence → Lead Ops → Marketplace
 //   → Contractor Claim → Project/Portal/Engineering, plus Survey → 3D
@@ -19,7 +19,7 @@
 // If no projectId is provided, right panel shows a project selector prompt.
 //
 // RULES:
-//   - original iframe src is preserved as the default Map tab (same TOPO_URL)
+//   - original map style is preserved; TOPO_URL points to the local audited original-style artifact
 //   - no writes to DB
 //   - no side effects on production routes
 // ============================================================================
@@ -42,8 +42,7 @@ import type { TopographyState, FieldUsage } from '@/lib/topography/getTopography
 // Constants
 // ---------------------------------------------------------------------------
 
-const TOPO_URL =
-  'https://sites.super.myninja.ai/399ee147-1c47-4168-953c-039b63bf656e/a29238b9/index.html';
+const TOPO_URL = '/solarpro-mission-control-topography.html';
 
 // Partner app live URL (from PIPELINE_TOPOLOGY.html)
 const PARTNER_API_URL = 'https://site-survey-api-bpyz.onrender.com';
@@ -651,7 +650,7 @@ const ARCHITECTURE_NODES: ArchitectureNode[] = [
   { id: 'survey', group: 'Survey & Physical Data', title: 'Survey Ingest + project_physical_data', detail: 'Partner/mobile and SolarPro survey paths normalize field data, webhook events, photos, and physical/electrical facts.', evidence: ['/api/auth/authorize', '/api/webhooks/survey-complete', '/api/survey/submit', 'lib/survey/ingest/ingestPipeline.ts'], tables: ['site_surveys', 'site_survey_files', 'project_physical_data', 'webhook_deliveries', 'webhook_ingestion_log'], status: 'live', layer: 'mobile' },
   { id: 'survey-partial', group: 'Survey & Physical Data', title: 'Survey → Engineering Consumption', detail: 'Engineering report reads 4/20 physical-data fields; SystemDefinition/CAD/Permit/Proposal auto-application has source files but no production callers.', evidence: ['lib/topography/getTopographyState.ts', 'lib/engineering/reportGenerator.ts', 'lib/siteSurvey/applyToSystemDefinition.ts', 'lib/siteSurvey/permitIntegration.ts'], tables: ['project_physical_data', 'project_files'], status: 'partial', layer: 'blocked' },
   { id: 'engineering', group: 'Engineering & Documents', title: 'Engineering, SLD, BOM, Permit, Plan Set', detail: 'Engineering APIs calculate topology, BOM, SLD/PDF, permit, plan-set, PVWatts, structural output, sync, and saved artifacts.', evidence: ['/engineering', '/api/engineering/topology', '/api/engineering/bom', '/api/engineering/sld', '/api/engineering/permit', '/api/engineering/plan-set', '/api/engineering/pvwatts'], tables: ['engineering_runs', 'project_hardware', 'project_files', 'productions'], status: 'live', layer: 'engineering' },
-  { id: 'maps3d', group: '3D / Maps / Solar Design', title: 'Maps, 3D, Solar Placement', detail: 'Map/session/solar design surfaces and dependencies support visual placement and layout persistence; external iframe remains static/external.', evidence: ['/api/maps-session', '/api/solar', 'Mapbox/Cesium/Three dependencies', TOPO_URL], tables: ['layouts', 'projects'], status: 'partial', layer: 'cloud' },
+  { id: 'maps3d', group: '3D / Maps / Solar Design', title: 'Maps, 3D, Solar Placement', detail: 'Map/session/solar design surfaces and dependencies support visual placement and layout persistence; the original topography artifact is now vendored locally with audited pipeline additions.', evidence: ['/api/maps-session', '/api/solar', 'Mapbox/Cesium/Three dependencies', TOPO_URL], tables: ['layouts', 'projects'], status: 'partial', layer: 'cloud' },
   { id: 'equipment', group: 'Equipment / Pricing / Utility', title: 'Equipment Registry + Pricing + Utility Policy', detail: 'Equipment registries, user equipment tables, distributor pricing, utility policies, and pricing config feed design, SLD/BOM, and proposal logic.', evidence: ['lib/topology-manager.ts', 'lib/equipment-registry-v4.ts', 'lib/proposal/buildCanonicalProposal.ts'], tables: ['user_equipment_panels', 'user_equipment_inverters', 'user_equipment_batteries', 'user_equipment_mounting', 'distributor_prices', 'utility_policies', 'pricing_config'], status: 'live', layer: 'backend' },
   { id: 'health', group: 'Health / Logging', title: 'Admin Health, Events, Logs', detail: 'Operational visibility comes through admin health, analytics, network events, webhook ingestion logs, and admin activity logs.', evidence: ['/api/admin/network/health', '/api/admin/network/analytics', '/api/admin/network/webhooks'], tables: ['network_events', 'webhook_ingestion_log', 'admin_activity_log', 'campaign_analytics'], status: 'live', layer: 'db' },
   { id: 'external', group: 'External Services', title: 'External AI, Storage, Maps, Payments, Email', detail: 'External integrations appear in source/dependencies and should be marked external rather than treated as SolarPro-owned database systems.', evidence: ['Vercel Blob', 'Claude/OpenAI/OCR hints', 'Google Maps/Solar', 'NREL/PVWATTS', 'Stripe', 'Resend', PARTNER_API_URL], status: 'external', layer: 'cloud' },

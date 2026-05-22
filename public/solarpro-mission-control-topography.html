@@ -1,0 +1,3039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SolarPro Mission Control · System Topography v47.343 + Website Audit Pipelines</title>
+<style>
+  :root {
+    --bg:         #070b14;
+    --bg2:        #0c1220;
+    --surface:    #0f1825;
+    --surface2:   #141f30;
+    --surface3:   #1a2840;
+    --border:     #1e2d45;
+    --border2:    #243552;
+    --text:       #e2eaf5;
+    --text-muted: #7a90b0;
+    --text-dim:   #3a4d66;
+    --accent:     #4d9fff;
+    --accent-glow:rgba(77,159,255,0.35);
+    --green:      #3dd68c;
+    --green-glow: rgba(61,214,140,0.3);
+    --amber:      #f0b429;
+    --amber-glow: rgba(240,180,41,0.3);
+    --red:        #ff5252;
+    --red-glow:   rgba(255,82,82,0.3);
+    --gray:       #4a5f7a;
+    --purple:     #c084fc;
+    --orange:     #fb923c;
+    --teal:       #2dd4bf;
+    --pink:       #f472b6;
+    --sidebar-w:  285px;
+    --header-h:   56px;
+    --info-w:     360px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── DOT GRID BACKGROUND ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: radial-gradient(circle, rgba(77,159,255,0.045) 1px, transparent 1px);
+    background-size: 28px 28px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── AMBIENT GLOW TOP-LEFT ── */
+  body::after {
+    content: '';
+    position: fixed;
+    top: -200px;
+    left: -200px;
+    width: 700px;
+    height: 700px;
+    background: radial-gradient(ellipse, rgba(77,159,255,0.06) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── HEADER ── */
+  #header {
+    height: var(--header-h);
+    background: linear-gradient(90deg, var(--surface) 0%, rgba(15,24,37,0.98) 100%);
+    border-bottom: 1px solid var(--border2);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 0 18px;
+    flex-shrink: 0;
+    z-index: 100;
+    position: relative;
+    box-shadow: 0 1px 0 rgba(77,159,255,0.08), 0 4px 20px rgba(0,0,0,0.4);
+  }
+
+  .mc-logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-right: 4px;
+  }
+  .mc-logo-icon {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #f0b429 0%, #ff8c00 100%);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+    box-shadow: 0 0 12px rgba(240,180,41,0.4);
+    flex-shrink: 0;
+  }
+  .mc-title-block {}
+  .mc-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: 0.3px;
+    line-height: 1.2;
+  }
+  .mc-subtitle {
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    margin-top: 1px;
+  }
+
+  .header-divider {
+    width: 1px;
+    height: 28px;
+    background: var(--border2);
+    flex-shrink: 0;
+  }
+
+  .mc-version {
+    font-size: 11px;
+    color: var(--accent);
+    background: rgba(77,159,255,0.1);
+    padding: 3px 9px;
+    border-radius: 12px;
+    border: 1px solid rgba(77,159,255,0.25);
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+  }
+
+  #search-wrap {
+    flex: 1;
+    max-width: 320px;
+    position: relative;
+    margin-left: 4px;
+  }
+  #search-input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    font-size: 12px;
+    padding: 7px 36px 7px 12px;
+    border-radius: 8px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  #search-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(77,159,255,0.12);
+  }
+  #search-input::placeholder { color: var(--text-dim); }
+  #search-count {
+    position: absolute; right: 10px; top: 50%;
+    transform: translateY(-50%);
+    font-size: 10px; color: var(--text-muted); pointer-events: none;
+  }
+
+  .header-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    color: var(--text-muted);
+    font-size: 11px;
+    padding: 6px 12px;
+    border-radius: 7px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s;
+    display: flex; align-items: center; gap: 5px;
+    font-weight: 500;
+  }
+  .header-btn:hover {
+    background: var(--surface3);
+    border-color: var(--border);
+    color: var(--text);
+  }
+  .header-btn.primary {
+    background: rgba(77,159,255,0.1);
+    border-color: rgba(77,159,255,0.35);
+    color: var(--accent);
+  }
+  .header-btn.primary:hover {
+    background: rgba(77,159,255,0.18);
+    box-shadow: 0 0 12px rgba(77,159,255,0.2);
+  }
+  .header-btn.success {
+    background: rgba(61,214,140,0.1);
+    border-color: rgba(61,214,140,0.3);
+    color: var(--green);
+  }
+  .header-btn.success:hover {
+    background: rgba(61,214,140,0.18);
+    box-shadow: 0 0 12px rgba(61,214,140,0.2);
+  }
+
+  #zoom-display {
+    font-size: 11px;
+    color: var(--text-muted);
+    min-width: 44px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .mc-live-indicator {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10px; color: var(--text-muted);
+    white-space: nowrap;
+    margin-left: auto;
+  }
+  .mc-live-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--green); }
+    50% { opacity: 0.5; box-shadow: 0 0 2px var(--green); }
+  }
+
+  /* ── LAYOUT ── */
+  #body-wrap { display: flex; flex: 1; overflow: hidden; position: relative; z-index: 1; }
+
+  /* ── SIDEBAR ── */
+  #sidebar {
+    width: var(--sidebar-w);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: hidden; flex-shrink: 0;
+    transition: width 0.25s cubic-bezier(0.4,0,0.2,1);
+    z-index: 50;
+  }
+  #sidebar.collapsed { width: 0; }
+  #sidebar-inner {
+    width: var(--sidebar-w);
+    overflow-y: auto; overflow-x: hidden;
+    flex: 1;
+  }
+  #sidebar-inner::-webkit-scrollbar { width: 3px; }
+  #sidebar-inner::-webkit-scrollbar-track { background: transparent; }
+  #sidebar-inner::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  .sb-section { padding: 14px; border-bottom: 1px solid var(--border); }
+  .sb-title {
+    font-size: 9px; font-weight: 800;
+    color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 1.2px;
+    margin-bottom: 10px;
+  }
+  .sb-btn {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; text-align: left;
+    background: none; border: none;
+    color: var(--text-muted);
+    font-size: 11.5px; padding: 6px 8px;
+    border-radius: 6px; cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sb-btn::before {
+    content: '';
+    width: 3px; height: 3px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+    opacity: 0.5;
+  }
+  .sb-btn:hover { background: var(--surface2); color: var(--text); }
+  .sb-btn.active {
+    background: rgba(77,159,255,0.1);
+    color: var(--accent);
+    border: 1px solid rgba(77,159,255,0.15);
+  }
+  .sb-btn.active::before { background: var(--accent); opacity: 1; }
+
+  .sheet-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+  .sheet-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    color: var(--text-muted);
+    font-size: 10px; padding: 5px 2px;
+    border-radius: 5px; cursor: pointer;
+    text-align: center;
+    transition: all 0.15s;
+    font-weight: 600;
+  }
+  .sheet-btn:hover {
+    background: rgba(77,159,255,0.1);
+    color: var(--accent);
+    border-color: rgba(77,159,255,0.3);
+  }
+
+  /* LEGEND */
+  .legend-row {
+    display: flex; align-items: center; gap: 9px;
+    margin-bottom: 5px; cursor: pointer;
+    padding: 4px 6px; border-radius: 5px;
+    transition: background 0.1s;
+  }
+  .legend-row:hover { background: var(--surface2); }
+  .legend-dot {
+    width: 9px; height: 9px;
+    border-radius: 50%; flex-shrink: 0;
+  }
+  .legend-label { font-size: 11px; color: var(--text-muted); flex: 1; }
+  .legend-count { font-size: 10px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  .legend-row.active .legend-label { color: var(--text); }
+
+  /* STATUS LEGEND */
+  .status-legend { margin-top: 8px; }
+  .status-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 3px 6px; margin-bottom: 4px;
+  }
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%; flex-shrink: 0;
+  }
+  .status-dot.green  { background: var(--green);  box-shadow: 0 0 5px var(--green); }
+  .status-dot.amber  { background: var(--amber);  box-shadow: 0 0 5px var(--amber); }
+  .status-dot.red    { background: var(--red);    box-shadow: 0 0 5px var(--red); }
+  .status-dot.gray   { background: var(--gray); }
+  .status-label { font-size: 10.5px; color: var(--text-muted); }
+
+  .kbd {
+    display: inline-block;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 4px;
+    font-size: 10px; padding: 1px 5px;
+    color: var(--text-muted); font-family: monospace;
+  }
+  .shortcut-row {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 6px;
+  }
+  .shortcut-desc { font-size: 11px; color: var(--text-muted); }
+
+  .file-item {
+    font-size: 10px; color: var(--text-muted);
+    padding: 4px 6px; display: flex; align-items: flex-start; gap: 6px;
+    border-radius: 4px; transition: background 0.1s;
+  }
+  .file-item:hover { background: var(--surface2); }
+  .file-item .fi-icon { color: var(--accent); }
+  .file-path { color: var(--text-dim); font-size: 9px; margin-top: 1px; }
+
+  /* ── CANVAS ── */
+  #canvas-wrap {
+    flex: 1; overflow: hidden; position: relative; cursor: grab;
+  }
+  #canvas-wrap.dragging { cursor: grabbing; }
+  #canvas-wrap.searching .node-group { opacity: 0.08; }
+  #canvas-wrap.searching .node-group.search-hit { opacity: 1; }
+
+  svg#map { width: 100%; height: 100%; user-select: none; }
+
+  /* ── NODE GROUPS ── */
+  .node-group {
+    cursor: pointer;
+    transition: opacity 0.2s;
+    filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5));
+  }
+  .node-group:hover {
+    filter: drop-shadow(0 4px 16px rgba(0,0,0,0.6)) drop-shadow(0 0 12px rgba(77,159,255,0.2));
+    transform-origin: center;
+  }
+  .node-group.selected {
+    filter: drop-shadow(0 0 20px rgba(77,159,255,0.5)) drop-shadow(0 4px 20px rgba(0,0,0,0.7));
+  }
+  .node-box {
+    transition: filter 0.2s;
+  }
+
+  /* ── EDGE ANIMATION ── */
+  .edge-animated {
+    stroke-dasharray: 8 6;
+    animation: flow 1.2s linear infinite;
+  }
+  @keyframes flow {
+    from { stroke-dashoffset: 28; }
+    to   { stroke-dashoffset: 0; }
+  }
+
+  /* ── INFO PANEL ── */
+  #info-panel {
+    width: var(--info-w);
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    flex-shrink: 0;
+    display: flex; flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.25s cubic-bezier(0.4,0,0.2,1);
+    position: absolute; right: 0; top: 0; bottom: 0;
+    z-index: 50;
+    box-shadow: -4px 0 30px rgba(0,0,0,0.4);
+  }
+  #info-panel.open { transform: translateX(0); }
+  #info-header {
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: flex-start; justify-content: space-between;
+  }
+  #info-title { font-size: 13px; font-weight: 700; color: var(--text); line-height: 1.3; }
+  #info-subtitle { font-size: 11px; color: var(--text-muted); margin-top: 4px; font-family: monospace; }
+  #info-close {
+    background: var(--surface2); border: 1px solid var(--border2);
+    color: var(--text-muted); cursor: pointer;
+    font-size: 13px; width: 26px; height: 26px;
+    border-radius: 6px; display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s; flex-shrink: 0;
+  }
+  #info-close:hover { background: var(--surface3); color: var(--text); border-color: var(--border); }
+  #info-body { flex: 1; overflow-y: auto; padding: 16px 18px; }
+  #info-body::-webkit-scrollbar { width: 3px; }
+  #info-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  .info-section { margin-bottom: 18px; }
+  .info-section-title {
+    font-size: 9px; font-weight: 800;
+    color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 1.2px;
+    margin-bottom: 10px;
+  }
+  .info-row {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    margin-bottom: 7px; gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(30,45,69,0.5);
+  }
+  .info-row:last-child { border-bottom: none; }
+  .info-key { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+  .info-val { font-size: 11px; color: var(--text); text-align: right; word-break: break-word; }
+  .info-val.code { font-family: monospace; font-size: 10px; color: var(--accent); }
+  .info-val.warn { color: var(--amber); }
+  .info-val.ok { color: var(--green); }
+  .info-tag {
+    display: inline-block;
+    padding: 2px 8px; border-radius: 10px;
+    font-size: 10px; font-weight: 700;
+    margin-right: 4px; margin-bottom: 3px;
+  }
+  .dep-chip {
+    display: inline-block;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 5px; font-size: 10px;
+    padding: 2px 7px; color: var(--text-muted);
+    margin: 2px; font-family: monospace;
+  }
+  .info-code-block {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--border2);
+    border-radius: 8px; padding: 10px 12px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 10px; color: var(--accent);
+    line-height: 1.7; overflow-x: auto; white-space: pre;
+  }
+
+  /* ── TOOLTIP ── */
+  #tooltip {
+    position: fixed;
+    background: rgba(9,15,28,0.96);
+    border: 1px solid var(--border2);
+    border-radius: 9px;
+    padding: 10px 14px;
+    font-size: 11.5px;
+    pointer-events: none;
+    z-index: 200;
+    max-width: 280px;
+    display: none;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(77,159,255,0.08);
+    backdrop-filter: blur(8px);
+  }
+  #tooltip .tt-title { font-weight: 700; color: var(--text); margin-bottom: 5px; font-size: 12px; }
+  #tooltip .tt-desc { color: var(--text-muted); line-height: 1.5; }
+  #tooltip .tt-hint { margin-top: 7px; font-size: 10px; color: var(--accent); opacity: 0.7; }
+
+  /* ── TOAST ── */
+  #toast {
+    position: fixed; bottom: 24px; left: 50%;
+    transform: translateX(-50%) translateY(60px);
+    background: var(--surface2);
+    border: 1px solid rgba(61,214,140,0.4);
+    color: var(--green);
+    padding: 9px 20px; border-radius: 20px;
+    font-size: 12px; z-index: 300;
+    transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+    pointer-events: none;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4), 0 0 12px rgba(61,214,140,0.15);
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+
+  /* ── MINIMAP ── */
+  #minimap {
+    position: absolute; bottom: 18px; right: 18px;
+    width: 170px; height: 106px;
+    background: rgba(7,11,20,0.92);
+    border: 1px solid var(--border2);
+    border-radius: 8px; overflow: hidden;
+    z-index: 40;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 0 1px rgba(77,159,255,0.06);
+  }
+  #minimap canvas { width: 100%; height: 100%; }
+  #minimap-viewport {
+    position: absolute;
+    border: 1px solid var(--accent);
+    background: rgba(77,159,255,0.06);
+    pointer-events: none; border-radius: 2px;
+  }
+
+  /* ── ZOOM CONTROLS ── */
+  #zoom-controls {
+    position: absolute; bottom: 18px; left: 18px;
+    display: flex; flex-direction: column; gap: 5px;
+    z-index: 40;
+  }
+  .zoom-btn {
+    width: 34px; height: 34px;
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    color: var(--text-muted); font-size: 16px;
+    border-radius: 8px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  }
+  .zoom-btn:hover {
+    background: var(--surface2);
+    border-color: var(--border);
+    color: var(--text);
+  }
+
+  /* ── TOGGLE SIDEBAR ── */
+  #toggle-sidebar {
+    position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-left: none;
+    color: var(--text-muted);
+    width: 16px; height: 44px;
+    border-radius: 0 6px 6px 0;
+    cursor: pointer; font-size: 10px; z-index: 60;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  #toggle-sidebar:hover { background: var(--surface2); color: var(--text); }
+
+  /* Scrollbar global */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: var(--surface); }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+</style>
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head>
+<body>
+
+<!-- HEADER: MISSION CONTROL -->
+<div id="header">
+  <div class="mc-logo">
+    <div class="mc-logo-icon">⚡</div>
+    <div class="mc-title-block">
+      <div class="mc-title">SolarPro Mission Control</div>
+      <div class="mc-subtitle">System Topography</div>
+    </div>
+  </div>
+
+  <div class="header-divider"></div>
+  <span class="mc-version">v47.343 · audit pipelines merged</span>
+
+  <div id="search-wrap">
+    <input id="search-input" type="text" placeholder="Search nodes, functions, fields… (Ctrl+F)" spellcheck="false">
+    <span id="search-count"></span>
+  </div>
+
+  <button class="header-btn" onclick="zoomIn()">＋</button>
+  <button class="header-btn" onclick="zoomOut()">－</button>
+  <button class="header-btn primary" onclick="fitAll()">⊡ Fit</button>
+  <span id="zoom-display">100%</span>
+  <button class="header-btn" onclick="toggleSidebar()">☰ Layers</button>
+  <button class="header-btn success" onclick="copyForChatGPT()" id="copy-btn">⬆ Copy for ChatGPT</button>
+
+  <div class="mc-live-indicator">
+    <div class="mc-live-dot"></div>
+    <span>LIVE</span>
+    <span id="mc-timestamp" style="margin-left:6px; color: var(--text-dim)"></span>
+  </div>
+</div>
+
+<!-- BODY -->
+<div id="body-wrap">
+
+  <!-- SIDEBAR -->
+  <div id="sidebar">
+    <div id="sidebar-inner">
+
+      <!-- PIPELINE LAYERS NAV -->
+      <div class="sb-section">
+        <div class="sb-title">Pipeline Layers</div>
+        <button class="sb-btn" onclick="jumpToLayer('platform_intake')">① Intake & Qualification</button>
+        <button class="sb-btn" onclick="jumpToLayer('platform_bill')">② Bill Intelligence</button>
+        <button class="sb-btn" onclick="jumpToLayer('platform_ops')">③ Admin Lead Ops</button>
+        <button class="sb-btn" onclick="jumpToLayer('platform_market')">④ Marketplace</button>
+        <button class="sb-btn" onclick="jumpToLayer('platform_contractor')">⑤ Contractor Network</button>
+        <button class="sb-btn" onclick="jumpToLayer('platform_core')">⑥ Core Project / CRM</button>
+        <button class="sb-btn" onclick="jumpToLayer('platform_portal')">⑦ Homeowner Portal</button>
+        <button class="sb-btn" onclick="jumpToLayer('platform_design')">⑧ Maps / Design / Equipment</button>
+        <button class="sb-btn" onclick="jumpToLayer('platform_health')">⑨ Health / External Services</button>
+        <div style="height:8px"></div>
+        <button class="sb-btn active" onclick="jumpToLayer('entry')">⑩ Engineering Entry & API Route</button>
+        <button class="sb-btn" onclick="jumpToLayer('canonical')">② Canonical Data Contract</button>
+        <button class="sb-btn" onclick="jumpToLayer('cad')">③ CAD Engine</button>
+        <button class="sb-btn" onclick="jumpToLayer('validation')">④ Hard Validation Gate</button>
+        <button class="sb-btn" onclick="jumpToLayer('pages')">⑤ Page Generators</button>
+        <button class="sb-btn" onclick="jumpToLayer('output')">⑥ Output & Assembly</button>
+        <button class="sb-btn" onclick="jumpToLayer('engine3d')">⑦ 3D Engine (Cesium)</button>
+        <button class="sb-btn" onclick="jumpToLayer('version')">⑧ Version Registry</button>
+        <button class="sb-btn" onclick="jumpToLayer('survey_entry')">⑨ Survey Entry (Webhook)</button>
+        <button class="sb-btn" onclick="jumpToLayer('survey_ingest')">⑩ Survey Ingest Pipeline</button>
+        <button class="sb-btn" onclick="jumpToLayer('survey_transform')">⑪ Transform Layer v2.0</button>
+        <button class="sb-btn" onclick="jumpToLayer('physical_db')">⑫ Physical Data DB</button>
+        <button class="sb-btn" onclick="jumpToLayer('field_display')">⑬ Field Display (UI)</button>
+
+      </div>
+
+      <!-- SHEET QUICK JUMP -->
+      <div class="sb-section">
+        <div class="sb-title">Planset Sheets</div>
+        <div class="sheet-grid" id="sheet-grid"></div>
+      </div>
+
+      <!-- NODE TYPE LEGEND -->
+      <div class="sb-section">
+        <div class="sb-title">Node Types</div>
+        <div id="legend-container"></div>
+      </div>
+
+      <!-- STATUS LEGEND -->
+      <div class="sb-section">
+        <div class="sb-title">Status</div>
+        <div class="status-legend">
+          <div class="status-row"><div class="status-dot green"></div><span class="status-label">Live / Complete</span></div>
+          <div class="status-row"><div class="status-dot amber"></div><span class="status-label">In Progress / Planned</span></div>
+          <div class="status-row"><div class="status-dot red"></div><span class="status-label">Blocked / Fixed Required</span></div>
+          <div class="status-row"><div class="status-dot gray"></div><span class="status-label">Inactive / Legacy</span></div>
+        </div>
+      </div>
+
+      <!-- KEYBOARD SHORTCUTS -->
+      <div class="sb-section">
+        <div class="sb-title">Shortcuts</div>
+        <div class="shortcut-row"><span class="shortcut-desc">Zoom in</span><span><kbd class="kbd">+</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Zoom out</span><span><kbd class="kbd">-</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Fit all</span><span><kbd class="kbd">F</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Search</span><span><kbd class="kbd">Ctrl+F</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Next hit</span><span><kbd class="kbd">Enter</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Drag pan</span><span>Mouse drag</span></div>
+      </div>
+
+      <!-- FILE TREE -->
+      <div class="sb-section">
+        <div class="sb-title">Source Files</div>
+        <div class="file-item"><span class="fi-icon">📄</span><div><div>route.ts</div><div class="file-path">app/api/engineering/permit/</div></div></div>
+        <div class="file-item"><span class="fi-icon">📄</span><div><div>version.ts</div><div class="file-path">lib/</div></div></div>
+        <div class="file-item"><span class="fi-icon">📄</span><div><div>inject_v47323.py</div><div class="file-path">scripts/</div></div></div>
+        <div class="file-item"><span class="fi-icon">📄</span><div><div>inject_v47324.py</div><div class="file-path">scripts/</div></div></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MAP CANVAS -->
+  <div id="canvas-wrap">
+    <button id="toggle-sidebar" onclick="toggleSidebar()" title="Toggle sidebar">‹</button>
+
+    <svg id="map" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <!-- Arrows -->
+        <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#2a3d5a"/>
+        </marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#4d9fff"/>
+        </marker>
+        <marker id="arrow-green" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#3dd68c"/>
+        </marker>
+
+        <!-- Glow filters -->
+        <filter id="glow-blue" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="4" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="glow-green" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="3" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="glow-strong" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="7" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="node-shadow" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="rgba(0,0,0,0.6)"/>
+        </filter>
+
+        <!-- Gradient defs for edges -->
+        <linearGradient id="edge-flow" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%"   stop-color="#4d9fff" stop-opacity="0.6"/>
+          <stop offset="100%" stop-color="#4d9fff" stop-opacity="0.15"/>
+        </linearGradient>
+      </defs>
+      <g id="viewport">
+        <!-- Generated by JS -->
+      </g>
+    </svg>
+
+    <!-- ZOOM CONTROLS -->
+    <div id="zoom-controls">
+      <button class="zoom-btn" onclick="zoomIn()" title="Zoom in (+)">+</button>
+      <button class="zoom-btn" onclick="zoomOut()" title="Zoom out (-)">-</button>
+      <button class="zoom-btn" onclick="fitAll()" title="Fit all (F)" style="font-size:11px">⊡</button>
+    </div>
+
+    <!-- MINIMAP -->
+    <div id="minimap">
+      <canvas id="minimap-canvas" width="340" height="212"></canvas>
+      <div id="minimap-viewport"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- INFO PANEL -->
+<div id="info-panel">
+  <div id="info-header">
+    <div>
+      <div id="info-title">Node Details</div>
+      <div id="info-subtitle"></div>
+    </div>
+    <button id="info-close" onclick="closeInfo()">✕</button>
+  </div>
+  <div id="info-body"></div>
+</div>
+
+<!-- TOOLTIP -->
+<div id="tooltip">
+  <div class="tt-title" id="tt-title"></div>
+  <div class="tt-desc" id="tt-desc"></div>
+  <div class="tt-hint">Click for details →</div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<script>
+
+
+// ══════════════════════════════════════════════════════════════════════
+//  DATA SECTION — preserved verbatim from v47.343 source
+// ══════════════════════════════════════════════════════════════════════
+
+
+// ═══════════════════════════════════════════════════════════════
+//  PIPELINE DATA — Full v47.343 Topology + 3D Engine v6.2.2
+// ═══════════════════════════════════════════════════════════════
+
+const NODE_TYPES = {
+  entry:      { label: 'Entry/API',       color: '#58a6ff', bg: 'rgba(88,166,255,0.12)',  border: '#58a6ff' },
+  interface:  { label: 'Interface/Type',  color: '#bc8cff', bg: 'rgba(188,140,255,0.12)', border: '#bc8cff' },
+  builder:    { label: 'Builder/Factory', color: '#3fb950', bg: 'rgba(63,185,80,0.12)',   border: '#3fb950' },
+  validator:  { label: 'Validator/Gate',  color: '#f85149', bg: 'rgba(248,81,73,0.12)',   border: '#f85149' },
+  cad:        { label: 'CAD Engine',      color: '#ffa657', bg: 'rgba(255,166,87,0.12)',  border: '#ffa657' },
+  page:       { label: 'Page Generator',  color: '#39d353', bg: 'rgba(57,211,83,0.12)',   border: '#39d353' },
+  helper:     { label: 'Helper/Util',     color: '#d29922', bg: 'rgba(210,153,34,0.12)',  border: '#d29922' },
+  output:     { label: 'Output/Assembly', color: '#ff7b72', bg: 'rgba(255,123,114,0.12)', border: '#ff7b72' },
+  version:    { label: 'Version/Config',  color: '#56d364', bg: 'rgba(86,211,100,0.12)',  border: '#56d364' },
+  engine3d:   { label: '3D Engine',       color: '#79c0ff', bg: 'rgba(121,192,255,0.12)', border: '#79c0ff' },
+};
+
+const LAYERS = {
+  platform_intake:     { label: '① Intake & Qualification',       y: 0  },
+  platform_bill:       { label: '② Bill Intelligence',            y: 1  },
+  platform_ops:        { label: '③ Admin Lead Operations',        y: 2  },
+  platform_market:     { label: '④ Marketplace',                  y: 3  },
+  platform_contractor: { label: '⑤ Contractor Network',           y: 4  },
+  platform_core:       { label: '⑥ Core Project / CRM',           y: 5  },
+  platform_portal:     { label: '⑦ Homeowner Portal',             y: 6  },
+  platform_design:     { label: '⑧ Maps / Design / Equipment',    y: 7  },
+  platform_health:     { label: '⑨ Health / External Services',   y: 8  },
+  entry:      { label: '⑩ Engineering Entry & API',       y: 9  },
+  canonical:  { label: '⑪ Canonical Contract',            y: 10 },
+  cad:        { label: '⑫ CAD Engine',                    y: 11 },
+  validation: { label: '⑬ Validation Gate',               y: 12 },
+  pages:      { label: '⑭ Page Generators',               y: 13 },
+  output:     { label: '⑮ Output & Assembly',             y: 14 },
+  engine3d:   { label: '⑯ 3D Engine (Cesium)',            y: 15 },
+  version:    { label: '⑰ Version Registry',              y: 16 },
+  survey_entry:     { label: '⑱ Survey Entry (Webhook)',  y: 17 },
+  survey_ingest:    { label: '⑲ Survey Ingest Pipeline',  y: 18 },
+  survey_transform: { label: '⑳ Transform Layer v2.0',    y: 19 },
+  physical_db:      { label: '㉑ Physical Data (DB Layer)', y: 20 },
+  field_display:    { label: '㉒ Field Display (UI)',      y: 21 },
+
+};
+
+// Grid config
+
+const NODES = [
+
+  // ── AUDIT MERGE: Full SolarPro website + database topology pipelines
+  {
+    id: 'homeowner_intake', layer: 'platform_intake', col: 0, type: 'entry',
+    label: 'Homeowner Intake',
+    sublabel: '/free-solar-estimate · POST /api/intake/homeowner',
+    desc: 'Public review-first estimate funnel persists homeowner submissions without immediately creating marketplace inventory. Audit evidence: /free-solar-estimate, POST /api/intake/homeowner, lib/intake/homeownerEventIntake.ts.',
+    fields: [
+      { k: 'Routes', v: '/free-solar-estimate · /api/intake/homeowner' },
+      { k: 'Library', v: 'lib/intake/homeownerEventIntake.ts' },
+      { k: 'Tables', v: 'intake_events, intake_funnels' },
+      { k: 'Status', v: 'LIVE — added from full website/database audit' },
+    ],
+    tags: [{ label: 'AUDIT MERGE', color: '#4d9fff' }, { label: 'LIVE', color: '#3dd68c' }],
+    deps: [],
+    code: 'Homeowner estimate form → POST /api/intake/homeowner → intake_events / intake_funnels',
+  },
+  {
+    id: 'qualification_event', layer: 'platform_intake', col: 1, type: 'builder',
+    label: 'Qualification Event',
+    sublabel: 'POST /api/intake/homeowner/qualification',
+    desc: 'Post-submit qualification appends derived intelligence for admin review, scoring, matching, and enrichment.',
+    fields: [
+      { k: 'Route', v: 'POST /api/intake/homeowner/qualification' },
+      { k: 'Table', v: 'intake_events' },
+      { k: 'Feeds', v: 'Bill intelligence and admin intake review' },
+    ],
+    tags: [{ label: 'AUDIT MERGE', color: '#4d9fff' }, { label: 'LIVE', color: '#3dd68c' }],
+    deps: ['homeowner_intake'],
+    code: 'intake_events qualification lifecycle → admin review / enrichment context',
+  },
+  {
+    id: 'utility_bill_intelligence', layer: 'platform_bill', col: 0, type: 'helper',
+    label: 'Utility Bill Storage + Intelligence',
+    sublabel: '/api/bill-upload · bill OCR/parser/enrichment',
+    desc: 'Bill attachments use Vercel Blob or local fallback, then OCR/parser/Claude/enrichment/confidence/insights prepare bill intelligence.',
+    fields: [
+      { k: 'Routes', v: '/api/bill-upload · /api/admin/network/intake/bill-intelligence' },
+      { k: 'Libraries', v: 'utilityBillAttachment.ts · utilityBillIntelligence.ts' },
+      { k: 'Tables', v: 'project_files, projects.bill_data, opportunity_intelligence' },
+      { k: 'External', v: 'Blob storage / OCR / AI enrichment' },
+    ],
+    tags: [{ label: 'AUDIT MERGE', color: '#4d9fff' }, { label: 'LIVE', color: '#3dd68c' }],
+    deps: ['qualification_event', 'external_services'],
+    code: 'Bill upload → attachment storage → OCR/parser/AI enrichment → opportunity intelligence',
+  },
+  {
+    id: 'admin_intake_review', layer: 'platform_ops', col: 0, type: 'builder',
+    label: 'Admin Intake Review',
+    sublabel: '/admin/network · intake/enrichment/health',
+    desc: 'Admin network control center reviews intake, funnels, enrichment, analytics, health, campaigns, and webhooks before release.',
+    fields: [
+      { k: 'Routes', v: '/admin/network · /api/admin/network/intake · /api/admin/network/enrichment' },
+      { k: 'Health', v: '/api/admin/network/health' },
+      { k: 'Tables', v: 'intake_events, enrichment_queue, campaign_analytics, webhook_ingestion_log' },
+    ],
+    tags: [{ label: 'AUDIT MERGE', color: '#4d9fff' }, { label: 'LIVE', color: '#3dd68c' }],
+    deps: ['utility_bill_intelligence', 'admin_health_events'],
+    code: 'Admin review console → enrichment queue / analytics / release decisions',
+  },
+  {
+    id: 'marketplace_release', layer: 'platform_market', col: 0, type: 'validator',
+    label: 'Marketplace Release + Screening',
+    sublabel: 'marketplaceInventory · releaseGate',
+    desc: 'Operator release converts approved intake/opportunities into marketplace inventory guarded by screening and release gates.',
+    fields: [
+      { k: 'Route', v: '/api/admin/network/marketplace' },
+      { k: 'Libraries', v: 'marketplaceInventory.ts · marketplaceReleaseGate.ts' },
+      { k: 'Tables', v: 'network_opportunities, opportunity_screening_queue, opportunity_sources' },
+    ],
+    tags: [{ label: 'AUDIT MERGE', color: '#4d9fff' }, { label: 'LIVE', color: '#3dd68c' }],
+    deps: ['admin_intake_review'],
+    code: 'Approved intake/opportunity → release gate → network_opportunities',
+  },
+  {
+    id: 'opportunity_intelligence', layer: 'platform_market', col: 1, type: 'helper',
+    label: 'Opportunity Intelligence + Revenue Projection',
+    sublabel: 'matching · enrichment · projection',
+    desc: 'Marketplace intelligence, enrichment, matching, and revenue projection annotate and prioritize opportunities.',
+    fields: [
+      { k: 'Libraries', v: 'marketplaceIntelligence.ts · marketplaceRevenueProjection.ts · contractorMatcher.ts' },
+      { k: 'Tables', v: 'opportunity_intelligence, opportunity_assignments, network_events' },
+      { k: 'Feeds', v: 'Contractor discovery and claims' },
+    ],
+    tags: [{ label: 'AUDIT MERGE', color: '#4d9fff' }, { label: 'LIVE', color: '#3dd68c' }],
+    deps: ['marketplace_release'],
+    code: 'Screening + enrichment + matching + revenue projection → opportunity ranking',
+  },
+  {
+    id: 'contractor_discovery_claim', layer: 'platform_contractor', col: 0, type: 'entry',
+    label: 'Contractor Discovery + Claim',
+    sublabel: '/network · claim · contractor profile',
+    desc: 'Contractors discover live opportunities, maintain profiles, claim jobs, and view assigned/claimed inventory.',
+    fields: [
+      { k: 'Routes', v: '/network · /api/network/opportunities · /api/network/opportunities/[id]/claim' },
+      { k: 'Profile', v: '/api/network/contractor-profile' },
+      { k: 'Tables', v: 'contractor_profiles, opportunity_claims, opportunity_assignments, network_opportunities' },
+    ],
+    tags: [{ label: 'AUDIT MERGE', color: '#4d9fff' }, { label: 'LIVE', color: '#3dd68c' }],
+    deps: ['opportunity_intelligence'],
+    code: 'Live opportunity → contractor discovery → claim / assignment records',
+  },
+  {
+    id: 'core_project_crm', layer: 'platform_core', col: 0, type: 'interface',
+    label: 'Clients, Projects, Layouts, Files, Proposals',
+    sublabel: 'Core Project / CRM database layer',
+    desc: 'Canonical CRM/project layer backing project creation, design state, generated artifacts, proposal outputs, and portal surfaces.',
+    fields: [
+      { k: 'Routes', v: '/projects · /proposals · /api/projects · /api/project-files · /api/proposals' },
+      { k: 'Tables', v: 'clients, projects, layouts, project_files, proposals, proposal_signatures' },
+      { k: 'Role', v: 'Bridge between marketplace, surveys, engineering, portal' },
+    ],
+    tags: [{ label: 'AUDIT MERGE', color: '#4d9fff' }, { label: 'LIVE', color: '#3dd68c' }],
+    deps: ['contractor_discovery_claim', 'survey_mobile_partner'],
+    code: 'Marketplace claims / survey links / project files → core project CRM truth',
+  },
+  {
+    id: 'homeowner_portal_dashboard', layer: 'platform_portal', col: 0, type: 'entry',
+    label: 'OTP Portal + Dashboard',
+    sublabel: '/portal/dashboard · bill/files/proposals/stage',
+    desc: 'Homeowners access project dashboard, stage state, bill upload, files, proposals, and logout flows.',
+    fields: [
+      { k: 'Routes', v: '/portal/dashboard · /api/portal/dashboard · /api/portal/bill-upload · /api/portal/logout' },
+      { k: 'Tables', v: 'portal_otp_tokens, projects, project_homeowner_stage_history, project_micro_stages' },
+      { k: 'Reads', v: 'Core project outputs and generated proposal/artifact state' },
+    ],
+    tags: [{ label: 'AUDIT MERGE', color: '#4d9fff' }, { label: 'LIVE', color: '#3dd68c' }],
+    deps: ['core_project_crm', 'planset_bundle'],
+    code: 'OTP login → dashboard reads project, files, proposal, stage state',
+  },
+  {
+    id: 'maps_3d_solar_design', layer: 'platform_design', col: 0, type: 'engine3d',
+    label: 'Maps, 3D, Solar Placement',
+    sublabel: '/api/maps-session · /api/solar · layouts',
+    desc: 'Map/session/solar design surfaces and dependencies support visual placement and layout persistence; external providers remain marked partial/external.',
+    fields: [
+      { k: 'Routes', v: '/api/maps-session · /api/solar' },
+      { k: 'Dependencies', v: 'Mapbox / Cesium / Three / Google Solar style providers' },
+      { k: 'Tables', v: 'layouts, projects' },
+      { k: 'Status', v: 'PARTIAL — external/static provider dependencies' },
+    ],
+    tags: [{ label: 'AUDIT MERGE', color: '#4d9fff' }, { label: 'PARTIAL', color: '#f0b429' }],
+    deps: ['external_services', 'core_project_crm'],
+    code: 'Map/session + solar design state → layouts/projects → CAD/engineering context',
+  },
+  {
+    id: 'equipment_pricing_utility', layer: 'platform_design', col: 1, type: 'helper',
+    label: 'Equipment Registry + Pricing + Utility Policy',
+    sublabel: 'topology-manager · registry · proposal canonicalizer',
+    desc: 'Equipment registries, user equipment tables, distributor pricing, utility policies, and pricing config feed design, SLD/BOM, and proposal logic.',
+    fields: [
+      { k: 'Libraries', v: 'topology-manager.ts · equipment-registry-v4.ts · buildCanonicalProposal.ts' },
+      { k: 'Tables', v: 'user_equipment_*, distributor_prices, utility_policies, pricing_config' },
+      { k: 'Feeds', v: 'Engineering topology, SLD, BOM, proposal pricing' },
+    ],
+    tags: [{ label: 'AUDIT MERGE', color: '#4d9fff' }, { label: 'LIVE', color: '#3dd68c' }],
+    deps: ['core_project_crm'],
+    code: 'Equipment + pricing + utility policy → topology / BOM / SLD / proposal',
+  },
+  {
+    id: 'admin_health_events', layer: 'platform_health', col: 0, type: 'validator',
+    label: 'Admin Health, Events, Logs',
+    sublabel: 'network health · analytics · webhooks',
+    desc: 'Operational visibility comes through admin health, analytics, network events, webhook ingestion logs, and admin activity logs.',
+    fields: [
+      { k: 'Routes', v: '/api/admin/network/health · /api/admin/network/analytics · /api/admin/network/webhooks' },
+      { k: 'Tables', v: 'network_events, webhook_ingestion_log, admin_activity_log, campaign_analytics' },
+      { k: 'Role', v: 'Feeds admin operations and audit observability' },
+    ],
+    tags: [{ label: 'AUDIT MERGE', color: '#4d9fff' }, { label: 'LIVE', color: '#3dd68c' }],
+    deps: [],
+    code: 'Events / webhook logs / admin activity → health and operator visibility',
+  },
+  {
+    id: 'external_services', layer: 'platform_health', col: 1, type: 'helper',
+    label: 'External AI, Storage, Maps, Payments, Email',
+    sublabel: 'Blob · AI/OCR · Google/NREL · Stripe · Resend · partner API',
+    desc: 'External integrations appear in source/dependencies and are marked external rather than treated as SolarPro-owned database systems.',
+    fields: [
+      { k: 'Storage/AI', v: 'Vercel Blob, Claude/OpenAI/OCR hints' },
+      { k: 'Maps/Solar', v: 'Google Maps/Solar, NREL/PVWATTS' },
+      { k: 'Business', v: 'Stripe, Resend, partner survey API' },
+      { k: 'Status', v: 'EXTERNAL — dependency, not owned DB system' },
+    ],
+    tags: [{ label: 'AUDIT MERGE', color: '#4d9fff' }, { label: 'EXTERNAL', color: '#c084fc' }],
+    deps: [],
+    code: 'External providers → bill intelligence / maps-design / survey partner / payments-email',
+  },
+  {
+    id: 'survey_mobile_partner', layer: 'survey_entry', col: 4, type: 'entry',
+    label: 'SolarPro + Partner Survey Paths',
+    sublabel: '/api/auth/authorize · /api/survey/submit · partner webhook',
+    desc: 'Partner/mobile and SolarPro survey paths normalize field data, webhook events, photos, and physical/electrical facts.',
+    fields: [
+      { k: 'Routes', v: '/api/auth/authorize · /api/webhooks/survey-complete · /api/survey/submit' },
+      { k: 'Library', v: 'lib/survey/ingest/ingestPipeline.ts' },
+      { k: 'Tables', v: 'site_surveys, site_survey_files, project_physical_data, webhook_deliveries' },
+    ],
+    tags: [{ label: 'AUDIT MERGE', color: '#4d9fff' }, { label: 'LIVE', color: '#3dd68c' }],
+    deps: ['external_services'],
+    code: 'Mobile/partner survey submission → webhook/submit route → ingest pipeline',
+  },
+  {
+    id: 'survey_engineering_partial', layer: 'physical_db', col: 5, type: 'validator',
+    label: 'Survey → Engineering Consumption',
+    sublabel: '4/20 fields currently consumed by engineering report',
+    desc: 'Engineering report reads 4/20 physical-data fields; SystemDefinition/CAD/Permit/Proposal auto-application has source files but no production callers.',
+    fields: [
+      { k: 'Evidence', v: 'getTopographyState.ts · reportGenerator.ts · siteSurvey apply/integration files' },
+      { k: 'Tables', v: 'project_physical_data, project_files' },
+      { k: 'Status', v: 'PARTIAL — known audit gap' },
+    ],
+    tags: [{ label: 'AUDIT MERGE', color: '#4d9fff' }, { label: 'PHASE 1 TARGET', color: '#f0b429' }],
+    deps: ['physical_data_table'],
+    code: 'project_physical_data → engineering report defaults only partially applied today',
+  },
+
+  // ── LAYER 0: Entry
+  {
+    id: 'api_route', layer: 'entry', col: 0, type: 'entry',
+    label: 'POST /api/engineering/permit',
+    sublabel: 'route.ts · Next.js App Router',
+    desc: 'Top-level API handler. Receives project JSON from frontend, orchestrates entire planset generation pipeline, returns PDF blob. Calls buildCanonical → generateCADLayout → validateCanonicalStrict → page assembly → wkhtmltopdf. Wrapped in try/catch error handler.',
+    fields: [
+      { k: 'File', v: 'app/api/engineering/permit/route.ts' },
+      { k: 'Method', v: 'POST' },
+      { k: 'Auth', v: 'Bearer token required' },
+      { k: 'Returns', v: 'application/pdf' },
+      { k: 'Lines', v: '8,050+' },
+      { k: 'Flow', v: 'req.json() → buildCanonical → CAD → validate → pages → PDF' },
+    ],
+    tags: [{ label: 'API', color: '#58a6ff' }, { label: 'Entry Point', color: '#3fb950' }],
+    deps: ['project_input', 'core_project_crm', 'equipment_pricing_utility', 'maps_3d_solar_design'],
+    code: 'export async function POST(req: Request) {\n  const project = await req.json();\n  const canonical = buildCanonical(project);\n  // → CAD → validate → pages → PDF\n}',
+  },
+  {
+    id: 'version_check', layer: 'entry', col: 1, type: 'version',
+    label: 'PLANSET_ENGINE_VERSION',
+    sublabel: '47324 · lib/version.ts',
+    desc: 'Global version constant. Stamped on every planset cover sheet, validation summary, and PE letter. Incremented with each major engine upgrade.',
+    fields: [
+      { k: 'Current', v: '47324' },
+      { k: 'Previous', v: '47323 → 47322 → ...' },
+      { k: 'BUILD_VERSION', v: 'v47.324' },
+      { k: 'BUILD_DATE', v: '2026-04-09' },
+      { k: 'File', v: 'lib/version.ts' },
+    ],
+    tags: [{ label: 'v47.324', color: '#56d364' }],
+    deps: [],
+    code: 'export const PLANSET_ENGINE_VERSION = 47324;\nexport const BUILD_VERSION = "v47.324";\nexport const BUILD_DATE = "2026-04-09";',
+  },
+  {
+    id: 'project_input', layer: 'entry', col: 2, type: 'entry',
+    label: 'ProjectInput (raw)',
+    sublabel: 'Unvalidated JSON from frontend',
+    desc: 'Raw project data from the frontend. May contain missing fields, wrong types, or legacy field names. Must pass through buildCanonical() before any processing.',
+    fields: [
+      { k: 'Source', v: 'Frontend POST body' },
+      { k: 'Validation', v: 'None at this stage' },
+      { k: 'Key fields', v: 'systemType, panelCount, mountType, address, ahjWindSpeedMph' },
+    ],
+    tags: [{ label: 'Raw Input', color: '#d29922' }],
+    deps: ['core_project_crm'],
+    code: '// Key fields used:\nproject.systemType        // "ground"|"roof"|"fence"\nproject.panelCount\nproject.mountType\nproject.address\nproject.ahjWindSpeedMph   // fallback chain',
+  },
+
+  // ── LAYER 1: Canonical
+  {
+    id: 'canonical_input', layer: 'canonical', col: 1, type: 'interface',
+    label: 'CanonicalInput',
+    sublabel: 'Central data contract · v47.323+',
+    desc: 'The single source of truth for all downstream processing. Expanded in v47.323 with structured sub-objects. All page generators and validators consume exclusively from CanonicalInput.',
+    fields: [
+      { k: 'Added v47.323', v: 'site, structure, electrical' },
+      { k: 'Added v47.324', v: 'layoutDimensions' },
+      { k: 'Total sub-objects', v: '4' },
+      { k: 'Null-safe', v: 'layoutDimensions nullable' },
+    ],
+    tags: [{ label: 'Interface', color: '#bc8cff' }, { label: 'v47.323', color: '#56d364' }],
+    deps: ['project_input'],
+    code: 'interface CanonicalInput {\n  // Core\n  systemType: string;\n  panelCount: number;\n  mountType: string;\n  // v47.323 sub-objects\n  site: CanonicalSite;\n  structure: CanonicalStructure;\n  electrical: CanonicalElectrical;\n  // v47.324\n  layoutDimensions: CanonicalLayoutDimensions | null;\n}',
+  },
+  {
+    id: 'canonical_site', layer: 'canonical', col: 0, type: 'interface',
+    label: 'CanonicalSite',
+    sublabel: 'Site & location data',
+    desc: 'Geographic and jurisdictional data. Drives compliance lookups, title block, and permit document headers.',
+    fields: [
+      { k: 'Fields', v: 'address, city, state, zip, county, ahj, utilityCompany' },
+      { k: 'Added', v: 'v47.323' },
+      { k: 'Used by', v: 'pageCoverSheet, pageSiteInformation, PE Letter' },
+    ],
+    tags: [{ label: 'Interface', color: '#bc8cff' }],
+    deps: ['canonical_input'],
+    code: 'interface CanonicalSite {\n  address: string;\n  city: string;\n  state: string;\n  zip: string;\n  county: string;\n  ahj: string;\n  utilityCompany: string;\n}',
+  },
+  {
+    id: 'canonical_structure', layer: 'canonical', col: 2, type: 'interface',
+    label: 'CanonicalStructure',
+    sublabel: 'Structural & mechanical data',
+    desc: 'Structural engineering parameters. Wind speed is critical — feeds Broms embedment calc and structural pages. Updated by CAD patch after geometry is resolved.',
+    fields: [
+      { k: 'Fields', v: 'mountType, postSpacingFt, postEmbedDepthFt, railLengthFt, windSpeedMph, snowLoadPsf, exposureCategory' },
+      { k: 'Added', v: 'v47.323' },
+      { k: 'Wind fallback', v: 'compliance → ahjWindSpeed → windSpeed → 115' },
+      { k: 'Updated by', v: 'CAD patch block' },
+    ],
+    tags: [{ label: 'Interface', color: '#bc8cff' }, { label: 'Critical', color: '#f85149' }],
+    deps: ['canonical_input'],
+    code: 'interface CanonicalStructure {\n  mountType: string;\n  postSpacingFt: number;\n  postEmbedDepthFt: number;\n  windSpeedMph: number;  // ← required\n  snowLoadPsf: number;\n  exposureCategory: string;\n}',
+  },
+  {
+    id: 'canonical_electrical', layer: 'canonical', col: 3, type: 'interface',
+    label: 'CanonicalElectrical',
+    sublabel: 'Electrical system data',
+    desc: 'PV electrical parameters. Drives single-line diagram, string sizing, and electrical schedule pages.',
+    fields: [
+      { k: 'Fields', v: 'systemSizeKw, panelWatts, panelModel, inverterModel, inverterCount, stringCount, panelsPerString, dcVoltage, acVoltage' },
+      { k: 'Added', v: 'v47.323' },
+    ],
+    tags: [{ label: 'Interface', color: '#bc8cff' }],
+    deps: ['canonical_input'],
+    code: 'interface CanonicalElectrical {\n  systemSizeKw: number;\n  panelWatts: number;\n  panelModel: string;\n  inverterModel: string;\n  inverterCount: number;\n  stringCount: number;\n  panelsPerString: number;\n}',
+  },
+  {
+    id: 'canonical_layout_dims', layer: 'canonical', col: 4, type: 'interface',
+    label: 'CanonicalLayoutDimensions',
+    sublabel: 'Real geometry · v47.324',
+    desc: 'Physical layout dimensions extracted from CAD output. Populated AFTER CAD runs via buildLayoutDimensions(). Null until CAD completes. Used for dimension callouts on PV-1.',
+    fields: [
+      { k: 'Fields', v: 'totalLengthFt, totalHeightFt, panelWidthIn, panelHeightIn, rowSpacingFt, columnSpacingFt, source' },
+      { k: 'Added', v: 'v47.324' },
+      { k: 'Source values', v: '"fence-cad" | "ground-cad" | "roof-cad" | "bounds-fallback"' },
+      { k: 'Nullable', v: 'yes — null until CAD runs' },
+    ],
+    tags: [{ label: 'Interface', color: '#bc8cff' }, { label: 'v47.324', color: '#56d364' }, { label: 'NEW', color: '#3fb950' }],
+    deps: ['canonical_input'],
+    code: 'interface CanonicalLayoutDimensions {\n  totalLengthFt: number;\n  totalHeightFt: number;\n  panelWidthIn: number;\n  panelHeightIn: number;\n  rowSpacingFt: number;\n  columnSpacingFt: number;\n  source: string;\n}',
+  },
+  {
+    id: 'build_canonical', layer: 'canonical', col: 1, type: 'builder',
+    label: 'buildCanonical(project)',
+    sublabel: 'Factory · normalizes raw input',
+    desc: 'Transforms raw ProjectInput into normalized CanonicalInput. Applies wind speed fallback chain. Initializes layoutDimensions to null (populated later by CAD patch).',
+    fields: [
+      { k: 'Input', v: 'ProjectInput (raw)' },
+      { k: 'Output', v: 'CanonicalInput' },
+      { k: 'Wind fallback', v: 'compliance.structural.wind.windSpeed → ahjWindSpeedMph → windSpeedMph → 115' },
+      { k: 'layoutDimensions', v: 'null (initial)' },
+    ],
+    tags: [{ label: 'Builder', color: '#3fb950' }],
+    deps: ['project_input', 'canonical_input'],
+    code: 'function buildCanonical(project): CanonicalInput {\n  const windSpeed =\n    project.compliance?.structural?.wind?.windSpeed ||\n    project.ahjWindSpeedMph ||\n    project.windSpeedMph ||\n    115; // default\n  return {\n    ...normalized,\n    site: { ... },\n    structure: { windSpeedMph: windSpeed, ... },\n    electrical: { ... },\n    layoutDimensions: null, // populated post-CAD\n  };\n}',
+  },
+
+  // ── LAYER 2: CAD Engine
+  {
+    id: 'cad_engine', layer: 'cad', col: 1, type: 'cad',
+    label: 'CAD Engine',
+    sublabel: 'generateCAD(canonical)',
+    desc: 'Core geometry engine. Generates SVG-based layout diagram from canonical parameters. Outputs raw CAD object with arrays, planes, fence sections, panel dimensions, and bounding box.',
+    fields: [
+      { k: 'Input', v: 'CanonicalInput' },
+      { k: 'Output', v: 'CADOutput (raw geometry)' },
+      { k: 'Fence output', v: 'totalLengthM, panelHeightM, postSpacingM' },
+      { k: 'Ground output', v: 'arrays[0].dimensions' },
+      { k: 'Roof output', v: 'planes[0].dimensions' },
+      { k: 'Fallback', v: 'cad.bounds (bbox)' },
+    ],
+    tags: [{ label: 'CAD', color: '#ffa657' }, { label: 'Core', color: '#f85149' }],
+    deps: ['canonical_input', 'build_canonical'],
+    code: 'const cad = generateCAD(canonical);\n// cad.fence.totalLengthM\n// cad.fence.panelHeightM\n// cad.ground.arrays[0].dimensions\n// cad.roof.planes[0].dimensions\n// cad.bounds → fallback',
+  },
+  {
+    id: 'build_layout_dims', layer: 'cad', col: 2, type: 'builder',
+    label: 'buildLayoutDimensions(canonical, cad)',
+    sublabel: 'Extracts real dims · v47.324',
+    desc: 'NEW in v47.324. Reads CAD output and populates CanonicalLayoutDimensions with authoritative physical measurements. Dispatch logic by mountType: fence, ground, roof, or bounds fallback.',
+    fields: [
+      { k: 'Added', v: 'v47.324' },
+      { k: 'Fence path', v: 'cad.fence → totalLengthM, panelHeightM, postSpacingM' },
+      { k: 'Ground path', v: 'cad.ground.arrays[0].dimensions' },
+      { k: 'Roof path', v: 'cad.roof.planes[0].dimensions' },
+      { k: 'Fallback', v: 'cad.bounds bbox' },
+      { k: 'Called', v: 'In CAD patch block, before strict gate' },
+    ],
+    tags: [{ label: 'Builder', color: '#3fb950' }, { label: 'v47.324', color: '#56d364' }, { label: 'NEW', color: '#3fb950' }],
+    deps: ['cad_engine', 'canonical_layout_dims'],
+    code: 'function buildLayoutDimensions(\n  canonical: CanonicalInput,\n  cad: CADOutput\n): CanonicalLayoutDimensions {\n  switch(canonical.mountType) {\n    case "fence":\n      return { totalLengthFt: cad.fence.totalLengthM * 3.281, ... source: "fence-cad" };\n    case "ground":\n      return { ...cad.ground.arrays[0].dimensions, source: "ground-cad" };\n    case "roof":\n      return { ...cad.roof.planes[0].dimensions, source: "roof-cad" };\n    default:\n      return { ...cad.bounds, source: "bounds-fallback" };\n  }\n}',
+  },
+  {
+    id: 'cad_patch', layer: 'cad', col: 0, type: 'builder',
+    label: 'CAD Patch Block',
+    sublabel: 'Post-CAD canonical update',
+    desc: 'After CAD runs, this block updates canonical.structure and canonical.electrical with authoritative CAD geometry, applies wind speed fallback, then calls buildLayoutDimensions() to populate canonical.layoutDimensions before the strict validation gate fires.',
+    fields: [
+      { k: 'Updates', v: 'canonical.structure (postSpacing, railLength), canonical.electrical (stringCount), canonical.layoutDimensions' },
+      { k: 'Wind fallback', v: 'Applied here if not set by buildCanonical' },
+      { k: 'Order', v: '1. CAD run 2. Patch 3. buildLayoutDimensions 4. validateCanonicalStrict' },
+    ],
+    tags: [{ label: 'Patch', color: '#d29922' }, { label: 'Critical Order', color: '#f85149' }],
+    deps: ['cad_engine', 'build_layout_dims'],
+    code: '// Post-CAD patch\ncanonical.structure.postSpacingFt = cad.fence.postSpacingM * 3.281;\ncanonical.structure.windSpeedMph =\n  canonical.structure.windSpeedMph ||\n  project.ahjWindSpeedMph || 115;\ncanonical.layoutDimensions =\n  buildLayoutDimensions(canonical, cad);\n// Now safe to run strict gate\nvalidateCanonicalStrict(canonical);',
+  },
+
+  // ── LAYER 3: Validation Gate
+  {
+    id: 'validate_strict', layer: 'validation', col: 1, type: 'validator',
+    label: 'validateCanonicalStrict()',
+    sublabel: 'Hard gate · 6 checks · v47.324',
+    desc: 'Hard validation gate — all 6 checks throw Error immediately if failed. No planset generates if any check fails. This replaced the soft validateCanonical() in v47.324.',
+    fields: [
+      { k: 'Check 1', v: 'canonical.site exists' },
+      { k: 'Check 2', v: 'canonical.structure exists' },
+      { k: 'Check 3', v: 'canonical.electrical exists' },
+      { k: 'Check 4', v: 'windSpeedMph > 0' },
+      { k: 'Check 5', v: 'panelCount > 0' },
+      { k: 'Check 6', v: 'systemType valid' },
+      { k: 'Behavior', v: 'throw Error — hard fail' },
+      { k: 'Added', v: 'v47.324 (replaced soft validate)' },
+    ],
+    tags: [{ label: 'Validator', color: '#f85149' }, { label: 'Hard Gate', color: '#f85149' }, { label: 'v47.324', color: '#56d364' }],
+    deps: ['cad_patch', 'canonical_input'],
+    code: 'function validateCanonicalStrict(c: CanonicalInput) {\n  if (!c.site)      throw new Error("MISSING SITE");\n  if (!c.structure) throw new Error("MISSING STRUCTURE");\n  if (!c.electrical) throw new Error("MISSING ELECTRICAL");\n  if (!c.structure.windSpeedMph)\n    throw new Error("MISSING WIND SPEED");\n  if (!c.panelCount || c.panelCount <= 0)\n    throw new Error("INVALID PANEL COUNT");\n  if (!["fence","ground","roof"].includes(c.systemType))\n    throw new Error("INVALID SYSTEM TYPE");\n}',
+  },
+  {
+    id: 'validate_legacy', layer: 'validation', col: 0, type: 'validator',
+    label: 'validateCanonical() [legacy]',
+    sublabel: 'Alias → validateCanonicalStrict',
+    desc: 'Legacy alias kept for backward compatibility. Now calls validateCanonicalStrict() directly. Any code still calling validateCanonical() gets the same hard-gate behavior.',
+    fields: [
+      { k: 'Status', v: 'Legacy alias' },
+      { k: 'Delegates to', v: 'validateCanonicalStrict()' },
+      { k: 'Removed soft checks', v: 'Yes — all checks now hard-throw' },
+    ],
+    tags: [{ label: 'Legacy', color: '#d29922' }, { label: 'Alias', color: '#8b949e' }],
+    deps: ['validate_strict'],
+    code: '// Legacy alias — kept for compatibility\nfunction validateCanonical(c: CanonicalInput) {\n  return validateCanonicalStrict(c);\n}',
+  },
+  {
+    id: 'get_layout_mode', layer: 'validation', col: 2, type: 'helper',
+    label: 'getLayoutMode(canonical)',
+    sublabel: 'Dispatch: fence | ground | roof',
+    desc: 'Returns layout mode string used by CAD and page generators to dispatch to the correct family (fence/ground/roof). Used as the branching switch throughout the pipeline.',
+    fields: [
+      { k: 'Returns', v: '"fence" | "ground" | "roof"' },
+      { k: 'Used by', v: 'CAD engine, all page generators, PE letter dispatcher' },
+    ],
+    tags: [{ label: 'Helper', color: '#d29922' }],
+    deps: ['canonical_input'],
+    code: 'function getLayoutMode(c: CanonicalInput): string {\n  return c.mountType ?? c.systemType ?? "roof";\n}',
+  },
+
+  // ── LAYER 4: Page Generators
+  {
+    id: 'page_cover', layer: 'pages', col: 0, type: 'page',
+    label: 'pageCoverSheet()',
+    sublabel: 'Sheet 1 — Project Cover',
+    desc: 'Cover page with project info, system specs, AHJ name, utility, installer info, and engine version stamp.',
+    fields: [
+      { k: 'Sheet', v: '1' },
+      { k: 'Sources', v: 'canonical.site, canonical.electrical' },
+      { k: 'Outputs', v: 'Project title, system size, AHJ, version' },
+    ],
+    tags: [{ label: 'Page', color: '#39d353' }, { label: 'Sheet 1', color: '#56d364' }],
+    deps: ['validate_strict', 'resolve_topology'],
+    code: 'function pageCoverSheet(canonical): SVGString {\n  return buildPage({\n    title: canonical.site.address,\n    systemKw: canonical.electrical.systemSizeKw,\n    ahj: canonical.site.ahj,\n    version: PLANSET_ENGINE_VERSION,\n  });\n}',
+  },
+  {
+    id: 'page_site', layer: 'pages', col: 1, type: 'page',
+    label: 'pageSiteInformation()',
+    sublabel: 'Sheet 2 — Site Plan',
+    desc: 'Site plan page with layout diagram, dimension callouts, and setback annotations. Target for Gold Standard Phase 1: wire canonical.layoutDimensions into drawDimension() calls.',
+    fields: [
+      { k: 'Sheet', v: '2' },
+      { k: 'Sources', v: 'canonical.site, canonical.layoutDimensions (Phase 1 target)' },
+      { k: 'Gold Standard Gap', v: 'layoutDimensions not yet wired to dimension callouts' },
+    ],
+    tags: [{ label: 'Page', color: '#39d353' }, { label: 'Sheet 2', color: '#56d364' }, { label: 'Phase 1 Target', color: '#d29922' }],
+    deps: ['validate_strict', 'canonical_layout_dims'],
+    code: '// Phase 1 Gold Standard target:\n// wire canonical.layoutDimensions\n// into drawDimension() callouts\nfunction pageSiteInformation(canonical): SVGString {\n  const dims = canonical.layoutDimensions;\n  // TODO: drawDimension(dims.totalLengthFt)\n  // TODO: drawDimension(dims.totalHeightFt)\n}',
+  },
+  {
+    id: 'page_pv1', layer: 'pages', col: 2, type: 'page',
+    label: 'pagePV1()',
+    sublabel: 'Sheet 3 — PV Layout (PV-1)',
+    desc: 'Primary PV layout drawing. Shows panel arrangement, row/column spacing, setbacks, and dimension callouts. Critical for permit approval — must have measurable geometry from CAD.',
+    fields: [
+      { k: 'Sheet', v: '3' },
+      { k: 'Sources', v: 'canonical.layoutDimensions, CAD geometry' },
+      { k: 'Critical', v: 'Must show measurable dimensions' },
+    ],
+    tags: [{ label: 'Page', color: '#39d353' }, { label: 'Sheet 3', color: '#56d364' }, { label: 'Critical', color: '#f85149' }],
+    deps: ['validate_strict', 'build_layout_dims'],
+    code: 'function pagePV1(canonical, cad): SVGString {\n  const dims = canonical.layoutDimensions!;\n  drawDimension(dims.totalLengthFt, "horizontal");\n  drawDimension(dims.totalHeightFt, "vertical");\n  drawPanelLayout(cad);\n}',
+  },
+  {
+    id: 'page_electrical', layer: 'pages', col: 3, type: 'page',
+    label: 'pageElectrical()',
+    sublabel: 'Sheets 4–6 — Electrical',
+    desc: 'Electrical pages: single-line diagram, string sizing table, equipment schedule, and conduit layout.',
+    fields: [
+      { k: 'Sheets', v: '4, 5, 6' },
+      { k: 'Sources', v: 'canonical.electrical' },
+      { k: 'Pages', v: 'SLD, String Table, Equipment Schedule' },
+    ],
+    tags: [{ label: 'Page', color: '#39d353' }, { label: 'Sheets 4–6', color: '#56d364' }],
+    deps: ['validate_strict', 'resolve_topology'],
+    code: 'function pageElectrical(canonical): SVGString[] {\n  return [\n    pageSLD(canonical.electrical),\n    pageStringTable(canonical.electrical),\n    pageEquipmentSchedule(canonical.electrical),\n  ];\n}',
+  },
+  {
+    id: 'page_structural_fence', layer: 'pages', col: 0, type: 'page',
+    label: 'pageStructuralFence()',
+    sublabel: 'Sheet 7F — Fence Structural',
+    desc: 'Fence-specific structural page. Runs real Broms embedment calculation: qz = 0.00256·Kz·Kzt·Kd·V², p = qz·Cf(1.3), F = p·H·S, M = F·H/2, D_req = 1.5·∛(M/(q·b)).',
+    fields: [
+      { k: 'Sheet', v: '7 (Fence family)' },
+      { k: 'Source', v: 'canonical.structure.windSpeedMph' },
+      { k: 'Calc', v: 'Real Broms embedment depth' },
+      { k: 'Added', v: 'v47.323' },
+      { k: 'qz formula', v: '0.00256·Kz·Kzt·Kd·V²' },
+      { k: 'D_req formula', v: '1.5·∛(M/(q·b))' },
+    ],
+    tags: [{ label: 'Page', color: '#39d353' }, { label: 'Fence Only', color: '#ffa657' }, { label: 'v47.323', color: '#56d364' }],
+    deps: ['validate_strict', 'canonical_structure'],
+    code: '// Real Broms Calc:\nconst V = canonical.structure.windSpeedMph;\nconst qz = 0.00256 * Kz * Kzt * Kd * V * V;\nconst p = qz * 1.3;  // Cf = 1.3\nconst F = p * H * S; // H=height, S=spacing\nconst M = F * H / 2;\nconst D_req = 1.5 * Math.cbrt(M / (q * b));',
+  },
+  {
+    id: 'page_structural_ground', layer: 'pages', col: 1, type: 'page',
+    label: 'pageStructuralGround()',
+    sublabel: 'Sheet 7G — Ground Mount Structural',
+    desc: 'Ground-mount structural page. Pile embedment, tracker loading, wind/snow load calculations for ground arrays.',
+    fields: [
+      { k: 'Sheet', v: '7 (Ground family)' },
+      { k: 'Source', v: 'canonical.structure' },
+      { k: 'Added', v: 'v47.322 family isolation' },
+    ],
+    tags: [{ label: 'Page', color: '#39d353' }, { label: 'Ground Only', color: '#ffa657' }],
+    deps: ['validate_strict', 'canonical_structure'],
+    code: 'function pageStructuralGround(canonical): SVGString {\n  // Ground pile embedment calcs\n  // Wind/snow load per canonical.structure\n}',
+  },
+  {
+    id: 'page_structural_roof', layer: 'pages', col: 2, type: 'page',
+    label: 'pageStructuralRoof()',
+    sublabel: 'Sheet 7R — Roof Mount Structural',
+    desc: 'Roof-mount structural page. Rafter loading, standoff spacing, wind uplift, and attachment details.',
+    fields: [
+      { k: 'Sheet', v: '7 (Roof family)' },
+      { k: 'Source', v: 'canonical.structure' },
+      { k: 'Added', v: 'v47.322 family isolation' },
+    ],
+    tags: [{ label: 'Page', color: '#39d353' }, { label: 'Roof Only', color: '#ffa657' }],
+    deps: ['validate_strict', 'canonical_structure'],
+    code: 'function pageStructuralRoof(canonical): SVGString {\n  // Rafter loading\n  // Wind uplift per ASCE 7\n  // Standoff attachment details\n}',
+  },
+  {
+    id: 'page_pe_letter', layer: 'pages', col: 3, type: 'page',
+    label: 'pagePELetter()',
+    sublabel: 'Sheets 8F/8G/8R — PE Certification',
+    desc: 'Professional Engineer stamp letter. Three variants dispatched by mountType. Includes structural engineer certification, wind speed, design standards, and system description.',
+    fields: [
+      { k: 'Sheets', v: '8F (Fence), 8G (Ground), 8R (Roof)' },
+      { k: 'Sources', v: 'canonical.site, canonical.structure, canonical.electrical' },
+      { k: 'Added', v: 'v47.322 family isolation' },
+    ],
+    tags: [{ label: 'Page', color: '#39d353' }, { label: 'PE Letter', color: '#bc8cff' }, { label: 'v47.322', color: '#56d364' }],
+    deps: ['validate_strict', 'canonical_site', 'canonical_structure', 'canonical_electrical'],
+    code: '// Dispatched by mountType:\nconst peLetter = {\n  fence:  pagePELetterFence,\n  ground: pagePELetterGround,\n  roof:   pagePELetterRoof,\n}[canonical.mountType];',
+  },
+  {
+    id: 'page_labels', layer: 'pages', col: 4, type: 'page',
+    label: 'pagePlacard()',
+    sublabel: 'Sheets 9–14 — Labels & Placards',
+    desc: 'NEC 2020 / NFPA 70E compliant warning labels, rapid shutdown placards, AC/DC disconnect labels, and fire setback markings.',
+    fields: [
+      { k: 'Sheets', v: '9 through 14' },
+      { k: 'Standards', v: 'NEC 2020, NFPA 70E' },
+      { k: 'Types', v: 'Rapid shutdown, AC disconnect, DC disconnect, fire setback' },
+    ],
+    tags: [{ label: 'Page', color: '#39d353' }, { label: 'Sheets 9–14', color: '#56d364' }],
+    deps: ['validate_strict'],
+    code: 'function pagePlacard(canonical): SVGString[] {\n  return [\n    pageRapidShutdown(canonical),\n    pageACDisconnect(canonical),\n    pageDCDisconnect(canonical),\n    pageFireSetback(canonical),\n    ...\n  ];\n}',
+  },
+  {
+    id: 'page_validation_summary', layer: 'pages', col: 5, type: 'page',
+    label: 'pageValidationSummary()',
+    sublabel: 'Sheet 15 — QA/Validation',
+    desc: 'NEW in v47.323. Quality assurance summary sheet printed as the final sheet. Shows all canonical checks, wind speed, panel count, system type, layout dimensions (v47.324), and engine version.',
+    fields: [
+      { k: 'Sheet', v: '15 (final sheet)' },
+      { k: 'Added', v: 'v47.323' },
+      { k: 'Layout Dims row', v: 'Added v47.324' },
+      { k: 'Rows', v: 'Site, Structure, Electrical, Wind Speed, Panel Count, System Type, Layout Dimensions, Engine Version' },
+    ],
+    tags: [{ label: 'Page', color: '#39d353' }, { label: 'Sheet 15', color: '#56d364' }, { label: 'v47.323', color: '#56d364' }, { label: 'NEW', color: '#3fb950' }],
+    deps: ['validate_strict', 'canonical_layout_dims'],
+    code: 'function pageValidationSummary(canonical): SVGString {\n  const checks = [\n    ["Site",      canonical.site       ? "✓" : "✗"],\n    ["Structure", canonical.structure   ? "✓" : "✗"],\n    ["Wind Speed",canonical.structure?.windSpeedMph + " mph"],\n    ["Dimensions",canonical.layoutDimensions?.source ?? "pending"],\n    ["Engine",    PLANSET_ENGINE_VERSION],\n  ];\n}',
+  },
+  {
+    id: 'draw_dimension', layer: 'pages', col: 0, type: 'helper',
+    label: 'drawDimension(value, axis)',
+    sublabel: 'SVG dimension callout helper',
+    desc: 'Renders a dimension annotation with leader lines and text onto the SVG canvas. Used by pagePV1 and pageSiteInformation for linear measurements.',
+    fields: [
+      { k: 'Input', v: 'value (ft or in), axis ("horizontal"|"vertical"), optional label' },
+      { k: 'Output', v: 'SVG group with leader lines + dimension text' },
+      { k: 'Added', v: 'v47.323 (alongside validateCanonical insertion)' },
+    ],
+    tags: [{ label: 'Helper', color: '#d29922' }],
+    deps: ['canonical_layout_dims'],
+    code: 'function drawDimension(\n  value: number,\n  axis: "horizontal"|"vertical",\n  label?: string\n): SVGElement {\n  // Renders ←──── 24.5 ft ────→\n  // on SVG canvas\n}',
+  },
+
+
+  // ── NEW NODES: v47.325 → v47.343 changes ─────────────────────────────
+  {
+    id: 'resolve_topology', layer: 'canonical', col: 5, type: 'helper',
+    label: 'resolveTopology(input)',
+    sublabel: 'Auto-detects MICRO/OPTIMIZER/STRING · v47.341',
+    desc: 'NEW in v47.341. Auto-detects inverter topology from 3 signals in priority order: (1) inverter type field direct match, (2) brand heuristic (Enphase/APsystems=MICRO, SolarEdge/Tigo=OPTIMIZER, else STRING), (3) system.topology field. Fixes the bug where topology defaulted to STRING for all systems.',
+    fields: [
+      { k: 'Added', v: 'v47.341' },
+      { k: 'Priority 1', v: 'inverter.type direct match' },
+      { k: 'Priority 2', v: 'Brand heuristic (Enphase/APsystems→MICRO, SolarEdge/Tigo→OPTIMIZER)' },
+      { k: 'Priority 3', v: 'system.topology field' },
+      { k: 'Returns', v: '\"MICRO\" | \"OPTIMIZER\" | \"STRING\"' },
+      { k: 'Used by', v: 'pageCoverSheet, SLD, conductor schedule, EGC sizing' },
+    ],
+    tags: [{ label: 'Helper', color: '#d29922' }, { label: 'v47.341', color: '#56d364' }, { label: 'NEW', color: '#3fb950' }],
+    deps: ['canonical_electrical'],
+    code: 'function resolveTopology(input): \"MICRO\"|\"OPTIMIZER\"|\"STRING\" {\\n  // Priority 1: inverter.type direct\\n  // Priority 2: brand heuristic\\n  //   Enphase/APsystems → MICRO\\n  //   SolarEdge/Tigo → OPTIMIZER\\n  // Priority 3: system.topology\\n  return topology;\\n}',
+  },
+  {
+    id: 'utility_display', layer: 'canonical', col: 6, type: 'helper',
+    label: 'utilityDisplayName(slug)',
+    sublabel: 'Slug → display name · v47.341',
+    desc: 'NEW in v47.341. Converts utility slugs/codes to proper display names for the title block. Fixes title blocks showing raw slugs like "comed" instead of "ComEd" or "pge" instead of "PG&E".',
+    fields: [
+      { k: 'Added', v: 'v47.341' },
+      { k: 'Input', v: 'Raw slug (e.g. "comed", "pge", "sce")' },
+      { k: 'Output', v: 'Display name (e.g. "ComEd", "PG&E", "Southern California Edison")' },
+      { k: 'Used by', v: 'titleBlock() — all pages' },
+    ],
+    tags: [{ label: 'Helper', color: '#d29922' }, { label: 'v47.341', color: '#56d364' }, { label: 'NEW', color: '#3fb950' }],
+    deps: ['canonical_site'],
+    code: 'function utilityDisplayName(slug: string): string {\\n  const map: Record<string,string> = {\\n    comed: \"ComEd\",\\n    pge: \"PG&E\",\\n    sce: \"Southern California Edison\",\\n    // ... 40+ entries\\n  };\\n  return map[slug.toLowerCase()] ?? slug;\\n}',
+  },
+  {
+    id: 'egc_sizing', layer: 'pages', col: 6, type: 'helper',
+    label: 'EGC Auto-Sizing (NEC 250.122)',
+    sublabel: 'Branch OCPD → wire size · v47.342',
+    desc: 'FIXED in v47.342. EGC wire size is now always computed from branch circuit OCPD per NEC Table 250.122. Previously the stored elec.groundingConductor value took priority via || fallback, causing stale #14 AWG to appear instead of the correct #12 AWG. The fix: remove the stored value fallback, always compute inline IIFE from panelIsc.',
+    fields: [
+      { k: 'Fixed', v: 'v47.342' },
+      { k: 'Root cause', v: 'elec.groundingConductor stored value took priority via || fallback' },
+      { k: 'Fix', v: 'Removed stored value || prefix — always compute from branch OCPD' },
+      { k: 'NEC ref', v: 'NEC 250.122 Table' },
+      { k: '≤15A', v: '#14 AWG' },
+      { k: '≤20A', v: '#12 AWG' },
+      { k: '≤60A', v: '#10 AWG' },
+      { k: '≤100A', v: '#8 AWG' },
+      { k: '≤200A', v: '#6 AWG' },
+    ],
+    tags: [{ label: 'Helper', color: '#d29922' }, { label: 'v47.342', color: '#56d364' }, { label: 'FIXED', color: '#f85149' }],
+    deps: ['page_electrical'],
+    code: '// IIFE — always computed, never uses stored value\n<td>${(() => {\\n  const topo = resolveTopology(input);\\n  let ocpd = topo === \"MICRO\"\\n    ? Math.ceil(panelIsc * 1.25 * 1.25 / 5) * 5\\n    : Math.ceil(iscStr * 1.25 * 1.25 / 5) * 5;\\n  if (ocpd <= 15) return \"#14 AWG\";\\n  if (ocpd <= 20) return \"#12 AWG\";\\n  if (ocpd <= 60) return \"#10 AWG\";\\n  if (ocpd <= 100) return \"#8 AWG\";\\n  return \"#6 AWG\";\\n})()} bare Cu</td>',
+  },
+  {
+    id: 'sld_float_fix', layer: 'pages', col: 7, type: 'helper',
+    label: 'SLD Float Sanitization',
+    sublabel: 'Stored SVG bypass fix · v47.342',
+    desc: 'FIXED in v47.342. When a pre-generated SLD SVG is stored and injected directly (bypassing buildSLD()), floating-point numbers like 25.369999999999997 leaked into the output. Fixed by applying a regex sanitization pass on the stored SVG string before injection. Uses parseFloat(m).toFixed(2) for correct rounding (not truncation).',
+    fields: [
+      { k: 'Fixed', v: 'v47.342' },
+      { k: 'Root cause', v: 'Stored SLD SVG bypasses all buildSLD() inline fixes' },
+      { k: 'Fix', v: 'Regex replace on stored SVG: /\\d+\.\\d{2}\\d{10,}/g → parseFloat(m).toFixed(2)' },
+      { k: 'Note', v: 'toFixed(2) rounds correctly; string replacement "$1" truncates' },
+    ],
+    tags: [{ label: 'Fix', color: '#f85149' }, { label: 'v47.342', color: '#56d364' }, { label: 'FIXED', color: '#f85149' }],
+    deps: ['page_electrical'],
+    code: 'storedSldSvg = storedSldSvg.replace(\\n  /\\d+\.\\d{2}\\d{10,}/g,\\n  (m: string) => parseFloat(m).toFixed(2)\\n);',
+  },
+  {
+    id: 'pipeline_control', layer: 'pages', col: 8, type: 'builder',
+    label: 'Pipeline Control Layer',
+    sublabel: 'Flex normalization + draw/data balancing · v47.343',
+    desc: 'NEW in v47.343. Comprehensive layout engine overhaul: (1) .sec flex:0 0 auto removes ghost-stretching, (2) .page-draw uses flex:1 1 0%+min-height:0 pattern, (3) .page-body uses align-content:start to prevent grid cell expansion, (4) draw-zone/data-zone get align-self:stretch+min-height:0, (5) composeDrawPage() gets min-height:320px guard on draw zone, (6) Engineering border frame on all pages via CSS outline.',
+    fields: [
+      { k: 'Added', v: 'v47.343' },
+      { k: '.sec', v: 'height:100% → flex:0 0 auto (no ghost-stretch)' },
+      { k: '.page-draw', v: 'height:100% removed, flex:1 1 0% + min-height:0' },
+      { k: '.page-body', v: 'align-content:start + align-items:start' },
+      { k: '.draw-zone', v: 'align-self:stretch + min-height:0' },
+      { k: '.page border', v: 'outline:2.5px solid #000 + outline-offset:-6px (ANSI B frame)' },
+      { k: 'min-height guard', v: '320px on draw-zone — never collapses' },
+    ],
+    tags: [{ label: 'Builder', color: '#3fb950' }, { label: 'v47.343', color: '#56d364' }, { label: 'NEW', color: '#3fb950' }],
+    deps: ['page_pv1', 'page_electrical'],
+    code: '/* v47.343 CSS key changes */\n.sec { flex: 0 0 auto; }          /* was height:100% */\n.page-draw { flex: 1 1 0%; min-height: 0; } /* was height:100% */\n.page-body { align-content: start; } /* was stretch */\n.page { outline: 2.5px solid #000; outline-offset: -6px; } /* border frame */',
+  },
+  {
+    id: 'page_array_geometry', layer: 'pages', col: 9, type: 'page',
+    label: 'pageArrayGeometry()',
+    sublabel: 'PV-2B — Array Geometry (rewritten v47.343)',
+    desc: 'REWRITTEN in v47.343. Was a two-col-layout with max-height:320px SVG. Now uses full draw-zone/data-zone layout with 78/22 split. Draw zone: dynamic viewBox 1200×700 SVG that scales cell dimensions to fill available space. Data zone: array params + string legend + system-specific supplement (fire setbacks/fence segments/ground details) + callout notes.',
+    fields: [
+      { k: 'Rewritten', v: 'v47.343' },
+      { k: 'Old layout', v: 'two-col-layout, max-height:320px SVG' },
+      { k: 'New layout', v: 'draw-zone 78% / data-zone 22%' },
+      { k: 'SVG viewBox', v: '1200×700 dynamic — cells scale to fill' },
+      { k: 'Cell sizing', v: 'agCellW/H computed from available space and panel count' },
+      { k: 'Handles', v: 'actual positions, schematic fallback, >300 panels condensed' },
+      { k: 'Data zone', v: 'Array params + string legend + system supplement + notes' },
+    ],
+    tags: [{ label: 'Page', color: '#39d353' }, { label: 'PV-2B', color: '#56d364' }, { label: 'v47.343', color: '#56d364' }, { label: 'REWRITTEN', color: '#f85149' }],
+    deps: ['validate_strict', 'pipeline_control'],
+    code: 'function pageArrayGeometry(...): string {\\n  // Dynamic SVG: viewBox 1200×700\\n  const agCellW = Math.min(\\n    Math.floor((1200-120) / agMaxCols) - 4, 72\\n  );\\n  // Draw zone 78% | Data zone 22%\\n  // String legend + fire setbacks/fence segs\\n}',
+  },
+  // ── LAYER 5: Output
+  {
+    id: 'page_assembler', layer: 'output', col: 1, type: 'output',
+    label: 'generatePermitHTML()',
+    sublabel: 'Assembles all sheets → HTML',
+    desc: 'Concatenates all page SVGs into a single HTML document. Applies CSS page breaks, header/footer, and sheet numbering. TOTAL = 15 sheets.',
+    fields: [
+      { k: 'Input', v: 'All page SVGs (15 sheets)' },
+      { k: 'Output', v: 'Full HTML document' },
+      { k: 'TOTAL', v: '15 (set in v47.323)' },
+      { k: 'Page breaks', v: 'CSS @media print' },
+    ],
+    tags: [{ label: 'Output', color: '#ff7b72' }],
+    deps: ['page_cover', 'page_site', 'page_pv1', 'page_electrical', 'page_structural_fence', 'page_structural_ground', 'page_structural_roof', 'page_pe_letter', 'page_labels', 'page_validation_summary', 'page_array_geometry'],
+    code: 'function generatePermitHTML(canonical, cad): string {\n  // Run CAD patch\n  // validateCanonicalStrict\n  // Collect all 15 pages\n  const TOTAL = 15;\n  return assembleHTML(pages, TOTAL);\n}',
+  },
+  {
+    id: 'html_to_pdf', layer: 'output', col: 2, type: 'output',
+    label: 'htmlToPDF()',
+    sublabel: 'wkhtmltopdf → PDF blob',
+    desc: 'Converts assembled HTML to PDF using wkhtmltopdf. Sets A1 paper size, 150 DPI, and proper margins for permit-quality output.',
+    fields: [
+      { k: 'Tool', v: 'wkhtmltopdf' },
+      { k: 'Paper', v: 'ANSI B — 17″×11″ landscape (wkhtmltopdf --page-width 17in --page-height 11in)' },
+      { k: 'DPI', v: '150' },
+      { k: 'Format', v: '--page-width 17in --page-height 11in --orientation Landscape' },
+      { k: 'Output', v: 'Buffer (PDF blob)' },
+    ],
+    tags: [{ label: 'Output', color: '#ff7b72' }],
+    deps: ['page_assembler', 'api_route'],
+    code: 'const pdfBuffer = await wkhtmltopdf(html, {\n  pageSize: "A1",\n  dpi: 150,\n  marginTop: "0.5in",\n  marginBottom: "0.5in",\n});\nreturn new Response(pdfBuffer, {\n  headers: { "Content-Type": "application/pdf" },\n});',
+  },
+  {
+    id: 'error_handler', layer: 'output', col: 0, type: 'output',
+    label: 'Error Handler',
+    sublabel: 'Catches validation gate throws',
+    desc: 'Wraps the entire pipeline in try/catch. If validateCanonicalStrict() throws, returns 400 with structured JSON error instead of PDF. This is what blocks planset download when validation fails.',
+    fields: [
+      { k: 'Catches', v: 'validateCanonicalStrict() throws' },
+      { k: 'Returns', v: 'HTTP 400 + JSON error body' },
+      { k: 'Error format', v: '{ error: "[PLANSET BLOCKED] ...", check: "...", value: "..." }' },
+      { k: 'Hotfix applied', v: 'Wind speed demoted to warn+default (v47.323 hotfix)' },
+    ],
+    tags: [{ label: 'Error', color: '#f85149' }, { label: 'Hotfix', color: '#d29922' }],
+    deps: ['validate_strict', 'api_route'],
+    code: 'try {\n  // full pipeline\n} catch (err) {\n  return Response.json({\n    error: `[PLANSET BLOCKED] ${err.message}`,\n    canonical: sanitized,\n  }, { status: 400 });\n}',
+  },
+
+  // ── LAYER 6: 3D Engine (Cesium) ─────────────────────────────────
+  {
+    id: 'gm_reality_engine', layer: 'engine3d', col: 0, type: 'engine3d',
+    label: 'groundMountRealityEngine',
+    sublabel: 'Core 3D structural solver · v6.2.2 STABLE',
+    desc: 'The ground mount 3D engine. Computes full structural geometry: pylons, strongbacks, rails, panels, struts, braces. Takes canonical ground mount config + terrain data, outputs positioned structural members with ECEF coordinates. Hierarchy: Pylon → Strongback → Rail → Panel. v6.2.2 is the STABLE frozen release after full stabilization.',
+    fields: [
+      { k: 'File', v: 'lib/3d/ground/groundMountRealityEngine.ts' },
+      { k: 'Lines', v: '~1,480' },
+      { k: 'Version', v: 'v6.2.2 (STABLE)' },
+      { k: 'Hierarchy', v: 'Pylon → Strongback → Rail → Panel' },
+      { k: 'Key helpers', v: 'sbCenterlinePoint, tiltNormal, railMountPoint, pylonBodyPoint, solveClearancePlane' },
+      { k: 'Heading convention', v: 'hNS = hRad(azDeg), hEW = hRad(azDeg-90)' },
+      { k: 'Terrain', v: 'Per-pylon estimation via localGroundZ + nearestPanel delta' },
+      { k: 'Audit', v: '50-check full_engine_audit.js — 50 PASS, 0 WARN, 0 FAIL' },
+    ],
+    tags: [{ label: '3D Engine', color: '#79c0ff' }, { label: 'v6.2.2', color: '#56d364' }, { label: 'STABLE', color: '#3fb950' }],
+    deps: [],
+    code: 'export function buildGroundMountStructure(\n  config: GroundMountConfig,\n  terrain: TerrainData\n): StructuralOutput {\n  // Pylon → Strongback → Rail → Panel\n  // solveClearancePlane() → per-pylon heights\n  // Full ECEF positioning\n}',
+  },
+  {
+    id: 'solar_engine_3d', layer: 'engine3d', col: 1, type: 'engine3d',
+    label: 'SolarEngine3D (Renderer)',
+    sublabel: 'Cesium viewer + grid overlay · v6.2.2',
+    desc: 'React component wrapping CesiumJS viewer. Renders panel boxes via BoxGeometry with HPR quaternion orientation. Draws structural members (pylons, strongbacks, rails, braces, struts). Includes grid overlay system that draws cell subdivision lines on each panel. v6.2.2 fixed grid orientation to match panel frame axes.',
+    fields: [
+      { k: 'File', v: 'components/3d/SolarEngine3D.tsx' },
+      { k: 'Lines', v: '~6,300' },
+      { k: 'Panel box', v: 'new C.Cartesian3(ph, pw, PANEL_THICKNESS) — boxX=ph, boxY=pw' },
+      { k: 'Heading', v: 'headingFromAzimuth: atan2(-cos(az), sin(az))' },
+      { k: 'HPR convention', v: 'right = east·cos(H) + north·sin(H), forward = -east·sin(H) + north·cos(H)' },
+      { k: 'Grid fix', v: 'v6.2.2: phDir/pwDir axes aligned to Cesium HPR frame' },
+    ],
+    tags: [{ label: '3D Engine', color: '#79c0ff' }, { label: 'Renderer', color: '#ffa657' }, { label: 'v6.2.2', color: '#56d364' }],
+    deps: ['gm_reality_engine'],
+    code: 'function headingFromAzimuth(azDeg: number): number {\n  const azRad = azDeg * Math.PI / 180;\n  return Math.atan2(-Math.cos(azRad), Math.sin(azRad));\n}\n// Panel: dimensions = new C.Cartesian3(ph, pw, THICKNESS)\n// Grid: phDir = east*cos(H)+north*sin(H), pwDir = cross(N,phDir)',
+  },
+  {
+    id: 'strut_azimuth_fix', layer: 'engine3d', col: 2, type: 'engine3d',
+    label: 'Strut Azimuth Fix',
+    sublabel: 'CRITICAL fix · v6.2.2',
+    desc: 'FIXED in v6.2.2. Two bugs in strut geometry: (1) dNS = (upper.lat - lower.lat) * MPD only captured latitude displacement — at az=90°/270° the strongback displaces along longitude, so dNS≈0 and struts collapsed to zero length. (2) Heading was hardcoded to hNS regardless of azimuth. Fix: compute dLatM + dLngM → dHoriz via Pythagorean, heading via atan2(dLngM, dLatM). BIT-IDENTICAL at az=180°, fixes collapse at 90°/270°.',
+    fields: [
+      { k: 'Fixed', v: 'v6.2.2' },
+      { k: 'Bug 1', v: 'dNS used only lat displacement — misses lng component at rotated azimuths' },
+      { k: 'Bug 2', v: 'Heading hardcoded to hNS — wrong for non-south azimuths' },
+      { k: 'Fix', v: 'dLatM + dLngM → dHoriz; atan2(dLngM, dLatM) for heading' },
+      { k: 'Test', v: 'strut_azimuth_test.js — 24/24 PASS' },
+      { k: 'Regression', v: 'BIT-IDENTICAL at az=180° (south-facing default)' },
+    ],
+    tags: [{ label: 'Fix', color: '#f85149' }, { label: 'CRITICAL', color: '#f85149' }, { label: 'v6.2.2', color: '#56d364' }],
+    deps: ['gm_reality_engine'],
+    code: '// v6.2.2: Azimuth-aware strut\nconst dLatM  = (upper.lat - lower.lat) * MPD;\nconst dLngM  = (upper.lng - lower.lng) * mpdLng(lower.lat);\nconst dHoriz = Math.sqrt(dLatM*dLatM + dLngM*dLngM);\nconst strutHeadingS = Math.atan2(dLngM, dLatM);',
+  },
+  {
+    id: 'debug_mode_toggle', layer: 'engine3d', col: 3, type: 'engine3d',
+    label: 'Debug Mode Toggle',
+    sublabel: 'GROUND_MOUNT_DEBUG flag · v6.2.2',
+    desc: 'NEW in v6.2.2. Added GROUND_MOUNT_DEBUG boolean constant. When false (production): steel-grey palette for all structural members. When true (debug): RED pylons, BLUE strongbacks, YELLOW rails, ORANGE braces for visual debugging. Colors for pile, strongback, rail, brace are gated via ternary on the flag.',
+    fields: [
+      { k: 'Added', v: 'v6.2.2' },
+      { k: 'Flag', v: 'GROUND_MOUNT_DEBUG = false (production default)' },
+      { k: 'Prod palette', v: 'Steel grey (r:0.60, g:0.62, b:0.64) for all members' },
+      { k: 'Debug palette', v: 'RED pile, BLUE strongback, YELLOW rail, ORANGE brace' },
+      { k: 'Gating', v: 'COLOR_PILE = GROUND_MOUNT_DEBUG ? DEBUG_COLOR_PILE : PROD_COLOR_PILE' },
+    ],
+    tags: [{ label: 'Feature', color: '#3fb950' }, { label: 'v6.2.2', color: '#56d364' }, { label: 'NEW', color: '#3fb950' }],
+    deps: ['gm_reality_engine'],
+    code: 'export const GROUND_MOUNT_DEBUG = false;\nconst DEBUG_COLOR_PILE = { r:0.85, g:0.15, b:0.15, a:1.0 };\nconst PROD_COLOR_PILE  = { r:0.60, g:0.62, b:0.64, a:1.0 };\nexport const COLOR_PILE = GROUND_MOUNT_DEBUG\n  ? DEBUG_COLOR_PILE : PROD_COLOR_PILE;',
+  },
+  {
+    id: 'grid_orientation_fix', layer: 'engine3d', col: 4, type: 'engine3d',
+    label: 'Grid Orientation Fix',
+    sublabel: 'Renderer-only visual fix · v6.2.2',
+    desc: 'FIXED in v6.2.2. Grid overlay lines were reversed relative to panel orientation. Root cause: grid computed pU = north*cos(H) + east*sin(H) but Cesium HPR right-axis is east*cos(H) + north*sin(H) — east/north terms SWAPPED. Also stored-U path used cross(N, pw) which gives -boxX; fixed to cross(pw, N). Fix is renderer-only (SolarEngine3D.tsx) — no engine logic changed.',
+    fields: [
+      { k: 'Fixed', v: 'v6.2.2' },
+      { k: 'Scope', v: 'Renderer-only (SolarEngine3D.tsx lines 1662-1780)' },
+      { k: 'Root cause', v: 'east/north swapped in grid U-axis vs Cesium HPR right-axis' },
+      { k: 'Fix (fallback path)', v: 'phDir = east*cos(H) + north*sin(H), pwDir = cross(N, phDir)' },
+      { k: 'Fix (stored U path)', v: 'cross(pw, N) not cross(N, pw) for correct handedness' },
+      { k: 'Test', v: 'grid_orientation_fix_test.js — all azimuths PASS, dot=1.0' },
+      { k: 'Engine unchanged', v: 'No modifications to groundMountRealityEngine.ts' },
+    ],
+    tags: [{ label: 'Fix', color: '#f85149' }, { label: 'Renderer', color: '#ffa657' }, { label: 'v6.2.2', color: '#56d364' }],
+    deps: ['solar_engine_3d'],
+    code: '// v6.2.2 Grid fix (fallback path)\nconst phDir = C3.add(\n  C3.multiplyByScalar(east, Math.cos(H), new C3()),\n  C3.multiplyByScalar(north, Math.sin(H), new C3()),\n  new C3());\nconst pwDir = C3.cross(surfaceNormal, phDir, new C3());\n// Stored U path: phDir = cross(pw, N) not cross(N, pw)',
+  },
+  {
+    id: 'stability_verdict', layer: 'engine3d', col: 5, type: 'engine3d',
+    label: 'STABILITY_VERDICT.md',
+    sublabel: 'Engine frozen STABLE · v6.2.2',
+    desc: 'Verdict document created after 5-task stabilization mode. Records all evidence: strut azimuth fix (24/24 PASS), debug toggle, pylon grounding audit (Δ0.0mm), visual acceptance (59/59 PASS), full engine audit (50 PASS, 0 WARN, 0 FAIL). Total: 227+ checks, 0 FAIL. Verdict: STABLE. Engine core is frozen.',
+    fields: [
+      { k: 'File', v: 'lib/3d/ground/STABILITY_VERDICT.md' },
+      { k: 'Verdict', v: 'STABLE' },
+      { k: 'Task 1', v: 'Strut Azimuth Fix — 24/24 PASS' },
+      { k: 'Task 2', v: 'Debug Mode Toggle — implemented + audit updated' },
+      { k: 'Task 3', v: 'Pylon Grounding Audit — Δ0.0mm, no bug' },
+      { k: 'Task 4', v: 'Visual Acceptance — 59/59 PASS (4 cases)' },
+      { k: 'Task 5', v: 'Freeze Core — 227+ checks, 0 FAIL' },
+      { k: 'Engine audit', v: 'full_engine_audit.js — 50 PASS, 0 WARN, 0 FAIL' },
+    ],
+    tags: [{ label: 'Verdict', color: '#3fb950' }, { label: 'STABLE', color: '#3fb950' }, { label: 'v6.2.2', color: '#56d364' }],
+    deps: ['gm_reality_engine', 'solar_engine_3d', 'strut_azimuth_fix', 'debug_mode_toggle', 'grid_orientation_fix'],
+    code: '# STABILITY VERDICT\n## v6.2.2 — STABLE\n\nTotal checks: 227+\nFailed: 0\n\nEngine core is FROZEN.\nNo further changes without re-stabilization.',
+  },
+
+  // ── LAYER 7: Version
+  {
+    id: 'version_ts', layer: 'version', col: 1, type: 'version',
+    label: 'lib/version.ts',
+    sublabel: 'Version registry',
+    desc: 'Single source of truth for all version metadata. BUILD_VERSION, BUILD_DATE, PLANSET_ENGINE_VERSION, BUILD_DESCRIPTION. Imported by route.ts and stamped on every planset.',
+    fields: [
+      { k: 'PLANSET_ENGINE_VERSION', v: '47324' },
+      { k: 'BUILD_VERSION', v: 'v47.324' },
+      { k: 'BUILD_DATE', v: '2026-04-09' },
+      { k: 'BUILD_DESCRIPTION', v: 'Hard Validation Gate + Dimension Enforcement' },
+    ],
+    tags: [{ label: 'Config', color: '#56d364' }, { label: 'v47.324', color: '#56d364' }],
+    deps: ['version_check'],
+    code: 'export const PLANSET_ENGINE_VERSION = 47324;\nexport const BUILD_VERSION = "v47.324";\nexport const BUILD_DATE = "2026-04-09";\nexport const BUILD_DESCRIPTION =\n  "v47.324: Hard Validation Gate + Dimension Enforcement";',
+  },,
+
+  // ══ LAYER: Survey Entry (webhook ingestion) ══
+  {
+    id: 'survey_webhook', layer: 'survey_entry', col: 0, type: 'entry',
+    label: 'POST /api/webhooks/survey-complete',
+    sublabel: 'route.ts · HMAC-verified webhook',
+    desc: 'Top-level webhook receiver for survey completion events from the partner mobile app. Performs: HMAC-SHA256 signature verification, idempotency check (duplicate detection), envelope validation, delivery row INSERT, then hands off to runIngestPipeline(). Returns 200 immediately; all processing is async.',
+    fields: [
+      { k: 'File', v: 'app/api/webhooks/survey-complete/route.ts' },
+      { k: 'Method', v: 'POST' },
+      { k: 'Auth', v: 'HMAC-SHA256 signature header' },
+      { k: 'maxDuration', v: '30s' },
+      { k: 'Flow', v: 'verify → validateEnvelope → INSERT delivery → runIngestPipeline' },
+    ],
+    tags: [{ label: 'Entry Point', color: '#58a6ff' }, { label: 'v47.435', color: '#56d364' }],
+    deps: [],
+    code: 'export async function POST(req: NextRequest) {\n  // 1. HMAC verify\n  // 2. Duplicate check\n  // 3. validateEnvelope()\n  // 4. INSERT webhook_deliveries\n  // 5. runIngestPipeline(context)\n}',
+  },
+  {
+    id: 'sig_verifier', layer: 'survey_entry', col: 1, type: 'validator',
+    label: 'verifyWebhookSignature()',
+    sublabel: 'HMAC-SHA256 · lib/survey/',
+    desc: 'Verifies the partner webhook HMAC-SHA256 signature. Reads raw request body and compares against X-Survey-Signature header using timingSafeEqual to prevent timing attacks. Returns { ok, error }.',
+    fields: [
+      { k: 'File', v: 'lib/survey/verifyWebhookSignature.ts' },
+      { k: 'Algorithm', v: 'HMAC-SHA256' },
+      { k: 'Header', v: 'X-Survey-Signature' },
+      { k: 'Security', v: 'timingSafeEqual (no timing leak)' },
+    ],
+    tags: [{ label: 'Validator', color: '#f85149' }, { label: 'Security', color: '#f85149' }],
+    deps: ['survey_webhook'],
+    code: 'verifyWebhookSignature({\n  rawBody, secret, signature\n}): { ok: boolean; error?: string }',
+  },
+  {
+    id: 'envelope_validator', layer: 'survey_entry', col: 2, type: 'validator',
+    label: 'validateEnvelope(raw)',
+    sublabel: 'Thin-event schema gate · v47.435',
+    desc: 'Validates the thin-event envelope shape before any processing. Checks required fields: event type, schema version, survey_id, submitted_at. Returns EnvelopeResult { ok, event } or { ok: false, error }. Hard gate — pipeline does not start if envelope is invalid.',
+    fields: [
+      { k: 'File', v: 'lib/survey/envelopeValidator.ts' },
+      { k: 'Input', v: 'unknown (raw JSON body)' },
+      { k: 'Output', v: 'EnvelopeResult (ok | error)' },
+      { k: 'Checks', v: 'event_type, schema_version, survey_id, submitted_at' },
+    ],
+    tags: [{ label: 'Validator', color: '#f85149' }, { label: 'Hard Gate', color: '#f85149' }],
+    deps: ['survey_webhook'],
+    code: 'function validateEnvelope(raw: unknown): EnvelopeResult {\n  // Checks shape of SurveyCompletedEvent\n  // Returns { ok: true, event } or { ok: false, error }\n}',
+  },
+  {
+    id: 'survey_completed_event', layer: 'survey_entry', col: 3, type: 'interface',
+    label: 'SurveyCompletedEvent',
+    sublabel: 'Thin-event wire contract · lib/survey/types.ts',
+    desc: 'The external thin-event envelope sent by the partner mobile app on survey completion. Contains only the survey_id (and metadata) — NOT the full payload. Full payload is fetched separately by payloadFetcher in STEP_C.',
+    fields: [
+      { k: 'File', v: 'lib/survey/types.ts' },
+      { k: 'Fields', v: 'event, schemaVersion, surveyId, submittedAt' },
+      { k: 'Does NOT contain', v: 'full survey data (that is fetched separately)' },
+    ],
+    tags: [{ label: 'Interface', color: '#bc8cff' }, { label: 'Wire Contract', color: '#58a6ff' }],
+    deps: ['envelope_validator'],
+    code: 'interface SurveyCompletedEvent {\n  event: "survey.completed";\n  schemaVersion: SchemaVersion;\n  surveyId: string;\n  submittedAt: string;\n}',
+  },
+  {
+    id: 'token_minter', layer: 'survey_entry', col: 4, type: 'helper',
+    label: 'tokenMinter (Survey Handoff)',
+    sublabel: 'lib/survey/handoff/tokenMinter.ts',
+    desc: 'Generates secure single-use tokens for survey handoff from the project detail page to the mobile survey app. Called from POST /api/projects/[id]/survey-handoff. Token is stored in DB with expiry and project/user binding.',
+    fields: [
+      { k: 'File', v: 'lib/survey/handoff/tokenMinter.ts' },
+      { k: 'Used by', v: 'POST /api/projects/[id]/survey-handoff' },
+      { k: 'Token binding', v: 'projectId + userId + expiry' },
+    ],
+    tags: [{ label: 'Helper', color: '#d29922' }],
+    deps: [],
+    code: 'mintSurveyToken({ projectId, userId })\n// Returns: { token, expiresAt }\n// Stored in survey_handoff_tokens table',
+  },
+
+  // ══ LAYER: Survey Ingest Pipeline ══
+  {
+    id: 'ingest_pipeline', layer: 'survey_ingest', col: 2, type: 'builder',
+    label: 'runIngestPipeline(context)',
+    sublabel: 'STEP_A–F · lib/survey/ingest/',
+    desc: 'The single entry point for the survey ingest pipeline. Executes 6 steps sequentially: STEP_A context validation, STEP_B project link resolution, STEP_C payload fetch, STEP_D transform, STEP_E DB writes (project + physical_data + files), STEP_F delivery status update. Never throws — always returns IngestResult { status, projectId, error }.',
+    fields: [
+      { k: 'File', v: 'lib/survey/ingest/ingestPipeline.ts' },
+      { k: 'STEP_A', v: 'Validate IngestContext (ownerId required)' },
+      { k: 'STEP_B', v: 'Resolve project link (CREATE_ORPHAN | LINK_EXISTING)' },
+      { k: 'STEP_C', v: 'Fetch full SurveyV2Payload from partner API' },
+      { k: 'STEP_D', v: 'Run transform() → TransformOutput' },
+      { k: 'STEP_E', v: '_upsertProject + _upsertPhysicalData + _insertFiles' },
+      { k: 'STEP_F', v: 'Mark delivery ingested/failed + duration' },
+      { k: 'Returns', v: 'IngestResult — never throws' },
+    ],
+    tags: [{ label: 'Builder', color: '#3fb950' }, { label: 'v47.435', color: '#56d364' }],
+    deps: ['survey_webhook', 'link_resolver', 'payload_fetcher', 'transform_layer'],
+    code: 'export async function runIngestPipeline(\n  context: IngestContext\n): Promise<IngestResult> {\n  // STEP_A: validate context\n  // STEP_B: resolve project link\n  // STEP_C: fetch payload\n  // STEP_D: transform\n  // STEP_E: DB writes\n  // STEP_F: mark delivery\n}',
+  },
+  {
+    id: 'ingest_context', layer: 'survey_ingest', col: 0, type: 'interface',
+    label: 'IngestContext',
+    sublabel: 'Pipeline execution contract',
+    desc: 'The clean context object passed into runIngestPipeline(). Built by the webhook route after HMAC verification. Contains the verified event, deliveryId (DB row to update), ownerId, partnerProjectId (nullable), receivedAt timestamp, and correlationId for tracing.',
+    fields: [
+      { k: 'File', v: 'lib/survey/ingest/types.ts' },
+      { k: 'event', v: 'SurveyCompletedEvent (verified)' },
+      { k: 'deliveryId', v: 'webhook_deliveries row ID' },
+      { k: 'ownerId', v: 'SURVEY_INGEST_DEFAULT_USER_ID env' },
+      { k: 'partnerProjectId', v: 'nullable — from webhook headers' },
+      { k: 'receivedAt', v: 'ISO-8601 request timestamp' },
+    ],
+    tags: [{ label: 'Interface', color: '#bc8cff' }],
+    deps: ['survey_completed_event'],
+    code: 'interface IngestContext {\n  event: SurveyCompletedEvent;\n  deliveryId: string;\n  ownerId: string;\n  partnerProjectId: string | null;\n  receivedAt: string;\n  correlationId: string;\n}',
+  },
+  {
+    id: 'link_resolver', layer: 'survey_ingest', col: 1, type: 'helper',
+    label: 'resolveProjectLink()',
+    sublabel: 'STEP_B · CREATE_ORPHAN | LINK_EXISTING',
+    desc: 'Resolves how the incoming survey should be linked to a SolarPro project. Strategy is determined by resolveProjectLinkStrategy() from env config. CREATE_ORPHAN: always create a new project. LINK_EXISTING: attempt to match by partnerProjectId, fall back to CREATE_ORPHAN if no match.',
+    fields: [
+      { k: 'File', v: 'lib/survey/ingest/projectLinkResolver.ts' },
+      { k: 'Strategies', v: 'CREATE_ORPHAN | LINK_EXISTING' },
+      { k: 'Returns', v: 'LinkResolution { action, projectId? }' },
+      { k: 'v47.435', v: 'CREATE_ORPHAN is default strategy' },
+    ],
+    tags: [{ label: 'Helper', color: '#d29922' }, { label: 'v47.435', color: '#56d364' }],
+    deps: ['ingest_context'],
+    code: 'function resolveProjectLink(\n  context: IngestContext,\n  strategy: SurveyProjectLinkStrategy\n): LinkResolution {\n  // CREATE_ORPHAN: { action: "CREATE_ORPHAN" }\n  // LINK_EXISTING: match by partnerProjectId\n}',
+  },
+  {
+    id: 'payload_fetcher', layer: 'survey_ingest', col: 3, type: 'helper',
+    label: 'fetchPayload(surveyId)',
+    sublabel: 'STEP_C · partner API fetch',
+    desc: 'Fetches the full SurveyV2Payload from the partner API using the surveyId from the thin event. Returns null in degraded mode if the partner API is unavailable — pipeline continues without physical data. Called in STEP_C of runIngestPipeline().',
+    fields: [
+      { k: 'File', v: 'lib/survey/ingest/payloadFetcher.ts' },
+      { k: 'Input', v: 'surveyId (from SurveyCompletedEvent)' },
+      { k: 'Output', v: 'SurveyV2Payload | null (degraded mode)' },
+      { k: 'Degraded mode', v: 'null → pipeline skips physical_data write' },
+    ],
+    tags: [{ label: 'Helper', color: '#d29922' }],
+    deps: ['ingest_pipeline'],
+    code: 'async function fetchPayload(\n  surveyId: string\n): Promise<SurveyV2Payload | null> {\n  // Fetch from partner API\n  // Returns null on failure (degraded mode)\n}',
+  },
+  {
+    id: 'ingest_result', layer: 'survey_ingest', col: 4, type: 'interface',
+    label: 'IngestResult',
+    sublabel: 'Pipeline terminal output',
+    desc: 'The structured result returned by runIngestPipeline(). Always returned — never throws. Status is either "ingested" (full success) or "failed" (unrecoverable error). Contains projectId on success, error message on failure.',
+    fields: [
+      { k: 'File', v: 'lib/survey/ingest/types.ts' },
+      { k: 'status', v: '"ingested" | "failed"' },
+      { k: 'projectId', v: 'string (on success)' },
+      { k: 'error', v: 'string (on failure)' },
+    ],
+    tags: [{ label: 'Interface', color: '#bc8cff' }],
+    deps: ['ingest_pipeline'],
+    code: 'interface IngestResult {\n  status: "ingested" | "failed";\n  projectId?: string;\n  durationMs: number;\n  error?: string;\n}',
+  },
+
+  // ══ LAYER: Transform Layer ══
+  {
+    id: 'transform_layer', layer: 'survey_transform', col: 3, type: 'builder',
+    label: 'transform(input)',
+    sublabel: 'STEP_D · SurveyV2Payload → TransformOutput',
+    desc: 'Core transform function. Dispatches to the correct registered transformer based on schemaVersion + eventType. v2.0 transformer calls extractPhysicalData() for all 23 fields, extractPhotos(), and project metadata. Returns TransformOutput containing projectName, physicalData (PhysicalDataOutput | null), files array.',
+    fields: [
+      { k: 'File', v: 'lib/survey/ingest/transformLayer.ts' },
+      { k: 'Version', v: 'v2.0 (v47.438 — Q3 Complete)' },
+      { k: 'Input', v: 'TransformInput { event, payload }' },
+      { k: 'Output', v: 'TransformOutput { projectName, physicalData, files }' },
+      { k: 'physicalData null', v: 'if payload is null (degraded mode)' },
+    ],
+    tags: [{ label: 'Builder', color: '#3fb950' }, { label: 'v47.438', color: '#56d364' }, { label: 'NEW', color: '#3fb950' }],
+    deps: ['ingest_pipeline', 'physical_data_output'],
+    code: 'export function transform(\n  input: TransformInput\n): TransformOutput {\n  const transformer = getTransformer(\n    input.event.schemaVersion,\n    input.event.event\n  );\n  return transformer.transform(input);\n}',
+  },
+  {
+    id: 'map_functions', layer: 'survey_transform', col: 1, type: 'helper',
+    label: '9× Map Functions',
+    sublabel: 'Enum normalizers · v47.438',
+    desc: 'Nine explicit enum normalization functions that map raw survey string values to canonical DB values. All follow the same pattern: unknown/empty → null, known values → mapped string/number. Functions: mapRoofMaterial, mapRoofPitch, mapRafterSpacing, mapPanelRatingAmps, mapPanelBrand, mapBreakerSlots, mapMeterSocketType, mapInterconnectionPoint, mapServiceEntrance.',
+    fields: [
+      { k: 'File', v: 'lib/survey/ingest/transformLayer.ts' },
+      { k: 'mapRoofMaterial', v: 'asphalt_shingle | metal | tile | flat → canonical' },
+      { k: 'mapRoofPitch', v: 'low | medium | high | steep → canonical' },
+      { k: 'mapRafterSpacing', v: '16in | 24in → number' },
+      { k: 'mapPanelRatingAmps', v: '100A | 150A | 200A | 400A → number' },
+      { k: 'mapPanelBrand', v: 'square_d | eaton | siemens | ge | other → canonical' },
+      { k: 'mapBreakerSlots', v: 'full | half | tight → canonical' },
+      { k: 'mapMeterSocketType', v: 'ringless | ring | unknown → canonical' },
+      { k: 'mapInterconnectionPoint', v: 'load_side | supply_side | main_panel | sub_panel → canonical' },
+      { k: 'mapServiceEntrance', v: 'overhead | underground → canonical' },
+    ],
+    tags: [{ label: 'Helper', color: '#d29922' }, { label: 'v47.438', color: '#56d364' }, { label: 'NEW', color: '#3fb950' }],
+    deps: ['transform_layer'],
+    code: '// Pattern: unknown/empty → null, known → canonical\nfunction mapRoofMaterial(val): string | null {\n  const MAP = { asphalt_shingle: "Asphalt Shingle", ... };\n  return MAP[val ?? ""] ?? null;\n}\n// × 9 functions, same pattern',
+  },
+  {
+    id: 'extract_physical_data', layer: 'survey_transform', col: 2, type: 'builder',
+    label: 'extractPhysicalData(payload)',
+    sublabel: '23-field extractor · SurveyV2Payload',
+    desc: 'Maps all 23 fields from SurveyV2Payload to PhysicalDataOutput. Called by the v2.0 transformer. Reads from 5 survey steps: roof (8 fields), electrical (8 fields), obstruction count, notes (3 fields), completion metadata. All 9 map functions are called here.',
+    fields: [
+      { k: 'File', v: 'lib/survey/ingest/transformLayer.ts' },
+      { k: 'Roof fields', v: 'material, pitch, rafter_spacing, condition, age, layers, deck_type, mount_type' },
+      { k: 'Electrical fields', v: 'panel_brand, panel_rating_amps, breaker_slots, meter_socket, interconnection, service_entrance, has_sub_panel, sub_panel_rating' },
+      { k: 'Other fields', v: 'obstruction_count, access/mounting/electrical notes' },
+    ],
+    tags: [{ label: 'Builder', color: '#3fb950' }, { label: 'v47.438', color: '#56d364' }, { label: 'NEW', color: '#3fb950' }],
+    deps: ['map_functions'],
+    code: 'function extractPhysicalData(\n  payload: SurveyV2Payload\n): PhysicalDataOutput {\n  const { roof, electrical } = payload;\n  return {\n    roof_material: mapRoofMaterial(roof?.roofMaterial),\n    rafter_spacing_in: mapRafterSpacing(roof?.rafterSpacing),\n    panel_rating_amps: mapPanelRatingAmps(electrical?.panelRating),\n    interconnection_point: mapInterconnectionPoint(electrical?.interconnectionPoint),\n    // ... 19 more fields\n  };\n}',
+  },
+  {
+    id: 'physical_data_output', layer: 'survey_transform', col: 0, type: 'interface',
+    label: 'PhysicalDataOutput',
+    sublabel: '23-field interface · ingest/types.ts',
+    desc: 'Internal interface representing the normalized physical survey data ready for DB write. All fields are nullable — partial surveys are valid. This is the OUTPUT of the transform layer and the INPUT to _upsertPhysicalData(). Different from ProjectPhysicalData (which is the engineering READ model).',
+    fields: [
+      { k: 'File', v: 'lib/survey/ingest/types.ts' },
+      { k: 'Total fields', v: '23' },
+      { k: 'Roof group', v: '8 fields (material, pitch, rafter_spacing_in, condition, age_years, layers, deck_type, mount_type)' },
+      { k: 'Electrical group', v: '8 fields (panel_brand, panel_rating_amps, breaker_slots, meter_socket_type, interconnection_point, service_entrance_type, has_sub_panel, sub_panel_rating_amps)' },
+      { k: 'Other', v: 'obstruction_count, access/mounting/electrical notes, completed_at' },
+    ],
+    tags: [{ label: 'Interface', color: '#bc8cff' }, { label: 'v47.438', color: '#56d364' }],
+    deps: [],
+    code: 'interface PhysicalDataOutput {\n  roof_material: string | null;\n  roof_pitch: string | null;\n  rafter_spacing_in: number | null;\n  panel_rating_amps: number | null;\n  interconnection_point: string | null;\n  // ... 18 more nullable fields\n}',
+  },
+  {
+    id: 'survey_v2_payload', layer: 'survey_transform', col: 4, type: 'interface',
+    label: 'SurveyV2Payload',
+    sublabel: 'Full survey wire format · v2/types.ts',
+    desc: 'The complete survey payload fetched from the partner API. Contains 5 structured sub-objects from each survey step: roof (StepRoof), electrical (StepElectrical), siteOverview (StepSiteOverview), obstructions (Obstruction[]), photos (PhotoEntry[]). This is the input to extractPhysicalData().',
+    fields: [
+      { k: 'File', v: 'lib/survey/v2/types.ts' },
+      { k: 'roof', v: 'StepRoof — 8 typed fields' },
+      { k: 'electrical', v: 'StepElectrical — 8 typed fields' },
+      { k: 'siteOverview', v: 'StepSiteOverview — address, access notes' },
+      { k: 'obstructions', v: 'Obstruction[] — id, type, location, notes' },
+      { k: 'photos', v: 'PhotoEntry[] — url, category, capturedAt' },
+    ],
+    tags: [{ label: 'Interface', color: '#bc8cff' }],
+    deps: ['payload_fetcher'],
+    code: 'interface SurveyV2Payload {\n  roof: StepRoof;\n  electrical: StepElectrical;\n  siteOverview: StepSiteOverview;\n  obstructions: Obstruction[];\n  photos: PhotoEntry[];\n}',
+  },
+
+  // ══ LAYER: Physical Data DB ══
+  {
+    id: 'upsert_physical_data', layer: 'physical_db', col: 1, type: 'builder',
+    label: '_upsertPhysicalData()',
+    sublabel: 'STEP_E · ON CONFLICT (project_id) DO UPDATE',
+    desc: 'Writes PhysicalDataOutput to the project_physical_data table. Uses ON CONFLICT (project_id) DO UPDATE SET to handle re-surveys. Called as best-effort in STEP_E — failure is non-fatal (warns but continues). Part of runIngestPipeline().',
+    fields: [
+      { k: 'File', v: 'lib/survey/ingest/ingestPipeline.ts' },
+      { k: 'Table', v: 'project_physical_data' },
+      { k: 'Conflict', v: 'ON CONFLICT (project_id) DO UPDATE SET' },
+      { k: 'Non-fatal', v: 'failure warns but does not block ingestion' },
+      { k: 'Updated at', v: 'updated_at = now() on each upsert' },
+    ],
+    tags: [{ label: 'Builder', color: '#3fb950' }, { label: 'v47.438', color: '#56d364' }, { label: 'NEW', color: '#3fb950' }],
+    deps: ['ingest_pipeline', 'physical_data_table'],
+    code: 'async function _upsertPhysicalData(\n  sql, projectId, transformOutput\n) {\n  await sql`\n    INSERT INTO project_physical_data (...)\n    VALUES (...)\n    ON CONFLICT (project_id)\n    DO UPDATE SET\n      roof_material = EXCLUDED.roof_material,\n      ...\n      updated_at = now()\n  `;\n}',
+  },
+  {
+    id: 'upsert_project', layer: 'physical_db', col: 0, type: 'builder',
+    label: '_upsertProject()',
+    sublabel: 'STEP_E · projects table',
+    desc: 'Creates or updates the SolarPro project row from survey data. Uses ON CONFLICT (id) DO UPDATE. Sets project name, address, status, owner_id. Returns { projectId, created: boolean }.',
+    fields: [
+      { k: 'File', v: 'lib/survey/ingest/ingestPipeline.ts' },
+      { k: 'Table', v: 'projects' },
+      { k: 'Conflict key', v: 'id (UUID)' },
+      { k: 'Returns', v: '{ projectId: string, created: boolean }' },
+    ],
+    tags: [{ label: 'Builder', color: '#3fb950' }],
+    deps: ['ingest_pipeline'],
+    code: 'async function _upsertProject(\n  sql, context, transformOutput, projectId\n): Promise<{ projectId: string; created: boolean }> {\n  // INSERT INTO projects ... ON CONFLICT (id) DO UPDATE\n}',
+  },
+  {
+    id: 'physical_data_table', layer: 'physical_db', col: 2, type: 'version',
+    label: 'project_physical_data (table)',
+    sublabel: 'Neon PostgreSQL · single source of truth',
+    desc: 'The database table that bridges field survey data and engineering. Written by _upsertPhysicalData() in the ingest pipeline. Read by getProjectPhysicalData() for engineering report generation. One row per project (project_id is unique key). Contains all 23 physical fields + timestamps.',
+    fields: [
+      { k: 'Primary key', v: 'id (UUID)' },
+      { k: 'Unique', v: 'project_id (FK → projects)' },
+      { k: 'Written by', v: '_upsertPhysicalData() in ingest pipeline' },
+      { k: 'Read by', v: 'getProjectPhysicalData() for engineering' },
+      { k: 'Columns', v: '23 physical fields + created_at + updated_at' },
+      { k: 'Conflict strategy', v: 'ON CONFLICT (project_id) DO UPDATE' },
+    ],
+    tags: [{ label: 'Database', color: '#56d364' }, { label: 'v47.438', color: '#56d364' }, { label: 'NEW', color: '#3fb950' }],
+    deps: [],
+    code: 'CREATE TABLE project_physical_data (\n  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n  project_id UUID UNIQUE NOT NULL REFERENCES projects(id),\n  roof_material TEXT,\n  rafter_spacing_in INTEGER,\n  panel_rating_amps INTEGER,\n  interconnection_point TEXT,\n  -- 19 more physical columns\n  created_at TIMESTAMPTZ DEFAULT now(),\n  updated_at TIMESTAMPTZ DEFAULT now()\n);',
+  },
+  {
+    id: 'get_physical_data', layer: 'physical_db', col: 3, type: 'helper',
+    label: 'getProjectPhysicalData()',
+    sublabel: 'Engineering read helper · lib/db-neon.ts',
+    desc: 'Reads physical survey data from project_physical_data for use by the engineering report generator. Returns ProjectPhysicalData | null. null is normal (no survey yet) — engineering falls back to hardcoded defaults. Called by generateEngineeringReport() and GET /api/projects/[id]/physical-data.',
+    fields: [
+      { k: 'File', v: 'lib/db-neon.ts' },
+      { k: 'Returns', v: 'ProjectPhysicalData | null' },
+      { k: 'null meaning', v: 'No survey yet — not an error' },
+      { k: 'Used by', v: 'generateEngineeringReport(), GET /api/.../physical-data' },
+    ],
+    tags: [{ label: 'Helper', color: '#d29922' }, { label: 'v47.438', color: '#56d364' }],
+    deps: ['physical_data_table'],
+    code: 'export async function getProjectPhysicalData(\n  projectId: string\n): Promise<ProjectPhysicalData | null> {\n  const rows = await sql`\n    SELECT * FROM project_physical_data\n    WHERE project_id = ${projectId} LIMIT 1\n  `;\n  return rows[0] ?? null;\n}',
+  },
+  {
+    id: 'project_physical_data_type', layer: 'physical_db', col: 4, type: 'interface',
+    label: 'ProjectPhysicalData',
+    sublabel: 'Engineering read model · lib/engineering/types.ts',
+    desc: 'The TypeScript interface for the engineering side of the physical data read. Different from PhysicalDataOutput (which is the ingest write model). Used by generateEngineeringReport() to apply 4 field overrides: mainPanelBusAmps, rafterSpacingIn, roofType, interconnectionType.',
+    fields: [
+      { k: 'File', v: 'lib/engineering/types.ts' },
+      { k: 'Used by', v: 'generateEngineeringReport() — 4 overrides' },
+      { k: 'Override 1', v: 'mainPanelBusAmps ← panel_rating_amps (default: 200)' },
+      { k: 'Override 2', v: 'rafterSpacingIn ← rafter_spacing_in (default: 24)' },
+      { k: 'Override 3', v: 'roofType ← roof_material (default: Asphalt Shingle)' },
+      { k: 'Override 4', v: 'interconnectionType ← interconnection_point (load/supply)' },
+    ],
+    tags: [{ label: 'Interface', color: '#bc8cff' }, { label: 'v47.438', color: '#56d364' }],
+    deps: ['physical_data_table'],
+    code: 'interface ProjectPhysicalData {\n  panel_rating_amps: number | null;\n  rafter_spacing_in: number | null;\n  roof_material: string | null;\n  interconnection_point: string | null;\n  // ... other fields\n}',
+  },
+
+  // ══ Engineering overrides (add to existing engineering layer) ══
+  {
+    id: 'engineering_overrides', layer: 'pages', col: 10, type: 'helper',
+    label: 'Engineering Overrides (×4)',
+    sublabel: 'Survey data → report defaults · v47.438',
+    desc: 'Four fields in generateEngineeringReport() that are overridden by survey physical data when available. Each uses pd?.field ?? hardcodedDefault pattern. If no survey data (pd = null), falls back to the original hardcoded default. Verified by E2E test (33/33 assertions, audit5_e2e_test.ts).',
+    fields: [
+      { k: 'File', v: 'lib/engineering/reportGenerator.ts' },
+      { k: 'mainPanelBusAmps', v: 'pd?.panel_rating_amps ?? 200' },
+      { k: 'rafterSpacingIn', v: 'pd?.rafter_spacing_in ?? 24' },
+      { k: 'roofType', v: 'pd?.roof_material ?? "Asphalt Shingle"' },
+      { k: 'interconnectionType', v: 'pd?.interconnection_point → load-side/supply-side' },
+      { k: 'E2E test', v: 'scripts/audit5_e2e_test.ts — 33/33 PASS' },
+    ],
+    tags: [{ label: 'Helper', color: '#d29922' }, { label: 'v47.438', color: '#56d364' }, { label: 'NEW', color: '#3fb950' }],
+    deps: ['get_physical_data', 'validate_strict'],
+    code: '// Survey data flows into engineering report:\nconst mainPanelBusAmps = pd?.panel_rating_amps ?? 200;\nconst rafterSpacingIn  = pd?.rafter_spacing_in  ?? 24;\nroofType: pd?.roof_material ?? "Asphalt Shingle",\ninterconnectionType: pd?.interconnection_point\n  === "load_side" ? "load-side" : "supply-side"',
+  },
+
+  // ══ LAYER: Field Display (UI) ══
+  {
+    id: 'physical_data_api', layer: 'field_display', col: 0, type: 'entry',
+    label: 'GET /api/projects/[id]/physical-data',
+    sublabel: 'route.ts · project physical data endpoint',
+    desc: 'API route exposing project physical data to the frontend. Auth-guarded (session required) + project ownership check. Calls getProjectPhysicalData(). Returns { success: true, data: ProjectPhysicalData | null }. data=null is normal (no survey yet) — not a 404.',
+    fields: [
+      { k: 'File', v: 'app/api/projects/[id]/physical-data/route.ts' },
+      { k: 'Method', v: 'GET' },
+      { k: 'Auth', v: 'Session + project ownership check' },
+      { k: 'Returns', v: '{ success: true, data: ProjectPhysicalData | null }' },
+      { k: 'null meaning', v: 'No survey yet — not an error, not a 404' },
+    ],
+    tags: [{ label: 'API', color: '#58a6ff' }, { label: 'v47.438', color: '#56d364' }, { label: 'NEW', color: '#3fb950' }],
+    deps: ['get_physical_data'],
+    code: 'export async function GET(req, { params }) {\n  // Auth guard\n  // Project ownership check\n  const data = await getProjectPhysicalData(projectId);\n  return Response.json({ success: true, data });\n  // data=null is valid (no survey yet)\n}',
+  },
+  {
+    id: 'field_survey_panel', layer: 'field_display', col: 1, type: 'page',
+    label: 'FieldSurveyPanel',
+    sublabel: 'components/project/FieldSurveyPanel.tsx',
+    desc: 'Read-only React component displaying project physical survey data on the project detail page (Field Survey tab). Fetches /api/projects/[id]/physical-data on mount. Three states: loading (spinner), error (retry), data. Shows 4 card groups: Roof/Structure, Electrical Service, Constraints & Layout, Survey Metadata. No-data state shows "Start Survey" CTA. Partial data shows "Not captured" for null fields.',
+    fields: [
+      { k: 'File', v: 'components/project/FieldSurveyPanel.tsx' },
+      { k: 'Tab', v: '"Field Survey" tab on project detail page' },
+      { k: 'Groups', v: 'Roof/Structure (8), Electrical Service (8), Constraints (2), Metadata (2)' },
+      { k: 'No-data CTA', v: '"Start Survey" button → survey handoff' },
+      { k: 'Null fields', v: 'Rendered as "Not captured" italic' },
+      { k: 'has_sub_panel=false', v: 'Sub-Panel Rating shows "N/A"' },
+    ],
+    tags: [{ label: 'Page', color: '#39d353' }, { label: 'v47.438', color: '#56d364' }, { label: 'NEW', color: '#3fb950' }],
+    deps: ['physical_data_api'],
+    code: 'export default function FieldSurveyPanel({ projectId, onStartSurvey }) {\n  // Fetch on mount\n  // 3 states: loading | error | data\n  // 4 card groups\n  // fmt(null) → "Not captured"\n  // No data → <NoDataState onStart={onStartSurvey} />\n}',
+  },
+  {
+    id: 'survey_app', layer: 'field_display', col: 2, type: 'page',
+    label: 'Survey App (Mobile)',
+    sublabel: 'app/survey/[token]/page.tsx · 6 steps',
+    desc: 'Mobile-optimized survey data collection app. Accessed via secure token from survey handoff. Contains 6 step components: StepSiteOverview, StepRoof, StepElectrical, StepObstructions, StepPhotos, StepReview. Submits to POST /api/survey/submit which triggers the ingest pipeline.',
+    fields: [
+      { k: 'File', v: 'app/survey/[token]/page.tsx' },
+      { k: 'Steps', v: 'SiteOverview → Roof → Electrical → Obstructions → Photos → Review' },
+      { k: 'Auth', v: 'Token-based (from survey handoff)' },
+      { k: 'Submits to', v: 'POST /api/survey/submit' },
+      { k: 'Shell', v: 'SurveyShell.tsx — progress bar, step navigation' },
+    ],
+    tags: [{ label: 'Page', color: '#39d353' }],
+    deps: ['token_minter'],
+    code: '// app/survey/[token]/page.tsx\n// Steps: SurveyShell wraps all 6 step components\n// StepRoof → StepElectrical → ... → StepReview\n// Submit → POST /api/survey/submit\n//        → webhook → ingest pipeline',
+  },
+
+];
+
+// Sheets for sidebar quick-jump
+const SHEETS = [
+  { num: 1, label: 'Cover', nodeId: 'page_cover' },
+  { num: 2, label: 'Site', nodeId: 'page_site' },
+  { num: 3, label: 'PV-1', nodeId: 'page_pv1' },
+  { num: '2B', label: 'Geom', nodeId: 'page_array_geometry' },
+  { num: 4, label: 'Elec', nodeId: 'page_electrical' },
+  { num: 7, label: 'Struct', nodeId: 'page_structural_fence' },
+  { num: 8, label: 'PE', nodeId: 'page_pe_letter' },
+  { num: '9–14', label: 'Labels', nodeId: 'page_labels' },
+  { num: 15, label: 'QA', nodeId: 'page_validation_summary' },
+,
+
+  { num: 'INT', label: 'Intake', nodeId: 'homeowner_intake' },
+  { num: 'BIL', label: 'Bill Intel', nodeId: 'utility_bill_intelligence' },
+  { num: 'OPS', label: 'Lead Ops', nodeId: 'admin_intake_review' },
+  { num: 'MKT', label: 'Marketplace', nodeId: 'marketplace_release' },
+  { num: 'NET', label: 'Contractor', nodeId: 'contractor_discovery_claim' },
+  { num: 'CRM', label: 'Core CRM', nodeId: 'core_project_crm' },
+  { num: 'POR', label: 'Portal', nodeId: 'homeowner_portal_dashboard' },
+  { num: 'DSN', label: 'Maps/Design', nodeId: 'maps_3d_solar_design' },
+  { num: 'EQP', label: 'Equipment', nodeId: 'equipment_pricing_utility' },
+
+  { num: 'SWH', label: 'Survey Webhook', nodeId: 'survey_webhook' },
+  { num: 'ING', label: 'Ingest Pipeline', nodeId: 'ingest_pipeline' },
+  { num: 'TRF', label: 'Transform', nodeId: 'transform_layer' },
+  { num: 'PHY', label: 'Physical DB', nodeId: 'physical_data_table' },
+  { num: 'FSP', label: 'Field Survey Panel', nodeId: 'field_survey_panel' },
+];
+
+// ══════════════════════════════════════════════════════════════════════
+//  MISSION CONTROL LAYOUT ENGINE
+// ══════════════════════════════════════════════════════════════════════
+
+// Grid config — nodes slightly taller for card feel
+const GX  = 270;  // horizontal gap
+const GY  = 230;  // vertical gap between layers
+const PW  = 228;  // node width
+const PH  = 82;   // node height (taller for card padding)
+const PAD = 64;   // outer padding
+
+// Derive status from node tags
+function getNodeStatus(n) {
+  if (!n.tags) return 'green';
+  const labels = n.tags.map(t => t.label.toUpperCase());
+  if (labels.includes('CRITICAL') || labels.includes('FIXED') || labels.includes('BLOCKED')) return 'red';
+  if (labels.includes('PHASE 1 TARGET') || labels.includes('LEGACY') || labels.includes('ALIAS')) return 'amber';
+  if (labels.includes('INACTIVE') || labels.includes('PLANNED')) return 'gray';
+  return 'green';
+}
+
+const STATUS_COLORS = {
+  green: '#3dd68c',
+  amber: '#f0b429',
+  red:   '#ff5252',
+  gray:  '#4a5f7a',
+};
+
+// Assign grid positions
+const layerNames = Object.keys(LAYERS);
+const layerNodeMap = {};
+layerNames.forEach(l => { layerNodeMap[l] = []; });
+NODES.forEach(n => { layerNodeMap[n.layer].push(n); });
+
+layerNames.forEach(layerName => {
+  const nodes = layerNodeMap[layerName];
+  nodes.sort((a, b) => (a.col ?? 0) - (b.col ?? 0));
+  const layerY = layerNames.indexOf(layerName) * GY + PAD;
+  nodes.forEach((n, i) => {
+    n._x = PAD + i * (PW + 60);
+    n._y = layerY;
+  });
+});
+
+let maxX = 0, maxY = 0;
+NODES.forEach(n => {
+  if (n._x + PW > maxX) maxX = n._x + PW;
+  if (n._y + PH > maxY) maxY = n._y + PH;
+});
+const CANVAS_W = maxX + PAD * 2;
+const CANVAS_H = maxY + PAD * 2;
+
+// ══════════════════════════════════════════════════════════════════════
+//  RENDER
+// ══════════════════════════════════════════════════════════════════════
+
+const svg       = document.getElementById('map');
+const viewport  = document.getElementById('viewport');
+const nodeById  = {};
+NODES.forEach(n => { nodeById[n.id] = n; });
+
+function svgEl(tag) {
+  return document.createElementNS('http://www.w3.org/2000/svg', tag);
+}
+
+function renderMap() {
+  viewport.innerHTML = '';
+
+  // ── Layer label + separator lines ──
+  layerNames.forEach((layerName, i) => {
+    const layer = LAYERS[layerName];
+    const y = i * GY + PAD - 32;
+
+    // Separator line
+    const line = svgEl('line');
+    line.setAttribute('x1', PAD - 10);
+    line.setAttribute('y1', y - 4);
+    line.setAttribute('x2', CANVAS_W - PAD + 10);
+    line.setAttribute('y2', y - 4);
+    line.setAttribute('stroke', '#1a2840');
+    line.setAttribute('stroke-width', '1');
+    viewport.appendChild(line);
+
+    // Layer label
+    const el = svgEl('text');
+    el.setAttribute('x', PAD - 2);
+    el.setAttribute('y', y + 10);
+    el.setAttribute('fill', '#2a3d5a');
+    el.setAttribute('font-size', '10');
+    el.setAttribute('font-family', 'monospace');
+    el.setAttribute('font-weight', '700');
+    el.setAttribute('letter-spacing', '1.5');
+    el.textContent = layer.label.toUpperCase();
+    viewport.appendChild(el);
+  });
+
+  // ── Edges ──
+  NODES.forEach(n => {
+    (n.deps || []).forEach(depId => {
+      const dep = nodeById[depId];
+      if (!dep) return;
+
+      const x1 = dep._x + PW / 2;
+      const y1 = dep._y + PH;
+      const x2 = n._x + PW / 2;
+      const y2 = n._y;
+
+      // Glow edge (blurred, wide)
+      const glowPath = svgEl('path');
+      const midY = (y1 + y2) / 2;
+      const ctrl1Y = y1 + (midY - y1) * 0.6;
+      const ctrl2Y = y2 - (y2 - midY) * 0.6;
+      const d = `M${x1},${y1} C${x1},${ctrl1Y} ${x2},${ctrl2Y} ${x2},${y2}`;
+      glowPath.setAttribute('d', d);
+      glowPath.setAttribute('fill', 'none');
+      glowPath.setAttribute('stroke', '#4d9fff');
+      glowPath.setAttribute('stroke-width', '4');
+      glowPath.setAttribute('opacity', '0.06');
+      glowPath.setAttribute('filter', 'url(#glow-blue)');
+      viewport.appendChild(glowPath);
+
+      // Base edge
+      const path = svgEl('path');
+      path.setAttribute('d', d);
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', '#1e2d45');
+      path.setAttribute('stroke-width', '1.5');
+      path.setAttribute('marker-end', 'url(#arrow)');
+      path.setAttribute('class', `edge edge-from-${depId} edge-to-${n.id}`);
+      viewport.appendChild(path);
+
+      // Animated flow dash
+      const flowPath = svgEl('path');
+      flowPath.setAttribute('d', d);
+      flowPath.setAttribute('fill', 'none');
+      flowPath.setAttribute('stroke', '#4d9fff');
+      flowPath.setAttribute('stroke-width', '1.5');
+      flowPath.setAttribute('stroke-dasharray', '6 8');
+      flowPath.setAttribute('opacity', '0.3');
+      flowPath.setAttribute('class', 'edge-animated');
+      flowPath.setAttribute('pointer-events', 'none');
+      viewport.appendChild(flowPath);
+    });
+  });
+
+  // ── Nodes ──
+  NODES.forEach(n => {
+    const type   = NODE_TYPES[n.type] || NODE_TYPES.helper;
+    const status = getNodeStatus(n);
+    const statusColor = STATUS_COLORS[status];
+    const isNew  = n.tags && n.tags.some(t => t.label === 'NEW');
+    const isFixed = n.tags && n.tags.some(t => t.label === 'FIXED');
+    const isCritical = n.tags && n.tags.some(t => t.label === 'CRITICAL');
+
+    const g = svgEl('g');
+    g.setAttribute('class', 'node-group');
+    g.setAttribute('data-id', n.id);
+    g.setAttribute('transform', `translate(${n._x}, ${n._y})`);
+    g.setAttribute('filter', 'url(#node-shadow)');
+
+    // ── Outer glow rect (behind the card) ──
+    const glowRect = svgEl('rect');
+    glowRect.setAttribute('x', '-4');
+    glowRect.setAttribute('y', '-4');
+    glowRect.setAttribute('width', PW + 8);
+    glowRect.setAttribute('height', PH + 8);
+    glowRect.setAttribute('rx', '14');
+    glowRect.setAttribute('fill', type.color);
+    glowRect.setAttribute('opacity', '0.04');
+    g.appendChild(glowRect);
+
+    // ── Card background ──
+    const rect = svgEl('rect');
+    rect.setAttribute('width', PW);
+    rect.setAttribute('height', PH);
+    rect.setAttribute('rx', '10');
+    rect.setAttribute('fill', type.bg);
+    rect.setAttribute('stroke', type.border);
+    rect.setAttribute('stroke-width', '1.5');
+    rect.setAttribute('class', 'node-box');
+    g.appendChild(rect);
+
+    // ── Inner surface gradient overlay ──
+    const overlay = svgEl('rect');
+    overlay.setAttribute('width', PW);
+    overlay.setAttribute('height', PH / 2);
+    overlay.setAttribute('rx', '10');
+    overlay.setAttribute('fill', 'white');
+    overlay.setAttribute('opacity', '0.02');
+    g.appendChild(overlay);
+
+    // ── Top accent bar ──
+    const bar = svgEl('rect');
+    bar.setAttribute('width', PW);
+    bar.setAttribute('height', '3');
+    bar.setAttribute('rx', '10');
+    bar.setAttribute('fill', type.color);
+    bar.setAttribute('opacity', '0.9');
+    g.appendChild(bar);
+
+    // ── Status indicator dot (top-right area) ──
+    const statusDot = svgEl('circle');
+    statusDot.setAttribute('cx', PW - 14);
+    statusDot.setAttribute('cy', '16');
+    statusDot.setAttribute('r', '4');
+    statusDot.setAttribute('fill', statusColor);
+    statusDot.setAttribute('opacity', '0.9');
+    g.appendChild(statusDot);
+
+    // Status dot glow
+    const statusGlow = svgEl('circle');
+    statusGlow.setAttribute('cx', PW - 14);
+    statusGlow.setAttribute('cy', '16');
+    statusGlow.setAttribute('r', '7');
+    statusGlow.setAttribute('fill', statusColor);
+    statusGlow.setAttribute('opacity', '0.2');
+    g.appendChild(statusGlow);
+
+    // ── Label ──
+    const label = svgEl('text');
+    label.setAttribute('x', '12');
+    label.setAttribute('y', '28');
+    label.setAttribute('fill', '#e2eaf5');
+    label.setAttribute('font-size', '11.5');
+    label.setAttribute('font-weight', '700');
+    label.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif');
+    label.setAttribute('letter-spacing', '0.2');
+    const labelText = n.label.length > 27 ? n.label.slice(0, 25) + '…' : n.label;
+    label.textContent = labelText;
+    g.appendChild(label);
+
+    // ── Sublabel ──
+    const sub = svgEl('text');
+    sub.setAttribute('x', '12');
+    sub.setAttribute('y', '43');
+    sub.setAttribute('fill', '#5a7494');
+    sub.setAttribute('font-size', '9.5');
+    sub.setAttribute('font-family', '"SF Mono", "Fira Code", monospace');
+    const subText = n.sublabel.length > 33 ? n.sublabel.slice(0, 31) + '…' : n.sublabel;
+    sub.textContent = subText;
+    g.appendChild(sub);
+
+    // ── Divider line ──
+    const divider = svgEl('line');
+    divider.setAttribute('x1', '12');
+    divider.setAttribute('y1', '51');
+    divider.setAttribute('x2', PW - 12);
+    divider.setAttribute('y2', '51');
+    divider.setAttribute('stroke', type.color);
+    divider.setAttribute('stroke-width', '0.5');
+    divider.setAttribute('opacity', '0.2');
+    g.appendChild(divider);
+
+    // ── Type badge ──
+    const badgeBg = svgEl('rect');
+    const badgeW = type.label.length * 5.4 + 14;
+    badgeBg.setAttribute('x', '12');
+    badgeBg.setAttribute('y', '57');
+    badgeBg.setAttribute('width', badgeW);
+    badgeBg.setAttribute('height', '15');
+    badgeBg.setAttribute('rx', '7');
+    badgeBg.setAttribute('fill', type.color);
+    badgeBg.setAttribute('opacity', '0.18');
+    g.appendChild(badgeBg);
+
+    const badgeText = svgEl('text');
+    badgeText.setAttribute('x', '19');
+    badgeText.setAttribute('y', '68');
+    badgeText.setAttribute('fill', type.color);
+    badgeText.setAttribute('font-size', '8.5');
+    badgeText.setAttribute('font-weight', '800');
+    badgeText.setAttribute('letter-spacing', '0.5');
+    badgeText.textContent = type.label.toUpperCase();
+    g.appendChild(badgeText);
+
+    // ── Special corner badge (NEW / FIXED / CRITICAL) ──
+    if (isNew || isFixed || isCritical) {
+      const bLabel = isCritical ? 'CRIT' : isFixed ? 'FIXED' : 'NEW';
+      const bColor = isCritical ? '#ff5252' : isFixed ? '#fb923c' : '#3dd68c';
+      const bW     = bLabel.length * 5.5 + 10;
+
+      const nb = svgEl('rect');
+      nb.setAttribute('x', PW - bW - 8);
+      nb.setAttribute('y', '57');
+      nb.setAttribute('width', bW);
+      nb.setAttribute('height', '15');
+      nb.setAttribute('rx', '7');
+      nb.setAttribute('fill', bColor);
+      nb.setAttribute('opacity', '0.9');
+      g.appendChild(nb);
+
+      const nbt = svgEl('text');
+      nbt.setAttribute('x', PW - bW / 2 - 8);
+      nbt.setAttribute('y', '68');
+      nbt.setAttribute('fill', '#070b14');
+      nbt.setAttribute('font-size', '7.5');
+      nbt.setAttribute('font-weight', '900');
+      nbt.setAttribute('text-anchor', 'middle');
+      nbt.setAttribute('letter-spacing', '0.5');
+      nbt.textContent = bLabel;
+      g.appendChild(nbt);
+    }
+
+    // ── Hover interaction (CSS handles scale/glow, JS handles edge highlight) ──
+    g.addEventListener('mouseenter', (e) => {
+      // Highlight edges
+      document.querySelectorAll(`.edge-from-${n.id}, .edge-to-${n.id}`).forEach(edge => {
+        edge.setAttribute('stroke', '#4d9fff');
+        edge.setAttribute('stroke-width', '2.5');
+        edge.setAttribute('opacity', '0.7');
+      });
+      showTooltip(e, n);
+    });
+    g.addEventListener('mousemove', moveTooltip);
+    g.addEventListener('mouseleave', () => {
+      document.querySelectorAll(`.edge-from-${n.id}, .edge-to-${n.id}`).forEach(edge => {
+        edge.setAttribute('stroke', '#1e2d45');
+        edge.setAttribute('stroke-width', '1.5');
+        edge.setAttribute('opacity', '1');
+      });
+      hideTooltip();
+    });
+    g.addEventListener('click', () => openInfo(n.id));
+
+    viewport.appendChild(g);
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  ZOOM / PAN
+// ══════════════════════════════════════════════════════════════════════
+
+let tx = 0, ty = 0, scale = 1;
+const MIN_SCALE = 0.05;
+const MAX_SCALE = 4;
+
+function applyTransform() {
+  viewport.setAttribute('transform', `translate(${tx},${ty}) scale(${scale})`);
+  document.getElementById('zoom-display').textContent = Math.round(scale * 100) + '%';
+  updateMinimap();
+}
+
+function zoomAt(cx, cy, factor) {
+  const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * factor));
+  const sd = newScale / scale;
+  tx = cx - sd * (cx - tx);
+  ty = cy - sd * (cy - ty);
+  scale = newScale;
+  applyTransform();
+}
+
+function zoomIn()  { const r = document.getElementById('canvas-wrap').getBoundingClientRect(); zoomAt(r.width/2, r.height/2, 1.25); }
+function zoomOut() { const r = document.getElementById('canvas-wrap').getBoundingClientRect(); zoomAt(r.width/2, r.height/2, 0.80); }
+
+function fitAll() {
+  const wrap = document.getElementById('canvas-wrap');
+  const ww = wrap.clientWidth, wh = wrap.clientHeight;
+  scale = Math.min(ww / CANVAS_W, wh / CANVAS_H) * 0.9;
+  tx = (ww - CANVAS_W * scale) / 2;
+  ty = (wh - CANVAS_H * scale) / 2;
+  applyTransform();
+}
+
+// Wheel zoom
+const canvasWrap = document.getElementById('canvas-wrap');
+canvasWrap.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const r = canvasWrap.getBoundingClientRect();
+  zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.12 : 0.89);
+}, { passive: false });
+
+// Drag pan
+let dragging = false, lastX = 0, lastY = 0;
+canvasWrap.addEventListener('mousedown', (e) => {
+  if (e.target.closest('.node-group')) return;
+  dragging = true; lastX = e.clientX; lastY = e.clientY;
+  canvasWrap.classList.add('dragging');
+});
+window.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  tx += e.clientX - lastX; ty += e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  applyTransform();
+});
+window.addEventListener('mouseup', () => { dragging = false; canvasWrap.classList.remove('dragging'); });
+
+// Touch pinch + pan
+let touches = {}, lastPinchDist = null;
+canvasWrap.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  Array.from(e.touches).forEach(t => { touches[t.identifier] = { x: t.clientX, y: t.clientY }; });
+  if (e.touches.length === 1) { lastX = e.touches[0].clientX; lastY = e.touches[0].clientY; }
+  if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    lastPinchDist = Math.sqrt(dx*dx + dy*dy);
+  }
+}, { passive: false });
+canvasWrap.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (e.touches.length === 1) {
+    tx += e.touches[0].clientX - lastX; ty += e.touches[0].clientY - lastY;
+    lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+    applyTransform();
+  } else if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    if (lastPinchDist) {
+      const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - canvasWrap.getBoundingClientRect().left;
+      const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2 - canvasWrap.getBoundingClientRect().top;
+      zoomAt(cx, cy, dist / lastPinchDist);
+    }
+    lastPinchDist = dist;
+  }
+}, { passive: false });
+canvasWrap.addEventListener('touchend', () => { lastPinchDist = null; touches = {}; });
+
+// ══════════════════════════════════════════════════════════════════════
+//  INFO PANEL
+// ══════════════════════════════════════════════════════════════════════
+
+let selectedId = null;
+
+function openInfo(id) {
+  const n = nodeById[id];
+  if (!n) return;
+
+  if (selectedId) {
+    const old = document.querySelector(`[data-id="${selectedId}"]`);
+    if (old) old.classList.remove('selected');
+  }
+  selectedId = id;
+  const el = document.querySelector(`[data-id="${id}"]`);
+  if (el) el.classList.add('selected');
+
+  document.getElementById('info-title').textContent = n.label;
+  document.getElementById('info-subtitle').textContent = n.sublabel;
+
+  const body = document.getElementById('info-body');
+  const type = NODE_TYPES[n.type] || NODE_TYPES.helper;
+  const status = getNodeStatus(n);
+  const statusColor = STATUS_COLORS[status];
+  const statusLabel = { green:'Live / Complete', amber:'In Progress', red:'Blocked / Critical', gray:'Inactive' }[status];
+
+  let html = '';
+
+  // Status strip
+  html += `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(${
+    status==='green'?'61,214,140':status==='amber'?'240,180,41':status==='red'?'255,82,82':'74,95,122'
+  },0.08);border:1px solid rgba(${
+    status==='green'?'61,214,140':status==='amber'?'240,180,41':status==='red'?'255,82,82':'74,95,122'
+  },0.2);border-radius:8px;margin-bottom:14px">
+    <div style="width:8px;height:8px;border-radius:50%;background:${statusColor};box-shadow:0 0 6px ${statusColor}"></div>
+    <span style="font-size:11px;color:${statusColor};font-weight:700">${statusLabel}</span>
+    <span style="font-size:10px;color:#3a4d66;margin-left:auto">${type.label}</span>
+  </div>`;
+
+  // Description
+  if (n.desc) {
+    html += `<div class="info-section"><div class="info-section-title">Description</div>
+      <div style="font-size:11px;color:#7a90b0;line-height:1.65">${n.desc}</div></div>`;
+  }
+
+  // Fields
+  if (n.fields && n.fields.length) {
+    html += `<div class="info-section"><div class="info-section-title">Properties</div>`;
+    n.fields.forEach(f => {
+      const isCode = f.k === 'File' || f.k === 'Returns' || f.k === 'Flow';
+      html += `<div class="info-row">
+        <span class="info-key">${f.k}</span>
+        <span class="info-val ${isCode?'code':''}">${f.v}</span>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  // Tags
+  if (n.tags && n.tags.length) {
+    html += `<div class="info-section"><div class="info-section-title">Tags</div><div>`;
+    n.tags.forEach(t => {
+      html += `<span class="info-tag" style="background:${t.color}22;color:${t.color};border:1px solid ${t.color}44">${t.label}</span>`;
+    });
+    html += '</div></div>';
+  }
+
+  // Dependencies
+  if (n.deps && n.deps.length) {
+    html += `<div class="info-section"><div class="info-section-title">Dependencies</div><div>`;
+    n.deps.forEach(d => {
+      const dep = nodeById[d];
+      html += `<span class="dep-chip" onclick="openInfo('${d}')" style="cursor:pointer">${dep ? dep.label : d}</span>`;
+    });
+    html += '</div></div>';
+  }
+
+  // Code
+  if (n.code) {
+    html += `<div class="info-section"><div class="info-section-title">Code Sample</div>
+      <div class="info-code-block">${n.code.replace(/</g,'<').replace(/>/g,'>')}</div></div>`;
+  }
+
+  body.innerHTML = html;
+  document.getElementById('info-panel').classList.add('open');
+}
+
+function closeInfo() {
+  document.getElementById('info-panel').classList.remove('open');
+  if (selectedId) {
+    const el = document.querySelector(`[data-id="${selectedId}"]`);
+    if (el) el.classList.remove('selected');
+    selectedId = null;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  SEARCH
+// ══════════════════════════════════════════════════════════════════════
+
+let searchHits = [], searchIdx = 0;
+
+document.getElementById('search-input').addEventListener('input', function() {
+  const q = this.value.trim().toLowerCase();
+  const wrap = document.getElementById('canvas-wrap');
+  document.getElementById('search-count').textContent = '';
+  wrap.classList.remove('searching');
+  searchHits = [];
+  document.querySelectorAll('.node-group').forEach(g => g.classList.remove('search-hit'));
+
+  if (!q) return;
+  NODES.forEach(n => {
+    const hit = (n.label + n.sublabel + (n.desc || '') + (n.fields || []).map(f => f.k + f.v).join(' ')).toLowerCase().includes(q);
+    if (hit) {
+      searchHits.push(n.id);
+      const el = document.querySelector(`[data-id="${n.id}"]`);
+      if (el) el.classList.add('search-hit');
+    }
+  });
+  if (searchHits.length) {
+    wrap.classList.add('searching');
+    document.getElementById('search-count').textContent = searchHits.length;
+    searchIdx = 0;
+    jumpToNode(searchHits[0]);
+  }
+});
+
+document.getElementById('search-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && searchHits.length) {
+    searchIdx = (searchIdx + 1) % searchHits.length;
+    jumpToNode(searchHits[searchIdx]);
+  }
+  if (e.key === 'Escape') { this.value = ''; this.dispatchEvent(new Event('input')); }
+});
+
+// ══════════════════════════════════════════════════════════════════════
+//  TOOLTIP
+// ══════════════════════════════════════════════════════════════════════
+
+const tooltip = document.getElementById('tooltip');
+
+function showTooltip(e, n) {
+  document.getElementById('tt-title').textContent = n.label;
+  document.getElementById('tt-desc').textContent = n.sublabel;
+  tooltip.style.display = 'block';
+  moveTooltip(e);
+}
+function moveTooltip(e) {
+  const x = e.clientX + 16, y = e.clientY - 10;
+  const tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
+  tooltip.style.left = (x + tw > window.innerWidth ? e.clientX - tw - 16 : x) + 'px';
+  tooltip.style.top  = (y + th > window.innerHeight ? e.clientY - th - 10 : y) + 'px';
+}
+function hideTooltip() { tooltip.style.display = 'none'; }
+
+// ══════════════════════════════════════════════════════════════════════
+//  TOAST
+// ══════════════════════════════════════════════════════════════════════
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  SIDEBAR + LEGEND
+// ══════════════════════════════════════════════════════════════════════
+
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const btn = document.getElementById('toggle-sidebar');
+  sb.classList.toggle('collapsed');
+  btn.textContent = sb.classList.contains('collapsed') ? '›' : '‹';
+}
+
+function jumpToLayer(layerName) {
+  const nodes = layerNodeMap[layerName];
+  if (!nodes || !nodes.length) return;
+  const xs = nodes.map(n => n._x), ys = nodes.map(n => n._y);
+  const cx = (Math.min(...xs) + Math.max(...xs) + PW) / 2;
+  const cy = (Math.min(...ys) + Math.max(...ys) + PH) / 2;
+  const wrap = document.getElementById('canvas-wrap');
+  scale = 0.85;
+  tx = wrap.clientWidth  / 2 - cx * scale;
+  ty = wrap.clientHeight / 2 - cy * scale;
+  applyTransform();
+  document.querySelectorAll('.sb-btn').forEach(b => b.classList.remove('active'));
+  if (typeof event !== 'undefined' && event.target) event.target.classList.add('active');
+}
+
+function jumpToNode(id) {
+  const n = nodeById[id];
+  if (!n) return;
+  const wrap = document.getElementById('canvas-wrap');
+  const cx = n._x + PW / 2, cy = n._y + PH / 2;
+  tx = wrap.clientWidth  / 2 - cx * scale;
+  ty = wrap.clientHeight / 2 - cy * scale;
+  applyTransform();
+}
+
+// Build legend
+function buildLegend() {
+  const container = document.getElementById('legend-container');
+  const typeCounts = {};
+  NODES.forEach(n => { typeCounts[n.type] = (typeCounts[n.type] || 0) + 1; });
+  let activeFilter = null;
+
+  Object.entries(NODE_TYPES).forEach(([key, type]) => {
+    if (!typeCounts[key]) return;
+    const row = document.createElement('div');
+    row.className = 'legend-row';
+    row.innerHTML = `<div class="legend-dot" style="background:${type.color};box-shadow:0 0 5px ${type.color}44"></div>
+      <span class="legend-label">${type.label}</span>
+      <span class="legend-count">${typeCounts[key]}</span>`;
+    row.addEventListener('click', () => {
+      if (activeFilter === key) {
+        activeFilter = null;
+        document.querySelectorAll('.node-group').forEach(g => g.style.opacity = '');
+        row.classList.remove('active');
+      } else {
+        activeFilter = key;
+        document.querySelectorAll('.legend-row').forEach(r => r.classList.remove('active'));
+        row.classList.add('active');
+        document.querySelectorAll('.node-group').forEach(g => {
+          const n = nodeById[g.getAttribute('data-id')];
+          g.style.opacity = (n && n.type === key) ? '1' : '0.1';
+        });
+      }
+    });
+    container.appendChild(row);
+  });
+}
+
+// Build sheet buttons
+function buildSheetGrid() {
+  const grid = document.getElementById('sheet-grid');
+  SHEETS.forEach(s => {
+    const btn = document.createElement('button');
+    btn.className = 'sheet-btn';
+    btn.textContent = s.num;
+    btn.title = s.label;
+    btn.addEventListener('click', () => {
+      jumpToNode(s.nodeId);
+      showToast(`Sheet ${s.num} — ${s.label}`);
+    });
+    grid.appendChild(btn);
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  MINIMAP
+// ══════════════════════════════════════════════════════════════════════
+
+function updateMinimap() {
+  const canvas = document.getElementById('minimap-canvas');
+  const ctx = canvas.getContext('2d');
+  const mw = canvas.width, mh = canvas.height;
+  const scaleM = Math.min(mw / CANVAS_W, mh / CANVAS_H);
+
+  ctx.clearRect(0, 0, mw, mh);
+
+  // Draw nodes
+  NODES.forEach(n => {
+    const type = NODE_TYPES[n.type] || NODE_TYPES.helper;
+    ctx.fillStyle = type.color + '55';
+    ctx.strokeStyle = type.color + '99';
+    ctx.lineWidth = 0.5;
+    const x = n._x * scaleM, y = n._y * scaleM;
+    const w = PW * scaleM, h = PH * scaleM;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 2);
+    ctx.fill();
+    ctx.stroke();
+  });
+
+  // Viewport indicator
+  const wrap = document.getElementById('canvas-wrap');
+  const vx = (-tx / scale) * scaleM;
+  const vy = (-ty / scale) * scaleM;
+  const vw = (wrap.clientWidth  / scale) * scaleM;
+  const vh = (wrap.clientHeight / scale) * scaleM;
+
+  const vp = document.getElementById('minimap-viewport');
+  const mm = document.getElementById('minimap');
+  const mmRect = mm.getBoundingClientRect();
+  vp.style.left   = Math.max(0, vx) + 'px';
+  vp.style.top    = Math.max(0, vy) + 'px';
+  vp.style.width  = Math.min(mw, vw) * (mmRect.width  / mw) + 'px';
+  vp.style.height = Math.min(mh, vh) * (mmRect.height / mh) + 'px';
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  COPY FOR CHATGPT
+// ══════════════════════════════════════════════════════════════════════
+
+function buildAuditText() {
+  const now = new Date().toISOString();
+  const lines = [
+    '# SolarPro Pipeline — Full System Topography Audit',
+    '> Generated: ' + now,
+    '> Total Layers: ' + layerNames.length + ' | Total Nodes: ' + NODES.length,
+    '',
+    '---',
+    '',
+    '## AUDIT INSTRUCTIONS FOR AI',
+    'Please review this pipeline topology and identify:',
+    '1. Any nodes marked CRITICAL or BLOCKED that need immediate attention',
+    '2. Any missing connections or gaps between pipeline stages',
+    '3. Any LEGACY or ALIAS nodes that should be migrated',
+    '4. Any data flow inconsistencies between layers',
+    '5. Suggestions for optimization or risk reduction',
+    '',
+    '---',
+    ''
+  ];
+
+  layerNames.forEach(layerName => {
+    const layer = LAYERS[layerName];
+    const layerNodes = layerNodeMap[layerName] || [];
+    lines.push('## Layer: ' + layer.label);
+    if (layer.desc) lines.push('> ' + layer.desc);
+    lines.push('> Nodes in layer: ' + layerNodes.length);
+    lines.push('');
+
+    layerNodes.forEach(n => {
+      const status = getNodeStatus(n);
+      const statusLabel = status === 'red' ? '🔴 CRITICAL' : status === 'amber' ? '🟡 WARNING' : status === 'gray' ? '⚫ INACTIVE' : '🟢 OK';
+      lines.push('### ' + n.label + ' [' + n.type + '] ' + statusLabel);
+      if (n.sublabel) lines.push('**Path/Identifier:** `' + n.sublabel + '`');
+      if (n.desc) lines.push('**Description:** ' + n.desc);
+      if (n.tags && n.tags.length > 0) lines.push('**Tags:** ' + n.tags.map(t => t.label).join(', '));
+      if (n.fields && n.fields.length > 0) {
+        lines.push('**Properties:**');
+        n.fields.forEach(f => lines.push('- **' + f.k + ':** ' + f.v));
+      }
+      if (n.deps && n.deps.length > 0) {
+        lines.push('**Dependencies:** ' + n.deps.join(', '));
+      }
+      lines.push('');
+    });
+    lines.push('---');
+    lines.push('');
+  });
+
+  const redNodes = NODES.filter(n => getNodeStatus(n) === 'red');
+  const amberNodes = NODES.filter(n => getNodeStatus(n) === 'amber');
+  const grayNodes = NODES.filter(n => getNodeStatus(n) === 'gray');
+  lines.push('## Summary Statistics');
+  lines.push('- 🟢 Healthy nodes: ' + (NODES.length - redNodes.length - amberNodes.length - grayNodes.length));
+  lines.push('- 🟡 Warning nodes: ' + amberNodes.length);
+  lines.push('- 🔴 Critical nodes: ' + redNodes.length);
+  lines.push('- ⚫ Inactive nodes: ' + grayNodes.length);
+  lines.push('- Total nodes: ' + NODES.length);
+
+  return lines.join('\n');
+}
+
+function showCopyModal(text) {
+  const existing = document.getElementById('copy-modal');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'copy-modal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;';
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#0d1117;border:1px solid #1e2d45;border-radius:12px;width:min(780px,92vw);max-height:80vh;display:flex;flex-direction:column;box-shadow:0 0 40px rgba(77,159,255,0.15);';
+
+  const header = document.createElement('div');
+  header.style.cssText = 'padding:16px 20px;border-bottom:1px solid #1e2d45;display:flex;align-items:center;justify-content:space-between;';
+  header.innerHTML = '<span style="color:#4d9fff;font-weight:700;font-size:14px;letter-spacing:1px;">📋 PIPELINE AUDIT — COPY TO CHATGPT</span><button onclick="document.getElementById(\'copy-modal\').remove()" style="background:none;border:none;color:#4a5568;font-size:20px;cursor:pointer;line-height:1;">✕</button>';
+
+  const instructions = document.createElement('div');
+  instructions.style.cssText = 'padding:10px 20px;background:#0a0e14;border-bottom:1px solid #1e2d45;color:#6b7280;font-size:12px;';
+  instructions.textContent = 'Select all text below (Ctrl+A / Cmd+A) then copy (Ctrl+C / Cmd+C), then paste into ChatGPT.';
+
+  const ta = document.createElement('textarea');
+  ta.id = 'copy-modal-ta';
+  ta.value = text;
+  ta.style.cssText = 'flex:1;min-height:300px;margin:0;padding:16px 20px;background:#060a0f;color:#e2e8f0;border:none;outline:none;font-family:monospace;font-size:12px;line-height:1.6;resize:none;overflow-y:auto;';
+
+  const footer = document.createElement('div');
+  footer.style.cssText = 'padding:12px 20px;border-top:1px solid #1e2d45;display:flex;gap:10px;justify-content:flex-end;';
+
+  const selectAllBtn = document.createElement('button');
+  selectAllBtn.textContent = 'Select All';
+  selectAllBtn.style.cssText = 'background:#1e2d45;color:#93c5fd;border:1px solid #2d4a6e;border-radius:6px;padding:7px 16px;cursor:pointer;font-size:13px;';
+  selectAllBtn.onclick = () => { ta.focus(); ta.select(); ta.setSelectionRange(0, 99999); };
+
+  const copyBtn2 = document.createElement('button');
+  copyBtn2.textContent = '⬆ Copy All';
+  copyBtn2.style.cssText = 'background:linear-gradient(135deg,#1a56db,#2563eb);color:#fff;border:none;border-radius:6px;padding:7px 20px;cursor:pointer;font-size:13px;font-weight:600;';
+  copyBtn2.onclick = () => {
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, 99999);
+    const success = () => {
+      copyBtn2.textContent = '✓ Copied!';
+      showToast('✓ Copied to clipboard');
+      setTimeout(() => { copyBtn2.textContent = '⬆ Copy All'; }, 2000);
+    };
+    try {
+      document.execCommand('copy');
+      success();
+    } catch(e) {
+      navigator.clipboard.writeText(text).then(success);
+    }
+  };
+
+  footer.appendChild(selectAllBtn);
+  footer.appendChild(copyBtn2);
+  modal.appendChild(header);
+  modal.appendChild(instructions);
+  modal.appendChild(ta);
+  modal.appendChild(footer);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  setTimeout(() => { ta.focus(); ta.select(); ta.setSelectionRange(0, 99999); }, 100);
+}
+
+function copyForChatGPT() {
+  const text = buildAuditText();
+  const btn = document.getElementById('copy-btn');
+
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(() => {
+      showToast('✓ Copied to clipboard — paste into ChatGPT!');
+      btn.textContent = '✓ Copied!';
+      setTimeout(() => { btn.innerHTML = '⬆ Copy for ChatGPT'; }, 2000);
+    }).catch(() => {
+      showCopyModal(text);
+      btn.innerHTML = '⬆ Copy for ChatGPT';
+    });
+  } else {
+    showCopyModal(text);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  KEYBOARD SHORTCUTS
+// ══════════════════════════════════════════════════════════════════════
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === '+' || e.key === '=') zoomIn();
+  if (e.key === '-') zoomOut();
+  if (e.key === '0' || e.key === 'f' || e.key === 'F') fitAll();
+  if (e.key === 'Escape') closeInfo();
+  if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+    e.preventDefault();
+    document.getElementById('search-input').focus();
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════
+//  TIMESTAMP
+// ══════════════════════════════════════════════════════════════════════
+
+function updateTimestamp() {
+  const el = document.getElementById('mc-timestamp');
+  if (el) {
+    const now = new Date();
+    el.textContent = 'Updated ' + now.toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  }
+}
+updateTimestamp();
+setInterval(updateTimestamp, 1000);
+
+// ══════════════════════════════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════════════════════════════
+
+renderMap();
+buildLegend();
+buildSheetGrid();
+fitAll();
+
+</script>
+</body>
+</html>
