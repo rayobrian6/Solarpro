@@ -14,6 +14,7 @@ import {
   isValidUUID,
 } from '@/lib/db-neon';
 import { buildSurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
+import { getProjectSurveyContext } from '@/lib/survey/getProjectSurveyContext';
 
 // ---------------------------------------------------------------------------
 // GET — survey detail + all files
@@ -42,8 +43,19 @@ export async function GET(
     // the manifest for the authorized survey.
     const files = await getSiteSurveyFiles(surveyId);
     const evidenceManifest = buildSurveyEvidenceManifest({ survey, files });
+    const projectContext = survey.projectId
+      ? await getProjectSurveyContext(survey.projectId, user.id)
+      : null;
 
-    return NextResponse.json({ success: true, data: { survey, files, evidenceManifest } });
+    return NextResponse.json({
+      success: true,
+      data: {
+        survey,
+        files,
+        evidenceManifest,
+        evidenceHygiene: projectContext?.evidenceHygiene ?? null,
+      },
+    });
   } catch (err) {
     console.error('[GET /api/site-surveys/[surveyId]]', err);
     return NextResponse.json({ success: false, error: 'Failed to load survey' }, { status: 500 });

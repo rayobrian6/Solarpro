@@ -1,6 +1,6 @@
-import { buildSurveyEvidenceManifest } from '../../Solarpro/lib/survey/evidence/manifest';
-import { buildSurveyEvidenceEngineeringBridge, summarizeSurveyEvidenceEngineeringBridge } from '../../Solarpro/lib/survey/evidence/engineeringBridge';
-import { normalizeSurveyEvidenceCategory, inferSurveyEvidenceCategoryFromText } from '../../Solarpro/lib/survey/evidence/categoryRegistry';
+import { buildSurveyEvidenceManifest } from '../../lib/survey/evidence/manifest';
+import { buildSurveyEvidenceEngineeringBridge, summarizeSurveyEvidenceEngineeringBridge } from '../../lib/survey/evidence/engineeringBridge';
+import { normalizeSurveyEvidenceCategory, inferSurveyEvidenceCategoryFromText } from '../../lib/survey/evidence/categoryRegistry';
 
 type SnapshotSurvey = {
   id: string;
@@ -99,14 +99,14 @@ const results = realSurveys.map((record) => {
     itemCount: manifest.summary.totalItems,
     categories: manifest.items.map(item => item.category),
     uncategorizedCount: manifest.items.filter(item => item.category === 'uncategorized').length,
-    missingRequired: manifest.summary.missingRequiredCategories,
+    missingRequired: manifest.requiredMissing,
     warningCount: manifest.warnings.length,
     warnings: manifest.warnings,
     completeness: manifest.summary.completeness,
-    lifecycleState: manifest.lifecycleState,
-    qualityStatus: manifest.qualityStatus,
-    duplicateStatus: manifest.duplicateStatus,
-    aiExtractionStatus: manifest.aiExtractionStatus,
+    lifecycleState: manifest.summary.completeness,
+    qualityStatus: manifest.summary.qualityCheckedItems > 0 ? 'processed' : 'not_processed',
+    duplicateStatus: manifest.summary.duplicateCheckedItems > 0 ? 'processed' : 'not_processed',
+    aiExtractionStatus: manifest.summary.aiProcessedItems > 0 ? 'processed' : 'not_started',
     bridgeReadiness: bridge.readiness,
     bridgeCounts,
     cadAutomationStatus: bridge.cadAutomationStatus,

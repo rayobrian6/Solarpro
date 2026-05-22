@@ -41,6 +41,7 @@ import type {
   SurveyEvidenceDomain,
   SurveyEvidenceManifest,
 } from '@/lib/survey/evidence/manifest';
+import type { ProjectSurveyEvidenceHygieneManifest } from '@/lib/survey/evidence/sessionGrouping';
 import { buildSurveyEvidenceEngineeringBridge } from '@/lib/survey/evidence/engineeringBridge';
 import type {
   SurveyV2Payload,
@@ -455,6 +456,103 @@ const DOMAIN_COLORS: Record<SurveyEvidenceDomain, string> = {
 
 function evidenceCategoryLabel(category: SurveyEvidenceCategory): string {
   return category.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function SurveySessionHygieneViewer({ hygiene, currentSurveyId }: { hygiene: ProjectSurveyEvidenceHygieneManifest | null | undefined; currentSurveyId: string }) {
+  if (!hygiene || hygiene.surveySubmissionCount <= 1) return null;
+
+  const canonical = hygiene.sessions.find(session => session.surveyId === hygiene.canonicalSurveyId);
+  const historical = hygiene.sessions.filter(session => session.surveyId !== hygiene.canonicalSurveyId);
+
+  return (
+    <SectionCard icon={<Layers size={14} />} title="Survey Session Duplicate Hygiene v1" iconColor="text-cyan-400">
+      <div className="space-y-4">
+        {hygiene.banner && (
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
+            <div className="flex items-center gap-2 text-amber-200">
+              <AlertTriangle size={13} />
+              <p className="text-xs font-semibold">{hygiene.banner}</p>
+            </div>
+            <p className="mt-1 text-[11px] text-amber-100/80">
+              Raw uploads are preserved. Required coverage, engineering bridge counts, and permit evidence summaries use canonical metadata representatives so repeated path walks do not inflate confidence.
+            </p>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">Survey Submissions</p>
+            <p className="text-lg font-bold text-white">{hygiene.surveySubmissionCount}</p>
+          </div>
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">Raw Photo Uploads</p>
+            <p className="text-lg font-bold text-white">{hygiene.rawEvidenceCount}</p>
+          </div>
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-emerald-300/80">Canonical Evidence</p>
+            <p className="text-lg font-bold text-emerald-100">{hygiene.canonicalEvidenceCount}</p>
+          </div>
+          <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-cyan-300/80">Collapsed Repeats</p>
+            <p className="text-lg font-bold text-cyan-100">{hygiene.collapsedDuplicateEvidenceCount}</p>
+          </div>
+        </div>
+
+        {canonical && (
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
+            <p className="text-[10px] font-semibold text-emerald-300 uppercase tracking-wider">Canonical / current survey session</p>
+            <p className="mt-1 text-xs text-emerald-100 break-all">
+              {canonical.surveyId}{canonical.surveyId === currentSurveyId ? ' (currently viewing)' : ''}
+            </p>
+            <p className="text-[11px] text-emerald-100/75">
+              {canonical.rawPhotoCount} raw photo(s), {canonical.canonicalEvidenceCount} canonical evidence representative(s), technician {canonical.technician ?? 'unknown'}.
+            </p>
+          </div>
+        )}
+
+        {historical.length > 0 && (
+          <details className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-3">
+            <summary className="cursor-pointer text-xs font-semibold text-slate-300">
+              Historical repeated survey submissions preserved ({historical.length})
+            </summary>
+            <div className="mt-3 space-y-2">
+              {historical.map(session => (
+                <div key={session.surveyId} className="rounded-lg border border-slate-700/50 bg-slate-950/30 p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-slate-300 break-all">{session.surveyId}{session.surveyId === currentSurveyId ? ' (currently viewing)' : ''}</p>
+                    <span className="text-[9px] uppercase rounded-full border border-amber-500/20 bg-amber-500/10 text-amber-300 px-2 py-0.5">
+                      {session.surveySessionDuplicateStatus}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    {session.rawPhotoCount} raw photo(s), {session.canonicalEvidenceCount} canonical representative(s), submitted {session.submittedAt ? new Date(session.submittedAt).toLocaleString() : 'unknown time'}.
+                  </p>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+
+        {hygiene.evidenceDuplicateGroups.length > 0 && (
+          <details className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-3">
+            <summary className="cursor-pointer text-xs font-semibold text-slate-300">
+              Photo evidence duplicate groups ({hygiene.evidenceDuplicateGroups.length})
+            </summary>
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+              {hygiene.evidenceDuplicateGroups.map(group => (
+                <div key={group.evidenceDuplicateGroupId} className="rounded-lg border border-slate-700/50 bg-slate-950/30 p-2">
+                  <p className="text-[11px] font-medium text-slate-200">{evidenceCategoryLabel(group.category)}</p>
+                  <p className="text-[10px] text-slate-500">Canonical evidence: {group.canonicalEvidenceId}</p>
+                  <p className="text-[10px] text-slate-500">Raw uploads: {group.rawUploadCount}; duplicates collapsed: {group.duplicateCount}</p>
+                  <p className="text-[10px] text-slate-600">Reason: {group.duplicateReason}</p>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
+    </SectionCard>
+  );
 }
 
 function SurveyEvidenceViewer({ manifest }: { manifest: SurveyEvidenceManifest | null | undefined }) {
@@ -903,6 +1001,7 @@ interface SurveyDetailData {
   survey: SiteSurvey;
   files: SiteSurveyFile[];
   evidenceManifest?: SurveyEvidenceManifest;
+  evidenceHygiene?: ProjectSurveyEvidenceHygieneManifest | null;
 }
 
 export default function SurveyDetailPage() {
@@ -967,7 +1066,7 @@ export default function SurveyDetailPage() {
     );
   }
 
-  const { survey, files, evidenceManifest } = detail;
+  const { survey, files, evidenceManifest, evidenceHygiene } = detail;
 
   // ---------------------------------------------------------------------------
   // Determine payload version:
@@ -1043,8 +1142,11 @@ export default function SurveyDetailPage() {
         {/* 1. Photos — always shown (from site_survey_files) */}
         <PhotosSection files={files} />
 
-        {/* 1b. Survey Evidence Manifest — structured engineering evidence view */}
-        <SurveyEvidenceViewer manifest={evidenceManifest} />
+        {/* 1b. Survey Session Hygiene — deterministic project-level duplicate grouping */}
+        <SurveySessionHygieneViewer hygiene={evidenceHygiene} currentSurveyId={survey.id} />
+
+        {/* 1c. Survey Evidence Manifest — structured engineering evidence view */}
+        <SurveyEvidenceViewer manifest={evidenceHygiene?.canonicalManifest ?? evidenceManifest} />
 
         {/* ------------------------------------------------------------------ */}
         {/* Typed V2 sections                                                   */}

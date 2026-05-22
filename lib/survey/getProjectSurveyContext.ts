@@ -21,6 +21,10 @@ import {
   type SiteSurveyFile,
 } from '@/lib/db-neon';
 import type { SurveyV2Payload } from '@/lib/survey/v2/types';
+import {
+  buildProjectSurveyEvidenceHygiene,
+  type ProjectSurveyEvidenceHygieneManifest,
+} from '@/lib/survey/evidence/sessionGrouping';
 
 // ---------------------------------------------------------------------------
 // Output type
@@ -33,6 +37,10 @@ export interface ProjectSurveyContext {
   latest: SiteSurvey | null;
   /** Files (photos) for the latest survey */
   files: SiteSurveyFile[];
+  /** Files for every preserved survey, keyed by survey id */
+  filesBySurveyId: Record<string, SiteSurveyFile[]>;
+  /** Deterministic project-level duplicate hygiene across survey sessions and photo evidence */
+  evidenceHygiene: ProjectSurveyEvidenceHygieneManifest | null;
   /**
    * Typed SurveyV2Payload from latest.surveyData, if schemaVersion === '2.0'.
    * Null for v1.0 / partner payloads or if no survey exists.
@@ -73,14 +81,22 @@ export async function getProjectSurveyContext(
   const surveys = await getSiteSurveysByProject(projectId, userId);
 
   if (surveys.length === 0) {
-    return { surveys: [], latest: null, files: [], payload: null };
+    return { surveys: [], latest: null, files: [], filesBySurveyId: {}, evidenceHygiene: null, payload: null };
   }
 
   const latest = surveys[0]; // getSiteSurveysByProject returns newest first
-  const files   = await getSiteSurveyFiles(latest.id);
+  const surveyFilesEntries = await Promise.all(
+    surveys.map(async (survey) => [survey.id, await getSiteSurveyFiles(survey.id)] as const),
+  );
+  const filesBySurveyId = Object.fromEntries(surveyFilesEntries);
+  const files = filesBySurveyId[latest.id] ?? [];
   const payload = extractV2Payload(latest);
+  const evidenceHygiene = buildProjectSurveyEvidenceHygiene({
+    projectId,
+    surveys: surveys.map(survey => ({ survey, files: filesBySurveyId[survey.id] ?? [] })),
+  });
 
-  return { surveys, latest, files, payload };
+  return { surveys, latest, files, filesBySurveyId, evidenceHygiene, payload };
 }
 
 // ---------------------------------------------------------------------------
