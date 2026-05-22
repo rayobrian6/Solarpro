@@ -33,6 +33,12 @@ describe("/free-solar-estimate public intake funnel", () => {
   it("captures post-submit qualification answers without adding them to the first intake payload", () => {
     expect(pageSource).toContain("Quick qualification");
     expect(pageSource).toContain("purchase_intent");
+    expect(pageSource).toContain(
+      "Do you want a PPA/lease or do you want to own the system?",
+    );
+    expect(pageSource).toContain("ppa_or_lease");
+    expect(pageSource).toContain("Own the system — finance/loan");
+    expect(pageSource).toContain("PPA or lease — third-party owned");
     expect(pageSource).toContain("estimated_credit_band");
     expect(pageSource).toContain("estimated_income_band");
     expect(pageSource).toContain("property_type");
@@ -56,16 +62,29 @@ describe("/free-solar-estimate public intake funnel", () => {
     expect(pageSource).toContain("Battery interest:");
     expect(pageSource).toContain("Preferred contact method:");
     expect(pageSource).toContain("Timeline:");
-    expect(pageSource).toContain("The intake endpoint stores any non-empty utility bill file and links the attachment metadata to the canonical intake event.");
-    expect(pageSource).toContain("Optional — upload any utility bill file for review");
+    expect(pageSource).toContain(
+      "The intake endpoint stores any non-empty utility bill file and links the attachment metadata to the canonical intake event.",
+    );
+    expect(pageSource).toContain(
+      "Optional — upload any utility bill file for review",
+    );
     expect(pageSource).not.toContain('accept=\".pdf,image/*\"');
     expect(pageSource).toContain("const requestBody = new FormData()");
-    expect(pageSource).toContain('requestBody.append("payload", JSON.stringify(payload))');
-    expect(pageSource).toContain('requestBody.append("utility_bill", billFile)');
+    expect(pageSource).toContain(
+      'requestBody.append("payload", JSON.stringify(payload))',
+    );
+    expect(pageSource).toContain(
+      'requestBody.append("utility_bill", billFile)',
+    );
 
-    const homeownerFetchStart = pageSource.indexOf('fetch("/api/intake/homeowner",');
+    const homeownerFetchStart = pageSource.indexOf(
+      'fetch("/api/intake/homeowner",',
+    );
     expect(homeownerFetchStart).toBeGreaterThan(-1);
-    const requestBodyLine = pageSource.indexOf("body: requestBody", homeownerFetchStart);
+    const requestBodyLine = pageSource.indexOf(
+      "body: requestBody",
+      homeownerFetchStart,
+    );
     expect(requestBodyLine).toBeGreaterThan(homeownerFetchStart);
     const homeownerFetchBlock = pageSource.slice(
       homeownerFetchStart,

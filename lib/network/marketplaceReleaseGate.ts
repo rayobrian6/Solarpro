@@ -50,6 +50,7 @@ export interface MarketplaceReleaseGateEvidence {
     status: string | null;
     lead_grade: string | null;
     finance_readiness: boolean;
+    purchase_intent: string | null;
   };
   operator_review: {
     contacted: boolean;
@@ -300,6 +301,11 @@ function buildGateEvidence(
       status: firstString(metadata.qualification.qualification_status, metadata.qualification.status),
       lead_grade: stringValue(metadata.qualification.lead_grade),
       finance_readiness: boolValue(metadata.qualification.finance_readiness),
+      purchase_intent: firstString(
+        recordAt(metadata.qualification, "normalized").purchase_intent,
+        metadata.qualification.purchase_intent,
+        metadata.qualification.financing_preference,
+      ),
     },
     operator_review: {
       contacted: metadata.operational.contacted === true,

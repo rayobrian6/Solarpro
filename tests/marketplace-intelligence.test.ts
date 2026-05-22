@@ -295,6 +295,41 @@ describe("marketplace purchase and revenue expansion", () => {
     expect(JSON.stringify(projection)).not.toContain("monthly_payment");
   });
 
+  it("projects explicit PPA or lease preference without converting it into loan financing", () => {
+    const projection = buildMarketplaceIntelligence({
+      ...gateRow(),
+      purchase_intent: "ppa_or_lease",
+      finance_readiness: false,
+      marketplace_intake_metadata: {
+        ...intakeMetadata,
+        qualification: {
+          ...intakeMetadata.qualification,
+          finance_readiness: false,
+          normalized: {
+            purchase_intent: "ppa_or_lease",
+          },
+        },
+      },
+      marketplace_raw_payload: {},
+    });
+
+    expect(projection.evidence.qualification.purchase_intent).toBe(
+      "ppa_or_lease",
+    );
+    expect(projection.purchase_profile.likely_purchase_method).toBe(
+      "lease_or_ppa",
+    );
+    expect(projection.purchase_profile.purchase_method_label).toBe(
+      "Lease/PPA possible",
+    );
+    expect(projection.purchase_profile.readiness_label).toContain(
+      "ppa or lease preference",
+    );
+    expect(projection.purchase_profile.purchase_method_label).not.toContain(
+      "Loan",
+    );
+  });
+
   it("degrades gracefully without inventing purchase economics", () => {
     const projection = buildMarketplaceIntelligence({
       id: "opp-limited",

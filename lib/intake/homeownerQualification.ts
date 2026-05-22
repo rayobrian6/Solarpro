@@ -12,7 +12,7 @@
 export const HOMEOWNER_QUALIFICATION_EVENT_TYPE = 'homeowner_qualification'
 export const HOMEOWNER_QUALIFICATION_SCHEMA_VERSION = 'homeowner-qualification.v1'
 
-export const PURCHASE_INTENTS = ['financing', 'cash', 'not_sure'] as const
+export const PURCHASE_INTENTS = ['financing', 'cash', 'ppa_or_lease', 'not_sure'] as const
 export const ESTIMATED_CREDIT_BANDS = ['720_plus', '680_719', '640_679', 'below_640', 'unsure'] as const
 export const ESTIMATED_INCOME_BANDS = ['under_50k', '50k_100k', '100k_150k', '150k_plus', 'prefer_not_to_say'] as const
 export const PROPERTY_TYPES = ['single_family', 'farm', 'mobile_home', 'duplex', 'commercial'] as const
@@ -63,6 +63,7 @@ export interface QualificationScorerInput {
   median_income?: number | null
   finance_eligible?: boolean | null
   financing_preference?: string | null
+  purchase_intent?: string | null
   structure_type?: string | null
   usable_roof_pct?: number | null
   intent_score?: number | null
@@ -179,6 +180,7 @@ function sunlightScore(value: SunlightConfidence): number {
 
 function financingScore(input: Required<HomeownerQualificationInput>): number {
   if (input.purchase_intent === 'cash') return 12
+  if (input.purchase_intent === 'ppa_or_lease') return 8
   if (input.purchase_intent !== 'financing') return input.estimated_credit_band === 'unsure' ? 5 : 7
   if (input.estimated_credit_band === '720_plus') return 14
   if (input.estimated_credit_band === '680_719') return 13
@@ -251,7 +253,12 @@ function financeReady(input: Required<HomeownerQualificationInput>): boolean {
 
 function humanLabels(input: Required<HomeownerQualificationInput>): Record<string, string> {
   const labels: Record<string, Record<string, string>> = {
-    purchase_intent: { financing: 'financing ready', cash: 'cash buyer', not_sure: 'purchase path not sure' },
+    purchase_intent: {
+      financing: 'wants to own system with financing',
+      cash: 'wants to own system with cash',
+      ppa_or_lease: 'interested in PPA/lease third-party ownership',
+      not_sure: 'purchase path not sure',
+    },
     estimated_credit_band: { '720_plus': '720+ estimated credit', '680_719': '680–719 estimated credit', '640_679': '640–679 estimated credit', below_640: 'below 640 estimated credit', unsure: 'credit range unsure' },
     estimated_income_band: { under_50k: 'under $50k household income', '50k_100k': '$50k–$100k household income', '100k_150k': '$100k–$150k household income', '150k_plus': '$150k+ household income', prefer_not_to_say: 'income not disclosed' },
     property_type: { single_family: 'single-family property', farm: 'farm/rural property', mobile_home: 'mobile home', duplex: 'duplex', commercial: 'commercial property' },
@@ -353,6 +360,7 @@ export function deriveQualificationIntelligence(
     median_income: incomeProxy(normalized.estimated_income_band),
     finance_eligible: ready,
     financing_preference: normalized.purchase_intent,
+    purchase_intent: normalized.purchase_intent,
     structure_type: structureType(normalized.property_type),
     usable_roof_pct: usableRoofPct(normalized.sunlight_confidence),
     intent_score: lead_score,
@@ -396,6 +404,8 @@ export function deriveQualificationIntelligence(
       property_type: normalized.property_type,
       electrical_panel_size: normalized.electrical_panel_size,
       prior_quotes: normalized.prior_quotes,
+      purchase_intent: normalized.purchase_intent,
+      purchase_intent_label: labels.purchase_intent,
       contractor_summary: buildContractorQualificationSummary(lead_grade, normalized, context, labels),
     },
     generated_at: generatedAt,

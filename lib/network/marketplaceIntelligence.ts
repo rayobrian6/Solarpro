@@ -372,6 +372,7 @@ export function buildMarketplaceIntelligence(
     homeownerStatus: stringValue(row.homeowner_status),
     batteryInterest: stringValue(row.battery_interest),
     preferredContactMethod: stringValue(row.preferred_contact_method),
+    purchaseIntent: stringValue(row.purchase_intent),
   });
 
   const projectValue = deriveProjectValue({

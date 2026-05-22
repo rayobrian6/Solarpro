@@ -518,7 +518,7 @@ export default function FreeSolarEstimatePage() {
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <SelectField
-                    label="Purchase intent"
+                    label="Do you want a PPA/lease or do you want to own the system?"
                     required
                     value={qualification.purchase_intent}
                     onChange={(value) =>
@@ -526,8 +526,9 @@ export default function FreeSolarEstimatePage() {
                     }
                     options={[
                       ["", "Select one"],
-                      ["financing", "Financing"],
-                      ["cash", "Cash buyer"],
+                      ["financing", "Own the system — finance/loan"],
+                      ["cash", "Own the system — cash purchase"],
+                      ["ppa_or_lease", "PPA or lease — third-party owned"],
                       ["not_sure", "Not sure yet"],
                     ]}
                   />

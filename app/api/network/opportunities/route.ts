@@ -134,6 +134,11 @@ export async function GET(req: NextRequest) {
           no.intake_metadata->'qualification'->>'estimated_credit_band'
         ) AS estimated_credit_band,
         COALESCE(
+          no.intake_metadata->'qualification'->'normalized'->>'purchase_intent',
+          no.intake_metadata->'qualification'->>'purchase_intent',
+          no.intake_metadata->'qualification'->'scoring_input'->>'financing_preference'
+        ) AS purchase_intent,
+        COALESCE(
           no.intake_metadata->'qualification'->'normalized'->>'sunlight_confidence',
           no.intake_metadata->'qualification'->>'sunlight_confidence'
         ) AS sunlight_confidence,

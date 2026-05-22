@@ -32,6 +32,7 @@ export interface PurchaseProfileInput {
   homeownerStatus?: string | null;
   batteryInterest?: string | null;
   preferredContactMethod?: string | null;
+  purchaseIntent?: string | null;
 }
 
 export interface PurchaseProfileResult {
@@ -107,6 +108,9 @@ export function derivePurchaseProfile(
     input.qualificationStatus ?? gateEvidence.qualification.status,
   );
   const homeownerStatus = normalizedText(input.homeownerStatus);
+  const purchaseIntent = normalizedText(
+    input.purchaseIntent ?? gateEvidence.qualification.purchase_intent,
+  );
   const batteryInterest = normalizedText(input.batteryInterest);
   const contact = displayText(input.preferredContactMethod);
 
@@ -142,9 +146,16 @@ export function derivePurchaseProfile(
 
   if (homeownerStatus)
     evidence.push({
-      label: "Ownership",
+      label: "Property ownership",
       value: displayText(input.homeownerStatus) ?? homeownerStatus,
       source: "homeowner",
+    });
+  if (purchaseIntent)
+    evidence.push({
+      label: "System ownership preference",
+      value:
+        displayText(input.purchaseIntent ?? purchaseIntent) ?? purchaseIntent,
+      source: "qualification",
     });
   if (batteryInterest)
     evidence.push({
@@ -160,9 +171,20 @@ export function derivePurchaseProfile(
     });
 
   let likelyPurchaseMethod: PurchaseMethod = "undetermined";
-  if (financeReady) likelyPurchaseMethod = "financing_likely";
+  if (
+    purchaseIntent === "ppa_or_lease" ||
+    purchaseIntent === "ppa" ||
+    purchaseIntent === "lease"
+  ) {
+    likelyPurchaseMethod = "lease_or_ppa";
+  } else if (purchaseIntent === "cash") {
+    likelyPurchaseMethod = "cash";
+  } else if (purchaseIntent === "financing" || purchaseIntent === "loan") {
+    likelyPurchaseMethod = "loan";
+  } else if (financeReady) likelyPurchaseMethod = "financing_likely";
   const explicitFinance = boolValue(input.financeReadiness);
-  if (explicitFinance === true) likelyPurchaseMethod = "loan";
+  if (explicitFinance === true && likelyPurchaseMethod === "undetermined")
+    likelyPurchaseMethod = "loan";
 
   const seriousness = timelineUrgency(timeline);
   const qualified = ["a", "a+", "qualified", "approved", "high_intent"].some(
@@ -188,6 +210,10 @@ export function derivePurchaseProfile(
 
   const readinessParts: string[] = [];
   if (qualified) readinessParts.push("qualified");
+  if (purchaseIntent)
+    readinessParts.push(
+      `${displayText(purchaseIntent) ?? purchaseIntent} preference`,
+    );
   if (financeReady) readinessParts.push("financing signal present");
   if (timeline)
     readinessParts.push(`${displayText(timeline) ?? timeline} timeline`);
