@@ -375,6 +375,8 @@ describe("contractor network assignment visibility", () => {
     expect(canonicalQuery).toContain("no.homeowner_timeline AS timeline");
     expect(canonicalQuery).toContain("no.opportunity_grade AS lead_grade");
     expect(canonicalQuery).toContain("preferred_contact_method");
+    expect(canonicalQuery).toContain("AS estimated_offset_pct");
+    expect(canonicalQuery).not.toContain("no.offset_percentage");
     expect(canonicalQuery).toContain("no.status = 'live'");
     expect(canonicalQuery).not.toContain("COALESCE(no.claim_count, 0) < GREATEST");
     expect(canonicalQuery).toContain("NOT EXISTS");

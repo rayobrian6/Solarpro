@@ -106,7 +106,14 @@ export async function GET(req: NextRequest) {
         no.utility_rate_per_kwh,
         no.estimated_project_value AS estimated_system_cost,
         no.estimated_annual_savings,
-        no.offset_percentage AS estimated_offset_pct,
+        COALESCE(
+          no.raw_payload->'bill_marketplace_projection'->>'offset_percentage',
+          no.intake_metadata->'bill_marketplace_projection'->>'offset_percentage',
+          no.raw_payload->'solar'->>'offset_percentage',
+          no.intake_metadata->'solar'->>'offset_percentage',
+          no.raw_payload->>'estimated_offset_pct',
+          no.intake_metadata->>'estimated_offset_pct'
+        ) AS estimated_offset_pct,
         no.estimated_payback_yrs,
         no.monthly_bill_amount,
         no.homeowner_ownership AS homeowner_status,
