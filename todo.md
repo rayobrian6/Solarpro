@@ -1,27 +1,15 @@
-# SolarPro Topology Architecture Audit
+# Topography Map Visibility Correction
 
-## Audit Evidence
-- [x] Confirm repository branch, working state, and current Topography source files.
-- [x] Inventory app/admin/platform routes and identify page/component files.
-- [x] Inventory API routes by domain with methods, inputs, outputs, and dependencies where discoverable.
-- [x] Audit database schema and migrations for tables, domains, and relationships.
-- [x] Audit existing topology data model, node categories, edge categories, and copy/export behavior.
-- [x] Trace major pipelines: intake, bill intelligence, lead ops, marketplace, portal, engineering, 3D/topography, survey, equipment, health.
+## Diagnose
+- [x] Inspect uploaded screenshot and identify what surface is unchanged.
+- [x] Inspect current dev Topography source to confirm whether canonical topology was only in Pipeline tab while Map still used the stale iframe.
 
-## Audit Report
-- [x] Produce pre-implementation audit report covering current topology, missing/stale systems, required nodes/edges, route/API/DB summary, and proposed topology structure.
+## Fix
+- [x] Update the visible Topography map experience so canonical architecture appears without relying on the stale external iframe.
+- [x] Preserve existing tabs and legacy/external map reference explicitly.
+- [x] Validate TypeScript, lint, build, and source markers.
 
-## Implementation
-- [x] Update Topography data/model from verified architecture evidence only.
-- [x] Preserve existing topology functionality and mark uncertain/legacy/planned systems explicitly.
-- [x] Ensure Copy for ChatGPT/export context includes updated topology architecture.
-
-## QA
-- [x] Run topology-related tests or route/API mapping tests if available.
-- [x] Run TypeScript, ESLint, and build validation.
-- [x] Manually validate /admin/topography route availability: local route serves and redirects to admin login; full UI walkthrough blocked by missing DATABASE_URL/JWT_SECRET/admin session. Major pipeline content verified by source/build evidence.
-
-## Delivery
-- [x] Review diff for audit fidelity, no invented systems, and no feature creep.
-- [ ] Commit and push changes to dev.
-- [ ] Report audit summary, files changed, validation evidence, and known risks.
+## Git
+- [ ] Commit correction directly on dev.
+- [ ] Push dev.
+- [ ] Report exact correction and validation evidence.

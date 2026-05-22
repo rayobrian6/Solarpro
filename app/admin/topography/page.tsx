@@ -2,10 +2,11 @@
 // app/admin/topography/page.tsx  — v3: Unified Pipeline Topology + Live Audit
 //
 // Split layout:
-//   LEFT  — tab toggle: "Map" (original iframe) | "Pipeline" (unified topology)
+//   LEFT  — tab toggle: "Map" (canonical architecture) | "Pipeline" (evidence detail)
+//           | "Legacy" (external iframe reference) | "Partner" | "Surveys"
 //   RIGHT — System Integration Panel (live audit, unchanged from v2)
 //
-// Pipeline tab shows the canonical SolarPro architecture map:
+// Map and Pipeline tabs show the canonical SolarPro architecture map:
 //   Homeowner Intake → Bill Intelligence → Lead Ops → Marketplace
 //   → Contractor Claim → Project/Portal/Engineering, plus Survey → 3D
 //   → Engineering documents.
@@ -17,7 +18,7 @@
 // If no projectId is provided, right panel shows a project selector prompt.
 //
 // RULES:
-//   - iframe src is UNCHANGED (same TOPO_URL)
+//   - legacy iframe src is preserved (same TOPO_URL) but no longer the default map
 //   - no writes to DB
 //   - no side effects on production routes
 // ============================================================================
@@ -31,7 +32,7 @@ import {
   ChevronDown, ChevronRight, Database, Zap, Home,
   GitBranch, FileText, Cpu, Shield, BarChart2,
   Map, Network, Smartphone, Server, Cloud, Link2,
-  ArrowRight, ChevronRight as Arrow,
+  ArrowRight, ChevronRight as Arrow, ExternalLink,
   Download, Image, MapPin, Camera,
 } from 'lucide-react';
 import type { TopographyState, FieldUsage } from '@/lib/topography/getTopographyState';
@@ -739,6 +740,110 @@ function ArchitectureEdgesView() {
             {architectureStatusBadge(edge.status)}
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function ArchitectureMapView({ onOpenLegacy }: { onOpenLegacy: () => void }) {
+  const columns: Array<{ title: string; nodeIds: string[] }> = [
+    { title: 'Acquire', nodeIds: ['intake', 'qualification', 'bill'] },
+    { title: 'Operate', nodeIds: ['leadops', 'marketplace', 'intelligence'] },
+    { title: 'Fulfill', nodeIds: ['contractor', 'core', 'portal'] },
+    { title: 'Design', nodeIds: ['survey', 'survey-partial', 'maps3d'] },
+    { title: 'Generate', nodeIds: ['equipment', 'engineering'] },
+    { title: 'Observe', nodeIds: ['health', 'external'] },
+  ];
+
+  const nodeById: Record<string, ArchitectureNode> = Object.fromEntries(ARCHITECTURE_NODES.map(node => [node.id, node]));
+  const primaryFlow = ['intake', 'qualification', 'bill', 'leadops', 'marketplace', 'intelligence', 'contractor', 'core', 'engineering', 'portal'];
+  const secondaryFlow = ['survey', 'survey-partial', 'maps3d', 'core', 'engineering'];
+
+  return (
+    <div className="h-full overflow-y-auto bg-[#050a17] text-slate-100">
+      <div className="min-h-full p-5 xl:p-6">
+        <div className="mb-5 rounded-2xl border border-cyan-500/20 bg-gradient-to-r from-cyan-500/10 via-[#7aa2ff]/10 to-[#f472b6]/10 p-4 shadow-[0_0_30px_rgba(34,211,238,0.08)]">
+          <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-9 h-9 rounded-xl bg-cyan-500/15 border border-cyan-400/30 flex items-center justify-center">
+                  <Network size={17} className="text-cyan-300" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-black text-white tracking-tight">SolarPro Mission Control Topography</h2>
+                  <p className="text-[11px] text-cyan-100/70">Canonical architecture map generated from audited routes, APIs, migrations, and libraries.</p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed max-w-4xl">
+                Homeowner Intake → Bill Intelligence → Lead Operations → Marketplace Release → Contractor Claim → Core Project/Portal/Engineering, with Survey, 3D/Maps, Equipment, Health, and External Services marked by verified wiring status.
+              </p>
+            </div>
+            <button
+              onClick={onOpenLegacy}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-700 bg-slate-900/70 hover:border-slate-500 text-[11px] text-slate-300 hover:text-white transition-all"
+            >
+              <ExternalLink size={12} /> Legacy iframe reference
+            </button>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            {(['live', 'partial', 'external', 'legacy', 'blocked'] as ArchitectureStatus[]).map(s => <div key={s}>{architectureStatusBadge(s)}</div>)}
+            <span className="text-[10px] text-slate-500">{ARCHITECTURE_NODES.length} nodes · {ARCHITECTURE_EDGES.length} audited edges · default map replaces stale external-only diagram</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 2xl:grid-cols-6 xl:grid-cols-3 gap-3 mb-5">
+          {columns.map((column) => (
+            <section key={column.title} className="rounded-2xl border border-slate-800/80 bg-[#081024] p-3 min-h-[260px]">
+              <h3 className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500 mb-3">{column.title}</h3>
+              <div className="space-y-3">
+                {column.nodeIds.map((id) => {
+                  const node = nodeById[id];
+                  const c = COLOR[node.layer];
+                  return (
+                    <div key={node.id} className={`relative rounded-xl border ${c.border} ${c.bg} p-3 shadow-sm`}>
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <div className={`text-[11px] font-bold leading-snug ${c.text}`}>{node.title}</div>
+                        {architectureStatusBadge(node.status)}
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-relaxed line-clamp-3">{node.detail}</p>
+                      {node.tables && (
+                        <p className="mt-2 text-[9px] font-mono text-[#fbbf24]/80 truncate">{node.tables.slice(0, 3).join(' · ')}{node.tables.length > 3 ? ' · …' : ''}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-5">
+          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+            <h3 className="text-xs font-bold text-emerald-300 uppercase tracking-wide mb-3">Primary Revenue / Operations Flow</h3>
+            <div className="flex flex-wrap items-center gap-2">
+              {primaryFlow.map((id, i) => (
+                <React.Fragment key={id}>
+                  <span className="px-2.5 py-1 rounded-lg bg-[#07111f] border border-emerald-500/20 text-[10px] text-emerald-100">{nodeById[id].title}</span>
+                  {i < primaryFlow.length - 1 && <ArrowRight size={12} className="text-emerald-500/70" />}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
+            <h3 className="text-xs font-bold text-amber-300 uppercase tracking-wide mb-3">Survey / Design / Engineering Flow</h3>
+            <div className="flex flex-wrap items-center gap-2">
+              {secondaryFlow.map((id, i) => (
+                <React.Fragment key={id}>
+                  <span className="px-2.5 py-1 rounded-lg bg-[#07111f] border border-amber-500/20 text-[10px] text-amber-100">{nodeById[id].title}</span>
+                  {i < secondaryFlow.length - 1 && <ArrowRight size={12} className="text-amber-500/70" />}
+                </React.Fragment>
+              ))}
+            </div>
+            <p className="mt-3 text-[10px] text-amber-200/70">Survey → engineering remains explicitly partial: engineering report consumes 4/20 physical-data fields; survey auto-apply to SystemDefinition/CAD/Permit/Proposal is not production-wired.</p>
+          </div>
+        </div>
+
+        <ArchitectureEdgesView />
       </div>
     </div>
   );
@@ -1474,7 +1579,7 @@ function LiveSurveyDataView() {
 // Main Page Component
 // ===========================================================================
 
-type LeftTab = 'map' | 'pipeline' | 'partner' | 'surveys';
+type LeftTab = 'map' | 'pipeline' | 'legacy' | 'partner' | 'surveys';
 
 export default function AdminTopography() {
   const iframeRef                         = useRef<HTMLIFrameElement>(null);
@@ -1557,6 +1662,17 @@ export default function AdminTopography() {
               Pipeline
             </button>
             <button
+              onClick={() => setLeftTab('legacy')}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                leftTab === 'legacy'
+                  ? 'bg-[#c084fc]/20 text-[#c084fc] shadow-sm'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <ExternalLink size={10} />
+              Legacy
+            </button>
+            <button
               onClick={() => setLeftTab('partner')}
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${
                 leftTab === 'partner'
@@ -1580,8 +1696,8 @@ export default function AdminTopography() {
             </button>
           </div>
 
-          {/* Map status (only when map tab active) */}
-          {leftTab === 'map' && (
+          {/* Legacy iframe status (only when legacy tab active) */}
+          {leftTab === 'legacy' && (
             <>
               {iframeLoading && (
                 <span className="flex items-center gap-1.5 text-[10px] text-slate-500">
@@ -1607,6 +1723,13 @@ export default function AdminTopography() {
             <span className="flex items-center gap-1 text-[10px] bg-[#f472b6]/10 text-[#f472b6] border border-[#f472b6]/20 px-2 py-0.5 rounded-full font-medium">
               <Network size={9} />
               {ARCHITECTURE_NODES.length} Nodes · {ARCHITECTURE_EDGES.length} Edges
+            </span>
+          )}
+          {/* Legacy badge */}
+          {leftTab === 'legacy' && (
+            <span className="flex items-center gap-1 text-[10px] bg-[#c084fc]/10 text-[#c084fc] border border-[#c084fc]/20 px-2 py-0.5 rounded-full font-medium">
+              <ExternalLink size={9} />
+              Legacy external iframe reference
             </span>
           )}
           {/* Partner badge */}
@@ -1639,13 +1762,13 @@ export default function AdminTopography() {
         </div>
 
         <div className="flex items-center gap-4">
-          {leftTab === 'map' && lastLoaded && !iframeError && (
+          {leftTab === 'legacy' && lastLoaded && !iframeError && (
             <span className="flex items-center gap-1.5 text-[10px] text-slate-500">
               <Clock size={10} />
               {fmtTime(lastLoaded)}
             </span>
           )}
-          {leftTab === 'map' && (
+          {leftTab === 'legacy' && (
             <button
               onClick={handleRefresh}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs text-slate-300 hover:text-white transition-all"
@@ -1669,28 +1792,32 @@ export default function AdminTopography() {
       {/* ── Split layout ── */}
       <div className="flex flex-1 overflow-hidden">
 
-        {/* ── LEFT: Map iframe OR Pipeline topology ── */}
+        {/* ── LEFT: Canonical Map, Evidence Pipeline, Legacy iframe, Partner, or Surveys ── */}
         <div className="relative flex-1 overflow-hidden">
 
-          {/* MAP TAB */}
+          {/* MAP TAB — primary canonical architecture map */}
           <div className={`absolute inset-0 transition-opacity duration-200 ${leftTab === 'map' ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
+            <ArchitectureMapView onOpenLegacy={() => setLeftTab('legacy')} />
+          </div>
+
+
+          {/* LEGACY MAP TAB — preserved external iframe reference */}
+          <div className={`absolute inset-0 transition-opacity duration-200 ${leftTab === 'legacy' ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
             <div className="relative w-full h-full bg-[#0a0f1e]">
-              {iframeLoading && leftTab === 'map' && (
+              {iframeLoading && leftTab === 'legacy' && (
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-[#0a0f1e]">
-                  <div className="w-10 h-10 border-2 border-slate-700 border-t-amber-400 rounded-full animate-spin" />
-                  <p className="text-slate-400 text-sm">Loading topography map…</p>
+                  <div className="w-10 h-10 border-2 border-slate-700 border-t-[#c084fc] rounded-full animate-spin" />
+                  <p className="text-slate-400 text-sm">Loading legacy external topography iframe…</p>
                 </div>
               )}
-              {iframeError && leftTab === 'map' && (
+              {iframeError && leftTab === 'legacy' && (
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-[#0a0f1e]">
                   <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
                     <AlertTriangle size={20} className="text-red-400" />
                   </div>
                   <div className="text-center">
-                    <p className="text-white font-semibold text-sm mb-1">Map failed to load</p>
-                    <p className="text-slate-500 text-xs mb-4">
-                      The topography site may be temporarily unavailable.
-                    </p>
+                    <p className="text-white font-semibold text-sm mb-1">Legacy iframe failed to load</p>
+                    <p className="text-slate-500 text-xs mb-4">The external topography site may be temporarily unavailable.</p>
                     <button
                       onClick={handleRefresh}
                       className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs text-slate-300 hover:text-white transition-all mx-auto"
@@ -1700,6 +1827,10 @@ export default function AdminTopography() {
                   </div>
                 </div>
               )}
+              <div className="absolute top-3 left-3 z-10 rounded-xl border border-[#c084fc]/30 bg-[#070d1e]/90 backdrop-blur px-3 py-2 shadow-lg">
+                <p className="text-[10px] font-bold text-[#c084fc] uppercase tracking-wide">Legacy / external reference</p>
+                <p className="text-[10px] text-slate-400">Preserved unchanged. Canonical map is now the Map tab.</p>
+              </div>
               <iframe
                 key={refreshKey}
                 ref={iframeRef}
@@ -1707,7 +1838,7 @@ export default function AdminTopography() {
                 className="w-full h-full border-0"
                 onLoad={handleLoad}
                 onError={handleError}
-                title="SolarPro Topography Map"
+                title="SolarPro Legacy External Topography Map"
                 allow="fullscreen"
               />
             </div>
