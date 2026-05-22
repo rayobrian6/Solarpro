@@ -124,6 +124,48 @@ interface ProjectValueProjection {
   missing: string[];
 }
 
+interface MarketplaceRevenueProjectionDetail {
+  pricing_assumption: {
+    state_code: string;
+    low_price_per_watt: number;
+    market_price_per_watt: number;
+    premium_price_per_watt: number;
+    source_label: string;
+  };
+  project_value_range: IntelligenceRange | null;
+  low_install_estimate: number | null;
+  market_average_estimate: number | null;
+  premium_install_estimate: number | null;
+  financed_payment_range: IntelligenceRange | null;
+  ppa_lease_payment_range: IntelligenceRange | null;
+  battery_attachment_value: IntelligenceRange | null;
+  gross_opportunity_tier:
+    | "premium"
+    | "high"
+    | "standard"
+    | "developing"
+    | "unknown";
+  gross_opportunity_label: string;
+  opportunity_score_contribution: number;
+  payment_profile_label: string;
+  basis: string;
+  evidence: IntelligenceEvidenceNote[];
+  missing: string[];
+  disclaimers: string[];
+}
+
+interface PurchaseBehaviorProjection {
+  tags: string[];
+  primary_behavior: string;
+  behavior_label: string;
+  confidence: IntelligenceLevel;
+  sales_fit_score: number;
+  closeability_label: string;
+  evidence: IntelligenceEvidenceNote[];
+  missing: string[];
+  disclaimers: string[];
+}
+
 interface FinancingIntelligenceProjection {
   likelihood: IntelligenceLevel;
   likelihood_label: string;
@@ -170,8 +212,10 @@ interface MarketplaceIntelligenceProjection {
     estimated_offset_pct: MarketplaceSourcedValue<number> | null;
     estimated_payback_yrs: MarketplaceSourcedValue<number> | null;
     utility_provider: MarketplaceSourcedValue<string> | null;
+    projection?: MarketplaceRevenueProjectionDetail;
   };
   purchase_profile?: PurchaseProfileProjection;
+  purchase_behavior?: PurchaseBehaviorProjection;
   project_value?: ProjectValueProjection;
   financing?: FinancingIntelligenceProjection;
   sales_complexity?: ComplexityProjection;
@@ -435,6 +479,13 @@ function moneyRange(
   const max =
     "$" + range.max.toLocaleString("en-US", { maximumFractionDigits: 0 });
   return range.min === range.max ? min : `${min}–${max}`;
+}
+
+function compactRange(
+  range: IntelligenceRange | null | undefined,
+  fallback = "Awaiting validation",
+) {
+  return moneyRange(range, fallback).replace(/,000/g, "k").replace(/000/g, "k");
 }
 
 function intelligenceTone(level: IntelligenceLevel | string | undefined) {
@@ -805,7 +856,9 @@ function OpportunityCard({
       : null);
   const utility = revenue?.utility_provider?.value ?? opp.utility_name;
   const confidence = intelligence?.confidence;
+  const revenueProjection = revenue?.projection;
   const purchaseProfile = intelligence?.purchase_profile;
+  const purchaseBehavior = intelligence?.purchase_behavior;
   const projectIntelligence = intelligence?.project_value;
   const financing = intelligence?.financing;
   const salesComplexity = intelligence?.sales_complexity;
@@ -882,14 +935,18 @@ function OpportunityCard({
             label="Project value"
             value={
               projectIntelligence?.value_label ??
-              sourcedNumber(
-                projectValue,
-                fmtCurrency,
-                "Project value awaiting validation",
+              compactRange(
+                revenueProjection?.project_value_range,
+                sourcedNumber(
+                  projectValue,
+                  fmtCurrency,
+                  "Project value awaiting validation",
+                ),
               )
             }
             source={
               projectIntelligence?.basis ??
+              revenueProjection?.basis ??
               (projectValue
                 ? sourceLabel(projectValue.source)
                 : "Limited bill intelligence")
@@ -941,12 +998,30 @@ function OpportunityCard({
 
         <div className="grid grid-cols-3 gap-2 mb-4">
           <RevenueMetric
-            label="Financing"
-            value={
-              financing?.likelihood_label ?? "Financing awaiting validation"
+            label="Financed pmt"
+            value={compactRange(
+              revenueProjection?.financed_payment_range,
+              financing?.likelihood_label ?? "Financing awaiting validation",
+            )}
+            source={
+              revenueProjection?.financed_payment_range
+                ? "Estimated monthly range"
+                : financing?.payment_readiness_label
             }
-            source={financing?.payment_readiness_label}
             accent={intelligenceTone(financing?.likelihood)}
+          />
+          <RevenueMetric
+            label="PPA / Lease"
+            value={compactRange(
+              revenueProjection?.ppa_lease_payment_range,
+              "PPA/lease estimate pending",
+            )}
+            source={revenueProjection?.payment_profile_label}
+            accent={
+              purchaseProfile?.likely_purchase_method === "lease_or_ppa"
+                ? "text-blue-300"
+                : undefined
+            }
           />
           <RevenueMetric
             label="Battery"
@@ -968,6 +1043,24 @@ function OpportunityCard({
             }
           />
         </div>
+
+        {(revenueProjection || purchaseBehavior) && (
+          <div className="mb-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/8 p-3 text-xs">
+            <div className="mb-1 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">
+              Estimated acquisition fit
+            </div>
+            <div className="font-semibold text-white">
+              {revenueProjection?.gross_opportunity_label ??
+                purchaseBehavior?.behavior_label ??
+                "Opportunity economics awaiting validation"}
+            </div>
+            <div className="mt-1 text-slate-500">
+              {purchaseBehavior?.tags?.slice(0, 3).join(" · ") ||
+                revenueProjection?.basis ||
+                "Estimated values remain separate from verified bill evidence."}
+            </div>
+          </div>
+        )}
 
         <div className="mb-4 grid grid-cols-2 gap-2 text-xs">
           <div className="rounded-xl border border-slate-800/80 bg-slate-950/30 p-3">
@@ -1239,7 +1332,9 @@ function DetailModal({
   const release = intelligence?.release;
   const narrative = intelligence?.narrative;
   const billVisuals = intelligence?.bill_visuals;
+  const revenueProjection = revenue?.projection;
   const purchaseProfile = intelligence?.purchase_profile;
+  const purchaseBehavior = intelligence?.purchase_behavior;
   const projectIntelligence = intelligence?.project_value;
   const financing = intelligence?.financing;
   const salesComplexity = intelligence?.sales_complexity;
@@ -1404,10 +1499,15 @@ function DetailModal({
               <RevenueMetric
                 label="Project value range"
                 value={moneyRange(
-                  projectIntelligence?.project_value_range,
+                  revenueProjection?.project_value_range ??
+                    projectIntelligence?.project_value_range,
                   "Project value awaiting validation",
                 )}
-                source={projectIntelligence?.basis ?? "No fake economics shown"}
+                source={
+                  revenueProjection?.basis ??
+                  projectIntelligence?.basis ??
+                  "No fake economics shown"
+                }
                 accent="text-emerald-300"
               />
               <RevenueMetric
@@ -1438,6 +1538,103 @@ function DetailModal({
               </div>
             ) : null}
           </section>
+
+          <EvidencePanel
+            title="Estimated revenue projection"
+            subtitle="ESTIMATED only: state pricing assumptions, payment ranges, and opportunity attractiveness. Not a proposal, quote, lender offer, or profit model."
+            items={[
+              {
+                label: "Project Value",
+                value: moneyRange(
+                  revenueProjection?.project_value_range,
+                  "Project value awaiting system size",
+                ),
+                accent: "text-emerald-300",
+              },
+              {
+                label: "Financed Payment",
+                value: moneyRange(
+                  revenueProjection?.financed_payment_range,
+                  "Financed payment awaiting project value",
+                ),
+              },
+              {
+                label: "PPA / Lease Payment",
+                value: moneyRange(
+                  revenueProjection?.ppa_lease_payment_range,
+                  "PPA/lease payment awaiting bill data",
+                ),
+                accent: "text-blue-300",
+              },
+              {
+                label: "Battery Attachment",
+                value: moneyRange(
+                  revenueProjection?.battery_attachment_value,
+                  "Battery attachment not signaled",
+                ),
+                accent: "text-amber-300",
+              },
+              {
+                label: "Gross Opportunity",
+                value:
+                  revenueProjection?.gross_opportunity_label ??
+                  "Opportunity tier awaiting sizing",
+                accent: intelligenceTone(
+                  revenueProjection?.gross_opportunity_tier,
+                ),
+              },
+              {
+                label: "Score Contribution",
+                value: revenueProjection
+                  ? `${revenueProjection.opportunity_score_contribution}/22 estimated`
+                  : "Awaiting revenue projection",
+              },
+              {
+                label: "Pricing Basis",
+                value:
+                  revenueProjection?.pricing_assumption?.source_label ??
+                  "State assumption unavailable",
+              },
+              {
+                label: "Payment Basis",
+                value:
+                  revenueProjection?.payment_profile_label ??
+                  "Payment profile awaiting evidence",
+              },
+            ]}
+          />
+
+          <EvidencePanel
+            title="Purchase behavior"
+            subtitle="Sales/acquisition intelligence only. Behavior tags are not underwriting and must be validated in contractor discovery."
+            items={[
+              {
+                label: "Primary Behavior",
+                value:
+                  purchaseBehavior?.behavior_label ??
+                  "Purchase behavior awaiting evidence",
+                accent: intelligenceTone(purchaseBehavior?.confidence),
+              },
+              {
+                label: "Behavior Tags",
+                value: purchaseBehavior?.tags?.length
+                  ? purchaseBehavior.tags.join(" · ")
+                  : "No behavior tags validated yet",
+              },
+              {
+                label: "Sales Fit",
+                value: purchaseBehavior
+                  ? `${purchaseBehavior.sales_fit_score}/100`
+                  : "Sales fit awaiting evidence",
+              },
+              {
+                label: "Closeability",
+                value:
+                  purchaseBehavior?.closeability_label ??
+                  "Closeability awaiting qualification evidence",
+              },
+            ]}
+          />
 
           <EvidencePanel
             title="Purchase intelligence"

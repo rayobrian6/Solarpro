@@ -27,6 +27,14 @@ import {
   type ProjectValueResult,
 } from "@/lib/network/projectValue";
 import {
+  deriveMarketplaceRevenueProjection,
+  type MarketplaceRevenueProjectionResult,
+} from "@/lib/network/marketplaceRevenueProjection";
+import {
+  derivePurchaseBehavior,
+  type PurchaseBehaviorResult,
+} from "@/lib/network/purchaseBehavior";
+import {
   derivePurchaseProfile,
   type PurchaseProfileResult,
 } from "@/lib/network/purchaseProfile";
@@ -79,6 +87,7 @@ export interface MarketplaceRevenueIntelligence {
   estimated_offset_pct: MarketplaceSourcedValue<number> | null;
   estimated_payback_yrs: MarketplaceSourcedValue<number> | null;
   utility_provider: MarketplaceSourcedValue<string> | null;
+  projection: MarketplaceRevenueProjectionResult;
 }
 
 export interface MarketplaceEvidenceSummary {
@@ -104,6 +113,7 @@ export interface MarketplaceIntelligenceProjection {
   narrative: MarketplaceNarrativeResult;
   revenue: MarketplaceRevenueIntelligence;
   purchase_profile: PurchaseProfileResult;
+  purchase_behavior: PurchaseBehaviorResult;
   project_value: ProjectValueResult;
   financing: FinancingIntelligenceResult;
   sales_complexity: SalesComplexityResult;
@@ -388,6 +398,22 @@ export function buildMarketplaceIntelligence(
     estimatedOffsetPct: estimatedOffset,
   });
 
+  const revenueProjection = deriveMarketplaceRevenueProjection({
+    stateCode: stringValue(row.state_code),
+    estimatedSystemSizeKw: estimatedSystemSize,
+    batteryInterest: stringValue(row.battery_interest),
+    batteryCandidate: boolValue(row.battery_candidate),
+    purchaseIntent,
+    financingPreference: purchaseIntent,
+    utilityProvider,
+    utilityRatePerKwh: utilityRate,
+    monthlyBillAmount: monthlyBill,
+    annualUsageKwh: annualUsage,
+    estimatedOffsetPct: estimatedOffset,
+    estimatedAnnualSavings,
+    verifiedProjectValue: estimatedProjectValue,
+  });
+
   const financing = deriveFinancingIntelligence({
     releaseGate,
     financeReadiness: boolValue(row.finance_readiness),
@@ -414,6 +440,24 @@ export function buildMarketplaceIntelligence(
     batteryCandidate: boolValue(row.battery_candidate),
   });
 
+  const purchaseBehavior = derivePurchaseBehavior({
+    releaseGate,
+    purchaseProfile,
+    revenueProjection,
+    purchaseIntent,
+    financingPreference: purchaseIntent,
+    timeline: stringValue(row.timeline),
+    batteryInterest: stringValue(row.battery_interest),
+    batteryCandidate: boolValue(row.battery_candidate),
+    monthlyBillAmount: monthlyBill,
+    annualUsageKwh: annualUsage,
+    utilityRatePerKwh: utilityRate,
+    estimatedCreditBand: stringValue(row.estimated_credit_band),
+    estimatedIncomeBand: stringValue(row.estimated_income_band),
+    qualificationStatus: stringValue(row.qualification_status),
+    leadGrade: stringValue(row.lead_grade),
+  });
+
   const salesComplexity = deriveSalesComplexity({
     purchaseProfile,
     financing,
@@ -434,6 +478,7 @@ export function buildMarketplaceIntelligence(
     financing,
     salesComplexity,
     installComplexity,
+    revenueProjection,
     batteryCandidate: boolValue(row.battery_candidate),
     releaseOk: releaseGate.ok,
   });
@@ -524,8 +569,10 @@ export function buildMarketplaceIntelligence(
           : "homeowner_entered",
         "Utility provider",
       ),
+      projection: revenueProjection,
     },
     purchase_profile: purchaseProfile,
+    purchase_behavior: purchaseBehavior,
     project_value: projectValue,
     financing,
     sales_complexity: salesComplexity,

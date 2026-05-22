@@ -2,6 +2,7 @@ import type { MarketplaceConfidenceResult } from "@/lib/network/marketplaceConfi
 import type { FinancingIntelligenceResult } from "@/lib/network/financingIntelligence";
 import type { InstallComplexityResult } from "@/lib/network/installComplexity";
 import type { ProjectValueResult } from "@/lib/network/projectValue";
+import type { MarketplaceRevenueProjectionResult } from "@/lib/network/marketplaceRevenueProjection";
 import type { PurchaseProfileResult } from "@/lib/network/purchaseProfile";
 import type { SalesComplexityResult } from "@/lib/network/salesComplexity";
 import { clampScore } from "@/lib/network/intelligenceUtils";
@@ -13,6 +14,7 @@ export interface OpportunityScoreInput {
   financing: FinancingIntelligenceResult;
   salesComplexity: SalesComplexityResult;
   installComplexity: InstallComplexityResult;
+  revenueProjection?: MarketplaceRevenueProjectionResult | null;
   batteryCandidate?: boolean | null;
   releaseOk?: boolean;
 }
@@ -38,7 +40,20 @@ export function deriveOpportunityScore(
   if (input.projectValue.project_value_range) {
     score += 18;
     reasons.push("Project value range available");
+  } else if (input.revenueProjection?.project_value_range) {
+    score += 16;
+    reasons.push("Revenue projection value range available");
   } else cautions.push("Project value unavailable");
+
+  if (input.revenueProjection) {
+    score += Math.round(
+      input.revenueProjection.opportunity_score_contribution * 0.45,
+    );
+    if (input.revenueProjection.gross_opportunity_tier !== "unknown")
+      reasons.push(input.revenueProjection.gross_opportunity_label);
+    if (!input.revenueProjection.project_value_range)
+      cautions.push("Revenue projection awaiting system size");
+  }
 
   if (
     input.purchaseProfile.homeowner_seriousness === "urgent" ||

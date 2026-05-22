@@ -4,6 +4,8 @@ import { deriveMarketplaceConfidence } from "@/lib/network/marketplaceConfidence
 import { buildMarketplaceIntelligence } from "@/lib/network/marketplaceIntelligence";
 import { buildMarketplaceNarrative } from "@/lib/network/marketplaceNarratives";
 import { evaluateMarketplaceReleaseGate } from "@/lib/network/marketplaceReleaseGate";
+import { deriveMarketplaceRevenueProjection } from "@/lib/network/marketplaceRevenueProjection";
+import { derivePurchaseBehavior } from "@/lib/network/purchaseBehavior";
 
 const intakeMetadata = {
   monthly_bill_amount: 255,
@@ -288,6 +290,42 @@ describe("marketplace purchase and revenue expansion", () => {
     expect(projection.opportunity_score.reasons).toContain(
       "Project value range available",
     );
+    expect(projection.revenue.projection.project_value_range).toMatchObject({
+      min: 36000,
+      max: 46000,
+      midpoint: 40700,
+      unit: "usd",
+    });
+    expect(projection.revenue.projection.financed_payment_range?.label).toBe(
+      "Estimated financed monthly payment range",
+    );
+    expect(projection.revenue.projection.ppa_lease_payment_range).toMatchObject(
+      {
+        unit: "usd",
+        label: "Estimated PPA/lease utility replacement payment range",
+      },
+    );
+    expect(
+      projection.revenue.projection.battery_attachment_value,
+    ).toMatchObject({
+      min: 12000,
+      max: 18000,
+      unit: "usd",
+    });
+    expect(projection.revenue.projection.gross_opportunity_label).toMatch(
+      /opportunity/i,
+    );
+    expect(projection.purchase_behavior.tags).toEqual(
+      expect.arrayContaining([
+        "financing-friendly",
+        "payment-sensitive",
+        "battery-ready",
+        "fast-close",
+      ]),
+    );
+    expect(projection.purchase_behavior.disclaimers[0]).toContain(
+      "not credit underwriting",
+    );
     expect(projection.financing.disclaimers[0]).toContain(
       "not a credit approval or loan quote",
     );
@@ -341,6 +379,12 @@ describe("marketplace purchase and revenue expansion", () => {
     expect(projection.financing.payment_readiness_label).toBe(
       "Third-party ownership path selected",
     );
+    expect(projection.purchase_behavior.tags).toEqual(
+      expect.arrayContaining(["PPA candidate", "lease-friendly"]),
+    );
+    expect(projection.revenue.projection.payment_profile_label).toContain(
+      "estimated PPA/lease payment",
+    );
     expect(projection.release.missing).not.toContain("financing_readiness");
   });
 
@@ -358,6 +402,16 @@ describe("marketplace purchase and revenue expansion", () => {
     });
 
     expect(projection.project_value.project_value_range).toBeNull();
+    expect(projection.revenue.projection.project_value_range).toBeNull();
+    expect(projection.revenue.projection.financed_payment_range).toBeNull();
+    expect(projection.revenue.projection.ppa_lease_payment_range).toBeNull();
+    expect(projection.revenue.projection.missing).toEqual(
+      expect.arrayContaining([
+        "Estimated system size or annual usage required",
+        "Project value required for financed payment range",
+      ]),
+    );
+    expect(projection.purchase_behavior.primary_behavior).toBe("undetermined");
     expect(projection.project_value.value_label).toBe(
       "Project value awaiting validation",
     );
@@ -373,5 +427,116 @@ describe("marketplace purchase and revenue expansion", () => {
     expect(projection.opportunity_score.cautions).toEqual(
       expect.arrayContaining(["Project value unavailable"]),
     );
+  });
+});
+
+describe("canonical marketplace revenue projection engine", () => {
+  it("uses deterministic Illinois state pricing and approximate payment ranges", () => {
+    const projection = deriveMarketplaceRevenueProjection({
+      stateCode: "IL",
+      estimatedSystemSizeKw: 15,
+      batteryInterest: "backup",
+      purchaseIntent: "ppa_or_lease",
+      utilityProvider: "Ameren Illinois",
+      utilityRatePerKwh: 0.18,
+      monthlyBillAmount: 315,
+      annualUsageKwh: 21000,
+      estimatedOffsetPct: 100,
+    });
+
+    expect(projection.pricing_assumption).toMatchObject({
+      state_code: "IL",
+      low_price_per_watt: 2.8,
+      market_price_per_watt: 3,
+      premium_price_per_watt: 3.2,
+    });
+    expect(projection.project_value_range).toMatchObject({
+      min: 42000,
+      midpoint: 45000,
+      max: 48000,
+      unit: "usd",
+    });
+    expect(projection.financed_payment_range?.min).toBeGreaterThan(250);
+    expect(projection.ppa_lease_payment_range?.min).toBeGreaterThan(200);
+    expect(projection.battery_attachment_value).toMatchObject({
+      min: 12000,
+      max: 18000,
+    });
+    expect(projection.disclaimers.join(" ")).toContain(
+      "not a contractor quote",
+    );
+    expect(JSON.stringify(projection)).not.toContain("dealer_fee");
+  });
+
+  it("degrades without fabricating impossible payment outputs", () => {
+    const projection = deriveMarketplaceRevenueProjection({ stateCode: "ZZ" });
+
+    expect(projection.pricing_assumption.state_code).toBe("ZZ");
+    expect(projection.project_value_range).toBeNull();
+    expect(projection.financed_payment_range).toBeNull();
+    expect(projection.ppa_lease_payment_range).toBeNull();
+    expect(projection.gross_opportunity_tier).toBe("unknown");
+    expect(projection.missing).toEqual(
+      expect.arrayContaining([
+        "Estimated system size or annual usage required",
+        "Monthly bill or annual savings required for PPA/lease payment range",
+      ]),
+    );
+  });
+});
+
+describe("canonical purchase behavior classifier", () => {
+  it("classifies sales behavior without underwriting language", () => {
+    const releaseGate = evaluateMarketplaceReleaseGate(gateRow());
+    const revenueProjection = deriveMarketplaceRevenueProjection({
+      stateCode: "CA",
+      estimatedSystemSizeKw: 12,
+      batteryCandidate: true,
+      purchaseIntent: "financing",
+      monthlyBillAmount: 255,
+      annualUsageKwh: 18000,
+      utilityRatePerKwh: 0.21,
+    });
+    const marketplace = buildMarketplaceIntelligence({
+      ...gateRow(),
+      purchase_intent: "financing",
+      finance_readiness: true,
+      timeline: "1_3_months",
+      qualification_status: "qualified",
+      lead_grade: "A",
+      monthly_bill_amount: 255,
+      annual_kwh: 18000,
+      utility_rate_per_kwh: 0.21,
+      battery_candidate: true,
+      marketplace_intake_metadata: intakeMetadata,
+      marketplace_raw_payload: {},
+    });
+
+    const behavior = derivePurchaseBehavior({
+      releaseGate,
+      purchaseProfile: marketplace.purchase_profile,
+      revenueProjection,
+      purchaseIntent: "financing",
+      timeline: "1_3_months",
+      batteryCandidate: true,
+      monthlyBillAmount: 255,
+      annualUsageKwh: 18000,
+      utilityRatePerKwh: 0.21,
+      qualificationStatus: "qualified",
+      leadGrade: "A",
+    });
+
+    expect(behavior.tags).toEqual(
+      expect.arrayContaining([
+        "financing-friendly",
+        "payment-sensitive",
+        "battery-ready",
+        "fast-close",
+        "premium-upgrade candidate",
+      ]),
+    );
+    expect(behavior.sales_fit_score).toBeGreaterThan(60);
+    expect(behavior.disclaimers[0]).toContain("not credit underwriting");
+    expect(JSON.stringify(behavior)).not.toContain("approved");
   });
 });
