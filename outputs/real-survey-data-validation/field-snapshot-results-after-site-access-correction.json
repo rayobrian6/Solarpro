@@ -1,0 +1,309 @@
+{
+  "realSnapshotSource": "partner_db_audit.md prior live pull from site_survey_app Render PostgreSQL",
+  "liveDbAccessibleInSandbox": false,
+  "photoBytesReachableAtAuditUrls": false,
+  "surveyCount": 9,
+  "fileCount": 10,
+  "categoryCounts": {
+    "uncategorized": 7,
+    "overview": 2,
+    "meter": 1
+  },
+  "aliasChecks": [
+    {
+      "input": "utility_meter",
+      "normalizeDirect": "meter",
+      "inferFromText": "meter"
+    },
+    {
+      "input": "site_exterior",
+      "normalizeDirect": "overview",
+      "inferFromText": "overview"
+    },
+    {
+      "input": "attic_rafter",
+      "normalizeDirect": "rafters",
+      "inferFromText": "rafters"
+    },
+    {
+      "input": "roof_obstruction",
+      "normalizeDirect": "obstructions",
+      "inferFromText": "obstructions"
+    },
+    {
+      "input": "grounding_bonding",
+      "normalizeDirect": "grounding",
+      "inferFromText": "grounding"
+    },
+    {
+      "input": "Meter Photo",
+      "normalizeDirect": "uncategorized",
+      "inferFromText": "meter"
+    },
+    {
+      "input": "Overhead Line Photo",
+      "normalizeDirect": "uncategorized",
+      "inferFromText": "uncategorized"
+    },
+    {
+      "input": "Site Access Photo",
+      "normalizeDirect": "uncategorized",
+      "inferFromText": "overview"
+    },
+    {
+      "input": "Got that sauce",
+      "normalizeDirect": "uncategorized",
+      "inferFromText": "uncategorized"
+    }
+  ],
+  "results": [
+    {
+      "id": "e3ac0230-9b62-427d-9b47-553966563e27",
+      "name": "Ray — Roof Mount",
+      "inputLabels": [
+        "unlabeled",
+        "unlabeled"
+      ],
+      "itemCount": 2,
+      "categories": [
+        "uncategorized",
+        "uncategorized"
+      ],
+      "uncategorizedCount": 2,
+      "warningCount": 4,
+      "warnings": [
+        "Missing required survey evidence category: main_service_panel",
+        "Missing required survey evidence category: meter",
+        "Missing required survey evidence category: roof_plane",
+        "Missing required survey evidence category: overview"
+      ],
+      "completeness": "partial",
+      "bridgeReadiness": "needs_review",
+      "bridgeCounts": {
+        "electricalEvidenceCount": 0,
+        "structuralEvidenceCount": 0,
+        "roofLayoutEvidenceCount": 0,
+        "sitePlanEvidenceCount": 0
+      },
+      "cadAutomationStatus": "not_started"
+    },
+    {
+      "id": "8172ffe1-261c-4e8d-beef-7c708faed69d",
+      "name": "Josh — Commercial 3-Phase Solar",
+      "inputLabels": [
+        "Got that sauce",
+        "unlabeled"
+      ],
+      "itemCount": 2,
+      "categories": [
+        "uncategorized",
+        "uncategorized"
+      ],
+      "uncategorizedCount": 2,
+      "warningCount": 4,
+      "warnings": [
+        "Missing required survey evidence category: main_service_panel",
+        "Missing required survey evidence category: meter",
+        "Missing required survey evidence category: roof_plane",
+        "Missing required survey evidence category: overview"
+      ],
+      "completeness": "partial",
+      "bridgeReadiness": "needs_review",
+      "bridgeCounts": {
+        "electricalEvidenceCount": 0,
+        "structuralEvidenceCount": 0,
+        "roofLayoutEvidenceCount": 0,
+        "sitePlanEvidenceCount": 0
+      },
+      "cadAutomationStatus": "not_started"
+    },
+    {
+      "id": "b367e8bd-26ce-4433-a0fe-3659433fe70f",
+      "name": "Testies — Roof Mount",
+      "inputLabels": [
+        "Site Access Photo"
+      ],
+      "itemCount": 1,
+      "categories": [
+        "overview"
+      ],
+      "uncategorizedCount": 0,
+      "warningCount": 3,
+      "warnings": [
+        "Missing required survey evidence category: main_service_panel",
+        "Missing required survey evidence category: meter",
+        "Missing required survey evidence category: roof_plane"
+      ],
+      "completeness": "partial",
+      "bridgeReadiness": "needs_review",
+      "bridgeCounts": {
+        "electricalEvidenceCount": 0,
+        "structuralEvidenceCount": 0,
+        "roofLayoutEvidenceCount": 0,
+        "sitePlanEvidenceCount": 1
+      },
+      "cadAutomationStatus": "not_started"
+    },
+    {
+      "id": "e7f8bfda-6af2-4925-b5c3-000a36ca7df3",
+      "name": "Testing — Roof Mount",
+      "inputLabels": [
+        "Site Access Photo"
+      ],
+      "itemCount": 1,
+      "categories": [
+        "overview"
+      ],
+      "uncategorizedCount": 0,
+      "warningCount": 3,
+      "warnings": [
+        "Missing required survey evidence category: main_service_panel",
+        "Missing required survey evidence category: meter",
+        "Missing required survey evidence category: roof_plane"
+      ],
+      "completeness": "partial",
+      "bridgeReadiness": "needs_review",
+      "bridgeCounts": {
+        "electricalEvidenceCount": 0,
+        "structuralEvidenceCount": 0,
+        "roofLayoutEvidenceCount": 0,
+        "sitePlanEvidenceCount": 1
+      },
+      "cadAutomationStatus": "not_started"
+    },
+    {
+      "id": "75ce25c6-1456-4b81-89d1-ed39a9e0ea64",
+      "name": "Testing 2 — Ground Mount",
+      "inputLabels": [
+        "unlabeled",
+        "Overhead Line Photo",
+        "Meter Photo"
+      ],
+      "itemCount": 3,
+      "categories": [
+        "uncategorized",
+        "uncategorized",
+        "meter"
+      ],
+      "uncategorizedCount": 2,
+      "warningCount": 3,
+      "warnings": [
+        "Missing required survey evidence category: main_service_panel",
+        "Missing required survey evidence category: roof_plane",
+        "Missing required survey evidence category: overview"
+      ],
+      "completeness": "partial",
+      "bridgeReadiness": "needs_review",
+      "bridgeCounts": {
+        "electricalEvidenceCount": 1,
+        "structuralEvidenceCount": 0,
+        "roofLayoutEvidenceCount": 0,
+        "sitePlanEvidenceCount": 0
+      },
+      "cadAutomationStatus": "not_started"
+    },
+    {
+      "id": "8e1c1e0e-e377-4f1b-b732-3b90a6f4c0bd",
+      "name": "Teating first upload 1 — Electrical",
+      "inputLabels": [
+        "unlabeled"
+      ],
+      "itemCount": 1,
+      "categories": [
+        "uncategorized"
+      ],
+      "uncategorizedCount": 1,
+      "warningCount": 4,
+      "warnings": [
+        "Missing required survey evidence category: main_service_panel",
+        "Missing required survey evidence category: meter",
+        "Missing required survey evidence category: roof_plane",
+        "Missing required survey evidence category: overview"
+      ],
+      "completeness": "partial",
+      "bridgeReadiness": "needs_review",
+      "bridgeCounts": {
+        "electricalEvidenceCount": 0,
+        "structuralEvidenceCount": 0,
+        "roofLayoutEvidenceCount": 0,
+        "sitePlanEvidenceCount": 0
+      },
+      "cadAutomationStatus": "not_started"
+    },
+    {
+      "id": "no-photo-1",
+      "name": "Hdhdhfff — Roof Mount",
+      "inputLabels": [],
+      "itemCount": 0,
+      "categories": [],
+      "uncategorizedCount": 0,
+      "warningCount": 5,
+      "warnings": [
+        "No survey photo evidence items are linked to this survey.",
+        "Missing required survey evidence category: main_service_panel",
+        "Missing required survey evidence category: meter",
+        "Missing required survey evidence category: roof_plane",
+        "Missing required survey evidence category: overview"
+      ],
+      "completeness": "missing",
+      "bridgeReadiness": "blocked",
+      "bridgeCounts": {
+        "electricalEvidenceCount": 0,
+        "structuralEvidenceCount": 0,
+        "roofLayoutEvidenceCount": 0,
+        "sitePlanEvidenceCount": 0
+      },
+      "cadAutomationStatus": "not_started"
+    },
+    {
+      "id": "no-photo-2",
+      "name": "Bdbdhfjf — Roof Mount",
+      "inputLabels": [],
+      "itemCount": 0,
+      "categories": [],
+      "uncategorizedCount": 0,
+      "warningCount": 5,
+      "warnings": [
+        "No survey photo evidence items are linked to this survey.",
+        "Missing required survey evidence category: main_service_panel",
+        "Missing required survey evidence category: meter",
+        "Missing required survey evidence category: roof_plane",
+        "Missing required survey evidence category: overview"
+      ],
+      "completeness": "missing",
+      "bridgeReadiness": "blocked",
+      "bridgeCounts": {
+        "electricalEvidenceCount": 0,
+        "structuralEvidenceCount": 0,
+        "roofLayoutEvidenceCount": 0,
+        "sitePlanEvidenceCount": 0
+      },
+      "cadAutomationStatus": "not_started"
+    },
+    {
+      "id": "no-photo-3",
+      "name": "Bbhh — Roof Mount",
+      "inputLabels": [],
+      "itemCount": 0,
+      "categories": [],
+      "uncategorizedCount": 0,
+      "warningCount": 5,
+      "warnings": [
+        "No survey photo evidence items are linked to this survey.",
+        "Missing required survey evidence category: main_service_panel",
+        "Missing required survey evidence category: meter",
+        "Missing required survey evidence category: roof_plane",
+        "Missing required survey evidence category: overview"
+      ],
+      "completeness": "missing",
+      "bridgeReadiness": "blocked",
+      "bridgeCounts": {
+        "electricalEvidenceCount": 0,
+        "structuralEvidenceCount": 0,
+        "roofLayoutEvidenceCount": 0,
+        "sitePlanEvidenceCount": 0
+      },
+      "cadAutomationStatus": "not_started"
+    }
+  ]
+}

@@ -352,6 +352,7 @@ export function inferSurveyEvidenceCategoryFromText(text: string | null | undefi
   const tokens = new Set(normalizedText.split('_').filter(Boolean));
   if (tokens.has('subpanel') || normalizedText.includes('sub_panel')) return 'subpanel';
   if (tokens.has('meter')) return 'meter';
+  if (tokens.has('site') || tokens.has('exterior')) return 'overview';
   if (tokens.has('attic') && tokens.has('access')) return 'attic_access';
   if (tokens.has('attic') || tokens.has('rafter') || tokens.has('rafters')) return 'rafters';
   if (tokens.has('obstruction') || tokens.has('chimney') || tokens.has('skylight') || tokens.has('vent')) return 'obstructions';
@@ -359,7 +360,6 @@ export function inferSurveyEvidenceCategoryFromText(text: string | null | undefi
   if (tokens.has('ground') || tokens.has('bond') || tokens.has('grounding')) return 'grounding';
   if (normalizedText.includes('main_panel') || normalizedText.includes('main_service_panel') || normalizedText.includes('service_panel')) return 'main_service_panel';
   if (tokens.has('roof')) return 'roof_plane';
-  if (tokens.has('site') || tokens.has('exterior')) return 'overview';
 
   return 'uncategorized';
 }

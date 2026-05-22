@@ -67,6 +67,31 @@ describe('Survey Evidence Manifest v1', () => {
     expect(manifest.openSourceBoundaries.pythonWorker).toContain('OpenCV blur/orientation/duplicate scoring');
   });
 
+  it('classifies real partner-audit human labels without creating legacy categories', () => {
+    const manifest = buildSurveyEvidenceManifest({
+      survey: {
+        ...baseSurvey,
+        surveyData: { source: 'partner_db_audit.md', photos: [] },
+      },
+      files: [
+        file('f1', 'Meter Photo', 'https://site-survey-api-bpyz.onrender.com/uploads/1776926369554-2h1zvol2u7.jpg'),
+        file('f2', 'Site Access Photo', 'https://site-survey-api-bpyz.onrender.com/uploads/1776997006569-toy05beg0pl.jpg'),
+        file('f3', 'Overhead Line Photo', 'https://site-survey-api-bpyz.onrender.com/uploads/1776926369550-w9ridr6nym.jpg'),
+        file('f4', 'Got that sauce', 'https://site-survey-api-bpyz.onrender.com/uploads/1776998279240-dkq2ffqwdtg.jpg'),
+      ],
+      generatedAt: '2026-04-24T12:00:00.000Z',
+    });
+
+    expect(manifest.items.map(item => item.category)).toEqual(['meter', 'overview', 'uncategorized', 'uncategorized']);
+    expect(manifest.items.map(item => item.submittedCategory)).toEqual(['Meter Photo', 'Site Access Photo', 'Overhead Line Photo', 'Got that sauce']);
+    expect(manifest.coverage.find(group => group.category === 'meter')?.count).toBe(1);
+    expect(manifest.coverage.find(group => group.category === 'overview')?.count).toBe(1);
+    expect(manifest.coverage.find(group => group.category === 'uncategorized')?.count).toBe(2);
+    expect(manifest.requiredMissing).toContain('main_service_panel');
+    expect(manifest.requiredMissing).not.toContain('meter');
+    expect(manifest.requiredMissing).not.toContain('overview');
+  });
+
   it('reports missing required evidence without blocking manifest construction', () => {
     const onePhotoSurvey = {
       ...baseSurvey,

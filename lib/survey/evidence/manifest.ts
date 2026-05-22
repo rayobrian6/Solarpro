@@ -4,6 +4,7 @@ import {
   REQUIRED_SURVEY_EVIDENCE_CATEGORIES,
   SURVEY_EVIDENCE_CATEGORIES,
   getSurveyEvidenceDomain,
+  inferSurveyEvidenceCategoryFromText,
   normalizeSurveyEvidenceCategory,
 } from './categoryRegistry';
 import type { SurveyEvidenceCategory, SurveyEvidenceDomain } from './categoryRegistry';
@@ -257,7 +258,7 @@ function buildEvidenceItem(input: {
   generatedAt: string;
 }): SurveyEvidenceItem {
   const submittedCategory = input.file.label ?? asString(input.payloadPhoto?.category);
-  const category = normalizeSurveyEvidenceCategory(submittedCategory);
+  const category = classifySubmittedEvidenceCategory(submittedCategory);
   const classified = category !== 'uncategorized';
   const captureTimestamp = asString(input.payloadPhoto?.capturedAt)
     ?? asString(input.payloadPhoto?.timestamp)
@@ -313,7 +314,7 @@ function buildPayloadOnlyEvidenceItem(input: {
 }): SurveyEvidenceItem {
   const url = asString(input.payloadPhoto.url) ?? '';
   const submittedCategory = asString(input.payloadPhoto.category);
-  const category = normalizeSurveyEvidenceCategory(submittedCategory);
+  const category = classifySubmittedEvidenceCategory(submittedCategory);
   const classified = category !== 'uncategorized';
 
   return {
@@ -350,6 +351,12 @@ function buildPayloadOnlyEvidenceItem(input: {
     aiExtractionStatus: 'not_started',
     engineeringUsageReferences: [],
   };
+}
+
+function classifySubmittedEvidenceCategory(category: string | null | undefined): SurveyEvidenceCategory {
+  const exact = normalizeSurveyEvidenceCategory(category);
+  if (exact !== 'uncategorized') return exact;
+  return inferSurveyEvidenceCategoryFromText(category);
 }
 
 function buildCoverage(items: SurveyEvidenceItem[]): SurveyEvidenceCoverageGroup[] {
