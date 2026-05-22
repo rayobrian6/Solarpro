@@ -299,12 +299,16 @@ describe("marketplace purchase and revenue expansion", () => {
     const projection = buildMarketplaceIntelligence({
       ...gateRow(),
       purchase_intent: "ppa_or_lease",
-      finance_readiness: false,
+      finance_readiness: true,
       marketplace_intake_metadata: {
         ...intakeMetadata,
+        operational: {
+          ...intakeMetadata.operational,
+          financing_ready: true,
+        },
         qualification: {
           ...intakeMetadata.qualification,
-          finance_readiness: false,
+          finance_readiness: true,
           normalized: {
             purchase_intent: "ppa_or_lease",
           },
@@ -328,6 +332,16 @@ describe("marketplace purchase and revenue expansion", () => {
     expect(projection.purchase_profile.purchase_method_label).not.toContain(
       "Loan",
     );
+    expect(projection.badges.map((badge) => badge.label)).not.toContain(
+      "Financing Ready",
+    );
+    expect(projection.financing.likelihood_label).toBe(
+      "PPA/lease preference selected",
+    );
+    expect(projection.financing.payment_readiness_label).toBe(
+      "Third-party ownership path selected",
+    );
+    expect(projection.release.missing).not.toContain("financing_readiness");
   });
 
   it("degrades gracefully without inventing purchase economics", () => {

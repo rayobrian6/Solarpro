@@ -9,6 +9,7 @@ export interface MarketplaceBadgeInput {
   leadGrade?: string | null;
   qualificationStatus?: string | null;
   financeReadiness?: boolean | null;
+  purchaseIntent?: string | null;
   homeownerStatus?: string | null;
   timeline?: string | null;
   batteryCandidate?: boolean | null;
@@ -59,6 +60,11 @@ function isPositiveInterest(value: unknown): boolean {
   return !!normalized && ["yes", "true", "interested", "battery", "backup", "likely"].some(token => normalized.includes(token));
 }
 
+function isPpaOrLeasePreference(value: unknown): boolean {
+  const normalized = truthyString(value);
+  return !!normalized && ["ppa_or_lease", "ppa", "lease"].includes(normalized);
+}
+
 function hoursSince(value: string | null | undefined): number | null {
   if (!value) return null;
   const timestamp = new Date(value).getTime();
@@ -91,7 +97,10 @@ export function deriveMarketplaceBadges(input: MarketplaceBadgeInput): Marketpla
     push({ label: "AI Qualified", tone: "violet", reason: "Qualification intelligence marks the lead as strong", source: "qualification" });
   }
 
-  if (input.financeReadiness === true || evidence?.qualification.finance_readiness || evidence?.operator_review.financing_ready) {
+  const ppaOrLeasePreference = isPpaOrLeasePreference(input.purchaseIntent ?? evidence?.qualification.purchase_intent);
+  if (ppaOrLeasePreference) {
+    push({ label: "PPA/Lease Preference", tone: "blue", reason: "Qualification captured a third-party-owned system preference", source: "qualification" });
+  } else if (input.financeReadiness === true || evidence?.qualification.finance_readiness || evidence?.operator_review.financing_ready) {
     push({ label: "Financing Ready", tone: "emerald", reason: "Financing readiness is present in qualification or operator review", source: "qualification" });
   }
 

@@ -18,6 +18,7 @@ export interface FinancingIntelligenceInput {
   estimatedCreditBand?: string | null;
   monthlyBillAmount?: number | null;
   estimatedProjectValue?: number | null;
+  purchaseIntent?: string | null;
   qualificationStatus?: string | null;
   leadGrade?: string | null;
 }
@@ -41,11 +42,17 @@ export function deriveFinancingIntelligence(
     "Financing result is a deterministic readiness signal, not a credit approval or loan quote.",
   ];
   const gateEvidence = input.releaseGate.evidence;
+  const purchaseIntent = normalizedText(
+    input.purchaseIntent ?? gateEvidence.qualification.purchase_intent,
+  );
+  const ppaOrLeasePreference =
+    purchaseIntent === "ppa_or_lease" || purchaseIntent === "ppa" || purchaseIntent === "lease";
   const financeReady =
-    input.financeReadiness === true ||
-    gateEvidence.qualification.finance_readiness ||
-    gateEvidence.operator_review.financing_ready ||
-    gateEvidence.homeowner_intake.financing_interest;
+    !ppaOrLeasePreference &&
+    (input.financeReadiness === true ||
+      gateEvidence.qualification.finance_readiness ||
+      gateEvidence.operator_review.financing_ready ||
+      gateEvidence.homeowner_intake.financing_interest);
   const incomeBand = stringValue(input.estimatedIncomeBand);
   const creditBand = stringValue(input.estimatedCreditBand);
   const monthlyBill = numberValue(
@@ -59,6 +66,24 @@ export function deriveFinancingIntelligence(
   const grade = normalizedText(
     input.leadGrade ?? gateEvidence.qualification.lead_grade,
   );
+
+  if (ppaOrLeasePreference) {
+    return {
+      likelihood: "medium",
+      likelihood_label: "PPA/lease preference selected",
+      score: 55,
+      payment_readiness_label: "Third-party ownership path selected",
+      evidence: [
+        {
+          label: "System ownership preference",
+          value: displayText(purchaseIntent) ?? purchaseIntent ?? "PPA/lease",
+          source: "qualification",
+        },
+      ],
+      missing,
+      disclaimers,
+    };
+  }
 
   let score = 25;
   if (financeReady) {

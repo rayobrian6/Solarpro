@@ -328,6 +328,7 @@ export function buildMarketplaceIntelligence(
       enrichmentField(row, "core", "estimated_offset_pct"),
   );
   const estimatedPayback = numberValue(row.estimated_payback_yrs);
+  const purchaseIntent = stringValue(row.purchase_intent);
 
   const confidence = deriveMarketplaceConfidence({
     releaseGate,
@@ -348,6 +349,7 @@ export function buildMarketplaceIntelligence(
     leadGrade: stringValue(row.lead_grade),
     qualificationStatus: stringValue(row.qualification_status),
     financeReadiness: boolValue(row.finance_readiness),
+    purchaseIntent,
     homeownerStatus: stringValue(row.homeowner_status),
     timeline: stringValue(row.timeline),
     batteryCandidate: boolValue(row.battery_candidate),
@@ -393,6 +395,7 @@ export function buildMarketplaceIntelligence(
     estimatedCreditBand: stringValue(row.estimated_credit_band),
     monthlyBillAmount: monthlyBill,
     estimatedProjectValue,
+    purchaseIntent,
     qualificationStatus: stringValue(row.qualification_status),
     leadGrade: stringValue(row.lead_grade),
   });
@@ -447,6 +450,7 @@ export function buildMarketplaceIntelligence(
     estimatedAnnualSavings,
     estimatedOffsetPct: estimatedOffset,
     financeReadiness: boolValue(row.finance_readiness),
+    purchaseIntent,
     batteryCandidate: boolValue(row.battery_candidate),
     timeline: stringValue(row.timeline),
     leadGrade: stringValue(row.lead_grade ?? row.qualification_status),

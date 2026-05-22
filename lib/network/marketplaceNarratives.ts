@@ -14,6 +14,7 @@ export interface MarketplaceNarrativeInput {
   estimatedAnnualSavings?: number | null;
   estimatedOffsetPct?: number | null;
   financeReadiness?: boolean | null;
+  purchaseIntent?: string | null;
   batteryCandidate?: boolean | null;
   timeline?: string | null;
   leadGrade?: string | null;
@@ -79,6 +80,8 @@ export function buildMarketplaceNarrative(input: MarketplaceNarrativeInput): Mar
   const offsetPct = offset(input.estimatedOffsetPct);
   const timeline = display(input.timeline ?? input.releaseGate?.evidence.homeowner_intake.timeline);
   const grade = display(input.leadGrade ?? input.releaseGate?.evidence.qualification.lead_grade);
+  const purchaseIntent = String(input.purchaseIntent ?? input.releaseGate?.evidence.qualification.purchase_intent ?? "").toLowerCase();
+  const ppaOrLeasePreference = ["ppa_or_lease", "ppa", "lease"].includes(purchaseIntent);
 
   if (value) parts.push(`${value} estimated project`);
   if (system) parts.push(`${system} install potential`);
@@ -87,7 +90,8 @@ export function buildMarketplaceNarrative(input: MarketplaceNarrativeInput): Mar
 
   if (badgeLabels.has("Verified Bill")) bullets.push("Stored utility bill evidence supports the marketplace projection.");
   if (badgeLabels.has("Bill Parsed")) bullets.push("Bill intelligence is parsed and available for contractor review.");
-  if (input.financeReadiness || input.releaseGate?.evidence.qualification.finance_readiness || input.releaseGate?.evidence.operator_review.financing_ready) bullets.push("Financing readiness is present in qualification or operator review evidence.");
+  if (ppaOrLeasePreference) bullets.push("Qualification captured a PPA/lease third-party ownership preference.");
+  else if (input.financeReadiness || input.releaseGate?.evidence.qualification.finance_readiness || input.releaseGate?.evidence.operator_review.financing_ready) bullets.push("Financing readiness is present in qualification or operator review evidence.");
   if (input.batteryCandidate || badgeLabels.has("Battery Ready")) bullets.push("Battery attachment is supported by candidate flags or homeowner interest.");
   if (timeline) bullets.push(`Homeowner timeline: ${timeline}.`);
   if (monthlyBill) bullets.push(`Homeowner-entered monthly bill: ${monthlyBill}.`);

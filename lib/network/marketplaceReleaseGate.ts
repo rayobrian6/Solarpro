@@ -386,7 +386,10 @@ export function evaluateMarketplaceReleaseGate(row: MarketplaceGateRow): Marketp
   if (testOrSimulated) missing.push("not_test_or_simulated");
   if (!isLiveMarketplaceInventory && !evidence.homeowner_intake.present) missing.push("homeowner_intake_present");
   if (!isLiveMarketplaceInventory && !evidence.qualification.present) missing.push("qualification_present");
-  if (!isLiveMarketplaceInventory && !(evidence.operator_review.financing_ready || evidence.qualification.finance_readiness)) missing.push("financing_readiness");
+  const ppaOrLeasePreference = ["ppa_or_lease", "ppa", "lease"].includes(
+    String(evidence.qualification.purchase_intent ?? "").toLowerCase(),
+  );
+  if (!isLiveMarketplaceInventory && !(ppaOrLeasePreference || evidence.operator_review.financing_ready || evidence.qualification.finance_readiness)) missing.push("financing_readiness");
 
   const blockers = Array.from(new Set(missing));
   const warnings = billWarnings(evidence);
