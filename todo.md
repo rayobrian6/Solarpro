@@ -8,5 +8,5 @@
 
 ## Validate + Ship
 - [x] Run TypeScript and build validation.
-- [ ] Commit directly on dev and push dev.
-- [ ] Report exact result and limitation about external hosted map source.
+- [x] Commit directly on dev and push dev.
+- [x] Report exact result and limitation about external hosted map source.
