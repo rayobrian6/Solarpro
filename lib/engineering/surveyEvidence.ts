@@ -56,6 +56,21 @@ export interface EngineeringSurveyEvidence {
   completeness: 'missing' | 'partial' | 'sufficient';
   blockers: string[];
   warnings: string[];
+  manifestV1?: {
+    itemCount: number;
+    lifecycleState: 'uploaded' | 'classified' | 'quality_checked' | 'duplicate_checked' | 'ai_pending' | 'ai_processed' | 'engineering_reviewed' | 'permit_consumed' | 'archived';
+    aiExtractionStatus: 'not_started';
+    qualityStatus: 'not_processed';
+    duplicateStatus: 'not_processed';
+    engineeringBridge: {
+      readiness: 'blocked' | 'needs_review' | 'ready_for_engineering';
+      electricalEvidenceCount: number;
+      structuralEvidenceCount: number;
+      roofLayoutEvidenceCount: number;
+      sitePlanEvidenceCount: number;
+      cadAutomationStatus: 'not_started';
+    };
+  };
   fieldEvidence: {
     hasPhysicalData: boolean;
     hasRoofGeometry: boolean;
@@ -138,6 +153,25 @@ export function collectEngineeringSurveyEvidence(
         ? 'sufficient'
         : 'partial';
 
+  const electricalEvidenceCount = photos.filter(photo =>
+    photo.category === 'main_service_panel' ||
+    photo.category === 'subpanel' ||
+    photo.category === 'utility_meter' ||
+    photo.category === 'equipment_label' ||
+    photo.category === 'grounding_bonding',
+  ).length;
+  const structuralEvidenceCount = photos.filter(photo =>
+    photo.category === 'attic_rafter' ||
+    photo.category === 'roof_access',
+  ).length;
+  const roofLayoutEvidenceCount = photos.filter(photo =>
+    photo.category === 'roof_plane' ||
+    photo.category === 'roof_obstruction',
+  ).length;
+  const sitePlanEvidenceCount = photos.filter(photo =>
+    photo.category === 'site_exterior',
+  ).length;
+
   return {
     projectId: survey.projectId,
     surveyId: survey.id,
@@ -146,6 +180,21 @@ export function collectEngineeringSurveyEvidence(
     completeness,
     blockers,
     warnings,
+    manifestV1: {
+      itemCount: photos.length,
+      lifecycleState: photos.length > 0 ? 'classified' : 'uploaded',
+      aiExtractionStatus: 'not_started',
+      qualityStatus: 'not_processed',
+      duplicateStatus: 'not_processed',
+      engineeringBridge: {
+        readiness: completeness === 'sufficient' ? 'ready_for_engineering' : photos.length === 0 ? 'blocked' : 'needs_review',
+        electricalEvidenceCount,
+        structuralEvidenceCount,
+        roofLayoutEvidenceCount,
+        sitePlanEvidenceCount,
+        cadAutomationStatus: 'not_started',
+      },
+    },
     fieldEvidence: {
       hasPhysicalData: survey.derived.hasGeometryData || survey.derived.hasElectricalData || survey.derived.hasStructuralData,
       hasRoofGeometry: survey.derived.hasGeometryData,

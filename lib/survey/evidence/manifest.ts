@@ -1,0 +1,542 @@
+import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
+
+export type SurveyEvidenceDomain = 'electrical' | 'roof' | 'site' | 'general';
+
+export type SurveyEvidenceCategory =
+  | 'main_service_panel'
+  | 'subpanel'
+  | 'meter'
+  | 'disconnect'
+  | 'grounding'
+  | 'utility_connection'
+  | 'roof_plane'
+  | 'roof_edge'
+  | 'ridge'
+  | 'attic'
+  | 'rafters'
+  | 'obstructions'
+  | 'roof_surface'
+  | 'detached_structures'
+  | 'trench_path'
+  | 'battery_location'
+  | 'inverter_location'
+  | 'gateway_location'
+  | 'garage_interior_wall'
+  | 'attic_access'
+  | 'utility_access'
+  | 'overview'
+  | 'duplicate'
+  | 'blurry'
+  | 'unusable'
+  | 'uncategorized';
+
+export type SurveyEvidenceProcessingStatus =
+  | 'uploaded'
+  | 'classified'
+  | 'quality_checked'
+  | 'duplicate_checked'
+  | 'ai_pending'
+  | 'ai_processed'
+  | 'engineering_reviewed'
+  | 'permit_consumed'
+  | 'archived';
+
+export type SurveyEvidenceAiExtractionStatus =
+  | 'not_started'
+  | 'not_applicable'
+  | 'pending'
+  | 'processed'
+  | 'failed'
+  | 'review_required';
+
+export type SurveyEvidenceConfidence = 'unknown' | 'low' | 'medium' | 'high';
+
+export interface SurveyEvidenceImageMetadata {
+  widthPx: number | null;
+  heightPx: number | null;
+  orientation: string | null;
+}
+
+export interface SurveyEvidenceQuality {
+  blurScore: number | null;
+  duplicateScore: number | null;
+  warnings: string[];
+}
+
+export interface SurveyEvidenceHistoryEvent {
+  status: SurveyEvidenceProcessingStatus;
+  source: string;
+  at: string;
+  note?: string;
+}
+
+export interface SurveyEvidenceEngineeringUsageReference {
+  system: 'engineering' | 'permit' | 'cad' | 'structural' | 'electrical';
+  reference: string;
+  consumedAt?: string;
+}
+
+export interface SurveyEvidenceItem {
+  evidenceId: string;
+  projectId: string | null;
+  surveyId: string;
+  siteSurveyFileId: string | null;
+  projectFileId: string | null;
+  fileUrl: string;
+  blobKey: string | null;
+  filename: string | null;
+  mimeType: string | null;
+  submittedCategory: string | null;
+  category: SurveyEvidenceCategory;
+  domain: SurveyEvidenceDomain;
+  processingStatus: SurveyEvidenceProcessingStatus;
+  evidenceConfidence: SurveyEvidenceConfidence;
+  evidenceSource: 'site_survey_files' | 'survey_payload' | 'project_files' | 'manual' | 'derived';
+  captureTimestamp: string | null;
+  surveyTechnician: string | null;
+  image: SurveyEvidenceImageMetadata;
+  quality: SurveyEvidenceQuality;
+  sceneGroup: string | null;
+  processingHistory: SurveyEvidenceHistoryEvent[];
+  aiExtractionStatus: SurveyEvidenceAiExtractionStatus;
+  engineeringUsageReferences: SurveyEvidenceEngineeringUsageReference[];
+}
+
+export interface SurveyEvidenceCoverageGroup {
+  category: SurveyEvidenceCategory;
+  domain: SurveyEvidenceDomain;
+  required: boolean;
+  count: number;
+  status: 'missing' | 'present';
+}
+
+export interface SurveyEvidenceManifest {
+  manifestVersion: 1;
+  projectId: string | null;
+  surveyId: string;
+  generatedAt: string;
+  sourceOfTruth: 'site_surveys+site_survey_files';
+  surveyTechnician: string | null;
+  items: SurveyEvidenceItem[];
+  coverage: SurveyEvidenceCoverageGroup[];
+  requiredMissing: SurveyEvidenceCategory[];
+  warnings: string[];
+  summary: {
+    totalItems: number;
+    classifiedItems: number;
+    qualityCheckedItems: number;
+    duplicateCheckedItems: number;
+    aiProcessedItems: number;
+    engineeringReviewedItems: number;
+    permitConsumedItems: number;
+    confidence: SurveyEvidenceConfidence;
+    completeness: 'missing' | 'partial' | 'sufficient';
+  };
+  openSourceBoundaries: {
+    webRuntime: string[];
+    pythonWorker: string[];
+    futureOnly: string[];
+  };
+}
+
+export const REQUIRED_SURVEY_EVIDENCE_CATEGORIES: SurveyEvidenceCategory[] = [
+  'main_service_panel',
+  'meter',
+  'roof_plane',
+  'overview',
+];
+
+export const SURVEY_EVIDENCE_CATEGORY_DOMAIN: Record<SurveyEvidenceCategory, SurveyEvidenceDomain> = {
+  main_service_panel: 'electrical',
+  subpanel: 'electrical',
+  meter: 'electrical',
+  disconnect: 'electrical',
+  grounding: 'electrical',
+  utility_connection: 'electrical',
+  roof_plane: 'roof',
+  roof_edge: 'roof',
+  ridge: 'roof',
+  attic: 'roof',
+  rafters: 'roof',
+  obstructions: 'roof',
+  roof_surface: 'roof',
+  detached_structures: 'site',
+  trench_path: 'site',
+  battery_location: 'site',
+  inverter_location: 'site',
+  gateway_location: 'site',
+  garage_interior_wall: 'site',
+  attic_access: 'site',
+  utility_access: 'site',
+  overview: 'general',
+  duplicate: 'general',
+  blurry: 'general',
+  unusable: 'general',
+  uncategorized: 'general',
+};
+
+const CATEGORY_ALIASES: Record<string, SurveyEvidenceCategory> = {
+  main_panel_open: 'main_service_panel',
+  main_panel_closed: 'main_service_panel',
+  main_panel: 'main_service_panel',
+  msp: 'main_service_panel',
+  main_service_panel: 'main_service_panel',
+  sub_panel: 'subpanel',
+  subpanel: 'subpanel',
+  meter: 'meter',
+  utility_meter: 'meter',
+  disconnect: 'disconnect',
+  ac_disconnect: 'disconnect',
+  grounding: 'grounding',
+  grounding_bonding: 'grounding',
+  utility_connection: 'utility_connection',
+  service_entrance: 'utility_connection',
+  roof_overview: 'roof_plane',
+  roof_plane: 'roof_plane',
+  roof_detail: 'roof_surface',
+  roof_surface: 'roof_surface',
+  roof_edge: 'roof_edge',
+  ridge: 'ridge',
+  attic: 'attic',
+  attic_access: 'attic_access',
+  rafters: 'rafters',
+  attic_rafter: 'rafters',
+  rafter: 'rafters',
+  obstruction: 'obstructions',
+  obstructions: 'obstructions',
+  roof_obstruction: 'obstructions',
+  detached_structures: 'detached_structures',
+  trench_path: 'trench_path',
+  battery_location: 'battery_location',
+  inverter_location: 'inverter_location',
+  gateway_location: 'gateway_location',
+  garage_interior_wall: 'garage_interior_wall',
+  utility_access: 'utility_access',
+  site: 'overview',
+  site_overview: 'overview',
+  site_exterior: 'overview',
+  overview: 'overview',
+  additional: 'uncategorized',
+  unknown: 'uncategorized',
+  uncategorized: 'uncategorized',
+  duplicate: 'duplicate',
+  blurry: 'blurry',
+  unusable: 'unusable',
+};
+
+interface PayloadPhotoLike {
+  url?: unknown;
+  uploadKey?: unknown;
+  category?: unknown;
+  capturedAt?: unknown;
+  timestamp?: unknown;
+  createdAt?: unknown;
+  notes?: unknown;
+}
+
+export interface BuildSurveyEvidenceManifestInput {
+  survey: Pick<SiteSurvey, 'id' | 'projectId' | 'surveyData' | 'inspectorName'>;
+  files: SiteSurveyFile[];
+  generatedAt?: string;
+}
+
+export function normalizeSurveyEvidenceCategory(category: string | null | undefined): SurveyEvidenceCategory {
+  if (!category) return 'uncategorized';
+  const key = category.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return CATEGORY_ALIASES[key] ?? 'uncategorized';
+}
+
+export function getSurveyEvidenceDomain(category: SurveyEvidenceCategory): SurveyEvidenceDomain {
+  return SURVEY_EVIDENCE_CATEGORY_DOMAIN[category];
+}
+
+export function buildSurveyEvidenceManifest(input: BuildSurveyEvidenceManifestInput): SurveyEvidenceManifest {
+  const generatedAt = input.generatedAt ?? new Date().toISOString();
+  const payloadPhotos = extractPayloadPhotos(input.survey.surveyData);
+  const seenUrls = new Set<string>();
+
+  const items = input.files
+    .filter((file) => file.fileType === 'photo')
+    .map((file, index) => {
+      seenUrls.add(file.fileUrl);
+      return buildEvidenceItem({
+        survey: input.survey,
+        file,
+        index,
+        generatedAt,
+        payloadPhoto: findPayloadPhoto(file, payloadPhotos),
+      });
+    });
+
+  // If a payload photo was submitted but never made it into site_survey_files,
+  // expose it as a derived manifest item instead of hiding the evidence gap.
+  for (const payloadPhoto of payloadPhotos) {
+    const url = typeof payloadPhoto.url === 'string' ? payloadPhoto.url : '';
+    if (!url || seenUrls.has(url)) continue;
+    items.push(buildPayloadOnlyEvidenceItem({
+      survey: input.survey,
+      payloadPhoto,
+      index: items.length,
+      generatedAt,
+    }));
+  }
+
+  const coverage = buildCoverage(items);
+  const requiredMissing = coverage
+    .filter((group) => group.required && group.status === 'missing')
+    .map((group) => group.category);
+
+  const warnings: string[] = [];
+  if (items.length === 0) warnings.push('No survey photo evidence items are linked to this survey.');
+  for (const category of requiredMissing) {
+    warnings.push(`Missing required survey evidence category: ${category}`);
+  }
+
+  const classifiedItems = items.filter((item) => item.processingStatus !== 'uploaded').length;
+  const qualityCheckedItems = items.filter((item) => item.processingStatus === 'quality_checked').length;
+  const duplicateCheckedItems = items.filter((item) => item.processingStatus === 'duplicate_checked').length;
+  const aiProcessedItems = items.filter((item) => item.aiExtractionStatus === 'processed').length;
+  const engineeringReviewedItems = items.filter((item) => item.processingStatus === 'engineering_reviewed').length;
+  const permitConsumedItems = items.filter((item) => item.processingStatus === 'permit_consumed').length;
+  const completeness = items.length === 0
+    ? 'missing'
+    : requiredMissing.length === 0
+      ? 'sufficient'
+      : 'partial';
+
+  return {
+    manifestVersion: 1,
+    projectId: input.survey.projectId ?? null,
+    surveyId: input.survey.id,
+    generatedAt,
+    sourceOfTruth: 'site_surveys+site_survey_files',
+    surveyTechnician: input.survey.inspectorName ?? extractTechnician(input.survey.surveyData),
+    items,
+    coverage,
+    requiredMissing,
+    warnings,
+    summary: {
+      totalItems: items.length,
+      classifiedItems,
+      qualityCheckedItems,
+      duplicateCheckedItems,
+      aiProcessedItems,
+      engineeringReviewedItems,
+      permitConsumedItems,
+      confidence: completeness === 'sufficient' ? 'high' : items.length > 0 ? 'medium' : 'unknown',
+      completeness,
+    },
+    openSourceBoundaries: {
+      webRuntime: [
+        'deterministic manifest construction',
+        'category coverage warnings',
+        'admin/project evidence viewer',
+        'engineering/permit evidence summary',
+      ],
+      pythonWorker: [
+        'OpenCV blur/orientation/duplicate scoring',
+        'YOLO/Supervision detection candidates',
+        'targeted OCR extraction candidates',
+      ],
+      futureOnly: [
+        'Open3D geometry reasoning',
+        'FreeCAD automation',
+        'Detectron2 segmentation',
+        'Label Studio dataset workflows',
+      ],
+    },
+  };
+}
+
+function buildEvidenceItem(input: {
+  survey: Pick<SiteSurvey, 'id' | 'projectId' | 'surveyData' | 'inspectorName'>;
+  file: SiteSurveyFile;
+  payloadPhoto: PayloadPhotoLike | null;
+  index: number;
+  generatedAt: string;
+}): SurveyEvidenceItem {
+  const submittedCategory = input.file.label ?? asString(input.payloadPhoto?.category);
+  const category = normalizeSurveyEvidenceCategory(submittedCategory);
+  const classified = category !== 'uncategorized';
+  const captureTimestamp = asString(input.payloadPhoto?.capturedAt)
+    ?? asString(input.payloadPhoto?.timestamp)
+    ?? asString(input.payloadPhoto?.createdAt)
+    ?? input.file.createdAt
+    ?? null;
+
+  return {
+    evidenceId: stableEvidenceId(input.survey.id, input.file.id || input.file.fileUrl, input.index),
+    projectId: input.survey.projectId ?? null,
+    surveyId: input.survey.id,
+    siteSurveyFileId: input.file.id,
+    projectFileId: null,
+    fileUrl: input.file.fileUrl,
+    blobKey: asString(input.payloadPhoto?.uploadKey) ?? inferBlobKey(input.file.fileUrl),
+    filename: input.file.filename,
+    mimeType: input.file.mimeType,
+    submittedCategory: submittedCategory ?? null,
+    category,
+    domain: getSurveyEvidenceDomain(category),
+    processingStatus: classified ? 'classified' : 'uploaded',
+    evidenceConfidence: classified ? 'high' : 'unknown',
+    evidenceSource: 'site_survey_files',
+    captureTimestamp,
+    surveyTechnician: input.survey.inspectorName ?? extractTechnician(input.survey.surveyData),
+    image: { widthPx: null, heightPx: null, orientation: null },
+    quality: { blurScore: null, duplicateScore: null, warnings: [] },
+    sceneGroup: null,
+    processingHistory: [
+      {
+        status: 'uploaded',
+        source: 'survey_ingest',
+        at: input.file.createdAt ?? input.generatedAt,
+        note: 'Photo linked from site_survey_files; image quality and duplicate analysis not processed in v1.',
+      },
+      ...(classified ? [{
+        status: 'classified' as const,
+        source: 'category_mapper_v1',
+        at: input.generatedAt,
+        note: `Submitted category "${submittedCategory}" mapped to evidence category "${category}".`,
+      }] : []),
+    ],
+    aiExtractionStatus: 'not_started',
+    engineeringUsageReferences: [],
+  };
+}
+
+function buildPayloadOnlyEvidenceItem(input: {
+  survey: Pick<SiteSurvey, 'id' | 'projectId' | 'surveyData' | 'inspectorName'>;
+  payloadPhoto: PayloadPhotoLike;
+  index: number;
+  generatedAt: string;
+}): SurveyEvidenceItem {
+  const url = asString(input.payloadPhoto.url) ?? '';
+  const submittedCategory = asString(input.payloadPhoto.category);
+  const category = normalizeSurveyEvidenceCategory(submittedCategory);
+  const classified = category !== 'uncategorized';
+
+  return {
+    evidenceId: stableEvidenceId(input.survey.id, url || 'payload-photo', input.index),
+    projectId: input.survey.projectId ?? null,
+    surveyId: input.survey.id,
+    siteSurveyFileId: null,
+    projectFileId: null,
+    fileUrl: url,
+    blobKey: asString(input.payloadPhoto.uploadKey) ?? inferBlobKey(url),
+    filename: null,
+    mimeType: null,
+    submittedCategory: submittedCategory ?? null,
+    category,
+    domain: getSurveyEvidenceDomain(category),
+    processingStatus: classified ? 'classified' : 'uploaded',
+    evidenceConfidence: classified ? 'medium' : 'unknown',
+    evidenceSource: 'survey_payload',
+    captureTimestamp: asString(input.payloadPhoto.capturedAt)
+      ?? asString(input.payloadPhoto.timestamp)
+      ?? asString(input.payloadPhoto.createdAt),
+    surveyTechnician: input.survey.inspectorName ?? extractTechnician(input.survey.surveyData),
+    image: { widthPx: null, heightPx: null, orientation: null },
+    quality: { blurScore: null, duplicateScore: null, warnings: ['Photo exists in survey payload but was not found in site_survey_files.'] },
+    sceneGroup: null,
+    processingHistory: [
+      {
+        status: 'uploaded',
+        source: 'survey_payload',
+        at: input.generatedAt,
+        note: 'Payload photo was included in manifest because no matching site_survey_files row was found.',
+      },
+    ],
+    aiExtractionStatus: 'not_started',
+    engineeringUsageReferences: [],
+  };
+}
+
+function buildCoverage(items: SurveyEvidenceItem[]): SurveyEvidenceCoverageGroup[] {
+  const tracked: SurveyEvidenceCategory[] = [
+    'main_service_panel',
+    'subpanel',
+    'meter',
+    'disconnect',
+    'grounding',
+    'utility_connection',
+    'roof_plane',
+    'roof_edge',
+    'ridge',
+    'attic',
+    'rafters',
+    'obstructions',
+    'roof_surface',
+    'detached_structures',
+    'trench_path',
+    'battery_location',
+    'inverter_location',
+    'gateway_location',
+    'garage_interior_wall',
+    'attic_access',
+    'utility_access',
+    'overview',
+    'duplicate',
+    'blurry',
+    'unusable',
+    'uncategorized',
+  ];
+
+  return tracked.map((category) => {
+    const count = items.filter((item) => item.category === category).length;
+    return {
+      category,
+      domain: getSurveyEvidenceDomain(category),
+      required: REQUIRED_SURVEY_EVIDENCE_CATEGORIES.includes(category),
+      count,
+      status: count > 0 ? 'present' : 'missing',
+    };
+  });
+}
+
+function extractPayloadPhotos(surveyData: Record<string, unknown> | null | undefined): PayloadPhotoLike[] {
+  if (!surveyData || typeof surveyData !== 'object') return [];
+  const photos = (surveyData as { photos?: unknown }).photos;
+  if (!Array.isArray(photos)) return [];
+  return photos.filter((photo): photo is PayloadPhotoLike => typeof photo === 'object' && photo !== null);
+}
+
+function findPayloadPhoto(file: SiteSurveyFile, payloadPhotos: PayloadPhotoLike[]): PayloadPhotoLike | null {
+  return payloadPhotos.find((photo) => {
+    const url = asString(photo.url);
+    if (url && url === file.fileUrl) return true;
+    const category = asString(photo.category);
+    return Boolean(category && file.label && category === file.label);
+  }) ?? null;
+}
+
+function extractTechnician(surveyData: Record<string, unknown> | null | undefined): string | null {
+  if (!surveyData || typeof surveyData !== 'object') return null;
+  const rootInspector = asString((surveyData as { inspector_name?: unknown }).inspector_name);
+  if (rootInspector) return rootInspector;
+  const siteOverview = (surveyData as { siteOverview?: unknown }).siteOverview;
+  if (siteOverview && typeof siteOverview === 'object') {
+    return asString((siteOverview as { inspectorName?: unknown }).inspectorName);
+  }
+  return null;
+}
+
+function stableEvidenceId(surveyId: string, source: string, index: number): string {
+  const input = `${surveyId}:${source}:${index}`;
+  let hash = 0;
+  for (let i = 0; i < input.length; i += 1) {
+    hash = ((hash << 5) - hash + input.charCodeAt(i)) | 0;
+  }
+  return `ev_${Math.abs(hash).toString(36).padStart(6, '0')}`;
+}
+
+function inferBlobKey(url: string): string | null {
+  if (!url) return null;
+  const marker = '/surveys/';
+  const idx = url.indexOf(marker);
+  if (idx >= 0) return url.slice(idx + 1);
+  return null;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}

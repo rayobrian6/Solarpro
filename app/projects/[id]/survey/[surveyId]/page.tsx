@@ -37,6 +37,11 @@ import {
 } from 'lucide-react';
 import type { SiteSurvey, SiteSurveyFile } from '@/lib/db-neon';
 import type {
+  SurveyEvidenceCategory,
+  SurveyEvidenceDomain,
+  SurveyEvidenceManifest,
+} from '@/lib/survey/evidence/manifest';
+import type {
   SurveyV2Payload,
   SurveyElectricalService,
   SurveyRoofConditions,
@@ -433,6 +438,157 @@ function PhotosSection({ files }: { files: SiteSurveyFile[] }) {
   );
 }
 
+const DOMAIN_LABELS: Record<SurveyEvidenceDomain, string> = {
+  electrical: 'Electrical',
+  roof: 'Roof',
+  site: 'Site',
+  general: 'General',
+};
+
+const DOMAIN_COLORS: Record<SurveyEvidenceDomain, string> = {
+  electrical: 'text-yellow-300 border-yellow-500/20 bg-yellow-500/10',
+  roof: 'text-amber-300 border-amber-500/20 bg-amber-500/10',
+  site: 'text-cyan-300 border-cyan-500/20 bg-cyan-500/10',
+  general: 'text-slate-300 border-slate-500/20 bg-slate-500/10',
+};
+
+function evidenceCategoryLabel(category: SurveyEvidenceCategory): string {
+  return category.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function SurveyEvidenceViewer({ manifest }: { manifest: SurveyEvidenceManifest | null | undefined }) {
+  if (!manifest) {
+    return (
+      <SectionCard icon={<Shield size={14} />} title="Survey Evidence Manifest" iconColor="text-cyan-400">
+        <p className="text-xs text-slate-500">No evidence manifest is available for this survey.</p>
+      </SectionCard>
+    );
+  }
+
+  const grouped = manifest.items.reduce<Record<SurveyEvidenceDomain, typeof manifest.items>>((acc, item) => {
+    if (!acc[item.domain]) acc[item.domain] = [];
+    acc[item.domain].push(item);
+    return acc;
+  }, { electrical: [], roof: [], site: [], general: [] });
+
+  const requiredCoverage = manifest.coverage.filter(group => group.required);
+  const statusColor = manifest.summary.completeness === 'sufficient'
+    ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20'
+    : manifest.summary.completeness === 'partial'
+      ? 'text-amber-300 bg-amber-500/10 border-amber-500/20'
+      : 'text-red-300 bg-red-500/10 border-red-500/20';
+
+  return (
+    <SectionCard icon={<Shield size={14} />} title="Survey Evidence Manifest v1" iconColor="text-cyan-400">
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">Evidence Items</p>
+            <p className="text-lg font-bold text-white">{manifest.summary.totalItems}</p>
+          </div>
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">Classified</p>
+            <p className="text-lg font-bold text-white">{manifest.summary.classifiedItems}</p>
+          </div>
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">Quality Checked</p>
+            <p className="text-lg font-bold text-white">{manifest.summary.qualityCheckedItems}</p>
+          </div>
+          <div className={`rounded-xl border p-3 ${statusColor}`}>
+            <p className="text-[10px] uppercase tracking-wider opacity-80">Completeness</p>
+            <p className="text-lg font-bold capitalize">{manifest.summary.completeness}</p>
+          </div>
+        </div>
+
+        <div>
+          <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Required evidence coverage</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {requiredCoverage.map(group => (
+              <div
+                key={group.category}
+                className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
+                  group.status === 'present'
+                    ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+                    : 'border-red-500/20 bg-red-500/10 text-red-300'
+                }`}
+              >
+                <span className="text-xs font-medium">{evidenceCategoryLabel(group.category)}</span>
+                <span className="text-[10px] font-semibold uppercase">{group.status} ({group.count})</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {manifest.warnings.length > 0 && (
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
+            <div className="flex items-center gap-2 mb-2 text-amber-300">
+              <AlertTriangle size={13} />
+              <p className="text-xs font-semibold">Evidence warnings</p>
+            </div>
+            <ul className="space-y-1">
+              {manifest.warnings.map((warning, i) => (
+                <li key={`${warning}-${i}`} className="text-[11px] text-amber-100/80">- {warning}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="space-y-4">
+          {(Object.keys(grouped) as SurveyEvidenceDomain[]).map(domain => {
+            const items = grouped[domain];
+            if (items.length === 0) return null;
+            return (
+              <div key={domain}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className={`text-[10px] font-bold uppercase tracking-wider rounded-full border px-2 py-1 ${DOMAIN_COLORS[domain]}`}>
+                    {DOMAIN_LABELS[domain]}
+                  </span>
+                  <span className="text-xs text-slate-600">{items.length} item(s)</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {items.map(item => (
+                    <a
+                      key={item.evidenceId}
+                      href={item.fileUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-3 hover:border-cyan-500/40 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-slate-200 truncate">{evidenceCategoryLabel(item.category)}</p>
+                          <p className="text-[10px] text-slate-500 truncate">{item.submittedCategory ?? 'uncategorized'} | {item.filename ?? item.evidenceId}</p>
+                        </div>
+                        <span className="text-[9px] uppercase rounded-full border border-cyan-500/20 bg-cyan-500/10 text-cyan-300 px-2 py-0.5">
+                          {item.processingStatus}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 mt-3 text-[10px] text-slate-500">
+                        <span>AI: <b className="text-slate-300">{item.aiExtractionStatus}</b></span>
+                        <span>Confidence: <b className="text-slate-300">{item.evidenceConfidence}</b></span>
+                        <span>Blur: <b className="text-slate-300">{item.quality.blurScore ?? 'not checked'}</b></span>
+                        <span>Duplicate: <b className="text-slate-300">{item.quality.duplicateScore ?? 'not checked'}</b></span>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="rounded-xl border border-slate-700/50 bg-slate-950/40 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Runtime boundary</p>
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            v1 is deterministic web-runtime evidence organization only. OpenCV quality scoring, duplicate detection,
+            YOLO/Supervision, OCR, Claude reasoning, Open3D, and FreeCAD remain external worker or future-only stages.
+          </p>
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // 2. ELECTRICAL section
 // ---------------------------------------------------------------------------
@@ -719,6 +875,7 @@ function StatusBadge({ status }: { status: SiteSurvey['status'] }) {
 interface SurveyDetailData {
   survey: SiteSurvey;
   files: SiteSurveyFile[];
+  evidenceManifest?: SurveyEvidenceManifest;
 }
 
 export default function SurveyDetailPage() {
@@ -783,7 +940,7 @@ export default function SurveyDetailPage() {
     );
   }
 
-  const { survey, files } = detail;
+  const { survey, files, evidenceManifest } = detail;
 
   // ---------------------------------------------------------------------------
   // Determine payload version:
@@ -858,6 +1015,9 @@ export default function SurveyDetailPage() {
 
         {/* 1. Photos — always shown (from site_survey_files) */}
         <PhotosSection files={files} />
+
+        {/* 1b. Survey Evidence Manifest — structured engineering evidence view */}
+        <SurveyEvidenceViewer manifest={evidenceManifest} />
 
         {/* ------------------------------------------------------------------ */}
         {/* Typed V2 sections                                                   */}

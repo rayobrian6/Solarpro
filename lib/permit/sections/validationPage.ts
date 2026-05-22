@@ -168,6 +168,21 @@ export function pageValidationSummary(
     : surveyEvidence?.completeness === 'partial'
       ? '#b45309'
       : '#cc0000';
+  const manifestV1 = surveyEvidence?.manifestV1 ?? {
+    itemCount: surveyEvidence?.photos.length ?? 0,
+    lifecycleState: surveyEvidence?.photos.length ? 'classified' : 'uploaded',
+    aiExtractionStatus: 'not_started',
+    qualityStatus: 'not_processed',
+    duplicateStatus: 'not_processed',
+    engineeringBridge: {
+      readiness: surveyEvidence?.completeness === 'sufficient' ? 'ready_for_engineering' : surveyEvidence?.photos.length ? 'needs_review' : 'blocked',
+      electricalEvidenceCount: 0,
+      structuralEvidenceCount: 0,
+      roofLayoutEvidenceCount: 0,
+      sitePlanEvidenceCount: 0,
+      cadAutomationStatus: 'not_started',
+    },
+  };
   const surveyEvidenceSummary = surveyEvidence
     ? `${surveyEvidence.photos.length} photo(s) | completeness: ${surveyEvidence.completeness.toUpperCase()} | normalized: ${surveyEvidence.source.normalizedAt}`
     : 'No survey evidence attached to this permit run';
@@ -186,10 +201,12 @@ export function pageValidationSummary(
     ? [...surveyEvidence.blockers, ...surveyEvidence.warnings].slice(0, 6)
     : ['No normalized survey evidence object was provided; plan-set assumptions are based on design/canonical inputs only.'];
   const surveyFieldEvidenceRows = surveyEvidence ? [
+    ['Evidence Manifest v1', `items: ${manifestV1.itemCount} | lifecycle: ${manifestV1.lifecycleState} | quality: ${manifestV1.qualityStatus} | duplicates: ${manifestV1.duplicateStatus} | AI: ${manifestV1.aiExtractionStatus} | engineering readiness: ${manifestV1.engineeringBridge.readiness} | CAD automation: ${manifestV1.engineeringBridge.cadAutomationStatus}`],
     ['Physical Data', surveyEvidence.fieldEvidence.hasPhysicalData ? 'present' : 'missing'],
     ['Roof Geometry', `${surveyEvidence.fieldEvidence.hasRoofGeometry ? 'present' : 'missing'} | planes: ${surveyEvidence.fieldEvidence.roofPlaneCount} | usable area: ${surveyEvidence.fieldEvidence.usableAreaSqFt ?? '—'} sq ft`],
-    ['Electrical', `${surveyEvidence.fieldEvidence.hasElectricalData ? 'present' : 'missing'} | MSP: ${surveyEvidence.fieldEvidence.mainPanelRatingAmps ?? '—'}A | Busbar: ${surveyEvidence.fieldEvidence.busbarRatingAmps ?? '—'}A`],
-    ['Structural', `${surveyEvidence.fieldEvidence.hasStructuralData ? 'present' : 'missing'} | ${surveyEvidence.fieldEvidence.rafterSize ?? '—'} @ ${surveyEvidence.fieldEvidence.rafterSpacingInches ?? '—'} in O.C. | ${surveyEvidence.fieldEvidence.roofMaterial ?? '—'}`],
+    ['Electrical', `${surveyEvidence.fieldEvidence.hasElectricalData ? 'present' : 'missing'} | MSP: ${surveyEvidence.fieldEvidence.mainPanelRatingAmps ?? '—'}A | Busbar: ${surveyEvidence.fieldEvidence.busbarRatingAmps ?? '—'}A | evidence items: ${manifestV1.engineeringBridge.electricalEvidenceCount}`],
+    ['Structural', `${surveyEvidence.fieldEvidence.hasStructuralData ? 'present' : 'missing'} | ${surveyEvidence.fieldEvidence.rafterSize ?? '—'} @ ${surveyEvidence.fieldEvidence.rafterSpacingInches ?? '—'} in O.C. | ${surveyEvidence.fieldEvidence.roofMaterial ?? '—'} | evidence items: ${manifestV1.engineeringBridge.structuralEvidenceCount}`],
+    ['Layout / Site Evidence', `roof/layout items: ${manifestV1.engineeringBridge.roofLayoutEvidenceCount} | site-plan items: ${manifestV1.engineeringBridge.sitePlanEvidenceCount}`],
   ] : [
     ['Physical Data', 'No survey evidence attached'],
     ['Roof Geometry', 'Not traceable to survey evidence in this permit run'],

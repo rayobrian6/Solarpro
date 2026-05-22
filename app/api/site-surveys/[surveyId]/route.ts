@@ -13,6 +13,7 @@ import {
   updateSiteSurvey,
   isValidUUID,
 } from '@/lib/db-neon';
+import { buildSurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
 
 // ---------------------------------------------------------------------------
 // GET — survey detail + all files
@@ -39,7 +40,9 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Survey not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ success: true, data: { survey, files } });
+    const evidenceManifest = buildSurveyEvidenceManifest({ survey, files });
+
+    return NextResponse.json({ success: true, data: { survey, files, evidenceManifest } });
   } catch (err) {
     console.error('[GET /api/site-surveys/[surveyId]]', err);
     return NextResponse.json({ success: false, error: 'Failed to load survey' }, { status: 500 });
