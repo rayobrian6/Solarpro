@@ -12,5 +12,5 @@
 
 ## Validation + Git
 - [x] Run TypeScript/lint/build validation.
-- [ ] Commit directly on dev and push dev.
-- [ ] Report correction and any limitations.
+- [x] Commit directly on dev and push dev.
+- [x] Report correction and any limitations.
