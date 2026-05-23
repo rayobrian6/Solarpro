@@ -23,5 +23,5 @@
 - [x] Run npm run type-check
 - [x] Run npm run build
 - [x] Run prohibited boundary scan
-- [ ] Commit and push changes
-- [ ] Final summary with structures, bindings, dependency graph, integrations, guards, tests, validation, provenance-aware generators, and no CV/OCR/CAD/image-byte confirmation
+- [x] Commit and push changes
+- [x] Final summary with structures, bindings, dependency graph, integrations, guards, tests, validation, provenance-aware generators, and no CV/OCR/CAD/image-byte confirmation
