@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import { verifyToken } from '@/lib/auth';
+import { isValidUUID } from '@/lib/db-neon';
 import { hydrateProjectEngineeringIntelligenceFromDb, buildEngineeringIntelligenceWorkspace, buildCADReadinessMetadata } from '@/lib/engineeringIntelligence';
 import { buildFieldEvidenceOrchestrationModel } from '@/lib/survey/evidence/fieldOrchestration';
 import {
@@ -25,9 +26,12 @@ export const metadata = {
 export default async function ProjectEngineeringIntelligencePage({ params }: { params: { id: string } }) {
   const token = cookies().get('solarpro_session')?.value;
   const sessionUser = token ? verifyToken(token) : null;
-  const hydration = sessionUser?.id
-    ? await hydrateProjectEngineeringIntelligenceFromDb({ projectId: params.id, userId: sessionUser.id })
-    : emptyProjectHydration(params.id);
+  const hasValidProjectId = isValidUUID(params.id);
+  const hydration = !hasValidProjectId
+    ? invalidProjectHydration(params.id)
+    : sessionUser?.id
+      ? await hydrateProjectEngineeringIntelligenceFromDb({ projectId: params.id, userId: sessionUser.id })
+      : emptyProjectHydration(params.id);
   const model = hydration.workspace;
   const fieldEvidenceOrchestration = buildFieldEvidenceOrchestrationModel();
 
@@ -51,6 +55,30 @@ export default async function ProjectEngineeringIntelligencePage({ params }: { p
       <AuditGuardWorkspace audit={model.auditGuards} />
     </WorkspaceShell>
   );
+}
+
+function invalidProjectHydration(projectId: string) {
+  const workspace = buildEngineeringIntelligenceWorkspace({ projectId });
+  return {
+    projectId,
+    generatedAt: new Date(0).toISOString(),
+    source: 'not_loaded' as const,
+    surveyCount: 0,
+    canonicalSurveyId: null,
+    surveyEvidence: null,
+    workspaceInput: { projectId },
+    workspace,
+    stateGraph: null,
+    snapshots: [],
+    invalidationResult: null,
+    regenerationPlans: [],
+    cadReadiness: buildCADReadinessMetadata({ projectId }),
+    deterministicNotes: [
+      'Project engineering hydration did not run because the route parameter is not a valid project UUID.',
+      'Use the Project Intelligence Picker or an existing project/survey/permit/engineering entry point to open a real project id.',
+      'Workspace remains registry/empty-state and does not synthesize project evidence, graph edges, snapshots, invalidation history, or CAD metadata.',
+    ],
+  };
 }
 
 function emptyProjectHydration(projectId: string) {

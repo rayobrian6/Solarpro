@@ -26,7 +26,7 @@ export default function AdminEngineering() {
 
   const intelligenceRoutes = [
     { href: '/admin/engineering-intelligence', label: 'Engineering Intelligence', icon: Network, description: 'System-level deterministic engineering-state workspace.' },
-    { href: '/admin/engineering-intelligence/project/demo', label: 'Project Intelligence', icon: GitBranch, description: 'Project-scoped evidence, requirements, decisions, and stale-state view.' },
+    { href: '/admin/engineering-intelligence', label: 'Project Intelligence Picker', icon: GitBranch, description: 'Select a real project UUID before opening project-scoped evidence, requirements, decisions, and stale-state view.' },
     { href: '/admin/engineering-intelligence/snapshots', label: 'Snapshot Timeline', icon: History, description: 'Persistent snapshots, hashes, diffs, and transition timeline.' },
     { href: '/admin/engineering-intelligence/graph', label: 'Dependency Graph', icon: Share2, description: 'Deterministic dependency graph across evidence, decisions, outputs, and plans.' },
   ];

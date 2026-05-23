@@ -1,23 +1,22 @@
-# Live Engineering State Hydration + Field Evidence Orchestration
+# Real Project Hydration Routing + Live Engineering State Loading
 
-## Repository and architecture audit
-- [x] Verify dev branch and clean/current repo state
-- [x] Inspect existing Engineering Intelligence workspace builder and persistence inputs
-- [x] Inspect canonical survey/evidence, requirement evaluation, invalidation, graph, and snapshot modules
-- [x] Inspect survey app/workflow structures and CAD/geometry metadata surfaces
+## Audit
+- [x] Verify branch/status and current Engineering Intelligence route state
+- [x] Find demo/default project intelligence entry points and placeholder project IDs
+- [x] Inspect project, survey, permit, engineering output, and admin project navigation surfaces
 
 ## Implementation
-- [x] Add deterministic field evidence orchestration model with technician movement ordering
-- [x] Add CAD readiness metadata model without CAD generation
-- [x] Add project hydration adapter for canonical evidence, requirements, graph edges, invalidation, snapshots, and regeneration planning
-- [x] Wire project Engineering Intelligence route to hydrated project state
-- [x] Improve graph edge, invalidation, snapshot, and regeneration panels to surface hydrated state clearly
-- [x] Add deterministic tests for orchestration, CAD readiness, and project hydration
+- [x] Replace demo project intelligence links with deterministic real-project routing
+- [x] Add project-selection UX for Engineering Intelligence using real projects
+- [x] Add navigation entry points from project detail/admin projects list and available survey/permit/engineering surfaces
+- [x] Preserve explicit empty states for no evidence/snapshots/graph/invalidation without fabricated state
+- [x] Ensure graph/CAD/field evidence hydration remains canonical and duplicate-aware
 
-## Reports
-- [x] Create live engineering state hydration v1 report
-- [x] Create field evidence orchestration v1 report
-- [x] Create CAD readiness metadata v1 report
+## Tests and reports
+- [x] Add deterministic tests for project picker/navigation and demo route removal
+- [x] Create real project hydration routing v1 report
+- [x] Create live project graph hydration v1 report
+- [x] Create engineering intelligence project picker v1 report
 
 ## Validation
 - [x] Run topology check
@@ -29,6 +28,6 @@
 
 ## Commit and push
 - [x] Review diff/status
-- [x] Commit directly to dev
-- [x] Push dev safely without printing token
-- [x] Final summary with exact validation results
+- [ ] Commit changes
+- [ ] Push dev safely without printing token
+- [ ] Final summary with exact validation results

@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, RefreshCw, Trash2, RotateCcw, CheckCircle, AlertCircle, ExternalLink, ChevronRight } from 'lucide-react';
+import { Search, RefreshCw, Trash2, RotateCcw, CheckCircle, AlertCircle, ExternalLink, ChevronRight, GitBranch } from 'lucide-react';
 
 const STATUS_COLORS: Record<string, string> = {
   lead:      'bg-blue-500/20 text-blue-400',
@@ -172,6 +172,13 @@ export default function AdminProjects() {
                       >
                         <ExternalLink size={13} />
                       </a>
+                      <button
+                        onClick={() => router.push(`/admin/engineering-intelligence/project/${p.id}`)}
+                        title="Open Engineering Intelligence"
+                        className="p-1.5 rounded-lg text-sky-400 hover:bg-sky-500/10 transition-colors"
+                      >
+                        <GitBranch size={13} />
+                      </button>
                       {p.deleted_at ? (
                         <button onClick={() => act(p.id, 'restore')} title="Restore" className="p-1.5 rounded-lg text-green-400 hover:bg-green-500/10 transition-colors">
                           <RotateCcw size={13} />

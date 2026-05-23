@@ -39,7 +39,7 @@ const NAV_SECTIONS = [
     items: [
       { href: '/admin/engineering', label: 'Engineering Monitor', icon: Cpu },
       { href: '/admin/engineering-intelligence', label: 'Engineering Intelligence', icon: Network },
-      { href: '/admin/engineering-intelligence/project/demo', label: 'Project Intelligence', icon: GitBranch },
+      { href: '/admin/engineering-intelligence', label: 'Project Intelligence Picker', icon: GitBranch },
       { href: '/admin/engineering-intelligence/snapshots', label: 'Snapshot Timeline', icon: History },
       { href: '/admin/engineering-intelligence/graph', label: 'Dependency Graph', icon: Share2 },
       { href: '/admin/incentives',  label: 'Incentives',  icon: Zap },

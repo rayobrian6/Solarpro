@@ -16,9 +16,14 @@ const engineeringIntelligenceRoutes = [
 const requiredNavigationTargets = [
   '/admin/engineering',
   '/admin/engineering-intelligence',
-  '/admin/engineering-intelligence/project/demo',
   '/admin/engineering-intelligence/snapshots',
   '/admin/engineering-intelligence/graph',
+];
+
+const prohibitedDemoTargets = [
+  '/admin/engineering-intelligence/project/demo',
+  'project/demo',
+  'no_project_data demo route',
 ];
 
 describe('Engineering Intelligence admin route integration', () => {
@@ -37,9 +42,43 @@ describe('Engineering Intelligence admin route integration', () => {
 
     expect(adminShell).toContain("label: 'Engineering Monitor'");
     expect(adminShell).toContain("label: 'Engineering Intelligence'");
-    expect(adminShell).toContain("label: 'Project Intelligence'");
+    expect(adminShell).toContain("label: 'Project Intelligence Picker'");
     expect(adminShell).toContain("label: 'Snapshot Timeline'");
     expect(adminShell).toContain("label: 'Dependency Graph'");
+  });
+
+  it('removes demo-only project intelligence entry points from admin routing', () => {
+    const checkedFiles = [
+      'app/admin/AdminShell.tsx',
+      'app/admin/engineering/page.tsx',
+      'app/admin/engineering-intelligence/components.tsx',
+      'app/admin/engineering-intelligence/page.tsx',
+      'app/admin/engineering-intelligence/project/[id]/page.tsx',
+    ];
+
+    for (const file of checkedFiles) {
+      const content = read(file);
+      for (const prohibited of prohibitedDemoTargets) {
+        expect(content, `${file} should not contain ${prohibited}`).not.toContain(prohibited);
+      }
+    }
+  });
+
+  it('exposes a deterministic real-project picker instead of a placeholder project id', () => {
+    const pickerPage = read('app/admin/engineering-intelligence/page.tsx');
+    const components = read('app/admin/engineering-intelligence/components.tsx');
+    const projectRoute = read('app/admin/engineering-intelligence/project/[id]/page.tsx');
+    const adminProjects = read('app/admin/projects/page.tsx');
+
+    expect(pickerPage).toContain('getProjectsByUser');
+    expect(pickerPage).toContain('loadProjectPickerRecords');
+    expect(components).toContain('ProjectIntelligencePicker');
+    expect(components).toContain('/admin/engineering-intelligence/project/${project.id}');
+    expect(components).toContain('no_projects');
+    expect(components).toContain('select_real_project');
+    expect(projectRoute).toContain('isValidUUID(params.id)');
+    expect(projectRoute).toContain('invalidProjectHydration');
+    expect(adminProjects).toContain('/admin/engineering-intelligence/project/${p.id}');
   });
 
   it('uses path-safe active matching so legacy monitor does not shadow intelligence routes', () => {

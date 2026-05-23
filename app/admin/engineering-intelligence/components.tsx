@@ -15,6 +15,7 @@ import type {
 import type { HydratedProjectEngineeringState } from '@/lib/engineeringIntelligence/projectHydration';
 import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
 import type { FieldEvidenceOrchestrationModel } from '@/lib/survey/evidence/fieldOrchestration';
+import type { Project } from '@/types';
 
 const statusColor: Record<string, string> = {
   satisfied: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
@@ -72,8 +73,9 @@ export function RouteNav({ routes }: { routes: EngineeringIntelligenceRouteSumma
   return (
     <div className="grid gap-3 md:grid-cols-4">
       {routes.map(route => {
-        const href = route.href.includes('[id]') ? '/admin/engineering-intelligence/project/demo' : route.href;
-        const stateLabel = route.href.includes('[id]') ? 'no_project_data demo route' : 'registered route';
+        const isProjectRoute = route.href.includes('[id]');
+        const href = isProjectRoute ? '/admin/engineering-intelligence' : route.href;
+        const stateLabel = isProjectRoute ? 'select_real_project' : 'registered route';
         return (
           <Link key={route.routeId} href={href}
             className="rounded-xl border border-white/10 bg-white/[0.03] p-4 transition hover:border-sky-400/40 hover:bg-sky-400/10">
@@ -82,10 +84,61 @@ export function RouteNav({ routes }: { routes: EngineeringIntelligenceRouteSumma
               <span className="rounded-full border border-slate-500/30 bg-slate-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-400">{stateLabel}</span>
             </div>
             <div className="mt-2 text-xs leading-5 text-slate-400">{route.deterministicPurpose}</div>
+            {isProjectRoute && <div className="mt-3 text-[10px] font-mono text-sky-300">Project route requires an actual project UUID selected below.</div>}
           </Link>
         );
       })}
     </div>
+  );
+}
+
+export function ProjectIntelligencePicker({ projects, loadState }: { projects: Project[]; loadState: 'loaded' | 'unauthenticated' | 'load_error' }) {
+  return (
+    <Panel title="Project Intelligence Picker" eyebrow="Real project routing">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Route mode" value="real_uuid_only" />
+        <Metric label="Selectable projects" value={projects.length} />
+        <Metric label="Demo route" value="removed" />
+        <Metric label="Load state" value={loadState} />
+      </div>
+      <p className="mt-4 text-sm leading-6 text-slate-300">
+        Select an existing project to open live Engineering Intelligence hydration. Links are built only from real project records returned for the authenticated user; this workspace never falls back to a placeholder, demo, or fabricated project id.
+      </p>
+      {loadState === 'unauthenticated' ? (
+        <div className="mt-4"><EmptyState state="not_authenticated">Project records were not loaded because no valid admin session user was available. No placeholder project intelligence route is rendered.</EmptyState></div>
+      ) : loadState === 'load_error' ? (
+        <div className="mt-4"><EmptyState state="project_list_load_error">Project records could not be loaded from the database. No placeholder project intelligence route is rendered.</EmptyState></div>
+      ) : projects.length === 0 ? (
+        <div className="mt-4"><EmptyState state="no_projects">No real projects are available for selection. Create or load a project first; Engineering Intelligence will not synthesize a project route.</EmptyState></div>
+      ) : (
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {projects.map(project => (
+            <Link key={project.id} href={`/admin/engineering-intelligence/project/${project.id}`}
+              className="rounded-xl border border-white/10 bg-white/[0.025] p-4 transition hover:border-sky-400/40 hover:bg-sky-400/10">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-white">{project.name}</h3>
+                  <div className="mt-1 break-all font-mono text-[10px] text-sky-300">{project.id}</div>
+                </div>
+                <StatusPill value={project.status ?? 'not_loaded'} />
+              </div>
+              <div className="mt-3 grid gap-2 text-xs text-slate-400 md:grid-cols-2">
+                <div>System: {project.systemType ?? 'not_loaded'}</div>
+                <div>Size: {project.systemSizeKw ? `${project.systemSizeKw} kW` : 'not_loaded'}</div>
+                <div>Updated: {project.updatedAt ? new Date(project.updatedAt).toLocaleString() : 'not_loaded'}</div>
+                <div>Evidence route: real project UUID</div>
+              </div>
+              <div className="mt-3 text-xs text-slate-500">{project.address ?? 'No project address stored.'}</div>
+            </Link>
+          ))}
+        </div>
+      )}
+      <DeterministicNotes notes={[
+        'Project Intelligence links are emitted only from persisted project ids returned by getProjectsByUser.',
+        'If no project list is available, the picker renders explicit no_projects/not_authenticated/load_error states instead of fake engineering state.',
+        'Selecting a project only loads deterministic evidence, graph, snapshot, invalidation, regeneration-plan metadata, and CAD-readiness metadata; it does not run OCR, CV, CAD generation, or autonomous regeneration.',
+      ]} />
+    </Panel>
   );
 }
 

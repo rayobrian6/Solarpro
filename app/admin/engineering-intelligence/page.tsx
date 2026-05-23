@@ -1,10 +1,15 @@
+import { cookies } from 'next/headers';
+import { verifyToken } from '@/lib/auth';
+import { getProjectsByUser } from '@/lib/db-neon';
 import { buildEngineeringIntelligenceWorkspace } from '@/lib/engineeringIntelligence';
+import type { Project } from '@/types';
 import {
   AuditGuardWorkspace,
   CanonicalEvidenceWorkspace,
   DecisionWorkspace,
   DependencyGraphViewer,
   EngineeringHealthDashboard,
+  ProjectIntelligencePicker,
   RegenerationPlanningWorkspace,
   RequirementWorkspace,
   SnapshotTimelineWorkspace,
@@ -16,15 +21,19 @@ export const metadata = {
   title: 'Engineering Intelligence | SolarPro Admin',
 };
 
-export default function EngineeringIntelligencePage() {
+export default async function EngineeringIntelligencePage() {
+  const token = cookies().get('solarpro_session')?.value;
+  const sessionUser = token ? verifyToken(token) : null;
+  const projectList = await loadProjectPickerRecords(sessionUser?.id);
   const model = buildEngineeringIntelligenceWorkspace();
 
   return (
     <WorkspaceShell
       model={model}
       title="Engineering Intelligence Workspace"
-      subtitle="Deterministic internal/admin workspace for engineering-state health, canonical evidence lineage, requirements, decisions, stale-state tracking, snapshots, dependency graphs, regeneration planning, and audit guards."
+      subtitle="Deterministic internal/admin workspace for engineering-state health, canonical evidence lineage, requirements, decisions, stale-state tracking, snapshots, dependency graphs, regeneration planning, audit guards, and real project selection."
     >
+      <ProjectIntelligencePicker projects={projectList.projects} loadState={projectList.loadState} />
       <EngineeringHealthDashboard health={model.health} />
       <div className="grid gap-6 2xl:grid-cols-2">
         <CanonicalEvidenceWorkspace groups={model.evidenceGroups} />
@@ -42,4 +51,15 @@ export default function EngineeringIntelligencePage() {
       </div>
     </WorkspaceShell>
   );
+}
+
+async function loadProjectPickerRecords(userId: string | undefined): Promise<{ projects: Project[]; loadState: 'loaded' | 'unauthenticated' | 'load_error' }> {
+  if (!userId) return { projects: [], loadState: 'unauthenticated' };
+  try {
+    const projects = await getProjectsByUser(userId);
+    return { projects, loadState: 'loaded' };
+  } catch (error) {
+    console.warn('[EngineeringIntelligencePage] Project picker load failed:', error instanceof Error ? error.message : String(error));
+    return { projects: [], loadState: 'load_error' };
+  }
 }
