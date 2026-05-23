@@ -1721,7 +1721,7 @@ export function AssistedEvidenceSandboxWorkspace({ sandbox }: { sandbox: { candi
   const rejectedCount = statusCounts.rejected_by_reviewer ?? 0;
   const invalidatedCount = statusCounts.invalidated ?? 0;
   return (
-    <Panel title="Assisted Evidence Sandbox" eyebrow="Review-required quarantine">
+    <Panel title="Assisted Evidence Sandbox" eyebrow="FIXTURE DATA · NON-AUTHORITATIVE · Review-required quarantine">
       <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm font-semibold leading-6 text-amber-100">
         {safeRenderValue(sandbox.warning)}
       </div>
@@ -1742,6 +1742,7 @@ export function AssistedEvidenceSandboxWorkspace({ sandbox }: { sandbox: { candi
                 <div className="flex flex-wrap gap-2"><StatusPill value={safeRenderValue(candidate.candidateStatus)} /><StatusPill value={safeRenderValue(candidate.candidateCategory)} /></div>
               </div>
               <div className="mt-3 grid gap-2 md:grid-cols-3"><Metric label="Confidence" value={candidate.candidateConfidence} /><Metric label="Non-authoritative" value={candidate.nonAuthoritative} /><Metric label="Review required" value={candidate.reviewRequired} /></div>
+              <div className="mt-3 rounded-lg border border-amber-400/20 bg-amber-400/10 p-2 font-bold text-amber-100">FIXTURE DATA · NON-AUTHORITATIVE · REVIEW REQUIRED</div>
               <div className="mt-3 leading-5 text-slate-300">{safeRenderValue(candidate.candidateSummary)}</div>
               <div className="mt-3"><div className="mb-2 font-bold text-slate-200">Limitations</div><TokenList values={normalizeWorkspaceDisplay(candidate.candidateLimitations)} limit={12} /></div>
               <div className="mt-3"><div className="mb-2 font-bold text-slate-200">Provenance</div><TokenList values={[safeRenderValue(candidate.toolName), safeRenderValue(candidate.toolVersion), safeRenderValue(candidate.toolRunId), safeRenderValue(candidate.sourceFileId), safeRenderValue(candidate.sourceUploadKey)]} limit={12} /></div>

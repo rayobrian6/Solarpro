@@ -3,6 +3,7 @@ import { verifyToken } from '@/lib/auth';
 import { getProjectsByUser } from '@/lib/db-neon';
 import { buildEngineeringIntelligenceWorkspace } from '@/lib/engineeringIntelligence';
 import { acceptCandidate, createCandidate, markReviewRequired } from '@/lib/assistedEvidence';
+import { generateMetadataFixtureCandidates, generateOcrFixtureCandidates } from '@/lib/assistedEvidenceSources';
 import type { Project } from '@/types';
 import {
   AssistedEvidenceSandboxWorkspace,
@@ -134,9 +135,39 @@ function buildAssistedEvidenceSandboxPanel() {
     acceptedFields: ['suggestedCategory'],
     reviewNotes: ['Accepted into reviewed projection fixture only; no canonical mapping performed.'],
   });
+  const sourceContext = {
+    sourceFileId: 'fixture-source-open-source-1',
+    sourceUploadKey: 'fixtures/assisted-evidence-sources/fixture-source-open-source-1.jpg',
+    projectId: 'fixture-project-assisted',
+    surveyId: 'fixture-survey-assisted',
+    toolRunId: 'fixture-source-run-1',
+    toolConfigHash: 'fixture-source-config-v1',
+    sourceMetadataHash: 'fixture-source-metadata-hash-v1',
+    createdAt: '2025-01-03T00:00:00.000Z',
+    createdBy: 'engineering-intelligence-demo',
+  };
+  const metadataFixtures = generateMetadataFixtureCandidates(sourceContext, {
+    fixtureId: 'admin-metadata-fixture-1',
+    imageWidth: 800,
+    imageHeight: 600,
+    orientationHint: 'landscape',
+    duplicateGroupHint: 'possible-admin-fixture-duplicate',
+    signals: [
+      { signalId: 'admin-metadata-signal-low-resolution', field: 'possible_low_resolution_photo', value: '800x600', confidence: 0.37, limitationRefs: ['fixture-dimensions-only'] },
+      { signalId: 'admin-metadata-signal-duplicate', field: 'possible_duplicate_photo', value: true, confidence: 0.42, limitationRefs: ['filename-similarity-only'] },
+    ],
+  });
+  const ocrFixtures = generateOcrFixtureCandidates(sourceContext, {
+    fixtureId: 'admin-ocr-fixture-1',
+    textRegionCount: 2,
+    signals: [
+      { signalId: 'admin-ocr-signal-meter-label', field: 'possible_meter_label_text', text: 'METER FIXTURE 123', confidence: 0.46, limitationRefs: ['fixture-text-only'] },
+      { signalId: 'admin-ocr-signal-equipment-label', field: 'possible_equipment_label_text', text: 'INV-1 FIXTURE', confidence: 0.51, limitationRefs: ['fixture-text-only'] },
+    ],
+  });
   return {
-    candidates: [candidate, accepted.candidate],
+    candidates: [candidate, accepted.candidate, ...metadataFixtures.candidates, ...ocrFixtures.candidates],
     projections: [accepted.projection],
-    warning: 'Candidate metadata is non-authoritative and does not affect engineering truth until reviewed and explicitly mapped.',
+    warning: 'FIXTURE DATA ONLY: candidate metadata is non-authoritative, review-required, and cannot affect engineering truth until separately reviewed and explicitly mapped in a future approved layer.',
   };
 }
