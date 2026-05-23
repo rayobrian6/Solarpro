@@ -10,6 +10,7 @@ import { buildCanonical, validateCanonicalStrict, buildLayoutDimensions } from '
 import { generateCADLayout } from '@/lib/cad/cadEngine';
 import { buildRenderContext, type RenderContext } from '@/lib/drafting/renderContext';
 import { buildDocumentProvenanceBundle } from '@/lib/documentProvenance';
+import { buildEngineeringStateRegistry, buildInvalidationLineageMetadata, staleMetadataForState } from '@/lib/engineeringStateInvalidation';
 import {
   buildDecisionAwareBOMMetadata,
   buildDecisionAwareReadinessSummary,
@@ -226,16 +227,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   if (documentProvenance) {
     (input as any).documentProvenance = documentProvenance;
   }
-  const renderCtx = buildRenderContext(cad, {
-    electricityRate: utilityOpts?.electricityRate,
-    rateSource:      utilityOpts?.rateSource,
-    utilityName:     utilityOpts?.utilityName ?? (input as any).project?.utilityName ?? null,
-    monthlyKwh:      utilityOpts?.monthlyKwh,
-    annualKwh:       utilityOpts?.annualKwh,
-    billInsights:    utilityOpts?.billInsights ?? null,
-    documentProvenance: documentProvenance ?? null,
-    decisionProvenance,
-  });
+
 
   // ── BOM Integration (v48.x) ─────────────────────────────────────────────
   // generateBOMForPermit() merges V4 electrical BOM + structural BOM.
@@ -262,6 +254,38 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   }
 
   (input as any).decisionAwareSLDMetadata = buildDecisionAwareSLDMetadata({ decisionBundle: decisionProvenance });
+
+  const engineeringStateRegistry = buildEngineeringStateRegistry({
+    registryId: `${provenanceDocumentId}.engineering-state`,
+    generatedAt: input.surveyEvidence?.source.normalizedAt,
+    documentProvenance: documentProvenance ?? null,
+    decisionProvenance,
+    dependencyGraph: documentProvenance?.dependencyGraph ?? null,
+    renderContextIds: ['renderContext:primary'],
+    bomMetadata: (input as any).decisionAwareBOMMetadata ?? [],
+    sldMetadata: (input as any).decisionAwareSLDMetadata ?? null,
+  });
+  const invalidationLineage = buildInvalidationLineageMetadata({ registry: engineeringStateRegistry });
+  (input as any).engineeringStateRegistry = engineeringStateRegistry;
+  (input as any).invalidationLineage = invalidationLineage;
+  if (documentProvenance) {
+    (documentProvenance as any).engineeringStateRegistry = engineeringStateRegistry;
+    (documentProvenance as any).invalidationLineage = invalidationLineage;
+  }
+
+  const renderCtx = buildRenderContext(cad, {
+    electricityRate: utilityOpts?.electricityRate,
+    rateSource:      utilityOpts?.rateSource,
+    utilityName:     utilityOpts?.utilityName ?? (input as any).project?.utilityName ?? null,
+    monthlyKwh:      utilityOpts?.monthlyKwh,
+    annualKwh:       utilityOpts?.annualKwh,
+    billInsights:    utilityOpts?.billInsights ?? null,
+    documentProvenance: documentProvenance ?? null,
+    decisionProvenance,
+    engineeringStateRegistry,
+    invalidationLineage,
+    staleStateMetadata: staleMetadataForState(engineeringStateRegistry.stateRecords.find((record: any) => record.stateId === 'state:renderContext:renderContext:primary') ?? engineeringStateRegistry.stateRecords[0]),
+  });
 
   const TOTAL = 15;
 

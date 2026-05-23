@@ -8,6 +8,7 @@ import type { RenderContext } from '@/lib/drafting/renderContext';
 import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
 import type { DocumentProvenanceBundle } from '@/lib/documentProvenance';
 import type { EngineeringDecisionEvaluationBundle, DecisionAwareBOMMetadata, DecisionAwareSLDMetadata, DecisionAwareReadinessSummary } from '@/lib/engineeringDecisionProvenance';
+import type { EngineeringStateRegistry, EngineeringInvalidationLineageMetadata, SelectiveRegenerationPlan } from '@/lib/engineeringStateInvalidation';
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -214,6 +215,9 @@ export interface PermitInput {
   decisionAwareReadinessSummary?: DecisionAwareReadinessSummary;
   decisionAwareBOMMetadata?: DecisionAwareBOMMetadata[];
   decisionAwareSLDMetadata?: DecisionAwareSLDMetadata;
+  engineeringStateRegistry?: EngineeringStateRegistry;
+  invalidationLineage?: EngineeringInvalidationLineageMetadata;
+  selectiveRegenerationPlan?: SelectiveRegenerationPlan;
   aerialData?: {
     imageBase64?: string;
     imageWidth?: number;

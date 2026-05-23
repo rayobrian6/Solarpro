@@ -7,6 +7,7 @@ import type {
 import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
 import type { EvidenceTruthSource } from '@/lib/survey/evidence/provenance';
 import type { EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance';
+import type { EngineeringStateRegistry, EngineeringInvalidationLineageMetadata } from '@/lib/engineeringStateInvalidation';
 import type { PermitInput } from '@/lib/permit/types';
 
 export type DocumentType =
@@ -92,6 +93,8 @@ export interface DocumentProvenanceBundle {
   auditGuards: DocumentAuditGuardResult[];
   dependencyGraph?: EngineeringDependencyGraph;
   decisionProvenance?: EngineeringDecisionEvaluationBundle;
+  engineeringStateRegistry?: EngineeringStateRegistry;
+  invalidationLineage?: EngineeringInvalidationLineageMetadata;
 }
 
 export interface RequirementDocumentBinding {
@@ -215,4 +218,6 @@ export interface BuildDocumentProvenanceInput {
   includeLegacyDesignInput?: boolean;
   permitInput?: PermitInput | null;
   decisionProvenance?: EngineeringDecisionEvaluationBundle | null;
+  engineeringStateRegistry?: EngineeringStateRegistry | null;
 }
+

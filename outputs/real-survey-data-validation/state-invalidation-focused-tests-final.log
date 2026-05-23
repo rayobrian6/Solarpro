@@ -1,0 +1,18 @@
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90m/workspace/Solarpro[39m
+
+[90mstdout[2m | lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts[2m > [22m[2mengineering state invalidation v1[2m > [22m[2mcarries stale-state metadata through render contexts
+[22m[39m[RenderContext] built systemType=roof hasBillInsights=false hasEngineering=false rate=null rateSource=none combinedUtility=false hasDocumentProvenance=true hasDecisionProvenance=true hasEngineeringStateRegistry=true staleStatus=current
+
+ [32m✓[39m lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts[2m > [22mengineering state invalidation v1[2m > [22minvalidates MSP evidence dependency chains without invalidating unrelated roof-only outputs[32m 32[2mms[22m[39m
+ [32m✓[39m lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts[2m > [22mengineering state invalidation v1[2m > [22mkeeps unrelated outputs current when utility meter evidence changes[32m 14[2mms[22m[39m
+ [32m✓[39m lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts[2m > [22mengineering state invalidation v1[2m > [22mdoes not treat duplicate raw upload count changes as invalidation hash changes[32m 13[2mms[22m[39m
+ [32m✓[39m lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts[2m > [22mengineering state invalidation v1[2m > [22mcarries stale-state metadata through render contexts[32m 8[2mms[22m[39m
+ [32m✓[39m lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts[2m > [22mengineering state invalidation v1[2m > [22mbuilds deterministic selective regeneration plans[32m 8[2mms[22m[39m
+ [32m✓[39m lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts[2m > [22mengineering state invalidation v1[2m > [22maudit guards fail on stale lineage violations[32m 6[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m6 passed[39m[22m[90m (6)[39m
+[2m   Start at [22m 02:19:57
+[2m   Duration [22m 569ms[2m (transform 200ms, setup 0ms, import 242ms, tests 83ms, environment 0ms)[22m
+

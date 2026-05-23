@@ -1,0 +1,10 @@
+lib/engineeringStateInvalidation
+lib/documentProvenance/types.ts
+lib/drafting/renderContext.ts
+lib/engineeringDecisionProvenance/evaluator.ts
+lib/engineeringDecisionProvenance/types.ts
+lib/permit/generatePermit.ts
+lib/permit/sections/validationPage.ts
+lib/permit/types.ts
+outputs/real-survey-data-validation/engineering-state-invalidation-v1-report.md
+outputs/real-survey-data-validation/selective-regeneration-planning-v1-report.md

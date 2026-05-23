@@ -20,6 +20,7 @@ import type { CADModel }    from '../cad/types';
 import type { BillInsights } from '../billInsights';
 import type { DocumentProvenanceBundle } from '@/lib/documentProvenance';
 import type { EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance';
+import type { EngineeringInvalidationLineageMetadata, EngineeringStateRegistry, EngineeringStaleStateMetadata } from '@/lib/engineeringStateInvalidation';
 
 // ─── Engineering data (rate / utility intelligence) ──────────────────────────
 
@@ -74,6 +75,11 @@ export interface RenderContext {
 
   /** Engineering decision provenance carried through rendering; additive explainability metadata only. */
   decisionProvenance: EngineeringDecisionEvaluationBundle | null;
+
+  /** Engineering state invalidation metadata carried through rendering; additive stale-state metadata only. */
+  engineeringStateRegistry: EngineeringStateRegistry | null;
+  invalidationLineage: EngineeringInvalidationLineageMetadata | null;
+  staleStateMetadata: EngineeringStaleStateMetadata | null;
 }
 
 // ─── Builder ──────────────────────────────────────────────────────────────────
@@ -95,6 +101,9 @@ export function buildRenderContext(
     annualKwh?:        number | null;
     documentProvenance?: DocumentProvenanceBundle | null;
     decisionProvenance?: EngineeringDecisionEvaluationBundle | null;
+    engineeringStateRegistry?: EngineeringStateRegistry | null;
+    invalidationLineage?: EngineeringInvalidationLineageMetadata | null;
+    staleStateMetadata?: EngineeringStaleStateMetadata | null;
   },
 ): RenderContext {
   const systemType = cad.systemType as RenderContext['systemType'];
@@ -132,6 +141,9 @@ export function buildRenderContext(
     engineering,
     documentProvenance: opts?.documentProvenance ?? null,
     decisionProvenance: opts?.decisionProvenance ?? null,
+    engineeringStateRegistry: opts?.engineeringStateRegistry ?? null,
+    invalidationLineage: opts?.invalidationLineage ?? null,
+    staleStateMetadata: opts?.staleStateMetadata ?? null,
   };
 
   console.log(
@@ -142,7 +154,9 @@ export function buildRenderContext(
     ` rateSource=${engineering?.rateSource ?? 'none'}` +
     ` combinedUtility=${ctx.billInsights?.combinedUtilityDetected ?? false}` +
     ` hasDocumentProvenance=${ctx.documentProvenance !== null}` +
-    ` hasDecisionProvenance=${ctx.decisionProvenance !== null}`
+    ` hasDecisionProvenance=${ctx.decisionProvenance !== null}` +
+    ` hasEngineeringStateRegistry=${ctx.engineeringStateRegistry !== null}` +
+    ` staleStatus=${ctx.staleStateMetadata?.staleStatus ?? 'none'}`
   );
 
   return ctx;

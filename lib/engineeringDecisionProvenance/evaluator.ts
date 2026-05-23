@@ -5,6 +5,7 @@ import type { DocumentProvenanceBundle, DocumentTruthSource } from '@/lib/docume
 import type { EngineeringRequirementEvaluation, EngineeringRequirementId } from '@/lib/survey/evidence/engineeringRequirements';
 import { getEngineeringDecisionDefinition, listEngineeringDecisionDefinitions } from './decisionRegistry';
 import { runEngineeringDecisionAuditGuards } from './guards';
+import { stableEngineeringStateHash } from '@/lib/engineeringStateInvalidation/hash';
 import type {
   BuildEngineeringDecisionProvenanceInput,
   DecisionAwareBOMMetadata,
@@ -65,6 +66,9 @@ export function buildDecisionAwareReadinessSummary(bundle: EngineeringDecisionEv
       'Readiness summary references decision provenance bundle ids only; UI text must not manufacture reasoning outside records.',
       `${bundle.decisionIds.length} decision(s) and ${bundle.fallbackDecisionIds.length} fallback/default event(s) are available for readiness display.`,
     ],
+    engineeringStateIds: bundle.decisionIds.map(id => `state:decision:${id}`).sort((a, b) => a.localeCompare(b)),
+    stateGenerationHash: stableEngineeringStateHash('decision-readiness-generation', bundle.decisionIds),
+    stateDependencyHash: stableEngineeringStateHash('decision-readiness-dependency', bundle.dependencyNodeIds),
   };
 }
 
@@ -90,6 +94,9 @@ export function buildDecisionAwareBOMMetadata(input: {
     governingRuleIds: ruleIds,
     dependencyNodeIds: dependencyIds,
     derivedFrom: uniqueSorted([item.derivedFrom, item.formula, item.necReference].filter(Boolean) as string[]),
+    engineeringStateIds: [item.id ?? `bom-row-${String(index + 1).padStart(3, '0')}`].map(id => `state:bomRow:${id}`),
+    stateGenerationHash: stableEngineeringStateHash('bom-row-generation', [item.id ?? `bom-row-${String(index + 1).padStart(3, '0')}`, ...bomDecisionIds]),
+    stateDependencyHash: stableEngineeringStateHash('bom-row-dependency', dependencyIds),
   }));
 }
 
@@ -112,6 +119,9 @@ export function buildDecisionAwareSLDMetadata(input: {
     deterministicHash: bundle?.deterministicHash ?? 'decision-bundle-missing',
     topologyDecisionId: topology?.decisionId,
     interconnectionDecisionId: interconnection?.decisionId,
+    engineeringStateIds: [`state:sldSection:${bundle?.bundleId ?? 'decision-bundle-missing'}.sld`],
+    stateGenerationHash: stableEngineeringStateHash('sld-metadata-generation', sldRecords.map(record => record.decisionId)),
+    stateDependencyHash: stableEngineeringStateHash('sld-metadata-dependency', sldRecords.flatMap(record => record.dependencyNodeIds)),
   };
 }
 

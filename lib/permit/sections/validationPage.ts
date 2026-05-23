@@ -202,6 +202,9 @@ export function pageValidationSummary(
   const requirementEvaluation = surveyEvidence?.requirementEvaluation;
   const documentProvenance = input.documentProvenance ?? surveyEvidence?.documentProvenance ?? null;
   const decisionProvenance = input.decisionProvenance ?? surveyEvidence?.decisionProvenance ?? documentProvenance?.decisionProvenance ?? null;
+  const engineeringStateRegistry = input.engineeringStateRegistry ?? documentProvenance?.engineeringStateRegistry ?? null;
+  const invalidationLineage = input.invalidationLineage ?? documentProvenance?.invalidationLineage ?? null;
+  const staleStateCount = engineeringStateRegistry?.stateRecords.filter(record => record.staleStatus !== 'current').length ?? 0;
   const registryStatusRows = requirementEvaluation
     ? [
         ['Registry Status', `readiness: ${requirementEvaluation.readiness} | completeness: ${requirementEvaluation.completeness} | confidence: ${requirementEvaluation.confidenceSource}`],
@@ -283,12 +286,30 @@ export function pageValidationSummary(
       ? `status: ${input.decisionAwareReadinessSummary.readinessStatus} | decisions: ${input.decisionAwareReadinessSummary.decisionCount} | fallbacks: ${input.decisionAwareReadinessSummary.fallbackDecisionCount} | confidence: ${input.decisionAwareReadinessSummary.confidenceSource}`
       : 'No decision-aware readiness metadata was attached.'],
     ['Decision-Aware BOM Metadata', input.decisionAwareBOMMetadata?.length
-      ? input.decisionAwareBOMMetadata.slice(0, 8).map(row => `${row.bomRowId}: decisions ${row.decisionIds.join(', ') || 'none'} | rules ${row.governingRuleIds.join(', ') || 'none'}`).join(' | ')
+      ? input.decisionAwareBOMMetadata.slice(0, 8).map(row => `${row.bomRowId}: decisions ${row.decisionIds.join(', ') || 'none'} | rules ${row.governingRuleIds.join(', ') || 'none'} | state ${row.engineeringStateIds?.join(', ') || 'none'} | depHash ${row.stateDependencyHash ?? 'none'}`).join(' | ')
       : 'No decision-aware BOM metadata was attached.'],
     ['Decision-Aware SLD Metadata', input.decisionAwareSLDMetadata
-      ? `decisions: ${input.decisionAwareSLDMetadata.decisionIds.join(', ') || 'none'} | rules: ${input.decisionAwareSLDMetadata.governingRuleIds.join(', ') || 'none'} | fallback: ${input.decisionAwareSLDMetadata.fallbackDecisionIds.join(', ') || 'none'} | hash: ${input.decisionAwareSLDMetadata.deterministicHash}`
+      ? `decisions: ${input.decisionAwareSLDMetadata.decisionIds.join(', ') || 'none'} | rules: ${input.decisionAwareSLDMetadata.governingRuleIds.join(', ') || 'none'} | fallback: ${input.decisionAwareSLDMetadata.fallbackDecisionIds.join(', ') || 'none'} | hash: ${input.decisionAwareSLDMetadata.deterministicHash} | state: ${input.decisionAwareSLDMetadata.engineeringStateIds?.join(', ') || 'none'} | depHash: ${input.decisionAwareSLDMetadata.stateDependencyHash ?? 'none'}`
       : 'No decision-aware SLD metadata was attached.'],
   ] as const;
+
+
+  const engineeringStateRows = engineeringStateRegistry ? [
+    ['Engineering State Registry', `${engineeringStateRegistry.registryId} | states: ${engineeringStateRegistry.stateIds.length} | stale: ${staleStateCount} | hash ${engineeringStateRegistry.deterministicHash}`],
+    ['Generation Hash', engineeringStateRegistry.generationHash],
+    ['Provenance Hash', engineeringStateRegistry.provenanceHash],
+    ['Dependency Hash', engineeringStateRegistry.dependencyHash],
+    ['Invalidation Lineage', invalidationLineage ? `states: ${invalidationLineage.stateIds.length} | stale ids: ${invalidationLineage.staleStateIds.join(', ') || 'none'} | plan: ${invalidationLineage.regenerationPlanId ?? 'none'}` : 'No invalidation lineage metadata attached.'],
+    ['State Audit Guards', engineeringStateRegistry.auditGuards.map(guard => `${guard.guardCode}: ${guard.passed ? 'PASS' : guard.severity.toUpperCase()}`).join(' | ')],
+  ] as const : [
+    ['Engineering State Registry', 'No engineering state invalidation registry was attached to this permit run.'],
+  ] as const;
+  const engineeringStateRecordRows = engineeringStateRegistry?.stateRecords.length
+    ? engineeringStateRegistry.stateRecords.slice(0, 14).map(record => [
+        record.stateId,
+        `${record.stateType} | ${record.stateCategory} | status: ${record.staleStatus} | requirements: ${record.requirementIds.join(', ') || 'none'} | decisions: ${record.decisionIds.join(', ') || 'none'} | evidence: ${record.canonicalEvidenceIds.join(', ') || 'none'} | depHash: ${record.dependencyHash}`,
+      ] as const)
+    : [['Engineering State Records', 'No engineering state records were provided.'] as const];
 
   const surveyFieldEvidenceRows = surveyEvidence ? [
     ['Evidence Manifest v1', `items: ${manifestV1.itemCount} | source: ${manifestSummarySource} | lifecycle: ${manifestV1.lifecycleState} | quality: ${manifestV1.qualityStatus} | duplicates: ${manifestV1.duplicateStatus} | AI: ${manifestV1.aiExtractionStatus} | engineering readiness: ${manifestV1.engineeringBridge.readiness} | CAD automation: ${manifestV1.engineeringBridge.cadAutomationStatus}`],
@@ -435,7 +456,21 @@ export function pageValidationSummary(
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
             <td colspan="3" style="font-family:monospace;font-size:6.25px;color:#000;">${esc(value)}</td>
           </tr>`).join('')}
-          <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#be123c;background:#fff1f2;">Decision-Aware Output Metadata</td></tr>
+  
+        <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#065f46;background:#d1fae5;">Engineering State Invalidation</td></tr>
+        ${engineeringStateRows.map(([label, value], i) => `
+        <tr style="background:${i%2===0?'#ecfdf5':'#fff'};">
+          <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
+          <td colspan="3" style="font-family:monospace;font-size:6.25px;color:#000;">${esc(value)}</td>
+        </tr>`).join('')}
+        <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#047857;background:#ecfdf5;">Engineering State Records</td></tr>
+        ${engineeringStateRecordRows.map(([label, value], i) => `
+        <tr style="background:${i%2===0?'#ecfdf5':'#fff'};">
+          <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
+          <td colspan="3" style="font-family:monospace;font-size:6px;color:#000;">${esc(value)}</td>
+        </tr>`).join('')}
+
+        <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#be123c;background:#fff1f2;">Decision-Aware Output Metadata</td></tr>
           ${decisionMetadataRows.map(([label, value], i) => `
           <tr style="background:${i%2===0?'#fff1f2':'#fff'};">
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
