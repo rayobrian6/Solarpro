@@ -12,6 +12,9 @@ import type { EngineeringRegenerationPlanV1 } from '@/lib/engineeringIntelligenc
 import type { EngineeringSnapshotDeltaV1 } from '@/lib/engineeringIntelligence/snapshotDelta';
 import type { StructuredEngineeringSignal, StructuredEngineeringSignalSummary } from '@/lib/engineeringIntelligence/signalTypes';
 import type { EngineeringContextResolutionSummary, EngineeringContextStatus, ResolvedEngineeringContext } from '@/lib/engineeringIntelligence/contextTypes';
+import type { EngineeringScenarioSimulationResult } from '@/lib/engineeringIntelligence/scenarioSimulation';
+import type { EngineeringRecommendationSummary } from '@/lib/engineeringIntelligence/recommendationTypes';
+import type { EngineeringWorkflowOrchestrationSummary } from '@/lib/engineeringIntelligence/workflowTypes';
 import type {
   EngineeringDecisionDefinition,
   EngineeringDecisionType,
@@ -468,6 +471,7 @@ export interface EngineeringIntelligenceWorkspaceModel {
   contextInvalidations: ContextInvalidationsWorkspaceModel;
   contextStaleImpacts: ContextStaleImpactsWorkspaceModel;
   contextResolutionTimeline: ContextResolutionTimelineWorkspaceModel;
+  workflowOrchestration: EngineeringWorkflowOrchestrationSummary;
   auditGuards: AuditGuardWorkspaceModel;
   deterministicNotes: string[];
 }
@@ -489,5 +493,7 @@ export interface BuildEngineeringIntelligenceWorkspaceInput {
   snapshotDelta?: EngineeringSnapshotDeltaV1 | null;
   structuredSignals?: StructuredEngineeringSignalSummary | null;
   contextResolution?: EngineeringContextResolutionSummary | null;
+  recommendations?: EngineeringRecommendationSummary | null;
+  scenarioSimulations?: EngineeringScenarioSimulationResult[] | null;
   auditGuards?: EngineeringStateAuditGuardResult[] | null;
 }

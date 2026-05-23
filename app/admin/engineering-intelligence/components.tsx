@@ -38,6 +38,8 @@ import type {
   EngineeringScenarioSimulationResult,
   EngineeringRecommendationSummary,
   EngineeringRecommendation,
+  EngineeringWorkflowOrchestrationSummary,
+  EngineeringWorkflowItem,
 } from '@/lib/engineeringIntelligence';
 import type { HydratedProjectEngineeringState } from '@/lib/engineeringIntelligence/projectHydration';
 import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
@@ -1578,4 +1580,129 @@ export function RecommendationConfidenceBreakdownWorkspace({ recommendations }: 
       )}
     </Panel>
   );
+}
+
+
+function WorkflowCard({ workflow }: { workflow: EngineeringWorkflowItem }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-xs text-slate-300">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="font-mono text-sky-300">{safeRenderValue(workflow.workflowId)}</div>
+          <div className="mt-1 text-base font-semibold text-white">{safeRenderValue(workflow.workflowType)}</div>
+          <div className="mt-1 text-slate-400">{safeRenderValue(workflow.category)} · reviewer: {safeRenderValue(workflow.recommendedReviewerRole)}</div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <StatusPill value={workflow.priority} />
+          <StatusPill value={workflow.severity} />
+          <StatusPill value={workflow.status} />
+          <StatusPill value={workflow.confidence} />
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-5">
+        <Metric label="Score" value={workflow.deterministicScore} />
+        <Metric label="Affected outputs" value={collectionSize(workflow.affectedOutputIds)} />
+        <Metric label="Dependency paths" value={collectionSize(workflow.dependencyTraversal)} />
+        <Metric label="CAD impacts" value={collectionSize(workflow.cadReadinessImpact)} />
+        <Metric label="Blocking impacts" value={collectionSize(workflow.blockingImpacts)} />
+      </div>
+      <div className="mt-3 leading-5 text-slate-300">{safeRenderValue(workflow.explanation)}</div>
+      <div className="mt-3 rounded-lg border border-sky-500/15 bg-sky-500/5 p-3 text-sky-100/80">
+        <div className="mb-1 font-bold text-sky-200">Why it exists</div>
+        {safeRenderValue(workflow.scoreBreakdown.deterministicReason)}
+      </div>
+      <div className="mt-3 rounded-lg border border-amber-500/15 bg-amber-500/5 p-3 text-amber-100/80">
+        <div className="mb-1 font-bold text-amber-200">Escalation and explicit action</div>
+        <div>{safeRenderValue(workflow.escalationReason)}</div>
+        <div className="mt-2">{safeRenderValue(workflow.recommendedTechnicianAction)}</div>
+      </div>
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <div>
+          <div className="mb-2 font-bold text-slate-200">Affected deterministic lineage</div>
+          <TokenList values={[...workflow.affectedEvidenceIds, ...workflow.affectedSignalIds, ...workflow.affectedContextIds, ...workflow.affectedRequirementIds, ...workflow.affectedDecisionIds, ...workflow.affectedOutputIds]} limit={30} />
+        </div>
+        <div>
+          <div className="mb-2 font-bold text-slate-200">Blocking, unresolved, and CAD impacts</div>
+          <TokenList values={[...workflow.blockingImpacts, ...workflow.unresolvedStatesPreserved, ...workflow.cadReadinessImpact]} limit={30} />
+        </div>
+      </div>
+      <div className="mt-3 grid gap-3 lg:grid-cols-3">
+        <ListBox title="Stale / invalidation / regeneration" values={[...workflow.staleImpactParticipation.map(item => item.entityId), ...workflow.invalidationParticipation, ...workflow.regenerationParticipation]} />
+        <ListBox title="Fallback and conflict participation" values={[...workflow.fallbackParticipation, ...workflow.conflictParticipation]} />
+        <ListBox title="Simulation outcomes" values={[...workflow.simulationOutcome.scenarioIds, ...workflow.simulationOutcome.hypotheticalRemediationOutcomes]} />
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-3">
+        <Metric label="Hypothetical confidence improvement" value={workflow.simulationOutcome.hypotheticalConfidenceImprovement} />
+        <Metric label="Hypothetical CAD readiness improvement" value={workflow.simulationOutcome.hypotheticalCADReadinessImprovement} />
+        <Metric label="Hypothetical stale reduction" value={workflow.simulationOutcome.hypotheticalStaleReduction} />
+      </div>
+    </div>
+  );
+}
+
+function WorkflowCollection({ workflows, empty }: { workflows: EngineeringWorkflowItem[]; empty: string }) {
+  return workflows.length === 0 ? <EmptyState state={empty}>No deterministic workflow items are available for this queue.</EmptyState> : (
+    <div className="space-y-3">
+      {workflows.slice(0, 24).map(workflow => <WorkflowCard key={workflow.workflowId} workflow={workflow} />)}
+    </div>
+  );
+}
+
+export function EngineeringWorkflowOrchestrationWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+  return (
+    <Panel title="Engineering Workflow Orchestration" eyebrow="Deterministic engineering operations center">
+      <div className="rounded-xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm leading-6 text-amber-100">
+        This workspace displays deterministic Workflow Orchestration V1 review queues only. It is not AI orchestration, not autonomous engineering, not CAD generation, not permit approval, not automatic regeneration, and not task execution. Workflow statuses are review states and are never auto-resolved by this runtime.
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <Metric label="Workflows" value={collectionSize(orchestration.workflows)} />
+        <Metric label="Mode" value={orchestration.mode} />
+        <Metric label="Queues" value={collectionSize(orchestration.queueSummaries)} />
+        <Metric label="Hash" value={orchestration.deterministicHash} />
+      </div>
+      <DeterministicNotes notes={orchestration.deterministicNotes} />
+      <DeterministicNotes notes={orchestration.prohibitedRuntimeBehavior} />
+      <div className="mt-4"><WorkflowCollection workflows={orchestration.highestPriorityWorkflows} empty="no_workflows" /></div>
+    </Panel>
+  );
+}
+
+export function SurveyFollowUpQueueWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+  return <Panel title="Survey Follow-Up Queue" eyebrow="Explicit field evidence follow-up"><WorkflowCollection workflows={orchestration.surveyFollowUpQueue} empty="no_survey_follow_up" /></Panel>;
+}
+
+export function EngineeringReviewQueueWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+  return <Panel title="Engineering Review Queue" eyebrow="Human review required"><WorkflowCollection workflows={orchestration.engineeringReviewQueue} empty="no_engineering_review" /></Panel>;
+}
+
+export function ConflictResolutionQueueWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+  return <Panel title="Conflict Resolution Queue" eyebrow="Uncertainty preserved"><WorkflowCollection workflows={orchestration.conflictResolutionQueue} empty="no_conflict_workflows" /></Panel>;
+}
+
+export function FallbackRiskQueueWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+  return <Panel title="Fallback Risk Queue" eyebrow="Fallback lineage visible"><WorkflowCollection workflows={orchestration.fallbackRiskQueue} empty="no_fallback_workflows" /></Panel>;
+}
+
+export function CADReadinessEscalationsWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+  return <Panel title="CAD Readiness Escalations" eyebrow="No CAD generated"><WorkflowCollection workflows={orchestration.cadReadinessEscalations} empty="no_cad_escalations" /></Panel>;
+}
+
+export function PermitReadinessQueueWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+  return <Panel title="Permit Readiness Queue" eyebrow="No permit approval"><WorkflowCollection workflows={orchestration.permitReadinessQueue} empty="no_permit_workflows" /></Panel>;
+}
+
+export function InstallBlockerQueueWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+  return <Panel title="Install Blocker Queue" eyebrow="No install execution"><WorkflowCollection workflows={orchestration.installBlockerQueue} empty="no_install_workflows" /></Panel>;
+}
+
+export function RegenerationApprovalQueueWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+  return <Panel title="Regeneration Approval Queue" eyebrow="No regeneration executed"><WorkflowCollection workflows={orchestration.regenerationApprovalQueue} empty="no_regeneration_workflows" /></Panel>;
+}
+
+export function DependencyRiskEscalationsWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+  return <Panel title="Dependency Risk Escalations" eyebrow="Traversal centrality"><WorkflowCollection workflows={orchestration.dependencyRiskEscalations} empty="no_dependency_workflows" /></Panel>;
+}
+
+export function WorkflowSimulationImpactsWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+  return <Panel title="Workflow Simulation Impacts" eyebrow="Read-only hypothetical outcomes"><WorkflowCollection workflows={orchestration.workflowSimulationImpacts} empty="no_simulation_workflows" /></Panel>;
 }

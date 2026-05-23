@@ -9,6 +9,7 @@ import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/categoryRegis
 import type { CanonicalEvidenceProvenanceRecord } from '@/lib/survey/evidence/provenance';
 import type { CADReadinessFlag } from './cadReadiness';
 import { buildDeterministicPhotoGrouping } from './photoGrouping';
+import { buildEngineeringWorkflowOrchestration } from './workflowOrchestration';
 import {
   listEngineeringDecisionDefinitions,
   type EngineeringDecisionDefinition,
@@ -973,6 +974,16 @@ export function buildEngineeringIntelligenceWorkspace(input: BuildEngineeringInt
   const contextInvalidations = buildContextInvalidationsWorkspace(input);
   const contextStaleImpacts = buildContextStaleImpactsWorkspace(input);
   const contextResolutionTimeline = buildContextResolutionTimelineWorkspace(input);
+  const workflowOrchestration = buildEngineeringWorkflowOrchestration({
+    projectId: input.projectId ?? null,
+    recommendations: input.recommendations ?? null,
+    cadReadiness: input.cadReadiness ?? null,
+    structuredSignals: input.structuredSignals ?? null,
+    contextResolution: input.contextResolution ?? null,
+    invalidationPropagation: input.invalidationPropagation ?? null,
+    regenerationPlan: input.regenerationPlanV1 ?? null,
+    scenarioSimulations: input.scenarioSimulations ?? null,
+  });
   const auditGuards = buildAuditGuards(input);
 
   return {
@@ -1012,6 +1023,7 @@ export function buildEngineeringIntelligenceWorkspace(input: BuildEngineeringInt
     contextInvalidations,
     contextStaleImpacts,
     contextResolutionTimeline,
+    workflowOrchestration,
     auditGuards,
     deterministicNotes: [
       latestSnapshot

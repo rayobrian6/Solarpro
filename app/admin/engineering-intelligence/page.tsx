@@ -5,15 +5,26 @@ import { buildEngineeringIntelligenceWorkspace } from '@/lib/engineeringIntellig
 import type { Project } from '@/types';
 import {
   AuditGuardWorkspace,
+  CADReadinessEscalationsWorkspace,
   CanonicalEvidenceWorkspace,
   DecisionWorkspace,
   DependencyGraphViewer,
+  DependencyRiskEscalationsWorkspace,
   EngineeringHealthDashboard,
+  EngineeringReviewQueueWorkspace,
+  EngineeringWorkflowOrchestrationWorkspace,
   ProjectIntelligencePicker,
+  ConflictResolutionQueueWorkspace,
+  RegenerationApprovalQueueWorkspace,
   RegenerationPlanningWorkspace,
   RequirementWorkspace,
+  FallbackRiskQueueWorkspace,
+  InstallBlockerQueueWorkspace,
+  PermitReadinessQueueWorkspace,
   SnapshotTimelineWorkspace,
   StaleInvalidationWorkspace,
+  SurveyFollowUpQueueWorkspace,
+  WorkflowSimulationImpactsWorkspace,
   WorkspaceShell,
 } from './components';
 
@@ -35,6 +46,27 @@ export default async function EngineeringIntelligencePage() {
     >
       <ProjectIntelligencePicker projects={projectList.projects} loadState={projectList.loadState} />
       <EngineeringHealthDashboard health={model.health} />
+      <EngineeringWorkflowOrchestrationWorkspace orchestration={model.workflowOrchestration} />
+      <div className="grid gap-6 2xl:grid-cols-2">
+        <SurveyFollowUpQueueWorkspace orchestration={model.workflowOrchestration} />
+        <EngineeringReviewQueueWorkspace orchestration={model.workflowOrchestration} />
+      </div>
+      <div className="grid gap-6 2xl:grid-cols-2">
+        <ConflictResolutionQueueWorkspace orchestration={model.workflowOrchestration} />
+        <FallbackRiskQueueWorkspace orchestration={model.workflowOrchestration} />
+      </div>
+      <div className="grid gap-6 2xl:grid-cols-2">
+        <CADReadinessEscalationsWorkspace orchestration={model.workflowOrchestration} />
+        <PermitReadinessQueueWorkspace orchestration={model.workflowOrchestration} />
+      </div>
+      <div className="grid gap-6 2xl:grid-cols-2">
+        <InstallBlockerQueueWorkspace orchestration={model.workflowOrchestration} />
+        <RegenerationApprovalQueueWorkspace orchestration={model.workflowOrchestration} />
+      </div>
+      <div className="grid gap-6 2xl:grid-cols-2">
+        <DependencyRiskEscalationsWorkspace orchestration={model.workflowOrchestration} />
+        <WorkflowSimulationImpactsWorkspace orchestration={model.workflowOrchestration} />
+      </div>
       <div className="grid gap-6 2xl:grid-cols-2">
         <CanonicalEvidenceWorkspace groups={model.evidenceGroups} />
         <RequirementWorkspace requirements={model.requirements} />

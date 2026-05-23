@@ -38,6 +38,17 @@ import {
   StaleImpactRecommendationsWorkspace,
   HighestValueNextActionsWorkspace,
   RecommendationConfidenceBreakdownWorkspace,
+  EngineeringWorkflowOrchestrationWorkspace,
+  SurveyFollowUpQueueWorkspace,
+  EngineeringReviewQueueWorkspace,
+  ConflictResolutionQueueWorkspace,
+  FallbackRiskQueueWorkspace,
+  CADReadinessEscalationsWorkspace,
+  PermitReadinessQueueWorkspace,
+  InstallBlockerQueueWorkspace,
+  RegenerationApprovalQueueWorkspace,
+  DependencyRiskEscalationsWorkspace,
+  WorkflowSimulationImpactsWorkspace,
 } from '@/app/admin/engineering-intelligence/components';
 import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
 import type { DeterministicPhotoGroupingModel } from '@/lib/engineeringIntelligence/photoGrouping';
@@ -57,6 +68,7 @@ import type {
   StaleInvalidationWorkspaceModel,
   EngineeringScenarioSimulationResult,
   EngineeringRecommendationSummary,
+  EngineeringWorkflowOrchestrationSummary,
 } from '@/lib/engineeringIntelligence';
 
 describe('Engineering Intelligence workspace render safety', () => {
@@ -584,6 +596,115 @@ describe('Engineering Intelligence workspace render safety', () => {
     expect(screen.getByText(/deterministic Engineering Recommendation System V1 guidance only/)).toBeInTheDocument();
     expect(screen.getByText(/not AI inference/)).toBeInTheDocument();
     expect(screen.getByText('Recommendation Confidence Breakdown')).toBeInTheDocument();
+    expect(screen.getAllByText(/object\(keys=/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Set\(/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Map\(/).length).toBeGreaterThan(0);
+  });
+
+
+  it('renders workflow orchestration queues safely without raw object children', () => {
+    const workflow = {
+      workflowId: { id: 'workflow-object' },
+      workflowType: 'collect_missing_electrical_evidence',
+      category: 'survey_ops',
+      priority: 'high',
+      severity: 'blocked',
+      status: 'requires_review',
+      deterministicScore: BigInt(123),
+      confidence: 'medium',
+      explanation: { text: 'workflow exists because deterministic state has missing evidence' },
+      affectedEvidenceIds: [new Set(['evidence:msp'])],
+      affectedSignalIds: [{ signal: 'main_service_panel_present' }],
+      affectedSignalTypes: ['main_service_panel_present'],
+      affectedContextIds: [new Map([['context', 'preferred_msp_context']])],
+      affectedContextTypes: ['preferred_msp_context'],
+      affectedRequirementIds: [{ requirement: 'main_service_panel' }],
+      affectedDecisionIds: [new Set(['interconnection'])],
+      affectedOutputIds: [new Map([['output', 'plan_set']])],
+      staleImpactParticipation: [{ entityId: { state: 'state:msp' }, staleClasses: [new Set(['BLOCKED'])], deterministicReason: { reason: 'stale impact' } }],
+      invalidationParticipation: [{ invalidation: 'path-a' }],
+      regenerationParticipation: [new Set(['regen-a'])],
+      fallbackParticipation: [new Map([['fallback', 'default-policy']])],
+      conflictParticipation: [{ conflict: 'context conflict' }],
+      dependencyTraversal: [{ pathId: { id: 'path-a' }, depth: BigInt(2), nodeIds: [{ node: 'a' }], deterministicReason: new Set(['path reason']) }],
+      cadReadinessImpact: ['routing-ready'],
+      blockingImpacts: [{ blocker: 'missing MSP' }],
+      escalationReason: new Map([['reason', 'blocked deterministic requirement']]),
+      recommendedReviewerRole: 'survey_ops',
+      recommendedTechnicianAction: { action: 'capture explicit MSP evidence' },
+      sourceRecommendationIds: [new Set(['recommendation-a'])],
+      sourceRecommendationTypes: ['collect_msp_photo'],
+      simulationOutcome: {
+        scenarioIds: [new Map([['scenario', 'scenario-a']])],
+        hypotheticalRemediationOutcomes: [{ outcome: 'confidence improved' }],
+        hypotheticalConfidenceImprovement: { gain: 0.5 },
+        hypotheticalCADReadinessImprovement: new Set([0.25]),
+        hypotheticalStaleReduction: BigInt(1),
+        deterministicReason: { reason: 'read-only scenario only' },
+      },
+      unresolvedStatesPreserved: [new Set(['missing explicit evidence remains unresolved'])],
+      safetyNotes: [{ note: 'must not auto-run' }],
+      scoreBreakdown: {
+        staleImpactSeverity: 1,
+        affectedOutputCount: 1,
+        invalidationPropagationDepth: 2,
+        blockedRequirementCount: 1,
+        cadReadinessImpact: 1,
+        conflictSeverity: 1,
+        fallbackParticipation: 1,
+        unresolvedDependencyCount: 1,
+        recommendationRanking: 1,
+        simulationImpact: 1,
+        dependencyTraversalCentrality: 1,
+        confidenceDegradation: 0.5,
+        permitReadinessImpact: 1,
+        installReadinessImpact: 1,
+        deterministicScore: 123,
+        deterministicReason: { reason: 'score from deterministic counters only' },
+      },
+      deterministicHash: new Date('2026-01-02T03:04:05Z'),
+    };
+    const summary = {
+      modelVersion: 'engineering_workflow_orchestration_v1',
+      projectId: 'project-workflow-object',
+      surveyId: { id: 'survey-workflow-object' },
+      generatedAt: new Date('2026-01-02T03:04:05Z'),
+      mode: 'deterministic_orchestration_review_only',
+      workflows: [workflow],
+      highestPriorityWorkflows: [workflow],
+      surveyFollowUpQueue: [workflow],
+      engineeringReviewQueue: [workflow],
+      conflictResolutionQueue: [workflow],
+      fallbackRiskQueue: [workflow],
+      cadReadinessEscalations: [workflow],
+      permitReadinessQueue: [workflow],
+      installBlockerQueue: [workflow],
+      regenerationApprovalQueue: [workflow],
+      dependencyRiskEscalations: [workflow],
+      workflowSimulationImpacts: [workflow],
+      queueSummaries: [{ queueId: { id: 'queue' }, label: new Set(['Queue']), category: 'mixed', workflows: [workflow], deterministicReason: { reason: 'queue reason' } }],
+      unresolvedStatesPreserved: [new Set(['unresolved evidence remains visible'])],
+      deterministicHash: { hash: 'workflow-hash' },
+      deterministicNotes: [{ note: 'review-only orchestration' }],
+      prohibitedRuntimeBehavior: ['no automatic workflow execution', { guard: 'no autonomous engineering' }],
+    } as unknown as EngineeringWorkflowOrchestrationSummary;
+
+    expect(() => render(<EngineeringWorkflowOrchestrationWorkspace orchestration={summary} />)).not.toThrow();
+    expect(() => render(<SurveyFollowUpQueueWorkspace orchestration={summary} />)).not.toThrow();
+    expect(() => render(<EngineeringReviewQueueWorkspace orchestration={summary} />)).not.toThrow();
+    expect(() => render(<ConflictResolutionQueueWorkspace orchestration={summary} />)).not.toThrow();
+    expect(() => render(<FallbackRiskQueueWorkspace orchestration={summary} />)).not.toThrow();
+    expect(() => render(<CADReadinessEscalationsWorkspace orchestration={summary} />)).not.toThrow();
+    expect(() => render(<PermitReadinessQueueWorkspace orchestration={summary} />)).not.toThrow();
+    expect(() => render(<InstallBlockerQueueWorkspace orchestration={summary} />)).not.toThrow();
+    expect(() => render(<RegenerationApprovalQueueWorkspace orchestration={summary} />)).not.toThrow();
+    expect(() => render(<DependencyRiskEscalationsWorkspace orchestration={summary} />)).not.toThrow();
+    expect(() => render(<WorkflowSimulationImpactsWorkspace orchestration={summary} />)).not.toThrow();
+
+    expect(screen.getByText('Engineering Workflow Orchestration')).toBeInTheDocument();
+    expect(screen.getByText(/deterministic Workflow Orchestration V1 review queues only/)).toBeInTheDocument();
+    expect(screen.getByText(/not automatic regeneration/)).toBeInTheDocument();
+    expect(screen.getByText('Workflow Simulation Impacts')).toBeInTheDocument();
     expect(screen.getAllByText(/object\(keys=/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Set\(/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Map\(/).length).toBeGreaterThan(0);

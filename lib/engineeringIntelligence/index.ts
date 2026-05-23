@@ -20,3 +20,9 @@ export * from './recommendationScoring';
 export * from './recommendationRanking';
 export * from './recommendationRegistry';
 export * from './recommendationEngine';
+
+export * from './workflowTypes';
+export * from './workflowRegistry';
+export * from './workflowScoring';
+export * from './workflowQueues';
+export * from './workflowOrchestration';
