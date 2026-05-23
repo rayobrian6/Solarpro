@@ -19,12 +19,23 @@ const APPROVED_METADATA_RUNTIME_IMPORT_FILES = new Set([
   'lib/assistedEvidenceSources/metadataRuntimeAdapter.ts',
 ]);
 
+const APPROVED_SURVEY_ALIGNMENT_FILES = new Set([
+  'lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.ts',
+]);
+
+const APPROVED_CORE_HASH_FILES = new Set([
+  'lib/assistedEvidence/candidateRegistry.ts',
+]);
+
 const APPROVED_METADATA_RUNTIME_IMPORTS = new Set([
   'sharp',
 ]);
 
 const FORBIDDEN_SOURCE_IMPORTS = [
   'lib/survey/evidence',
+  'lib/survey/ingest',
+  'lib/db/surveys',
+  'app/api/survey',
   'lib/engineeringIntelligence/signalExtraction',
   'lib/engineeringIntelligence/contextResolution',
   'lib/engineeringIntelligence/cadReadiness',
@@ -48,6 +59,10 @@ const PROHIBITED_RUNTIME_PATTERNS = [
   { label: 'direct canonical mutation', regex: /buildSurveyEvidenceManifest|evaluateEngineeringRequirements|buildCADReadinessMetadata|buildEngineeringRecommendations|buildEngineeringWorkflowOrchestration|INSERT INTO|UPDATE\s+/i },
   { label: 'canonical mutation enabled', regex: /canonicalMutationAllowed\s*:\s*true/i },
   { label: 'direct database mutation', regex: /\.(?:insert|upsert|delete)\(|(?:supabase|db|client)\.from\([^\n]+\.update\(|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM/i },
+  { label: 'survey table mutation', regex: /site_surveys|site_survey_files|project_physical_data/i },
+  { label: 'duplicate blur system', regex: /blurScore\s*=|blurScore\s*:|laplacian|variance\s+of\s+laplacian|blur\s*threshold/i },
+  { label: 'duplicate metadata system', regex: /widthPx\s*=|heightPx\s*=|EXIF parser|parseExif|readExif/i },
+  { label: 'duplicate hashing system', regex: /createHash\(|sha256|checksum|fingerprint/i },
 ];
 
 function walk(dir) {
@@ -105,7 +120,15 @@ for (const file of sourceFiles()) {
         const isAllowedGuardText = /prohibit|forbid|must not|not implement|no |blocked|without/i.test(line)
           && (relative.endsWith('sandboxGuards.ts') || relative.endsWith('candidateAdapterContracts.ts'));
         const isAllowedNegativeTest = relative.endsWith('.test.ts') && /toThrow|expect\(/.test(line);
-        if (!isAllowedGuardText && !isAllowedNegativeTest) violations.push(`${relative}:${index + 1}: ${pattern.label}: ${line.trim()}`);
+        const isTestFixtureReference = relative.endsWith('.test.ts')
+          && ['survey table mutation', 'duplicate blur system', 'duplicate metadata system', 'duplicate hashing system'].includes(pattern.label);
+        const isApprovedSurveyAlignmentReference = APPROVED_SURVEY_ALIGNMENT_FILES.has(relative)
+          && ['survey table mutation', 'duplicate blur system', 'duplicate metadata system', 'duplicate hashing system'].includes(pattern.label);
+        const isApprovedCoreHashing = APPROVED_CORE_HASH_FILES.has(relative)
+          && pattern.label === 'duplicate hashing system';
+        const isApprovedMetadataAdapterHashing = APPROVED_METADATA_RUNTIME_IMPORT_FILES.has(relative)
+          && pattern.label === 'duplicate hashing system';
+        if (!isAllowedGuardText && !isAllowedNegativeTest && !isTestFixtureReference && !isApprovedSurveyAlignmentReference && !isApprovedCoreHashing && !isApprovedMetadataAdapterHashing) violations.push(`${relative}:${index + 1}: ${pattern.label}: ${line.trim()}`);
       }
     }
   });
@@ -120,8 +143,13 @@ for (const file of sourceFiles()) {
     }
   }
 
-  if (/generate[A-Za-z0-9]*Candidates\s*\(/.test(text) && !/getRegisteredOpenSourceTool/.test(text) && !relative.endsWith('candidateNormalization.ts') && !relative.endsWith('candidateAdapterTypes.ts')) {
-    violations.push(`${relative}: runtime/candidate generation must resolve a registered tool before execution.`);
+  const usesCandidateGeneration = /generate[A-Za-z0-9]*Candidates\s*\(/.test(text);
+  const delegatesToRegisteredMetadataRuntime = APPROVED_SURVEY_ALIGNMENT_FILES.has(relative)
+    && /generateMetadataRuntimeCandidates\s*\(/.test(text)
+    && !/getRegisteredOpenSourceTool/.test(text);
+  const isCandidateGenerationTest = relative.endsWith('.test.ts');
+  if (usesCandidateGeneration && !isCandidateGenerationTest && !/getRegisteredOpenSourceTool/.test(text) && !delegatesToRegisteredMetadataRuntime && !relative.endsWith('candidateNormalization.ts') && !relative.endsWith('candidateAdapterTypes.ts')) {
+    violations.push(`${relative}: runtime/candidate generation must resolve a registered tool before execution or delegate to an approved registered runtime bridge.`);
   }
 }
 

@@ -1,37 +1,27 @@
 # Metadata Runtime Boundary V1 Report
 
-## Scope
+## Boundary expansion implemented
 
-This report documents the boundary protections added for the first controlled metadata runtime pilot. The boundary guard now permits the selected metadata runtime only in the approved adapter file while continuing to block OCR, computer vision, semantic interpretation, geometry, canonical mutation, database mutation, engineering inference, CAD readiness influence, recommendation influence, and workflow orchestration.
+`scripts/check-assisted-evidence-boundaries.js` was expanded to protect the survey-aligned runtime pilot from uncontrolled runtime escalation and hidden canonical influence. The guard now scans assisted evidence modules, assisted evidence source modules, and canonical Engineering Intelligence boundary files.
 
-## Approved Runtime Import
+## New protections
 
-`scripts/check-assisted-evidence-boundaries.js` now defines `APPROVED_METADATA_RUNTIME_IMPORT_FILES` and `APPROVED_METADATA_RUNTIME_IMPORTS`. The only approved metadata runtime import is `sharp`, and the only approved file importing it is `lib/assistedEvidenceSources/metadataRuntimeAdapter.ts`.
+The guard blocks forbidden source imports from assisted evidence runtime namespaces into survey evidence, survey ingestion, survey database helpers, survey upload routes, engineering signal extraction, context resolution, CAD readiness, recommendations, workflow orchestration, calculations, and regeneration modules. This prevents runtime bypass of governed adapters and prevents assisted-evidence code from reaching canonical survey or engineering truth paths directly.
 
-If `sharp` is imported from another application, admin, canonical, engineering, recommendation, workflow, or unrelated source file, the boundary guard fails loudly.
+The guard blocks runtime/package escalation patterns including Tesseract, OpenCV, YOLO, TensorFlow, PyTorch, ONNX, MediaPipe, raw image-byte analysis patterns, perceptual hashing, semantic scene classification, object detection, roof segmentation, and geometry extraction. These checks are intentionally broad and fail loudly if future work attempts to introduce OCR/CV/geometry behavior into the metadata runtime boundary.
 
-## Adapter Routing Enforcement
+The guard blocks canonical mutation patterns including direct calls to survey evidence manifest builders, engineering requirement evaluation, CAD readiness metadata builders, recommendation builders, workflow orchestration builders, SQL insert/update/delete patterns, explicit `canonicalMutationAllowed: true`, and database update patterns. It also blocks survey table mutation text patterns in assisted runtime code unless the file is the approved survey-alignment bridge documenting source identity.
 
-The boundary guard now treats both `*FixtureAdapter.ts` and `*RuntimeAdapter.ts` as adapter files. Adapter files must route candidate generation through either direct `createCandidate()` and `markReviewRequired()` calls or the shared `createReviewRequiredCandidates()` helper. This prevents runtime output from bypassing the assisted evidence lifecycle and review-required quarantine.
+The guard blocks duplicate blur, metadata, and hashing system patterns. Approved exceptions are limited: the existing core deterministic hash implementation in `lib/assistedEvidence/candidateRegistry.ts`, the existing metadata adapter's internal runtime payload hashing, the approved survey alignment bridge's source reference documentation, and safe test fixture references. These exceptions are deliberately file-scoped rather than global.
 
-## Runtime Escalation Protection
+## Registration and adapter enforcement
 
-The guard continues to scan assisted evidence and assisted evidence source files for prohibited runtime and escalation patterns. It blocks Tesseract/OCR worker execution, OpenCV, YOLO, TensorFlow, PyTorch, ONNX, MediaPipe, image-byte analysis APIs, perceptual hashing, semantic scene classification, direct canonical mutation, canonical mutation opt-in, SQL mutation patterns, and database insert/upsert/delete/update contexts.
+Candidate-generating runtime files must resolve a registered open-source tool before execution or delegate to an approved registered runtime bridge. The survey ingestion bridge is permitted only because it delegates to `generateMetadataRuntimeCandidates()` and does not import runtime packages directly. Test files are excluded from runtime implementation enforcement so deterministic tests can call the bridge under test without being treated as production adapters.
 
-The selected runtime is allowed only because it is contained to metadata extraction in a single approved adapter. The boundary policy does not allow that runtime to become a general image understanding layer.
+## Canonical backflow scan
 
-## Source Namespace Protection
+The guard continues scanning canonical/Engineering Intelligence boundary files and fails if those files import or consume assisted evidence runtime candidates directly. This preserves the one-way review-only boundary and prevents runtime output from becoming canonical engineering input without an explicit future governed review workflow.
 
-The source namespace remains blocked from importing canonical survey evidence, engineering signal extraction, context resolution, CAD readiness, recommendation engine, workflow orchestration, calculation, and regeneration modules. This prevents runtime candidates from directly influencing downstream engineering truth or operational workflow layers.
+## Validation result
 
-## Passing Boundary Result
-
-The expanded boundary guard passed with runtime import containment enabled:
-
-```text
-Assisted evidence boundary guard passed. Scanned 8 assistedEvidence files, 13 assistedEvidenceSources files, and 7 canonical/Engineering Intelligence boundary files.
-```
-
-## Safety Result
-
-The runtime pilot can inspect image bytes only inside the approved metadata adapter. It cannot perform OCR, model inference, semantic classification, object detection, segmentation, geometry extraction, canonical mutation, CAD readiness generation, recommendation generation, workflow generation, or database mutation. Its only output path is review-required assisted evidence candidates.
+After refinement, `npm run check:assisted-evidence-boundaries` passed and reported that it scanned eight assistedEvidence files, sixteen assistedEvidenceSources files, and seven canonical/Engineering Intelligence boundary files. This result confirms that the new bridge is inside the governed namespace and that current runtime code does not contain prohibited OCR, CV, geometry, canonical mutation, database mutation, duplicate metadata, duplicate blur, or duplicate hashing behavior outside approved boundaries.
