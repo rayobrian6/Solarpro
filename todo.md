@@ -17,5 +17,5 @@
 - [x] Generate metadata runtime pilot, governance validation, and boundary reports
 - [x] Run required validations and capture logs/exits
 - [x] Stage intended files and commit directly to dev
-- [ ] Push dev only
-- [ ] Provide final summary and safety guarantees
+- [x] Push dev only
+- [x] Provide final summary and safety guarantees
