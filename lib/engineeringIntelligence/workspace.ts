@@ -8,6 +8,7 @@ import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence
 import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/categoryRegistry';
 import type { CanonicalEvidenceProvenanceRecord } from '@/lib/survey/evidence/provenance';
 import type { CADReadinessFlag } from './cadReadiness';
+import { buildDeterministicPhotoGrouping } from './photoGrouping';
 import {
   listEngineeringDecisionDefinitions,
   type EngineeringDecisionDefinition,
@@ -396,6 +397,15 @@ function buildGroupFieldQualitySignals(
   return sortText(signals);
 }
 
+function buildPhotoGrouping(input: BuildEngineeringIntelligenceWorkspaceInput) {
+  return input.photoGrouping ?? buildDeterministicPhotoGrouping({
+    projectId: input.projectId,
+    survey: null,
+    canonicalManifest: null,
+    readinessFlags: input.cadReadiness?.flags ?? [],
+  });
+}
+
 function buildRequirements(latestSnapshot: EngineeringStateSnapshot | null): RequirementWorkspaceItemModel[] {
   const refs = stateRefs(latestSnapshot);
   return sortBy(ENGINEERING_REQUIREMENT_DEFINITIONS, req => req.requirementId).map((definition: EngineeringRequirementDefinition) => {
@@ -597,6 +607,7 @@ export function buildEngineeringIntelligenceWorkspace(input: BuildEngineeringInt
   const latestSnapshot = latestValidStateSnapshot(snapshots) ?? snapshots[snapshots.length - 1] ?? null;
   const health = buildHealth(input, latestSnapshot);
   const evidenceGroups = buildEvidenceGroups(input, latestSnapshot);
+  const photoGrouping = buildPhotoGrouping(input);
   const requirements = buildRequirements(latestSnapshot);
   const decisions = buildDecisions(latestSnapshot);
   const staleInvalidation = buildStaleInvalidation(input, latestSnapshot);
@@ -611,6 +622,7 @@ export function buildEngineeringIntelligenceWorkspace(input: BuildEngineeringInt
     routes: ROUTES,
     health,
     evidenceGroups,
+    photoGrouping,
     requirements,
     decisions,
     staleInvalidation,

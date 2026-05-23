@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import { verifyToken } from '@/lib/auth';
 import { isValidUUID } from '@/lib/db-neon';
 import { hydrateProjectEngineeringIntelligenceFromDb, buildEngineeringIntelligenceWorkspace, buildCADReadinessMetadata } from '@/lib/engineeringIntelligence';
+import { buildDeterministicPhotoGrouping } from '@/lib/engineeringIntelligence/photoGrouping';
 import { buildFieldEvidenceOrchestrationModel } from '@/lib/survey/evidence/fieldOrchestration';
 import {
   AuditGuardWorkspace,
@@ -11,6 +12,7 @@ import {
   DependencyGraphViewer,
   EngineeringHealthDashboard,
   FieldEvidenceOrchestrationWorkspace,
+  PhotoGroupingWorkspace,
   ProjectHydrationSummary,
   RegenerationPlanningWorkspace,
   RequirementWorkspace,
@@ -51,6 +53,7 @@ export default async function ProjectEngineeringIntelligencePage({ params }: { p
       <DependencyGraphViewer graph={model.graph} />
       <RegenerationPlanningWorkspace planning={model.regenerationPlanning} />
       <CADReadinessWorkspace readiness={hydration.cadReadiness} />
+      <PhotoGroupingWorkspace grouping={model.photoGrouping} />
       <FieldEvidenceOrchestrationWorkspace orchestration={fieldEvidenceOrchestration} />
       <AuditGuardWorkspace audit={model.auditGuards} />
     </WorkspaceShell>
@@ -58,7 +61,10 @@ export default async function ProjectEngineeringIntelligencePage({ params }: { p
 }
 
 function invalidProjectHydration(projectId: string) {
-  const workspace = buildEngineeringIntelligenceWorkspace({ projectId });
+  const cadReadiness = buildCADReadinessMetadata({ projectId });
+  const photoGrouping = buildDeterministicPhotoGrouping({ projectId, readinessFlags: cadReadiness.flags, generatedAt: new Date(0).toISOString() });
+  const workspaceInput = { projectId, cadReadiness, photoGrouping };
+  const workspace = buildEngineeringIntelligenceWorkspace(workspaceInput);
   return {
     projectId,
     generatedAt: new Date(0).toISOString(),
@@ -66,13 +72,14 @@ function invalidProjectHydration(projectId: string) {
     surveyCount: 0,
     canonicalSurveyId: null,
     surveyEvidence: null,
-    workspaceInput: { projectId },
+    workspaceInput,
     workspace,
     stateGraph: null,
     snapshots: [],
     invalidationResult: null,
     regenerationPlans: [],
-    cadReadiness: buildCADReadinessMetadata({ projectId }),
+    cadReadiness,
+    photoGrouping,
     deterministicNotes: [
       'Project engineering hydration did not run because the route parameter is not a valid project UUID.',
       'Use the Project Intelligence Picker or an existing project/survey/permit/engineering entry point to open a real project id.',
@@ -82,7 +89,10 @@ function invalidProjectHydration(projectId: string) {
 }
 
 function emptyProjectHydration(projectId: string) {
-  const workspace = buildEngineeringIntelligenceWorkspace({ projectId });
+  const cadReadiness = buildCADReadinessMetadata({ projectId });
+  const photoGrouping = buildDeterministicPhotoGrouping({ projectId, readinessFlags: cadReadiness.flags, generatedAt: new Date(0).toISOString() });
+  const workspaceInput = { projectId, cadReadiness, photoGrouping };
+  const workspace = buildEngineeringIntelligenceWorkspace(workspaceInput);
   return {
     projectId,
     generatedAt: new Date(0).toISOString(),
@@ -90,13 +100,14 @@ function emptyProjectHydration(projectId: string) {
     surveyCount: 0,
     canonicalSurveyId: null,
     surveyEvidence: null,
-    workspaceInput: { projectId },
+    workspaceInput,
     workspace,
     stateGraph: null,
     snapshots: [],
     invalidationResult: null,
     regenerationPlans: [],
-    cadReadiness: buildCADReadinessMetadata({ projectId }),
+    cadReadiness,
+    photoGrouping,
     deterministicNotes: [
       'Project engineering hydration did not run because no valid admin session user was available in this route render.',
       'Workspace remains registry/empty-state and does not synthesize project evidence or engineering state.',

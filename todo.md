@@ -1,22 +1,25 @@
-# Evidence Row Hydration + Real Engineering Lineage Visualization
+# Deterministic Photo Grouping + Survey Sequence Interpretation V1
 
 ## Audit
-- [x] Verify repository branch/status and current route/model state
-- [x] Inspect Engineering Intelligence evidence group model and project hydration inputs
-- [x] Inspect provenance, graph, CAD-readiness, stale, snapshot, and field orchestration metadata shapes
+- [x] Verify dev branch guardrails and current workspace model surfaces
+- [x] Inspect survey evidence/file metadata shapes for allowed deterministic inputs
+- [x] Inspect CAD readiness, requirement, provenance, graph, and UI integration points
 
 ## Implementation
-- [x] Hydrate real canonical evidence rows into project evidence groups
-- [x] Render evidence row provenance, duplicate lineage, requirement/decision/output links, graph links, readiness, and stale impacts
-- [x] Expand snapshot/timeline and stale impact visualization without triggering regeneration
-- [x] Add deterministic field-quality metadata for missing/minimal evidence
-- [x] Preserve explicit missing/partial states without fabricated engineering evidence
+- [x] Add deterministic survey traversal and photo grouping metadata model
+- [x] Derive traversal order, segments, clusters, continuity chains, breakpoints, and completeness scores from allowed metadata only
+- [x] Add grouped CAD readiness context without CAD generation or inferred engineering truth
+- [x] Hydrate grouping metadata into project Engineering Intelligence workspace
+- [x] Render survey movement reconstruction, photo clusters, and grouped readiness context in the workspace UI
+- [x] Preserve sparse/missing/blocked states and truth-boundary guardrails
 
 ## Tests and reports
-- [x] Add deterministic regression tests for evidence row hydration and lineage visualization
-- [x] Create evidence row hydration v1 report
-- [x] Create engineering lineage visualization v1 report
-- [x] Create stale impact visualization v1 report
+- [x] Add regression tests for sparse exterior-only surveys
+- [x] Add regression tests for interrupted ordering, duplicate timestamps, mixed roof traversal, and stable reruns
+- [x] Add regression tests for grouped roof/utility/detached continuity and missing electrical evidence
+- [x] Create deterministic photo grouping v1 report
+- [x] Create survey sequence interpretation v1 report
+- [x] Create grouped CAD readiness v1 report
 
 ## Validation
 - [x] Run topology check
@@ -26,8 +29,8 @@
 - [x] Run lint
 - [x] Run prohibited-boundary scan
 
-## Commit and push
+## Commit and dev-only push
 - [x] Review diff/status
-- [x] Commit changes
-- [x] Push branch safely without printing token
-- [x] Final summary with exact validation results
+- [ ] Commit changes on dev
+- [ ] Push dev only
+- [ ] Final recap with exact validation results

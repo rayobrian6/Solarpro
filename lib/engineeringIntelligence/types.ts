@@ -5,6 +5,7 @@ import type {
 } from '@/lib/survey/evidence/engineeringRequirements';
 import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
 import type { CADReadinessFlag, CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
+import type { DeterministicPhotoGroupingModel } from '@/lib/engineeringIntelligence/photoGrouping';
 import type {
   EngineeringDecisionDefinition,
   EngineeringDecisionType,
@@ -234,6 +235,7 @@ export interface EngineeringIntelligenceWorkspaceModel {
   routes: EngineeringIntelligenceRouteSummary[];
   health: EngineeringHealthDashboardModel;
   evidenceGroups: CanonicalEvidenceWorkspaceGroupModel[];
+  photoGrouping: DeterministicPhotoGroupingModel;
   requirements: RequirementWorkspaceItemModel[];
   decisions: DecisionWorkspaceItemModel[];
   staleInvalidation: StaleInvalidationWorkspaceModel;
@@ -248,6 +250,7 @@ export interface BuildEngineeringIntelligenceWorkspaceInput {
   projectId?: string | null;
   surveyEvidence?: EngineeringSurveyEvidence | null;
   cadReadiness?: CADReadinessMetadataModel | null;
+  photoGrouping?: DeterministicPhotoGroupingModel | null;
   invalidationResult?: EngineeringInvalidationResult | null;
   snapshots?: EngineeringStateSnapshot[] | null;
   snapshotDiffs?: EngineeringStateSnapshotDiff[] | null;

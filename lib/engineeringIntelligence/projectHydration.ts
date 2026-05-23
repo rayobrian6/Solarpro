@@ -20,6 +20,7 @@ import {
 } from '@/lib/engineeringStateInvalidation';
 import { getSiteSurveyFiles, getSiteSurveysByProject, type SiteSurvey, type SiteSurveyFile } from '@/lib/db-neon';
 import { buildCADReadinessMetadata, type CADReadinessMetadataModel } from './cadReadiness';
+import { buildDeterministicPhotoGrouping, type DeterministicPhotoGroupingModel } from './photoGrouping';
 import { buildEngineeringIntelligenceWorkspace } from './workspace';
 import type { BuildEngineeringIntelligenceWorkspaceInput, EngineeringIntelligenceWorkspaceModel } from './types';
 import { buildSurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
@@ -47,6 +48,7 @@ export interface HydratedProjectEngineeringState {
   invalidationResult: EngineeringInvalidationResult | null;
   regenerationPlans: SelectiveRegenerationPlan[];
   cadReadiness: CADReadinessMetadataModel;
+  photoGrouping: DeterministicPhotoGroupingModel;
   deterministicNotes: string[];
 }
 
@@ -61,8 +63,18 @@ export async function hydrateProjectEngineeringIntelligenceFromDb(input: {
     return hydrateProjectEngineeringIntelligence({ projectId: input.projectId, sources, generatedAt: input.generatedAt });
   } catch (error) {
     const generatedAt = input.generatedAt ?? new Date(0).toISOString();
-    const workspace = buildEngineeringIntelligenceWorkspace({ projectId: input.projectId });
     const cadReadiness = buildCADReadinessMetadata({ projectId: input.projectId });
+    const photoGrouping = buildDeterministicPhotoGrouping({
+      projectId: input.projectId,
+      readinessFlags: cadReadiness.flags,
+      generatedAt,
+    });
+    const workspaceInput: BuildEngineeringIntelligenceWorkspaceInput = {
+      projectId: input.projectId,
+      cadReadiness,
+      photoGrouping,
+    };
+    const workspace = buildEngineeringIntelligenceWorkspace(workspaceInput);
     return {
       projectId: input.projectId,
       generatedAt,
@@ -70,13 +82,14 @@ export async function hydrateProjectEngineeringIntelligenceFromDb(input: {
       surveyCount: 0,
       canonicalSurveyId: null,
       surveyEvidence: null,
-      workspaceInput: { projectId: input.projectId },
+      workspaceInput,
       workspace,
       stateGraph: null,
       snapshots: [],
       invalidationResult: null,
       regenerationPlans: [],
       cadReadiness,
+      photoGrouping,
       deterministicNotes: [
         `Project engineering hydration could not load DB survey state: ${(error as Error).message}`,
         'Workspace remains registry/empty-state rather than fabricating project engineering state.',
@@ -97,8 +110,18 @@ export function hydrateProjectEngineeringIntelligence(input: {
   });
 
   if (!sortedSources.length) {
-    const workspace = buildEngineeringIntelligenceWorkspace({ projectId: input.projectId });
     const cadReadiness = buildCADReadinessMetadata({ projectId: input.projectId });
+    const photoGrouping = buildDeterministicPhotoGrouping({
+      projectId: input.projectId,
+      readinessFlags: cadReadiness.flags,
+      generatedAt,
+    });
+    const workspaceInput: BuildEngineeringIntelligenceWorkspaceInput = {
+      projectId: input.projectId,
+      cadReadiness,
+      photoGrouping,
+    };
+    const workspace = buildEngineeringIntelligenceWorkspace(workspaceInput);
     return {
       projectId: input.projectId,
       generatedAt,
@@ -106,13 +129,14 @@ export function hydrateProjectEngineeringIntelligence(input: {
       surveyCount: 0,
       canonicalSurveyId: null,
       surveyEvidence: null,
-      workspaceInput: { projectId: input.projectId },
+      workspaceInput,
       workspace,
       stateGraph: null,
       snapshots: [],
       invalidationResult: null,
       regenerationPlans: [],
       cadReadiness,
+      photoGrouping,
       deterministicNotes: [
         'No project survey records were supplied for live engineering hydration.',
         'Workspace uses explicit registry/empty state and does not synthesize evidence, geometry, or stale state.',
@@ -226,10 +250,19 @@ export function hydrateProjectEngineeringIntelligence(input: {
     renderOutputExpected: false,
   });
   const cadReadiness = buildCADReadinessMetadata({ projectId: input.projectId, surveyId: canonicalSurveyId, canonicalManifest: hygiene.canonicalManifest ?? canonicalManifest, surveyEvidence });
+  const photoGrouping = buildDeterministicPhotoGrouping({
+    projectId: input.projectId,
+    survey: canonicalSource.survey,
+    canonicalManifest: hygiene.canonicalManifest ?? canonicalManifest,
+    sessions: hygiene.sessions,
+    readinessFlags: cadReadiness.flags,
+    generatedAt,
+  });
   const workspaceInput: BuildEngineeringIntelligenceWorkspaceInput = {
     projectId: input.projectId,
     surveyEvidence,
     cadReadiness,
+    photoGrouping,
     invalidationResult,
     snapshots,
     snapshotDiffs: diffs,
@@ -255,6 +288,7 @@ export function hydrateProjectEngineeringIntelligence(input: {
     invalidationResult,
     regenerationPlans,
     cadReadiness,
+    photoGrouping,
     deterministicNotes: [
       `Hydrated from ${sortedSources.length} project survey session(s) and canonical survey ${canonicalSurveyId}.`,
       'Canonical evidence, requirement evaluation, provenance, graph, snapshots, invalidation events, and regeneration plans are derived from deterministic project survey metadata.',

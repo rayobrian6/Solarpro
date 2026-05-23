@@ -114,6 +114,9 @@ describe('project engineering intelligence hydration', () => {
     expect(hydrated.regenerationPlans.length).toBe(1);
     expect(hydrated.workspace.regenerationPlanning.plans.length).toBe(1);
     expect(hydrated.cadReadiness.flags.length).toBeGreaterThan(0);
+    expect(hydrated.photoGrouping.surveyTraversalOrder.length).toBeGreaterThan(0);
+    expect(hydrated.workspace.photoGrouping).toBe(hydrated.photoGrouping);
+    expect(hydrated.photoGrouping.prohibitedRuntimeBehavior).toEqual(expect.arrayContaining(['no OCR', 'no CAD generation']));
 
     const roofGroup = hydrated.workspace.evidenceGroups.find(group => group.groupId === 'roof');
     const electricalGroup = hydrated.workspace.evidenceGroups.find(group => group.groupId === 'electrical');
@@ -192,6 +195,9 @@ describe('project engineering intelligence hydration', () => {
     expect(essGroup?.canonicalEvidenceItems).toHaveLength(0);
     expect(detachedGroup?.canonicalEvidenceItems).toHaveLength(0);
     expect(detachedGroup?.readinessFlags.find(flag => flag.flagId === 'detached-structure-ready')?.status).toBe('blocked');
+    expect(hydrated.photoGrouping.electricalEvidenceGroups).toEqual([]);
+    expect(hydrated.photoGrouping.detachedStructureGroups).toEqual([]);
+    expect(hydrated.photoGrouping.groupedCADReadiness.find(context => context.contextId === 'grouped-readiness:trench-path-continuity')?.status).toBe('blocked');
     expect(hydrated.workspace.evidenceGroups.flatMap(group => group.deterministicNotes).join(' ')).toContain('do not trigger CAD or regeneration');
   });
 
@@ -211,6 +217,9 @@ describe('project engineering intelligence hydration', () => {
     expect(hydrated.invalidationResult).toBeNull();
     expect(hydrated.regenerationPlans).toEqual([]);
     expect(hydrated.workspace.projectId).toBe('project-empty-1');
+    expect(hydrated.photoGrouping.source).toBe('not_loaded');
+    expect(hydrated.photoGrouping.surveyTraversalOrder).toEqual([]);
+    expect(hydrated.workspace.photoGrouping.source).toBe('not_loaded');
     expect(hydrated.deterministicNotes.join(' ')).toContain('does not synthesize evidence, geometry, or stale state');
   });
 });

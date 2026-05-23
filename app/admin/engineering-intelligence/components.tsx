@@ -14,6 +14,7 @@ import type {
 } from '@/lib/engineeringIntelligence';
 import type { HydratedProjectEngineeringState } from '@/lib/engineeringIntelligence/projectHydration';
 import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
+import type { DeterministicPhotoGroupingModel } from '@/lib/engineeringIntelligence/photoGrouping';
 import type { FieldEvidenceOrchestrationModel } from '@/lib/survey/evidence/fieldOrchestration';
 import type { Project } from '@/types';
 
@@ -239,6 +240,103 @@ export function CADReadinessWorkspace({ readiness }: { readiness: CADReadinessMe
       </div>
       <div className="mt-4"><ListBox title="Prohibited runtime behavior" values={readiness.prohibitedRuntimeBehavior} /></div>
       <DeterministicNotes notes={readiness.deterministicNotes} />
+    </Panel>
+  );
+}
+
+
+export function PhotoGroupingWorkspace({ grouping }: { grouping: DeterministicPhotoGroupingModel }) {
+  return (
+    <Panel title="Deterministic Photo Grouping + Survey Sequence" eyebrow="Metadata-only grouping">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Traversal rows" value={grouping.surveyTraversalOrder.length} />
+        <Metric label="Segments" value={grouping.surveyTraversalSegments.length} />
+        <Metric label="Clusters" value={grouping.evidenceClusters.length} />
+        <Metric label="Sequence breaks" value={grouping.sequenceBreakpoints.length} />
+      </div>
+      {grouping.source === 'not_loaded' ? (
+        <div className="mt-4"><EmptyState state="not_loaded">No canonical manifest metadata was loaded, so traversal order, photo continuity, evidence clusters, and grouped readiness are not fabricated.</EmptyState></div>
+      ) : (
+        <>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <Metric label="Roof-side groups" value={grouping.roofSideCandidateGroups.length} />
+            <Metric label="Utility groups" value={grouping.utilityEvidenceGroups.length} />
+            <Metric label="Electrical groups" value={grouping.electricalEvidenceGroups.length} />
+          </div>
+          <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-white/[0.04] text-slate-400">
+                <tr><th className="p-3">Order</th><th className="p-3">Evidence</th><th className="p-3">Category</th><th className="p-3">Timestamp</th><th className="p-3">Metadata</th></tr>
+              </thead>
+              <tbody className="divide-y divide-white/10">
+                {grouping.surveyTraversalOrder.slice(0, 40).map(item => (
+                  <tr key={item.evidenceId} className="align-top">
+                    <td className="p-3 font-mono text-sky-300">{item.sequenceIndex}</td>
+                    <td className="p-3"><div className="break-all font-mono text-white">{item.evidenceId}</div><div className="mt-1 break-all text-slate-500">{item.filename ?? 'no_filename'}</div></td>
+                    <td className="p-3"><div className="font-mono text-slate-200">{item.category}</div><div className="mt-1 text-slate-500">submitted: {item.submittedCategory ?? 'not_loaded'}</div></td>
+                    <td className="p-3 text-slate-400"><div>capture: {item.captureTimestamp ?? 'not_loaded'}</div><div>upload: {item.uploadTimestamp ?? 'not_loaded'}</div></td>
+                    <td className="p-3 text-slate-400"><div>score: {item.metadataCompletenessScore}</div><div>{item.widthPx ?? 'w?'}×{item.heightPx ?? 'h?'} · {item.orientation ?? 'orientation?'}</div></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <div className="space-y-3">
+          <h3 className="text-sm font-bold text-white">Movement segments</h3>
+          {grouping.surveyTraversalSegments.length ? grouping.surveyTraversalSegments.map(segment => (
+            <div key={segment.segmentId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs">
+              <div className="flex items-center justify-between gap-3"><span className="font-mono text-white">{segment.segmentId}</span><StatusPill value={segment.continuityConfidence} /></div>
+              <p className="mt-2 text-slate-400">{segment.probableMovementContext}</p>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <LineageBox title="Evidence chain" values={segment.evidenceIds} />
+                <LineageBox title="Categories" values={segment.dominantCategories} />
+                <LineageBox title="Boundary reasons" values={segment.clusterBoundaryReasons} />
+                <LineageBox title="Transition reasons" values={segment.clusterTransitionReasons} />
+              </div>
+            </div>
+          )) : <EmptyState state="no_segments">No movement segments were derived.</EmptyState>}
+        </div>
+        <div className="space-y-3">
+          <h3 className="text-sm font-bold text-white">Evidence clusters</h3>
+          {grouping.evidenceClusters.length ? grouping.evidenceClusters.map(cluster => (
+            <div key={cluster.clusterId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs">
+              <div className="flex items-center justify-between gap-3"><span className="font-mono text-white">{cluster.clusterId}</span><StatusPill value={cluster.clusterConfidence} /></div>
+              <div className="mt-1 text-sky-300">{cluster.label} · sequence {cluster.sequenceStart}-{cluster.sequenceEnd}</div>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <LineageBox title="Evidence ids" values={cluster.evidenceIds} />
+                <LineageBox title="Readiness context" values={cluster.readinessPromotionContext} />
+              </div>
+            </div>
+          )) : <EmptyState state="no_clusters">No evidence clusters were derived.</EmptyState>}
+        </div>
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <ListBox title="Photo continuity chains" values={grouping.photoContinuityChains.map(chain => `${chain.chainId}:${chain.sequenceStart}-${chain.sequenceEnd}:${chain.continuityConfidence}`)} />
+        <ListBox title="Sequence breakpoints" values={grouping.sequenceBreakpoints.map(point => `${point.breakpointId}:${point.reason}`)} />
+        <ListBox title="Detached structure groups" values={grouping.detachedStructureGroups.map(group => group.clusterId)} />
+        <ListBox title="Ground/trench candidate groups" values={grouping.groundMountCandidateGroups.map(group => group.clusterId)} />
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        {grouping.groupedCADReadiness.map(context => (
+          <div key={context.contextId} className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-4 text-xs">
+            <div className="flex items-center justify-between gap-3"><span className="font-bold text-white">{context.label}</span><StatusPill value={context.status} /></div>
+            <p className="mt-2 text-slate-300">{context.deterministicReason}</p>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              <LineageBox title="Readiness flags" values={context.linkedReadinessFlagIds} />
+              <LineageBox title="Supporting clusters" values={context.supportingClusterIds} />
+              <LineageBox title="Blocking reasons" values={context.blockingReasons.length ? context.blockingReasons : ['none']} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <ListBox title="Metadata completeness scores" values={grouping.metadataCompletenessScores.map(score => `${score.evidenceId}:${score.score}:missing=${score.missingFields.join('|') || 'none'}`)} />
+        <ListBox title="Prohibited runtime behavior" values={grouping.prohibitedRuntimeBehavior} />
+      </div>
+      <DeterministicNotes notes={grouping.deterministicNotes} />
     </Panel>
   );
 }
