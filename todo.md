@@ -18,5 +18,5 @@
 
 ## Delivery
 - [x] Stage intended files and commit directly to dev
-- [ ] Push dev only
-- [ ] Provide final summary and safety guarantees
+- [x] Push dev only
+- [x] Provide final summary and safety guarantees
