@@ -11,5 +11,5 @@
 ## Validation and Delivery
 - [x] Validate formatting and repository diff
 - [x] Stage intended files and commit directly to dev
-- [ ] Push dev only
+- [x] Push dev only
 - [ ] Provide final summary
