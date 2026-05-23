@@ -10,6 +10,7 @@ import type { EngineeringInvalidationPropagationResult, EngineeringAffectedOutpu
 import type { PropagationTraversalResult } from '@/lib/engineeringIntelligence/propagationGraph';
 import type { EngineeringRegenerationPlanV1 } from '@/lib/engineeringIntelligence/regenerationPlanner';
 import type { EngineeringSnapshotDeltaV1 } from '@/lib/engineeringIntelligence/snapshotDelta';
+import type { StructuredEngineeringSignal, StructuredEngineeringSignalSummary } from '@/lib/engineeringIntelligence/signalTypes';
 import type {
   EngineeringDecisionDefinition,
   EngineeringDecisionType,
@@ -298,6 +299,62 @@ export interface StaleStateTimelineWorkspaceModel {
   deterministicNotes: string[];
 }
 
+
+export interface StructuredEngineeringSignalsWorkspaceModel {
+  summary: StructuredEngineeringSignalSummary | null;
+  signals: StructuredEngineeringSignal[];
+  satisfied: string[];
+  partial: string[];
+  blocked: string[];
+  missing: string[];
+  notApplicable: string[];
+  deterministicNotes: string[];
+}
+
+export interface SignalProvenanceWorkspaceModel {
+  chains: Array<{
+    signalId: string;
+    sourceEvidenceIds: string[];
+    sourceSurveyIds: string[];
+    derivedFrom: string[];
+    dependencyNodes: string[];
+    deterministicHash: string;
+  }>;
+  deterministicNotes: string[];
+}
+
+export interface SignalDependencyGraphWorkspaceModel {
+  nodes: StructuredEngineeringSignalSummary['dependencyGraph']['nodes'];
+  edges: StructuredEngineeringSignalSummary['dependencyGraph']['edges'];
+  deterministicNotes: string[];
+}
+
+export interface SignalRequirementMappingWorkspaceModel {
+  mappings: NonNullable<StructuredEngineeringSignalSummary>['requirementMappings'];
+  deterministicNotes: string[];
+}
+
+export interface SignalConfidenceWorkspaceModel {
+  confidenceBreakdown: Array<{ signalId: string; status: string; score: number; band: string; factors: string[] }>;
+  deterministicNotes: string[];
+}
+
+export interface SignalBlockingWorkspaceModel {
+  blockingReasons: Array<{ signalId: string; status: string; blockingReasons: string[]; partialReasons: string[] }>;
+  deterministicNotes: string[];
+}
+
+export interface SignalInvalidationWorkspaceModel {
+  invalidations: Array<{ signalId: string; invalidatedBy: string[]; staleImpacts: string[] }>;
+  deterministicNotes: string[];
+}
+
+export interface SignalStaleImpactsWorkspaceModel {
+  staleImpacts: StructuredEngineeringSignalSummary['staleImpacts'];
+  fallbackParticipation: StructuredEngineeringSignalSummary['fallbackParticipation'];
+  deterministicNotes: string[];
+}
+
 export interface AuditGuardWorkspaceModel {
   guards: EngineeringStateAuditGuardResult[];
   topologyViolations: EngineeringStateAuditGuardResult[];
@@ -327,6 +384,14 @@ export interface EngineeringIntelligenceWorkspaceModel {
   snapshotDelta: SnapshotDeltaWorkspaceModel;
   affectedOutputs: AffectedOutputsWorkspaceModel;
   staleStateTimeline: StaleStateTimelineWorkspaceModel;
+  structuredSignals: StructuredEngineeringSignalsWorkspaceModel;
+  signalProvenance: SignalProvenanceWorkspaceModel;
+  signalDependencyGraph: SignalDependencyGraphWorkspaceModel;
+  signalRequirementMapping: SignalRequirementMappingWorkspaceModel;
+  signalConfidence: SignalConfidenceWorkspaceModel;
+  signalBlocking: SignalBlockingWorkspaceModel;
+  signalInvalidations: SignalInvalidationWorkspaceModel;
+  signalStaleImpacts: SignalStaleImpactsWorkspaceModel;
   auditGuards: AuditGuardWorkspaceModel;
   deterministicNotes: string[];
 }
@@ -346,5 +411,6 @@ export interface BuildEngineeringIntelligenceWorkspaceInput {
   invalidationPropagation?: EngineeringInvalidationPropagationResult | null;
   regenerationPlanV1?: EngineeringRegenerationPlanV1 | null;
   snapshotDelta?: EngineeringSnapshotDeltaV1 | null;
+  structuredSignals?: StructuredEngineeringSignalSummary | null;
   auditGuards?: EngineeringStateAuditGuardResult[] | null;
 }

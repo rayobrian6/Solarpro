@@ -1,4 +1,5 @@
 import type { SurveyEvidenceCategory, SurveyEvidenceManifest } from './manifest';
+import type { StructuredEngineeringSignalSummary, StructuredEngineeringSignal } from '@/lib/engineeringIntelligence/signalTypes';
 import {
   getSurveyEvidenceCategoryDefinition,
   getSurveyEvidenceLabel,
@@ -87,6 +88,10 @@ export interface EngineeringRequirementEvaluation {
   originatingSurveyIds: string[];
   originatingSurveyCreatedAts: Array<string | null>;
   evidenceCategoriesSatisfied: SurveyEvidenceCategory[];
+  structuredSignalIds: string[];
+  structuredSignalTypes: string[];
+  structuredSignalStatuses: Array<{ signalId: string; status: string; confidenceScore: number }>;
+  requirementSatisfiedBySignals: boolean;
   requiredEvidenceCategories: SurveyEvidenceCategory[];
   optionalEvidenceCategories: SurveyEvidenceCategory[];
   minimumCanonicalEvidenceCount: number;
@@ -129,6 +134,7 @@ export interface BuildEngineeringRequirementEvaluationInput {
     requirementTraceability?: RequirementEvidenceTraceabilityRecord[];
     missingRequirementTraceability?: RequirementEvidenceTraceabilityRecord[];
   } | null;
+  structuredSignals?: StructuredEngineeringSignalSummary | null;
 }
 
 const STRICT_METADATA_RULES: EngineeringRequirementMetadataCompletenessRules = {
@@ -382,7 +388,7 @@ export function buildEngineeringRequirementEvaluation(
     evidenceTruthSource: 'canonical_manifest_v1',
   });
 
-  const evaluations = ENGINEERING_REQUIREMENT_DEFINITIONS.map(definition => evaluateRequirement(definition, manifest, traceability));
+  const evaluations = ENGINEERING_REQUIREMENT_DEFINITIONS.map(definition => evaluateRequirement(definition, manifest, traceability, input.structuredSignals ?? null));
   const activeEvaluations = evaluations.filter(evaluation => evaluation.active);
   const satisfiedRequirements = activeEvaluations.filter(evaluation => evaluation.status === 'satisfied');
   const partiallySatisfiedRequirements = activeEvaluations.filter(evaluation => evaluation.status === 'partially_satisfied' || evaluation.status === 'insufficient_metadata');
@@ -417,7 +423,9 @@ export function buildEngineeringRequirementEvaluation(
     inactiveRequirements,
     allRequirements: evaluations,
     deterministicSummary: [
-      'Engineering Requirement Registry v1 evaluated canonicalManifest and provenance traceability only.',
+      input.structuredSignals
+        ? 'Engineering Requirement Registry v1 evaluated canonicalManifest, provenance traceability, and Structured Engineering Signals V1.'
+        : 'Engineering Requirement Registry v1 evaluated canonicalManifest and provenance traceability only.',
       `Registry evaluated ${activeEvaluations.length} active requirement(s) and ${inactiveRequirements.length} inactive future requirement(s).`,
       `Readiness resolved to ${readiness}; completeness resolved to ${completeness}.`,
       'Raw upload history is not consumed for satisfaction; duplicate collapse is represented through provenance group sizes only.',
@@ -430,6 +438,7 @@ function evaluateRequirement(
   definition: EngineeringRequirementDefinition,
   manifest: SurveyEvidenceManifest | null,
   traceability: SurveyEvidenceTraceabilityBundle,
+  structuredSignals: StructuredEngineeringSignalSummary | null,
 ): EngineeringRequirementEvaluation {
   if (!definition.active) {
     return inactiveEvaluation(definition);
@@ -449,21 +458,28 @@ function evaluateRequirement(
     definition.requiredEvidenceCategories.includes(record.requirementCategory)
     || definition.optionalEvidenceCategories.includes(record.requirementCategory),
   );
+  const linkedSignals = signalsForRequirement(definition.requirementId, structuredSignals);
+  const confirmedSignals = linkedSignals.filter(signal => signal.status === 'confirmed');
+  const partialSignals = linkedSignals.filter(signal => signal.status === 'partial');
   const failedMetadataRules = uniqueRecords.flatMap(record => failedMetadataRulesFor(record.metadataCompleteness, definition.metadataCompletenessRules, record.canonicalEvidenceId));
   const observedCanonicalEvidenceCount = uniqueRecords.length;
   const hasMinimumEvidence = observedCanonicalEvidenceCount >= definition.minimumCanonicalEvidenceCount;
+  const hasSignalSupport = confirmedSignals.length > 0;
+  const hasPartialSignalSupport = partialSignals.length > 0;
   const hasRequiredEvidence = definition.requiredEvidenceCategories.length === 0
-    || definition.requiredEvidenceCategories.every(category => requiredRecords.some(record => record.evidenceCategory === category));
+    || definition.requiredEvidenceCategories.every(category => requiredRecords.some(record => record.evidenceCategory === category))
+    || hasSignalSupport;
   const hasOptionalEvidence = optionalRecords.length > 0;
   const insufficientMetadata = hasMinimumEvidence && failedMetadataRules.length > 0;
-  const requirementSatisfied = hasMinimumEvidence && hasRequiredEvidence && !insufficientMetadata;
-  const partiallySatisfied = !requirementSatisfied && observedCanonicalEvidenceCount > 0;
-  const missing = observedCanonicalEvidenceCount === 0;
+  const requirementSatisfiedBySignals = hasSignalSupport && !insufficientMetadata;
+  const requirementSatisfied = (hasMinimumEvidence && hasRequiredEvidence && !insufficientMetadata) || requirementSatisfiedBySignals;
+  const partiallySatisfied = !requirementSatisfied && (observedCanonicalEvidenceCount > 0 || hasPartialSignalSupport);
+  const missing = observedCanonicalEvidenceCount === 0 && !hasSignalSupport && !hasPartialSignalSupport;
   const status: EngineeringRequirementStatus = requirementSatisfied
     ? 'satisfied'
     : insufficientMetadata
       ? 'insufficient_metadata'
-      : partiallySatisfied || (definition.confidencePolicy === 'canonical_or_optional_evidence' && hasOptionalEvidence)
+      : partiallySatisfied || (definition.confidencePolicy === 'canonical_or_optional_evidence' && hasOptionalEvidence) || hasPartialSignalSupport
         ? 'partially_satisfied'
         : 'missing';
   const confidenceSource = confidenceSourceFor(uniqueRecords, status);
@@ -482,6 +498,10 @@ function evaluateRequirement(
     originatingSurveyIds: Array.from(new Set(uniqueRecords.map(record => record.originatingSurveyId))),
     originatingSurveyCreatedAts: uniqueRecords.map(record => record.originatingSurveyCreatedAt),
     evidenceCategoriesSatisfied: Array.from(new Set(uniqueRecords.map(record => record.evidenceCategory))),
+    structuredSignalIds: linkedSignals.map(signal => signal.id).sort((a, b) => a.localeCompare(b)),
+    structuredSignalTypes: linkedSignals.map(signal => signal.signal_type).sort((a, b) => a.localeCompare(b)),
+    structuredSignalStatuses: linkedSignals.map(signal => ({ signalId: signal.id, status: signal.status, confidenceScore: signal.confidence.score })).sort((a, b) => a.signalId.localeCompare(b.signalId)),
+    requirementSatisfiedBySignals,
     requiredEvidenceCategories: definition.requiredEvidenceCategories,
     optionalEvidenceCategories: definition.optionalEvidenceCategories,
     minimumCanonicalEvidenceCount: definition.minimumCanonicalEvidenceCount,
@@ -498,15 +518,15 @@ function evaluateRequirement(
     active: definition.active,
     provenanceRecords: uniqueRecords,
     traceabilityRecords,
-    reasoningPath: reasoningPathFor(definition, status, uniqueRecords, failedMetadataRules, manifest),
+    reasoningPath: reasoningPathFor(definition, status, uniqueRecords, failedMetadataRules, manifest, linkedSignals),
     deterministicEvaluationNotes: [
       `Requirement ${definition.requirementId} evaluated against required categories: ${definition.requiredEvidenceCategories.join(', ') || 'none'}.`,
-      `Observed ${observedCanonicalEvidenceCount} canonical evidence item(s); minimum required: ${definition.minimumCanonicalEvidenceCount}.`,
+      `Observed ${observedCanonicalEvidenceCount} canonical evidence item(s); minimum required: ${definition.minimumCanonicalEvidenceCount}; linked structured signals: ${linkedSignals.length}.`,
       uniqueRecords.some(record => record.duplicateGroupSize > 1)
         ? 'Duplicate-collapsed status: at least one satisfying canonical representative includes duplicate group provenance.'
         : 'Duplicate-collapsed status: no duplicate group inflation applied to this requirement.',
       `Confidence source: ${confidenceSource}.`,
-      'Evaluation is deterministic registry logic over canonical manifest/provenance only.',
+      structuredSignals ? 'Evaluation is deterministic registry logic over canonical manifest/provenance plus structured signals.' : 'Evaluation is deterministic registry logic over canonical manifest/provenance only.',
     ],
   };
 }
@@ -526,6 +546,10 @@ function inactiveEvaluation(definition: EngineeringRequirementDefinition): Engin
     originatingSurveyIds: [],
     originatingSurveyCreatedAts: [],
     evidenceCategoriesSatisfied: [],
+    structuredSignalIds: [],
+    structuredSignalTypes: [],
+    structuredSignalStatuses: [],
+    requirementSatisfiedBySignals: false,
     requiredEvidenceCategories: definition.requiredEvidenceCategories,
     optionalEvidenceCategories: definition.optionalEvidenceCategories,
     minimumCanonicalEvidenceCount: definition.minimumCanonicalEvidenceCount,
@@ -585,6 +609,7 @@ function reasoningPathFor(
   records: CanonicalEvidenceProvenanceRecord[],
   failedMetadataRules: string[],
   manifest: SurveyEvidenceManifest | null,
+  linkedSignals: StructuredEngineeringSignal[] = [],
 ): string[] {
   const requiredLabels = definition.requiredEvidenceCategories.map(category => getSurveyEvidenceLabel(category)).join(', ') || 'none';
   const optionalLabels = definition.optionalEvidenceCategories.map(category => getSurveyEvidenceLabel(category)).join(', ') || 'none';
@@ -595,6 +620,9 @@ function reasoningPathFor(
     records.length
       ? `Canonical evidence ids used: ${records.map(record => record.canonicalEvidenceId).join(', ')}.`
       : 'No canonical evidence ids satisfy this registry requirement.',
+    linkedSignals.length
+      ? `Structured signal ids mapped: ${linkedSignals.map(signal => `${signal.id}:${signal.status}`).join(', ')}.`
+      : 'No structured engineering signals are mapped to this requirement.',
     failedMetadataRules.length
       ? `Metadata rule failures: ${failedMetadataRules.join('; ')}.`
       : 'Metadata completeness rules passed or no strict metadata rules were required beyond canonical file URL.',
@@ -621,4 +649,10 @@ export function requirementDefinitionForCategory(category: SurveyEvidenceCategor
 
 export function requirementLabelForCategory(category: SurveyEvidenceCategory): string {
   return requirementDefinitionForCategory(category)?.humanLabel ?? getSurveyEvidenceCategoryDefinition(category).label;
+}
+
+function signalsForRequirement(requirementId: EngineeringRequirementId, structuredSignals: StructuredEngineeringSignalSummary | null): StructuredEngineeringSignal[] {
+  return (structuredSignals?.signals ?? [])
+    .filter(signal => signal.requirementImpacts.includes(requirementId))
+    .sort((a, b) => a.id.localeCompare(b.id));
 }

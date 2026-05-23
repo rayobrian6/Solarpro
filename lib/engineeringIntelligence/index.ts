@@ -7,3 +7,6 @@ export * from './propagationGraph';
 export * from './invalidationEngine';
 export * from './regenerationPlanner';
 export * from './snapshotDelta';
+export * from './signalTypes';
+export * from './signalRegistry';
+export * from './signalExtraction';

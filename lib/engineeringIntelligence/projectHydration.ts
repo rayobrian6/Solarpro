@@ -24,6 +24,8 @@ import { buildDeterministicPhotoGrouping, type DeterministicPhotoGroupingModel }
 import { computeEngineeringInvalidationPropagation, type EngineeringInvalidationPropagationResult } from './invalidationEngine';
 import { buildEngineeringRegenerationPlanV1, type EngineeringRegenerationPlanV1 } from './regenerationPlanner';
 import { buildEngineeringSnapshotDeltaV1, type EngineeringSnapshotDeltaV1 } from './snapshotDelta';
+import { buildStructuredEngineeringSignals } from './signalExtraction';
+import type { StructuredEngineeringSignalSummary } from './signalTypes';
 import { buildEngineeringIntelligenceWorkspace } from './workspace';
 import type { BuildEngineeringIntelligenceWorkspaceInput, EngineeringIntelligenceWorkspaceModel } from './types';
 import { buildSurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
@@ -55,6 +57,7 @@ export interface HydratedProjectEngineeringState {
   snapshotDelta: EngineeringSnapshotDeltaV1 | null;
   cadReadiness: CADReadinessMetadataModel;
   photoGrouping: DeterministicPhotoGroupingModel;
+  structuredSignals: StructuredEngineeringSignalSummary;
   deterministicNotes: string[];
 }
 
@@ -75,10 +78,13 @@ export async function hydrateProjectEngineeringIntelligenceFromDb(input: {
       readinessFlags: cadReadiness.flags,
       generatedAt,
     });
+    const structuredSignals = buildStructuredEngineeringSignals({ projectId: input.projectId, photoGrouping, cadReadiness, generatedAt });
+    const signalAwareCADReadiness = buildCADReadinessMetadata({ projectId: input.projectId, structuredSignals });
     const workspaceInput: BuildEngineeringIntelligenceWorkspaceInput = {
       projectId: input.projectId,
-      cadReadiness,
+      cadReadiness: signalAwareCADReadiness,
       photoGrouping,
+      structuredSignals,
     };
     const workspace = buildEngineeringIntelligenceWorkspace(workspaceInput);
     return {
@@ -97,8 +103,9 @@ export async function hydrateProjectEngineeringIntelligenceFromDb(input: {
       invalidationPropagation: null,
       regenerationPlanV1: null,
       snapshotDelta: null,
-      cadReadiness,
+      cadReadiness: signalAwareCADReadiness,
       photoGrouping,
+      structuredSignals,
       deterministicNotes: [
         `Project engineering hydration could not load DB survey state: ${(error as Error).message}`,
         'Workspace remains registry/empty-state rather than fabricating project engineering state.',
@@ -125,10 +132,13 @@ export function hydrateProjectEngineeringIntelligence(input: {
       readinessFlags: cadReadiness.flags,
       generatedAt,
     });
+    const structuredSignals = buildStructuredEngineeringSignals({ projectId: input.projectId, photoGrouping, cadReadiness, generatedAt });
+    const signalAwareCADReadiness = buildCADReadinessMetadata({ projectId: input.projectId, structuredSignals });
     const workspaceInput: BuildEngineeringIntelligenceWorkspaceInput = {
       projectId: input.projectId,
-      cadReadiness,
+      cadReadiness: signalAwareCADReadiness,
       photoGrouping,
+      structuredSignals,
     };
     const workspace = buildEngineeringIntelligenceWorkspace(workspaceInput);
     return {
@@ -147,8 +157,9 @@ export function hydrateProjectEngineeringIntelligence(input: {
       invalidationPropagation: null,
       regenerationPlanV1: null,
       snapshotDelta: null,
-      cadReadiness,
+      cadReadiness: signalAwareCADReadiness,
       photoGrouping,
+      structuredSignals,
       deterministicNotes: [
         'No project survey records were supplied for live engineering hydration.',
         'Workspace uses explicit registry/empty state and does not synthesize evidence, geometry, or stale state.',
@@ -261,15 +272,26 @@ export function hydrateProjectEngineeringIntelligence(input: {
     diffs,
     renderOutputExpected: false,
   });
-  const cadReadiness = buildCADReadinessMetadata({ projectId: input.projectId, surveyId: canonicalSurveyId, canonicalManifest: hygiene.canonicalManifest ?? canonicalManifest, surveyEvidence });
+  const baseCADReadiness = buildCADReadinessMetadata({ projectId: input.projectId, surveyId: canonicalSurveyId, canonicalManifest: hygiene.canonicalManifest ?? canonicalManifest, surveyEvidence });
   const photoGrouping = buildDeterministicPhotoGrouping({
     projectId: input.projectId,
     survey: canonicalSource.survey,
     canonicalManifest: hygiene.canonicalManifest ?? canonicalManifest,
     sessions: hygiene.sessions,
-    readinessFlags: cadReadiness.flags,
+    readinessFlags: baseCADReadiness.flags,
     generatedAt,
   });
+  const preliminarySignals = buildStructuredEngineeringSignals({
+    projectId: input.projectId,
+    surveyId: canonicalSurveyId,
+    canonicalManifest: hygiene.canonicalManifest ?? canonicalManifest,
+    surveyEvidence,
+    photoGrouping,
+    cadReadiness: baseCADReadiness,
+    invalidationResult,
+    generatedAt,
+  });
+  const cadReadiness = buildCADReadinessMetadata({ projectId: input.projectId, surveyId: canonicalSurveyId, canonicalManifest: hygiene.canonicalManifest ?? canonicalManifest, surveyEvidence, structuredSignals: preliminarySignals });
   const invalidationPropagation = computeEngineeringInvalidationPropagation({
     propagationId: `engineering-intelligence:${input.projectId}:propagation:v1`,
     registry: updatedRegistry,
@@ -278,6 +300,17 @@ export function hydrateProjectEngineeringIntelligence(input: {
     persistentGraph: stateGraph,
     snapshots,
     cadReadiness,
+  });
+  const structuredSignals = buildStructuredEngineeringSignals({
+    projectId: input.projectId,
+    surveyId: canonicalSurveyId,
+    canonicalManifest: hygiene.canonicalManifest ?? canonicalManifest,
+    surveyEvidence,
+    photoGrouping,
+    cadReadiness,
+    invalidationResult,
+    invalidationPropagation,
+    generatedAt,
   });
   const regenerationPlanV1 = buildEngineeringRegenerationPlanV1({
     planId: `engineering-intelligence:${input.projectId}:regeneration-plan:v1`,
@@ -299,6 +332,7 @@ export function hydrateProjectEngineeringIntelligence(input: {
     surveyEvidence,
     cadReadiness,
     photoGrouping,
+    structuredSignals,
     invalidationResult,
     snapshots,
     snapshotDiffs: diffs,
@@ -331,6 +365,7 @@ export function hydrateProjectEngineeringIntelligence(input: {
     snapshotDelta,
     cadReadiness,
     photoGrouping,
+    structuredSignals,
     deterministicNotes: [
       `Hydrated from ${sortedSources.length} project survey session(s) and canonical survey ${canonicalSurveyId}.`,
       'Canonical evidence, requirement evaluation, provenance, graph, snapshots, invalidation events, and regeneration plans are derived from deterministic project survey metadata.',

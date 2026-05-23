@@ -17,6 +17,14 @@ import type {
   SnapshotTimelineWorkspaceModel,
   StaleInvalidationWorkspaceModel,
   StaleStateTimelineWorkspaceModel,
+  StructuredEngineeringSignalsWorkspaceModel,
+  SignalProvenanceWorkspaceModel,
+  SignalDependencyGraphWorkspaceModel,
+  SignalRequirementMappingWorkspaceModel,
+  SignalConfidenceWorkspaceModel,
+  SignalBlockingWorkspaceModel,
+  SignalInvalidationWorkspaceModel,
+  SignalStaleImpactsWorkspaceModel,
 } from '@/lib/engineeringIntelligence';
 import type { HydratedProjectEngineeringState } from '@/lib/engineeringIntelligence/projectHydration';
 import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
@@ -38,6 +46,11 @@ const statusColor: Record<string, string> = {
   not_loaded: 'border-slate-500/30 bg-slate-500/10 text-slate-400',
   insufficient_metadata: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
   ready: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+  confirmed: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+  high: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+  medium: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+  low: 'border-orange-500/30 bg-orange-500/10 text-orange-300',
+  none: 'border-slate-500/30 bg-slate-500/10 text-slate-400',
   not_applicable: 'border-slate-500/30 bg-slate-500/10 text-slate-400',
 };
 
@@ -330,6 +343,9 @@ export function CADReadinessWorkspace({ readiness }: { readiness: CADReadinessMe
             <div className="mt-3 text-slate-500">Satisfied categories</div><TokenList values={flag.satisfiedCategories} />
             <div className="mt-3 text-slate-500">Missing categories</div><TokenList values={flag.missingCategories} />
             <div className="mt-3 text-slate-500">Explicit survey signals</div><TokenList values={flag.explicitSurveySignals} />
+            <div className="mt-3 text-slate-500">Structured engineering signals</div><TokenList values={flag.structuredSignalIds} />
+            <div className="mt-3 text-slate-500">Unresolved assumptions</div><TokenList values={flag.unresolvedAssumptions} />
+            <div className="mt-3 text-slate-500">Default policy fallbacks</div><TokenList values={flag.defaultPolicyFallbacks} />
           </div>
         ))}
       </div>
@@ -914,6 +930,224 @@ export function StaleStateTimelineWorkspace({ model }: { model: StaleStateTimeli
             </div>
           </div>
         )) : <EmptyState state="no_timeline_events">No transition events are loaded.</EmptyState>}
+      </div>
+      <DeterministicNotes notes={model.deterministicNotes} />
+    </Panel>
+  );
+}
+
+
+export function StructuredEngineeringSignalsWorkspace({ model }: { model: StructuredEngineeringSignalsWorkspaceModel }) {
+  const signals = safeArray(model.signals);
+  return (
+    <Panel title="Structured Engineering Signals" eyebrow="Signal extraction V1">
+      <div className="grid gap-3 md:grid-cols-5">
+        <Metric label="Confirmed" value={collectionSize(model.satisfied)} />
+        <Metric label="Partial" value={collectionSize(model.partial)} />
+        <Metric label="Blocked" value={collectionSize(model.blocked)} />
+        <Metric label="Missing" value={collectionSize(model.missing)} />
+        <Metric label="Not applicable" value={collectionSize(model.notApplicable)} />
+      </div>
+      {signals.length ? (
+        <div className="mt-4 grid gap-3 xl:grid-cols-2">
+          {signals.map(signal => (
+            <div key={signal.id} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs">
+              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <div className="break-all font-mono text-white">{safeRenderValue(signal.id)}</div>
+                  <div className="mt-1 text-sky-300">{safeRenderValue(signal.signal_type)} · {safeRenderValue(signal.category)}</div>
+                </div>
+                <div className="flex flex-wrap gap-2"><StatusPill value={signal.status} /><StatusPill value={signal.confidence.band} /></div>
+              </div>
+              <p className="mt-3 leading-5 text-slate-300">{safeRenderValue(signal.explanation)}</p>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <LineageBox title="Source evidence" values={signal.sourceEvidenceIds} />
+                <LineageBox title="Source photos" values={signal.sourcePhotoIds} />
+                <LineageBox title="Source surveys" values={signal.sourceSurveyIds} />
+                <LineageBox title="Derived from" values={signal.derivedFrom} />
+                <LineageBox title="Requirement impacts" values={signal.requirementImpacts} />
+                <LineageBox title="CAD impacts" values={signal.cadImpacts} />
+                <LineageBox title="Stale impacts" values={signal.staleImpacts} />
+                <LineageBox title="Invalidated by" values={signal.invalidatedBy} />
+              </div>
+              <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
+                <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Confidence factors · score {safeRenderValue(signal.confidence.score)}</div>
+                <TokenList values={signal.confidence.factors} limit={10} />
+              </div>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <LineageBox title="Blocking reasons" values={signal.blockingReasons} />
+                <LineageBox title="Partial reasons" values={signal.partialReasons} />
+              </div>
+              <div className="mt-3 break-all font-mono text-[10px] text-slate-500">hash: {safeRenderValue(signal.deterministicHash)}</div>
+            </div>
+          ))}
+        </div>
+      ) : <div className="mt-4"><EmptyState state="no_signals">No structured signal model was supplied; missing truth remains visible.</EmptyState></div>}
+      <DeterministicNotes notes={model.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function SignalProvenanceWorkspace({ model }: { model: SignalProvenanceWorkspaceModel }) {
+  return (
+    <Panel title="Signal Provenance" eyebrow="Evidence-to-signal lineage">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Provenance chains" value={collectionSize(model.chains)} />
+        <Metric label="Mode" value="deterministic" />
+        <Metric label="Image inspection" value="disabled" />
+        <Metric label="CAD generation" value="disabled" />
+      </div>
+      <div className="mt-4 space-y-3">
+        {safeArray(model.chains).length ? safeArray(model.chains).map(chain => (
+          <div key={chain.signalId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs">
+            <div className="break-all font-mono text-white">{safeRenderValue(chain.signalId)}</div>
+            <div className="mt-3 grid gap-2 md:grid-cols-2 lg:grid-cols-4">
+              <LineageBox title="Evidence" values={chain.sourceEvidenceIds} />
+              <LineageBox title="Surveys" values={chain.sourceSurveyIds} />
+              <LineageBox title="Derived from" values={chain.derivedFrom} />
+              <LineageBox title="Dependency nodes" values={chain.dependencyNodes} />
+            </div>
+            <div className="mt-3 break-all font-mono text-[10px] text-slate-500">deterministic hash: {safeRenderValue(chain.deterministicHash)}</div>
+          </div>
+        )) : <EmptyState state="no_signal_provenance">No signal provenance chains are available.</EmptyState>}
+      </div>
+      <DeterministicNotes notes={model.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function SignalDependencyGraphWorkspace({ model }: { model: SignalDependencyGraphWorkspaceModel }) {
+  const nodes = safeArray(model.nodes).slice(0, 40);
+  const width = 920;
+  const height = Math.max(320, Math.ceil(nodes.length / 4) * 96);
+  const positioned = nodes.map((node, index) => ({ ...node, x: 80 + (index % 4) * 220, y: 60 + Math.floor(index / 4) * 92 }));
+  return (
+    <Panel title="Signal Dependency Graph" eyebrow="Signal dependency metadata">
+      <div className="grid gap-3 md:grid-cols-2"><Metric label="Signal graph nodes" value={collectionSize(model.nodes)} /><Metric label="Signal graph edges" value={collectionSize(model.edges)} /></div>
+      <div className="mt-4 overflow-auto rounded-xl border border-white/10 bg-black/30 p-4">
+        <svg width={width} height={height} role="img" aria-label="Structured engineering signal dependency graph preview">
+          {safeArray(model.edges).slice(0, 80).map(edge => {
+            const source = positioned.find(node => node.nodeId === edge.sourceNodeId);
+            const target = positioned.find(node => node.nodeId === edge.targetNodeId);
+            if (!source || !target) return null;
+            return <line key={edge.edgeId} x1={source.x} y1={source.y} x2={target.x} y2={target.y} stroke="rgba(168,85,247,0.35)" strokeWidth="1" />;
+          })}
+          {positioned.map(node => (
+            <g key={node.nodeId} transform={`translate(${node.x},${node.y})`}>
+              <rect x="-64" y="-28" width="128" height="56" rx="12" fill="rgba(15,23,42,0.95)" stroke="rgba(168,85,247,0.5)" />
+              <text x="0" y="-3" textAnchor="middle" fill="white" fontSize="10" fontWeight="700">{safeRenderValue(node.label).slice(0, 18)}</text>
+              <text x="0" y="11" textAnchor="middle" fill="rgb(216,180,254)" fontSize="8">{safeRenderValue(node.nodeType)}</text>
+              <text x="0" y="23" textAnchor="middle" fill="rgb(148,163,184)" fontSize="7">{safeRenderValue(node.status)}</text>
+            </g>
+          ))}
+        </svg>
+      </div>
+      <DeterministicNotes notes={model.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function SignalRequirementMappingWorkspace({ model }: { model: SignalRequirementMappingWorkspaceModel }) {
+  return (
+    <Panel title="Signal-to-Requirement Mapping" eyebrow="Requirement hydration support">
+      <div className="grid gap-3 md:grid-cols-3"><Metric label="Mappings" value={collectionSize(model.mappings)} /><Metric label="Signal support" value="explicit" /><Metric label="Assumption promotion" value="disabled" /></div>
+      <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
+        <table className="w-full text-left text-xs">
+          <thead className="bg-white/[0.04] text-slate-400"><tr><th className="p-3">Requirement</th><th className="p-3">Signals</th><th className="p-3">Confirmed</th><th className="p-3">Partial</th><th className="p-3">Missing</th></tr></thead>
+          <tbody className="divide-y divide-white/10">
+            {safeArray(model.mappings).map(mapping => (
+              <tr key={mapping.requirementId} className="align-top">
+                <td className="p-3 font-mono text-white">{safeRenderValue(mapping.requirementId)}</td>
+                <td className="p-3"><TokenList values={mapping.signalIds} /></td>
+                <td className="p-3"><TokenList values={mapping.confirmedSignalIds} /></td>
+                <td className="p-3"><TokenList values={mapping.partialSignalIds} /></td>
+                <td className="p-3"><TokenList values={mapping.missingSignalIds} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <DeterministicNotes notes={model.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function SignalConfidenceWorkspace({ model }: { model: SignalConfidenceWorkspaceModel }) {
+  return (
+    <Panel title="Signal Confidence Breakdown" eyebrow="Deterministic scoring factors">
+      <div className="grid gap-3 md:grid-cols-3"><Metric label="Confidence rows" value={collectionSize(model.confidenceBreakdown)} /><Metric label="AI confidence" value="not_used" /><Metric label="Scoring" value="metadata_rules" /></div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        {safeArray(model.confidenceBreakdown).map(entry => (
+          <div key={entry.signalId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs">
+            <div className="flex items-center justify-between gap-3"><span className="break-all font-mono text-white">{safeRenderValue(entry.signalId)}</span><StatusPill value={entry.status} /></div>
+            <div className="mt-2 flex items-center gap-2 text-slate-300"><span>Score:</span><span className="font-mono text-sky-300">{safeRenderValue(entry.score)}</span><StatusPill value={entry.band} /></div>
+            <div className="mt-3"><TokenList values={entry.factors} limit={10} /></div>
+          </div>
+        ))}
+      </div>
+      <DeterministicNotes notes={model.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function SignalBlockingWorkspace({ model }: { model: SignalBlockingWorkspaceModel }) {
+  return (
+    <Panel title="Signal Blocking Reasons" eyebrow="Missing truth stays visible">
+      <div className="grid gap-3 md:grid-cols-3"><Metric label="Rows" value={collectionSize(model.blockingReasons)} /><Metric label="Blocked truth" value="visible" /><Metric label="Assumptions" value="not promoted" /></div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        {safeArray(model.blockingReasons).map(entry => (
+          <div key={entry.signalId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs">
+            <div className="flex items-center justify-between gap-3"><span className="break-all font-mono text-white">{safeRenderValue(entry.signalId)}</span><StatusPill value={entry.status} /></div>
+            <div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Blocking reasons" values={entry.blockingReasons} /><LineageBox title="Partial reasons" values={entry.partialReasons} /></div>
+          </div>
+        ))}
+      </div>
+      <DeterministicNotes notes={model.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function SignalInvalidationWorkspace({ model }: { model: SignalInvalidationWorkspaceModel }) {
+  return (
+    <Panel title="Signal Invalidations" eyebrow="Invalidation participation">
+      <div className="grid gap-3 md:grid-cols-3"><Metric label="Invalidation rows" value={collectionSize(model.invalidations)} /><Metric label="Propagation" value="metadata_only" /><Metric label="Auto regeneration" value="disabled" /></div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        {safeArray(model.invalidations).map(entry => (
+          <div key={entry.signalId} className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-4 text-xs">
+            <div className="break-all font-mono text-white">{safeRenderValue(entry.signalId)}</div>
+            <div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Invalidated by" values={entry.invalidatedBy} /><LineageBox title="Stale impacts" values={entry.staleImpacts} /></div>
+          </div>
+        ))}
+      </div>
+      <DeterministicNotes notes={model.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function SignalStaleImpactsWorkspace({ model }: { model: SignalStaleImpactsWorkspaceModel }) {
+  return (
+    <Panel title="Signal Stale Impacts" eyebrow="Fallback/default participation">
+      <div className="grid gap-3 md:grid-cols-3"><Metric label="Stale impact rows" value={collectionSize(model.staleImpacts)} /><Metric label="Fallback rows" value={collectionSize(model.fallbackParticipation)} /><Metric label="CAD certainty" value="not implied" /></div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div className="space-y-3">
+          <h3 className="text-sm font-bold text-white">Stale impact participation</h3>
+          {safeArray(model.staleImpacts).length ? safeArray(model.staleImpacts).map(entry => (
+            <div key={entry.signalId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs">
+              <div className="break-all font-mono text-white">{safeRenderValue(entry.signalId)}</div>
+              <div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Stale classes" values={entry.staleClasses} /><LineageBox title="Invalidated by" values={entry.invalidatedBy} /></div>
+            </div>
+          )) : <EmptyState state="no_stale_signal_impacts">No stale signal impact metadata is loaded.</EmptyState>}
+        </div>
+        <div className="space-y-3">
+          <h3 className="text-sm font-bold text-white">Fallback/default participation</h3>
+          {safeArray(model.fallbackParticipation).length ? safeArray(model.fallbackParticipation).map(entry => (
+            <div key={entry.signalId} className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-xs">
+              <div className="break-all font-mono text-white">{safeRenderValue(entry.signalId)}</div>
+              <div className="mt-2 text-amber-300">{safeRenderValue(entry.fallback)}</div>
+              <p className="mt-2 text-slate-300">{safeRenderValue(entry.deterministicReason)}</p>
+            </div>
+          )) : <EmptyState state="no_fallback_participation">No fallback participation rows are loaded.</EmptyState>}
+        </div>
       </div>
       <DeterministicNotes notes={model.deterministicNotes} />
     </Panel>

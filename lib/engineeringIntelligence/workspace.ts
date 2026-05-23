@@ -46,6 +46,14 @@ import type {
   SnapshotTimelineWorkspaceModel,
   StaleInvalidationWorkspaceModel,
   StaleStateTimelineWorkspaceModel,
+  StructuredEngineeringSignalsWorkspaceModel,
+  SignalProvenanceWorkspaceModel,
+  SignalDependencyGraphWorkspaceModel,
+  SignalRequirementMappingWorkspaceModel,
+  SignalConfidenceWorkspaceModel,
+  SignalBlockingWorkspaceModel,
+  SignalInvalidationWorkspaceModel,
+  SignalStaleImpactsWorkspaceModel,
 } from './types';
 
 const sortText = <T extends string>(values: T[]): T[] => [...new Set(values)].sort((a, b) => a.localeCompare(b));
@@ -691,6 +699,84 @@ function includesAny(value: string, tokens: string[]) {
   return tokens.some(token => value.includes(token));
 }
 
+
+function buildStructuredSignalsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): StructuredEngineeringSignalsWorkspaceModel {
+  const summary = input.structuredSignals ?? null;
+  const signals = summary?.signals ?? [];
+  return {
+    summary,
+    signals,
+    satisfied: signals.filter(signal => signal.status === 'confirmed').map(signal => signal.id),
+    partial: signals.filter(signal => signal.status === 'partial').map(signal => signal.id),
+    blocked: signals.filter(signal => signal.status === 'blocked').map(signal => signal.id),
+    missing: signals.filter(signal => signal.status === 'missing').map(signal => signal.id),
+    notApplicable: signals.filter(signal => signal.status === 'not_applicable').map(signal => signal.id),
+    deterministicNotes: summary?.deterministicNotes ?? ['No Structured Engineering Signals V1 model was supplied.'],
+  };
+}
+
+function buildSignalProvenanceWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalProvenanceWorkspaceModel {
+  const signals = input.structuredSignals?.signals ?? [];
+  return {
+    chains: signals.map(signal => ({
+      signalId: signal.id,
+      sourceEvidenceIds: signal.sourceEvidenceIds,
+      sourceSurveyIds: signal.sourceSurveyIds,
+      derivedFrom: signal.derivedFrom,
+      dependencyNodes: signal.dependencyNodes,
+      deterministicHash: signal.deterministicHash,
+    })),
+    deterministicNotes: signals.length ? ['Signal provenance chains are derived from signal source fields and deterministic hashes.'] : ['No signal provenance is available without a signal model.'],
+  };
+}
+
+function buildSignalDependencyGraphWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalDependencyGraphWorkspaceModel {
+  return {
+    nodes: input.structuredSignals?.dependencyGraph.nodes ?? [],
+    edges: input.structuredSignals?.dependencyGraph.edges ?? [],
+    deterministicNotes: input.structuredSignals ? ['Signal dependency graph is generated from signal source/impact mappings.'] : ['No signal dependency graph was supplied.'],
+  };
+}
+
+function buildSignalRequirementMappingWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalRequirementMappingWorkspaceModel {
+  return {
+    mappings: input.structuredSignals?.requirementMappings ?? [],
+    deterministicNotes: input.structuredSignals ? ['Signal-to-requirement mappings are registry-defined and deterministic.'] : ['No signal-to-requirement mapping was supplied.'],
+  };
+}
+
+function buildSignalConfidenceWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalConfidenceWorkspaceModel {
+  const signals = input.structuredSignals?.signals ?? [];
+  return {
+    confidenceBreakdown: signals.map(signal => ({ signalId: signal.id, status: signal.status, score: signal.confidence.score, band: signal.confidence.band, factors: signal.confidence.factors })),
+    deterministicNotes: signals.length ? ['Confidence is deterministic metadata scoring, not AI confidence.'] : ['No signal confidence breakdown was supplied.'],
+  };
+}
+
+function buildSignalBlockingWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalBlockingWorkspaceModel {
+  const signals = input.structuredSignals?.signals ?? [];
+  return {
+    blockingReasons: signals.filter(signal => signal.blockingReasons.length > 0 || signal.partialReasons.length > 0 || signal.status === 'missing').map(signal => ({ signalId: signal.id, status: signal.status, blockingReasons: signal.blockingReasons, partialReasons: signal.partialReasons })),
+    deterministicNotes: signals.length ? ['Blocking and partial reasons remain explicit; missing engineering truth is not hidden.'] : ['No signal blocking metadata was supplied.'],
+  };
+}
+
+function buildSignalInvalidationWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalInvalidationWorkspaceModel {
+  const signals = input.structuredSignals?.signals ?? [];
+  return {
+    invalidations: signals.filter(signal => signal.invalidatedBy.length > 0 || signal.staleImpacts.length > 0).map(signal => ({ signalId: signal.id, invalidatedBy: signal.invalidatedBy, staleImpacts: signal.staleImpacts })),
+    deterministicNotes: signals.length ? ['Signal invalidation metadata is linked to evidence/state invalidation events when present.'] : ['No signal invalidation metadata was supplied.'],
+  };
+}
+
+function buildSignalStaleImpactsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalStaleImpactsWorkspaceModel {
+  return {
+    staleImpacts: input.structuredSignals?.staleImpacts ?? [],
+    fallbackParticipation: input.structuredSignals?.fallbackParticipation ?? [],
+    deterministicNotes: input.structuredSignals ? ['Signal stale impacts and fallback participation are surfaced explicitly for review.'] : ['No signal stale-impact metadata was supplied.'],
+  };
+}
+
 function buildAuditGuards(input: BuildEngineeringIntelligenceWorkspaceInput): AuditGuardWorkspaceModel {
   const guards: EngineeringStateAuditGuardResult[] = sortBy(input.auditGuards ?? [], guard => guard.guardCode);
   const failures = guards.filter(guard => !guard.passed);
@@ -732,6 +818,14 @@ export function buildEngineeringIntelligenceWorkspace(input: BuildEngineeringInt
   const snapshotDelta = buildSnapshotDeltaWorkspace(input);
   const affectedOutputs = buildAffectedOutputsWorkspace(input);
   const staleStateTimeline = buildStaleStateTimelineWorkspace(input);
+  const structuredSignals = buildStructuredSignalsWorkspace(input);
+  const signalProvenance = buildSignalProvenanceWorkspace(input);
+  const signalDependencyGraph = buildSignalDependencyGraphWorkspace(input);
+  const signalRequirementMapping = buildSignalRequirementMappingWorkspace(input);
+  const signalConfidence = buildSignalConfidenceWorkspace(input);
+  const signalBlocking = buildSignalBlockingWorkspace(input);
+  const signalInvalidations = buildSignalInvalidationWorkspace(input);
+  const signalStaleImpacts = buildSignalStaleImpactsWorkspace(input);
   const auditGuards = buildAuditGuards(input);
 
   return {
@@ -753,6 +847,14 @@ export function buildEngineeringIntelligenceWorkspace(input: BuildEngineeringInt
     snapshotDelta,
     affectedOutputs,
     staleStateTimeline,
+    structuredSignals,
+    signalProvenance,
+    signalDependencyGraph,
+    signalRequirementMapping,
+    signalConfidence,
+    signalBlocking,
+    signalInvalidations,
+    signalStaleImpacts,
     auditGuards,
     deterministicNotes: [
       latestSnapshot
