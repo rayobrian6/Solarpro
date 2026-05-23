@@ -16,5 +16,5 @@
 - [x] Generate registry, fixture adapter, and boundary expansion reports
 - [x] Run required validations and capture logs/exits
 - [x] Clean/stage intended files and commit directly to dev
-- [ ] Push dev only
-- [ ] Provide final summary and safety guarantees
+- [x] Push dev only
+- [x] Provide final summary and safety guarantees
