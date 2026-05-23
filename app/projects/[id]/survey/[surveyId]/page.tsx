@@ -639,6 +639,8 @@ function SurveyEvidenceViewer({ manifest }: { manifest: SurveyEvidenceManifest |
 
   const requiredCoverage = manifest.coverage.filter(group => group.required);
   const bridge = buildSurveyEvidenceEngineeringBridge(manifest);
+  const requirementEvaluation = bridge.requirementEvaluation;
+  const activeRequirements = requirementEvaluation.allRequirements.filter(requirement => requirement.active);
   const bridgeCounts = {
     electrical: bridge.electricalEvidence.length,
     structural: bridge.structuralEvidence.length,
@@ -709,6 +711,94 @@ function SurveyEvidenceViewer({ manifest }: { manifest: SurveyEvidenceManifest |
             <span className="rounded-lg border border-slate-700/60 bg-slate-950/30 px-2 py-1 text-slate-300">Site Plan: <b>{bridgeCounts.sitePlan}</b></span>
           </div>
           <p className="mt-2 text-[10px] text-slate-500">CAD automation: <b className="text-slate-300">{bridge.cadAutomationStatus}</b></p>
+        </div>
+
+        <div className="rounded-xl border border-violet-500/20 bg-violet-500/10 p-3">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <p className="text-[10px] font-semibold text-violet-300 uppercase tracking-wider">Engineering Requirement Registry</p>
+              <p className="text-[11px] text-slate-400">Central deterministic requirement source of truth; evaluated from canonical evidence and provenance only.</p>
+            </div>
+            <span className="rounded-full border border-violet-400/30 bg-violet-400/10 px-2 py-1 text-[10px] font-semibold uppercase text-violet-200">
+              {requirementEvaluation.confidenceSource}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-[10px]">
+            <span className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-emerald-200">Satisfied: <b>{requirementEvaluation.satisfiedRequirements.length}</b></span>
+            <span className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-amber-200">Partial: <b>{requirementEvaluation.partiallySatisfiedRequirements.length}</b></span>
+            <span className="rounded-lg border border-red-500/20 bg-red-500/10 px-2 py-1 text-red-200">Missing: <b>{requirementEvaluation.missingRequirements.length}</b></span>
+            <span className="rounded-lg border border-red-500/20 bg-red-500/10 px-2 py-1 text-red-200">Blocked: <b>{requirementEvaluation.blockedRequirements.length}</b></span>
+            <span className="rounded-lg border border-slate-500/20 bg-slate-500/10 px-2 py-1 text-slate-200">Inactive: <b>{requirementEvaluation.inactiveRequirements.length}</b></span>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            <details className="rounded-xl border border-slate-700/60 bg-slate-950/30 p-3" open>
+              <summary className="cursor-pointer text-xs font-semibold text-violet-200">Requirement Satisfaction Summary</summary>
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                {activeRequirements.map(requirement => (
+                  <div key={requirement.requirementId} className="rounded-lg border border-slate-700/50 bg-slate-950/40 p-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] font-semibold text-slate-200">{requirement.humanLabel}</p>
+                      <span className={`text-[9px] uppercase rounded-full border px-2 py-0.5 ${
+                        requirement.requirementSatisfied
+                          ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+                          : requirement.missingSeverity === 'blocker'
+                            ? 'border-red-500/20 bg-red-500/10 text-red-300'
+                            : 'border-amber-500/20 bg-amber-500/10 text-amber-300'
+                      }`}>
+                        {requirement.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[10px] text-slate-500">Impact: {requirement.readinessImpact} | Severity: {requirement.missingSeverity} | Canonical count: {requirement.observedCanonicalEvidenceCount}/{requirement.minimumCanonicalEvidenceCount}</p>
+                    <p className="text-[10px] text-slate-600">Required: {requirement.requiredEvidenceCategories.map(evidenceCategoryLabel).join(', ') || 'none'} | Optional: {requirement.optionalEvidenceCategories.map(evidenceCategoryLabel).join(', ') || 'none'}</p>
+                  </div>
+                ))}
+              </div>
+            </details>
+
+            <details className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
+              <summary className="cursor-pointer text-xs font-semibold text-amber-200">Missing Requirement Analysis</summary>
+              <div className="mt-3 space-y-2">
+                {requirementEvaluation.missingRequirements.length === 0 && requirementEvaluation.partiallySatisfiedRequirements.length === 0 ? (
+                  <p className="text-[11px] text-amber-100/80">No missing or partially satisfied active registry requirements.</p>
+                ) : [...requirementEvaluation.blockedRequirements, ...requirementEvaluation.partiallySatisfiedRequirements, ...requirementEvaluation.missingRequirements.filter(requirement => requirement.readinessImpact !== 'blocking')].map(requirement => (
+                  <div key={`${requirement.requirementId}-${requirement.status}`} className="rounded-lg border border-slate-700/50 bg-slate-950/30 p-2">
+                    <p className="text-[11px] font-semibold text-slate-200">{requirement.humanLabel}</p>
+                    <p className="text-[10px] text-slate-500">Status: {requirement.status} | Severity: {requirement.missingSeverity} | Duplicate collapsed: {requirement.duplicateCollapsed ? 'yes' : 'no'}</p>
+                    <p className="text-[10px] text-slate-600">{requirement.reasoningPath.join(' -> ')}</p>
+                  </div>
+                ))}
+              </div>
+            </details>
+
+            <details className="rounded-xl border border-teal-500/20 bg-teal-500/10 p-3">
+              <summary className="cursor-pointer text-xs font-semibold text-teal-200">Requirement Provenance</summary>
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                {activeRequirements.map(requirement => (
+                  <div key={`provenance-${requirement.requirementId}`} className="rounded-lg border border-slate-700/50 bg-slate-950/30 p-2">
+                    <p className="text-[11px] font-semibold text-slate-200">{requirement.humanLabel}</p>
+                    <p className="text-[10px] text-slate-500 break-all">Evidence: {requirement.canonicalEvidenceIds.join(', ') || 'none'}</p>
+                    <p className="text-[10px] text-slate-500 break-all">Surveys: {requirement.originatingSurveyIds.join(', ') || 'none'}</p>
+                    <p className="text-[10px] text-slate-600">Confidence: {requirement.confidenceSource} | Duplicate-collapsed: {requirement.duplicateCollapsed ? 'yes' : 'no'}</p>
+                  </div>
+                ))}
+              </div>
+            </details>
+
+            <details className="rounded-xl border border-slate-700/60 bg-slate-950/30 p-3">
+              <summary className="cursor-pointer text-xs font-semibold text-slate-300">Inactive Future Capability Flags</summary>
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                {requirementEvaluation.inactiveRequirements.map(requirement => (
+                  <div key={`inactive-${requirement.requirementId}`} className="rounded-lg border border-slate-700/50 bg-slate-950/30 p-2">
+                    <p className="text-[11px] font-semibold text-slate-200">{requirement.humanLabel}</p>
+                    <p className="text-[10px] text-slate-500">Status: {requirement.status}; future flags are informational only.</p>
+                    <p className="text-[10px] text-slate-600">OCR: {requirement.futureCapabilities.supportsOCR ? 'documented' : 'off'} | CV: {requirement.futureCapabilities.supportsCVClassification ? 'documented' : 'off'} | CAD: {requirement.futureCapabilities.supportsCADInference ? 'documented' : 'off'} | Semantic: {requirement.futureCapabilities.supportsSemanticExtraction ? 'documented' : 'off'}</p>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </div>
         </div>
 
         {manifest.warnings.length > 0 && (

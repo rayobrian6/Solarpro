@@ -140,7 +140,8 @@ describe('Survey Evidence Manifest v1', () => {
     });
     const bridge = buildSurveyEvidenceEngineeringBridge(manifest);
 
-    expect(bridge.readiness).toBe('ready_for_engineering');
+    expect(bridge.readiness).toBe('needs_review');
+    expect(bridge.requirementEvaluation.confidenceSource).toBe('engineering_requirement_registry_v1');
     expect(bridge.electricalEvidence.length).toBeGreaterThan(0);
     expect(bridge.roofLayoutEvidence.length).toBeGreaterThan(0);
     expect(bridge.sitePlanEvidence.length).toBeGreaterThan(0);

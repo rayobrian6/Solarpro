@@ -3,7 +3,15 @@ import {
   getSurveyEvidenceLabel,
 } from './categoryRegistry';
 import type { SurveyEvidenceManifest, SurveyEvidenceItem } from './manifest';
-import { buildSurveyEvidenceTraceability, type RequirementEvidenceTraceabilityRecord } from './provenance';
+import {
+  buildEngineeringRequirementEvaluation,
+  type EngineeringRequirementEvaluationSummary,
+} from './engineeringRequirements';
+import {
+  buildSurveyEvidenceTraceability,
+  type RequirementEvidenceTraceabilityRecord,
+  type SurveyEvidenceTraceabilityBundle,
+} from './provenance';
 
 export interface SurveyEvidenceEngineeringBridge {
   readiness: 'blocked' | 'needs_review' | 'ready_for_engineering';
@@ -13,6 +21,7 @@ export interface SurveyEvidenceEngineeringBridge {
   sitePlanEvidence: string[];
   requirementTraceability: RequirementEvidenceTraceabilityRecord[];
   missingRequirementTraceability: RequirementEvidenceTraceabilityRecord[];
+  requirementEvaluation: EngineeringRequirementEvaluationSummary;
   permitWarnings: string[];
   cadAutomationStatus: 'not_started';
 }
@@ -26,21 +35,27 @@ export interface SurveyEvidenceEngineeringBridgeCounts {
 
 export function buildSurveyEvidenceEngineeringBridge(
   manifest: SurveyEvidenceManifest | null | undefined,
+  traceabilityOverride?: SurveyEvidenceTraceabilityBundle | null,
 ): SurveyEvidenceEngineeringBridge {
-  const traceability = buildSurveyEvidenceTraceability({
+  const traceability = traceabilityOverride ?? buildSurveyEvidenceTraceability({
     canonicalManifest: manifest,
     evidenceTruthSource: 'canonical_manifest_v1',
+  });
+  const requirementEvaluation = buildEngineeringRequirementEvaluation({
+    canonicalManifest: manifest,
+    traceability,
   });
 
   if (!manifest || manifest.summary.totalItems === 0) {
     return {
-      readiness: 'blocked',
+      readiness: requirementEvaluation.readiness,
       electricalEvidence: [],
       structuralEvidence: [],
       roofLayoutEvidence: [],
       sitePlanEvidence: [],
       requirementTraceability: traceability.requirements,
       missingRequirementTraceability: traceability.missingRequirements,
+      requirementEvaluation,
       permitWarnings: ['No structured survey photo evidence manifest is available.'],
       cadAutomationStatus: 'not_started',
     };
@@ -61,14 +76,15 @@ export function buildSurveyEvidenceEngineeringBridge(
   }
 
   return {
-    readiness: manifest.summary.completeness === 'sufficient' ? 'ready_for_engineering' : 'needs_review',
+    readiness: requirementEvaluation.readiness,
     electricalEvidence,
     structuralEvidence,
     roofLayoutEvidence,
     sitePlanEvidence,
     requirementTraceability: traceability.requirements,
     missingRequirementTraceability: traceability.missingRequirements,
-    permitWarnings: manifest.warnings,
+    requirementEvaluation,
+    permitWarnings: registryPermitWarnings(requirementEvaluation, manifest.warnings),
     cadAutomationStatus: 'not_started',
   };
 }
@@ -92,4 +108,18 @@ function evidenceMessage(item: SurveyEvidenceItem): string {
       ? 'survey payload gap-recovery item'
       : item.evidenceSource;
   return `${label} photo evidence available from ${source} for ${item.domain} review traceability.`;
+}
+
+function registryPermitWarnings(
+  evaluation: EngineeringRequirementEvaluationSummary,
+  manifestWarnings: string[],
+): string[] {
+  const registryWarnings = [
+    ...evaluation.blockedRequirements.map(requirement => `Blocked engineering requirement: ${requirement.humanLabel} (${requirement.status}).`),
+    ...evaluation.missingRequirements
+      .filter(requirement => requirement.missingSeverity === 'warning')
+      .map(requirement => `Missing review requirement: ${requirement.humanLabel}.`),
+    ...evaluation.partiallySatisfiedRequirements.map(requirement => `Partial requirement satisfaction: ${requirement.humanLabel} (${requirement.status}).`),
+  ];
+  return [...manifestWarnings, ...registryWarnings];
 }

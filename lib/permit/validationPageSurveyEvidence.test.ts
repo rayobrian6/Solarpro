@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { CADModel } from '@/lib/cad/types';
+import { buildEngineeringRequirementEvaluation } from '@/lib/survey/evidence/engineeringRequirements';
 import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
 import type { CanonicalInput, PermitInput } from './types';
 import { pageValidationSummary } from './sections/validationPage';
@@ -110,6 +111,37 @@ function mockTraceability(): EngineeringSurveyEvidence['traceability'] {
   };
 }
 
+
+function mockRequirementEvaluation(): EngineeringSurveyEvidence['requirementEvaluation'] {
+  return buildEngineeringRequirementEvaluation({
+    canonicalManifest: {
+      manifestVersion: 1,
+      projectId: 'project-evidence-001',
+      surveyId: 'survey-evidence-001',
+      generatedAt: '2025-01-01T00:00:00.000Z',
+      sourceOfTruth: 'site_surveys+site_survey_files',
+      surveyTechnician: 'James',
+      items: [],
+      coverage: [],
+      requiredMissing: [],
+      warnings: [],
+      summary: {
+        totalItems: 4,
+        classifiedItems: 4,
+        qualityCheckedItems: 0,
+        duplicateCheckedItems: 4,
+        aiProcessedItems: 0,
+        engineeringReviewedItems: 0,
+        permitConsumedItems: 0,
+        confidence: 'high',
+        completeness: 'partial',
+      },
+      openSourceBoundaries: { webRuntime: [], pythonWorker: [], futureOnly: [] },
+    },
+    traceability: mockTraceability(),
+  });
+}
+
 function mockSurveyEvidence(): EngineeringSurveyEvidence {
   return {
     projectId: 'project-evidence-001',
@@ -118,6 +150,7 @@ function mockSurveyEvidence(): EngineeringSurveyEvidence {
     canonicalEvidenceCount: 4,
     evidenceTruthSource: 'canonical_manifest_v1',
     traceability: mockTraceability(),
+    requirementEvaluation: mockRequirementEvaluation(),
     photos: [
       {
         id: 'main_panel_open',
@@ -188,7 +221,7 @@ function mockSurveyEvidence(): EngineeringSurveyEvidence {
       qualityStatus: 'not_processed',
       duplicateStatus: 'duplicate_checked',
       engineeringBridge: {
-        readiness: 'ready_for_engineering',
+        readiness: 'needs_review',
         electricalEvidenceCount: 2,
         structuralEvidenceCount: 0,
         roofLayoutEvidenceCount: 1,
@@ -272,7 +305,12 @@ describe('pageValidationSummary survey evidence rendering', () => {
     expect(html).toContain('main_service_panel: 1');
     expect(html).toContain('meter: 1');
     expect(html).toContain('survey evidence fallbacks, when used, are explicitly labeled and visible');
-    expect(html).toContain('ready_for_engineering');
+    expect(html).toContain('needs_review');
+    expect(html).toContain('Engineering Requirement Registry');
+    expect(html).toContain('Missing Requirement Analysis');
+    expect(html).toContain('Requirement Provenance');
+    expect(html).toContain('engineering_requirement_registry_v1');
+    expect(html).toContain('Utility Bill: inactive');
     expect(html).toContain('Electrical</td>');
     expect(html).toContain('evidence items: 2');
     expect(html).toContain('Requirement Evidence Traceability');
@@ -309,7 +347,7 @@ describe('pageValidationSummary survey evidence rendering', () => {
       qualityStatus: 'not_processed',
       duplicateStatus: 'duplicate_checked',
       engineeringBridge: {
-        readiness: 'ready_for_engineering',
+        readiness: 'needs_review',
         electricalEvidenceCount: 2,
         structuralEvidenceCount: 0,
         roofLayoutEvidenceCount: 1,

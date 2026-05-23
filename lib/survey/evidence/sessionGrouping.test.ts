@@ -107,7 +107,10 @@ describe('Project survey evidence duplicate hygiene v1', () => {
 
     const bridge = hygiene.engineeringBridge;
     expect(bridge).not.toBeNull();
-    expect(bridge?.readiness).toBe('ready_for_engineering');
+    expect(bridge?.readiness).toBe('needs_review');
+    expect(bridge?.requirementEvaluation.confidenceSource).toBe('engineering_requirement_registry_v1');
+    expect(bridge?.requirementEvaluation.allRequirements.find(requirement => requirement.requirementId === 'main_service_panel')?.observedCanonicalEvidenceCount).toBe(1);
+    expect(bridge?.requirementEvaluation.allRequirements.find(requirement => requirement.requirementId === 'main_service_panel')?.duplicateCollapsed).toBe(true);
     expect(summarizeSurveyEvidenceEngineeringBridge(bridge!)).toEqual({
       electricalEvidenceCount: 2,
       structuralEvidenceCount: 0,

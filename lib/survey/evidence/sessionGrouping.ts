@@ -177,7 +177,7 @@ export function buildProjectSurveyEvidenceHygiene(
     evidenceDuplicateGroups,
     rawManifests,
     canonicalManifest,
-    engineeringBridge: canonicalManifest ? buildSurveyEvidenceEngineeringBridge(canonicalManifest) : null,
+    engineeringBridge: canonicalManifest ? buildSurveyEvidenceEngineeringBridge(canonicalManifest, traceability) : null,
     traceability,
     warnings,
   };

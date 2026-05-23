@@ -26,6 +26,7 @@ import {
   type SurveyEvidenceTraceabilityBundle,
 } from '@/lib/survey/evidence/provenance';
 import type { EvidenceDuplicateGroup, SurveySessionSummary } from '@/lib/survey/evidence/sessionGrouping';
+import type { EngineeringRequirementEvaluationSummary } from '@/lib/survey/evidence/engineeringRequirements';
 
 export type SurveyPhotoEvidenceCategory = SurveyEvidenceCategory;
 
@@ -64,6 +65,7 @@ export interface EngineeringSurveyEvidence {
   canonicalEvidenceCount: number;
   evidenceTruthSource: 'canonical_manifest_v1' | 'legacy_raw_photos_fallback';
   traceability: SurveyEvidenceTraceabilityBundle;
+  requirementEvaluation: EngineeringRequirementEvaluationSummary;
   missingCategories: SurveyPhotoEvidenceCategory[];
   completeness: 'missing' | 'partial' | 'sufficient';
   blockers: string[];
@@ -160,28 +162,29 @@ export function collectEngineeringSurveyEvidence(
     sessions: options.sessions,
   });
   const photos = canonicalManifest.items.map(item => mapCanonicalManifestEvidence(item, survey));
-  const present = new Set(photos.map(photo => photo.category));
 
-  const missingCategories = canonicalManifest.requiredMissing;
+  const bridge = buildSurveyEvidenceEngineeringBridge(canonicalManifest, traceability);
+  const bridgeCounts = summarizeSurveyEvidenceEngineeringBridge(bridge);
+  const requirementEvaluation = bridge.requirementEvaluation;
+  const missingCategories = requirementEvaluation.blockedRequirements
+    .flatMap(requirement => requirement.requiredEvidenceCategories)
+    .filter((category, index, categories) => categories.indexOf(category) === index);
 
   const blockers: string[] = [];
-  const warnings: string[] = [...canonicalManifest.warnings];
+  const warnings: string[] = [...bridge.permitWarnings];
 
   if (canonicalManifest.summary.totalItems === 0) {
     blockers.push('No canonical survey photo evidence items are available to support permit plan-set assumptions.');
   }
 
-  if (!present.has('main_service_panel')) {
-    warnings.push('Missing main service panel photo evidence; electrical interconnection assumptions require engineer verification.');
+  for (const requirement of requirementEvaluation.blockedRequirements) {
+    blockers.push(`Engineering requirement blocked: ${requirement.humanLabel} (${requirement.status}).`);
   }
-  if (!present.has('meter')) {
-    warnings.push('Missing utility meter photo evidence; meter/service location should be verified before permit submittal.');
+  for (const requirement of requirementEvaluation.partiallySatisfiedRequirements) {
+    warnings.push(`Engineering requirement needs review: ${requirement.humanLabel} (${requirement.status}).`);
   }
-  if (!present.has('roof_plane')) {
-    warnings.push('Missing roof plane photo evidence; CAD roof layout remains schematic until field/eagleview geometry is confirmed.');
-  }
-  if (!present.has('overview')) {
-    warnings.push('Missing site exterior photo evidence; equipment locations and access notes require verification.');
+  for (const requirement of requirementEvaluation.missingRequirements.filter(requirement => requirement.missingSeverity === 'warning')) {
+    warnings.push(`Missing engineering review evidence: ${requirement.humanLabel}.`);
   }
 
   if (!survey.derived.hasGeometryData) {
@@ -194,10 +197,7 @@ export function collectEngineeringSurveyEvidence(
     warnings.push('Survey physical data does not include structural roof details; attachment design requires engineer review.');
   }
 
-  const completeness: EngineeringSurveyEvidence['completeness'] = canonicalManifest.summary.completeness;
-
-  const bridge = buildSurveyEvidenceEngineeringBridge(canonicalManifest);
-  const bridgeCounts = summarizeSurveyEvidenceEngineeringBridge(bridge);
+  const completeness: EngineeringSurveyEvidence['completeness'] = requirementEvaluation.completeness;
 
   return {
     projectId: survey.projectId,
@@ -207,6 +207,7 @@ export function collectEngineeringSurveyEvidence(
     canonicalEvidenceCount: canonicalManifest.summary.totalItems,
     evidenceTruthSource,
     traceability,
+    requirementEvaluation,
     missingCategories,
     completeness,
     blockers,

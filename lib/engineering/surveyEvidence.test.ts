@@ -128,7 +128,8 @@ describe('collectEngineeringSurveyEvidence', () => {
     expect(evidence.rawPhotoCount).toBe(4);
     expect(evidence.canonicalEvidenceCount).toBe(4);
     expect(evidence.evidenceTruthSource).toBe('legacy_raw_photos_fallback');
-    expect(evidence.completeness).toBe('sufficient');
+    expect(evidence.completeness).toBe('partial');
+    expect(evidence.requirementEvaluation.confidenceSource).toBe('engineering_requirement_registry_v1');
     expect(evidence.missingCategories).toEqual([]);
     expect(evidence.blockers).toEqual([]);
     expect(evidence.photos.map(photo => photo.category)).toEqual([
@@ -155,7 +156,6 @@ describe('collectEngineeringSurveyEvidence', () => {
       'main_service_panel',
       'meter',
       'roof_plane',
-      'overview',
     ]);
     expect(evidence.traceability.missingRequirements.map(requirement => requirement.requirementCategory)).toEqual([
       'main_service_panel',
@@ -178,8 +178,8 @@ describe('collectEngineeringSurveyEvidence', () => {
     expect(evidence.rawPhotoCount).toBe(2);
     expect(evidence.canonicalEvidenceCount).toBe(2);
     expect(evidence.completeness).toBe('partial');
-    expect(evidence.missingCategories).toEqual(['meter', 'overview']);
-    expect(evidence.warnings.some(w => w.includes('utility meter'))).toBe(true);
+    expect(evidence.missingCategories).toEqual(['meter']);
+    expect(evidence.blockers.some(w => w.includes('Utility Meter'))).toBe(true);
   });
 
   it('uses canonical hygiene manifest so repeated duplicate uploads do not inflate engineering truth', () => {
@@ -212,9 +212,12 @@ describe('collectEngineeringSurveyEvidence', () => {
     expect(evidence.rawPhotoCount).toBe(28);
     expect(evidence.canonicalEvidenceCount).toBe(4);
     expect(evidence.photos).toHaveLength(4);
-    expect(evidence.completeness).toBe('sufficient');
+    expect(evidence.completeness).toBe('partial');
+    expect(evidence.requirementEvaluation.confidenceSource).toBe('engineering_requirement_registry_v1');
+    expect(evidence.requirementEvaluation.allRequirements.find(requirement => requirement.requirementId === 'main_service_panel')?.observedCanonicalEvidenceCount).toBe(1);
+    expect(evidence.requirementEvaluation.allRequirements.find(requirement => requirement.requirementId === 'main_service_panel')?.duplicateCollapsed).toBe(true);
     expect(evidence.manifestV1.itemCount).toBe(4);
-    expect(evidence.manifestV1.engineeringBridge.readiness).toBe('ready_for_engineering');
+    expect(evidence.manifestV1.engineeringBridge.readiness).toBe('needs_review');
     expect(evidence.manifestV1.engineeringBridge.electricalEvidenceCount).toBe(2);
     expect(evidence.manifestV1.engineeringBridge.roofLayoutEvidenceCount).toBe(1);
     expect(evidence.manifestV1.engineeringBridge.sitePlanEvidenceCount).toBe(1);

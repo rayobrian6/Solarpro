@@ -8,10 +8,6 @@ import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
 import { PLANSET_ENGINE_VERSION } from '../constants';
 import { isFence, isGround, isRoof } from '@/lib/system';
-import {
-  getSurveyEvidenceCategoryDefinition,
-  normalizeSurveyEvidenceCategory,
-} from '@/lib/survey/evidence/manifest';
 
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -172,34 +168,18 @@ export function pageValidationSummary(
     : surveyEvidence?.completeness === 'partial'
       ? '#b45309'
       : '#cc0000';
-  const fallbackBridgeCounts = surveyEvidence?.photos.reduce((acc, photo) => {
-    const category = normalizeSurveyEvidenceCategory(photo.category);
-    const bucket = getSurveyEvidenceCategoryDefinition(category).engineeringBucket;
-    if (bucket === 'electricalEvidence') acc.electricalEvidenceCount += 1;
-    if (bucket === 'structuralEvidence') acc.structuralEvidenceCount += 1;
-    if (bucket === 'roofLayoutEvidence') acc.roofLayoutEvidenceCount += 1;
-    if (bucket === 'sitePlanEvidence') acc.sitePlanEvidenceCount += 1;
-    return acc;
-  }, {
-    electricalEvidenceCount: 0,
-    structuralEvidenceCount: 0,
-    roofLayoutEvidenceCount: 0,
-    sitePlanEvidenceCount: 0,
-  }) ?? {
-    electricalEvidenceCount: 0,
-    structuralEvidenceCount: 0,
-    roofLayoutEvidenceCount: 0,
-    sitePlanEvidenceCount: 0,
-  };
   const manifestV1 = surveyEvidence?.manifestV1 ?? {
-    itemCount: surveyEvidence?.photos.length ?? 0,
-    lifecycleState: surveyEvidence?.photos.length ? 'classified' : 'uploaded',
+    itemCount: 0,
+    lifecycleState: 'uploaded',
     aiExtractionStatus: 'not_started',
     qualityStatus: 'not_processed',
     duplicateStatus: 'not_processed',
     engineeringBridge: {
-      readiness: surveyEvidence?.completeness === 'sufficient' ? 'ready_for_engineering' : surveyEvidence?.photos.length ? 'needs_review' : 'blocked',
-      ...fallbackBridgeCounts,
+      readiness: 'blocked',
+      electricalEvidenceCount: 0,
+      structuralEvidenceCount: 0,
+      roofLayoutEvidenceCount: 0,
+      sitePlanEvidenceCount: 0,
       cadAutomationStatus: 'not_started',
     },
   };
@@ -219,6 +199,28 @@ export function pageValidationSummary(
       ? 'None'
       : 'main_service_panel, meter, roof_plane, overview';
   const traceability = surveyEvidence?.traceability;
+  const requirementEvaluation = surveyEvidence?.requirementEvaluation;
+  const registryStatusRows = requirementEvaluation
+    ? [
+        ['Registry Status', `readiness: ${requirementEvaluation.readiness} | completeness: ${requirementEvaluation.completeness} | confidence: ${requirementEvaluation.confidenceSource}`],
+        ['Satisfied Requirements', requirementEvaluation.satisfiedRequirements.map(requirement => `${requirement.humanLabel}: ${requirement.canonicalEvidenceIds.join(', ') || 'none'}`).join(' | ') || 'None'],
+        ['Partial Requirements', requirementEvaluation.partiallySatisfiedRequirements.map(requirement => `${requirement.humanLabel}: ${requirement.status}`).join(' | ') || 'None'],
+        ['Blocked Requirements', requirementEvaluation.blockedRequirements.map(requirement => `${requirement.humanLabel}: ${requirement.missingSeverity}`).join(' | ') || 'None'],
+        ['Inactive Future Flags', requirementEvaluation.inactiveRequirements.map(requirement => `${requirement.humanLabel}: inactive`).join(' | ') || 'None'],
+      ] as const
+    : [['Registry Status', 'No engineering requirement registry evaluation was provided.'] as const];
+  const missingRequirementAnalysisRows = requirementEvaluation?.missingRequirements.length
+    ? requirementEvaluation.missingRequirements.map(requirement => [
+        requirement.humanLabel,
+        `${requirement.status} | severity: ${requirement.missingSeverity} | readiness impact: ${requirement.readinessImpact} | ${requirement.reasoningPath.join(' -> ')}`,
+      ] as const)
+    : [['Missing Requirement Analysis', 'No missing active registry requirements.'] as const];
+  const requirementProvenanceRows = requirementEvaluation?.allRequirements.filter(requirement => requirement.active).length
+    ? requirementEvaluation.allRequirements.filter(requirement => requirement.active).map(requirement => [
+        requirement.humanLabel,
+        `${requirement.status} | evidence: ${requirement.canonicalEvidenceIds.join(', ') || 'none'} | surveys: ${requirement.originatingSurveyIds.join(', ') || 'none'} | duplicate-collapsed: ${requirement.duplicateCollapsed ? 'yes' : 'no'} | confidence: ${requirement.confidenceSource}`,
+      ] as const)
+    : [['Requirement Provenance', 'No active registry requirement provenance was provided.'] as const];
   const requirementTraceRows = traceability?.requirements.length
     ? traceability.requirements.map(requirement => [
         requirement.requirementLabel,
@@ -326,6 +328,24 @@ export function pageValidationSummary(
           <tr style="background:${i%2===0?'#f9f9f9':'#fff'};">
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
             <td colspan="3" style="font-family:monospace;font-size:7px;color:#000;">${esc(value)}</td>
+          </tr>`).join('')}
+          <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#7c3aed;background:#f5f3ff;">Engineering Requirement Registry</td></tr>
+          ${registryStatusRows.map(([label, value], i) => `
+          <tr style="background:${i%2===0?'#faf5ff':'#fff'};">
+            <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
+            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
+          </tr>`).join('')}
+          <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#92400e;background:#fffbeb;">Missing Requirement Analysis</td></tr>
+          ${missingRequirementAnalysisRows.map(([label, value], i) => `
+          <tr style="background:${i%2===0?'#fffbeb':'#fff'};">
+            <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
+            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
+          </tr>`).join('')}
+          <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#0f766e;background:#f0fdfa;">Requirement Provenance</td></tr>
+          ${requirementProvenanceRows.map(([label, value], i) => `
+          <tr style="background:${i%2===0?'#f0fdfa':'#fff'};">
+            <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
+            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
           </tr>`).join('')}
           <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#0e7490;background:#ecfeff;">Requirement Evidence Traceability</td></tr>
           ${requirementTraceRows.map(([label, value], i) => `
