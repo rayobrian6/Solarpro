@@ -66,13 +66,20 @@ export function WorkspaceShell({ model, title, subtitle, children }: {
 export function RouteNav({ routes }: { routes: EngineeringIntelligenceRouteSummary[] }) {
   return (
     <div className="grid gap-3 md:grid-cols-4">
-      {routes.map(route => (
-        <Link key={route.routeId} href={route.href.includes('[id]') ? '/admin/engineering-intelligence/project/demo' : route.href}
-          className="rounded-xl border border-white/10 bg-white/[0.03] p-4 transition hover:border-sky-400/40 hover:bg-sky-400/10">
-          <div className="text-sm font-bold text-white">{route.label}</div>
-          <div className="mt-2 text-xs leading-5 text-slate-400">{route.deterministicPurpose}</div>
-        </Link>
-      ))}
+      {routes.map(route => {
+        const href = route.href.includes('[id]') ? '/admin/engineering-intelligence/project/demo' : route.href;
+        const stateLabel = route.href.includes('[id]') ? 'no_project_data demo route' : 'registered route';
+        return (
+          <Link key={route.routeId} href={href}
+            className="rounded-xl border border-white/10 bg-white/[0.03] p-4 transition hover:border-sky-400/40 hover:bg-sky-400/10">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-bold text-white">{route.label}</div>
+              <span className="rounded-full border border-slate-500/30 bg-slate-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-400">{stateLabel}</span>
+            </div>
+            <div className="mt-2 text-xs leading-5 text-slate-400">{route.deterministicPurpose}</div>
+          </Link>
+        );
+      })}
     </div>
   );
 }
@@ -89,8 +96,13 @@ export function Panel({ title, eyebrow, children }: { title: string; eyebrow?: s
   );
 }
 
-function EmptyState({ children }: { children: React.ReactNode }) {
-  return <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] p-4 text-sm text-slate-400">{children}</div>;
+function EmptyState({ children, state = 'not_loaded' }: { children: React.ReactNode; state?: string }) {
+  return (
+    <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] p-4 text-sm text-slate-400">
+      <div className="mb-2 inline-flex rounded-full border border-slate-500/30 bg-slate-500/10 px-2 py-0.5 font-mono text-[10px] text-slate-300">{state}</div>
+      <div>{children}</div>
+    </div>
+  );
 }
 
 function StatusPill({ value }: { value: string }) {
@@ -165,7 +177,7 @@ export function CanonicalEvidenceWorkspace({ groups }: { groups: CanonicalEviden
                   </div>
                   <div className="mt-2"><TokenList values={item.linkedRequirementIds} /></div>
                 </div>
-              )) : <EmptyState>No canonical evidence rows are loaded for this group in the current deterministic workspace context.</EmptyState>}
+              )) : <EmptyState state="registry_visible_only">No canonical evidence rows are loaded for this group in the current deterministic workspace context.</EmptyState>}
             </div>
           </div>
         ))}
@@ -233,7 +245,7 @@ export function StaleInvalidationWorkspace({ stale }: { stale: StaleInvalidation
             <div className="font-mono text-orange-300">{chain.eventId}</div><div className="mt-1 text-white">{chain.stateId}</div><p className="mt-2 text-slate-400">{chain.reason}</p>
             <div className="mt-3 grid gap-3 md:grid-cols-3"><TokenList values={chain.triggeringEvidenceIds} /><TokenList values={chain.triggeringDecisionIds} /><TokenList values={chain.downstreamStateIds} /></div>
           </div>
-        )) : <EmptyState>No invalidation transition history is loaded.</EmptyState>}
+        )) : <EmptyState state="not_loaded">No invalidation transition history is loaded.</EmptyState>}
       </div>
       <DeterministicNotes notes={stale.deterministicNotes} />
     </Panel>
@@ -253,7 +265,7 @@ export function SnapshotTimelineWorkspace({ snapshots }: { snapshots: SnapshotTi
           <div key={snapshot.snapshotId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
             <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between"><div className="font-semibold text-white">{snapshot.snapshotId}</div><div className="break-all font-mono text-xs text-sky-300">{snapshot.snapshotHash}</div></div>
           </div>
-        )) : <EmptyState>No persistent snapshot set is loaded.</EmptyState>}
+        )) : <EmptyState state="no_snapshot">No persistent snapshot set is loaded.</EmptyState>}
       </div>
       <DeterministicNotes notes={snapshots.deterministicNotes} />
     </Panel>
@@ -267,6 +279,9 @@ export function DependencyGraphViewer({ graph }: { graph: DependencyGraphViewerM
   const positioned = nodes.map((node, index) => ({ ...node, x: 80 + (index % 4) * 220, y: 60 + Math.floor(index / 4) * 92 }));
   return (
     <Panel title="Dependency Graph Viewer" eyebrow="Graph">
+      {graph.sourceGraph === null && (
+        <div className="mb-4"><EmptyState state="no_graph">No persistent graph snapshot is loaded; graph preview is showing registry-visible requirement and decision nodes only.</EmptyState></div>
+      )}
       <div className="overflow-auto rounded-xl border border-white/10 bg-black/30 p-4">
         <svg width={width} height={height} role="img" aria-label="Deterministic engineering dependency graph preview">
           {graph.edges.slice(0, 60).map(edge => {
@@ -277,9 +292,10 @@ export function DependencyGraphViewer({ graph }: { graph: DependencyGraphViewerM
           })}
           {positioned.map(node => (
             <g key={node.nodeId} transform={`translate(${node.x},${node.y})`}>
-              <rect x="-58" y="-24" width="116" height="48" rx="12" fill="rgba(15,23,42,0.95)" stroke="rgba(148,163,184,0.35)" />
+              <rect x="-64" y="-28" width="128" height="56" rx="12" fill={node.status === 'stale' || node.status === 'invalidated' ? 'rgba(124,45,18,0.95)' : 'rgba(15,23,42,0.95)'} stroke={node.status === 'not_loaded' ? 'rgba(148,163,184,0.45)' : node.status === 'current' ? 'rgba(56,189,248,0.45)' : 'rgba(251,146,60,0.6)'} />
               <text x="0" y="-3" textAnchor="middle" fill="white" fontSize="10" fontWeight="700">{node.label.slice(0, 18)}</text>
-              <text x="0" y="13" textAnchor="middle" fill="rgb(125,211,252)" fontSize="8">{node.nodeType}</text>
+              <text x="0" y="11" textAnchor="middle" fill="rgb(125,211,252)" fontSize="8">{node.nodeType}</text>
+              <text x="0" y="23" textAnchor="middle" fill="rgb(148,163,184)" fontSize="7">{node.status}</text>
             </g>
           ))}
         </svg>
@@ -310,7 +326,7 @@ export function AuditGuardWorkspace({ audit }: { audit: AuditGuardWorkspaceModel
             <div className="flex items-center justify-between gap-3"><span className="font-mono text-white">{guard.guardCode}</span><StatusPill value={guard.passed ? 'current' : 'blocked'} /></div>
             <p className="mt-2 text-slate-400">{guard.message}</p>
           </div>
-        )) : <EmptyState>No audit guard result set is loaded.</EmptyState>}
+        )) : <EmptyState state="not_loaded">No audit guard result set is loaded.</EmptyState>}
       </div>
       <DeterministicNotes notes={audit.deterministicNotes} />
     </Panel>

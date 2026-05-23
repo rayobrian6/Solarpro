@@ -7,7 +7,7 @@ import {
   Cpu, Zap, Database, HardDrive, Activity,
   Shield, ChevronRight, LogOut, Sun, Wrench,
   ScrollText, Terminal, MessageSquare, Rocket, Layers, DollarSign, PenTool,
-  UserPlus, LayoutTemplate, Network,
+  UserPlus, LayoutTemplate, Network, GitBranch, History, Share2,
 } from 'lucide-react';
 
 const NAV_SECTIONS = [
@@ -37,7 +37,11 @@ const NAV_SECTIONS = [
   },  {
     label: 'Configuration',
     items: [
-      { href: '/admin/engineering', label: 'Engineering', icon: Cpu },
+      { href: '/admin/engineering', label: 'Engineering Monitor', icon: Cpu },
+      { href: '/admin/engineering-intelligence', label: 'Engineering Intelligence', icon: Network },
+      { href: '/admin/engineering-intelligence/project/demo', label: 'Project Intelligence', icon: GitBranch },
+      { href: '/admin/engineering-intelligence/snapshots', label: 'Snapshot Timeline', icon: History },
+      { href: '/admin/engineering-intelligence/graph', label: 'Dependency Graph', icon: Share2 },
       { href: '/admin/incentives',  label: 'Incentives',  icon: Zap },
       { href: '/admin/utilities',   label: 'Utilities',   icon: Activity },
       { href: '/admin/hardware',    label: 'Hardware',    icon: Wrench },
@@ -98,9 +102,11 @@ export default function AdminShell({
   }, [path]);
 
   const isActive = (href: string) =>
-    href === '/admin' ? path === '/admin' : path.startsWith(href);
+    href === '/admin' ? path === '/admin' : path === href || path.startsWith(`${href}/`);
 
-  const currentPage = ALL_NAV.find(n => isActive(n.href))?.label ?? 'Admin';
+  const currentPage = [...ALL_NAV]
+    .sort((a, b) => b.href.length - a.href.length)
+    .find(n => isActive(n.href))?.label ?? 'Admin';
 
   return (
     <div className="flex h-screen bg-[#0a0f1e] text-white overflow-hidden">

@@ -761,6 +761,11 @@ function ProjectDetailInner() {
                 <Pencil size={10} className="opacity-60" />
               </button>
             </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Link href={`/admin/engineering-intelligence/project/${id}`} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/25 bg-sky-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-sky-300 transition hover:bg-sky-500/20">
+                <Network size={12} /> Engineering Intelligence
+              </Link>
+            </div>
             <div className="flex items-center gap-3 mt-1 text-xs text-slate-400 flex-wrap">
               {project.client?.name && (
                 <span className="flex items-center gap-1"><User size={10} />{project.client.name}</span>

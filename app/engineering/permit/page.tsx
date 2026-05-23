@@ -201,6 +201,16 @@ function PermitViewerPageInner() {
 
             <button
               className="pv-btn pv-btn-secondary"
+              onClick={() => projectId && router.push(`/admin/engineering-intelligence/project/${projectId}`)}
+              disabled={!projectId}
+              title="Open deterministic project Engineering Intelligence workspace"
+            >
+              <ExternalLink size={14} />
+              Intelligence
+            </button>
+
+            <button
+              className="pv-btn pv-btn-secondary"
               onClick={handleRunPipeline}
               disabled={!projectId}
               title="Go to Engineering page to regenerate the permit package"

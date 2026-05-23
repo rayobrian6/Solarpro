@@ -31,7 +31,7 @@ import Link from 'next/link';
 import AppShell from '@/components/ui/AppShell';
 import {
   ArrowLeft, Camera, Home, Zap, ChevronDown, ChevronUp,
-  AlertTriangle, RefreshCw, CheckCircle, Clock,
+  AlertTriangle, RefreshCw, CheckCircle, Clock, Network,
   MapPin, User, Calendar, ImageIcon, Shield,
   Sun, Layers, FileText, Wrench,
 } from 'lucide-react';
@@ -1296,6 +1296,9 @@ export default function SurveyDetailPage() {
               )}
             </div>
           </div>
+          <Link href={`/admin/engineering-intelligence/project/${projectId}`} className="hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-[11px] font-semibold text-sky-300 transition hover:bg-sky-500/20">
+            <Network size={13} /> Intelligence
+          </Link>
           <button onClick={load} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-all flex-shrink-0">
             <RefreshCw size={13} />
           </button>

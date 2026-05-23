@@ -1,6 +1,8 @@
 'use client';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Cpu, RefreshCw, LayoutGrid, FileCode, List, CheckCircle, AlertCircle } from 'lucide-react';
+import { buildEngineeringIntelligenceWorkspace } from '@/lib/engineeringIntelligence';
+import { Cpu, RefreshCw, LayoutGrid, FileCode, List, CheckCircle, AlertCircle, Network, GitBranch, History, Share2, ShieldCheck } from 'lucide-react';
 
 export default function AdminEngineering() {
   const [stats, setStats]   = useState<any>(null);
@@ -19,6 +21,24 @@ export default function AdminEngineering() {
 
   const l = stats?.layouts || {};
   const f = stats?.files   || {};
+  const intelligence = buildEngineeringIntelligenceWorkspace();
+  const health = intelligence.health;
+
+  const intelligenceRoutes = [
+    { href: '/admin/engineering-intelligence', label: 'Engineering Intelligence', icon: Network, description: 'System-level deterministic engineering-state workspace.' },
+    { href: '/admin/engineering-intelligence/project/demo', label: 'Project Intelligence', icon: GitBranch, description: 'Project-scoped evidence, requirements, decisions, and stale-state view.' },
+    { href: '/admin/engineering-intelligence/snapshots', label: 'Snapshot Timeline', icon: History, description: 'Persistent snapshots, hashes, diffs, and transition timeline.' },
+    { href: '/admin/engineering-intelligence/graph', label: 'Dependency Graph', icon: Share2, description: 'Deterministic dependency graph across evidence, decisions, outputs, and plans.' },
+  ];
+
+  const intelligenceSummary = [
+    { label: 'Stale outputs', value: health.staleOutputs, sub: 'snapshot-derived when loaded' },
+    { label: 'Invalidation events', value: health.invalidatedOutputs, sub: 'transition history only' },
+    { label: 'Snapshots', value: health.snapshotVersions, sub: 'durable versions loaded' },
+    { label: 'Regeneration candidates', value: health.regenerationCandidates, sub: 'plan metadata only' },
+    { label: 'Audit guard warnings', value: health.activeAuditGuardWarnings, sub: 'warnings/failures loaded' },
+    { label: 'Graph health', value: `${health.dependencyGraphNodes}/${health.dependencyGraphEdges}`, sub: 'nodes / edges loaded' },
+  ];
 
   const fileTypes = [
     { label: 'Engineering Reports', type: 'engineering',   icon: FileCode,    color: 'text-blue-400',   bg: 'bg-blue-500/10' },
@@ -31,12 +51,50 @@ export default function AdminEngineering() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-black text-white">Engineering Engine Monitor</h1>
-          <p className="text-sm text-slate-400 mt-1">Layout generation, SLD, BOM, and compliance statistics</p>
+          <h1 className="text-2xl font-black text-white">Engineering Monitor</h1>
+          <p className="text-sm text-slate-400 mt-1">Legacy generation metrics plus deterministic Engineering Intelligence entry points</p>
         </div>
         <button onClick={load} className="flex items-center gap-2 text-xs text-slate-400 hover:text-white border border-white/10 rounded-lg px-3 py-2 transition-all">
           <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refresh
         </button>
+      </div>
+
+      <div className="rounded-2xl border border-sky-500/20 bg-gradient-to-br from-slate-950 via-slate-950 to-sky-950/30 p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.24em] text-sky-300">
+              <ShieldCheck size={12} /> Engineering Intelligence
+            </div>
+            <h2 className="text-xl font-black text-white">Deterministic engineering-state workspace</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
+              Inspect canonical evidence lineage, requirement status, decision provenance, stale-state invalidation, snapshots, dependency graph metadata, regeneration planning, and audit guards. This launcher does not trigger generation, OCR, CV, CAD automation, or AI engineering decisions.
+            </p>
+          </div>
+          <Link href="/admin/engineering-intelligence" className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-400/30 bg-sky-400/10 px-4 py-3 text-sm font-bold text-sky-200 transition hover:bg-sky-400/20">
+            <Network size={16} /> Open Workspace
+          </Link>
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {intelligenceRoutes.map(route => (
+            <Link key={route.href} href={route.href} className="rounded-xl border border-white/10 bg-white/[0.03] p-4 transition hover:border-sky-400/40 hover:bg-sky-400/10">
+              <div className="flex items-center gap-2 text-sm font-bold text-white"><route.icon size={15} className="text-sky-300" />{route.label}</div>
+              <p className="mt-2 text-xs leading-5 text-slate-400">{route.description}</p>
+            </Link>
+          ))}
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+          {intelligenceSummary.map(item => (
+            <div key={item.label} className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{item.label}</div>
+              <div className="mt-2 text-2xl font-black text-white">{item.value}</div>
+              <div className="mt-1 text-[10px] text-slate-500">{item.sub}</div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-xs text-slate-300">Requirement health: <span className="font-mono text-sky-300">{health.requirementSatisfaction}</span></div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-xs text-slate-300">Evidence completeness: <span className="font-mono text-sky-300">{health.evidenceCompleteness}</span></div>
+        </div>
       </div>
 
       {loading ? (

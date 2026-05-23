@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, RefreshCw, CheckCircle, AlertCircle,
-  Clock, MapPin, Zap, User, Building2, History, Activity, Send,
+  Clock, MapPin, Zap, User, Building2, History, Activity, Send, Network,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -209,13 +209,22 @@ export default function AdminProjectDetail() {
             <p className="text-xs text-slate-500 font-mono mt-0.5">{project.id}</p>
           </div>
         </div>
-        <a
-          href={`/admin/projects/${project.id}/portal-preview`}
-          className="flex items-center gap-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/25 text-amber-400 px-4 py-2 rounded-lg text-sm font-medium transition-all"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
-          Portal Preview
-        </a>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <a
+            href={`/admin/engineering-intelligence/project/${project.id}`}
+            className="flex items-center gap-2 bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/25 text-sky-300 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+          >
+            <Network size={14} />
+            Engineering Intelligence
+          </a>
+          <a
+            href={`/admin/projects/${project.id}/portal-preview`}
+            className="flex items-center gap-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/25 text-amber-400 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+            Portal Preview
+          </a>
+        </div>
       </div>
 
       {/* Info grid */}
