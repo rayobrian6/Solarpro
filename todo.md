@@ -17,6 +17,6 @@
 - [x] Run required validations and capture logs/exits
 
 ## Delivery
-- [ ] Stage intended files and commit directly to dev
+- [x] Stage intended files and commit directly to dev
 - [ ] Push dev only
 - [ ] Provide final summary and safety guarantees
