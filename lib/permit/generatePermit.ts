@@ -10,6 +10,12 @@ import { buildCanonical, validateCanonicalStrict, buildLayoutDimensions } from '
 import { generateCADLayout } from '@/lib/cad/cadEngine';
 import { buildRenderContext, type RenderContext } from '@/lib/drafting/renderContext';
 import { buildDocumentProvenanceBundle } from '@/lib/documentProvenance';
+import {
+  buildDecisionAwareBOMMetadata,
+  buildDecisionAwareReadinessSummary,
+  buildDecisionAwareSLDMetadata,
+  buildEngineeringDecisionProvenanceBundle,
+} from '@/lib/engineeringDecisionProvenance';
 import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
 
 // Section imports
@@ -186,15 +192,31 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // Assembles systemType + CAD + billInsights + engineering into one object.
   // ctx is optional — all templates render normally when ctx is null/absent.
   const utilityOpts = (input as any).utility;
+  const provenanceDocumentId = `permit:${(project as any).projectId ?? (project as any).id ?? project.projectName ?? 'unknown'}`;
+  const decisionProvenance = buildEngineeringDecisionProvenanceBundle({
+    bundleId: `${provenanceDocumentId}.decision-provenance`,
+    generatedAt: input.surveyEvidence?.source.normalizedAt,
+    surveyEvidence: input.surveyEvidence ?? null,
+    documentProvenance: input.documentProvenance ?? input.surveyEvidence?.documentProvenance ?? null,
+    cad,
+    permitInput: input,
+    renderContextIds: ['renderContext:primary'],
+    includeDocumentMetadataDecisions: true,
+  });
+  (input as any).decisionProvenance = decisionProvenance;
+  (input as any).decisionAwareReadinessSummary = buildDecisionAwareReadinessSummary(decisionProvenance);
+
   const documentProvenance = input.surveyEvidence
     ? buildDocumentProvenanceBundle({
-        documentId: `permit:${(project as any).projectId ?? (project as any).id ?? project.projectName ?? 'unknown'}`,
+        documentId: provenanceDocumentId,
         documentType: 'permit_package',
         surveyEvidence: input.surveyEvidence,
         cad,
+        permitInput: input,
+        decisionProvenance,
         generatedAt: input.surveyEvidence.source.normalizedAt,
         renderInputs: {
-          inputKeys: ['PermitInput', 'EngineeringSurveyEvidence'],
+          inputKeys: ['PermitInput', 'EngineeringSurveyEvidence', 'EngineeringDecisionProvenance'],
           canonicalInputKeys: ['CanonicalInput', 'SurveyEvidenceManifest', 'EngineeringRequirementEvaluationSummary'],
           cadPrimitiveIds: [`cad:${cad.systemType}:model`],
           legacyFallbackKeys: [],
@@ -212,6 +234,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     annualKwh:       utilityOpts?.annualKwh,
     billInsights:    utilityOpts?.billInsights ?? null,
     documentProvenance: documentProvenance ?? null,
+    decisionProvenance,
   });
 
   // ── BOM Integration (v48.x) ─────────────────────────────────────────────
@@ -224,9 +247,21 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     if (generatedBOM.length > 0) {
       (input as any).bom = generatedBOM;
     }
+    (input as any).decisionAwareBOMMetadata = buildDecisionAwareBOMMetadata({
+      bomItems: (input as any).bom ?? generatedBOM,
+      decisionBundle: decisionProvenance,
+    });
   } catch (bomErr: unknown) {
     console.warn('[generatePermitHTML] BOM generation failed (non-critical):', (bomErr as Error)?.message ?? bomErr);
   }
+  if (!(input as any).decisionAwareBOMMetadata) {
+    (input as any).decisionAwareBOMMetadata = buildDecisionAwareBOMMetadata({
+      bomItems: (input as any).bom ?? [],
+      decisionBundle: decisionProvenance,
+    });
+  }
+
+  (input as any).decisionAwareSLDMetadata = buildDecisionAwareSLDMetadata({ decisionBundle: decisionProvenance });
 
   const TOTAL = 15;
 

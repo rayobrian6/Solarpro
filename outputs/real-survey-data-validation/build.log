@@ -1,0 +1,386 @@
+
+> solar-platform@1.0.0 build
+> next build
+
+
+[BUILD] ⚠️  ─────────────────────────────────────────────────────────
+[BUILD] ⚠️  MISSING REQUIRED ENVIRONMENT VARIABLES (build continues)
+[BUILD] ⚠️  ─────────────────────────────────────────────────────────
+[BUILD] ⚠️  Missing: DATABASE_URL, JWT_SECRET
+[BUILD] ⚠️  These vars are required at RUNTIME. The app will boot
+[BUILD] ⚠️  but DB/auth operations will throw descriptive errors.
+[BUILD] ⚠️  Fix: Vercel → Project → Settings → Environment Variables
+[BUILD] ⚠️    DATABASE_URL               — Neon PostgreSQL connection string (postgresql://...)
+[BUILD] ⚠️    JWT_SECRET                 — Random 32+ character secret for JWT session signing
+[BUILD] ⚠️  ─────────────────────────────────────────────────────────
+
+[BUILD] ⚠️  Recommended vars not set: OPENAI_API_KEY, GOOGLE_MAPS_API_KEY, RESEND_API_KEY, NEXT_PUBLIC_BASE_URL — some features degraded
+[BUILD] ⚠️  Build continuing despite missing env vars — see warnings above (BUILD_VERSION=v60.5)
+  ▲ Next.js 14.2.35
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Skipping validation of types
+   Skipping linting
+   Collecting page data ...
+[SERVER_INSTANCE_STARTED] db-ready.ts module loaded on new function instance
+[ENV_COLD_START] 🔴 DATABASE_URL=false (len=0) JWT_SECRET=false (len=0) GOOGLE_MAPS=false NODE_ENV=production VERCEL_ENV=local
+
+[ENV_COLD_START] ❌ DATABASE_URL is not set!
+  → Vercel Dashboard → Project → Settings → Environment Variables
+  → Add: DATABASE_URL = <your Neon connection string>
+  → Then redeploy. Env vars are NOT hot-reloaded.
+
+
+[ENV_COLD_START] ❌ JWT_SECRET is not set!
+  → Vercel Dashboard → Project → Settings → Environment Variables
+  → Add: JWT_SECRET = <any random 32+ character string>
+  → Then redeploy.
+
+[SERVER_INSTANCE_STARTED] db-neon.ts module loaded
+[ENVIRONMENT_LOADED] DATABASE_URL present: false NODE_ENV: production VERCEL_ENV: local
+[ENV_STATUS] route=bill-upload DATABASE_URL=✗ JWT_SECRET=✗ ANTHROPIC_API_KEY=✗ OPENAI_API_KEY=✗ GOOGLE_MAPS_API_KEY=✗ RESEND_API_KEY=✗ NEXT_PUBLIC_BASE_URL=✗ valid=false
+[ENV_MISSING] CRITICAL: DATABASE_URL, JWT_SECRET, SURVEY_WEBHOOK_SECRET, SOLARPRO_HANDOFF_SECRET, SURVEY_INGEST_DEFAULT_USER_ID not set — route=bill-upload will fail on DB/auth operations
+[ENV_WARNINGS] route=bill-upload ANTHROPIC_API_KEY not set — Claude 3.5 Sonnet bill extraction disabled — falling back to GPT-4o-mini | OPENAI_API_KEY not set — GPT-4o-mini bill extraction fallback disabled (Tesseract OCR only if Claude also absent) | GOOGLE_MAPS_API_KEY not set — Geocoding and utility rate detection disabled | RESEND_API_KEY not set — Transactional email disabled — password reset emails will NOT be sent | NEXT_PUBLIC_BASE_URL not set — Email reset links may point to wrong URL — set to production domain
+[OCR_STARTUP] openai=false google=false internal_secret=false
+[OCR_STARTUP] OPENAI_API_KEY not set — Vision fallback disabled in OCR route
+[ENV_STATUS] route=system-size DATABASE_URL=✗ JWT_SECRET=✗ ANTHROPIC_API_KEY=✗ OPENAI_API_KEY=✗ GOOGLE_MAPS_API_KEY=✗ RESEND_API_KEY=✗ NEXT_PUBLIC_BASE_URL=✗ valid=false
+[ENV_MISSING] CRITICAL: DATABASE_URL, JWT_SECRET, SURVEY_WEBHOOK_SECRET, SOLARPRO_HANDOFF_SECRET, SURVEY_INGEST_DEFAULT_USER_ID not set — route=system-size will fail on DB/auth operations
+[ENV_WARNINGS] route=system-size ANTHROPIC_API_KEY not set — Claude 3.5 Sonnet bill extraction disabled — falling back to GPT-4o-mini | OPENAI_API_KEY not set — GPT-4o-mini bill extraction fallback disabled (Tesseract OCR only if Claude also absent) | GOOGLE_MAPS_API_KEY not set — Geocoding and utility rate detection disabled | RESEND_API_KEY not set — Transactional email disabled — password reset emails will NOT be sent | NEXT_PUBLIC_BASE_URL not set — Email reset links may point to wrong URL — set to production domain
+   Generating static pages (0/67) ...
+[SERVER_INSTANCE_STARTED] db-ready.ts module loaded on new function instance
+[ENV_COLD_START] 🔴 DATABASE_URL=false (len=0) JWT_SECRET=false (len=0) GOOGLE_MAPS=false NODE_ENV=production VERCEL_ENV=local
+[SERVER_INSTANCE_STARTED] db-neon.ts module loaded
+[ENVIRONMENT_LOADED] DATABASE_URL present: false NODE_ENV: production VERCEL_ENV: local
+
+[ENV_COLD_START] ❌ DATABASE_URL is not set!
+  → Vercel Dashboard → Project → Settings → Environment Variables
+  → Add: DATABASE_URL = <your Neon connection string>
+  → Then redeploy. Env vars are NOT hot-reloaded.
+
+
+[ENV_COLD_START] ❌ JWT_SECRET is not set!
+  → Vercel Dashboard → Project → Settings → Environment Variables
+  → Add: JWT_SECRET = <any random 32+ character string>
+  → Then redeploy.
+
+   Generating static pages (16/67) 
+   Generating static pages (33/67) 
+   Generating static pages (50/67) 
+ ✓ Generating static pages (67/67)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                      Size     First Load JS
+┌ ○ /                                            20 kB           117 kB
+├ ○ /_not-found                                  880 B          88.9 kB
+├ ○ /account/billing                             3.79 kB         207 kB
+├ ƒ /admin                                       3.92 kB         101 kB
+├ ƒ /admin/activity-log                          4.8 kB         92.8 kB
+├ ƒ /admin/companies                             6.77 kB        94.8 kB
+├ ƒ /admin/database                              3.15 kB        91.2 kB
+├ ƒ /admin/distributor-prices                    6.34 kB        94.4 kB
+├ ƒ /admin/engineering                           3.09 kB        91.1 kB
+├ ƒ /admin/feedback                              4.12 kB        92.2 kB
+├ ƒ /admin/files                                 3.22 kB        91.3 kB
+├ ƒ /admin/hardware                              178 B          94.2 kB
+├ ƒ /admin/health                                5.75 kB        93.8 kB
+├ ƒ /admin/incentives                            4 kB           92.1 kB
+├ ƒ /admin/leads                                 5.73 kB         103 kB
+├ ƒ /admin/leads/[id]                            4.63 kB         101 kB
+├ ƒ /admin/network                               43.9 kB         141 kB
+├ ƒ /admin/network/intelligence                  5.85 kB        93.9 kB
+├ ƒ /admin/portal-dashboard                      8.75 kB        96.8 kB
+├ ƒ /admin/pricing                               177 B          94.6 kB
+├ ƒ /admin/projects                              3.84 kB        91.9 kB
+├ ƒ /admin/projects/[id]                         5.49 kB        93.5 kB
+├ ƒ /admin/projects/[id]/portal-preview          6.57 kB         103 kB
+├ ƒ /admin/roadmap                               35.8 kB         124 kB
+├ ƒ /admin/sld-emblems                           21.4 kB         134 kB
+├ ƒ /admin/system-tools                          4.42 kB        92.5 kB
+├ ƒ /admin/topography                            17 kB           105 kB
+├ ƒ /admin/users                                 7.34 kB        95.4 kB
+├ ƒ /admin/utilities                             6.16 kB        94.2 kB
+├ ○ /analytics                                   18.5 kB         325 kB
+├ ƒ /api/activity                                0 B                0 B
+├ ƒ /api/admin/activity-log                      0 B                0 B
+├ ƒ /api/admin/companies                         0 B                0 B
+├ ƒ /api/admin/debug                             0 B                0 B
+├ ƒ /api/admin/debug-role                        0 B                0 B
+├ ƒ /api/admin/debug/account-state               0 B                0 B
+├ ƒ /api/admin/debug/auth-loop                   0 B                0 B
+├ ƒ /api/admin/debug/auth-status                 0 B                0 B
+├ ƒ /api/admin/debug/db-identity                 0 B                0 B
+├ ƒ /api/admin/debug/env-fingerprint             0 B                0 B
+├ ƒ /api/admin/debug/owner-resolver-probe        0 B                0 B
+├ ƒ /api/admin/debug/user-audit                  0 B                0 B
+├ ƒ /api/admin/distributor-prices                0 B                0 B
+├ ƒ /api/admin/feedback                          0 B                0 B
+├ ƒ /api/admin/feedback/count                    0 B                0 B
+├ ƒ /api/admin/feedback/screenshot               0 B                0 B
+├ ƒ /api/admin/files                             0 B                0 B
+├ ƒ /api/admin/free-pass                         0 B                0 B
+├ ƒ /api/admin/health                            0 B                0 B
+├ ƒ /api/admin/impersonate                       0 B                0 B
+├ ƒ /api/admin/incentives                        0 B                0 B
+├ ƒ /api/admin/leads                             0 B                0 B
+├ ƒ /api/admin/leads/[id]                        0 B                0 B
+├ ƒ /api/admin/leads/[id]/assign-user            0 B                0 B
+├ ƒ /api/admin/leads/[id]/convert                0 B                0 B
+├ ƒ /api/admin/me-debug                          0 B                0 B
+├ ƒ /api/admin/me-exact-debug                    0 B                0 B
+├ ƒ /api/admin/me-ultra-debug                    0 B                0 B
+├ ƒ /api/admin/network/analytics                 0 B                0 B
+├ ƒ /api/admin/network/campaigns                 0 B                0 B
+├ ƒ /api/admin/network/contractor-match/[id]     0 B                0 B
+├ ƒ /api/admin/network/enrichment                0 B                0 B
+├ ƒ /api/admin/network/funnels                   0 B                0 B
+├ ƒ /api/admin/network/health                    0 B                0 B
+├ ƒ /api/admin/network/intake                    0 B                0 B
+├ ƒ /api/admin/network/intake/bill-intelligence  0 B                0 B
+├ ƒ /api/admin/network/intelligence/runner       0 B                0 B
+├ ƒ /api/admin/network/marketplace               0 B                0 B
+├ ƒ /api/admin/network/opportunities             0 B                0 B
+├ ƒ /api/admin/network/screening                 0 B                0 B
+├ ƒ /api/admin/network/simulator                 0 B                0 B
+├ ƒ /api/admin/network/webhooks                  0 B                0 B
+├ ƒ /api/admin/perf-diag                         0 B                0 B
+├ ƒ /api/admin/projects                          0 B                0 B
+├ ƒ /api/admin/projects/[id]                     0 B                0 B
+├ ƒ /api/admin/projects/[id]/send-portal-invite  0 B                0 B
+├ ƒ /api/admin/repair-account                    0 B                0 B
+├ ƒ /api/admin/set-roles                         0 B                0 B
+├ ƒ /api/admin/staff                             0 B                0 B
+├ ƒ /api/admin/stats                             0 B                0 B
+├ ƒ /api/admin/survey-reassign                   0 B                0 B
+├ ƒ /api/admin/survey-webhook-log                0 B                0 B
+├ ƒ /api/admin/survey-webhook-log/[id]/replay    0 B                0 B
+├ ƒ /api/admin/system-tools                      0 B                0 B
+├ ƒ /api/admin/users                             0 B                0 B
+├ ƒ /api/admin/utilities                         0 B                0 B
+├ ƒ /api/assistant                               0 B                0 B
+├ ƒ /api/auth/authorize                          0 B                0 B
+├ ƒ /api/auth/delete-account                     0 B                0 B
+├ ƒ /api/auth/login                              0 B                0 B
+├ ƒ /api/auth/logout                             0 B                0 B
+├ ƒ /api/auth/me                                 0 B                0 B
+├ ƒ /api/auth/mobile-session                     0 B                0 B
+├ ƒ /api/auth/register                           0 B                0 B
+├ ƒ /api/auth/request-password-reset             0 B                0 B
+├ ƒ /api/auth/reset-password                     0 B                0 B
+├ ƒ /api/auth/tour-complete                      0 B                0 B
+├ ƒ /api/auto-design                             0 B                0 B
+├ ƒ /api/auto-size                               0 B                0 B
+├ ƒ /api/bill-upload                             0 B                0 B
+├ ƒ /api/bill-upload/provision                   0 B                0 B
+├ ƒ /api/bill-upload/test                        0 B                0 B
+├ ƒ /api/bills                                   0 B                0 B
+├ ƒ /api/clients                                 0 B                0 B
+├ ƒ /api/clients/[id]                            0 B                0 B
+├ ƒ /api/clients/[id]/notes                      0 B                0 B
+├ ƒ /api/clients/[id]/projects                   0 B                0 B
+├ ƒ /api/clients/[id]/proposals                  0 B                0 B
+├ ƒ /api/clients/[id]/site-surveys               0 B                0 B
+├ ƒ /api/commands                                0 B                0 B
+├ ƒ /api/commands/[id]                           0 B                0 B
+├ ƒ /api/commands/generate                       0 B                0 B
+├ ƒ /api/crew-members/[memberId]                 0 B                0 B
+├ ƒ /api/crew-schedule                           0 B                0 B
+├ ƒ /api/crews                                   0 B                0 B
+├ ƒ /api/crews/[id]/members                      0 B                0 B
+├ ƒ /api/crews/[id]/members/[memberId]           0 B                0 B
+├ ƒ /api/cron/proposal-expiry                    0 B                0 B
+├ ƒ /api/debug/aerial                            0 B                0 B
+├ ƒ /api/debug/auth                              0 B                0 B
+├ ƒ /api/debug/backfill-site-surveys             0 B                0 B
+├ ƒ /api/debug/bill                              0 B                0 B
+├ ƒ /api/debug/force-ingest                      0 B                0 B
+├ ƒ /api/debug/layout                            0 B                0 B
+├ ƒ /api/debug/ocr                               0 B                0 B
+├ ƒ /api/debug/project                           0 B                0 B
+├ ƒ /api/debug/rate                              0 B                0 B
+├ ƒ /api/dev-check                               0 B                0 B
+├ ƒ /api/dsm                                     0 B                0 B
+├ ƒ /api/elevation                               0 B                0 B
+├ ƒ /api/engineering/ahj-lookup                  0 B                0 B
+├ ƒ /api/engineering/assist                      0 B                0 B
+├ ƒ /api/engineering/auto-configure              0 B                0 B
+├ ƒ /api/engineering/bom                         0 B                0 B
+├ ƒ /api/engineering/calculate                   0 B                0 B
+├ ƒ /api/engineering/enphase                     0 B                0 B
+├ ƒ /api/engineering/equipment                   0 B                0 B
+├ ƒ /api/engineering/generate                    0 B                0 B
+├ ƒ /api/engineering/ironridge                   0 B                0 B
+├ ƒ /api/engineering/latest-run                  0 B                0 B
+├ ƒ /api/engineering/override                    0 B                0 B
+├ ƒ /api/engineering/permit                      0 B                0 B
+├ ƒ /api/engineering/permit-preview              0 B                0 B
+├ ƒ /api/engineering/plan-set                    0 B                0 B
+├ ƒ /api/engineering/preliminary                 0 B                0 B
+├ ƒ /api/engineering/pvwatts                     0 B                0 B
+├ ƒ /api/engineering/report                      0 B                0 B
+├ ƒ /api/engineering/rules                       0 B                0 B
+├ ƒ /api/engineering/run-from-file               0 B                0 B
+├ ƒ /api/engineering/save-config                 0 B                0 B
+├ ƒ /api/engineering/save-outputs                0 B                0 B
+├ ƒ /api/engineering/sld                         0 B                0 B
+├ ƒ /api/engineering/sld/pdf                     0 B                0 B
+├ ƒ /api/engineering/slg/generate                0 B                0 B
+├ ƒ /api/engineering/structural                  0 B                0 B
+├ ƒ /api/engineering/structural-v2               0 B                0 B
+├ ƒ /api/engineering/sync-pipeline               0 B                0 B
+├ ƒ /api/engineering/topology                    0 B                0 B
+├ ƒ /api/enterprise/contact                      0 B                0 B
+├ ƒ /api/equipment                               0 B                0 B
+├ ƒ /api/equipment/save                          0 B                0 B
+├ ƒ /api/feedback                                0 B                0 B
+├ ƒ /api/geocode                                 0 B                0 B
+├ ƒ /api/hardware                                0 B                0 B
+├ ƒ /api/health                                  0 B                0 B
+├ ƒ /api/health/auth                             0 B                0 B
+├ ƒ /api/health/database                         0 B                0 B
+├ ƒ /api/health/env                              0 B                0 B
+├ ƒ /api/incentives                              0 B                0 B
+├ ƒ /api/intake                                  0 B                0 B
+├ ƒ /api/intake/homeowner                        0 B                0 B
+├ ƒ /api/intake/homeowner/qualification          0 B                0 B
+├ ƒ /api/intake/webhook/generic                  0 B                0 B
+├ ƒ /api/intake/webhook/google                   0 B                0 B
+├ ƒ /api/intake/webhook/meta                     0 B                0 B
+├ ƒ /api/leads/public                            0 B                0 B
+├ ƒ /api/maps-session                            0 B                0 B
+├ ƒ /api/migrate                                 0 B                0 B
+├ ƒ /api/mobile/clients                          0 B                0 B
+├ ƒ /api/mobile/clients/[clientId]/projects      0 B                0 B
+├ ƒ /api/mobile/debug-auth                       0 B                0 B
+├ ƒ /api/network/contractor-profile              0 B                0 B
+├ ƒ /api/network/my-claims                       0 B                0 B
+├ ƒ /api/network/my-opportunities                0 B                0 B
+├ ƒ /api/network/opportunities                   0 B                0 B
+├ ƒ /api/network/opportunities/[id]              0 B                0 B
+├ ƒ /api/network/opportunities/[id]/claim        0 B                0 B
+├ ƒ /api/ocr                                     0 B                0 B
+├ ƒ /api/operations/projects                     0 B                0 B
+├ ƒ /api/organizations                           0 B                0 B
+├ ƒ /api/organizations/invite                    0 B                0 B
+├ ƒ /api/organizations/member                    0 B                0 B
+├ ƒ /api/pipeline/run                            0 B                0 B
+├ ƒ /api/portal/bill-upload                      0 B                0 B
+├ ƒ /api/portal/dashboard                        0 B                0 B
+├ ƒ /api/portal/login                            0 B                0 B
+├ ƒ /api/portal/logout                           0 B                0 B
+├ ƒ /api/portal/verify-otp                       0 B                0 B
+├ ƒ /api/pricing                                 0 B                0 B
+├ ƒ /api/production                              0 B                0 B
+├ ƒ /api/project-files                           0 B                0 B
+├ ƒ /api/project-files/download                  0 B                0 B
+├ ƒ /api/projects                                0 B                0 B
+├ ƒ /api/projects/[id]                           0 B                0 B
+├ ƒ /api/projects/[id]/homeowner-stage           0 B                0 B
+├ ƒ /api/projects/[id]/layout                    0 B                0 B
+├ ƒ /api/projects/[id]/milestones                0 B                0 B
+├ ƒ /api/projects/[id]/operations                0 B                0 B
+├ ƒ /api/projects/[id]/physical-data             0 B                0 B
+├ ƒ /api/projects/[id]/repair-system-type        0 B                0 B
+├ ƒ /api/projects/[id]/site-conditions           0 B                0 B
+├ ƒ /api/projects/[id]/site-surveys              0 B                0 B
+├ ƒ /api/projects/[id]/survey-context            0 B                0 B
+├ ƒ /api/projects/[id]/survey-handoff            0 B                0 B
+├ ƒ /api/projects/[id]/tasks                     0 B                0 B
+├ ƒ /api/projects/[id]/versions                  0 B                0 B
+├ ƒ /api/projects/[id]/versions/[versionId]      0 B                0 B
+├ ƒ /api/projects/bulk-delete                    0 B                0 B
+├ ƒ /api/projects/transition                     0 B                0 B
+├ ƒ /api/projects/update-status                  0 B                0 B
+├ ƒ /api/proposals                               0 B                0 B
+├ ƒ /api/proposals/[id]                          0 B                0 B
+├ ƒ /api/proposals/[id]/pdf                      0 B                0 B
+├ ƒ /api/proposals/[id]/send-email               0 B                0 B
+├ ƒ /api/proposals/[id]/share                    0 B                0 B
+├ ƒ /api/proposals/[id]/sign                     0 B                0 B
+├ ƒ /api/proposals/[id]/signature                0 B                0 B
+├ ƒ /api/proposals/bulk                          0 B                0 B
+├ ƒ /api/schedule                                0 B                0 B
+├ ƒ /api/settings/branding                       0 B                0 B
+├ ƒ /api/settings/logo                           0 B                0 B
+├ ƒ /api/settings/notifications                  0 B                0 B
+├ ƒ /api/settings/onboarding-complete            0 B                0 B
+├ ƒ /api/settings/profile                        0 B                0 B
+├ ƒ /api/site-surveys/[surveyId]                 0 B                0 B
+├ ƒ /api/solar                                   0 B                0 B
+├ ƒ /api/solar-tile                              0 B                0 B
+├ ƒ /api/solardog/aliases                        0 B                0 B
+├ ƒ /api/solardog/debug                          0 B                0 B
+├ ƒ /api/solardog/learn                          0 B                0 B
+├ ƒ /api/stats                                   0 B                0 B
+├ ƒ /api/stripe/checkout                         0 B                0 B
+├ ƒ /api/stripe/customer-status                  0 B                0 B
+├ ƒ /api/stripe/portal                           0 B                0 B
+├ ƒ /api/stripe/webhook                          0 B                0 B
+├ ƒ /api/survey/lookup-data                      0 B                0 B
+├ ƒ /api/survey/standalone-handoff               0 B                0 B
+├ ƒ /api/survey/submit                           0 B                0 B
+├ ƒ /api/survey/upload-photo                     0 B                0 B
+├ ƒ /api/system-size                             0 B                0 B
+├ ƒ /api/system/capabilities                     0 B                0 B
+├ ƒ /api/system/env                              0 B                0 B
+├ ƒ /api/system/health                           0 B                0 B
+├ ƒ /api/system/release                          0 B                0 B
+├ ƒ /api/tile                                    0 B                0 B
+├ ƒ /api/topography/state                        0 B                0 B
+├ ƒ /api/tos-accept                              0 B                0 B
+├ ƒ /api/tts                                     0 B                0 B
+├ ƒ /api/utility-detect                          0 B                0 B
+├ ƒ /api/utility-rates                           0 B                0 B
+├ ƒ /api/version                                 0 B                0 B
+├ ƒ /api/webhooks/survey-complete                0 B                0 B
+├ ○ /auth/forgot-password                        2.71 kB        99.5 kB
+├ ○ /auth/login                                  4.37 kB         101 kB
+├ ○ /auth/register                               4.49 kB         101 kB
+├ ○ /auth/reset-password                         3.97 kB         101 kB
+├ ○ /auth/subscribe                              5.54 kB         102 kB
+├ ○ /clients                                     6.99 kB         210 kB
+├ ƒ /clients/[id]                                6.92 kB         309 kB
+├ ƒ /clients/[id]/edit                           3.37 kB         207 kB
+├ ○ /clients/new                                 7.18 kB         211 kB
+├ ○ /dashboard                                   34.1 kB         237 kB
+├ ○ /debug/project                               2.91 kB        91.1 kB
+├ ○ /design                                      103 kB          306 kB
+├ ○ /engineering                                 196 kB          680 kB
+├ ƒ /engineering/[projectId]                     554 B          88.6 kB
+├ ○ /engineering/assist                          504 B          88.6 kB
+├ ○ /engineering/permit                          5.07 kB         208 kB
+├ ○ /enterprise                                  4.23 kB         101 kB
+├ ○ /free-solar-estimate                         8.44 kB        96.5 kB
+├ ○ /get-a-quote                                 4.78 kB        92.8 kB
+├ ○ /hardware                                    227 B          94.2 kB
+├ ○ /mobile-login                                462 B          88.5 kB
+├ ○ /network                                     18.3 kB         222 kB
+├ ○ /onboarding                                  5.88 kB         103 kB
+├ ○ /operations                                  1.42 kB        89.5 kB
+├ ○ /portal                                      153 B          88.2 kB
+├ ○ /portal/dashboard                            14.3 kB         139 kB
+├ ○ /portal/login                                5.41 kB        93.5 kB
+├ ○ /pricing                                     226 B          94.6 kB
+├ ○ /projects                                    9.86 kB         213 kB
+├ ƒ /projects/[id]                               40.2 kB         350 kB
+├ ƒ /projects/[id]/survey/[surveyId]             16.3 kB         220 kB
+├ ○ /projects/new                                6.67 kB         218 kB
+├ ○ /proposals                                   26.6 kB         573 kB
+├ ƒ /proposals/view/[id]                         27.9 kB         559 kB
+├ ○ /settings                                    14.6 kB         218 kB
+├ ○ /sitemap.xml                                 0 B                0 B
+├ ○ /subscribe                                   6 kB            103 kB
+├ ƒ /survey/[token]                              15.1 kB         103 kB
+└ ○ /terms                                       15.3 kB         112 kB
++ First Load JS shared by all                    88.1 kB
+  ├ chunks/2117-e979ffbe5bce0a65.js              31.9 kB
+  ├ chunks/fd9d1056-2b205af35c505cf3.js          53.6 kB
+  └ other shared chunks (total)                  2.51 kB
+
+
+ƒ Middleware                                     28 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

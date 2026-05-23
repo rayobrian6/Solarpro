@@ -6,6 +6,8 @@ import type {
 } from '@/lib/survey/evidence/engineeringRequirements';
 import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
 import type { EvidenceTruthSource } from '@/lib/survey/evidence/provenance';
+import type { EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance';
+import type { PermitInput } from '@/lib/permit/types';
 
 export type DocumentType =
   | 'permit_package'
@@ -25,7 +27,8 @@ export type ProvenanceSource =
   | 'document_binding_registry_v1'
   | 'engineering_dependency_graph_v1'
   | 'render_context_v1'
-  | 'legacy_design_input';
+  | 'legacy_design_input'
+  | 'engineering_decision_registry_v1';
 
 export type DocumentTruthSource =
   | EvidenceTruthSource
@@ -88,6 +91,7 @@ export interface DocumentProvenanceBundle {
   sections: DocumentProvenanceSection[];
   auditGuards: DocumentAuditGuardResult[];
   dependencyGraph?: EngineeringDependencyGraph;
+  decisionProvenance?: EngineeringDecisionEvaluationBundle;
 }
 
 export interface RequirementDocumentBinding {
@@ -114,7 +118,10 @@ export type EngineeringDependencyNodeType =
   | 'bom_row'
   | 'cad_layout_primitive'
   | 'render_context'
-  | 'engineering_assumption';
+  | 'engineering_assumption'
+  | 'engineering_decision'
+  | 'calculation'
+  | 'render_output';
 
 export interface EngineeringDependencyNode {
   id: string;
@@ -133,7 +140,14 @@ export type EngineeringDependencyEdgeType =
   | 'supports_geometry_assumption'
   | 'supports_electrical_assumption'
   | 'supports_structural_assumption'
-  | 'documents_missing_requirement';
+  | 'documents_missing_requirement'
+  | 'explains_engineering_decision'
+  | 'decision_uses_requirement'
+  | 'decision_uses_evidence'
+  | 'decision_feeds_document'
+  | 'decision_feeds_bom'
+  | 'decision_feeds_sld'
+  | 'decision_feeds_render_output';
 
 export interface EngineeringDependencyEdge {
   id: string;
@@ -176,7 +190,12 @@ export type DocumentAuditGuardCode =
   | 'canonical_truth_required'
   | 'raw_upload_count_not_render_truth'
   | 'section_provenance_required'
-  | 'render_context_provenance_required';
+  | 'render_context_provenance_required'
+  | 'decision_lineage_required'
+  | 'document_sections_require_governing_rules'
+  | 'fallback_assumptions_documented'
+  | 'calculations_require_dependency_lineage'
+  | 'render_outputs_require_decision_provenance';
 
 export interface DocumentAuditGuardResult {
   guardCode: DocumentAuditGuardCode;
@@ -194,4 +213,6 @@ export interface BuildDocumentProvenanceInput {
   generatedAt?: string;
   renderInputs?: Partial<DocumentRenderInputs>;
   includeLegacyDesignInput?: boolean;
+  permitInput?: PermitInput | null;
+  decisionProvenance?: EngineeringDecisionEvaluationBundle | null;
 }

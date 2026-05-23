@@ -7,6 +7,7 @@ import type { CADModel } from '@/lib/cad/types';
 import type { RenderContext } from '@/lib/drafting/renderContext';
 import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
 import type { DocumentProvenanceBundle } from '@/lib/documentProvenance';
+import type { EngineeringDecisionEvaluationBundle, DecisionAwareBOMMetadata, DecisionAwareSLDMetadata, DecisionAwareReadinessSummary } from '@/lib/engineeringDecisionProvenance';
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -209,6 +210,10 @@ export interface PermitInput {
   // Optional and additive: missing evidence is rendered as warnings, not as a generation blocker.
   surveyEvidence?: EngineeringSurveyEvidence;
   documentProvenance?: DocumentProvenanceBundle;
+  decisionProvenance?: EngineeringDecisionEvaluationBundle;
+  decisionAwareReadinessSummary?: DecisionAwareReadinessSummary;
+  decisionAwareBOMMetadata?: DecisionAwareBOMMetadata[];
+  decisionAwareSLDMetadata?: DecisionAwareSLDMetadata;
   aerialData?: {
     imageBase64?: string;
     imageWidth?: number;

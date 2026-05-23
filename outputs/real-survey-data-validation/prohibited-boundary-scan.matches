@@ -1,0 +1,3 @@
+lib/drafting/renderPlanSet.ts:66: * @param cad          Solved CADModel (from generateCADLayout)
+lib/permit/generatePermit.ts:10:import { generateCADLayout } from '@/lib/cad/cadEngine';
+lib/permit/generatePermit.ts:53:  const cad = generateCADLayout(input as any);

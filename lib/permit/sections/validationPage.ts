@@ -201,6 +201,7 @@ export function pageValidationSummary(
   const traceability = surveyEvidence?.traceability;
   const requirementEvaluation = surveyEvidence?.requirementEvaluation;
   const documentProvenance = input.documentProvenance ?? surveyEvidence?.documentProvenance ?? null;
+  const decisionProvenance = input.decisionProvenance ?? surveyEvidence?.decisionProvenance ?? documentProvenance?.decisionProvenance ?? null;
   const registryStatusRows = requirementEvaluation
     ? [
         ['Registry Status', `readiness: ${requirementEvaluation.readiness} | completeness: ${requirementEvaluation.completeness} | confidence: ${requirementEvaluation.confidenceSource}`],
@@ -261,6 +262,33 @@ export function pageValidationSummary(
         `${section.sectionLabel} | requirements: ${section.requirementIds.join(', ')} | evidence: ${section.canonicalEvidenceIds.join(', ') || 'none'} | dependencies: ${section.engineeringDependencyIds.length}`,
       ] as const)
     : [['Document Section Provenance', 'No section-level document provenance was provided.'] as const];
+  const decisionProvenanceRows = decisionProvenance ? [
+    ['Decision Provenance Bundle', `${decisionProvenance.bundleId} | decisions: ${decisionProvenance.decisionIds.length} | hash ${decisionProvenance.deterministicHash}`],
+    ['Governing Rules', decisionProvenance.governingRuleIds.join(', ') || 'None'],
+    ['Fallback / Default Events', decisionProvenance.fallbackDecisionIds.join(', ') || 'None'],
+    ['Decision Evidence Links', decisionProvenance.canonicalEvidenceIds.join(', ') || 'None'],
+    ['Decision Dependencies', `${decisionProvenance.dependencyNodeIds.length} dependency node(s) | sections: ${decisionProvenance.documentSectionIds.join(', ') || 'none'} | render contexts: ${decisionProvenance.renderContextIds.join(', ') || 'none'}`],
+    ['Decision Audit Guards', decisionProvenance.auditGuards.map(guard => `${guard.guardCode}: ${guard.passed ? 'PASS' : guard.severity.toUpperCase()}`).join(' | ')],
+  ] as const : [
+    ['Decision Provenance Bundle', 'No engineering decision provenance bundle was attached to this permit run.'],
+  ] as const;
+  const decisionRecordRows = decisionProvenance?.decisionRecords.length
+    ? decisionProvenance.decisionRecords.slice(0, 14).map(record => [
+        record.decisionId,
+        `${record.decisionType} | selected: ${String(record.selectedValue ?? 'none')} | reason: ${record.decisionReason} | requirements: ${record.requirementIds.join(', ') || 'none'} | evidence: ${record.canonicalEvidenceIds.join(', ') || 'none'} | rules: ${record.governingRules.map(rule => rule.reference).join(', ') || 'none'} | confidence: ${record.confidenceSource}`,
+      ] as const)
+    : [['Engineering Decision Records', 'No engineering decision records were provided.'] as const];
+  const decisionMetadataRows = [
+    ['Decision-Aware Readiness', input.decisionAwareReadinessSummary
+      ? `status: ${input.decisionAwareReadinessSummary.readinessStatus} | decisions: ${input.decisionAwareReadinessSummary.decisionCount} | fallbacks: ${input.decisionAwareReadinessSummary.fallbackDecisionCount} | confidence: ${input.decisionAwareReadinessSummary.confidenceSource}`
+      : 'No decision-aware readiness metadata was attached.'],
+    ['Decision-Aware BOM Metadata', input.decisionAwareBOMMetadata?.length
+      ? input.decisionAwareBOMMetadata.slice(0, 8).map(row => `${row.bomRowId}: decisions ${row.decisionIds.join(', ') || 'none'} | rules ${row.governingRuleIds.join(', ') || 'none'}`).join(' | ')
+      : 'No decision-aware BOM metadata was attached.'],
+    ['Decision-Aware SLD Metadata', input.decisionAwareSLDMetadata
+      ? `decisions: ${input.decisionAwareSLDMetadata.decisionIds.join(', ') || 'none'} | rules: ${input.decisionAwareSLDMetadata.governingRuleIds.join(', ') || 'none'} | fallback: ${input.decisionAwareSLDMetadata.fallbackDecisionIds.join(', ') || 'none'} | hash: ${input.decisionAwareSLDMetadata.deterministicHash}`
+      : 'No decision-aware SLD metadata was attached.'],
+  ] as const;
 
   const surveyFieldEvidenceRows = surveyEvidence ? [
     ['Evidence Manifest v1', `items: ${manifestV1.itemCount} | source: ${manifestSummarySource} | lifecycle: ${manifestV1.lifecycleState} | quality: ${manifestV1.qualityStatus} | duplicates: ${manifestV1.duplicateStatus} | AI: ${manifestV1.aiExtractionStatus} | engineering readiness: ${manifestV1.engineeringBridge.readiness} | CAD automation: ${manifestV1.engineeringBridge.cadAutomationStatus}`],
@@ -394,6 +422,24 @@ export function pageValidationSummary(
           <tr style="background:${i%2===0?'#eff6ff':'#fff'};">
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
             <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
+          </tr>`).join('')}
+          <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#7f1d1d;background:#fee2e2;">Engineering Decision Provenance</td></tr>
+          ${decisionProvenanceRows.map(([label, value], i) => `
+          <tr style="background:${i%2===0?'#fff1f2':'#fff'};">
+            <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
+            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
+          </tr>`).join('')}
+          <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#9f1239;background:#ffe4e6;">Engineering Decision Records</td></tr>
+          ${decisionRecordRows.map(([label, value], i) => `
+          <tr style="background:${i%2===0?'#fff1f2':'#fff'};">
+            <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
+            <td colspan="3" style="font-family:monospace;font-size:6.25px;color:#000;">${esc(value)}</td>
+          </tr>`).join('')}
+          <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#be123c;background:#fff1f2;">Decision-Aware Output Metadata</td></tr>
+          ${decisionMetadataRows.map(([label, value], i) => `
+          <tr style="background:${i%2===0?'#fff1f2':'#fff'};">
+            <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
+            <td colspan="3" style="font-family:monospace;font-size:6.25px;color:#000;">${esc(value)}</td>
           </tr>`).join('')}
           ${surveyWarningRows.map((warning, i) => `
           <tr style="background:${i%2===0?'#fff7ed':'#fff'};">

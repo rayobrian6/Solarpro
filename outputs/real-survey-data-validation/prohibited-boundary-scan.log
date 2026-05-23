@@ -1,0 +1,8 @@
+# Prohibited Boundary Scan
+Generated: 2026-05-23T01:41:31Z
+Scanned paths: lib/engineeringDecisionProvenance lib/documentProvenance lib/drafting/renderContext.ts lib/drafting/renderPlanSet.ts lib/engineering/surveyEvidence.ts lib/permit/generatePermit.ts lib/permit/sections/validationPage.ts lib/permit/types.ts
+
+## Pattern matches
+lib/drafting/renderPlanSet.ts:66: * @param cad          Solved CADModel (from generateCADLayout)
+lib/permit/generatePermit.ts:10:import { generateCADLayout } from '@/lib/cad/cadEngine';
+lib/permit/generatePermit.ts:53:  const cad = generateCADLayout(input as any);

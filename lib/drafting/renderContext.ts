@@ -19,6 +19,7 @@
 import type { CADModel }    from '../cad/types';
 import type { BillInsights } from '../billInsights';
 import type { DocumentProvenanceBundle } from '@/lib/documentProvenance';
+import type { EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance';
 
 // ─── Engineering data (rate / utility intelligence) ──────────────────────────
 
@@ -70,6 +71,9 @@ export interface RenderContext {
 
   /** Document provenance carried through rendering; additive metadata only. */
   documentProvenance: DocumentProvenanceBundle | null;
+
+  /** Engineering decision provenance carried through rendering; additive explainability metadata only. */
+  decisionProvenance: EngineeringDecisionEvaluationBundle | null;
 }
 
 // ─── Builder ──────────────────────────────────────────────────────────────────
@@ -90,6 +94,7 @@ export function buildRenderContext(
     monthlyKwh?:       number | null;
     annualKwh?:        number | null;
     documentProvenance?: DocumentProvenanceBundle | null;
+    decisionProvenance?: EngineeringDecisionEvaluationBundle | null;
   },
 ): RenderContext {
   const systemType = cad.systemType as RenderContext['systemType'];
@@ -126,6 +131,7 @@ export function buildRenderContext(
     billInsights: opts?.billInsights ?? null,
     engineering,
     documentProvenance: opts?.documentProvenance ?? null,
+    decisionProvenance: opts?.decisionProvenance ?? null,
   };
 
   console.log(
@@ -135,7 +141,8 @@ export function buildRenderContext(
     ` rate=${engineering?.electricityRate ?? 'null'}` +
     ` rateSource=${engineering?.rateSource ?? 'none'}` +
     ` combinedUtility=${ctx.billInsights?.combinedUtilityDetected ?? false}` +
-    ` hasDocumentProvenance=${ctx.documentProvenance !== null}`
+    ` hasDocumentProvenance=${ctx.documentProvenance !== null}` +
+    ` hasDecisionProvenance=${ctx.decisionProvenance !== null}`
   );
 
   return ctx;

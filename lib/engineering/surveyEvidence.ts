@@ -28,6 +28,7 @@ import {
 import type { EvidenceDuplicateGroup, SurveySessionSummary } from '@/lib/survey/evidence/sessionGrouping';
 import type { EngineeringRequirementEvaluationSummary } from '@/lib/survey/evidence/engineeringRequirements';
 import { buildDocumentProvenanceBundle, type DocumentProvenanceBundle } from '@/lib/documentProvenance';
+import { buildEngineeringDecisionProvenanceBundle, type EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance';
 
 export type SurveyPhotoEvidenceCategory = SurveyEvidenceCategory;
 
@@ -68,6 +69,7 @@ export interface EngineeringSurveyEvidence {
   traceability: SurveyEvidenceTraceabilityBundle;
   requirementEvaluation: EngineeringRequirementEvaluationSummary;
   documentProvenance?: DocumentProvenanceBundle;
+  decisionProvenance?: EngineeringDecisionEvaluationBundle;
   missingCategories: SurveyPhotoEvidenceCategory[];
   completeness: 'missing' | 'partial' | 'sufficient';
   blockers: string[];
@@ -219,6 +221,14 @@ export function collectEngineeringSurveyEvidence(
       normalizedAt,
     },
   } as EngineeringSurveyEvidence;
+  const decisionProvenance = buildEngineeringDecisionProvenanceBundle({
+    bundleId: `permit:${survey.projectId}:${survey.id}.decision-provenance`,
+    generatedAt: normalizedAt,
+    surveyEvidence: surveyEvidenceBaseForProvenance,
+    documentProvenance: null,
+    permitInput: null,
+    renderContextIds: ['renderContext:primary'],
+  });
   const documentProvenance = buildDocumentProvenanceBundle({
     documentId: `permit:${survey.projectId}:${survey.id}`,
     documentType: 'permit_package',
@@ -230,6 +240,7 @@ export function collectEngineeringSurveyEvidence(
       legacyFallbackKeys: evidenceTruthSource === 'legacy_raw_photos_fallback' ? ['legacy_raw_photos_fallback'] : [],
     },
     includeLegacyDesignInput: evidenceTruthSource === 'legacy_raw_photos_fallback',
+    decisionProvenance,
   });
 
   return {
@@ -242,6 +253,7 @@ export function collectEngineeringSurveyEvidence(
     traceability,
     requirementEvaluation,
     documentProvenance,
+    decisionProvenance,
     missingCategories,
     completeness,
     blockers,

@@ -18,6 +18,7 @@ import type {
   EvidenceBackedGeometryInput,
 } from './types';
 import { runDocumentAuditGuards } from './guards';
+import { buildEngineeringDecisionProvenanceBundle, type EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance';
 
 const EMPTY_RENDER_INPUTS: DocumentRenderInputs = {
   inputKeys: [],
@@ -43,12 +44,25 @@ export function buildDocumentProvenanceBundle(input: BuildDocumentProvenanceInpu
   const requirementIds = uniqueSorted(sections.flatMap(section => section.requirementIds)) as EngineeringRequirementId[];
   const canonicalEvidenceIds = uniqueSorted(sections.flatMap(section => section.canonicalEvidenceIds));
   const originatingSurveyIds = uniqueSorted(sections.flatMap(section => section.originatingSurveyIds));
+  const decisionProvenance = input.decisionProvenance ?? (input.permitInput
+    ? buildEngineeringDecisionProvenanceBundle({
+        bundleId: `${input.documentId}.decision-provenance`,
+        generatedAt,
+        surveyEvidence,
+        documentProvenance: null,
+        cad: input.cad ?? null,
+        permitInput: input.permitInput,
+        renderContextIds: ['renderContext:primary'],
+        includeDocumentMetadataDecisions: true,
+      })
+    : undefined);
   const dependencyGraph = buildEngineeringDependencyGraph({
     graphId: `${input.documentId}.dependency-graph`,
     generatedAt,
     surveyEvidence,
     sections,
     cad: input.cad ?? null,
+    decisionProvenance: decisionProvenance ?? null,
   });
   const engineeringDependencyIds = uniqueSorted(dependencyGraph.nodes.map(node => node.id));
 
@@ -72,6 +86,7 @@ export function buildDocumentProvenanceBundle(input: BuildDocumentProvenanceInpu
     sections,
     auditGuards: [],
     dependencyGraph,
+    decisionProvenance: decisionProvenance ?? undefined,
   };
   bundle.auditGuards = runDocumentAuditGuards(bundle, { surveyEvidence });
   return bundle;
@@ -136,12 +151,14 @@ export function buildEngineeringDependencyGraph(input: {
   surveyEvidence?: EngineeringSurveyEvidence | null;
   sections?: DocumentProvenanceSection[];
   cad?: CADModel | null;
+  decisionProvenance?: EngineeringDecisionEvaluationBundle | null;
 }): EngineeringDependencyGraph {
   const generatedAt = input.generatedAt ?? new Date(0).toISOString();
   const nodes = new Map<string, EngineeringDependencyNode>();
   const edges = new Map<string, EngineeringDependencyEdge>();
   const evaluations = input.surveyEvidence?.requirementEvaluation.allRequirements ?? [];
   const sections = input.sections ?? [];
+  const decisionRecords = input.decisionProvenance?.decisionRecords ?? [];
 
   for (const evaluation of evaluations) {
     putNode(nodes, {
@@ -239,6 +256,64 @@ export function buildEngineeringDependencyGraph(input: {
     });
   }
 
+
+  for (const decision of decisionRecords) {
+    putNode(nodes, {
+      id: decision.decisionId,
+      nodeType: decision.decisionCategory === 'calculation' ? 'calculation' : 'engineering_decision',
+      label: `${decision.decisionType}: ${String(decision.selectedValue ?? 'none')}`,
+      requirementIds: decision.requirementIds,
+      canonicalEvidenceIds: decision.canonicalEvidenceIds,
+      truthSource: decision.truthSource,
+      deterministicNotes: decision.deterministicNotes,
+    });
+    for (const requirementId of decision.requirementIds) {
+      putEdge(edges, {
+        id: `edge:requirement:${requirementId}->${decision.decisionId}`,
+        fromNodeId: `requirement:${requirementId}`,
+        toNodeId: decision.decisionId,
+        edgeType: 'decision_uses_requirement',
+        deterministicReason: `Decision ${decision.decisionType} uses requirement ${requirementId}.`,
+      });
+    }
+    for (const evidenceId of decision.canonicalEvidenceIds) {
+      putEdge(edges, {
+        id: `edge:canonicalEvidence:${evidenceId}->${decision.decisionId}`,
+        fromNodeId: `canonicalEvidence:${evidenceId}`,
+        toNodeId: decision.decisionId,
+        edgeType: 'decision_uses_evidence',
+        deterministicReason: `Decision ${decision.decisionType} is linked to canonical evidence ${evidenceId}.`,
+      });
+    }
+    for (const sectionId of decision.documentSectionIds) {
+      putNode(nodes, {
+        id: `documentSection:${sectionId}`,
+        nodeType: sectionId.startsWith('SLD.') ? 'sld_section' : 'permit_section',
+        label: `${sectionId} decision-linked output`,
+        requirementIds: decision.requirementIds,
+        canonicalEvidenceIds: decision.canonicalEvidenceIds,
+        truthSource: decision.truthSource,
+        deterministicNotes: [`Decision-linked section node created for ${decision.decisionType} provenance when no explicit document binding node exists.`],
+      });
+      putEdge(edges, {
+        id: `edge:${decision.decisionId}->section:${sectionId}`,
+        fromNodeId: decision.decisionId,
+        toNodeId: `documentSection:${sectionId}`,
+        edgeType: sectionId.startsWith('SLD.') ? 'decision_feeds_sld' : sectionId.startsWith('BOM.') ? 'decision_feeds_bom' : 'decision_feeds_document',
+        deterministicReason: `Decision ${decision.decisionType} feeds document section ${sectionId}.`,
+      });
+    }
+    for (const renderContextId of decision.renderContextIds) {
+      putEdge(edges, {
+        id: `edge:${decision.decisionId}->render:${renderContextId}`,
+        fromNodeId: decision.decisionId,
+        toNodeId: renderContextId,
+        edgeType: 'decision_feeds_render_output',
+        deterministicReason: `Decision ${decision.decisionType} is carried through render context ${renderContextId}.`,
+      });
+    }
+  }
+
   const sortedNodes = Array.from(nodes.values()).sort((a, b) => a.id.localeCompare(b.id));
   const sortedEdges = Array.from(edges.values()).sort((a, b) => a.id.localeCompare(b.id));
   const deterministicHash = deterministicGraphHash(sortedNodes, sortedEdges);
@@ -252,7 +327,7 @@ export function buildEngineeringDependencyGraph(input: {
     deterministicNotes: [
       'EngineeringDependencyGraph v1 is a deterministic mapping graph, not an AI reasoning graph.',
       'Nodes and edges are sorted and hashed from stable ids to prove deterministic output ordering.',
-      'Graph links requirements, canonical evidence, document sections, geometry wrappers, and render context metadata.',
+      'Graph links requirements, canonical evidence, document sections, geometry wrappers, render context metadata, and engineering decision nodes when supplied.',
     ],
   };
 }
