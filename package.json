@@ -17,7 +17,8 @@
     "test:ci": "vitest run --reporter=verbose",
     "verify:golden": "vitest run tests/golden-path.test.ts --reporter=verbose",
     "golden:generate": "tsx tests/golden-generate.ts",
-    "check:topology": "node scripts/check-dependency-topology.js"
+    "check:topology": "node scripts/check-dependency-topology.js",
+    "check:engineering-boundaries": "node scripts/check-engineering-boundaries.js"
   },
   "dependencies": {
     "@mapbox/mapbox-gl-geocoder": "^5.0.2",

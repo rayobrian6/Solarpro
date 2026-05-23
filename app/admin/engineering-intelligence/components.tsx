@@ -3,14 +3,20 @@ import type {
   AuditGuardWorkspaceModel,
   CanonicalEvidenceWorkspaceGroupModel,
   DecisionWorkspaceItemModel,
+  AffectedOutputsWorkspaceModel,
   DependencyGraphViewerModel,
+  DependencyTraversalWorkspaceModel,
   EngineeringHealthDashboardModel,
   EngineeringIntelligenceRouteSummary,
   EngineeringIntelligenceWorkspaceModel,
+  InvalidationPropagationWorkspaceModel,
+  RegenerationPlanningV1WorkspaceModel,
   RegenerationPlanningWorkspaceModel,
   RequirementWorkspaceItemModel,
+  SnapshotDeltaWorkspaceModel,
   SnapshotTimelineWorkspaceModel,
   StaleInvalidationWorkspaceModel,
+  StaleStateTimelineWorkspaceModel,
 } from '@/lib/engineeringIntelligence';
 import type { HydratedProjectEngineeringState } from '@/lib/engineeringIntelligence/projectHydration';
 import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
@@ -759,6 +765,157 @@ export function RegenerationPlanningWorkspace({ planning }: { planning: Regenera
       <div className="grid gap-3 md:grid-cols-4"><Metric label="Plans" value={collectionSize(planning.plans)} /><Metric label="Candidates" value={collectionSize(planning.regenerationCandidates)} /><Metric label="Blocked deps" value={collectionSize(planning.blockedDependencies)} /><Metric label="Preserved" value={collectionSize(planning.preservedOutputIds)} /></div>
       <div className="mt-4 grid gap-4 md:grid-cols-2"><ListBox title="Regeneration order" values={planning.regenerationOrder} /><ListBox title="Blocked dependencies" values={planning.blockedDependencies} /><ListBox title="Preserved outputs" values={planning.preservedOutputIds} /><ListBox title="Candidates" values={planning.regenerationCandidates} /></div>
       <DeterministicNotes notes={planning.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function InvalidationPropagationWorkspace({ model }: { model: InvalidationPropagationWorkspaceModel }) {
+  return (
+    <Panel title="Invalidation Propagation Workspace" eyebrow="Propagation V1">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Sources" value={collectionSize(model.invalidationSources)} />
+        <Metric label="Impacted outputs" value={collectionSize(model.impactedOutputs)} />
+        <Metric label="Propagation paths" value={collectionSize(model.dependencyTraversalPaths)} />
+        <Metric label="Cycle detected" value={model.propagation?.cycleProtection.cycleDetected ?? 'not_loaded'} />
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <ListBox title="Invalidation sources" values={model.invalidationSources} />
+        <ListBox title="Impacted outputs" values={model.impactedOutputs} />
+        <ListBox title="Impacted document sections" values={model.impactedDocumentSections} />
+        <ListBox title="Impacted render contexts" values={model.impactedRenderContexts} />
+        <ListBox title="Impacted snapshots" values={model.impactedSnapshots} />
+        <ListBox title="Cycle protection" values={model.cycleProtectionIndicators} />
+      </div>
+      <div className="mt-4"><ListBox title="Dependency traversal paths" values={model.dependencyTraversalPaths} /></div>
+      <DeterministicNotes notes={model.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function DependencyTraversalWorkspace({ model }: { model: DependencyTraversalWorkspaceModel }) {
+  return (
+    <Panel title="Dependency Traversal Workspace" eyebrow="Traversal V1">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Visited nodes" value={collectionSize(model.traversal?.visitedNodeIds)} />
+        <Metric label="Impacted nodes" value={collectionSize(model.traversal?.impactedNodeIds)} />
+        <Metric label="Missing nodes" value={collectionSize(model.missingNodeIds)} />
+        <Metric label="Suppressed duplicate edges" value={collectionSize(model.duplicateEdgeIdsSuppressed)} />
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <ListBox title="Downstream lineage" values={model.downstreamLineage} />
+        <ListBox title="Propagation depth" values={model.propagationDepths} />
+        <ListBox title="Missing nodes" values={model.missingNodeIds} />
+        <ListBox title="Duplicate edges suppressed" values={model.duplicateEdgeIdsSuppressed} />
+        <ListBox title="Cycle protection" values={model.cycleProtectionIndicators} />
+        <ListBox title="Traversal seeds" values={model.traversal?.seedNodeIds ?? []} />
+      </div>
+      <DeterministicNotes notes={model.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function RegenerationPlanningV1Workspace({ model }: { model: RegenerationPlanningV1WorkspaceModel }) {
+  return (
+    <Panel title="Regeneration Planning V1 Workspace" eyebrow="No regeneration executed">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Would regenerate" value={collectionSize(model.wouldRegenerate)} />
+        <Metric label="Missing evidence" value={collectionSize(model.missingEvidence)} />
+        <Metric label="Dependency chains" value={collectionSize(model.dependencyChains)} />
+        <Metric label="Plan loaded" value={model.plan ? 'loaded' : 'not_loaded'} />
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <ListBox title="Would need regeneration/review" values={model.wouldRegenerate} />
+        <ListBox title="Why" values={model.whyRegenerate} />
+        <ListBox title="Upstream triggers" values={model.upstreamTriggers} />
+        <ListBox title="Impacted outputs" values={model.impactedOutputs} />
+        <ListBox title="Missing evidence" values={model.missingEvidence} />
+        <ListBox title="Dependency chains" values={model.dependencyChains} />
+      </div>
+      <DeterministicNotes notes={model.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function SnapshotDeltaWorkspace({ model }: { model: SnapshotDeltaWorkspaceModel }) {
+  return (
+    <Panel title="Snapshot Delta Workspace" eyebrow="Delta V1">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Delta entries" value={collectionSize(model.delta?.entries)} />
+        <Metric label="Stale introduced" value={collectionSize(model.staleOutputsIntroduced)} />
+        <Metric label="Graph delta" value={collectionSize(model.dependencyGraphDelta)} />
+        <Metric label="CAD readiness changes" value={collectionSize(model.changedCADReadiness)} />
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <ListBox title="Added evidence" values={model.addedEvidence} />
+        <ListBox title="Removed evidence" values={model.removedEvidence} />
+        <ListBox title="Changed decisions" values={model.changedDecisions} />
+        <ListBox title="Stale outputs introduced" values={model.staleOutputsIntroduced} />
+        <ListBox title="Regenerated candidates" values={model.regeneratedCandidates} />
+        <ListBox title="Invalidation causes" values={model.invalidationCauses} />
+        <ListBox title="Changed CAD readiness" values={model.changedCADReadiness} />
+        <ListBox title="Dependency graph delta" values={model.dependencyGraphDelta} />
+      </div>
+      <DeterministicNotes notes={model.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function AffectedOutputsWorkspace({ model }: { model: AffectedOutputsWorkspaceModel }) {
+  return (
+    <Panel title="Affected Outputs Workspace" eyebrow="Output impact V1">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Outputs" value={collectionSize(model.outputs)} />
+        <Metric label="Document sections" value={collectionSize(model.documentSections)} />
+        <Metric label="Render contexts" value={collectionSize(model.renderContexts)} />
+        <Metric label="Review required" value={collectionSize(model.reviewRequired)} />
+      </div>
+      <div className="mt-4 space-y-3">
+        {safeArray(model.outputs).length ? safeArray(model.outputs).slice(0, 24).map(output => (
+          <div key={output.impactId} className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-4 text-xs">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between"><div className="break-all font-mono text-white">{safeRenderValue(output.outputId)}</div><StatusPill value={output.staleClass} /></div>
+            <p className="mt-2 text-slate-300">{safeRenderValue(output.deterministicReason)}</p>
+            <div className="mt-3 grid gap-2 md:grid-cols-3">
+              <LineageBox title="Document sections" values={output.affectedDocumentSectionIds} />
+              <LineageBox title="Render contexts" values={output.affectedRenderContextIds} />
+              <LineageBox title="Snapshots" values={output.affectedSnapshotIds} />
+              <LineageBox title="Decisions" values={output.invalidatedDecisionIds} />
+              <LineageBox title="Missing evidence" values={output.missingEvidenceIds} />
+              <LineageBox title="Propagation paths" values={output.propagationPathIds} />
+            </div>
+          </div>
+        )) : <EmptyState state="no_affected_outputs">No V1 affected-output metadata is loaded.</EmptyState>}
+      </div>
+      <DeterministicNotes notes={model.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function StaleStateTimelineWorkspace({ model }: { model: StaleStateTimelineWorkspaceModel }) {
+  return (
+    <Panel title="Stale State Timeline" eyebrow="Timeline V1">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Events" value={collectionSize(model.events)} />
+        <Metric label="Stale states" value={collectionSize(model.staleStateIds)} />
+        <Metric label="Transitions" value={collectionSize(model.transitionEventIds)} />
+        <Metric label="Mode" value="metadata_only" />
+      </div>
+      <div className="mt-4 space-y-3">
+        {safeArray(model.events).length ? safeArray(model.events).slice(0, 24).map(event => (
+          <div key={event.eventId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between"><div className="break-all font-mono text-white">{safeRenderValue(event.eventId)}</div><StatusPill value={event.staleClass} /></div>
+            <div className="mt-1 text-sky-300">Snapshot: {safeRenderValue(event.snapshotId)}</div>
+            <p className="mt-2 text-slate-300">{safeRenderValue(event.deterministicReason)}</p>
+            <div className="mt-3 grid gap-2 md:grid-cols-3">
+              <LineageBox title="States" values={event.stateIds} />
+              <LineageBox title="Dependencies" values={event.dependencyNodeIds} />
+              <LineageBox title="Evidence" values={event.canonicalEvidenceIds} />
+              <LineageBox title="Requirements" values={event.requirementIds} />
+              <LineageBox title="Decisions" values={event.decisionIds} />
+            </div>
+          </div>
+        )) : <EmptyState state="no_timeline_events">No transition events are loaded.</EmptyState>}
+      </div>
+      <DeterministicNotes notes={model.deterministicNotes} />
     </Panel>
   );
 }

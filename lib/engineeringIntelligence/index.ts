@@ -3,3 +3,7 @@ export * from './workspace';
 export * from './cadReadiness';
 export * from './projectHydration';
 export * from './photoGrouping';
+export * from './propagationGraph';
+export * from './invalidationEngine';
+export * from './regenerationPlanner';
+export * from './snapshotDelta';

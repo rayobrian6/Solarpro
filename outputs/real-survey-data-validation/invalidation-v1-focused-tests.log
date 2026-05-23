@@ -1,0 +1,32 @@
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90m/workspace/Solarpro[39m
+
+[90mstdout[2m | tests/engineering-intelligence-invalidation-v1.test.ts
+[22m[39m[SERVER_INSTANCE_STARTED] db-ready.ts module loaded on new function instance
+[ENV_COLD_START] 🔴 DATABASE_URL=false (len=0) JWT_SECRET=false (len=0) GOOGLE_MAPS=false NODE_ENV=test VERCEL_ENV=local
+
+[90mstderr[2m | tests/engineering-intelligence-invalidation-v1.test.ts
+[22m[39m
+[ENV_COLD_START] ❌ DATABASE_URL is not set!
+  → Vercel Dashboard → Project → Settings → Environment Variables
+  → Add: DATABASE_URL = <your Neon connection string>
+  → Then redeploy. Env vars are NOT hot-reloaded.
+
+
+[ENV_COLD_START] ❌ JWT_SECRET is not set!
+  → Vercel Dashboard → Project → Settings → Environment Variables
+  → Add: JWT_SECRET = <any random 32+ character string>
+  → Then redeploy.
+
+
+[90mstdout[2m | tests/engineering-intelligence-invalidation-v1.test.ts
+[22m[39m[SERVER_INSTANCE_STARTED] db-neon.ts module loaded
+[ENVIRONMENT_LOADED] DATABASE_URL present: false NODE_ENV: test VERCEL_ENV: local
+
+ [32m✓[39m tests/engineering-intelligence-invalidation-v1.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m   Start at [22m 15:49:14
+[2m   Duration [22m 760ms[2m (transform 394ms, setup 0ms, import 489ms, tests 21ms, environment 0ms)[22m
+

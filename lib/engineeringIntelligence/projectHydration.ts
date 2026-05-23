@@ -21,6 +21,9 @@ import {
 import { getSiteSurveyFiles, getSiteSurveysByProject, type SiteSurvey, type SiteSurveyFile } from '@/lib/db-neon';
 import { buildCADReadinessMetadata, type CADReadinessMetadataModel } from './cadReadiness';
 import { buildDeterministicPhotoGrouping, type DeterministicPhotoGroupingModel } from './photoGrouping';
+import { computeEngineeringInvalidationPropagation, type EngineeringInvalidationPropagationResult } from './invalidationEngine';
+import { buildEngineeringRegenerationPlanV1, type EngineeringRegenerationPlanV1 } from './regenerationPlanner';
+import { buildEngineeringSnapshotDeltaV1, type EngineeringSnapshotDeltaV1 } from './snapshotDelta';
 import { buildEngineeringIntelligenceWorkspace } from './workspace';
 import type { BuildEngineeringIntelligenceWorkspaceInput, EngineeringIntelligenceWorkspaceModel } from './types';
 import { buildSurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
@@ -47,6 +50,9 @@ export interface HydratedProjectEngineeringState {
   snapshots: EngineeringStateSnapshot[];
   invalidationResult: EngineeringInvalidationResult | null;
   regenerationPlans: SelectiveRegenerationPlan[];
+  invalidationPropagation: EngineeringInvalidationPropagationResult | null;
+  regenerationPlanV1: EngineeringRegenerationPlanV1 | null;
+  snapshotDelta: EngineeringSnapshotDeltaV1 | null;
   cadReadiness: CADReadinessMetadataModel;
   photoGrouping: DeterministicPhotoGroupingModel;
   deterministicNotes: string[];
@@ -88,6 +94,9 @@ export async function hydrateProjectEngineeringIntelligenceFromDb(input: {
       snapshots: [],
       invalidationResult: null,
       regenerationPlans: [],
+      invalidationPropagation: null,
+      regenerationPlanV1: null,
+      snapshotDelta: null,
       cadReadiness,
       photoGrouping,
       deterministicNotes: [
@@ -135,6 +144,9 @@ export function hydrateProjectEngineeringIntelligence(input: {
       snapshots: [],
       invalidationResult: null,
       regenerationPlans: [],
+      invalidationPropagation: null,
+      regenerationPlanV1: null,
+      snapshotDelta: null,
       cadReadiness,
       photoGrouping,
       deterministicNotes: [
@@ -258,6 +270,30 @@ export function hydrateProjectEngineeringIntelligence(input: {
     readinessFlags: cadReadiness.flags,
     generatedAt,
   });
+  const invalidationPropagation = computeEngineeringInvalidationPropagation({
+    propagationId: `engineering-intelligence:${input.projectId}:propagation:v1`,
+    registry: updatedRegistry,
+    invalidationResult,
+    dependencyGraph: documentProvenance?.dependencyGraph ?? null,
+    persistentGraph: stateGraph,
+    snapshots,
+    cadReadiness,
+  });
+  const regenerationPlanV1 = buildEngineeringRegenerationPlanV1({
+    planId: `engineering-intelligence:${input.projectId}:regeneration-plan:v1`,
+    propagation: invalidationPropagation,
+    existingPlans: regenerationPlans,
+  });
+  const snapshotDelta = buildEngineeringSnapshotDeltaV1({
+    deltaId: `engineering-intelligence:${input.projectId}:snapshot-delta:v1`,
+    previousSnapshot: baselineSnapshot,
+    nextSnapshot: latestSnapshot,
+    snapshotDiffs: diffs,
+    previousGraph: baselineGraph,
+    nextGraph: stateGraph,
+    propagation: invalidationPropagation,
+    cadReadiness,
+  });
   const workspaceInput: BuildEngineeringIntelligenceWorkspaceInput = {
     projectId: input.projectId,
     surveyEvidence,
@@ -270,6 +306,9 @@ export function hydrateProjectEngineeringIntelligence(input: {
     timeline,
     persistentGraph: stateGraph,
     regenerationPlans,
+    invalidationPropagation,
+    regenerationPlanV1,
+    snapshotDelta,
     auditGuards,
   };
   const workspace = buildEngineeringIntelligenceWorkspace(workspaceInput);
@@ -287,6 +326,9 @@ export function hydrateProjectEngineeringIntelligence(input: {
     snapshots,
     invalidationResult,
     regenerationPlans,
+    invalidationPropagation,
+    regenerationPlanV1,
+    snapshotDelta,
     cadReadiness,
     photoGrouping,
     deterministicNotes: [

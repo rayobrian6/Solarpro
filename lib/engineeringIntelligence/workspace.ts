@@ -29,17 +29,23 @@ import type {
   CanonicalEvidenceWorkspaceGroupModel,
   CanonicalEvidenceWorkspaceItemModel,
   DecisionWorkspaceItemModel,
+  AffectedOutputsWorkspaceModel,
   DependencyGraphViewerModel,
+  DependencyTraversalWorkspaceModel,
   EngineeringEvidenceWorkspaceGroupId,
   EngineeringHealthDashboardModel,
   EngineeringIntelligenceGraphEdgeModel,
   EngineeringIntelligenceGraphNodeModel,
   EngineeringIntelligenceRouteSummary,
   EngineeringIntelligenceWorkspaceModel,
+  InvalidationPropagationWorkspaceModel,
+  RegenerationPlanningV1WorkspaceModel,
   RegenerationPlanningWorkspaceModel,
   RequirementWorkspaceItemModel,
+  SnapshotDeltaWorkspaceModel,
   SnapshotTimelineWorkspaceModel,
   StaleInvalidationWorkspaceModel,
+  StaleStateTimelineWorkspaceModel,
 } from './types';
 
 const sortText = <T extends string>(values: T[]): T[] => [...new Set(values)].sort((a, b) => a.localeCompare(b));
@@ -575,6 +581,112 @@ function buildRegenerationPlanning(input: BuildEngineeringIntelligenceWorkspaceI
   };
 }
 
+function buildInvalidationPropagationWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): InvalidationPropagationWorkspaceModel {
+  const propagation = input.invalidationPropagation ?? null;
+  return {
+    propagation,
+    stalePropagationChains: sortText(propagation?.propagationPaths.map(path => `${path.pathId}:depth=${path.depth}`) ?? []),
+    invalidationSources: propagation?.sourceNodeIds ?? [],
+    impactedOutputs: sortText(propagation?.affectedOutputs.map(output => output.outputId) ?? []),
+    impactedDocumentSections: propagation?.affectedDocumentSectionIds ?? [],
+    impactedRenderContexts: propagation?.affectedRenderContextIds ?? [],
+    impactedSnapshots: propagation?.affectedSnapshotIds ?? [],
+    dependencyTraversalPaths: sortText(propagation?.propagationPaths.map(path => path.nodeIds.join(' -> ')) ?? []),
+    cycleProtectionIndicators: propagation ? [
+      `cycleDetected:${propagation.cycleProtection.cycleDetected}`,
+      `truncated:${propagation.cycleProtection.truncated}`,
+      `maxDepth:${propagation.cycleProtection.maxDepth}`,
+      `traversalLimit:${propagation.cycleProtection.traversalLimit}`,
+    ] : ['not_loaded'],
+    deterministicNotes: propagation?.deterministicNotes ?? ['No V1 invalidation propagation metadata was supplied.'],
+  };
+}
+
+function buildDependencyTraversalWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): DependencyTraversalWorkspaceModel {
+  const traversal = input.invalidationPropagation?.traversal ?? null;
+  return {
+    traversal,
+    upstreamLineage: [],
+    downstreamLineage: sortText(traversal?.paths.map(path => path.nodeIds.join(' -> ')) ?? []),
+    propagationDepths: sortText(traversal?.paths.map(path => `${path.targetNodeId}:depth=${path.depth}`) ?? []),
+    cycleProtectionIndicators: traversal ? [
+      `cycleDetected:${traversal.cycleDetected}`,
+      `truncated:${traversal.truncated}`,
+      `maxDepth:${traversal.maxDepth}`,
+      `traversalLimit:${traversal.traversalLimit}`,
+    ] : ['not_loaded'],
+    missingNodeIds: traversal?.missingNodeIds ?? [],
+    duplicateEdgeIdsSuppressed: traversal?.duplicateEdgeIdsSuppressed ?? [],
+    deterministicNotes: traversal?.deterministicNotes ?? ['No traversal result was supplied; dependency traversal remains explicit not_loaded metadata.'],
+  };
+}
+
+function buildRegenerationPlanningV1Workspace(input: BuildEngineeringIntelligenceWorkspaceInput): RegenerationPlanningV1WorkspaceModel {
+  const plan = input.regenerationPlanV1 ?? null;
+  return {
+    plan,
+    wouldRegenerate: plan?.regenerationCandidateIds ?? [],
+    whyRegenerate: sortText(plan?.planItems.map(item => `${item.affectedStateId}:${item.deterministicReason}`) ?? []),
+    upstreamTriggers: plan?.triggerId ? [plan.triggerId] : [],
+    impactedOutputs: sortText(plan?.planItems.map(item => item.affectedOutputId) ?? []),
+    missingEvidence: plan?.missingEvidenceIds ?? [],
+    dependencyChains: plan?.propagationPathIds ?? [],
+    deterministicNotes: plan?.deterministicNotes ?? ['No Regeneration Planning V1 metadata was supplied; no regeneration is initiated.'],
+  };
+}
+
+function buildSnapshotDeltaWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SnapshotDeltaWorkspaceModel {
+  const delta = input.snapshotDelta ?? null;
+  return {
+    delta,
+    addedEvidence: delta?.addedEvidenceIds ?? [],
+    removedEvidence: delta?.removedEvidenceIds ?? [],
+    changedDecisions: delta?.changedDecisionIds ?? [],
+    staleOutputsIntroduced: delta?.staleOutputsIntroduced ?? [],
+    regeneratedCandidates: delta?.regeneratedCandidateIds ?? [],
+    invalidationCauses: delta?.invalidationCauseIds ?? [],
+    changedCADReadiness: delta?.changedCADReadinessIds ?? [],
+    dependencyGraphDelta: delta?.dependencyGraphDeltaIds ?? [],
+    deterministicNotes: delta?.deterministicNotes ?? ['No Snapshot Delta V1 metadata was supplied.'],
+  };
+}
+
+function buildAffectedOutputsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): AffectedOutputsWorkspaceModel {
+  const outputs = input.invalidationPropagation?.affectedOutputs ?? [];
+  return {
+    outputs,
+    documentSections: sortText(outputs.flatMap(output => output.affectedDocumentSectionIds)),
+    renderContexts: sortText(outputs.flatMap(output => output.affectedRenderContextIds)),
+    snapshots: sortText(outputs.flatMap(output => output.affectedSnapshotIds)),
+    decisions: sortText(outputs.flatMap(output => output.invalidatedDecisionIds)),
+    reviewRequired: sortText(outputs.filter(output => output.staleClass === 'BLOCKED' || output.staleClass === 'REQUIRES_REVIEW' || output.missingEvidenceIds.length > 0).map(output => output.stateId)),
+    deterministicNotes: input.invalidationPropagation ? ['Affected outputs are derived from V1 propagation output only.'] : ['No affected-output propagation metadata was supplied.'],
+  };
+}
+
+function buildStaleStateTimelineWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): StaleStateTimelineWorkspaceModel {
+  const events = sortBy(input.transitionHistory?.transitionEvents ?? [], event => event.transitionEventId).map(event => ({
+    eventId: event.transitionEventId,
+    stateIds: event.stateIds,
+    staleClass: event.eventType === 'state_invalidated' ? 'INVALIDATED' : event.eventType === 'stale_state_preserved' ? 'STALE' : 'VALID',
+    snapshotId: event.snapshotId,
+    dependencyNodeIds: event.dependencyNodeIds,
+    requirementIds: event.requirementIds,
+    decisionIds: event.decisionIds,
+    canonicalEvidenceIds: event.canonicalEvidenceIds,
+    deterministicReason: event.deterministicReason,
+  }));
+  return {
+    events,
+    staleStateIds: input.timeline?.staleStateIds ?? [],
+    transitionEventIds: input.timeline?.transitionEventIds ?? [],
+    deterministicNotes: [
+      events.length ? 'Stale-state timeline is derived from transition history events.' : 'No transition history was supplied for stale-state timeline metadata.',
+      'Timeline rendering is observational and does not regenerate stale outputs.',
+    ],
+  };
+}
+
 function includesAny(value: string, tokens: string[]) {
   return tokens.some(token => value.includes(token));
 }
@@ -614,6 +726,12 @@ export function buildEngineeringIntelligenceWorkspace(input: BuildEngineeringInt
   const snapshotTimeline = buildSnapshots(input, latestSnapshot);
   const graph = buildGraph(input, latestSnapshot);
   const regenerationPlanning = buildRegenerationPlanning(input);
+  const invalidationPropagation = buildInvalidationPropagationWorkspace(input);
+  const dependencyTraversal = buildDependencyTraversalWorkspace(input);
+  const regenerationPlanningV1 = buildRegenerationPlanningV1Workspace(input);
+  const snapshotDelta = buildSnapshotDeltaWorkspace(input);
+  const affectedOutputs = buildAffectedOutputsWorkspace(input);
+  const staleStateTimeline = buildStaleStateTimelineWorkspace(input);
   const auditGuards = buildAuditGuards(input);
 
   return {
@@ -629,6 +747,12 @@ export function buildEngineeringIntelligenceWorkspace(input: BuildEngineeringInt
     snapshots: snapshotTimeline,
     graph,
     regenerationPlanning,
+    invalidationPropagation,
+    dependencyTraversal,
+    regenerationPlanningV1,
+    snapshotDelta,
+    affectedOutputs,
+    staleStateTimeline,
     auditGuards,
     deterministicNotes: [
       latestSnapshot

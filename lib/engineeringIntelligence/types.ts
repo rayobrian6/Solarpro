@@ -6,6 +6,10 @@ import type {
 import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
 import type { CADReadinessFlag, CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
 import type { DeterministicPhotoGroupingModel } from '@/lib/engineeringIntelligence/photoGrouping';
+import type { EngineeringInvalidationPropagationResult, EngineeringAffectedOutputImpact } from '@/lib/engineeringIntelligence/invalidationEngine';
+import type { PropagationTraversalResult } from '@/lib/engineeringIntelligence/propagationGraph';
+import type { EngineeringRegenerationPlanV1 } from '@/lib/engineeringIntelligence/regenerationPlanner';
+import type { EngineeringSnapshotDeltaV1 } from '@/lib/engineeringIntelligence/snapshotDelta';
 import type {
   EngineeringDecisionDefinition,
   EngineeringDecisionType,
@@ -219,6 +223,81 @@ export interface RegenerationPlanningWorkspaceModel {
   deterministicNotes: string[];
 }
 
+export interface InvalidationPropagationWorkspaceModel {
+  propagation: EngineeringInvalidationPropagationResult | null;
+  stalePropagationChains: string[];
+  invalidationSources: string[];
+  impactedOutputs: string[];
+  impactedDocumentSections: string[];
+  impactedRenderContexts: string[];
+  impactedSnapshots: string[];
+  dependencyTraversalPaths: string[];
+  cycleProtectionIndicators: string[];
+  deterministicNotes: string[];
+}
+
+export interface DependencyTraversalWorkspaceModel {
+  traversal: PropagationTraversalResult | null;
+  upstreamLineage: string[];
+  downstreamLineage: string[];
+  propagationDepths: string[];
+  cycleProtectionIndicators: string[];
+  missingNodeIds: string[];
+  duplicateEdgeIdsSuppressed: string[];
+  deterministicNotes: string[];
+}
+
+export interface RegenerationPlanningV1WorkspaceModel {
+  plan: EngineeringRegenerationPlanV1 | null;
+  wouldRegenerate: string[];
+  whyRegenerate: string[];
+  upstreamTriggers: string[];
+  impactedOutputs: string[];
+  missingEvidence: string[];
+  dependencyChains: string[];
+  deterministicNotes: string[];
+}
+
+export interface SnapshotDeltaWorkspaceModel {
+  delta: EngineeringSnapshotDeltaV1 | null;
+  addedEvidence: string[];
+  removedEvidence: string[];
+  changedDecisions: string[];
+  staleOutputsIntroduced: string[];
+  regeneratedCandidates: string[];
+  invalidationCauses: string[];
+  changedCADReadiness: string[];
+  dependencyGraphDelta: string[];
+  deterministicNotes: string[];
+}
+
+export interface AffectedOutputsWorkspaceModel {
+  outputs: EngineeringAffectedOutputImpact[];
+  documentSections: string[];
+  renderContexts: string[];
+  snapshots: string[];
+  decisions: string[];
+  reviewRequired: string[];
+  deterministicNotes: string[];
+}
+
+export interface StaleStateTimelineWorkspaceModel {
+  events: Array<{
+    eventId: string;
+    stateIds: string[];
+    staleClass: string;
+    snapshotId: string;
+    dependencyNodeIds: string[];
+    requirementIds: string[];
+    decisionIds: string[];
+    canonicalEvidenceIds: string[];
+    deterministicReason: string;
+  }>;
+  staleStateIds: string[];
+  transitionEventIds: string[];
+  deterministicNotes: string[];
+}
+
 export interface AuditGuardWorkspaceModel {
   guards: EngineeringStateAuditGuardResult[];
   topologyViolations: EngineeringStateAuditGuardResult[];
@@ -242,6 +321,12 @@ export interface EngineeringIntelligenceWorkspaceModel {
   snapshots: SnapshotTimelineWorkspaceModel;
   graph: DependencyGraphViewerModel;
   regenerationPlanning: RegenerationPlanningWorkspaceModel;
+  invalidationPropagation: InvalidationPropagationWorkspaceModel;
+  dependencyTraversal: DependencyTraversalWorkspaceModel;
+  regenerationPlanningV1: RegenerationPlanningV1WorkspaceModel;
+  snapshotDelta: SnapshotDeltaWorkspaceModel;
+  affectedOutputs: AffectedOutputsWorkspaceModel;
+  staleStateTimeline: StaleStateTimelineWorkspaceModel;
   auditGuards: AuditGuardWorkspaceModel;
   deterministicNotes: string[];
 }
@@ -258,5 +343,8 @@ export interface BuildEngineeringIntelligenceWorkspaceInput {
   timeline?: EngineeringStateTimeline | null;
   persistentGraph?: PersistentEngineeringStateGraph | null;
   regenerationPlans?: SelectiveRegenerationPlan[] | null;
+  invalidationPropagation?: EngineeringInvalidationPropagationResult | null;
+  regenerationPlanV1?: EngineeringRegenerationPlanV1 | null;
+  snapshotDelta?: EngineeringSnapshotDeltaV1 | null;
   auditGuards?: EngineeringStateAuditGuardResult[] | null;
 }

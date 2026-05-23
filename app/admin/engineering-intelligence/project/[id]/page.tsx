@@ -5,19 +5,25 @@ import { hydrateProjectEngineeringIntelligenceFromDb, buildEngineeringIntelligen
 import { buildDeterministicPhotoGrouping } from '@/lib/engineeringIntelligence/photoGrouping';
 import { buildFieldEvidenceOrchestrationModel } from '@/lib/survey/evidence/fieldOrchestration';
 import {
+  AffectedOutputsWorkspace,
   AuditGuardWorkspace,
   CADReadinessWorkspace,
   CanonicalEvidenceWorkspace,
   DecisionWorkspace,
   DependencyGraphViewer,
+  DependencyTraversalWorkspace,
   EngineeringHealthDashboard,
   FieldEvidenceOrchestrationWorkspace,
+  InvalidationPropagationWorkspace,
   PhotoGroupingWorkspace,
   ProjectHydrationSummary,
+  RegenerationPlanningV1Workspace,
   RegenerationPlanningWorkspace,
   RequirementWorkspace,
+  SnapshotDeltaWorkspace,
   SnapshotTimelineWorkspace,
   StaleInvalidationWorkspace,
+  StaleStateTimelineWorkspace,
   WorkspaceShell,
 } from '../../components';
 
@@ -52,6 +58,12 @@ export default async function ProjectEngineeringIntelligencePage({ params }: { p
       <SnapshotTimelineWorkspace snapshots={model.snapshots} />
       <DependencyGraphViewer graph={model.graph} />
       <RegenerationPlanningWorkspace planning={model.regenerationPlanning} />
+      <InvalidationPropagationWorkspace model={model.invalidationPropagation} />
+      <DependencyTraversalWorkspace model={model.dependencyTraversal} />
+      <RegenerationPlanningV1Workspace model={model.regenerationPlanningV1} />
+      <SnapshotDeltaWorkspace model={model.snapshotDelta} />
+      <AffectedOutputsWorkspace model={model.affectedOutputs} />
+      <StaleStateTimelineWorkspace model={model.staleStateTimeline} />
       <CADReadinessWorkspace readiness={hydration.cadReadiness} />
       <PhotoGroupingWorkspace grouping={model.photoGrouping} />
       <FieldEvidenceOrchestrationWorkspace orchestration={fieldEvidenceOrchestration} />
@@ -78,6 +90,9 @@ function invalidProjectHydration(projectId: string) {
     snapshots: [],
     invalidationResult: null,
     regenerationPlans: [],
+    invalidationPropagation: null,
+    regenerationPlanV1: null,
+    snapshotDelta: null,
     cadReadiness,
     photoGrouping,
     deterministicNotes: [
@@ -106,6 +121,9 @@ function emptyProjectHydration(projectId: string) {
     snapshots: [],
     invalidationResult: null,
     regenerationPlans: [],
+    invalidationPropagation: null,
+    regenerationPlanV1: null,
+    snapshotDelta: null,
     cadReadiness,
     photoGrouping,
     deterministicNotes: [

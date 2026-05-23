@@ -1,0 +1,5 @@
+
+> solar-platform@1.0.0 check:engineering-boundaries
+> node scripts/check-engineering-boundaries.js
+
+Engineering Intelligence boundary scan passed: no prohibited OCR/CV/ML/image-byte/CAD-autogeneration runtime patterns found in 105 scoped file(s).
