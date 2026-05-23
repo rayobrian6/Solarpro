@@ -28,6 +28,16 @@ import {
   ResolvedEngineeringContextsWorkspace,
   SnapshotTimelineWorkspace,
   StaleInvalidationWorkspace,
+  EngineeringRecommendationsWorkspace,
+  SurveyImprovementRecommendationsWorkspace,
+  ConflictResolutionRecommendationsWorkspace,
+  FallbackReductionRecommendationsWorkspace,
+  CADReadinessRecommendationsWorkspace,
+  SimulationBackedRecommendationsWorkspace,
+  DependencyRiskRecommendationsWorkspace,
+  StaleImpactRecommendationsWorkspace,
+  HighestValueNextActionsWorkspace,
+  RecommendationConfidenceBreakdownWorkspace,
 } from '@/app/admin/engineering-intelligence/components';
 import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
 import type { DeterministicPhotoGroupingModel } from '@/lib/engineeringIntelligence/photoGrouping';
@@ -46,6 +56,7 @@ import type {
   SnapshotTimelineWorkspaceModel,
   StaleInvalidationWorkspaceModel,
   EngineeringScenarioSimulationResult,
+  EngineeringRecommendationSummary,
 } from '@/lib/engineeringIntelligence';
 
 describe('Engineering Intelligence workspace render safety', () => {
@@ -482,6 +493,97 @@ describe('Engineering Intelligence workspace render safety', () => {
     expect(screen.getByText(/hypothetical Engineering Scenario Simulation V1 metadata only/)).toBeInTheDocument();
     expect(screen.getByText(/not production truth/)).toBeInTheDocument();
     expect(screen.getByText('Regeneration Forecast')).toBeInTheDocument();
+    expect(screen.getAllByText(/object\(keys=/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Set\(/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Map\(/).length).toBeGreaterThan(0);
+  });
+
+  it('renders recommendation workspaces safely while preserving deterministic guidance boundary copy', () => {
+    const recommendation = {
+      recommendationId: { id: 'recommendation-object' },
+      recommendationType: new Map([['type', 'collect_msp_photo']]),
+      category: 'survey',
+      priority: new Set(['critical']),
+      severity: { severity: 'blocked' },
+      confidence: 'medium',
+      explanation: { reason: 'deterministic guidance only' },
+      affectedEvidenceIds: [{ evidence: 'msp-photo' }],
+      affectedSignalIds: [new Map([['signal', 'main_service_panel_present']])],
+      affectedSignalTypes: ['main_service_panel_present'],
+      affectedContextIds: [{ context: 'preferred_msp_context' }],
+      affectedContextTypes: ['preferred_msp_context'],
+      affectedRequirementIds: [new Set(['msp_required'])],
+      affectedDecisionIds: [{ decision: 'interconnection' }],
+      affectedOutputIds: [new Map([['output', 'layout']])],
+      staleImpactParticipation: [{ entityId: { state: 'state:msp' }, staleClasses: [new Set(['BLOCKED'])], deterministicReason: { reason: 'stale metadata' } }],
+      invalidationParticipation: [{ path: 'path:msp' }],
+      regenerationParticipation: [new Set(['layout'])],
+      fallbackParticipation: [new Map([['fallback', 'manual_review']])],
+      conflictParticipation: [{ conflict: 'routing ambiguity' }],
+      dependencyTraversal: [{ pathId: { id: 'path-object' }, nodeIds: [{ node: 'source' }, new Map([['node', 'target']])], deterministicReason: new Set(['dependency traversal']) }],
+      cadReadinessImpact: ['routing-ready'],
+      expectedConfidenceGain: BigInt(1),
+      expectedReadinessGain: { gain: 0.25 },
+      unresolvedStatesPreserved: [new Set(['missing explicit MSP photo'])],
+      uncertaintyNotes: [{ note: 'uncertainty remains visible' }],
+      safetyNotes: [new Map([['safe', 'no automatic regeneration']])],
+      scoreBreakdown: {
+        staleImpactCount: 1,
+        affectedOutputCount: 1,
+        invalidationPropagationDepth: 2,
+        blockedRequirementCount: 1,
+        cadReadinessImpact: 1,
+        conflictSeverity: 1,
+        fallbackParticipation: 1,
+        unresolvedDependencyCount: 1,
+        dependencyTraversalCentrality: 1,
+        contextAuthorityWeakness: 1,
+        scenarioSimulationImpact: 1,
+        expectedReadinessGain: 0.25,
+        expectedConfidenceGain: 0.5,
+        deterministicScore: 99,
+        deterministicReason: { reason: 'score from explicit counters only' },
+      },
+      deterministicScore: 99,
+      deterministicHash: new Date('2026-01-02T03:04:05Z'),
+    };
+    const summary = {
+      modelVersion: 'engineering_recommendations_v1',
+      projectId: 'project-object',
+      surveyId: { id: 'survey-object' },
+      generatedAt: new Date('2026-01-02T03:04:05Z'),
+      mode: 'deterministic_guidance_only',
+      recommendations: [recommendation],
+      highestValueNextActions: [recommendation],
+      surveyRecommendations: [recommendation],
+      conflictResolutionRecommendations: [recommendation],
+      fallbackReductionRecommendations: [recommendation],
+      cadReadinessRecommendations: [recommendation],
+      simulationBackedRecommendations: [recommendation],
+      dependencyRiskRecommendations: [recommendation],
+      staleImpactRecommendations: [recommendation],
+      confidenceBreakdown: [{ recommendationId: { id: 'recommendation-object' }, confidence: 'medium', expectedConfidenceGain: new Set([0.5]), expectedReadinessGain: { gain: 0.25 }, deterministicScore: BigInt(99), uncertaintyNotes: [new Map([['note', 'uncertainty visible']])] }],
+      unresolvedStatesPreserved: [new Set(['missing explicit MSP photo'])],
+      deterministicHash: { hash: 'recommendation-hash' },
+      deterministicNotes: [{ note: 'deterministic guidance only' }],
+      prohibitedRuntimeBehavior: ['no OCR', { guard: 'no autonomous engineering' }],
+    } as unknown as EngineeringRecommendationSummary;
+
+    expect(() => render(<EngineeringRecommendationsWorkspace recommendations={summary} />)).not.toThrow();
+    expect(() => render(<SurveyImprovementRecommendationsWorkspace recommendations={summary} />)).not.toThrow();
+    expect(() => render(<ConflictResolutionRecommendationsWorkspace recommendations={summary} />)).not.toThrow();
+    expect(() => render(<FallbackReductionRecommendationsWorkspace recommendations={summary} />)).not.toThrow();
+    expect(() => render(<CADReadinessRecommendationsWorkspace recommendations={summary} />)).not.toThrow();
+    expect(() => render(<SimulationBackedRecommendationsWorkspace recommendations={summary} />)).not.toThrow();
+    expect(() => render(<DependencyRiskRecommendationsWorkspace recommendations={summary} />)).not.toThrow();
+    expect(() => render(<StaleImpactRecommendationsWorkspace recommendations={summary} />)).not.toThrow();
+    expect(() => render(<HighestValueNextActionsWorkspace recommendations={summary} />)).not.toThrow();
+    expect(() => render(<RecommendationConfidenceBreakdownWorkspace recommendations={summary} />)).not.toThrow();
+
+    expect(screen.getByText('Engineering Recommendations')).toBeInTheDocument();
+    expect(screen.getByText(/deterministic Engineering Recommendation System V1 guidance only/)).toBeInTheDocument();
+    expect(screen.getByText(/not AI inference/)).toBeInTheDocument();
+    expect(screen.getByText('Recommendation Confidence Breakdown')).toBeInTheDocument();
     expect(screen.getAllByText(/object\(keys=/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Set\(/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Map\(/).length).toBeGreaterThan(0);

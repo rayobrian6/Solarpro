@@ -15,3 +15,8 @@ export * from './contextRegistry';
 export * from './contextResolution';
 
 export * from './scenarioSimulation';
+export * from './recommendationTypes';
+export * from './recommendationScoring';
+export * from './recommendationRanking';
+export * from './recommendationRegistry';
+export * from './recommendationEngine';

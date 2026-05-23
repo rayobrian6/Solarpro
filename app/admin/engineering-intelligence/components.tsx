@@ -36,6 +36,8 @@ import type {
   ContextStaleImpactsWorkspaceModel,
   ContextResolutionTimelineWorkspaceModel,
   EngineeringScenarioSimulationResult,
+  EngineeringRecommendationSummary,
+  EngineeringRecommendation,
 } from '@/lib/engineeringIntelligence';
 import type { HydratedProjectEngineeringState } from '@/lib/engineeringIntelligence/projectHydration';
 import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
@@ -1458,6 +1460,122 @@ export function SimulationDependencyTraversalWorkspace({ simulation }: { simulat
           </div>
         ))}
       </div>
+    </Panel>
+  );
+}
+
+function RecommendationCard({ recommendation }: { recommendation: EngineeringRecommendation }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-xs text-slate-300">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="font-mono text-sky-300">{safeRenderValue(recommendation.recommendationType)}</div>
+          <div className="mt-1 text-sm font-bold text-white">{safeRenderValue(recommendation.recommendationId)}</div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <StatusPill value={recommendation.priority} />
+          <StatusPill value={recommendation.severity} />
+          <StatusPill value={recommendation.confidence} />
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-4">
+        <Metric label="Score" value={recommendation.deterministicScore} />
+        <Metric label="Confidence gain" value={recommendation.expectedConfidenceGain} />
+        <Metric label="Readiness gain" value={recommendation.expectedReadinessGain} />
+        <Metric label="Dependency paths" value={collectionSize(recommendation.dependencyTraversal)} />
+      </div>
+      <div className="mt-3 leading-5 text-slate-300">{safeRenderValue(recommendation.explanation)}</div>
+      <div className="mt-3 rounded-lg border border-sky-500/15 bg-sky-500/5 p-3 text-sky-100/80">
+        <div className="mb-1 font-bold text-sky-200">Why it exists</div>
+        {safeRenderValue(recommendation.scoreBreakdown.deterministicReason)}
+      </div>
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <div>
+          <div className="mb-2 font-bold text-slate-200">Affected lineage</div>
+          <TokenList values={[...recommendation.affectedEvidenceIds, ...recommendation.affectedSignalIds, ...recommendation.affectedContextIds, ...recommendation.affectedRequirementIds, ...recommendation.affectedDecisionIds, ...recommendation.affectedOutputIds]} limit={24} />
+        </div>
+        <div>
+          <div className="mb-2 font-bold text-slate-200">Uncertainty preserved</div>
+          <TokenList values={recommendation.unresolvedStatesPreserved.length ? recommendation.unresolvedStatesPreserved : recommendation.uncertaintyNotes} limit={24} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RecommendationCollection({ recommendations, empty }: { recommendations: EngineeringRecommendation[]; empty: string }) {
+  return recommendations.length === 0 ? <EmptyState state={empty}>No deterministic recommendations are available for this workspace.</EmptyState> : (
+    <div className="space-y-3">
+      {recommendations.slice(0, 24).map(recommendation => <RecommendationCard key={recommendation.recommendationId} recommendation={recommendation} />)}
+    </div>
+  );
+}
+
+export function EngineeringRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+  return (
+    <Panel title="Engineering Recommendations" eyebrow="Deterministic engineering advisor">
+      <div className="rounded-xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm leading-6 text-amber-100">
+        This workspace displays deterministic Engineering Recommendation System V1 guidance only. It is not AI inference, not autonomous engineering, not production truth, not CAD generation, and not automatic regeneration. Recommendations preserve unresolved states and do not imply guaranteed correctness, CAD success, or permit approval.
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <Metric label="Recommendations" value={collectionSize(recommendations.recommendations)} />
+        <Metric label="Mode" value={recommendations.mode} />
+        <Metric label="Unresolved preserved" value={collectionSize(recommendations.unresolvedStatesPreserved)} />
+        <Metric label="Hash" value={recommendations.deterministicHash} />
+      </div>
+      <DeterministicNotes notes={recommendations.deterministicNotes} />
+      <DeterministicNotes notes={recommendations.prohibitedRuntimeBehavior} />
+      <div className="mt-4"><RecommendationCollection recommendations={recommendations.highestValueNextActions} empty="no_recommendations" /></div>
+    </Panel>
+  );
+}
+
+export function SurveyImprovementRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+  return <Panel title="Survey Improvement Recommendations" eyebrow="Evidence gaps"><RecommendationCollection recommendations={recommendations.surveyRecommendations} empty="no_survey_recommendations" /></Panel>;
+}
+
+export function ConflictResolutionRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+  return <Panel title="Conflict Resolution Recommendations" eyebrow="Do not collapse uncertainty"><RecommendationCollection recommendations={recommendations.conflictResolutionRecommendations} empty="no_conflict_recommendations" /></Panel>;
+}
+
+export function FallbackReductionRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+  return <Panel title="Fallback Reduction Recommendations" eyebrow="Fallback lineage visible"><RecommendationCollection recommendations={recommendations.fallbackReductionRecommendations} empty="no_fallback_recommendations" /></Panel>;
+}
+
+export function CADReadinessRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+  return <Panel title="CAD Readiness Recommendations" eyebrow="Metadata-only readiness"><RecommendationCollection recommendations={recommendations.cadReadinessRecommendations} empty="no_cad_recommendations" /></Panel>;
+}
+
+export function SimulationBackedRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+  return <Panel title="Simulation-Backed Recommendations" eyebrow="Hypothetical sandbox deltas"><RecommendationCollection recommendations={recommendations.simulationBackedRecommendations} empty="no_simulation_recommendations" /></Panel>;
+}
+
+export function DependencyRiskRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+  return <Panel title="Dependency Risk Recommendations" eyebrow="Traversal and centrality"><RecommendationCollection recommendations={recommendations.dependencyRiskRecommendations} empty="no_dependency_recommendations" /></Panel>;
+}
+
+export function StaleImpactRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+  return <Panel title="Stale Impact Recommendations" eyebrow="Invalidation participation"><RecommendationCollection recommendations={recommendations.staleImpactRecommendations} empty="no_stale_recommendations" /></Panel>;
+}
+
+export function HighestValueNextActionsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+  return <Panel title="Highest-Value Next Actions" eyebrow="Deterministic rank order"><RecommendationCollection recommendations={recommendations.highestValueNextActions} empty="no_next_actions" /></Panel>;
+}
+
+export function RecommendationConfidenceBreakdownWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+  return (
+    <Panel title="Recommendation Confidence Breakdown" eyebrow="No hidden confidence boosting">
+      {recommendations.confidenceBreakdown.length === 0 ? <EmptyState state="no_confidence_breakdown">No confidence breakdown rows are available.</EmptyState> : (
+        <div className="space-y-2">
+          {recommendations.confidenceBreakdown.slice(0, 32).map(row => (
+            <div key={row.recommendationId} className="rounded-lg border border-white/10 bg-white/[0.02] p-3 text-xs text-slate-300">
+              <div className="flex flex-wrap items-center justify-between gap-2"><div className="font-mono text-sky-300">{safeRenderValue(row.recommendationId)}</div><StatusPill value={row.confidence} /></div>
+              <div className="mt-2 grid gap-2 md:grid-cols-3"><Metric label="Score" value={row.deterministicScore} /><Metric label="Confidence gain" value={row.expectedConfidenceGain} /><Metric label="Readiness gain" value={row.expectedReadinessGain} /></div>
+              <div className="mt-3"><TokenList values={row.uncertaintyNotes} limit={12} /></div>
+            </div>
+          ))}
+        </div>
+      )}
     </Panel>
   );
 }
