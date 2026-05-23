@@ -5,7 +5,7 @@
 //
 // This module is intentionally pure and conservative:
 //   - no DB/network/filesystem access
-//   - no AI/OCR claims
+//   - no automated visual extraction claims
 //   - missing evidence becomes warnings/blockers, never a crash
 //   - evidence is traceable to normalized site-survey photos and fields
 // ============================================================================
@@ -27,6 +27,7 @@ import {
 } from '@/lib/survey/evidence/provenance';
 import type { EvidenceDuplicateGroup, SurveySessionSummary } from '@/lib/survey/evidence/sessionGrouping';
 import type { EngineeringRequirementEvaluationSummary } from '@/lib/survey/evidence/engineeringRequirements';
+import { buildDocumentProvenanceBundle, type DocumentProvenanceBundle } from '@/lib/documentProvenance';
 
 export type SurveyPhotoEvidenceCategory = SurveyEvidenceCategory;
 
@@ -66,6 +67,7 @@ export interface EngineeringSurveyEvidence {
   evidenceTruthSource: 'canonical_manifest_v1' | 'legacy_raw_photos_fallback';
   traceability: SurveyEvidenceTraceabilityBundle;
   requirementEvaluation: EngineeringRequirementEvaluationSummary;
+  documentProvenance?: DocumentProvenanceBundle;
   missingCategories: SurveyPhotoEvidenceCategory[];
   completeness: 'missing' | 'partial' | 'sufficient';
   blockers: string[];
@@ -188,7 +190,7 @@ export function collectEngineeringSurveyEvidence(
   }
 
   if (!survey.derived.hasGeometryData) {
-    warnings.push('Survey physical data does not include roof geometry or usable roof area; CAD generation will rely on design/layout defaults.');
+    warnings.push('Survey physical data does not include roof geometry or usable roof area; layout solving will rely on design/layout defaults.');
   }
   if (!survey.derived.hasElectricalData) {
     warnings.push('Survey physical data does not include main electrical service details; electrical plan-set values may come from design defaults.');
@@ -198,6 +200,37 @@ export function collectEngineeringSurveyEvidence(
   }
 
   const completeness: EngineeringSurveyEvidence['completeness'] = requirementEvaluation.completeness;
+  const normalizedAt = options.normalizedAt ?? new Date().toISOString();
+  const surveyEvidenceBaseForProvenance = {
+    projectId: survey.projectId,
+    surveyId: survey.id,
+    photos,
+    rawPhotoCount: legacyRawPhotos.length,
+    canonicalEvidenceCount: canonicalManifest.summary.totalItems,
+    evidenceTruthSource,
+    traceability,
+    requirementEvaluation,
+    missingCategories,
+    completeness,
+    blockers,
+    warnings,
+    source: {
+      pipelineVersion: survey.pipelineVersion,
+      normalizedAt,
+    },
+  } as EngineeringSurveyEvidence;
+  const documentProvenance = buildDocumentProvenanceBundle({
+    documentId: `permit:${survey.projectId}:${survey.id}`,
+    documentType: 'permit_package',
+    surveyEvidence: surveyEvidenceBaseForProvenance,
+    generatedAt: normalizedAt,
+    renderInputs: {
+      inputKeys: ['EngineeringSurveyEvidence', 'PermitInput'],
+      canonicalInputKeys: ['canonicalManifest', 'requirementEvaluation', 'traceability'],
+      legacyFallbackKeys: evidenceTruthSource === 'legacy_raw_photos_fallback' ? ['legacy_raw_photos_fallback'] : [],
+    },
+    includeLegacyDesignInput: evidenceTruthSource === 'legacy_raw_photos_fallback',
+  });
 
   return {
     projectId: survey.projectId,
@@ -208,6 +241,7 @@ export function collectEngineeringSurveyEvidence(
     evidenceTruthSource,
     traceability,
     requirementEvaluation,
+    documentProvenance,
     missingCategories,
     completeness,
     blockers,
@@ -245,7 +279,7 @@ export function collectEngineeringSurveyEvidence(
     },
     source: {
       pipelineVersion: survey.pipelineVersion,
-      normalizedAt: options.normalizedAt ?? new Date().toISOString(),
+      normalizedAt,
     },
   };
 }

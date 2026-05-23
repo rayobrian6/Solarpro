@@ -34,6 +34,7 @@ import { drawGroundArray, drawGroundStructural } from './templates/ground';
 import { drawRoofPlan, drawRoofStructural } from './templates/roof';
 import { buildRenderContext, type RenderContext } from './renderContext';
 import type { BillInsights } from '../billInsights';
+import type { DocumentProvenanceBundle } from '@/lib/documentProvenance';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -80,6 +81,7 @@ export function renderPlanSet(
     utilityName?: string | null;
     monthlyKwh?: number | null;
     annualKwh?: number | null;
+    documentProvenance?: DocumentProvenanceBundle | null;
   } | null,
 ): PlanSetSheets {
   // ── STEP 10: Validate before any rendering ──
@@ -93,6 +95,7 @@ export function renderPlanSet(
     utilityName:     engOpts?.utilityName ?? null,
     monthlyKwh:      engOpts?.monthlyKwh ?? null,
     annualKwh:       engOpts?.annualKwh ?? null,
+    documentProvenance: engOpts?.documentProvenance ?? null,
   });
 
   console.log(`[renderPlanSet] ✓ validated ${systemType} — ${cad.totalPanels} panels / ${cad.totalDcKw.toFixed(2)} kW DC hasBillInsights=${ctx.billInsights !== null}`);

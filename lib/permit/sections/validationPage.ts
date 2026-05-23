@@ -200,6 +200,7 @@ export function pageValidationSummary(
       : 'main_service_panel, meter, roof_plane, overview';
   const traceability = surveyEvidence?.traceability;
   const requirementEvaluation = surveyEvidence?.requirementEvaluation;
+  const documentProvenance = input.documentProvenance ?? surveyEvidence?.documentProvenance ?? null;
   const registryStatusRows = requirementEvaluation
     ? [
         ['Registry Status', `readiness: ${requirementEvaluation.readiness} | completeness: ${requirementEvaluation.completeness} | confidence: ${requirementEvaluation.confidenceSource}`],
@@ -244,6 +245,23 @@ export function pageValidationSummary(
   const surveyWarningRows = surveyEvidence
     ? [...surveyEvidence.blockers, ...surveyEvidence.warnings].slice(0, 6)
     : ['No normalized survey evidence object was provided; plan-set assumptions are based on design/canonical inputs only.'];
+  const documentProvenanceRows = documentProvenance ? [
+    ['Document Provenance Bundle', `${documentProvenance.documentId} | type: ${documentProvenance.documentType} | truth: ${documentProvenance.truthSource} | confidence: ${documentProvenance.confidenceSource}`],
+    ['Bound Requirements', documentProvenance.requirementIds.join(', ') || 'None'],
+    ['Canonical Evidence Links', documentProvenance.canonicalEvidenceIds.join(', ') || 'None'],
+    ['Originating Surveys', documentProvenance.originatingSurveyIds.join(', ') || 'None'],
+    ['Dependency Graph', `${documentProvenance.dependencyGraph?.nodes.length ?? 0} node(s) | ${documentProvenance.dependencyGraph?.edges.length ?? 0} edge(s) | hash ${documentProvenance.dependencyGraph?.deterministicHash ?? 'none'}`],
+    ['Audit Guards', documentProvenance.auditGuards.map(guard => `${guard.guardCode}: ${guard.passed ? 'PASS' : guard.severity.toUpperCase()}`).join(' | ')],
+  ] as const : [
+    ['Document Provenance Bundle', 'No document provenance bundle was attached to this permit run.'],
+  ] as const;
+  const documentSectionRows = documentProvenance?.sections.length
+    ? documentProvenance.sections.slice(0, 10).map(section => [
+        section.sectionId,
+        `${section.sectionLabel} | requirements: ${section.requirementIds.join(', ')} | evidence: ${section.canonicalEvidenceIds.join(', ') || 'none'} | dependencies: ${section.engineeringDependencyIds.length}`,
+      ] as const)
+    : [['Document Section Provenance', 'No section-level document provenance was provided.'] as const];
+
   const surveyFieldEvidenceRows = surveyEvidence ? [
     ['Evidence Manifest v1', `items: ${manifestV1.itemCount} | source: ${manifestSummarySource} | lifecycle: ${manifestV1.lifecycleState} | quality: ${manifestV1.qualityStatus} | duplicates: ${manifestV1.duplicateStatus} | AI: ${manifestV1.aiExtractionStatus} | engineering readiness: ${manifestV1.engineeringBridge.readiness} | CAD automation: ${manifestV1.engineeringBridge.cadAutomationStatus}`],
     ['Physical Data', surveyEvidence.fieldEvidence.hasPhysicalData ? 'present' : 'missing'],
@@ -362,6 +380,18 @@ export function pageValidationSummary(
           <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#4338ca;background:#eef2ff;">Survey Lineage</td></tr>
           ${surveyLineageRows.map(([label, value], i) => `
           <tr style="background:${i%2===0?'#f9f9ff':'#fff'};">
+            <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
+            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
+          </tr>`).join('')}
+          <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#1d4ed8;background:#eff6ff;">Document Provenance + Requirement Bindings</td></tr>
+          ${documentProvenanceRows.map(([label, value], i) => `
+          <tr style="background:${i%2===0?'#eff6ff':'#fff'};">
+            <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
+            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
+          </tr>`).join('')}
+          <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#1e40af;background:#dbeafe;">Document Section Provenance</td></tr>
+          ${documentSectionRows.map(([label, value], i) => `
+          <tr style="background:${i%2===0?'#eff6ff':'#fff'};">
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
             <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
           </tr>`).join('')}

@@ -9,6 +9,7 @@ import { PLANSET_ENGINE_VERSION } from './constants';
 import { buildCanonical, validateCanonicalStrict, buildLayoutDimensions } from './utils/canonical';
 import { generateCADLayout } from '@/lib/cad/cadEngine';
 import { buildRenderContext, type RenderContext } from '@/lib/drafting/renderContext';
+import { buildDocumentProvenanceBundle } from '@/lib/documentProvenance';
 import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
 
 // Section imports
@@ -185,6 +186,24 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // Assembles systemType + CAD + billInsights + engineering into one object.
   // ctx is optional — all templates render normally when ctx is null/absent.
   const utilityOpts = (input as any).utility;
+  const documentProvenance = input.surveyEvidence
+    ? buildDocumentProvenanceBundle({
+        documentId: `permit:${(project as any).projectId ?? (project as any).id ?? project.projectName ?? 'unknown'}`,
+        documentType: 'permit_package',
+        surveyEvidence: input.surveyEvidence,
+        cad,
+        generatedAt: input.surveyEvidence.source.normalizedAt,
+        renderInputs: {
+          inputKeys: ['PermitInput', 'EngineeringSurveyEvidence'],
+          canonicalInputKeys: ['CanonicalInput', 'SurveyEvidenceManifest', 'EngineeringRequirementEvaluationSummary'],
+          cadPrimitiveIds: [`cad:${cad.systemType}:model`],
+          legacyFallbackKeys: [],
+        },
+      })
+    : undefined;
+  if (documentProvenance) {
+    (input as any).documentProvenance = documentProvenance;
+  }
   const renderCtx = buildRenderContext(cad, {
     electricityRate: utilityOpts?.electricityRate,
     rateSource:      utilityOpts?.rateSource,
@@ -192,6 +211,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     monthlyKwh:      utilityOpts?.monthlyKwh,
     annualKwh:       utilityOpts?.annualKwh,
     billInsights:    utilityOpts?.billInsights ?? null,
+    documentProvenance: documentProvenance ?? null,
   });
 
   // ── BOM Integration (v48.x) ─────────────────────────────────────────────
