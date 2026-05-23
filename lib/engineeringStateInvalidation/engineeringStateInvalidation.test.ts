@@ -12,13 +12,20 @@ import { buildProjectSurveyEvidenceHygiene } from '@/lib/survey/evidence/session
 import {
   assertEngineeringStateAuditGuards,
   buildEngineeringStateRegistry,
+  buildEngineeringStateSnapshot,
+  buildEngineeringStateTimeline,
+  buildEngineeringStateTransitionHistory,
+  buildPersistentEngineeringStateGraph,
   buildInvalidationLineageMetadata,
   buildInvalidationTrigger,
   buildSelectiveRegenerationPlan,
+  diffEngineeringStateSnapshots,
+  engineeringStateSnapshotReference,
   invalidateEngineeringState,
   runEngineeringStateAuditGuards,
   staleMetadataForState,
   type EngineeringStateRecord,
+  type PersistentEngineeringStateGraph,
 } from './index';
 
 const generatedAt = '2026-05-23T11:00:00.000Z';
@@ -193,4 +200,90 @@ describe('engineering state invalidation v1', () => {
     expect(guards.find(guard => guard.guardCode === 'regeneration_from_raw_uploads_blocked')?.passed).toBe(false);
     expect(() => assertEngineeringStateAuditGuards({ records: [broken], renderOutputExpected: true })).toThrow(/regeneration_requires_provenance_lineage/);
   });
+
+  it('persists stable engineering state snapshots with identical-input determinism', () => {
+    const fixture = buildFixture();
+    const graph = buildPersistentEngineeringStateGraph({ graphId: 'state-graph:persistence', generatedAt, registry: fixture.registry, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+    const first = buildEngineeringStateSnapshot({ snapshotId: 'snapshot:persistence:001', generatedAt, registry: fixture.registry, stateGraph: graph, dependencyGraph: fixture.documentProvenance.dependencyGraph, decisionProvenance: fixture.decisionProvenance });
+    const second = buildEngineeringStateSnapshot({ snapshotId: 'snapshot:persistence:001', generatedAt: '2026-05-24T00:00:00.000Z', registry: fixture.registry, stateGraph: graph, dependencyGraph: fixture.documentProvenance.dependencyGraph, decisionProvenance: fixture.decisionProvenance });
+
+    expect(first.snapshotHash).toBe(second.snapshotHash);
+    expect(first.hashVector.dependencyGraphHash).toBe(fixture.documentProvenance.dependencyGraph?.deterministicHash);
+    expect(first.stateRefs).toEqual([...first.stateRefs].sort((a, b) => a.stateId.localeCompare(b.stateId)));
+    expect(graph.nodes).toEqual([...graph.nodes].sort((a, b) => a.nodeId.localeCompare(b.nodeId)));
+  });
+
+  it('persists dependency-change invalidation lineage and preserved outputs', () => {
+    const fixture = buildFixture();
+    const mspEvidence = firstEvidenceForRequirement(fixture.surveyEvidence, 'main_service_panel');
+    const baselineGraph = buildPersistentEngineeringStateGraph({ graphId: 'state-graph:baseline', generatedAt, registry: fixture.registry, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+    const baselineSnapshot = buildEngineeringStateSnapshot({ snapshotId: 'snapshot:baseline', generatedAt, registry: fixture.registry, stateGraph: baselineGraph, dependencyGraph: fixture.documentProvenance.dependencyGraph, decisionProvenance: fixture.decisionProvenance });
+    const trigger = buildInvalidationTrigger({ triggerId: 'trigger:persistence:msp', triggerType: 'canonical_evidence_changed', changedCanonicalEvidenceIds: [mspEvidence], triggeredAt: generatedAt });
+    const invalidation = invalidateEngineeringState({ resultId: 'result:persistence:msp', generatedAt, registry: fixture.registry, trigger, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+    const updatedRegistry = { ...fixture.registry, stateRecords: invalidation.updatedStateRecords, stateIds: invalidation.updatedStateRecords.map(record => record.stateId).sort((a, b) => a.localeCompare(b)) };
+    const invalidatedGraph = buildPersistentEngineeringStateGraph({ graphId: 'state-graph:invalidated', generatedAt, registry: updatedRegistry, dependencyGraph: fixture.documentProvenance.dependencyGraph, invalidationResult: invalidation });
+    const invalidatedSnapshot = buildEngineeringStateSnapshot({ snapshotId: 'snapshot:invalidated', generatedAt, registry: updatedRegistry, stateGraph: invalidatedGraph, dependencyGraph: fixture.documentProvenance.dependencyGraph, decisionProvenance: fixture.decisionProvenance, invalidationResult: invalidation, previousSnapshot: baselineSnapshot });
+    const diff = diffEngineeringStateSnapshots(baselineSnapshot, invalidatedSnapshot);
+
+    expect(invalidatedSnapshot.previousSnapshotHash).toBe(baselineSnapshot.snapshotHash);
+    expect(invalidatedSnapshot.staleStateIds).toEqual(invalidation.affectedStateIds);
+    expect(diff.preservedStateIds).toEqual(invalidation.unaffectedStateIds);
+    expect(diff.entries).toEqual([...diff.entries].sort((a, b) => a.diffId.localeCompare(b.diffId)));
+    expect(invalidatedGraph.edges.some(edge => edge.edgeType === 'invalidates_state')).toBe(true);
+  });
+
+  it('persists stale-state transitions and exposes deterministic timeline helpers', () => {
+    const fixture = buildFixture();
+    const roofEvidence = firstEvidenceForRequirement(fixture.surveyEvidence, 'roof_overview');
+    const baselineGraph = buildPersistentEngineeringStateGraph({ graphId: 'state-graph:timeline:baseline', generatedAt, registry: fixture.registry, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+    const baselineSnapshot = buildEngineeringStateSnapshot({ snapshotId: 'snapshot:timeline:001', generatedAt, registry: fixture.registry, stateGraph: baselineGraph, dependencyGraph: fixture.documentProvenance.dependencyGraph, decisionProvenance: fixture.decisionProvenance });
+    const trigger = buildInvalidationTrigger({ triggerId: 'trigger:timeline:roof', triggerType: 'canonical_evidence_changed', changedCanonicalEvidenceIds: [roofEvidence], triggeredAt: generatedAt });
+    const invalidation = invalidateEngineeringState({ resultId: 'result:timeline:roof', generatedAt, registry: fixture.registry, trigger, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+    const updatedRegistry = { ...fixture.registry, stateRecords: invalidation.updatedStateRecords, stateIds: invalidation.updatedStateRecords.map(record => record.stateId).sort((a, b) => a.localeCompare(b)) };
+    const invalidatedGraph = buildPersistentEngineeringStateGraph({ graphId: 'state-graph:timeline:invalidated', generatedAt, registry: updatedRegistry, dependencyGraph: fixture.documentProvenance.dependencyGraph, invalidationResult: invalidation });
+    const invalidatedSnapshot = buildEngineeringStateSnapshot({ snapshotId: 'snapshot:timeline:002', generatedAt, registry: updatedRegistry, stateGraph: invalidatedGraph, dependencyGraph: fixture.documentProvenance.dependencyGraph, decisionProvenance: fixture.decisionProvenance, invalidationResult: invalidation, previousSnapshot: baselineSnapshot });
+    const diff = diffEngineeringStateSnapshots(baselineSnapshot, invalidatedSnapshot);
+    const plan = buildSelectiveRegenerationPlan({ planId: 'plan:timeline:roof', generatedAt, invalidationResult: invalidation, dependencyGraph: fixture.documentProvenance.dependencyGraph, snapshotReference: engineeringStateSnapshotReference(invalidatedSnapshot) });
+    const history = buildEngineeringStateTransitionHistory({ historyId: 'history:timeline', generatedAt, snapshots: [baselineSnapshot, invalidatedSnapshot], diffs: [diff], invalidationResults: [invalidation], regenerationPlans: [plan] });
+    const timeline = buildEngineeringStateTimeline(history, [baselineSnapshot, invalidatedSnapshot]);
+
+    expect(history.transitionEvents.some(event => event.eventType === 'snapshot_created')).toBe(true);
+    expect(history.transitionEvents.some(event => event.eventType === 'state_invalidated')).toBe(true);
+    expect(history.transitionEvents.some(event => event.eventType === 'stale_state_preserved')).toBe(true);
+    expect(timeline.latestSnapshotId).toBe(invalidatedSnapshot.snapshotId);
+    expect(timeline.latestValidSnapshotId).toBe(baselineSnapshot.snapshotId);
+    expect(plan.snapshotReference?.snapshotHash).toBe(invalidatedSnapshot.snapshotHash);
+  });
+
+  it('carries snapshot references through provenance, render, lineage, and decision-aware metadata', () => {
+    const fixture = buildFixture();
+    const graph = buildPersistentEngineeringStateGraph({ graphId: 'state-graph:metadata', generatedAt, registry: fixture.registry, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+    const snapshot = buildEngineeringStateSnapshot({ snapshotId: 'snapshot:metadata', generatedAt, registry: fixture.registry, stateGraph: graph, dependencyGraph: fixture.documentProvenance.dependencyGraph, decisionProvenance: fixture.decisionProvenance });
+    const snapshotRef = engineeringStateSnapshotReference(snapshot);
+    const lineage = buildInvalidationLineageMetadata({ registry: fixture.registry, snapshotReference: snapshotRef });
+    const documentProvenance = buildDocumentProvenanceBundle({ documentId: 'permit:state:snapshot-aware', documentType: 'permit_package', generatedAt, surveyEvidence: fixture.surveyEvidence, cad: fixture.cad, permitInput: fixture.permit, decisionProvenance: fixture.decisionProvenance, engineeringStateRegistry: fixture.registry, engineeringStateSnapshot: snapshotRef });
+    const bomMetadata = buildDecisionAwareBOMMetadata({ bomItems: fixture.permit.bom, decisionBundle: fixture.decisionProvenance, engineeringStateSnapshot: snapshotRef });
+    const sldMetadata = buildDecisionAwareSLDMetadata({ decisionBundle: fixture.decisionProvenance, engineeringStateSnapshot: snapshotRef });
+    const ctx = buildRenderContext(fixture.cad, { documentProvenance, decisionProvenance: fixture.decisionProvenance, engineeringStateRegistry: fixture.registry, invalidationLineage: lineage });
+
+    expect(documentProvenance.engineeringStateSnapshot?.snapshotHash).toBe(snapshot.snapshotHash);
+    expect(ctx.engineeringStateSnapshot?.snapshotId).toBe(snapshot.snapshotId);
+    expect(lineage.snapshotReference?.stateGraphId).toBe(graph.graphId);
+    expect(bomMetadata[0].engineeringStateSnapshot?.snapshotHash).toBe(snapshot.snapshotHash);
+    expect(sldMetadata.engineeringStateSnapshot?.snapshotHash).toBe(snapshot.snapshotHash);
+  });
+
+  it('audit guards fail on orphaned persistent lineage and snapshot drift', () => {
+    const fixture = buildFixture();
+    const graph = buildPersistentEngineeringStateGraph({ graphId: 'state-graph:guard', generatedAt, registry: fixture.registry, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+    const snapshot = buildEngineeringStateSnapshot({ snapshotId: 'snapshot:guard', generatedAt, registry: fixture.registry, stateGraph: graph, dependencyGraph: fixture.documentProvenance.dependencyGraph, decisionProvenance: fixture.decisionProvenance });
+    const orphanedGraph: PersistentEngineeringStateGraph = { ...graph, nodes: [{ ...graph.nodes[0], nodeKind: 'state_record', stateId: '', dependencyNodeIds: [], provenanceHash: '' }, ...graph.nodes.slice(1)] };
+    const driftedSnapshot = { ...snapshot, snapshotHash: 'engineering-state-snapshot-corrupted' };
+    const guards = runEngineeringStateAuditGuards({ records: fixture.registry.stateRecords, persistentGraph: orphanedGraph, snapshots: [driftedSnapshot] });
+
+    expect(guards.find(guard => guard.guardCode === 'persistence_requires_provenance')?.passed).toBe(false);
+    expect(guards.find(guard => guard.guardCode === 'persistent_graph_nodes_not_orphaned')?.passed).toBe(false);
+    expect(guards.find(guard => guard.guardCode === 'snapshot_hash_not_drifted')?.passed).toBe(false);
+  });
+
 });

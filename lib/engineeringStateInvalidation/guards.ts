@@ -2,14 +2,21 @@ import type {
   EngineeringInvalidationResult,
   EngineeringStateAuditGuardResult,
   EngineeringStateRecord,
+  EngineeringStateSnapshot,
+  EngineeringStateSnapshotDiff,
+  PersistentEngineeringStateGraph,
   SelectiveRegenerationPlan,
 } from './types';
+import { stableEngineeringStateHash } from './hash';
 
 export function runEngineeringStateAuditGuards(input: {
   records: EngineeringStateRecord[];
   invalidationResult?: EngineeringInvalidationResult | null;
   regenerationPlan?: SelectiveRegenerationPlan | null;
   renderOutputExpected?: boolean;
+  persistentGraph?: PersistentEngineeringStateGraph | null;
+  snapshots?: EngineeringStateSnapshot[] | null;
+  diffs?: EngineeringStateSnapshotDiff[] | null;
 }): EngineeringStateAuditGuardResult[] {
   const records = input.records;
   const invalidationResult = input.invalidationResult ?? null;
@@ -43,6 +50,55 @@ export function runEngineeringStateAuditGuards(input: {
     && event.triggeringDecisionIds.length === 0
     && event.triggeringCanonicalEvidenceIds.length === 0,
   ) ?? [];
+  const graph = input.persistentGraph ?? null;
+  const snapshots = input.snapshots ?? [];
+  const diffs = input.diffs ?? [];
+  const persistedRecordsWithoutProvenance = graph?.nodes.filter(node =>
+    node.nodeKind === 'state_record'
+    && ((node.provenanceHash ?? '').length === 0 || (node.dependencyHash ?? '').length === 0 || (node.generationHash ?? '').length === 0),
+  ) ?? [];
+  const graphNodeIds = new Set(graph?.nodes.map(node => node.nodeId) ?? []);
+  const orphanedPersistentGraphNodes = graph?.nodes.filter(node => {
+    if (node.nodeKind === 'state_record') return !node.stateId || node.dependencyNodeIds.length === 0;
+    return !node.dependencyNodeId || (node.requirementIds.length === 0 && node.canonicalEvidenceIds.length === 0 && node.dependencyNodeIds.length === 0);
+  }) ?? [];
+  const graphEdgesWithMissingEndpoints = graph?.edges.filter(edge => !graphNodeIds.has(edge.fromNodeId) || !graphNodeIds.has(edge.toNodeId)) ?? [];
+  const nonDeterministicallyOrdered = [
+    !isSorted(records.map(record => record.stateId)) ? 'stateRecords' : null,
+    graph && !isSorted(graph.nodes.map(node => node.nodeId)) ? 'persistentGraph.nodes' : null,
+    graph && !isSorted(graph.edges.map(edge => edge.edgeId)) ? 'persistentGraph.edges' : null,
+    ...snapshots.flatMap(snapshot => [
+      !isSorted(snapshot.stateRefs.map(ref => ref.stateId)) ? `${snapshot.snapshotId}.stateRefs` : null,
+      !isSorted(snapshot.staleStateIds) ? `${snapshot.snapshotId}.staleStateIds` : null,
+      !isSorted(snapshot.validStateIds) ? `${snapshot.snapshotId}.validStateIds` : null,
+    ]),
+    ...diffs.map(diff => !isSorted(diff.entries.map(entry => entry.diffId)) ? `${diff.diffId}.entries` : null),
+  ].filter(Boolean) as string[];
+  const snapshotDrift = snapshots.filter(snapshot => {
+    const graphHash = graph?.graphId === snapshot.stateGraphId ? graph.deterministicHash : null;
+    if (!graphHash) return false;
+    const recomputed = stableEngineeringStateHash('engineering-state-snapshot', [
+      snapshot.snapshotId,
+      snapshot.registryId,
+      graphHash,
+      snapshot.previousSnapshotHash,
+      ...Object.entries(snapshot.hashVector).map(([key, value]) => `${key}:${value}`),
+      ...snapshot.stateRefs.map(ref => `${ref.stateId}|${ref.staleStatus}|${ref.generationHash}|${ref.provenanceHash}|${ref.dependencyHash}`),
+    ]);
+    return recomputed !== snapshot.snapshotHash;
+  });
+  const invalidationWithoutLineage = invalidationResult?.invalidationEvents.filter(event =>
+    event.lastValidGenerationHash.length === 0
+    || event.lastValidProvenanceHash.length === 0
+    || (event.triggeringDependencyIds.length === 0
+      && event.triggeringRequirementIds.length === 0
+      && event.triggeringDecisionIds.length === 0
+      && event.triggeringCanonicalEvidenceIds.length === 0),
+  ) ?? [];
+  const regenerationPlanWithoutDependencyHash = regenerationPlan?.staleStateIds.filter(stateId => {
+    const record = records.find(candidate => candidate.stateId === stateId);
+    return !record || record.dependencyHash.length === 0 || record.dependencyNodeIds.length === 0;
+  }) ?? [];
 
   return [
     {
@@ -99,14 +155,76 @@ export function runEngineeringStateAuditGuards(input: {
         : `Invalidation event(s) hide propagation triggers: ${hiddenPropagationEvents.map(event => event.eventId).join(', ')}`,
       deterministicNotes: ['Every invalidation event must expose deterministic trigger lineage; no UI-manufactured stale states are allowed.'],
     },
+    {
+      guardCode: 'persistence_requires_provenance',
+      passed: persistedRecordsWithoutProvenance.length === 0,
+      severity: persistedRecordsWithoutProvenance.length === 0 ? 'info' : 'error',
+      message: persistedRecordsWithoutProvenance.length === 0
+        ? 'Persistent state graph nodes retain provenance, generation, and dependency hashes.'
+        : `Persistent graph state node(s) lack provenance/generation/dependency hashes: ${persistedRecordsWithoutProvenance.map(node => node.nodeId).join(', ')}`,
+      deterministicNotes: ['Persistent Engineering State Graph nodes cannot be stored without auditable hash lineage.'],
+    },
+    {
+      guardCode: 'invalidation_requires_lineage',
+      passed: invalidationWithoutLineage.length === 0,
+      severity: invalidationWithoutLineage.length === 0 ? 'info' : 'error',
+      message: invalidationWithoutLineage.length === 0
+        ? 'Invalidation events retain last-valid hashes and trigger lineage.'
+        : `Invalidation event(s) missing lineage: ${invalidationWithoutLineage.map(event => event.eventId).join(', ')}`,
+      deterministicNotes: ['Invalidation persistence requires last-valid generation/provenance hashes and explicit trigger ids.'],
+    },
+    {
+      guardCode: 'regeneration_plan_requires_dependency_hash',
+      passed: regenerationPlanWithoutDependencyHash.length === 0,
+      severity: regenerationPlanWithoutDependencyHash.length === 0 ? 'info' : 'error',
+      message: regenerationPlanWithoutDependencyHash.length === 0
+        ? 'Regeneration plan stale states resolve to dependency hashes.'
+        : `Regeneration plan references state without dependency hash: ${regenerationPlanWithoutDependencyHash.join(', ')}`,
+      deterministicNotes: ['Selective regeneration planning must be keyed to dependency hashes; it remains planning metadata only.'],
+    },
+    {
+      guardCode: 'snapshot_hash_not_drifted',
+      passed: snapshotDrift.length === 0,
+      severity: snapshotDrift.length === 0 ? 'info' : 'error',
+      message: snapshotDrift.length === 0
+        ? 'Snapshot hashes match persisted graph/state hash vectors when graph data is supplied.'
+        : `Snapshot hash drift detected: ${snapshotDrift.map(snapshot => snapshot.snapshotId).join(', ')}`,
+      deterministicNotes: ['Snapshot corruption/drift is detected by recomputing deterministic snapshot hashes from persisted references.'],
+    },
+    {
+      guardCode: 'persistence_ordering_deterministic',
+      passed: nonDeterministicallyOrdered.length === 0,
+      severity: nonDeterministicallyOrdered.length === 0 ? 'info' : 'error',
+      message: nonDeterministicallyOrdered.length === 0
+        ? 'Persistent graph, snapshot, diff, and registry arrays are deterministically ordered.'
+        : `Non-deterministic persistence ordering detected in: ${nonDeterministicallyOrdered.join(', ')}`,
+      deterministicNotes: ['Persistent state arrays must be sorted by stable ids before hashing or storage.'],
+    },
+    {
+      guardCode: 'persistent_graph_nodes_not_orphaned',
+      passed: orphanedPersistentGraphNodes.length === 0 && graphEdgesWithMissingEndpoints.length === 0,
+      severity: orphanedPersistentGraphNodes.length === 0 && graphEdgesWithMissingEndpoints.length === 0 ? 'info' : 'error',
+      message: orphanedPersistentGraphNodes.length === 0 && graphEdgesWithMissingEndpoints.length === 0
+        ? 'Persistent graph nodes and edges are connected to state/dependency lineage.'
+        : `Persistent graph orphan(s): ${[...orphanedPersistentGraphNodes.map(node => node.nodeId), ...graphEdgesWithMissingEndpoints.map(edge => edge.edgeId)].join(', ')}`,
+      deterministicNotes: ['Orphaned graph nodes or edges cannot be persisted because stale-state lineage would be unexplainable.'],
+    },
   ];
 }
+
+function isSorted(values: string[]): boolean {
+  return values.every((value, index) => index === 0 || values[index - 1].localeCompare(value) <= 0);
+}
+
 
 export function assertEngineeringStateAuditGuards(input: {
   records: EngineeringStateRecord[];
   invalidationResult?: EngineeringInvalidationResult | null;
   regenerationPlan?: SelectiveRegenerationPlan | null;
   renderOutputExpected?: boolean;
+  persistentGraph?: PersistentEngineeringStateGraph | null;
+  snapshots?: EngineeringStateSnapshot[] | null;
+  diffs?: EngineeringStateSnapshotDiff[] | null;
 }): EngineeringStateAuditGuardResult[] {
   const guards = runEngineeringStateAuditGuards(input);
   const failing = guards.filter(guard => guard.severity === 'error' && !guard.passed);

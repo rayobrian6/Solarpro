@@ -51,7 +51,7 @@ export function buildEngineeringDecisionProvenanceBundle(
   return bundle;
 }
 
-export function buildDecisionAwareReadinessSummary(bundle: EngineeringDecisionEvaluationBundle): DecisionAwareReadinessSummary {
+export function buildDecisionAwareReadinessSummary(bundle: EngineeringDecisionEvaluationBundle, opts?: { engineeringStateSnapshot?: import('@/lib/engineeringStateInvalidation').EngineeringStateSnapshotReference | null }): DecisionAwareReadinessSummary {
   return {
     readinessSummaryId: `${bundle.bundleId}.readiness`,
     readinessStatus: bundle.decisionIds.length > 0 ? 'decision_provenance_available' : 'decision_provenance_missing',
@@ -69,12 +69,14 @@ export function buildDecisionAwareReadinessSummary(bundle: EngineeringDecisionEv
     engineeringStateIds: bundle.decisionIds.map(id => `state:decision:${id}`).sort((a, b) => a.localeCompare(b)),
     stateGenerationHash: stableEngineeringStateHash('decision-readiness-generation', bundle.decisionIds),
     stateDependencyHash: stableEngineeringStateHash('decision-readiness-dependency', bundle.dependencyNodeIds),
+    engineeringStateSnapshot: opts?.engineeringStateSnapshot ?? undefined,
   };
 }
 
 export function buildDecisionAwareBOMMetadata(input: {
   bomItems?: PermitInput['bom'] | null;
   decisionBundle?: EngineeringDecisionEvaluationBundle | null;
+  engineeringStateSnapshot?: import('@/lib/engineeringStateInvalidation').EngineeringStateSnapshotReference | null;
 }): DecisionAwareBOMMetadata[] {
   const bomItems = input.bomItems ?? [];
   const bundle = input.decisionBundle ?? null;
@@ -97,11 +99,13 @@ export function buildDecisionAwareBOMMetadata(input: {
     engineeringStateIds: [item.id ?? `bom-row-${String(index + 1).padStart(3, '0')}`].map(id => `state:bomRow:${id}`),
     stateGenerationHash: stableEngineeringStateHash('bom-row-generation', [item.id ?? `bom-row-${String(index + 1).padStart(3, '0')}`, ...bomDecisionIds]),
     stateDependencyHash: stableEngineeringStateHash('bom-row-dependency', dependencyIds),
+    engineeringStateSnapshot: input.engineeringStateSnapshot ?? undefined,
   }));
 }
 
 export function buildDecisionAwareSLDMetadata(input: {
   decisionBundle?: EngineeringDecisionEvaluationBundle | null;
+  engineeringStateSnapshot?: import('@/lib/engineeringStateInvalidation').EngineeringStateSnapshotReference | null;
 }): DecisionAwareSLDMetadata {
   const bundle = input.decisionBundle ?? null;
   const sldRecords = bundle?.decisionRecords.filter(record =>
@@ -122,6 +126,7 @@ export function buildDecisionAwareSLDMetadata(input: {
     engineeringStateIds: [`state:sldSection:${bundle?.bundleId ?? 'decision-bundle-missing'}.sld`],
     stateGenerationHash: stableEngineeringStateHash('sld-metadata-generation', sldRecords.map(record => record.decisionId)),
     stateDependencyHash: stableEngineeringStateHash('sld-metadata-dependency', sldRecords.flatMap(record => record.dependencyNodeIds)),
+    engineeringStateSnapshot: input.engineeringStateSnapshot ?? undefined,
   };
 }
 

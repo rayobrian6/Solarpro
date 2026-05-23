@@ -1,32 +1,35 @@
-# Dependency Topology Stabilization v1
+# Engineering State Graph Persistence v1
 
 ## Setup
-- [x] Confirm repository branch, baseline commit, and working tree
-- [x] Create stabilization branch from current dev baseline
-- [x] Identify available circular dependency tooling and package scripts
+- [x] Confirm dev branch, baseline commit, and clean working tree
+- [x] Inventory existing state invalidation, dependency graph, provenance, render context, and decision modules
 
-## Baseline Scans
-- [x] Re-run circular dependency scan before changes
-- [x] Classify each current cycle by risk
-- [x] Re-run prohibited-boundary scan baseline/current
+## Design and Implementation
+- [x] Add persistent engineering state graph/snapshot/transition data structures
+- [x] Add deterministic snapshot creation and hashing
+- [x] Add deterministic engineering state diff engine
+- [x] Add state transition history and timeline query helpers
+- [x] Integrate stable snapshot references into provenance/render/dependency/decision/invalidation metadata
+- [x] Expand audit guards for persistence invariants
 
-## Topology Fixes
-- [x] Establish directional architecture rules in report/source guard documentation
-- [x] Fix high-risk cycles surgically without behavior changes
-- [x] Add topology guard script/test for protected architecture areas
+## Tests
+- [x] Add regression tests for stable snapshot hashes and identical input determinism
+- [x] Add regression tests for dependency-change invalidation lineage and preserved outputs
+- [x] Add regression tests for deterministic diff ordering and persisted stale-state transitions
+- [x] Add regression tests for audit guard failures on orphaned lineage
 - [x] Run focused tests for touched modules
 
 ## Validation
-- [x] Re-run circular dependency scan after fixes
-- [x] Run topology guard/prohibited architecture boundary scan after changes
+- [x] Run npm run check:topology
 - [x] Run npm run type-check
 - [x] Run npm test
 - [x] Run npm run build
-- [x] Run npm run lint if available
-- [x] Run prohibited-boundary scan after changes
+- [x] Run npm run lint
+- [x] Run prohibited-boundary scan
 
 ## Reports and Delivery
-- [x] Create dependency topology stabilization report
-- [x] Create circular scan report
-- [x] Commit and push meaningful changes
-- [ ] Final summary with cycles found/fixed/deferred, files changed, topology rules, guard added, validation results, and dev safety status
+- [x] Create engineering state graph persistence report
+- [x] Create engineering state diff engine report
+- [x] Commit implementation and reports locally on dev
+- [ ] Push dev to origin (blocked: current GitHub token lacks repository push permission)
+- [ ] Final summary with structures, engines, transitions, integrations, guards, tests, validation, snapshot-aware outputs, and prohibited-runtime confirmation

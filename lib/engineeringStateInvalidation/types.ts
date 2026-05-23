@@ -137,6 +137,7 @@ export interface SelectiveRegenerationPlan {
   staleStateIds: string[];
   deterministicHash: string;
   deterministicNotes: string[];
+  snapshotReference?: EngineeringStateSnapshotReference;
 }
 
 export interface EngineeringStaleStateMetadata {
@@ -157,6 +158,7 @@ export interface EngineeringInvalidationLineageMetadata {
   staleStateIds: string[];
   invalidationEventIds: string[];
   regenerationPlanId?: string;
+  snapshotReference?: EngineeringStateSnapshotReference;
   deterministicNotes: string[];
 }
 
@@ -166,7 +168,13 @@ export type EngineeringStateAuditGuardCode =
   | 'regeneration_from_raw_uploads_blocked'
   | 'document_sections_not_orphaned'
   | 'decision_outputs_have_invalidation_tracking'
-  | 'dependency_propagation_not_hidden';
+  | 'dependency_propagation_not_hidden'
+  | 'persistence_requires_provenance'
+  | 'invalidation_requires_lineage'
+  | 'regeneration_plan_requires_dependency_hash'
+  | 'snapshot_hash_not_drifted'
+  | 'persistence_ordering_deterministic'
+  | 'persistent_graph_nodes_not_orphaned';
 
 export interface EngineeringStateAuditGuardResult {
   guardCode: EngineeringStateAuditGuardCode;
@@ -200,6 +208,7 @@ export interface BuildSelectiveRegenerationPlanInput {
   generatedAt?: string;
   invalidationResult: EngineeringInvalidationResult;
   dependencyGraph?: EngineeringDependencyGraph | null;
+  snapshotReference?: EngineeringStateSnapshotReference | null;
 }
 
 export type StateAwareDependencyNodeMetadata = {
@@ -211,3 +220,200 @@ export type StateAwareDependencyNodeMetadata = {
 };
 
 export type StateRegistryNodeType = EngineeringDependencyNodeType | 'engineering_state';
+
+export interface EngineeringStateHashVector {
+  dependencyGraphHash: string;
+  provenanceHash: string;
+  generationHash: string;
+  invalidationHash: string;
+  renderHash: string;
+  decisionHash: string;
+  requirementHash: string;
+}
+
+export interface EngineeringStateSnapshotReference {
+  snapshotId: string;
+  snapshotHash: string;
+  stateGraphId: string;
+  dependencyGraphHash: string;
+  provenanceHash: string;
+  generationHash: string;
+  invalidationHash: string;
+  deterministicNotes: string[];
+}
+
+export type PersistentEngineeringStateNodeKind = 'state_record' | 'dependency_graph_node';
+export type PersistentEngineeringStateEdgeType = 'depends_on_dependency_node' | 'invalidates_state' | 'preserves_stale_state' | 'supersedes_snapshot';
+
+export interface PersistentEngineeringStateGraphNode {
+  nodeId: string;
+  nodeKind: PersistentEngineeringStateNodeKind;
+  stateId?: string;
+  dependencyNodeId?: string;
+  stateType?: EngineeringStateType;
+  staleStatus?: EngineeringStaleStatus;
+  requirementIds: EngineeringRequirementId[];
+  decisionIds: string[];
+  canonicalEvidenceIds: string[];
+  dependencyNodeIds: string[];
+  generationHash?: string;
+  provenanceHash?: string;
+  dependencyHash?: string;
+  truthSource: DocumentTruthSource;
+  deterministicNotes: string[];
+}
+
+export interface PersistentEngineeringStateGraphEdge {
+  edgeId: string;
+  fromNodeId: string;
+  toNodeId: string;
+  edgeType: PersistentEngineeringStateEdgeType;
+  deterministicReason: string;
+}
+
+export interface PersistentEngineeringStateGraph {
+  graphId: string;
+  generatedAt: string;
+  registryId: string;
+  dependencyGraphId?: string;
+  nodes: PersistentEngineeringStateGraphNode[];
+  edges: PersistentEngineeringStateGraphEdge[];
+  stateNodeIds: string[];
+  dependencyNodeIds: string[];
+  deterministicHash: string;
+  deterministicNotes: string[];
+}
+
+export interface EngineeringStateSnapshotStateRef {
+  stateId: string;
+  stateType: EngineeringStateType;
+  staleStatus: EngineeringStaleStatus;
+  generationHash: string;
+  provenanceHash: string;
+  dependencyHash: string;
+  requirementIds: EngineeringRequirementId[];
+  decisionIds: string[];
+  canonicalEvidenceIds: string[];
+  dependencyNodeIds: string[];
+}
+
+export interface EngineeringStateSnapshot {
+  snapshotId: string;
+  generatedAt: string;
+  registryId: string;
+  stateGraphId: string;
+  previousSnapshotId?: string;
+  previousSnapshotHash?: string;
+  supersededBySnapshotId?: string;
+  hashVector: EngineeringStateHashVector;
+  stateRefs: EngineeringStateSnapshotStateRef[];
+  staleStateIds: string[];
+  validStateIds: string[];
+  transitionEventIds: string[];
+  snapshotHash: string;
+  deterministicNotes: string[];
+}
+
+export type EngineeringStateDiffType = 'added' | 'removed' | 'unchanged' | 'hash_changed' | 'stale_status_changed' | 'lineage_changed';
+
+export interface EngineeringStateDiffEntry {
+  diffId: string;
+  stateId: string;
+  diffType: EngineeringStateDiffType;
+  previousStatus?: EngineeringStaleStatus;
+  nextStatus?: EngineeringStaleStatus;
+  changedHashFields: Array<keyof Pick<EngineeringStateSnapshotStateRef, 'generationHash' | 'provenanceHash' | 'dependencyHash'>>;
+  lineageChangedFields: Array<'requirementIds' | 'decisionIds' | 'canonicalEvidenceIds' | 'dependencyNodeIds'>;
+  deterministicReason: string;
+}
+
+export interface EngineeringStateSnapshotDiff {
+  diffId: string;
+  previousSnapshotId: string;
+  nextSnapshotId: string;
+  previousSnapshotHash: string;
+  nextSnapshotHash: string;
+  hashVectorChanges: Array<keyof EngineeringStateHashVector>;
+  entries: EngineeringStateDiffEntry[];
+  addedStateIds: string[];
+  removedStateIds: string[];
+  staleStateIds: string[];
+  preservedStateIds: string[];
+  deterministicHash: string;
+  deterministicNotes: string[];
+}
+
+export type EngineeringStateTransitionEventType =
+  | 'snapshot_created'
+  | 'snapshot_superseded'
+  | 'state_invalidated'
+  | 'state_regenerated'
+  | 'dependency_changed'
+  | 'requirement_changed'
+  | 'decision_changed'
+  | 'render_context_changed'
+  | 'stale_state_preserved';
+
+export interface EngineeringStateTransitionEvent {
+  transitionEventId: string;
+  eventType: EngineeringStateTransitionEventType;
+  occurredAt: string;
+  snapshotId: string;
+  previousSnapshotId?: string;
+  stateIds: string[];
+  dependencyNodeIds: string[];
+  requirementIds: EngineeringRequirementId[];
+  decisionIds: string[];
+  canonicalEvidenceIds: string[];
+  invalidationEventIds: string[];
+  regenerationPlanId?: string;
+  deterministicReason: string;
+  deterministicHash: string;
+}
+
+export interface EngineeringStateTransitionHistory {
+  historyId: string;
+  generatedAt: string;
+  snapshotIds: string[];
+  transitionEvents: EngineeringStateTransitionEvent[];
+  deterministicHash: string;
+  deterministicNotes: string[];
+}
+
+export interface EngineeringStateTimeline {
+  timelineId: string;
+  latestSnapshotId?: string;
+  latestValidSnapshotId?: string;
+  staleStateIds: string[];
+  transitionEventIds: string[];
+  deterministicHash: string;
+  deterministicNotes: string[];
+}
+
+export interface BuildPersistentEngineeringStateGraphInput {
+  graphId: string;
+  generatedAt?: string;
+  registry: EngineeringStateRegistry;
+  dependencyGraph?: EngineeringDependencyGraph | null;
+  invalidationResult?: EngineeringInvalidationResult | null;
+}
+
+export interface BuildEngineeringStateSnapshotInput {
+  snapshotId: string;
+  generatedAt?: string;
+  registry: EngineeringStateRegistry;
+  stateGraph?: PersistentEngineeringStateGraph | null;
+  dependencyGraph?: EngineeringDependencyGraph | null;
+  decisionProvenance?: import('@/lib/engineeringDecisionProvenance').EngineeringDecisionEvaluationBundle | null;
+  invalidationResult?: EngineeringInvalidationResult | null;
+  previousSnapshot?: EngineeringStateSnapshot | null;
+}
+
+export interface BuildEngineeringStateTransitionHistoryInput {
+  historyId: string;
+  generatedAt?: string;
+  snapshots: EngineeringStateSnapshot[];
+  diffs?: EngineeringStateSnapshotDiff[];
+  invalidationResults?: EngineeringInvalidationResult[];
+  regenerationPlans?: SelectiveRegenerationPlan[];
+}

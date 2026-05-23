@@ -1,7 +1,7 @@
 import type { CADSystemType } from '@/lib/cad/types';
 import type { EngineeringRequirementId } from '@/lib/survey/evidence/engineeringRequirements';
 import type { DocumentTruthSource } from '@/lib/documentProvenance/types';
-import type { EngineeringStaleStateMetadata } from '@/lib/engineeringStateInvalidation/types';
+import type { EngineeringStateSnapshotReference, EngineeringStaleStateMetadata } from '@/lib/engineeringStateInvalidation/types';
 
 export type EngineeringDecisionType =
   | 'conductor_sizing'
@@ -175,6 +175,7 @@ export interface DecisionAwareBOMMetadata {
   stateGenerationHash?: string;
   stateDependencyHash?: string;
   staleStateMetadata?: EngineeringStaleStateMetadata;
+  engineeringStateSnapshot?: EngineeringStateSnapshotReference;
 }
 
 export interface DecisionAwareSLDMetadata {
@@ -190,6 +191,7 @@ export interface DecisionAwareSLDMetadata {
   stateGenerationHash?: string;
   stateDependencyHash?: string;
   staleStateMetadata?: EngineeringStaleStateMetadata;
+  engineeringStateSnapshot?: EngineeringStateSnapshotReference;
 }
 
 export interface DecisionAwareReadinessSummary {
@@ -207,6 +209,7 @@ export interface DecisionAwareReadinessSummary {
   stateGenerationHash?: string;
   stateDependencyHash?: string;
   staleStateMetadata?: EngineeringStaleStateMetadata;
+  engineeringStateSnapshot?: EngineeringStateSnapshotReference;
 }
 
 export type DecisionGraphSystemType = CADSystemType | 'unknown';

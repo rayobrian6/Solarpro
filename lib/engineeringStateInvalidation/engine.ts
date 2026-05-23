@@ -121,6 +121,7 @@ export function buildSelectiveRegenerationPlan(input: BuildSelectiveRegeneration
     staleStateIds: input.invalidationResult.affectedStateIds,
     deterministicHash: stableHash('regeneration-plan', [...order, ...blocked, ...input.invalidationResult.unaffectedStateIds]),
     deterministicNotes: ['SelectiveRegenerationPlan v1 is a bounded plan only; it performs no autonomous regeneration.', 'Regeneration order is sorted by explicit state category precedence and stable state ids.'],
+    snapshotReference: input.snapshotReference ?? undefined,
   };
   return plan;
 }
@@ -153,7 +154,7 @@ export function staleMetadataForState(record: EngineeringStateRecord, events: En
   };
 }
 
-export function buildInvalidationLineageMetadata(input: { registry: EngineeringStateRegistry; invalidationResult?: EngineeringInvalidationResult | null; regenerationPlan?: SelectiveRegenerationPlan | null }): EngineeringInvalidationLineageMetadata {
+export function buildInvalidationLineageMetadata(input: { registry: EngineeringStateRegistry; invalidationResult?: EngineeringInvalidationResult | null; regenerationPlan?: SelectiveRegenerationPlan | null; snapshotReference?: import('./types').EngineeringStateSnapshotReference | null }): EngineeringInvalidationLineageMetadata {
   const staleStateIds = input.invalidationResult?.affectedStateIds ?? input.registry.stateRecords.filter(record => record.staleStatus !== 'current').map(record => record.stateId);
   return {
     stateRegistryId: input.registry.registryId,
@@ -164,6 +165,7 @@ export function buildInvalidationLineageMetadata(input: { registry: EngineeringS
     staleStateIds: uniqueSorted(staleStateIds),
     invalidationEventIds: uniqueSorted(input.invalidationResult?.invalidationEvents.map(event => event.eventId) ?? []),
     regenerationPlanId: input.regenerationPlan?.planId,
+    snapshotReference: input.snapshotReference ?? input.regenerationPlan?.snapshotReference,
     deterministicNotes: ['Invalidation lineage metadata carries state hashes and stale ids through render/document contexts.'],
   };
 }

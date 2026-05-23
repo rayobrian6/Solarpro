@@ -20,7 +20,7 @@ import type { CADModel }    from '../cad/types';
 import type { BillInsights } from '../billInsights';
 import type { DocumentProvenanceBundle } from '@/lib/documentProvenance';
 import type { EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance';
-import type { EngineeringInvalidationLineageMetadata, EngineeringStateRegistry, EngineeringStaleStateMetadata } from '@/lib/engineeringStateInvalidation';
+import type { EngineeringInvalidationLineageMetadata, EngineeringStateRegistry, EngineeringStateSnapshotReference, EngineeringStaleStateMetadata } from '@/lib/engineeringStateInvalidation';
 
 // ─── Engineering data (rate / utility intelligence) ──────────────────────────
 
@@ -80,6 +80,7 @@ export interface RenderContext {
   engineeringStateRegistry: EngineeringStateRegistry | null;
   invalidationLineage: EngineeringInvalidationLineageMetadata | null;
   staleStateMetadata: EngineeringStaleStateMetadata | null;
+  engineeringStateSnapshot: EngineeringStateSnapshotReference | null;
 }
 
 // ─── Builder ──────────────────────────────────────────────────────────────────
@@ -104,6 +105,7 @@ export function buildRenderContext(
     engineeringStateRegistry?: EngineeringStateRegistry | null;
     invalidationLineage?: EngineeringInvalidationLineageMetadata | null;
     staleStateMetadata?: EngineeringStaleStateMetadata | null;
+    engineeringStateSnapshot?: EngineeringStateSnapshotReference | null;
   },
 ): RenderContext {
   const systemType = cad.systemType as RenderContext['systemType'];
@@ -144,6 +146,7 @@ export function buildRenderContext(
     engineeringStateRegistry: opts?.engineeringStateRegistry ?? null,
     invalidationLineage: opts?.invalidationLineage ?? null,
     staleStateMetadata: opts?.staleStateMetadata ?? null,
+    engineeringStateSnapshot: opts?.engineeringStateSnapshot ?? opts?.documentProvenance?.engineeringStateSnapshot ?? opts?.invalidationLineage?.snapshotReference ?? null,
   };
 
   console.log(
@@ -156,7 +159,8 @@ export function buildRenderContext(
     ` hasDocumentProvenance=${ctx.documentProvenance !== null}` +
     ` hasDecisionProvenance=${ctx.decisionProvenance !== null}` +
     ` hasEngineeringStateRegistry=${ctx.engineeringStateRegistry !== null}` +
-    ` staleStatus=${ctx.staleStateMetadata?.staleStatus ?? 'none'}`
+    ` staleStatus=${ctx.staleStateMetadata?.staleStatus ?? 'none'}` +
+    ` hasEngineeringStateSnapshot=${ctx.engineeringStateSnapshot !== null}`
   );
 
   return ctx;

@@ -88,6 +88,8 @@ export function buildDocumentProvenanceBundle(input: BuildDocumentProvenanceInpu
     auditGuards: [],
     dependencyGraph,
     decisionProvenance: decisionProvenance ?? undefined,
+    engineeringStateRegistry: input.engineeringStateRegistry ?? undefined,
+    engineeringStateSnapshot: input.engineeringStateSnapshot ?? undefined,
   };
   bundle.auditGuards = runDocumentAuditGuards(bundle, { surveyEvidence });
   return bundle;
