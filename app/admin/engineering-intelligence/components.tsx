@@ -12,6 +12,9 @@ import type {
   SnapshotTimelineWorkspaceModel,
   StaleInvalidationWorkspaceModel,
 } from '@/lib/engineeringIntelligence';
+import type { HydratedProjectEngineeringState } from '@/lib/engineeringIntelligence/projectHydration';
+import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
+import type { FieldEvidenceOrchestrationModel } from '@/lib/survey/evidence/fieldOrchestration';
 
 const statusColor: Record<string, string> = {
   satisfied: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
@@ -26,6 +29,8 @@ const statusColor: Record<string, string> = {
   preserved: 'border-violet-500/30 bg-violet-500/10 text-violet-300',
   not_loaded: 'border-slate-500/30 bg-slate-500/10 text-slate-400',
   insufficient_metadata: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+  ready: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+  not_applicable: 'border-slate-500/30 bg-slate-500/10 text-slate-400',
 };
 
 function cx(...values: Array<string | false | null | undefined>) {
@@ -118,6 +123,106 @@ function TokenList({ values, limit = 6 }: { values: string[]; limit?: number }) 
       {visible.map(value => <span key={value} className="rounded-md bg-white/5 px-2 py-1 font-mono text-[10px] text-slate-300">{value}</span>)}
       {remaining > 0 && <span className="rounded-md bg-white/5 px-2 py-1 text-[10px] text-slate-400">+{remaining}</span>}
     </div>
+  );
+}
+
+
+export function ProjectHydrationSummary({ hydration }: { hydration: HydratedProjectEngineeringState }) {
+  return (
+    <Panel title="Live Project Engineering Hydration" eyebrow="Project state">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Hydration source" value={hydration.source} />
+        <Metric label="Survey sessions" value={hydration.surveyCount} />
+        <Metric label="Snapshots" value={hydration.snapshots.length} />
+        <Metric label="Regeneration plans" value={hydration.regenerationPlans.length} />
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-xs text-slate-300">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Canonical survey</div>
+          <div className="mt-2 break-all font-mono text-sky-300">{hydration.canonicalSurveyId ?? 'not_loaded'}</div>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-xs text-slate-300">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Invalidation event</div>
+          <div className="mt-2 break-all font-mono text-orange-300">{hydration.invalidationResult?.resultId ?? 'not_loaded'}</div>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-xs text-slate-300">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">State graph</div>
+          <div className="mt-2 break-all font-mono text-violet-300">{hydration.stateGraph?.graphId ?? 'not_loaded'}</div>
+        </div>
+      </div>
+      {hydration.surveyEvidence ? (
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <Metric label="Canonical evidence" value={hydration.surveyEvidence.canonicalEvidenceCount} />
+          <Metric label="Completeness" value={hydration.surveyEvidence.completeness} />
+          <Metric label="Raw photo count" value={hydration.surveyEvidence.rawPhotoCount} />
+        </div>
+      ) : (
+        <div className="mt-4"><EmptyState state="not_loaded">No project survey evidence was loaded; live panels remain explicit empty state.</EmptyState></div>
+      )}
+      <DeterministicNotes notes={hydration.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function CADReadinessWorkspace({ readiness }: { readiness: CADReadinessMetadataModel }) {
+  return (
+    <Panel title="CAD Readiness Metadata" eyebrow="Metadata only">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Ready flags" value={readiness.readyFlags.length} />
+        <Metric label="Partial flags" value={readiness.partialFlags.length} />
+        <Metric label="Blocked flags" value={readiness.blockedFlags.length} />
+        <Metric label="Runtime CAD" value="disabled" />
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        {readiness.flags.map(flag => (
+          <div key={flag.flagId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs">
+            <div className="flex items-center justify-between gap-3"><span className="font-mono text-white">{flag.flagId}</span><StatusPill value={flag.status} /></div>
+            <p className="mt-2 leading-5 text-slate-400">{flag.deterministicReason}</p>
+            <div className="mt-3 text-slate-500">Satisfied categories</div><TokenList values={flag.satisfiedCategories} />
+            <div className="mt-3 text-slate-500">Missing categories</div><TokenList values={flag.missingCategories} />
+            <div className="mt-3 text-slate-500">Explicit survey signals</div><TokenList values={flag.explicitSurveySignals} />
+          </div>
+        ))}
+      </div>
+      <div className="mt-4"><ListBox title="Prohibited runtime behavior" values={readiness.prohibitedRuntimeBehavior} /></div>
+      <DeterministicNotes notes={readiness.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function FieldEvidenceOrchestrationWorkspace({ orchestration }: { orchestration: FieldEvidenceOrchestrationModel }) {
+  return (
+    <Panel title="Field Evidence Orchestration" eyebrow="Technician movement order">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Workflow steps" value={orchestration.steps.length} />
+        <Metric label="Canonical groups" value={orchestration.groups.length} />
+        <Metric label="Capture items" value={orchestration.steps.reduce((sum, step) => sum + step.captureItems.length, 0)} />
+        <Metric label="Movement logic" value="deterministic" />
+      </div>
+      <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
+        <table className="w-full text-left text-xs">
+          <thead className="bg-white/[0.04] text-slate-400">
+            <tr><th className="p-3">Order</th><th className="p-3">Movement zone</th><th className="p-3">Group</th><th className="p-3">Instruction</th><th className="p-3">Capture categories</th></tr>
+          </thead>
+          <tbody className="divide-y divide-white/10">
+            {orchestration.steps.map(step => (
+              <tr key={step.stepId} className="align-top">
+                <td className="p-3 font-mono text-sky-300">{step.sequence}</td>
+                <td className="p-3"><div className="font-semibold text-white">{step.label}</div><div className="mt-1 font-mono text-slate-500">{step.movementZone}</div></td>
+                <td className="p-3 font-mono text-slate-300">{step.groupId}</td>
+                <td className="p-3 max-w-md text-slate-400">{step.technicianInstruction}<div className="mt-2 text-slate-500">{step.minimizesBacktrackingBecause}</div></td>
+                <td className="p-3"><TokenList values={step.captureItems.map(item => item.canonicalCategory)} limit={10} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        {orchestration.groups.map(group => <ListBox key={group.groupId} title={group.label} values={group.canonicalCategories} />)}
+      </div>
+      <div className="mt-4"><ListBox title="Prohibited runtime behavior" values={orchestration.prohibitedRuntimeBehavior} /></div>
+      <DeterministicNotes notes={orchestration.deterministicNotes} />
+    </Panel>
   );
 }
 

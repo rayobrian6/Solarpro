@@ -1,35 +1,34 @@
-# Engineering State Graph Persistence v1
+# Live Engineering State Hydration + Field Evidence Orchestration
 
-## Setup
-- [x] Confirm dev branch, baseline commit, and clean working tree
-- [x] Inventory existing state invalidation, dependency graph, provenance, render context, and decision modules
+## Repository and architecture audit
+- [x] Verify dev branch and clean/current repo state
+- [x] Inspect existing Engineering Intelligence workspace builder and persistence inputs
+- [x] Inspect canonical survey/evidence, requirement evaluation, invalidation, graph, and snapshot modules
+- [x] Inspect survey app/workflow structures and CAD/geometry metadata surfaces
 
-## Design and Implementation
-- [x] Add persistent engineering state graph/snapshot/transition data structures
-- [x] Add deterministic snapshot creation and hashing
-- [x] Add deterministic engineering state diff engine
-- [x] Add state transition history and timeline query helpers
-- [x] Integrate stable snapshot references into provenance/render/dependency/decision/invalidation metadata
-- [x] Expand audit guards for persistence invariants
+## Implementation
+- [x] Add deterministic field evidence orchestration model with technician movement ordering
+- [x] Add CAD readiness metadata model without CAD generation
+- [x] Add project hydration adapter for canonical evidence, requirements, graph edges, invalidation, snapshots, and regeneration planning
+- [x] Wire project Engineering Intelligence route to hydrated project state
+- [x] Improve graph edge, invalidation, snapshot, and regeneration panels to surface hydrated state clearly
+- [x] Add deterministic tests for orchestration, CAD readiness, and project hydration
 
-## Tests
-- [x] Add regression tests for stable snapshot hashes and identical input determinism
-- [x] Add regression tests for dependency-change invalidation lineage and preserved outputs
-- [x] Add regression tests for deterministic diff ordering and persisted stale-state transitions
-- [x] Add regression tests for audit guard failures on orphaned lineage
-- [x] Run focused tests for touched modules
+## Reports
+- [x] Create live engineering state hydration v1 report
+- [x] Create field evidence orchestration v1 report
+- [x] Create CAD readiness metadata v1 report
 
 ## Validation
-- [x] Run npm run check:topology
-- [x] Run npm run type-check
-- [x] Run npm test
-- [x] Run npm run build
-- [x] Run npm run lint
+- [x] Run topology check
+- [x] Run type-check
+- [x] Run tests
+- [x] Run build
+- [x] Run lint
 - [x] Run prohibited-boundary scan
 
-## Reports and Delivery
-- [x] Create engineering state graph persistence report
-- [x] Create engineering state diff engine report
-- [x] Commit implementation and reports locally on dev
-- [ ] Push dev to origin (blocked: current GitHub token lacks repository push permission)
-- [ ] Final summary with structures, engines, transitions, integrations, guards, tests, validation, snapshot-aware outputs, and prohibited-runtime confirmation
+## Commit and push
+- [x] Review diff/status
+- [x] Commit directly to dev
+- [x] Push dev safely without printing token
+- [x] Final summary with exact validation results
