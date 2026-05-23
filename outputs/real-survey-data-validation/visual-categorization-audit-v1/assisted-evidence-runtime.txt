@@ -1,0 +1,2420 @@
+--- assisted evidence source files ---
+===== lib/assistedEvidence/assistedEvidence.test.ts
+import { describe, expect, it } from 'vitest';
+import {
+  acceptCandidate,
+  assertCandidateIsNonAuthoritative,
+  candidateCanCreateWorkflowItems,
+  candidateCanInfluenceCADReadiness,
+  candidateCanInfluenceRecommendations,
+  candidateCanSatisfyRequirement,
+  createCandidate,
+  invalidatedCandidateCanProjectDownstream,
+  invalidateCandidate,
+  markReviewRequired,
+  projectionAutomaticallyMutatesCanonicalEvidence,
+  projectionIsEligibleForFutureMappingOnly,
+  rejectedCandidateIsAuditableButInactive,
+  rejectCandidate,
+  stableStringify,
+  supersedeCandidate,
+} from './index';
+import type { CreateAssistedEvidenceCandidateInput } from './types';
+
+const baseInput: CreateAssistedEvidenceCandidateInput = {
+  sourceFileId: 'file-assisted-1',
+  sourceUploadKey: 'uploads/project-1/survey-1/file-assisted-1.jpg',
+  projectId: 'project-assisted-1',
+  surveyId: 'survey-assisted-1',
+  candidateType: 'roof_edge_candidate',
+  candidateCategory: 'roof_context',
+  candidateConfidence: 0.74,
+  toolName: 'manual-fixture-assisted-evidence',
+  toolVersion: '1.0.0',
+  toolRunId: 'manual-run-1',
+  toolConfigHash: 'config-hash-fixture-1',
+  sourceMetadataHash: 'source-metadata-hash-1',
+  candidatePayload: { suggestedCategory: 'roof_edge', qualityNote: 'fixture metadata only' },
+  candidateSummary: 'Fixture candidate suggesting roof edge context; not authoritative.',
+  candidateClaims: [
+    { claimId: 'claim-2', field: 'qualityNote', value: 'fixture metadata only', confidence: 0.61, limitationRefs: ['manual-fixture'] },
+    { claimId: 'claim-1', field: 'suggestedCategory', value: 'roof_edge', confidence: 0.74, limitationRefs: ['manual-fixture'] },
+  ],
+  candidateLimitations: ['manual-fixture', 'no-image-processing', 'review-required'],
+  createdAt: '2025-01-01T00:00:00.000Z',
+  provenance: {
+    source: 'test_fixture',
+    createdBy: 'test-suite',
+    deterministicInputs: ['sourceFileId', 'candidatePayload'],
+    notes: ['No image bytes inspected.', 'Fixture metadata only.'],
+  },
+};
+
+function reviewRequiredCandidate() {
+  return markReviewRequired(createCandidate(baseInput));
+}
+
+describe('Assisted Evidence Sandbox Architecture V1', () => {
+  it('creates deterministic non-authoritative candidates from fixture metadata only', () => {
+    const candidate = createCandidate(baseInput);
+    const replay = createCandidate({ ...baseInput, candidateClaims: [...baseInput.candidateClaims].reverse() });
+
+    expect(candidate.candidateStatus).toBe('created');
+    expect(candidate.nonAuthoritative).toBe(true);
+    expect(candidate.reviewRequired).toBe(true);
+    expect(candidate.candidateId).toBe(replay.candidateId);
+    expect(candidate.deterministicHash).toBe(replay.deterministicHash);
+    expect(candidate.provenance.source).toBe('test_fixture');
+    expect(candidate.provenance.notes).toContain('No image bytes inspected.');
+  });
+
+  it('moves candidates into review-required quarantine', () => {
+    const candidate = reviewRequiredCandidate();
+    expect(candidate.candidateStatus).toBe('review_required');
+    expect(assertCandidateIsNonAuthoritative(candidate)).toBe(true);
+  });
+
+  it('proves unreviewed candidates cannot satisfy requirements, CAD readiness, recommendations, or workflows', () => {
+    const candidate = reviewRequiredCandidate();
+    expect(candidateCanSatisfyRequirement(candidate)).toBe(false);
+    expect(candidateCanInfluenceCADReadiness(candidate)).toBe(false);
+    expect(candidateCanInfluenceRecommendations(candidate)).toBe(false);
+    expect(candidateCanCreateWorkflowItems(candidate)).toBe(false);
+  });
+
+  it('rejects candidates while preserving auditable inactive candidate history', () => {
+    const result = rejectCandidate(reviewRequiredCandidate(), {
+      reviewerId: 'reviewer-1',
+      reviewedAt: '2025-01-02T00:00:00.000Z',
+      rejectedFields: ['suggestedCategory'],
+      reviewNotes: ['Rejected fixture candidate.'],
+    });
+
+    expect(result.projection).toBeNull();
+    expect(result.candidate.candidateStatus).toBe('rejected_by_reviewer');
+    expect(rejectedCandidateIsAuditableButInactive(result.candidate)).toBe(true);
+  });
+
+  it('invalidates candidates and blocks downstream projection', () => {
+    const invalidated = invalidateCandidate(reviewRequiredCandidate(), '2025-01-03T00:00:00.000Z');
+    expect(invalidated.candidateStatus).toBe('invalidated');
+    expect(invalidated.invalidatedAt).toBe('2025-01-03T00:00:00.000Z');
+    expect(invalidatedCandidateCanProjectDownstream(invalidated)).toBe(false);
+    expect(() => acceptCandidate(invalidated, { reviewerId: 'reviewer-1', reviewedAt: '2025-01-03T01:00:00.000Z', acceptedFields: ['suggestedCategory'] })).toThrow();
+  });
+
+  it('supersedes candidates while keeping source candidate auditable', () => {
+    const superseded = supersedeCandidate(reviewRequiredCandidate(), 'aec_replacement_candidate');
+    expect(superseded.candidateStatus).toBe('superseded');
+    expect(superseded.supersededBy).toBe('aec_replacement_candidate');
+    expect(candidateCanSatisfyRequirement(superseded)).toBe(false);
+  });
+
+  it('accepts review-required candidates into reviewed projections only', () => {
+    const result = acceptCandidate(reviewRequiredCandidate(), {
+      reviewerId: 'reviewer-1',
+      reviewedAt: '2025-01-04T00:00:00.000Z',
+      acceptedFields: ['suggestedCategory'],
+      rejectedFields: ['qualityNote'],
+      reviewNotes: ['Accepted category for future mapping eligibility only.'],
+    });
+
+    expect(result.candidate.candidateStatus).toBe('accepted_by_reviewer');
+    expect(result.projection.sourceCandidateId).toBe(result.candidate.candidateId);
+    expect(result.projection.projectionPayload).toEqual({ suggestedCategory: 'roof_edge' });
+    expect(result.projection.canonicalParticipationStatus).toBe('eligible_for_mapping');
+    expect(projectionIsEligibleForFutureMappingOnly(result.projection)).toBe(true);
+    expect(projectionAutomaticallyMutatesCanonicalEvidence(result.projection)).toBe(false);
+  });
+
+  it('does not allow accepted projection creation without explicit accepted fields', () => {
+    expect(() => acceptCandidate(reviewRequiredCandidate(), {
+      reviewerId: 'reviewer-1',
+      reviewedAt: '2025-01-04T00:00:00.000Z',
+      acceptedFields: [],
+    })).toThrow();
+  });
+
+  it('keeps deterministic hash stability and stable stringify replay behavior', () => {
+    const a = createCandidate(baseInput);
+    const b = createCandidate({
+      ...baseInput,
+      candidatePayload: { qualityNote: 'fixture metadata only', suggestedCategory: 'roof_edge' },
+      candidateLimitations: [...baseInput.candidateLimitations].reverse(),
+    });
+    expect(stableStringify({ b: 2, a: 1 })).toBe('{"a":1,"b":2}');
+    expect(a.deterministicHash).toBe(b.deterministicHash);
+  });
+});
+===== lib/assistedEvidence/candidateLifecycle.ts
+import { deterministicHash, withCandidateHash } from './candidateRegistry';
+import type { AssistedEvidenceCandidate, CreateAssistedEvidenceCandidateInput } from './types';
+
+function withoutCandidateHash(candidate: AssistedEvidenceCandidate): Omit<AssistedEvidenceCandidate, 'deterministicHash'> {
+  const { deterministicHash: _deterministicHash, ...rest } = candidate;
+  return rest;
+}
+
+function assertConfidence(confidence: number): void {
+  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+    throw new Error('Assisted evidence candidate confidence must be between 0 and 1.');
+  }
+}
+
+export function createCandidate(input: CreateAssistedEvidenceCandidateInput): AssistedEvidenceCandidate {
+  assertConfidence(input.candidateConfidence);
+  const candidateId = input.candidateId ?? `aec_${deterministicHash({
+    sourceFileId: input.sourceFileId,
+    sourceUploadKey: input.sourceUploadKey,
+    projectId: input.projectId,
+    surveyId: input.surveyId,
+    candidateType: input.candidateType,
+    candidatePayload: input.candidatePayload,
+    createdAt: input.createdAt,
+  }).slice(0, 24)}`;
+
+  return withCandidateHash({
+    candidateId,
+    sourceFileId: input.sourceFileId,
+    sourceUploadKey: input.sourceUploadKey,
+    projectId: input.projectId,
+    surveyId: input.surveyId,
+    candidateType: input.candidateType,
+    candidateCategory: input.candidateCategory,
+    candidateStatus: 'created',
+    candidateConfidence: input.candidateConfidence,
+    toolName: input.toolName,
+    toolVersion: input.toolVersion,
+    toolRunId: input.toolRunId,
+    toolConfigHash: input.toolConfigHash,
+    sourceMetadataHash: input.sourceMetadataHash,
+    candidatePayload: input.candidatePayload,
+    candidateSummary: input.candidateSummary,
+    candidateClaims: [...input.candidateClaims].sort((a, b) => a.claimId.localeCompare(b.claimId)),
+    candidateLimitations: [...input.candidateLimitations].sort((a, b) => a.localeCompare(b)),
+    nonAuthoritative: true,
+    reviewRequired: true,
+    createdAt: input.createdAt,
+    invalidatedAt: null,
+    supersededBy: null,
+    provenance: {
+      source: input.provenance?.source ?? 'manual_fixture',
+      sourceFileId: input.sourceFileId,
+      sourceUploadKey: input.sourceUploadKey,
+      projectId: input.projectId,
+      surveyId: input.surveyId,
+      toolName: input.toolName,
+      toolVersion: input.toolVersion,
+      toolRunId: input.toolRunId,
+      toolConfigHash: input.toolConfigHash,
+      sourceMetadataHash: input.sourceMetadataHash,
+      createdBy: input.provenance?.createdBy,
+      deterministicInputs: [...(input.provenance?.deterministicInputs ?? [])].sort((a, b) => a.localeCompare(b)),
+      notes: [...(input.provenance?.notes ?? ['Candidate was created from deterministic fixture metadata only.'])].sort((a, b) => a.localeCompare(b)),
+    },
+  });
+}
+
+export function markReviewRequired(candidate: AssistedEvidenceCandidate): AssistedEvidenceCandidate {
+  if (candidate.candidateStatus === 'invalidated' || candidate.candidateStatus === 'superseded') return candidate;
+  return withCandidateHash({ ...withoutCandidateHash(candidate), candidateStatus: 'review_required' });
+}
+
+export function invalidateCandidate(candidate: AssistedEvidenceCandidate, invalidatedAt: string): AssistedEvidenceCandidate {
+  return withCandidateHash({ ...withoutCandidateHash(candidate), candidateStatus: 'invalidated', invalidatedAt });
+}
+
+export function supersedeCandidate(candidate: AssistedEvidenceCandidate, supersededBy: string): AssistedEvidenceCandidate {
+  if (!supersededBy) throw new Error('supersededBy is required when superseding an assisted evidence candidate.');
+  return withCandidateHash({ ...withoutCandidateHash(candidate), candidateStatus: 'superseded', supersededBy });
+}
+===== lib/assistedEvidence/candidateRegistry.ts
+import { createHash } from 'node:crypto';
+import type { AssistedEvidenceCandidate, ReviewedEvidenceProjection } from './types';
+
+export const ASSISTED_EVIDENCE_MODEL_VERSION = 'assisted_evidence_sandbox_v1' as const;
+
+export function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, entryValue]) => entryValue !== undefined)
+    .sort(([a], [b]) => a.localeCompare(b));
+  return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`).join(',')}}`;
+}
+
+export function deterministicHash(value: unknown): string {
+  return createHash('sha256').update(stableStringify(value)).digest('hex');
+}
+
+export function candidateHashInput(candidate: Omit<AssistedEvidenceCandidate, 'deterministicHash'>): Record<string, unknown> {
+  return {
+    modelVersion: ASSISTED_EVIDENCE_MODEL_VERSION,
+    candidateId: candidate.candidateId,
+    sourceFileId: candidate.sourceFileId,
+    sourceUploadKey: candidate.sourceUploadKey,
+    projectId: candidate.projectId,
+    surveyId: candidate.surveyId,
+    candidateType: candidate.candidateType,
+    candidateCategory: candidate.candidateCategory,
+    candidateStatus: candidate.candidateStatus,
+    candidateConfidence: candidate.candidateConfidence,
+    toolName: candidate.toolName,
+    toolVersion: candidate.toolVersion,
+    toolRunId: candidate.toolRunId,
+    toolConfigHash: candidate.toolConfigHash,
+    sourceMetadataHash: candidate.sourceMetadataHash,
+    candidatePayload: candidate.candidatePayload,
+    candidateSummary: candidate.candidateSummary,
+    candidateClaims: candidate.candidateClaims,
+    candidateLimitations: candidate.candidateLimitations,
+    nonAuthoritative: candidate.nonAuthoritative,
+    reviewRequired: candidate.reviewRequired,
+    createdAt: candidate.createdAt,
+    invalidatedAt: candidate.invalidatedAt,
+    supersededBy: candidate.supersededBy,
+    provenance: candidate.provenance,
+  };
+}
+
+export function withCandidateHash(candidate: Omit<AssistedEvidenceCandidate, 'deterministicHash'>): AssistedEvidenceCandidate {
+  return { ...candidate, deterministicHash: deterministicHash(candidateHashInput(candidate)) };
+}
+
+export function projectionHashInput(projection: Omit<ReviewedEvidenceProjection, 'deterministicHash'>): Record<string, unknown> {
+  return {
+    modelVersion: ASSISTED_EVIDENCE_MODEL_VERSION,
+    projectionId: projection.projectionId,
+    sourceCandidateId: projection.sourceCandidateId,
+    projectId: projection.projectId,
+    surveyId: projection.surveyId,
+    reviewerId: projection.reviewerId,
+    acceptedFields: projection.acceptedFields,
+    projectionCategory: projection.projectionCategory,
+    projectionPayload: projection.projectionPayload,
+    projectionConfidence: projection.projectionConfidence,
+    projectionLimitations: projection.projectionLimitations,
+    projectionStatus: projection.projectionStatus,
+    createdAt: projection.createdAt,
+    canonicalParticipationStatus: projection.canonicalParticipationStatus,
+    reviewProvenance: projection.reviewProvenance,
+  };
+}
+
+export function withProjectionHash(projection: Omit<ReviewedEvidenceProjection, 'deterministicHash'>): ReviewedEvidenceProjection {
+  return { ...projection, deterministicHash: deterministicHash(projectionHashInput(projection)) };
+}
+===== lib/assistedEvidence/index.ts
+export * from './types';
+export * from './candidateRegistry';
+export * from './candidateLifecycle';
+export * from './reviewWorkflow';
+export * from './reviewProjection';
+export * from './sandboxGuards';
+===== lib/assistedEvidence/reviewProjection.ts
+import { deterministicHash, withProjectionHash } from './candidateRegistry';
+import type { AssistedEvidenceCandidate, CandidateReviewInput, ReviewedEvidenceProjection } from './types';
+
+export function buildProjectionPayload(candidate: AssistedEvidenceCandidate, acceptedFields: string[]): Record<string, unknown> {
+  const accepted = new Set(acceptedFields);
+  const payload: Record<string, unknown> = {};
+  for (const claim of candidate.candidateClaims) {
+    if (accepted.has(claim.field)) payload[claim.field] = claim.value;
+  }
+  return payload;
+}
+
+export function createReviewedEvidenceProjection(
+  candidate: AssistedEvidenceCandidate,
+  review: Required<Pick<CandidateReviewInput, 'reviewerId' | 'reviewedAt'>> & CandidateReviewInput,
+): ReviewedEvidenceProjection {
+  if (candidate.candidateStatus !== 'review_required') {
+    throw new Error('Only review-required assisted evidence candidates can create reviewed projections.');
+  }
+  const acceptedFields = [...(review.acceptedFields ?? [])].sort((a, b) => a.localeCompare(b));
+  if (acceptedFields.length === 0) throw new Error('Accepted assisted evidence projections require at least one accepted field.');
+  const rejectedFields = [...(review.rejectedFields ?? [])].sort((a, b) => a.localeCompare(b));
+  const reviewNotes = [...(review.reviewNotes ?? [])].sort((a, b) => a.localeCompare(b));
+  const projectionPayload = buildProjectionPayload(candidate, acceptedFields);
+  const projectionSeed = {
+    sourceCandidateId: candidate.candidateId,
+    reviewerId: review.reviewerId,
+    reviewedAt: review.reviewedAt,
+    acceptedFields,
+    projectionPayload,
+  };
+  const projectionId = `aep_${deterministicHash(projectionSeed).slice(0, 24)}`;
+  const projectionWithoutReviewHash = {
+    projectionId,
+    sourceCandidateId: candidate.candidateId,
+    projectId: candidate.projectId,
+    surveyId: candidate.surveyId,
+    reviewerId: review.reviewerId,
+    acceptedFields,
+    projectionCategory: candidate.candidateCategory,
+    projectionPayload,
+    projectionConfidence: candidate.candidateConfidence,
+    projectionLimitations: candidate.candidateLimitations,
+    projectionStatus: 'active_reviewed_projection' as const,
+    createdAt: review.reviewedAt,
+    canonicalParticipationStatus: 'eligible_for_mapping' as const,
+    reviewProvenance: {
+      reviewerId: review.reviewerId,
+      reviewedAt: review.reviewedAt,
+      reviewDecision: 'accepted' as const,
+      acceptedFields,
+      rejectedFields,
+      reviewNotes,
+      sourceCandidateId: candidate.candidateId,
+      candidateHash: candidate.deterministicHash,
+      reviewProjectionHash: '',
+    },
+  };
+  const reviewProjectionHash = deterministicHash({ ...projectionWithoutReviewHash, reviewProvenance: { ...projectionWithoutReviewHash.reviewProvenance, reviewProjectionHash: 'pending' } });
+  return withProjectionHash({
+    ...projectionWithoutReviewHash,
+    reviewProvenance: { ...projectionWithoutReviewHash.reviewProvenance, reviewProjectionHash },
+  });
+}
+===== lib/assistedEvidence/reviewWorkflow.ts
+import { withCandidateHash } from './candidateRegistry';
+import { invalidateCandidate, supersedeCandidate } from './candidateLifecycle';
+import { createReviewedEvidenceProjection } from './reviewProjection';
+import type { AssistedEvidenceCandidate, CandidateReviewInput, ReviewedEvidenceProjection } from './types';
+
+function withoutCandidateHash(candidate: AssistedEvidenceCandidate): Omit<AssistedEvidenceCandidate, 'deterministicHash'> {
+  const { deterministicHash: _deterministicHash, ...rest } = candidate;
+  return rest;
+}
+
+export interface AcceptedCandidateReviewResult {
+  candidate: AssistedEvidenceCandidate;
+  projection: ReviewedEvidenceProjection;
+}
+
+export interface RejectedCandidateReviewResult {
+  candidate: AssistedEvidenceCandidate;
+  projection: null;
+}
+
+export function acceptCandidate(candidate: AssistedEvidenceCandidate, review: CandidateReviewInput): AcceptedCandidateReviewResult {
+  if (candidate.candidateStatus !== 'review_required') {
+    throw new Error('Only review-required assisted evidence candidates can be accepted.');
+  }
+  if (!review.reviewerId || !review.reviewedAt) throw new Error('Reviewer id and reviewedAt are required for acceptance.');
+  const projection = createReviewedEvidenceProjection(candidate, {
+    reviewerId: review.reviewerId,
+    reviewedAt: review.reviewedAt,
+    acceptedFields: review.acceptedFields ?? [],
+    rejectedFields: review.rejectedFields ?? [],
+    reviewNotes: review.reviewNotes ?? [],
+  });
+  const acceptedCandidate = withCandidateHash({ ...withoutCandidateHash(candidate), candidateStatus: 'accepted_by_reviewer' });
+  return { candidate: acceptedCandidate, projection };
+}
+
+export function rejectCandidate(candidate: AssistedEvidenceCandidate, review: CandidateReviewInput): RejectedCandidateReviewResult {
+  if (candidate.candidateStatus !== 'review_required') {
+    throw new Error('Only review-required assisted evidence candidates can be rejected.');
+  }
+  if (!review.reviewerId || !review.reviewedAt) throw new Error('Reviewer id and reviewedAt are required for rejection.');
+  return { candidate: withCandidateHash({ ...withoutCandidateHash(candidate), candidateStatus: 'rejected_by_reviewer' }), projection: null };
+}
+
+export { invalidateCandidate, supersedeCandidate };
+===== lib/assistedEvidence/sandboxGuards.ts
+import type { AssistedEvidenceCandidate, ReviewedEvidenceProjection } from './types';
+
+export function assertCandidateIsNonAuthoritative(candidate: AssistedEvidenceCandidate): true {
+  if (candidate.nonAuthoritative !== true || candidate.reviewRequired !== true) {
+    throw new Error('Assisted evidence candidates must remain non-authoritative and review-required.');
+  }
+  return true;
+}
+
+export function candidateCanSatisfyRequirement(_candidate: AssistedEvidenceCandidate): false {
+  return false;
+}
+
+export function candidateCanInfluenceCADReadiness(_candidate: AssistedEvidenceCandidate): false {
+  return false;
+}
+
+export function candidateCanInfluenceRecommendations(_candidate: AssistedEvidenceCandidate): false {
+  return false;
+}
+
+export function candidateCanCreateWorkflowItems(_candidate: AssistedEvidenceCandidate): false {
+  return false;
+}
+
+export function candidateCanProjectDownstream(candidate: AssistedEvidenceCandidate): boolean {
+  return candidate.candidateStatus === 'review_required';
+}
+
+export function invalidatedCandidateCanProjectDownstream(candidate: AssistedEvidenceCandidate): false {
+  if (candidate.candidateStatus !== 'invalidated') return false;
+  return false;
+}
+
+export function rejectedCandidateIsAuditableButInactive(candidate: AssistedEvidenceCandidate): boolean {
+  return candidate.candidateStatus === 'rejected_by_reviewer' && candidate.nonAuthoritative === true && candidate.reviewRequired === true;
+}
+
+export function projectionAutomaticallyMutatesCanonicalEvidence(_projection: ReviewedEvidenceProjection): false {
+  return false;
+}
+
+export function projectionIsEligibleForFutureMappingOnly(projection: ReviewedEvidenceProjection): boolean {
+  return projection.projectionStatus === 'active_reviewed_projection'
+    && projection.canonicalParticipationStatus === 'eligible_for_mapping';
+}
+===== lib/assistedEvidence/types.ts
+export type AssistedEvidenceCandidateStatus =
+  | 'created'
+  | 'review_required'
+  | 'accepted_by_reviewer'
+  | 'rejected_by_reviewer'
+  | 'superseded'
+  | 'invalidated';
+
+export type AssistedEvidenceCandidateType =
+  | 'photo_quality_candidate'
+  | 'orientation_candidate'
+  | 'duplicate_similarity_candidate'
+  | 'text_region_candidate'
+  | 'utility_scene_candidate'
+  | 'electrical_scene_candidate'
+  | 'roof_edge_candidate'
+  | 'routing_continuity_candidate'
+  | 'trench_context_candidate'
+  | 'ess_context_candidate'
+  | 'detached_structure_candidate';
+
+export type AssistedEvidenceCandidateCategory =
+  | 'quality'
+  | 'orientation'
+  | 'duplicate_hygiene'
+  | 'field_context'
+  | 'electrical_context'
+  | 'roof_context'
+  | 'routing_context'
+  | 'trench_context'
+  | 'ess_context'
+  | 'structure_context';
+
+export type AssistedEvidenceReviewDecision = 'accepted' | 'rejected';
+
+export type AssistedEvidenceProjectionStatus = 'active_reviewed_projection' | 'inactive_rejected' | 'inactive_invalidated' | 'inactive_superseded';
+
+export type CanonicalParticipationStatus =
+  | 'not_eligible'
+  | 'eligible_for_mapping'
+  | 'mapped_to_explicit_survey_metadata'
+  | 'mapped_to_reviewed_evidence'
+  | 'rejected_from_canonical';
+
+export interface AssistedEvidenceProvenance {
+  source: 'manual_fixture' | 'test_fixture' | 'future_assisted_tool_placeholder';
+  sourceFileId: string;
+  sourceUploadKey: string;
+  projectId: string;
+  surveyId: string;
+  toolName: string;
+  toolVersion: string;
+  toolRunId: string;
+  toolConfigHash: string;
+  sourceMetadataHash: string;
+  createdBy?: string;
+  deterministicInputs: string[];
+  notes: string[];
+}
+
+export interface AssistedEvidenceCandidateClaim {
+  claimId: string;
+  field: string;
+  value: unknown;
+  confidence: number;
+  limitationRefs: string[];
+}
+
+export interface AssistedEvidenceCandidate {
+  candidateId: string;
+  sourceFileId: string;
+  sourceUploadKey: string;
+  projectId: string;
+  surveyId: string;
+  candidateType: AssistedEvidenceCandidateType;
+  candidateCategory: AssistedEvidenceCandidateCategory;
+  candidateStatus: AssistedEvidenceCandidateStatus;
+  candidateConfidence: number;
+  toolName: string;
+  toolVersion: string;
+  toolRunId: string;
+  toolConfigHash: string;
+  sourceMetadataHash: string;
+  candidatePayload: Record<string, unknown>;
+  candidateSummary: string;
+  candidateClaims: AssistedEvidenceCandidateClaim[];
+  candidateLimitations: string[];
+  nonAuthoritative: true;
+  reviewRequired: true;
+  createdAt: string;
+  invalidatedAt: string | null;
+  supersededBy: string | null;
+  provenance: AssistedEvidenceProvenance;
+  deterministicHash: string;
+}
+
+export interface AssistedEvidenceReviewProvenance {
+  reviewerId: string;
+  reviewedAt: string;
+  reviewDecision: AssistedEvidenceReviewDecision;
+  acceptedFields: string[];
+  rejectedFields: string[];
+  reviewNotes: string[];
+  sourceCandidateId: string;
+  candidateHash: string;
+  reviewProjectionHash: string;
+}
+
+export interface ReviewedEvidenceProjection {
+  projectionId: string;
+  sourceCandidateId: string;
+  projectId: string;
+  surveyId: string;
+  reviewerId: string;
+  acceptedFields: string[];
+  projectionCategory: AssistedEvidenceCandidateCategory;
+  projectionPayload: Record<string, unknown>;
+  projectionConfidence: number;
+  projectionLimitations: string[];
+  projectionStatus: AssistedEvidenceProjectionStatus;
+  createdAt: string;
+  deterministicHash: string;
+  canonicalParticipationStatus: CanonicalParticipationStatus;
+  reviewProvenance: AssistedEvidenceReviewProvenance;
+}
+
+export interface CreateAssistedEvidenceCandidateInput {
+  candidateId?: string;
+  sourceFileId: string;
+  sourceUploadKey: string;
+  projectId: string;
+  surveyId: string;
+  candidateType: AssistedEvidenceCandidateType;
+  candidateCategory: AssistedEvidenceCandidateCategory;
+  candidateConfidence: number;
+  toolName: string;
+  toolVersion: string;
+  toolRunId: string;
+  toolConfigHash: string;
+  sourceMetadataHash: string;
+  candidatePayload: Record<string, unknown>;
+  candidateSummary: string;
+  candidateClaims: AssistedEvidenceCandidateClaim[];
+  candidateLimitations: string[];
+  createdAt: string;
+  provenance?: Partial<AssistedEvidenceProvenance>;
+}
+
+export interface CandidateReviewInput {
+  reviewerId: string;
+  reviewedAt: string;
+  acceptedFields?: string[];
+  rejectedFields?: string[];
+  reviewNotes?: string[];
+}
+===== lib/assistedEvidenceSources/assistedEvidenceSources.test.ts
+import { describe, expect, it } from 'vitest';
+import {
+  classifyLicensePosture,
+  generateMetadataFixtureCandidates,
+  generateOcrFixtureCandidates,
+  getRegisteredOpenSourceTool,
+  normalizeCandidateConfidence,
+  validateOpenSourceToolDefinition,
+} from './index';
+import type { AssistedEvidenceSourceContext, MetadataFixturePayload, OcrFixturePayload } from './index';
+
+const sourceContext: AssistedEvidenceSourceContext = {
+  sourceFileId: 'fixture-source-file-1',
+  sourceUploadKey: 'uploads/project-fixture/survey-fixture/source-file-1.jpg',
+  projectId: 'project-fixture',
+  surveyId: 'survey-fixture',
+  toolRunId: 'fixture-run-1',
+  toolConfigHash: 'fixture-config-hash-1',
+  sourceMetadataHash: 'fixture-source-metadata-hash-1',
+  createdAt: '2025-02-01T00:00:00.000Z',
+  createdBy: 'fixture-test-suite',
+};
+
+const metadataPayload: MetadataFixturePayload = {
+  fixtureId: 'metadata-fixture-1',
+  imageWidth: 800,
+  imageHeight: 600,
+  orientationHint: 'landscape',
+  duplicateGroupHint: 'possible-duplicate-group-a',
+  signals: [
+    { signalId: 'metadata-signal-2', field: 'possible_duplicate_photo', value: true, confidence: 0.42, limitationRefs: ['filename-similarity-only'] },
+    { signalId: 'metadata-signal-1', field: 'possible_low_resolution_photo', value: '800x600', confidence: 0.37, limitationRefs: ['fixture-dimensions-only'] },
+  ],
+};
+
+const ocrPayload: OcrFixturePayload = {
+  fixtureId: 'ocr-fixture-1',
+  textRegionCount: 2,
+  signals: [
+    { signalId: 'ocr-signal-2', field: 'possible_equipment_label_text', text: 'INV-1 FIXTURE', confidence: 0.51, limitationRefs: ['fixture-text-only'] },
+    { signalId: 'ocr-signal-1', field: 'possible_meter_label_text', text: 'METER FIXTURE 123', confidence: 0.46, limitationRefs: ['fixture-text-only'] },
+  ],
+};
+
+describe('Open-source assisted evidence registry and fixture adapters', () => {
+  it('classifies approved, caution, and blocked license posture', () => {
+    expect(classifyLicensePosture('MIT')).toBe('approved');
+    expect(classifyLicensePosture('MPL-2.0')).toBe('caution');
+    expect(classifyLicensePosture('AGPL-3.0')).toBe('blocked');
+    expect(classifyLicensePosture('unknown license')).toBe('blocked');
+  });
+
+  it('rejects invalid tool definitions and canonical mutation permissions', () => {
+    const valid = getRegisteredOpenSourceTool('fixture-image-metadata-adapter', '1.0.0');
+    expect(valid.canonicalMutationAllowed).toBe(false);
+    expect(valid.reviewRequired).toBe(true);
+    expect(() => validateOpenSourceToolDefinition({ ...valid, canonicalMutationAllowed: true as false })).toThrow(/canonical mutation/i);
+    expect(() => validateOpenSourceToolDefinition({ ...valid, license: 'GPL-3.0' })).toThrow(/blocked/i);
+    expect(() => validateOpenSourceToolDefinition({ ...valid, toolName: '' })).toThrow(/toolName/i);
+  });
+
+  it('rejects unregistered tool execution', () => {
+    expect(() => getRegisteredOpenSourceTool('not-registered', '0.0.1')).toThrow(/Unregistered/);
+  });
+
+  it('normalizes confidence without implicit upgrades', () => {
+    expect(normalizeCandidateConfidence(-1)).toBe(0);
+    expect(normalizeCandidateConfidence(1.25)).toBe(1);
+    expect(normalizeCandidateConfidence(0.37456)).toBe(0.3746);
+  });
+
+  it('metadata fixture adapter generates deterministic review-required non-canonical candidates', () => {
+    const first = generateMetadataFixtureCandidates(sourceContext, metadataPayload);
+    const second = generateMetadataFixtureCandidates(sourceContext, { ...metadataPayload, signals: [...metadataPayload.signals].reverse() });
+
+    expect(first.candidates).toHaveLength(2);
+    expect(first.candidates.map(candidate => candidate.candidateStatus)).toEqual(['review_required', 'review_required']);
+    expect(first.candidates.map(candidate => candidate.nonAuthoritative)).toEqual([true, true]);
+    expect(first.candidates.map(candidate => candidate.reviewRequired)).toEqual([true, true]);
+    expect(first.candidates.map(candidate => candidate.deterministicHash)).toEqual(second.candidates.map(candidate => candidate.deterministicHash));
+    expect(first.candidates[0].candidatePayload.fixtureOnly).toBe(true);
+    expect(first.candidates[0].candidateLimitations).toContain('no-image-bytes-inspected');
+    expect(first.candidates[0].provenance.notes.join(' ')).toContain('no runtime OCR/CV/image processing executed');
+  });
+
+  it('OCR fixture adapter generates deterministic text candidates without OCR runtime authority', () => {
+    const first = generateOcrFixtureCandidates(sourceContext, ocrPayload);
+    const second = generateOcrFixtureCandidates(sourceContext, { ...ocrPayload, signals: [...ocrPayload.signals].reverse() });
+
+    expect(first.candidates).toHaveLength(2);
+    expect(first.candidates.map(candidate => candidate.candidateType)).toEqual(['text_region_candidate', 'text_region_candidate']);
+    expect(first.candidates.map(candidate => candidate.candidateStatus)).toEqual(['review_required', 'review_required']);
+    expect(first.candidates.map(candidate => candidate.deterministicHash)).toEqual(second.candidates.map(candidate => candidate.deterministicHash));
+    expect(first.candidates[0].candidateLimitations).toContain('no-ocr-runtime');
+    expect(first.candidates[0].candidatePayload.fixtureOnly).toBe(true);
+  });
+
+  it('preserves low confidence fixture signals instead of upgrading them', () => {
+    const result = generateMetadataFixtureCandidates(sourceContext, metadataPayload);
+    const lowResolution = result.candidates.find(candidate => candidate.candidateClaims.some(claim => claim.field === 'possible_low_resolution_photo'));
+    expect(lowResolution?.candidateConfidence).toBe(0.37);
+  });
+});
+===== lib/assistedEvidenceSources/candidateAdapterContracts.ts
+import type { FixtureCandidateAdapter, MetadataFixturePayload, MetadataRuntimePayload, OcrFixturePayload, OcrRuntimePayload, RuntimeCandidateAdapter } from './candidateAdapterTypes';
+
+export type MetadataCandidateFixtureAdapter = FixtureCandidateAdapter<MetadataFixturePayload>;
+export type OcrCandidateFixtureAdapter = FixtureCandidateAdapter<OcrFixturePayload>;
+export type MetadataCandidateRuntimeAdapter = RuntimeCandidateAdapter<MetadataRuntimePayload>;
+export type OcrCandidateRuntimeAdapter = RuntimeCandidateAdapter<OcrRuntimePayload>;
+export type VisualCategorizationFixtureAdapter = FixtureCandidateAdapter<Record<string, never>>;
+export type FutureGeometryAdapterPlaceholder = never;
+
+export const ADAPTER_CONTRACT_INVARIANTS = [
+  'Adapters output normalized candidate payloads only.',
+  'Adapters must route candidate creation through createCandidate() and markReviewRequired().',
+  'Runtime adapters must be server-only and adapter-contained.',
+  'Adapters must not import canonical evidence, engineering requirements, CAD readiness, recommendations, or workflows.',
+  'Adapters must not upgrade confidence implicitly.',
+  'Future geometry adapters are placeholders only and are not approved for runtime execution.',
+] as const;
+===== lib/assistedEvidenceSources/candidateAdapterTypes.ts
+import type { AssistedEvidenceCandidate, AssistedEvidenceCandidateCategory, AssistedEvidenceCandidateClaim, AssistedEvidenceCandidateType, CreateAssistedEvidenceCandidateInput } from '@/lib/assistedEvidence';
+import type { ValidatedOpenSourceToolDefinition } from './openSourceToolTypes';
+
+export interface AssistedEvidenceSourceContext {
+  sourceFileId: string;
+  sourceUploadKey: string;
+  projectId: string;
+  surveyId: string;
+  toolRunId: string;
+  toolConfigHash: string;
+  sourceMetadataHash: string;
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface NormalizedCandidatePayload {
+  candidateType: AssistedEvidenceCandidateType;
+  candidateCategory: AssistedEvidenceCandidateCategory;
+  candidateConfidence: number;
+  candidatePayload: Record<string, unknown>;
+  candidateSummary: string;
+  candidateClaims: AssistedEvidenceCandidateClaim[];
+  candidateLimitations: string[];
+  deterministicInputRefs: string[];
+}
+
+export interface CandidateAdapterInput<RawFixturePayload> {
+  tool: ValidatedOpenSourceToolDefinition;
+  sourceContext: AssistedEvidenceSourceContext;
+  rawPayload: RawFixturePayload;
+}
+
+export interface CandidateAdapterResult {
+  normalizedCandidates: NormalizedCandidatePayload[];
+  candidateInputs: CreateAssistedEvidenceCandidateInput[];
+  candidates: AssistedEvidenceCandidate[];
+}
+
+export interface FixtureCandidateAdapter<RawFixturePayload> {
+  adapterId: string;
+  adapterVersion: string;
+  toolName: string;
+  toolVersion: string;
+  normalize(input: CandidateAdapterInput<RawFixturePayload>): NormalizedCandidatePayload[];
+  generateCandidates(input: CandidateAdapterInput<RawFixturePayload>): CandidateAdapterResult;
+}
+
+export interface RuntimeCandidateAdapter<RuntimePayload> {
+  adapterId: string;
+  adapterVersion: string;
+  toolName: string;
+  toolVersion: string;
+  extractRuntimePayload(imageBytes: Uint8Array): Promise<RuntimePayload>;
+  normalize(input: CandidateAdapterInput<RuntimePayload>): NormalizedCandidatePayload[];
+  generateCandidates(input: CandidateAdapterInput<RuntimePayload>): CandidateAdapterResult;
+}
+
+export interface MetadataRuntimePayload {
+  runtimePayloadHash: string;
+  inputByteLength: number;
+  format: string | null;
+  width: number | null;
+  height: number | null;
+  orientation: number | null;
+  density: number | null;
+  hasExifMetadata: boolean;
+  hasProfile: boolean;
+  hasAlpha: boolean;
+  pages: number | null;
+  fileSizeBucket: 'empty' | 'small' | 'normal' | 'large';
+  derivedSignals: MetadataRuntimeSignal[];
+}
+
+export interface MetadataRuntimeSignal {
+  signalId: string;
+  field:
+    | 'possible_image_orientation'
+    | 'possible_low_resolution_photo'
+    | 'possible_large_image_file'
+    | 'possible_missing_exif_metadata'
+    | 'possible_invalid_photo_dimensions'
+    | 'possible_duplicate_photo';
+  value: string | number | boolean | null;
+  confidence: number;
+  limitationRefs: string[];
+}
+
+export interface MetadataFixtureSignal {
+  signalId: string;
+  field: 'possible_image_orientation' | 'possible_low_resolution_photo' | 'possible_duplicate_photo';
+  value: string | number | boolean;
+  confidence: number;
+  limitationRefs: string[];
+}
+
+export interface MetadataFixturePayload {
+  fixtureId: string;
+  imageWidth: number;
+  imageHeight: number;
+  orientationHint: string;
+  duplicateGroupHint: string | null;
+  signals: MetadataFixtureSignal[];
+}
+
+export interface OcrFixtureSignal {
+  signalId: string;
+  field: 'possible_meter_label_text' | 'possible_equipment_label_text';
+  text: string;
+  confidence: number;
+  limitationRefs: string[];
+}
+
+export interface OcrFixturePayload {
+  fixtureId: string;
+  textRegionCount: number;
+  signals: OcrFixtureSignal[];
+}
+
+export type OcrRuntimeField =
+  | 'possible_utility_account_number'
+  | 'possible_meter_number'
+  | 'possible_service_panel_rating_text'
+  | 'possible_breaker_rating_text'
+  | 'possible_equipment_label_text'
+  | 'possible_address_text'
+  | 'possible_placard_text'
+  | 'possible_invoice_or_bill_text'
+  | 'possible_nameplate_text';
+
+export interface OcrRuntimeSignal {
+  signalId: string;
+  field: OcrRuntimeField;
+  text: string;
+  confidence: number;
+  limitationRefs: string[];
+}
+
+export interface OcrRuntimePayload {
+  runtimePayloadHash: string;
+  inputByteLength: number;
+  method: 'tesseract-js' | 'none';
+  confidence: number;
+  text: string;
+  textLength: number;
+  textLineCount: number;
+  derivedSignals: OcrRuntimeSignal[];
+}
+===== lib/assistedEvidenceSources/candidateConfidenceRules.ts
+export function normalizeCandidateConfidence(confidence: number): number {
+  if (!Number.isFinite(confidence)) return 0;
+  const clamped = Math.min(1, Math.max(0, confidence));
+  return Math.round(clamped * 10000) / 10000;
+}
+
+export function preserveLowestConfidence(values: number[]): number {
+  if (values.length === 0) return 0;
+  return normalizeCandidateConfidence(Math.min(...values));
+}
+===== lib/assistedEvidenceSources/candidateNormalization.ts
+import { createCandidate, deterministicHash, markReviewRequired } from '@/lib/assistedEvidence';
+import type { AssistedEvidenceCandidate, CreateAssistedEvidenceCandidateInput } from '@/lib/assistedEvidence';
+import { assertToolCanEmitCandidateType } from './openSourceToolRegistry';
+import { normalizeCandidateConfidence } from './candidateConfidenceRules';
+import type { AssistedEvidenceSourceContext, CandidateAdapterResult, NormalizedCandidatePayload } from './candidateAdapterTypes';
+import type { ValidatedOpenSourceToolDefinition } from './openSourceToolTypes';
+
+function sortedUnique(values: string[]): string[] {
+  return [...new Set(values)].sort((a, b) => a.localeCompare(b));
+}
+
+export function normalizeCandidatePayload(payload: NormalizedCandidatePayload): NormalizedCandidatePayload {
+  return {
+    ...payload,
+    candidateConfidence: normalizeCandidateConfidence(payload.candidateConfidence),
+    candidateClaims: [...payload.candidateClaims]
+      .map(claim => ({ ...claim, confidence: normalizeCandidateConfidence(claim.confidence), limitationRefs: sortedUnique(claim.limitationRefs) }))
+      .sort((a, b) => a.claimId.localeCompare(b.claimId)),
+    candidateLimitations: sortedUnique(payload.candidateLimitations),
+    deterministicInputRefs: sortedUnique(payload.deterministicInputRefs),
+  };
+}
+
+export function toCreateCandidateInput(
+  tool: ValidatedOpenSourceToolDefinition,
+  sourceContext: AssistedEvidenceSourceContext,
+  payload: NormalizedCandidatePayload,
+): CreateAssistedEvidenceCandidateInput {
+  assertToolCanEmitCandidateType(tool, payload.candidateType);
+  const normalized = normalizeCandidatePayload(payload);
+  const registryHash = deterministicHash({
+    toolName: tool.toolName,
+    toolVersion: tool.toolVersion,
+    license: tool.license,
+    runtimeCategory: tool.runtimeCategory,
+    allowedRuntimeBoundary: tool.allowedRuntimeBoundary,
+  });
+
+  return {
+    sourceFileId: sourceContext.sourceFileId,
+    sourceUploadKey: sourceContext.sourceUploadKey,
+    projectId: sourceContext.projectId,
+    surveyId: sourceContext.surveyId,
+    candidateType: normalized.candidateType,
+    candidateCategory: normalized.candidateCategory,
+    candidateConfidence: normalized.candidateConfidence,
+    toolName: tool.toolName,
+    toolVersion: tool.toolVersion,
+    toolRunId: sourceContext.toolRunId,
+    toolConfigHash: sourceContext.toolConfigHash,
+    sourceMetadataHash: sourceContext.sourceMetadataHash,
+    candidatePayload: {
+      ...normalized.candidatePayload,
+      registryHash,
+      runtimeCategory: tool.runtimeCategory,
+      allowedRuntimeBoundary: tool.allowedRuntimeBoundary,
+      fixtureOnly: tool.runtimeCategory === 'fixture_only',
+    },
+    candidateSummary: normalized.candidateSummary,
+    candidateClaims: normalized.candidateClaims,
+    candidateLimitations: sortedUnique([
+      ...normalized.candidateLimitations,
+      tool.runtimeCategory === 'fixture_only' ? 'fixture-only' : 'runtime-pilot',
+      'non-authoritative',
+      'review-required',
+    ]),
+    createdAt: sourceContext.createdAt,
+    provenance: {
+      source: 'future_assisted_tool_placeholder',
+      createdBy: sourceContext.createdBy,
+      deterministicInputs: sortedUnique([
+        'registered-open-source-tool',
+        tool.runtimeCategory === 'fixture_only' ? 'fixture-payload' : 'runtime-payload',
+        'source-context',
+        ...normalized.deterministicInputRefs,
+      ]),
+      notes: sortedUnique([
+        tool.runtimeCategory === 'fixture_only'
+          ? 'Fixture-only adapter output; no runtime OCR/CV/image processing executed.'
+          : tool.runtimeCategory === 'ocr_text_candidate'
+            ? 'Controlled OCR runtime pilot output; text extraction only, no semantic image understanding or engineering inference executed.'
+            : 'Controlled metadata runtime pilot output; no OCR/CV/semantic image understanding executed.',
+        `Registered source tool ${tool.toolName}@${tool.toolVersion}.`,
+        `License posture ${tool.licensePosture}.`,
+      ]),
+    },
+  };
+}
+
+export function createReviewRequiredCandidates(
+  tool: ValidatedOpenSourceToolDefinition,
+  sourceContext: AssistedEvidenceSourceContext,
+  normalizedCandidates: NormalizedCandidatePayload[],
+): CandidateAdapterResult {
+  const candidateInputs = normalizedCandidates
+    .map(payload => toCreateCandidateInput(tool, sourceContext, payload))
+    .sort((a, b) => `${a.candidateType}:${a.candidateSummary}`.localeCompare(`${b.candidateType}:${b.candidateSummary}`));
+  const candidates: AssistedEvidenceCandidate[] = candidateInputs.map(input => markReviewRequired(createCandidate(input)));
+  return { normalizedCandidates: normalizedCandidates.map(normalizeCandidatePayload), candidateInputs, candidates };
+}
+===== lib/assistedEvidenceSources/index.ts
+export * from './openSourceToolTypes';
+export * from './openSourceToolLicenses';
+export * from './openSourceToolValidation';
+export * from './openSourceToolRegistry';
+export * from './candidateAdapterTypes';
+export * from './candidateAdapterContracts';
+export * from './candidateConfidenceRules';
+export * from './candidateNormalization';
+export * from './metadataFixtureAdapter';
+export * from './ocrFixtureAdapter';
+export * from './metadataRuntimeAdapter';
+export * from './surveyIngestionRuntimeBridge';
+export * from './ocrRuntimeAdapter';
+export * from './ocrRuntimeBridge';
+===== lib/assistedEvidenceSources/metadataFixtureAdapter.ts
+import { getRegisteredOpenSourceTool } from './openSourceToolRegistry';
+import { createReviewRequiredCandidates } from './candidateNormalization';
+import { preserveLowestConfidence } from './candidateConfidenceRules';
+import type { CandidateAdapterInput, MetadataFixturePayload, NormalizedCandidatePayload } from './candidateAdapterTypes';
+import type { MetadataCandidateFixtureAdapter } from './candidateAdapterContracts';
+
+const TOOL_NAME = 'fixture-image-metadata-adapter';
+const TOOL_VERSION = '1.0.0';
+
+function typeForField(field: string) {
+  if (field === 'possible_image_orientation') return { candidateType: 'orientation_candidate' as const, candidateCategory: 'orientation' as const };
+  if (field === 'possible_duplicate_photo') return { candidateType: 'duplicate_similarity_candidate' as const, candidateCategory: 'duplicate_hygiene' as const };
+  return { candidateType: 'photo_quality_candidate' as const, candidateCategory: 'quality' as const };
+}
+
+export const metadataFixtureAdapter: MetadataCandidateFixtureAdapter = {
+  adapterId: 'metadata-fixture-adapter-v1',
+  adapterVersion: '1.0.0',
+  toolName: TOOL_NAME,
+  toolVersion: TOOL_VERSION,
+  normalize(input: CandidateAdapterInput<MetadataFixturePayload>): NormalizedCandidatePayload[] {
+    return [...input.rawPayload.signals]
+      .sort((a, b) => a.signalId.localeCompare(b.signalId))
+      .map(signal => {
+        const typed = typeForField(signal.field);
+        return {
+          ...typed,
+          candidateConfidence: preserveLowestConfidence([signal.confidence]),
+          candidatePayload: {
+            fixtureId: input.rawPayload.fixtureId,
+            field: signal.field,
+            value: signal.value,
+            imageWidth: input.rawPayload.imageWidth,
+            imageHeight: input.rawPayload.imageHeight,
+            orientationHint: input.rawPayload.orientationHint,
+            duplicateGroupHint: input.rawPayload.duplicateGroupHint,
+          },
+          candidateSummary: `Fixture metadata candidate for ${signal.field}.`,
+          candidateClaims: [{
+            claimId: signal.signalId,
+            field: signal.field,
+            value: signal.value,
+            confidence: signal.confidence,
+            limitationRefs: signal.limitationRefs,
+          }],
+          candidateLimitations: [...signal.limitationRefs, 'no-image-bytes-inspected', 'metadata-fixture-only'],
+          deterministicInputRefs: ['fixtureId', 'signalId', 'sourceContext', 'registryMetadata'],
+        };
+      });
+  },
+  generateCandidates(input: CandidateAdapterInput<MetadataFixturePayload>) {
+    return createReviewRequiredCandidates(input.tool, input.sourceContext, this.normalize(input));
+  },
+};
+
+export function generateMetadataFixtureCandidates(sourceContext: CandidateAdapterInput<MetadataFixturePayload>['sourceContext'], rawPayload: MetadataFixturePayload) {
+  const tool = getRegisteredOpenSourceTool(TOOL_NAME, TOOL_VERSION);
+  return metadataFixtureAdapter.generateCandidates({ tool, sourceContext, rawPayload });
+}
+===== lib/assistedEvidenceSources/metadataRuntimeAdapter.test.ts
+import { execFileSync } from 'child_process';
+import { describe, expect, it } from 'vitest';
+import {
+  generateMetadataRuntimeCandidates,
+  getRegisteredOpenSourceTool,
+  metadataRuntimeAdapter,
+  validateOpenSourceToolDefinition,
+} from './index';
+import type { AssistedEvidenceSourceContext } from './index';
+
+const sourceContext: AssistedEvidenceSourceContext = {
+  sourceFileId: 'runtime-source-file-1',
+  sourceUploadKey: 'uploads/project-runtime/survey-runtime/source-file-1.png',
+  projectId: 'project-runtime',
+  surveyId: 'survey-runtime',
+  toolRunId: 'runtime-run-1',
+  toolConfigHash: 'runtime-config-hash-1',
+  sourceMetadataHash: 'runtime-source-metadata-hash-1',
+  createdAt: '2025-03-01T00:00:00.000Z',
+  createdBy: 'runtime-test-suite',
+};
+
+const onePixelPng = new Uint8Array([
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
+  0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, 144, 119, 83, 222,
+  0, 0, 0, 12, 73, 68, 65, 84, 8, 153, 99, 248, 207, 192, 0, 0,
+  3, 1, 1, 0, 24, 221, 141, 176, 0, 0, 0, 0, 73, 69, 78, 68,
+  174, 66, 96, 130,
+]);
+
+describe('Controlled metadata runtime adapter pilot', () => {
+  it('registers the sharp metadata runtime with review-only runtime pilot governance', () => {
+    const tool = getRegisteredOpenSourceTool('sharp-metadata-runtime', '0.34.5');
+    expect(tool.license).toBe('Apache-2.0');
+    expect(tool.licensePosture).toBe('approved');
+    expect(tool.runtimeCategory).toBe('image_metadata');
+    expect(tool.allowedRuntimeBoundary).toBe('server_adapter_contract');
+    expect(tool.enabledStatus).toBe('enabled_for_runtime_pilot');
+    expect(tool.reviewRequired).toBe(true);
+    expect(tool.canonicalMutationAllowed).toBe(false);
+    expect(tool.requiresModelWeights).toBe(false);
+  });
+
+  it('rejects unsafe runtime registry definitions', () => {
+    const tool = getRegisteredOpenSourceTool('sharp-metadata-runtime', '0.34.5');
+    expect(() => validateOpenSourceToolDefinition({ ...tool, toolName: 'blocked-runtime', license: 'AGPL-3.0' })).toThrow(/blocked/i);
+    expect(() => validateOpenSourceToolDefinition({ ...tool, toolName: 'canonical-runtime', canonicalMutationAllowed: true as false })).toThrow(/canonical mutation/i);
+    expect(() => validateOpenSourceToolDefinition({ ...tool, toolName: 'visual-runtime', runtimeCategory: 'visual_categorization_candidate' })).toThrow(/not approved/i);
+    expect(() => validateOpenSourceToolDefinition({ ...tool, toolName: 'browser-runtime', serverOnly: false })).toThrow(/server-only/i);
+  });
+
+  it('extracts deterministic metadata payloads from the same image bytes', async () => {
+    const first = await metadataRuntimeAdapter.extractRuntimePayload(onePixelPng);
+    const second = await metadataRuntimeAdapter.extractRuntimePayload(onePixelPng);
+
+    expect(first).toEqual(second);
+    expect(first.format).toBe('png');
+    expect(first.width).toBe(1);
+    expect(first.height).toBe(1);
+    expect(first.runtimePayloadHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(first.derivedSignals.map(signal => signal.signalId)).toEqual([...first.derivedSignals.map(signal => signal.signalId)].sort());
+  });
+
+  it('generates stable review-required non-authoritative candidates with bounded confidence', async () => {
+    const first = await generateMetadataRuntimeCandidates(sourceContext, onePixelPng);
+    const second = await generateMetadataRuntimeCandidates(sourceContext, onePixelPng);
+
+    expect(first.candidates.length).toBeGreaterThan(0);
+    expect(first.candidates.map(candidate => candidate.deterministicHash)).toEqual(second.candidates.map(candidate => candidate.deterministicHash));
+    expect(first.candidates.map(candidate => `${candidate.candidateType}:${candidate.candidateSummary}`)).toEqual(
+      [...first.candidates.map(candidate => `${candidate.candidateType}:${candidate.candidateSummary}`)].sort(),
+    );
+
+    for (const candidate of first.candidates) {
+      expect(candidate.candidateStatus).toBe('review_required');
+      expect(candidate.nonAuthoritative).toBe(true);
+      expect(candidate.reviewRequired).toBe(true);
+      expect(candidate.candidateConfidence).toBeGreaterThanOrEqual(0);
+      expect(candidate.candidateConfidence).toBeLessThanOrEqual(1);
+      expect(candidate.candidatePayload.runtimePilot).toBe(true);
+      expect(candidate.candidatePayload.fixtureOnly).toBe(false);
+      expect(candidate.candidatePayload.runtimeCategory).toBe('image_metadata');
+      expect(candidate.candidateLimitations).toContain('runtime-pilot');
+      expect(candidate.candidateLimitations).toContain('review-required');
+      expect(candidate.candidateLimitations).toContain('non-authoritative');
+      expect(candidate.candidateLimitations).toContain('no-engineering-authority');
+      expect(candidate.provenance.deterministicInputs).toContain('runtime-payload');
+      expect(candidate.provenance.notes.join(' ')).toContain('Controlled metadata runtime pilot output');
+    }
+  });
+
+  it('keeps runtime output out of canonical, CAD, recommendation, and workflow authority', async () => {
+    const result = await generateMetadataRuntimeCandidates(sourceContext, onePixelPng);
+    const serialized = JSON.stringify(result.candidates);
+
+    expect(serialized).not.toMatch(/buildSurveyEvidenceManifest|buildCADReadinessMetadata|buildEngineeringRecommendations|buildEngineeringWorkflowOrchestration/);
+    expect(result.candidates.every(candidate => candidate.candidatePayload.runtimePilot === true)).toBe(true);
+    expect(result.candidates.every(candidate => candidate.candidateStatus === 'review_required')).toBe(true);
+  });
+
+  it('passes the assisted evidence boundary guard with runtime import containment', () => {
+    const output = execFileSync('npm', ['run', 'check:assisted-evidence-boundaries'], { encoding: 'utf8' });
+    expect(output).toContain('Assisted evidence boundary guard passed');
+  });
+});
+===== lib/assistedEvidenceSources/metadataRuntimeAdapter.ts
+import sharp from 'sharp';
+import { createHash } from 'crypto';
+import { deterministicHash } from '@/lib/assistedEvidence';
+import { createReviewRequiredCandidates } from './candidateNormalization';
+import { normalizeCandidateConfidence, preserveLowestConfidence } from './candidateConfidenceRules';
+import { getRegisteredOpenSourceTool } from './openSourceToolRegistry';
+import type { CandidateAdapterInput, MetadataRuntimePayload, MetadataRuntimeSignal } from './candidateAdapterTypes';
+import type { MetadataCandidateRuntimeAdapter } from './candidateAdapterContracts';
+
+const TOOL_NAME = 'sharp-metadata-runtime';
+const TOOL_VERSION = '0.34.5';
+const LARGE_IMAGE_BYTES = 8 * 1024 * 1024;
+const LOW_RESOLUTION_PIXELS = 1024 * 768;
+
+function sha256Bytes(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+function fileSizeBucket(byteLength: number): MetadataRuntimePayload['fileSizeBucket'] {
+  if (byteLength <= 0) return 'empty';
+  if (byteLength < 100 * 1024) return 'small';
+  if (byteLength > LARGE_IMAGE_BYTES) return 'large';
+  return 'normal';
+}
+
+function orientationLabel(width: number | null, height: number | null, orientation: number | null): string {
+  if (orientation && orientation >= 5 && orientation <= 8) return 'exif-rotated';
+  if (!width || !height || width <= 0 || height <= 0) return 'unknown';
+  if (width === height) return 'square';
+  return width > height ? 'landscape' : 'portrait';
+}
+
+function normalizedMetadataHash(payload: Omit<MetadataRuntimePayload, 'runtimePayloadHash'>): string {
+  return deterministicHash(payload);
+}
+
+function buildSignals(payload: Omit<MetadataRuntimePayload, 'runtimePayloadHash' | 'derivedSignals'>): MetadataRuntimeSignal[] {
+  const signals: MetadataRuntimeSignal[] = [];
+  const width = payload.width;
+  const height = payload.height;
+  const pixelCount = width && height ? width * height : 0;
+
+  signals.push({
+    signalId: 'metadata-runtime-orientation',
+    field: 'possible_image_orientation',
+    value: orientationLabel(width, height, payload.orientation),
+    confidence: width && height ? 0.78 : 0.2,
+    limitationRefs: ['metadata-only', 'no-image-understanding'],
+  });
+
+  if (!width || !height || width <= 0 || height <= 0) {
+    signals.push({
+      signalId: 'metadata-runtime-invalid-dimensions',
+      field: 'possible_invalid_photo_dimensions',
+      value: `${width ?? 'unknown'}x${height ?? 'unknown'}`,
+      confidence: 0.82,
+      limitationRefs: ['metadata-only', 'dimensions-missing-or-invalid'],
+    });
+  }
+
+  if (pixelCount > 0 && pixelCount < LOW_RESOLUTION_PIXELS) {
+    signals.push({
+      signalId: 'metadata-runtime-low-resolution',
+      field: 'possible_low_resolution_photo',
+      value: `${width}x${height}`,
+      confidence: 0.67,
+      limitationRefs: ['metadata-only', 'resolution-threshold-only'],
+    });
+  }
+
+  if (!payload.hasExifMetadata) {
+    signals.push({
+      signalId: 'metadata-runtime-missing-exif',
+      field: 'possible_missing_exif_metadata',
+      value: true,
+      confidence: 0.58,
+      limitationRefs: ['metadata-only', 'exif-presence-only'],
+    });
+  }
+
+  if (payload.fileSizeBucket === 'large') {
+    signals.push({
+      signalId: 'metadata-runtime-large-file',
+      field: 'possible_large_image_file',
+      value: payload.inputByteLength,
+      confidence: 0.64,
+      limitationRefs: ['metadata-only', 'file-size-threshold-only'],
+    });
+  }
+
+  signals.push({
+    signalId: 'metadata-runtime-duplicate-fingerprint',
+    field: 'possible_duplicate_photo',
+    value: deterministicHash({ width, height, format: payload.format, orientation: payload.orientation, inputByteLength: payload.inputByteLength }),
+    confidence: 0.31,
+    limitationRefs: ['metadata-only', 'not-perceptual-hash', 'not-image-comparison'],
+  });
+
+  return signals.sort((a, b) => a.signalId.localeCompare(b.signalId));
+}
+
+function candidateTypeForSignal(signal: MetadataRuntimeSignal) {
+  if (signal.field === 'possible_image_orientation') return 'orientation_candidate' as const;
+  if (signal.field === 'possible_duplicate_photo') return 'duplicate_similarity_candidate' as const;
+  return 'photo_quality_candidate' as const;
+}
+
+function candidateCategoryForSignal(signal: MetadataRuntimeSignal) {
+  if (signal.field === 'possible_image_orientation') return 'orientation' as const;
+  if (signal.field === 'possible_duplicate_photo') return 'duplicate_hygiene' as const;
+  return 'quality' as const;
+}
+
+export const metadataRuntimeAdapter: MetadataCandidateRuntimeAdapter = {
+  adapterId: 'metadata-runtime-adapter-v1',
+  adapterVersion: '1.0.0',
+  toolName: TOOL_NAME,
+  toolVersion: TOOL_VERSION,
+  async extractRuntimePayload(imageBytes) {
+    const metadata = await sharp(imageBytes, { failOn: 'none' }).metadata();
+    const basePayload = {
+      inputByteLength: imageBytes.byteLength,
+      format: metadata.format ?? null,
+      width: metadata.width ?? null,
+      height: metadata.height ?? null,
+      orientation: metadata.orientation ?? null,
+      density: metadata.density ?? null,
+      hasExifMetadata: Boolean(metadata.exif),
+      hasProfile: Boolean(metadata.icc || metadata.iccProfile),
+      hasAlpha: Boolean(metadata.hasAlpha),
+      pages: metadata.pages ?? null,
+      fileSizeBucket: fileSizeBucket(imageBytes.byteLength),
+    } satisfies Omit<MetadataRuntimePayload, 'runtimePayloadHash' | 'derivedSignals'>;
+    const derivedSignals = buildSignals(basePayload);
+    return {
+      ...basePayload,
+      derivedSignals,
+      runtimePayloadHash: normalizedMetadataHash({ ...basePayload, derivedSignals }),
+    };
+  },
+  normalize(input) {
+    const runtimeInputHash = input.rawPayload.runtimePayloadHash || sha256Bytes(new TextEncoder().encode(JSON.stringify(input.rawPayload)));
+    return [...input.rawPayload.derivedSignals]
+      .sort((a, b) => a.signalId.localeCompare(b.signalId))
+      .map(signal => ({
+        candidateType: candidateTypeForSignal(signal),
+        candidateCategory: candidateCategoryForSignal(signal),
+        candidateConfidence: preserveLowestConfidence([signal.confidence, normalizeCandidateConfidence(signal.confidence)]),
+        candidatePayload: {
+          field: signal.field,
+          value: signal.value,
+          runtimePayloadHash: runtimeInputHash,
+          runtimeSource: TOOL_NAME,
+          runtimeVersion: TOOL_VERSION,
+          inputByteLength: input.rawPayload.inputByteLength,
+          format: input.rawPayload.format,
+          width: input.rawPayload.width,
+          height: input.rawPayload.height,
+          orientation: input.rawPayload.orientation,
+          density: input.rawPayload.density,
+          hasExifMetadata: input.rawPayload.hasExifMetadata,
+          hasProfile: input.rawPayload.hasProfile,
+          hasAlpha: input.rawPayload.hasAlpha,
+          fileSizeBucket: input.rawPayload.fileSizeBucket,
+          runtimePilot: true,
+          runtimeLabel: 'RUNTIME DATA',
+        },
+        candidateSummary: `Runtime metadata signal ${signal.field}: ${String(signal.value)}`,
+        candidateClaims: [
+          {
+            claimId: signal.signalId,
+            field: signal.field,
+            value: signal.value,
+            confidence: signal.confidence,
+            limitationRefs: signal.limitationRefs,
+          },
+        ],
+        candidateLimitations: [...signal.limitationRefs, 'runtime-metadata-only', 'no-ocr-runtime', 'no-cv-runtime', 'no-engineering-authority'],
+        deterministicInputRefs: ['runtime-metadata-payload', runtimeInputHash, signal.signalId],
+      }));
+  },
+  generateCandidates(input) {
+    return createReviewRequiredCandidates(input.tool, input.sourceContext, this.normalize(input));
+  },
+};
+
+export async function generateMetadataRuntimeCandidates(
+  sourceContext: CandidateAdapterInput<MetadataRuntimePayload>['sourceContext'],
+  imageBytes: Uint8Array,
+) {
+  const tool = getRegisteredOpenSourceTool(TOOL_NAME, TOOL_VERSION);
+  const rawPayload = await metadataRuntimeAdapter.extractRuntimePayload(imageBytes);
+  return metadataRuntimeAdapter.generateCandidates({ tool, sourceContext, rawPayload });
+}
+===== lib/assistedEvidenceSources/ocrFixtureAdapter.ts
+import { getRegisteredOpenSourceTool } from './openSourceToolRegistry';
+import { createReviewRequiredCandidates } from './candidateNormalization';
+import { preserveLowestConfidence } from './candidateConfidenceRules';
+import type { CandidateAdapterInput, NormalizedCandidatePayload, OcrFixturePayload } from './candidateAdapterTypes';
+import type { OcrCandidateFixtureAdapter } from './candidateAdapterContracts';
+
+const TOOL_NAME = 'fixture-ocr-text-adapter';
+const TOOL_VERSION = '1.0.0';
+
+export const ocrFixtureAdapter: OcrCandidateFixtureAdapter = {
+  adapterId: 'ocr-fixture-adapter-v1',
+  adapterVersion: '1.0.0',
+  toolName: TOOL_NAME,
+  toolVersion: TOOL_VERSION,
+  normalize(input: CandidateAdapterInput<OcrFixturePayload>): NormalizedCandidatePayload[] {
+    return [...input.rawPayload.signals]
+      .sort((a, b) => a.signalId.localeCompare(b.signalId))
+      .map(signal => ({
+        candidateType: 'text_region_candidate',
+        candidateCategory: signal.field === 'possible_equipment_label_text' ? 'electrical_context' : 'field_context',
+        candidateConfidence: preserveLowestConfidence([signal.confidence]),
+        candidatePayload: {
+          fixtureId: input.rawPayload.fixtureId,
+          field: signal.field,
+          possibleText: signal.text,
+          textRegionCount: input.rawPayload.textRegionCount,
+          fixtureOnly: true,
+        },
+        candidateSummary: `Fixture OCR-like text candidate for ${signal.field}; not extracted by runtime OCR.`,
+        candidateClaims: [{
+          claimId: signal.signalId,
+          field: signal.field,
+          value: signal.text,
+          confidence: signal.confidence,
+          limitationRefs: signal.limitationRefs,
+        }],
+        candidateLimitations: [...signal.limitationRefs, 'no-ocr-runtime', 'text-fixture-only', 'review-required'],
+        deterministicInputRefs: ['fixtureId', 'signalId', 'sourceContext', 'registryMetadata'],
+      }));
+  },
+  generateCandidates(input: CandidateAdapterInput<OcrFixturePayload>) {
+    return createReviewRequiredCandidates(input.tool, input.sourceContext, this.normalize(input));
+  },
+};
+
+export function generateOcrFixtureCandidates(sourceContext: CandidateAdapterInput<OcrFixturePayload>['sourceContext'], rawPayload: OcrFixturePayload) {
+  const tool = getRegisteredOpenSourceTool(TOOL_NAME, TOOL_VERSION);
+  return ocrFixtureAdapter.generateCandidates({ tool, sourceContext, rawPayload });
+}
+===== lib/assistedEvidenceSources/ocrRuntimeAdapter.test.ts
+import { execFileSync } from 'child_process';
+import { describe, expect, it } from 'vitest';
+import {
+  buildOcrRuntimeSourceMetadataHash,
+  generateSurveyIngestionOcrRuntimeCandidates,
+  getRegisteredOpenSourceTool,
+  ocrRuntimeAdapter,
+  validateOpenSourceToolDefinition,
+} from './index';
+import {
+  acceptCandidate,
+  candidateCanCreateWorkflowItems,
+  candidateCanInfluenceCADReadiness,
+  candidateCanInfluenceRecommendations,
+  candidateCanSatisfyRequirement,
+  projectionAutomaticallyMutatesCanonicalEvidence,
+} from '@/lib/assistedEvidence';
+import type { OcrRuntimePayload, OcrRuntimeSourceRef, AssistedEvidenceSourceContext } from './index';
+
+const sourceContext: AssistedEvidenceSourceContext = {
+  sourceFileId: 'ocr-runtime-file-1',
+  sourceUploadKey: 'uploads/project-ocr/survey-ocr/equipment-label.jpg',
+  projectId: 'project-ocr',
+  surveyId: 'survey-ocr',
+  toolRunId: 'ocr-runtime-run-1',
+  toolConfigHash: 'ocr-runtime-config-hash-1',
+  sourceMetadataHash: 'ocr-runtime-source-metadata-hash-1',
+  createdAt: '2025-05-01T00:00:00.000Z',
+  createdBy: 'ocr-runtime-test-suite',
+};
+
+const runtimePayload: OcrRuntimePayload = {
+  runtimePayloadHash: 'ocr-runtime-payload-hash-1',
+  inputByteLength: 1234,
+  method: 'tesseract-js',
+  confidence: 0.42,
+  text: 'MAIN PANEL 200A\nMETER 12345',
+  textLength: 26,
+  textLineCount: 2,
+  derivedSignals: [
+    {
+      signalId: 'ocr-runtime-text-region-1',
+      field: 'possible_equipment_label_text',
+      text: 'MAIN PANEL 200A\nMETER 12345',
+      confidence: 0.42,
+      limitationRefs: ['ocr-text-only', 'test-runtime-payload'],
+    },
+  ],
+};
+
+const source: OcrRuntimeSourceRef = {
+  surveyId: 'site-survey-ocr-1',
+  projectId: 'project-ocr-1',
+  siteSurveyFileId: 'site-survey-file-ocr-1',
+  evidenceId: 'survey-evidence-ocr-1',
+  fileUrl: 'https://blob.example/surveys/project-ocr-1/site-survey-ocr-1/equipment/photo.jpg',
+  blobKey: 'surveys/project-ocr-1/site-survey-ocr-1/equipment/photo.jpg',
+  filename: 'equipment-label.jpg',
+  mimeType: 'image/jpeg',
+  submittedCategory: 'equipment_label',
+  canonicalSourceOfTruth: 'site_surveys+site_survey_files',
+};
+
+describe('Controlled OCR runtime adapter pilot', () => {
+  it('registers tesseract.js as a review-only text-region runtime', () => {
+    const tool = getRegisteredOpenSourceTool('tesseract-js-ocr-runtime', '7.0.0');
+    expect(tool.license).toBe('Apache-2.0');
+    expect(tool.licensePosture).toBe('approved');
+    expect(tool.runtimeCategory).toBe('ocr_text_candidate');
+    expect(tool.allowedCandidateTypes).toEqual(['text_region_candidate']);
+    expect(tool.allowedCandidateCategories).toEqual(['field_context', 'electrical_context']);
+    expect(tool.allowedRuntimeBoundary).toBe('server_adapter_contract');
+    expect(tool.enabledStatus).toBe('enabled_for_runtime_pilot');
+    expect(tool.reviewRequired).toBe(true);
+    expect(tool.canonicalMutationAllowed).toBe(false);
+    expect(tool.requiresModelWeights).toBe(false);
+    expect(tool.serverOnly).toBe(true);
+  });
+
+  it('rejects unsafe OCR registry definitions', () => {
+    const tool = getRegisteredOpenSourceTool('tesseract-js-ocr-runtime', '7.0.0');
+    expect(() => validateOpenSourceToolDefinition({ ...tool, toolName: 'ocr-canonical', canonicalMutationAllowed: true as false })).toThrow(/canonical mutation/i);
+    expect(() => validateOpenSourceToolDefinition({ ...tool, toolName: 'ocr-model', requiresModelWeights: true })).toThrow(/model weights/i);
+    expect(() => validateOpenSourceToolDefinition({ ...tool, toolName: 'ocr-browser', browserCompatible: true })).toThrow(/browser/i);
+    expect(() => validateOpenSourceToolDefinition({ ...tool, toolName: 'ocr-scene', allowedCandidateTypes: ['electrical_scene_candidate'] })).toThrow(/text_region_candidate only/i);
+  });
+
+  it('normalizes OCR payloads into text-only review-required candidates without confidence upgrades', () => {
+    const tool = getRegisteredOpenSourceTool('tesseract-js-ocr-runtime', '7.0.0');
+    const result = ocrRuntimeAdapter.generateCandidates({ tool, sourceContext, rawPayload: runtimePayload });
+
+    expect(result.candidates).toHaveLength(1);
+    const candidate = result.candidates[0];
+    expect(candidate.candidateType).toBe('text_region_candidate');
+    expect(candidate.candidateCategory).toBe('electrical_context');
+    expect(candidate.candidateStatus).toBe('review_required');
+    expect(candidate.nonAuthoritative).toBe(true);
+    expect(candidate.reviewRequired).toBe(true);
+    expect(candidate.candidateConfidence).toBe(0.42);
+    expect(candidate.candidatePayload.field).toBe('possible_equipment_label_text');
+    expect(candidate.candidatePayload.possibleText).toBe('MAIN PANEL 200A\nMETER 12345');
+    expect(candidate.candidatePayload.runtimeSource).toBe('tesseract-js-ocr-runtime');
+    expect(candidate.candidatePayload.runtimePilot).toBe(true);
+    expect(candidate.candidatePayload.canonicalMutationAllowed).toBe(false);
+    expect(candidate.candidatePayload.textOnlyEvidence).toBe(true);
+    expect(candidate.candidateLimitations).toContain('runtime-ocr-text-only');
+    expect(candidate.candidateLimitations).toContain('no-engineering-authority');
+    expect(candidate.candidateLimitations).toContain('does-not-confirm-panel-rating');
+    expect(candidate.candidateLimitations).toContain('does-not-set-breaker-size');
+    expect(candidate.candidateLimitations).toContain('does-not-satisfy-requirements');
+    expect(candidate.provenance.notes.join(' ')).toContain('Controlled OCR runtime pilot output');
+  });
+
+  it('rejects empty OCR safely without generating candidates', async () => {
+    const payload = await ocrRuntimeAdapter.extractRuntimePayload(new Uint8Array());
+    const tool = getRegisteredOpenSourceTool('tesseract-js-ocr-runtime', '7.0.0');
+    const result = ocrRuntimeAdapter.generateCandidates({ tool, sourceContext, rawPayload: payload });
+
+    expect(payload.method).toBe('none');
+    expect(payload.text).toBe('');
+    expect(payload.derivedSignals).toHaveLength(0);
+    expect(result.candidates).toHaveLength(0);
+  });
+
+  it('builds deterministic survey-source OCR hashes and preserves survey attachment identity', async () => {
+    const firstHash = buildOcrRuntimeSourceMetadataHash(source);
+    const secondHash = buildOcrRuntimeSourceMetadataHash({ ...source });
+    expect(firstHash).toBe(secondHash);
+    expect(firstHash).toMatch(/^[a-f0-9]{64}$/);
+
+    const result = await generateSurveyIngestionOcrRuntimeCandidates({
+      source,
+      imageBytes: new Uint8Array(),
+      toolRunId: 'ocr-runtime-bridge-run-1',
+      toolConfigHash: 'ocr-runtime-bridge-config-v1',
+      createdAt: '2025-05-02T00:00:00.000Z',
+      createdBy: 'ocr-runtime-bridge-test',
+    });
+
+    expect(result.sourceContext.sourceFileId).toBe(source.siteSurveyFileId);
+    expect(result.sourceContext.sourceUploadKey).toBe(source.blobKey);
+    expect(result.reusedExistingSurveySignals).toEqual({
+      sourceOfTruth: 'site_surveys+site_survey_files',
+      reusedUploadIdentity: true,
+      reusedCategory: true,
+      canonicalMutationAllowed: false,
+    });
+    expect(result.candidates).toHaveLength(0);
+    expect(result.omittedRuntimeSignals).toEqual(['ocr-runtime:no-text-extracted']);
+  });
+
+  it('keeps OCR candidates and reviewed projections out of requirement, CAD, recommendation, workflow, and canonical authority', () => {
+    const tool = getRegisteredOpenSourceTool('tesseract-js-ocr-runtime', '7.0.0');
+    const candidate = ocrRuntimeAdapter.generateCandidates({ tool, sourceContext, rawPayload: runtimePayload }).candidates[0];
+
+    expect(candidateCanSatisfyRequirement(candidate)).toBe(false);
+    expect(candidateCanInfluenceCADReadiness(candidate)).toBe(false);
+    expect(candidateCanInfluenceRecommendations(candidate)).toBe(false);
+    expect(candidateCanCreateWorkflowItems(candidate)).toBe(false);
+
+    const accepted = acceptCandidate(candidate, {
+      reviewerId: 'ocr-reviewer-1',
+      reviewedAt: '2025-05-03T00:00:00.000Z',
+      acceptedFields: ['possible_equipment_label_text'],
+      reviewNotes: ['Accepted text transcription for future mapping review only.'],
+    });
+    expect(accepted.projection.projectionPayload).toEqual({ possible_equipment_label_text: 'MAIN PANEL 200A\nMETER 12345' });
+    expect(accepted.projection.canonicalParticipationStatus).toBe('eligible_for_mapping');
+    expect(projectionAutomaticallyMutatesCanonicalEvidence(accepted.projection)).toBe(false);
+  });
+
+  it('passes the assisted evidence boundary guard with OCR runtime import containment', () => {
+    const output = execFileSync('npm', ['run', 'check:assisted-evidence-boundaries'], { encoding: 'utf8' });
+    expect(output).toContain('Assisted evidence boundary guard passed');
+  });
+});
+===== lib/assistedEvidenceSources/ocrRuntimeAdapter.ts
+import { deterministicHash } from '@/lib/assistedEvidence';
+import { createReviewRequiredCandidates } from './candidateNormalization';
+import { normalizeCandidateConfidence, preserveLowestConfidence } from './candidateConfidenceRules';
+import { getRegisteredOpenSourceTool } from './openSourceToolRegistry';
+import type { CandidateAdapterInput, OcrRuntimeField, OcrRuntimePayload, OcrRuntimeSignal } from './candidateAdapterTypes';
+import type { OcrCandidateRuntimeAdapter } from './candidateAdapterContracts';
+
+const TOOL_NAME = 'tesseract-js-ocr-runtime';
+const TOOL_VERSION = '7.0.0';
+const DEFAULT_FIELD: OcrRuntimeField = 'possible_equipment_label_text';
+const MAX_TEXT_CHARS = 4000;
+
+function normalizeOcrRuntimeText(text: string): string {
+  return text
+    .replace(/\r\n/g, '\n')
+    .replace(/[\t ]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .slice(0, MAX_TEXT_CHARS);
+}
+
+function normalizeOcrConfidence(confidence: number): number {
+  return normalizeCandidateConfidence(confidence > 1 ? confidence / 100 : confidence);
+}
+
+function buildRuntimePayloadHash(payload: Omit<OcrRuntimePayload, 'runtimePayloadHash'>): string {
+  return deterministicHash(payload);
+}
+
+function lineCount(text: string): number {
+  if (!text) return 0;
+  return text.split('\n').filter(line => line.trim()).length;
+}
+
+function buildSignals(payload: Omit<OcrRuntimePayload, 'runtimePayloadHash' | 'derivedSignals'>): OcrRuntimeSignal[] {
+  if (!payload.text.trim()) return [];
+  return [{
+    signalId: 'ocr-runtime-text-region-1',
+    field: DEFAULT_FIELD,
+    text: payload.text,
+    confidence: payload.confidence,
+    limitationRefs: ['ocr-text-only', 'field-label-default-review-required', 'no-engineering-fact-inference'],
+  }];
+}
+
+function categoryForField(field: OcrRuntimeField) {
+  return field === 'possible_service_panel_rating_text'
+    || field === 'possible_breaker_rating_text'
+    || field === 'possible_equipment_label_text'
+    || field === 'possible_nameplate_text'
+    ? 'electrical_context' as const
+    : 'field_context' as const;
+}
+
+export const ocrRuntimeAdapter: OcrCandidateRuntimeAdapter = {
+  adapterId: 'ocr-runtime-adapter-v1',
+  adapterVersion: '1.0.0',
+  toolName: TOOL_NAME,
+  toolVersion: TOOL_VERSION,
+  async extractRuntimePayload(imageBytes) {
+    if (imageBytes.byteLength === 0) {
+      const basePayload = {
+        inputByteLength: 0,
+        method: 'none' as const,
+        confidence: 0,
+        text: '',
+        textLength: 0,
+        textLineCount: 0,
+        derivedSignals: [] as OcrRuntimeSignal[],
+      };
+      return { ...basePayload, runtimePayloadHash: buildRuntimePayloadHash(basePayload) };
+    }
+
+    const { createWorker } = await import('tesseract.js');
+    const worker = await createWorker('eng');
+    try {
+      const { data } = await worker.recognize(Buffer.from(imageBytes));
+      const text = normalizeOcrRuntimeText(data.text ?? '');
+      const confidence = normalizeOcrConfidence(Math.round(data.confidence ?? 0));
+      const basePayload = {
+        inputByteLength: imageBytes.byteLength,
+        method: text ? 'tesseract-js' as const : 'none' as const,
+        confidence: text ? confidence : 0,
+        text,
+        textLength: text.length,
+        textLineCount: lineCount(text),
+      };
+      const derivedSignals = buildSignals(basePayload);
+      return {
+        ...basePayload,
+        derivedSignals,
+        runtimePayloadHash: buildRuntimePayloadHash({ ...basePayload, derivedSignals }),
+      };
+    } finally {
+      await worker.terminate();
+    }
+  },
+  normalize(input: CandidateAdapterInput<OcrRuntimePayload>) {
+    const runtimeInputHash = input.rawPayload.runtimePayloadHash || deterministicHash(input.rawPayload);
+    return [...input.rawPayload.derivedSignals]
+      .filter(signal => signal.text.trim().length > 0)
+      .sort((a, b) => a.signalId.localeCompare(b.signalId))
+      .map(signal => ({
+        candidateType: 'text_region_candidate' as const,
+        candidateCategory: categoryForField(signal.field),
+        candidateConfidence: preserveLowestConfidence([signal.confidence, input.rawPayload.confidence]),
+        candidatePayload: {
+          field: signal.field,
+          possibleText: signal.text,
+          runtimePayloadHash: runtimeInputHash,
+          runtimeSource: TOOL_NAME,
+          runtimeVersion: TOOL_VERSION,
+          runtimeMethod: input.rawPayload.method,
+          inputByteLength: input.rawPayload.inputByteLength,
+          textLength: signal.text.length,
+          textLineCount: input.rawPayload.textLineCount,
+          runtimePilot: true,
+          runtimeLabel: 'OCR RUNTIME TEXT',
+          canonicalMutationAllowed: false,
+          textOnlyEvidence: true,
+        },
+        candidateSummary: `Runtime OCR text candidate for ${signal.field}; review required before any use.`,
+        candidateClaims: [{
+          claimId: signal.signalId,
+          field: signal.field,
+          value: signal.text,
+          confidence: signal.confidence,
+          limitationRefs: signal.limitationRefs,
+        }],
+        candidateLimitations: [
+          ...signal.limitationRefs,
+          'runtime-ocr-text-only',
+          'review-required',
+          'non-authoritative',
+          'no-engineering-authority',
+          'no-canonical-mutation',
+          'does-not-confirm-panel-rating',
+          'does-not-set-breaker-size',
+          'does-not-satisfy-requirements',
+        ],
+        deterministicInputRefs: ['runtime-ocr-payload', runtimeInputHash, signal.signalId],
+      }));
+  },
+  generateCandidates(input) {
+    return createReviewRequiredCandidates(input.tool, input.sourceContext, this.normalize(input));
+  },
+};
+
+export async function generateOcrRuntimeCandidates(
+  sourceContext: CandidateAdapterInput<OcrRuntimePayload>['sourceContext'],
+  imageBytes: Uint8Array,
+) {
+  const tool = getRegisteredOpenSourceTool(TOOL_NAME, TOOL_VERSION);
+  const rawPayload = await ocrRuntimeAdapter.extractRuntimePayload(imageBytes);
+  return ocrRuntimeAdapter.generateCandidates({ tool, sourceContext, rawPayload });
+}
+===== lib/assistedEvidenceSources/ocrRuntimeBridge.ts
+import { deterministicHash } from '@/lib/assistedEvidence';
+import { generateOcrRuntimeCandidates } from './ocrRuntimeAdapter';
+import type { AssistedEvidenceCandidate } from '@/lib/assistedEvidence';
+import type { AssistedEvidenceSourceContext } from './candidateAdapterTypes';
+
+export interface OcrRuntimeSourceRef {
+  surveyId: string;
+  projectId: string | null;
+  siteSurveyFileId: string | null;
+  evidenceId: string;
+  fileUrl: string;
+  blobKey: string | null;
+  filename: string | null;
+  mimeType: string | null;
+  submittedCategory: string | null;
+  canonicalSourceOfTruth: 'site_surveys+site_survey_files';
+}
+
+export interface OcrRuntimeBridgeInput {
+  source: OcrRuntimeSourceRef;
+  imageBytes: Uint8Array;
+  toolRunId: string;
+  toolConfigHash: string;
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface OcrRuntimeBridgeResult {
+  sourceContext: AssistedEvidenceSourceContext;
+  sourceMetadataHash: string;
+  candidates: AssistedEvidenceCandidate[];
+  reusedExistingSurveySignals: {
+    sourceOfTruth: 'site_surveys+site_survey_files';
+    reusedUploadIdentity: boolean;
+    reusedCategory: boolean;
+    canonicalMutationAllowed: false;
+  };
+  omittedRuntimeSignals: string[];
+}
+
+export function buildOcrRuntimeSourceMetadataHash(source: OcrRuntimeSourceRef): string {
+  return deterministicHash({
+    surveyId: source.surveyId,
+    projectId: source.projectId,
+    siteSurveyFileId: source.siteSurveyFileId,
+    evidenceId: source.evidenceId,
+    fileUrl: source.fileUrl,
+    blobKey: source.blobKey,
+    filename: source.filename,
+    mimeType: source.mimeType,
+    submittedCategory: source.submittedCategory,
+    canonicalSourceOfTruth: source.canonicalSourceOfTruth,
+  });
+}
+
+function buildSourceContext(input: OcrRuntimeBridgeInput, sourceMetadataHash: string): AssistedEvidenceSourceContext {
+  return {
+    sourceFileId: input.source.siteSurveyFileId ?? input.source.evidenceId,
+    sourceUploadKey: input.source.blobKey ?? input.source.fileUrl,
+    projectId: input.source.projectId ?? 'unknown-project',
+    surveyId: input.source.surveyId,
+    toolRunId: input.toolRunId,
+    toolConfigHash: input.toolConfigHash,
+    sourceMetadataHash,
+    createdAt: input.createdAt,
+    createdBy: input.createdBy,
+  };
+}
+
+function annotateOcrCandidate(candidate: AssistedEvidenceCandidate, source: OcrRuntimeSourceRef): AssistedEvidenceCandidate {
+  return {
+    ...candidate,
+    candidatePayload: {
+      ...candidate.candidatePayload,
+      ocrRuntimeBridge: true,
+      canonicalSourceOfTruth: source.canonicalSourceOfTruth,
+      siteSurveyFileId: source.siteSurveyFileId,
+      surveyEvidenceId: source.evidenceId,
+      submittedCategory: source.submittedCategory,
+      canonicalMutationAllowed: false,
+      textOnlyEvidence: true,
+    },
+    candidateLimitations: [...new Set([
+      ...candidate.candidateLimitations,
+      'survey-ingestion-aligned',
+      'canonical-survey-truth-preserved',
+      'does-not-update-site-surveys',
+      'does-not-update-site-survey-files',
+      'does-not-update-project-physical-data',
+      'does-not-infer-engineering-facts',
+    ])].sort((a, b) => a.localeCompare(b)),
+    provenance: {
+      ...candidate.provenance,
+      deterministicInputs: [...new Set([
+        ...candidate.provenance.deterministicInputs,
+        'site_surveys+site_survey_files-source-ref',
+        'ocr-runtime-source-metadata-hash',
+      ])].sort((a, b) => a.localeCompare(b)),
+      notes: [...new Set([
+        ...candidate.provenance.notes,
+        'OCR runtime bridge preserved site_surveys+site_survey_files as canonical attachment truth.',
+        'OCR text is non-authoritative and review-required; no engineering fact inference or canonical mutation is allowed.',
+      ])].sort((a, b) => a.localeCompare(b)),
+    },
+  };
+}
+
+export async function generateSurveyIngestionOcrRuntimeCandidates(
+  input: OcrRuntimeBridgeInput,
+): Promise<OcrRuntimeBridgeResult> {
+  const sourceMetadataHash = buildOcrRuntimeSourceMetadataHash(input.source);
+  const sourceContext = buildSourceContext(input, sourceMetadataHash);
+  const runtimeResult = await generateOcrRuntimeCandidates(sourceContext, input.imageBytes);
+  const candidates = runtimeResult.candidates.map(candidate => annotateOcrCandidate(candidate, input.source));
+
+  return {
+    sourceContext,
+    sourceMetadataHash,
+    candidates,
+    reusedExistingSurveySignals: {
+      sourceOfTruth: input.source.canonicalSourceOfTruth,
+      reusedUploadIdentity: Boolean(input.source.siteSurveyFileId || input.source.evidenceId),
+      reusedCategory: input.source.submittedCategory !== null,
+      canonicalMutationAllowed: false,
+    },
+    omittedRuntimeSignals: candidates.length === 0 ? ['ocr-runtime:no-text-extracted'] : [],
+  };
+}
+===== lib/assistedEvidenceSources/openSourceToolLicenses.ts
+import type { OpenSourceToolLicensePosture } from './openSourceToolTypes';
+
+const APPROVED_LICENSES = new Set(['MIT', 'APACHE-2.0', 'BSD-2-CLAUSE', 'BSD-3-CLAUSE', 'ISC']);
+const CAUTION_LICENSES = new Set(['MPL-2.0', 'LGPL-2.1', 'LGPL-3.0']);
+const BLOCKED_LICENSES = new Set(['GPL', 'GPL-2.0', 'GPL-3.0', 'AGPL', 'AGPL-3.0', 'SSPL', 'UNKNOWN', 'UNLICENSED', 'NON-COMMERCIAL', 'RESEARCH-ONLY']);
+
+export function normalizeLicense(license: string): string {
+  return license.trim().toUpperCase();
+}
+
+export function classifyLicensePosture(license: string): OpenSourceToolLicensePosture {
+  const normalized = normalizeLicense(license);
+  if (!normalized) return 'blocked';
+  if (APPROVED_LICENSES.has(normalized)) return 'approved';
+  if (CAUTION_LICENSES.has(normalized)) return 'caution';
+  if (BLOCKED_LICENSES.has(normalized)) return 'blocked';
+  if (normalized.includes('AGPL') || normalized.includes('GPL') || normalized.includes('UNKNOWN')) return 'blocked';
+  if (normalized.includes('NON-COMMERCIAL') || normalized.includes('RESEARCH')) return 'blocked';
+  return 'caution';
+}
+
+export function licenseIsBlocked(license: string): boolean {
+  return classifyLicensePosture(license) === 'blocked';
+}
+===== lib/assistedEvidenceSources/openSourceToolRegistry.ts
+import type { OpenSourceToolDefinition, ValidatedOpenSourceToolDefinition } from './openSourceToolTypes';
+import { validateOpenSourceToolRegistry } from './openSourceToolValidation';
+
+export const OPEN_SOURCE_FIXTURE_TOOLS: readonly OpenSourceToolDefinition[] = [
+  {
+    toolName: 'fixture-image-metadata-adapter',
+    toolVersion: '1.0.0',
+    sourceUrl: 'internal://solarpro/fixtures/image-metadata-adapter',
+    license: 'MIT',
+    runtimeCategory: 'fixture_only',
+    allowedCandidateTypes: ['orientation_candidate', 'photo_quality_candidate', 'duplicate_similarity_candidate'],
+    allowedCandidateCategories: ['orientation', 'quality', 'duplicate_hygiene'],
+    requiresImageBytes: false,
+    requiresNativeBinaries: false,
+    requiresModelWeights: false,
+    browserCompatible: false,
+    serverOnly: false,
+    reviewRequired: true,
+    canonicalMutationAllowed: false,
+    allowedRuntimeBoundary: 'fixture_static',
+    deterministicReplaySupport: 'fixture_replay_only',
+    riskLevel: 'low',
+    enabledStatus: 'enabled_for_fixtures',
+    maintainedStatus: 'fixture_internal',
+    registryNotes: ['Fixture-only metadata adapter. No image bytes are inspected.'],
+  },
+  {
+    toolName: 'fixture-ocr-text-adapter',
+    toolVersion: '1.0.0',
+    sourceUrl: 'internal://solarpro/fixtures/ocr-text-adapter',
+    license: 'MIT',
+    runtimeCategory: 'fixture_only',
+    allowedCandidateTypes: ['text_region_candidate'],
+    allowedCandidateCategories: ['field_context', 'electrical_context'],
+    requiresImageBytes: false,
+    requiresNativeBinaries: false,
+    requiresModelWeights: false,
+    browserCompatible: false,
+    serverOnly: false,
+    reviewRequired: true,
+    canonicalMutationAllowed: false,
+    allowedRuntimeBoundary: 'fixture_static',
+    deterministicReplaySupport: 'fixture_replay_only',
+    riskLevel: 'moderate',
+    enabledStatus: 'enabled_for_fixtures',
+    maintainedStatus: 'fixture_internal',
+    registryNotes: ['Fixture-only OCR-like text adapter. No OCR runtime is executed.'],
+  },
+] as const;
+
+export const OPEN_SOURCE_RUNTIME_TOOLS: readonly OpenSourceToolDefinition[] = [
+  {
+    toolName: 'sharp-metadata-runtime',
+    toolVersion: '0.34.5',
+    sourceUrl: 'https://github.com/lovell/sharp',
+    license: 'Apache-2.0',
+    runtimeCategory: 'image_metadata',
+    allowedCandidateTypes: ['orientation_candidate', 'photo_quality_candidate', 'duplicate_similarity_candidate'],
+    allowedCandidateCategories: ['orientation', 'quality', 'duplicate_hygiene'],
+    requiresImageBytes: true,
+    requiresNativeBinaries: true,
+    requiresModelWeights: false,
+    browserCompatible: false,
+    serverOnly: true,
+    reviewRequired: true,
+    canonicalMutationAllowed: false,
+    allowedRuntimeBoundary: 'server_adapter_contract',
+    deterministicReplaySupport: 'runtime_payload_hash_required',
+    riskLevel: 'low',
+    enabledStatus: 'enabled_for_runtime_pilot',
+    maintainedStatus: 'maintained',
+    registryNotes: [
+      'First controlled runtime pilot for metadata and photo quality extraction only.',
+      'Uses sharp metadata APIs only; excluded capabilities remain outside this pilot by boundary policy.',
+      'Runtime execution is server-only and adapter-contained.',
+    ],
+  },
+  {
+    toolName: 'tesseract-js-ocr-runtime',
+    toolVersion: '7.0.0',
+    sourceUrl: 'https://github.com/naptha/tesseract.js',
+    license: 'Apache-2.0',
+    runtimeCategory: 'ocr_text_candidate',
+    allowedCandidateTypes: ['text_region_candidate'],
+    allowedCandidateCategories: ['field_context', 'electrical_context'],
+    requiresImageBytes: true,
+    requiresNativeBinaries: false,
+    requiresModelWeights: false,
+    browserCompatible: false,
+    serverOnly: true,
+    reviewRequired: true,
+    canonicalMutationAllowed: false,
+    allowedRuntimeBoundary: 'server_adapter_contract',
+    deterministicReplaySupport: 'runtime_payload_hash_required',
+    riskLevel: 'moderate',
+    enabledStatus: 'enabled_for_runtime_pilot',
+    maintainedStatus: 'maintained',
+    registryNotes: [
+      'Controlled OCR runtime pilot for text extraction only.',
+      'Uses tesseract.js only; no external vision services and no engineering inference.',
+      'Runtime output must remain non-authoritative review-required text_region_candidate evidence.',
+    ],
+  },
+] as const;
+
+export const OPEN_SOURCE_ASSISTED_EVIDENCE_TOOLS: readonly OpenSourceToolDefinition[] = [
+  ...OPEN_SOURCE_FIXTURE_TOOLS,
+  ...OPEN_SOURCE_RUNTIME_TOOLS,
+] as const;
+
+export const VALIDATED_OPEN_SOURCE_FIXTURE_TOOLS: readonly ValidatedOpenSourceToolDefinition[] = validateOpenSourceToolRegistry(OPEN_SOURCE_FIXTURE_TOOLS);
+export const VALIDATED_OPEN_SOURCE_RUNTIME_TOOLS: readonly ValidatedOpenSourceToolDefinition[] = validateOpenSourceToolRegistry(OPEN_SOURCE_RUNTIME_TOOLS);
+export const VALIDATED_OPEN_SOURCE_ASSISTED_EVIDENCE_TOOLS: readonly ValidatedOpenSourceToolDefinition[] = validateOpenSourceToolRegistry(OPEN_SOURCE_ASSISTED_EVIDENCE_TOOLS);
+
+export function getRegisteredOpenSourceTool(toolName: string, toolVersion: string): ValidatedOpenSourceToolDefinition {
+  const tool = VALIDATED_OPEN_SOURCE_ASSISTED_EVIDENCE_TOOLS.find(candidate => candidate.toolName === toolName && candidate.toolVersion === toolVersion);
+  if (!tool) throw new Error(`Unregistered open-source assisted evidence tool cannot execute: ${toolName}@${toolVersion}.`);
+  return tool;
+}
+
+export function assertToolCanEmitCandidateType(tool: ValidatedOpenSourceToolDefinition, candidateType: string): true {
+  if (!tool.allowedCandidateTypes.includes(candidateType as never)) {
+    throw new Error(`${tool.toolName}@${tool.toolVersion} cannot emit candidate type ${candidateType}.`);
+  }
+  return true;
+}
+===== lib/assistedEvidenceSources/openSourceToolTypes.ts
+import type { AssistedEvidenceCandidateCategory, AssistedEvidenceCandidateType } from '@/lib/assistedEvidence';
+
+export type OpenSourceToolLicensePosture = 'approved' | 'caution' | 'blocked';
+
+export type OpenSourceRuntimeCategory =
+  | 'fixture_only'
+  | 'image_metadata'
+  | 'ocr_text_candidate'
+  | 'visual_categorization_candidate'
+  | 'future_geometry_placeholder';
+
+export type OpenSourceRuntimeBoundary = 'fixture_static' | 'server_adapter_contract' | 'browser_adapter_contract' | 'blocked_future_geometry';
+
+export type OpenSourceToolRiskLevel = 'low' | 'moderate' | 'high' | 'blocked';
+
+export type OpenSourceToolEnabledStatus = 'enabled_for_fixtures' | 'enabled_for_runtime_pilot' | 'disabled_pending_runtime_review' | 'blocked';
+
+export type DeterministicReplaySupport = 'fixture_replay_only' | 'runtime_payload_hash_required' | 'blocked_not_replayable';
+
+export interface OpenSourceToolDefinition {
+  toolName: string;
+  toolVersion: string;
+  sourceUrl: string;
+  license: string;
+  runtimeCategory: OpenSourceRuntimeCategory;
+  allowedCandidateTypes: AssistedEvidenceCandidateType[];
+  allowedCandidateCategories: AssistedEvidenceCandidateCategory[];
+  requiresImageBytes: boolean;
+  requiresNativeBinaries: boolean;
+  requiresModelWeights: boolean;
+  browserCompatible: boolean;
+  serverOnly: boolean;
+  reviewRequired: true;
+  canonicalMutationAllowed: false;
+  allowedRuntimeBoundary: OpenSourceRuntimeBoundary;
+  deterministicReplaySupport: DeterministicReplaySupport;
+  riskLevel: OpenSourceToolRiskLevel;
+  enabledStatus: OpenSourceToolEnabledStatus;
+  maintainedStatus: 'maintained' | 'fixture_internal' | 'abandoned' | 'unknown';
+  registryNotes: string[];
+}
+
+export interface ValidatedOpenSourceToolDefinition extends OpenSourceToolDefinition {
+  licensePosture: OpenSourceToolLicensePosture;
+}
+===== lib/assistedEvidenceSources/openSourceToolValidation.ts
+import { classifyLicensePosture, licenseIsBlocked } from './openSourceToolLicenses';
+import type { OpenSourceToolDefinition, ValidatedOpenSourceToolDefinition } from './openSourceToolTypes';
+
+function assertNonEmptyString(value: string, field: string): void {
+  if (!value || !value.trim()) throw new Error(`Open-source tool registry metadata is missing required field: ${field}.`);
+}
+
+export function validateOpenSourceToolDefinition(tool: OpenSourceToolDefinition): ValidatedOpenSourceToolDefinition {
+  assertNonEmptyString(tool.toolName, 'toolName');
+  assertNonEmptyString(tool.toolVersion, 'toolVersion');
+  assertNonEmptyString(tool.sourceUrl, 'sourceUrl');
+  assertNonEmptyString(tool.license, 'license');
+
+  if (tool.reviewRequired !== true) throw new Error(`${tool.toolName} must be review-required.`);
+  if (tool.canonicalMutationAllowed !== false) throw new Error(`${tool.toolName} cannot allow canonical mutation.`);
+  if (tool.allowedCandidateTypes.length === 0) throw new Error(`${tool.toolName} must declare at least one allowed candidate type.`);
+  if (tool.allowedCandidateCategories.length === 0) throw new Error(`${tool.toolName} must declare at least one allowed candidate category.`);
+  if (licenseIsBlocked(tool.license)) throw new Error(`${tool.toolName} uses a blocked or unknown license posture.`);
+  if (tool.maintainedStatus === 'abandoned' || tool.maintainedStatus === 'unknown') throw new Error(`${tool.toolName} is not allowed because maintenance status is ${tool.maintainedStatus}.`);
+  if (tool.riskLevel === 'blocked' || tool.enabledStatus === 'blocked') throw new Error(`${tool.toolName} is blocked by registry risk policy.`);
+  if (tool.runtimeCategory === 'visual_categorization_candidate') throw new Error(`${tool.toolName} runtime category ${tool.runtimeCategory} is not approved in the metadata/OCR pilot.`);
+  if (tool.requiresNativeBinaries && tool.runtimeCategory !== 'fixture_only' && tool.runtimeCategory !== 'image_metadata') throw new Error(`${tool.toolName} requires unapproved native binaries.`);
+  if (tool.requiresModelWeights && tool.runtimeCategory !== 'fixture_only') throw new Error(`${tool.toolName} requires unapproved model weights.`);
+  if ((tool.runtimeCategory === 'image_metadata' || tool.runtimeCategory === 'ocr_text_candidate') && tool.allowedRuntimeBoundary !== 'server_adapter_contract') throw new Error(`${tool.toolName} runtime must use the server adapter contract boundary.`);
+  if ((tool.runtimeCategory === 'image_metadata' || tool.runtimeCategory === 'ocr_text_candidate') && tool.enabledStatus !== 'enabled_for_runtime_pilot') throw new Error(`${tool.toolName} runtime must be explicitly enabled for runtime pilot execution.`);
+  if ((tool.runtimeCategory === 'image_metadata' || tool.runtimeCategory === 'ocr_text_candidate') && !tool.serverOnly) throw new Error(`${tool.toolName} runtime must be server-only.`);
+  if ((tool.runtimeCategory === 'image_metadata' || tool.runtimeCategory === 'ocr_text_candidate') && tool.requiresModelWeights) throw new Error(`${tool.toolName} runtime cannot require model weights.`);
+  if (tool.runtimeCategory === 'ocr_text_candidate' && !tool.allowedCandidateTypes.every(type => type === 'text_region_candidate')) throw new Error(`${tool.toolName} OCR runtime may emit text_region_candidate only.`);
+  if (tool.runtimeCategory === 'ocr_text_candidate' && tool.browserCompatible) throw new Error(`${tool.toolName} OCR runtime pilot must not be browser-executed.`);
+  if (tool.allowedRuntimeBoundary === 'blocked_future_geometry') throw new Error(`${tool.toolName} is assigned a blocked future geometry boundary.`);
+  if (tool.runtimeCategory === 'future_geometry_placeholder') throw new Error(`${tool.toolName} future geometry runtime is not approved in this phase.`);
+
+  return { ...tool, licensePosture: classifyLicensePosture(tool.license) };
+}
+
+export function validateOpenSourceToolRegistry(tools: readonly OpenSourceToolDefinition[]): ValidatedOpenSourceToolDefinition[] {
+  const seen = new Set<string>();
+  return tools.map(tool => {
+    const key = `${tool.toolName}@${tool.toolVersion}`;
+    if (seen.has(key)) throw new Error(`Duplicate open-source tool registration: ${key}.`);
+    seen.add(key);
+    return validateOpenSourceToolDefinition(tool);
+  });
+}
+===== lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts
+import { describe, expect, it } from 'vitest';
+import {
+  buildSurveyIngestionRuntimeSourceMetadataHash,
+  generateSurveyIngestionMetadataRuntimeCandidates,
+} from './surveyIngestionRuntimeBridge';
+import type { SurveyIngestionRuntimeSourceRef } from './surveyIngestionRuntimeBridge';
+
+const onePixelPng = new Uint8Array([
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
+  0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, 144, 119, 83, 222,
+  0, 0, 0, 12, 73, 68, 65, 84, 8, 153, 99, 248, 207, 192, 0, 0,
+  3, 1, 1, 0, 24, 221, 141, 176, 0, 0, 0, 0, 73, 69, 78, 68,
+  174, 66, 96, 130,
+]);
+
+const source: SurveyIngestionRuntimeSourceRef = {
+  surveyId: 'site-survey-runtime-1',
+  projectId: 'project-runtime-1',
+  siteSurveyFileId: 'site-survey-file-1',
+  evidenceId: 'survey-evidence-1',
+  fileUrl: 'https://blob.example/surveys/project-runtime-1/site-survey-runtime-1/roof_overview/photo.png',
+  blobKey: 'surveys/project-runtime-1/site-survey-runtime-1/roof_overview/photo.png',
+  filename: 'roof-overview-1.png',
+  mimeType: 'image/png',
+  submittedCategory: 'roof_overview',
+  canonicalSourceOfTruth: 'site_surveys+site_survey_files',
+  existingImageMetadata: {
+    widthPx: null,
+    heightPx: null,
+    orientation: null,
+  },
+  existingQuality: {
+    blurScore: null,
+    duplicateScore: null,
+    warnings: [],
+  },
+};
+
+const bridgeInput = {
+  source,
+  imageBytes: onePixelPng,
+  toolRunId: 'survey-runtime-bridge-run-1',
+  toolConfigHash: 'survey-runtime-bridge-config-v1',
+  createdAt: '2025-04-01T00:00:00.000Z',
+  createdBy: 'survey-runtime-bridge-test',
+};
+
+describe('survey ingestion runtime bridge', () => {
+  it('builds a deterministic source metadata hash from existing survey attachment identity', () => {
+    const first = buildSurveyIngestionRuntimeSourceMetadataHash(source);
+    const second = buildSurveyIngestionRuntimeSourceMetadataHash({
+      ...source,
+      existingQuality: { ...source.existingQuality, warnings: [...source.existingQuality.warnings].reverse() },
+    });
+
+    expect(first).toBe(second);
+    expect(first).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('reuses existing survey ingestion identity and category without creating a parallel truth path', async () => {
+    const result = await generateSurveyIngestionMetadataRuntimeCandidates(bridgeInput);
+
+    expect(result.sourceContext.sourceFileId).toBe(source.siteSurveyFileId);
+    expect(result.sourceContext.sourceUploadKey).toBe(source.blobKey);
+    expect(result.sourceContext.sourceMetadataHash).toBe(buildSurveyIngestionRuntimeSourceMetadataHash(source));
+    expect(result.reusedExistingSurveySignals).toEqual({
+      sourceOfTruth: 'site_surveys+site_survey_files',
+      reusedUploadIdentity: true,
+      reusedCategory: true,
+      reusedExistingImageMetadata: false,
+      reusedExistingBlurScore: false,
+      reusedExistingDuplicateScore: false,
+      canonicalMutationAllowed: false,
+    });
+  });
+
+  it('omits blur candidates when existing survey ingestion has no blur score to reuse', async () => {
+    const result = await generateSurveyIngestionMetadataRuntimeCandidates(bridgeInput);
+
+    expect(result.omittedRuntimeSignals).toContain('possible_blurry_photo:no-existing-blur-score-to-reuse');
+    expect(result.candidates.map(candidate => candidate.candidatePayload.field)).not.toContain('possible_blurry_photo');
+  });
+
+  it('generates stable review-required runtime candidates with survey provenance annotations', async () => {
+    const first = await generateSurveyIngestionMetadataRuntimeCandidates(bridgeInput);
+    const second = await generateSurveyIngestionMetadataRuntimeCandidates(bridgeInput);
+
+    expect(first.candidates.length).toBeGreaterThan(0);
+    expect(first.candidates.map(candidate => candidate.deterministicHash)).toEqual(second.candidates.map(candidate => candidate.deterministicHash));
+
+    for (const candidate of first.candidates) {
+      expect(candidate.candidateStatus).toBe('review_required');
+      expect(candidate.nonAuthoritative).toBe(true);
+      expect(candidate.reviewRequired).toBe(true);
+      expect(candidate.candidatePayload.runtimePilot).toBe(true);
+      expect(candidate.candidatePayload.surveyRuntimeBridge).toBe(true);
+      expect(candidate.candidatePayload.canonicalSourceOfTruth).toBe('site_surveys+site_survey_files');
+      expect(candidate.candidatePayload.siteSurveyFileId).toBe(source.siteSurveyFileId);
+      expect(candidate.candidatePayload.surveyEvidenceId).toBe(source.evidenceId);
+      expect(candidate.candidatePayload.canonicalMutationAllowed).toBe(false);
+      expect(candidate.candidateLimitations).toContain('survey-ingestion-aligned');
+      expect(candidate.candidateLimitations).toContain('canonical-survey-truth-preserved');
+      expect(candidate.candidateLimitations).toContain('does-not-update-site-surveys');
+      expect(candidate.candidateLimitations).toContain('does-not-update-site-survey-files');
+      expect(candidate.provenance.deterministicInputs).toContain('site_surveys+site_survey_files-source-ref');
+      expect(candidate.provenance.notes.join(' ')).toContain('preserved site_surveys+site_survey_files as canonical attachment truth');
+    }
+  });
+
+  it('keeps survey-aligned runtime candidates out of canonical, CAD, recommendation, and workflow authority', async () => {
+    const result = await generateSurveyIngestionMetadataRuntimeCandidates(bridgeInput);
+    const serialized = JSON.stringify(result);
+
+    expect(serialized).not.toMatch(/buildSurveyEvidenceManifest|evaluateEngineeringRequirements|buildCADReadinessMetadata|buildEngineeringRecommendations|buildEngineeringWorkflowOrchestration/);
+    expect(result.candidates.every(candidate => candidate.candidatePayload.canonicalMutationAllowed === false)).toBe(true);
+    expect(result.candidates.every(candidate => candidate.candidateStatus === 'review_required')).toBe(true);
+  });
+});
+===== lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.ts
+import { deterministicHash } from '@/lib/assistedEvidence';
+import { generateMetadataRuntimeCandidates } from './metadataRuntimeAdapter';
+import type { AssistedEvidenceCandidate } from '@/lib/assistedEvidence';
+import type { AssistedEvidenceSourceContext } from './candidateAdapterTypes';
+
+export interface SurveyIngestionRuntimeSourceRef {
+  surveyId: string;
+  projectId: string | null;
+  siteSurveyFileId: string | null;
+  evidenceId: string;
+  fileUrl: string;
+  blobKey: string | null;
+  filename: string | null;
+  mimeType: string | null;
+  submittedCategory: string | null;
+  canonicalSourceOfTruth: 'site_surveys+site_survey_files';
+  existingImageMetadata: {
+    widthPx: number | null;
+    heightPx: number | null;
+    orientation: string | null;
+  };
+  existingQuality: {
+    blurScore: number | null;
+    duplicateScore: number | null;
+    warnings: readonly string[];
+  };
+}
+
+export interface SurveyIngestionRuntimeBridgeInput {
+  source: SurveyIngestionRuntimeSourceRef;
+  imageBytes: Uint8Array;
+  toolRunId: string;
+  toolConfigHash: string;
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface SurveyIngestionRuntimeBridgeResult {
+  sourceContext: AssistedEvidenceSourceContext;
+  sourceMetadataHash: string;
+  candidates: AssistedEvidenceCandidate[];
+  reusedExistingSurveySignals: {
+    sourceOfTruth: 'site_surveys+site_survey_files';
+    reusedUploadIdentity: boolean;
+    reusedCategory: boolean;
+    reusedExistingImageMetadata: boolean;
+    reusedExistingBlurScore: boolean;
+    reusedExistingDuplicateScore: boolean;
+    canonicalMutationAllowed: false;
+  };
+  omittedRuntimeSignals: string[];
+}
+
+function sortedWarnings(warnings: readonly string[]): string[] {
+  return [...new Set(warnings)].sort((a, b) => a.localeCompare(b));
+}
+
+export function buildSurveyIngestionRuntimeSourceMetadataHash(source: SurveyIngestionRuntimeSourceRef): string {
+  return deterministicHash({
+    surveyId: source.surveyId,
+    projectId: source.projectId,
+    siteSurveyFileId: source.siteSurveyFileId,
+    evidenceId: source.evidenceId,
+    fileUrl: source.fileUrl,
+    blobKey: source.blobKey,
+    filename: source.filename,
+    mimeType: source.mimeType,
+    submittedCategory: source.submittedCategory,
+    canonicalSourceOfTruth: source.canonicalSourceOfTruth,
+    existingImageMetadata: source.existingImageMetadata,
+    existingQuality: {
+      ...source.existingQuality,
+      warnings: sortedWarnings(source.existingQuality.warnings),
+    },
+  });
+}
+
+function buildSourceContext(input: SurveyIngestionRuntimeBridgeInput, sourceMetadataHash: string): AssistedEvidenceSourceContext {
+  return {
+    sourceFileId: input.source.siteSurveyFileId ?? input.source.evidenceId,
+    sourceUploadKey: input.source.blobKey ?? input.source.fileUrl,
+    projectId: input.source.projectId ?? 'unlinked-survey-project',
+    surveyId: input.source.surveyId,
+    toolRunId: input.toolRunId,
+    toolConfigHash: input.toolConfigHash,
+    sourceMetadataHash,
+    createdAt: input.createdAt,
+    createdBy: input.createdBy,
+  };
+}
+
+function annotateSurveyIngestionCandidate(candidate: AssistedEvidenceCandidate, source: SurveyIngestionRuntimeSourceRef): AssistedEvidenceCandidate {
+  return {
+    ...candidate,
+    candidatePayload: {
+      ...candidate.candidatePayload,
+      surveyRuntimeBridge: true,
+      canonicalSourceOfTruth: source.canonicalSourceOfTruth,
+      surveyEvidenceId: source.evidenceId,
+      siteSurveyFileId: source.siteSurveyFileId,
+      submittedCategory: source.submittedCategory,
+      existingImageMetadata: source.existingImageMetadata,
+      existingQuality: {
+        ...source.existingQuality,
+        warnings: sortedWarnings(source.existingQuality.warnings),
+      },
+      canonicalMutationAllowed: false,
+    },
+    candidateLimitations: [...new Set([
+      ...candidate.candidateLimitations,
+      'survey-ingestion-aligned',
+      'canonical-survey-truth-preserved',
+      'does-not-update-site-surveys',
+      'does-not-update-site-survey-files',
+    ])].sort((a, b) => a.localeCompare(b)),
+    provenance: {
+      ...candidate.provenance,
+      deterministicInputs: [...new Set([
+        ...candidate.provenance.deterministicInputs,
+        'site_surveys+site_survey_files-source-ref',
+        source.evidenceId,
+      ])].sort((a, b) => a.localeCompare(b)),
+      notes: [...new Set([
+        ...candidate.provenance.notes,
+        'Survey ingestion alignment bridge preserved site_surveys+site_survey_files as canonical attachment truth.',
+        'Runtime candidates are review-only and leave survey evidence image and quality fields unchanged.',
+      ])].sort((a, b) => a.localeCompare(b)),
+    },
+  };
+}
+
+export async function generateSurveyIngestionMetadataRuntimeCandidates(
+  input: SurveyIngestionRuntimeBridgeInput,
+): Promise<SurveyIngestionRuntimeBridgeResult> {
+  const sourceMetadataHash = buildSurveyIngestionRuntimeSourceMetadataHash(input.source);
+  const sourceContext = buildSourceContext(input, sourceMetadataHash);
+  const runtimeResult = await generateMetadataRuntimeCandidates(sourceContext, input.imageBytes);
+  const candidates = runtimeResult.candidates.map(candidate => annotateSurveyIngestionCandidate(candidate, input.source));
+
+  return {
+    sourceContext,
+    sourceMetadataHash,
+    candidates,
+    reusedExistingSurveySignals: {
+      sourceOfTruth: input.source.canonicalSourceOfTruth,
+      reusedUploadIdentity: Boolean(input.source.siteSurveyFileId || input.source.evidenceId),
+      reusedCategory: input.source.submittedCategory !== null,
+      reusedExistingImageMetadata: input.source.existingImageMetadata.widthPx !== null
+        || input.source.existingImageMetadata.heightPx !== null
+        || input.source.existingImageMetadata.orientation !== null,
+      reusedExistingBlurScore: input.source.existingQuality.blurScore !== null,
+      reusedExistingDuplicateScore: input.source.existingQuality.duplicateScore !== null,
+      canonicalMutationAllowed: false,
+    },
+    omittedRuntimeSignals: [
+      ...(input.source.existingQuality.blurScore === null ? ['possible_blurry_photo:no-existing-blur-score-to-reuse'] : []),
+    ],
+  };
+}

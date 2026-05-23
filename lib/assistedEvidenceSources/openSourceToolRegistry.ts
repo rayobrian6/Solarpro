@@ -1,4 +1,5 @@
 import type { OpenSourceToolDefinition, ValidatedOpenSourceToolDefinition } from './openSourceToolTypes';
+import { VISUAL_CATEGORIZATION_RUNTIME_TOOL_NAME, VISUAL_CATEGORIZATION_RUNTIME_TOOL_VERSION } from './visualCategorizationRuntimeTypes';
 import { validateOpenSourceToolRegistry } from './openSourceToolValidation';
 
 export const OPEN_SOURCE_FIXTURE_TOOLS: readonly OpenSourceToolDefinition[] = [
@@ -99,6 +100,32 @@ export const OPEN_SOURCE_RUNTIME_TOOLS: readonly OpenSourceToolDefinition[] = [
       'Controlled OCR runtime pilot for text extraction only.',
       'Uses tesseract.js only; no external vision services and no engineering inference.',
       'Runtime output must remain non-authoritative review-required text_region_candidate evidence.',
+    ],
+  },
+  {
+    toolName: VISUAL_CATEGORIZATION_RUNTIME_TOOL_NAME,
+    toolVersion: VISUAL_CATEGORIZATION_RUNTIME_TOOL_VERSION,
+    sourceUrl: 'internal://solarpro/runtime/deterministic-visual-categorization',
+    license: 'MIT',
+    runtimeCategory: 'visual_categorization_candidate',
+    allowedCandidateTypes: ['visual_category_candidate'],
+    allowedCandidateCategories: ['field_context', 'electrical_context', 'roof_context', 'structure_context'],
+    requiresImageBytes: true,
+    requiresNativeBinaries: false,
+    requiresModelWeights: false,
+    browserCompatible: false,
+    serverOnly: true,
+    reviewRequired: true,
+    canonicalMutationAllowed: false,
+    allowedRuntimeBoundary: 'server_adapter_contract',
+    deterministicReplaySupport: 'runtime_payload_hash_required',
+    riskLevel: 'moderate',
+    enabledStatus: 'enabled_for_runtime_pilot',
+    maintainedStatus: 'maintained',
+    registryNotes: [
+      'Controlled visual categorization runtime pilot for possible photo-category candidates only.',
+      'No object detection, segmentation, geometry extraction, CAD influence, recommendation influence, workflow influence, or canonical mutation is permitted.',
+      'Runtime output must remain non-authoritative review-required visual_category_candidate evidence.',
     ],
   },
 ] as const;

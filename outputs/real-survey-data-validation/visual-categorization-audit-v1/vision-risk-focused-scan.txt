@@ -1,0 +1,32 @@
+Solarpro-dev-fix/lib/roadmapRE26.ts:773:      summary: 'Full YOLOv8 microservice: FastAPI POST /vision/infer + /health + /vision/model. infer.py core inference (URL or local → VisionDetection[]). train.py ultralytics training script (yolov8n.pt base). validate.py post-training metrics. Dockerfile + start.sh for containerized deploy. 8-class solar dataset structure (dataset.yaml, classes.txt, LABELING_GUIDE.md, split + validate scripts). ingestPipeline._runVisionPipelineAsync now calls VISION_SERVICE_URL/vision/infer instead of Roboflow API. Removes ROBOFLOW_API_KEY / ROBOFLOW_MODEL_ID dependencies. VisionDetection / VisionBoundingBox / VisionInferenceResult types (backward-compat @deprecated aliases kept).',
+Solarpro-dev-fix/lib/roadmapRE26.ts:781:        'services/vision/infer.py',
+Solarpro-dev-fix/lib/roadmapRE26.ts:790:        'lib/vision/types.ts',
+Solarpro-dev-fix/lib/roadmapRE26.ts:791:        'lib/vision/visionAggregator.ts',
+Solarpro-dev-fix/lib/roadmapRE26.ts:794:      notes: 'VISION_SERVICE_URL env var must be set to the deployed FastAPI service URL (e.g. https://vision.yourdomain.com). Model weights not committed — train with train.py on labeled solar dataset or provide a pre-trained .pt file. 8 classes: panel, inverter, conduit, disconnect, meter, service_panel, attic_access, roof_vent.',
+Solarpro-dev-fix/lib/system/systemDefinition.ts:132:// Re-declared here (not imported from lib/vision/types.ts) to keep SystemDefinition
+Solarpro-dev-fix/lib/system/systemDefinition.ts:134:// RULE: Keep in sync with ObstructionNode / ElectricalNode in lib/vision/types.ts.
+Solarpro-dev-fix/lib/system/visionPatch.ts:35:import type { VisionAggregationResult, ObstructionNode, ElectricalNode, PlaneCorrection } from '@/lib/vision/types';
+Solarpro-dev-fix/lib/survey/ingest/ingestPipeline.test.ts:361:  const originalVisionServiceUrl = process.env.VISION_SERVICE_URL;
+Solarpro-dev-fix/lib/survey/ingest/ingestPipeline.test.ts:365:    process.env.VISION_SERVICE_URL = 'https://vision.example.test';
+Solarpro-dev-fix/lib/survey/ingest/ingestPipeline.test.ts:384:      delete process.env.VISION_SERVICE_URL;
+Solarpro-dev-fix/lib/survey/ingest/ingestPipeline.test.ts:386:      process.env.VISION_SERVICE_URL = originalVisionServiceUrl;
+Solarpro-dev-fix/lib/survey/ingest/ingestPipeline.test.ts:391:  it('persists file-present surveys without calling vision inference even when VISION_SERVICE_URL is configured', async () => {
+Solarpro-dev-fix/lib/vision/types.ts:2:// lib/vision/types.ts — Vision Pipeline Canonical Type Contracts
+Solarpro-dev-fix/lib/vision/types.ts:8://     → yoloClient.inferRoboflowFromPath()  (app backend, calls VISION_SERVICE_URL)
+Solarpro-dev-fix/lib/vision/types.ts:93: * VisionDetection — single detection returned by the YOLOv8 inference service.
+Solarpro-dev-fix/lib/vision/types.ts:94: * Matches the shape returned by yoloClient.ts (POST /vision/infer detections[]).
+Solarpro-dev-fix/lib/vision/types.ts:96:export interface VisionDetection {
+Solarpro-dev-fix/lib/vision/types.ts:108: * VisionInferenceResult — response from the in-house YOLOv8 inference service.
+Solarpro-dev-fix/lib/vision/types.ts:111:export interface VisionInferenceResult {
+Solarpro-dev-fix/lib/vision/types.ts:113:  detections: VisionDetection[];
+Solarpro-dev-fix/lib/vision/types.ts:123: * @deprecated Use VisionDetection instead.
+Solarpro-dev-fix/lib/vision/types.ts:126:export type RoboflowDetection = VisionDetection;
+Solarpro-dev-fix/lib/vision/types.ts:129: * @deprecated Use VisionInferenceResult instead.
+Solarpro-dev-fix/lib/vision/types.ts:132:export type RoboflowInferenceResult = VisionInferenceResult;
+Solarpro-dev-fix/lib/vision/types.ts:200:  rawDetection: VisionDetection;
+Solarpro-dev-fix/lib/vision/types.ts:355:  inferenceResult: VisionInferenceResult;
+Solarpro-dev-fix/lib/vision/visionAggregator.ts:2:// lib/vision/visionAggregator.ts — Vision Detection Aggregation Engine
+Solarpro-dev-fix/lib/vision/visionAggregator.ts:62:  type VisionDetection,
+Solarpro-dev-fix/lib/vision/visionAggregator.ts:122:  detection: VisionDetection,
+Solarpro-dev-fix/lib/vision/visionAggregator.ts:137:  detection: VisionDetection,
+Solarpro-dev-fix/lib/vision/confidenceGate.ts:2:// lib/vision/confidenceGate.ts — Detection Confidence Gating

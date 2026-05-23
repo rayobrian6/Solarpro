@@ -1,0 +1,1501 @@
+--- hidden cv/geometry risk scan ---
+app/enterprise/page.tsx:90:                { icon: <MessageSquare size={18} />, title: 'Custom Integrations', desc: 'Connect SolarPro to your existing CRM, ERP, or workflow tools.' },
+app/dashboard/page.tsx:717:      const snoozedUntil = localStorage.getItem('solarpro:workflowBannerSnoozedUntil');
+app/dashboard/page.tsx:727:      localStorage.setItem('solarpro:workflowBannerSnoozedUntil', String(until));
+app/dashboard/page.tsx:732:    try { localStorage.removeItem('solarpro:workflowBannerSnoozedUntil'); } catch { /* ignore */ }
+app/dashboard/page.tsx:1035:                    title="Show workflow guide"
+app/dashboard/page.tsx:1037:                    aria-label="Show workflow guide"
+app/dashboard/page.tsx:1063:                aria-label="Hide workflow guide for 7 days"
+app/proposals/page.tsx:1043:  // #5 FIX: "Send to Client" email workflow
+app/admin/topography/page.tsx:14://   AI/CV/CAD worker stages are explicitly future-only/not started.
+app/admin/topography/page.tsx:376:  const cadStatus: NodeStatus          = systemIntegration.usedInCAD ? 'green' : 'red';
+app/admin/topography/page.tsx:414:            label="Legacy Survey (project_physical_data)"
+app/admin/topography/page.tsx:454:            label="CAD Engine"
+app/admin/topography/page.tsx:455:            status={systemIntegration.usedInCAD ? 'green' : 'red'}
+app/admin/topography/page.tsx:456:            note={!systemIntegration.usedInCAD ? 'not wired' : undefined}
+app/admin/topography/page.tsx:495:              label="project_physical_data"
+app/admin/topography/page.tsx:522:              sublabel="advisory evidence traceability only; CAD automation not started"
+app/admin/topography/page.tsx:534:              sublabel="OpenCV / YOLO / OCR / Claude / Open3D / FreeCAD — NOT started"
+app/admin/topography/page.tsx:545:              label="CAD Engine"
+app/admin/topography/page.tsx:546:              sublabel={systemIntegration.usedInCAD ? 'survey geometry used' : 'CAD automation — NOT started from evidence manifest'}
+app/admin/topography/page.tsx:675:  { id: 'survey', group: 'Survey Evidence Foundation', title: 'SurveyEvidenceManifest v1 Canonical Evidence Pipeline', detail: 'Survey App writes site_surveys and site_survey_files; the canonical SurveyEvidenceManifest feeds advisory engineering bridge, permit validation, admin UI, and future worker contracts. AI/CV/CAD workers are explicitly not started.', evidence: ['/api/auth/authorize', '/api/webhooks/survey-complete', '/api/survey/submit', '/api/site-surveys/[surveyId]', 'lib/survey/evidence/manifest.ts', 'lib/survey/evidence/categoryRegistry.ts', 'lib/survey/evidence/engineeringBridge.ts'], tables: ['site_surveys', 'site_survey_files', 'project_physical_data', 'webhook_deliveries', 'webhook_ingestion_log'], status: 'live', layer: 'mobile' },
+app/admin/topography/page.tsx:676:  { id: 'survey-partial', group: 'Survey Evidence Foundation', title: 'Future Worker Boundary — AI/CV/CAD Not Started', detail: 'OpenCV blur scoring, YOLO/Supervision detection, OCR extraction, Claude reasoning, Open3D geometry, and FreeCAD/CAD automation remain future-only and must map back into the canonical evidence registry.', evidence: ['lib/topography/getTopographyState.ts', 'lib/survey/evidence/categoryRegistry.ts', 'lib/survey/evidence/manifest.ts'], tables: ['site_surveys', 'site_survey_files'], status: 'blocked', layer: 'blocked' },
+app/admin/topography/page.tsx:721:    'Known partial/stale items: external iframe is static; partner map is legacy/reference; survey-to-engineering consumes 4/20 physical fields; SystemDefinition/CAD/Permit/Proposal survey auto-application has source files but no production callers.',
+app/admin/topography/page.tsx:831:              ['Survey ingest → project_physical_data', 'LIVE', 'text-emerald-400'],
+app/admin/topography/page.tsx:834:              ['Survey auto-apply → SystemDefinition/CAD/Permit/Proposal', 'NOT WIRED', 'text-slate-500'],
+app/admin/network/page.tsx:1715:  workflow_timeline?: Array<Record<string, unknown>> | null;
+app/admin/network/page.tsx:2314:      workflow_reason: "",
+app/admin/network/page.tsx:2370:      !has("workflow_reason") &&
+app/admin/network/page.tsx:2378:      !has("workflow_reason") &&
+app/admin/network/page.tsx:2443:      workflow_reason: actionText("workflow_reason"),
+app/admin/network/page.tsx:2807:    ...(lead.workflow_timeline ?? []),
+app/admin/network/page.tsx:3773:                                      Operator workflow controls
+app/admin/network/page.tsx:4231:                    value={actionText("workflow_reason")}
+app/admin/network/page.tsx:4233:                      setActionValue("workflow_reason", e.target.value)
+app/admin/network/page.tsx:4235:                    placeholder="Explain why this lead is being moved back through operational workflow."
+app/admin/network/page.tsx:4267:                      value={actionText("workflow_reason")}
+app/admin/network/page.tsx:4269:                        setActionValue("workflow_reason", e.target.value)
+app/admin/engineering-intelligence/page.tsx:11:  CADReadinessEscalationsWorkspace,
+app/admin/engineering-intelligence/page.tsx:54:      <EngineeringWorkflowOrchestrationWorkspace orchestration={model.workflowOrchestration} />
+app/admin/engineering-intelligence/page.tsx:56:        <SurveyFollowUpQueueWorkspace orchestration={model.workflowOrchestration} />
+app/admin/engineering-intelligence/page.tsx:57:        <EngineeringReviewQueueWorkspace orchestration={model.workflowOrchestration} />
+app/admin/engineering-intelligence/page.tsx:60:        <ConflictResolutionQueueWorkspace orchestration={model.workflowOrchestration} />
+app/admin/engineering-intelligence/page.tsx:61:        <FallbackRiskQueueWorkspace orchestration={model.workflowOrchestration} />
+app/admin/engineering-intelligence/page.tsx:64:        <CADReadinessEscalationsWorkspace orchestration={model.workflowOrchestration} />
+app/admin/engineering-intelligence/page.tsx:65:        <PermitReadinessQueueWorkspace orchestration={model.workflowOrchestration} />
+app/admin/engineering-intelligence/page.tsx:68:        <InstallBlockerQueueWorkspace orchestration={model.workflowOrchestration} />
+app/admin/engineering-intelligence/page.tsx:69:        <RegenerationApprovalQueueWorkspace orchestration={model.workflowOrchestration} />
+app/admin/engineering-intelligence/page.tsx:72:        <DependencyRiskEscalationsWorkspace orchestration={model.workflowOrchestration} />
+app/admin/engineering-intelligence/page.tsx:73:        <WorkflowSimulationImpactsWorkspace orchestration={model.workflowOrchestration} />
+app/admin/engineering-intelligence/project/[id]/page.tsx:4:import { hydrateProjectEngineeringIntelligenceFromDb, buildEngineeringIntelligenceWorkspace, buildCADReadinessMetadata, buildEngineeringContextResolution } from '@/lib/engineeringIntelligence';
+app/admin/engineering-intelligence/project/[id]/page.tsx:11:  CADReadinessWorkspace,
+app/admin/engineering-intelligence/project/[id]/page.tsx:104:      <CADReadinessWorkspace readiness={hydration.cadReadiness} />
+app/admin/engineering-intelligence/project/[id]/page.tsx:113:  const cadReadiness = buildCADReadinessMetadata({ projectId });
+app/admin/engineering-intelligence/project/[id]/page.tsx:117:  const signalAwareCADReadiness = buildCADReadinessMetadata({ projectId, structuredSignals });
+app/admin/engineering-intelligence/project/[id]/page.tsx:118:  const contextResolution = buildEngineeringContextResolution({ projectId, structuredSignals, photoGrouping, cadReadiness: signalAwareCADReadiness, generatedAt });
+app/admin/engineering-intelligence/project/[id]/page.tsx:119:  const contextAwareCADReadiness = buildCADReadinessMetadata({ projectId, structuredSignals, contextResolution });
+app/admin/engineering-intelligence/project/[id]/page.tsx:120:  const workspaceInput = { projectId, cadReadiness: contextAwareCADReadiness, photoGrouping, structuredSignals, contextResolution };
+app/admin/engineering-intelligence/project/[id]/page.tsx:138:    cadReadiness: contextAwareCADReadiness,
+app/admin/engineering-intelligence/project/[id]/page.tsx:145:      'Workspace remains registry/empty-state and does not synthesize project evidence, graph edges, snapshots, invalidation history, or CAD metadata.',
+app/admin/engineering-intelligence/project/[id]/page.tsx:151:  const cadReadiness = buildCADReadinessMetadata({ projectId });
+app/admin/engineering-intelligence/project/[id]/page.tsx:155:  const signalAwareCADReadiness = buildCADReadinessMetadata({ projectId, structuredSignals });
+app/admin/engineering-intelligence/project/[id]/page.tsx:156:  const contextResolution = buildEngineeringContextResolution({ projectId, structuredSignals, photoGrouping, cadReadiness: signalAwareCADReadiness, generatedAt });
+app/admin/engineering-intelligence/project/[id]/page.tsx:157:  const contextAwareCADReadiness = buildCADReadinessMetadata({ projectId, structuredSignals, contextResolution });
+app/admin/engineering-intelligence/project/[id]/page.tsx:158:  const workspaceInput = { projectId, cadReadiness: contextAwareCADReadiness, photoGrouping, structuredSignals, contextResolution };
+app/admin/engineering-intelligence/project/[id]/page.tsx:176:    cadReadiness: contextAwareCADReadiness,
+app/admin/engineering-intelligence/components.tsx:46:import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
+app/admin/engineering-intelligence/components.tsx:189:            <div className="mt-3 text-slate-400">No OCR/CV/CAD/autonomous-regeneration runtime path is exposed here.</div>
+app/admin/engineering-intelligence/components.tsx:266:        'Selecting a project only loads deterministic evidence, graph, snapshot, invalidation, regeneration-plan metadata, and CAD-readiness metadata; it does not run OCR, CV, CAD generation, or autonomous regeneration.',
+app/admin/engineering-intelligence/components.tsx:349:export function CADReadinessWorkspace({ readiness }: { readiness: CADReadinessMetadataModel }) {
+app/admin/engineering-intelligence/components.tsx:351:    <Panel title="CAD Readiness Metadata" eyebrow="Metadata only">
+app/admin/engineering-intelligence/components.tsx:356:        <Metric label="Runtime CAD" value="disabled" />
+app/admin/engineering-intelligence/components.tsx:454:        {safeArray(grouping.groupedCADReadiness).map(context => (
+app/admin/engineering-intelligence/components.tsx:570:              <div className="text-[10px] font-bold uppercase tracking-wide text-violet-300">CAD readiness flags from real evidence</div>
+app/admin/engineering-intelligence/components.tsx:580:              ) : <EmptyState state="not_loaded">No CAD-readiness metadata is linked to this group.</EmptyState>}
+app/admin/engineering-intelligence/components.tsx:882:        <Metric label="CAD readiness changes" value={collectionSize(model.changedCADReadiness)} />
+app/admin/engineering-intelligence/components.tsx:891:        <ListBox title="Changed CAD readiness" values={model.changedCADReadiness} />
+app/admin/engineering-intelligence/components.tsx:989:                <LineageBox title="CAD impacts" values={signal.cadImpacts} />
+app/admin/engineering-intelligence/components.tsx:1018:        <Metric label="CAD generation" value="disabled" />
+app/admin/engineering-intelligence/components.tsx:1150:      <div className="grid gap-3 md:grid-cols-3"><Metric label="Stale impact rows" value={collectionSize(model.staleImpacts)} /><Metric label="Fallback rows" value={collectionSize(model.fallbackParticipation)} /><Metric label="CAD certainty" value="not implied" /></div>
+app/admin/engineering-intelligence/components.tsx:1206:                <LineageBox title="CAD readiness" values={context.cadReadinessImpacts} />
+app/admin/engineering-intelligence/components.tsx:1256:  return <Panel title="Context Stale Impacts" eyebrow="Readiness mappings"><div className="grid gap-3 md:grid-cols-3"><Metric label="Stale rows" value={collectionSize(model.staleImpacts)} /><Metric label="CAD mappings" value={collectionSize(model.cadReadinessMappings)} /><Metric label="Truth source" value="signals_only" /></div><div className="mt-4 grid gap-4 lg:grid-cols-2"><div className="space-y-3">{safeArray(model.staleImpacts).map(entry => <div key={entry.contextId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs"><div className="break-all font-mono text-white">{safeRenderValue(entry.contextId)}</div><div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Stale classes" values={entry.staleClasses} /><LineageBox title="Invalidated by" values={entry.invalidatedBy} /></div></div>)}</div><div className="space-y-3">{safeArray(model.cadReadinessMappings).map(mapping => <div key={mapping.flagId} className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-4 text-xs"><div className="font-mono text-white">{safeRenderValue(mapping.flagId)}</div><div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Contexts" values={mapping.contextIds} /><LineageBox title="Conflicting" values={mapping.conflictingContextIds} /><LineageBox title="Blocked" values={mapping.blockedContextIds} /><LineageBox title="Unresolved" values={mapping.unresolvedContextIds} /></div></div>)}</div></div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1470:function RecommendationCard({ recommendation }: { recommendation: EngineeringRecommendation }) {
+app/admin/engineering-intelligence/components.tsx:1475:          <div className="font-mono text-sky-300">{safeRenderValue(recommendation.recommendationType)}</div>
+app/admin/engineering-intelligence/components.tsx:1476:          <div className="mt-1 text-sm font-bold text-white">{safeRenderValue(recommendation.recommendationId)}</div>
+app/admin/engineering-intelligence/components.tsx:1479:          <StatusPill value={recommendation.priority} />
+app/admin/engineering-intelligence/components.tsx:1480:          <StatusPill value={recommendation.severity} />
+app/admin/engineering-intelligence/components.tsx:1481:          <StatusPill value={recommendation.confidence} />
+app/admin/engineering-intelligence/components.tsx:1485:        <Metric label="Score" value={recommendation.deterministicScore} />
+app/admin/engineering-intelligence/components.tsx:1486:        <Metric label="Confidence gain" value={recommendation.expectedConfidenceGain} />
+app/admin/engineering-intelligence/components.tsx:1487:        <Metric label="Readiness gain" value={recommendation.expectedReadinessGain} />
+app/admin/engineering-intelligence/components.tsx:1488:        <Metric label="Dependency paths" value={collectionSize(recommendation.dependencyTraversal)} />
+app/admin/engineering-intelligence/components.tsx:1490:      <div className="mt-3 leading-5 text-slate-300">{safeRenderValue(recommendation.explanation)}</div>
+app/admin/engineering-intelligence/components.tsx:1493:        {safeRenderValue(recommendation.scoreBreakdown.deterministicReason)}
+app/admin/engineering-intelligence/components.tsx:1498:          <TokenList values={[...recommendation.affectedEvidenceIds, ...recommendation.affectedSignalIds, ...recommendation.affectedContextIds, ...recommendation.affectedRequirementIds, ...recommendation.affectedDecisionIds, ...recommendation.affectedOutputIds]} limit={24} />
+app/admin/engineering-intelligence/components.tsx:1502:          <TokenList values={recommendation.unresolvedStatesPreserved.length ? recommendation.unresolvedStatesPreserved : recommendation.uncertaintyNotes} limit={24} />
+app/admin/engineering-intelligence/components.tsx:1509:function RecommendationCollection({ recommendations, empty }: { recommendations: EngineeringRecommendation[]; empty: string }) {
+app/admin/engineering-intelligence/components.tsx:1510:  return recommendations.length === 0 ? <EmptyState state={empty}>No deterministic recommendations are available for this workspace.</EmptyState> : (
+app/admin/engineering-intelligence/components.tsx:1512:      {recommendations.slice(0, 24).map(recommendation => <RecommendationCard key={recommendation.recommendationId} recommendation={recommendation} />)}
+app/admin/engineering-intelligence/components.tsx:1517:export function EngineeringRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1521:        This workspace displays deterministic Engineering Recommendation System V1 guidance only. It is not AI inference, not autonomous engineering, not production truth, not CAD generation, and not automatic regeneration. Recommendations preserve unresolved states and do not imply guaranteed correctness, CAD success, or permit approval.
+app/admin/engineering-intelligence/components.tsx:1524:        <Metric label="Recommendations" value={collectionSize(recommendations.recommendations)} />
+app/admin/engineering-intelligence/components.tsx:1525:        <Metric label="Mode" value={recommendations.mode} />
+app/admin/engineering-intelligence/components.tsx:1526:        <Metric label="Unresolved preserved" value={collectionSize(recommendations.unresolvedStatesPreserved)} />
+app/admin/engineering-intelligence/components.tsx:1527:        <Metric label="Hash" value={recommendations.deterministicHash} />
+app/admin/engineering-intelligence/components.tsx:1529:      <DeterministicNotes notes={recommendations.deterministicNotes} />
+app/admin/engineering-intelligence/components.tsx:1530:      <DeterministicNotes notes={recommendations.prohibitedRuntimeBehavior} />
+app/admin/engineering-intelligence/components.tsx:1531:      <div className="mt-4"><RecommendationCollection recommendations={recommendations.highestValueNextActions} empty="no_recommendations" /></div>
+app/admin/engineering-intelligence/components.tsx:1536:export function SurveyImprovementRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1537:  return <Panel title="Survey Improvement Recommendations" eyebrow="Evidence gaps"><RecommendationCollection recommendations={recommendations.surveyRecommendations} empty="no_survey_recommendations" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1540:export function ConflictResolutionRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1541:  return <Panel title="Conflict Resolution Recommendations" eyebrow="Do not collapse uncertainty"><RecommendationCollection recommendations={recommendations.conflictResolutionRecommendations} empty="no_conflict_recommendations" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1544:export function FallbackReductionRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1545:  return <Panel title="Fallback Reduction Recommendations" eyebrow="Fallback lineage visible"><RecommendationCollection recommendations={recommendations.fallbackReductionRecommendations} empty="no_fallback_recommendations" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1548:export function CADReadinessRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1549:  return <Panel title="CAD Readiness Recommendations" eyebrow="Metadata-only readiness"><RecommendationCollection recommendations={recommendations.cadReadinessRecommendations} empty="no_cad_recommendations" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1552:export function SimulationBackedRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1553:  return <Panel title="Simulation-Backed Recommendations" eyebrow="Hypothetical sandbox deltas"><RecommendationCollection recommendations={recommendations.simulationBackedRecommendations} empty="no_simulation_recommendations" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1556:export function DependencyRiskRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1557:  return <Panel title="Dependency Risk Recommendations" eyebrow="Traversal and centrality"><RecommendationCollection recommendations={recommendations.dependencyRiskRecommendations} empty="no_dependency_recommendations" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1560:export function StaleImpactRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1561:  return <Panel title="Stale Impact Recommendations" eyebrow="Invalidation participation"><RecommendationCollection recommendations={recommendations.staleImpactRecommendations} empty="no_stale_recommendations" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1564:export function HighestValueNextActionsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1565:  return <Panel title="Highest-Value Next Actions" eyebrow="Deterministic rank order"><RecommendationCollection recommendations={recommendations.highestValueNextActions} empty="no_next_actions" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1568:export function RecommendationConfidenceBreakdownWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1571:      {recommendations.confidenceBreakdown.length === 0 ? <EmptyState state="no_confidence_breakdown">No confidence breakdown rows are available.</EmptyState> : (
+app/admin/engineering-intelligence/components.tsx:1573:          {recommendations.confidenceBreakdown.slice(0, 32).map(row => (
+app/admin/engineering-intelligence/components.tsx:1574:            <div key={row.recommendationId} className="rounded-lg border border-white/10 bg-white/[0.02] p-3 text-xs text-slate-300">
+app/admin/engineering-intelligence/components.tsx:1575:              <div className="flex flex-wrap items-center justify-between gap-2"><div className="font-mono text-sky-300">{safeRenderValue(row.recommendationId)}</div><StatusPill value={row.confidence} /></div>
+app/admin/engineering-intelligence/components.tsx:1587:function WorkflowCard({ workflow }: { workflow: EngineeringWorkflowItem }) {
+app/admin/engineering-intelligence/components.tsx:1592:          <div className="font-mono text-sky-300">{safeRenderValue(workflow.workflowId)}</div>
+app/admin/engineering-intelligence/components.tsx:1593:          <div className="mt-1 text-base font-semibold text-white">{safeRenderValue(workflow.workflowType)}</div>
+app/admin/engineering-intelligence/components.tsx:1594:          <div className="mt-1 text-slate-400">{safeRenderValue(workflow.category)} · reviewer: {safeRenderValue(workflow.recommendedReviewerRole)}</div>
+app/admin/engineering-intelligence/components.tsx:1597:          <StatusPill value={workflow.priority} />
+app/admin/engineering-intelligence/components.tsx:1598:          <StatusPill value={workflow.severity} />
+app/admin/engineering-intelligence/components.tsx:1599:          <StatusPill value={workflow.status} />
+app/admin/engineering-intelligence/components.tsx:1600:          <StatusPill value={workflow.confidence} />
+app/admin/engineering-intelligence/components.tsx:1604:        <Metric label="Score" value={workflow.deterministicScore} />
+app/admin/engineering-intelligence/components.tsx:1605:        <Metric label="Affected outputs" value={collectionSize(workflow.affectedOutputIds)} />
+app/admin/engineering-intelligence/components.tsx:1606:        <Metric label="Dependency paths" value={collectionSize(workflow.dependencyTraversal)} />
+app/admin/engineering-intelligence/components.tsx:1607:        <Metric label="CAD impacts" value={collectionSize(workflow.cadReadinessImpact)} />
+app/admin/engineering-intelligence/components.tsx:1608:        <Metric label="Blocking impacts" value={collectionSize(workflow.blockingImpacts)} />
+app/admin/engineering-intelligence/components.tsx:1610:      <div className="mt-3 leading-5 text-slate-300">{safeRenderValue(workflow.explanation)}</div>
+app/admin/engineering-intelligence/components.tsx:1613:        {safeRenderValue(workflow.scoreBreakdown.deterministicReason)}
+app/admin/engineering-intelligence/components.tsx:1617:        <div>{safeRenderValue(workflow.escalationReason)}</div>
+app/admin/engineering-intelligence/components.tsx:1618:        <div className="mt-2">{safeRenderValue(workflow.recommendedTechnicianAction)}</div>
+app/admin/engineering-intelligence/components.tsx:1623:          <TokenList values={[...workflow.affectedEvidenceIds, ...workflow.affectedSignalIds, ...workflow.affectedContextIds, ...workflow.affectedRequirementIds, ...workflow.affectedDecisionIds, ...workflow.affectedOutputIds]} limit={30} />
+app/admin/engineering-intelligence/components.tsx:1626:          <div className="mb-2 font-bold text-slate-200">Blocking, unresolved, and CAD impacts</div>
+app/admin/engineering-intelligence/components.tsx:1627:          <TokenList values={[...workflow.blockingImpacts, ...workflow.unresolvedStatesPreserved, ...workflow.cadReadinessImpact]} limit={30} />
+app/admin/engineering-intelligence/components.tsx:1631:        <ListBox title="Stale / invalidation / regeneration" values={[...workflow.staleImpactParticipation.map(item => item.entityId), ...workflow.invalidationParticipation, ...workflow.regenerationParticipation]} />
+app/admin/engineering-intelligence/components.tsx:1632:        <ListBox title="Fallback and conflict participation" values={[...workflow.fallbackParticipation, ...workflow.conflictParticipation]} />
+app/admin/engineering-intelligence/components.tsx:1633:        <ListBox title="Simulation outcomes" values={[...workflow.simulationOutcome.scenarioIds, ...workflow.simulationOutcome.hypotheticalRemediationOutcomes]} />
+app/admin/engineering-intelligence/components.tsx:1636:        <Metric label="Hypothetical confidence improvement" value={workflow.simulationOutcome.hypotheticalConfidenceImprovement} />
+app/admin/engineering-intelligence/components.tsx:1637:        <Metric label="Hypothetical CAD readiness improvement" value={workflow.simulationOutcome.hypotheticalCADReadinessImprovement} />
+app/admin/engineering-intelligence/components.tsx:1638:        <Metric label="Hypothetical stale reduction" value={workflow.simulationOutcome.hypotheticalStaleReduction} />
+app/admin/engineering-intelligence/components.tsx:1644:function WorkflowCollection({ workflows, empty }: { workflows: EngineeringWorkflowItem[]; empty: string }) {
+app/admin/engineering-intelligence/components.tsx:1645:  return workflows.length === 0 ? <EmptyState state={empty}>No deterministic workflow items are available for this queue.</EmptyState> : (
+app/admin/engineering-intelligence/components.tsx:1647:      {workflows.slice(0, 24).map(workflow => <WorkflowCard key={workflow.workflowId} workflow={workflow} />)}
+app/admin/engineering-intelligence/components.tsx:1656:        This workspace displays deterministic Workflow Orchestration V1 review queues only. It is not AI orchestration, not autonomous engineering, not CAD generation, not permit approval, not automatic regeneration, and not task execution. Workflow statuses are review states and are never auto-resolved by this runtime.
+app/admin/engineering-intelligence/components.tsx:1659:        <Metric label="Workflows" value={collectionSize(orchestration.workflows)} />
+app/admin/engineering-intelligence/components.tsx:1666:      <div className="mt-4"><WorkflowCollection workflows={orchestration.highestPriorityWorkflows} empty="no_workflows" /></div>
+app/admin/engineering-intelligence/components.tsx:1672:  return <Panel title="Survey Follow-Up Queue" eyebrow="Explicit field evidence follow-up"><WorkflowCollection workflows={orchestration.surveyFollowUpQueue} empty="no_survey_follow_up" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1676:  return <Panel title="Engineering Review Queue" eyebrow="Human review required"><WorkflowCollection workflows={orchestration.engineeringReviewQueue} empty="no_engineering_review" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1680:  return <Panel title="Conflict Resolution Queue" eyebrow="Uncertainty preserved"><WorkflowCollection workflows={orchestration.conflictResolutionQueue} empty="no_conflict_workflows" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1684:  return <Panel title="Fallback Risk Queue" eyebrow="Fallback lineage visible"><WorkflowCollection workflows={orchestration.fallbackRiskQueue} empty="no_fallback_workflows" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1687:export function CADReadinessEscalationsWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1688:  return <Panel title="CAD Readiness Escalations" eyebrow="No CAD generated"><WorkflowCollection workflows={orchestration.cadReadinessEscalations} empty="no_cad_escalations" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1692:  return <Panel title="Permit Readiness Queue" eyebrow="No permit approval"><WorkflowCollection workflows={orchestration.permitReadinessQueue} empty="no_permit_workflows" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1696:  return <Panel title="Install Blocker Queue" eyebrow="No install execution"><WorkflowCollection workflows={orchestration.installBlockerQueue} empty="no_install_workflows" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1700:  return <Panel title="Regeneration Approval Queue" eyebrow="No regeneration executed"><WorkflowCollection workflows={orchestration.regenerationApprovalQueue} empty="no_regeneration_workflows" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1704:  return <Panel title="Dependency Risk Escalations" eyebrow="Traversal centrality"><WorkflowCollection workflows={orchestration.dependencyRiskEscalations} empty="no_dependency_workflows" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1708:  return <Panel title="Workflow Simulation Impacts" eyebrow="Read-only hypothetical outcomes"><WorkflowCollection workflows={orchestration.workflowSimulationImpacts} empty="no_simulation_workflows" /></Panel>;
+app/admin/engineering/page.tsx:70:              Inspect canonical evidence lineage, requirement status, decision provenance, stale-state invalidation, snapshots, dependency graph metadata, regeneration planning, and audit guards. This launcher does not trigger generation, OCR, CV, CAD automation, or AI engineering decisions.
+app/page.tsx:845:                The average SolarPro user completes a full design-to-permit workflow in under 15 minutes. Legacy tools — Aurora, Helioscope, manual CAD — average 3–4 hours for the same output.
+app/page.tsx:1089:                Field teams log in with their SolarPro credentials. Each surveyor sees their assigned projects. Survey results feed directly into the design workflow — no re-entry, no lost data, no delays.
+app/engineering/core/stringSystem.ts:354:      message: `AC voltage drop (${acVoltageDrop.toFixed(2)}%) exceeds 3% recommendation`,
+app/engineering/page.tsx:26:// Phase 11 — brand-driven sizing recommendation UI
+app/engineering/page.tsx:34:// MUST read from CAD → SystemDefinition → config (fallback), never directly
+app/engineering/page.tsx:298:  //   - Auto-apply of the sizing recommendation is a hard no-op.
+app/engineering/page.tsx:303:  // NON-NEGOTIABLE: the sizing engine MAY still compute a recommendation
+app/engineering/page.tsx:310:  //   - CAD sync will only update panel count, never rearrange strings
+app/engineering/page.tsx:990:  // CAD/layout from 3D design engine (panels[], roofPlanes[]) — AUTHORITATIVE
+app/engineering/page.tsx:1457:        // Used below to detect stale inverter configs saved before CAD loaded.
+app/engineering/page.tsx:1474:        // (auto-saved before CAD loaded, likely from newString() default panelCount:10).
+app/engineering/page.tsx:2066:    // Prevents newString() default 1×10 from being persisted before CAD loads.
+app/engineering/page.tsx:2145:  // Phase 11 — brand sizing recommendation UI state
+app/engineering/page.tsx:2203:  // Auto-loaded workflow status from DB — populated on page load without needing to run pipeline
+app/engineering/page.tsx:2261:  //   1. projectLayout.panels.length     (CAD placed panels — authoritative)
+app/engineering/page.tsx:2262:  //   2. projectLayout.totalPanels       (CAD precomputed total)
+app/engineering/page.tsx:2264:  //   4. totalPanels (config fallback)   — only when no CAD/SD available
+app/engineering/page.tsx:2271:  // This fixes the bug where CAD places 36 panels but the inverter card
+app/engineering/page.tsx:2342:      // SOURCE OF TRUTH: prefer CAD / SystemDefinition panel count. Falls
+app/engineering/page.tsx:2379:      // derivedFrom: 'estimated-geometry' (not CAD model)
+app/engineering/page.tsx:2380:      // v47.432: CAD-based version historically lived in bom-unified.ts (deleted Stage 8.1)
+app/engineering/page.tsx:2594:  // Phase 11 — Brand-driven sizing recommendation
+app/engineering/page.tsx:2612:    console.log('🚨 [SIZING ENGINE] computing recommendation (display only) — userHasEditedInverters:', config.userHasEditedInverters);
+app/engineering/page.tsx:2630:      // inferred brand for this recommendation call so the engine agrees
+app/engineering/page.tsx:2668:        // SOURCE OF TRUTH: CAD → SystemDefinition → config fallback.
+app/engineering/page.tsx:2687:           // engine back to that same model, producing a circular recommendation
+app/engineering/page.tsx:2713:    // Depend on the AUTHORITATIVE panel count — recompute when CAD or
+app/engineering/page.tsx:2729:  // Makes it impossible to confuse CAD panel count, sizing engine count,
+app/engineering/page.tsx:2746:  // Fires whenever DC/AC ratio or sizing recommendation changes.
+app/engineering/page.tsx:3037:  // result + optional context (CAD count). Non-blocking: the UI surfaces
+app/engineering/page.tsx:3147:    console.log('[SIZING APPLY] Applying recommendation:', {
+app/engineering/page.tsx:3283:      // Phase 13.9 — also sync selectedBrand to the recommendation's brand.
+app/engineering/page.tsx:3285:      // applying a SolarEdge recommendation, causing the mismatch banner
+app/engineering/page.tsx:3363:  //   1. CAD has produced a real panel count (systemPanelCount > 0), AND
+app/engineering/page.tsx:3371:  // seed `selectedBrand`. All downstream hooks (sizing recommendation,
+app/engineering/page.tsx:3475:  //   3. current config does NOT match the recommendation
+app/engineering/page.tsx:3486:    // config, auto-apply is a HARD STOP. The recommendation stays visible
+app/engineering/page.tsx:3551:     // the sizing engine has a recommendation, we override the userHasEditedInverters
+app/engineering/page.tsx:3563:       // Safety: do not override if the recommendation itself also violates.
+app/engineering/page.tsx:3570:         console.warn('[HARD DC/AC AUTO-HEAL] recommendation also has ratio < 1.0 — skipping', { recRatio });
+app/engineering/page.tsx:3673:  // blocks auto-apply of the sizing recommendation. The user's config
+app/engineering/page.tsx:3674:  // becomes the source of truth; the recommendation stays visible but
+app/engineering/page.tsx:3683:      // B5 FIX: Prefer the authoritative systemPanelCount (CAD > SystemDefinition >
+app/engineering/page.tsx:3684:      // config fallback) over the stale config-derived sum. When CAD placed 36 panels
+app/engineering/page.tsx:3911:    // B4 FIX: Prefer the authoritative systemPanelCount (CAD > SystemDefinition >
+app/engineering/page.tsx:3912:    // config fallback) over the stale config-derived sum. When CAD placed 36 panels
+app/engineering/page.tsx:4490:                recommendations: structV2Data.recommendations,
+app/engineering/page.tsx:5016:          // v58.5 FIX: Use authoritative systemPanelCount (CAD/SystemDefinition/config fallback)
+app/engineering/page.tsx:5017:          // rather than totalPanels (config-derived sum only). When CAD has placed 36 panels
+app/engineering/page.tsx:5024:          // When sizingRecommendation is null (e.g. CAD not yet loaded, systemPanelCount=0),
+app/engineering/page.tsx:5111:          // Fence structural data — ESTIMATED from fenceCAD.ts defaults + panel count
+app/engineering/page.tsx:5112:          // MASTER TASK NOTE: This is best-effort estimation. When CAD geometry is
+app/engineering/page.tsx:5113:          // available server-side, use extractStructuralInputFromCAD() instead.
+app/engineering/page.tsx:5114:          // derivedFrom: 'estimated-ui-defaults' (not CAD geometry)
+app/engineering/page.tsx:5116:            // fenceCAD.ts defaults: 8ft post spacing, 3ft embed, 2 rails
+app/engineering/page.tsx:5117:            const panelWidthFt = 3.28;    // ~1m panel width (fenceCAD DEFAULT_PANEL_WIDTH_FT)
+app/engineering/page.tsx:5119:            const postSpacingFt = 8;      // DEFAULT_POST_SPACING_FT from fenceCAD.ts
+app/engineering/page.tsx:5120:            const postEmbedFt = 3;        // DEFAULT_POST_EMBED_FT from fenceCAD.ts
+app/engineering/page.tsx:5121:            const railCount = 2;          // DEFAULT_RAIL_COUNT from fenceCAD.ts
+app/engineering/page.tsx:5137:              gateCount: 0,                     // gate data from CAD if available
+app/engineering/page.tsx:5148:          // falls back to mounting system defaults. When CAD geometry is available
+app/engineering/page.tsx:5149:          // server-side, use extractStructuralInputFromCAD() instead.
+app/engineering/page.tsx:5171:              groundClearanceFt: 2,     // 0.6096m default from CAD types
+app/engineering/page.tsx:5492:          // Log mount spacing recommendation
+app/engineering/page.tsx:5505:            logDecision('Auto Fix', `Structural FAIL — check recommendations: ${structData.recommendations?.join('; ')}`, 'auto');
+app/engineering/page.tsx:5837:              : _csSinglePc > 20              // fallback when no CAD count yet
+app/engineering/page.tsx:5841:        // This prevents CAD sync from overwriting a user-configured string layout.
+app/engineering/page.tsx:5891:              // v61.8 CAD SYNC FIX: if the current config is a placeholder (1 string,
+app/engineering/page.tsx:5900:                console.log('[CONFIG BUILD] CAD sync placeholder contamination detected (', currentTotal, '→', layout.panelCount, ') — clearing locks, re-sizing will fire');
+app/engineering/page.tsx:5909:                console.log('[CONFIG BUILD] CAD panel count update (user-controlled, no rearrange):', currentTotal, '→', layout.panelCount);
+app/engineering/page.tsx:6049:  // Auto-load workflow status from DB on page load (Task 6: status from actual data, not UI flags)
+app/engineering/page.tsx:6050:  // Uses /api/debug/project which derives workflow state from layouts, engineering_reports, project_files
+app/engineering/page.tsx:6057:        const ws = d.workflow ?? {};         // { designComplete, engineeringComplete, permitReady, filesReady }
+app/engineering/page.tsx:7445:            // NEVER mix recommendation strings in one place and current config in another.
+app/engineering/page.tsx:8238:                            // userHasEditedInverters so auto-sizing can run fresh recommendations
+app/engineering/page.tsx:8362:                        // via the sizing recommendation so the STRINGS/ARRAYS section is never stale.
+app/engineering/page.tsx:9759:                            {_str.recommendations?.length > 0 && (
+app/engineering/page.tsx:9761:                                {_str.recommendations.map((rec: string, i: number) => (
+app/engineering/page.tsx:10552:                  {compliance.structural.recommendations?.length > 0 && (
+app/engineering/page.tsx:10554:                      {compliance.structural.recommendations.map((rec: string, i: number) => (
+app/engineering/page.tsx:12025:                      return <polygon points={p.map(q=>q.join(',')).join(' ')} fill="url(#isoR)" stroke="#4b5563" strokeWidth="1" opacity="0.85"/>;
+app/engineering/page.tsx:12036:                        <polygon points={pts.map(q=>q.join(',')).join(' ')} fill="url(#isoP)" stroke="#3b82f6" strokeWidth="1.2"/>
+app/engineering/page.tsx:12137:                      <polygon points={`${30 + c*(pW+gap) - 5},${svgH - 20} ${30 + c*(pW+gap) + 5},${svgH - 20} ${30 + c*(pW+gap)},${svgH - 8}`} fill="#57534e"/>
+app/engineering/page.tsx:12789:                        CAD · SLD · NEC · Structural · Title Block
+app/engineering/page.tsx:12836:                          <p className="text-slate-400 text-xs">Full permit-ready documentation — CAD, NEC compliance, structural calcs, SLD, equipment schedule, PE letter, warning labels.</p>
+app/engineering/page.tsx:14000:                            pipelineResult.workflow?.filesReady ? 'bg-emerald-400' : 'bg-slate-500'
+app/engineering/page.tsx:14012:                              pipelineResult.workflow?.[w.key] ? 'text-emerald-400' : 'text-slate-600'
+app/engineering/page.tsx:14014:                              {pipelineResult.workflow?.[w.key]
+app/engineering/page.tsx:14022:                            onClick={() => setPipelineRawExpanded(s => ({ ...s, workflow: !s.workflow }))}
+app/engineering/page.tsx:14025:                            {pipelineRawExpanded.workflow ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+app/engineering/page.tsx:14029:                      {pipelineRawExpanded.workflow && (
+app/engineering/page.tsx:14031:                          {JSON.stringify(pipelineResult.workflow, null, 2)}
+app/engineering/page.tsx:14081:                  // Task 6: Show workflow status derived from actual DB data (layouts, engineering_reports, project_files)
+app/api/pipeline/run/route.ts:85:  workflow: {
+app/api/pipeline/run/route.ts:139:  let workflowResult:    PipelineRunResult['workflow']    = { designComplete: false, engineeringComplete: false, permitReady: false, filesReady: false };
+app/api/pipeline/run/route.ts:161:      return buildResponse(false, projectId, startMs, steps, layoutResult, engineeringResult, artifactResult, permitResult, clientFilesResult, workflowResult, mismatches, errors);
+app/api/pipeline/run/route.ts:168:      return buildResponse(false, projectId, startMs, steps, layoutResult, engineeringResult, artifactResult, permitResult, clientFilesResult, workflowResult, mismatches, errors);
+app/api/pipeline/run/route.ts:195:      addStep(3, 'Validate Layout', 'warning', `${panelCount} panels found but no roof planes — roof setbacks may be missing`);
+app/api/pipeline/run/route.ts:349:    // ── Step 11: Compute workflow state ───────────────────────────────────────
+app/api/pipeline/run/route.ts:350:    workflowResult = {
+app/api/pipeline/run/route.ts:357:      `Design: ${workflowResult.designComplete ? '✓' : '✗'} | Engineering: ${workflowResult.engineeringComplete ? '✓' : '✗'} | Permit: ${workflowResult.permitReady ? '✓' : '✗'} | Files: ${workflowResult.filesReady ? '✓' : '✗'}`,
+app/api/pipeline/run/route.ts:358:      workflowResult
+app/api/pipeline/run/route.ts:403:      permitResult, clientFilesResult, workflowResult, mismatches, errors
+app/api/pipeline/run/route.ts:411:    return buildResponse(false, projectId, startMs, steps, layoutResult, engineeringResult, artifactResult, permitResult, clientFilesResult, workflowResult, mismatches, errors);
+app/api/pipeline/run/route.ts:425:  workflow: PipelineRunResult['workflow'],
+app/api/pipeline/run/route.ts:440:    workflow,
+app/api/solar/route.ts:41: * Reconstruct a 4-vertex polygon for a roof segment.
+app/api/solar/route.ts:84: * Default edge types for a 4-vertex polygon from reconstructPolygon():
+app/api/solar/route.ts:95: * Detect shared edges between all pairs of polygons.
+app/api/solar/route.ts:100:  polygons: { lat: number; lng: number }[][]
+app/api/solar/route.ts:104:  for (let i = 0; i < polygons.length; i++) {
+app/api/solar/route.ts:108:  for (let i = 0; i < polygons.length; i++) {
+app/api/solar/route.ts:109:    for (let j = i + 1; j < polygons.length; j++) {
+app/api/solar/route.ts:110:      const polyI = polygons[i];
+app/api/solar/route.ts:111:      const polyJ = polygons[j];
+app/api/solar/route.ts:182:  const polygons    = segments.map(seg => reconstructPolygon(seg));
+app/api/solar/route.ts:183:  const adjacencies = detectAdjacencies(polygons);
+app/api/solar/route.ts:195:      vertices:    polygons[i],
+app/api/migrate/route.ts:392:          project_id    UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:493:          project_id      UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:655:          user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:789:          project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:808:          project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:840:          project_id      UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:894:          project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:920:          project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:1163:    // Migration 020: project_physical_data (v47.438)
+app/api/migrate/route.ts:1168:    // 020a: Create project_physical_data table
+app/api/migrate/route.ts:1171:        CREATE TABLE IF NOT EXISTS project_physical_data (
+app/api/migrate/route.ts:1173:          project_id              UUID          NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:1204:      results.push('✅ project_physical_data table — ensured');
+app/api/migrate/route.ts:1206:      results.push(`⚠️ project_physical_data table: ${(e as Error).message}`);
+app/api/migrate/route.ts:1212:        CREATE UNIQUE INDEX IF NOT EXISTS idx_project_physical_data_project_id
+app/api/migrate/route.ts:1213:          ON project_physical_data(project_id)
+app/api/migrate/route.ts:1215:      results.push('✅ idx_project_physical_data_project_id — ensured');
+app/api/migrate/route.ts:1217:      results.push(`⚠️ idx_project_physical_data_project_id: ${(e as Error).message}`);
+app/api/migrate/route.ts:1223:        CREATE INDEX IF NOT EXISTS idx_project_physical_data_source
+app/api/migrate/route.ts:1224:          ON project_physical_data(source)
+app/api/migrate/route.ts:1226:      results.push('✅ idx_project_physical_data_source — ensured');
+app/api/migrate/route.ts:1228:      results.push(`⚠️ idx_project_physical_data_source: ${(e as Error).message}`);
+app/api/migrate/route.ts:1234:        CREATE OR REPLACE FUNCTION update_project_physical_data_updated_at()
+app/api/migrate/route.ts:1242:      results.push('✅ update_project_physical_data_updated_at() function — ensured');
+app/api/migrate/route.ts:1244:      results.push(`⚠️ update_project_physical_data_updated_at fn: ${(e as Error).message}`);
+app/api/migrate/route.ts:1250:        DROP TRIGGER IF EXISTS trg_project_physical_data_updated_at ON project_physical_data
+app/api/migrate/route.ts:1253:        CREATE TRIGGER trg_project_physical_data_updated_at
+app/api/migrate/route.ts:1254:          BEFORE UPDATE ON project_physical_data
+app/api/migrate/route.ts:1256:          EXECUTE FUNCTION update_project_physical_data_updated_at()
+app/api/migrate/route.ts:1258:      results.push('✅ trg_project_physical_data_updated_at trigger — ensured');
+app/api/migrate/route.ts:1260:      results.push(`⚠️ trg_project_physical_data_updated_at trigger: ${(e as Error).message}`);
+app/api/migrate/route.ts:1289:          owner_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:1305:          org_id        UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:1307:          invited_by    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:1596:          user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:1619:          user_id        UUID REFERENCES users(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:1620:          type           TEXT NOT NULL CHECK (type IN ('page','button','workflow','equipment_brand','feature','route','warning','action','preference')),
+app/api/migrate/route.ts:1676:            CHECK (type IN ('page','button','workflow','equipment','equipment_brand','feature','route','warning','action','preference'));
+app/api/migrate/route.ts:1710:          project_id  UUID        NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:1938:          client_id  UUID        NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:1979:    // Records when/to whom a proposal was emailed via the "Send to Client" workflow.
+app/api/migrate/route.ts:2008:          client_id  UUID        NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:2009:          user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:2127:    // crew_members.crew_id → crews.id (ON DELETE CASCADE)
+app/api/migrate/route.ts:2132:          crew_id          UUID        NOT NULL REFERENCES crews(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:2168:          user_id               UUID        NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:2215:          created_by_user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:2282:          opportunity_id        UUID        NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:2283:          claimed_by_user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:2410:          opportunity_id        UUID NOT NULL REFERENCES network_opportunities(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:2516:          opportunity_id        UUID NOT NULL REFERENCES network_opportunities(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:2655:          opportunity_id          UUID NOT NULL REFERENCES network_opportunities(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:2727:          opportunity_id        UUID NOT NULL REFERENCES network_opportunities(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:2728:          contractor_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:3038:          opportunity_id        UUID REFERENCES network_opportunities(id) ON DELETE CASCADE,
+app/api/migrate/route.ts:3122:          opportunity_id            UUID UNIQUE NOT NULL REFERENCES network_opportunities(id) ON DELETE CASCADE,
+app/api/debug/project/route.ts:5://          workflow state, permit inputs summary.
+app/api/debug/project/route.ts:134:    const workflowState = {
+app/api/debug/project/route.ts:172:      workflow:    workflowState,
+app/api/debug/force-ingest/route.ts:11://   → upserts into SolarPro: projects + project_physical_data + project_files
+app/api/debug/force-ingest/route.ts:99:// ── Map partner metadata → project_physical_data fields ──────────────────────
+app/api/debug/force-ingest/route.ts:125:    // Columns that exist in project_physical_data (migration 013)
+app/api/debug/force-ingest/route.ts:163:      LEFT JOIN project_physical_data ppd ON ppd.project_id = p.id
+app/api/debug/force-ingest/route.ts:416:        // ── Upsert project_physical_data ────────────────────────────────
+app/api/debug/force-ingest/route.ts:419:          INSERT INTO project_physical_data (
+app/api/debug/bill/route.ts:457:    recommendation: hasKwh
+app/api/debug/backfill-site-surveys/route.ts:100:      LEFT JOIN project_physical_data ppd ON ppd.project_id = p.id
+app/api/network/opportunities/route.ts:413:      LEFT JOIN project_physical_data pd ON pd.project_id = p.id
+app/api/ocr/route.ts:183: * Run two OCR passes with different page segmentation modes and return the
+app/api/ocr/route.ts:186: * PSM 3 = Fully automatic page segmentation (default) — good for full bills
+app/api/proposals/[id]/send-email/route.ts:4: * "Send to Client" workflow — emails the proposal link to the client.
+app/api/admin/network/intake/route.ts:114:    workflow_reason: bodyString(body, "workflow_reason", 1000),
+app/api/admin/network/intake/route.ts:184:    if (!has("callback_reason") && !has("workflow_reason") && !notes)
+app/api/admin/network/intake/route.ts:192:    if (!has("workflow_reason") && !notes) missing.push("workflow_reason");
+app/api/admin/network/intake/route.ts:643:        workflow_timeline: leadOpsSummary.workflow_timeline,
+app/api/admin/network/intake/route.ts:985:            "Archived or rejected leads must be reactivated before ordinary workflow actions",
+app/api/engineering/structural/route.ts:95:      recommendations: result.recommendations,
+app/api/engineering/bom/route.ts:302:    // Full SystemDefinition integration deferred until engineering page uses CAD engine.
+app/api/engineering/structural-v2/route.ts:145:      recommendations:      result.recommendations,
+app/api/engineering/calculate/route.ts:181:            // hardware. Reuses the sizing recommendation — no separate merge
+app/api/engineering/permit/route.ts:490:    // If project_physical_data exists for this project, run the full survey
+app/api/engineering/permit/route.ts:511:        // 1. Fetch project_physical_data row (written by the Site Survey ingest pipeline)
+app/api/engineering/permit/route.ts:521:          FROM project_physical_data
+app/api/engineering/permit/route.ts:527:          console.log('[permit/survey] No project_physical_data found for project', projectId, '— skipping survey enrichment');
+app/api/engineering/permit/route.ts:530:          console.log('[permit/survey] Found project_physical_data row, running survey pipeline...');
+app/api/engineering/permit/route.ts:623:              console.log('[permit/survey] aerialData.roofSegments backfilled from survey CAD surfaces');
+app/api/engineering/ahj-lookup/route.ts:5:// wind/snow loads, fire setbacks, and plan set requirements
+app/api/engineering/save-outputs/route.ts:497:    '  ☐ Site Plan (roof layout with setbacks)',
+app/api/engineering/plan-set/route.ts:43:import { calcFireSetbacks } from '@/lib/engineering/fire-setbacks';
+app/api/engineering/plan-set/route.ts:370:    // STEP 3: Look up AHJ data and fire setbacks (non-electrical — OK here)
+app/api/engineering/plan-set/route.ts:378:    let setbacks: any = {
+app/api/engineering/plan-set/route.ts:387:      setbacks = calcFireSetbacks({
+app/api/engineering/plan-set/route.ts:473:      { number: 'A-1', title: 'Site / Roof Layout', description: 'Roof plan, panel placement, fire setbacks, equipment locations' },
+app/api/engineering/plan-set/route.ts:718:      ridgeSetbackIn:       setbacks.ridgeSetbackIn,
+app/api/engineering/plan-set/route.ts:719:      eaveSetbackIn:        setbacks.eaveSetbackIn,
+app/api/engineering/plan-set/route.ts:720:      valleySetbackIn:      setbacks.valleySetbackIn,
+app/api/engineering/plan-set/route.ts:721:      pathwayWidthIn:       setbacks.pathwayWidthIn,
+app/api/engineering/plan-set/route.ts:722:      pathwayRequired:      setbacks.pathwayRequired,
+app/api/engineering/plan-set/route.ts:723:      setbackCodeRef:       setbacks.codeReference || 'IRC R324.4',
+app/api/engineering/plan-set/route.ts:743:      ridgeSetbackIn:       setbacks.ridgeSetbackIn,
+app/api/engineering/plan-set/route.ts:744:      eaveSetbackIn:        setbacks.eaveSetbackIn,
+app/api/engineering/plan-set/route.ts:745:      valleySetbackIn:      setbacks.valleySetbackIn,
+app/api/engineering/plan-set/route.ts:746:      pathwayWidthIn:       setbacks.pathwayWidthIn,
+app/api/engineering/plan-set/route.ts:747:      pathwayRequired:      setbacks.pathwayRequired,
+app/api/engineering/plan-set/route.ts:748:      setbackCodeRef:       setbacks.codeReference || 'IRC R324.4',
+app/api/engineering/plan-set/route.ts:809:      ridgeSetbackIn:       setbacks.ridgeSetbackIn,
+app/api/engineering/plan-set/route.ts:810:      eaveSetbackIn:        setbacks.eaveSetbackIn,
+app/api/engineering/plan-set/route.ts:811:      pathwayWidthIn:       setbacks.pathwayWidthIn,
+app/api/engineering/plan-set/route.ts:812:      pathwayRequired:      setbacks.pathwayRequired,
+app/api/assistant/route.ts:111:  // v11: Guided workflow fields
+app/api/assistant/route.ts:112:  workflowKey?:      string | null;
+app/api/assistant/route.ts:130:  // v61.16: Next workflow step recommendation
+app/api/assistant/route.ts:205:    lines.push(`  sizingAutoApply:        ${es.sizingAutoApply}   (true=auto-apply sizing recommendation on mismatch)`);
+app/api/assistant/route.ts:210:    if (es.panelCountMismatch) lines.push(`  panelCountMismatch:     true  ⚠ CAD panel count disagrees with string config`);
+app/api/assistant/route.ts:224:      lines.push('  - panelCountMismatch=true: CAD panel count disagrees with string layout.');
+app/api/assistant/route.ts:225:      lines.push('    Explain: "Your CAD shows X panels but the string config has Y. Apply the sizing recommendation to sync them."');
+app/api/assistant/route.ts:391:- system recommendation vs current configuration
+app/api/assistant/route.ts:539:   - Buttons, pages, workflows, equipment brands, features
+app/api/assistant/route.ts:666:4. GUIDE workflows step-by-step
+app/api/assistant/route.ts:713:1. Load the relevant workflow from the knowledge base
+app/api/assistant/route.ts:721:  \"workflowKey\":    \"pass_engineering\" | \"create_new_project\" | \"submit_permit\" | etc.
+app/api/assistant/route.ts:723:  \"totalSteps\":     7  (total steps in workflow)
+app/api/assistant/route.ts:728:→ Load workflow 'pass_engineering' from knowledge base
+app/api/assistant/route.ts:735:The SolarPro knowledge base is seeded with structured facts about every page, button, workflow, and equipment type.
+app/api/assistant/route.ts:741:- ALWAYS check knowledge items above BEFORE answering about buttons, pages, workflows, or equipment (check knowledge items FIRST)
+app/api/assistant/route.ts:752:- Always give a clear recommendation based on the use case
+app/api/assistant/route.ts:755:- Knowledge items (buttons, workflows, equipment) → solarpro_knowledge_items table
+app/api/assistant/route.ts:757:- Equipment brands, button descriptions, workflow explanations = knowledge items, NOT aliases
+app/api/assistant/route.ts:839:  \"workflowKey\":    \"workflow key if guided mode, or null\",
+app/api/assistant/route.ts:846:  \"nextStep\": \"workflow_step_id_or_null\"
+app/api/assistant/route.ts:875:→ { "intent_type": "question", "type": "chat", "route": null, "action": null, "message": "Yes — that needs a structured SolarPro knowledge base. I can index every page, button, workflow, and equipment brand so I can explain the site reliably. Want me to start with a specific page?", "confidence": "high", "severity": "info" }
+app/api/assistant/route.ts:1382:    // v11: Guided workflow fields
+app/api/assistant/route.ts:1383:    const replyWorkflowKey   = typeof parsed.workflowKey   === 'string' ? parsed.workflowKey : null;
+app/api/assistant/route.ts:1466:      // v11: Guided workflow fields
+app/api/assistant/route.ts:1467:      workflowKey:     replyWorkflowKey,
+app/api/projects/[id]/physical-data/route.ts:4:// Returns the project_physical_data row for a project, if one exists.
+app/api/dsm/route.ts:165:    const bbox = image.getBoundingBox(); // [west, south, east, north] in UTM meters
+app/api/dsm/route.ts:166:    const [utmWest, utmSouth, utmEast, utmNorth] = bbox;
+app/api/dsm/route.ts:245:          polygon: hull.map(p => ({ lat: Math.round(p.lat*1e7)/1e7, lng: Math.round(p.lng*1e7)/1e7 })),
+app/projects/[id]/page.tsx:203:    description: 'Draw roof zones on the 3D map and place panels with one click. The studio respects setbacks, obstructions, and equipment constraints automatically.',
+app/projects/[id]/page.tsx:327:    // Start at first incomplete workflow step
+app/projects/[id]/survey/[surveyId]/page.tsx:14://   6. Notes      -- accessNotes, mountingNotes, electricalNotes, setbackNotes
+app/projects/[id]/survey/[surveyId]/page.tsx:701:              <p className="text-[11px] text-slate-400">Advisory evidence-to-engineering traceability only; CAD automation is not started.</p>
+app/projects/[id]/survey/[surveyId]/page.tsx:713:          <p className="mt-2 text-[10px] text-slate-500">CAD automation: <b className="text-slate-300">{bridge.cadAutomationStatus}</b></p>
+app/projects/[id]/survey/[surveyId]/page.tsx:796:                    <p className="text-[10px] text-slate-600">OCR: {requirement.futureCapabilities.supportsOCR ? 'documented' : 'off'} | CV: {requirement.futureCapabilities.supportsCVClassification ? 'documented' : 'off'} | CAD: {requirement.futureCapabilities.supportsCADInference ? 'documented' : 'off'} | Semantic: {requirement.futureCapabilities.supportsSemanticExtraction ? 'documented' : 'off'}</p>
+app/projects/[id]/survey/[surveyId]/page.tsx:866:            YOLO/Supervision, OCR, Claude reasoning, Open3D, and FreeCAD remain external worker or future-only stages.
+app/projects/[id]/survey/[surveyId]/page.tsx:1003:    { label: 'Setback Notes',     value: payload.obstructions?.setbackNotes },
+app/projects/new/page.tsx:21:    features: ['Auto roof detection', 'Fire code setbacks', 'Pitch & azimuth optimization', 'Multiple roof planes'],
+app/terms/page.tsx:133:                ['"Platform"', 'The SolarPro software application, including all web interfaces, APIs, databases, automation workflows, algorithms, and related systems, whether accessed via browser, API, or any other means.'],
+app/terms/page.tsx:137:                ['"Proprietary Technology"', 'All algorithms, automation workflows, OCR extraction logic, system sizing methods, proposal generation processes, engineering workflows, data models, and any other technical processes embodied in the Platform.'],
+app/terms/page.tsx:139:                ['"Output(s)"', 'Any data, reports, proposals, system designs, calculations, engineering recommendations, or other materials generated by or through the Platform.'],
+app/terms/page.tsx:191:              The SolarPro Platform, including without limitation all source code, object code, software architecture, database schemas, algorithms, automation workflows, OCR extraction systems, solar system sizing models, proposal generation logic, engineering calculation methods, user interface designs, documentation, and all other components thereof (collectively, the &quot;Platform&quot;), is the exclusive proprietary intellectual property of <strong>Raymond O&apos;Brian</strong>. All rights, title, and interest in and to the Platform are and shall remain vested exclusively in Raymond O&apos;Brian.
+app/terms/page.tsx:213:                'Automated proposal generation workflows, template structures, and output formatting logic',
+app/terms/page.tsx:214:                'Engineering workflow automation, bill-of-materials generation, and permit package preparation systems',
+app/terms/page.tsx:216:                'Project data management schemas, client relationship data models, and project lifecycle workflows',
+app/terms/page.tsx:290:                ['Automation Processes:', 'All automated workflows including bill intake, OCR processing, data extraction, system sizing, proposal generation, and engineering preparation sequences'],
+app/terms/page.tsx:364:                ['Workflow Documentation:', "Document, transcribe, map, or systematically record the Platform's workflows, processes, decision logic, or user interface flows for purposes beyond authorized personal use"],
+app/terms/page.tsx:382:                ["Competitive Assistance:", "Share information about the Platform's Proprietary Technology, workflows, or Outputs with any person or entity developing or operating a competing product"],
+app/terms/page.tsx:396:                ['Screenshots and Recordings:', "Distribute, publish, post, or share screenshots, screen recordings, or other visual captures of the Platform's internal interfaces, workflows, calculation results, or engineering logic to any third party outside of your own organization's internal use"],
+app/terms/page.tsx:435:                'Generating solar system sizing recommendations for your clients',
+app/terms/page.tsx:438:                'Accessing engineering preparation workflows for projects you manage',
+app/terms/page.tsx:472:              All Outputs generated by the Platform, including but not limited to solar system proposals, system design specifications, energy calculations, financial projections, equipment bill-of-materials, engineering workflow documents, and permit preparation packages, are produced by Proprietary Technology owned exclusively by Raymond O&apos;Brian. The format, structure, methodology, and logic embodied in such Outputs remain the confidential and proprietary intellectual property of the Owner, regardless of whether the Output incorporates your client&apos;s data.
+app/terms/page.tsx:514:              <strong>Important:</strong> All calculations, system designs, proposals, and engineering recommendations generated by SolarPro are automated estimates for informational and sales purposes only. They do not constitute licensed engineering advice, certified design documents, or final project specifications.
+lib/siteSurvey/enrichSurvey.ts:14://   2. Compute usable area        — total area minus setback shrink + obstructions
+lib/siteSurvey/enrichSurvey.ts:15://   3. Build CAD-ready surfaces   — usable polygon per roof plane
+lib/siteSurvey/enrichSurvey.ts:16://   4. Build CAD exclusion zones  — obstruction footprints with NEC setbacks
+lib/siteSurvey/enrichSurvey.ts:35:  type CADReadySurface,
+lib/siteSurvey/enrichSurvey.ts:36:  type CADExclusionZone,
+lib/siteSurvey/enrichSurvey.ts:69: * NEC 690.12 — Rapid Shutdown / obstruction setback minimum (feet)
+lib/siteSurvey/enrichSurvey.ts:70: * Used when obstruction has no explicit setback captured.
+lib/siteSurvey/enrichSurvey.ts:75: * NEC fire access pathway minimum setback from roof edges (inches)
+lib/siteSurvey/enrichSurvey.ts:76: * Used as floor value when setback data is missing.
+lib/siteSurvey/enrichSurvey.ts:123:  // ── Step 2: Compute setback shrink amounts ────────────────────────────────────
+lib/siteSurvey/enrichSurvey.ts:124:  // Build a lookup of edge → inches shrink from the setback rules.
+lib/siteSurvey/enrichSurvey.ts:126:  const setbackShrink = computeSetbackShrink(normalized.geometry.setbacks, log);
+lib/siteSurvey/enrichSurvey.ts:128:  // ── Step 3: Build CAD-ready surfaces ──────────────────────────────────────────
+lib/siteSurvey/enrichSurvey.ts:129:  // One CADReadySurface per valid roof plane.
+lib/siteSurvey/enrichSurvey.ts:131:  const cadRoofSurfaces = buildCADRoofSurfaces(
+lib/siteSurvey/enrichSurvey.ts:133:    setbackShrink,
+lib/siteSurvey/enrichSurvey.ts:138:  // ── Step 4: Build CAD exclusion zones ─────────────────────────────────────────
+lib/siteSurvey/enrichSurvey.ts:139:  // One CADExclusionZone per obstruction, with NEC setbacks applied.
+lib/siteSurvey/enrichSurvey.ts:141:  const cadExclusionZones = buildCADExclusionZones(
+lib/siteSurvey/enrichSurvey.ts:219:      setbackShrink,
+lib/siteSurvey/enrichSurvey.ts:269:  setbacks: SurveySetback[],
+lib/siteSurvey/enrichSurvey.ts:274:  if (setbacks.length === 0) {
+lib/siteSurvey/enrichSurvey.ts:275:    // Apply NEC minimum default setbacks
+lib/siteSurvey/enrichSurvey.ts:280:    log.push(`[enrich] No setbacks captured — applying NEC minimum ${NEC_MIN_EDGE_SETBACK_IN}" to all edges`);
+lib/siteSurvey/enrichSurvey.ts:284:  for (const s of setbacks) {
+lib/siteSurvey/enrichSurvey.ts:286:      // Use the LARGER of any existing setback and this one (most restrictive wins)
+lib/siteSurvey/enrichSurvey.ts:301:        log.push(`[enrich] WARN: ${edge} setback ${prev}" below NEC minimum ${NEC_MIN_EDGE_SETBACK_IN}" — overridden`);
+lib/siteSurvey/enrichSurvey.ts:310:// ─── Step 3: Build CAD roof surfaces ──────────────────────────────────────────
+lib/siteSurvey/enrichSurvey.ts:312:function buildCADRoofSurfaces(
+lib/siteSurvey/enrichSurvey.ts:314:  setbackShrink: Record<string, number>,
+lib/siteSurvey/enrichSurvey.ts:317:): CADReadySurface[] {
+lib/siteSurvey/enrichSurvey.ts:319:    log.push(`[enrich] WARN: No roof planes — no CAD surfaces generated`);
+lib/siteSurvey/enrichSurvey.ts:323:  const surfaces: CADReadySurface[] = [];
+lib/siteSurvey/enrichSurvey.ts:324:  // Default setback for area reduction (use average of eave/rake as representative)
+lib/siteSurvey/enrichSurvey.ts:325:  const avgSetbackIn = computeAvgEdgeSetback(setbackShrink);
+lib/siteSurvey/enrichSurvey.ts:329:    // Compute usable polygon from vertices with setback shrink applied
+lib/siteSurvey/enrichSurvey.ts:332:      setbackShrink,
+lib/siteSurvey/enrichSurvey.ts:338:    // 1. If polygon available — compute from inset polygon area
+lib/siteSurvey/enrichSurvey.ts:339:    // 2. If total area available — apply setback reduction formula
+lib/siteSurvey/enrichSurvey.ts:343:      // Use Shoelace formula on inset polygon — converted from lat/lng degrees to sqft
+lib/siteSurvey/enrichSurvey.ts:344:      const rawPolyAreaSqft = polygonAreaSqFt(usablePolygon);
+lib/siteSurvey/enrichSurvey.ts:346:      log.push(`[enrich] Plane ${plane.id}: polygon-computed usable area ${usableAreaSqFt.toFixed(0)} sqft`);
+lib/siteSurvey/enrichSurvey.ts:348:      // Approximate setback reduction: treat plane as rectangle
+lib/siteSurvey/enrichSurvey.ts:349:      // Reduce each dimension by the average setback on both sides
+lib/siteSurvey/enrichSurvey.ts:355:      log.push(`[enrich] WARN: Plane ${plane.id}: cannot compute usable area — no polygon or area`);
+lib/siteSurvey/enrichSurvey.ts:369:  log.push(`[enrich] Built ${surfaces.length} CAD roof surfaces`);
+lib/siteSurvey/enrichSurvey.ts:374: * applySetbacksToPolygon — shrinks a GeoPoint polygon inward by setback amounts.
+lib/siteSurvey/enrichSurvey.ts:377: * For each edge of the polygon, we move the edge inward by the setback distance.
+lib/siteSurvey/enrichSurvey.ts:381: * For polygons without vertex data, returns empty polygon (caller uses area fallback).
+lib/siteSurvey/enrichSurvey.ts:385:  setbackShrink: Record<string, number>,
+lib/siteSurvey/enrichSurvey.ts:389:  // Without polygon we cannot compute inset — return empty
+lib/siteSurvey/enrichSurvey.ts:391:    return { usablePolygon: [], appliedSetbacks: setbackShrink };
+lib/siteSurvey/enrichSurvey.ts:398:  // Apply uniform inward shrink using average setback (in feet → meters)
+lib/siteSurvey/enrichSurvey.ts:399:  // A full polygon inset requires knowing which edge maps to which roof edge type.
+lib/siteSurvey/enrichSurvey.ts:400:  // Since we don't have edge labels, we apply the minimum setback uniformly.
+lib/siteSurvey/enrichSurvey.ts:401:  const minSetbackFt = Math.min(...Object.values(setbackShrink)) / 12;
+lib/siteSurvey/enrichSurvey.ts:407:    log.push(`[enrich] WARN: Plane ${planeId} polygon collapsed after setback inset — returning empty`);
+lib/siteSurvey/enrichSurvey.ts:408:    return { usablePolygon: [], appliedSetbacks: setbackShrink };
+lib/siteSurvey/enrichSurvey.ts:414:  return { usablePolygon, appliedSetbacks: setbackShrink };
+lib/siteSurvey/enrichSurvey.ts:417:// ─── Step 4: Build CAD exclusion zones ───────────────────────────────────────
+lib/siteSurvey/enrichSurvey.ts:419:function buildCADExclusionZones(
+lib/siteSurvey/enrichSurvey.ts:422:): CADExclusionZone[] {
+lib/siteSurvey/enrichSurvey.ts:425:  const zones: CADExclusionZone[] = [];
+lib/siteSurvey/enrichSurvey.ts:428:    const setbackFt = obs.setbackFt ?? NEC_DEFAULT_OBSTRUCTION_SETBACK_FT;
+lib/siteSurvey/enrichSurvey.ts:430:    // Physical footprint of the obstruction + NEC setback
+lib/siteSurvey/enrichSurvey.ts:431:    const halfWidthFt = (obs.dimensions.widthFt / 2) + setbackFt;
+lib/siteSurvey/enrichSurvey.ts:432:    const halfLengthFt = (obs.dimensions.lengthFt / 2) + setbackFt;
+lib/siteSurvey/enrichSurvey.ts:435:    // Build a rectangular exclusion polygon (4 corners + NEC buffer)
+lib/siteSurvey/enrichSurvey.ts:451:    log.push(`[enrich] Exclusion zone: ${obs.type} id=${obs.id} setback=${setbackFt}ft radius=${exclusionRadiusFt.toFixed(1)}ft`);
+lib/siteSurvey/enrichSurvey.ts:454:  log.push(`[enrich] Built ${zones.length} CAD exclusion zones`);
+lib/siteSurvey/enrichSurvey.ts:461:  surfaces: CADReadySurface[],
+lib/siteSurvey/enrichSurvey.ts:462:  exclusionZones: CADExclusionZone[],
+lib/siteSurvey/enrichSurvey.ts:723:  surfaces: CADReadySurface[],
+lib/siteSurvey/enrichSurvey.ts:731:  // Has at least one roof plane with polygon (+25)
+lib/siteSurvey/enrichSurvey.ts:799: * insetPolygon — shrinks a polygon inward by `distance` meters on all edges.
+lib/siteSurvey/enrichSurvey.ts:800: * Uses vertex normal bisector method (handles convex and near-convex polygons).
+lib/siteSurvey/enrichSurvey.ts:801: * For heavily concave polygons this is approximate, but sufficient for roof planes.
+lib/siteSurvey/enrichSurvey.ts:823:    // Inward normals (rotate 90° clockwise for CW polygon, CCW for CCW polygon)
+lib/siteSurvey/enrichSurvey.ts:846:  // Ensure polygon is still non-degenerate
+lib/siteSurvey/enrichSurvey.ts:849:  // Validate the inset polygon has positive area (was inset inward, not inside-out)
+lib/siteSurvey/enrichSurvey.ts:857: * polygonAreaSqFt — computes area of a lat/lng GeoPoint polygon in sq ft.
+lib/siteSurvey/enrichSurvey.ts:860:function polygonAreaSqFt(poly: GeoPoint[]): number {
+lib/siteSurvey/enrichSurvey.ts:881: * buildExclusionRectangle — builds a 4-corner rectangular polygon around
+lib/siteSurvey/enrichSurvey.ts:882: * an obstruction center, extended by halfWidth/halfLength + NEC setback.
+lib/siteSurvey/enrichSurvey.ts:883: * Returns lat/lng polygon.
+lib/siteSurvey/enrichSurvey.ts:907:/** Compute average setback across all edge types (in inches) */
+lib/siteSurvey/enrichSurvey.ts:908:function computeAvgEdgeSetback(setbackShrink: Record<string, number>): number {
+lib/siteSurvey/enrichSurvey.ts:909:  const values = Object.values(setbackShrink);
+lib/siteSurvey/permitIntegration.ts:53: *   aerialData.* — survey provides roofSegments from CAD surfaces
+lib/siteSurvey/permitIntegration.ts:294:// ─── PV-1: Aerial data patch (roof segments from CAD surfaces) ────────────────
+lib/siteSurvey/permitIntegration.ts:304:  // Build roof segments from enriched CAD surfaces
+lib/siteSurvey/permitIntegration.ts:309:    polygon: surface.usablePolygon.length >= 3 ? surface.usablePolygon : undefined,
+lib/siteSurvey/permitIntegration.ts:319:  log.push(`[permit] aerialData.roofSegments = ${roofSegments.length} segments from survey CAD surfaces`);
+lib/siteSurvey/permitIntegration.ts:535:  polygon: Array<{ lat: number; lng: number }>,
+lib/siteSurvey/permitIntegration.ts:537:  const n = polygon.length;
+lib/siteSurvey/permitIntegration.ts:539:  const sumLat = polygon.reduce((s, p) => s + p.lat, 0);
+lib/siteSurvey/permitIntegration.ts:540:  const sumLng = polygon.reduce((s, p) => s + p.lng, 0);
+lib/siteSurvey/normalizeSurvey.ts:66:/** Minimum vertices for a valid polygon roof plane */
+lib/siteSurvey/normalizeSurvey.ts:134:  log.push(`[normalize] Geometry: ${geometry.roofPlanes.length} planes, ${geometry.obstructions.length} obstructions, ${geometry.setbacks.length} setbacks`);
+lib/siteSurvey/normalizeSurvey.ts:216:    return { roofPlanes: [], obstructions: [], setbacks: [], usableAreaSqFt: null };
+lib/siteSurvey/normalizeSurvey.ts:221:  const setbacks = normalizeSetbacks(raw.setbacks, log);
+lib/siteSurvey/normalizeSurvey.ts:234:  return { roofPlanes, obstructions, setbacks, usableAreaSqFt };
+lib/siteSurvey/normalizeSurvey.ts:252:    // Require at least a polygon OR an area
+lib/siteSurvey/normalizeSurvey.ts:306:      log.push(`[normalize] WARN: ${planeLabel} polygon has only ${vertices.length} vertices (min ${MIN_POLYGON_VERTICES}) — cleared`);
+lib/siteSurvey/normalizeSurvey.ts:371:    const setbackFt = (o.setbackFt !== undefined && isFinite(Number(o.setbackFt)) && Number(o.setbackFt) >= 0)
+lib/siteSurvey/normalizeSurvey.ts:372:      ? Number(o.setbackFt)
+lib/siteSurvey/normalizeSurvey.ts:373:      : 3; // NEC 690.12 default 3ft setback
+lib/siteSurvey/normalizeSurvey.ts:380:      setbackFt,
+lib/siteSurvey/normalizeSurvey.ts:396:  const setbacks: SurveySetback[] = [];
+lib/siteSurvey/normalizeSurvey.ts:408:      log.push(`[normalize] WARN: setback[${i}] has no valid edges — skipped`);
+lib/siteSurvey/normalizeSurvey.ts:413:    let distanceIn: number = 36; // NEC default 36" (3ft) setback
+lib/siteSurvey/normalizeSurvey.ts:419:        log.push(`[normalize] WARN: setback[${i}] invalid distanceIn=${s.distanceIn} — defaulting to 36"`);
+lib/siteSurvey/normalizeSurvey.ts:422:      log.push(`[normalize] WARN: setback[${i}] missing distanceIn — defaulting to 36"`);
+lib/siteSurvey/normalizeSurvey.ts:425:    setbacks.push({
+lib/siteSurvey/normalizeSurvey.ts:432:  return setbacks;
+lib/siteSurvey/types.ts:15://     → buildCADFromSurvey()      → CADModel inputs
+lib/siteSurvey/types.ts:88:  /** NEC-required setback from this obstruction (feet) */
+lib/siteSurvey/types.ts:89:  setbackFt?: number;
+lib/siteSurvey/types.ts:94:/** A setback boundary for a roof edge or fire pathway */
+lib/siteSurvey/types.ts:96:  /** Which edge(s) this setback applies to */
+lib/siteSurvey/types.ts:240:    setbacks?: Array<Partial<SurveySetback>> | null;
+lib/siteSurvey/types.ts:334:    /** Validated setbacks */
+lib/siteSurvey/types.ts:335:    setbacks: SurveySetback[];
+lib/siteSurvey/types.ts:407:    /** Computed usable area from roof planes minus setbacks and obstructions (sq ft) */
+lib/siteSurvey/types.ts:413:    /** CAD-ready roof planes with usable polygon applied */
+lib/siteSurvey/types.ts:414:    cadRoofSurfaces: CADReadySurface[];
+lib/siteSurvey/types.ts:415:    /** CAD exclusion zones from obstructions */
+lib/siteSurvey/types.ts:416:    cadExclusionZones: CADExclusionZone[];
+lib/siteSurvey/types.ts:418:    setbackShrink: Record<string, number>;
+lib/siteSurvey/types.ts:445:    /** True when geometry data is sufficient for CAD use (roof planes OR GPS+area) */
+lib/siteSurvey/types.ts:454:// ─── CAD-Ready Types (produced by enrichment) ─────────────────────────────────
+lib/siteSurvey/types.ts:456:/** A roof surface ready for CAD panel placement */
+lib/siteSurvey/types.ts:457:export interface CADReadySurface {
+lib/siteSurvey/types.ts:466:  /** Usable area after setbacks (sq ft) */
+lib/siteSurvey/types.ts:468:  /** Usable polygon vertices (lat/lng) after setback shrink */
+lib/siteSurvey/types.ts:474:/** A CAD exclusion zone derived from an obstruction */
+lib/siteSurvey/types.ts:475:export interface CADExclusionZone {
+lib/siteSurvey/types.ts:481:  /** Exclusion boundary with NEC setback applied */
+lib/siteSurvey/siteSurvey.test.ts:10://   buildCADFromSurvey()      — Phase 5
+lib/siteSurvey/siteSurvey.test.ts:25:import { buildCADFromSurvey } from '@/lib/cad/buildCADFromSurvey';
+lib/siteSurvey/siteSurvey.test.ts:93:          setbackFt: 3,
+lib/siteSurvey/siteSurvey.test.ts:96:      setbacks: [
+lib/siteSurvey/siteSurvey.test.ts:558:    expect(result.geometry.setbacks).toEqual([]);
+lib/siteSurvey/siteSurvey.test.ts:669:describe('enrichSurvey — setback shrink', () => {
+lib/siteSurvey/siteSurvey.test.ts:671:  it('applies setback shrink for each edge type', () => {
+lib/siteSurvey/siteSurvey.test.ts:674:    expect(enriched.derived.setbackShrink).toBeDefined();
+lib/siteSurvey/siteSurvey.test.ts:675:    expect(typeof enriched.derived.setbackShrink).toBe('object');
+lib/siteSurvey/siteSurvey.test.ts:678:  it('enforces NEC minimum 36" (3ft) floor on setbacks', () => {
+lib/siteSurvey/siteSurvey.test.ts:679:    // Provide a setback smaller than 36"
+lib/siteSurvey/siteSurvey.test.ts:683:        setbacks: [
+lib/siteSurvey/siteSurvey.test.ts:689:    // All setback values must be at least 36" after NEC floor enforcement
+lib/siteSurvey/siteSurvey.test.ts:690:    Object.values(enriched.derived.setbackShrink).forEach(shrinkIn => {
+lib/siteSurvey/siteSurvey.test.ts:697:describe('enrichSurvey — CAD roof surfaces', () => {
+lib/siteSurvey/siteSurvey.test.ts:722:      // usableAreaSqFt = polygon-computed (independent calculation)
+lib/siteSurvey/siteSurvey.test.ts:734:describe('enrichSurvey — CAD exclusion zones', () => {
+lib/siteSurvey/siteSurvey.test.ts:1198:// ─── SECTION 4: buildCADFromSurvey ────────────────────────────────────────────
+lib/siteSurvey/siteSurvey.test.ts:1200:describe('buildCADFromSurvey — core behavior', () => {
+lib/siteSurvey/siteSurvey.test.ts:1202:  it('returns a SurveyCADInputs object with required fields', () => {
+lib/siteSurvey/siteSurvey.test.ts:1204:    const cad = buildCADFromSurvey(survey);
+lib/siteSurvey/siteSurvey.test.ts:1217:    expect(() => buildCADFromSurvey(survey)).not.toThrow();
+lib/siteSurvey/siteSurvey.test.ts:1222:    const cad = buildCADFromSurvey(survey);
+lib/siteSurvey/siteSurvey.test.ts:1229:    const cad = buildCADFromSurvey(survey);
+lib/siteSurvey/siteSurvey.test.ts:1235:describe('buildCADFromSurvey — origin', () => {
+lib/siteSurvey/siteSurvey.test.ts:1239:    const cad = buildCADFromSurvey(survey);
+lib/siteSurvey/siteSurvey.test.ts:1249:    const cad = buildCADFromSurvey(survey);
+lib/siteSurvey/siteSurvey.test.ts:1250:    // When no GPS and no polygon data, origin is null
+lib/siteSurvey/siteSurvey.test.ts:1256:describe('buildCADFromSurvey — roof plane inputs', () => {
+lib/siteSurvey/siteSurvey.test.ts:1258:  it('produces roofPlaneInputs for each enriched CAD surface', () => {
+lib/siteSurvey/siteSurvey.test.ts:1260:    const cad = buildCADFromSurvey(survey);
+lib/siteSurvey/siteSurvey.test.ts:1264:  it('each roofPlaneInput has id, polygon, usablePolygon', () => {
+lib/siteSurvey/siteSurvey.test.ts:1266:    const cad = buildCADFromSurvey(survey);
+lib/siteSurvey/siteSurvey.test.ts:1271:      expect(plane).toHaveProperty('polygon');
+lib/siteSurvey/siteSurvey.test.ts:1276:  it('polygon coordinates are in local meters (not lat/lng)', () => {
+lib/siteSurvey/siteSurvey.test.ts:1278:    const cad = buildCADFromSurvey(survey);
+lib/siteSurvey/siteSurvey.test.ts:1282:      if (plane.polygon && plane.polygon.length > 0) {
+lib/siteSurvey/siteSurvey.test.ts:1284:        const pt = plane.polygon[0];
+lib/siteSurvey/siteSurvey.test.ts:1293:  it('setbacks are expressed in meters in roofPlaneInputs', () => {
+lib/siteSurvey/siteSurvey.test.ts:1295:    const cad = buildCADFromSurvey(survey);
+lib/siteSurvey/siteSurvey.test.ts:1299:      if (plane.setbacks) {
+lib/siteSurvey/siteSurvey.test.ts:1302:        const { eaveM, ridgeM, rakeM } = plane.setbacks;
+lib/siteSurvey/siteSurvey.test.ts:1315:describe('buildCADFromSurvey — overrides', () => {
+lib/siteSurvey/siteSurvey.test.ts:1319:    const cad = buildCADFromSurvey(survey);
+lib/siteSurvey/siteSurvey.test.ts:1326:    const cad = buildCADFromSurvey(survey);
+lib/siteSurvey/siteSurvey.test.ts:1333:    const cad = buildCADFromSurvey(survey);
+lib/siteSurvey/siteSurvey.test.ts:1339:    const cad = buildCADFromSurvey(survey);
+lib/siteSurvey/siteSurvey.test.ts:1343:  it('systemType is "ground_mount" for a ground survey (mapped to CADSystemType)', () => {
+lib/siteSurvey/siteSurvey.test.ts:1345:    const cad = buildCADFromSurvey(survey);
+lib/siteSurvey/siteSurvey.test.ts:1346:    // SurveySystemType 'ground' maps to CADSystemType 'ground_mount'
+lib/siteSurvey/siteSurvey.test.ts:1352:describe('buildCADFromSurvey — coordinate conversion accuracy', () => {
+lib/siteSurvey/siteSurvey.test.ts:1354:  it('converts lat/lng polygon to local meters using Equirectangular approximation', () => {
+lib/siteSurvey/siteSurvey.test.ts:1357:    const cad = buildCADFromSurvey(survey);
+lib/siteSurvey/siteSurvey.test.ts:1361:      if (plane.polygon && plane.polygon.length >= 2) {
+lib/siteSurvey/siteSurvey.test.ts:1362:        // The polygon for plane-1 spans 0.0002° lat and 0.0004° lng
+lib/siteSurvey/siteSurvey.test.ts:1365:        const xCoords = plane.polygon.map(p => p.x);
+lib/siteSurvey/siteSurvey.test.ts:1366:        const yCoords = plane.polygon.map(p => p.y);
+lib/siteSurvey/siteSurvey.test.ts:1378:  it('usable polygon in roofPlaneInputs has valid local-meter coordinates', () => {
+lib/siteSurvey/siteSurvey.test.ts:1380:    const cad = buildCADFromSurvey(survey);
+lib/siteSurvey/siteSurvey.test.ts:1385:        // All usable polygon points should be valid finite numbers in local meters
+lib/siteSurvey/siteSurvey.test.ts:1390:        // Usable polygon should be close to origin (within reasonable site dimensions ~200m)
+lib/siteSurvey/siteSurvey.test.ts:1426:  it('buildCADFromSurvey receives and operates on a v1 pipeline survey', () => {
+lib/siteSurvey/siteSurvey.test.ts:1430:    expect(() => buildCADFromSurvey(survey)).not.toThrow();
+lib/siteSurvey/siteSurvey.test.ts:1511:      if (enriched) buildCADFromSurvey(enriched);
+lib/siteSurvey/fromPhysicalData.ts:7://   Constructs a RawSurveyPayload from project_physical_data + project_files
+lib/siteSurvey/fromPhysicalData.ts:13://   project_physical_data (DB)  ┐
+lib/siteSurvey/fromPhysicalData.ts:22://   - NEVER modifies CAD, proposal, permit, or engineering paths
+lib/siteSurvey/fromPhysicalData.ts:34://   Reads: project_physical_data + project_files (NOT project_site_surveys — that table does not exist)
+lib/siteSurvey/fromPhysicalData.ts:38:// ── ProjectPhysicalDataRow — shape of a project_physical_data DB row ──────────
+lib/siteSurvey/fromPhysicalData.ts:125: * Takes a project_physical_data row (already fetched by the caller) and
+lib/siteSurvey/fromPhysicalData.ts:130: * @param physData    Row from project_physical_data (or null if not yet ingested)
+lib/siteSurvey/fromPhysicalData.ts:202:      setbacks:       null,
+lib/siteSurvey/PHASE10_COMPLETE.md:24:| 5 | `lib/cad/buildCADFromSurvey.ts` | CAD bridge (Equirectangular projection) |
+lib/siteSurvey/PHASE10_COMPLETE.md:48:### enrichSurvey (Phases: core, azimuth, setbacks, CAD surfaces, exclusion zones, feasibility)
+lib/siteSurvey/PHASE10_COMPLETE.md:53:- setback NEC minimum 36" floor enforcement
+lib/siteSurvey/PHASE10_COMPLETE.md:61:### buildCADFromSurvey (origin, roof planes, overrides, coordinate conversion)
+lib/siteSurvey/PHASE10_COMPLETE.md:63:- `ground` → `ground_mount` CADSystemType mapping
+lib/siteSurvey/PHASE10_COMPLETE.md:64:- `null` origin when no GPS and no polygon fallback
+lib/siteSurvey/PHASE10_COMPLETE.md:87:9. ✅ NEC 690.12 minimum 36" setback floor enforced
+lib/jurisdictions/ahjOverlays.ts:125:          id: 'ca_cal_fire_setbacks',
+lib/jurisdictions/ahjOverlays.ts:127:          requirement: 'Additional setbacks required in State Responsibility Areas (SRAs) and Very High Fire Hazard Severity Zones (VHFHSZ). ' +
+lib/jurisdictions/ahjOverlays.ts:131:          notes: 'Check SRA designation at osfm.fire.ca.gov/map. Non-SRA sites: standard IFC setbacks apply.',
+lib/jurisdictions/ahj.ts:30:  // Fire / setbacks
+lib/jurisdictions/ahj.ts:187:  // Roof setbacks
+lib/jurisdictions/ahj.ts:189:    id: 'roof_setback',
+lib/jurisdictions/ahj.ts:191:    requirement: `Roof setback: ${ahj.roofSetbackInches}" from eave/rake edges; ${ahj.ridgeSetbackInches}" from ridge`,
+lib/jurisdictions/necVersions.ts:31:  // Fire setbacks (inches)
+lib/jurisdictions/necVersions.ts:96:      'Fire setbacks per CAL FIRE requirements',
+lib/jurisdictions/ahj-national.ts:133:  ahj({ id:'ca-los-angeles-la', stateCode:'CA', stateName:'California', county:'Los Angeles', city:'Los Angeles', ahjName:'City of Los Angeles LADBS', ahjType:'city', necVersion:'2023', utilityName:'LADWP', phone:'(213) 482-0000', website:'https://www.ladbs.org', onlinePermitting:true, expeditedAvailable:true, typicalPermitFee:'$300–$1,000', feeStructure:'$1.50 per watt DC', typicalPlanCheckDays:3, typicalPermitDays:5, windSpeedMph:110, groundSnowLoadPsf:0, seismicDesignCategory:'D', localAmendments:['Title 24 California Energy Code','CALGreen','LADBS local amendments'], specialRequirements:['LADWP interconnection application','Title 24 compliance','Seismic zone D requirements'], planSetRequirements:['Site plan with setbacks','SLD','Structural calcs (seismic)','Title 24 compliance','Equipment cut sheets','Load calculations'], notes:'LADBS allows solar permits over-the-counter for standard residential systems' }),
+lib/jurisdictions/ahj-national.ts:135:  ahj({ id:'ca-los-angeles-county', stateCode:'CA', stateName:'California', county:'Los Angeles', city:'Unincorporated', ahjName:'LA County Building & Safety', ahjType:'county', necVersion:'2023', utilityName:'SCE (Southern California Edison)', phone:'(626) 458-3173', website:'https://dpw.lacounty.gov/building', onlinePermitting:true, typicalPermitFee:'$250–$800', typicalPlanCheckDays:5, typicalPermitDays:10, windSpeedMph:110, groundSnowLoadPsf:0, seismicDesignCategory:'D', specialRequirements:['SCE Rule 21 interconnection','Title 24 compliance','CAL FIRE setbacks in high fire zones'] }),
+lib/jurisdictions/ahj-national.ts:137:  ahj({ id:'ca-san-diego-county', stateCode:'CA', stateName:'California', county:'San Diego', city:'Unincorporated', ahjName:'San Diego County Planning & Development', ahjType:'county', necVersion:'2023', utilityName:'SDG&E (San Diego Gas & Electric)', phone:'(858) 694-2960', onlinePermitting:true, typicalPermitFee:'$200–$600', typicalPlanCheckDays:5, typicalPermitDays:10, windSpeedMph:110, groundSnowLoadPsf:0, seismicDesignCategory:'D', specialRequirements:['SDG&E Rule 21','CAL FIRE setbacks in SRA zones'] }),
+lib/jurisdictions/ahj-national.ts:334:  ahj({ id:'ca-san-bernardino-san-bernardino', stateCode:'CA', stateName:'California', county:'San Bernardino', city:'San Bernardino', ahjName:'City of San Bernardino Development Services', ahjType:'city', necVersion:'2023', utilityName:'Southern California Edison', phone:'(909) 384-5057', onlinePermitting:true, expeditedAvailable:true, typicalPermitFee:'$200–$700', typicalPlanCheckDays:3, typicalPermitDays:5, windSpeedMph:110, groundSnowLoadPsf:0, seismicDesignCategory:'D', localAmendments:['California Building Code','California Electrical Code','Title 24 Part 6 Energy Code'], specialRequirements:['SCE interconnection (Rule 21)','California NEM 3.0','California fire setbacks — 18\" ridge, 36\" valley','Rapid shutdown NEC 690.12','CalFire high fire hazard zone — check parcel'], notes:'San Bernardino County high fire hazard — verify parcel zone before permit application' }),
+lib/jurisdictions/ahj-national.ts:361:  ahj({ id:'tx-nueces-corpus-christi', stateCode:'TX', stateName:'Texas', county:'Nueces', city:'Corpus Christi', ahjName:'City of Corpus Christi Development Services', ahjType:'city', necVersion:'2020', utilityName:'AEP Texas', phone:'(361) 826-3240', typicalPermitFee:'$100–$400', typicalPlanCheckDays:5, typicalPermitDays:10, windSpeedMph:130, groundSnowLoadPsf:0, seismicDesignCategory:'A', specialRequirements:['AEP Texas interconnection','ERCOT grid','Hurricane zone — wind uplift calcs required','Coastal zone setbacks'] }),
+lib/jurisdictions/ahj-national.ts:456:  ahj({ id:'md-anne-arundel-county', stateCode:'MD', stateName:'Maryland', county:'Anne Arundel', city:'Unincorporated', ahjName:'Anne Arundel County Inspections & Permits', ahjType:'county', necVersion:'2020', utilityName:'BGE (Baltimore Gas & Electric)', phone:'(410) 222-7777', website:'https://www.aacounty.org/departments/inspections-permits', onlinePermitting:true, typicalPermitFee:'$150–$600', typicalPlanCheckDays:7, typicalPermitDays:10, windSpeedMph:115, groundSnowLoadPsf:25, seismicDesignCategory:'B', localAmendments:['Maryland Building Performance Standards'], specialRequirements:['BGE interconnection','Maryland net metering','Maryland SREC market','Chesapeake Bay critical area — check setbacks near waterways'] }),
+lib/structural-calc.ts:170:  recommendations: string[];
+lib/structural-calc.ts:236:  const recommendations: string[] = [];
+lib/structural-calc.ts:656:    recommendations.push(`Structural analysis PASS — system meets ASCE 7-22 requirements. Attachment spacing: ${input.attachmentSpacing}", max allowed: ${maxAllowedSpacing}", margin: ${spacingMarginPct.toFixed(0)}%.`);
+lib/structural-calc.ts:659:    recommendations.push('High snow load area: verify panel tilt allows snow shedding. Minimum 10° tilt recommended.');
+lib/structural-calc.ts:662:    recommendations.push('High wind area: use enhanced attachment hardware and verify racking manufacturer wind rating.');
+lib/structural-calc.ts:665:    recommendations.push(`Attachment spacing (${input.attachmentSpacing}") has ${spacingMarginPct.toFixed(0)}% margin — spacing could potentially be increased up to ${maxAllowedSpacing}". Consult racking manufacturer.`);
+lib/structural-calc.ts:685:    recommendations,
+lib/topography/getTopographyState.ts:9://   - Which downstream systems (engineering, CAD, permit, proposal) are
+lib/topography/getTopographyState.ts:16:// The four flags (appliedToSystemDefinition, usedInCAD, usedInPermit,
+lib/topography/getTopographyState.ts:20://   - buildCADFromSurvey       → 0 callers in app/  → false
+lib/topography/getTopographyState.ts:23://   - project_physical_data → engineering_reports → true (4 fields)
+lib/topography/getTopographyState.ts:55:    /** project_physical_data row exists (legacy ingest pipeline) */
+lib/topography/getTopographyState.ts:59:    /** Count of non-null fields in project_physical_data */
+lib/topography/getTopographyState.ts:80:     * buildCADFromSurvey: ZERO callers in app/ routes — NOT wired.
+lib/topography/getTopographyState.ts:82:    usedInCAD: false;
+lib/topography/getTopographyState.ts:84:     * project_physical_data IS read by generateEngineeringReport().
+lib/topography/getTopographyState.ts:225:  // -- 2. project_physical_data (legacy survey system) -----------------------
+lib/topography/getTopographyState.ts:245:      FROM project_physical_data
+lib/topography/getTopographyState.ts:270:    errors.push(`project_physical_data: ${err instanceof Error ? err.message : String(err)}`);
+lib/topography/getTopographyState.ts:387:      surveySource: legacyExists ? 'project_physical_data' : 'none',
+lib/topography/getTopographyState.ts:391:        usedInCAD: false,
+lib/topography/getTopographyState.ts:399:        'CAD (buildCADFromSurvey — not wired)',
+lib/topography/getTopographyState.ts:430:      usedInCAD: false,                 // verified: 0 callers of buildCADFromSurvey in app/
+lib/topography/getTopographyState.ts:498:      usedInCAD: false,
+lib/geotiffDecoder.ts:159:      console.warn('[Irradiance] Mask decode failed (overlay will show full bbox):', (e as Error).message);
+lib/geotiffDecoder.ts:162:    console.warn('[Irradiance] No maskUrl in dataLayers response — overlay shows full bbox');
+lib/roadmapRE26.ts:181:    summary: '120 CI-blocking battery tests + 6 new datasheet-verified battery SKUs (Tigo EI/GO, BYD HVM, Pylontech Force-H2, EG4 PowerPro, HomeGrid Stackd). Dangling-recommendation tokens across 4 BrandProfiles trimmed.',
+lib/roadmapRE26.ts:241:    summary: 'Read-only audit producing docs/STAGE7_CONSOLIDATION_ASSESSMENT.md per UPGRADE_ROADMAP_v47.399.md mandate. Three audit areas: (1) BOM engine proliferation — identified ~2,228 lines of dead code across bom-engine.ts / bom-v2-engine.ts / bom-unified.ts / bom-merge.ts + orphan /api/engineering/bom-v2 route; one live engine is bom-engine-v4.ts. Recommended Stage 8.1 atomic deletion. (2) Racking DB duality — racking-database.ts (14 rows, 1 consumer: structural-engine-v3) vs mounting-hardware-db.ts (42 rows, 8 consumers including structural-engine-v4 and the entire UI/BOM/permit surface); 14/14 IDs overlap but fields differ. Both structural routes are live. Three options documented; recommended Option B (drift-fence CI test). (3) equipment-db vs brandProfiles spec duplication — ~360 drift points across 6 fields duplicated per SKU; recommended drift-fence CI test with overridesEquipmentDb opt-out rather than full refactor. Stage 8 scope recommendation: 8.1 (BOM deletion -2,228 lines) + 8.2 (drift-fence tests); defer 8.3 (racking unification) and 8.4 (brand-profile centralization). Zero code changes.',
+lib/roadmapRE26.ts:469:    summary: 'Parallel of the v47.425 brand-onboarding suite — CI-blocking tests enforcing schema, plausibility, chemistry allowlist, warranty minimums, datasheet traceability, and brand-to-battery recommendation integrity (no dangling tokens). 120 CI-blocking tests.',
+lib/roadmapRE26.ts:477:    notes: 'Discovered & fixed 6 dangling recommendation tokens across Solis/Sol-Ark/Growatt/EcoFlow BrandProfiles. Global 2 invariant now permanently prevents regression.',
+lib/roadmapRE26.ts:769:    // ── Shipped: YOLO Vision Pipeline ─────────────────────────────────────────
+lib/roadmapRE26.ts:771:      id: 'vision-yolo-replace-roboflow',
+lib/roadmapRE26.ts:772:      title: 'In-house YOLOv8 pipeline — replaces Roboflow (zero recurring API cost)',
+lib/roadmapRE26.ts:773:      summary: 'Full YOLOv8 microservice: FastAPI POST /vision/infer + /health + /vision/model. infer.py core inference (URL or local → VisionDetection[]). train.py ultralytics training script (yolov8n.pt base). validate.py post-training metrics. Dockerfile + start.sh for containerized deploy. 8-class solar dataset structure (dataset.yaml, classes.txt, LABELING_GUIDE.md, split + validate scripts). ingestPipeline._runVisionPipelineAsync now calls VISION_SERVICE_URL/vision/infer instead of Roboflow API. Removes ROBOFLOW_API_KEY / ROBOFLOW_MODEL_ID dependencies. VisionDetection / VisionBoundingBox / VisionInferenceResult types (backward-compat @deprecated aliases kept).',
+lib/roadmapRE26.ts:815:    summary: 'Two racking DBs coexist: mounting-hardware-db.ts (42 systems, UI-wired) and racking-database.ts (12 systems, structural engine only). Produce a written KEEP/MERGE/DEPRECATE recommendation. No code changes.',
+lib/roadmapRE26.ts:866:    title: 'Google Solar API — roof geometry + shade',
+lib/roadmapRE26.ts:1235:    summary: 'Audit flagged: 4 of 5 modules in lib/siteSurvey/ (applyToSystemDefinition, buildCADFromSurvey, permitIntegration, electricalFromSurvey) have ZERO callers in production routes. Decide: wire them into the engineering-generate flow, or delete them.',
+lib/roadmapRE26.ts:1242:      'lib/siteSurvey/buildCADFromSurvey.ts',
+lib/roadmapRE26.ts:1291:    notes: 'Final security posture: 42 real fixes across 76 phases. Remaining recommendations: Next.js 15 upgrade (CVE resolution), WAF layer for production.',
+lib/roadmapRE26.ts:1563:    summary: 'Strip install-crew workflow out of the desktop app. Punch-list, photo capture, commissioning sign-off on iOS/Android.',
+lib/files/getProjectFiles.ts:12://   - NEVER called from CAD, proposal, or permit paths — SiteSurvey only
+lib/db/solardog.ts:10:// project_physical_data — engineering read helper
+lib/db/solardog.ts:46:    FROM project_physical_data
+lib/db/solardog.ts:278:  type:            'page' | 'button' | 'workflow' | 'equipment' | 'equipment_brand' | 'feature' | 'route' | 'warning' | 'action' | 'preference';
+lib/db/solardog.ts:284:  /** v11: ordered steps for workflow items */
+lib/db/solardog.ts:345:  const type = (['page','button','workflow','equipment','equipment_brand','feature','route','warning','action','preference'].includes(itemType)
+lib/db/solardog.ts:456:// Seeds global knowledge items (pages, buttons, workflows, equipment) once.
+lib/placementEngine.ts:6: *   2. Fire setback zone calculation (NEC/IFC compliant defaults)
+lib/placementEngine.ts:34: * Fire setback configuration — configurable per AHJ.
+lib/placementEngine.ts:38:  /** Side (rake/gable end) setback in meters (default: 0.457m = 18 inches) */
+lib/placementEngine.ts:42:  /** Ridge (top) setback in meters (default: 0.457m = 18 inches) */
+lib/placementEngine.ts:44:  /** Eave (bottom/gutter) setback in meters (default: 0 -- no IRC eave requirement) */
+lib/placementEngine.ts:80: * Setback zone polygon for canvas overlay rendering.
+lib/placementEngine.ts:116:  setbacks: FireSetbackConfig;
+lib/placementEngine.ts:230: * Calculate the effective setback distance for a roof polygon.
+lib/placementEngine.ts:239: * maximum setback value. The 3D engine uses per-edge setbacks.
+lib/placementEngine.ts:242:  // v47.111: Returns SIDE setback only (used as uniform polygon shrink for the visual overlay).
+lib/placementEngine.ts:243:  // The CAD solver now uses per-edge setbacks directly (ridge/eave/side separate).
+lib/placementEngine.ts:249: * Returns per-edge setbacks for the CAD solver.
+lib/placementEngine.ts:267: * Generate setback zone overlay polygons for canvas rendering.
+lib/placementEngine.ts:270: * The restricted zone is the ring between the roof edge and the setback line.
+lib/placementEngine.ts:271: * The buildable zone is the inset polygon where panels can be placed.
+lib/placementEngine.ts:285:    label: `Edge setback ${(config.edgeSetbackM * 39.37).toFixed(0)}"`,
+lib/placementEngine.ts:288:  // Buildable zone = inset polygon
+lib/placementEngine.ts:302: * Inset a polygon by a given distance in meters.
+lib/placementEngine.ts:303: * Uses a simple centroid-based shrink (works well for convex polygons).
+lib/placementEngine.ts:347:  setbackM: number;
+lib/placementEngine.ts:356:    layoutId, vertices, panel, orientation, setbackM,
+lib/placementEngine.ts:364:  // Centroid of polygon
+lib/placementEngine.ts:396:  // Apply setback inset
+lib/placementEngine.ts:397:  minX += setbackM; maxX -= setbackM;
+lib/placementEngine.ts:398:  minY += setbackM; maxY -= setbackM;
+lib/placementEngine.ts:402:  // Precompute polygon for fast PIP
+lib/placementEngine.ts:418:      // Check if panel center is inside the inset polygon
+lib/placementEngine.ts:535: * Auto-fill a roof plane with panels, respecting fire setbacks.
+lib/placementEngine.ts:536: * This is the upgraded version of fillRoof() that uses proper setback zones.
+lib/placementEngine.ts:540:    layoutId, roofPlane, panel, orientation, setbacks,
+lib/placementEngine.ts:544:  const effectiveSetback = calcEffectiveSetback(setbacks);
+lib/placementEngine.ts:551:    setbackM: effectiveSetback,
+lib/placementEngine.ts:582:  // Close the polygon if not already closed
+lib/placementEngine.ts:594:    setbackM: marginM,
+lib/placementEngine.ts:726:    // Find bounding box of this layout's panels
+lib/intake/operationalLifecycle.ts:98:  workflow_reopened_at?: string | null;
+lib/intake/operationalLifecycle.ts:99:  workflow_reopened_by?: string | null;
+lib/intake/operationalLifecycle.ts:100:  workflow_reopen_reason?: string | null;
+lib/intake/operationalLifecycle.ts:101:  workflow_timeline?: OperationalMemoryEntry[];
+lib/intake/operationalLifecycle.ts:162:  workflow_timeline: OperationalMemoryEntry[];
+lib/intake/operationalLifecycle.ts:293:    workflow_reopened_at: str(operational.workflow_reopened_at),
+lib/intake/operationalLifecycle.ts:294:    workflow_reopened_by: str(operational.workflow_reopened_by),
+lib/intake/operationalLifecycle.ts:295:    workflow_reopen_reason: str(operational.workflow_reopen_reason),
+lib/intake/operationalLifecycle.ts:296:    workflow_timeline: Array.isArray(operational.workflow_timeline)
+lib/intake/operationalLifecycle.ts:297:      ? (operational.workflow_timeline as OperationalMemoryEntry[])
+lib/intake/operationalLifecycle.ts:409:  const workflowReason = detailString("workflow_reason") ?? note;
+lib/intake/operationalLifecycle.ts:420:  if (workflowReason && action.startsWith("reopen_")) {
+lib/intake/operationalLifecycle.ts:421:    next.workflow_reopen_reason = workflowReason;
+lib/intake/operationalLifecycle.ts:422:    next.workflow_reopened_at = occurredAt;
+lib/intake/operationalLifecycle.ts:423:    next.workflow_reopened_by = options.adminId;
+lib/intake/operationalLifecycle.ts:468:      | "workflow_timeline"
+lib/intake/operationalLifecycle.ts:497:    appendMemory("workflow_timeline", entry);
+lib/intake/operationalLifecycle.ts:570:      workflowReason ?? "Qualification reopened",
+lib/intake/operationalLifecycle.ts:586:      workflowReason ?? "Financing reopened",
+lib/intake/operationalLifecycle.ts:597:      workflowReason ??
+lib/intake/operationalLifecycle.ts:619:      workflowReason ?? "Documents reopened",
+lib/intake/operationalLifecycle.ts:626:      detailString("dormant_reason") ?? workflowReason ?? "Marked dormant";
+lib/intake/operationalLifecycle.ts:644:      workflowReason ?? "Lead reactivated",
+lib/intake/operationalLifecycle.ts:818:      workflow_reopen_reason: next.workflow_reopen_reason ?? null,
+lib/intake/operationalLifecycle.ts:1087:    workflow_timeline: operational.workflow_timeline ?? [],
+lib/intake/homeownerEventIntake.ts:10: * opportunity through the canonical admin workflow.
+lib/version.ts:13:  'Stage 19.1 (v60.1) — ARRAY_UNDERSIZED_FOR_BRAND warning: when no model in the brand can produce DC/AC ≥1.00, surfaces actionable message with minimum panels needed and micro recommendation',
+lib/version.ts:89:  'Stage v48.x post-BOM fixes (v48.0) — (1) extractFilesLegacy photo.name fallback: v1.0/partner surveys with item.name field now get correct filenames instead of photo-N.jpg; (2) renderHardwareSchedule() standalone helper: fence/ground hardware schedule tables now show real computed quantities (piles, rails, clamps, ground rods, conduit) via extractStructuralInputFromCAD + deriveStructuralBOM — no more TBD placeholders; (3) plan-set V4 enrichment: enrichEquipmentItemsFromV4() wired into 7-page plan-set pipeline, merges real part numbers + NEC refs into EquipmentItem[], additive-only + try/catch guarded; (4) extractPhotos v2 tag-based filenames: photo.tag used for meaningful names like roof-overview-1.jpg',
+lib/assistedEvidence/assistedEvidence.test.ts:6:  candidateCanInfluenceCADReadiness,
+lib/assistedEvidence/assistedEvidence.test.ts:36:  candidateSummary: 'Fixture candidate suggesting roof edge context; not authoritative.',
+lib/assistedEvidence/assistedEvidence.test.ts:75:  it('proves unreviewed candidates cannot satisfy requirements, CAD readiness, recommendations, or workflows', () => {
+lib/assistedEvidence/assistedEvidence.test.ts:78:    expect(candidateCanInfluenceCADReadiness(candidate)).toBe(false);
+lib/assistedEvidence/sandboxGuards.ts:14:export function candidateCanInfluenceCADReadiness(_candidate: AssistedEvidenceCandidate): false {
+lib/system/systemAccessors.ts:5://   - Prefers SystemDefinition when present on CADModel
+lib/system/systemAccessors.ts:17:import type { CADModel } from '@/lib/cad/types';
+lib/system/systemAccessors.ts:47:export function getSystemType(input: PermitInput, cad?: CADModel | null): SysType {
+lib/system/systemAccessors.ts:71:export function getInverterTopology(input: PermitInput, cad?: CADModel | null): InverterTopology {
+lib/system/systemAccessors.ts:107:export function getEquipmentContext(input: PermitInput, cad?: CADModel | null): ResolvedEquipment {
+lib/system/optimizerMergeHint.ts:13: * existing hardware. Reuses the sizing recommendation — no separate merge
+lib/system/optimizerMergeHint.ts:20: *   • Reuse the sizing recommendation rather than building separate merge logic
+lib/system/optimizerMergeHint.ts:23: * no current-exceeded violation, or the recommendation isn't strictly fewer
+lib/system/optimizerMergeHint.ts:41:   * client). Pass an empty array or undefined when no recommendation.
+lib/system/optimizerMergeHint.ts:64: *      (= the recommendation has strictly FEWER strings = would reduce
+lib/system/systemDefinition.ts:10://     → CAD engine, rail generator, placement engine, permit engine
+lib/system/systemDefinition.ts:75:  /** Site setback in feet */
+lib/system/systemDefinition.ts:76:  setbackFt?: number;
+lib/system/systemDefinition.ts:144:  setbackIn: number;      // NEC/AHJ required setback in inches
+lib/system/systemDefinition.ts:162:/** Correction to a GPS-derived roof plane polygon */
+lib/system/systemDefinition.ts:165:  correctionType: 'polygon_offset' | 'azimuth_correction' | 'pitch_correction' | 'edge_trim';
+lib/system/systemDefinition.ts:197:   * Used by CAD engine for panel collision avoidance and fire setback buffers.
+lib/system/systemDefinition.ts:204:   * Used by conduitRouting.ts to determine optimal conduit path.
+lib/system/systemDefinition.ts:209:   * Corrections to GPS-derived roof plane polygons from vision detections.
+lib/system/systemDefinition.ts:210:   * Applied by CAD engine when confidence >= PLANE_CORRECTION_MIN_CONFIDENCE.
+lib/system/systemDefinition.ts:237: * by CAD engine, placement engine, and permit generator.
+lib/system/systemDefinition.ts:306: * Mirrors the priority logic in cadEngine.ts resolveCADSystemType().
+lib/system/systemDefinition.ts:416:    setbackFt:    input.layout?.groundSetbackFt ?? 5,
+lib/system/conduitRouting.ts:7://   CADModel (after roofCAD.ts runs)
+lib/system/conduitRouting.ts:11://     → CADConduitRoute[]
+lib/system/conduitRouting.ts:12://     → Written to CADModel.conduitRoutes
+lib/system/conduitRouting.ts:17://   2. Find the closest roof edge exit point to the drop point
+lib/system/conduitRouting.ts:18://   3. Route from drop point → roof edge exit → down wall → electrical node
+lib/system/conduitRouting.ts:21://   6. Return CADConduitRoute with waypoints and metadata
+lib/system/conduitRouting.ts:35:import type { CADModel, CADPanel, CADObstruction, CADElectricalNode, CADConduitRoute, CADConduitWaypoint } from '@/lib/cad/types';
+lib/system/conduitRouting.ts:37:import { dist2D, centroid, bbox } from '@/lib/cad/geometry';
+lib/system/conduitRouting.ts:72:  /** Override roof edge exit point */
+lib/system/conduitRouting.ts:77: * routeConduit — computes conduit routes for a solved CAD model.
+lib/system/conduitRouting.ts:79: * Returns one CADConduitRoute per electrical node that is a primary
+lib/system/conduitRouting.ts:85:  cadModel: CADModel,
+lib/system/conduitRouting.ts:87:): CADConduitRoute[] {
+lib/system/conduitRouting.ts:99:  cadModel: CADModel,
+lib/system/conduitRouting.ts:101:): CADConduitRoute[] {
+lib/system/conduitRouting.ts:102:  const routes: CADConduitRoute[] = [];
+lib/system/conduitRouting.ts:150:function findArrayDropPoint(cadModel: CADModel): Point2D | null {
+lib/system/conduitRouting.ts:174:  targetNode: CADElectricalNode,
+lib/system/conduitRouting.ts:175:  obstructions: CADObstruction[],
+lib/system/conduitRouting.ts:177:): CADConduitRoute {
+lib/system/conduitRouting.ts:183:    const waypoints: CADConduitWaypoint[] = [
+lib/system/conduitRouting.ts:214:    const fallbackWaypoints: CADConduitWaypoint[] = [
+lib/system/conduitRouting.ts:230:  const waypoints: CADConduitWaypoint[] = path.map((node, i) => ({
+lib/system/conduitRouting.ts:282:  obstructions: CADObstruction[],
+lib/system/conduitRouting.ts:309:  obstructions: CADObstruction[],
+lib/system/smartDefaults.test.ts:58:  it('returns true when panelCount=0 (placeholder pre-CAD)', () => {
+lib/system/smartDefaults.test.ts:102:  it('returns a supported brand for ground (no explicit recommendation)', () => {
+lib/system/smartDefaults.test.ts:114:  it('applies defaults on a factory-fresh config with CAD-provided panel count', () => {
+lib/system/smartDefaults.test.ts:149:  it('is a no-op when systemPanelCount is 0 (waiting for CAD)', () => {
+lib/system/rackingEcosystemSmoke.test.ts:101:    // racking recommendation pointing at a brand we don't carry, the
+lib/system/inverterCapabilities.ts:209:   * produced a given recommendation.
+lib/system/inverterCapabilities.ts:398: * Shown in the UI to explain the recommendation.
+lib/system/batteryEcosystemSmoke.helpers.ts:50:// ─── BrandProfile ↔ Battery recommendation linkage ────────────────────
+lib/system/batteryEcosystemSmoke.helpers.ts:55: * whose recommendations we enforce actually resolve to real SKUs.
+lib/system/batteryEcosystemSmoke.helpers.ts:66: * means the profile has a dangling recommendation — a smoke failure.
+lib/system/layoutScoring.ts:7:// The top-scored candidate becomes the system recommendation.
+lib/system/displayMode.test.ts:9://   4. Applying recommendation resets displayMode to 'current'
+lib/system/displayMode.test.ts:66: * Build recommendedDisplayConfig from a sizing recommendation.
+lib/system/displayMode.test.ts:107:// A fresh sizing recommendation for the same 64 panels (Fronius, string topology)
+lib/system/displayMode.test.ts:196:  it("4. Applying recommendation resets displayMode to 'current'", () => {
+lib/system/displayMode.test.ts:201:    //           AND updates config.inverters to match the recommendation
+lib/system/displayMode.test.ts:218:    // Apply the recommendation
+lib/system/displayMode.test.ts:230:    // (which now matches the recommendation — they are the same data)
+lib/system/displayMode.test.ts:271:    // panelCount should come from the recommendation input
+lib/system/brandProfileDriftGuard.test.ts:13:// implements drift-guard CI tests per that recommendation.
+lib/system/feasibilityEvaluator.ts:45:// above 2.00 the system is so clipped it's not viable as a recommendation.
+lib/system/feasibilityEvaluator.ts:65:  SEVERE_MAX:   2.00,  // ≤ this: severe clipping / strong recommendation to upsize
+lib/system/validationEngine.test.ts:77:  it('flags ERROR when CAD count differs from sizing count', () => {
+lib/system/validationEngine.test.ts:83:    expect(issues.some(i => i.code === 'PANEL_COUNT_MISMATCH_CAD')).toBe(true);
+lib/system/validationEngine.test.ts:84:    const err = issues.find(i => i.code === 'PANEL_COUNT_MISMATCH_CAD')!;
+lib/system/validationEngine.test.ts:112:  it('uses cad.panels[] length when present (CAD-first priority)', () => {
+lib/system/validationEngine.test.ts:121:    expect(issues.some(i => i.code === 'PANEL_COUNT_MISMATCH_CAD')).toBe(true);
+lib/system/validationEngine.test.ts:529:    // Force a panel mismatch via CAD disagreement.
+lib/system/validationEngine.test.ts:534:    expect(result.errors.some(e => e.code === 'PANEL_COUNT_MISMATCH_CAD')).toBe(true);
+lib/system/validationEngine.ts:48: * `recommendation` is an optional human-readable hint for how to fix.
+lib/system/validationEngine.ts:55:  recommendation?: string;
+lib/system/validationEngine.ts:74: * Minimal CAD model shape that validation needs. Callers can pass the full
+lib/system/validationEngine.ts:85: * (before BOM is computed, before CAD is finalized, etc.). Each rule checks
+lib/system/validationEngine.ts:164:// between CAD, SystemDefinition, and the sizing input are a classic
+lib/system/validationEngine.ts:182:      recommendation: 'Place panels in the CAD view or enter a system size.',
+lib/system/validationEngine.ts:188:      code: 'PANEL_COUNT_MISMATCH_CAD',
+lib/system/validationEngine.ts:190:      message: `CAD has ${cadCount} panels but sizing used ${sizingCount}.`,
+lib/system/validationEngine.ts:192:      recommendation: 'Re-run sizing against the current CAD layout.',
+lib/system/validationEngine.ts:202:      recommendation: 'Update SystemDefinition.layout.totalPanels or re-run sizing.',
+lib/system/validationEngine.ts:215:        recommendation: 'Re-run the sizing engine to rebuild string layout.',
+lib/system/validationEngine.ts:277:      recommendation:
+lib/system/validationEngine.ts:293:      recommendation:
+lib/system/validationEngine.ts:303:      // v61.9: Explicit upsizing-first recommendation. Panel reduction is last resort.
+lib/system/validationEngine.ts:307:      recommendation:
+lib/system/validationEngine.ts:319:      recommendation:
+lib/system/validationEngine.ts:330:      recommendation: 'Downsize the inverter or add modules.',
+lib/system/validationEngine.ts:385:      recommendation: 'Select a brand/inverter or re-run sizing.',
+lib/system/validationEngine.ts:425:        recommendation: 'Add an inverter unit or upsize to a larger model.',
+lib/system/validationEngine.ts:471:        recommendation: `Add at least ${min - s.panelCount} panel(s) or remove the string.`,
+lib/system/validationEngine.ts:480:        recommendation: `Remove ${s.panelCount - max} panel(s) or split the string.`,
+lib/system/validationEngine.ts:504:        recommendation: 'Rebalance strings for even MPPT input.',
+lib/system/validationEngine.ts:571:      recommendation: 'Re-run sizing to strip stale micro components.',
+lib/system/validationEngine.ts:615:        recommendation: 'Re-run sizing with a battery-capable brand.',
+lib/system/validationEngine.ts:673:          recommendation: 'Rebuild BOM after toggling battery off.',
+lib/system/validationEngine.ts:700:      recommendation: 'Consider a brand that officially supports this system type.',
+lib/system/validationEngine.ts:742:      recommendation: 'Rebuild BOM from the current sizing result.',
+lib/system/validationEngine.ts:755:        recommendation: 'Rebuild BOM to include sizing engine required components.',
+lib/system/validationEngine.ts:784:          recommendation: 'Rebuild BOM to remove stale components from prior brand.',
+lib/system/validationEngine.ts:814:      recommendation: 'Reconcile SystemDefinition and sizing inputs.',
+lib/system/validationEngine.ts:830:      recommendation: 'Update SystemDefinition.electrical or reselect brand.',
+lib/system/validationEngine.ts:894:          recommendation: 'Remove the extra unit or rebalance strings.',
+lib/system/validationEngine.ts:956:    recommendation: ci.recommendation,
+lib/system/validationEngine.ts:994:      recommendation:
+lib/system/optimizerMergeHint.test.ts:27:      recommendedStringPanelCounts: [18, 18],  // even with merge recommendation
+lib/system/optimizerMergeHint.test.ts:50:  it('returns null when no recommendation provided', () => {
+lib/system/optimizerMergeHint.test.ts:58:  it('returns null when recommendation is an empty array', () => {
+lib/system/optimizerMergeHint.test.ts:66:  it('returns null when recommendation has SAME number of strings (no merge improvement)', () => {
+lib/system/optimizerMergeHint.test.ts:75:  it('returns null when recommendation has MORE strings (adding strings makes current worse)', () => {
+lib/system/optimizerMergeHint.test.ts:180:  it('filters out non-positive entries from the recommendation', () => {
+lib/system/batteryEcosystemSmoke.test.ts:138:  describe('Global 2 — Every BrandProfile recommendation resolves to ≥1 real battery', () => {
+lib/system/batteryEcosystemSmoke.test.ts:195:    // recommendation system (Tesla Powerwall, Enphase IQ Battery, etc.
+lib/system/batteryEcosystemSmoke.test.ts:198:    // ecosystemBrand tokens that match the recommendation-style tokens
+lib/system/sizingEngine.ts:80:  /** Total panel count from CADModel or layout. */
+lib/system/sizingEngine.ts:526:    message: `No brand or recommendation — falling back to generic string inverter.`,
+lib/system/sizingEngine.ts:897:    // Run the best-fit engine to get the electrically-valid recommendation.
+lib/system/sizingEngine.ts:962:    // Chosen model is infeasible. Substitute with the engine's recommendation.
+lib/system/sizingEngine.ts:2039: *   - Different recommendation → INFO warning (advisory only)
+lib/system/sizingEngine.ts:2052: *       workflow.
+lib/system/sizingEngine.ts:2397:  // against the feasibility-first recommendation.
+lib/system/brandCompatibility.ts:22:// recommendations. It produces a structured verdict; consumers
+lib/system/brandCompatibility.ts:63:  recommendation?: string;
+lib/system/brandCompatibility.ts:82: * A corrective recommendation the UI can offer as a one-click fix.
+lib/system/brandCompatibility.ts:184:      recommendation: 'Select a supported inverter brand.',
+lib/system/brandCompatibility.ts:207:      recommendation: `Consider a brand that supports ${systemType} systems.`,
+lib/system/brandCompatibility.ts:222:      recommendation: `Either switch brand or set topology to '${inverterBrand.topology}'.`,
+lib/system/brandCompatibility.ts:235:        recommendation: `Use ${inverterBrand.displayName}'s native '${inverterBrand.topology}' topology.`,
+lib/system/brandCompatibility.ts:253:        recommendation: `Use a ${inverterBrand.displayName}-compatible battery.`,
+lib/system/brandCompatibility.ts:267:        recommendation: `Use a ${inverterBrand.displayName}-compatible battery.`,
+lib/system/brandCompatibility.ts:280:        recommendation: 'Disable battery or switch to a battery-capable brand.',
+lib/system/brandCompatibility.ts:297:          recommendation: `Use a recommended battery: ${recommended.join(', ')}.`,
+lib/system/brandCompatibility.ts:310:      recommendation: 'Enable battery or switch brands.',
+lib/system/systemVocabulary.ts:31:// ── Legacy / Verbose System Type (from CAD engine, helpers.ts) ───
+lib/system/systemVocabulary.ts:33:/** Verbose system type — used by CADSystemType and helpers.ts SysType */
+lib/system/systemVocabulary.ts:43:  // Verbose (from CAD engine / helpers.ts)
+lib/system/systemVocabulary.ts:65: * Convert canonical short form to verbose format (for CAD engine / legacy code).
+lib/system/panelCountSource.test.ts:5: *   1. CAD placed panels (cad.panels.length)
+lib/system/panelCountSource.test.ts:6: *   2. CAD precomputed totalPanels
+lib/system/panelCountSource.test.ts:10: * The key test is the spec scenario: CAD says 36, config says 10 → resolver
+lib/system/panelCountSource.test.ts:18:  it('MASTER TASK spec: CAD=36, config=10 → returns 36 and flags mismatch', () => {
+lib/system/panelCountSource.test.ts:28:  it('returns CAD panel count when both CAD panels[] and totalPanels are present', () => {
+lib/system/panelCountSource.test.ts:57:  it('falls back to SystemDefinition.layout.totalPanels when no CAD', () => {
+lib/system/panelCountSource.test.ts:74:  it('falls back to config only when neither CAD nor SystemDefinition provide a value', () => {
+lib/system/panelCountSource.test.ts:99:  it('mismatchedWithConfig=false when CAD and config agree', () => {
+lib/system/panelCountSource.test.ts:118:  it('floors fractional CAD totalPanels', () => {
+lib/system/dcAcConstants.ts:16:  /** Ideal / sweet-spot ratio used for recommendations. */
+lib/system/dcAcConstants.ts:47:  /** ≤ 2.00: severe clipping — strong recommendation to upsize inverter */
+lib/system/panelCountSource.ts:5:// system panel count. The true count comes from the CAD model or the
+lib/system/panelCountSource.ts:7:// be stale (e.g. user placed 36 panels in CAD, but the inverter card still
+lib/system/panelCountSource.ts:11://   1. CADModel.panels.length         (preferred — actually-placed panels)
+lib/system/panelCountSource.ts:12://   2. CADModel.totalPanels           (fallback — precomputed by CAD layer)
+lib/system/panelCountSource.ts:22: * A minimal shape we accept for the CAD/layout source. Both the live
+lib/system/panelCountSource.ts:29:  /** Precomputed total from the CAD / layout layer. */
+lib/system/panelCountSource.ts:46:  /** CAD/Layout source (e.g. `projectLayout` in engineering page). */
+lib/system/panelCountSource.ts:51:   * Config-derived fallback. MUST NOT be trusted when CAD/SystemDefinition
+lib/system/panelCountSource.ts:53:   * layout has been produced yet (e.g. brand-new project pre-CAD).
+lib/system/panelCountSource.ts:81:  // Priority 1: CAD layout placed-panel count (most authoritative).
+lib/system/panelCountSource.ts:92:  // Priority 2: CAD precomputed totalPanels.
+lib/system/visionPatch.ts:10://     → CAD engine (collision avoidance, conduit routing)
+lib/system/visionPatch.ts:45:/** Minimum confidence to apply a plane polygon correction */
+lib/system/visionPatch.ts:141:    log.push(`${tag} WRITE obstruction id=${mapped.id} type=${mapped.type} worldX=${mapped.worldX.toFixed(2)} worldY=${mapped.worldY.toFixed(2)} radiusM=${mapped.radiusM.toFixed(2)} setbackIn=${mapped.setbackIn} conf=${obs.confidence.toFixed(2)}`);
+lib/system/visionPatch.ts:254:    setbackIn:   obs.setbackIn,
+lib/system/smartDefaults.ts:158:   * CAD-resolved panel count. MUST be > 0 for defaults to fire — the
+lib/system/smartDefaults.ts:160:   * the function is a no-op (applied=false) and waits for CAD.
+lib/system/smartDefaults.ts:175:   *   - systemPanelCount was 0 (not enough CAD info yet).
+lib/system/smartDefaults.ts:215: *   - If `systemPanelCount` is 0 → NO-OP (wait for CAD).
+lib/system/smartDefaults.ts:269:      reason: 'no CAD panel count yet — waiting for design input',
+lib/system/smartDefaults.ts:331:  // string — CAD may have assigned a brand-specific panel that we don't
+lib/system/normalizedInverter.ts:41: * state (either the sizing recommendation or the current user config).
+lib/system/normalizedInverter.ts:63: * without requiring the full SystemDefinition / CAD model.
+lib/system/normalizedInverter.ts:86:  /** The sizing engine's recommendation, if available. */
+lib/system/__tests__/hydrationGate.test.ts:6: * Scenario A: Stale 1×10 config (from newString() default) is discarded when CAD has 23 panels
+lib/system/__tests__/hydrationGate.test.ts:7: * Scenario B: Correct saved config (1×23 matching CAD 23) is preserved
+lib/system/__tests__/hydrationGate.test.ts:100:// SCENARIO A: Stale 1×10 config discarded when CAD has 23 panels
+lib/system/__tests__/hydrationGate.test.ts:112:  it('discards inverter layout when savedConfig total (10) !== CAD count (23)', () => {
+lib/system/__tests__/hydrationGate.test.ts:154:// SCENARIO B: Correct saved config (1×23 matching CAD 23) is preserved
+lib/system/__tests__/hydrationGate.test.ts:156:describe('Scenario B — Correct saved config matching CAD is preserved', () => {
+lib/system/__tests__/hydrationGate.test.ts:165:  it('preserves config when saved total (23) === CAD count (23)', () => {
+lib/system/__tests__/hydrationGate.test.ts:181:  it('preserves a multi-string config that sums to CAD count', () => {
+lib/system/__tests__/hydrationGate.test.ts:193:  it('preserves a multi-inverter config that sums to CAD count', () => {
+lib/system/__tests__/configOverwriteKillSwitch.test.ts:13:// ─── Mock for sizeSystemFromBrand (used in CAD sync logic tests) ───────────
+lib/system/__tests__/configOverwriteKillSwitch.test.ts:23:/** Mirrors the _cadUserLocked logic in page.tsx CAD sync */
+lib/system/__tests__/configOverwriteKillSwitch.test.ts:105:  describe('3. CAD sync respects isUserControlled', () => {
+lib/system/__tests__/configOverwriteKillSwitch.test.ts:106:    it('CAD sync is locked when isUserControlled=true', () => {
+lib/system/__tests__/configOverwriteKillSwitch.test.ts:111:    it('CAD sync is locked when userHasEditedInverters=true', () => {
+lib/system/__tests__/configOverwriteKillSwitch.test.ts:116:    it('CAD sync is NOT locked when both flags are false', () => {
+lib/system/__tests__/configOverwriteKillSwitch.test.ts:121:    it('CAD sync locked = string rearrange is skipped (only panel count update)', () => {
+lib/system/__tests__/configOverwriteKillSwitch.test.ts:146:    it('after Apply, CAD sync cannot rearrange strings', () => {
+lib/system/__tests__/configOverwriteKillSwitch.test.ts:266:      // Simulate the user-controlled CAD sync: 2 inverters, 2 strings each
+lib/system/__tests__/clippingRecommendation.test.ts:5: * and recommendation priority (inverter upsizing before panel reduction).
+lib/system/__tests__/clippingRecommendation.test.ts:165:  it('recommendation text mentions inverter upsizing, not panel reduction', () => {
+lib/system/__tests__/clippingRecommendation.test.ts:168:    const recs = issues.map(i => i.recommendation ?? '').join(' ');
+lib/system/__tests__/clippingRecommendation.test.ts:223:  it('recommendation does NOT say "reduce panel count" as primary action', () => {
+lib/system/__tests__/clippingRecommendation.test.ts:226:    const recs = issues.map(i => i.recommendation ?? '').join(' ');
+lib/system/__tests__/clippingRecommendation.test.ts:291:  it('DC_AC_RATIO_HIGH recommendation text does not lead with panel reduction', () => {
+lib/system/__tests__/clippingRecommendation.test.ts:296:    const rec = issue!.recommendation ?? '';
+lib/system/__tests__/clippingRecommendation.test.ts:309:  it('DC_AC_RATIO_SEVERE recommendation mentions upsizing first', () => {
+lib/system/__tests__/clippingRecommendation.test.ts:314:    const rec = issue!.recommendation ?? '';
+lib/system/__tests__/architectureInvariants.test.ts:13: *   6. CAD vs config explicit panel count choice
+lib/system/__tests__/architectureInvariants.test.ts:272:// ─── 6. CAD vs config explicit panel count choice ───────────────────────────
+lib/system/__tests__/architectureInvariants.test.ts:275:  it('CAD panels array takes priority over config fallback', () => {
+lib/system/__tests__/architectureInvariants.test.ts:285:  it('config fallback used when no CAD data', () => {
+lib/system/__tests__/architectureInvariants.test.ts:301:  it('systemDefinition is used as fallback when CAD is absent', () => {
+lib/system/bestFitEngine.ts:112:  /** Human-readable reasons for the recommendation. */
+lib/system/rackingEcosystemSmoke.helpers.ts:68:// ─── BrandProfile ↔ Racking recommendation linkage ───────────────
+lib/system/rackingEcosystemSmoke.helpers.ts:72: * These are the profiles whose recommendations we enforce actually resolve
+lib/system/rackingEcosystemSmoke.helpers.ts:83: * from its recommendedRackingBrands tokens. Empty = dangling recommendation.
+lib/intelligence/producers.test.ts:54:      { id: 'ahj-event-1', project_id: 'project-1', ahj_name: 'Phoenix AHJ', event_type: 'permit_redline', occurred_at: '2025-01-01T00:00:00Z', details: 'Battery fire setback pathway needs conduit revision and resubmit' },
+lib/intelligence/producers.test.ts:59:    expect(obs[0].observation_type).toBe('ahj_fire_setback_pattern')
+lib/intelligence/producers.test.ts:61:    expect(obs[0].derivation.factors.matched_patterns).toEqual(expect.arrayContaining(['ahj_fire_setback_pattern', 'ahj_battery_restriction']))
+lib/intelligence/producers.ts:274:      ahj_fire_setback_pattern: /fire|setback|pathway|access/i,
+lib/intelligence/producers.ts:342:      redesign_root_cause: /redesign|layout|roof|structural|setback|conduit|label/i,
+lib/permit_gen.mjs:310:  const setback = 22;
+lib/permit_gen.mjs:311:  const arrayX = roofX + setback;
+lib/permit_gen.mjs:312:  const arrayY = roofY + setback;
+lib/permit_gen.mjs:313:  const arrayW = roofW - setback * 2;
+lib/permit_gen.mjs:314:  const arrayH = roofH - setback * 2 - 30;
+lib/permit_gen.mjs:352:    <!-- Fire setback lines -->
+lib/permit_gen.mjs:353:    <rect x="${roofX + setback}" y="${roofY + setback}" width="${roofW - setback * 2}" height="${roofH - setback * 2 - 15}"
+lib/permit_gen.mjs:366:    <line x1="${roofX + 2}" y1="${roofY + roofH / 2}" x2="${roofX + setback - 2}" y2="${roofY + roofH / 2}" stroke="#f59e0b" stroke-width="1" marker-end="url(#arrow)"/>
+lib/permit_gen.mjs:367:    <text x="${roofX + setback / 2}" y="${roofY + roofH / 2 - 4}" text-anchor="middle" font-size="7" fill="#d97706" font-weight="bold">18"</text>
+lib/permit_gen.mjs:386:      <polygon points="0,-14 5,8 0,4 -5,8" fill="#374151"/>
+lib/permit_gen.mjs:453:            <li>Minimum 18" fire setback required from all roof edges, ridges, hips, and valleys per IFC \xA7605.11.1. Setbacks shall be measured from the module edge to the roof feature.</li>
+lib/permit_gen.mjs:456:            <li>Module layout shown is schematic. Field adjust to maintain setbacks, avoid obstructions (vents, chimneys, skylights), and align with rafters.</li>
+lib/permit_gen.mjs:498:    <polygon points="148,40 156,40 155,32 149,32" fill="#64748b" stroke="#475569" stroke-width="0.8"/>
+lib/bom/deriveRunLengths.ts:4: * Derives wire run lengths (in feet) from CAD geometry, replacing the
+lib/bom/deriveRunLengths.ts:32: * All values are in FEET. CAD geometry is in METERS → convert with M_TO_FT.
+lib/bom/deriveRunLengths.ts:36:import type { CADModel, CADRoofPlane, CADConduitRoute, CADElectricalNode } from '@/lib/cad/types';
+lib/bom/deriveRunLengths.ts:62:/** Centroid of a CAD roof plane polygon. */
+lib/bom/deriveRunLengths.ts:63:function planeCentroid(plane: CADRoofPlane): { x: number; y: number } {
+lib/bom/deriveRunLengths.ts:64:  const pts = plane.polygon;
+lib/bom/deriveRunLengths.ts:72:function largestPlane(planes: CADRoofPlane[]): CADRoofPlane | null {
+lib/bom/deriveRunLengths.ts:78:function totalConduitLengthFt(routes: CADConduitRoute[] | undefined): number {
+lib/bom/deriveRunLengths.ts:85:function findMspNode(nodes: CADElectricalNode[] | undefined): CADElectricalNode | null {
+lib/bom/deriveRunLengths.ts:96:/** Centroid of the entire CAD model bounding box. */
+lib/bom/deriveRunLengths.ts:97:function modelCentroid(cad: CADModel): { x: number; y: number } {
+lib/bom/deriveRunLengths.ts:116: * Derive wire run lengths from CAD geometry.
+lib/bom/deriveRunLengths.ts:124:export function deriveRunLengths(cad: CADModel): DerivedRunLengths {
+lib/bom/deriveRunLengths.ts:227:      // ARRAY_CONDUIT_RUN: vision conduit or bounding box diagonal to MSP
+lib/surfacePicker.ts:245: * Sample a polygon area and return surface hit points for panel placement.
+lib/surfacePicker.ts:250:  polygon: Array<{ lat: number; lng: number }>,
+lib/surfacePicker.ts:258:  if (!C || polygon.length < 3) return [];
+lib/surfacePicker.ts:260:  // Compute bounding box
+lib/surfacePicker.ts:261:  const lats = polygon.map(p => p.lat);
+lib/surfacePicker.ts:262:  const lngs = polygon.map(p => p.lng);
+lib/surfacePicker.ts:285:      // Point-in-polygon test
+lib/surfacePicker.ts:286:      if (!pointInPolygon(lat, lng, polygon)) continue;
+lib/surfacePicker.ts:378:function pointInPolygon(lat: number, lng: number, polygon: Array<{ lat: number; lng: number }>): boolean {
+lib/surfacePicker.ts:380:  const n = polygon.length;
+lib/surfacePicker.ts:382:    const xi = polygon[i].lng, yi = polygon[i].lat;
+lib/surfacePicker.ts:383:    const xj = polygon[j].lng, yj = polygon[j].lat;
+lib/permissions.ts:183:      description: 'Digital proposal signing and client approval workflows are available on Professional and above.',
+lib/gridCache.ts:14:  polygonHash:  string;
+lib/gridCache.ts:15:  setback:      number;
+lib/gridCache.ts:44:    k.polygonHash,
+lib/gridCache.ts:45:    k.setback.toFixed(3),
+lib/gridCache.ts:58: * Fast 32-bit hash of a lat/lng polygon.
+lib/network/contractorMatcher.ts:65:  recommended: boolean          // top-tier recommendation
+lib/network/opportunityEnrichment.test.ts:158:    expect(payload.marketplace.exclusivity_recommendation.value).toBe('exclusive_offer')
+lib/network/opportunityEnrichment.test.ts:227:    expect(payload.marketplace.exclusivity_recommendation.value).toMatch(/exclusive_offer|limited_marketplace|standard_marketplace/)
+lib/network/opportunityEnrichment.ts:333:    exclusivity_recommendation: field(closeProbability >= 0.72 || contractorFitScore != null && contractorFitScore >= 85 ? 'exclusive_offer' : liquidityScore >= 55 ? 'limited_marketplace' : 'standard_marketplace', { confidence: confidence({ fields: [closeProbability, contractorFitScore, liquidityScore], factors: ['close probability', 'contractor fit score', 'lead liquidity'], maxConfidence: 0.78 }), factors: ['close probability', 'contractor fit score', 'lead liquidity'] }),
+lib/documentProvenance/documentProvenance.test.ts:3:import type { CADModel } from '@/lib/cad/types';
+lib/documentProvenance/documentProvenance.test.ts:91:function mockCad(): CADModel {
+lib/documentProvenance/documentProvenance.test.ts:99:          polygon: [],
+lib/documentProvenance/documentProvenance.test.ts:104:          setbacks: { eaveM: 0.46, ridgeM: 0.46, rakeM: 0.46 },
+lib/documentProvenance/documentProvenance.test.ts:110:      setbackIn: 18,
+lib/documentProvenance/types.ts:1:import type { CADModel, CADSystemType } from '@/lib/cad/types';
+lib/documentProvenance/types.ts:175:  systemType: CADSystemType | 'unknown';
+lib/documentProvenance/types.ts:216:  cad?: CADModel | null;
+lib/documentProvenance/builders.ts:1:import type { CADModel } from '@/lib/cad/types';
+lib/documentProvenance/builders.ts:156:  cad?: CADModel | null;
+lib/documentProvenance/builders.ts:340:  cad?: CADModel | null;
+lib/documentProvenance/builders.ts:383:        'CADModel summary is linked to available registry evidence as provenance metadata only.',
+lib/documentProvenance/builders.ts:411:      'Wrapper carries provenance only; it does not extract geometry, infer dimensions, or generate CAD.',
+lib/documentProvenance/builders.ts:434:  cad: CADModel | null | undefined,
+lib/documentProvenance/builders.ts:453:function cadPrimitiveIds(cad: CADModel | null, family: 'roof' | 'electrical' | 'structural' | 'all'): string[] {
+lib/cad/cadEngine.ts:2:// SolarPro CAD Engine — Root Entry Point
+lib/cad/cadEngine.ts:5:// generateCADLayout(input: PermitInputShape): CADModel
+lib/cad/cadEngine.ts:10://     → roofCAD()  | groundCAD() | fenceCAD()
+lib/cad/cadEngine.ts:11://     → CADModel
+lib/cad/cadEngine.ts:12://     → adaptCADToDrafting()
+lib/cad/cadEngine.ts:16://   - One CAD solver per system type (no shared layout logic)
+lib/cad/cadEngine.ts:18://   - CADModel is the SINGLE SOURCE OF TRUTH
+lib/cad/cadEngine.ts:23:import type { CADModel, CADSystemType } from './types';
+lib/cad/cadEngine.ts:24:import { roofCAD }   from './roof/roofCAD';
+lib/cad/cadEngine.ts:25:import { groundCAD } from './ground/groundCAD';
+lib/cad/cadEngine.ts:26:import { fenceCAD }  from './fence/fenceCAD';
+lib/cad/cadEngine.ts:35:function resolveCADSystemType(input: PermitInputShape): CADSystemType {
+lib/cad/cadEngine.ts:58: * Primary CAD engine entry point.
+lib/cad/cadEngine.ts:61: * system-specific CAD solver. Returns a CADModel that
+lib/cad/cadEngine.ts:67:export function generateCADLayout(input: PermitInputShape): CADModel {
+lib/cad/cadEngine.ts:68:  const systemType = resolveCADSystemType(input);
+lib/cad/cadEngine.ts:70:  console.log('[CAD ENGINE INIT]', {
+lib/cad/cadEngine.ts:81:  let model: CADModel;
+lib/cad/cadEngine.ts:85:      model = roofCAD(input);
+lib/cad/cadEngine.ts:89:      model = groundCAD(input);
+lib/cad/cadEngine.ts:93:      model = fenceCAD(input);
+lib/cad/cadEngine.ts:99:      throw new Error(`[CAD ENGINE] Unknown system type: ${String(_never)}`);
+lib/cad/cadEngine.ts:111:    console.warn('[CAD ENGINE] SystemDefinition build failed (non-critical):', sdErr instanceof Error ? (sdErr as Error).message : sdErr);
+lib/cad/cadEngine.ts:117:export type { CADModel, CADSystemType } from './types';
+lib/cad/cadEngine.ts:119:  CADRoofModel, CADRoofPlane,
+lib/cad/cadEngine.ts:120:  CADGroundModel, CADGroundArray, CADGroundRow,
+lib/cad/cadEngine.ts:121:  CADFenceModel, CADFenceSegment, CADFencePost,
+lib/cad/cadEngine.ts:122:  CADPanel, CADDimension,
+lib/cad/ground/groundCAD.ts:2:// SolarPro CAD Engine — Ground Mount CAD Solver
+lib/cad/ground/groundCAD.ts:3:// lib/cad/ground/groundCAD.ts
+lib/cad/ground/groundCAD.ts:20:  CADModel, CADGroundModel, CADGroundArray, CADGroundRow, CADPanel,
+lib/cad/ground/groundCAD.ts:24:  bbox, metersToFt, ftToMeters, fmtFt,
+lib/cad/ground/groundCAD.ts:32:export function groundCAD(input: PermitInputShape): CADModel {
+lib/cad/ground/groundCAD.ts:34:  console.log('[CAD ENGINE INIT] groundCAD', {
+lib/cad/ground/groundCAD.ts:51:  const setbackFt = input.layout?.groundSetbackFt ?? 5;
+lib/cad/ground/groundCAD.ts:52:  const setbackM  = ftToMeters(setbackFt);
+lib/cad/ground/groundCAD.ts:54:  const cadArrays: CADGroundArray[] = [];
+lib/cad/ground/groundCAD.ts:60:    warnings.push('groundCAD: no groundArrays — generating from system totals');
+lib/cad/ground/groundCAD.ts:105:    const rows: CADGroundRow[]  = [];
+lib/cad/ground/groundCAD.ts:106:    const allPanels: CADPanel[] = [];
+lib/cad/ground/groundCAD.ts:111:      const rowPanels: CADPanel[] = [];
+lib/cad/ground/groundCAD.ts:140:    console.log('[PANEL GRID GENERATED] groundCAD', {
+lib/cad/ground/groundCAD.ts:171:    globalOriginX += arrayW + setbackM + ftToMeters(20); // 20ft gap between arrays
+lib/cad/ground/groundCAD.ts:185:  const globalBounds = bbox(allPoints.length > 0
+lib/cad/ground/groundCAD.ts:192:  const groundModel: CADGroundModel = {
+lib/cad/ground/groundCAD.ts:195:    setbackFt,
+lib/cad/ground/groundCAD.ts:198:  console.log('[GROUND CAD SOLVED]', {
+lib/cad/ground/groundCAD.ts:236:function buildGroundDimensions(arrays: CADGroundArray[]): any[] {
+lib/cad/types.ts:2:// SolarPro CAD Engine — Core Types
+lib/cad/types.ts:5:// CADModel is the SINGLE SOURCE OF TRUTH output from the CAD engine.
+lib/cad/types.ts:6:// It is consumed ONLY by adaptCADToDrafting() — never by templates directly.
+lib/cad/types.ts:9:// The CAD engine populates DraftingInput from CADModel.
+lib/cad/types.ts:15:export type CADSystemType = 'roof' | 'ground_mount' | 'solar_fence';
+lib/cad/types.ts:17:// ── CAD Panel ────────────────────────────────────────────────
+lib/cad/types.ts:18:// A single panel placed in CAD space (local meters, XY).
+lib/cad/types.ts:20:export interface CADPanel {
+lib/cad/types.ts:34:// ── CAD Roof Plane ───────────────────────────────────────────
+lib/cad/types.ts:36:export interface CADRoofPlane {
+lib/cad/types.ts:38:  polygon:        Point2D[];   // local XY meters — raw plane boundary
+lib/cad/types.ts:39:  usablePolygon:  Point2D[];   // local XY meters — after setbacks applied
+lib/cad/types.ts:43:  setbacks: {
+lib/cad/types.ts:48:  panels:         CADPanel[];
+lib/cad/types.ts:55:  /** Obstructions on this roof plane (subset of CADModel.obstructions) */
+lib/cad/types.ts:56:  obstructions?:  CADObstruction[];
+lib/cad/types.ts:59:// ── CAD Ground Array ─────────────────────────────────────────
+lib/cad/types.ts:61:export interface CADGroundArray {
+lib/cad/types.ts:65:  rows:          CADGroundRow[];
+lib/cad/types.ts:66:  panels:        CADPanel[];
+lib/cad/types.ts:82:export interface CADGroundRow {
+lib/cad/types.ts:88:  panels:  CADPanel[];
+lib/cad/types.ts:91:// ── CAD Fence ────────────────────────────────────────────────
+lib/cad/types.ts:93:export interface CADFenceSegment {
+lib/cad/types.ts:102:  panels:     CADPanel[];
+lib/cad/types.ts:103:  posts:      CADFencePost[];
+lib/cad/types.ts:109:export interface CADFencePost {
+lib/cad/types.ts:124:export interface CADFenceSection {
+lib/cad/types.ts:137:// ── CAD Dimensions (attached to model, rendered by engine) ───
+lib/cad/types.ts:139:export interface CADDimension {
+lib/cad/types.ts:151:// ── CAD Obstruction (vision-sourced) ──────────────────────────────────
+lib/cad/types.ts:152:// Represents a roof obstruction in the CAD model.
+lib/cad/types.ts:153:// Placed by roofCAD.ts using SystemDefinition.obstructions[].
+lib/cad/types.ts:154:// The CAD engine renders these as exclusion zones and avoids placing panels
+lib/cad/types.ts:155:// within (radiusM + setbackM) of each obstruction center.
+lib/cad/types.ts:157:export interface CADObstruction {
+lib/cad/types.ts:163:  setbackM:    number;         // required clearance from footprint edge (NEC/AHJ)
+lib/cad/types.ts:164:  totalRadiusM: number;        // radiusM + setbackM (total exclusion radius)
+lib/cad/types.ts:171:// ── CAD Electrical Node (vision-sourced) ────────────────────────────
+lib/cad/types.ts:172:// Represents a detected electrical component in the CAD model.
+lib/cad/types.ts:175:export interface CADElectricalNode {
+lib/cad/types.ts:186:// ── CAD Conduit Route ────────────────────────────────────────────────
+lib/cad/types.ts:187:// Output of conduitRouting.ts. Represents the planned conduit path
+lib/cad/types.ts:190:export interface CADConduitWaypoint {
+lib/cad/types.ts:196:export interface CADConduitRoute {
+lib/cad/types.ts:198:  waypoints:       CADConduitWaypoint[];
+lib/cad/types.ts:206:// ── CAD Model ────────────────────────────────────────────────
+lib/cad/types.ts:207:// Top-level output from generateCADLayout().
+lib/cad/types.ts:209:export interface CADModel {
+lib/cad/types.ts:210:  systemType:  CADSystemType;
+lib/cad/types.ts:214:  roof?:   CADRoofModel;
+lib/cad/types.ts:215:  ground?: CADGroundModel;
+lib/cad/types.ts:216:  fence?:  CADFenceModel;
+lib/cad/types.ts:234:  dimensions: CADDimension[];
+lib/cad/types.ts:241:  // Populated by generateCADLayout() from input data.
+lib/cad/types.ts:248:  obstructions?: CADObstruction[];
+lib/cad/types.ts:251:  electricalNodes?: CADElectricalNode[];
+lib/cad/types.ts:254:  conduitRoutes?: CADConduitRoute[];
+lib/cad/types.ts:259:export interface CADRoofModel {
+lib/cad/types.ts:260:  planes:       CADRoofPlane[];
+lib/cad/types.ts:262:  setbackIn:    number;
+lib/cad/types.ts:266:export interface CADGroundModel {
+lib/cad/types.ts:267:  arrays:       CADGroundArray[];
+lib/cad/types.ts:269:  setbackFt:    number;
+lib/cad/types.ts:272:export interface CADFenceModel {
+lib/cad/types.ts:273:  segments:         CADFenceSegment[];
+lib/cad/types.ts:281:  sections:         CADFenceSection[];  // user-controlled fence sections
+lib/cad/geometry.ts:2:// SolarPro CAD Engine — Shared Geometry Utilities
+lib/cad/geometry.ts:6:// Used by roofCAD, groundCAD, fenceCAD.
+lib/cad/geometry.ts:9://   - polygon operations
+lib/cad/geometry.ts:11://   - offset/setback math
+lib/cad/geometry.ts:12://   - bounding box math
+lib/cad/geometry.ts:66:export function bbox(points: Point2D[]): BBox {
+lib/cad/geometry.ts:88:export function polygonArea(pts: Point2D[]): number {
+lib/cad/geometry.ts:126:// Insets a convex or near-convex polygon by `dist` meters.
+lib/cad/geometry.ts:128:// NOTE: For concave polygons, use only small offsets.
+lib/cad/geometry.ts:142:    // Inward normal (for CCW polygon: rotate left = inward)
+lib/cad/geometry.ts:187:// ── Rotate a polygon around its centroid ─────────────────────
+lib/cad/geometry.ts:194:// ── Grid generation inside a polygon ─────────────────────────
+lib/cad/mergeCADModels.ts:2:// lib/cad/mergeCADModels.ts — Survey → CAD Constraint Overlay (Phase 3)
+lib/cad/mergeCADModels.ts:7://   generateCADLayout()   → CADModel (solved)      ← base
+lib/cad/mergeCADModels.ts:8://   buildCADFromSurvey()  → SurveyCADInputs        ← overlay source
+lib/cad/mergeCADModels.ts:9://   mergeCADModels()      → MergeResult            ← YOU ARE HERE
+lib/cad/mergeCADModels.ts:13://   - NEVER re-runs the CAD solver
+lib/cad/mergeCADModels.ts:14://   - NEVER throws — all errors push to mergeLog; baseCAD returned as-is
+lib/cad/mergeCADModels.ts:15://   - Returns baseCAD UNCHANGED when surveyInputs is null/undefined
+lib/cad/mergeCADModels.ts:16://   - Returns baseCAD UNCHANGED when system type mismatch
+lib/cad/mergeCADModels.ts:28:import type { CADModel } from './types';
+lib/cad/mergeCADModels.ts:29:import type { SurveyCADInputs } from './buildCADFromSurvey';
+lib/cad/mergeCADModels.ts:34:  /** The merged (or unchanged) CAD model */
+lib/cad/mergeCADModels.ts:35:  model:     CADModel;
+lib/cad/mergeCADModels.ts:47: * mergeCADModels — overlays survey-derived constraints onto a solved CADModel.
+lib/cad/mergeCADModels.ts:52: * @param baseCAD       The fully-solved CADModel from generateCADLayout()
+lib/cad/mergeCADModels.ts:53: * @param surveyInputs  Optional SurveyCADInputs from buildCADFromSurvey()
+lib/cad/mergeCADModels.ts:56:export function mergeCADModels(
+lib/cad/mergeCADModels.ts:57:  baseCAD:        CADModel,
+lib/cad/mergeCADModels.ts:58:  surveyInputs?:  SurveyCADInputs | null,
+lib/cad/mergeCADModels.ts:66:    log.push('[merge] No surveyInputs — returning baseCAD unchanged');
+lib/cad/mergeCADModels.ts:67:    return { model: baseCAD, mergeLog: log, applied, skipped };
+lib/cad/mergeCADModels.ts:74:      surveyInputs.systemType !== baseCAD.systemType
+lib/cad/mergeCADModels.ts:76:      const msg = `[merge] System type mismatch: base=${baseCAD.systemType} survey=${surveyInputs.systemType} — skipping all geometry overlays`;
+lib/cad/mergeCADModels.ts:79:      return { model: baseCAD, mergeLog: log, applied, skipped };
+lib/cad/mergeCADModels.ts:82:    // Work on a shallow copy — never mutate baseCAD directly
+lib/cad/mergeCADModels.ts:83:    let model: CADModel = { ...baseCAD };
+lib/cad/mergeCADModels.ts:218:    // Uses index signature (CADModel allows [key: string]: any via spread)
+lib/cad/mergeCADModels.ts:230:    // Safety net — ANY unexpected error returns baseCAD unchanged
+lib/cad/mergeCADModels.ts:231:    const msg = `[merge] ERROR (non-fatal, returning baseCAD unchanged): ${(err as Error).message}`;
+lib/cad/mergeCADModels.ts:233:    console.warn('[CAD MERGE]', msg);
+lib/cad/mergeCADModels.ts:234:    return { model: baseCAD, mergeLog: log, applied, skipped };
+lib/cad/roof/roofCAD.ts:2:// SolarPro CAD Engine — Roof CAD Solver
+lib/cad/roof/roofCAD.ts:3:// lib/cad/roof/roofCAD.ts
+lib/cad/roof/roofCAD.ts:7://   2. Apply TRUE polygon setbacks per plane (independent)
+lib/cad/roof/roofCAD.ts:21:  CADModel, CADRoofModel, CADRoofPlane, CADPanel, CADDimension,
+lib/cad/roof/roofCAD.ts:22:  CADObstruction, CADElectricalNode,
+lib/cad/roof/roofCAD.ts:27:  latLngToXY, latlngArrayToXY, bbox,
+lib/cad/roof/roofCAD.ts:28:  insetPolygon, gridInsidePolygon, polygonArea, centroid,
+lib/cad/roof/roofCAD.ts:44:export function roofCAD(input: PermitInputShape): CADModel {
+lib/cad/roof/roofCAD.ts:46:  console.log('[CAD ENGINE INIT] roofCAD', {
+lib/cad/roof/roofCAD.ts:57:  // contains world-projected obstructions. We project them to CAD space and
+lib/cad/roof/roofCAD.ts:58:  // filter panels that fall within (radiusM + setbackM) of each obstruction.
+lib/cad/roof/roofCAD.ts:119:  const cadPlanes: CADRoofPlane[] = [];
+lib/cad/roof/roofCAD.ts:128:      // Apply uniform setback (use full inset for simplicity — all sides equal)
+lib/cad/roof/roofCAD.ts:134:      const planeBB = bbox(usablePolygon.length >= 3 ? usablePolygon : polyXY);
+lib/cad/roof/roofCAD.ts:135:      const areaSqM = polygonArea(polyXY);
+lib/cad/roof/roofCAD.ts:140:      const planePanels: CADPanel[] = [];
+lib/cad/roof/roofCAD.ts:142:      // Find GPS panels that fall inside this plane's polygon
+lib/cad/roof/roofCAD.ts:165:        console.log(`[PANEL GRID GENERATED] roofCAD plane=${rp.id} source=GPS count=${planePanels.length}`);
+lib/cad/roof/roofCAD.ts:169:        const gridBB   = bbox(gridPoly);
+lib/cad/roof/roofCAD.ts:204:        console.log(`[PANEL GRID GENERATED] roofCAD plane=${rp.id} source=GRID count=${planePanels.length}`);
+lib/cad/roof/roofCAD.ts:209:        ? bbox(planePanels.flatMap(p => [
+lib/cad/roof/roofCAD.ts:218:      console.log('[SETBACK APPLIED] roofCAD', {
+lib/cad/roof/roofCAD.ts:232:      // Exclusion zone = radiusM + setbackIn * INCHES_TO_METERS.
+lib/cad/roof/roofCAD.ts:233:      const planeObstructions = buildCADObstructions(sysDefObstructions, rp.id);
+lib/cad/roof/roofCAD.ts:238:        console.log(`[OBSTRUCTION FILTER] roofCAD plane=${rp.id} removed=${removedCount} remaining=${filteredPanels.length}`);
+lib/cad/roof/roofCAD.ts:243:        ? bbox(filteredPanels.flatMap(p => [
+lib/cad/roof/roofCAD.ts:253:        polygon:       polyXY,
+lib/cad/roof/roofCAD.ts:258:        setbacks:      { eaveM, ridgeM, rakeM },
+lib/cad/roof/roofCAD.ts:271:    warnings.push('roofCAD: no roofPlanes with GPS — generating schematic layout');
+lib/cad/roof/roofCAD.ts:287:    const panels: CADPanel[] = [];
+lib/cad/roof/roofCAD.ts:306:    console.log(`[PANEL GRID GENERATED] roofCAD plane=schematic source=SCHEMATIC count=${panels.length}`);
+lib/cad/roof/roofCAD.ts:310:      polygon:       schematicPoly,
+lib/cad/roof/roofCAD.ts:315:      setbacks:      { eaveM, ridgeM, rakeM },
+lib/cad/roof/roofCAD.ts:335:  const allPoints = cadPlanes.flatMap(p => p.polygon);
+lib/cad/roof/roofCAD.ts:336:  const globalBounds = bbox(allPoints.length > 0 ? allPoints : [{ x: 0, y: 0 }, { x: 10, y: 10 }]);
+lib/cad/roof/roofCAD.ts:341:  const roofModel: CADRoofModel = {
+lib/cad/roof/roofCAD.ts:344:    setbackIn:      eaveSetIn,
+lib/cad/roof/roofCAD.ts:348:  console.log('[ROOF CAD SOLVED]', {
+lib/cad/roof/roofCAD.ts:356:  // Build top-level CAD obstruction and electrical node arrays
+lib/cad/roof/roofCAD.ts:357:  const allCADObstructions = buildCADObstructions(sysDefObstructions, null);
+lib/cad/roof/roofCAD.ts:358:  const allCADElecNodes = buildCADElectricalNodes(sysDefElecNodes);
+lib/cad/roof/roofCAD.ts:374:    obstructions:    allCADObstructions.length > 0 ? allCADObstructions : undefined,
+lib/cad/roof/roofCAD.ts:375:    electricalNodes: allCADElecNodes.length > 0 ? allCADElecNodes : undefined,
+lib/cad/roof/roofCAD.ts:381:function buildRoofDimensions(planes: CADRoofPlane[]): any[] {
+lib/cad/roof/roofCAD.ts:385:    const panelBB = bbox(plane.panels.flatMap(p => [
+lib/cad/roof/roofCAD.ts:415:      id:      `${plane.id}-setback`,
+lib/cad/roof/roofCAD.ts:417:      x1:      plane.polygon[0]?.x ?? 0,
+lib/cad/roof/roofCAD.ts:418:      y1:      plane.polygon[0]?.y ?? 0,
+lib/cad/roof/roofCAD.ts:421:      valueFt: metersToFt(plane.setbacks.eaveM),
+lib/cad/roof/roofCAD.ts:422:      label:   fmtFt(metersToFt(plane.setbacks.eaveM)) + ' FIRE SETBACK',
+lib/cad/roof/roofCAD.ts:429:// ── Local point-in-polygon helper ────────────────────────────
+lib/cad/roof/roofCAD.ts:447: * Build CADObstruction array from SysDefObstruction[].
+lib/cad/roof/roofCAD.ts:448: * Converts setbackIn → setbackM and computes totalRadiusM.
+lib/cad/roof/roofCAD.ts:451:function buildCADObstructions(
+lib/cad/roof/roofCAD.ts:454:): CADObstruction[] {
+lib/cad/roof/roofCAD.ts:458:      const setbackM = o.setbackIn * 0.0254;
+lib/cad/roof/roofCAD.ts:465:        setbackM,
+lib/cad/roof/roofCAD.ts:466:        totalRadiusM: o.radiusM + setbackM,
+lib/cad/roof/roofCAD.ts:476: * Build CADElectricalNode array from SysDefElectricalNode[].
+lib/cad/roof/roofCAD.ts:478:function buildCADElectricalNodes(nodes: SysDefElectricalNode[]): CADElectricalNode[] {
+lib/cad/roof/roofCAD.ts:497: * more accurate but requires AHJ-specific setback direction knowledge.
+lib/cad/roof/roofCAD.ts:500:  panels: CADPanel[],
+lib/cad/roof/roofCAD.ts:501:  obstructions: CADObstruction[],
+lib/cad/roof/roofCAD.ts:503:): CADPanel[] {
+lib/cad/fence/fenceCAD.ts:2:// SolarPro CAD Engine — Solar Fence CAD Solver
+lib/cad/fence/fenceCAD.ts:3:// lib/cad/fence/fenceCAD.ts
+lib/cad/fence/fenceCAD.ts:22:  CADModel, CADFenceModel, CADFenceSegment, CADFencePost, CADPanel,
+lib/cad/fence/fenceCAD.ts:23:  CADFenceSection, FenceSectionType,
+lib/cad/fence/fenceCAD.ts:27:  latLngToXY, bbox, metersToFt, ftToMeters, fmtFt, dist2D,
+lib/cad/fence/fenceCAD.ts:38:export function fenceCAD(input: PermitInputShape): CADModel {
+lib/cad/fence/fenceCAD.ts:40:  console.log('[CAD ENGINE INIT] fenceCAD', {
+lib/cad/fence/fenceCAD.ts:89:    warnings.push('fenceCAD: no fenceSegments — generating schematic single-segment');
+lib/cad/fence/fenceCAD.ts:112:  const cadSegments: CADFenceSegment[] = [];
+lib/cad/fence/fenceCAD.ts:113:  const allSections: CADFenceSection[] = [];
+lib/cad/fence/fenceCAD.ts:138:    const panels: CADPanel[] = [];
+lib/cad/fence/fenceCAD.ts:139:    const segSections: CADFenceSection[] = [];
+lib/cad/fence/fenceCAD.ts:200:    const posts: CADFencePost[] = [];
+lib/cad/fence/fenceCAD.ts:213:    console.log('[PANEL GRID GENERATED] fenceCAD', {
+lib/cad/fence/fenceCAD.ts:258:  const globalBounds = bbox(allPoints.length > 0
+lib/cad/fence/fenceCAD.ts:265:  const fenceModel: CADFenceModel = {
+lib/cad/fence/fenceCAD.ts:277:  console.log('[FENCE CAD SOLVED]', {
+lib/cad/fence/fenceCAD.ts:312:  segments: CADFenceSegment[],
+lib/cad/buildCADFromSurvey.ts:2:// lib/cad/buildCADFromSurvey.ts — Survey → CAD Bridge
+lib/cad/buildCADFromSurvey.ts:8://     → buildCADFromSurvey() ← YOU ARE HERE → CADModel inputs
+lib/cad/buildCADFromSurvey.ts:9://     → generateCADLayout()  → CADModel (full solved layout)
+lib/cad/buildCADFromSurvey.ts:13://   generateCADLayout() and the CAD engine. This is a BRIDGE module:
+lib/cad/buildCADFromSurvey.ts:17://     - Converts CADReadySurface[] → CADRoofPlane[] (partial — no panels yet)
+lib/cad/buildCADFromSurvey.ts:18://     - Sets usablePolygon from enriched setback-inset polygon
+lib/cad/buildCADFromSurvey.ts:22://     - Constructs a CADGroundArray input from survey site dimensions
+lib/cad/buildCADFromSurvey.ts:28://   - Output: SurveyCADInputs — a structured input payload for generateCADLayout()
+lib/cad/buildCADFromSurvey.ts:29://   - The CAD engine is NOT invoked here — caller does that with these inputs
+lib/cad/buildCADFromSurvey.ts:31:// WHY NOT BUILD THE FULL CADModel HERE:
+lib/cad/buildCADFromSurvey.ts:32://   generateCADLayout() owns panel placement, row solving, dimension generation,
+lib/cad/buildCADFromSurvey.ts:34://   constructs only the inputs that the CAD engine needs from survey data.
+lib/cad/buildCADFromSurvey.ts:39:  CADRoofPlane,
+lib/cad/buildCADFromSurvey.ts:40:  CADSystemType,
+lib/cad/buildCADFromSurvey.ts:46:  type CADReadySurface,
+lib/cad/buildCADFromSurvey.ts:53: * SurveyCADInputs — the structured inputs for generateCADLayout() derived
+lib/cad/buildCADFromSurvey.ts:57: *   const inputs = buildCADFromSurvey(enriched);
+lib/cad/buildCADFromSurvey.ts:58: *   const cadModel = await generateCADLayout({
+lib/cad/buildCADFromSurvey.ts:63:export interface SurveyCADInputs {
+lib/cad/buildCADFromSurvey.ts:64:  /** Resolved CAD system type (matches CADSystemType) */
+lib/cad/buildCADFromSurvey.ts:65:  systemType: CADSystemType;
+lib/cad/buildCADFromSurvey.ts:71:   * Roof plane inputs derived from CADReadySurface data.
+lib/cad/buildCADFromSurvey.ts:73:   * These are PARTIAL CADRoofPlane objects — panels are NOT solved here.
+lib/cad/buildCADFromSurvey.ts:84:   * Override values for the CAD engine's SystemDefinitionInput.
+lib/cad/buildCADFromSurvey.ts:87:  overrides: SurveyCADOverrides;
+lib/cad/buildCADFromSurvey.ts:89:  /** Warnings generated during CAD input construction */
+lib/cad/buildCADFromSurvey.ts:97: * Survey-derived roof plane input — a partial CADRoofPlane shape.
+lib/cad/buildCADFromSurvey.ts:98: * The CAD engine fills in panels[], dimensions{}, and solve metadata.
+lib/cad/buildCADFromSurvey.ts:102:  /** Raw boundary polygon in local meters (from survey geo polygon) */
+lib/cad/buildCADFromSurvey.ts:103:  polygon: Point2D[];
+lib/cad/buildCADFromSurvey.ts:104:  /** Usable polygon after setbacks (from enrichment inset) */
+lib/cad/buildCADFromSurvey.ts:110:  setbacks: {
+lib/cad/buildCADFromSurvey.ts:119: * Used to construct a CADGroundArray-compatible input.
+lib/cad/buildCADFromSurvey.ts:132: * Override values to merge into the CAD engine's call params.
+lib/cad/buildCADFromSurvey.ts:133: * These are the survey-sourced values that improve CAD accuracy.
+lib/cad/buildCADFromSurvey.ts:135:export interface SurveyCADOverrides {
+lib/cad/buildCADFromSurvey.ts:156: * buildCADFromSurvey — constructs CAD engine inputs from an EnrichedSiteSurvey.
+lib/cad/buildCADFromSurvey.ts:161: * @returns       SurveyCADInputs — structured inputs for generateCADLayout()
+lib/cad/buildCADFromSurvey.ts:163:export function buildCADFromSurvey(survey: EnrichedSiteSurvey): SurveyCADInputs {
+lib/cad/buildCADFromSurvey.ts:167:  log.push(`[cadBridge] Building CAD inputs for survey=${survey.id} project=${survey.projectId} pipeline_v${SITE_SURVEY_PIPELINE_VERSION}`);
+lib/cad/buildCADFromSurvey.ts:169:  // ── Resolve CAD system type ─────────────────────────────────────────────────
+lib/cad/buildCADFromSurvey.ts:206:): CADSystemType {
+lib/cad/buildCADFromSurvey.ts:235:  log.push(`[cadBridge] WARN: No GPS or polygon data — origin unknown`);
+lib/cad/buildCADFromSurvey.ts:250:    warnings.push(`No CAD roof surfaces available — CAD engine will use default plane layout`);
+lib/cad/buildCADFromSurvey.ts:259:    // Get the original roof plane for polygon data
+lib/cad/buildCADFromSurvey.ts:262:    // Build raw polygon in local meters from lat/lng vertices
+lib/cad/buildCADFromSurvey.ts:263:    const polygon: Point2D[] = roofPlane && roofPlane.vertices.length >= 3
+lib/cad/buildCADFromSurvey.ts:267:    // Build usable polygon from enriched inset polygon
+lib/cad/buildCADFromSurvey.ts:270:      : polygon; // fallback to raw polygon if inset failed
+lib/cad/buildCADFromSurvey.ts:275:    // Convert setback shrink (inches) to meters
+lib/cad/buildCADFromSurvey.ts:276:    const setbackShrink = surface.appliedSetbacks;
+lib/cad/buildCADFromSurvey.ts:277:    const eaveM = ((setbackShrink['eave'] ?? 36) / 12) * 0.3048;
+lib/cad/buildCADFromSurvey.ts:278:    const ridgeM = ((setbackShrink['ridge'] ?? 36) / 12) * 0.3048;
+lib/cad/buildCADFromSurvey.ts:279:    const rakeM = ((setbackShrink['rake'] ?? 36) / 12) * 0.3048;
+lib/cad/buildCADFromSurvey.ts:281:    if (polygon.length < 3) {
+lib/cad/buildCADFromSurvey.ts:282:      log.push(`[cadBridge] WARN: Plane ${surface.planeId} has no polygon — usablePolygon also empty`);
+lib/cad/buildCADFromSurvey.ts:287:      polygon,
+lib/cad/buildCADFromSurvey.ts:292:      setbacks: { eaveM, ridgeM, rakeM },
+lib/cad/buildCADFromSurvey.ts:295:    log.push(`[cadBridge] Roof plane ${surface.planeId}: az=${surface.azimuth}° pitch=${surface.pitchDeg}° area=${surface.totalAreaSqFt.toFixed(0)}sqft usable=${surface.usableAreaSqFt.toFixed(0)}sqft polygon=${polygon.length}pts`);
+lib/cad/buildCADFromSurvey.ts:326:    warnings.push(`Ground system: no usable area captured — CAD engine will use default array dimensions`);
+lib/cad/buildCADFromSurvey.ts:346:): SurveyCADOverrides {
+lib/cad/buildCADFromSurvey.ts:347:  const overrides: SurveyCADOverrides = {};
+lib/cad/buildCADFromSurvey.ts:398: * geoPolygonToLocal — converts GeoPoint lat/lng polygon to local Point2D meters.
+lib/cad/adapter.ts:2:// SolarPro CAD Engine — CAD → Drafting Adapter
+lib/cad/adapter.ts:5:// adaptCADToDrafting(cadModel, originalInput): DraftingInput
+lib/cad/adapter.ts:8://   Convert CADModel (geometry-solved) into the existing
+lib/cad/adapter.ts:13://   - Overwrites ONLY geometry fields with CAD-solved values
+lib/cad/adapter.ts:18://   CADRoofModel.planes[]        → project.roofPlanes + project.panelPositions
+lib/cad/adapter.ts:19://   CADGroundModel.arrays[]      → layout.groundArrays
+lib/cad/adapter.ts:20://   CADFenceModel.segments[]     → layout.fenceSegments
+lib/cad/adapter.ts:39:import type { CADModel, CADRoofPlane, CADGroundArray, CADFenceSegment } from './types';
+lib/cad/adapter.ts:46: * Encode local XY meters (from CAD origin) as "fake degrees"
+lib/cad/adapter.ts:63: * Converts CADModel into DraftingInput for consumption by
+lib/cad/adapter.ts:69:export function adaptCADToDrafting(
+lib/cad/adapter.ts:70:  cad: CADModel,
+lib/cad/adapter.ts:73:  console.log('[CAD → DRAFTING ADAPTER]', {
+lib/cad/adapter.ts:81:  // Base engineering (pass-through with CAD overrides)
+lib/cad/adapter.ts:105:      throw new Error(`[CAD Adapter] Unknown systemType: ${(cad as any).systemType}`);
+lib/cad/adapter.ts:112:  cad: CADModel,
+lib/cad/adapter.ts:118:  // Convert CAD plane polygons to fake-degree coordinates (1° == 1 ft).
+lib/cad/adapter.ts:119:  // plane.polygon vertices are stored in local XY meters from CAD origin.
+lib/cad/adapter.ts:120:  const adaptedRoofPlanes = roof.planes.map((plane: CADRoofPlane) => ({
+lib/cad/adapter.ts:122:    vertices: plane.polygon.map(pt => xyToFakeDeg(pt.x, pt.y)),
+lib/cad/adapter.ts:130:  // Convert CAD panels to fake-degree coordinates.
+lib/cad/adapter.ts:134:  const adaptedPanelPositions = roof.planes.flatMap((plane: CADRoofPlane) =>
+lib/cad/adapter.ts:153:  console.log('[CAD → DRAFTING ADAPTER] roof encoding sample:', {
+lib/cad/adapter.ts:177:  cad: CADModel,
+lib/cad/adapter.ts:183:  // Convert CAD arrays back to layout.groundArrays format
+lib/cad/adapter.ts:184:  const adaptedGroundArrays = ground.arrays.map((arr: CADGroundArray) => ({
+lib/cad/adapter.ts:195:    // CAD-solved extras for templates
+lib/cad/adapter.ts:210:    groundSetbackFt: ground.setbackFt,
+lib/cad/adapter.ts:219:  cad: CADModel,
+lib/cad/adapter.ts:225:  // Convert CAD segment endpoints to fake-degree coordinates (1° == 1 ft).
+lib/cad/adapter.ts:226:  // seg.startX/Y and endX/Y are in meters from CAD origin.
+lib/cad/adapter.ts:227:  const adaptedSegments = fence.segments.map((seg: CADFenceSegment) => {
+lib/cad/adapter.ts:250:      // CAD-solved extras
+lib/3d/controlLayer.ts:17: *   6. VALIDATION — polygon containment, NaN guard, dedup
+lib/3d/controlLayer.ts:118:  polygon3D?:   Array<{ x: number; y: number; z: number }>;
+lib/3d/controlLayer.ts:160:  setbacks?: ControlSetbacks;
+lib/3d/controlLayer.ts:228:   * 'boundary'     — next panel position is outside roof polygon (row is full)
+lib/3d/controlLayer.ts:250:  const setbacks    = config.setbacks ?? DEFAULT_SETBACKS;
+lib/3d/controlLayer.ts:257:    setbacks,
+lib/3d/controlLayer.ts:286:          eaveSetbackM:    setbacks.eaveM,
+lib/3d/controlLayer.ts:287:          ridgeSetbackM:   setbacks.ridgeM,
+lib/3d/controlLayer.ts:288:          sideSetbackM:    setbacks.sideM,
+lib/3d/controlLayer.ts:317:          eaveSetbackM:  setbacks.eaveM,
+lib/3d/controlLayer.ts:318:          ridgeSetbackM: setbacks.ridgeM,
+lib/3d/controlLayer.ts:319:          sideSetbackM:  setbacks.sideM,
+lib/3d/controlLayer.ts:397:          // Engine returned null — new panel position is outside roof polygon boundary
+lib/3d/controlLayer.ts:399:          warnings.push('[extend_row] Engine returned null — boundary rejection (panel would exceed roof polygon)');
+lib/3d/controlLayer.ts:545: *  2. Reject panels outside plane polygon (if plane provided)
+lib/3d/controlLayer.ts:577:        // Soft rejection for surface modes — engine already applies setbacks.
+lib/3d/controlLayer.ts:579:        // Hard-reject only for extend_row where engine has no polygon check.
+lib/3d/controlLayer.ts:583:            `is outside plane polygon — REJECTED`
+lib/3d/controlLayer.ts:593:      warnings.push(`[validate] ${rejected} panels rejected by polygon containment check`);
+lib/3d/controlLayer.ts:721: * Point-in-polygon test in lat/lng space (ray casting).
+lib/3d/controlLayer.ts:763:  setbacks:    ControlSetbacks,
+lib/3d/controlLayer.ts:780:      setbacks,
+lib/panelLayout.ts:31:  setback: number;        // meters
+lib/panelLayout.ts:37:  const { layoutId, roofPlane, panel, setback, panelSpacing, rowSpacing, tilt, azimuth } = params;
+lib/panelLayout.ts:42:  // Get bounding box of roof plane
+lib/panelLayout.ts:45:  const minLat = Math.min(...lats) + setback / METERS_PER_DEG_LAT;
+lib/panelLayout.ts:46:  const maxLat = Math.max(...lats) - setback / METERS_PER_DEG_LAT;
+lib/panelLayout.ts:47:  const minLng = Math.min(...lngs) + setback / metersPerDegLng(roofPlane.vertices[0].lat);
+lib/panelLayout.ts:48:  const maxLng = Math.max(...lngs) - setback / metersPerDegLng(roofPlane.vertices[0].lat);
+lib/panelLayout.ts:64:      // Check if panel center is inside roof polygon
+lib/panelLayout.ts:252:  polygon: { lat: number; lng: number }[]
+lib/panelLayout.ts:257:  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+lib/panelLayout.ts:258:    const xi = polygon[i].lng, yi = polygon[i].lat;
+lib/panelLayout.ts:259:    const xj = polygon[j].lng, yj = polygon[j].lat;
+lib/panelLayout.ts:287:export function polygonAreaM2(vertices: { lat: number; lng: number }[]): number {
+lib/autoDesign.ts:22:  setbackM?: number;         // default 0.3m
+lib/autoDesign.ts:104:  setbackM: number,
+lib/autoDesign.ts:118:    const y = setbackM + row * rowPitch;
+lib/autoDesign.ts:122:      const x = setbackM + col * (panelWidthM + panelSpacingM);
+lib/autoDesign.ts:159:    setbackM = 0.3,
+lib/autoDesign.ts:189:        optimalTilt, optimalAzimuth, setbackM, rowSpacingM, panelSpacingM, lat
+lib/autoDesign.ts:206:        panels: generatePanelLayout(southCount, panelWatts, panelWidthM, panelHeightM, optimalTilt, 180, setbackM, rowSpacingM, panelSpacingM, lat),
+lib/autoDesign.ts:212:        panels: generatePanelLayout(eastCount, panelWatts, panelWidthM, panelHeightM, optimalTilt, 90, setbackM, rowSpacingM, panelSpacingM, lat),
+lib/autoDesign.ts:218:        panels: generatePanelLayout(westCount, panelWatts, panelWidthM, panelHeightM, optimalTilt, 270, setbackM, rowSpacingM, panelSpacingM, lat),
+lib/autoDesign.ts:229:      panels: generatePanelLayout(totalPanels, panelWatts, panelWidthM, panelHeightM, flatTilt, 180, setbackM, rowSpacingM, panelSpacingM, lat),
+lib/autoDesign.ts:239:      panels: generatePanelLayout(totalPanels, panelWatts, panelWidthM, panelHeightM, optimalTilt, optimalAzimuth, setbackM, rowSpacingM, panelSpacingM, lat),
+lib/roofGeometry.ts:2: * roofGeometry.ts — CAD-Style Roof Geometry Engine  (v47.99)
+lib/roofGeometry.ts:9: *   → inward setback offset (feet) → usable polygon (feet)
+lib/roofGeometry.ts:13: *   → clip: reject any panel whose 4 corners are not ALL inside usable polygon
+lib/roofGeometry.ts:32:  polygonCentroidLatLng,
+lib/roofGeometry.ts:47:// ─── Legacy LocalPoint (meters) — kept for callers outside CAD engine ────────
+lib/roofGeometry.ts:51:/** Legacy metric projection — kept for non-CAD callers (debug overlay, area calc). */
+lib/roofGeometry.ts:71:export function polygonCentroid(vertices: LatLng[]): LatLng {
+lib/roofGeometry.ts:79:  return polygonCentroid(vertices);
+lib/roofGeometry.ts:91:export function polygonAreaM2(vertices: LatLng[]): number {
+lib/roofGeometry.ts:93:  const origin = polygonCentroid(vertices);
+lib/roofGeometry.ts:102:// ─── Internal feet-based polygon signed area ─────────────────────────────────
+lib/roofGeometry.ts:131:// ─── Legacy 2D Rotation (meters — for non-CAD callers) ───────────────────────
+lib/roofGeometry.ts:145:function bboxFeet(pts: LocalFeetPoint[]): BBoxFeet {
+lib/roofGeometry.ts:158:function bbox2D(pts: LocalPoint[]): BBox2D {
+lib/roofGeometry.ts:171: * Standard CAD setback: moves each vertex along the bisector of its two
+lib/roofGeometry.ts:172: * adjacent inward edge normals.  Works for convex and mildly concave polygons.
+lib/roofGeometry.ts:174: * @param pts   - CCW polygon in local feet
+lib/roofGeometry.ts:183:  // Collapse guard: polygon must be wider than 2× setback in both axes
+lib/roofGeometry.ts:184:  const bb    = bboxFeet(ccw);
+lib/roofGeometry.ts:202:    // Inward normal for CCW polygon: right-turn 90° = (ey, -ex) / len
+lib/roofGeometry.ts:224:  if (resultArea < 0)               return [];   // inverted (setback too large)
+lib/roofGeometry.ts:232: * with callers outside the CAD engine (debug overlay, computeRoofAreas, etc.)
+lib/roofGeometry.ts:240:  const bb      = bbox2D(ccw);
+lib/roofGeometry.ts:299:/** Legacy meters-based PIP — kept for non-CAD callers. */
+lib/roofGeometry.ts:316:// For a roof polygon defined by lat/lng vertices, find the longest edge and
+lib/roofGeometry.ts:327:// To get a CAD rotAngle from this axis (same convention as the azimuth-based
+lib/roofGeometry.ts:332: * Compute compass bearing (degrees, 0=N clockwise) of each polygon edge.
+lib/roofGeometry.ts:376: * Compute CAD rotAngle (radians) that aligns the grid to the longest roof edge,
+lib/roofGeometry.ts:427:// ─── CAD Panel Grid Parameters ───────────────────────────────────────────────
+lib/roofGeometry.ts:429:export interface CADPanelGridParams {
+lib/roofGeometry.ts:433:  /** Uniform edge setback in meters (legacy — used when per-edge setbacks not provided) */
+lib/roofGeometry.ts:434:  setbackM:      number;
+lib/roofGeometry.ts:444:  /** Per-edge setbacks (override setbackM when provided) */
+lib/roofGeometry.ts:446:  ridgeSetbackM?: number;   // top / ridge edge (default: same as setbackM)
+lib/roofGeometry.ts:447:  sideSetbackM?:  number;   // left and right rake/gable edges (default: same as setbackM)
+lib/roofGeometry.ts:449:   * v47.118: Align grid to longest roof edge instead of pure azimuth.
+lib/roofGeometry.ts:456:// ─── CAD Panel Grid Generator (LECS — feet internally) ───────────────────────

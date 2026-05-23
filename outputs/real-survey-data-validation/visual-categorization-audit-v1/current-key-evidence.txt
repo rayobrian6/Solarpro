@@ -1,0 +1,355 @@
+===== lib/survey/evidence/categoryRegistry.ts
+3:export type SurveyEvidenceCategory =
+38:export interface SurveyEvidenceCategoryDefinition {
+39:  category: SurveyEvidenceCategory;
+49:export const SURVEY_EVIDENCE_CATEGORY_REGISTRY: Record<SurveyEvidenceCategory, SurveyEvidenceCategoryDefinition> = {
+58:    aliases: ['main_panel_open', 'main_panel_closed', 'main_panel', 'msp', 'service_panel', 'panel_photo', 'panel'],
+113:    description: 'Overview photo evidence of a roof plane used for layout traceability.',
+118:    aliases: ['roof_overview', 'roof_plane', 'roof', 'roof_photo'],
+173:    description: 'Close-up photo evidence of roof material or roof surface condition.',
+263:    description: 'General site overview photo evidence for site-plan traceability.',
+298:    aliases: ['unusable', 'bad_photo'],
+303:    description: 'Photo evidence that could not be mapped to a canonical category.',
+312:export const SURVEY_EVIDENCE_CATEGORIES = Object.keys(SURVEY_EVIDENCE_CATEGORY_REGISTRY) as SurveyEvidenceCategory[];
+315:  category => SURVEY_EVIDENCE_CATEGORY_REGISTRY[category].required,
+320:    acc[category] = SURVEY_EVIDENCE_CATEGORY_REGISTRY[category].domain;
+323:  {} as Record<SurveyEvidenceCategory, SurveyEvidenceDomain>,
+329:    for (const alias of SURVEY_EVIDENCE_CATEGORY_REGISTRY[category].aliases) {
+334:  {} as Record<string, SurveyEvidenceCategory>,
+341:export function normalizeSurveyEvidenceCategory(category: string | null | undefined): SurveyEvidenceCategory {
+346:export function inferSurveyEvidenceCategoryFromText(text: string | null | undefined): SurveyEvidenceCategory {
+367:export function getSurveyEvidenceDomain(category: SurveyEvidenceCategory): SurveyEvidenceDomain {
+368:  return SURVEY_EVIDENCE_CATEGORY_REGISTRY[category].domain;
+371:export function getSurveyEvidenceCategoryDefinition(category: SurveyEvidenceCategory): SurveyEvidenceCategoryDefinition {
+372:  return SURVEY_EVIDENCE_CATEGORY_REGISTRY[category];
+375:export function getSurveyEvidenceLabel(category: SurveyEvidenceCategory): string {
+376:  return SURVEY_EVIDENCE_CATEGORY_REGISTRY[category].label;
+===== lib/survey/evidence/manifest.ts
+7:  inferSurveyEvidenceCategoryFromText,
+8:  normalizeSurveyEvidenceCategory,
+10:import type { SurveyEvidenceCategory, SurveyEvidenceDomain } from './categoryRegistry';
+13:  SurveyEvidenceCategory,
+15:  SurveyEvidenceCategoryDefinition,
+22:  SURVEY_EVIDENCE_CATEGORY_REGISTRY,
+23:  getSurveyEvidenceCategoryDefinition,
+26:  inferSurveyEvidenceCategoryFromText,
+27:  normalizeSurveyEvidenceCategory,
+86:  submittedCategory: string | null;
+87:  category: SurveyEvidenceCategory;
+91:  evidenceSource: 'site_survey_files' | 'survey_payload' | 'project_files' | 'manual' | 'derived';
+103:  category: SurveyEvidenceCategory;
+115:  sourceOfTruth: 'site_surveys+site_survey_files';
+119:  requiredMissing: SurveyEvidenceCategory[];
+161:    .filter((file) => file.fileType === 'photo')
+173:  // If a payload photo was submitted but never made it into site_survey_files,
+192:  if (items.length === 0) warnings.push('No survey photo evidence items are linked to this survey.');
+214:    sourceOfTruth: 'site_surveys+site_survey_files',
+239:        'OpenCV blur/orientation/duplicate scoring',
+240:        'YOLO/Supervision detection candidates',
+241:        'targeted OCR extraction candidates',
+244:        'Open3D geometry reasoning',
+245:        'FreeCAD automation',
+246:        'Detectron2 segmentation',
+247:        'Label Studio dataset workflows',
+260:  const submittedCategory = input.file.label ?? asString(input.payloadPhoto?.category);
+261:  const category = classifySubmittedEvidenceCategory(submittedCategory);
+279:    submittedCategory: submittedCategory ?? null,
+284:    evidenceSource: 'site_survey_files',
+295:        note: 'Photo linked from site_survey_files; image quality and duplicate analysis not processed in v1.',
+301:        note: `Submitted category "${submittedCategory}" mapped to evidence category "${category}".`,
+316:  const submittedCategory = asString(input.payloadPhoto.category);
+317:  const category = classifySubmittedEvidenceCategory(submittedCategory);
+321:    evidenceId: stableEvidenceId(input.survey.id, url || 'payload-photo', input.index),
+330:    submittedCategory: submittedCategory ?? null,
+341:    quality: { blurScore: null, duplicateScore: null, warnings: ['Photo exists in survey payload but was not found in site_survey_files.'] },
+348:        note: 'Payload photo was included in manifest because no matching site_survey_files row was found.',
+356:function classifySubmittedEvidenceCategory(category: string | null | undefined): SurveyEvidenceCategory {
+357:  const exact = normalizeSurveyEvidenceCategory(category);
+359:  return inferSurveyEvidenceCategoryFromText(category);
+379:  const photos = (surveyData as { photos?: unknown }).photos;
+380:  if (!Array.isArray(photos)) return [];
+381:  return photos.filter((photo): photo is PayloadPhotoLike => typeof photo === 'object' && photo !== null);
+385:  return payloadPhotos.find((photo) => {
+386:    const url = asString(photo.url);
+388:    const category = asString(photo.category);
+===== lib/survey/evidence/engineeringRequirements.ts
+1:import type { SurveyEvidenceCategory, SurveyEvidenceManifest } from './manifest';
+4:  getSurveyEvidenceCategoryDefinition,
+41:export type EngineeringRequirementConfidencePolicy = 'canonical_evidence_required' | 'canonical_or_optional_evidence' | 'manual_review_only' | 'inactive_future';
+44:  supportsOCR: boolean;
+45:  supportsCVClassification: boolean;
+46:  supportsCADInference: boolean;
+64:  requiredEvidenceCategories: SurveyEvidenceCategory[];
+65:  optionalEvidenceCategories: SurveyEvidenceCategory[];
+87:  canonicalEvidenceIds: string[];
+90:  evidenceCategoriesSatisfied: SurveyEvidenceCategory[];
+95:  requiredEvidenceCategories: SurveyEvidenceCategory[];
+96:  optionalEvidenceCategories: SurveyEvidenceCategory[];
+130:  canonicalManifest: SurveyEvidenceManifest | null | undefined;
+171:  supportsOCR: false,
+172:  supportsCVClassification: false,
+173:  supportsCADInference: false,
+178:  supportsOCR: true,
+179:  supportsCVClassification: true,
+180:  supportsCADInference: false,
+195:    confidencePolicy: 'canonical_evidence_required',
+211:    confidencePolicy: 'canonical_evidence_required',
+227:    confidencePolicy: 'canonical_evidence_required',
+236:    description: 'Optional evidence of attic access for structural review workflow context.',
+243:    confidencePolicy: 'canonical_or_optional_evidence',
+252:    description: 'Optional canonical subpanel evidence when downstream distribution equipment is present.',
+259:    confidencePolicy: 'canonical_or_optional_evidence',
+268:    description: 'Optional canonical disconnect evidence for electrical equipment review.',
+275:    confidencePolicy: 'canonical_or_optional_evidence',
+291:    confidencePolicy: 'canonical_or_optional_evidence',
+310:    futureCapabilities: { ...FUTURE_FLAGS_DOCUMENTED, supportsCADInference: false },
+348:    description: 'Optional canonical battery-location evidence when storage is in scope.',
+355:    confidencePolicy: 'canonical_or_optional_evidence',
+385:  const manifest = input.canonicalManifest ?? null;
+387:    canonicalManifest: manifest,
+388:    evidenceTruthSource: 'canonical_manifest_v1',
+427:        ? 'Engineering Requirement Registry v1 evaluated canonicalManifest, provenance traceability, and Structured Engineering Signals V1.'
+428:        : 'Engineering Requirement Registry v1 evaluated canonicalManifest and provenance traceability only.',
+432:      'Future capability flags are informational and do not activate OCR, CV, semantic extraction, CAD inference, or image-byte inspection.',
+447:  const provenanceRecords = traceability.canonicalEvidence.filter(record =>
+453:  const satisfyingRecords = definition.confidencePolicy === 'canonical_or_optional_evidence'
+464:  const failedMetadataRules = uniqueRecords.flatMap(record => failedMetadataRulesFor(record.metadataCompleteness, definition.metadataCompletenessRules, record.canonicalEvidenceId));
+482:      : partiallySatisfied || (definition.confidencePolicy === 'canonical_or_optional_evidence' && hasOptionalEvidence) || hasPartialSignalSupport
+497:    canonicalEvidenceIds: uniqueRecords.map(record => record.canonicalEvidenceId),
+524:      `Observed ${observedCanonicalEvidenceCount} canonical evidence item(s); minimum required: ${definition.minimumCanonicalEvidenceCount}; linked structured signals: ${linkedSignals.length}.`,
+526:        ? 'Duplicate-collapsed status: at least one satisfying canonical representative includes duplicate group provenance.'
+529:      structuredSignals ? 'Evaluation is deterministic registry logic over canonical manifest/provenance plus structured signals.' : 'Evaluation is deterministic registry logic over canonical manifest/provenance only.',
+545:    canonicalEvidenceIds: [],
+575:      'No OCR, CV, semantic extraction, CAD inference, or image-byte processing is activated by this flag set.',
+590:  if (rules.requireSubmittedCategory && !metadata.hasSubmittedCategory) failures.push(`${evidenceId}: submittedCategory missing`);
+601:  if (records.some(record => record.requirementConfidenceSource === 'canonical_evidence_confidence')) return 'canonical_evidence_confidence';
+602:  if (records.some(record => record.requirementConfidenceSource === 'canonical_manifest_summary')) return 'canonical_manifest_summary';
+618:    `Required canonical categories: ${requiredLabels}; optional canonical categories: ${optionalLabels}.`,
+619:    `canonicalManifest totalItems=${manifest?.summary.totalItems ?? 0}; requiredMissing=${manifest?.requiredMissing.join(', ') || 'none'}.`,
+621:      ? `Canonical evidence ids used: ${records.map(record => record.canonicalEvidenceId).join(', ')}.`
+622:      : 'No canonical evidence ids satisfy this registry requirement.',
+628:      : 'Metadata completeness rules passed or no strict metadata rules were required beyond canonical file URL.',
+636:  for (const record of records.sort((a, b) => a.canonicalEvidenceId.localeCompare(b.canonicalEvidenceId))) {
+637:    if (seen.has(record.canonicalEvidenceId)) continue;
+638:    seen.add(record.canonicalEvidenceId);
+644:export function requirementDefinitionForCategory(category: SurveyEvidenceCategory): EngineeringRequirementDefinition | null {
+650:export function requirementLabelForCategory(category: SurveyEvidenceCategory): string {
+651:  return requirementDefinitionForCategory(category)?.humanLabel ?? getSurveyEvidenceCategoryDefinition(category).label;
+===== lib/survey/evidence/engineeringBridge.ts
+2:  getSurveyEvidenceCategoryDefinition,
+41:    canonicalManifest: manifest,
+42:    evidenceTruthSource: 'canonical_manifest_v1',
+45:    canonicalManifest: manifest,
+59:      permitWarnings: ['No structured survey photo evidence manifest is available.'],
+71:    const bucket = getSurveyEvidenceCategoryDefinition(item.category).engineeringBucket;
+105:  const source = item.evidenceSource === 'site_survey_files'
+110:  return `${label} photo evidence available from ${source} for ${item.domain} review traceability.`;
+===== lib/survey/ingest/transformLayer.ts
+10://   3. PhysicalDataOutput — every field maps to a project_physical_data column.
+11://   4. Photo extraction from SurveyV2Payload.photos array.
+15://   - project_physical_data row  via _upsertPhysicalData()   [NEW in v47.438]
+87:// Each function maps from the SurveyV2Payload enum string to the canonical
+88:// string stored in project_physical_data. Never returns raw payload values
+113: * Maps RoofPitch enum → stored string (same as enum — already canonical).
+331:      // --- files (photos) ---
+364://   roof_age_years, roof_material }, photos[{ id, label, file_path,
+443:// Photo extraction — SurveyV2Payload.photos → TransformOutput.files
+449:  if (!payload || !Array.isArray(payload.photos)) return [];
+453:  for (let i = 0; i < payload.photos.length; i++) {
+454:    const photo = payload.photos[i];
+456:    if (!photo?.url) continue;
+458:    // category is the canonical survey slot key (e.g. 'main_panel_open', 'roof_overview').
+459:    // This is written directly to site_survey_files.label — no filename guessing needed.
+460:    const category = photo.category?.trim() || null;
+463:    const photoLabel = photo.tag?.trim()
+465:      || 'photo';
+466:    const photoName = `${photoLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${i + 1}.jpg`;
+469:      externalId: photo.id || `${surveyId}-photo-${i}`,
+470:      name:       photoName,
+471:      url:        photo.url,
+487://   photos[{ id, label, file_path, mime_type, captured_at }]
+628: * extractFilesLegacy — maps partner photos array → TransformFile[].
+630: * Partner photo shape: { id, label, file_path, mime_type, captured_at }
+638:  // Partner uses 'photos'; fall back to other common names
+639:  for (const key of ['photos', 'images', 'files', 'attachments', 'media']) {
+671:        : `photo-${i + 1}.jpg`;
+===== lib/survey/ingest/ingestPipeline.ts
+127:  // /api/survey/submit), use the v2.0 transformer so photos, physicalData,
+263:  // Upsert project_physical_data (best-effort - does NOT fail the ingest)
+270:    log(`STEP_E upserting project_physical_data for projectId=${projectId}`);
+273:      log(`STEP_E project_physical_data upsert OK`);
+276:      warn(`STEP_E project_physical_data upsert failed (non-fatal): ${msg}`);
+279:    log(`STEP_E physicalData is null — project_physical_data not written (degraded mode)`);
+283:  // This is separate from site_survey_files — project_files serves the older
+298:  // -- E2. Create site_surveys row (canonical Field Data Layer) ---------------
+305:  //   3. Inserts site_survey_files rows with category as label (no guessing).
+306:  //   4. Backfills source_survey_id on project_physical_data.
+314:  //   - [SURVEY_LINK] log: { projectId, surveyId, photosInserted, createdOrUpdated }
+396:      // Track how many photos were inserted for the [SURVEY_LINK] log.
+397:      let photosInserted = 0;
+399:      // Insert survey photos into site_survey_files.
+400:      // Use file.category directly — this is the canonical SurveyV2 slot key
+406:          fileType: 'photo' as const,
+413:        photosInserted = await bulkAddSiteSurveyFiles(surveyFiles);
+414:        log(`STEP_E2 site_survey_files inserted count=${photosInserted}`);
+424:        photosInserted,
+429:      // Backfill source_survey_id on project_physical_data now that we have
+431:      // the canonical survey record.
+435:            UPDATE project_physical_data
+439:          log(`STEP_E2 project_physical_data.source_survey_id backfilled id=${siteSurveyId}`);
+459:        photosInserted:   0,
+470:      photosInserted:   0,
+499:  // Survey ingest must preserve immutable field evidence and canonical file
+500:  // history without launching CV/OCR/AI/image-byte analysis or mutating
+502:  // after persistence; downstream engineering must use canonical manifests and
+505:    log(`STEP_G vision/CV pipeline disabled by canonical survey evidence boundary files=${transformOutput.files.length}`);
+507:    log(`STEP_G no files ingested; no vision/CV pipeline available`);
+718:// _upsertPhysicalData - INSERT or UPDATE project_physical_data for a project.
+742:    INSERT INTO project_physical_data (
+869://   5. Auto-create a client record from survey address/name so photos
+870://      always land in site_survey_files and appear in the UI.
+915:  // so that photos land in site_survey_files and appear in the project UI.
+990:// _guessPhotoLabel — infer a display label from a photo filename/URL.
+===== lib/assistedEvidenceSources/candidateAdapterTypes.ts
+78:    | 'possible_low_resolution_photo'
+80:    | 'possible_missing_exif_metadata'
+81:    | 'possible_invalid_photo_dimensions'
+82:    | 'possible_duplicate_photo';
+90:  field: 'possible_image_orientation' | 'possible_low_resolution_photo' | 'possible_duplicate_photo';
+141:  method: 'tesseract-js' | 'none';
+===== lib/assistedEvidenceSources/candidateNormalization.ts
+35:    runtimeCategory: tool.runtimeCategory,
+55:      runtimeCategory: tool.runtimeCategory,
+57:      fixtureOnly: tool.runtimeCategory === 'fixture_only',
+63:      tool.runtimeCategory === 'fixture_only' ? 'fixture-only' : 'runtime-pilot',
+73:        tool.runtimeCategory === 'fixture_only' ? 'fixture-payload' : 'runtime-payload',
+78:        tool.runtimeCategory === 'fixture_only'
+79:          ? 'Fixture-only adapter output; no runtime OCR/CV/image processing executed.'
+80:          : tool.runtimeCategory === 'ocr_text_candidate'
+81:            ? 'Controlled OCR runtime pilot output; text extraction only, no semantic image understanding or engineering inference executed.'
+82:            : 'Controlled metadata runtime pilot output; no OCR/CV/semantic image understanding executed.',
+90:export function createReviewRequiredCandidates(
+===== lib/assistedEvidenceSources/openSourceToolRegistry.ts
+10:    runtimeCategory: 'fixture_only',
+11:    allowedCandidateTypes: ['orientation_candidate', 'photo_quality_candidate', 'duplicate_similarity_candidate'],
+12:    allowedCandidateCategories: ['orientation', 'quality', 'duplicate_hygiene'],
+18:    reviewRequired: true,
+19:    canonicalMutationAllowed: false,
+32:    runtimeCategory: 'fixture_only',
+33:    allowedCandidateTypes: ['text_region_candidate'],
+34:    allowedCandidateCategories: ['field_context', 'electrical_context'],
+40:    reviewRequired: true,
+41:    canonicalMutationAllowed: false,
+47:    registryNotes: ['Fixture-only OCR-like text adapter. No OCR runtime is executed.'],
+53:    toolName: 'sharp-metadata-runtime',
+55:    sourceUrl: 'https://github.com/lovell/sharp',
+57:    runtimeCategory: 'image_metadata',
+58:    allowedCandidateTypes: ['orientation_candidate', 'photo_quality_candidate', 'duplicate_similarity_candidate'],
+59:    allowedCandidateCategories: ['orientation', 'quality', 'duplicate_hygiene'],
+65:    reviewRequired: true,
+66:    canonicalMutationAllowed: false,
+73:      'First controlled runtime pilot for metadata and photo quality extraction only.',
+74:      'Uses sharp metadata APIs only; excluded capabilities remain outside this pilot by boundary policy.',
+79:    toolName: 'tesseract-js-ocr-runtime',
+81:    sourceUrl: 'https://github.com/naptha/tesseract.js',
+83:    runtimeCategory: 'ocr_text_candidate',
+84:    allowedCandidateTypes: ['text_region_candidate'],
+85:    allowedCandidateCategories: ['field_context', 'electrical_context'],
+91:    reviewRequired: true,
+92:    canonicalMutationAllowed: false,
+99:      'Controlled OCR runtime pilot for text extraction only.',
+100:      'Uses tesseract.js only; no external vision services and no engineering inference.',
+122:  if (!tool.allowedCandidateTypes.includes(candidateType as never)) {
+===== lib/assistedEvidenceSources/openSourceToolValidation.ts
+14:  if (tool.reviewRequired !== true) throw new Error(`${tool.toolName} must be review-required.`);
+15:  if (tool.canonicalMutationAllowed !== false) throw new Error(`${tool.toolName} cannot allow canonical mutation.`);
+16:  if (tool.allowedCandidateTypes.length === 0) throw new Error(`${tool.toolName} must declare at least one allowed candidate type.`);
+17:  if (tool.allowedCandidateCategories.length === 0) throw new Error(`${tool.toolName} must declare at least one allowed candidate category.`);
+21:  if (tool.runtimeCategory === 'visual_categorization_candidate') throw new Error(`${tool.toolName} runtime category ${tool.runtimeCategory} is not approved in the metadata/OCR pilot.`);
+22:  if (tool.requiresNativeBinaries && tool.runtimeCategory !== 'fixture_only' && tool.runtimeCategory !== 'image_metadata') throw new Error(`${tool.toolName} requires unapproved native binaries.`);
+23:  if (tool.requiresModelWeights && tool.runtimeCategory !== 'fixture_only') throw new Error(`${tool.toolName} requires unapproved model weights.`);
+24:  if ((tool.runtimeCategory === 'image_metadata' || tool.runtimeCategory === 'ocr_text_candidate') && tool.allowedRuntimeBoundary !== 'server_adapter_contract') throw new Error(`${tool.toolName} runtime must use the server adapter contract boundary.`);
+25:  if ((tool.runtimeCategory === 'image_metadata' || tool.runtimeCategory === 'ocr_text_candidate') && tool.enabledStatus !== 'enabled_for_runtime_pilot') throw new Error(`${tool.toolName} runtime must be explicitly enabled for runtime pilot execution.`);
+26:  if ((tool.runtimeCategory === 'image_metadata' || tool.runtimeCategory === 'ocr_text_candidate') && !tool.serverOnly) throw new Error(`${tool.toolName} runtime must be server-only.`);
+27:  if ((tool.runtimeCategory === 'image_metadata' || tool.runtimeCategory === 'ocr_text_candidate') && tool.requiresModelWeights) throw new Error(`${tool.toolName} runtime cannot require model weights.`);
+28:  if (tool.runtimeCategory === 'ocr_text_candidate' && !tool.allowedCandidateTypes.every(type => type === 'text_region_candidate')) throw new Error(`${tool.toolName} OCR runtime may emit text_region_candidate only.`);
+29:  if (tool.runtimeCategory === 'ocr_text_candidate' && tool.browserCompatible) throw new Error(`${tool.toolName} OCR runtime pilot must not be browser-executed.`);
+30:  if (tool.allowedRuntimeBoundary === 'blocked_future_geometry') throw new Error(`${tool.toolName} is assigned a blocked future geometry boundary.`);
+31:  if (tool.runtimeCategory === 'future_geometry_placeholder') throw new Error(`${tool.toolName} future geometry runtime is not approved in this phase.`);
+===== lib/assistedEvidenceSources/metadataRuntimeAdapter.ts
+1:import sharp from 'sharp';
+4:import { createReviewRequiredCandidates } from './candidateNormalization';
+10:const TOOL_NAME = 'sharp-metadata-runtime';
+27:  if (orientation && orientation >= 5 && orientation <= 8) return 'exif-rotated';
+54:      field: 'possible_invalid_photo_dimensions',
+64:      field: 'possible_low_resolution_photo',
+73:      signalId: 'metadata-runtime-missing-exif',
+74:      field: 'possible_missing_exif_metadata',
+77:      limitationRefs: ['metadata-only', 'exif-presence-only'],
+93:    field: 'possible_duplicate_photo',
+104:  if (signal.field === 'possible_duplicate_photo') return 'duplicate_similarity_candidate' as const;
+105:  return 'photo_quality_candidate' as const;
+110:  if (signal.field === 'possible_duplicate_photo') return 'duplicate_hygiene' as const;
+120:    const metadata = await sharp(imageBytes, { failOn: 'none' }).metadata();
+128:      hasExifMetadata: Boolean(metadata.exif),
+183:    return createReviewRequiredCandidates(input.tool, input.sourceContext, this.normalize(input));
+===== lib/assistedEvidenceSources/metadataRuntimeBridge.ts
+===== lib/assistedEvidenceSources/ocrRuntimeAdapter.ts
+2:import { createReviewRequiredCandidates } from './candidateNormalization';
+8:const TOOL_NAME = 'tesseract-js-ocr-runtime';
+74:    const { createWorker } = await import('tesseract.js');
+82:        method: text ? 'tesseract-js' as const : 'none' as const,
+118:          runtimeLabel: 'OCR RUNTIME TEXT',
+119:          canonicalMutationAllowed: false,
+122:        candidateSummary: `Runtime OCR text candidate for ${signal.field}; review required before any use.`,
+136:          'no-canonical-mutation',
+145:    return createReviewRequiredCandidates(input.tool, input.sourceContext, this.normalize(input));
+===== lib/assistedEvidenceSources/ocrRuntimeBridge.ts
+15:  submittedCategory: string | null;
+16:  canonicalSourceOfTruth: 'site_surveys+site_survey_files';
+33:    sourceOfTruth: 'site_surveys+site_survey_files';
+36:    canonicalMutationAllowed: false;
+51:    submittedCategory: source.submittedCategory,
+52:    canonicalSourceOfTruth: source.canonicalSourceOfTruth,
+76:      canonicalSourceOfTruth: source.canonicalSourceOfTruth,
+79:      submittedCategory: source.submittedCategory,
+80:      canonicalMutationAllowed: false,
+86:      'canonical-survey-truth-preserved',
+96:        'site_surveys+site_survey_files-source-ref',
+101:        'OCR runtime bridge preserved site_surveys+site_survey_files as canonical attachment truth.',
+102:        'OCR text is non-authoritative and review-required; no engineering fact inference or canonical mutation is allowed.',
+121:      sourceOfTruth: input.source.canonicalSourceOfTruth,
+123:      reusedCategory: input.source.submittedCategory !== null,
+124:      canonicalMutationAllowed: false,
+===== scripts/check-assisted-evidence-boundaries.js
+15:  'lib/engineeringIntelligence/workflowOrchestration.ts',
+27:const APPROVED_OCR_RUNTIME_IMPORT_FILES = new Set([
+36:  'sharp',
+39:const APPROVED_OCR_RUNTIME_IMPORTS = new Set([
+40:  'tesseract.js',
+43:const FORBIDDEN_OCR_SOURCE_IMPORTS = [
+65:  'lib/engineeringIntelligence/workflowOrchestration',
+71:  { label: 'tesseract runtime', regex: /tesseract|createWorker\(|recognize\(/i },
+78:  { label: 'image-byte analysis', regex: /getImageData|pixelData|decodeImage|parseImage|file\.arrayBuffer|arrayBuffer\(\)|Buffer\.from\(|readFile\(/i },
+80:  { label: 'semantic scene classification', regex: /scene classification|semantic visual|object detection|roof segmentation|geometry extraction/i },
+81:  { label: 'direct canonical mutation', regex: /buildSurveyEvidenceManifest|evaluateEngineeringRequirements|buildCADReadinessMetadata|buildEngineeringRecommendations|buildEngineeringWorkflowOrchestration|INSERT INTO|UPDATE\s+/i },
+82:  { label: 'canonical mutation enabled', regex: /canonicalMutationAllowed\s*:\s*true/i },
+84:  { label: 'survey table mutation', regex: /site_surveys|site_survey_files|project_physical_data/i },
+119:    violations.push(`${target}: canonical/Engineering Intelligence runtime must not import or consume assisted evidence candidates or source adapters directly.`);
+131:        violations.push(`${relative}: forbidden canonical/engineering import '${specifier}'.`);
+137:    if (APPROVED_OCR_RUNTIME_IMPORTS.has(specifier) && !APPROVED_OCR_RUNTIME_IMPORT_FILES.has(relative)) {
+138:      violations.push(`${relative}: OCR runtime import '${specifier}' is only allowed in the approved OCR runtime adapter.`);
+140:    for (const forbiddenOcr of FORBIDDEN_OCR_SOURCE_IMPORTS) {
+142:        violations.push(`${relative}: forbidden OCR/bill/debug import '${specifier}' inside assisted evidence runtime boundary.`);
+152:        const isAllowedNegativeTest = relative.endsWith('.test.ts') && (/toThrow|expect\(/.test(line) || pattern.label === 'tesseract runtime');
+161:        const isApprovedOcrRuntime = APPROVED_OCR_RUNTIME_IMPORT_FILES.has(relative)
+162:          && ['tesseract runtime', 'image-byte analysis'].includes(pattern.label);
+164:          && pattern.label === 'tesseract runtime';
+165:        const isApprovedOcrRuntimeHashing = APPROVED_OCR_RUNTIME_IMPORT_FILES.has(relative)
+175:    if (!/createCandidate|createReviewRequiredCandidates/.test(text)) {
+176:      violations.push(`${relative}: adapter foundation must route candidate creation through createCandidate() or the shared createReviewRequiredCandidates() helper.`);
+178:    if (!/markReviewRequired|createReviewRequiredCandidates/.test(text)) {
+192:  if (relative.includes('ocrRuntime') && /panelRating\s*[:=]|breakerSize\s*[:=]|serviceSize\s*[:=]|project_physical_data|buildCADReadinessMetadata|buildEngineeringRecommendations|buildEngineeringWorkflowOrchestration|evaluateEngineeringRequirements/.test(text)) {
+193:    violations.push(`${relative}: OCR runtime must not convert text into engineering facts or downstream engineering authority.`);
+197:    violations.push(`${relative}: OCR runtime must not silently upgrade OCR confidence with hard-coded high confidence values.`);
+207:console.log(`Assisted evidence boundary guard passed. Scanned ${walk(ASSISTED_DIR).length} assistedEvidence files, ${walk(ASSISTED_SOURCES_DIR).length} assistedEvidenceSources files, and ${CANONICAL_FORBIDDEN_IMPORT_TARGETS.length} canonical/Engineering Intelligence boundary files.`);

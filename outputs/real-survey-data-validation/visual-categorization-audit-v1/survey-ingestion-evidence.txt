@@ -1,0 +1,1302 @@
+--- survey ingestion and evidence files ---
+===== lib/survey/ingest/types.ts
+// ============================================================================
+// v47.435 Stage 9.2 — Survey Ingest Pipeline: Core Types
+//
+// These types define the internal contract for the ingest pipeline.
+// They are NOT part of the external wire contract (that lives in
+// lib/survey/types.ts). These are SolarPro-internal domain types.
+//
+// Design principles:
+//   - No field assumptions about the full survey payload (Q3 pending).
+//   - Project-linkage strategy is an abstraction (Q8 pending).
+//   - Every ingest attempt produces a structured IngestResult — callers
+//     never need to catch exceptions from runIngestPipeline().
+//   - All DB writes go through the pipeline; the route only reads the result.
+// ============================================================================
+
+import type { SurveyCompletedEvent } from '@/lib/survey/types';
+
+// ---------------------------------------------------------------------------
+// IngestStatus — terminal states produced by runIngestPipeline().
+//
+// Mirrors the WebhookDeliveryStatus subset that the pipeline can produce:
+//   'ingested' — full pipeline succeeded; project created/updated.
+//   'failed'   — pipeline encountered an unrecoverable error.
+//
+// Note: 'verified', 'duplicate', 'received', 'replayed' are set upstream
+// (in the route handler before runIngestPipeline is called). The pipeline
+// only ever produces 'ingested' | 'failed'.
+// ---------------------------------------------------------------------------
+export type IngestStatus = 'ingested' | 'failed';
+
+// ---------------------------------------------------------------------------
+// IngestContext — everything the pipeline needs to run.
+//
+// The route handler builds this after HMAC verification and delivery INSERT,
+// then passes it into runIngestPipeline(). The pipeline does not touch
+// NextRequest or the DB delivery row — it receives a clean context object.
+// ---------------------------------------------------------------------------
+export interface IngestContext {
+  /** The verified, parsed thin-event envelope. */
+  event: SurveyCompletedEvent;
+
+  /** The webhook_deliveries row ID that was just inserted (status='verified').
+   *  Pipeline will UPDATE this row's status + processed_at + error_message. */
+  deliveryId: string;
+
+  /** The user ID that should OWN survey-origin projects.
+   *  Source: resolved by F-06 owner resolver from solarpro_user_id claim;
+   *  falls back to SURVEY_INGEST_DEFAULT_USER_ID if claim is absent or invalid.
+   *  Required. Pipeline returns 'failed' if this is missing. */
+  ownerId: string;
+
+  /** F-06: Source of the ownerId.
+   *  'claim'       - resolved from solarpro_user_id UUID match
+   *  'claim_email' - resolved from solarpro_email match
+   *  'project'     - resolved from solarpro_project_id project lookup
+   *  'default'     - fell back to SURVEY_INGEST_DEFAULT_USER_ID */
+  ownerSource: 'claim' | 'claim_email' | 'project' | 'inspector_email' | 'inspector_name' | 'default';
+
+  /** Optional: the partner-supplied project_id from the webhook headers or
+   *  a future fat-event field. Used by the link resolver (Q8 strategy).
+   *  Null when the thin event carries no project reference. */
+  partnerProjectId: string | null;
+
+  // v47.438: On-device picker selections from standalone surveys.
+  // Set when the field worker used the client/project picker.
+  // Both are null for project-specific surveys (where partnerProjectId is set).
+  /** SolarPro project UUID selected by field worker on-device. Takes priority
+   *  over partnerProjectId when present. Resolver attaches to this project. */
+  selectedProjectId: string | null;
+  /** SolarPro client UUID selected by field worker on-device. Used when
+   *  selectedProjectId is null — resolver creates a new project under this client. */
+  selectedClientId: string | null;
+
+  /** ISO-8601 timestamp when the route received the request.
+   *  Used to set processed_at on the delivery row. */
+  receivedAt: string;
+
+  /** Tracing correlation ID — equals deliveryId for v47.435.
+   *  Surfaced in all log lines for cross-system trace linking. */
+  traceId: string;
+}
+
+// ---------------------------------------------------------------------------
+// IngestResult — returned by runIngestPipeline() in all cases (never throws).
+// ---------------------------------------------------------------------------
+export type IngestResult =
+  | IngestResultSuccess
+  | IngestResultFailure;
+
+export interface IngestResultSuccess {
+  status: 'ingested';
+  /** The SolarPro project ID that was created or updated. */
+  projectId: string;
+  /** Whether a new project was created (true) or an existing one updated (false). */
+  created: boolean;
+  /** Summary of what the transform layer produced (for logging). */
+  transformSummary: TransformSummary;
+  /** Milliseconds elapsed inside runIngestPipeline(). */
+  durationMs: number;
+}
+
+export interface IngestResultFailure {
+  status: 'failed';
+  /** Human-readable error message. Stored in webhook_deliveries.error_message. */
+  error: string;
+  /** Error code for programmatic handling. */
+  code: IngestErrorCode;
+  /** Milliseconds elapsed before failure. */
+  durationMs: number;
+}
+
+// ---------------------------------------------------------------------------
+// IngestErrorCode — closed enum of pipeline error categories.
+//
+// These codes are stored in webhook_deliveries.error_message as a prefix
+// (e.g. "MISSING_OWNER_ID: SURVEY_INGEST_DEFAULT_USER_ID not set") so ops
+// can filter the admin log by error category.
+// ---------------------------------------------------------------------------
+export type IngestErrorCode =
+  | 'MISSING_OWNER_ID'           // SURVEY_INGEST_DEFAULT_USER_ID env var not set
+  | 'LINK_RESOLUTION_FAILED'     // projectLinkResolver could not determine a project target
+  | 'PROJECT_RESOLUTION_FAILED'  // could not resolve an EXISTING project for this survey
+  | 'TRANSFORM_FAILED'           // transformLayer.transform() threw
+  | 'DB_WRITE_FAILED'            // project upsert or file insert failed
+  | 'DELIVERY_UPDATE_FAILED'     // could not mark delivery as ingested/failed in DB
+  | 'UNKNOWN';                   // catch-all for unexpected errors
+
+// ---------------------------------------------------------------------------
+// SurveyProjectLinkStrategy — Q8 abstraction.
+//
+// Q8: "What should we do when the thin event carries no project_id?"
+// We know three plausible answers from the scoping doc:
+//   ATTACH_TO_EXISTING — look up an existing project by survey_external_id
+//   CREATE_ORPHAN      — create a new unlinked project, mark origin='survey'
+//   TRIAGE_QUEUE       — defer: create a triage record for ops to resolve
+//
+// The strategy is read from SURVEY_PROJECT_LINK_STRATEGY env var (default:
+// CREATE_ORPHAN until Q8 is answered). The projectLinkResolver selects the
+// correct strategy at runtime. No hard-coded logic in the pipeline.
+// ---------------------------------------------------------------------------
+export type SurveyProjectLinkStrategy =
+  | 'ATTACH_TO_EXISTING'
+  | 'CREATE_ORPHAN'
+  | 'TRIAGE_QUEUE';
+
+export const SURVEY_PROJECT_LINK_STRATEGIES: readonly SurveyProjectLinkStrategy[] = [
+  'ATTACH_TO_EXISTING',
+  'CREATE_ORPHAN',
+  'TRIAGE_QUEUE',
+] as const;
+
+export const DEFAULT_SURVEY_PROJECT_LINK_STRATEGY: SurveyProjectLinkStrategy = 'CREATE_ORPHAN';
+
+// ---------------------------------------------------------------------------
+// LinkResolution — output of projectLinkResolver.resolveProjectLink().
+//
+// v47.440: Only two outcomes are valid:
+//   'attach'           — a direct project UUID is known (from JWT or on-device
+//                        picker). Pipeline verifies it exists in DB.
+//   'resolve_existing' — no direct UUID; pipeline must look up an existing
+//                        project by survey_external_id or client+address.
+//                        NEVER creates a new project.
+//   'error'            — resolver could not even produce a lookup strategy.
+//
+// The old 'create', 'create_under_client', and 'triage' variants have been
+// removed. Surveys MUST attach to existing projects.
+// ---------------------------------------------------------------------------
+export type LinkResolution =
+  | LinkResolutionAttach
+  | LinkResolutionResolveExisting
+  | LinkResolutionError;
+
+export interface LinkResolutionAttach {
+  action: 'attach';
+  /** Existing SolarPro project UUID to attach this survey to.
+   *  Pipeline validates this UUID exists in DB before proceeding. */
+  projectId: string;
+  /** Which mechanism produced this UUID (for [SURVEY_PROJECT_RESOLUTION] log). */
+  method: 'direct_id' | 'selected_project';
+}
+
+export interface LinkResolutionResolveExisting {
+  action: 'resolve_existing';
+  /** The survey_external_id (= event.survey_id) used for Priority B lookup. */
+  surveyExternalId: string;
+  /** Hint fields forwarded to the pipeline DB resolver. */
+  clientId: string | null;
+  address: string | null;
+}
+
+export interface LinkResolutionError {
+  action: 'error';
+  /** Why link resolution failed. */
+  error: string;
+}
+
+// ---------------------------------------------------------------------------
+// SurveyRawPayload — the untyped full survey payload.
+//
+// In v47.435 the ingest pipeline does NOT know the final shape of the full
+// payload (Q3 pending). The transform layer receives this opaque record
+// and is expected to extract fields defensively.
+//
+// When Q3 is answered, create a typed SurveyFullPayload interface and
+// replace SurveyRawPayload with it. The transform layer is the only place
+// that touches the field names, so the change is isolated.
+// ---------------------------------------------------------------------------
+export type SurveyRawPayload = Record<string, unknown>;
+
+// ---------------------------------------------------------------------------
+// TransformInput — what the transform layer receives.
+// ---------------------------------------------------------------------------
+export interface TransformInput {
+  /** The verified thin-event envelope. */
+  event: SurveyCompletedEvent;
+  /** The full survey payload fetched from the survey backend (null in v47.435
+   *  stub — fetch client is blocked on Q2). */
+  rawPayload: SurveyRawPayload | null;
+  /** The link resolution that determined where to write. */
+  linkResolution: LinkResolution;
+  /** Ingest context (for ownerId, traceId, etc.). */
+  context: IngestContext;
+}
+
+// ---------------------------------------------------------------------------
+// PhysicalDataOutput — structured physical + electrical field data
+// extracted from SurveyV2Payload, written to project_physical_data table.
+//
+// Every field maps directly to a column in project_physical_data.
+// Engineering reads this table instead of using hardcoded defaults.
+// ---------------------------------------------------------------------------
+export interface PhysicalDataOutput {
+  // Structure / Roof
+  roof_material:           string | null;
+  roof_pitch:              string | null;
+  rafter_spacing_in:       number | null;
+  roof_condition:          string | null;
+  roof_age_years:          number | null;
+  attic_access:            boolean | null;
+
+  // Electrical
+  panel_brand:             string | null;
+  panel_rating_amps:       number | null;
+  available_breaker_slots: string | null;
+  meter_socket_type:       string | null;
+  interconnection_point:   string | null;
+  service_entrance_type:   string | null;
+  has_sub_panel:           boolean | null;
+  sub_panel_rating_amps:   number | null;
+
+  // Constraints
+  obstructions:            unknown[];
+  usable_roof_pct:         number | null;
+  setback_notes:           string | null;
+
+  // Survey metadata
+  inspector_name:          string | null;
+  surveyed_at:             string | null;
+  access_notes:            string | null;
+  mounting_notes:          string | null;
+===== lib/survey/evidence/provenance.ts
+import type { SurveyEvidenceCategory, SurveyEvidenceItem, SurveyEvidenceManifest } from './manifest';
+import {
+  REQUIRED_SURVEY_EVIDENCE_CATEGORIES,
+  getSurveyEvidenceCategoryDefinition,
+  getSurveyEvidenceLabel,
+} from './manifest';
+import type { EvidenceDuplicateGroup, SurveySessionSummary } from './sessionTypes';
+
+export type EvidenceTruthSource = 'canonical_manifest_v1' | 'legacy_raw_photos_fallback';
+export type RequirementConfidenceSource = 'canonical_manifest_summary' | 'canonical_evidence_confidence' | 'missing_requirement';
+
+export interface EvidenceMetadataCompleteness {
+  hasFileUrl: boolean;
+  hasFilename: boolean;
+  hasMimeType: boolean;
+  hasCaptureTimestamp: boolean;
+  hasSubmittedCategory: boolean;
+  hasSiteSurveyFileId: boolean;
+  hasSurveyTechnician: boolean;
+}
+
+export interface CanonicalEvidenceProvenanceRecord {
+  canonicalEvidenceId: string;
+  originatingSurveyId: string;
+  originatingSurveyCreatedAt: string | null;
+  evidenceCategory: SurveyEvidenceCategory;
+  evidenceCategoryLabel: string;
+  duplicateGroupSize: number;
+  selectionReason: string;
+  evidenceTruthSource: EvidenceTruthSource;
+  requirementSatisfied: boolean;
+  requirementConfidenceSource: RequirementConfidenceSource;
+  metadataCompleteness: EvidenceMetadataCompleteness;
+  evidenceSource: SurveyEvidenceItem['evidenceSource'];
+  evidenceConfidence: SurveyEvidenceItem['evidenceConfidence'];
+  fileUrl: string;
+  filename: string | null;
+  sceneGroup: string | null;
+}
+
+export interface RequirementEvidenceTraceabilityRecord {
+  requirementCategory: SurveyEvidenceCategory;
+  requirementLabel: string;
+  requirementDomain: ReturnType<typeof getSurveyEvidenceCategoryDefinition>['domain'];
+  engineeringBucket: ReturnType<typeof getSurveyEvidenceCategoryDefinition>['engineeringBucket'];
+  requirementSatisfied: boolean;
+  canonicalEvidenceId: string | null;
+  originatingSurveyId: string | null;
+  originatingSurveyCreatedAt: string | null;
+  evidenceCategory: SurveyEvidenceCategory;
+  duplicateGroupSize: number;
+  selectionReason: string;
+  evidenceTruthSource: EvidenceTruthSource;
+  requirementConfidenceSource: RequirementConfidenceSource;
+  metadataCompleteness: EvidenceMetadataCompleteness | null;
+  deterministicReasoningPath: string[];
+}
+
+export interface SurveyLineageTraceRecord {
+  surveyId: string;
+  submittedAt: string | null;
+  technician: string | null;
+  duplicateStatus: string;
+  rawPhotoCount: number;
+  canonicalEvidenceCount: number;
+  categoryCoverage: SurveyEvidenceCategory[];
+  isCanonical: boolean;
+}
+
+export interface SurveyEvidenceTraceabilityBundle {
+  evidenceTruthSource: EvidenceTruthSource;
+  requirements: RequirementEvidenceTraceabilityRecord[];
+  canonicalEvidence: CanonicalEvidenceProvenanceRecord[];
+  surveyLineage: SurveyLineageTraceRecord[];
+  missingRequirements: RequirementEvidenceTraceabilityRecord[];
+}
+
+export interface BuildSurveyEvidenceTraceabilityInput {
+  canonicalManifest: SurveyEvidenceManifest | null | undefined;
+  evidenceTruthSource?: EvidenceTruthSource;
+  evidenceDuplicateGroups?: EvidenceDuplicateGroup[];
+  sessions?: SurveySessionSummary[];
+}
+
+export function buildSurveyEvidenceTraceability(
+  input: BuildSurveyEvidenceTraceabilityInput,
+): SurveyEvidenceTraceabilityBundle {
+  const evidenceTruthSource = input.evidenceTruthSource ?? 'canonical_manifest_v1';
+  const manifest = input.canonicalManifest ?? null;
+  const items = [...(manifest?.items ?? [])].sort(compareEvidenceDeterministically);
+  const duplicateGroups = input.evidenceDuplicateGroups ?? [];
+  const sessions = input.sessions ?? [];
+
+  const canonicalEvidence = items.map(item => buildCanonicalEvidenceProvenance({
+    item,
+    evidenceTruthSource,
+    duplicateGroups,
+    sessions,
+  }));
+
+  const canonicalByCategory = new Map<SurveyEvidenceCategory, CanonicalEvidenceProvenanceRecord>();
+  for (const record of canonicalEvidence) {
+    if (!canonicalByCategory.has(record.evidenceCategory)) canonicalByCategory.set(record.evidenceCategory, record);
+  }
+
+  const requirements = REQUIRED_SURVEY_EVIDENCE_CATEGORIES.map(requirementCategory => {
+    const definition = getSurveyEvidenceCategoryDefinition(requirementCategory);
+    const record = canonicalByCategory.get(requirementCategory) ?? null;
+    if (record) {
+      return {
+        requirementCategory,
+        requirementLabel: definition.label,
+        requirementDomain: definition.domain,
+        engineeringBucket: definition.engineeringBucket,
+        requirementSatisfied: true,
+        canonicalEvidenceId: record.canonicalEvidenceId,
+        originatingSurveyId: record.originatingSurveyId,
+        originatingSurveyCreatedAt: record.originatingSurveyCreatedAt,
+        evidenceCategory: record.evidenceCategory,
+        duplicateGroupSize: record.duplicateGroupSize,
+        selectionReason: record.selectionReason,
+        evidenceTruthSource,
+        requirementConfidenceSource: record.requirementConfidenceSource,
+        metadataCompleteness: record.metadataCompleteness,
+        deterministicReasoningPath: [
+          `Requirement ${definition.label} maps to canonical category ${requirementCategory}.`,
+          `canonicalManifest contains canonical evidence ${record.canonicalEvidenceId} in category ${record.evidenceCategory}.`,
+          `Representative originated from survey ${record.originatingSurveyId}${record.originatingSurveyCreatedAt ? ` submitted ${record.originatingSurveyCreatedAt}` : ''}.`,
+          record.duplicateGroupSize > 1
+            ? `Duplicate hygiene collapsed ${record.duplicateGroupSize} metadata-matched raw upload(s) into this canonical representative.`
+            : 'No duplicate group was required for this canonical evidence item.',
+          `Selection reason: ${record.selectionReason}`,
+          `Confidence provenance: ${record.requirementConfidenceSource}; no CV/OCR/CAD/image-byte inference is used.`,
+        ],
+      } satisfies RequirementEvidenceTraceabilityRecord;
+    }
+
+    return {
+      requirementCategory,
+      requirementLabel: definition.label,
+      requirementDomain: definition.domain,
+      engineeringBucket: definition.engineeringBucket,
+      requirementSatisfied: false,
+      canonicalEvidenceId: null,
+      originatingSurveyId: null,
+      originatingSurveyCreatedAt: null,
+      evidenceCategory: requirementCategory,
+      duplicateGroupSize: 0,
+      selectionReason: 'canonicalManifest requiredMissing includes this category or no canonical representative exists',
+      evidenceTruthSource,
+      requirementConfidenceSource: 'missing_requirement',
+      metadataCompleteness: null,
+      deterministicReasoningPath: [
+        `Requirement ${definition.label} maps to canonical category ${requirementCategory}.`,
+        'canonicalManifest has no canonical evidence item in this category.',
+        'Requirement remains missing deterministically; raw upload history is not counted as satisfaction.',
+        'Confidence provenance: missing_requirement; no fake confidence is generated.',
+      ],
+    } satisfies RequirementEvidenceTraceabilityRecord;
+  });
+
+  const surveyLineage = sessions.map(session => ({
+    surveyId: session.surveyId,
+    submittedAt: session.submittedAt,
+    technician: session.technician,
+    duplicateStatus: session.surveySessionDuplicateStatus,
+    rawPhotoCount: session.rawPhotoCount,
+    canonicalEvidenceCount: session.canonicalEvidenceCount,
+    categoryCoverage: session.categoryCoverage,
+    isCanonical: session.isCanonical,
+  } satisfies SurveyLineageTraceRecord));
+
+  return {
+    evidenceTruthSource,
+    requirements,
+    canonicalEvidence,
+    surveyLineage,
+    missingRequirements: requirements.filter(requirement => !requirement.requirementSatisfied),
+  };
+}
+
+function buildCanonicalEvidenceProvenance(input: {
+  item: SurveyEvidenceItem;
+  evidenceTruthSource: EvidenceTruthSource;
+  duplicateGroups: EvidenceDuplicateGroup[];
+  sessions: SurveySessionSummary[];
+}): CanonicalEvidenceProvenanceRecord {
+  const { item, evidenceTruthSource, duplicateGroups, sessions } = input;
+  const group = duplicateGroups.find(candidate => candidate.canonicalEvidenceId === item.evidenceId || candidate.evidenceIds.includes(item.evidenceId));
+  const originatingSurvey = sessions.find(session => session.surveyId === item.surveyId) ?? null;
+  const metadataCompleteness = metadataCompletenessFor(item);
+
+  return {
+    canonicalEvidenceId: item.evidenceId,
+    originatingSurveyId: item.surveyId,
+    originatingSurveyCreatedAt: originatingSurvey?.submittedAt ?? item.captureTimestamp ?? null,
+    evidenceCategory: item.category,
+    evidenceCategoryLabel: getSurveyEvidenceLabel(item.category),
+    duplicateGroupSize: group?.rawUploadCount ?? 1,
+    selectionReason: selectionReasonFor(item, group),
+    evidenceTruthSource,
+    requirementSatisfied: REQUIRED_SURVEY_EVIDENCE_CATEGORIES.includes(item.category),
+    requirementConfidenceSource: item.evidenceConfidence === 'unknown'
+      ? 'canonical_manifest_summary'
+      : 'canonical_evidence_confidence',
+    metadataCompleteness,
+    evidenceSource: item.evidenceSource,
+    evidenceConfidence: item.evidenceConfidence,
+    fileUrl: item.fileUrl,
+    filename: item.filename,
+    sceneGroup: item.sceneGroup,
+  };
+}
+
+function selectionReasonFor(item: SurveyEvidenceItem, group: EvidenceDuplicateGroup | undefined): string {
+  const reasons: string[] = [];
+  if (group) {
+    reasons.push(`duplicate collapse representative from group ${group.evidenceDuplicateGroupId}`);
+    reasons.push(`${group.rawUploadCount} metadata-matched raw upload(s)`);
+  } else {
+    reasons.push('unique canonical evidence item');
+  }
+  if (item.category !== 'uncategorized') reasons.push('categorized evidence outranks uncategorized evidence');
+  if (item.siteSurveyFileId) reasons.push('site_survey_files record present');
+  if (item.filename) reasons.push('filename metadata present');
+  if (item.mimeType) reasons.push('MIME type metadata present');
+  if (item.captureTimestamp) reasons.push('capture/submission timestamp available; newest timestamp wins after metadata score ties');
+  reasons.push('deterministic tie-break order uses stable evidence id after score/timestamp comparison');
+  return reasons.join('; ');
+}
+
+function metadataCompletenessFor(item: SurveyEvidenceItem): EvidenceMetadataCompleteness {
+  return {
+    hasFileUrl: Boolean(item.fileUrl),
+    hasFilename: Boolean(item.filename),
+    hasMimeType: Boolean(item.mimeType),
+    hasCaptureTimestamp: Boolean(item.captureTimestamp),
+    hasSubmittedCategory: Boolean(item.submittedCategory),
+    hasSiteSurveyFileId: Boolean(item.siteSurveyFileId),
+    hasSurveyTechnician: Boolean(item.surveyTechnician),
+  };
+}
+
+function compareEvidenceDeterministically(a: SurveyEvidenceItem, b: SurveyEvidenceItem): number {
+  const category = a.category.localeCompare(b.category);
+  if (category !== 0) return category;
+  const aTime = timestamp(a.captureTimestamp);
+  const bTime = timestamp(b.captureTimestamp);
+  if (aTime !== bTime) return bTime - aTime;
+  return a.evidenceId.localeCompare(b.evidenceId);
+}
+
+function timestamp(value: string | null | undefined): number {
+  const parsed = value ? Date.parse(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+===== lib/survey/evidence/engineeringRequirements.ts
+import type { SurveyEvidenceCategory, SurveyEvidenceManifest } from './manifest';
+import type { StructuredEngineeringSignalSummary, StructuredEngineeringSignal } from '@/lib/engineeringIntelligence/signalTypes';
+import {
+  getSurveyEvidenceCategoryDefinition,
+  getSurveyEvidenceLabel,
+} from './manifest';
+import {
+  buildSurveyEvidenceTraceability,
+  type CanonicalEvidenceProvenanceRecord,
+  type EvidenceMetadataCompleteness,
+  type RequirementConfidenceSource,
+  type RequirementEvidenceTraceabilityRecord,
+  type SurveyEvidenceTraceabilityBundle,
+} from './provenance';
+
+export type EngineeringRequirementId =
+  | 'main_service_panel'
+  | 'utility_meter'
+  | 'roof_overview'
+  | 'attic_access'
+  | 'subpanel'
+  | 'main_disconnect'
+  | 'structural_access'
+  | 'utility_bill'
+  | 'placards'
+  | 'rapid_shutdown'
+  | 'battery_location'
+  | 'service_equipment_label';
+
+export type EngineeringRequirementUsage =
+  | 'electrical_design'
+  | 'structural_review'
+  | 'roof_layout'
+  | 'site_plan'
+  | 'permit_validation'
+  | 'interconnection';
+
+export type EngineeringRequirementReadinessImpact = 'blocking' | 'review_required' | 'informational';
+export type EngineeringRequirementMissingSeverity = 'blocker' | 'warning' | 'info';
+export type EngineeringRequirementStatus = 'satisfied' | 'partially_satisfied' | 'missing' | 'insufficient_metadata' | 'inactive';
+export type EngineeringRequirementConfidencePolicy = 'canonical_evidence_required' | 'canonical_or_optional_evidence' | 'manual_review_only' | 'inactive_future';
+
+export interface EngineeringRequirementFutureCapabilities {
+  supportsOCR: boolean;
+  supportsCVClassification: boolean;
+  supportsCADInference: boolean;
+  supportsSemanticExtraction: boolean;
+}
+
+export interface EngineeringRequirementMetadataCompletenessRules {
+  requireFileUrl: boolean;
+  requireFilename: boolean;
+  requireMimeType: boolean;
+  requireCaptureTimestamp: boolean;
+  requireSubmittedCategory: boolean;
+  requireSiteSurveyFileId: boolean;
+  requireSurveyTechnician: boolean;
+}
+
+export interface EngineeringRequirementDefinition {
+  requirementId: EngineeringRequirementId;
+  humanLabel: string;
+  description: string;
+  requiredEvidenceCategories: SurveyEvidenceCategory[];
+  optionalEvidenceCategories: SurveyEvidenceCategory[];
+  minimumCanonicalEvidenceCount: number;
+  metadataCompletenessRules: EngineeringRequirementMetadataCompletenessRules;
+  engineeringUsage: EngineeringRequirementUsage[];
+  permitUsage: string[];
+  confidencePolicy: EngineeringRequirementConfidencePolicy;
+  readinessImpact: EngineeringRequirementReadinessImpact;
+  missingSeverity: EngineeringRequirementMissingSeverity;
+  futureCapabilities: EngineeringRequirementFutureCapabilities;
+  active: boolean;
+}
+
+export interface EngineeringRequirementEvaluation {
+  requirementId: EngineeringRequirementId;
+  humanLabel: string;
+  description: string;
+  status: EngineeringRequirementStatus;
+  requirementSatisfied: boolean;
+  partiallySatisfied: boolean;
+  missing: boolean;
+  insufficientMetadata: boolean;
+  duplicateCollapsed: boolean;
+  canonicalEvidenceIds: string[];
+  originatingSurveyIds: string[];
+  originatingSurveyCreatedAts: Array<string | null>;
+  evidenceCategoriesSatisfied: SurveyEvidenceCategory[];
+  structuredSignalIds: string[];
+  structuredSignalTypes: string[];
+  structuredSignalStatuses: Array<{ signalId: string; status: string; confidenceScore: number }>;
+  requirementSatisfiedBySignals: boolean;
+  requiredEvidenceCategories: SurveyEvidenceCategory[];
+  optionalEvidenceCategories: SurveyEvidenceCategory[];
+  minimumCanonicalEvidenceCount: number;
+  observedCanonicalEvidenceCount: number;
+  metadataCompletenessRules: EngineeringRequirementMetadataCompletenessRules;
+  failedMetadataRules: string[];
+  engineeringUsage: EngineeringRequirementUsage[];
+  permitUsage: string[];
+  confidencePolicy: EngineeringRequirementConfidencePolicy;
+  confidenceSource: RequirementConfidenceSource | 'registry_policy' | 'inactive_requirement';
+  readinessImpact: EngineeringRequirementReadinessImpact;
+  missingSeverity: EngineeringRequirementMissingSeverity;
+  futureCapabilities: EngineeringRequirementFutureCapabilities;
+  active: boolean;
+  provenanceRecords: CanonicalEvidenceProvenanceRecord[];
+  traceabilityRecords: RequirementEvidenceTraceabilityRecord[];
+  reasoningPath: string[];
+  deterministicEvaluationNotes: string[];
+}
+
+export interface EngineeringRequirementEvaluationSummary {
+  readiness: 'blocked' | 'needs_review' | 'ready_for_engineering';
+  completeness: 'missing' | 'partial' | 'sufficient';
+  confidenceSource: 'engineering_requirement_registry_v1';
+  satisfiedRequirements: EngineeringRequirementEvaluation[];
+  missingRequirements: EngineeringRequirementEvaluation[];
+  partiallySatisfiedRequirements: EngineeringRequirementEvaluation[];
+  blockedRequirements: EngineeringRequirementEvaluation[];
+  informationalRequirements: EngineeringRequirementEvaluation[];
+  inactiveRequirements: EngineeringRequirementEvaluation[];
+  allRequirements: EngineeringRequirementEvaluation[];
+  deterministicSummary: string[];
+}
+
+export interface BuildEngineeringRequirementEvaluationInput {
+  canonicalManifest: SurveyEvidenceManifest | null | undefined;
+  traceability?: SurveyEvidenceTraceabilityBundle | null;
+  engineeringBridge?: {
+    readiness: 'blocked' | 'needs_review' | 'ready_for_engineering';
+    requirementTraceability?: RequirementEvidenceTraceabilityRecord[];
+    missingRequirementTraceability?: RequirementEvidenceTraceabilityRecord[];
+  } | null;
+  structuredSignals?: StructuredEngineeringSignalSummary | null;
+}
+
+const STRICT_METADATA_RULES: EngineeringRequirementMetadataCompletenessRules = {
+  requireFileUrl: true,
+  requireFilename: false,
+  requireMimeType: false,
+  requireCaptureTimestamp: false,
+  requireSubmittedCategory: false,
+  requireSiteSurveyFileId: false,
+  requireSurveyTechnician: false,
+};
+
+const OPTIONAL_METADATA_RULES: EngineeringRequirementMetadataCompletenessRules = {
+  requireFileUrl: true,
+  requireFilename: false,
+  requireMimeType: false,
+  requireCaptureTimestamp: false,
+  requireSubmittedCategory: false,
+  requireSiteSurveyFileId: false,
+  requireSurveyTechnician: false,
+};
+
+const INACTIVE_METADATA_RULES: EngineeringRequirementMetadataCompletenessRules = {
+  requireFileUrl: false,
+  requireFilename: false,
+  requireMimeType: false,
+  requireCaptureTimestamp: false,
+  requireSubmittedCategory: false,
+  requireSiteSurveyFileId: false,
+  requireSurveyTechnician: false,
+};
+
+const FUTURE_FLAGS_OFF: EngineeringRequirementFutureCapabilities = {
+  supportsOCR: false,
+  supportsCVClassification: false,
+  supportsCADInference: false,
+  supportsSemanticExtraction: false,
+};
+
+const FUTURE_FLAGS_DOCUMENTED: EngineeringRequirementFutureCapabilities = {
+  supportsOCR: true,
+  supportsCVClassification: true,
+  supportsCADInference: false,
+  supportsSemanticExtraction: true,
+};
+
+export const ENGINEERING_REQUIREMENT_REGISTRY: Record<EngineeringRequirementId, EngineeringRequirementDefinition> = {
+  main_service_panel: {
+    requirementId: 'main_service_panel',
+    humanLabel: 'Main Service Panel',
+    description: 'Canonical evidence of the main service panel for electrical interconnection review.',
+    requiredEvidenceCategories: ['main_service_panel'],
+    optionalEvidenceCategories: ['subpanel', 'disconnect', 'grounding'],
+    minimumCanonicalEvidenceCount: 1,
+    metadataCompletenessRules: STRICT_METADATA_RULES,
+    engineeringUsage: ['electrical_design', 'permit_validation'],
+    permitUsage: ['Electrical sheets', 'Validation summary', 'Interconnection notes'],
+    confidencePolicy: 'canonical_evidence_required',
+    readinessImpact: 'blocking',
+    missingSeverity: 'blocker',
+    futureCapabilities: FUTURE_FLAGS_DOCUMENTED,
+    active: true,
+  },
+  utility_meter: {
+    requirementId: 'utility_meter',
+    humanLabel: 'Utility Meter',
+    description: 'Canonical evidence of the utility meter or meter socket for service location traceability.',
+    requiredEvidenceCategories: ['meter'],
+    optionalEvidenceCategories: ['utility_connection', 'utility_access'],
+    minimumCanonicalEvidenceCount: 1,
+    metadataCompletenessRules: STRICT_METADATA_RULES,
+    engineeringUsage: ['electrical_design', 'interconnection', 'permit_validation'],
+    permitUsage: ['Electrical one-line context', 'Interconnection checklist'],
+    confidencePolicy: 'canonical_evidence_required',
+    readinessImpact: 'blocking',
+    missingSeverity: 'blocker',
+    futureCapabilities: FUTURE_FLAGS_DOCUMENTED,
+    active: true,
+  },
+  roof_overview: {
+    requirementId: 'roof_overview',
+    humanLabel: 'Roof Overview',
+    description: 'Canonical roof-plane evidence for roof layout and plan-set traceability.',
+    requiredEvidenceCategories: ['roof_plane'],
+    optionalEvidenceCategories: ['roof_edge', 'ridge', 'roof_surface', 'obstructions'],
+    minimumCanonicalEvidenceCount: 1,
+    metadataCompletenessRules: STRICT_METADATA_RULES,
+    engineeringUsage: ['roof_layout', 'permit_validation'],
+    permitUsage: ['Roof layout notes', 'Validation summary'],
+    confidencePolicy: 'canonical_evidence_required',
+    readinessImpact: 'blocking',
+    missingSeverity: 'blocker',
+    futureCapabilities: FUTURE_FLAGS_DOCUMENTED,
+    active: true,
+  },
+  attic_access: {
+    requirementId: 'attic_access',
+    humanLabel: 'Attic Access',
+    description: 'Optional evidence of attic access for structural review workflow context.',
+    requiredEvidenceCategories: ['attic_access'],
+    optionalEvidenceCategories: ['attic', 'rafters'],
+    minimumCanonicalEvidenceCount: 1,
+    metadataCompletenessRules: OPTIONAL_METADATA_RULES,
+    engineeringUsage: ['structural_review'],
+    permitUsage: ['Structural review notes'],
+    confidencePolicy: 'canonical_or_optional_evidence',
+    readinessImpact: 'review_required',
+    missingSeverity: 'warning',
+    futureCapabilities: FUTURE_FLAGS_DOCUMENTED,
+    active: true,
+  },
+  subpanel: {
+    requirementId: 'subpanel',
+    humanLabel: 'Subpanel',
+    description: 'Optional canonical subpanel evidence when downstream distribution equipment is present.',
+    requiredEvidenceCategories: ['subpanel'],
+    optionalEvidenceCategories: ['main_service_panel'],
+    minimumCanonicalEvidenceCount: 1,
+    metadataCompletenessRules: OPTIONAL_METADATA_RULES,
+    engineeringUsage: ['electrical_design'],
+    permitUsage: ['Electrical notes when applicable'],
+    confidencePolicy: 'canonical_or_optional_evidence',
+    readinessImpact: 'informational',
+===== app/api/survey/submit/route.ts
+// ============================================================================
+// v47.438 - Survey V2: POST /api/survey/submit
+//
+// Accepts the completed survey payload, verifies the JWT, validates required
+// fields, then forwards to the webhook ingest pipeline via the existing
+// POST /api/webhooks/survey-complete endpoint (internal call).
+//
+// Request body: { token: string, payload: SurveyV2Payload }
+//
+// Auth: JWT in request body (no session cookie - mobile field device).
+//
+// v47.438: Handles standalone surveys (project_id === "__standalone__"):
+//   - Skips the project_id === payload.projectId check for standalone tokens.
+//   - Validates that selectedClientId OR selectedProjectId is present for
+//     standalone surveys (ensures the field worker made a selection).
+//   - Forwards solarpro_selected_project_id and solarpro_selected_client_id
+//     to the ingest pipeline via the webhook body.
+//
+// Returns:
+//   200 { ok: true, surveyId }  - submitted + ingested
+//   400 { error }               - validation failure
+//   401 { error }               - invalid/expired token
+//   500 { error }               - internal error
+//
+// Pure ASCII, no Unicode.
+// ============================================================================
+
+export const maxDuration = 30;
+
+import { NextRequest, NextResponse } from 'next/server';
+import { verifyHandoffToken } from '../../../../lib/survey/handoff/tokenMinter';
+import { REQUIRED_PHOTO_CATEGORIES, STANDALONE_PROJECT_ID } from '../../../../lib/survey/v2/types';
+import type { SurveyV2Payload } from '../../../../lib/survey/v2/types';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+
+// ---------------------------------------------------------------------------
+// POST handler
+// ---------------------------------------------------------------------------
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  try {
+    // -- Rate limiting -------------------------------------------------------
+    const rl = await checkRateLimit('survey', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+    }
+    const body = await req.json().catch(() => null);
+
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
+
+    const { token, payload } = body as { token?: string; payload?: SurveyV2Payload };
+
+    // Validate token
+    if (typeof token !== 'string' || !token) {
+      return NextResponse.json({ error: 'Missing token' }, { status: 400 });
+    }
+
+    // Verify JWT
+    const claims = verifyHandoffToken(token);
+    if (!claims) {
+      return NextResponse.json(
+        { error: 'Invalid or expired survey token' },
+        { status: 401 },
+      );
+    }
+
+    // Validate payload shape
+    if (!payload || typeof payload !== 'object') {
+      return NextResponse.json({ error: 'Missing payload' }, { status: 400 });
+    }
+
+    const isStandalone =
+      claims.project_id === STANDALONE_PROJECT_ID || claims.standalone === true;
+
+    // For non-standalone surveys: verify payload.projectId matches JWT project_id.
+    // For standalone surveys: the project_id is "__standalone__" in both places — skip match.
+    if (!isStandalone && payload.projectId !== claims.project_id) {
+      return NextResponse.json(
+        { error: 'Token project_id does not match payload projectId' },
+        { status: 400 },
+      );
+    }
+
+    const validationError = validatePayload(payload, isStandalone);
+    if (validationError) {
+      return NextResponse.json({ error: validationError }, { status: 400 });
+    }
+
+    // ---------------------------------------------------------------------------
+    // Forward to internal webhook ingest pipeline
+    // ---------------------------------------------------------------------------
+    const webhookSecret = process.env.SURVEY_WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      console.error('[survey/submit] SURVEY_WEBHOOK_SECRET not set');
+      return NextResponse.json(
+        { error: 'Server configuration error' },
+        { status: 500 },
+      );
+    }
+
+    // Build the webhook envelope body.
+    // v47.438: Add solarpro_selected_project_id and solarpro_selected_client_id
+    // for standalone surveys. These are forwarded to projectLinkResolver.
+    const webhookBodyObj: Record<string, unknown> = {
+      // Envelope fields required by envelopeValidator.ts
+      event:        'survey.completed',
+      event_id:     payload.surveyId,
+      survey_id:    payload.surveyId,
+      completed_at: payload.submittedAt,
+      // schemaVersion is intentionally OMITTED from the webhook envelope.
+      // The envelope validator (envelopeValidator.ts) accepts absent schemaVersion
+      // and coerces it to CURRENT_SCHEMA_VERSION ('1.0'). The mobile payload's
+      // schemaVersion ('2.0') is an internal V2 schema and must not be forwarded.
+      // F-06 ownership claims — forwarded from the verified handoff JWT.
+      solarpro_user_id:    claims.solarpro_user_id    ?? null,
+      // v47.442: Use claims.solarpro_project_id when present (explicit handoff JWT claim).
+      // Fall back to payload.projectId when solarpro_project_id is absent from the JWT
+      // (e.g. the JWT was minted without it) but the payload carries a real project UUID.
+      // This ensures Strategy 3 (project-based owner resolution in ownerResolver.ts) can
+      // fire even when the JWT predates the solarpro_project_id claim addition.
+      // NEVER forward __standalone__ as a project ID -- that is a sentinel, not a UUID.
+      solarpro_project_id: claims.solarpro_project_id
+        ?? (payload.projectId && payload.projectId !== STANDALONE_PROJECT_ID
+            ? payload.projectId
+            : null),
+      solarpro_email:      claims.solarpro_email       ?? null,
+      // Survey payload fields
+      projectId:         payload.projectId,
+      submittedAt:       payload.submittedAt,
+      inspectorName:     payload.inspectorName,
+      siteOverview:      payload.siteOverview,
+      roofConditions:    payload.roofConditions,
+      electricalService: payload.electricalService,
+      obstructions:      payload.obstructions,
+      photos:            payload.photos,
+    };
+
+    // v47.438: Forward on-device picker selections for standalone surveys
+    if (isStandalone) {
+      webhookBodyObj['solarpro_selected_project_id'] = payload.selectedProjectId ?? null;
+      webhookBodyObj['solarpro_selected_client_id']  = payload.selectedClientId  ?? null;
+    }
+
+    // v47.441: Inline the full SurveyV2Payload so the ingest pipeline (Step C)
+    // can use it directly as rawPayload without fetching from the partner API.
+    // This ensures photos (with category labels) and physicalData are extracted
+    // by the v2.0 transformer even though schemaVersion is absent from the envelope.
+    webhookBodyObj['inline_payload'] = payload as unknown as Record<string, unknown>;
+
+    const webhookBodyStr = JSON.stringify(webhookBodyObj);
+
+    // Timestamp is included in the signed string so the verifier can enforce
+    // replay-protection (5-minute tolerance window). ISO-8601 format is accepted
+    // by parseTimestampHeaderToSeconds() in verifyWebhookSignature.ts.
+    const timestamp = new Date().toISOString();
+    const signedString = `${timestamp}.${webhookBodyStr}`;
+
+    const { createHmac } = await import('crypto');
+    const signature = createHmac('sha256', webhookSecret)
+      .update(signedString)
+      .digest('hex');
+
+    // Construct internal webhook URL — always this app, never the partner app
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+    const webhookUrl = `${baseUrl.replace(/\/$/, '')}/api/webhooks/survey-complete`;
+
+    const webhookRes = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type':       'application/json',
+        'x-survey-signature': `sha256=${signature}`,
+        'x-survey-timestamp': timestamp,
+        'x-survey-event-id':  webhookBodyObj.event_id as string,
+      },
+      body: webhookBodyStr,
+    });
+
+    if (!webhookRes.ok) {
+      const webhookResBody = await webhookRes.json().catch(() => ({}));
+      const msg = (webhookResBody as { error?: string }).error ?? `Ingest failed (${webhookRes.status})`;
+      console.error('[survey/submit] ingest pipeline error:', msg);
+      return NextResponse.json(
+        { error: 'Survey was received but ingest pipeline failed. Contact support.' },
+        { status: 500 },
+      );
+    }
+
+    const ingestResult = await webhookRes.json().catch(() => ({}));
+
+    return NextResponse.json(
+      {
+        ok: true,
+        surveyId: payload.surveyId,
+        ingest: ingestResult,
+      },
+      { status: 200 },
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Internal server error';
+    console.error('[survey/submit] error:', msg);
+    return NextResponse.json({ error: 'Submission failed' }, { status: 500 });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// validatePayload - checks required fields before forwarding to ingest
+//
+// v47.438: For standalone surveys, additionally validates that either
+// selectedClientId or selectedProjectId is present.
+// ---------------------------------------------------------------------------
+function validatePayload(payload: SurveyV2Payload, isStandalone: boolean): string | null {
+  if (!payload.schemaVersion || payload.schemaVersion !== '2.0') {
+    return 'Invalid schemaVersion - expected 2.0';
+  }
+
+  if (!payload.surveyId) return 'Missing surveyId';
+  if (!payload.projectId) return 'Missing projectId';
+  if (!payload.submittedAt) return 'Missing submittedAt';
+  if (!payload.inspectorName?.trim()) return 'Missing inspectorName';
+
+  // v47.438: Standalone surveys must have a client or project selection.
+  // This ensures the survey can be attached to the correct project in the DB.
+  if (isStandalone) {
+    const hasSelection =
+      (typeof payload.selectedProjectId === 'string' && payload.selectedProjectId.trim()) ||
+      (typeof payload.selectedClientId === 'string' && payload.selectedClientId.trim());
+    if (!hasSelection) {
+      return 'Standalone survey must have a selectedProjectId or selectedClientId';
+    }
+  }
+
+  // Step 1 - site overview
+  const s = payload.siteOverview;
+  if (!s) return 'Missing siteOverview';
+  if (!s.projectName?.trim()) return 'Missing siteOverview.projectName';
+  if (!s.siteAddress?.trim()) return 'Missing siteOverview.siteAddress';
+  if (!s.structureType) return 'Missing siteOverview.structureType';
+  if (!s.stories) return 'Missing siteOverview.stories';
+
+  // Step 2 - roof
+  const r = payload.roofConditions;
+  if (!r) return 'Missing roofConditions';
+  if (!r.roofMaterial) return 'Missing roofConditions.roofMaterial';
+  if (!r.roofPitch) return 'Missing roofConditions.roofPitch';
+  if (!r.rafterSpacing) return 'Missing roofConditions.rafterSpacing';
+  if (!r.roofCondition) return 'Missing roofConditions.roofCondition';
+
+  // Step 3 - electrical
+  const e = payload.electricalService;
+  if (!e) return 'Missing electricalService';
+  if (!e.panelBrand) return 'Missing electricalService.panelBrand';
+  if (!e.panelRating) return 'Missing electricalService.panelRating';
+  if (!e.availableBreakerSlots) return 'Missing electricalService.availableBreakerSlots';
+  if (!e.meterSocketType) return 'Missing electricalService.meterSocketType';
+  if (!e.interconnectionPoint) return 'Missing electricalService.interconnectionPoint';
+  if (!e.serviceEntrance) return 'Missing electricalService.serviceEntrance';
+
+  // Step 5 - required photos
+  if (!Array.isArray(payload.photos)) return 'Missing photos array';
+===== app/api/bill-upload/route.ts
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const revalidate = 0;
+
+import { NextRequest, NextResponse } from 'next/server';
+import { parseBillText, validateBillData, extractBillDataWithAI } from '@/lib/billOcr';
+import type { BillExtractResult } from '@/lib/billOcr';
+import { getUserFromRequest } from '@/lib/auth';
+import { extractPdfTextPure } from '@/lib/pdfExtract';
+import { logEnvStatus } from '@/lib/env-check';
+// v47.213: Universal bill parsing pipeline (Layer 1 + 2 + 3)
+import { parseUtilityBill, mapAiResultToBillExtractResult } from '@/lib/billPipeline';
+// v47.306: Bill Intelligence Layer
+import { computeBillInsights } from '@/lib/billInsights';
+// v48.0: Claude 3.5 Sonnet LMM Extraction Engine (direct image path)
+import { extractBillWithClaude } from '@/lib/billClaudeExtractor';
+// v48.1: Post-parse utility normalization + DB enrichment layer
+import { enrichBillData, type BillEnrichmentInput } from '@/lib/billEnrichment';
+// v48.2: Confidence scoring layer
+import { confidenceFromBillExtractResult } from '@/lib/billConfidence';
+import { logger } from '@/lib/logger';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+
+// ── Magic byte validation for bill uploads ──────────────────────────────────
+// Accepted: PDF, JPEG, PNG, WebP, GIF, TIFF, BMP
+function isValidBillFileMagic(buf: Buffer): boolean {
+  if (buf.length < 4) return false;
+  // PDF: %PDF (25 50 44 46)
+  if (buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46) return true;
+  // JPEG: FF D8 FF
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return true;
+  // PNG: 89 50 4E 47
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return true;
+  // WebP: RIFF????WEBP
+  if (buf.length >= 12 &&
+      buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+      buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return true;
+  // GIF: GIF87a or GIF89a (47 49 46)
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return true;
+  // TIFF: little-endian (49 49 2A 00) or big-endian (4D 4D 00 2A)
+  if (buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2A && buf[3] === 0x00) return true;
+  if (buf[0] === 0x4D && buf[1] === 0x4D && buf[2] === 0x00 && buf[3] === 0x2A) return true;
+  // BMP: BM (42 4D)
+  if (buf[0] === 0x42 && buf[1] === 0x4D) return true;
+  return false;
+}
+
+// Log env status once per cold start for deployment observability
+logEnvStatus('bill-upload');
+
+// v48.1: Fire-and-forget enrichment helper — runs after every successful parse.
+// v48.2: Also computes full confidence score using all available BillExtractResult fields.
+// Never throws, never blocks the response. Logs results for observability.
+function runEnrichmentAsync(billData: BillExtractResult, stateHint?: string | null): void {
+  const input: BillEnrichmentInput = {
+    utilityName:        billData.utilityProvider ?? null,
+    state:              stateHint ?? null,
+    parsedRate:         billData.electricityRate ?? null,
+    monthlyKwh:         billData.monthlyKwh ?? null,
+    annualKwh:          billData.annualKwh ?? billData.estimatedAnnualKwh ?? null,
+    monthlyHistory:     billData.monthlyUsageHistory ?? null,
+    billingPeriodStart: billData.billingPeriodStart ?? null,
+    billingPeriodEnd:   billData.billingPeriodEnd ?? null,
+  };
+  enrichBillData(input).then(result => {
+    console.log(
+      `[ENRICHMENT_COMPLETE] canonicalId=${result.canonicalId ?? 'none'}` +
+      ` rateSource=${result.rateSource} effectiveRate=${result.effectiveRate ?? 'null'}` +
+      ` dbAction=${result.dbAction} rateCorrected=${result.rateCorrected}` +
+      ` validation=${JSON.stringify(result.validation)}`
+    );
+
+    // v48.2: Compute full confidence using all BillExtractResult fields
+    // (enrichment confidence uses a subset; this one has customer, address, account, etc.)
+    const confidence = confidenceFromBillExtractResult(billData, result.rateSource);
+
+    // Phase 4: Dev-only confidence debug log
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(
+        `[CONFIDENCE_SCORE] overall=${confidence.overall}` +
+        ` usage=${confidence.usage} rate=${confidence.rate} completeness=${confidence.completeness}` +
+        ` rateSource=${confidence._debug.rateSource}` +
+        ` months=${confidence._debug.monthsFound} hasAnnual=${confidence._debug.hasAnnual}` +
+        ` fields=${confidence._debug.fieldsPresent}/5`
+      );
+    }
+
+    // Attach to billData.meta (additive — never overwrites existing fields)
+    // This mutates the local copy only; the HTTP response is already sent.
+    // The confidence is available in Vercel logs for observability.
+    (billData as any).meta = {
+      ...((billData as any).meta ?? {}),
+      confidence,
+    };
+  }).catch(err => {
+    logger.warn('BILL', '[ENRICHMENT_ERROR] background enrichment threw (non-fatal):', err instanceof Error ? (err as Error).message : err);
+  });
+}
+
+// billOcrEngine and billParser are imported dynamically inside extractImageTextSmart()
+// to prevent webpack from bundling tesseract.js worker_threads at module load time.
+// Static import of tesseract.js causes HTML 500 errors before the route handler runs.
+
+// Top-level reference so webpack marks pdf-parse as external (not bundled)
+let PDFParse: any = null;
+try {
+  const pdfParseModule = require('pdf-parse');
+  PDFParse = pdfParseModule.PDFParse ?? pdfParseModule.default?.PDFParse ?? null;
+} catch (e) {
+  logger.warn('BILL', '[bill-upload] pdf-parse not available:', e instanceof Error ? e.message : e);
+}
+
+// Vercel: OCR+parse only — must complete in < 30s (well under 60s limit)
+// Geocoding, utility matching, sizing moved to /api/system-size
+export const maxDuration = 60; // v47.25: increased for OpenAI Vision fallback on Vercel
+
+// POST /api/bill-upload
+// Responsibilities: buffer creation, OCR/text extraction, bill field parsing.
+// Does NOT: geocode, match utility, validate rate, calculate system size, create DB records.
+// All heavy async work happens in /api/system-size (called by frontend after this returns).
+
+function safeJsonError(msg: string, status = 500): NextResponse {
+  return NextResponse.json({ success: false, error: msg }, { status });
+}
+
+// 6-second timeout guard — returns a rejected promise after ms
+function timeoutAfter(ms: number): Promise<never> {
+  return new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`Operation timed out after ${ms}ms`)), ms)
+  );
+}
+
+export async function POST(req: NextRequest) {
+  const startMs = Date.now();
+
+  // ── JSON Error Boundary ────────────────────────────────────────────────────
+  try {
+    // v48.6: Rate limiting — 5 req / 30s per IP (protects Claude + OCR costs)
+    const rl = await checkRateLimit('bill-upload', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { success: false, error: 'Too many requests. Please wait before uploading another bill.' },
+        { status: 429 }
+      );
+    }
+
+    const user = await getUserFromRequest(req);
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const formData = await req.formData();
+    const file = formData.get('file') as File | null;
+    const rawText = formData.get('text') as string | null;
+
+    if (!file && !rawText) {
+      return NextResponse.json({ success: false, error: 'No file or text provided' }, { status: 400 });
+    }
+
+    logger.debug('BILL', `[UPLOAD_RECEIVED] file=${file?.name ?? 'none'} size=${file?.size ?? 0} hasText=${!!rawText} openai=${!!process.env.OPENAI_API_KEY} ts=${new Date().toISOString()}`);
+    logger.debug('BILL', `[BILL_UPLOAD_STARTED] file=${file?.name ?? 'none'} size=${file?.size ?? 0} hasText=${!!rawText} openai=${!!process.env.OPENAI_API_KEY}`);
+
+    let extractedText = rawText || '';
+    let extractionMethod = 'text';
+
+    if (file) {
+      const MAX_SIZE = 10 * 1024 * 1024;
+      if (file.size > MAX_SIZE) {
+        return NextResponse.json({ success: false, error: 'File too large. Maximum size is 10MB.' }, { status: 413 });
+      }
+
+      const fileType = file.type;
+      const fileName = file.name.toLowerCase();
+
+      logger.debug('BILL', `[FILE_RECEIVED] name=${fileName} type=${fileType} size=${file.size} openai=${!!process.env.OPENAI_API_KEY}`);
+
+      // Create buffer ONCE — used for ALL downstream operations (OCR, PDF parse, save)
+      const buffer = Buffer.from(await file.arrayBuffer());
+      logger.debug('BILL', `[FILE_BUFFER_CREATED] bytes=${buffer.length} mime=${fileType}`);
+      logger.debug('BILL', `[FILE_SIZE_BYTES] bytes=${buffer.length} kb=${Math.round(buffer.length/1024)} mime=${fileType} name=${fileName}`);
+      if (buffer.length === 0) {
+        console.error('[FILE_BUFFER_CREATED] ERROR: buffer is 0 bytes — file.arrayBuffer() returned empty');
+        return NextResponse.json({ success: false, error: 'File buffer is empty. Please try uploading again.', stage: 'buffer' }, { status: 422 });
+      }
+
+      // ── Magic byte validation — reject files whose binary signature doesn't match their declared type ──
+      if (!isValidBillFileMagic(buffer)) {
+        logger.warn('BILL', `[MAGIC_BYTE_REJECTED] name=${fileName} mime=${fileType} size=${buffer.length}`);
+        return NextResponse.json(
+          { success: false, error: 'Unsupported or invalid file format. Please upload a PDF, JPG, PNG, WebP, GIF, TIFF, or BMP.' },
+          { status: 400 }
+        );
+      }
+
+      if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
+        // v47.213: Try universal pipeline (extract + AI parse) first.
+        // If it succeeds with enough data, return immediately (bypass legacy deterministic path).
+        // If it fails or returns insufficient data, fall through to legacy path as safety net.
+        logger.debug('BILL', `[PDF_PIPELINE_STARTED] ms=${Date.now() - startMs}`);
+        try {
+          const pipelineResult = await Promise.race([
+            parseUtilityBill(buffer, 'application/pdf'),
+            timeoutAfter(55000).catch(() => ({
+              success: false as const,
+              error: 'pipeline timeout',
+              rawText: '',
+              extractionMethod: 'timeout',
+            })),
+          ]);
+
+          const pr = pipelineResult as { success: boolean; data?: BillExtractResult; rawText?: string; extractionMethod?: string; error?: string };
+          logger.debug('BILL', `[PDF_PIPELINE_RESULT] success=${pr.success} method=${pr.extractionMethod} fields=${pr.data?.extractedFields?.length ?? 0} ms=${Date.now() - startMs}`);
+
+          if (pr.success && pr.data) {
+            const pd = pr.data;
+            const hasUsefulData = (pd.extractedFields?.length ?? 0) >= 2
+              || (pd.monthlyKwh !== undefined && pd.monthlyKwh > 0)
+              || (pd.monthlyUsageHistory?.length ?? 0) >= 3;
+
+            if (hasUsefulData) {
+              logger.debug('BILL', `[PDF_PIPELINE_SUCCESS] fields=${pd.extractedFields.length} confidence=${pd.confidence} returning early`);
+              const extractionEvidence = {
+                monthlySource: 'ai-pipeline',
+                monthlyConfidence: pd.confidence === 'high' ? 90 : pd.confidence === 'medium' ? 60 : 30,
+                monthsFound: pd.monthlyUsageHistory?.length ?? 0,
+                monthlyEvidence: `AI pipeline: ${pd.extractedFields.join(', ')}`,
+                annualSource: pd.annualKwh ? 'ai' : 'derived',
+                annualSourceText: null,
+                utilitySource: pd.utilityProvider ? 'ai' : 'none',
+                rateSource: pd.electricityRate ? 'ai' : 'none',
+                debugLog: [`[pipeline] method=${pr.extractionMethod} fields=${pd.extractedFields.join(',')}`],
+              };
+              const elapsedMs = Date.now() - startMs;
+              logger.debug('BILL', `[BILL_UPLOAD_RETURNING] fields=${pd.extractedFields.length} confidence=${pd.confidence} elapsedMs=${elapsedMs} path=pipeline`);
+              // v48.1: Fire-and-forget enrichment (normalize utility, upsert DB, validate rate)
+              runEnrichmentAsync(pd);
+              return NextResponse.json({
+                success: true,
+                billData: pd,
+                extractionEvidence,
+                extractionMethod: pr.extractionMethod ?? 'pipeline',
+                locationData: null,
+                utilityData: null,
+                matchedUtility: null,
+                systemSizing: null,
+                rateValidation: null,
+                validation: { valid: true, warnings: [], errors: [] },
+              });
+            }
+            logger.debug('BILL', `[PDF_PIPELINE_INSUFFICIENT] fields=${pd.extractedFields?.length ?? 0} falling through to legacy`);
+          } else {
+            logger.debug('BILL', `[PDF_PIPELINE_FAILED] error=${pr.error ?? 'unknown'} falling through to legacy`);
+          }
+
+          // Reuse pipeline's extracted text for the legacy path if available
+          if (pr.rawText && pr.rawText.length > 50) {
+            extractedText = pr.rawText;
+            extractionMethod = pr.extractionMethod ?? 'pdf-parse';
+            logger.debug('BILL', `[PDF_PIPELINE_TEXT_REUSE] chars=${extractedText.length} method=${extractionMethod}`);
+          }

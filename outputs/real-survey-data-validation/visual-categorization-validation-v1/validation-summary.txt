@@ -1,0 +1,41 @@
+=== check-engineering-boundaries ===
+command: npm run check:engineering-boundaries
+exit_code: 0
+log: outputs/real-survey-data-validation/visual-categorization-validation-v1/check-engineering-boundaries.log
+
+=== check-topology ===
+command: npm run check:topology
+exit_code: 0
+log: outputs/real-survey-data-validation/visual-categorization-validation-v1/check-topology.log
+
+=== check-assisted-evidence-boundaries ===
+command: npm run check:assisted-evidence-boundaries
+exit_code: 0
+log: outputs/real-survey-data-validation/visual-categorization-validation-v1/check-assisted-evidence-boundaries.log
+
+=== type-check ===
+command: npm run type-check
+exit_code: 0
+log: outputs/real-survey-data-validation/visual-categorization-validation-v1/type-check.log
+
+=== targeted-visual-runtime-tests ===
+command: npm exec vitest -- lib/assistedEvidenceSources/visualCategorizationRuntimeAdapter.test.ts --run
+exit_code: 0
+log: outputs/real-survey-data-validation/visual-categorization-validation-v1/targeted-visual-runtime-tests.log
+
+=== npm-test ===
+command: npm test
+exit_code: 0
+log: outputs/real-survey-data-validation/visual-categorization-validation-v1/npm-test.log
+
+=== build ===
+command: npm run build
+exit_code: 0
+log: outputs/real-survey-data-validation/visual-categorization-validation-v1/build.log
+
+=== lint ===
+command: npm run lint
+exit_code: 0
+log: outputs/real-survey-data-validation/visual-categorization-validation-v1/lint.log
+
+VALIDATION_STATUS=passed

@@ -1,5 +1,6 @@
 import type { AssistedEvidenceCandidate, AssistedEvidenceCandidateCategory, AssistedEvidenceCandidateClaim, AssistedEvidenceCandidateType, CreateAssistedEvidenceCandidateInput } from '@/lib/assistedEvidence';
 import type { ValidatedOpenSourceToolDefinition } from './openSourceToolTypes';
+import type { VisualCategorizationRuntimePayload, VisualCategorizationSignal } from './visualCategorizationRuntimeTypes';
 
 export interface AssistedEvidenceSourceContext {
   sourceFileId: string;
@@ -145,3 +146,5 @@ export interface OcrRuntimePayload {
   textLineCount: number;
   derivedSignals: OcrRuntimeSignal[];
 }
+
+export type { VisualCategorizationRuntimePayload, VisualCategorizationSignal };

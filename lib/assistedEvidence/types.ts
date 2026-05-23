@@ -11,6 +11,7 @@ export type AssistedEvidenceCandidateType =
   | 'orientation_candidate'
   | 'duplicate_similarity_candidate'
   | 'text_region_candidate'
+  | 'visual_category_candidate'
   | 'utility_scene_candidate'
   | 'electrical_scene_candidate'
   | 'roof_edge_candidate'

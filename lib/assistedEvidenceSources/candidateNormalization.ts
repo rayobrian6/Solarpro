@@ -9,6 +9,13 @@ function sortedUnique(values: string[]): string[] {
   return [...new Set(values)].sort((a, b) => a.localeCompare(b));
 }
 
+function runtimeProvenanceNote(tool: ValidatedOpenSourceToolDefinition): string {
+  if (tool.runtimeCategory === 'fixture_only') return 'Fixture-only adapter output; no runtime OCR/CV/image processing executed.';
+  if (tool.runtimeCategory === 'ocr_text_candidate') return 'Controlled OCR runtime pilot output; text extraction only, no semantic image understanding or engineering inference executed.';
+  if (tool.runtimeCategory === 'visual_categorization_candidate') return 'Controlled visual categorization runtime pilot output; possible photo-category candidates only, no object detection, geometry extraction, engineering inference, CAD influence, workflow influence, or canonical mutation executed.';
+  return 'Controlled metadata runtime pilot output; no OCR/CV/semantic image understanding executed.';
+}
+
 export function normalizeCandidatePayload(payload: NormalizedCandidatePayload): NormalizedCandidatePayload {
   return {
     ...payload,
@@ -75,11 +82,7 @@ export function toCreateCandidateInput(
         ...normalized.deterministicInputRefs,
       ]),
       notes: sortedUnique([
-        tool.runtimeCategory === 'fixture_only'
-          ? 'Fixture-only adapter output; no runtime OCR/CV/image processing executed.'
-          : tool.runtimeCategory === 'ocr_text_candidate'
-            ? 'Controlled OCR runtime pilot output; text extraction only, no semantic image understanding or engineering inference executed.'
-            : 'Controlled metadata runtime pilot output; no OCR/CV/semantic image understanding executed.',
+        runtimeProvenanceNote(tool),
         `Registered source tool ${tool.toolName}@${tool.toolVersion}.`,
         `License posture ${tool.licensePosture}.`,
       ]),

@@ -1,0 +1,21 @@
+--- package image/runtime dependency scan ---
+package.json:43:    "html2canvas": "^1.4.1",
+package.json:45:    "jspdf": "^4.2.0",
+package.json:49:    "pdf-parse": "^2.4.5",
+package.json:59:    "sharp": "^0.34.5",
+package.json:63:    "tesseract.js": "^7.0.0",
+package.json:83:    "canvas": "^3.2.1",
+package-lock.json:29:        "html2canvas": "^1.4.1",
+package-lock.json:31:        "jspdf": "^4.2.0",
+package-lock.json:35:        "pdf-parse": "^2.4.5",
+package-lock.json:45:        "sharp": "^0.34.5",
+package-lock.json:49:        "tesseract.js": "^7.0.0",
+package-lock.json:69:        "canvas": "^3.2.1",
+package-lock.json:9310:        "text-segmentation": "^1.0.3"
+package-lock.json:10998:        "canvas": "^3.0.0"
+package-lock.json:11001:        "canvas": {
+package-lock.json:11161:        "html2canvas": "^1.0.0-rc.5"
+package-lock.json:12754:        "pdfjs-dist": "5.4.296"
+package-lock.json:12757:        "pdf-parse": "bin/cli.mjs"
+package-lock.json:15239:    "node_modules/text-segmentation": {
+package-lock.json:15241:      "resolved": "https://registry.npmjs.org/text-segmentation/-/text-segmentation-1.0.3.tgz",
