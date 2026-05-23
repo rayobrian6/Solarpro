@@ -54,6 +54,16 @@ import type {
   SignalBlockingWorkspaceModel,
   SignalInvalidationWorkspaceModel,
   SignalStaleImpactsWorkspaceModel,
+  ResolvedEngineeringContextsWorkspaceModel,
+  ContextArbitrationWorkspaceModel,
+  ContextConflictInspectorWorkspaceModel,
+  FallbackChainInspectorWorkspaceModel,
+  ContextProvenanceWorkspaceModel,
+  ContextDependencyGraphWorkspaceModel,
+  ContextConfidenceBreakdownWorkspaceModel,
+  ContextInvalidationsWorkspaceModel,
+  ContextStaleImpactsWorkspaceModel,
+  ContextResolutionTimelineWorkspaceModel,
 } from './types';
 
 const sortText = <T extends string>(values: T[]): T[] => [...new Set(values)].sort((a, b) => a.localeCompare(b));
@@ -777,6 +787,133 @@ function buildSignalStaleImpactsWorkspace(input: BuildEngineeringIntelligenceWor
   };
 }
 
+
+function buildResolvedEngineeringContextsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ResolvedEngineeringContextsWorkspaceModel {
+  const summary = input.contextResolution ?? null;
+  const contexts = summary?.contexts ?? [];
+  return {
+    summary,
+    contexts,
+    authoritative: contexts.filter(context => context.status === 'authoritative').map(context => context.id),
+    preferred: contexts.filter(context => context.status === 'preferred').map(context => context.id),
+    partial: contexts.filter(context => context.status === 'partial').map(context => context.id),
+    conflicting: contexts.filter(context => context.status === 'conflicting').map(context => context.id),
+    blocked: contexts.filter(context => context.status === 'blocked').map(context => context.id),
+    unresolved: contexts.filter(context => context.status === 'unresolved').map(context => context.id),
+    notApplicable: contexts.filter(context => context.status === 'not_applicable').map(context => context.id),
+    deterministicNotes: summary?.deterministicNotes ?? ['No Engineering Context Resolution V1 model was supplied.'],
+  };
+}
+
+function buildContextArbitrationWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextArbitrationWorkspaceModel {
+  const contexts = input.contextResolution?.contexts ?? [];
+  return {
+    rankings: contexts
+      .map(context => ({
+        contextId: context.id,
+        contextType: context.contextType,
+        domain: context.domain,
+        status: context.status,
+        score: context.confidence.score,
+        rank: context.confidence.rank,
+        rankingReason: context.rankingReason,
+        sourceSignalIds: context.sourceSignalIds,
+        supportingSignalIds: context.supportingSignalIds,
+      }))
+      .sort((a, b) => a.rank - b.rank || a.contextId.localeCompare(b.contextId)),
+    deterministicNotes: input.contextResolution ? ['Context arbitration rank is deterministic by score descending with stable context-id tie-breaks.'] : ['No context arbitration metadata was supplied.'],
+  };
+}
+
+function buildContextConflictInspectorWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextConflictInspectorWorkspaceModel {
+  const conflicts = input.contextResolution?.conflicts ?? [];
+  return {
+    conflicts,
+    conflictingContextIds: sortText(conflicts.map(conflict => conflict.contextId)),
+    competingSignalIds: sortText(conflicts.flatMap(conflict => conflict.competingSignalIds)),
+    deterministicNotes: input.contextResolution ? ['Context conflicts preserve competing signals and do not silently promote a winner.'] : ['No context conflict metadata was supplied.'],
+  };
+}
+
+function buildFallbackChainInspectorWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): FallbackChainInspectorWorkspaceModel {
+  const contexts = input.contextResolution?.contexts ?? [];
+  return {
+    fallbackParticipation: input.contextResolution?.fallbackParticipation ?? [],
+    fallbackDependentContextIds: sortText(contexts.filter(context => context.fallbackLineage.length > 0).map(context => context.id)),
+    fallbackConfidencePenalties: contexts
+      .filter(context => context.fallbackConfidencePenalties.length > 0)
+      .map(context => ({ contextId: context.id, penalties: context.fallbackConfidencePenalties }))
+      .sort((a, b) => a.contextId.localeCompare(b.contextId)),
+    deterministicNotes: input.contextResolution ? ['Fallback lineage remains visible and reduces deterministic confidence; it is not promoted into truth.'] : ['No fallback-chain context metadata was supplied.'],
+  };
+}
+
+function buildContextProvenanceWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextProvenanceWorkspaceModel {
+  const contexts = input.contextResolution?.contexts ?? [];
+  return {
+    chains: contexts.map(context => ({
+      contextId: context.id,
+      sourceSignalIds: context.sourceSignalIds,
+      sourceEvidenceIds: context.sourceEvidenceIds,
+      sourceMetadataIds: context.sourceMetadataIds,
+      dependencyLineage: context.dependencyLineage,
+      invalidationLineage: context.invalidationLineage,
+      deterministicHash: context.deterministicHash,
+    })),
+    deterministicNotes: contexts.length ? ['Context provenance chains are derived from structured signal source fields, grouping metadata, and invalidation lineage.'] : ['No context provenance is available without a context resolution model.'],
+  };
+}
+
+function buildContextDependencyGraphWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextDependencyGraphWorkspaceModel {
+  return {
+    nodes: input.contextResolution?.dependencyGraph.nodes ?? [],
+    edges: input.contextResolution?.dependencyGraph.edges ?? [],
+    deterministicNotes: input.contextResolution ? ['Context dependency graph links contexts to signals, evidence, metadata, readiness, requirements, decisions, and invalidations.'] : ['No context dependency graph was supplied.'],
+  };
+}
+
+function buildContextConfidenceBreakdownWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextConfidenceBreakdownWorkspaceModel {
+  const contexts = input.contextResolution?.contexts ?? [];
+  return {
+    confidenceBreakdown: contexts.map(context => ({
+      contextId: context.id,
+      status: context.status,
+      score: context.confidence.score,
+      band: context.confidence.band,
+      rank: context.confidence.rank,
+      factors: context.confidence.factors,
+      penalties: context.confidence.penalties,
+    })),
+    deterministicNotes: contexts.length ? ['Context confidence is deterministic metadata scoring, not AI confidence or image interpretation.'] : ['No context confidence breakdown was supplied.'],
+  };
+}
+
+function buildContextInvalidationsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextInvalidationsWorkspaceModel {
+  const contexts = input.contextResolution?.contexts ?? [];
+  return {
+    invalidations: contexts
+      .filter(context => context.invalidationLineage.length > 0 || context.staleImpactPropagation.length > 0 || context.regenerationParticipation.length > 0)
+      .map(context => ({ contextId: context.id, invalidationLineage: context.invalidationLineage, staleImpactPropagation: context.staleImpactPropagation, regenerationParticipation: context.regenerationParticipation }))
+      .sort((a, b) => a.contextId.localeCompare(b.contextId)),
+    deterministicNotes: contexts.length ? ['Context invalidation participation is surfaced from upstream signal and state invalidation lineage.'] : ['No context invalidation metadata was supplied.'],
+  };
+}
+
+function buildContextStaleImpactsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextStaleImpactsWorkspaceModel {
+  return {
+    staleImpacts: input.contextResolution?.staleImpacts ?? [],
+    cadReadinessMappings: input.contextResolution?.cadReadinessMappings ?? [],
+    deterministicNotes: input.contextResolution ? ['Context stale impacts and CAD-readiness mappings are displayed as metadata only.'] : ['No context stale-impact metadata was supplied.'],
+  };
+}
+
+function buildContextResolutionTimelineWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextResolutionTimelineWorkspaceModel {
+  return {
+    events: input.contextResolution?.timeline ?? [],
+    deterministicNotes: input.contextResolution ? ['Context resolution timeline is deterministic status metadata for each resolved context.'] : ['No context resolution timeline was supplied.'],
+  };
+}
+
 function buildAuditGuards(input: BuildEngineeringIntelligenceWorkspaceInput): AuditGuardWorkspaceModel {
   const guards: EngineeringStateAuditGuardResult[] = sortBy(input.auditGuards ?? [], guard => guard.guardCode);
   const failures = guards.filter(guard => !guard.passed);
@@ -826,6 +963,16 @@ export function buildEngineeringIntelligenceWorkspace(input: BuildEngineeringInt
   const signalBlocking = buildSignalBlockingWorkspace(input);
   const signalInvalidations = buildSignalInvalidationWorkspace(input);
   const signalStaleImpacts = buildSignalStaleImpactsWorkspace(input);
+  const resolvedContexts = buildResolvedEngineeringContextsWorkspace(input);
+  const contextArbitration = buildContextArbitrationWorkspace(input);
+  const contextConflictInspector = buildContextConflictInspectorWorkspace(input);
+  const fallbackChainInspector = buildFallbackChainInspectorWorkspace(input);
+  const contextProvenance = buildContextProvenanceWorkspace(input);
+  const contextDependencyGraph = buildContextDependencyGraphWorkspace(input);
+  const contextConfidenceBreakdown = buildContextConfidenceBreakdownWorkspace(input);
+  const contextInvalidations = buildContextInvalidationsWorkspace(input);
+  const contextStaleImpacts = buildContextStaleImpactsWorkspace(input);
+  const contextResolutionTimeline = buildContextResolutionTimelineWorkspace(input);
   const auditGuards = buildAuditGuards(input);
 
   return {
@@ -855,6 +1002,16 @@ export function buildEngineeringIntelligenceWorkspace(input: BuildEngineeringInt
     signalBlocking,
     signalInvalidations,
     signalStaleImpacts,
+    resolvedContexts,
+    contextArbitration,
+    contextConflictInspector,
+    fallbackChainInspector,
+    contextProvenance,
+    contextDependencyGraph,
+    contextConfidenceBreakdown,
+    contextInvalidations,
+    contextStaleImpacts,
+    contextResolutionTimeline,
     auditGuards,
     deterministicNotes: [
       latestSnapshot

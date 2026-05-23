@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import { verifyToken } from '@/lib/auth';
 import { isValidUUID } from '@/lib/db-neon';
-import { hydrateProjectEngineeringIntelligenceFromDb, buildEngineeringIntelligenceWorkspace, buildCADReadinessMetadata } from '@/lib/engineeringIntelligence';
+import { hydrateProjectEngineeringIntelligenceFromDb, buildEngineeringIntelligenceWorkspace, buildCADReadinessMetadata, buildEngineeringContextResolution } from '@/lib/engineeringIntelligence';
 import { buildDeterministicPhotoGrouping } from '@/lib/engineeringIntelligence/photoGrouping';
 import { buildStructuredEngineeringSignals } from '@/lib/engineeringIntelligence/signalExtraction';
 import { buildFieldEvidenceOrchestrationModel } from '@/lib/survey/evidence/fieldOrchestration';
@@ -33,6 +33,16 @@ import {
   SignalBlockingWorkspace,
   SignalInvalidationWorkspace,
   SignalStaleImpactsWorkspace,
+  ResolvedEngineeringContextsWorkspace,
+  ContextArbitrationWorkspace,
+  ContextConflictInspectorWorkspace,
+  FallbackChainInspectorWorkspace,
+  ContextProvenanceWorkspace,
+  ContextDependencyGraphWorkspace,
+  ContextConfidenceBreakdownWorkspace,
+  ContextInvalidationsWorkspace,
+  ContextStaleImpactsWorkspace,
+  ContextResolutionTimelineWorkspace,
   WorkspaceShell,
 } from '../../components';
 
@@ -81,6 +91,16 @@ export default async function ProjectEngineeringIntelligencePage({ params }: { p
       <SignalBlockingWorkspace model={model.signalBlocking} />
       <SignalInvalidationWorkspace model={model.signalInvalidations} />
       <SignalStaleImpactsWorkspace model={model.signalStaleImpacts} />
+      <ResolvedEngineeringContextsWorkspace model={model.resolvedContexts} />
+      <ContextArbitrationWorkspace model={model.contextArbitration} />
+      <ContextConflictInspectorWorkspace model={model.contextConflictInspector} />
+      <FallbackChainInspectorWorkspace model={model.fallbackChainInspector} />
+      <ContextProvenanceWorkspace model={model.contextProvenance} />
+      <ContextDependencyGraphWorkspace model={model.contextDependencyGraph} />
+      <ContextConfidenceBreakdownWorkspace model={model.contextConfidenceBreakdown} />
+      <ContextInvalidationsWorkspace model={model.contextInvalidations} />
+      <ContextStaleImpactsWorkspace model={model.contextStaleImpacts} />
+      <ContextResolutionTimelineWorkspace model={model.contextResolutionTimeline} />
       <CADReadinessWorkspace readiness={hydration.cadReadiness} />
       <PhotoGroupingWorkspace grouping={model.photoGrouping} />
       <FieldEvidenceOrchestrationWorkspace orchestration={fieldEvidenceOrchestration} />
@@ -92,13 +112,16 @@ export default async function ProjectEngineeringIntelligencePage({ params }: { p
 function invalidProjectHydration(projectId: string) {
   const cadReadiness = buildCADReadinessMetadata({ projectId });
   const photoGrouping = buildDeterministicPhotoGrouping({ projectId, readinessFlags: cadReadiness.flags, generatedAt: new Date(0).toISOString() });
-  const structuredSignals = buildStructuredEngineeringSignals({ projectId, photoGrouping, cadReadiness, generatedAt: new Date(0).toISOString() });
+  const generatedAt = new Date(0).toISOString();
+  const structuredSignals = buildStructuredEngineeringSignals({ projectId, photoGrouping, cadReadiness, generatedAt });
   const signalAwareCADReadiness = buildCADReadinessMetadata({ projectId, structuredSignals });
-  const workspaceInput = { projectId, cadReadiness: signalAwareCADReadiness, photoGrouping, structuredSignals };
+  const contextResolution = buildEngineeringContextResolution({ projectId, structuredSignals, photoGrouping, cadReadiness: signalAwareCADReadiness, generatedAt });
+  const contextAwareCADReadiness = buildCADReadinessMetadata({ projectId, structuredSignals, contextResolution });
+  const workspaceInput = { projectId, cadReadiness: contextAwareCADReadiness, photoGrouping, structuredSignals, contextResolution };
   const workspace = buildEngineeringIntelligenceWorkspace(workspaceInput);
   return {
     projectId,
-    generatedAt: new Date(0).toISOString(),
+    generatedAt,
     source: 'not_loaded' as const,
     surveyCount: 0,
     canonicalSurveyId: null,
@@ -112,9 +135,10 @@ function invalidProjectHydration(projectId: string) {
     invalidationPropagation: null,
     regenerationPlanV1: null,
     snapshotDelta: null,
-    cadReadiness: signalAwareCADReadiness,
+    cadReadiness: contextAwareCADReadiness,
     photoGrouping,
     structuredSignals,
+    contextResolution,
     deterministicNotes: [
       'Project engineering hydration did not run because the route parameter is not a valid project UUID.',
       'Use the Project Intelligence Picker or an existing project/survey/permit/engineering entry point to open a real project id.',
@@ -126,13 +150,16 @@ function invalidProjectHydration(projectId: string) {
 function emptyProjectHydration(projectId: string) {
   const cadReadiness = buildCADReadinessMetadata({ projectId });
   const photoGrouping = buildDeterministicPhotoGrouping({ projectId, readinessFlags: cadReadiness.flags, generatedAt: new Date(0).toISOString() });
-  const structuredSignals = buildStructuredEngineeringSignals({ projectId, photoGrouping, cadReadiness, generatedAt: new Date(0).toISOString() });
+  const generatedAt = new Date(0).toISOString();
+  const structuredSignals = buildStructuredEngineeringSignals({ projectId, photoGrouping, cadReadiness, generatedAt });
   const signalAwareCADReadiness = buildCADReadinessMetadata({ projectId, structuredSignals });
-  const workspaceInput = { projectId, cadReadiness: signalAwareCADReadiness, photoGrouping, structuredSignals };
+  const contextResolution = buildEngineeringContextResolution({ projectId, structuredSignals, photoGrouping, cadReadiness: signalAwareCADReadiness, generatedAt });
+  const contextAwareCADReadiness = buildCADReadinessMetadata({ projectId, structuredSignals, contextResolution });
+  const workspaceInput = { projectId, cadReadiness: contextAwareCADReadiness, photoGrouping, structuredSignals, contextResolution };
   const workspace = buildEngineeringIntelligenceWorkspace(workspaceInput);
   return {
     projectId,
-    generatedAt: new Date(0).toISOString(),
+    generatedAt,
     source: 'not_loaded' as const,
     surveyCount: 0,
     canonicalSurveyId: null,
@@ -146,9 +173,10 @@ function emptyProjectHydration(projectId: string) {
     invalidationPropagation: null,
     regenerationPlanV1: null,
     snapshotDelta: null,
-    cadReadiness: signalAwareCADReadiness,
+    cadReadiness: contextAwareCADReadiness,
     photoGrouping,
     structuredSignals,
+    contextResolution,
     deterministicNotes: [
       'Project engineering hydration did not run because no valid admin session user was available in this route render.',
       'Workspace remains registry/empty-state and does not synthesize project evidence or engineering state.',

@@ -169,12 +169,12 @@ describe('CAD readiness metadata', () => {
     const readiness = buildCADReadinessMetadata();
 
     expect(readiness.prohibitedRuntimeBehavior).toEqual(expect.arrayContaining([
-      'no autonomous CAD generation',
-      'no image-byte analysis',
-      'no OCR runtime',
-      'no OpenCV runtime',
-      'no YOLO runtime',
-      'no hallucinated geometry',
+      'no operator-free plan-output creation',
+      'no pixel inspection or image-byte inspection',
+      'no text extraction runtime over survey imagery',
+      'no computer-vision runtime dependency',
+      'no vision model runtime dependency',
+      'no geometry fabrication',
     ]));
     expect(readiness.deterministicNotes.join(' ')).toContain('metadata only');
     expect(readiness.flags.every(flag => ['ready', 'partial', 'blocked', 'not_applicable'].includes(flag.status))).toBe(true);

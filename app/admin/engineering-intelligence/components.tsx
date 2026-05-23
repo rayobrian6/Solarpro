@@ -25,6 +25,16 @@ import type {
   SignalBlockingWorkspaceModel,
   SignalInvalidationWorkspaceModel,
   SignalStaleImpactsWorkspaceModel,
+  ResolvedEngineeringContextsWorkspaceModel,
+  ContextArbitrationWorkspaceModel,
+  ContextConflictInspectorWorkspaceModel,
+  FallbackChainInspectorWorkspaceModel,
+  ContextProvenanceWorkspaceModel,
+  ContextDependencyGraphWorkspaceModel,
+  ContextConfidenceBreakdownWorkspaceModel,
+  ContextInvalidationsWorkspaceModel,
+  ContextStaleImpactsWorkspaceModel,
+  ContextResolutionTimelineWorkspaceModel,
 } from '@/lib/engineeringIntelligence';
 import type { HydratedProjectEngineeringState } from '@/lib/engineeringIntelligence/projectHydration';
 import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
@@ -52,6 +62,10 @@ const statusColor: Record<string, string> = {
   low: 'border-orange-500/30 bg-orange-500/10 text-orange-300',
   none: 'border-slate-500/30 bg-slate-500/10 text-slate-400',
   not_applicable: 'border-slate-500/30 bg-slate-500/10 text-slate-400',
+  authoritative: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+  preferred: 'border-sky-500/30 bg-sky-500/10 text-sky-300',
+  conflicting: 'border-red-500/30 bg-red-500/10 text-red-300',
+  unresolved: 'border-slate-500/30 bg-slate-500/10 text-slate-400',
 };
 
 function cx(...values: Array<string | false | null | undefined>) {
@@ -1152,6 +1166,92 @@ export function SignalStaleImpactsWorkspace({ model }: { model: SignalStaleImpac
       <DeterministicNotes notes={model.deterministicNotes} />
     </Panel>
   );
+}
+
+
+export function ResolvedEngineeringContextsWorkspace({ model }: { model: ResolvedEngineeringContextsWorkspaceModel }) {
+  const contexts = safeArray(model.contexts);
+  return (
+    <Panel title="Resolved Engineering Contexts" eyebrow="Context Resolution V1">
+      <div className="grid gap-3 md:grid-cols-7">
+        <Metric label="Authoritative" value={collectionSize(model.authoritative)} />
+        <Metric label="Preferred" value={collectionSize(model.preferred)} />
+        <Metric label="Partial" value={collectionSize(model.partial)} />
+        <Metric label="Conflicting" value={collectionSize(model.conflicting)} />
+        <Metric label="Blocked" value={collectionSize(model.blocked)} />
+        <Metric label="Unresolved" value={collectionSize(model.unresolved)} />
+        <Metric label="N/A" value={collectionSize(model.notApplicable)} />
+      </div>
+      {contexts.length ? (
+        <div className="mt-4 grid gap-3 xl:grid-cols-2">
+          {contexts.map(context => (
+            <div key={context.id} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs">
+              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                <div><div className="break-all font-mono text-white">{safeRenderValue(context.id)}</div><div className="mt-1 text-sky-300">{safeRenderValue(context.contextType)} · {safeRenderValue(context.domain)}</div></div>
+                <div className="flex flex-wrap gap-2"><StatusPill value={context.status} /><StatusPill value={context.confidence.band} /></div>
+              </div>
+              <p className="mt-3 leading-5 text-slate-300">{safeRenderValue(context.rankingReason)}</p>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <LineageBox title="Source signals" values={context.sourceSignalIds} />
+                <LineageBox title="Supporting signals" values={context.supportingSignalIds} />
+                <LineageBox title="Competing signals" values={context.competingSignalIds} />
+                <LineageBox title="Source evidence" values={context.sourceEvidenceIds} />
+                <LineageBox title="Metadata" values={context.sourceMetadataIds} />
+                <LineageBox title="CAD readiness" values={context.cadReadinessImpacts} />
+                <LineageBox title="Requirements" values={context.requirementImpacts} />
+                <LineageBox title="Affected outputs" values={context.affectedOutputs} />
+              </div>
+              <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Rank {safeRenderValue(context.confidence.rank)} · score {safeRenderValue(context.confidence.score)}</div><TokenList values={context.confidence.factors} limit={10} /></div>
+              <div className="mt-3 break-all font-mono text-[10px] text-slate-500">hash: {safeRenderValue(context.deterministicHash)}</div>
+            </div>
+          ))}
+        </div>
+      ) : <div className="mt-4"><EmptyState state="no_resolved_contexts">No context resolution model was supplied.</EmptyState></div>}
+      <DeterministicNotes notes={model.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function ContextArbitrationWorkspace({ model }: { model: ContextArbitrationWorkspaceModel }) {
+  return (
+    <Panel title="Context Arbitration" eyebrow="Confidence-ranked contexts">
+      <div className="grid gap-3 md:grid-cols-3"><Metric label="Ranked contexts" value={collectionSize(model.rankings)} /><Metric label="Tie break" value="context_id" /><Metric label="Inference" value="disabled" /></div>
+      <div className="mt-4 overflow-hidden rounded-xl border border-white/10"><table className="w-full text-left text-xs"><thead className="bg-white/[0.04] text-slate-400"><tr><th className="p-3">Rank</th><th className="p-3">Context</th><th className="p-3">Status</th><th className="p-3">Score</th><th className="p-3">Signals</th><th className="p-3">Reason</th></tr></thead><tbody className="divide-y divide-white/10">{safeArray(model.rankings).map(row => <tr key={row.contextId} className="align-top"><td className="p-3 font-mono text-sky-300">{safeRenderValue(row.rank)}</td><td className="p-3"><div className="font-mono text-white">{safeRenderValue(row.contextId)}</div><div className="text-slate-500">{safeRenderValue(row.domain)}</div></td><td className="p-3"><StatusPill value={row.status} /></td><td className="p-3 font-mono text-white">{safeRenderValue(row.score)}</td><td className="p-3"><TokenList values={[...row.sourceSignalIds, ...row.supportingSignalIds]} limit={8} /></td><td className="p-3 text-slate-300">{safeRenderValue(row.rankingReason)}</td></tr>)}</tbody></table></div>
+      <DeterministicNotes notes={model.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function ContextConflictInspectorWorkspace({ model }: { model: ContextConflictInspectorWorkspaceModel }) {
+  return <Panel title="Context Conflict Inspector" eyebrow="Conflict preservation"><div className="grid gap-3 md:grid-cols-3"><Metric label="Conflicts" value={collectionSize(model.conflicts)} /><Metric label="Contexts" value={collectionSize(model.conflictingContextIds)} /><Metric label="Signals" value={collectionSize(model.competingSignalIds)} /></div><div className="mt-4 grid gap-3 lg:grid-cols-2">{safeArray(model.conflicts).length ? safeArray(model.conflicts).map(conflict => <div key={conflict.conflictId} className="rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-xs"><div className="break-all font-mono text-white">{safeRenderValue(conflict.conflictId)}</div><div className="mt-2"><StatusPill value={conflict.domain} /></div><div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Competing contexts" values={conflict.competingContextIds} /><LineageBox title="Competing signals" values={conflict.competingSignalIds} /><LineageBox title="Reasons" values={conflict.conflictReasoning} /><LineageBox title="Policy" values={[conflict.deterministicResolutionPolicy]} /></div></div>) : <EmptyState state="no_context_conflicts">No context conflicts are loaded.</EmptyState>}</div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+}
+
+export function FallbackChainInspectorWorkspace({ model }: { model: FallbackChainInspectorWorkspaceModel }) {
+  return <Panel title="Fallback Chain Inspector" eyebrow="Fallback visibility"><div className="grid gap-3 md:grid-cols-3"><Metric label="Fallback rows" value={collectionSize(model.fallbackParticipation)} /><Metric label="Dependent contexts" value={collectionSize(model.fallbackDependentContextIds)} /><Metric label="Penalty rows" value={collectionSize(model.fallbackConfidencePenalties)} /></div><div className="mt-4 grid gap-4 lg:grid-cols-2"><ListBox title="Fallback-dependent contexts" values={model.fallbackDependentContextIds} /><div className="space-y-3">{safeArray(model.fallbackParticipation).map(entry => <div key={`${entry.contextId}:${entry.fallback}`} className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-xs"><div className="break-all font-mono text-white">{safeRenderValue(entry.contextId)}</div><div className="mt-2 text-amber-300">{safeRenderValue(entry.fallback)}</div><p className="mt-2 text-slate-300">{safeRenderValue(entry.deterministicReason)}</p></div>)}</div></div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+}
+
+export function ContextProvenanceWorkspace({ model }: { model: ContextProvenanceWorkspaceModel }) {
+  return <Panel title="Context Provenance" eyebrow="Signal-to-context lineage"><div className="grid gap-3 md:grid-cols-4"><Metric label="Chains" value={collectionSize(model.chains)} /><Metric label="Evidence" value="canonical_ids" /><Metric label="Metadata" value="grouping_traversal" /><Metric label="Hashing" value="stable" /></div><div className="mt-4 space-y-3">{safeArray(model.chains).length ? safeArray(model.chains).map(chain => <div key={chain.contextId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs"><div className="break-all font-mono text-white">{safeRenderValue(chain.contextId)}</div><div className="mt-3 grid gap-2 md:grid-cols-3"><LineageBox title="Signals" values={chain.sourceSignalIds} /><LineageBox title="Evidence" values={chain.sourceEvidenceIds} /><LineageBox title="Metadata" values={chain.sourceMetadataIds} /><LineageBox title="Dependencies" values={chain.dependencyLineage} /><LineageBox title="Invalidations" values={chain.invalidationLineage} /></div><div className="mt-3 break-all font-mono text-[10px] text-slate-500">hash: {safeRenderValue(chain.deterministicHash)}</div></div>) : <EmptyState state="no_context_provenance">No context provenance chains are available.</EmptyState>}</div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+}
+
+export function ContextDependencyGraphWorkspace({ model }: { model: ContextDependencyGraphWorkspaceModel }) {
+  return <Panel title="Context Dependency Graph" eyebrow="Context dependency metadata"><div className="grid gap-3 md:grid-cols-2"><Metric label="Context graph nodes" value={collectionSize(model.nodes)} /><Metric label="Context graph edges" value={collectionSize(model.edges)} /></div><div className="mt-4 grid gap-3 lg:grid-cols-2"><ListBox title="Nodes" values={safeArray(model.nodes).slice(0, 30).map(node => `${node.nodeType}:${node.nodeId}:${node.status}`)} /><ListBox title="Edges" values={safeArray(model.edges).slice(0, 30).map(edge => `${edge.edgeType}:${edge.sourceNodeId}->${edge.targetNodeId}`)} /></div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+}
+
+export function ContextConfidenceBreakdownWorkspace({ model }: { model: ContextConfidenceBreakdownWorkspaceModel }) {
+  return <Panel title="Context Confidence Breakdown" eyebrow="Deterministic context scoring"><div className="grid gap-3 md:grid-cols-3"><Metric label="Rows" value={collectionSize(model.confidenceBreakdown)} /><Metric label="AI confidence" value="not_used" /><Metric label="Penalties" value="visible" /></div><div className="mt-4 grid gap-3 lg:grid-cols-2">{safeArray(model.confidenceBreakdown).map(entry => <div key={entry.contextId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs"><div className="flex items-center justify-between gap-3"><span className="break-all font-mono text-white">{safeRenderValue(entry.contextId)}</span><StatusPill value={entry.status} /></div><div className="mt-2 flex flex-wrap items-center gap-2 text-slate-300"><span>Rank:</span><span className="font-mono text-sky-300">{safeRenderValue(entry.rank)}</span><span>Score:</span><span className="font-mono text-sky-300">{safeRenderValue(entry.score)}</span><StatusPill value={entry.band} /></div><div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Factors" values={entry.factors} /><LineageBox title="Penalties" values={entry.penalties} /></div></div>)}</div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+}
+
+export function ContextInvalidationsWorkspace({ model }: { model: ContextInvalidationsWorkspaceModel }) {
+  return <Panel title="Context Invalidations" eyebrow="Invalidation lineage"><div className="grid gap-3 md:grid-cols-3"><Metric label="Rows" value={collectionSize(model.invalidations)} /><Metric label="Propagation" value="metadata_only" /><Metric label="Regeneration" value="not_triggered" /></div><div className="mt-4 grid gap-3 lg:grid-cols-2">{safeArray(model.invalidations).length ? safeArray(model.invalidations).map(entry => <div key={entry.contextId} className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-4 text-xs"><div className="break-all font-mono text-white">{safeRenderValue(entry.contextId)}</div><div className="mt-3 grid gap-2 md:grid-cols-3"><LineageBox title="Invalidations" values={entry.invalidationLineage} /><LineageBox title="Stale impacts" values={entry.staleImpactPropagation} /><LineageBox title="Regeneration participation" values={entry.regenerationParticipation} /></div></div>) : <EmptyState state="no_context_invalidations">No context invalidation rows are loaded.</EmptyState>}</div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+}
+
+export function ContextStaleImpactsWorkspace({ model }: { model: ContextStaleImpactsWorkspaceModel }) {
+  return <Panel title="Context Stale Impacts" eyebrow="Readiness mappings"><div className="grid gap-3 md:grid-cols-3"><Metric label="Stale rows" value={collectionSize(model.staleImpacts)} /><Metric label="CAD mappings" value={collectionSize(model.cadReadinessMappings)} /><Metric label="Truth source" value="signals_only" /></div><div className="mt-4 grid gap-4 lg:grid-cols-2"><div className="space-y-3">{safeArray(model.staleImpacts).map(entry => <div key={entry.contextId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs"><div className="break-all font-mono text-white">{safeRenderValue(entry.contextId)}</div><div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Stale classes" values={entry.staleClasses} /><LineageBox title="Invalidated by" values={entry.invalidatedBy} /></div></div>)}</div><div className="space-y-3">{safeArray(model.cadReadinessMappings).map(mapping => <div key={mapping.flagId} className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-4 text-xs"><div className="font-mono text-white">{safeRenderValue(mapping.flagId)}</div><div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Contexts" values={mapping.contextIds} /><LineageBox title="Conflicting" values={mapping.conflictingContextIds} /><LineageBox title="Blocked" values={mapping.blockedContextIds} /><LineageBox title="Unresolved" values={mapping.unresolvedContextIds} /></div></div>)}</div></div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+}
+
+export function ContextResolutionTimelineWorkspace({ model }: { model: ContextResolutionTimelineWorkspaceModel }) {
+  return <Panel title="Context Resolution Timeline" eyebrow="Status timeline"><div className="grid gap-3 md:grid-cols-2"><Metric label="Events" value={collectionSize(model.events)} /><Metric label="Runtime actions" value="none" /></div><div className="mt-4 space-y-2">{safeArray(model.events).length ? safeArray(model.events).map(event => <div key={event.eventId} className="rounded-xl border border-white/10 bg-white/[0.025] p-3 text-xs"><div className="flex items-center justify-between gap-3"><span className="break-all font-mono text-white">{safeRenderValue(event.contextId)}</span><StatusPill value={event.status} /></div><p className="mt-2 text-slate-300">{safeRenderValue(event.deterministicReason)}</p></div>) : <EmptyState state="no_context_timeline">No context timeline events are loaded.</EmptyState>}</div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
 }
 
 export function AuditGuardWorkspace({ audit }: { audit: AuditGuardWorkspaceModel }) {

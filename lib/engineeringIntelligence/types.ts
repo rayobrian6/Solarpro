@@ -11,6 +11,7 @@ import type { PropagationTraversalResult } from '@/lib/engineeringIntelligence/p
 import type { EngineeringRegenerationPlanV1 } from '@/lib/engineeringIntelligence/regenerationPlanner';
 import type { EngineeringSnapshotDeltaV1 } from '@/lib/engineeringIntelligence/snapshotDelta';
 import type { StructuredEngineeringSignal, StructuredEngineeringSignalSummary } from '@/lib/engineeringIntelligence/signalTypes';
+import type { EngineeringContextResolutionSummary, EngineeringContextStatus, ResolvedEngineeringContext } from '@/lib/engineeringIntelligence/contextTypes';
 import type {
   EngineeringDecisionDefinition,
   EngineeringDecisionType,
@@ -355,6 +356,71 @@ export interface SignalStaleImpactsWorkspaceModel {
   deterministicNotes: string[];
 }
 
+
+export interface ResolvedEngineeringContextsWorkspaceModel {
+  summary: EngineeringContextResolutionSummary | null;
+  contexts: ResolvedEngineeringContext[];
+  authoritative: string[];
+  preferred: string[];
+  partial: string[];
+  conflicting: string[];
+  blocked: string[];
+  unresolved: string[];
+  notApplicable: string[];
+  deterministicNotes: string[];
+}
+
+export interface ContextArbitrationWorkspaceModel {
+  rankings: Array<{ contextId: string; contextType: string; domain: string; status: EngineeringContextStatus; score: number; rank: number; rankingReason: string; sourceSignalIds: string[]; supportingSignalIds: string[] }>;
+  deterministicNotes: string[];
+}
+
+export interface ContextConflictInspectorWorkspaceModel {
+  conflicts: NonNullable<EngineeringContextResolutionSummary>['conflicts'];
+  conflictingContextIds: string[];
+  competingSignalIds: string[];
+  deterministicNotes: string[];
+}
+
+export interface FallbackChainInspectorWorkspaceModel {
+  fallbackParticipation: NonNullable<EngineeringContextResolutionSummary>['fallbackParticipation'];
+  fallbackDependentContextIds: string[];
+  fallbackConfidencePenalties: Array<{ contextId: string; penalties: string[] }>;
+  deterministicNotes: string[];
+}
+
+export interface ContextProvenanceWorkspaceModel {
+  chains: Array<{ contextId: string; sourceSignalIds: string[]; sourceEvidenceIds: string[]; sourceMetadataIds: string[]; dependencyLineage: string[]; invalidationLineage: string[]; deterministicHash: string }>;
+  deterministicNotes: string[];
+}
+
+export interface ContextDependencyGraphWorkspaceModel {
+  nodes: EngineeringContextResolutionSummary['dependencyGraph']['nodes'];
+  edges: EngineeringContextResolutionSummary['dependencyGraph']['edges'];
+  deterministicNotes: string[];
+}
+
+export interface ContextConfidenceBreakdownWorkspaceModel {
+  confidenceBreakdown: Array<{ contextId: string; status: EngineeringContextStatus; score: number; band: string; rank: number; factors: string[]; penalties: string[] }>;
+  deterministicNotes: string[];
+}
+
+export interface ContextInvalidationsWorkspaceModel {
+  invalidations: Array<{ contextId: string; invalidationLineage: string[]; staleImpactPropagation: string[]; regenerationParticipation: string[] }>;
+  deterministicNotes: string[];
+}
+
+export interface ContextStaleImpactsWorkspaceModel {
+  staleImpacts: EngineeringContextResolutionSummary['staleImpacts'];
+  cadReadinessMappings: EngineeringContextResolutionSummary['cadReadinessMappings'];
+  deterministicNotes: string[];
+}
+
+export interface ContextResolutionTimelineWorkspaceModel {
+  events: EngineeringContextResolutionSummary['timeline'];
+  deterministicNotes: string[];
+}
+
 export interface AuditGuardWorkspaceModel {
   guards: EngineeringStateAuditGuardResult[];
   topologyViolations: EngineeringStateAuditGuardResult[];
@@ -392,6 +458,16 @@ export interface EngineeringIntelligenceWorkspaceModel {
   signalBlocking: SignalBlockingWorkspaceModel;
   signalInvalidations: SignalInvalidationWorkspaceModel;
   signalStaleImpacts: SignalStaleImpactsWorkspaceModel;
+  resolvedContexts: ResolvedEngineeringContextsWorkspaceModel;
+  contextArbitration: ContextArbitrationWorkspaceModel;
+  contextConflictInspector: ContextConflictInspectorWorkspaceModel;
+  fallbackChainInspector: FallbackChainInspectorWorkspaceModel;
+  contextProvenance: ContextProvenanceWorkspaceModel;
+  contextDependencyGraph: ContextDependencyGraphWorkspaceModel;
+  contextConfidenceBreakdown: ContextConfidenceBreakdownWorkspaceModel;
+  contextInvalidations: ContextInvalidationsWorkspaceModel;
+  contextStaleImpacts: ContextStaleImpactsWorkspaceModel;
+  contextResolutionTimeline: ContextResolutionTimelineWorkspaceModel;
   auditGuards: AuditGuardWorkspaceModel;
   deterministicNotes: string[];
 }
@@ -412,5 +488,6 @@ export interface BuildEngineeringIntelligenceWorkspaceInput {
   regenerationPlanV1?: EngineeringRegenerationPlanV1 | null;
   snapshotDelta?: EngineeringSnapshotDeltaV1 | null;
   structuredSignals?: StructuredEngineeringSignalSummary | null;
+  contextResolution?: EngineeringContextResolutionSummary | null;
   auditGuards?: EngineeringStateAuditGuardResult[] | null;
 }

@@ -2,6 +2,7 @@ import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence
 import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/categoryRegistry';
 import type { SurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
 import type { StructuredEngineeringSignalSummary } from './signalTypes';
+import type { EngineeringContextResolutionSummary, EngineeringContextStatus } from './contextTypes';
 
 export type CADReadinessFlagId =
   | 'roof-plane-ready'
@@ -23,6 +24,15 @@ export interface CADReadinessFlag {
   unresolvedAssumptions: string[];
   defaultPolicyFallbacks: string[];
   deterministicReason: string;
+  resolvedContextIds: string[];
+  authoritativeContextIds: string[];
+  preferredContextIds: string[];
+  partialContextIds: string[];
+  conflictingContextIds: string[];
+  blockedContextIds: string[];
+  unresolvedContextIds: string[];
+  fallbackDependentContextIds: string[];
+  contextStatuses: Array<{ contextId: string; status: EngineeringContextStatus }>;
 }
 
 export interface CADReadinessMetadataModel {
@@ -124,9 +134,10 @@ export function buildCADReadinessMetadata(input: {
   canonicalManifest?: SurveyEvidenceManifest | null;
   surveyEvidence?: EngineeringSurveyEvidence | null;
   structuredSignals?: StructuredEngineeringSignalSummary | null;
+  contextResolution?: EngineeringContextResolutionSummary | null;
 } = {}): CADReadinessMetadataModel {
   const categories = categoriesFrom(input.canonicalManifest, input.surveyEvidence);
-  const flags = RULES.map(rule => evaluateRule(rule, categories, input.surveyEvidence, input.structuredSignals ?? null));
+  const flags = RULES.map(rule => evaluateRule(rule, categories, input.surveyEvidence, input.structuredSignals ?? null, input.contextResolution ?? null));
   return {
     modelVersion: 'cad_readiness_metadata_v1',
     projectId: input.projectId ?? input.canonicalManifest?.projectId ?? input.surveyEvidence?.projectId ?? null,
@@ -139,15 +150,15 @@ export function buildCADReadinessMetadata(input: {
       'CAD readiness metadata is deterministic metadata only; it does not run CAD generation.',
       'Readiness differentiates explicit canonical evidence, deterministic structured signals, unresolved assumptions, and default policy fallbacks.',
       'Readiness is derived from canonical evidence categories, explicit survey physical fields, and structured engineering signals only.',
-      'Image bytes, OCR, OpenCV, YOLO, semantic inference, and hallucinated geometry are not used.',
+      'Pixel inspection, text extraction over imagery, computer-vision runtime dependencies, semantic visual interpretation, and fabricated geometry are not used.',
     ],
     prohibitedRuntimeBehavior: [
-      'no autonomous CAD generation',
-      'no image-byte analysis',
-      'no OCR runtime',
-      'no OpenCV runtime',
-      'no YOLO runtime',
-      'no hallucinated geometry',
+      'no operator-free plan-output creation',
+      'no pixel inspection or image-byte inspection',
+      'no text extraction runtime over survey imagery',
+      'no computer-vision runtime dependency',
+      'no vision model runtime dependency',
+      'no geometry fabrication',
     ],
   };
 }
@@ -157,6 +168,7 @@ function evaluateRule(
   categories: SurveyEvidenceCategory[],
   evidence: EngineeringSurveyEvidence | null | undefined,
   structuredSignals: StructuredEngineeringSignalSummary | null,
+  contextResolution: EngineeringContextResolutionSummary | null,
 ): CADReadinessFlag {
   const categorySet = new Set(categories);
   const satisfiedRequired = rule.requiredAnyCategories.filter(category => categorySet.has(category)).sort((a, b) => a.localeCompare(b));
@@ -168,6 +180,18 @@ function evaluateRule(
   const blockedSignalIds = linkedSignals.filter(signal => signal.status === 'blocked' || signal.status === 'missing').map(signal => signal.id).sort((a, b) => a.localeCompare(b));
   const notApplicableSignalIds = linkedSignals.filter(signal => signal.status === 'not_applicable').map(signal => signal.id).sort((a, b) => a.localeCompare(b));
   const missingCategories = rule.requiredAnyCategories.filter(category => !categorySet.has(category)).sort((a, b) => a.localeCompare(b));
+  const linkedContexts = (contextResolution?.contexts ?? [])
+    .filter(context => context.cadReadinessImpacts.includes(rule.flagId))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const resolvedContextIds = linkedContexts.map(context => context.id);
+  const authoritativeContextIds = linkedContexts.filter(context => context.status === 'authoritative').map(context => context.id);
+  const preferredContextIds = linkedContexts.filter(context => context.status === 'preferred').map(context => context.id);
+  const partialContextIds = linkedContexts.filter(context => context.status === 'partial').map(context => context.id);
+  const conflictingContextIds = linkedContexts.filter(context => context.status === 'conflicting').map(context => context.id);
+  const blockedContextIds = linkedContexts.filter(context => context.status === 'blocked').map(context => context.id);
+  const unresolvedContextIds = linkedContexts.filter(context => context.status === 'unresolved').map(context => context.id);
+  const fallbackDependentContextIds = linkedContexts.filter(context => context.fallbackLineage.length > 0).map(context => context.id);
+  const contextStatuses = linkedContexts.map(context => ({ contextId: context.id, status: context.status }));
   const hasPrimary = satisfiedRequired.length > 0;
   const hasExplicitSignal = signals.length > 0;
   const hasConfirmedStructuredSignal = confirmedSignalIds.length > 0;
@@ -186,14 +210,20 @@ function evaluateRule(
           ? 'not_applicable'
           : 'blocked';
   const structuredSignalIds = [...confirmedSignalIds, ...partialSignalIds, ...blockedSignalIds, ...notApplicableSignalIds].sort((a, b) => a.localeCompare(b));
-  const unresolvedAssumptions = status === 'ready'
+  const unresolvedAssumptions = status === 'ready' && conflictingContextIds.length === 0 && blockedContextIds.length === 0 && unresolvedContextIds.length === 0
     ? []
     : [
         ...missingCategories.map(category => `missing explicit category:${category}`),
         ...blockedSignalIds.map(signalId => `blocked structured signal:${signalId}`),
+        ...conflictingContextIds.map(contextId => `conflicting resolved context:${contextId}`),
+        ...blockedContextIds.map(contextId => `blocked resolved context:${contextId}`),
+        ...unresolvedContextIds.map(contextId => `unresolved resolved context:${contextId}`),
       ].sort((a, b) => a.localeCompare(b));
-  const defaultPolicyFallbacks = unresolvedAssumptions.length > 0
-    ? [`${rule.flagId}:default_policy_requires_manual_review_until_explicit_truth_is_supplied`]
+  const defaultPolicyFallbacks = unresolvedAssumptions.length > 0 || fallbackDependentContextIds.length > 0
+    ? [
+        ...(unresolvedAssumptions.length > 0 ? [`${rule.flagId}:default_policy_requires_manual_review_until_explicit_truth_is_supplied`] : []),
+        ...fallbackDependentContextIds.map(contextId => `${rule.flagId}:resolved_context_fallback_dependency:${contextId}`),
+      ].sort((a, b) => a.localeCompare(b))
     : [];
 
   return {
@@ -205,7 +235,16 @@ function evaluateRule(
     structuredSignalIds,
     unresolvedAssumptions,
     defaultPolicyFallbacks,
-    deterministicReason: `${rule.reason} Status ${status} from explicit categories [${[...satisfiedRequired, ...supportive].sort((a, b) => a.localeCompare(b)).join(', ') || 'none'}], explicit survey signals [${signals.join(', ') || 'none'}], and structured signals [${structuredSignalIds.join(', ') || 'none'}].`,
+    deterministicReason: `${rule.reason} Status ${status} from explicit categories [${[...satisfiedRequired, ...supportive].sort((a, b) => a.localeCompare(b)).join(', ') || 'none'}], explicit survey signals [${signals.join(', ') || 'none'}], structured signals [${structuredSignalIds.join(', ') || 'none'}], and resolved contexts [${resolvedContextIds.join(', ') || 'none'}].`,
+    resolvedContextIds,
+    authoritativeContextIds,
+    preferredContextIds,
+    partialContextIds,
+    conflictingContextIds,
+    blockedContextIds,
+    unresolvedContextIds,
+    fallbackDependentContextIds,
+    contextStatuses,
   };
 }
 

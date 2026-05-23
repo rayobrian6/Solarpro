@@ -10,3 +10,6 @@ export * from './snapshotDelta';
 export * from './signalTypes';
 export * from './signalRegistry';
 export * from './signalExtraction';
+export * from './contextTypes';
+export * from './contextRegistry';
+export * from './contextResolution';
