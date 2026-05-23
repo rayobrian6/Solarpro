@@ -114,7 +114,85 @@ describe('project engineering intelligence hydration', () => {
     expect(hydrated.regenerationPlans.length).toBe(1);
     expect(hydrated.workspace.regenerationPlanning.plans.length).toBe(1);
     expect(hydrated.cadReadiness.flags.length).toBeGreaterThan(0);
+
+    const roofGroup = hydrated.workspace.evidenceGroups.find(group => group.groupId === 'roof');
+    const electricalGroup = hydrated.workspace.evidenceGroups.find(group => group.groupId === 'electrical');
+    const trenchGroup = hydrated.workspace.evidenceGroups.find(group => group.groupId === 'trench_ground_mount');
+    const roofRow = roofGroup?.canonicalEvidenceItems.find(item => item.category === 'roof_plane');
+    const electricalRow = electricalGroup?.canonicalEvidenceItems.find(item => item.category === 'main_service_panel' || item.category === 'meter');
+
+    expect(roofGroup?.readinessFlags.map(flag => flag.flagId)).toEqual(expect.arrayContaining(['roof-plane-ready', 'setback-ready']));
+    expect(roofRow).toMatchObject({
+      canonicalRepresentativeStatus: 'canonical_representative',
+      originatingSurveyIds: ['survey-live-1'],
+      duplicateCollapseCount: expect.any(Number),
+      evidenceSource: 'site_survey_files',
+      evidenceTruthSource: 'canonical_manifest_v1',
+    });
+    expect(roofRow?.originatingSurveyCreatedAts).toEqual(['2024-12-31T20:00:00.000Z']);
+    expect(roofRow?.canonicalSelectionReason).toContain('unique canonical evidence item');
+    expect(roofRow?.linkedRequirementIds.length).toBeGreaterThan(0);
+    expect(roofRow?.linkedDecisionIds.length).toBeGreaterThan(0);
+    expect(roofRow?.linkedGraphNodeIds.length).toBeGreaterThan(0);
+    expect(roofRow?.linkedGraphEdgeIds.length).toBeGreaterThan(0);
+    expect(roofRow?.linkedCADReadinessFlags.map(flag => flag.flagId)).toEqual(expect.arrayContaining(['roof-plane-ready']));
+    expect(roofRow?.metadataCompleteness.map(entry => entry.field)).toEqual(expect.arrayContaining(['hasCaptureTimestamp', 'hasSiteSurveyFileId', 'hasSubmittedCategory']));
+
+    expect(electricalRow?.linkedDecisionIds.length).toBeGreaterThan(0);
+    expect(electricalRow?.linkedOutputIds.length).toBeGreaterThan(0);
+    expect(electricalRow?.staleStateImpactStateIds.length).toBeGreaterThan(0);
+    expect(electricalRow?.staleImpactReasons.join(' ')).toContain('depends on changed canonicalEvidence');
+    expect(electricalRow?.regenerationCandidateIds).toEqual(expect.arrayContaining(hydrated.regenerationPlans.map(plan => plan.planId)));
+
+    expect(trenchGroup?.canonicalEvidenceItems).toHaveLength(0);
+    expect(trenchGroup?.fieldQualitySignals.join(' ')).toContain('no trench context');
+    expect(trenchGroup?.readinessFlags.find(flag => flag.flagId === 'trench-route-ready')?.status).toBe('blocked');
     expect(hydrated.deterministicNotes.join(' ')).toContain('metadata visualizations only');
+  });
+
+  it('surfaces partial evidence rows and deterministic missing signals for minimal walkaround survey data', () => {
+    const hydrated = hydrateProjectEngineeringIntelligence({
+      projectId: 'project-minimal-1',
+      generatedAt,
+      sources: [
+        {
+          survey: survey({
+            id: 'survey-minimal-1',
+            projectId: 'project-minimal-1',
+            surveyData: {
+              systemType: 'roof',
+              geometry: {},
+              structural: {},
+              electrical: {},
+            },
+          }),
+          files: [
+            { ...file('file-minimal-overview', 'site_overview'), surveyId: 'survey-minimal-1' },
+            { ...file('file-minimal-roof', 'roof_overview'), surveyId: 'survey-minimal-1' },
+          ],
+        },
+      ],
+    });
+
+    const roofGroup = hydrated.workspace.evidenceGroups.find(group => group.groupId === 'roof');
+    const electricalGroup = hydrated.workspace.evidenceGroups.find(group => group.groupId === 'electrical');
+    const structuralGroup = hydrated.workspace.evidenceGroups.find(group => group.groupId === 'structural');
+    const routingGroup = hydrated.workspace.evidenceGroups.find(group => group.groupId === 'routing');
+    const essGroup = hydrated.workspace.evidenceGroups.find(group => group.groupId === 'ess');
+    const detachedGroup = hydrated.workspace.evidenceGroups.find(group => group.groupId === 'detached_structures');
+
+    expect(hydrated.surveyEvidence?.completeness).not.toBe('sufficient');
+    expect(roofGroup?.canonicalEvidenceItems.length).toBeGreaterThan(0);
+    expect(roofGroup?.fieldQualitySignals.join(' ')).toContain('low roof/completeness context');
+    expect(electricalGroup?.canonicalEvidenceItems).toHaveLength(0);
+    expect(electricalGroup?.fieldQualitySignals.join(' ')).toContain('insufficient electrical evidence');
+    expect(structuralGroup?.canonicalEvidenceItems).toHaveLength(0);
+    expect(structuralGroup?.fieldQualitySignals.join(' ')).toContain('no attic/framing evidence');
+    expect(routingGroup?.fieldQualitySignals.join(' ')).toContain('incomplete routing evidence');
+    expect(essGroup?.canonicalEvidenceItems).toHaveLength(0);
+    expect(detachedGroup?.canonicalEvidenceItems).toHaveLength(0);
+    expect(detachedGroup?.readinessFlags.find(flag => flag.flagId === 'detached-structure-ready')?.status).toBe('blocked');
+    expect(hydrated.workspace.evidenceGroups.flatMap(group => group.deterministicNotes).join(' ')).toContain('do not trigger CAD or regeneration');
   });
 
   it('keeps an explicit empty state when no surveys are supplied', () => {

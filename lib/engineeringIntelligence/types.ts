@@ -3,6 +3,8 @@ import type {
   EngineeringRequirementId,
   EngineeringRequirementStatus,
 } from '@/lib/survey/evidence/engineeringRequirements';
+import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+import type { CADReadinessFlag, CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
 import type {
   EngineeringDecisionDefinition,
   EngineeringDecisionType,
@@ -13,6 +15,7 @@ import type {
   EngineeringStateSnapshotDiff,
   EngineeringStateTransitionHistory,
   EngineeringStateTimeline,
+  EngineeringInvalidationResult,
   PersistentEngineeringStateGraph,
   SelectiveRegenerationPlan,
 } from '@/lib/engineeringStateInvalidation';
@@ -71,12 +74,29 @@ export interface EngineeringHealthDashboardModel {
 export interface CanonicalEvidenceWorkspaceItemModel {
   canonicalEvidenceId: string;
   category: string;
+  evidenceCategoryLabel: string;
   provenance: string[];
   originatingSurveyIds: string[];
+  originatingSurveyCreatedAts: Array<string | null>;
   duplicateCollapseCount: number;
+  canonicalRepresentativeStatus: 'canonical_representative' | 'snapshot_reference_only';
+  canonicalSelectionReason: string;
+  evidenceTruthSource: string;
+  evidenceSource: string;
+  evidenceConfidence: string;
+  metadataCompleteness: Array<{ field: string; present: boolean }>;
   linkedRequirementIds: EngineeringRequirementId[];
+  linkedDecisionIds: string[];
   linkedDocumentSectionIds: string[];
+  linkedOutputIds: string[];
+  linkedGraphNodeIds: string[];
+  linkedGraphEdgeIds: string[];
+  linkedCADReadinessFlags: CADReadinessFlag[];
+  readinessImpact: 'ready' | 'partial' | 'blocked' | 'not_applicable' | 'not_loaded';
+  fieldQualitySignals: string[];
   staleStateImpactStateIds: string[];
+  staleImpactReasons: string[];
+  regenerationCandidateIds: string[];
   status: EngineeringWorkspaceStatus;
 }
 
@@ -86,6 +106,9 @@ export interface CanonicalEvidenceWorkspaceGroupModel {
   description: string;
   requirementIds: EngineeringRequirementId[];
   canonicalEvidenceItems: CanonicalEvidenceWorkspaceItemModel[];
+  missingRequirementIds: EngineeringRequirementId[];
+  fieldQualitySignals: string[];
+  readinessFlags: CADReadinessFlag[];
   deterministicNotes: string[];
 }
 
@@ -223,6 +246,9 @@ export interface EngineeringIntelligenceWorkspaceModel {
 
 export interface BuildEngineeringIntelligenceWorkspaceInput {
   projectId?: string | null;
+  surveyEvidence?: EngineeringSurveyEvidence | null;
+  cadReadiness?: CADReadinessMetadataModel | null;
+  invalidationResult?: EngineeringInvalidationResult | null;
   snapshots?: EngineeringStateSnapshot[] | null;
   snapshotDiffs?: EngineeringStateSnapshotDiff[] | null;
   transitionHistory?: EngineeringStateTransitionHistory | null;

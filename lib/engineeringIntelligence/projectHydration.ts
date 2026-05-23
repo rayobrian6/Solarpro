@@ -225,8 +225,12 @@ export function hydrateProjectEngineeringIntelligence(input: {
     diffs,
     renderOutputExpected: false,
   });
+  const cadReadiness = buildCADReadinessMetadata({ projectId: input.projectId, surveyId: canonicalSurveyId, canonicalManifest: hygiene.canonicalManifest ?? canonicalManifest, surveyEvidence });
   const workspaceInput: BuildEngineeringIntelligenceWorkspaceInput = {
     projectId: input.projectId,
+    surveyEvidence,
+    cadReadiness,
+    invalidationResult,
     snapshots,
     snapshotDiffs: diffs,
     transitionHistory,
@@ -236,7 +240,6 @@ export function hydrateProjectEngineeringIntelligence(input: {
     auditGuards,
   };
   const workspace = buildEngineeringIntelligenceWorkspace(workspaceInput);
-  const cadReadiness = buildCADReadinessMetadata({ projectId: input.projectId, surveyId: canonicalSurveyId, canonicalManifest: hygiene.canonicalManifest ?? canonicalManifest, surveyEvidence });
 
   return {
     projectId: input.projectId,

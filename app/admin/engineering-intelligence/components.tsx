@@ -321,27 +321,86 @@ export function CanonicalEvidenceWorkspace({ groups }: { groups: CanonicalEviden
                 <h3 className="font-bold text-white">{group.label}</h3>
                 <p className="mt-1 text-xs leading-5 text-slate-400">{group.description}</p>
               </div>
-              <span className="rounded-full bg-sky-400/10 px-2 py-1 text-[10px] font-bold text-sky-300">{group.canonicalEvidenceItems.length} items</span>
+              <span className="rounded-full bg-sky-400/10 px-2 py-1 text-[10px] font-bold text-sky-300">{group.canonicalEvidenceItems.length} rows</span>
             </div>
-            <div className="mt-3 text-xs text-slate-400">Linked requirements</div>
-            <TokenList values={group.requirementIds} />
-            <div className="mt-4 space-y-2">
-              {group.canonicalEvidenceItems.length ? group.canonicalEvidenceItems.map(item => (
-                <div key={item.canonicalEvidenceId} className="rounded-lg border border-white/10 bg-slate-950/60 p-3">
-                  <div className="flex items-center justify-between gap-2"><span className="font-mono text-xs text-white">{item.canonicalEvidenceId}</span><StatusPill value={item.status} /></div>
-                  <div className="mt-2 grid gap-2 text-xs text-slate-400 md:grid-cols-2">
-                    <div>Duplicate collapse count: {item.duplicateCollapseCount}</div>
-                    <div>Origin surveys: {item.originatingSurveyIds.length}</div>
-                  </div>
-                  <div className="mt-2"><TokenList values={item.linkedRequirementIds} /></div>
+            <div className="mt-3 grid gap-2 text-xs md:grid-cols-2">
+              <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                <div className="font-bold uppercase tracking-wide text-slate-500">Linked requirements</div>
+                <TokenList values={group.requirementIds} />
+              </div>
+              <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                <div className="font-bold uppercase tracking-wide text-slate-500">Missing / insufficient</div>
+                <TokenList values={group.missingRequirementIds.length ? group.missingRequirementIds : ['none']} />
+              </div>
+            </div>
+            <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+              <div className="text-[10px] font-bold uppercase tracking-wide text-amber-300">Deterministic field-quality signals</div>
+              <TokenList values={group.fieldQualitySignals.length ? group.fieldQualitySignals : ['no group-level quality warnings']} limit={10} />
+            </div>
+            <div className="mt-3 rounded-lg border border-violet-500/20 bg-violet-500/5 p-3">
+              <div className="text-[10px] font-bold uppercase tracking-wide text-violet-300">CAD readiness flags from real evidence</div>
+              {group.readinessFlags.length ? (
+                <div className="mt-2 space-y-2">
+                  {group.readinessFlags.map(flag => (
+                    <div key={flag.flagId} className="rounded-md border border-white/10 bg-black/20 p-2 text-xs">
+                      <div className="flex items-center justify-between gap-2"><span className="font-mono text-white">{flag.flagId}</span><StatusPill value={flag.status} /></div>
+                      <div className="mt-1 text-slate-400">{flag.deterministicReason}</div>
+                    </div>
+                  ))}
                 </div>
-              )) : <EmptyState state="registry_visible_only">No canonical evidence rows are loaded for this group in the current deterministic workspace context.</EmptyState>}
+              ) : <EmptyState state="not_loaded">No CAD-readiness metadata is linked to this group.</EmptyState>}
             </div>
+            <div className="mt-4 space-y-3">
+              {group.canonicalEvidenceItems.length ? group.canonicalEvidenceItems.map(item => (
+                <div key={item.canonicalEvidenceId} className="rounded-xl border border-white/10 bg-slate-950/70 p-4">
+                  <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <div className="break-all font-mono text-xs text-white">{item.canonicalEvidenceId}</div>
+                      <div className="mt-1 text-xs text-sky-300">{item.evidenceCategoryLabel} · {item.category}</div>
+                    </div>
+                    <div className="flex flex-wrap gap-2"><StatusPill value={item.status} /><StatusPill value={item.readinessImpact} /></div>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs text-slate-400 md:grid-cols-3">
+                    <div>Representative: <span className="font-mono text-slate-200">{item.canonicalRepresentativeStatus}</span></div>
+                    <div>Duplicate group size: <span className="text-slate-200">{item.duplicateCollapseCount}</span></div>
+                    <div>Confidence: <span className="text-slate-200">{item.evidenceConfidence}</span></div>
+                    <div>Evidence source: <span className="text-slate-200">{item.evidenceSource}</span></div>
+                    <div>Truth source: <span className="text-slate-200">{item.evidenceTruthSource}</span></div>
+                    <div>Origin timestamps: <span className="text-slate-200">{item.originatingSurveyCreatedAts.filter(Boolean).join(', ') || 'not_loaded'}</span></div>
+                  </div>
+                  <p className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3 text-xs leading-5 text-slate-300">{item.canonicalSelectionReason}</p>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <LineageBox title="Origin surveys" values={item.originatingSurveyIds} />
+                    <LineageBox title="Provenance / state refs" values={item.provenance} />
+                    <LineageBox title="Requirements" values={item.linkedRequirementIds} />
+                    <LineageBox title="Decisions" values={item.linkedDecisionIds} />
+                    <LineageBox title="Outputs / document sections" values={[...item.linkedOutputIds, ...item.linkedDocumentSectionIds]} />
+                    <LineageBox title="Graph nodes / edges" values={[...item.linkedGraphNodeIds, ...item.linkedGraphEdgeIds]} />
+                    <LineageBox title="Stale impacts" values={[...item.staleStateImpactStateIds, ...item.staleImpactReasons]} />
+                    <LineageBox title="Regeneration candidates" values={item.regenerationCandidateIds} />
+                  </div>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Metadata completeness</div>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {item.metadataCompleteness.length ? item.metadataCompleteness.map(entry => <span key={entry.field} className={`rounded-full px-2 py-1 text-[10px] ${entry.present ? 'bg-emerald-500/10 text-emerald-300' : 'bg-orange-500/10 text-orange-300'}`}>{entry.field}:{entry.present ? 'present' : 'missing'}</span>) : <span className="text-xs text-slate-500">not_loaded</span>}
+                      </div>
+                    </div>
+                    <LineageBox title="Field-quality signals" values={item.fieldQualitySignals.length ? item.fieldQualitySignals : ['no row-level quality warnings']} />
+                  </div>
+                </div>
+              )) : <EmptyState state="no_evidence">No canonical evidence rows are loaded for this group. Missing evidence is explicit; no MSP, attic, routing, trench, ESS, or detached-structure evidence is synthesized.</EmptyState>}
+            </div>
+            <DeterministicNotes notes={group.deterministicNotes} />
           </div>
         ))}
       </div>
     </Panel>
   );
+}
+
+function LineageBox({ title, values }: { title: string; values: string[] }) {
+  return <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3"><div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">{title}</div><TokenList values={values.length ? values : ['none']} limit={8} /></div>;
 }
 
 export function RequirementWorkspace({ requirements }: { requirements: RequirementWorkspaceItemModel[] }) {
@@ -397,13 +456,29 @@ export function StaleInvalidationWorkspace({ stale }: { stale: StaleInvalidation
         <Metric label="Preserved outputs" value={stale.preservedOutputIds.length} />
         <Metric label="Regeneration scope" value={stale.regenerationScopeIds.length} />
       </div>
-      <div className="mt-4 space-y-2">
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <ListBox title="Current stale outputs" values={stale.staleOutputIds} />
+        <ListBox title="Preserved outputs" values={stale.preservedOutputIds} />
+        <ListBox title="Regeneration candidates" values={stale.regenerationScopeIds} />
+        <ListBox title="No autonomous action" values={['metadata visualization only', 'operator-controlled regeneration required']} />
+      </div>
+      <div className="mt-4 space-y-3">
         {stale.invalidationChains.length ? stale.invalidationChains.map(chain => (
           <div key={chain.eventId} className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-4 text-xs">
-            <div className="font-mono text-orange-300">{chain.eventId}</div><div className="mt-1 text-white">{chain.stateId}</div><p className="mt-2 text-slate-400">{chain.reason}</p>
-            <div className="mt-3 grid gap-3 md:grid-cols-3"><TokenList values={chain.triggeringEvidenceIds} /><TokenList values={chain.triggeringDecisionIds} /><TokenList values={chain.downstreamStateIds} /></div>
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div className="font-mono text-orange-300">{chain.eventId}</div>
+              <StatusPill value="stale" />
+            </div>
+            <div className="mt-1 break-all text-white">Impacted state: {chain.stateId}</div>
+            <p className="mt-2 text-slate-400">{chain.reason}</p>
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              <LineageBox title="Triggering evidence" values={chain.triggeringEvidenceIds} />
+              <LineageBox title="Triggering requirements" values={chain.triggeringRequirementIds} />
+              <LineageBox title="Triggering decisions" values={chain.triggeringDecisionIds} />
+              <LineageBox title="Downstream states" values={chain.downstreamStateIds} />
+            </div>
           </div>
-        )) : <EmptyState state="not_loaded">No invalidation transition history is loaded.</EmptyState>}
+        )) : <EmptyState state="no_invalidation_history">No invalidation transition history is loaded.</EmptyState>}
       </div>
       <DeterministicNotes notes={stale.deterministicNotes} />
     </Panel>
@@ -413,17 +488,43 @@ export function StaleInvalidationWorkspace({ stale }: { stale: StaleInvalidation
 export function SnapshotTimelineWorkspace({ snapshots }: { snapshots: SnapshotTimelineWorkspaceModel }) {
   return (
     <Panel title="Snapshot Timeline Workspace" eyebrow="State snapshots">
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-4">
         <Metric label="Snapshots" value={snapshots.snapshots.length} />
         <Metric label="Diffs" value={snapshots.diffs.length} />
         <Metric label="Transition events" value={snapshots.transitionHistory?.transitionEvents.length ?? 0} />
+        <Metric label="Latest" value={snapshots.latestSnapshotId ? 'loaded' : 'no_snapshot'} />
       </div>
-      <div className="mt-4 space-y-2">
-        {snapshots.snapshotHashes.length ? snapshots.snapshotHashes.map(snapshot => (
+      <div className="mt-4 space-y-3">
+        {snapshots.snapshots.length ? snapshots.snapshots.map(snapshot => (
           <div key={snapshot.snapshotId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
-            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between"><div className="font-semibold text-white">{snapshot.snapshotId}</div><div className="break-all font-mono text-xs text-sky-300">{snapshot.snapshotHash}</div></div>
+            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+              <div>
+                <div className="font-semibold text-white">{snapshot.snapshotId}</div>
+                <div className="mt-1 text-xs text-slate-400">Generated: {snapshot.generatedAt}</div>
+                <div className="mt-1 text-xs text-slate-500">Previous: {snapshot.previousSnapshotId ?? 'none'} · Superseded by: {snapshot.supersededBySnapshotId ?? 'none'}</div>
+              </div>
+              <div className="break-all font-mono text-xs text-sky-300">{snapshot.snapshotHash}</div>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-4">
+              <Metric label="State refs" value={snapshot.stateRefs.length} />
+              <Metric label="Valid" value={snapshot.validStateIds.length} />
+              <Metric label="Stale" value={snapshot.staleStateIds.length} />
+              <Metric label="Transitions" value={snapshot.transitionEventIds.length} />
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <LineageBox title="Valid outputs" values={snapshot.validStateIds} />
+              <LineageBox title="Stale outputs" values={snapshot.staleStateIds} />
+              <LineageBox title="Transition lineage" values={snapshot.transitionEventIds} />
+              <LineageBox title="Snapshot notes" values={snapshot.deterministicNotes} />
+            </div>
           </div>
         )) : <EmptyState state="no_snapshot">No persistent snapshot set is loaded.</EmptyState>}
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <ListBox title="Snapshot hashes" values={snapshots.snapshotHashes.map(snapshot => `${snapshot.snapshotId}:${snapshot.snapshotHash}`)} />
+        <ListBox title="Timeline transitions" values={snapshots.transitionHistory?.transitionEvents.map(event => `${event.eventType}:${event.transitionEventId}`) ?? []} />
+        <ListBox title="Diff entries" values={snapshots.diffs.flatMap(diff => diff.entries.map(entry => `${entry.diffType}:${entry.stateId}`))} />
+        <ListBox title="Timeline stale states" values={snapshots.timeline?.staleStateIds ?? []} />
       </div>
       <DeterministicNotes notes={snapshots.deterministicNotes} />
     </Panel>

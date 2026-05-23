@@ -1,8 +1,13 @@
 import {
   ENGINEERING_REQUIREMENT_DEFINITIONS,
   type EngineeringRequirementDefinition,
+  type EngineeringRequirementEvaluation,
   type EngineeringRequirementId,
 } from '@/lib/survey/evidence/engineeringRequirements';
+import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/categoryRegistry';
+import type { CanonicalEvidenceProvenanceRecord } from '@/lib/survey/evidence/provenance';
+import type { CADReadinessFlag } from './cadReadiness';
 import {
   listEngineeringDecisionDefinitions,
   type EngineeringDecisionDefinition,
@@ -10,8 +15,10 @@ import {
 import {
   latestValidStateSnapshot,
   listStaleEngineeringOutputs,
+  type EngineeringInvalidationEvent,
   type EngineeringStateAuditGuardResult,
   type EngineeringStateSnapshot,
+  type EngineeringStateSnapshotStateRef,
   type PersistentEngineeringStateGraphNode,
   type SelectiveRegenerationPlan,
 } from '@/lib/engineeringStateInvalidation';
@@ -19,6 +26,7 @@ import type {
   AuditGuardWorkspaceModel,
   BuildEngineeringIntelligenceWorkspaceInput,
   CanonicalEvidenceWorkspaceGroupModel,
+  CanonicalEvidenceWorkspaceItemModel,
   DecisionWorkspaceItemModel,
   DependencyGraphViewerModel,
   EngineeringEvidenceWorkspaceGroupId,
@@ -68,54 +76,72 @@ const EVIDENCE_GROUPS: Array<{
   label: string;
   description: string;
   requirementIds: EngineeringRequirementId[];
+  categories: SurveyEvidenceCategory[];
+  readinessFlagIds: string[];
 }> = [
   {
     groupId: 'utility',
     label: 'Utility',
     description: 'Meter, utility bill, utility access, and interconnection evidence required by deterministic registry rules.',
     requirementIds: ['utility_meter', 'utility_bill'],
+    categories: ['meter', 'utility_access', 'utility_connection'],
+    readinessFlagIds: ['routing-ready'],
   },
   {
     groupId: 'electrical',
     label: 'Electrical',
     description: 'Main service equipment, disconnects, subpanels, grounding, rapid shutdown, placards, and service labeling.',
     requirementIds: ['main_service_panel', 'subpanel', 'main_disconnect', 'rapid_shutdown', 'placards', 'service_equipment_label'],
+    categories: ['main_service_panel', 'subpanel', 'disconnect', 'grounding', 'utility_connection', 'inverter_location', 'gateway_location', 'garage_interior_wall'],
+    readinessFlagIds: ['routing-ready'],
   },
   {
     groupId: 'roof',
     label: 'Roof',
     description: 'Roof plane, edge, ridge, surface, and obstruction evidence used for roof-layout traceability.',
     requirementIds: ['roof_overview'],
+    categories: ['roof_plane', 'roof_edge', 'ridge', 'roof_surface', 'obstructions', 'overview'],
+    readinessFlagIds: ['roof-plane-ready', 'setback-ready'],
   },
   {
     groupId: 'structural',
     label: 'Structural',
     description: 'Attic, structural access, framing-context, and review-supporting canonical evidence.',
     requirementIds: ['attic_access', 'structural_access'],
+    categories: ['attic', 'attic_access', 'rafters'],
+    readinessFlagIds: ['roof-plane-ready'],
   },
   {
     groupId: 'routing',
     label: 'Routing',
     description: 'Conduit, grounding, service access, and path context that affects routed engineering outputs.',
     requirementIds: ['main_service_panel', 'utility_meter', 'main_disconnect'],
+    categories: ['utility_connection', 'utility_access', 'disconnect', 'grounding', 'inverter_location', 'garage_interior_wall'],
+    readinessFlagIds: ['routing-ready'],
   },
   {
     groupId: 'detached_structures',
     label: 'Detached Structures',
     description: 'Detached-structure evidence group reserved for explicit canonical evidence and future requirement expansion.',
     requirementIds: [],
+    categories: ['detached_structures'],
+    readinessFlagIds: ['detached-structure-ready'],
   },
   {
     groupId: 'ess',
     label: 'ESS',
     description: 'Battery location and energy-storage assumptions, surfaced only through explicit deterministic requirements/decisions.',
     requirementIds: ['battery_location'],
+    categories: ['battery_location', 'gateway_location'],
+    readinessFlagIds: ['routing-ready'],
   },
   {
     groupId: 'trench_ground_mount',
     label: 'Trench / Ground Mount',
     description: 'Trenching, ground-mount, and route-specific evidence group reserved for canonical evidence and dependency lineage.',
     requirementIds: [],
+    categories: ['trench_path'],
+    readinessFlagIds: ['trench-route-ready'],
   },
 ];
 
@@ -153,35 +179,221 @@ function buildHealth(input: BuildEngineeringIntelligenceWorkspaceInput, latestSn
   };
 }
 
-function buildEvidenceGroups(latestSnapshot: EngineeringStateSnapshot | null): CanonicalEvidenceWorkspaceGroupModel[] {
+function buildEvidenceGroups(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): CanonicalEvidenceWorkspaceGroupModel[] {
   const refs = stateRefs(latestSnapshot);
+  const surveyEvidence = input.surveyEvidence ?? null;
+  const canonicalRecords = surveyEvidence?.traceability.canonicalEvidence ?? [];
+  const requirementEvaluations = surveyEvidence?.requirementEvaluation.allRequirements ?? [];
+  const graph = input.persistentGraph ?? null;
+  const invalidationEvents = input.invalidationResult?.invalidationEvents ?? [];
+  const plans = input.regenerationPlans ?? [];
+  const readinessFlags = input.cadReadiness?.flags ?? [];
+
   return EVIDENCE_GROUPS.map(group => {
-    const linkedStateRefs = refs.filter(ref => ref.requirementIds.some(requirementId => group.requirementIds.includes(requirementId)));
-    const canonicalEvidenceIds = sortText(linkedStateRefs.flatMap(ref => ref.canonicalEvidenceIds));
+    const groupRequirements = requirementEvaluations.filter(requirement => group.requirementIds.includes(requirement.requirementId));
+    const missingRequirementIds = sortText(groupRequirements.filter(requirement => requirement.missing || requirement.insufficientMetadata).map(requirement => requirement.requirementId));
+    const recordsForGroup = canonicalRecords.filter(record => group.categories.includes(record.evidenceCategory));
+    const linkedStateRefs = refs.filter(ref =>
+      ref.canonicalEvidenceIds.some(evidenceId => recordsForGroup.some(record => record.canonicalEvidenceId === evidenceId)),
+    );
+    const snapshotOnlyIds = canonicalRecords.length === 0
+      ? sortText(refs
+        .filter(ref => ref.requirementIds.some(requirementId => group.requirementIds.includes(requirementId)))
+        .flatMap(ref => ref.canonicalEvidenceIds))
+      : [];
+    const canonicalEvidenceItems = [
+      ...recordsForGroup.map(record => buildCanonicalEvidenceRow({
+        record,
+        status: 'canonical_representative',
+        refs,
+        graph,
+        requirementEvaluations,
+        invalidationEvents,
+        plans,
+        readinessFlags,
+      })),
+      ...snapshotOnlyIds.map(canonicalEvidenceId => buildSnapshotOnlyEvidenceRow({
+        canonicalEvidenceId,
+        groupLabel: group.label,
+        refs,
+        graph,
+        invalidationEvents,
+        plans,
+        readinessFlags: readinessFlags.filter(flag => group.readinessFlagIds.includes(flag.flagId)),
+      })),
+    ].sort((a, b) => a.canonicalEvidenceId.localeCompare(b.canonicalEvidenceId));
+    const groupReadinessFlags = readinessFlags.filter(flag => group.readinessFlagIds.includes(flag.flagId));
+    const fieldQualitySignals = buildGroupFieldQualitySignals(group.groupId, groupRequirements, groupReadinessFlags, canonicalEvidenceItems.length, surveyEvidence);
+
     return {
       ...group,
-      canonicalEvidenceItems: canonicalEvidenceIds.map(canonicalEvidenceId => {
-        const evidenceStateRefs = linkedStateRefs.filter(ref => ref.canonicalEvidenceIds.includes(canonicalEvidenceId));
-        return {
-          canonicalEvidenceId,
-          category: group.label,
-          provenance: evidenceStateRefs.map(ref => ref.stateId),
-          originatingSurveyIds: [],
-          duplicateCollapseCount: 0,
-          linkedRequirementIds: sortText(evidenceStateRefs.flatMap(ref => ref.requirementIds)),
-          linkedDocumentSectionIds: [],
-          staleStateImpactStateIds: sortText(evidenceStateRefs.filter(ref => ref.staleStatus !== 'current').map(ref => ref.stateId)),
-          status: evidenceStateRefs.some(ref => ref.staleStatus !== 'current') ? 'stale' : 'current',
-        };
-      }),
+      canonicalEvidenceItems,
+      missingRequirementIds,
+      fieldQualitySignals,
+      readinessFlags: groupReadinessFlags,
       deterministicNotes: [
-        canonicalEvidenceIds.length > 0
-          ? 'Evidence rows are derived from snapshot state references and canonical evidence ids.'
-          : 'No canonical evidence rows are loaded for this group in the current workspace context.',
-        'Duplicate collapse counts require canonical manifest input; absent manifest values are shown as zero rather than inferred.',
+        canonicalEvidenceItems.length > 0
+          ? 'Evidence rows are hydrated from canonical evidence provenance records and linked snapshot/graph state references.'
+          : 'No canonical evidence rows are loaded for this group; missing or partial state is shown explicitly rather than fabricated.',
+        recordsForGroup.length > 0
+          ? 'Survey origin, duplicate collapse, and canonical selection reason are sourced from the canonical evidence traceability bundle.'
+          : 'No canonical traceability records matched this group category set.',
+        'CAD readiness, stale impact, and graph linkage are metadata visualizations only and do not trigger CAD or regeneration.',
       ],
     } satisfies CanonicalEvidenceWorkspaceGroupModel;
   });
+}
+
+function buildCanonicalEvidenceRow(input: {
+  record: CanonicalEvidenceProvenanceRecord;
+  status: 'canonical_representative';
+  refs: EngineeringStateSnapshotStateRef[];
+  graph: BuildEngineeringIntelligenceWorkspaceInput['persistentGraph'];
+  requirementEvaluations: EngineeringRequirementEvaluation[];
+  invalidationEvents: EngineeringInvalidationEvent[];
+  plans: SelectiveRegenerationPlan[];
+  readinessFlags: CADReadinessFlag[];
+}): CanonicalEvidenceWorkspaceItemModel {
+  const linkedRefs = input.refs.filter(ref => ref.canonicalEvidenceIds.includes(input.record.canonicalEvidenceId));
+  const linkedRequirements = input.requirementEvaluations.filter(requirement => requirement.canonicalEvidenceIds.includes(input.record.canonicalEvidenceId));
+  const graphNodes = input.graph?.nodes.filter(node => node.canonicalEvidenceIds.includes(input.record.canonicalEvidenceId)) ?? [];
+  const graphNodeIds = graphNodes.map(node => node.nodeId);
+  const graphEdges = input.graph?.edges.filter(edge => graphNodeIds.includes(edge.fromNodeId) || graphNodeIds.includes(edge.toNodeId)) ?? [];
+  const invalidationEvents = input.invalidationEvents.filter(event => event.triggeringCanonicalEvidenceIds.includes(input.record.canonicalEvidenceId));
+  const staleStateImpactStateIds = sortText([...linkedRefs.filter(ref => ref.staleStatus !== 'current').map(ref => ref.stateId), ...invalidationEvents.map(event => event.stateId)]);
+  const readinessFlags = input.readinessFlags.filter(flag => flag.satisfiedCategories.includes(input.record.evidenceCategory));
+  const linkedOutputIds = sortText([...linkedRefs.map(ref => ref.stateId), ...graphNodes.flatMap(node => node.stateId ? [node.stateId] : [])]);
+  const linkedDecisionIds = sortText([...linkedRefs.flatMap(ref => ref.decisionIds), ...graphNodes.flatMap(node => node.decisionIds)]);
+
+  return {
+    canonicalEvidenceId: input.record.canonicalEvidenceId,
+    category: input.record.evidenceCategory,
+    evidenceCategoryLabel: input.record.evidenceCategoryLabel,
+    provenance: sortText([...linkedRefs.map(ref => ref.stateId), input.record.evidenceTruthSource]),
+    originatingSurveyIds: [input.record.originatingSurveyId],
+    originatingSurveyCreatedAts: [input.record.originatingSurveyCreatedAt],
+    duplicateCollapseCount: input.record.duplicateGroupSize,
+    canonicalRepresentativeStatus: input.status,
+    canonicalSelectionReason: input.record.selectionReason,
+    evidenceTruthSource: input.record.evidenceTruthSource,
+    evidenceSource: input.record.evidenceSource,
+    evidenceConfidence: input.record.evidenceConfidence,
+    metadataCompleteness: metadataCompletenessEntries(input.record.metadataCompleteness),
+    linkedRequirementIds: sortText([...linkedRequirements.map(requirement => requirement.requirementId), ...linkedRefs.flatMap(ref => ref.requirementIds)]),
+    linkedDecisionIds,
+    linkedDocumentSectionIds: sortText(linkedRequirements.flatMap(requirement => requirement.permitUsage)),
+    linkedOutputIds,
+    linkedGraphNodeIds: sortText(graphNodeIds),
+    linkedGraphEdgeIds: sortText(graphEdges.map(edge => edge.edgeId)),
+    linkedCADReadinessFlags: readinessFlags,
+    readinessImpact: summarizeReadinessImpact(readinessFlags),
+    fieldQualitySignals: buildEvidenceFieldQualitySignals(input.record, linkedRequirements, readinessFlags),
+    staleStateImpactStateIds,
+    staleImpactReasons: sortText(invalidationEvents.map(event => event.invalidationReason)),
+    regenerationCandidateIds: sortText(input.plans.filter(plan => plan.staleStateIds.some(stateId => staleStateImpactStateIds.includes(stateId))).map(plan => plan.planId)),
+    status: staleStateImpactStateIds.length ? 'stale' : linkedRefs.length || graphNodeIds.length ? 'current' : 'partial',
+  };
+}
+
+function buildSnapshotOnlyEvidenceRow(input: {
+  canonicalEvidenceId: string;
+  groupLabel: string;
+  refs: EngineeringStateSnapshotStateRef[];
+  graph: BuildEngineeringIntelligenceWorkspaceInput['persistentGraph'];
+  invalidationEvents: EngineeringInvalidationEvent[];
+  plans: SelectiveRegenerationPlan[];
+  readinessFlags: CADReadinessFlag[];
+}): CanonicalEvidenceWorkspaceItemModel {
+  const linkedRefs = input.refs.filter(ref => ref.canonicalEvidenceIds.includes(input.canonicalEvidenceId));
+  const graphNodes = input.graph?.nodes.filter(node => node.canonicalEvidenceIds.includes(input.canonicalEvidenceId)) ?? [];
+  const graphNodeIds = graphNodes.map(node => node.nodeId);
+  const graphEdges = input.graph?.edges.filter(edge => graphNodeIds.includes(edge.fromNodeId) || graphNodeIds.includes(edge.toNodeId)) ?? [];
+  const invalidationEvents = input.invalidationEvents.filter(event => event.triggeringCanonicalEvidenceIds.includes(input.canonicalEvidenceId));
+  const staleStateImpactStateIds = sortText([...linkedRefs.filter(ref => ref.staleStatus !== 'current').map(ref => ref.stateId), ...invalidationEvents.map(event => event.stateId)]);
+  return {
+    canonicalEvidenceId: input.canonicalEvidenceId,
+    category: input.groupLabel,
+    evidenceCategoryLabel: input.groupLabel,
+    provenance: sortText(linkedRefs.map(ref => ref.stateId)),
+    originatingSurveyIds: [],
+    originatingSurveyCreatedAts: [],
+    duplicateCollapseCount: 0,
+    canonicalRepresentativeStatus: 'snapshot_reference_only',
+    canonicalSelectionReason: 'Snapshot referenced this canonical evidence id, but no canonical traceability record was supplied to this workspace context.',
+    evidenceTruthSource: 'snapshot_state_reference',
+    evidenceSource: 'derived',
+    evidenceConfidence: 'unknown',
+    metadataCompleteness: [],
+    linkedRequirementIds: sortText(linkedRefs.flatMap(ref => ref.requirementIds)),
+    linkedDecisionIds: sortText([...linkedRefs.flatMap(ref => ref.decisionIds), ...graphNodes.flatMap(node => node.decisionIds)]),
+    linkedDocumentSectionIds: [],
+    linkedOutputIds: sortText([...linkedRefs.map(ref => ref.stateId), ...graphNodes.flatMap(node => node.stateId ? [node.stateId] : [])]),
+    linkedGraphNodeIds: sortText(graphNodeIds),
+    linkedGraphEdgeIds: sortText(graphEdges.map(edge => edge.edgeId)),
+    linkedCADReadinessFlags: input.readinessFlags,
+    readinessImpact: summarizeReadinessImpact(input.readinessFlags),
+    fieldQualitySignals: ['canonical traceability record unavailable for this snapshot-referenced evidence id'],
+    staleStateImpactStateIds,
+    staleImpactReasons: sortText(invalidationEvents.map(event => event.invalidationReason)),
+    regenerationCandidateIds: sortText(input.plans.filter(plan => plan.staleStateIds.some(stateId => staleStateImpactStateIds.includes(stateId))).map(plan => plan.planId)),
+    status: staleStateImpactStateIds.length ? 'stale' : 'current',
+  };
+}
+
+function metadataCompletenessEntries(completeness: CanonicalEvidenceProvenanceRecord['metadataCompleteness']) {
+  return Object.entries(completeness).map(([field, present]) => ({ field, present })).sort((a, b) => a.field.localeCompare(b.field));
+}
+
+function summarizeReadinessImpact(flags: CADReadinessFlag[]): CanonicalEvidenceWorkspaceItemModel['readinessImpact'] {
+  if (!flags.length) return 'not_loaded';
+  if (flags.some(flag => flag.status === 'ready')) return 'ready';
+  if (flags.some(flag => flag.status === 'partial')) return 'partial';
+  if (flags.some(flag => flag.status === 'blocked')) return 'blocked';
+  return 'not_applicable';
+}
+
+function buildEvidenceFieldQualitySignals(
+  record: CanonicalEvidenceProvenanceRecord,
+  requirements: EngineeringRequirementEvaluation[],
+  readinessFlags: CADReadinessFlag[],
+): string[] {
+  const signals: string[] = [];
+  if (!record.metadataCompleteness.hasCaptureTimestamp) signals.push('missing capture timestamp');
+  if (!record.metadataCompleteness.hasSiteSurveyFileId) signals.push('missing site_survey_files linkage');
+  if (!record.metadataCompleteness.hasSubmittedCategory) signals.push('missing submitted field category');
+  if (record.duplicateGroupSize > 1) signals.push(`duplicate collapse group size ${record.duplicateGroupSize}`);
+  for (const requirement of requirements) {
+    if (requirement.insufficientMetadata) signals.push(`${requirement.requirementId} has insufficient metadata`);
+    if (requirement.partiallySatisfied) signals.push(`${requirement.requirementId} is partially satisfied`);
+  }
+  for (const flag of readinessFlags) {
+    if (flag.status !== 'ready') signals.push(`${flag.flagId} readiness ${flag.status}`);
+  }
+  return sortText(signals);
+}
+
+function buildGroupFieldQualitySignals(
+  groupId: EngineeringEvidenceWorkspaceGroupId,
+  requirements: EngineeringRequirementEvaluation[],
+  readinessFlags: CADReadinessFlag[],
+  evidenceCount: number,
+  surveyEvidence: EngineeringSurveyEvidence | null,
+): string[] {
+  const signals: string[] = [];
+  if (evidenceCount === 0) signals.push('no canonical evidence rows loaded for this group');
+  for (const requirement of requirements) {
+    if (requirement.missing) signals.push(`missing ${requirement.requirementId}`);
+    if (requirement.insufficientMetadata) signals.push(`insufficient metadata for ${requirement.requirementId}`);
+  }
+  for (const flag of readinessFlags) {
+    if (flag.status !== 'ready') signals.push(`${flag.flagId} readiness ${flag.status}: missing ${flag.missingCategories.join(', ') || 'none'}`);
+  }
+  if (groupId === 'electrical' && !surveyEvidence?.fieldEvidence.hasElectricalData) signals.push('insufficient electrical evidence');
+  if (groupId === 'structural' && (!surveyEvidence?.fieldEvidence.hasStructuralData || evidenceCount === 0)) signals.push('no attic/framing evidence');
+  if (groupId === 'routing' && (!surveyEvidence?.fieldEvidence.interconnectionPoint || evidenceCount === 0)) signals.push('incomplete routing evidence');
+  if (groupId === 'trench_ground_mount') signals.push('no trench context unless explicit trench_path evidence is present');
+  if (groupId === 'roof' && surveyEvidence?.completeness !== 'sufficient') signals.push('low roof/completeness context for full CAD readiness');
+  return sortText(signals);
 }
 
 function buildRequirements(latestSnapshot: EngineeringStateSnapshot | null): RequirementWorkspaceItemModel[] {
@@ -384,7 +596,7 @@ export function buildEngineeringIntelligenceWorkspace(input: BuildEngineeringInt
   const snapshots = input.snapshots ?? [];
   const latestSnapshot = latestValidStateSnapshot(snapshots) ?? snapshots[snapshots.length - 1] ?? null;
   const health = buildHealth(input, latestSnapshot);
-  const evidenceGroups = buildEvidenceGroups(latestSnapshot);
+  const evidenceGroups = buildEvidenceGroups(input, latestSnapshot);
   const requirements = buildRequirements(latestSnapshot);
   const decisions = buildDecisions(latestSnapshot);
   const staleInvalidation = buildStaleInvalidation(input, latestSnapshot);
