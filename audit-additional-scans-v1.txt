@@ -1,0 +1,984 @@
+# Additional Engineering Intelligence Audit Scans
+Generated at 2026-05-23T18:16:28Z
+
+## Required script availability
+build=next build
+lint=next lint
+type-check=tsc --noEmit
+test=vitest run
+test:watch=vitest
+test:coverage=vitest run --coverage
+test:ci=vitest run --reporter=verbose
+check:topology=node scripts/check-dependency-topology.js
+check:engineering-boundaries=node scripts/check-engineering-boundaries.js
+
+## Audited dependency imports
+IMPORT lib/engineeringIntelligence/regenerationPlanner.ts:1:import type { SelectiveRegenerationPlan } from '@/lib/engineeringStateInvalidation';
+IMPORT lib/engineeringIntelligence/regenerationPlanner.ts:2:import type { EngineeringStaleClass } from './propagationGraph';
+IMPORT lib/engineeringIntelligence/regenerationPlanner.ts:3:import type { EngineeringInvalidationPropagationResult } from './invalidationEngine';
+IMPORT lib/engineeringIntelligence/regenerationPlanner.ts:4:import { sortBy, sortText } from './propagationGraph';
+IMPORT lib/engineeringIntelligence/photoGrouping.ts:1:import type { SiteSurvey } from '@/lib/db/surveys';
+IMPORT lib/engineeringIntelligence/photoGrouping.ts:7:import type { SurveySessionSummary } from '@/lib/survey/evidence/sessionTypes';
+IMPORT lib/engineeringIntelligence/photoGrouping.ts:8:import type { CADReadinessFlag } from './cadReadiness';
+IMPORT lib/engineeringIntelligence/signalRegistry.ts:1:import type { StructuredEngineeringSignalDefinition, StructuredEngineeringSignalType } from './signalTypes';
+IMPORT lib/engineeringIntelligence/contextTypes.ts:1:import type { EngineeringRequirementId } from '@/lib/survey/evidence/engineeringRequirements';
+IMPORT lib/engineeringIntelligence/contextTypes.ts:2:import type { CADReadinessFlagId } from './cadReadiness';
+IMPORT lib/engineeringIntelligence/contextTypes.ts:3:import type { DeterministicPhotoGroupingModel } from './photoGrouping';
+IMPORT lib/engineeringIntelligence/contextTypes.ts:4:import type { EngineeringStaleClass } from './propagationGraph';
+IMPORT lib/engineeringIntelligence/contextTypes.ts:5:import type { StructuredEngineeringSignal, StructuredEngineeringSignalType } from './signalTypes';
+IMPORT lib/engineeringIntelligence/signalExtraction.test.ts:1:import { describe, expect, it } from 'vitest';
+IMPORT lib/engineeringIntelligence/signalExtraction.test.ts:2:import { buildCADReadinessMetadata } from './cadReadiness';
+IMPORT lib/engineeringIntelligence/signalExtraction.test.ts:3:import { buildDeterministicPhotoGrouping, type DeterministicPhotoGroupingModel, type EvidenceClusterModel, type GroupedCADReadinessContext } from './photoGrouping';
+IMPORT lib/engineeringIntelligence/signalExtraction.test.ts:4:import { buildStructuredEngineeringSignals } from './signalExtraction';
+IMPORT lib/engineeringIntelligence/signalExtraction.test.ts:5:import type { EngineeringInvalidationResult } from '@/lib/engineeringStateInvalidation';
+IMPORT lib/engineeringIntelligence/signalExtraction.test.ts:6:import type { SurveyEvidenceCategory, SurveyEvidenceItem, SurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
+IMPORT lib/engineeringIntelligence/types.ts:6:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+IMPORT lib/engineeringIntelligence/types.ts:7:import type { CADReadinessFlag, CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
+IMPORT lib/engineeringIntelligence/types.ts:8:import type { DeterministicPhotoGroupingModel } from '@/lib/engineeringIntelligence/photoGrouping';
+IMPORT lib/engineeringIntelligence/types.ts:9:import type { EngineeringInvalidationPropagationResult, EngineeringAffectedOutputImpact } from '@/lib/engineeringIntelligence/invalidationEngine';
+IMPORT lib/engineeringIntelligence/types.ts:10:import type { PropagationTraversalResult } from '@/lib/engineeringIntelligence/propagationGraph';
+IMPORT lib/engineeringIntelligence/types.ts:11:import type { EngineeringRegenerationPlanV1 } from '@/lib/engineeringIntelligence/regenerationPlanner';
+IMPORT lib/engineeringIntelligence/types.ts:12:import type { EngineeringSnapshotDeltaV1 } from '@/lib/engineeringIntelligence/snapshotDelta';
+IMPORT lib/engineeringIntelligence/types.ts:13:import type { StructuredEngineeringSignal, StructuredEngineeringSignalSummary } from '@/lib/engineeringIntelligence/signalTypes';
+IMPORT lib/engineeringIntelligence/types.ts:14:import type { EngineeringContextResolutionSummary, EngineeringContextStatus, ResolvedEngineeringContext } from '@/lib/engineeringIntelligence/contextTypes';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:1:import { collectEngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:2:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:3:import { buildDecisionAwareBOMMetadata, buildDecisionAwareSLDMetadata } from '@/lib/engineeringDecisionProvenance';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:21:import { getSiteSurveyFiles, getSiteSurveysByProject, type SiteSurvey, type SiteSurveyFile } from '@/lib/db-neon';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:22:import { buildCADReadinessMetadata, type CADReadinessMetadataModel } from './cadReadiness';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:23:import { buildDeterministicPhotoGrouping, type DeterministicPhotoGroupingModel } from './photoGrouping';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:24:import { computeEngineeringInvalidationPropagation, type EngineeringInvalidationPropagationResult } from './invalidationEngine';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:25:import { buildEngineeringRegenerationPlanV1, type EngineeringRegenerationPlanV1 } from './regenerationPlanner';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:26:import { buildEngineeringSnapshotDeltaV1, type EngineeringSnapshotDeltaV1 } from './snapshotDelta';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:27:import { buildStructuredEngineeringSignals } from './signalExtraction';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:28:import type { StructuredEngineeringSignalSummary } from './signalTypes';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:29:import { buildEngineeringContextResolution } from './contextResolution';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:30:import type { EngineeringContextResolutionSummary } from './contextTypes';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:31:import { buildEngineeringIntelligenceWorkspace } from './workspace';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:32:import type { BuildEngineeringIntelligenceWorkspaceInput, EngineeringIntelligenceWorkspaceModel } from './types';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:33:import { buildSurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:34:import { buildProjectSurveyEvidenceHygiene } from '@/lib/survey/evidence/sessionGrouping';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:35:import { normalizeSurvey } from '@/lib/siteSurvey/normalizeSurvey';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:36:import { enrichSurvey } from '@/lib/siteSurvey/enrichSurvey';
+IMPORT lib/engineeringIntelligence/projectHydration.ts:37:import type { EnrichedSiteSurvey, RawSurveyPayload, SurveyPhotoRef } from '@/lib/siteSurvey/types';
+IMPORT lib/engineeringIntelligence/workspace.ts:7:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+IMPORT lib/engineeringIntelligence/workspace.ts:8:import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/categoryRegistry';
+IMPORT lib/engineeringIntelligence/workspace.ts:9:import type { CanonicalEvidenceProvenanceRecord } from '@/lib/survey/evidence/provenance';
+IMPORT lib/engineeringIntelligence/workspace.ts:10:import type { CADReadinessFlag } from './cadReadiness';
+IMPORT lib/engineeringIntelligence/workspace.ts:11:import { buildDeterministicPhotoGrouping } from './photoGrouping';
+IMPORT lib/engineeringIntelligence/signalExtraction.ts:1:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+IMPORT lib/engineeringIntelligence/signalExtraction.ts:2:import type { EngineeringInvalidationResult } from '@/lib/engineeringStateInvalidation';
+IMPORT lib/engineeringIntelligence/signalExtraction.ts:3:import type { SurveyEvidenceCategory, SurveyEvidenceItem, SurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
+IMPORT lib/engineeringIntelligence/signalExtraction.ts:4:import { STRUCTURED_ENGINEERING_SIGNAL_REGISTRY } from './signalRegistry';
+IMPORT lib/engineeringIntelligence/signalExtraction.ts:5:import type { CADReadinessFlag, CADReadinessFlagId, CADReadinessMetadataModel } from './cadReadiness';
+IMPORT lib/engineeringIntelligence/signalExtraction.ts:6:import type { DeterministicPhotoGroupingModel, EvidenceClusterModel } from './photoGrouping';
+IMPORT lib/engineeringIntelligence/signalExtraction.ts:7:import type { EngineeringInvalidationPropagationResult } from './invalidationEngine';
+IMPORT lib/engineeringIntelligence/propagationGraph.ts:1:import type { EngineeringDependencyEdge, EngineeringDependencyEdgeType, EngineeringDependencyGraph, EngineeringDependencyNode, EngineeringDependencyNodeType } from '@/lib/documentProvenance';
+IMPORT lib/engineeringIntelligence/propagationGraph.ts:2:import type { PersistentEngineeringStateGraph, PersistentEngineeringStateGraphEdge, PersistentEngineeringStateGraphNode } from '@/lib/engineeringStateInvalidation';
+IMPORT lib/engineeringIntelligence/signalTypes.ts:1:import type { CADReadinessFlagId } from './cadReadiness';
+IMPORT lib/engineeringIntelligence/signalTypes.ts:2:import type { EngineeringStaleClass } from './propagationGraph';
+IMPORT lib/engineeringIntelligence/signalTypes.ts:3:import type { DeterministicClusterConfidence, DeterministicClusterType } from './photoGrouping';
+IMPORT lib/engineeringIntelligence/signalTypes.ts:4:import type { EngineeringRequirementId } from '@/lib/survey/evidence/engineeringRequirements';
+IMPORT lib/engineeringIntelligence/signalTypes.ts:5:import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/manifest';
+IMPORT lib/engineeringIntelligence/invalidationEngine.ts:1:import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
+IMPORT lib/engineeringIntelligence/invalidationEngine.ts:2:import type { EngineeringDependencyGraph } from '@/lib/documentProvenance';
+IMPORT lib/engineeringIntelligence/invalidationEngine.ts:11:import { sortBy, sortText, tracePropagation, type EngineeringStaleClass, type PropagationTraversalPath, type PropagationTraversalResult } from './propagationGraph';
+IMPORT lib/engineeringIntelligence/contextRegistry.ts:1:import type { EngineeringContextDefinition, EngineeringContextType } from './contextTypes';
+IMPORT lib/engineeringIntelligence/cadReadiness.ts:1:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+IMPORT lib/engineeringIntelligence/cadReadiness.ts:2:import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/categoryRegistry';
+IMPORT lib/engineeringIntelligence/cadReadiness.ts:3:import type { SurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
+IMPORT lib/engineeringIntelligence/cadReadiness.ts:4:import type { StructuredEngineeringSignalSummary } from './signalTypes';
+IMPORT lib/engineeringIntelligence/cadReadiness.ts:5:import type { EngineeringContextResolutionSummary, EngineeringContextStatus } from './contextTypes';
+IMPORT lib/engineeringIntelligence/contextResolution.test.ts:1:import { describe, expect, it } from 'vitest';
+IMPORT lib/engineeringIntelligence/contextResolution.test.ts:2:import { buildCADReadinessMetadata } from './cadReadiness';
+IMPORT lib/engineeringIntelligence/contextResolution.test.ts:3:import { buildEngineeringContextResolution } from './contextResolution';
+IMPORT lib/engineeringIntelligence/contextResolution.test.ts:4:import { buildDeterministicPhotoGrouping, type DeterministicPhotoGroupingModel } from './photoGrouping';
+IMPORT lib/engineeringIntelligence/contextResolution.test.ts:5:import type { StructuredEngineeringSignal, StructuredEngineeringSignalSummary, StructuredEngineeringSignalType } from './signalTypes';
+IMPORT lib/engineeringIntelligence/contextResolution.test.ts:6:import type { SurveyEvidenceCategory, SurveyEvidenceItem, SurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
+IMPORT lib/engineeringIntelligence/contextResolution.ts:1:import crypto from 'crypto';
+IMPORT lib/engineeringIntelligence/contextResolution.ts:2:import type { SurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
+IMPORT lib/engineeringIntelligence/contextResolution.ts:3:import type { CADReadinessFlagId, CADReadinessMetadataModel } from './cadReadiness';
+IMPORT lib/engineeringIntelligence/contextResolution.ts:4:import { ENGINEERING_CONTEXT_REGISTRY } from './contextRegistry';
+IMPORT lib/engineeringIntelligence/contextResolution.ts:13:import type { EngineeringInvalidationPropagationResult } from './invalidationEngine';
+IMPORT lib/engineeringIntelligence/contextResolution.ts:14:import type { EngineeringInvalidationResult } from '@/lib/engineeringStateInvalidation';
+IMPORT lib/engineeringIntelligence/contextResolution.ts:15:import type { DeterministicPhotoGroupingModel } from './photoGrouping';
+IMPORT lib/engineeringIntelligence/contextResolution.ts:16:import type { StructuredEngineeringSignal, StructuredEngineeringSignalSummary, StructuredEngineeringSignalType } from './signalTypes';
+IMPORT lib/engineeringIntelligence/photoGrouping.test.ts:1:import { describe, expect, it } from 'vitest';
+IMPORT lib/engineeringIntelligence/photoGrouping.test.ts:2:import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
+IMPORT lib/engineeringIntelligence/photoGrouping.test.ts:3:import { buildSurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
+IMPORT lib/engineeringIntelligence/photoGrouping.test.ts:4:import { buildCADReadinessMetadata } from './cadReadiness';
+IMPORT lib/engineeringIntelligence/photoGrouping.test.ts:5:import { buildDeterministicPhotoGrouping } from './photoGrouping';
+IMPORT lib/engineeringIntelligence/projectHydration.test.ts:1:import { describe, expect, it } from 'vitest';
+IMPORT lib/engineeringIntelligence/projectHydration.test.ts:2:import { hydrateProjectEngineeringIntelligence } from './projectHydration';
+IMPORT lib/engineeringIntelligence/projectHydration.test.ts:3:import type { SiteSurvey, SiteSurveyFile } from '@/lib/db-neon';
+IMPORT lib/engineeringIntelligence/cadReadiness.test.ts:1:import { describe, expect, it } from 'vitest';
+IMPORT lib/engineeringIntelligence/cadReadiness.test.ts:2:import { buildCADReadinessMetadata } from './cadReadiness';
+IMPORT lib/engineeringIntelligence/cadReadiness.test.ts:3:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+IMPORT lib/engineeringIntelligence/cadReadiness.test.ts:4:import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/categoryRegistry';
+IMPORT lib/engineeringIntelligence/cadReadiness.test.ts:5:import type { SurveyEvidenceItem, SurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
+IMPORT lib/engineeringIntelligence/snapshotDelta.ts:1:import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
+IMPORT lib/engineeringIntelligence/snapshotDelta.ts:2:import type { EngineeringStateSnapshot, EngineeringStateSnapshotDiff, PersistentEngineeringStateGraph } from '@/lib/engineeringStateInvalidation';
+IMPORT lib/engineeringIntelligence/snapshotDelta.ts:3:import type { EngineeringInvalidationPropagationResult } from './invalidationEngine';
+IMPORT lib/engineeringIntelligence/snapshotDelta.ts:4:import type { EngineeringStaleClass } from './propagationGraph';
+IMPORT lib/engineeringIntelligence/snapshotDelta.ts:5:import { sortBy, sortText } from './propagationGraph';
+IMPORT lib/engineeringDecisionProvenance/decisionRegistry.ts:1:import type { EngineeringDecisionDefinition, EngineeringDecisionType } from './types';
+IMPORT lib/engineeringDecisionProvenance/types.ts:1:import type { CADSystemType } from '@/lib/cad/types';
+IMPORT lib/engineeringDecisionProvenance/types.ts:2:import type { EngineeringRequirementId } from '@/lib/survey/evidence/engineeringRequirements';
+IMPORT lib/engineeringDecisionProvenance/types.ts:3:import type { DocumentTruthSource } from '@/lib/documentProvenance/types';
+IMPORT lib/engineeringDecisionProvenance/types.ts:4:import type { EngineeringStateSnapshotReference, EngineeringStaleStateMetadata } from '@/lib/engineeringStateInvalidation/types';
+IMPORT lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:1:import { describe, expect, it } from 'vitest';
+IMPORT lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:3:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:4:import { buildDocumentProvenanceBundle } from '@/lib/documentProvenance';
+IMPORT lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:5:import { buildRenderContext } from '@/lib/drafting/renderContext';
+IMPORT lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:6:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+IMPORT lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:7:import type { PermitInput } from '@/lib/permit/types';
+IMPORT lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:8:import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
+IMPORT lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:9:import { buildEngineeringRequirementEvaluation } from '@/lib/survey/evidence/engineeringRequirements';
+IMPORT lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:10:import { buildProjectSurveyEvidenceHygiene } from '@/lib/survey/evidence/sessionGrouping';
+IMPORT lib/engineeringDecisionProvenance/evaluator.ts:1:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/engineeringDecisionProvenance/evaluator.ts:2:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+IMPORT lib/engineeringDecisionProvenance/evaluator.ts:3:import type { PermitInput } from '@/lib/permit/types';
+IMPORT lib/engineeringDecisionProvenance/evaluator.ts:4:import type { DocumentProvenanceBundle, DocumentTruthSource } from '@/lib/documentProvenance/types';
+IMPORT lib/engineeringDecisionProvenance/evaluator.ts:5:import type { EngineeringRequirementEvaluation, EngineeringRequirementId } from '@/lib/survey/evidence/engineeringRequirements';
+IMPORT lib/engineeringDecisionProvenance/evaluator.ts:6:import { getEngineeringDecisionDefinition, listEngineeringDecisionDefinitions } from './decisionRegistry';
+IMPORT lib/engineeringDecisionProvenance/evaluator.ts:7:import { runEngineeringDecisionAuditGuards } from './guards';
+IMPORT lib/engineeringDecisionProvenance/evaluator.ts:8:import { stableEngineeringStateHash } from '@/lib/engineeringStateInvalidation/hash';
+IMPORT lib/engineeringStateInvalidation/types.ts:1:import type { DocumentTruthSource, DocumentType, EngineeringDependencyGraph, EngineeringDependencyNodeType } from '@/lib/documentProvenance';
+IMPORT lib/engineeringStateInvalidation/types.ts:2:import type { EngineeringRequirementId } from '@/lib/survey/evidence/engineeringRequirements';
+IMPORT lib/engineeringStateInvalidation/types.ts:3:import type { EngineeringDecisionType } from '@/lib/engineeringDecisionProvenance';
+IMPORT lib/engineeringStateInvalidation/engine.ts:1:import type { DocumentProvenanceBundle, DocumentProvenanceSection, EngineeringDependencyGraph, EngineeringDependencyNode } from '@/lib/documentProvenance';
+IMPORT lib/engineeringStateInvalidation/engine.ts:2:import type { EngineeringDecisionEvaluationBundle, EngineeringDecisionProvenanceRecord } from '@/lib/engineeringDecisionProvenance';
+IMPORT lib/engineeringStateInvalidation/engine.ts:3:import { runEngineeringStateAuditGuards } from './guards';
+IMPORT lib/engineeringStateInvalidation/persistence.ts:18:import { stableEngineeringStateHash } from './hash';
+IMPORT lib/engineeringStateInvalidation/guards.ts:10:import { stableEngineeringStateHash } from './hash';
+IMPORT lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:1:import { describe, expect, it } from 'vitest';
+IMPORT lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:3:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:4:import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
+IMPORT lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:5:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+IMPORT lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:6:import type { PermitInput } from '@/lib/permit/types';
+IMPORT lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:7:import { buildDocumentProvenanceBundle } from '@/lib/documentProvenance';
+IMPORT lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:8:import { buildRenderContext } from '@/lib/drafting/renderContext';
+IMPORT lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:9:import { buildEngineeringDecisionProvenanceBundle, buildDecisionAwareBOMMetadata, buildDecisionAwareSLDMetadata } from '@/lib/engineeringDecisionProvenance';
+IMPORT lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:10:import { buildEngineeringRequirementEvaluation } from '@/lib/survey/evidence/engineeringRequirements';
+IMPORT lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:11:import { buildProjectSurveyEvidenceHygiene } from '@/lib/survey/evidence/sessionGrouping';
+IMPORT lib/documentProvenance/documentProvenance.test.ts:1:import { describe, expect, it } from 'vitest';
+IMPORT lib/documentProvenance/documentProvenance.test.ts:3:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/documentProvenance/documentProvenance.test.ts:4:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+IMPORT lib/documentProvenance/documentProvenance.test.ts:5:import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
+IMPORT lib/documentProvenance/documentProvenance.test.ts:6:import { buildEngineeringRequirementEvaluation } from '@/lib/survey/evidence/engineeringRequirements';
+IMPORT lib/documentProvenance/documentProvenance.test.ts:7:import { buildProjectSurveyEvidenceHygiene } from '@/lib/survey/evidence/sessionGrouping';
+IMPORT lib/documentProvenance/documentProvenance.test.ts:16:import { buildRenderContext } from '@/lib/drafting/renderContext';
+IMPORT lib/documentProvenance/types.ts:1:import type { CADModel, CADSystemType } from '@/lib/cad/types';
+IMPORT lib/documentProvenance/types.ts:2:import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/manifest';
+IMPORT lib/documentProvenance/types.ts:7:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+IMPORT lib/documentProvenance/types.ts:8:import type { EvidenceTruthSource } from '@/lib/survey/evidence/provenance';
+IMPORT lib/documentProvenance/types.ts:9:import type { EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance';
+IMPORT lib/documentProvenance/types.ts:10:import type { EngineeringStateRegistry, EngineeringInvalidationLineageMetadata, EngineeringStateSnapshotReference } from '@/lib/engineeringStateInvalidation';
+IMPORT lib/documentProvenance/types.ts:11:import type { PermitInput } from '@/lib/permit/types';
+IMPORT lib/documentProvenance/requirementDocumentBindings.ts:1:import type { RequirementDocumentBinding } from './types';
+IMPORT lib/documentProvenance/requirementDocumentBindings.ts:2:import type { EngineeringRequirementId } from '@/lib/survey/evidence/engineeringRequirements';
+IMPORT lib/documentProvenance/requirementDocumentBindings.ts:3:import { ENGINEERING_REQUIREMENT_REGISTRY } from '@/lib/survey/evidence/engineeringRequirements';
+IMPORT lib/documentProvenance/builders.ts:1:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/documentProvenance/builders.ts:2:import type { EngineeringRequirementEvaluation, EngineeringRequirementId } from '@/lib/survey/evidence/engineeringRequirements';
+IMPORT lib/documentProvenance/builders.ts:3:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+IMPORT lib/documentProvenance/builders.ts:20:import { runDocumentAuditGuards } from './guards';
+IMPORT lib/documentProvenance/builders.ts:21:import { buildEngineeringDecisionProvenanceBundle } from '@/lib/engineeringDecisionProvenance/evaluator';
+IMPORT lib/documentProvenance/builders.ts:22:import type { EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance/types';
+IMPORT lib/documentProvenance/guards.ts:1:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+IMPORT lib/documentProvenance/guards.ts:2:import type { DocumentAuditGuardResult, DocumentProvenanceBundle } from './types';
+IMPORT lib/survey/evidence/sessionGrouping.test.ts:1:import { describe, expect, it } from 'vitest';
+IMPORT lib/survey/evidence/sessionGrouping.test.ts:3:import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
+IMPORT lib/survey/evidence/sessionGrouping.test.ts:4:import { buildProjectSurveyEvidenceHygiene } from './sessionGrouping';
+IMPORT lib/survey/evidence/sessionGrouping.test.ts:5:import { summarizeSurveyEvidenceEngineeringBridge } from './engineeringBridge';
+IMPORT lib/survey/evidence/engineeringRequirements.ts:1:import type { SurveyEvidenceCategory, SurveyEvidenceManifest } from './manifest';
+IMPORT lib/survey/evidence/engineeringRequirements.ts:2:import type { StructuredEngineeringSignalSummary, StructuredEngineeringSignal } from '@/lib/engineeringIntelligence/signalTypes';
+IMPORT lib/survey/evidence/fieldOrchestration.test.ts:1:import { describe, expect, it } from 'vitest';
+IMPORT lib/survey/evidence/sessionGrouping.ts:1:import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
+IMPORT lib/survey/evidence/sessionGrouping.ts:13:import { buildSurveyEvidenceEngineeringBridge } from './engineeringBridge';
+IMPORT lib/survey/evidence/sessionGrouping.ts:14:import { buildSurveyEvidenceTraceability } from './provenance';
+IMPORT lib/survey/evidence/provenance.ts:1:import type { SurveyEvidenceCategory, SurveyEvidenceItem, SurveyEvidenceManifest } from './manifest';
+IMPORT lib/survey/evidence/provenance.ts:7:import type { EvidenceDuplicateGroup, SurveySessionSummary } from './sessionTypes';
+IMPORT lib/survey/evidence/manifest.test.ts:1:import { describe, expect, it } from 'vitest';
+IMPORT lib/survey/evidence/manifest.test.ts:2:import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
+IMPORT lib/survey/evidence/manifest.test.ts:7:import { buildSurveyEvidenceEngineeringBridge } from './engineeringBridge';
+IMPORT lib/survey/evidence/engineeringBridge.ts:5:import type { SurveyEvidenceManifest, SurveyEvidenceItem } from './manifest';
+IMPORT lib/survey/evidence/sessionTypes.ts:6:import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
+IMPORT lib/survey/evidence/sessionTypes.ts:7:import type { SurveyEvidenceCategory } from './manifest';
+IMPORT lib/survey/evidence/engineeringRequirements.test.ts:1:import { describe, expect, it } from 'vitest';
+IMPORT lib/survey/evidence/engineeringRequirements.test.ts:3:import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
+IMPORT lib/survey/evidence/engineeringRequirements.test.ts:4:import { buildSurveyEvidenceManifest } from './manifest';
+IMPORT lib/survey/evidence/engineeringRequirements.test.ts:5:import { buildProjectSurveyEvidenceHygiene } from './sessionGrouping';
+IMPORT lib/survey/evidence/engineeringRequirements.test.ts:6:import { buildEngineeringRequirementEvaluation } from './engineeringRequirements';
+IMPORT lib/survey/evidence/manifest.ts:1:import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
+IMPORT lib/survey/evidence/manifest.ts:10:import type { SurveyEvidenceCategory, SurveyEvidenceDomain } from './categoryRegistry';
+IMPORT lib/survey/evidence/fieldOrchestration.ts:1:import type { SurveyEvidenceCategory } from './categoryRegistry';
+IMPORT lib/drafting/composers/index.ts:34:import type { DraftingInput, SysType } from '../types';
+IMPORT lib/drafting/composers/index.ts:35:import type { PermitInputShape } from '../permitInputShape';
+IMPORT lib/drafting/composers/index.ts:36:import { resolveSystemType } from '../resolver';
+IMPORT lib/drafting/composers/index.ts:37:import { drawRoofPlan, drawRoofStructural } from '../templates/roof';
+IMPORT lib/drafting/composers/index.ts:38:import { drawGroundArray, drawGroundStructural } from '../templates/ground';
+IMPORT lib/drafting/composers/index.ts:39:import { drawFencePlan, drawFenceElevation } from '../templates/fence';
+IMPORT lib/drafting/composers/index.ts:40:import { safeBuildIntent } from '../designIntent';
+IMPORT lib/drafting/composers/index.ts:41:import type { DesignIntent } from '../designIntent';
+IMPORT lib/drafting/composers/index.ts:42:import { assertValidPlanSet, type SystemType } from '../validation';
+IMPORT lib/drafting/composers/index.ts:43:import { buildRenderContext, type RenderContext } from '../renderContext';
+IMPORT lib/drafting/composers/index.ts:44:import type { BillInsights } from '../../billInsights';
+IMPORT lib/drafting/composers/index.ts:47:import { generateCADLayout } from '../../cad/cadEngine';
+IMPORT lib/drafting/composers/index.ts:48:import { adaptCADToDrafting } from '../../cad/adapter';
+IMPORT lib/drafting/composers/index.ts:49:import type { CADModel } from '../../cad/types';
+IMPORT lib/drafting/composers/index.ts:50:import { buildCADFromSurvey } from '../../cad/buildCADFromSurvey';
+IMPORT lib/drafting/composers/index.ts:51:import { mergeCADModels } from '../../cad/mergeCADModels';
+IMPORT lib/drafting/composers/index.ts:52:import type { EnrichedSiteSurvey } from '../../siteSurvey/types';
+IMPORT lib/drafting/primitives/index.ts:11:import type { LineClass, TextOptions } from '../types';
+IMPORT lib/drafting/dimensions/index.ts:12:import type { DimensionOptions } from '../types';
+IMPORT lib/drafting/dimensions/index.ts:13:import { drawArrowhead, drawText } from '../primitives';
+IMPORT lib/drafting/renderContext.ts:19:import type { CADModel }    from '../cad/types';
+IMPORT lib/drafting/renderContext.ts:20:import type { BillInsights } from '../billInsights';
+IMPORT lib/drafting/renderContext.ts:21:import type { DocumentProvenanceBundle } from '@/lib/documentProvenance';
+IMPORT lib/drafting/renderContext.ts:22:import type { EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance';
+IMPORT lib/drafting/renderContext.ts:23:import type { EngineeringInvalidationLineageMetadata, EngineeringStateRegistry, EngineeringStateSnapshotReference, EngineeringStaleStateMetadata } from '@/lib/engineeringStateInvalidation';
+IMPORT lib/drafting/resolver.ts:9:import type { DraftingInput, SysType } from './types';
+IMPORT lib/drafting/designIntent.ts:18:import type { DraftingInput, SysType } from './types';
+IMPORT lib/drafting/designIntent.ts:19:import { resolveSystemType } from './resolver';
+IMPORT lib/drafting/sheetComposition.ts:20:import type { CADModel } from '../cad/types';
+IMPORT lib/drafting/index.ts:101:import { resolveSystemType } from './resolver';
+IMPORT lib/drafting/index.ts:102:import type { DraftingInput } from './types';
+IMPORT lib/drafting/index.ts:103:import type { PermitInputShape } from './permitInputShape';
+IMPORT lib/drafting/callouts/index.ts:9:import type { CalloutOptions, LeaderOptions } from '../types';
+IMPORT lib/drafting/callouts/index.ts:10:import { drawText } from '../primitives';
+IMPORT lib/drafting/templates/roof.ts:26:import type { DraftingInput } from '../types';
+IMPORT lib/drafting/templates/roof.ts:27:import type { DesignIntent } from '../designIntent';
+IMPORT lib/drafting/templates/roof.ts:28:import type { CADModel } from '../../cad/types';
+IMPORT lib/drafting/templates/roof.ts:29:import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
+IMPORT lib/drafting/templates/roof.ts:30:import { getLayoutForSystem } from '../layoutEngine';
+IMPORT lib/drafting/templates/ground.ts:27:import type { DraftingInput } from '../types';
+IMPORT lib/drafting/templates/ground.ts:28:import type { DesignIntent } from '../designIntent';
+IMPORT lib/drafting/templates/ground.ts:29:import type { CADModel, CADGroundArray } from '../../cad/types';
+IMPORT lib/drafting/templates/ground.ts:30:import { getLayoutForSystem } from '../layoutEngine';
+IMPORT lib/drafting/templates/ground.ts:44:import { metersToFt } from '../../cad/geometry';
+IMPORT lib/drafting/templates/ground.ts:45:import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
+IMPORT lib/drafting/templates/fence.ts:27:import type { DraftingInput } from '../types';
+IMPORT lib/drafting/templates/fence.ts:28:import type { DesignIntent } from '../designIntent';
+IMPORT lib/drafting/templates/fence.ts:29:import type { CADModel, CADFenceSegment } from '../../cad/types';
+IMPORT lib/drafting/templates/fence.ts:30:import { getLayoutForSystem } from '../layoutEngine';
+IMPORT lib/drafting/templates/fence.ts:44:import { metersToFt } from '../../cad/geometry';
+IMPORT lib/drafting/templates/fence.ts:45:import { drawUtilityAnalysis, type RenderContext } from '../renderContext';
+IMPORT lib/drafting/validation.ts:20:import type { CADModel } from '../cad/types';
+IMPORT lib/drafting/validation.ts:21:import type { RenderContext } from './renderContext';
+IMPORT lib/drafting/renderPlanSet.ts:28:import type { CADModel } from '../cad/types';
+IMPORT lib/drafting/renderPlanSet.ts:29:import { assertValidPlanSet, type SystemType } from './validation';
+IMPORT lib/drafting/renderPlanSet.ts:30:import type { DraftingInput } from './types';
+IMPORT lib/drafting/renderPlanSet.ts:31:import type { DesignIntent } from './designIntent';
+IMPORT lib/drafting/renderPlanSet.ts:32:import { drawFenceElevation, drawFencePlan } from './templates/fence';
+IMPORT lib/drafting/renderPlanSet.ts:33:import { drawGroundArray, drawGroundStructural } from './templates/ground';
+IMPORT lib/drafting/renderPlanSet.ts:34:import { drawRoofPlan, drawRoofStructural } from './templates/roof';
+IMPORT lib/drafting/renderPlanSet.ts:35:import { buildRenderContext, type RenderContext } from './renderContext';
+IMPORT lib/drafting/renderPlanSet.ts:36:import type { BillInsights } from '../billInsights';
+IMPORT lib/drafting/renderPlanSet.ts:37:import type { DocumentProvenanceBundle } from '@/lib/documentProvenance';
+IMPORT lib/drafting/renderPlanSet.ts:38:import type { EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance';
+IMPORT lib/permit/satelliteService.ts:15:import type { SatelliteImageResult } from './types';
+IMPORT lib/permit/types.ts:6:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/permit/types.ts:7:import type { RenderContext } from '@/lib/drafting/renderContext';
+IMPORT lib/permit/types.ts:8:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+IMPORT lib/permit/types.ts:9:import type { DocumentProvenanceBundle } from '@/lib/documentProvenance';
+IMPORT lib/permit/types.ts:10:import type { EngineeringDecisionEvaluationBundle, DecisionAwareBOMMetadata, DecisionAwareSLDMetadata, DecisionAwareReadinessSummary } from '@/lib/engineeringDecisionProvenance';
+IMPORT lib/permit/types.ts:11:import type { EngineeringStateRegistry, EngineeringInvalidationLineageMetadata, SelectiveRegenerationPlan } from '@/lib/engineeringStateInvalidation';
+IMPORT lib/permit/sections/sitePlan.ts:6:import type { PermitInput } from '../types';
+IMPORT lib/permit/sections/sitePlan.ts:7:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/permit/sections/sitePlan.ts:8:import { titleBlock } from '../utils/titleBlock';
+IMPORT lib/permit/sections/sitePlan.ts:9:import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, interconnectionLabel, utilityDisplayName, compassDir } from '../utils/helpers';
+IMPORT lib/permit/sections/sitePlan.ts:10:import { mercPx, buildSchemSVG } from '../utils/drawing';
+IMPORT lib/permit/sections/sitePlan.ts:11:import { isFence, isGround } from '@/lib/system';
+IMPORT lib/permit/sections/validationPage.ts:6:import type { PermitInput, CanonicalInput } from '../types';
+IMPORT lib/permit/sections/validationPage.ts:7:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/permit/sections/validationPage.ts:8:import { titleBlock } from '../utils/titleBlock';
+IMPORT lib/permit/sections/validationPage.ts:9:import { PLANSET_ENGINE_VERSION } from '../constants';
+IMPORT lib/permit/sections/validationPage.ts:10:import { isFence, isGround, isRoof } from '@/lib/system';
+IMPORT lib/permit/sections/interconnectionPage.ts:21:import type { PermitInput } from '../types';
+IMPORT lib/permit/sections/interconnectionPage.ts:22:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/permit/sections/interconnectionPage.ts:23:import { titleBlock } from '../utils/titleBlock';
+IMPORT lib/permit/sections/interconnectionPage.ts:24:import { PLANSET_ENGINE_VERSION } from '../constants';
+IMPORT lib/permit/sections/interconnectionPage.ts:30:import { PROPOSAL_UTILITY_PROFILES } from '@/lib/proposalTruthEngine';
+IMPORT lib/permit/sections/arrayPages.ts:6:import type { PermitInput } from '../types';
+IMPORT lib/permit/sections/arrayPages.ts:7:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/permit/sections/arrayPages.ts:8:import type { RenderContext } from '@/lib/drafting/renderContext';
+IMPORT lib/permit/sections/arrayPages.ts:12:import { titleBlock } from '../utils/titleBlock';
+IMPORT lib/permit/sections/arrayPages.ts:13:import { sysTypeLabel, pv2Title, compassDir } from '../utils/helpers';
+IMPORT lib/permit/sections/arrayPages.ts:14:import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
+IMPORT lib/permit/sections/arrayPages.ts:15:import { isFence, isGround, isRoof, displaySystemType } from '@/lib/system';
+IMPORT lib/permit/sections/structuralPages.ts:6:import type { PermitInput } from '../types';
+IMPORT lib/permit/sections/structuralPages.ts:7:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/permit/sections/structuralPages.ts:8:import type { RenderContext } from '@/lib/drafting/renderContext';
+IMPORT lib/permit/sections/structuralPages.ts:12:import { titleBlock } from '../utils/titleBlock';
+IMPORT lib/permit/sections/structuralPages.ts:13:import { sysTypeLabel, pv3Title, statusBg, statusColor, statusLabel } from '../utils/helpers';
+IMPORT lib/permit/sections/structuralPages.ts:14:import type { CanonicalInput } from '../types';
+IMPORT lib/permit/sections/structuralPages.ts:15:import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension } from '../utils/drawing';
+IMPORT lib/permit/sections/structuralPages.ts:16:import {  isFence, isGround, isRoof } from '@/lib/system';
+IMPORT lib/permit/sections/certPages.ts:6:import type { PermitInput } from '../types';
+IMPORT lib/permit/sections/certPages.ts:7:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/permit/sections/certPages.ts:8:import { titleBlock } from '../utils/titleBlock';
+IMPORT lib/permit/sections/certPages.ts:9:import { roofTypeLabel } from '../utils/helpers';
+IMPORT lib/permit/sections/certPages.ts:10:import { getEquipmentContext, isFence, isGround } from '@/lib/system';
+IMPORT lib/permit/sections/certPages.ts:11:import { BUILD_VERSION } from '@/lib/version';
+IMPORT lib/permit/sections/compliancePages.ts:6:import type { PermitInput } from '../types';
+IMPORT lib/permit/sections/compliancePages.ts:7:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/permit/sections/compliancePages.ts:8:import { titleBlock } from '../utils/titleBlock';
+IMPORT lib/permit/sections/compliancePages.ts:9:import { interconnectionLabel } from '../utils/helpers';
+IMPORT lib/permit/sections/compliancePages.ts:10:import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
+IMPORT lib/permit/sections/compliancePages.ts:11:import type { CanonicalSysType } from '../types';
+IMPORT lib/permit/sections/compliancePages.ts:12:import { MOUNT_SYSTEM_MAP } from '../utils/canonical';
+IMPORT lib/permit/sections/electricalPages.ts:6:import type { PermitInput } from '../types';
+IMPORT lib/permit/sections/electricalPages.ts:7:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/permit/sections/electricalPages.ts:8:import { titleBlock } from '../utils/titleBlock';
+IMPORT lib/permit/sections/electricalPages.ts:9:import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, statusColor, statusBg, statusBorder, statusLabel, interconnectionLabel, utilityDisplayName, type SysType } from '../utils/helpers';
+IMPORT lib/permit/sections/electricalPages.ts:10:import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
+IMPORT lib/permit/sections/electricalPages.ts:11:import { generateLiveSLD } from '../utils/sldAdapter';
+IMPORT lib/permit/sections/coverSheet.ts:6:import type { PermitInput } from '../types';
+IMPORT lib/permit/sections/coverSheet.ts:7:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/permit/sections/coverSheet.ts:8:import { titleBlock, buildConstructionNotes } from '../utils/titleBlock';
+IMPORT lib/permit/sections/coverSheet.ts:9:import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, utilityDisplayName, interconnectionLabel, roofTypeLabel, pv2Title, pv3Title, type SysType } from '../utils/helpers';
+IMPORT lib/permit/sections/coverSheet.ts:10:import {  getSystemType, getInverterTopology, getEquipmentContext, topologyToLegacy, isFence, isGround, isRoof, displaySystemTypeShort } from '@/lib/system';
+IMPORT lib/permit/sections/coverSheet.ts:11:import type { CanonicalInput } from '../types';
+IMPORT lib/permit/sections/coverSheet.ts:12:import { BUILD_VERSION } from '@/lib/version';
+IMPORT lib/permit/sections/coverSheet.ts:13:import { PLANSET_ENGINE_VERSION } from '../constants';
+IMPORT lib/permit/generatePermit.ts:6:import type { PermitInput, CanonicalInput } from './types';
+IMPORT lib/permit/generatePermit.ts:7:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/permit/generatePermit.ts:8:import { PLANSET_ENGINE_VERSION } from './constants';
+IMPORT lib/permit/generatePermit.ts:9:import { buildCanonical, validateCanonicalStrict, buildLayoutDimensions } from './utils/canonical';
+IMPORT lib/permit/generatePermit.ts:10:import { generateCADLayout } from '@/lib/cad/cadEngine';
+IMPORT lib/permit/generatePermit.ts:11:import { buildRenderContext, type RenderContext } from '@/lib/drafting/renderContext';
+IMPORT lib/permit/generatePermit.ts:12:import { buildDocumentProvenanceBundle } from '@/lib/documentProvenance';
+IMPORT lib/permit/generatePermit.ts:13:import { buildEngineeringStateRegistry, buildInvalidationLineageMetadata, staleMetadataForState } from '@/lib/engineeringStateInvalidation';
+IMPORT lib/permit/generatePermit.ts:20:import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
+IMPORT lib/permit/generatePermit.ts:23:import { pageCoverSheet } from './sections/coverSheet';
+IMPORT lib/permit/generatePermit.ts:24:import { pageSiteInformation } from './sections/sitePlan';
+IMPORT lib/permit/generatePermit.ts:25:import { pageArrayPrimary, pageArrayGeometry } from './sections/arrayPages';
+IMPORT lib/permit/generatePermit.ts:26:import { pageStructuralPrimary, pageStructural, pageEquipmentSchedule } from './sections/structuralPages';
+IMPORT lib/permit/generatePermit.ts:27:import { pageNECCompliance, pageConductorSchedule, pageSingleLineDiagram } from './sections/electricalPages';
+IMPORT lib/permit/generatePermit.ts:28:import { pageWarningLabels, pageSpecSheetReference } from './sections/compliancePages';
+IMPORT lib/permit/generatePermit.ts:29:import { pageEngineerCert, pagePELetter } from './sections/certPages';
+IMPORT lib/permit/generatePermit.ts:30:import { pageValidationSummary } from './sections/validationPage';
+IMPORT lib/permit/generatePermit.ts:32:import { generateBOMForPermit } from './utils/bomForPermit';
+IMPORT lib/permit/permit-bom-integration.test.ts:16:import { describe, it, expect, beforeAll } from 'vitest';
+IMPORT lib/permit/permit-bom-integration.test.ts:17:import { generateBOMForPermit, summarizeBOM, type PermitBOMItem } from './utils/bomForPermit';
+IMPORT lib/permit/permit-bom-integration.test.ts:18:import { pageEquipmentSchedule } from './sections/structuralPages';
+IMPORT lib/permit/permit-bom-integration.test.ts:19:import type { PermitInput } from './types';
+IMPORT lib/permit/permit-bom-integration.test.ts:20:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/permit/validationPageSurveyEvidence.test.ts:1:import { describe, expect, it } from 'vitest';
+IMPORT lib/permit/validationPageSurveyEvidence.test.ts:3:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/permit/validationPageSurveyEvidence.test.ts:4:import { buildEngineeringRequirementEvaluation } from '@/lib/survey/evidence/engineeringRequirements';
+IMPORT lib/permit/validationPageSurveyEvidence.test.ts:5:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+IMPORT lib/permit/validationPageSurveyEvidence.test.ts:6:import type { CanonicalInput, PermitInput } from './types';
+IMPORT lib/permit/validationPageSurveyEvidence.test.ts:7:import { pageValidationSummary } from './sections/validationPage';
+IMPORT lib/permit/buildPermitCoverSheet.ts:16:import type { EngineeringReport } from '@/lib/engineering/types';
+IMPORT lib/permit/buildPermitCoverSheet.ts:17:import type { DesignSnapshot } from '@/lib/engineering/types';
+IMPORT lib/permit/buildPermitCoverSheet.ts:18:import type { PermitCoverData, PermitArtifact } from './types';
+IMPORT lib/permit/buildPermitCoverSheet.ts:19:import { PERMIT_SHEET_INDEX } from './types';
+IMPORT lib/permit/utils/bomForPermit.ts:24:import type { PermitInput } from '../types';
+IMPORT lib/permit/utils/bomForPermit.ts:25:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/permit/utils/titleBlock.ts:6:import type { PermitInput } from '../types';
+IMPORT lib/permit/utils/titleBlock.ts:7:import { utilityDisplayName, resolveEquipment } from './helpers';
+IMPORT lib/permit/utils/titleBlock.ts:8:import type { ResolvedEquipment } from '../types';
+IMPORT lib/permit/utils/peLetter.ts:6:import type { PermitInput } from '../types';
+IMPORT lib/permit/utils/drawing.ts:7:import type { PermitInput, DimOpts } from '../types';
+IMPORT lib/permit/utils/drawing.ts:8:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/permit/utils/drawing.ts:9:import type { RenderContext } from '@/lib/drafting/renderContext';
+IMPORT lib/permit/utils/drawing.ts:15:import { drawingEngine } from '@/lib/drafting';
+IMPORT lib/permit/utils/drawing.ts:16:import { titleBlock } from './titleBlock';
+IMPORT lib/permit/utils/drawing.ts:17:import { resolveEquipment } from './helpers';
+IMPORT lib/permit/utils/canonical.ts:6:import type { PermitInput, CanonicalInput, CanonicalSysType, CanonicalModule, CanonicalSite, CanonicalStructure, CanonicalElectrical, CanonicalLayoutDimensions } from '../types';
+IMPORT lib/permit/utils/canonical.ts:7:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/permit/utils/canonical.ts:8:import { getMountingSystemById } from '@/lib/mounting-hardware-db';
+IMPORT lib/permit/utils/canonical.ts:9:import { resolveEquipment } from './helpers';
+IMPORT lib/permit/utils/helpers.ts:6:import type { PermitInput, ResolvedEquipment } from '../types';
+IMPORT lib/permit/utils/sldAdapter.ts:6:import type { PermitInput } from '../types';
+IMPORT lib/permit/utils/sldAdapter.ts:7:import type { CADModel } from '@/lib/cad/types';
+IMPORT lib/permit/utils/sldAdapter.ts:8:import { renderSLDProfessional, type SLDProfessionalInput } from '@/lib/sld-professional-renderer';
+IMPORT lib/permit/utils/sldAdapter.ts:9:import { utilityDisplayName, interconnectionLabel } from './helpers';
+IMPORT lib/permit/utils/sldAdapter.ts:10:import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
+IMPORT lib/permit/utils/sldAdapter.ts:11:import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
+IMPORT app/admin/engineering-intelligence/snapshots/page.tsx:1:import { buildEngineeringIntelligenceWorkspace } from '@/lib/engineeringIntelligence';
+IMPORT app/admin/engineering-intelligence/page.tsx:1:import { cookies } from 'next/headers';
+IMPORT app/admin/engineering-intelligence/page.tsx:2:import { verifyToken } from '@/lib/auth';
+IMPORT app/admin/engineering-intelligence/page.tsx:3:import { getProjectsByUser } from '@/lib/db-neon';
+IMPORT app/admin/engineering-intelligence/page.tsx:4:import { buildEngineeringIntelligenceWorkspace } from '@/lib/engineeringIntelligence';
+IMPORT app/admin/engineering-intelligence/page.tsx:5:import type { Project } from '@/types';
+IMPORT app/admin/engineering-intelligence/project/[id]/page.tsx:1:import { cookies } from 'next/headers';
+IMPORT app/admin/engineering-intelligence/project/[id]/page.tsx:2:import { verifyToken } from '@/lib/auth';
+IMPORT app/admin/engineering-intelligence/project/[id]/page.tsx:3:import { isValidUUID } from '@/lib/db-neon';
+IMPORT app/admin/engineering-intelligence/project/[id]/page.tsx:4:import { hydrateProjectEngineeringIntelligenceFromDb, buildEngineeringIntelligenceWorkspace, buildCADReadinessMetadata, buildEngineeringContextResolution } from '@/lib/engineeringIntelligence';
+IMPORT app/admin/engineering-intelligence/project/[id]/page.tsx:5:import { buildDeterministicPhotoGrouping } from '@/lib/engineeringIntelligence/photoGrouping';
+IMPORT app/admin/engineering-intelligence/project/[id]/page.tsx:6:import { buildStructuredEngineeringSignals } from '@/lib/engineeringIntelligence/signalExtraction';
+IMPORT app/admin/engineering-intelligence/project/[id]/page.tsx:7:import { buildFieldEvidenceOrchestrationModel } from '@/lib/survey/evidence/fieldOrchestration';
+IMPORT app/admin/engineering-intelligence/graph/page.tsx:1:import { buildEngineeringIntelligenceWorkspace } from '@/lib/engineeringIntelligence';
+IMPORT app/admin/engineering-intelligence/components.tsx:1:import Link from 'next/link';
+IMPORT app/admin/engineering-intelligence/components.tsx:39:import type { HydratedProjectEngineeringState } from '@/lib/engineeringIntelligence/projectHydration';
+IMPORT app/admin/engineering-intelligence/components.tsx:40:import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
+IMPORT app/admin/engineering-intelligence/components.tsx:41:import type { DeterministicPhotoGroupingModel } from '@/lib/engineeringIntelligence/photoGrouping';
+IMPORT app/admin/engineering-intelligence/components.tsx:42:import type { FieldEvidenceOrchestrationModel } from '@/lib/survey/evidence/fieldOrchestration';
+IMPORT app/admin/engineering-intelligence/components.tsx:43:import type { Project } from '@/types';
+IMPORT tests/auth-health.test.ts:15:import { describe, it, expect, vi, beforeEach } from 'vitest';
+IMPORT tests/auth-health.test.ts:18:import { isTransientDbError, DbConfigError } from '../lib/db-ready';
+IMPORT tests/auth-health.test.ts:21:import { signToken, verifyToken } from '../lib/auth';
+IMPORT tests/priority6-no-fake-testimonials.test.ts:14:import { describe, it, expect } from 'vitest';
+IMPORT tests/priority6-no-fake-testimonials.test.ts:15:import { readFileSync } from 'fs';
+IMPORT tests/priority6-no-fake-testimonials.test.ts:16:import { join } from 'path';
+IMPORT tests/priority7-crew-members.test.ts:18:import { describe, it, expect } from 'vitest';
+IMPORT tests/priority7-crew-members.test.ts:19:import { readFileSync } from 'fs';
+IMPORT tests/priority7-crew-members.test.ts:20:import { join } from 'path';
+IMPORT tests/contractor-matcher.test.ts:1:import { beforeEach, describe, expect, it, vi } from 'vitest'
+IMPORT tests/homeowner-qualification.test.ts:1:import { beforeEach, describe, expect, it, vi } from "vitest";
+IMPORT tests/homeowner-qualification.test.ts:2:import fs from "node:fs";
+IMPORT tests/homeowner-qualification.test.ts:3:import path from "node:path";
+IMPORT tests/homeowner-qualification.test.ts:9:import { scoreOpportunity } from "@/lib/network/opportunityScorer";
+IMPORT tests/homeowner-qualification.test.ts:10:import { buildOpportunityEnrichment } from "@/lib/network/opportunityEnrichment";
+IMPORT tests/utility-bill-attachment.test.ts:1:import { mkdtemp, rm } from 'fs/promises'
+IMPORT tests/utility-bill-attachment.test.ts:2:import { existsSync } from 'fs'
+IMPORT tests/utility-bill-attachment.test.ts:3:import { join } from 'path'
+IMPORT tests/utility-bill-attachment.test.ts:4:import { tmpdir } from 'os'
+IMPORT tests/utility-bill-attachment.test.ts:5:import { afterEach, describe, expect, it, vi } from 'vitest'
+IMPORT tests/utility-bill-attachment.test.ts:7:import { isUtilityBillStorageFailure, metadataOnlyUtilityBill, storeUtilityBillAttachment } from '@/lib/intake/utilityBillAttachment'
+IMPORT tests/golden-path.test.ts:15:import { describe, it, expect, beforeAll } from 'vitest';
+IMPORT tests/golden-path.test.ts:16:import fs from 'fs';
+IMPORT tests/golden-path.test.ts:17:import path from 'path';
+IMPORT tests/golden-path.test.ts:19:import { roofProject } from '../test-fixtures/roofProject';
+IMPORT tests/golden-path.test.ts:20:import { groundProject } from '../test-fixtures/groundProject';
+IMPORT tests/golden-path.test.ts:21:import { fenceProject } from '../test-fixtures/fenceProject';
+IMPORT tests/golden-path.test.ts:22:import { billText } from '../test-fixtures/billText';
+IMPORT tests/golden-path.test.ts:24:import { parseBill } from '@/lib/billParser';
+IMPORT tests/golden-path.test.ts:25:import { buildCanonical } from '@/lib/permit/utils/canonical';
+IMPORT tests/golden-path.test.ts:26:import { generateCADLayout } from '@/lib/cad/cadEngine';
+IMPORT tests/golden-path.test.ts:27:import { buildSLDInputFromPermit } from '@/lib/permit/utils/sldAdapter';
+IMPORT tests/network-assignment-visibility.test.ts:1:import { beforeEach, describe, expect, it, vi } from "vitest";
+IMPORT tests/sld-ecosystem-truth.test.ts:34:import { describe, test, expect, beforeAll, vi } from 'vitest';
+IMPORT tests/sld-ecosystem-truth.test.ts:35:import { renderSLDProfessional } from '../lib/sld-professional-renderer';
+IMPORT tests/sld-ecosystem-truth.test.ts:36:import { getInverterById } from '../lib/equipment-db';
+IMPORT tests/opportunity-enrichment-display.test.ts:1:import { describe, expect, it } from 'vitest'
+IMPORT tests/intelligence-runner-route.test.ts:1:import { beforeEach, describe, expect, it, vi } from 'vitest'
+IMPORT tests/sld-engineering-accuracy.test.ts:21:import { describe, test, expect, beforeAll, afterAll, vi } from 'vitest';
+IMPORT tests/sld-engineering-accuracy.test.ts:22:import { renderSLDProfessional } from '../lib/sld-professional-renderer';
+IMPORT tests/sld-engineering-accuracy.test.ts:23:import { getInverterById } from '../lib/equipment-db';
+IMPORT tests/engineering-intelligence-render-safety.test.tsx:2:import React from 'react';
+IMPORT tests/engineering-intelligence-render-safety.test.tsx:4:import { render, screen } from '@testing-library/react';
+IMPORT tests/engineering-intelligence-render-safety.test.tsx:22:import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
+IMPORT tests/engineering-intelligence-render-safety.test.tsx:23:import type { DeterministicPhotoGroupingModel } from '@/lib/engineeringIntelligence/photoGrouping';
+IMPORT tests/proposals-signature.test.ts:19:import { describe, it, expect, vi, beforeEach } from 'vitest';
+IMPORT tests/proposals-signature.test.ts:27:import { getDbReady } from '@/lib/db-neon';
+IMPORT tests/proposals-signature.test.ts:28:import { GET }        from '@/app/api/proposals/[id]/signature/route';
+IMPORT tests/marketplace-inventory-release.test.ts:1:import { beforeEach, describe, expect, it, vi } from "vitest";
+IMPORT tests/free-solar-estimate-page.test.ts:1:import { describe, expect, it } from "vitest";
+IMPORT tests/free-solar-estimate-page.test.ts:2:import fs from "node:fs";
+IMPORT tests/free-solar-estimate-page.test.ts:3:import path from "node:path";
+IMPORT tests/operational-lifecycle.test.ts:1:import { afterEach, describe, expect, it, vi } from "vitest";
+IMPORT tests/operational-lifecycle.test.ts:13:import { evaluateMarketplaceReleaseGate } from "@/lib/network/marketplaceReleaseGate";
+IMPORT tests/marketplace-intelligence.test.ts:1:import { describe, expect, it, vi } from "vitest";
+IMPORT tests/marketplace-intelligence.test.ts:2:import { deriveMarketplaceBadges } from "@/lib/network/marketplaceBadges";
+IMPORT tests/marketplace-intelligence.test.ts:3:import { deriveMarketplaceConfidence } from "@/lib/network/marketplaceConfidence";
+IMPORT tests/marketplace-intelligence.test.ts:4:import { buildMarketplaceIntelligence } from "@/lib/network/marketplaceIntelligence";
+IMPORT tests/marketplace-intelligence.test.ts:5:import { buildMarketplaceNarrative } from "@/lib/network/marketplaceNarratives";
+IMPORT tests/marketplace-intelligence.test.ts:6:import { evaluateMarketplaceReleaseGate } from "@/lib/network/marketplaceReleaseGate";
+IMPORT tests/marketplace-intelligence.test.ts:7:import { deriveMarketplaceRevenueProjection } from "@/lib/network/marketplaceRevenueProjection";
+IMPORT tests/marketplace-intelligence.test.ts:8:import { derivePurchaseBehavior } from "@/lib/network/purchaseBehavior";
+IMPORT tests/solardog.test.ts:32:import { describe, it, expect } from 'vitest';
+IMPORT tests/solardog.test.ts:35:import { resolveRoute, detectLearnIntent, detectUnlearnIntent, isNavigationIntent, isValidLearnPhrase, isValidLearnTarget } from '../lib/solardog/resolveRoute';
+IMPORT tests/solardog.test.ts:36:import { normalizePhrase, SITE_MAP, buildAliasMap } from '../lib/solardog/siteMap';
+IMPORT tests/solardog.test.ts:37:import { ACTION_REGISTRY, buildActionList, getAction, getActionsByCategory } from '../lib/solardog/actionRegistry';
+IMPORT tests/solardog.test.ts:38:import { SOLARPRO_KNOWLEDGE_SEED } from '../lib/solardog/knowledgeSeed';
+IMPORT tests/contractor-eligibility.test.ts:1:import { beforeEach, describe, expect, it, vi } from "vitest";
+IMPORT tests/contractor-match-route.test.ts:1:import { beforeEach, describe, expect, it, vi } from "vitest";
+IMPORT tests/security-debug-routes.test.ts:18:import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+IMPORT tests/security-debug-routes.test.ts:19:import fs from 'fs';
+IMPORT tests/security-debug-routes.test.ts:20:import path from 'path';
+IMPORT tests/sld-topology-selection.test.ts:14:import { describe, test, expect, beforeAll } from 'vitest';
+IMPORT tests/sld-topology-selection.test.ts:15:import { renderSLDProfessional } from '../lib/sld-professional-renderer';
+IMPORT tests/network-screening-route-enrichment.test.ts:1:import { describe, expect, it } from 'vitest'
+IMPORT tests/network-screening-route-enrichment.test.ts:2:import { readFileSync } from 'fs'
+IMPORT tests/bill-upload.test.ts:18:import { describe, it, expect, vi, beforeEach } from 'vitest';
+IMPORT tests/bill-upload.test.ts:19:import { parseBill, parseMonthlyUsage, estimateSystemSize } from '../lib/billParser';
+IMPORT tests/bill-upload.test.ts:20:import { parseBillText, validateBillData } from '../lib/billOcr';
+IMPORT tests/bill-upload.test.ts:21:import { validateAndCorrectUtilityRate, getProductionFactor, checkNetMeteringLimit } from '../lib/utility-rules';
+IMPORT tests/admin-network-opportunities-publish.test.ts:1:import { beforeEach, describe, expect, it, vi } from "vitest";
+IMPORT tests/marketplace-workbench-route.test.ts:1:import { beforeEach, describe, expect, it, vi } from "vitest";
+IMPORT tests/marketplace-workbench-route.test.ts:2:import fs from "node:fs";
+IMPORT tests/marketplace-workbench-route.test.ts:3:import path from "node:path";
+IMPORT tests/priority-crew-settings.test.ts:12:import { describe, it, expect } from 'vitest';
+IMPORT tests/priority-crew-settings.test.ts:13:import * as fs from 'fs';
+IMPORT tests/priority-crew-settings.test.ts:14:import * as path from 'path';
+IMPORT tests/priority10-portal-vault-referral.test.ts:16:import { describe, it, expect } from 'vitest';
+IMPORT tests/priority10-portal-vault-referral.test.ts:17:import * as fs from 'fs';
+IMPORT tests/priority10-portal-vault-referral.test.ts:18:import * as path from 'path';
+IMPORT tests/onboarding-complete.test.ts:14:import { describe, it, expect, vi, beforeEach } from 'vitest';
+IMPORT tests/onboarding-complete.test.ts:28:import { getUserFromRequest } from '@/lib/auth';
+IMPORT tests/onboarding-complete.test.ts:29:import { getDbReady }         from '@/lib/db-neon';
+IMPORT tests/onboarding-complete.test.ts:30:import { POST }               from '@/app/api/settings/onboarding-complete/route';
+IMPORT tests/priority-portal-monitoring.test.ts:14:import { describe, it, expect } from 'vitest';
+IMPORT tests/priority-portal-monitoring.test.ts:15:import path from 'path';
+IMPORT tests/priority-portal-monitoring.test.ts:16:import fs from 'fs';
+IMPORT tests/hydrate-bill-data.test.ts:19:import { describe, it, expect } from 'vitest';
+IMPORT tests/hydrate-bill-data.test.ts:20:import { readFileSync } from 'fs';
+IMPORT tests/hydrate-bill-data.test.ts:21:import { hydrateBillData } from '../lib/bill/hydrateBillData';
+IMPORT tests/golden-generate.ts:7:import fs from 'fs';
+IMPORT tests/golden-generate.ts:8:import path from 'path';
+IMPORT tests/golden-generate.ts:10:import { roofProject } from '../test-fixtures/roofProject';
+IMPORT tests/golden-generate.ts:11:import { groundProject } from '../test-fixtures/groundProject';
+IMPORT tests/golden-generate.ts:12:import { fenceProject } from '../test-fixtures/fenceProject';
+IMPORT tests/golden-generate.ts:13:import { billText } from '../test-fixtures/billText';
+IMPORT tests/golden-generate.ts:15:import { parseBill } from '@/lib/billParser';
+IMPORT tests/golden-generate.ts:16:import { buildCanonical } from '@/lib/permit/utils/canonical';
+IMPORT tests/golden-generate.ts:17:import { generateCADLayout } from '@/lib/cad/cadEngine';
+IMPORT tests/golden-generate.ts:18:import { buildSLDInputFromPermit } from '@/lib/permit/utils/sldAdapter';
+IMPORT tests/proposals-sign.test.ts:29:import { describe, it, expect, vi, beforeEach } from 'vitest';
+IMPORT tests/proposals-sign.test.ts:41:import { getDbReady }               from '@/lib/db-neon';
+IMPORT tests/proposals-sign.test.ts:42:import { sendProposalSignedEmail }  from '@/lib/email';
+IMPORT tests/proposals-sign.test.ts:43:import { POST }                     from '@/app/api/proposals/[id]/sign/route';
+IMPORT tests/priority-sso-authorize.test.ts:30:import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+IMPORT tests/priority-sso-authorize.test.ts:31:import * as fs from 'fs';
+IMPORT tests/priority-sso-authorize.test.ts:32:import * as path from 'path';
+IMPORT tests/priority5-crew-calendar.test.ts:21:import { describe, it, expect } from 'vitest';
+IMPORT tests/priority5-crew-calendar.test.ts:22:import * as fs from 'fs';
+IMPORT tests/priority5-crew-calendar.test.ts:23:import * as path from 'path';
+IMPORT tests/priority-utility-seed-migration.test.ts:12:import { describe, it, expect } from 'vitest';
+IMPORT tests/priority-utility-seed-migration.test.ts:13:import path from 'path';
+IMPORT tests/priority-utility-seed-migration.test.ts:14:import fs from 'fs';
+IMPORT tests/network-simulator-route.test.ts:1:import { beforeEach, describe, expect, it, vi } from "vitest";
+IMPORT tests/network-simulator-route.test.ts:2:import fs from "node:fs";
+IMPORT tests/network-simulator-route.test.ts:3:import path from "node:path";
+IMPORT tests/utility-bill-intelligence-projection.test.ts:1:import { beforeEach, describe, expect, it, vi } from "vitest";
+IMPORT tests/priority-rate-limit-sign.test.ts:12:import { describe, it, expect } from 'vitest';
+IMPORT tests/priority-rate-limit-sign.test.ts:13:import path from 'path';
+IMPORT tests/priority-rate-limit-sign.test.ts:14:import fs from 'fs';
+IMPORT tests/priority6-install-photos.test.ts:17:import { describe, it, expect } from 'vitest';
+IMPORT tests/priority6-install-photos.test.ts:18:import * as fs from 'fs';
+IMPORT tests/priority6-install-photos.test.ts:19:import * as path from 'path';
+IMPORT tests/engineering-intelligence-navigation.test.ts:1:import { describe, expect, it } from 'vitest';
+IMPORT tests/engineering-intelligence-navigation.test.ts:2:import { readFileSync, existsSync } from 'node:fs';
+IMPORT tests/engineering-intelligence-navigation.test.ts:3:import { join } from 'node:path';
+IMPORT tests/engineering-intelligence-invalidation-v1.test.ts:1:import { describe, expect, it } from 'vitest';
+IMPORT tests/engineering-intelligence-invalidation-v1.test.ts:2:import type { EngineeringDependencyGraph } from '@/lib/documentProvenance';
+IMPORT tests/engineering-intelligence-invalidation-v1.test.ts:3:import type { EngineeringStateRegistry, EngineeringInvalidationResult, EngineeringStateSnapshot, PersistentEngineeringStateGraph } from '@/lib/engineeringStateInvalidation';
+IMPORT tests/intake-funnels-admin.test.ts:1:import { describe, expect, it } from "vitest";
+IMPORT tests/intake-funnels-admin.test.ts:2:import fs from "node:fs";
+IMPORT tests/intake-funnels-admin.test.ts:3:import path from "node:path";
+IMPORT tests/homeowner-intake-event-first.test.ts:1:import fs from "fs";
+IMPORT tests/homeowner-intake-event-first.test.ts:2:import path from "path";
+IMPORT tests/homeowner-intake-event-first.test.ts:3:import { beforeEach, describe, expect, it, vi } from "vitest";
+
+## Prohibited runtime terms in audited source
+lib/engineeringIntelligence/photoGrouping.ts:539:    'no image-byte inspection',
+lib/engineeringIntelligence/photoGrouping.ts:544:    'no autonomous engineering decisions',
+lib/engineeringIntelligence/signalExtraction.test.ts:153:    expect(summary.prohibitedRuntimeBehavior).toEqual(expect.arrayContaining(['no OCR', 'no CV classification', 'no image-byte inspection', 'no autonomous CAD generation']));
+lib/engineeringIntelligence/workspace.ts:580:      'Graph rendering is deterministic HTML/SVG layout; no semantic inference or image-byte inspection is performed.',
+lib/engineeringIntelligence/workspace.ts:1020:      'No client-side backend logic duplication, OCR, CV, CAD generation, image-byte inspection, semantic inference, or autonomous regeneration is introduced.',
+lib/engineeringIntelligence/signalExtraction.ts:75:      'Signals do not inspect image bytes, read visual content, infer geometry, classify scenes, generate CAD, or make autonomous engineering decisions.',
+lib/engineeringIntelligence/signalExtraction.ts:413:    'no image-byte inspection',
+lib/engineeringIntelligence/signalExtraction.ts:416:    'no autonomous CAD generation',
+lib/engineeringIntelligence/signalExtraction.ts:417:    'no autonomous engineering decisions',
+lib/engineeringIntelligence/invalidationEngine.ts:156:      'No OCR, CV, image-byte parsing, geometry inference, CAD generation, engineering decision generation, or autonomous regeneration is performed.',
+lib/engineeringIntelligence/cadReadiness.ts:153:      'Pixel inspection, text extraction over imagery, computer-vision runtime dependencies, semantic visual interpretation, and fabricated geometry are not used.',
+lib/engineeringIntelligence/cadReadiness.ts:157:      'no pixel inspection or image-byte inspection',
+lib/engineeringIntelligence/contextResolution.ts:77:      'Context ranking is deterministic and replayable; it does not use model weights, randomness, text/vision extraction runtimes, pixel inspection, geometry inference, plan-output creation, or operator-free engineering decisions.',
+lib/engineeringIntelligence/contextResolution.ts:343:    'no pixel inspection or image-byte inspection',
+lib/engineeringIntelligence/contextResolution.ts:344:    'no semantic visual interpretation',
+lib/engineeringIntelligence/photoGrouping.test.ts:133:    expect(grouping.prohibitedRuntimeBehavior).toEqual(expect.arrayContaining(['no OCR', 'no OpenCV', 'no CAD generation', 'no autonomous engineering decisions']));
+lib/engineeringIntelligence/cadReadiness.test.ts:168:  it('does not expose runtime CAD, CV, OCR, YOLO, or image-byte behavior', () => {
+lib/engineeringIntelligence/cadReadiness.test.ts:173:      'no pixel inspection or image-byte inspection',
+lib/engineeringIntelligence/snapshotDelta.ts:114:      'No semantic diffing, OCR, image-byte inspection, geometry inference, CAD generation, or autonomous engineering evaluation is performed.',
+lib/engineeringStateInvalidation/persistence.ts:120:      'No CV, OCR, CAD generation, image-byte inspection, or autonomous regeneration is performed.',
+lib/survey/evidence/engineeringRequirements.ts:432:      'Future capability flags are informational and do not activate OCR, CV, semantic extraction, CAD inference, or image-byte inspection.',
+lib/survey/evidence/engineeringRequirements.ts:575:      'No OCR, CV, semantic extraction, CAD inference, or image-byte processing is activated by this flag set.',
+lib/survey/evidence/fieldOrchestration.test.ts:94:      'no image-byte analysis',
+lib/survey/evidence/fieldOrchestration.test.ts:95:      'no autonomous CAD generation',
+lib/survey/evidence/provenance.ts:133:          `Confidence provenance: ${record.requirementConfidenceSource}; no CV/OCR/CAD/image-byte inference is used.`,
+lib/survey/evidence/engineeringRequirements.test.ts:182:    expect(evaluation.deterministicSummary.join(' ')).toContain('do not activate OCR, CV, semantic extraction, CAD inference, or image-byte inspection');
+lib/survey/evidence/fieldOrchestration.ts:262:      'no image-byte analysis',
+lib/survey/evidence/fieldOrchestration.ts:263:      'no autonomous CAD generation',
+lib/drafting/dimensions/index.ts:100:// Computes label from pixel span × scale.
+lib/drafting/layoutEngine.ts:23:    x: number;       // left edge (pixels)
+lib/drafting/layoutEngine.ts:24:    y: number;       // top edge (pixels from top of canvas)
+lib/drafting/templates/roof.ts:19://   so template scale = pixels/ft and panel sizes are pixel-accurate.
+lib/permit/sections/compliancePages.ts:402:            <tr><td class="il">Cell Type</td><td class="iv">Monocrystalline PERC / TOPCon</td></tr>
+lib/permit/utils/drawing.ts:81:  ppm: number,           // pixels per metre
+lib/permit/utils/drawing.ts:174:  // ── Panel physical size in SVG pixels ─────────────────────────────────────
+lib/permit/utils/drawing.ts:177:  const pLpx  = Math.max(5, pLenM * ppm);  // portrait: tall dimension (N-S pixels)
+lib/permit/utils/drawing.ts:178:  const pWpx  = Math.max(3, pWidM * ppm);  // portrait: wide dimension (E-W pixels)
+tests/auth-health.test.ts:229:    '/api/ocr',
+tests/auth-health.test.ts:263:  it('/api/ocr is public (internal route)', () => {
+tests/auth-health.test.ts:264:    expect(isPublic('/api/ocr')).toBe(true);
+tests/auth-health.test.ts:279:  it('/api/debug/ocr is NOT public (requires auth for diagnostics)', () => {
+tests/auth-health.test.ts:280:    expect(isPublic('/api/debug/ocr')).toBe(false);
+tests/engineering-intelligence-render-safety.test.tsx:131:      prohibitedRuntimeBehavior: [{ guard: 'no autonomous CAD' }],
+tests/security-debug-routes.test.ts:207:    { file: 'app/api/debug/ocr/route.ts',                   guard: 'getUserFromRequest' },
+tests/homeowner-intake-event-first.test.ts:36:      "x-real-ip": `203.0.113.${Math.floor(Math.random() * 200) + 1}`,
+tests/homeowner-intake-event-first.test.ts:53:      "x-real-ip": `198.51.100.${Math.floor(Math.random() * 200) + 1}`,
+tests/homeowner-intake-event-first.test.ts:190:            extraction: { success: true, method: "ocr", confidence: 0.88 },
+scripts/check-engineering-boundaries.js:41:  /No OCR|no OCR|OCR\/CV|OpenCV|YOLO|TensorFlow|PyTorch|image-byte|semantic inference|hallucinated geometry|autonomous regeneration/i,
+scripts/check-engineering-boundaries.js:44:  /no autonomous CAD generation/i,
+scripts/check-engineering-boundaries.js:47:  /flat_torch|Flat Torch-Down/,
+scripts/check-engineering-boundaries.js:52:  { code: 'ocr_runtime', pattern: /\b(tesseract|ocrad|easyocr|paddleocr|OCRWorker)\b/i },
+scripts/check-engineering-boundaries.js:53:  { code: 'opencv_runtime', pattern: /\b(opencv|cv2|OpenCV|@techstark\/opencv-js)\b/i },
+scripts/check-engineering-boundaries.js:54:  { code: 'yolo_runtime', pattern: /\b(yolo|ultralytics)\b/i },
+scripts/check-engineering-boundaries.js:55:  { code: 'ml_runtime', pattern: /\b(tensorflow|tfjs|pytorch|onnxruntime|keras)\b|(?<!flat_)\btorch\b/i },
+scripts/check-engineering-boundaries.js:56:  { code: 'image_byte_analysis', pattern: /\b(getImageData|pixelData|imageBytes|parseImage|decodeImage|sharp\(|jimp\(|exiftool)\b/i },
+scripts/check-engineering-boundaries.js:58:  { code: 'autonomous_cad_generation', pattern: /\b(generateCAD|autonomous CAD|autoGenerateLayout|hallucinated geometry|inferGeometry)\b/i },
+scripts/check-engineering-boundaries.js:104:console.log(`Engineering Intelligence boundary scan passed: no prohibited OCR/CV/ML/image-byte/CAD-autogeneration runtime patterns found in ${scannedFiles.size} scoped file(s).`);
+
+## Sort/hash/determinism markers
+lib/engineeringIntelligence/regenerationPlanner.ts:4:import { sortBy, sortText } from './propagationGraph';
+lib/engineeringIntelligence/regenerationPlanner.ts:46:  const existingBlocked = sortText(existingPlans.flatMap(plan => plan.blockedRegenerationDependencies));
+lib/engineeringIntelligence/regenerationPlanner.ts:47:  const planItems = sortBy(input.propagation.affectedOutputs.map(output => ({
+lib/engineeringIntelligence/regenerationPlanner.ts:60:    blockedDependencyIds: sortText([...existingBlocked, ...output.dependencyNodeIds.filter(id => input.propagation.cycleProtection.missingNodeIds.includes(id))]),
+lib/engineeringIntelligence/regenerationPlanner.ts:64:  const reviewRequiredIds = sortText(planItems
+lib/engineeringIntelligence/regenerationPlanner.ts:67:  const preservedOutputIds = sortText([
+lib/engineeringIntelligence/regenerationPlanner.ts:71:  const blockedDependencyIds = sortText([...existingBlocked, ...planItems.flatMap(item => item.blockedDependencyIds)]);
+lib/engineeringIntelligence/regenerationPlanner.ts:72:  const missingEvidenceIds = sortText([...input.propagation.missingEvidenceIds, ...planItems.flatMap(item => item.missingEvidenceIds)]);
+lib/engineeringIntelligence/regenerationPlanner.ts:73:  const propagationPathIds = sortText(planItems.flatMap(item => item.propagationPathIds));
+lib/engineeringIntelligence/regenerationPlanner.ts:74:  const deterministicHash = stableHash([
+lib/engineeringIntelligence/regenerationPlanner.ts:89:    regenerationCandidateIds: sortText(planItems.map(item => item.affectedStateId)),
+lib/engineeringIntelligence/regenerationPlanner.ts:104:function stableHash(values: Array<string | number | boolean | null | undefined>): string {
+lib/engineeringIntelligence/regenerationPlanner.ts:105:  const payload = sortText(Array.from(new Set(values.filter(value => value !== null && value !== undefined && String(value).length > 0).map(String)))).join('\n');
+lib/engineeringIntelligence/photoGrouping.ts:98:  generatedAt: string;
+lib/engineeringIntelligence/photoGrouping.ts:125:  generatedAt?: string;
+lib/engineeringIntelligence/photoGrouping.ts:127:  const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+lib/engineeringIntelligence/photoGrouping.ts:132:    return emptyGroupingModel({ projectId: input.projectId ?? manifest?.projectId ?? null, surveyId: manifest?.surveyId ?? input.survey?.id ?? null, generatedAt });
+lib/engineeringIntelligence/photoGrouping.ts:157:    generatedAt,
+lib/engineeringIntelligence/photoGrouping.ts:184:function emptyGroupingModel(input: { projectId: string | null; surveyId: string | null; generatedAt: string }): DeterministicPhotoGroupingModel {
+lib/engineeringIntelligence/photoGrouping.ts:186:    generatedAt: input.generatedAt,
+lib/engineeringIntelligence/photoGrouping.ts:230:    const filename = (a.filename ?? '').localeCompare(b.filename ?? '');
+lib/engineeringIntelligence/photoGrouping.ts:232:    const category = a.category.localeCompare(b.category);
+lib/engineeringIntelligence/photoGrouping.ts:234:    return a.evidenceId.localeCompare(b.evidenceId);
+lib/engineeringIntelligence/photoGrouping.ts:326:  }).sort((a, b) => a.sequenceStart - b.sequenceStart || a.clusterId.localeCompare(b.clusterId));
+lib/engineeringIntelligence/photoGrouping.ts:433:  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? 'uncategorized';
+lib/engineeringIntelligence/photoGrouping.ts:528:  return [...new Set(values)].sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/contextTypes.ts:107:  generatedAt: string;
+lib/engineeringIntelligence/signalExtraction.test.ts:8:const generatedAt = '2025-01-01T00:00:00.000Z';
+lib/engineeringIntelligence/signalExtraction.test.ts:27:    captureTimestamp: new Date(Date.parse(generatedAt) + index * 60_000).toISOString(),
+lib/engineeringIntelligence/signalExtraction.test.ts:43:    generatedAt,
+lib/engineeringIntelligence/signalExtraction.test.ts:95:  const base = buildDeterministicPhotoGrouping({ projectId: inputManifest.projectId, canonicalManifest: inputManifest, generatedAt });
+lib/engineeringIntelligence/signalExtraction.test.ts:108:    generatedAt,
+lib/engineeringIntelligence/signalExtraction.test.ts:116:      triggeredAt: generatedAt,
+lib/engineeringIntelligence/signalExtraction.test.ts:137:      invalidatedAt: generatedAt,
+lib/engineeringIntelligence/signalExtraction.test.ts:145:    const summary = buildStructuredEngineeringSignals({ generatedAt });
+lib/engineeringIntelligence/signalExtraction.test.ts:175:    const summary = buildStructuredEngineeringSignals({ canonicalManifest: inputManifest, photoGrouping: grouping, generatedAt });
+lib/engineeringIntelligence/signalExtraction.test.ts:194:    const exteriorSummary = buildStructuredEngineeringSignals({ canonicalManifest: exteriorOnly, photoGrouping: exteriorGrouping, generatedAt });
+lib/engineeringIntelligence/signalExtraction.test.ts:212:      generatedAt,
+lib/engineeringIntelligence/signalExtraction.test.ts:227:    const first = buildStructuredEngineeringSignals({ canonicalManifest: inputManifest, photoGrouping: grouping, invalidationResult: invalidationFor(targetEvidence), generatedAt });
+lib/engineeringIntelligence/signalExtraction.test.ts:228:    const second = buildStructuredEngineeringSignals({ canonicalManifest: inputManifest, photoGrouping: grouping, invalidationResult: invalidationFor(targetEvidence), generatedAt });
+lib/engineeringIntelligence/signalExtraction.test.ts:242:    const signals = buildStructuredEngineeringSignals({ canonicalManifest: inputManifest, photoGrouping: grouping, generatedAt });
+lib/engineeringIntelligence/signalExtraction.test.ts:251:    const blockedSignals = buildStructuredEngineeringSignals({ canonicalManifest: blockedManifest, photoGrouping: groupingFor(blockedManifest), generatedAt });
+lib/engineeringIntelligence/projectHydration.ts:46:  generatedAt: string;
+lib/engineeringIntelligence/projectHydration.ts:70:  generatedAt?: string;
+lib/engineeringIntelligence/projectHydration.ts:75:    return hydrateProjectEngineeringIntelligence({ projectId: input.projectId, sources, generatedAt: input.generatedAt });
+lib/engineeringIntelligence/projectHydration.ts:77:    const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+lib/engineeringIntelligence/projectHydration.ts:82:      generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:84:    const structuredSignals = buildStructuredEngineeringSignals({ projectId: input.projectId, photoGrouping, cadReadiness, generatedAt });
+lib/engineeringIntelligence/projectHydration.ts:86:    const contextResolution = buildEngineeringContextResolution({ projectId: input.projectId, structuredSignals, photoGrouping, cadReadiness: signalAwareCADReadiness, generatedAt });
+lib/engineeringIntelligence/projectHydration.ts:98:      generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:127:  generatedAt?: string;
+lib/engineeringIntelligence/projectHydration.ts:129:  const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+lib/engineeringIntelligence/projectHydration.ts:131:    const date = (b.survey.createdAt ?? '').localeCompare(a.survey.createdAt ?? '');
+lib/engineeringIntelligence/projectHydration.ts:132:    return date || b.survey.id.localeCompare(a.survey.id);
+lib/engineeringIntelligence/projectHydration.ts:140:      generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:142:    const structuredSignals = buildStructuredEngineeringSignals({ projectId: input.projectId, photoGrouping, cadReadiness, generatedAt });
+lib/engineeringIntelligence/projectHydration.ts:144:    const contextResolution = buildEngineeringContextResolution({ projectId: input.projectId, structuredSignals, photoGrouping, cadReadiness: signalAwareCADReadiness, generatedAt });
+lib/engineeringIntelligence/projectHydration.ts:156:      generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:181:  const hygiene = buildProjectSurveyEvidenceHygiene({ projectId: input.projectId, surveys: sortedSources, generatedAt });
+lib/engineeringIntelligence/projectHydration.ts:184:  const canonicalManifest = buildSurveyEvidenceManifest({ survey: canonicalSource.survey, files: canonicalSource.files, generatedAt });
+lib/engineeringIntelligence/projectHydration.ts:186:    normalizedAt: generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:198:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:208:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:214:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:225:        generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:232:          triggeredAt: generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:238:    ? { ...registry, stateRecords: invalidationResult.updatedStateRecords, stateIds: invalidationResult.updatedStateRecords.map(record => record.stateId).sort((a, b) => a.localeCompare(b)) }
+lib/engineeringIntelligence/projectHydration.ts:242:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:249:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:262:        generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:271:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:293:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:303:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:324:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:335:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:376:    generatedAt,
+lib/engineeringIntelligence/workspace.ts:69:const sortText = <T extends string>(values: T[]): T[] => [...new Set(values)].sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/workspace.ts:70:const sortBy = <T>(values: T[], selector: (value: T) => string): T[] => [...values].sort((a, b) => selector(a).localeCompare(selector(b)));
+lib/engineeringIntelligence/workspace.ts:219:    const missingRequirementIds = sortText(groupRequirements.filter(requirement => requirement.missing || requirement.insufficientMetadata).map(requirement => requirement.requirementId));
+lib/engineeringIntelligence/workspace.ts:225:      ? sortText(refs
+lib/engineeringIntelligence/workspace.ts:249:    ].sort((a, b) => a.canonicalEvidenceId.localeCompare(b.canonicalEvidenceId));
+lib/engineeringIntelligence/workspace.ts:288:  const staleStateImpactStateIds = sortText([...linkedRefs.filter(ref => ref.staleStatus !== 'current').map(ref => ref.stateId), ...invalidationEvents.map(event => event.stateId)]);
+lib/engineeringIntelligence/workspace.ts:290:  const linkedOutputIds = sortText([...linkedRefs.map(ref => ref.stateId), ...graphNodes.flatMap(node => node.stateId ? [node.stateId] : [])]);
+lib/engineeringIntelligence/workspace.ts:291:  const linkedDecisionIds = sortText([...linkedRefs.flatMap(ref => ref.decisionIds), ...graphNodes.flatMap(node => node.decisionIds)]);
+lib/engineeringIntelligence/workspace.ts:297:    provenance: sortText([...linkedRefs.map(ref => ref.stateId), input.record.evidenceTruthSource]),
+lib/engineeringIntelligence/workspace.ts:307:    linkedRequirementIds: sortText([...linkedRequirements.map(requirement => requirement.requirementId), ...linkedRefs.flatMap(ref => ref.requirementIds)]),
+lib/engineeringIntelligence/workspace.ts:309:    linkedDocumentSectionIds: sortText(linkedRequirements.flatMap(requirement => requirement.permitUsage)),
+lib/engineeringIntelligence/workspace.ts:311:    linkedGraphNodeIds: sortText(graphNodeIds),
+lib/engineeringIntelligence/workspace.ts:312:    linkedGraphEdgeIds: sortText(graphEdges.map(edge => edge.edgeId)),
+lib/engineeringIntelligence/workspace.ts:317:    staleImpactReasons: sortText(invalidationEvents.map(event => event.invalidationReason)),
+lib/engineeringIntelligence/workspace.ts:318:    regenerationCandidateIds: sortText(input.plans.filter(plan => plan.staleStateIds.some(stateId => staleStateImpactStateIds.includes(stateId))).map(plan => plan.planId)),
+lib/engineeringIntelligence/workspace.ts:337:  const staleStateImpactStateIds = sortText([...linkedRefs.filter(ref => ref.staleStatus !== 'current').map(ref => ref.stateId), ...invalidationEvents.map(event => event.stateId)]);
+lib/engineeringIntelligence/workspace.ts:342:    provenance: sortText(linkedRefs.map(ref => ref.stateId)),
+lib/engineeringIntelligence/workspace.ts:352:    linkedRequirementIds: sortText(linkedRefs.flatMap(ref => ref.requirementIds)),
+lib/engineeringIntelligence/workspace.ts:353:    linkedDecisionIds: sortText([...linkedRefs.flatMap(ref => ref.decisionIds), ...graphNodes.flatMap(node => node.decisionIds)]),
+lib/engineeringIntelligence/workspace.ts:355:    linkedOutputIds: sortText([...linkedRefs.map(ref => ref.stateId), ...graphNodes.flatMap(node => node.stateId ? [node.stateId] : [])]),
+lib/engineeringIntelligence/workspace.ts:356:    linkedGraphNodeIds: sortText(graphNodeIds),
+lib/engineeringIntelligence/workspace.ts:357:    linkedGraphEdgeIds: sortText(graphEdges.map(edge => edge.edgeId)),
+lib/engineeringIntelligence/workspace.ts:362:    staleImpactReasons: sortText(invalidationEvents.map(event => event.invalidationReason)),
+lib/engineeringIntelligence/workspace.ts:363:    regenerationCandidateIds: sortText(input.plans.filter(plan => plan.staleStateIds.some(stateId => staleStateImpactStateIds.includes(stateId))).map(plan => plan.planId)),
+lib/engineeringIntelligence/workspace.ts:369:  return Object.entries(completeness).map(([field, present]) => ({ field, present })).sort((a, b) => a.field.localeCompare(b.field));
+lib/engineeringIntelligence/workspace.ts:397:  return sortText(signals);
+lib/engineeringIntelligence/workspace.ts:421:  return sortText(signals);
+lib/engineeringIntelligence/workspace.ts:435:  return sortBy(ENGINEERING_REQUIREMENT_DEFINITIONS, req => req.requirementId).map((definition: EngineeringRequirementDefinition) => {
+lib/engineeringIntelligence/workspace.ts:444:      linkedEvidenceIds: sortText(linkedRefs.flatMap(ref => ref.canonicalEvidenceIds)),
+lib/engineeringIntelligence/workspace.ts:445:      linkedDecisionIds: sortText(linkedRefs.flatMap(ref => ref.decisionIds)),
+lib/engineeringIntelligence/workspace.ts:447:      dependencyReferences: sortText(linkedRefs.flatMap(ref => ref.dependencyNodeIds)),
+lib/engineeringIntelligence/workspace.ts:448:      staleImpactStateIds: sortText(staleRefs.map(ref => ref.stateId)),
+lib/engineeringIntelligence/workspace.ts:456:  return sortBy(listEngineeringDecisionDefinitions(), decision => decision.decisionType).map((definition: EngineeringDecisionDefinition) => {
+lib/engineeringIntelligence/workspace.ts:466:      governingRuleIds: sortText(definition.governingRules.map(rule => rule.ruleId)),
+lib/engineeringIntelligence/workspace.ts:467:      evidenceLineageIds: sortText(linkedRefs.flatMap(ref => ref.canonicalEvidenceIds)),
+lib/engineeringIntelligence/workspace.ts:468:      dependencyLineageIds: sortText([...definition.engineeringDependencies, ...linkedRefs.flatMap(ref => ref.dependencyNodeIds)]),
+lib/engineeringIntelligence/workspace.ts:470:      affectedOutputIds: sortText([...definition.affectedDocumentSectionIds, ...linkedRefs.map(ref => ref.stateId)]),
+lib/engineeringIntelligence/workspace.ts:471:      staleImpactStateIds: sortText(linkedRefs.filter(ref => ref.staleStatus !== 'current').map(ref => ref.stateId)),
+lib/engineeringIntelligence/workspace.ts:493:      .sort((a, b) => a.eventId.localeCompare(b.eventId)),
+lib/engineeringIntelligence/workspace.ts:494:    preservedOutputIds: sortText(plans.flatMap(plan => plan.unchangedPreservedOutputs)),
+lib/engineeringIntelligence/workspace.ts:495:    regenerationScopeIds: sortText(plans.flatMap(plan => plan.staleStateIds)),
+lib/engineeringIntelligence/workspace.ts:504:  const snapshots = sortBy(input.snapshots ?? [], snapshot => snapshot.snapshotId);
+lib/engineeringIntelligence/workspace.ts:509:    diffs: sortBy(input.snapshotDiffs ?? [], diff => diff.diffId),
+lib/engineeringIntelligence/workspace.ts:573:    nodes: sortBy([...registryNodes, ...graphNodes], node => node.nodeId),
+lib/engineeringIntelligence/workspace.ts:574:    edges: sortBy(graphEdges, edge => edge.edgeId),
+lib/engineeringIntelligence/workspace.ts:586:  const plans: SelectiveRegenerationPlan[] = sortBy(input.regenerationPlans ?? [], plan => plan.planId);
+lib/engineeringIntelligence/workspace.ts:589:    regenerationCandidates: sortText(plans.flatMap(plan => plan.staleStateIds)),
+lib/engineeringIntelligence/workspace.ts:590:    regenerationOrder: sortText(plans.flatMap(plan => plan.regenerationOrder)),
+lib/engineeringIntelligence/workspace.ts:591:    blockedDependencies: sortText(plans.flatMap(plan => plan.blockedRegenerationDependencies)),
+lib/engineeringIntelligence/workspace.ts:592:    preservedOutputIds: sortText(plans.flatMap(plan => plan.unchangedPreservedOutputs)),
+lib/engineeringIntelligence/workspace.ts:606:    stalePropagationChains: sortText(propagation?.propagationPaths.map(path => `${path.pathId}:depth=${path.depth}`) ?? []),
+lib/engineeringIntelligence/workspace.ts:608:    impactedOutputs: sortText(propagation?.affectedOutputs.map(output => output.outputId) ?? []),
+lib/engineeringIntelligence/workspace.ts:612:    dependencyTraversalPaths: sortText(propagation?.propagationPaths.map(path => path.nodeIds.join(' -> ')) ?? []),
+lib/engineeringIntelligence/workspace.ts:628:    downstreamLineage: sortText(traversal?.paths.map(path => path.nodeIds.join(' -> ')) ?? []),
+lib/engineeringIntelligence/workspace.ts:629:    propagationDepths: sortText(traversal?.paths.map(path => `${path.targetNodeId}:depth=${path.depth}`) ?? []),
+lib/engineeringIntelligence/workspace.ts:647:    whyRegenerate: sortText(plan?.planItems.map(item => `${item.affectedStateId}:${item.deterministicReason}`) ?? []),
+lib/engineeringIntelligence/workspace.ts:649:    impactedOutputs: sortText(plan?.planItems.map(item => item.affectedOutputId) ?? []),
+lib/engineeringIntelligence/workspace.ts:676:    documentSections: sortText(outputs.flatMap(output => output.affectedDocumentSectionIds)),
+lib/engineeringIntelligence/workspace.ts:677:    renderContexts: sortText(outputs.flatMap(output => output.affectedRenderContextIds)),
+lib/engineeringIntelligence/workspace.ts:678:    snapshots: sortText(outputs.flatMap(output => output.affectedSnapshotIds)),
+lib/engineeringIntelligence/workspace.ts:679:    decisions: sortText(outputs.flatMap(output => output.invalidatedDecisionIds)),
+lib/engineeringIntelligence/workspace.ts:680:    reviewRequired: sortText(outputs.filter(output => output.staleClass === 'BLOCKED' || output.staleClass === 'REQUIRES_REVIEW' || output.missingEvidenceIds.length > 0).map(output => output.stateId)),
+lib/engineeringIntelligence/workspace.ts:686:  const events = sortBy(input.transitionHistory?.transitionEvents ?? [], event => event.transitionEventId).map(event => ({
+lib/engineeringIntelligence/workspace.ts:823:      .sort((a, b) => a.rank - b.rank || a.contextId.localeCompare(b.contextId)),
+lib/engineeringIntelligence/workspace.ts:832:    conflictingContextIds: sortText(conflicts.map(conflict => conflict.contextId)),
+lib/engineeringIntelligence/workspace.ts:833:    competingSignalIds: sortText(conflicts.flatMap(conflict => conflict.competingSignalIds)),
+lib/engineeringIntelligence/workspace.ts:842:    fallbackDependentContextIds: sortText(contexts.filter(context => context.fallbackLineage.length > 0).map(context => context.id)),
+lib/engineeringIntelligence/workspace.ts:846:      .sort((a, b) => a.contextId.localeCompare(b.contextId)),
+lib/engineeringIntelligence/workspace.ts:897:      .sort((a, b) => a.contextId.localeCompare(b.contextId)),
+lib/engineeringIntelligence/workspace.ts:918:  const guards: EngineeringStateAuditGuardResult[] = sortBy(input.auditGuards ?? [], guard => guard.guardCode);
+lib/engineeringIntelligence/signalExtraction.ts:26:  generatedAt?: string;
+lib/engineeringIntelligence/signalExtraction.ts:30:  const generatedAt = input.generatedAt ?? input.canonicalManifest?.generatedAt ?? input.surveyEvidence?.source.normalizedAt ?? new Date(0).toISOString();
+lib/engineeringIntelligence/signalExtraction.ts:32:  const items = [...(manifest?.items ?? [])].sort((a, b) => a.evidenceId.localeCompare(b.evidenceId));
+lib/engineeringIntelligence/signalExtraction.ts:35:    generatedAt,
+lib/engineeringIntelligence/signalExtraction.ts:38:  })).sort((a, b) => a.id.localeCompare(b.id));
+lib/engineeringIntelligence/signalExtraction.ts:53:  }).sort((a, b) => `${a.signalId}:${a.fallback}`.localeCompare(`${b.signalId}:${b.fallback}`));
+lib/engineeringIntelligence/signalExtraction.ts:57:    generatedAt,
+lib/engineeringIntelligence/signalExtraction.ts:84:  input: BuildStructuredEngineeringSignalsInput & { generatedAt: string; manifestItems: SurveyEvidenceItem[]; canonicalManifest: SurveyEvidenceManifest | null },
+lib/engineeringIntelligence/signalExtraction.ts:98:  const sourceEvidenceIds = sortText(evidence.map(item => item.evidenceId));
+lib/engineeringIntelligence/signalExtraction.ts:99:  const invalidatedBy = sortText([
+lib/engineeringIntelligence/signalExtraction.ts:103:  const dependencyNodes = sortText([
+lib/engineeringIntelligence/signalExtraction.ts:124:    sourceSurveyIds: sortText([...evidence.map(item => item.surveyId), ...(input.canonicalManifest?.surveyId ? [input.canonicalManifest.surveyId] : [])]),
+lib/engineeringIntelligence/signalExtraction.ts:125:    derivedFrom: sortText([
+lib/engineeringIntelligence/signalExtraction.ts:137:    generatedAt: input.generatedAt,
+lib/engineeringIntelligence/signalExtraction.ts:144:    deterministicHash: stableHash(signalCore),
+lib/engineeringIntelligence/signalExtraction.ts:150:  return items.filter(item => categories.has(item.category)).sort((a, b) => a.evidenceId.localeCompare(b.evidenceId));
+lib/engineeringIntelligence/signalExtraction.ts:155:  return grouping.evidenceClusters.filter(cluster => definition.clusterTypes?.includes(cluster.clusterType)).sort((a, b) => a.clusterId.localeCompare(b.clusterId));
+lib/engineeringIntelligence/signalExtraction.ts:229:  return sortText([...sources]) as StructuredEngineeringSignalSource[];
+lib/engineeringIntelligence/signalExtraction.ts:279:  return { score: finalScore, band: finalScore >= 0.75 ? 'high' : finalScore >= 0.45 ? 'medium' : finalScore > 0 ? 'low' : 'none', factors: sortText(factors) };
+lib/engineeringIntelligence/signalExtraction.ts:289:  return sortText(reasons);
+lib/engineeringIntelligence/signalExtraction.ts:300:  return sortText(reasons);
+lib/engineeringIntelligence/signalExtraction.ts:311:  const requirementIds = sortText([...new Set(signals.flatMap(signal => signal.requirementImpacts))]);
+lib/engineeringIntelligence/signalExtraction.ts:325:  const flagIds = sortText([...new Set([...signals.flatMap(signal => signal.cadImpacts), ...flags.map(flag => flag.flagId)])]) as CADReadinessFlagId[];
+lib/engineeringIntelligence/signalExtraction.ts:369:    nodes: [...nodes.values()].sort((a, b) => a.nodeId.localeCompare(b.nodeId)),
+lib/engineeringIntelligence/signalExtraction.ts:370:    edges: edges.sort((a, b) => a.edgeId.localeCompare(b.edgeId)),
+lib/engineeringIntelligence/signalExtraction.ts:387:function sortText<T extends string>(values: T[]): T[] {
+lib/engineeringIntelligence/signalExtraction.ts:388:  return [...new Set(values)].sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/signalExtraction.ts:391:function stableHash(value: unknown): string {
+lib/engineeringIntelligence/signalExtraction.ts:404:    return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, nested]) => [key, sortStable(nested)]));
+lib/engineeringIntelligence/propagationGraph.ts:117:    nodes: sortBy([...nodes.values()], node => node.nodeId),
+lib/engineeringIntelligence/propagationGraph.ts:118:    edges: sortBy([...edges.values()], edge => edge.edgeId),
+lib/engineeringIntelligence/propagationGraph.ts:119:    duplicateEdgeIdsSuppressed: sortText([...duplicateEdgeIdsSuppressed]),
+lib/engineeringIntelligence/propagationGraph.ts:120:    missingNodeIds: sortText([...missingNodeIds]),
+lib/engineeringIntelligence/propagationGraph.ts:121:    sourceGraphTypes: sortText([...sourceGraphTypes]) as PropagationSourceGraphType[],
+lib/engineeringIntelligence/propagationGraph.ts:130:  const seedNodeIds = sortText(unique(input.seedNodeIds));
+lib/engineeringIntelligence/propagationGraph.ts:190:    visitedNodeIds: sortText([...visited]),
+lib/engineeringIntelligence/propagationGraph.ts:191:    impactedNodeIds: sortText([...visited].filter(nodeId => !seedNodeIds.includes(nodeId))),
+lib/engineeringIntelligence/propagationGraph.ts:192:    paths: sortBy([...paths.values()], path => path.pathId),
+lib/engineeringIntelligence/propagationGraph.ts:198:    missingNodeIds: sortText([...missingNodeIds]),
+lib/engineeringIntelligence/propagationGraph.ts:269:  for (const [key, values] of adjacency) adjacency.set(key, sortBy(values, edge => edge.edgeId));
+lib/engineeringIntelligence/propagationGraph.ts:295:export function sortText<T extends string>(values: T[]): T[] {
+lib/engineeringIntelligence/propagationGraph.ts:296:  return [...values].sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/propagationGraph.ts:299:export function sortBy<T>(values: T[], selector: (value: T) => string): T[] {
+lib/engineeringIntelligence/propagationGraph.ts:300:  return [...values].sort((a, b) => selector(a).localeCompare(selector(b)));
+lib/engineeringIntelligence/signalTypes.ts:92:  generatedAt: string;
+lib/engineeringIntelligence/signalTypes.ts:122:  generatedAt: string;
+lib/engineeringIntelligence/invalidationEngine.ts:11:import { sortBy, sortText, tracePropagation, type EngineeringStaleClass, type PropagationTraversalPath, type PropagationTraversalResult } from './propagationGraph';
+lib/engineeringIntelligence/invalidationEngine.ts:94:  const affectedStateIds = sortText(input.invalidationResult?.affectedStateIds ?? registryRecords.filter(record => record.staleStatus !== 'current').map(record => record.stateId));
+lib/engineeringIntelligence/invalidationEngine.ts:95:  const affectedRecords = sortBy(registryRecords.filter(record => affectedStateIds.includes(record.stateId) || record.staleStatus !== 'current'), record => record.stateId);
+lib/engineeringIntelligence/invalidationEngine.ts:96:  const preservedStateIds = sortText(input.invalidationResult?.unaffectedStateIds ?? registryRecords.filter(record => record.staleStatus === 'current').map(record => record.stateId));
+lib/engineeringIntelligence/invalidationEngine.ts:101:  const affectedDocumentSectionIds = sortText(affectedOutputs.flatMap(output => output.affectedDocumentSectionIds));
+lib/engineeringIntelligence/invalidationEngine.ts:102:  const affectedRenderContextIds = sortText(affectedOutputs.flatMap(output => output.affectedRenderContextIds));
+lib/engineeringIntelligence/invalidationEngine.ts:103:  const affectedSnapshotIds = sortText(affectedOutputs.flatMap(output => output.affectedSnapshotIds));
+lib/engineeringIntelligence/invalidationEngine.ts:104:  const affectedSnapshotStateIds = sortText(snapshots.flatMap(snapshot => snapshot.stateRefs.filter(ref => affectedStateIds.includes(ref.stateId)).map(ref => `${snapshot.snapshotId}:${ref.stateId}`)));
+lib/engineeringIntelligence/invalidationEngine.ts:105:  const missingEvidenceIds = sortText(affectedOutputs.flatMap(output => output.missingEvidenceIds));
+lib/engineeringIntelligence/invalidationEngine.ts:107:  const cadReadinessTransitionIds = sortText((input.cadReadiness?.flags ?? [])
+lib/engineeringIntelligence/invalidationEngine.ts:111:  const deterministicHash = stableHash([
+lib/engineeringIntelligence/invalidationEngine.ts:172:  return sortText([
+lib/engineeringIntelligence/invalidationEngine.ts:182:  const affectedSnapshotIds = sortText(snapshots.filter(snapshot => snapshot.stateRefs.some(ref => ref.stateId === record.stateId)).map(snapshot => snapshot.snapshotId));
+lib/engineeringIntelligence/invalidationEngine.ts:183:  const pathIds = sortText([
+lib/engineeringIntelligence/invalidationEngine.ts:199:    invalidatedDecisionIds: sortText(record.decisionIds),
+lib/engineeringIntelligence/invalidationEngine.ts:200:    missingEvidenceIds: record.canonicalEvidenceIds.length ? [] : sortText(record.requirementIds.map(id => `missingEvidenceForRequirement:${id}`)),
+lib/engineeringIntelligence/invalidationEngine.ts:201:    dependencyNodeIds: sortText(record.dependencyNodeIds),
+lib/engineeringIntelligence/invalidationEngine.ts:208:  const decisionIds = sortText(records.flatMap(record => record.decisionIds));
+lib/engineeringIntelligence/invalidationEngine.ts:215:      affectedStateIds: sortText(linkedRecords.map(record => record.stateId)),
+lib/engineeringIntelligence/invalidationEngine.ts:216:      affectedOutputIds: sortText(linkedOutputs.map(output => output.outputId)),
+lib/engineeringIntelligence/invalidationEngine.ts:217:      propagationPathIds: sortText([...(pathIdsByNode.get(decisionId) ?? []), ...linkedOutputs.flatMap(output => output.propagationPathIds)]),
+lib/engineeringIntelligence/invalidationEngine.ts:226:    for (const nodeId of path.nodeIds) lookup.set(nodeId, sortText([...(lookup.get(nodeId) ?? []), path.pathId]));
+lib/engineeringIntelligence/invalidationEngine.ts:245:function stableHash(values: Array<string | number | boolean | null | undefined>): string {
+lib/engineeringIntelligence/invalidationEngine.ts:246:  const payload = sortText(Array.from(new Set(values.filter(value => value !== null && value !== undefined && String(value).length > 0).map(String)))).join('\n');
+lib/engineeringIntelligence/cadReadiness.ts:146:    readyFlags: flags.filter(flag => flag.status === 'ready').map(flag => flag.flagId).sort((a, b) => a.localeCompare(b)),
+lib/engineeringIntelligence/cadReadiness.ts:147:    blockedFlags: flags.filter(flag => flag.status === 'blocked').map(flag => flag.flagId).sort((a, b) => a.localeCompare(b)),
+lib/engineeringIntelligence/cadReadiness.ts:148:    partialFlags: flags.filter(flag => flag.status === 'partial').map(flag => flag.flagId).sort((a, b) => a.localeCompare(b)),
+lib/engineeringIntelligence/cadReadiness.ts:174:  const satisfiedRequired = rule.requiredAnyCategories.filter(category => categorySet.has(category)).sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/cadReadiness.ts:175:  const supportive = rule.supportiveCategories.filter(category => categorySet.has(category)).sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/cadReadiness.ts:176:  const signals = rule.surveySignal(evidence).sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/cadReadiness.ts:178:  const confirmedSignalIds = linkedSignals.filter(signal => signal.status === 'confirmed').map(signal => signal.id).sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/cadReadiness.ts:179:  const partialSignalIds = linkedSignals.filter(signal => signal.status === 'partial').map(signal => signal.id).sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/cadReadiness.ts:180:  const blockedSignalIds = linkedSignals.filter(signal => signal.status === 'blocked' || signal.status === 'missing').map(signal => signal.id).sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/cadReadiness.ts:181:  const notApplicableSignalIds = linkedSignals.filter(signal => signal.status === 'not_applicable').map(signal => signal.id).sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/cadReadiness.ts:182:  const missingCategories = rule.requiredAnyCategories.filter(category => !categorySet.has(category)).sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/cadReadiness.ts:185:    .sort((a, b) => a.id.localeCompare(b.id));
+lib/engineeringIntelligence/cadReadiness.ts:212:  const structuredSignalIds = [...confirmedSignalIds, ...partialSignalIds, ...blockedSignalIds, ...notApplicableSignalIds].sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/cadReadiness.ts:221:      ].sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/cadReadiness.ts:226:      ].sort((a, b) => a.localeCompare(b))
+lib/engineeringIntelligence/cadReadiness.ts:232:    satisfiedCategories: [...satisfiedRequired, ...supportive].sort((a, b) => a.localeCompare(b)),
+lib/engineeringIntelligence/cadReadiness.ts:238:    deterministicReason: `${rule.reason} Status ${status} from explicit categories [${[...satisfiedRequired, ...supportive].sort((a, b) => a.localeCompare(b)).join(', ') || 'none'}], explicit survey signals [${signals.join(', ') || 'none'}], structured signals [${structuredSignalIds.join(', ') || 'none'}], and resolved contexts [${resolvedContextIds.join(', ') || 'none'}].`,
+lib/engineeringIntelligence/cadReadiness.ts:258:  ])).sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/contextResolution.test.ts:8:const generatedAt = '2025-01-01T00:00:00.000Z';
+lib/engineeringIntelligence/contextResolution.test.ts:27:    captureTimestamp: new Date(Date.parse(generatedAt) + index * 60_000).toISOString(),
+lib/engineeringIntelligence/contextResolution.test.ts:43:    generatedAt,
+lib/engineeringIntelligence/contextResolution.test.ts:66:  return buildDeterministicPhotoGrouping({ projectId: inputManifest.projectId, canonicalManifest: inputManifest, generatedAt });
+lib/engineeringIntelligence/contextResolution.test.ts:87:    generatedAt,
+lib/engineeringIntelligence/contextResolution.test.ts:98:    generatedAt,
+lib/engineeringIntelligence/contextResolution.test.ts:129:    const contexts = buildEngineeringContextResolution({ canonicalManifest: inputManifest, structuredSignals, photoGrouping: grouping(inputManifest), cadReadiness: buildCADReadinessMetadata({ canonicalManifest: inputManifest, structuredSignals }), generatedAt });
+lib/engineeringIntelligence/contextResolution.test.ts:148:    const contexts = buildEngineeringContextResolution({ structuredSignals, generatedAt });
+lib/engineeringIntelligence/contextResolution.test.ts:161:    const contexts = buildEngineeringContextResolution({ structuredSignals: fallbackSummary, generatedAt });
+lib/engineeringIntelligence/contextResolution.test.ts:178:      generatedAt,
+lib/engineeringIntelligence/contextResolution.test.ts:184:      generatedAt,
+lib/engineeringIntelligence/contextResolution.test.ts:199:    const contextResolution = buildEngineeringContextResolution({ structuredSignals, generatedAt });
+lib/engineeringIntelligence/contextResolution.test.ts:202:    expect(edgeIds).toEqual([...edgeIds].sort((a, b) => a.localeCompare(b)));
+lib/engineeringIntelligence/contextResolution.test.ts:212:    const contextResolution = buildEngineeringContextResolution({ structuredSignals, generatedAt });
+lib/engineeringIntelligence/contextResolution.ts:27:  generatedAt?: string;
+lib/engineeringIntelligence/contextResolution.ts:30:const sortText = <T extends string>(values: T[]): T[] => [...new Set(values)].sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/contextResolution.ts:31:const sortBy = <T>(values: T[], selector: (value: T) => string): T[] => [...values].sort((a, b) => selector(a).localeCompare(selector(b)));
+lib/engineeringIntelligence/contextResolution.ts:34:  const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+lib/engineeringIntelligence/contextResolution.ts:37:  const contexts = ENGINEERING_CONTEXT_REGISTRY.map(definition => evaluateContext(definition, { ...input, generatedAt, signals, lookup }));
+lib/engineeringIntelligence/contextResolution.ts:39:    .sort((a, b) => b.confidence.score - a.confidence.score || a.id.localeCompare(b.id))
+lib/engineeringIntelligence/contextResolution.ts:44:    return { ...withRank, deterministicHash: stableHash({ ...withRank, deterministicHash: undefined }) };
+lib/engineeringIntelligence/contextResolution.ts:45:  }).sort((a, b) => a.id.localeCompare(b.id));
+lib/engineeringIntelligence/contextResolution.ts:55:    generatedAt,
+lib/engineeringIntelligence/contextResolution.ts:83:function evaluateContext(definition: EngineeringContextDefinition, input: BuildEngineeringContextResolutionInput & { generatedAt: string; signals: StructuredEngineeringSignal[]; lookup: ContextSignalLookup }): ResolvedEngineeringContext {
+lib/engineeringIntelligence/contextResolution.ts:86:  const candidateSignals = sortBy([...primarySignals, ...supportingSignals], signal => signal.id);
+lib/engineeringIntelligence/contextResolution.ts:97:  const unresolvedDependencies = sortText([
+lib/engineeringIntelligence/contextResolution.ts:106:  const sourceEvidenceIds = sortText(candidateSignals.flatMap(signal => signal.sourceEvidenceIds));
+lib/engineeringIntelligence/contextResolution.ts:107:  const sourceMetadataIds = sortText([
+lib/engineeringIntelligence/contextResolution.ts:112:  const dependencyLineage = sortText(candidateSignals.flatMap(signal => signal.dependencyNodes));
+lib/engineeringIntelligence/contextResolution.ts:113:  const invalidationLineage = sortText([
+lib/engineeringIntelligence/contextResolution.ts:117:  const staleImpactPropagation = sortText(candidateSignals.flatMap(signal => signal.staleImpacts));
+lib/engineeringIntelligence/contextResolution.ts:118:  const regenerationParticipation = sortText([
+lib/engineeringIntelligence/contextResolution.ts:129:    sourceSignalIds: sortText(primarySignals.map(signal => signal.id)),
+lib/engineeringIntelligence/contextResolution.ts:130:    supportingSignalIds: sortText(supportingSignals.map(signal => signal.id)),
+lib/engineeringIntelligence/contextResolution.ts:131:    competingSignalIds: sortText(competingSignals.map(signal => signal.id)),
+lib/engineeringIntelligence/contextResolution.ts:138:    affectedOutputs: sortText(definition.affectedOutputs),
+lib/engineeringIntelligence/contextResolution.ts:139:    cadReadinessImpacts: sortText(definition.cadImpacts) as CADReadinessFlagId[],
+lib/engineeringIntelligence/contextResolution.ts:140:    requirementImpacts: sortText(definition.requirementImpacts),
+lib/engineeringIntelligence/contextResolution.ts:141:    decisionImpacts: sortText(definition.decisionImpacts),
+lib/engineeringIntelligence/contextResolution.ts:149:  return { ...contextCore, deterministicHash: stableHash(contextCore) };
+lib/engineeringIntelligence/contextResolution.ts:157:    lookup.set(signal.signal_type, sortBy(list, item => item.id));
+lib/engineeringIntelligence/contextResolution.ts:163:  return sortBy(signalTypes.flatMap(type => lookup.get(type) ?? []), signal => signal.id);
+lib/engineeringIntelligence/contextResolution.ts:218:  return { score, band, rank: 0, factors: sortText(factors), penalties: sortText(penalties) };
+lib/engineeringIntelligence/contextResolution.ts:231:  return sortText(reasons);
+lib/engineeringIntelligence/contextResolution.ts:247:  return sortText([
+lib/engineeringIntelligence/contextResolution.ts:257:  return contexts.filter(context => context.status === 'conflicting' || context.competingSignalIds.length > 0 || context.conflictReasoning.length > 0).map(context => ({ conflictId: `conflict:${context.contextType}`, contextId: context.id, contextType: context.contextType, domain: context.domain, competingContextIds: [context.id], competingSignalIds: context.competingSignalIds, conflictReasoning: context.conflictReasoning, deterministicResolutionPolicy: 'Do not collapse competing signals. Preserve conflict metadata for operator review and downstream invalidation awareness.' })).sort((a, b) => a.conflictId.localeCompare(b.conflictId));
+lib/engineeringIntelligence/contextResolution.ts:261:  const flagIds = sortText(contexts.flatMap(context => context.cadReadinessImpacts));
+lib/engineeringIntelligence/contextResolution.ts:319:  return { nodes: [...nodes.values()].sort((a, b) => a.nodeId.localeCompare(b.nodeId)), edges: [...edges.values()].sort((a, b) => a.edgeId.localeCompare(b.edgeId)) };
+lib/engineeringIntelligence/contextResolution.ts:326:function stableHash(value: unknown): string {
+lib/engineeringIntelligence/contextResolution.ts:327:  return `ecr_${crypto.createHash('sha256').update(JSON.stringify(normalize(value))).digest('hex').slice(0, 24)}`;
+lib/engineeringIntelligence/contextResolution.ts:333:    return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, entry]) => [key, normalize(entry)]));
+lib/engineeringIntelligence/photoGrouping.test.ts:7:const generatedAt = '2025-01-01T00:00:00.000Z';
+lib/engineeringIntelligence/photoGrouping.test.ts:44:  const manifest = buildSurveyEvidenceManifest({ survey: sourceSurvey, files, generatedAt });
+lib/engineeringIntelligence/photoGrouping.test.ts:51:    generatedAt,
+lib/engineeringIntelligence/photoGrouping.test.ts:128:    const manifest = buildSurveyEvidenceManifest({ survey: sourceSurvey, files, generatedAt });
+lib/engineeringIntelligence/photoGrouping.test.ts:129:    const grouping = buildDeterministicPhotoGrouping({ projectId: sourceSurvey.projectId, survey: sourceSurvey, canonicalManifest: manifest, generatedAt });
+lib/engineeringIntelligence/projectHydration.test.ts:5:const generatedAt = '2025-01-01T00:00:00.000Z';
+lib/engineeringIntelligence/projectHydration.test.ts:82:      generatedAt,
+lib/engineeringIntelligence/projectHydration.test.ts:159:      generatedAt,
+lib/engineeringIntelligence/projectHydration.test.ts:207:      generatedAt,
+lib/engineeringIntelligence/cadReadiness.test.ts:12:    generatedAt: '2025-01-01T00:00:00.000Z',
+lib/engineeringIntelligence/snapshotDelta.ts:5:import { sortBy, sortText } from './propagationGraph';
+lib/engineeringIntelligence/snapshotDelta.ts:71:  const addedEvidenceIds = sortText([...nextEvidence].filter(id => !previousEvidence.has(id)));
+lib/engineeringIntelligence/snapshotDelta.ts:72:  const removedEvidenceIds = sortText([...previousEvidence].filter(id => !nextEvidence.has(id)));
+lib/engineeringIntelligence/snapshotDelta.ts:75:  const changedDecisionIds = sortText([...new Set([...previousDecisions, ...nextDecisions])].filter(id => !previousDecisions.has(id) || !nextDecisions.has(id)));
+lib/engineeringIntelligence/snapshotDelta.ts:76:  const staleOutputsIntroduced = sortText(next.staleStateIds.filter(id => !previous.staleStateIds.includes(id)));
+
+## Cycle/traversal guard markers
+lib/engineeringIntelligence/regenerationPlanner.ts:65:    .filter(item => item.staleClass === 'BLOCKED' || item.staleClass === 'REQUIRES_REVIEW' || item.missingEvidenceIds.length > 0 || input.propagation.cycleProtection.cycleDetected)
+lib/engineeringIntelligence/workspace.ts:614:      `cycleDetected:${propagation.cycleProtection.cycleDetected}`,
+lib/engineeringIntelligence/workspace.ts:615:      `truncated:${propagation.cycleProtection.truncated}`,
+lib/engineeringIntelligence/workspace.ts:616:      `maxDepth:${propagation.cycleProtection.maxDepth}`,
+lib/engineeringIntelligence/workspace.ts:617:      `traversalLimit:${propagation.cycleProtection.traversalLimit}`,
+lib/engineeringIntelligence/workspace.ts:631:      `cycleDetected:${traversal.cycleDetected}`,
+lib/engineeringIntelligence/workspace.ts:632:      `truncated:${traversal.truncated}`,
+lib/engineeringIntelligence/workspace.ts:633:      `maxDepth:${traversal.maxDepth}`,
+lib/engineeringIntelligence/workspace.ts:634:      `traversalLimit:${traversal.traversalLimit}`,
+lib/engineeringIntelligence/propagationGraph.ts:44:  cycleDetected: boolean;
+lib/engineeringIntelligence/propagationGraph.ts:45:  truncated: boolean;
+lib/engineeringIntelligence/propagationGraph.ts:54:  visitedNodeIds: string[];
+lib/engineeringIntelligence/propagationGraph.ts:57:  maxDepth: number;
+lib/engineeringIntelligence/propagationGraph.ts:58:  traversalLimit: number;
+lib/engineeringIntelligence/propagationGraph.ts:59:  cycleDetected: boolean;
+lib/engineeringIntelligence/propagationGraph.ts:60:  truncated: boolean;
+lib/engineeringIntelligence/propagationGraph.ts:72:  maxDepth?: number;
+lib/engineeringIntelligence/propagationGraph.ts:73:  traversalLimit?: number;
+lib/engineeringIntelligence/propagationGraph.ts:128:  const maxDepth = input.maxDepth ?? DEFAULT_MAX_DEPTH;
+lib/engineeringIntelligence/propagationGraph.ts:129:  const traversalLimit = input.traversalLimit ?? DEFAULT_TRAVERSAL_LIMIT;
+lib/engineeringIntelligence/propagationGraph.ts:137:  const visited = new Set<string>(seedNodeIds);
+lib/engineeringIntelligence/propagationGraph.ts:139:  let cycleDetected = false;
+lib/engineeringIntelligence/propagationGraph.ts:140:  let truncated = false;
+lib/engineeringIntelligence/propagationGraph.ts:144:    if (visitCount >= traversalLimit) {
+lib/engineeringIntelligence/propagationGraph.ts:145:      truncated = true;
+lib/engineeringIntelligence/propagationGraph.ts:150:    if (current.nodePath.length - 1 >= maxDepth) {
+lib/engineeringIntelligence/propagationGraph.ts:151:      if ((adjacency.get(current.nodeId) ?? []).length) truncated = true;
+lib/engineeringIntelligence/propagationGraph.ts:160:      const pathHasCycle = current.nodePath.includes(nextNodeId);
+lib/engineeringIntelligence/propagationGraph.ts:161:      cycleDetected = cycleDetected || pathHasCycle;
+lib/engineeringIntelligence/propagationGraph.ts:173:          cycleDetected: pathHasCycle,
+lib/engineeringIntelligence/propagationGraph.ts:174:          truncated: nextEdgePath.length >= maxDepth && (adjacency.get(nextNodeId) ?? []).length > 0,
+lib/engineeringIntelligence/propagationGraph.ts:178:      if (!visited.has(nextNodeId)) {
+lib/engineeringIntelligence/propagationGraph.ts:179:        visited.add(nextNodeId);
+lib/engineeringIntelligence/propagationGraph.ts:190:    visitedNodeIds: sortText([...visited]),
+lib/engineeringIntelligence/propagationGraph.ts:191:    impactedNodeIds: sortText([...visited].filter(nodeId => !seedNodeIds.includes(nodeId))),
+lib/engineeringIntelligence/propagationGraph.ts:193:    maxDepth,
+lib/engineeringIntelligence/propagationGraph.ts:194:    traversalLimit,
+lib/engineeringIntelligence/propagationGraph.ts:195:    cycleDetected,
+lib/engineeringIntelligence/propagationGraph.ts:196:    truncated,
+lib/engineeringIntelligence/propagationGraph.ts:200:      `Traversal uses supplied dependency/persistent graph metadata only with maxDepth=${maxDepth} and traversalLimit=${traversalLimit}.`,
+lib/engineeringIntelligence/invalidationEngine.ts:22:  maxDepth?: number;
+lib/engineeringIntelligence/invalidationEngine.ts:23:  traversalLimit?: number;
+lib/engineeringIntelligence/invalidationEngine.ts:68:    cycleDetected: boolean;
+lib/engineeringIntelligence/invalidationEngine.ts:69:    truncated: boolean;
+lib/engineeringIntelligence/invalidationEngine.ts:70:    maxDepth: number;
+lib/engineeringIntelligence/invalidationEngine.ts:71:    traversalLimit: number;
+lib/engineeringIntelligence/invalidationEngine.ts:91:    maxDepth: input.maxDepth,
+lib/engineeringIntelligence/invalidationEngine.ts:92:    traversalLimit: input.traversalLimit,
+lib/engineeringIntelligence/invalidationEngine.ts:120:    String(traversal.cycleDetected),
+lib/engineeringIntelligence/invalidationEngine.ts:121:    String(traversal.truncated),
+lib/engineeringIntelligence/invalidationEngine.ts:141:      cycleDetected: traversal.cycleDetected,
+lib/engineeringIntelligence/invalidationEngine.ts:142:      truncated: traversal.truncated,
+lib/engineeringIntelligence/invalidationEngine.ts:143:      maxDepth: traversal.maxDepth,
+lib/engineeringIntelligence/invalidationEngine.ts:144:      traversalLimit: traversal.traversalLimit,
+tests/engineering-intelligence-invalidation-v1.test.ts:176:    const traversal = tracePropagation({ traversalId: 'test:traversal', seedNodeIds: ['canonicalEvidence:e1'], dependencyGraph: dependencyGraph(), maxDepth: 8 });
+tests/engineering-intelligence-invalidation-v1.test.ts:178:    expect(traversal.cycleDetected).toBe(true);
+tests/engineering-intelligence-invalidation-v1.test.ts:228:    expect(workspace.dependencyTraversal.cycleProtectionIndicators).toContain('cycleDetected:true');

@@ -4,15 +4,35 @@ import '@testing-library/jest-dom';
 import { render, screen } from '@testing-library/react';
 import {
   CADReadinessWorkspace,
+  ContextArbitrationWorkspace,
+  ContextConfidenceBreakdownWorkspace,
+  ContextConflictInspectorWorkspace,
+  ContextDependencyGraphWorkspace,
+  ContextInvalidationsWorkspace,
+  ContextProvenanceWorkspace,
+  ContextResolutionTimelineWorkspace,
+  ContextStaleImpactsWorkspace,
   DependencyGraphViewer,
+  FallbackChainInspectorWorkspace,
   PhotoGroupingWorkspace,
+  ResolvedEngineeringContextsWorkspace,
   SnapshotTimelineWorkspace,
   StaleInvalidationWorkspace,
 } from '@/app/admin/engineering-intelligence/components';
 import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
 import type { DeterministicPhotoGroupingModel } from '@/lib/engineeringIntelligence/photoGrouping';
 import type {
+  ContextArbitrationWorkspaceModel,
+  ContextConfidenceBreakdownWorkspaceModel,
+  ContextConflictInspectorWorkspaceModel,
+  ContextDependencyGraphWorkspaceModel,
+  ContextInvalidationsWorkspaceModel,
+  ContextProvenanceWorkspaceModel,
+  ContextResolutionTimelineWorkspaceModel,
+  ContextStaleImpactsWorkspaceModel,
   DependencyGraphViewerModel,
+  FallbackChainInspectorWorkspaceModel,
+  ResolvedEngineeringContextsWorkspaceModel,
   SnapshotTimelineWorkspaceModel,
   StaleInvalidationWorkspaceModel,
 } from '@/lib/engineeringIntelligence';
@@ -174,5 +194,169 @@ describe('Engineering Intelligence workspace render safety', () => {
     expect(screen.getByText('Dependency Graph Viewer')).toBeInTheDocument();
     expect(screen.getByText('Snapshot Timeline Workspace')).toBeInTheDocument();
     expect(screen.getByText('Stale-State / Invalidation Workspace')).toBeInTheDocument();
+  });
+
+  it('renders context resolution workspaces safely with hostile metadata values', () => {
+    const resolvedContexts = {
+      contexts: [{
+        id: { id: 'context-object' },
+        contextType: new Map([['type', 'roof_context']]),
+        domain: new Set(['roof']),
+        status: { status: 'conflicting' },
+        confidence: {
+          score: BigInt(42),
+          band: { band: 'partial' },
+          rank: new Date('2026-03-04T05:06:07Z'),
+          factors: [{ factor: 'explicit primary' }, new Set(['supporting signal'])],
+        },
+        rankingReason: { reason: 'conflicting metadata preserved' },
+        sourceSignalIds: [{ signal: 'roof-overview' }],
+        supportingSignalIds: [new Map([['signal', 'attic-access']])],
+        competingSignalIds: [new Set(['competing-signal'])],
+        sourceEvidenceIds: [{ evidence: 'e1' }],
+        sourceMetadataIds: [new Map([['metadata', 'm1']])],
+        cadReadinessImpacts: [{ flag: 'roof-plane-ready' }],
+        requirementImpacts: [new Set(['roof_overview'])],
+        affectedOutputs: [{ output: 'layout' }],
+        deterministicHash: { hash: 'hash-object' },
+      }],
+      authoritative: null,
+      preferred: undefined,
+      partial: [{ id: 'partial-context' }],
+      conflicting: new Set(['conflict-a']),
+      blocked: new Map([['blocked', 'context']]),
+      unresolved: [{ id: 'unresolved-context' }],
+      notApplicable: 'na-context',
+      deterministicNotes: [{ note: 'context note' }, new Set(['set note'])],
+    } as unknown as ResolvedEngineeringContextsWorkspaceModel;
+
+    const arbitration = {
+      rankings: [{
+        contextId: { id: 'rank-context' },
+        contextType: 'roof_context',
+        domain: new Set(['roof']),
+        status: { status: 'partial' },
+        score: BigInt(55),
+        rank: new Date('2026-03-04T05:06:07Z'),
+        rankingReason: { reason: 'rank reason' },
+        sourceSignalIds: [{ signal: 's1' }],
+        supportingSignalIds: [new Map([['signal', 's2']])],
+      }],
+      deterministicNotes: [{ note: 'arbitration note' }],
+    } as unknown as ContextArbitrationWorkspaceModel;
+
+    const conflicts = {
+      conflicts: [{
+        conflictId: { conflict: 'conflict-object' },
+        domain: new Set(['roof']),
+        competingContextIds: [{ id: 'ctx-a' }],
+        competingSignalIds: [new Map([['signal', 's1']])],
+        conflictReasoning: [{ reason: 'competing evidence' }],
+        deterministicResolutionPolicy: { policy: 'manual_review' },
+      }],
+      conflictingContextIds: [{ id: 'ctx-a' }],
+      competingSignalIds: [new Set(['s1'])],
+      deterministicNotes: [{ note: 'conflict note' }],
+    } as unknown as ContextConflictInspectorWorkspaceModel;
+
+    const fallback = {
+      fallbackParticipation: [{
+        contextId: { id: 'fallback-context' },
+        fallback: new Map([['fallback', 'manual-review']]),
+        deterministicReason: { reason: 'fallback is visible' },
+      }],
+      fallbackDependentContextIds: [{ id: 'fallback-context' }],
+      fallbackConfidencePenalties: [{ contextId: { id: 'fallback-context' }, penalties: [new Set(['penalty'])] }],
+      deterministicNotes: [{ note: 'fallback note' }],
+    } as unknown as FallbackChainInspectorWorkspaceModel;
+
+    const provenance = {
+      chains: [{
+        contextId: { id: 'provenance-context' },
+        sourceSignalIds: [{ signal: 's1' }],
+        sourceEvidenceIds: [new Map([['evidence', 'e1']])],
+        sourceMetadataIds: [new Set(['m1'])],
+        dependencyLineage: [{ dependency: 'dep1' }],
+        invalidationLineage: [BigInt(2)],
+        deterministicHash: { hash: 'provenance-hash' },
+      }],
+      deterministicNotes: [{ note: 'provenance note' }],
+    } as unknown as ContextProvenanceWorkspaceModel;
+
+    const dependencyGraph = {
+      nodes: [{ nodeId: { node: 'ctx' }, label: new Set(['Context']), nodeType: { type: 'context' }, status: new Map([['status', 'source']]) }],
+      edges: [{ edgeId: { edge: 'edge' }, sourceNodeId: { source: 's1' }, targetNodeId: new Set(['ctx']), edgeType: { type: 'supports' }, deterministicReason: { reason: 'edge reason' } }],
+      deterministicNotes: [{ note: 'graph note' }],
+    } as unknown as ContextDependencyGraphWorkspaceModel;
+
+    const confidence = {
+      confidenceBreakdown: [{
+        contextId: { id: 'confidence-context' },
+        status: new Map([['status', 'partial']]),
+        score: BigInt(34),
+        band: { band: 'low' },
+        rank: new Date('2026-03-04T05:06:07Z'),
+        factors: [{ factor: 'primary' }],
+        penalties: [new Set(['fallback'])],
+      }],
+      deterministicNotes: [{ note: 'confidence note' }],
+    } as unknown as ContextConfidenceBreakdownWorkspaceModel;
+
+    const invalidations = {
+      invalidations: [{
+        contextId: { id: 'invalidated-context' },
+        invalidationLineage: [{ invalidation: 'i1' }],
+        staleImpactPropagation: [new Map([['state', 'stale']])],
+        regenerationParticipation: [new Set(['candidate'])],
+      }],
+      deterministicNotes: [{ note: 'invalidation note' }],
+    } as unknown as ContextInvalidationsWorkspaceModel;
+
+    const staleImpacts = {
+      staleImpacts: [{ contextId: { id: 'stale-context' }, staleClasses: [new Set(['STALE'])], invalidatedBy: [{ id: 'trigger' }] }],
+      cadReadinessMappings: [{
+        flagId: { flag: 'roof-plane-ready' },
+        contextIds: [{ id: 'ctx' }],
+        conflictingContextIds: [new Map([['ctx', 'conflict']])],
+        blockedContextIds: [new Set(['blocked'])],
+        unresolvedContextIds: [{ id: 'unresolved' }],
+      }],
+      deterministicNotes: [{ note: 'stale impact note' }],
+    } as unknown as ContextStaleImpactsWorkspaceModel;
+
+    const timeline = {
+      events: [{
+        eventId: { event: 'timeline-event' },
+        contextId: new Map([['context', 'ctx']]),
+        status: { status: 'partial' },
+        deterministicReason: { reason: 'timeline reason' },
+      }],
+      deterministicNotes: [{ note: 'timeline note' }],
+    } as unknown as ContextResolutionTimelineWorkspaceModel;
+
+    expect(() => render(<ResolvedEngineeringContextsWorkspace model={resolvedContexts} />)).not.toThrow();
+    expect(() => render(<ContextArbitrationWorkspace model={arbitration} />)).not.toThrow();
+    expect(() => render(<ContextConflictInspectorWorkspace model={conflicts} />)).not.toThrow();
+    expect(() => render(<FallbackChainInspectorWorkspace model={fallback} />)).not.toThrow();
+    expect(() => render(<ContextProvenanceWorkspace model={provenance} />)).not.toThrow();
+    expect(() => render(<ContextDependencyGraphWorkspace model={dependencyGraph} />)).not.toThrow();
+    expect(() => render(<ContextConfidenceBreakdownWorkspace model={confidence} />)).not.toThrow();
+    expect(() => render(<ContextInvalidationsWorkspace model={invalidations} />)).not.toThrow();
+    expect(() => render(<ContextStaleImpactsWorkspace model={staleImpacts} />)).not.toThrow();
+    expect(() => render(<ContextResolutionTimelineWorkspace model={timeline} />)).not.toThrow();
+
+    expect(screen.getByText('Resolved Engineering Contexts')).toBeInTheDocument();
+    expect(screen.getByText('Context Arbitration')).toBeInTheDocument();
+    expect(screen.getByText('Context Conflict Inspector')).toBeInTheDocument();
+    expect(screen.getByText('Fallback Chain Inspector')).toBeInTheDocument();
+    expect(screen.getByText('Context Provenance')).toBeInTheDocument();
+    expect(screen.getByText('Context Dependency Graph')).toBeInTheDocument();
+    expect(screen.getByText('Context Confidence Breakdown')).toBeInTheDocument();
+    expect(screen.getByText('Context Invalidations')).toBeInTheDocument();
+    expect(screen.getByText('Context Stale Impacts')).toBeInTheDocument();
+    expect(screen.getByText('Context Resolution Timeline')).toBeInTheDocument();
+    expect(screen.getAllByText(/object\(keys=/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Set\(/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Map\(/).length).toBeGreaterThan(0);
   });
 });

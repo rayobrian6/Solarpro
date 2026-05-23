@@ -189,6 +189,21 @@ describe('Engineering Context Resolution V1', () => {
     expect(allNotApplicable.contexts.find(context => context.contextType === 'preferred_trench_context')?.status).toBe('not_applicable');
   });
 
+  it('deduplicates context dependency graph edges while preserving deterministic order', () => {
+    const structuredSignals = summary([
+      signal('main_service_panel_present', 'confirmed', ['evidence:msp'], { requirementImpacts: ['main_service_panel'] }),
+      signal('interconnection_zone_known', 'confirmed', ['evidence:interconnection'], { requirementImpacts: ['main_service_panel'] }),
+      signal('electrical_equipment_cluster_present', 'confirmed', ['evidence:cluster'], { requirementImpacts: ['main_service_panel'] }),
+    ]);
+
+    const contextResolution = buildEngineeringContextResolution({ structuredSignals, generatedAt });
+    const edgeIds = contextResolution.dependencyGraph.edges.map(edge => edge.edgeId);
+
+    expect(edgeIds).toEqual([...edgeIds].sort((a, b) => a.localeCompare(b)));
+    expect(edgeIds).toHaveLength(new Set(edgeIds).size);
+    expect(edgeIds.filter(edgeId => edgeId === 'edge:signal:main_service_panel_present->context:preferred_msp_context')).toHaveLength(1);
+  });
+
   it('annotates CAD readiness with linked resolved context states without promoting readiness into truth', () => {
     const structuredSignals = summary([
       signal('main_service_panel_present', 'confirmed', ['evidence:msp'], { requirementImpacts: ['main_service_panel'] }),

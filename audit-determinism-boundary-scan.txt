@@ -1,0 +1,628 @@
+# Date/now/random/timestamp scan
+lib/engineeringIntelligence/photoGrouping.ts:98:  generatedAt: string;
+lib/engineeringIntelligence/photoGrouping.ts:125:  generatedAt?: string;
+lib/engineeringIntelligence/photoGrouping.ts:127:  const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+lib/engineeringIntelligence/photoGrouping.ts:132:    return emptyGroupingModel({ projectId: input.projectId ?? manifest?.projectId ?? null, surveyId: manifest?.surveyId ?? input.survey?.id ?? null, generatedAt });
+lib/engineeringIntelligence/photoGrouping.ts:157:    generatedAt,
+lib/engineeringIntelligence/photoGrouping.ts:176:      'Grouping is based only on capture/upload timestamps, filename order, submitted category, canonical category, dimensions/orientation metadata, and stable ids.',
+lib/engineeringIntelligence/photoGrouping.ts:184:function emptyGroupingModel(input: { projectId: string | null; surveyId: string | null; generatedAt: string }): DeterministicPhotoGroupingModel {
+lib/engineeringIntelligence/photoGrouping.ts:186:    generatedAt: input.generatedAt,
+lib/engineeringIntelligence/photoGrouping.ts:220:    map.set(item.evidenceId, payload?.createdAt ?? payload?.timestamp ?? item.captureTimestamp ?? null);
+lib/engineeringIntelligence/photoGrouping.ts:227:    const aTime = timestamp(a.captureTimestamp) || timestamp(uploadTimestampByEvidenceId.get(a.evidenceId));
+lib/engineeringIntelligence/photoGrouping.ts:228:    const bTime = timestamp(b.captureTimestamp) || timestamp(uploadTimestampByEvidenceId.get(b.evidenceId));
+lib/engineeringIntelligence/photoGrouping.ts:250:    deterministicSortKey: [timestamp(item.captureTimestamp) || timestamp(uploadTimestamp), item.filename ?? '', item.category, item.evidenceId].join('|'),
+lib/engineeringIntelligence/photoGrouping.ts:409:  const minutes = Math.abs((timestamp(current.captureTimestamp) || timestamp(current.uploadTimestamp)) - (timestamp(previous.captureTimestamp) || timestamp(previous.uploadTimestamp))) / 60000;
+lib/engineeringIntelligence/photoGrouping.ts:410:  if (Number.isFinite(minutes) && minutes > 12) reasons.push(`timestamp gap ${minutes.toFixed(1)} minutes`);
+lib/engineeringIntelligence/photoGrouping.ts:414:  if ((previous.captureTimestamp ?? previous.uploadTimestamp) === (current.captureTimestamp ?? current.uploadTimestamp)) reasons.push('duplicate timestamp tie resolved by filename/category/evidence id');
+lib/engineeringIntelligence/photoGrouping.ts:420:  if (items.some(item => item.captureTimestamp)) reasons.push('capture/upload timestamp metadata available');
+lib/engineeringIntelligence/photoGrouping.ts:504:function extractPayloadPhotos(surveyData: SiteSurvey['surveyData'] | null | undefined): Array<{ url?: string; uploadKey?: string; category?: string; timestamp?: string; createdAt?: string }> {
+lib/engineeringIntelligence/photoGrouping.ts:512:    timestamp: typeof photo.timestamp === 'string' ? photo.timestamp : undefined,
+lib/engineeringIntelligence/photoGrouping.ts:517:function timestamp(value: string | null | undefined): number {
+lib/engineeringIntelligence/contextTypes.ts:107:  generatedAt: string;
+lib/engineeringIntelligence/signalExtraction.test.ts:8:const generatedAt = '2025-01-01T00:00:00.000Z';
+lib/engineeringIntelligence/signalExtraction.test.ts:27:    captureTimestamp: new Date(Date.parse(generatedAt) + index * 60_000).toISOString(),
+lib/engineeringIntelligence/signalExtraction.test.ts:43:    generatedAt,
+lib/engineeringIntelligence/signalExtraction.test.ts:95:  const base = buildDeterministicPhotoGrouping({ projectId: inputManifest.projectId, canonicalManifest: inputManifest, generatedAt });
+lib/engineeringIntelligence/signalExtraction.test.ts:108:    generatedAt,
+lib/engineeringIntelligence/signalExtraction.test.ts:116:      triggeredAt: generatedAt,
+lib/engineeringIntelligence/signalExtraction.test.ts:137:      invalidatedAt: generatedAt,
+lib/engineeringIntelligence/signalExtraction.test.ts:145:    const summary = buildStructuredEngineeringSignals({ generatedAt });
+lib/engineeringIntelligence/signalExtraction.test.ts:175:    const summary = buildStructuredEngineeringSignals({ canonicalManifest: inputManifest, photoGrouping: grouping, generatedAt });
+lib/engineeringIntelligence/signalExtraction.test.ts:188:  it('covers exterior-only, ESS, trench, detached, interrupted traversal, and duplicate timestamp metadata cases deterministically', () => {
+lib/engineeringIntelligence/signalExtraction.test.ts:191:      sequenceBreakpoints: [{ breakpointId: 'break:duplicate-timestamp', afterSequenceIndex: 0, beforeEvidenceId: exteriorOnly.items[0].evidenceId, afterEvidenceId: exteriorOnly.items[1].evidenceId, reason: 'duplicate timestamp fixture' }],
+lib/engineeringIntelligence/signalExtraction.test.ts:194:    const exteriorSummary = buildStructuredEngineeringSignals({ canonicalManifest: exteriorOnly, photoGrouping: exteriorGrouping, generatedAt });
+lib/engineeringIntelligence/signalExtraction.test.ts:212:      generatedAt,
+lib/engineeringIntelligence/signalExtraction.test.ts:227:    const first = buildStructuredEngineeringSignals({ canonicalManifest: inputManifest, photoGrouping: grouping, invalidationResult: invalidationFor(targetEvidence), generatedAt });
+lib/engineeringIntelligence/signalExtraction.test.ts:228:    const second = buildStructuredEngineeringSignals({ canonicalManifest: inputManifest, photoGrouping: grouping, invalidationResult: invalidationFor(targetEvidence), generatedAt });
+lib/engineeringIntelligence/signalExtraction.test.ts:242:    const signals = buildStructuredEngineeringSignals({ canonicalManifest: inputManifest, photoGrouping: grouping, generatedAt });
+lib/engineeringIntelligence/signalExtraction.test.ts:251:    const blockedSignals = buildStructuredEngineeringSignals({ canonicalManifest: blockedManifest, photoGrouping: groupingFor(blockedManifest), generatedAt });
+lib/engineeringIntelligence/projectHydration.ts:46:  generatedAt: string;
+lib/engineeringIntelligence/projectHydration.ts:70:  generatedAt?: string;
+lib/engineeringIntelligence/projectHydration.ts:75:    return hydrateProjectEngineeringIntelligence({ projectId: input.projectId, sources, generatedAt: input.generatedAt });
+lib/engineeringIntelligence/projectHydration.ts:77:    const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+lib/engineeringIntelligence/projectHydration.ts:82:      generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:84:    const structuredSignals = buildStructuredEngineeringSignals({ projectId: input.projectId, photoGrouping, cadReadiness, generatedAt });
+lib/engineeringIntelligence/projectHydration.ts:86:    const contextResolution = buildEngineeringContextResolution({ projectId: input.projectId, structuredSignals, photoGrouping, cadReadiness: signalAwareCADReadiness, generatedAt });
+lib/engineeringIntelligence/projectHydration.ts:98:      generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:127:  generatedAt?: string;
+lib/engineeringIntelligence/projectHydration.ts:129:  const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+lib/engineeringIntelligence/projectHydration.ts:140:      generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:142:    const structuredSignals = buildStructuredEngineeringSignals({ projectId: input.projectId, photoGrouping, cadReadiness, generatedAt });
+lib/engineeringIntelligence/projectHydration.ts:144:    const contextResolution = buildEngineeringContextResolution({ projectId: input.projectId, structuredSignals, photoGrouping, cadReadiness: signalAwareCADReadiness, generatedAt });
+lib/engineeringIntelligence/projectHydration.ts:156:      generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:181:  const hygiene = buildProjectSurveyEvidenceHygiene({ projectId: input.projectId, surveys: sortedSources, generatedAt });
+lib/engineeringIntelligence/projectHydration.ts:184:  const canonicalManifest = buildSurveyEvidenceManifest({ survey: canonicalSource.survey, files: canonicalSource.files, generatedAt });
+lib/engineeringIntelligence/projectHydration.ts:186:    normalizedAt: generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:198:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:208:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:214:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:225:        generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:232:          triggeredAt: generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:242:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:249:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:262:        generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:271:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:293:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:303:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:324:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:335:    generatedAt,
+lib/engineeringIntelligence/projectHydration.ts:376:    generatedAt,
+lib/engineeringIntelligence/workspace.ts:386:  if (!record.metadataCompleteness.hasCaptureTimestamp) signals.push('missing capture timestamp');
+lib/engineeringIntelligence/signalExtraction.ts:26:  generatedAt?: string;
+lib/engineeringIntelligence/signalExtraction.ts:30:  const generatedAt = input.generatedAt ?? input.canonicalManifest?.generatedAt ?? input.surveyEvidence?.source.normalizedAt ?? new Date(0).toISOString();
+lib/engineeringIntelligence/signalExtraction.ts:35:    generatedAt,
+lib/engineeringIntelligence/signalExtraction.ts:57:    generatedAt,
+lib/engineeringIntelligence/signalExtraction.ts:84:  input: BuildStructuredEngineeringSignalsInput & { generatedAt: string; manifestItems: SurveyEvidenceItem[]; canonicalManifest: SurveyEvidenceManifest | null },
+lib/engineeringIntelligence/signalExtraction.ts:137:    generatedAt: input.generatedAt,
+lib/engineeringIntelligence/signalTypes.ts:92:  generatedAt: string;
+lib/engineeringIntelligence/signalTypes.ts:122:  generatedAt: string;
+lib/engineeringIntelligence/contextResolution.test.ts:8:const generatedAt = '2025-01-01T00:00:00.000Z';
+lib/engineeringIntelligence/contextResolution.test.ts:27:    captureTimestamp: new Date(Date.parse(generatedAt) + index * 60_000).toISOString(),
+lib/engineeringIntelligence/contextResolution.test.ts:43:    generatedAt,
+lib/engineeringIntelligence/contextResolution.test.ts:66:  return buildDeterministicPhotoGrouping({ projectId: inputManifest.projectId, canonicalManifest: inputManifest, generatedAt });
+lib/engineeringIntelligence/contextResolution.test.ts:87:    generatedAt,
+lib/engineeringIntelligence/contextResolution.test.ts:98:    generatedAt,
+lib/engineeringIntelligence/contextResolution.test.ts:129:    const contexts = buildEngineeringContextResolution({ canonicalManifest: inputManifest, structuredSignals, photoGrouping: grouping(inputManifest), cadReadiness: buildCADReadinessMetadata({ canonicalManifest: inputManifest, structuredSignals }), generatedAt });
+lib/engineeringIntelligence/contextResolution.test.ts:148:    const contexts = buildEngineeringContextResolution({ structuredSignals, generatedAt });
+lib/engineeringIntelligence/contextResolution.test.ts:161:    const contexts = buildEngineeringContextResolution({ structuredSignals: fallbackSummary, generatedAt });
+lib/engineeringIntelligence/contextResolution.test.ts:178:      generatedAt,
+lib/engineeringIntelligence/contextResolution.test.ts:184:      generatedAt,
+lib/engineeringIntelligence/contextResolution.test.ts:197:    const contextResolution = buildEngineeringContextResolution({ structuredSignals, generatedAt });
+lib/engineeringIntelligence/contextResolution.ts:27:  generatedAt?: string;
+lib/engineeringIntelligence/contextResolution.ts:34:  const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+lib/engineeringIntelligence/contextResolution.ts:37:  const contexts = ENGINEERING_CONTEXT_REGISTRY.map(definition => evaluateContext(definition, { ...input, generatedAt, signals, lookup }));
+lib/engineeringIntelligence/contextResolution.ts:55:    generatedAt,
+lib/engineeringIntelligence/contextResolution.ts:83:function evaluateContext(definition: EngineeringContextDefinition, input: BuildEngineeringContextResolutionInput & { generatedAt: string; signals: StructuredEngineeringSignal[]; lookup: ContextSignalLookup }): ResolvedEngineeringContext {
+lib/engineeringIntelligence/photoGrouping.test.ts:7:const generatedAt = '2025-01-01T00:00:00.000Z';
+lib/engineeringIntelligence/photoGrouping.test.ts:44:  const manifest = buildSurveyEvidenceManifest({ survey: sourceSurvey, files, generatedAt });
+lib/engineeringIntelligence/photoGrouping.test.ts:51:    generatedAt,
+lib/engineeringIntelligence/photoGrouping.test.ts:74:  it('detects interrupted traversal ordering, duplicate timestamps, and stable reruns deterministically', () => {
+lib/engineeringIntelligence/photoGrouping.test.ts:89:    expect(first.sequenceBreakpoints.map(point => point.reason).join(' | ')).toContain('duplicate timestamp tie resolved');
+lib/engineeringIntelligence/photoGrouping.test.ts:90:    expect(first.sequenceBreakpoints.map(point => point.reason).join(' | ')).toContain('timestamp gap 19.0 minutes');
+lib/engineeringIntelligence/photoGrouping.test.ts:115:  it('uses payload upload metadata as an allowed deterministic fallback when file timestamps tie', () => {
+lib/engineeringIntelligence/photoGrouping.test.ts:128:    const manifest = buildSurveyEvidenceManifest({ survey: sourceSurvey, files, generatedAt });
+lib/engineeringIntelligence/photoGrouping.test.ts:129:    const grouping = buildDeterministicPhotoGrouping({ projectId: sourceSurvey.projectId, survey: sourceSurvey, canonicalManifest: manifest, generatedAt });
+lib/engineeringIntelligence/projectHydration.test.ts:5:const generatedAt = '2025-01-01T00:00:00.000Z';
+lib/engineeringIntelligence/projectHydration.test.ts:82:      generatedAt,
+lib/engineeringIntelligence/projectHydration.test.ts:159:      generatedAt,
+lib/engineeringIntelligence/projectHydration.test.ts:207:      generatedAt,
+lib/engineeringIntelligence/cadReadiness.test.ts:12:    generatedAt: '2025-01-01T00:00:00.000Z',
+lib/engineeringDecisionProvenance/types.ts:121:  generatedAt: string;
+lib/engineeringDecisionProvenance/types.ts:126:  generatedAt: string;
+lib/engineeringDecisionProvenance/types.ts:159:  generatedAt?: string;
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:21:const generatedAt = '2026-05-23T10:00:00.000Z';
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:25:  const submittedAt = new Date(baseTime + index * 60_000).toISOString();
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:59:      createdAt: generatedAt,
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:69:      createdAt: generatedAt,
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:79:      createdAt: generatedAt,
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:89:      createdAt: generatedAt,
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:102:    generatedAt,
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:148:      normalizedAt: generatedAt,
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:277:      generatedAt,
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:306:      generatedAt,
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:318:      generatedAt,
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:327:      generatedAt,
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:345:      generatedAt,
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:364:      generatedAt,
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:385:      generatedAt,
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:392:      generatedAt,
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:406:      generatedAt,
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:421:      generatedAt,
+lib/engineeringDecisionProvenance/engineeringDecisionProvenance.test.ts:440:      generatedAt,
+lib/engineeringDecisionProvenance/evaluator.ts:24:  const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+lib/engineeringDecisionProvenance/evaluator.ts:26:    .flatMap(definition => buildDecisionRecord(definition.decisionType, input, generatedAt))
+lib/engineeringDecisionProvenance/evaluator.ts:31:    generatedAt,
+lib/engineeringDecisionProvenance/evaluator.ts:136:  generatedAt: string,
+lib/engineeringDecisionProvenance/evaluator.ts:197:    generatedAt,
+lib/engineeringStateInvalidation/types.ts:64:  regeneratedAt?: string;
+lib/engineeringStateInvalidation/types.ts:71:  generatedAt: string;
+lib/engineeringStateInvalidation/types.ts:113:  generatedAt: string;
+lib/engineeringStateInvalidation/types.ts:126:  generatedAt: string;
+lib/engineeringStateInvalidation/types.ts:189:  generatedAt?: string;
+lib/engineeringStateInvalidation/types.ts:200:  generatedAt?: string;
+lib/engineeringStateInvalidation/types.ts:208:  generatedAt?: string;
+lib/engineeringStateInvalidation/types.ts:276:  generatedAt: string;
+lib/engineeringStateInvalidation/types.ts:302:  generatedAt: string;
+lib/engineeringStateInvalidation/types.ts:376:  generatedAt: string;
+lib/engineeringStateInvalidation/types.ts:395:  generatedAt?: string;
+lib/engineeringStateInvalidation/types.ts:403:  generatedAt?: string;
+lib/engineeringStateInvalidation/types.ts:414:  generatedAt?: string;
+lib/engineeringStateInvalidation/engine.ts:24:  const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+lib/engineeringStateInvalidation/engine.ts:29:    ...stateFromSections(documentProvenance, decisionProvenance, generatedAt),
+lib/engineeringStateInvalidation/engine.ts:30:    ...stateFromGraphNodes(graph, generatedAt),
+lib/engineeringStateInvalidation/engine.ts:31:    ...stateFromDecisions(decisionProvenance, generatedAt),
+lib/engineeringStateInvalidation/engine.ts:32:    ...stateFromRenderContexts(input.renderContextIds?.length ? input.renderContextIds : ['renderContext:primary'], documentProvenance, decisionProvenance, graph, generatedAt),
+lib/engineeringStateInvalidation/engine.ts:33:    ...stateFromBOM(input.bomMetadata ?? [], decisionProvenance, documentProvenance, generatedAt),
+lib/engineeringStateInvalidation/engine.ts:34:    ...stateFromSLD(input.sldMetadata ?? null, decisionProvenance, documentProvenance, generatedAt),
+lib/engineeringStateInvalidation/engine.ts:38:    generatedAt,
+lib/engineeringStateInvalidation/engine.ts:57:  const generatedAt = input.generatedAt ?? input.trigger.triggeredAt ?? new Date(0).toISOString();
+lib/engineeringStateInvalidation/engine.ts:78:      invalidatedAt: generatedAt,
+lib/engineeringStateInvalidation/engine.ts:82:    return { ...record, staleStatus: event.staleStatus, invalidationReason: event.invalidationReason, invalidatedAt: generatedAt } satisfies EngineeringStateRecord;
+lib/engineeringStateInvalidation/engine.ts:88:    generatedAt,
+lib/engineeringStateInvalidation/engine.ts:103:  const generatedAt = input.generatedAt ?? input.invalidationResult.generatedAt;
+lib/engineeringStateInvalidation/engine.ts:110:    generatedAt,
+lib/engineeringStateInvalidation/engine.ts:130:  const triggeredAt = input.triggeredAt ?? new Date(0).toISOString();
+lib/engineeringStateInvalidation/engine.ts:173:function stateFromSections(doc: DocumentProvenanceBundle | null, decisions: EngineeringDecisionEvaluationBundle | null, generatedAt: string): EngineeringStateRecord[] {
+lib/engineeringStateInvalidation/engine.ts:188:    generatedAt,
+lib/engineeringStateInvalidation/engine.ts:193:function stateFromGraphNodes(graph: EngineeringDependencyGraph | null, generatedAt: string): EngineeringStateRecord[] {
+lib/engineeringStateInvalidation/engine.ts:207:    generatedAt,
+lib/engineeringStateInvalidation/engine.ts:212:function stateFromDecisions(bundle: EngineeringDecisionEvaluationBundle | null, generatedAt: string): EngineeringStateRecord[] {
+lib/engineeringStateInvalidation/engine.ts:227:    generatedAt,
+lib/engineeringStateInvalidation/engine.ts:232:function stateFromRenderContexts(ids: string[], doc: DocumentProvenanceBundle | null, decisions: EngineeringDecisionEvaluationBundle | null, graph: EngineeringDependencyGraph | null, generatedAt: string): EngineeringStateRecord[] {
+lib/engineeringStateInvalidation/engine.ts:246:    generatedAt,
+lib/engineeringStateInvalidation/engine.ts:251:function stateFromBOM(bom: NonNullable<BuildEngineeringStateRegistryInput['bomMetadata']>, decisions: EngineeringDecisionEvaluationBundle | null, doc: DocumentProvenanceBundle | null, generatedAt: string): EngineeringStateRecord[] {
+lib/engineeringStateInvalidation/engine.ts:265:    generatedAt,
+lib/engineeringStateInvalidation/engine.ts:270:function stateFromSLD(sld: BuildEngineeringStateRegistryInput['sldMetadata'], decisions: EngineeringDecisionEvaluationBundle | null, doc: DocumentProvenanceBundle | null, generatedAt: string): EngineeringStateRecord[] {
+lib/engineeringStateInvalidation/engine.ts:285:    generatedAt,
+lib/engineeringStateInvalidation/engine.ts:290:type RecordInput = Omit<EngineeringStateRecord, 'generationHash' | 'provenanceHash' | 'dependencyHash' | 'staleStatus' | 'deterministicNotes'> & { generatedAt: string; notes: string[] };
+lib/engineeringStateInvalidation/engine.ts:317:    regeneratedAt: base.generatedAt,
+lib/engineeringStateInvalidation/persistence.ts:21:  const generatedAt = input.generatedAt ?? input.registry.generatedAt;
+lib/engineeringStateInvalidation/persistence.ts:104:    generatedAt,
+lib/engineeringStateInvalidation/persistence.ts:126:  const generatedAt = input.generatedAt ?? input.registry.generatedAt;
+lib/engineeringStateInvalidation/persistence.ts:129:    generatedAt,
+lib/engineeringStateInvalidation/persistence.ts:172:    generatedAt,
+lib/engineeringStateInvalidation/persistence.ts:186:      'Snapshot hash excludes wall-clock generatedAt so identical engineering inputs remain hash-stable.',
+lib/engineeringStateInvalidation/persistence.ts:264:  const generatedAt = input.generatedAt ?? input.snapshots[input.snapshots.length - 1]?.generatedAt ?? new Date(0).toISOString();
+lib/engineeringStateInvalidation/persistence.ts:265:  const invalidationBySnapshot = new Map((input.invalidationResults ?? []).map(result => [result.generatedAt, result]));
+lib/engineeringStateInvalidation/persistence.ts:272:    const invalidation = invalidationBySnapshot.get(snapshot.generatedAt);
+lib/engineeringStateInvalidation/persistence.ts:302:    generatedAt,
+lib/engineeringStateInvalidation/persistence.ts:359:    occurredAt: snapshot.generatedAt,
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:31:const generatedAt = '2026-05-23T11:00:00.000Z';
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:35:  const submittedAt = new Date(baseTime + index * 60_000).toISOString();
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:57:    { id: `${surveyId}-main-panel`, surveyId, fileUrl: `https://storage.example/${surveyId}/main-panel.jpg`, fileType: 'photo', label: 'Main Panel Photo', filename: 'main-panel.jpg', mimeType: 'image/jpeg', createdAt: generatedAt },
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:58:    { id: `${surveyId}-meter`, surveyId, fileUrl: `https://storage.example/${surveyId}/meter.jpg`, fileType: 'photo', label: 'Meter Photo', filename: 'meter.jpg', mimeType: 'image/jpeg', createdAt: generatedAt },
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:59:    { id: `${surveyId}-roof`, surveyId, fileUrl: `https://storage.example/${surveyId}/roof-plane.jpg`, fileType: 'photo', label: 'roof_overview', filename: 'roof-plane.jpg', mimeType: 'image/jpeg', createdAt: generatedAt },
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:60:    { id: `${surveyId}-overview`, surveyId, fileUrl: `https://storage.example/${surveyId}/site-overview.jpg`, fileType: 'photo', label: 'Site Overview Photo', filename: 'site-overview.jpg', mimeType: 'image/jpeg', createdAt: generatedAt },
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:69:  const hygiene = buildProjectSurveyEvidenceHygiene({ projectId: 'project-state-1', surveys, generatedAt });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:85:    source: { pipelineVersion: 1, normalizedAt: generatedAt },
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:109:  const decisionProvenance = buildEngineeringDecisionProvenanceBundle({ bundleId: 'permit:state.decision-provenance', generatedAt, surveyEvidence, cad, permitInput: permit, renderContextIds: ['renderContext:primary'], includeDocumentMetadataDecisions: true });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:110:  const documentProvenance = buildDocumentProvenanceBundle({ documentId: 'permit:state', documentType: 'permit_package', generatedAt, surveyEvidence, cad, permitInput: permit, decisionProvenance, renderInputs: { inputKeys: ['PermitInput', 'EngineeringSurveyEvidence'], canonicalInputKeys: ['CanonicalInput', 'SurveyEvidenceManifest'], cadPrimitiveIds: ['cad:roof:model'], legacyFallbackKeys: [] } });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:113:  const registry = buildEngineeringStateRegistry({ registryId: 'permit:state.engineering-state', generatedAt, documentProvenance, decisionProvenance, dependencyGraph: documentProvenance.dependencyGraph, renderContextIds: ['renderContext:primary'], bomMetadata, sldMetadata });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:125:    const trigger = buildInvalidationTrigger({ triggerId: 'trigger:msp-evidence', triggerType: 'canonical_evidence_changed', changedCanonicalEvidenceIds: [mspEvidence], triggeredAt: generatedAt, deterministicReason: 'MSP canonical evidence changed.' });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:126:    const result = invalidateEngineeringState({ resultId: 'result:msp-evidence', generatedAt, registry: fixture.registry, trigger, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:139:    const trigger = buildInvalidationTrigger({ triggerId: 'trigger:meter-evidence', triggerType: 'canonical_evidence_changed', changedCanonicalEvidenceIds: [meterEvidence], triggeredAt: generatedAt });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:140:    const result = invalidateEngineeringState({ resultId: 'result:meter-evidence', generatedAt, registry: fixture.registry, trigger, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:151:    const decision = buildEngineeringDecisionProvenanceBundle({ bundleId: 'permit:state.decision-provenance', generatedAt, surveyEvidence: duplicateOnly, cad: fixture.cad, permitInput: fixture.permit, renderContextIds: ['renderContext:primary'], includeDocumentMetadataDecisions: true });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:152:    const doc = buildDocumentProvenanceBundle({ documentId: 'permit:state', documentType: 'permit_package', generatedAt, surveyEvidence: duplicateOnly, cad: fixture.cad, permitInput: fixture.permit, decisionProvenance: decision, renderInputs: { inputKeys: ['PermitInput', 'EngineeringSurveyEvidence'], canonicalInputKeys: ['CanonicalInput', 'SurveyEvidenceManifest'], cadPrimitiveIds: ['cad:roof:model'], legacyFallbackKeys: [] } });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:155:    const registry = buildEngineeringStateRegistry({ registryId: 'permit:state.engineering-state', generatedAt, documentProvenance: doc, decisionProvenance: decision, dependencyGraph: doc.dependencyGraph, renderContextIds: ['renderContext:primary'], bomMetadata, sldMetadata });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:176:    const trigger = buildInvalidationTrigger({ triggerId: 'trigger:roof-evidence', triggerType: 'canonical_evidence_changed', changedCanonicalEvidenceIds: [roofEvidence], triggeredAt: generatedAt });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:177:    const first = invalidateEngineeringState({ resultId: 'result:roof-evidence', generatedAt, registry: fixture.registry, trigger, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:178:    const second = invalidateEngineeringState({ resultId: 'result:roof-evidence', generatedAt, registry: fixture.registry, trigger, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:179:    const firstPlan = buildSelectiveRegenerationPlan({ planId: 'plan:roof-evidence', generatedAt, invalidationResult: first, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:180:    const secondPlan = buildSelectiveRegenerationPlan({ planId: 'plan:roof-evidence', generatedAt, invalidationResult: second, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:206:    const graph = buildPersistentEngineeringStateGraph({ graphId: 'state-graph:persistence', generatedAt, registry: fixture.registry, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:207:    const first = buildEngineeringStateSnapshot({ snapshotId: 'snapshot:persistence:001', generatedAt, registry: fixture.registry, stateGraph: graph, dependencyGraph: fixture.documentProvenance.dependencyGraph, decisionProvenance: fixture.decisionProvenance });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:208:    const second = buildEngineeringStateSnapshot({ snapshotId: 'snapshot:persistence:001', generatedAt: '2026-05-24T00:00:00.000Z', registry: fixture.registry, stateGraph: graph, dependencyGraph: fixture.documentProvenance.dependencyGraph, decisionProvenance: fixture.decisionProvenance });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:219:    const baselineGraph = buildPersistentEngineeringStateGraph({ graphId: 'state-graph:baseline', generatedAt, registry: fixture.registry, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:220:    const baselineSnapshot = buildEngineeringStateSnapshot({ snapshotId: 'snapshot:baseline', generatedAt, registry: fixture.registry, stateGraph: baselineGraph, dependencyGraph: fixture.documentProvenance.dependencyGraph, decisionProvenance: fixture.decisionProvenance });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:221:    const trigger = buildInvalidationTrigger({ triggerId: 'trigger:persistence:msp', triggerType: 'canonical_evidence_changed', changedCanonicalEvidenceIds: [mspEvidence], triggeredAt: generatedAt });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:222:    const invalidation = invalidateEngineeringState({ resultId: 'result:persistence:msp', generatedAt, registry: fixture.registry, trigger, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:224:    const invalidatedGraph = buildPersistentEngineeringStateGraph({ graphId: 'state-graph:invalidated', generatedAt, registry: updatedRegistry, dependencyGraph: fixture.documentProvenance.dependencyGraph, invalidationResult: invalidation });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:225:    const invalidatedSnapshot = buildEngineeringStateSnapshot({ snapshotId: 'snapshot:invalidated', generatedAt, registry: updatedRegistry, stateGraph: invalidatedGraph, dependencyGraph: fixture.documentProvenance.dependencyGraph, decisionProvenance: fixture.decisionProvenance, invalidationResult: invalidation, previousSnapshot: baselineSnapshot });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:238:    const baselineGraph = buildPersistentEngineeringStateGraph({ graphId: 'state-graph:timeline:baseline', generatedAt, registry: fixture.registry, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:239:    const baselineSnapshot = buildEngineeringStateSnapshot({ snapshotId: 'snapshot:timeline:001', generatedAt, registry: fixture.registry, stateGraph: baselineGraph, dependencyGraph: fixture.documentProvenance.dependencyGraph, decisionProvenance: fixture.decisionProvenance });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:240:    const trigger = buildInvalidationTrigger({ triggerId: 'trigger:timeline:roof', triggerType: 'canonical_evidence_changed', changedCanonicalEvidenceIds: [roofEvidence], triggeredAt: generatedAt });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:241:    const invalidation = invalidateEngineeringState({ resultId: 'result:timeline:roof', generatedAt, registry: fixture.registry, trigger, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:243:    const invalidatedGraph = buildPersistentEngineeringStateGraph({ graphId: 'state-graph:timeline:invalidated', generatedAt, registry: updatedRegistry, dependencyGraph: fixture.documentProvenance.dependencyGraph, invalidationResult: invalidation });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:244:    const invalidatedSnapshot = buildEngineeringStateSnapshot({ snapshotId: 'snapshot:timeline:002', generatedAt, registry: updatedRegistry, stateGraph: invalidatedGraph, dependencyGraph: fixture.documentProvenance.dependencyGraph, decisionProvenance: fixture.decisionProvenance, invalidationResult: invalidation, previousSnapshot: baselineSnapshot });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:246:    const plan = buildSelectiveRegenerationPlan({ planId: 'plan:timeline:roof', generatedAt, invalidationResult: invalidation, dependencyGraph: fixture.documentProvenance.dependencyGraph, snapshotReference: engineeringStateSnapshotReference(invalidatedSnapshot) });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:247:    const history = buildEngineeringStateTransitionHistory({ historyId: 'history:timeline', generatedAt, snapshots: [baselineSnapshot, invalidatedSnapshot], diffs: [diff], invalidationResults: [invalidation], regenerationPlans: [plan] });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:260:    const graph = buildPersistentEngineeringStateGraph({ graphId: 'state-graph:metadata', generatedAt, registry: fixture.registry, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:261:    const snapshot = buildEngineeringStateSnapshot({ snapshotId: 'snapshot:metadata', generatedAt, registry: fixture.registry, stateGraph: graph, dependencyGraph: fixture.documentProvenance.dependencyGraph, decisionProvenance: fixture.decisionProvenance });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:264:    const documentProvenance = buildDocumentProvenanceBundle({ documentId: 'permit:state:snapshot-aware', documentType: 'permit_package', generatedAt, surveyEvidence: fixture.surveyEvidence, cad: fixture.cad, permitInput: fixture.permit, decisionProvenance: fixture.decisionProvenance, engineeringStateRegistry: fixture.registry, engineeringStateSnapshot: snapshotRef });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:278:    const graph = buildPersistentEngineeringStateGraph({ graphId: 'state-graph:guard', generatedAt, registry: fixture.registry, dependencyGraph: fixture.documentProvenance.dependencyGraph });
+lib/engineeringStateInvalidation/engineeringStateInvalidation.test.ts:279:    const snapshot = buildEngineeringStateSnapshot({ snapshotId: 'snapshot:guard', generatedAt, registry: fixture.registry, stateGraph: graph, dependencyGraph: fixture.documentProvenance.dependencyGraph, decisionProvenance: fixture.decisionProvenance });
+lib/documentProvenance/documentProvenance.test.ts:18:const generatedAt = '2026-05-23T10:00:00.000Z';
+lib/documentProvenance/documentProvenance.test.ts:22:  const submittedAt = new Date(baseTime + index * 60_000).toISOString();
+lib/documentProvenance/documentProvenance.test.ts:56:      createdAt: generatedAt,
+lib/documentProvenance/documentProvenance.test.ts:66:      createdAt: generatedAt,
+lib/documentProvenance/documentProvenance.test.ts:76:      createdAt: generatedAt,
+lib/documentProvenance/documentProvenance.test.ts:86:      createdAt: generatedAt,
+lib/documentProvenance/documentProvenance.test.ts:134:    generatedAt,
+lib/documentProvenance/documentProvenance.test.ts:180:      normalizedAt: generatedAt,
+lib/documentProvenance/documentProvenance.test.ts:193:      generatedAt,
+lib/documentProvenance/documentProvenance.test.ts:211:      generatedAt,
+lib/documentProvenance/documentProvenance.test.ts:230:      generatedAt,
+lib/documentProvenance/documentProvenance.test.ts:246:      generatedAt,
+lib/documentProvenance/documentProvenance.test.ts:266:      generatedAt,
+lib/documentProvenance/documentProvenance.test.ts:282:      generatedAt,
+lib/documentProvenance/documentProvenance.test.ts:286:      generatedAt,
+lib/documentProvenance/types.ts:75:  generatedAt: string;
+lib/documentProvenance/types.ts:90:  generatedAt: string;
+lib/documentProvenance/types.ts:166:  generatedAt: string;
+lib/documentProvenance/types.ts:217:  generatedAt?: string;
+lib/documentProvenance/builders.ts:32:  const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+lib/documentProvenance/builders.ts:40:    generatedAt,
+lib/documentProvenance/builders.ts:51:        generatedAt,
+lib/documentProvenance/builders.ts:62:    generatedAt,
+lib/documentProvenance/builders.ts:81:    generatedAt,
+lib/documentProvenance/builders.ts:101:  generatedAt: string;
+lib/documentProvenance/builders.ts:136:        generatedAt: input.generatedAt,
+lib/documentProvenance/builders.ts:153:  generatedAt?: string;
+lib/documentProvenance/builders.ts:159:  const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+lib/documentProvenance/builders.ts:326:    generatedAt,
+lib/survey/evidence/sessionGrouping.test.ts:11:  const submittedAt = new Date(baseTime + index * 60_000).toISOString();
+lib/survey/evidence/sessionGrouping.test.ts:44:    createdAt: new Date(baseTime + offset).toISOString(),
+lib/survey/evidence/sessionGrouping.test.ts:67:      generatedAt: '2026-05-22T13:00:00.000Z',
+lib/survey/evidence/sessionGrouping.test.ts:132:      generatedAt: '2026-05-22T13:00:00.000Z',
+lib/survey/evidence/sessionGrouping.ts:36:  generatedAt: string;
+lib/survey/evidence/sessionGrouping.ts:58:  generatedAt?: string;
+lib/survey/evidence/sessionGrouping.ts:69:  const generatedAt = input.generatedAt ?? new Date().toISOString();
+lib/survey/evidence/sessionGrouping.ts:71:  const rawManifests = orderedSurveys.map(({ survey, files }) => buildSurveyEvidenceManifest({ survey, files, generatedAt }));
+lib/survey/evidence/sessionGrouping.ts:112:      generatedAt,
+lib/survey/evidence/sessionGrouping.ts:135:    generatedAt,
+lib/survey/evidence/sessionGrouping.ts:264:  generatedAt: string;
+lib/survey/evidence/sessionGrouping.ts:289:    generatedAt: input.generatedAt,
+lib/survey/evidence/sessionGrouping.ts:331:        at: item.captureTimestamp ?? new Date(0).toISOString(),
+lib/survey/evidence/sessionGrouping.ts:361:  const closeWindow = Math.abs(timestamp(a.createdAt) - timestamp(b.createdAt)) <= 1000 * 60 * 60 * 24 * 14;
+lib/survey/evidence/sessionGrouping.ts:367:  return timestamp(b.survey.createdAt) - timestamp(a.survey.createdAt);
+lib/survey/evidence/sessionGrouping.ts:374:  return timestamp(b.createdAt) - timestamp(a.createdAt);
+lib/survey/evidence/sessionGrouping.ts:381:  return timestamp(b.item.captureTimestamp ?? b.survey.createdAt) - timestamp(a.item.captureTimestamp ?? a.survey.createdAt);
+lib/survey/evidence/sessionGrouping.ts:455:function timestamp(value: string | null | undefined): number {
+lib/survey/evidence/provenance.ts:227:  if (item.captureTimestamp) reasons.push('capture/submission timestamp available; newest timestamp wins after metadata score ties');
+lib/survey/evidence/provenance.ts:228:  reasons.push('deterministic tie-break order uses stable evidence id after score/timestamp comparison');
+lib/survey/evidence/provenance.ts:247:  const aTime = timestamp(a.captureTimestamp);
+lib/survey/evidence/provenance.ts:248:  const bTime = timestamp(b.captureTimestamp);
+lib/survey/evidence/provenance.ts:253:function timestamp(value: string | null | undefined): number {
+lib/survey/evidence/manifest.test.ts:55:      generatedAt: '2025-01-02T00:00:00.000Z',
+lib/survey/evidence/manifest.test.ts:82:      generatedAt: '2026-04-24T12:00:00.000Z',
+lib/survey/evidence/manifest.test.ts:108:      generatedAt: '2025-01-02T00:00:00.000Z',
+lib/survey/evidence/manifest.test.ts:122:      generatedAt: '2025-01-02T00:00:00.000Z',
+lib/survey/evidence/manifest.test.ts:139:      generatedAt: '2025-01-02T00:00:00.000Z',
+lib/survey/evidence/engineeringRequirements.test.ts:8:const generatedAt = '2026-05-22T13:00:00.000Z';
+lib/survey/evidence/engineeringRequirements.test.ts:27:    createdAt: generatedAt,
+lib/survey/evidence/engineeringRequirements.test.ts:32:  const submittedAt = new Date(baseTime + index * 60_000).toISOString();
+lib/survey/evidence/engineeringRequirements.test.ts:66:      createdAt: generatedAt,
+lib/survey/evidence/engineeringRequirements.test.ts:76:      createdAt: generatedAt,
+lib/survey/evidence/engineeringRequirements.test.ts:86:      createdAt: generatedAt,
+lib/survey/evidence/engineeringRequirements.test.ts:96:      createdAt: generatedAt,
+lib/survey/evidence/engineeringRequirements.test.ts:106:      generatedAt,
+lib/survey/evidence/engineeringRequirements.test.ts:131:      generatedAt,
+lib/survey/evidence/engineeringRequirements.test.ts:165:      generatedAt,
+lib/survey/evidence/manifest.ts:114:  generatedAt: string;
+lib/survey/evidence/manifest.ts:144:  timestamp?: unknown;
+lib/survey/evidence/manifest.ts:152:  generatedAt?: string;
+lib/survey/evidence/manifest.ts:156:  const generatedAt = input.generatedAt ?? new Date().toISOString();
+lib/survey/evidence/manifest.ts:168:        generatedAt,
+lib/survey/evidence/manifest.ts:182:      generatedAt,
+lib/survey/evidence/manifest.ts:213:    generatedAt,
+lib/survey/evidence/manifest.ts:258:  generatedAt: string;
+lib/survey/evidence/manifest.ts:264:    ?? asString(input.payloadPhoto?.timestamp)
+lib/survey/evidence/manifest.ts:294:        at: input.file.createdAt ?? input.generatedAt,
+lib/survey/evidence/manifest.ts:300:        at: input.generatedAt,
+lib/survey/evidence/manifest.ts:313:  generatedAt: string;
+lib/survey/evidence/manifest.ts:337:      ?? asString(input.payloadPhoto.timestamp)
+lib/survey/evidence/manifest.ts:347:        at: input.generatedAt,
+app/admin/engineering-intelligence/project/[id]/page.tsx:114:  const photoGrouping = buildDeterministicPhotoGrouping({ projectId, readinessFlags: cadReadiness.flags, generatedAt: new Date(0).toISOString() });
+app/admin/engineering-intelligence/project/[id]/page.tsx:115:  const generatedAt = new Date(0).toISOString();
+app/admin/engineering-intelligence/project/[id]/page.tsx:116:  const structuredSignals = buildStructuredEngineeringSignals({ projectId, photoGrouping, cadReadiness, generatedAt });
+app/admin/engineering-intelligence/project/[id]/page.tsx:118:  const contextResolution = buildEngineeringContextResolution({ projectId, structuredSignals, photoGrouping, cadReadiness: signalAwareCADReadiness, generatedAt });
+app/admin/engineering-intelligence/project/[id]/page.tsx:124:    generatedAt,
+app/admin/engineering-intelligence/project/[id]/page.tsx:152:  const photoGrouping = buildDeterministicPhotoGrouping({ projectId, readinessFlags: cadReadiness.flags, generatedAt: new Date(0).toISOString() });
+app/admin/engineering-intelligence/project/[id]/page.tsx:153:  const generatedAt = new Date(0).toISOString();
+app/admin/engineering-intelligence/project/[id]/page.tsx:154:  const structuredSignals = buildStructuredEngineeringSignals({ projectId, photoGrouping, cadReadiness, generatedAt });
+app/admin/engineering-intelligence/project/[id]/page.tsx:156:  const contextResolution = buildEngineeringContextResolution({ projectId, structuredSignals, photoGrouping, cadReadiness: signalAwareCADReadiness, generatedAt });
+app/admin/engineering-intelligence/project/[id]/page.tsx:162:    generatedAt,
+app/admin/engineering-intelligence/components.tsx:249:                <div>Updated: {project.updatedAt ? new Date(project.updatedAt).toLocaleString() : 'not_loaded'}</div>
+app/admin/engineering-intelligence/components.tsx:592:                    <div>Origin timestamps: <span className="text-slate-200">{normalizeWorkspaceDisplay(item.originatingSurveyCreatedAts).filter(Boolean).join(', ') || 'not_loaded'}</span></div>
+app/admin/engineering-intelligence/components.tsx:727:                <div className="mt-1 text-xs text-slate-400">Generated: {safeRenderValue(snapshot.generatedAt)}</div>
+tests/engineering-intelligence-render-safety.test.tsx:23:      generatedAt: new Date('2026-01-02T03:04:05Z'),
+tests/engineering-intelligence-render-safety.test.tsx:32:        filename: new Date('2026-01-02T03:04:05Z'),
+tests/engineering-intelligence-render-safety.test.tsx:51:        clusterBoundaryReasons: [new Map([['reason', 'timestamp']])],
+tests/engineering-intelligence-render-safety.test.tsx:77:      metadataCompletenessScores: [{ evidenceId: { id: 'e1' }, score: 0.5, missingFields: [{ field: 'timestamp' }, new Map([['field', 'orientation']])] }],
+tests/engineering-intelligence-render-safety.test.tsx:109:        explicitSurveySignals: [new Map([['signal', 'timestamp']])],
+tests/engineering-intelligence-render-safety.test.tsx:137:        generatedAt: new Date('2026-02-03T04:05:06Z'),
+tests/operational-lifecycle.test.ts:159:        last_contact_timestamp: "2026-01-01T00:00:00Z",
+tests/operational-lifecycle.test.ts:170:      last_contact_timestamp: "2026-01-01T00:00:00Z",
+tests/operational-lifecycle.test.ts:175:    vi.setSystemTime(new Date("2026-01-01T12:00:00Z"));
+tests/operational-lifecycle.test.ts:389:    vi.setSystemTime(new Date("2026-01-02T12:00:00Z"));
+tests/operational-lifecycle.test.ts:442:    vi.setSystemTime(new Date("2026-01-02T12:00:00Z"));
+tests/operational-lifecycle.test.ts:473:        last_contact_timestamp: "2025-12-25T12:00:00Z",
+tests/operational-lifecycle.test.ts:545:      nowMs: new Date("2026-01-02T12:00:00Z").getTime(),
+tests/operational-lifecycle.test.ts:629:    vi.setSystemTime(new Date("2026-01-03T12:00:00Z"));
+tests/marketplace-intelligence.test.ts:97:    vi.setSystemTime(new Date("2025-01-02T00:00:00Z"));
+tests/proposals-sign.test.ts:357:      expect(() => new Date(body.signedAt)).not.toThrow();
+tests/priority5-crew-calendar.test.ts:61:    const mon = new Date('2025-01-13'); // Monday
+tests/priority5-crew-calendar.test.ts:68:    const wed = new Date('2025-01-15'); // Wednesday
+tests/priority5-crew-calendar.test.ts:75:    const sun = new Date('2025-01-19'); // Sunday
+tests/priority5-crew-calendar.test.ts:82:    const sat = new Date('2025-01-18'); // Saturday
+tests/priority5-crew-calendar.test.ts:89:    const mon = new Date('2025-03-10');
+tests/priority5-crew-calendar.test.ts:101:      const result = weekStart(new Date(d));
+tests/priority5-crew-calendar.test.ts:107:    const input = new Date('2025-06-15');
+tests/priority5-crew-calendar.test.ts:118:    expect(weekDays(new Date('2025-01-15'))).toHaveLength(7);
+tests/priority5-crew-calendar.test.ts:122:    const days = weekDays(new Date('2025-01-15')); // Wednesday
+tests/priority5-crew-calendar.test.ts:128:    const days = weekDays(new Date('2025-01-20'));
+tests/priority5-crew-calendar.test.ts:136:    const days = weekDays(new Date('2025-01-15')).map(toIso);
+tests/priority5-crew-calendar.test.ts:146:    expect(toIso(new Date('2025-01-05'))).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+tests/priority5-crew-calendar.test.ts:151:    const d = new Date('2025-01-05T12:00:00Z');
+tests/priority5-crew-calendar.test.ts:162:    const d = new Date('2025-01-13T12:00:00'); // Monday Jan 13
+tests/priority5-crew-calendar.test.ts:170:    const days = weekDays(new Date('2025-01-13T12:00:00'));
+tests/priority5-crew-calendar.test.ts:183:    const days = weekDays(new Date('2025-01-15'));
+tests/priority5-crew-calendar.test.ts:188:    const days = weekDays(new Date('2025-01-15'));
+tests/priority5-crew-calendar.test.ts:194:    const days = weekDays(new Date('2025-01-29'));
+tests/priority5-crew-calendar.test.ts:201:    const days = weekDays(new Date('2025-12-31'));
+tests/priority5-crew-calendar.test.ts:211:    expect(isToday(new Date())).toBe(true);
+tests/priority5-crew-calendar.test.ts:215:    const yesterday = new Date();
+tests/priority5-crew-calendar.test.ts:221:    const tomorrow = new Date();
+tests/priority5-crew-calendar.test.ts:227:    expect(isToday(new Date('2030-01-01'))).toBe(false);
+tests/priority5-crew-calendar.test.ts:303:  it('normalises YYYY-MM-DD timestamps (truncates time portion)', () => {
+tests/priority6-install-photos.test.ts:139:    upload_date: new Date().toISOString(),
+tests/priority6-install-photos.test.ts:140:    created_at: new Date().toISOString(),
+tests/engineering-intelligence-invalidation-v1.test.ts:12:const generatedAt = '2024-01-01T00:00:00.000Z';
+tests/engineering-intelligence-invalidation-v1.test.ts:17:    generatedAt,
+tests/engineering-intelligence-invalidation-v1.test.ts:40:    generatedAt,
+tests/engineering-intelligence-invalidation-v1.test.ts:66:        invalidatedAt: generatedAt,
+tests/engineering-intelligence-invalidation-v1.test.ts:97:    generatedAt,
+tests/engineering-intelligence-invalidation-v1.test.ts:105:      triggeredAt: generatedAt,
+tests/engineering-intelligence-invalidation-v1.test.ts:126:      invalidatedAt: generatedAt,
+tests/engineering-intelligence-invalidation-v1.test.ts:135:    generatedAt,
+tests/engineering-intelligence-invalidation-v1.test.ts:162:    generatedAt,
+tests/homeowner-intake-event-first.test.ts:36:      "x-real-ip": `203.0.113.${Math.floor(Math.random() * 200) + 1}`,
+tests/homeowner-intake-event-first.test.ts:53:      "x-real-ip": `198.51.100.${Math.floor(Math.random() * 200) + 1}`,
+
+# Prohibited boundary term scan
+lib/engineeringIntelligence/photoGrouping.ts:533:    'no OCR',
+lib/engineeringIntelligence/photoGrouping.ts:534:    'no OpenCV',
+lib/engineeringIntelligence/photoGrouping.ts:535:    'no YOLO',
+lib/engineeringIntelligence/photoGrouping.ts:536:    'no TensorFlow',
+lib/engineeringIntelligence/photoGrouping.ts:537:    'no PyTorch',
+lib/engineeringIntelligence/photoGrouping.ts:539:    'no image-byte inspection',
+lib/engineeringIntelligence/photoGrouping.ts:541:    'no object detection',
+lib/engineeringIntelligence/signalExtraction.test.ts:153:    expect(summary.prohibitedRuntimeBehavior).toEqual(expect.arrayContaining(['no OCR', 'no CV classification', 'no image-byte inspection', 'no autonomous CAD generation']));
+lib/engineeringIntelligence/workspace.ts:580:      'Graph rendering is deterministic HTML/SVG layout; no semantic inference or image-byte inspection is performed.',
+lib/engineeringIntelligence/workspace.ts:1020:      'No client-side backend logic duplication, OCR, CV, CAD generation, image-byte inspection, semantic inference, or autonomous regeneration is introduced.',
+lib/engineeringIntelligence/signalExtraction.ts:411:    'no OCR',
+lib/engineeringIntelligence/signalExtraction.ts:413:    'no image-byte inspection',
+lib/engineeringIntelligence/signalExtraction.ts:416:    'no autonomous CAD generation',
+lib/engineeringIntelligence/invalidationEngine.ts:156:      'No OCR, CV, image-byte parsing, geometry inference, CAD generation, engineering decision generation, or autonomous regeneration is performed.',
+lib/engineeringIntelligence/cadReadiness.ts:157:      'no pixel inspection or image-byte inspection',
+lib/engineeringIntelligence/cadReadiness.ts:160:      'no vision model runtime dependency',
+lib/engineeringIntelligence/contextResolution.ts:77:      'Context ranking is deterministic and replayable; it does not use model weights, randomness, text/vision extraction runtimes, pixel inspection, geometry inference, plan-output creation, or operator-free engineering decisions.',
+lib/engineeringIntelligence/contextResolution.ts:338:    'no vision model runtime dependency',
+lib/engineeringIntelligence/contextResolution.ts:339:    'no pixel inspection or image-byte inspection',
+lib/engineeringIntelligence/photoGrouping.test.ts:133:    expect(grouping.prohibitedRuntimeBehavior).toEqual(expect.arrayContaining(['no OCR', 'no OpenCV', 'no CAD generation', 'no autonomous engineering decisions']));
+lib/engineeringIntelligence/projectHydration.test.ts:119:    expect(hydrated.photoGrouping.prohibitedRuntimeBehavior).toEqual(expect.arrayContaining(['no OCR', 'no CAD generation']));
+lib/engineeringIntelligence/cadReadiness.test.ts:168:  it('does not expose runtime CAD, CV, OCR, YOLO, or image-byte behavior', () => {
+lib/engineeringIntelligence/cadReadiness.test.ts:173:      'no pixel inspection or image-byte inspection',
+lib/engineeringIntelligence/cadReadiness.test.ts:176:      'no vision model runtime dependency',
+lib/engineeringIntelligence/snapshotDelta.ts:114:      'No semantic diffing, OCR, image-byte inspection, geometry inference, CAD generation, or autonomous engineering evaluation is performed.',
+lib/engineeringStateInvalidation/persistence.ts:120:      'No CV, OCR, CAD generation, image-byte inspection, or autonomous regeneration is performed.',
+lib/survey/evidence/engineeringRequirements.ts:44:  supportsOCR: boolean;
+lib/survey/evidence/engineeringRequirements.ts:171:  supportsOCR: false,
+lib/survey/evidence/engineeringRequirements.ts:178:  supportsOCR: true,
+lib/survey/evidence/engineeringRequirements.ts:432:      'Future capability flags are informational and do not activate OCR, CV, semantic extraction, CAD inference, or image-byte inspection.',
+lib/survey/evidence/engineeringRequirements.ts:575:      'No OCR, CV, semantic extraction, CAD inference, or image-byte processing is activated by this flag set.',
+lib/survey/evidence/fieldOrchestration.test.ts:90:      'no OpenCV runtime',
+lib/survey/evidence/fieldOrchestration.test.ts:91:      'no OCR runtime',
+lib/survey/evidence/fieldOrchestration.test.ts:92:      'no YOLO runtime',
+lib/survey/evidence/fieldOrchestration.test.ts:94:      'no image-byte analysis',
+lib/survey/evidence/fieldOrchestration.test.ts:95:      'no autonomous CAD generation',
+lib/survey/evidence/sessionGrouping.ts:309:      pythonWorker: ['OpenCV blur/orientation/duplicate scoring'],
+lib/survey/evidence/provenance.ts:133:          `Confidence provenance: ${record.requirementConfidenceSource}; no CV/OCR/CAD/image-byte inference is used.`,
+lib/survey/evidence/manifest.test.ts:67:    expect(manifest.openSourceBoundaries.pythonWorker).toContain('OpenCV blur/orientation/duplicate scoring');
+lib/survey/evidence/engineeringRequirements.test.ts:182:    expect(evaluation.deterministicSummary.join(' ')).toContain('do not activate OCR, CV, semantic extraction, CAD inference, or image-byte inspection');
+lib/survey/evidence/manifest.ts:239:        'OpenCV blur/orientation/duplicate scoring',
+lib/survey/evidence/manifest.ts:240:        'YOLO/Supervision detection candidates',
+lib/survey/evidence/manifest.ts:241:        'targeted OCR extraction candidates',
+lib/survey/evidence/fieldOrchestration.ts:258:      'no OpenCV runtime',
+lib/survey/evidence/fieldOrchestration.ts:259:      'no OCR runtime',
+lib/survey/evidence/fieldOrchestration.ts:260:      'no YOLO runtime',
+lib/survey/evidence/fieldOrchestration.ts:262:      'no image-byte analysis',
+lib/survey/evidence/fieldOrchestration.ts:263:      'no autonomous CAD generation',
+lib/survey/evidence/fieldOrchestration.ts:269:      'Future CV/OCR/CAD capabilities may be documented as metadata only and are not activated by this model.',
+lib/drafting/dimensions/index.ts:100:// Computes label from pixel span × scale.
+lib/drafting/layoutEngine.ts:23:    x: number;       // left edge (pixels)
+lib/drafting/layoutEngine.ts:24:    y: number;       // top edge (pixels from top of canvas)
+lib/drafting/templates/roof.ts:19://   so template scale = pixels/ft and panel sizes are pixel-accurate.
+lib/permit/utils/drawing.ts:81:  ppm: number,           // pixels per metre
+lib/permit/utils/drawing.ts:174:  // ── Panel physical size in SVG pixels ─────────────────────────────────────
+lib/permit/utils/drawing.ts:177:  const pLpx  = Math.max(5, pLenM * ppm);  // portrait: tall dimension (N-S pixels)
+lib/permit/utils/drawing.ts:178:  const pWpx  = Math.max(3, pWidM * ppm);  // portrait: wide dimension (E-W pixels)
+app/admin/engineering-intelligence/components.tsx:183:            <div className="mt-3 text-slate-400">No OCR/CV/CAD/autonomous-regeneration runtime path is exposed here.</div>
+app/admin/engineering-intelligence/components.tsx:260:        'Selecting a project only loads deterministic evidence, graph, snapshot, invalidation, regeneration-plan metadata, and CAD-readiness metadata; it does not run OCR, CV, CAD generation, or autonomous regeneration.',
+tests/engineering-intelligence-render-safety.test.tsx:88:      prohibitedRuntimeBehavior: ['no OCR', { guard: 'no CV' }],
+tests/engineering-intelligence-render-safety.test.tsx:111:      prohibitedRuntimeBehavior: [{ guard: 'no autonomous CAD' }],
+tests/solardog.test.ts:9: *  3.  LLM identity rules — never denies being an LLM
+tests/solardog.test.ts:99:const FORBIDDEN_LLM_DENIAL_PHRASES = [
+tests/solardog.test.ts:232:// 3. LLM identity rules
+tests/solardog.test.ts:235:describe('SolarDog system prompt — LLM identity rules', () => {
+tests/solardog.test.ts:238:You are powered by an LLM (you can say so if asked). You are NOT a scripted FAQ bot.
+tests/solardog.test.ts:253:  it('identity section contains LLM acknowledgment', () => {
+tests/solardog.test.ts:254:    expect(IDENTITY_SECTION).toContain('You are powered by an LLM');
+tests/solardog.test.ts:262:    FORBIDDEN_LLM_DENIAL_PHRASES.forEach(phrase => {
+tests/solardog.test.ts:267:  it('identity section tells bot it is LLM-powered', () => {
+tests/solardog.test.ts:268:    expect(IDENTITY_SECTION).toMatch(/language model|LLM/);
+tests/solardog.test.ts:928: * Minimal intent classifier that mirrors the LLM's INTENT CLASSIFICATION rules.
+tests/solardog.test.ts:929: * Used to unit-test the classification logic independently of the LLM.
+tests/solardog.test.ts:2706:  it('route handler extracts workflowKey from LLM response', () => {
+tests/solardog.test.ts:2712:  it('route handler extracts currentStep from LLM response', () => {
+tests/solardog.test.ts:2718:  it('route handler extracts suggestedSteps from LLM response', () => {
+tests/bill-upload.test.ts:5: * All OCR, AI, and geocoding dependencies are mocked.
+tests/bill-upload.test.ts:8: *   1. JPG bill — high-quality OCR text from a real utility bill
+tests/bill-upload.test.ts:10: *   3. Low-quality image — sparse OCR output, triggers AI fallback path
+tests/bill-upload.test.ts:85:/** Low-quality OCR output — sparse, garbled text */
+tests/bill-upload.test.ts:86:const FIXTURE_LOW_QUALITY_OCR = `
+tests/bill-upload.test.ts:162:  it('TC3: handles low-quality OCR text — extracts partial data', () => {
+tests/bill-upload.test.ts:163:    const result = parseBill(FIXTURE_LOW_QUALITY_OCR);
+tests/bill-upload.test.ts:188:    const texts = [FIXTURE_CMP_BILL, FIXTURE_NATIONAL_GRID_PDF, FIXTURE_LOW_QUALITY_OCR, FIXTURE_NO_KWH];
+tests/bill-upload.test.ts:218:    const texts = [FIXTURE_CMP_BILL, FIXTURE_NATIONAL_GRID_PDF, FIXTURE_LOW_QUALITY_OCR, FIXTURE_NO_KWH, ''];
+tests/hydrate-bill-data.test.ts:9: *   3. Flat/legacy format → BillAnalysis synthesized from raw OCR fields
+tests/engineering-intelligence-invalidation-v1.test.ts:194:    expect(propagation.deterministicNotes.join(' ')).toContain('No OCR');
+scripts/check-engineering-boundaries.js:12: * bill OCR/image-processing features; those are outside this directive and must
+scripts/check-engineering-boundaries.js:40:  /supportsOCR|supportsCVClassification|supportsCADInference|supportsSemanticExtraction/,
+scripts/check-engineering-boundaries.js:41:  /No OCR|no OCR|OCR\/CV|OpenCV|YOLO|TensorFlow|PyTorch|image-byte|semantic inference|hallucinated geometry|autonomous regeneration/i,
+scripts/check-engineering-boundaries.js:44:  /no autonomous CAD generation/i,
+scripts/check-engineering-boundaries.js:46:  /no object detection/i,
+scripts/check-engineering-boundaries.js:52:  { code: 'ocr_runtime', pattern: /\b(tesseract|ocrad|easyocr|paddleocr|OCRWorker)\b/i },
+scripts/check-engineering-boundaries.js:53:  { code: 'opencv_runtime', pattern: /\b(opencv|cv2|OpenCV|@techstark\/opencv-js)\b/i },
+scripts/check-engineering-boundaries.js:56:  { code: 'image_byte_analysis', pattern: /\b(getImageData|pixelData|imageBytes|parseImage|decodeImage|sharp\(|jimp\(|exiftool)\b/i },
+scripts/check-engineering-boundaries.js:57:  { code: 'scene_classification', pattern: /\b(scene classification|classifyScene|semantic scene|object detection)\b/i },
+scripts/check-engineering-boundaries.js:58:  { code: 'autonomous_cad_generation', pattern: /\b(generateCAD|autonomous CAD|autoGenerateLayout|hallucinated geometry|inferGeometry)\b/i },
+scripts/check-engineering-boundaries.js:104:console.log(`Engineering Intelligence boundary scan passed: no prohibited OCR/CV/ML/image-byte/CAD-autogeneration runtime patterns found in ${scannedFiles.size} scoped file(s).`);
+scripts/check-env.js:40:  'INTERNAL_OCR_SECRET',
+
+# Potential unstable sort scan
+lib/engineeringIntelligence/regenerationPlanner.ts:105:  const payload = sortText(Array.from(new Set(values.filter(value => value !== null && value !== undefined && String(value).length > 0).map(String)))).join('\n');
+lib/engineeringIntelligence/photoGrouping.ts:212:  const map = new Map<string, string | null>();
+lib/engineeringIntelligence/photoGrouping.ts:225:function orderItems(items: SurveyEvidenceItem[], uploadTimestampByEvidenceId: Map<string, string | null>): SurveyEvidenceItem[] {
+lib/engineeringIntelligence/photoGrouping.ts:278:  const breakAfter = new Set(breakpoints.map(point => point.afterSequenceIndex));
+lib/engineeringIntelligence/photoGrouping.ts:400:    linkedReadinessFlagIds: input.flags.map(flag => flag.flagId).sort(),
+lib/engineeringIntelligence/photoGrouping.ts:401:    supportingClusterIds: input.clusters.map(cluster => cluster.clusterId).sort(),
+lib/engineeringIntelligence/photoGrouping.ts:428:  const counts = new Map<DeterministicClusterType, number>();
+lib/engineeringIntelligence/photoGrouping.ts:528:  return [...new Set(values)].sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/contextTypes.ts:129:export type ContextSignalLookup = Map<StructuredEngineeringSignalType, StructuredEngineeringSignal[]>;
+lib/engineeringIntelligence/signalExtraction.test.ts:158:    const ids = new Map(inputManifest.items.map(row => [row.category, row.evidenceId]));
+lib/engineeringIntelligence/signalExtraction.test.ts:201:    const contextIds = new Map(contextManifest.items.map(row => [row.category, row.evidenceId]));
+lib/engineeringIntelligence/workspace.ts:69:const sortText = <T extends string>(values: T[]): T[] => [...new Set(values)].sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/workspace.ts:369:  return Object.entries(completeness).map(([field, present]) => ({ field, present })).sort((a, b) => a.field.localeCompare(b.field));
+lib/engineeringIntelligence/signalExtraction.ts:149:  const categories = new Set<SurveyEvidenceCategory>([...definition.evidenceCategories, ...(definition.anyEvidenceCategories ?? [])]);
+lib/engineeringIntelligence/signalExtraction.ts:210:  }).sort();
+lib/engineeringIntelligence/signalExtraction.ts:221:  const sources = new Set<StructuredEngineeringSignalSource>(definition.sourceHints);
+lib/engineeringIntelligence/signalExtraction.ts:311:  const requirementIds = sortText([...new Set(signals.flatMap(signal => signal.requirementImpacts))]);
+lib/engineeringIntelligence/signalExtraction.ts:316:      signalIds: linked.map(signal => signal.id).sort(),
+lib/engineeringIntelligence/signalExtraction.ts:317:      confirmedSignalIds: linked.filter(signal => signal.status === 'confirmed').map(signal => signal.id).sort(),
+lib/engineeringIntelligence/signalExtraction.ts:318:      partialSignalIds: linked.filter(signal => signal.status === 'partial').map(signal => signal.id).sort(),
+lib/engineeringIntelligence/signalExtraction.ts:319:      missingSignalIds: linked.filter(signal => signal.status === 'missing' || signal.status === 'blocked').map(signal => signal.id).sort(),
+lib/engineeringIntelligence/signalExtraction.ts:325:  const flagIds = sortText([...new Set([...signals.flatMap(signal => signal.cadImpacts), ...flags.map(flag => flag.flagId)])]) as CADReadinessFlagId[];
+lib/engineeringIntelligence/signalExtraction.ts:330:      signalIds: linked.map(signal => signal.id).sort(),
+lib/engineeringIntelligence/signalExtraction.ts:331:      confirmedSignalIds: linked.filter(signal => signal.status === 'confirmed').map(signal => signal.id).sort(),
+lib/engineeringIntelligence/signalExtraction.ts:332:      partialSignalIds: linked.filter(signal => signal.status === 'partial').map(signal => signal.id).sort(),
+lib/engineeringIntelligence/signalExtraction.ts:333:      blockedSignalIds: linked.filter(signal => signal.status === 'missing' || signal.status === 'blocked').map(signal => signal.id).sort(),
+lib/engineeringIntelligence/signalExtraction.ts:339:  const nodes = new Map<string, { nodeId: string; label: string; nodeType: 'signal' | 'evidence' | 'requirement' | 'cad_readiness' | 'grouping' | 'invalidation'; status: string }>();
+lib/engineeringIntelligence/signalExtraction.ts:388:  return [...new Set(values)].sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/signalExtraction.ts:404:    return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, nested]) => [key, sortStable(nested)]));
+lib/engineeringIntelligence/propagationGraph.ts:83:  const nodes = new Map<string, PropagationGraphNode>();
+lib/engineeringIntelligence/propagationGraph.ts:84:  const edges = new Map<string, PropagationGraphEdge>();
+lib/engineeringIntelligence/propagationGraph.ts:85:  const duplicateEdgeIdsSuppressed = new Set<string>();
+lib/engineeringIntelligence/propagationGraph.ts:86:  const missingNodeIds = new Set<string>();
+lib/engineeringIntelligence/propagationGraph.ts:87:  const sourceGraphTypes = new Set<PropagationSourceGraphType>();
+lib/engineeringIntelligence/propagationGraph.ts:131:  const nodeIds = new Set(merged.nodes.map(node => node.nodeId));
+lib/engineeringIntelligence/propagationGraph.ts:132:  const missingNodeIds = new Set(merged.missingNodeIds);
+lib/engineeringIntelligence/propagationGraph.ts:137:  const visited = new Set<string>(seedNodeIds);
+lib/engineeringIntelligence/propagationGraph.ts:138:  const paths = new Map<string, PropagationTraversalPath>();
+lib/engineeringIntelligence/propagationGraph.ts:249:function putEdge(edges: Map<string, PropagationGraphEdge>, duplicateEdgeIdsSuppressed: Set<string>, edge: PropagationGraphEdge) {
+lib/engineeringIntelligence/propagationGraph.ts:263:function buildAdjacency(edges: PropagationGraphEdge[], direction: PropagationTraversalDirection): Map<string, PropagationGraphEdge[]> {
+lib/engineeringIntelligence/propagationGraph.ts:264:  const adjacency = new Map<string, PropagationGraphEdge[]>();
+lib/engineeringIntelligence/propagationGraph.ts:292:  return Array.from(new Set(values.filter(value => value.length > 0)));
+lib/engineeringIntelligence/invalidationEngine.ts:180:function outputImpactForRecord(record: EngineeringStateRecord, snapshots: EngineeringStateSnapshot[], pathIdsByNode: Map<string, string[]>): EngineeringAffectedOutputImpact {
+lib/engineeringIntelligence/invalidationEngine.ts:207:function invalidatedDecisionImpacts(records: EngineeringStateRecord[], outputs: EngineeringAffectedOutputImpact[], pathIdsByNode: Map<string, string[]>): EngineeringInvalidatedDecisionImpact[] {
+lib/engineeringIntelligence/invalidationEngine.ts:223:function pathIdLookup(paths: PropagationTraversalPath[]): Map<string, string[]> {
+lib/engineeringIntelligence/invalidationEngine.ts:224:  const lookup = new Map<string, string[]>();
+lib/engineeringIntelligence/invalidationEngine.ts:246:  const payload = sortText(Array.from(new Set(values.filter(value => value !== null && value !== undefined && String(value).length > 0).map(String)))).join('\n');
+lib/engineeringIntelligence/cadReadiness.ts:173:  const categorySet = new Set(categories);
+lib/engineeringIntelligence/cadReadiness.ts:255:  return Array.from(new Set([
+lib/engineeringIntelligence/contextResolution.ts:30:const sortText = <T extends string>(values: T[]): T[] => [...new Set(values)].sort((a, b) => a.localeCompare(b));
+lib/engineeringIntelligence/contextResolution.ts:153:  const lookup: ContextSignalLookup = new Map();
+lib/engineeringIntelligence/contextResolution.ts:167:  const evidenceOwners = new Map<string, string[]>();
+lib/engineeringIntelligence/contextResolution.ts:174:  const duplicatedEvidenceSignalIds = new Set([...evidenceOwners.values()].filter(ids => ids.length > 1).flat());
+lib/engineeringIntelligence/contextResolution.ts:224:  if (activePrimary.length > 1) reasons.push(`Multiple active primary signal candidates remain visible: ${activePrimary.map(signal => signal.id).sort().join(', ')}.`);
+lib/engineeringIntelligence/contextResolution.ts:226:  if (partial.length > 0) reasons.push(`Partial competing signal support remains visible: ${partial.map(signal => signal.id).sort().join(', ')}.`);
+lib/engineeringIntelligence/contextResolution.ts:228:  if (blocked.length > 0) reasons.push(`Blocked or missing signal support remains visible: ${blocked.map(signal => signal.id).sort().join(', ')}.`);
+lib/engineeringIntelligence/contextResolution.ts:230:  if (invalidated.length > 0) reasons.push(`Invalidated signal lineage remains visible: ${invalidated.map(signal => signal.id).sort().join(', ')}.`);
+lib/engineeringIntelligence/contextResolution.ts:242:  const candidateSignalIds = new Set(candidateSignals.map(signal => signal.id));
+lib/engineeringIntelligence/contextResolution.ts:266:      contextIds: linked.map(context => context.id).sort(),
+lib/engineeringIntelligence/contextResolution.ts:267:      authoritativeContextIds: linked.filter(context => context.status === 'authoritative').map(context => context.id).sort(),
+lib/engineeringIntelligence/contextResolution.ts:268:      preferredContextIds: linked.filter(context => context.status === 'preferred').map(context => context.id).sort(),
+lib/engineeringIntelligence/contextResolution.ts:269:      partialContextIds: linked.filter(context => context.status === 'partial').map(context => context.id).sort(),
+lib/engineeringIntelligence/contextResolution.ts:270:      conflictingContextIds: linked.filter(context => context.status === 'conflicting').map(context => context.id).sort(),
+lib/engineeringIntelligence/contextResolution.ts:271:      blockedContextIds: linked.filter(context => context.status === 'blocked').map(context => context.id).sort(),
+lib/engineeringIntelligence/contextResolution.ts:272:      unresolvedContextIds: linked.filter(context => context.status === 'unresolved').map(context => context.id).sort(),
+lib/engineeringIntelligence/contextResolution.ts:278:  const nodes = new Map<string, EngineeringContextResolutionSummary['dependencyGraph']['nodes'][number]>();
+lib/engineeringIntelligence/contextResolution.ts:319:  return `${definition.deterministicPurpose} Status ${status}. Ranking factors: ${factors.join('; ') || 'none'}. Penalties: ${penalties.join('; ') || 'none'}. Competing signals: ${competingSignals.map(signal => signal.id).sort().join(', ') || 'none'}.`;
+lib/engineeringIntelligence/contextResolution.ts:329:    return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, entry]) => [key, normalize(entry)]));
+lib/engineeringIntelligence/snapshotDelta.ts:69:  const previousEvidence = new Set(previous.stateRefs.flatMap(ref => ref.canonicalEvidenceIds));
+lib/engineeringIntelligence/snapshotDelta.ts:70:  const nextEvidence = new Set(next.stateRefs.flatMap(ref => ref.canonicalEvidenceIds));
+lib/engineeringIntelligence/snapshotDelta.ts:73:  const previousDecisions = new Set(previous.stateRefs.flatMap(ref => ref.decisionIds));
+lib/engineeringIntelligence/snapshotDelta.ts:74:  const nextDecisions = new Set(next.stateRefs.flatMap(ref => ref.decisionIds));
+lib/engineeringIntelligence/snapshotDelta.ts:75:  const changedDecisionIds = sortText([...new Set([...previousDecisions, ...nextDecisions])].filter(id => !previousDecisions.has(id) || !nextDecisions.has(id)));
+lib/engineeringIntelligence/snapshotDelta.ts:142:  const previousIds = new Set([...previous.nodes.map(node => node.nodeId), ...previous.edges.map(edge => edge.edgeId)]);
+lib/engineeringIntelligence/snapshotDelta.ts:143:  const nextIds = new Set([...next.nodes.map(node => node.nodeId), ...next.edges.map(edge => edge.edgeId)]);
+lib/engineeringIntelligence/snapshotDelta.ts:144:  return sortText([...new Set([...previousIds, ...nextIds])].filter(id => !previousIds.has(id) || !nextIds.has(id)));
+lib/engineeringIntelligence/snapshotDelta.ts:183:  const payload = sortText(Array.from(new Set(values.filter(value => value !== null && value !== undefined && String(value).length > 0).map(String)))).join('\n');
+lib/engineeringDecisionProvenance/evaluator.ts:202:  evaluationByRequirement: Map<EngineeringRequirementId, EngineeringRequirementEvaluation>;
+lib/engineeringDecisionProvenance/evaluator.ts:203:  documentSectionIds: Set<string>;
+lib/engineeringDecisionProvenance/evaluator.ts:207:    evaluationByRequirement: new Map(evaluations.map(evaluation => [evaluation.requirementId, evaluation])),
+lib/engineeringDecisionProvenance/evaluator.ts:208:    documentSectionIds: new Set(input.documentProvenance?.sections.map(section => section.sectionId) ?? []),
+lib/engineeringDecisionProvenance/evaluator.ts:327:  context: { evaluationByRequirement: Map<EngineeringRequirementId, EngineeringRequirementEvaluation> },
+lib/engineeringDecisionProvenance/evaluator.ts:481:  return Array.from(new Set(values.filter(Boolean) as T[])).sort((a, b) => a.localeCompare(b));
+lib/engineeringStateInvalidation/hash.ts:2:  const payload = Array.from(new Set(values.filter(value => value !== null && value !== undefined && String(value).length > 0).map(String))).sort((a, b) => a.localeCompare(b)).join('\n');
+lib/engineeringStateInvalidation/engine.ts:61:  const affected = new Set<string>();
+lib/engineeringStateInvalidation/engine.ts:323:function reachableDependencyIds(trigger: EngineeringInvalidationTrigger, graph: EngineeringDependencyGraph | null): Set<string> {
+lib/engineeringStateInvalidation/engine.ts:324:  const seeds = new Set<string>([
+lib/engineeringStateInvalidation/engine.ts:330:  const reachable = new Set(seeds);
+lib/engineeringStateInvalidation/engine.ts:332:  const adjacency = new Map<string, string[]>();
+lib/engineeringStateInvalidation/engine.ts:342:function matchingTriggers(record: EngineeringStateRecord, trigger: EngineeringInvalidationTrigger, reachable: Set<string>): string[] {
+lib/engineeringStateInvalidation/engine.ts:371:function uniqueSorted<T extends string>(values: Array<T | null | undefined>): T[] { return Array.from(new Set(values.filter((value): value is T => typeof value === 'string' && value.length > 0))).sort((a, b) => a.localeCompare(b)); }
+lib/engineeringStateInvalidation/persistence.ts:23:  const dependencyNodesById = new Map((dependencyGraph?.nodes ?? []).map(node => [node.id, node]));
+lib/engineeringStateInvalidation/persistence.ts:24:  const nodes = new Map<string, PersistentEngineeringStateGraphNode>();
+lib/engineeringStateInvalidation/persistence.ts:25:  const edges = new Map<string, PersistentEngineeringStateGraphEdge>();
+lib/engineeringStateInvalidation/persistence.ts:167:    ...Object.entries(hashVector).map(([key, value]) => `${key}:${value}`),
+lib/engineeringStateInvalidation/persistence.ts:205:  const previousById = new Map(previous.stateRefs.map(ref => [ref.stateId, ref]));
+lib/engineeringStateInvalidation/persistence.ts:206:  const nextById = new Map(next.stateRefs.map(ref => [ref.stateId, ref]));
+lib/engineeringStateInvalidation/persistence.ts:239:  const hashVectorChanges = (Object.keys(next.hashVector) as Array<keyof EngineeringStateHashVector>)
+lib/engineeringStateInvalidation/persistence.ts:265:  const invalidationBySnapshot = new Map((input.invalidationResults ?? []).map(result => [result.generatedAt, result]));
+lib/engineeringStateInvalidation/persistence.ts:343:  const byId = new Map(snapshots.map(candidate => [candidate.snapshotId, candidate]));
+lib/engineeringStateInvalidation/persistence.ts:373:function putEdge(edges: Map<string, PersistentEngineeringStateGraphEdge>, edge: PersistentEngineeringStateGraphEdge): void {
+lib/engineeringStateInvalidation/persistence.ts:376:function sortUnique<T extends string>(values: T[]): T[] { return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b)); }
+lib/engineeringStateInvalidation/persistence.ts:378:function dedupeById<T extends { transitionEventId: string }>(events: T[]): T[] { return Array.from(new Map(events.map(event => [event.transitionEventId, event])).values()); }
+lib/engineeringStateInvalidation/guards.ts:60:  const graphNodeIds = new Set(graph?.nodes.map(node => node.nodeId) ?? []);
+lib/engineeringStateInvalidation/guards.ts:85:      ...Object.entries(snapshot.hashVector).map(([key, value]) => `${key}:${value}`),
+lib/documentProvenance/documentProvenance.test.ts:199:    expect(bundle.canonicalEvidenceIds).toEqual([...new Set(bundle.canonicalEvidenceIds)].sort());
+lib/documentProvenance/documentProvenance.test.ts:294:    expect(first.dependencyGraph?.nodes.map(node => node.id)).toEqual(first.dependencyGraph?.nodes.map(node => node.id).sort());
+lib/documentProvenance/requirementDocumentBindings.ts:62:  Object.entries(ENGINEERING_REQUIREMENT_REGISTRY).map(([requirementId, definition]) => {
+lib/documentProvenance/builders.ts:107:  const evaluationByRequirement = new Map<EngineeringRequirementId, EngineeringRequirementEvaluation>(
+lib/documentProvenance/builders.ts:160:  const nodes = new Map<string, EngineeringDependencyNode>();
+lib/documentProvenance/builders.ts:161:  const edges = new Map<string, EngineeringDependencyEdge>();
+lib/documentProvenance/builders.ts:345:  const byRequirement = new Map<EngineeringRequirementId, EngineeringRequirementEvaluation>(
+lib/documentProvenance/builders.ts:464:function putNode(nodes: Map<string, EngineeringDependencyNode>, node: EngineeringDependencyNode): void {
+lib/documentProvenance/builders.ts:482:function putEdge(edges: Map<string, EngineeringDependencyEdge>, edge: EngineeringDependencyEdge): void {
+lib/documentProvenance/builders.ts:501:  return Array.from(new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))).sort((a, b) => a.localeCompare(b));
+lib/survey/evidence/sessionGrouping.test.ts:88:    expect(hygiene.evidenceDuplicateGroups.map(group => group.category).sort()).toEqual([
+lib/survey/evidence/engineeringRequirements.ts:498:    originatingSurveyIds: Array.from(new Set(uniqueRecords.map(record => record.originatingSurveyId))),
+lib/survey/evidence/engineeringRequirements.ts:500:    evidenceCategoriesSatisfied: Array.from(new Set(uniqueRecords.map(record => record.evidenceCategory))),
+lib/survey/evidence/engineeringRequirements.ts:634:  const seen = new Set<string>();
+lib/survey/evidence/sessionGrouping.ts:78:  const canonicalEvidenceIds = new Set(evidenceDuplicateGroups.map(group => group.canonicalEvidenceId));
+lib/survey/evidence/sessionGrouping.ts:79:  const duplicateEvidenceIds = new Set(
+lib/survey/evidence/sessionGrouping.ts:158:  const groups = new Map<string, EvidenceWithSurvey[]>();
+lib/survey/evidence/sessionGrouping.ts:169:    const ids = members.map(member => member.item.evidenceId).sort();
+lib/survey/evidence/sessionGrouping.ts:170:    const surveyIds = Array.from(new Set(members.map(member => member.item.surveyId))).sort();
+lib/survey/evidence/sessionGrouping.ts:190:  canonicalEvidenceIds: Set<string>,
+lib/survey/evidence/sessionGrouping.ts:192:  const parent = new Map<string, string>();
+lib/survey/evidence/sessionGrouping.ts:222:  const byRoot = new Map<string, number[]>();
+lib/survey/evidence/sessionGrouping.ts:233:    const surveyIds = groupSurveys.map(survey => survey.id).sort();
+lib/survey/evidence/sessionGrouping.ts:273:    ...new Set([
+lib/survey/evidence/sessionGrouping.ts:421:  return Array.from(new Set(items.filter(item => item.category !== 'uncategorized').map(item => item.category))).sort();
+lib/survey/evidence/sessionGrouping.ts:425:  const setA = new Set(a);
+lib/survey/evidence/sessionGrouping.ts:426:  const setB = new Set(b);
+lib/survey/evidence/sessionGrouping.ts:427:  const union = new Set([...a, ...b]);
+lib/survey/evidence/sessionGrouping.ts:435:  const input = parts.filter(Boolean).sort().join('|');
+lib/survey/evidence/provenance.ts:101:  const canonicalByCategory = new Map<SurveyEvidenceCategory, CanonicalEvidenceProvenanceRecord>();
+lib/survey/evidence/categoryRegistry.ts:312:export const SURVEY_EVIDENCE_CATEGORIES = Object.keys(SURVEY_EVIDENCE_CATEGORY_REGISTRY) as SurveyEvidenceCategory[];
+lib/survey/evidence/categoryRegistry.ts:352:  const tokens = new Set(normalizedText.split('_').filter(Boolean));
+lib/survey/evidence/engineeringRequirements.test.ts:114:    expect(evaluation.blockedRequirements.map(requirement => requirement.requirementId).sort()).toEqual([
+lib/survey/evidence/engineeringRequirements.test.ts:174:    expect(evaluation.inactiveRequirements.map(requirement => requirement.requirementId).sort()).toEqual([
+lib/survey/evidence/manifest.ts:158:  const seenUrls = new Set<string>();
+lib/survey/evidence/fieldOrchestration.ts:233:  const groupIds = Array.from(new Set(steps.map(step => step.groupId)));
+lib/survey/evidence/fieldOrchestration.ts:305:  return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
+app/admin/engineering-intelligence/components.tsx:92:    const keys = Object.keys(value).sort().slice(0, 5);
+app/admin/engineering-intelligence/components.tsx:93:    return keys.length ? `object(keys=${keys.join('|')}${Object.keys(value).length > keys.length ? '|…' : ''})` : 'object(empty)';

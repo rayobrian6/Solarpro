@@ -1,0 +1,1393 @@
+===== lib/engineeringIntelligence/projectHydration.ts =====
+3:import { buildDecisionAwareBOMMetadata, buildDecisionAwareSLDMetadata } from '@/lib/engineeringDecisionProvenance';
+5:  buildEngineeringStateRegistry,
+6:  buildEngineeringStateSnapshot,
+7:  buildEngineeringStateTimeline,
+8:  buildEngineeringStateTransitionHistory,
+9:  buildInvalidationTrigger,
+10:  buildPersistentEngineeringStateGraph,
+11:  buildSelectiveRegenerationPlan,
+22:import { buildCADReadinessMetadata, type CADReadinessMetadataModel } from './cadReadiness';
+23:import { buildDeterministicPhotoGrouping, type DeterministicPhotoGroupingModel } from './photoGrouping';
+25:import { buildEngineeringRegenerationPlanV1, type EngineeringRegenerationPlanV1 } from './regenerationPlanner';
+26:import { buildEngineeringSnapshotDeltaV1, type EngineeringSnapshotDeltaV1 } from './snapshotDelta';
+27:import { buildStructuredEngineeringSignals } from './signalExtraction';
+29:import { buildEngineeringContextResolution } from './contextResolution';
+31:import { buildEngineeringIntelligenceWorkspace } from './workspace';
+33:import { buildSurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
+34:import { buildProjectSurveyEvidenceHygiene } from '@/lib/survey/evidence/sessionGrouping';
+54:  snapshots: EngineeringStateSnapshot[];
+56:  regenerationPlans: SelectiveRegenerationPlan[];
+58:  regenerationPlanV1: EngineeringRegenerationPlanV1 | null;
+59:  snapshotDelta: EngineeringSnapshotDeltaV1 | null;
+60:  cadReadiness: CADReadinessMetadataModel;
+62:  structuredSignals: StructuredEngineeringSignalSummary;
+63:  contextResolution: EngineeringContextResolutionSummary;
+67:export async function hydrateProjectEngineeringIntelligenceFromDb(input: {
+74:    const sources = await Promise.all(surveys.map(async survey => ({ survey, files: await getSiteSurveyFiles(survey.id) })));
+75:    return hydrateProjectEngineeringIntelligence({ projectId: input.projectId, sources, generatedAt: input.generatedAt });
+77:    const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+78:    const cadReadiness = buildCADReadinessMetadata({ projectId: input.projectId });
+79:    const photoGrouping = buildDeterministicPhotoGrouping({
+81:      readinessFlags: cadReadiness.flags,
+84:    const structuredSignals = buildStructuredEngineeringSignals({ projectId: input.projectId, photoGrouping, cadReadiness, generatedAt });
+85:    const signalAwareCADReadiness = buildCADReadinessMetadata({ projectId: input.projectId, structuredSignals });
+86:    const contextResolution = buildEngineeringContextResolution({ projectId: input.projectId, structuredSignals, photoGrouping, cadReadiness: signalAwareCADReadiness, generatedAt });
+87:    const contextAwareCADReadiness = buildCADReadinessMetadata({ projectId: input.projectId, structuredSignals, contextResolution });
+90:      cadReadiness: contextAwareCADReadiness,
+92:      structuredSignals,
+93:      contextResolution,
+95:    const workspace = buildEngineeringIntelligenceWorkspace(workspaceInput);
+106:      snapshots: [],
+108:      regenerationPlans: [],
+110:      regenerationPlanV1: null,
+111:      snapshotDelta: null,
+112:      cadReadiness: contextAwareCADReadiness,
+114:      structuredSignals,
+115:      contextResolution,
+124:export function hydrateProjectEngineeringIntelligence(input: {
+129:  const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+130:  const sortedSources = [...input.sources].sort((a, b) => {
+136:    const cadReadiness = buildCADReadinessMetadata({ projectId: input.projectId });
+137:    const photoGrouping = buildDeterministicPhotoGrouping({
+139:      readinessFlags: cadReadiness.flags,
+142:    const structuredSignals = buildStructuredEngineeringSignals({ projectId: input.projectId, photoGrouping, cadReadiness, generatedAt });
+143:    const signalAwareCADReadiness = buildCADReadinessMetadata({ projectId: input.projectId, structuredSignals });
+144:    const contextResolution = buildEngineeringContextResolution({ projectId: input.projectId, structuredSignals, photoGrouping, cadReadiness: signalAwareCADReadiness, generatedAt });
+145:    const contextAwareCADReadiness = buildCADReadinessMetadata({ projectId: input.projectId, structuredSignals, contextResolution });
+148:      cadReadiness: contextAwareCADReadiness,
+150:      structuredSignals,
+151:      contextResolution,
+153:    const workspace = buildEngineeringIntelligenceWorkspace(workspaceInput);
+164:      snapshots: [],
+166:      regenerationPlans: [],
+168:      regenerationPlanV1: null,
+169:      snapshotDelta: null,
+170:      cadReadiness: contextAwareCADReadiness,
+172:      structuredSignals,
+173:      contextResolution,
+176:        'Workspace uses explicit registry/empty state and does not synthesize evidence, geometry, or stale state.',
+181:  const hygiene = buildProjectSurveyEvidenceHygiene({ projectId: input.projectId, surveys: sortedSources, generatedAt });
+183:  const canonicalSource = sortedSources.find(source => source.survey.id === canonicalSurveyId) ?? sortedSources[0];
+184:  const canonicalManifest = buildSurveyEvidenceManifest({ survey: canonicalSource.survey, files: canonicalSource.files, generatedAt });
+194:  const bomMetadata = decisionProvenance ? buildDecisionAwareBOMMetadata({ bomItems: [], decisionBundle: decisionProvenance }) : [];
+195:  const sldMetadata = decisionProvenance ? buildDecisionAwareSLDMetadata({ decisionBundle: decisionProvenance }) : null;
+196:  const registry = buildEngineeringStateRegistry({
+201:    dependencyGraph: documentProvenance?.dependencyGraph ?? null,
+206:  const baselineGraph = buildPersistentEngineeringStateGraph({
+207:    graphId: `engineering-intelligence:${input.projectId}:graph:baseline`,
+210:    dependencyGraph: documentProvenance?.dependencyGraph ?? null,
+212:  const baselineSnapshot = buildEngineeringStateSnapshot({
+213:    snapshotId: `engineering-intelligence:${input.projectId}:snapshot:baseline`,
+217:    dependencyGraph: documentProvenance?.dependencyGraph ?? null,
+227:        dependencyGraph: documentProvenance?.dependencyGraph ?? null,
+228:        trigger: buildInvalidationTrigger({
+238:    ? { ...registry, stateRecords: invalidationResult.updatedStateRecords, stateIds: invalidationResult.updatedStateRecords.map(record => record.stateId).sort((a, b) => a.localeCompare(b)) }
+240:  const stateGraph = buildPersistentEngineeringStateGraph({
+241:    graphId: `engineering-intelligence:${input.projectId}:graph:latest`,
+244:    dependencyGraph: documentProvenance?.dependencyGraph ?? null,
+247:  const latestSnapshot = buildEngineeringStateSnapshot({
+248:    snapshotId: `engineering-intelligence:${input.projectId}:snapshot:latest`,
+252:    dependencyGraph: documentProvenance?.dependencyGraph ?? null,
+257:  const snapshots = [baselineSnapshot, latestSnapshot];
+259:  const regenerationPlan = invalidationResult
+260:    ? buildSelectiveRegenerationPlan({
+264:        dependencyGraph: documentProvenance?.dependencyGraph ?? null,
+265:        snapshotReference: engineeringStateSnapshotReference(latestSnapshot),
+268:  const regenerationPlans = regenerationPlan ? [regenerationPlan] : [];
+269:  const transitionHistory = buildEngineeringStateTransitionHistory({
+272:    snapshots,
+276:  const timeline = buildEngineeringStateTimeline(transitionHistory, snapshots);
+280:    regenerationPlan,
+282:    snapshots,
+286:  const baseCADReadiness = buildCADReadinessMetadata({ projectId: input.projectId, surveyId: canonicalSurveyId, canonicalManifest: hygiene.canonicalManifest ?? canonicalManifest, surveyEvidence });
+287:  const photoGrouping = buildDeterministicPhotoGrouping({
+295:  const preliminarySignals = buildStructuredEngineeringSignals({
+301:    cadReadiness: baseCADReadiness,
+305:  const signalAwareCADReadiness = buildCADReadinessMetadata({ projectId: input.projectId, surveyId: canonicalSurveyId, canonicalManifest: hygiene.canonicalManifest ?? canonicalManifest, surveyEvidence, structuredSignals: preliminarySignals });
+310:    dependencyGraph: documentProvenance?.dependencyGraph ?? null,
+312:    snapshots,
+313:    cadReadiness: signalAwareCADReadiness,
+315:  const structuredSignals = buildStructuredEngineeringSignals({
+321:    cadReadiness: signalAwareCADReadiness,
+326:  const contextResolution = buildEngineeringContextResolution({
+330:    structuredSignals,
+332:    cadReadiness: signalAwareCADReadiness,
+337:  const cadReadiness = buildCADReadinessMetadata({ projectId: input.projectId, surveyId: canonicalSurveyId, canonicalManifest: hygiene.canonicalManifest ?? canonicalManifest, surveyEvidence, structuredSignals, contextResolution });
+338:  const regenerationPlanV1 = buildEngineeringRegenerationPlanV1({
+339:    planId: `engineering-intelligence:${input.projectId}:regeneration-plan:v1`,
+341:    existingPlans: regenerationPlans,
+343:  const snapshotDelta = buildEngineeringSnapshotDeltaV1({
+344:    deltaId: `engineering-intelligence:${input.projectId}:snapshot-delta:v1`,
+347:    snapshotDiffs: diffs,
+351:    cadReadiness,
+356:    cadReadiness,
+358:    structuredSignals,
+359:    contextResolution,
+361:    snapshots,
+362:    snapshotDiffs: diffs,
+366:    regenerationPlans,
+368:    regenerationPlanV1,
+369:    snapshotDelta,
+372:  const workspace = buildEngineeringIntelligenceWorkspace(workspaceInput);
+384:    snapshots,
+386:    regenerationPlans,
+388:    regenerationPlanV1,
+389:    snapshotDelta,
+390:    cadReadiness,
+392:    structuredSignals,
+393:    contextResolution,
+396:      'Canonical evidence, requirement evaluation, provenance, graph, snapshots, invalidation events, and regeneration plans are derived from deterministic project survey metadata.',
+397:      'Selective invalidation and regeneration planning are metadata visualizations only; no autonomous regeneration is triggered.',
+402:function selectInvalidationEvidenceId(evidence: EngineeringSurveyEvidence): string | null {
+403:  const electrical = evidence.requirementEvaluation.allRequirements.find(requirement => requirement.requirementId === 'main_service_panel')?.canonicalEvidenceIds[0];
+404:  const utility = evidence.requirementEvaluation.allRequirements.find(requirement => requirement.requirementId === 'utility_meter')?.canonicalEvidenceIds[0];
+405:  const roof = evidence.requirementEvaluation.allRequirements.find(requirement => requirement.requirementId === 'roof_overview')?.canonicalEvidenceIds[0];
+409:function surveyToEnriched(survey: SiteSurvey, files: SiteSurveyFile[]): EnrichedSiteSurvey {
+427:function rawLocation(data: Record<string, unknown>, survey: SiteSurvey): RawSurveyPayload['location'] {
+439:function rawGeometry(data: Record<string, unknown>): RawSurveyPayload['geometry'] {
+450:function rawStructural(data: Record<string, unknown>): RawSurveyPayload['structural'] {
+469:function rawElectrical(data: Record<string, unknown>): RawSurveyPayload['electrical'] {
+486:function fileToSurveyPhoto(file: SiteSurveyFile): Partial<SurveyPhotoRef> {
+496:function surveyPhotoCategory(label: string | null): SurveyPhotoRef['category'] {
+506:function arrayValue(value: unknown): unknown[] | undefined {
+510:function record(value: unknown): Record<string, unknown> {
+514:function stringValue(value: unknown): string | null {
+518:function scalarValue(value: unknown): string | number | null {
+524:function numberOrNull(value: unknown): number | null {
+533:function booleanOrNull(value: unknown): boolean | null {
+
+===== lib/engineeringIntelligence/workspace.ts =====
+10:import type { CADReadinessFlag } from './cadReadiness';
+11:import { buildDeterministicPhotoGrouping } from './photoGrouping';
+69:const sortText = <T extends string>(values: T[]): T[] => [...new Set(values)].sort((a, b) => a.localeCompare(b));
+70:const sortBy = <T>(values: T[], selector: (value: T) => string): T[] => [...values].sort((a, b) => selector(a).localeCompare(selector(b)));
+83:    deterministicPurpose: 'Project-bound evidence, requirement, decision, invalidation, and regeneration-planning view.',
+86:    routeId: 'snapshots',
+87:    href: '/admin/engineering-intelligence/snapshots',
+89:    deterministicPurpose: 'Persistent engineering state snapshots, hashes, diffs, and transition timeline.',
+92:    routeId: 'graph',
+93:    href: '/admin/engineering-intelligence/graph',
+95:    deterministicPurpose: 'Queryable deterministic graph nodes and edges across evidence, requirements, decisions, outputs, and plans.',
+166:    description: 'Trenching, ground-mount, and route-specific evidence group reserved for canonical evidence and dependency lineage.',
+173:function stateRefs(snapshot: EngineeringStateSnapshot | null) {
+174:  return snapshot?.stateRefs ?? [];
+177:function buildHealth(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): EngineeringHealthDashboardModel {
+179:  const staleOutputs = latestSnapshot ? listStaleEngineeringOutputs(latestSnapshot).length : 0;
+180:  const blockedOutputs = refs.filter(ref => ref.staleStatus === 'blocked').length;
+182:  const invalidatedOutputs = input.transitionHistory?.transitionEvents.filter(event => event.eventType === 'state_invalidated').length ?? 0;
+183:  const regenerationCandidates = (input.regenerationPlans ?? []).reduce((count, plan) => count + plan.staleStateIds.length, 0);
+184:  const warningGuards = (input.auditGuards ?? []).filter(guard => !guard.passed || guard.severity === 'warning').length;
+188:    staleOutputs,
+191:    regenerationCandidates,
+193:    snapshotVersions: input.snapshots?.length ?? 0,
+194:    dependencyGraphNodes: input.persistentGraph?.nodes.length ?? 0,
+195:    dependencyGraphEdges: input.persistentGraph?.edges.length ?? 0,
+196:    evidenceCompleteness: latestSnapshot ? 'snapshot-linked' : 'canonical-manifest-required',
+197:    requirementSatisfaction: latestSnapshot ? 'snapshot-linked' : 'registry-visible',
+200:        ? `Health counts derived from latest engineering state snapshot ${latestSnapshot.snapshotId}.`
+201:        : 'No project snapshot was supplied; health dashboard shows registry/empty-state counts only.',
+207:function buildEvidenceGroups(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): CanonicalEvidenceWorkspaceGroupModel[] {
+212:  const graph = input.persistentGraph ?? null;
+214:  const plans = input.regenerationPlans ?? [];
+215:  const readinessFlags = input.cadReadiness?.flags ?? [];
+218:    const groupRequirements = requirementEvaluations.filter(requirement => group.requirementIds.includes(requirement.requirementId));
+219:    const missingRequirementIds = sortText(groupRequirements.filter(requirement => requirement.missing || requirement.insufficientMetadata).map(requirement => requirement.requirementId));
+220:    const recordsForGroup = canonicalRecords.filter(record => group.categories.includes(record.evidenceCategory));
+221:    const linkedStateRefs = refs.filter(ref =>
+224:    const snapshotOnlyIds = canonicalRecords.length === 0
+230:      ...recordsForGroup.map(record => buildCanonicalEvidenceRow({
+234:        graph,
+240:      ...snapshotOnlyIds.map(canonicalEvidenceId => buildSnapshotOnlyEvidenceRow({
+244:        graph,
+249:    ].sort((a, b) => a.canonicalEvidenceId.localeCompare(b.canonicalEvidenceId));
+250:    const groupReadinessFlags = readinessFlags.filter(flag => group.readinessFlagIds.includes(flag.flagId));
+251:    const fieldQualitySignals = buildGroupFieldQualitySignals(group.groupId, groupRequirements, groupReadinessFlags, canonicalEvidenceItems.length, surveyEvidence);
+261:          ? 'Evidence rows are hydrated from canonical evidence provenance records and linked snapshot/graph state references.'
+266:        'CAD readiness, stale impact, and graph linkage are metadata visualizations only and do not trigger CAD or regeneration.',
+272:function buildCanonicalEvidenceRow(input: {
+276:  graph: BuildEngineeringIntelligenceWorkspaceInput['persistentGraph'];
+282:  const linkedRefs = input.refs.filter(ref => ref.canonicalEvidenceIds.includes(input.record.canonicalEvidenceId));
+283:  const linkedRequirements = input.requirementEvaluations.filter(requirement => requirement.canonicalEvidenceIds.includes(input.record.canonicalEvidenceId));
+284:  const graphNodes = input.graph?.nodes.filter(node => node.canonicalEvidenceIds.includes(input.record.canonicalEvidenceId)) ?? [];
+285:  const graphNodeIds = graphNodes.map(node => node.nodeId);
+286:  const graphEdges = input.graph?.edges.filter(edge => graphNodeIds.includes(edge.fromNodeId) || graphNodeIds.includes(edge.toNodeId)) ?? [];
+287:  const invalidationEvents = input.invalidationEvents.filter(event => event.triggeringCanonicalEvidenceIds.includes(input.record.canonicalEvidenceId));
+288:  const staleStateImpactStateIds = sortText([...linkedRefs.filter(ref => ref.staleStatus !== 'current').map(ref => ref.stateId), ...invalidationEvents.map(event => event.stateId)]);
+289:  const readinessFlags = input.readinessFlags.filter(flag => flag.satisfiedCategories.includes(input.record.evidenceCategory));
+290:  const linkedOutputIds = sortText([...linkedRefs.map(ref => ref.stateId), ...graphNodes.flatMap(node => node.stateId ? [node.stateId] : [])]);
+291:  const linkedDecisionIds = sortText([...linkedRefs.flatMap(ref => ref.decisionIds), ...graphNodes.flatMap(node => node.decisionIds)]);
+311:    linkedGraphNodeIds: sortText(graphNodeIds),
+312:    linkedGraphEdgeIds: sortText(graphEdges.map(edge => edge.edgeId)),
+315:    fieldQualitySignals: buildEvidenceFieldQualitySignals(input.record, linkedRequirements, readinessFlags),
+316:    staleStateImpactStateIds,
+317:    staleImpactReasons: sortText(invalidationEvents.map(event => event.invalidationReason)),
+318:    regenerationCandidateIds: sortText(input.plans.filter(plan => plan.staleStateIds.some(stateId => staleStateImpactStateIds.includes(stateId))).map(plan => plan.planId)),
+319:    status: staleStateImpactStateIds.length ? 'stale' : linkedRefs.length || graphNodeIds.length ? 'current' : 'partial',
+323:function buildSnapshotOnlyEvidenceRow(input: {
+327:  graph: BuildEngineeringIntelligenceWorkspaceInput['persistentGraph'];
+332:  const linkedRefs = input.refs.filter(ref => ref.canonicalEvidenceIds.includes(input.canonicalEvidenceId));
+333:  const graphNodes = input.graph?.nodes.filter(node => node.canonicalEvidenceIds.includes(input.canonicalEvidenceId)) ?? [];
+334:  const graphNodeIds = graphNodes.map(node => node.nodeId);
+335:  const graphEdges = input.graph?.edges.filter(edge => graphNodeIds.includes(edge.fromNodeId) || graphNodeIds.includes(edge.toNodeId)) ?? [];
+336:  const invalidationEvents = input.invalidationEvents.filter(event => event.triggeringCanonicalEvidenceIds.includes(input.canonicalEvidenceId));
+337:  const staleStateImpactStateIds = sortText([...linkedRefs.filter(ref => ref.staleStatus !== 'current').map(ref => ref.stateId), ...invalidationEvents.map(event => event.stateId)]);
+346:    canonicalRepresentativeStatus: 'snapshot_reference_only',
+348:    evidenceTruthSource: 'snapshot_state_reference',
+353:    linkedDecisionIds: sortText([...linkedRefs.flatMap(ref => ref.decisionIds), ...graphNodes.flatMap(node => node.decisionIds)]),
+355:    linkedOutputIds: sortText([...linkedRefs.map(ref => ref.stateId), ...graphNodes.flatMap(node => node.stateId ? [node.stateId] : [])]),
+356:    linkedGraphNodeIds: sortText(graphNodeIds),
+357:    linkedGraphEdgeIds: sortText(graphEdges.map(edge => edge.edgeId)),
+360:    fieldQualitySignals: ['canonical traceability record unavailable for this snapshot-referenced evidence id'],
+361:    staleStateImpactStateIds,
+362:    staleImpactReasons: sortText(invalidationEvents.map(event => event.invalidationReason)),
+363:    regenerationCandidateIds: sortText(input.plans.filter(plan => plan.staleStateIds.some(stateId => staleStateImpactStateIds.includes(stateId))).map(plan => plan.planId)),
+364:    status: staleStateImpactStateIds.length ? 'stale' : 'current',
+368:function metadataCompletenessEntries(completeness: CanonicalEvidenceProvenanceRecord['metadataCompleteness']) {
+369:  return Object.entries(completeness).map(([field, present]) => ({ field, present })).sort((a, b) => a.field.localeCompare(b.field));
+372:function summarizeReadinessImpact(flags: CADReadinessFlag[]): CanonicalEvidenceWorkspaceItemModel['readinessImpact'] {
+380:function buildEvidenceFieldQualitySignals(
+400:function buildGroupFieldQualitySignals(
+424:function buildPhotoGrouping(input: BuildEngineeringIntelligenceWorkspaceInput) {
+425:  return input.photoGrouping ?? buildDeterministicPhotoGrouping({
+429:    readinessFlags: input.cadReadiness?.flags ?? [],
+433:function buildRequirements(latestSnapshot: EngineeringStateSnapshot | null): RequirementWorkspaceItemModel[] {
+436:    const linkedRefs = refs.filter(ref => ref.requirementIds.includes(definition.requirementId));
+437:    const staleRefs = linkedRefs.filter(ref => ref.staleStatus !== 'current');
+447:      dependencyReferences: sortText(linkedRefs.flatMap(ref => ref.dependencyNodeIds)),
+448:      staleImpactStateIds: sortText(staleRefs.map(ref => ref.stateId)),
+454:function buildDecisions(latestSnapshot: EngineeringStateSnapshot | null): DecisionWorkspaceItemModel[] {
+457:    const linkedRefs = refs.filter(ref => ref.decisionIds.some(decisionId => decisionId.includes(definition.decisionType)));
+458:    const fallbackDefaultChain = definition.missingInputBehavior === 'emit_explicit_default_decision'
+468:      dependencyLineageIds: sortText([...definition.engineeringDependencies, ...linkedRefs.flatMap(ref => ref.dependencyNodeIds)]),
+469:      fallbackDefaultChain,
+471:      staleImpactStateIds: sortText(linkedRefs.filter(ref => ref.staleStatus !== 'current').map(ref => ref.stateId)),
+477:function buildStaleInvalidation(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): StaleInvalidationWorkspaceModel {
+479:  const plans = input.regenerationPlans ?? [];
+481:    staleOutputIds: latestSnapshot ? listStaleEngineeringOutputs(latestSnapshot) : [],
+493:      .sort((a, b) => a.eventId.localeCompare(b.eventId)),
+495:    regenerationScopeIds: sortText(plans.flatMap(plan => plan.staleStateIds)),
+498:      'Regeneration planning remains a deterministic plan visualization; no autonomous regeneration is triggered.',
+503:function buildSnapshots(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): SnapshotTimelineWorkspaceModel {
+504:  const snapshots = sortBy(input.snapshots ?? [], snapshot => snapshot.snapshotId);
+506:    snapshots,
+507:    latestSnapshotId: latestSnapshot?.snapshotId ?? null,
+508:    snapshotHashes: snapshots.map(snapshot => ({ snapshotId: snapshot.snapshotId, snapshotHash: snapshot.snapshotHash })),
+509:    diffs: sortBy(input.snapshotDiffs ?? [], diff => diff.diffId),
+513:      snapshots.length > 0
+514:        ? 'Snapshot timeline is derived from persistent engineering state snapshots and deterministic snapshot hashes.'
+515:        : 'No persisted snapshots were supplied to this workspace context.',
+521:function graphNodeStatus(node: PersistentEngineeringStateGraphNode): EngineeringIntelligenceGraphNodeModel['status'] {
+522:  if (node.nodeKind === 'state_record') return node.staleStatus === 'current' ? 'current' : node.staleStatus;
+526:function buildGraph(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): DependencyGraphViewerModel {
+527:  const graph = input.persistentGraph ?? null;
+545:  const graphNodes: EngineeringIntelligenceGraphNodeModel[] = graph
+546:    ? graph.nodes.map(node => ({
+548:        label: node.stateId ?? node.dependencyNodeId ?? node.nodeId,
+549:        nodeType: node.nodeKind === 'state_record' ? (node.staleStatus === 'current' ? 'document_section' : 'stale_output') : 'dependency',
+550:        status: graphNodeStatus(node),
+555:  const graphEdges: EngineeringIntelligenceGraphEdgeModel[] = graph
+556:    ? graph.edges.map(edge => ({
+563:            : edge.edgeType === 'preserves_stale_state'
+565:              : edge.edgeType === 'supersedes_snapshot'
+573:    nodes: sortBy([...registryNodes, ...graphNodes], node => node.nodeId),
+574:    edges: sortBy(graphEdges, edge => edge.edgeId),
+575:    sourceGraph: graph,
+577:      graph
+578:        ? `Graph viewer includes persistent graph ${graph.graphId}.`
+579:        : 'Graph viewer is displaying registry nodes only because no persistent graph was supplied.',
+585:function buildRegenerationPlanning(input: BuildEngineeringIntelligenceWorkspaceInput): RegenerationPlanningWorkspaceModel {
+586:  const plans: SelectiveRegenerationPlan[] = sortBy(input.regenerationPlans ?? [], plan => plan.planId);
+589:    regenerationCandidates: sortText(plans.flatMap(plan => plan.staleStateIds)),
+590:    regenerationOrder: sortText(plans.flatMap(plan => plan.regenerationOrder)),
+595:        ? 'Regeneration planning rows are derived from persisted selective regeneration plans.'
+596:        : 'No regeneration plans were supplied; this workspace does not initiate generation.',
+602:function buildInvalidationPropagationWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): InvalidationPropagationWorkspaceModel {
+606:    stalePropagationChains: sortText(propagation?.propagationPaths.map(path => `${path.pathId}:depth=${path.depth}`) ?? []),
+612:    dependencyTraversalPaths: sortText(propagation?.propagationPaths.map(path => path.nodeIds.join(' -> ')) ?? []),
+623:function buildDependencyTraversalWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): DependencyTraversalWorkspaceModel {
+638:    deterministicNotes: traversal?.deterministicNotes ?? ['No traversal result was supplied; dependency traversal remains explicit not_loaded metadata.'],
+642:function buildRegenerationPlanningV1Workspace(input: BuildEngineeringIntelligenceWorkspaceInput): RegenerationPlanningV1WorkspaceModel {
+643:  const plan = input.regenerationPlanV1 ?? null;
+646:    wouldRegenerate: plan?.regenerationCandidateIds ?? [],
+651:    dependencyChains: plan?.propagationPathIds ?? [],
+652:    deterministicNotes: plan?.deterministicNotes ?? ['No Regeneration Planning V1 metadata was supplied; no regeneration is initiated.'],
+656:function buildSnapshotDeltaWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SnapshotDeltaWorkspaceModel {
+657:  const delta = input.snapshotDelta ?? null;
+663:    staleOutputsIntroduced: delta?.staleOutputsIntroduced ?? [],
+667:    dependencyGraphDelta: delta?.dependencyGraphDeltaIds ?? [],
+672:function buildAffectedOutputsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): AffectedOutputsWorkspaceModel {
+678:    snapshots: sortText(outputs.flatMap(output => output.affectedSnapshotIds)),
+680:    reviewRequired: sortText(outputs.filter(output => output.staleClass === 'BLOCKED' || output.staleClass === 'REQUIRES_REVIEW' || output.missingEvidenceIds.length > 0).map(output => output.stateId)),
+685:function buildStaleStateTimelineWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): StaleStateTimelineWorkspaceModel {
+686:  const events = sortBy(input.transitionHistory?.transitionEvents ?? [], event => event.transitionEventId).map(event => ({
+689:    staleClass: event.eventType === 'state_invalidated' ? 'INVALIDATED' : event.eventType === 'stale_state_preserved' ? 'STALE' : 'VALID',
+690:    snapshotId: event.snapshotId,
+691:    dependencyNodeIds: event.dependencyNodeIds,
+699:    staleStateIds: input.timeline?.staleStateIds ?? [],
+702:      events.length ? 'Stale-state timeline is derived from transition history events.' : 'No transition history was supplied for stale-state timeline metadata.',
+703:      'Timeline rendering is observational and does not regenerate stale outputs.',
+708:function includesAny(value: string, tokens: string[]) {
+713:function buildStructuredSignalsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): StructuredEngineeringSignalsWorkspaceModel {
+714:  const summary = input.structuredSignals ?? null;
+728:function buildSignalProvenanceWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalProvenanceWorkspaceModel {
+729:  const signals = input.structuredSignals?.signals ?? [];
+736:      dependencyNodes: signal.dependencyNodes,
+743:function buildSignalDependencyGraphWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalDependencyGraphWorkspaceModel {
+745:    nodes: input.structuredSignals?.dependencyGraph.nodes ?? [],
+746:    edges: input.structuredSignals?.dependencyGraph.edges ?? [],
+747:    deterministicNotes: input.structuredSignals ? ['Signal dependency graph is generated from signal source/impact mappings.'] : ['No signal dependency graph was supplied.'],
+751:function buildSignalRequirementMappingWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalRequirementMappingWorkspaceModel {
+753:    mappings: input.structuredSignals?.requirementMappings ?? [],
+754:    deterministicNotes: input.structuredSignals ? ['Signal-to-requirement mappings are registry-defined and deterministic.'] : ['No signal-to-requirement mapping was supplied.'],
+758:function buildSignalConfidenceWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalConfidenceWorkspaceModel {
+759:  const signals = input.structuredSignals?.signals ?? [];
+761:    confidenceBreakdown: signals.map(signal => ({ signalId: signal.id, status: signal.status, score: signal.confidence.score, band: signal.confidence.band, factors: signal.confidence.factors })),
+762:    deterministicNotes: signals.length ? ['Confidence is deterministic metadata scoring, not AI confidence.'] : ['No signal confidence breakdown was supplied.'],
+766:function buildSignalBlockingWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalBlockingWorkspaceModel {
+767:  const signals = input.structuredSignals?.signals ?? [];
+774:function buildSignalInvalidationWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalInvalidationWorkspaceModel {
+775:  const signals = input.structuredSignals?.signals ?? [];
+777:    invalidations: signals.filter(signal => signal.invalidatedBy.length > 0 || signal.staleImpacts.length > 0).map(signal => ({ signalId: signal.id, invalidatedBy: signal.invalidatedBy, staleImpacts: signal.staleImpacts })),
+782:function buildSignalStaleImpactsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalStaleImpactsWorkspaceModel {
+784:    staleImpacts: input.structuredSignals?.staleImpacts ?? [],
+785:    fallbackParticipation: input.structuredSignals?.fallbackParticipation ?? [],
+786:    deterministicNotes: input.structuredSignals ? ['Signal stale impacts and fallback participation are surfaced explicitly for review.'] : ['No signal stale-impact metadata was supplied.'],
+791:function buildResolvedEngineeringContextsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ResolvedEngineeringContextsWorkspaceModel {
+792:  const summary = input.contextResolution ?? null;
+800:    conflicting: contexts.filter(context => context.status === 'conflicting').map(context => context.id),
+802:    unresolved: contexts.filter(context => context.status === 'unresolved').map(context => context.id),
+808:function buildContextArbitrationWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextArbitrationWorkspaceModel {
+809:  const contexts = input.contextResolution?.contexts ?? [];
+817:        score: context.confidence.score,
+818:        rank: context.confidence.rank,
+823:      .sort((a, b) => a.rank - b.rank || a.contextId.localeCompare(b.contextId)),
+824:    deterministicNotes: input.contextResolution ? ['Context arbitration rank is deterministic by score descending with stable context-id tie-breaks.'] : ['No context arbitration metadata was supplied.'],
+828:function buildContextConflictInspectorWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextConflictInspectorWorkspaceModel {
+829:  const conflicts = input.contextResolution?.conflicts ?? [];
+831:    conflicts,
+832:    conflictingContextIds: sortText(conflicts.map(conflict => conflict.contextId)),
+833:    competingSignalIds: sortText(conflicts.flatMap(conflict => conflict.competingSignalIds)),
+834:    deterministicNotes: input.contextResolution ? ['Context conflicts preserve competing signals and do not silently promote a winner.'] : ['No context conflict metadata was supplied.'],
+838:function buildFallbackChainInspectorWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): FallbackChainInspectorWorkspaceModel {
+839:  const contexts = input.contextResolution?.contexts ?? [];
+841:    fallbackParticipation: input.contextResolution?.fallbackParticipation ?? [],
+842:    fallbackDependentContextIds: sortText(contexts.filter(context => context.fallbackLineage.length > 0).map(context => context.id)),
+843:    fallbackConfidencePenalties: contexts
+844:      .filter(context => context.fallbackConfidencePenalties.length > 0)
+845:      .map(context => ({ contextId: context.id, penalties: context.fallbackConfidencePenalties }))
+846:      .sort((a, b) => a.contextId.localeCompare(b.contextId)),
+847:    deterministicNotes: input.contextResolution ? ['Fallback lineage remains visible and reduces deterministic confidence; it is not promoted into truth.'] : ['No fallback-chain context metadata was supplied.'],
+
+===== lib/engineeringIntelligence/contextResolution.ts =====
+3:import type { CADReadinessFlagId, CADReadinessMetadataModel } from './cadReadiness';
+22:  structuredSignals?: StructuredEngineeringSignalSummary | null;
+24:  cadReadiness?: CADReadinessMetadataModel | null;
+30:const sortText = <T extends string>(values: T[]): T[] => [...new Set(values)].sort((a, b) => a.localeCompare(b));
+31:const sortBy = <T>(values: T[], selector: (value: T) => string): T[] => [...values].sort((a, b) => selector(a).localeCompare(selector(b)));
+33:export function buildEngineeringContextResolution(input: BuildEngineeringContextResolutionInput = {}): EngineeringContextResolutionSummary {
+34:  const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+35:  const signals = input.structuredSignals?.signals ?? [];
+36:  const lookup = buildSignalLookup(signals);
+37:  const contexts = ENGINEERING_CONTEXT_REGISTRY.map(definition => evaluateContext(definition, { ...input, generatedAt, signals, lookup }));
+39:    .sort((a, b) => b.confidence.score - a.confidence.score || a.id.localeCompare(b.id))
+41:  const contextsWithRanks = contexts.map(context => {
+43:    const withRank = { ...context, confidence: { ...context.confidence, rank } };
+45:  }).sort((a, b) => a.id.localeCompare(b.id));
+46:  const conflicts = buildConflicts(contextsWithRanks);
+47:  const fallbackParticipation = contextsWithRanks.flatMap(context => context.fallbackLineage.map(fallback => ({ contextId: context.id, fallback, deterministicReason: 'Resolved context depends on deterministic fallback metadata and remains review-visible.' })));
+48:  const cadReadinessMappings = buildCADMappings(contextsWithRanks);
+49:  const dependencyGraph = buildDependencyGraph(contextsWithRanks);
+50:  const timeline = contextsWithRanks.map(context => ({ eventId: `context-resolution:${context.contextType}:${context.status}`, contextId: context.id, status: context.status, deterministicReason: context.rankingReason }));
+51:  const staleImpacts = contextsWithRanks.map(context => ({ contextId: context.id, staleClasses: context.staleImpactPropagation, invalidatedBy: context.invalidationLineage }));
+56:    projectId: input.projectId ?? input.structuredSignals?.projectId ?? input.canonicalManifest?.projectId ?? null,
+57:    surveyId: input.surveyId ?? input.structuredSignals?.surveyId ?? input.canonicalManifest?.surveyId ?? null,
+58:    source: input.structuredSignals && signals.length > 0 ? 'structured_engineering_signals' : 'not_loaded',
+63:    conflictingContexts: contextsWithRanks.filter(context => context.status === 'conflicting'),
+65:    unresolvedContexts: contextsWithRanks.filter(context => context.status === 'unresolved'),
+67:    conflicts,
+68:    fallbackParticipation,
+69:    cadReadinessMappings,
+70:    dependencyGraph,
+72:    staleImpacts,
+75:      'Contexts are arbitration metadata over structured engineering signals, canonical evidence ids, deterministic grouping metadata, invalidation metadata, and stale-impact lineage only.',
+76:      'Conflicting, unresolved, fallback-dependent, blocked, partial, and not_applicable contexts remain visible and are not silently promoted.',
+83:function evaluateContext(definition: EngineeringContextDefinition, input: BuildEngineeringContextResolutionInput & { generatedAt: string; signals: StructuredEngineeringSignal[]; lookup: ContextSignalLookup }): ResolvedEngineeringContext {
+86:  const candidateSignals = sortBy([...primarySignals, ...supportingSignals], signal => signal.id);
+87:  const confirmedPrimary = primarySignals.filter(signal => signal.status === 'confirmed');
+88:  const partialPrimary = primarySignals.filter(signal => signal.status === 'partial');
+89:  const confirmedSupporting = supportingSignals.filter(signal => signal.status === 'confirmed');
+90:  const partialSupporting = supportingSignals.filter(signal => signal.status === 'partial');
+91:  const blockedSignals = candidateSignals.filter(signal => signal.status === 'blocked' || signal.status === 'missing');
+92:  const notApplicableSignals = candidateSignals.filter(signal => signal.status === 'not_applicable');
+93:  const activeSignals = candidateSignals.filter(signal => signal.status === 'confirmed' || signal.status === 'partial');
+97:  const unresolvedDependencies = sortText([
+102:  const conflictReasoning = conflictReasoningFor(definition, competingSignals, candidateSignals);
+103:  const fallbackLineage = fallbackLineageFor(definition, input.cadReadiness ?? null, candidateSignals, explicitPrimaryPresent, input.structuredSignals?.fallbackParticipation ?? []);
+104:  const status = statusFor({ definition, confirmedPrimaryCount: confirmedPrimary.length, partialPrimaryCount: partialPrimary.length, confirmedSupportingCount: confirmedSupporting.length, partialSupportingCount: partialSupporting.length, blockedCount: blockedSignals.length, activeSignalCount: activeSignals.length, competingSignalCount: competingSignals.length, explicitPrimaryPresent, allCandidateSignalsNotApplicable, unresolvedDependencyCount: unresolvedDependencies.length });
+105:  const confidence = rankingFor({ definition, status, primarySignals, supportingSignals, activeSignals, competingSignals, blockedSignals, fallbackLineage, invalidationPropagation: input.invalidationPropagation ?? null, photoGrouping: input.photoGrouping ?? null, canonicalManifest: input.canonicalManifest ?? null });
+106:  const sourceEvidenceIds = sortText(candidateSignals.flatMap(signal => signal.sourceEvidenceIds));
+108:    ...candidateSignals.flatMap(signal => signal.dependencyNodes.filter(node => node.startsWith('photoGrouping:') || node.startsWith('groupedReadiness:'))),
+112:  const dependencyLineage = sortText(candidateSignals.flatMap(signal => signal.dependencyNodes));
+117:  const staleImpactPropagation = sortText(candidateSignals.flatMap(signal => signal.staleImpacts));
+118:  const regenerationParticipation = sortText([
+119:    ...(input.invalidationPropagation?.affectedStateIds ?? []).filter(stateId => dependencyLineage.some(node => node.includes(stateId))),
+120:    ...invalidationLineage.map(id => `regeneration-review:${id}`),
+123:  const rankingReason = rankingReasonFor(definition, status, confidence.factors, confidence.penalties, competingSignals);
+134:    dependencyLineage,
+136:    staleImpactPropagation,
+137:    regenerationParticipation,
+139:    cadReadinessImpacts: sortText(definition.cadImpacts) as CADReadinessFlagId[],
+142:    confidence,
+144:    conflictReasoning,
+145:    fallbackLineage,
+146:    unresolvedDependencies,
+147:    fallbackConfidencePenalties: fallbackLineage.map(fallback => `fallback penalty applied:${fallback}`),
+152:function buildSignalLookup(signals: StructuredEngineeringSignal[]): ContextSignalLookup {
+162:function signalsFor(lookup: ContextSignalLookup, signalTypes: StructuredEngineeringSignalType[]): StructuredEngineeringSignal[] {
+166:function competingSignalsFor(signals: StructuredEngineeringSignal[]): StructuredEngineeringSignal[] {
+167:  const evidenceOwners = new Map<string, string[]>();
+174:  const duplicatedEvidenceSignalIds = new Set([...evidenceOwners.values()].filter(ids => ids.length > 1).flat());
+178:function statusFor(input: { definition: EngineeringContextDefinition; confirmedPrimaryCount: number; partialPrimaryCount: number; confirmedSupportingCount: number; partialSupportingCount: number; blockedCount: number; activeSignalCount: number; competingSignalCount: number; explicitPrimaryPresent: boolean; allCandidateSignalsNotApplicable: boolean; unresolvedDependencyCount: number }): EngineeringContextStatus {
+180:  if (input.competingSignalCount > 1) return 'conflicting';
+184:  if (input.definition.explicitPrimaryRequired && !input.explicitPrimaryPresent) return 'unresolved';
+188:  if (input.activeSignalCount === 0 && input.unresolvedDependencyCount > 0) return 'unresolved';
+189:  return 'unresolved';
+192:function rankingFor(input: { definition: EngineeringContextDefinition; status: EngineeringContextStatus; primarySignals: StructuredEngineeringSignal[]; supportingSignals: StructuredEngineeringSignal[]; activeSignals: StructuredEngineeringSignal[]; competingSignals: StructuredEngineeringSignal[]; blockedSignals: StructuredEngineeringSignal[]; fallbackLineage: string[]; invalidationPropagation: EngineeringInvalidationPropagationResult | null; photoGrouping: DeterministicPhotoGroupingModel | null; canonicalManifest: SurveyEvidenceManifest | null }): EngineeringContextConfidence {
+196:  const confirmedPrimaryCount = input.primarySignals.filter(signal => signal.status === 'confirmed').length;
+197:  const partialPrimaryCount = input.primarySignals.filter(signal => signal.status === 'partial').length;
+198:  const confirmedSupportingCount = input.supportingSignals.filter(signal => signal.status === 'confirmed').length;
+199:  const partialSupportingCount = input.supportingSignals.filter(signal => signal.status === 'partial').length;
+204:  const averageSignalConfidence = input.activeSignals.length > 0 ? input.activeSignals.reduce((sum, signal) => sum + signal.confidence.score, 0) / input.activeSignals.length : 0;
+205:  if (averageSignalConfidence > 0) { score += Math.round(averageSignalConfidence * 18); factors.push(`average structured-signal confidence ${averageSignalConfidence.toFixed(2)}`); }
+211:  if (input.fallbackLineage.length > 0) { score -= Math.min(20, input.fallbackLineage.length * 5); penalties.push(`${input.fallbackLineage.length} fallback lineage item(s)`); }
+213:  if (input.status === 'conflicting') score = Math.min(score, 62);
+215:  if (input.status === 'blocked' || input.status === 'unresolved' || input.status === 'not_applicable') score = Math.min(score, 20);
+221:function conflictReasoningFor(definition: EngineeringContextDefinition, competingSignals: StructuredEngineeringSignal[], candidateSignals: StructuredEngineeringSignal[]): string[] {
+223:  const activePrimary = candidateSignals.filter(signal => definition.primarySignalTypes.includes(signal.signal_type) && (signal.status === 'confirmed' || signal.status === 'partial'));
+224:  if (activePrimary.length > 1) reasons.push(`Multiple active primary signal candidates remain visible: ${activePrimary.map(signal => signal.id).sort().join(', ')}.`);
+225:  const partial = competingSignals.filter(signal => signal.status === 'partial');
+226:  if (partial.length > 0) reasons.push(`Partial competing signal support remains visible: ${partial.map(signal => signal.id).sort().join(', ')}.`);
+227:  const blocked = competingSignals.filter(signal => signal.status === 'blocked' || signal.status === 'missing');
+228:  if (blocked.length > 0) reasons.push(`Blocked or missing signal support remains visible: ${blocked.map(signal => signal.id).sort().join(', ')}.`);
+229:  const invalidated = competingSignals.filter(signal => signal.invalidatedBy.length > 0);
+230:  if (invalidated.length > 0) reasons.push(`Invalidated signal lineage remains visible: ${invalidated.map(signal => signal.id).sort().join(', ')}.`);
+234:function fallbackLineageFor(
+236:  cadReadiness: CADReadinessMetadataModel | null,
+239:  signalFallbackParticipation: StructuredEngineeringSignalSummary['fallbackParticipation'],
+241:  const linkedFlags = cadReadiness?.flags.filter(flag => definition.cadImpacts.includes(flag.flagId)) ?? [];
+242:  const candidateSignalIds = new Set(candidateSignals.map(signal => signal.id));
+245:    .map(row => `structured-signal-fallback:${row.signalId}:${row.fallback}`);
+248:    ...(definition.fallbackAllowed ? [`context-definition:${definition.contextType}:fallback_allowed`] : []),
+250:    ...linkedFlags.flatMap(flag => flag.defaultPolicyFallbacks.map(fallback => `cad-readiness:${flag.flagId}:${fallback}`)),
+256:function buildConflicts(contexts: ResolvedEngineeringContext[]): EngineeringContextResolutionSummary['conflicts'] {
+257:  return contexts.filter(context => context.status === 'conflicting' || context.competingSignalIds.length > 0 || context.conflictReasoning.length > 0).map(context => ({ conflictId: `conflict:${context.contextType}`, contextId: context.id, contextType: context.contextType, domain: context.domain, competingContextIds: [context.id], competingSignalIds: context.competingSignalIds, conflictReasoning: context.conflictReasoning, deterministicResolutionPolicy: 'Do not collapse competing signals. Preserve conflict metadata for operator review and downstream invalidation awareness.' })).sort((a, b) => a.conflictId.localeCompare(b.conflictId));
+260:function buildCADMappings(contexts: ResolvedEngineeringContext[]): EngineeringContextResolutionSummary['cadReadinessMappings'] {
+261:  const flagIds = sortText(contexts.flatMap(context => context.cadReadinessImpacts));
+263:    const linked = contexts.filter(context => context.cadReadinessImpacts.includes(flagId));
+266:      contextIds: linked.map(context => context.id).sort(),
+267:      authoritativeContextIds: linked.filter(context => context.status === 'authoritative').map(context => context.id).sort(),
+268:      preferredContextIds: linked.filter(context => context.status === 'preferred').map(context => context.id).sort(),
+269:      partialContextIds: linked.filter(context => context.status === 'partial').map(context => context.id).sort(),
+270:      conflictingContextIds: linked.filter(context => context.status === 'conflicting').map(context => context.id).sort(),
+271:      blockedContextIds: linked.filter(context => context.status === 'blocked').map(context => context.id).sort(),
+272:      unresolvedContextIds: linked.filter(context => context.status === 'unresolved').map(context => context.id).sort(),
+277:function buildDependencyGraph(contexts: ResolvedEngineeringContext[]): EngineeringContextResolutionSummary['dependencyGraph'] {
+278:  const nodes = new Map<string, EngineeringContextResolutionSummary['dependencyGraph']['nodes'][number]>();
+279:  const edges: EngineeringContextResolutionSummary['dependencyGraph']['edges'] = [];
+292:    for (const flagId of context.cadReadinessImpacts) {
+315:  return { nodes: [...nodes.values()].sort((a, b) => a.nodeId.localeCompare(b.nodeId)), edges: edges.sort((a, b) => a.edgeId.localeCompare(b.edgeId)) };
+318:function rankingReasonFor(definition: EngineeringContextDefinition, status: EngineeringContextStatus, factors: string[], penalties: string[], competingSignals: StructuredEngineeringSignal[]): string {
+319:  return `${definition.deterministicPurpose} Status ${status}. Ranking factors: ${factors.join('; ') || 'none'}. Penalties: ${penalties.join('; ') || 'none'}. Competing signals: ${competingSignals.map(signal => signal.id).sort().join(', ') || 'none'}.`;
+322:function stableHash(value: unknown): string {
+323:  return `ecr_${crypto.createHash('sha256').update(JSON.stringify(normalize(value))).digest('hex').slice(0, 24)}`;
+326:function normalize(value: unknown): unknown {
+329:    return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, entry]) => [key, normalize(entry)]));
+334:function prohibitedRuntimeBehavior() {
+337:    'no computer-vision runtime dependency',
+338:    'no vision model runtime dependency',
+346:    'no hidden fallback promotion',
+347:    'no silent conflict resolution',
+348:    'no autonomous regeneration',
+
+===== lib/engineeringIntelligence/signalExtraction.ts =====
+5:import type { CADReadinessFlag, CADReadinessFlagId, CADReadinessMetadataModel } from './cadReadiness';
+23:  cadReadiness?: CADReadinessMetadataModel | null;
+29:export function buildStructuredEngineeringSignals(input: BuildStructuredEngineeringSignalsInput = {}): StructuredEngineeringSignalSummary {
+30:  const generatedAt = input.generatedAt ?? input.canonicalManifest?.generatedAt ?? input.surveyEvidence?.source.normalizedAt ?? new Date(0).toISOString();
+32:  const items = [...(manifest?.items ?? [])].sort((a, b) => a.evidenceId.localeCompare(b.evidenceId));
+33:  const signals = STRUCTURED_ENGINEERING_SIGNAL_REGISTRY.map(definition => evaluateSignal(definition, {
+38:  })).sort((a, b) => a.id.localeCompare(b.id));
+40:  const requirementMappings = buildRequirementMappings(signals);
+41:  const cadReadinessMappings = buildCADMappings(signals, input.cadReadiness?.flags ?? []);
+42:  const dependencyGraph = buildSignalDependencyGraph(signals);
+43:  const staleImpacts = signals.map(signal => ({ signalId: signal.id, staleClasses: signal.staleImpacts, invalidatedBy: signal.invalidatedBy }));
+44:  const fallbackParticipation = signals.flatMap(signal => {
+48:        fallback: `cad_readiness:${flagId}:unresolved_assumption_or_default_policy`,
+49:        deterministicReason: `${signal.signal_type} is ${signal.status}; downstream readiness must show unresolved truth instead of promoting assumptions.`,
+53:  }).sort((a, b) => `${a.signalId}:${a.fallback}`.localeCompare(`${b.signalId}:${b.fallback}`));
+68:    cadReadinessMappings,
+69:    dependencyGraph,
+70:    staleImpacts,
+71:    fallbackParticipation,
+82:function evaluateSignal(
+88:  const groupedContexts = (input.photoGrouping?.groupedCADReadiness ?? []).filter(context => definition.groupedReadinessContextIds?.includes(context.contextId));
+94:  const hasGroupingContext = !definition.groupedReadinessContextIds?.length || groupedContexts.some(context => context.status === 'ready' || context.status === 'partial');
+98:  const sourceEvidenceIds = sortText(evidence.map(item => item.evidenceId));
+103:  const dependencyNodes = sortText([
+106:    ...definition.cadImpacts.map(id => `cadReadiness:${id}`),
+111:  const confidence = confidenceFor({ definition, status, evidence, clusters, fieldSignals, groupedContexts, manifestItems: input.manifestItems, invalidatedBy });
+120:    confidence,
+131:    dependencyNodes,
+135:    staleImpacts: invalidatedBy.length ? ['INVALIDATED' as const] : status === 'blocked' ? ['BLOCKED' as const] : status === 'partial' ? ['PARTIAL' as const] : status === 'missing' ? ['NOT_LOADED' as const] : ['VALID' as const],
+148:function evidenceForDefinition(definition: StructuredEngineeringSignalDefinition, items: SurveyEvidenceItem[]): SurveyEvidenceItem[] {
+149:  const categories = new Set<SurveyEvidenceCategory>([...definition.evidenceCategories, ...(definition.anyEvidenceCategories ?? [])]);
+150:  return items.filter(item => categories.has(item.category)).sort((a, b) => a.evidenceId.localeCompare(b.evidenceId));
+153:function clustersForDefinition(definition: StructuredEngineeringSignalDefinition, grouping: DeterministicPhotoGroupingModel | null): EvidenceClusterModel[] {
+155:  return grouping.evidenceClusters.filter(cluster => definition.clusterTypes?.includes(cluster.clusterType)).sort((a, b) => a.clusterId.localeCompare(b.clusterId));
+158:function statusFor(input: {
+176:function evaluateQualitySignal(definition: StructuredEngineeringSignalDefinition, input: BuildStructuredEngineeringSignalsInput & { manifestItems: SurveyEvidenceItem[] }): StructuredEngineeringSignalStatus | null {
+188:    const avg = average(grouping.metadataCompletenessScores.map(score => score.score));
+195:  if (definition.signalType === 'photo_cluster_confidence_high') {
+202:function presentFieldSignals(fieldSignals: string[], evidence: EngineeringSurveyEvidence | null): string[] {
+210:  }).sort();
+213:function sourcesFor(
+221:  const sources = new Set<StructuredEngineeringSignalSource>(definition.sourceHints);
+226:  if (input.cadReadiness) sources.add('cad_readiness_metadata');
+232:function confidenceFor(input: {
+275:    factors.push('confidence capped because signal participates in invalidation metadata');
+282:function blockingReasonsFor(definition: StructuredEngineeringSignalDefinition, status: StructuredEngineeringSignalStatus, missingEvidenceCount: number, missingClusterCount: number, hasGroupingContext: boolean, items: SurveyEvidenceItem[]): string[] {
+292:function partialReasonsFor(status: StructuredEngineeringSignalStatus, evidence: SurveyEvidenceItem[], clusters: EvidenceClusterModel[], fieldSignals: string[], groupedContexts: Array<{ contextId: string; status: string }>, items: SurveyEvidenceItem[]): string[] {
+303:function explanationFor(definition: StructuredEngineeringSignalDefinition, status: StructuredEngineeringSignalStatus, evidence: SurveyEvidenceItem[], clusters: EvidenceClusterModel[], fieldSignals: string[]): string {
+305:  if (status === 'partial') return `${definition.explanation} Partially supported; unresolved evidence/grouping/metadata remains visible.`;
+310:function buildRequirementMappings(signals: StructuredEngineeringSignal[]) {
+311:  const requirementIds = sortText([...new Set(signals.flatMap(signal => signal.requirementImpacts))]);
+313:    const linked = signals.filter(signal => signal.requirementImpacts.includes(requirementId));
+316:      signalIds: linked.map(signal => signal.id).sort(),
+317:      confirmedSignalIds: linked.filter(signal => signal.status === 'confirmed').map(signal => signal.id).sort(),
+318:      partialSignalIds: linked.filter(signal => signal.status === 'partial').map(signal => signal.id).sort(),
+319:      missingSignalIds: linked.filter(signal => signal.status === 'missing' || signal.status === 'blocked').map(signal => signal.id).sort(),
+324:function buildCADMappings(signals: StructuredEngineeringSignal[], flags: CADReadinessFlag[]) {
+325:  const flagIds = sortText([...new Set([...signals.flatMap(signal => signal.cadImpacts), ...flags.map(flag => flag.flagId)])]) as CADReadinessFlagId[];
+327:    const linked = signals.filter(signal => signal.cadImpacts.includes(flagId));
+330:      signalIds: linked.map(signal => signal.id).sort(),
+331:      confirmedSignalIds: linked.filter(signal => signal.status === 'confirmed').map(signal => signal.id).sort(),
+332:      partialSignalIds: linked.filter(signal => signal.status === 'partial').map(signal => signal.id).sort(),
+333:      blockedSignalIds: linked.filter(signal => signal.status === 'missing' || signal.status === 'blocked').map(signal => signal.id).sort(),
+338:function buildSignalDependencyGraph(signals: StructuredEngineeringSignal[]): StructuredEngineeringSignalSummary['dependencyGraph'] {
+339:  const nodes = new Map<string, { nodeId: string; label: string; nodeType: 'signal' | 'evidence' | 'requirement' | 'cad_readiness' | 'grouping' | 'invalidation'; status: string }>();
+340:  const edges: StructuredEngineeringSignalSummary['dependencyGraph']['edges'] = [];
+348:    for (const nodeId of signal.dependencyNodes.filter(id => id.startsWith('photoGrouping:') || id.startsWith('groupedReadiness:'))) {
+358:      const nodeId = `cadReadiness:${flagId}`;
+369:    nodes: [...nodes.values()].sort((a, b) => a.nodeId.localeCompare(b.nodeId)),
+370:    edges: edges.sort((a, b) => a.edgeId.localeCompare(b.edgeId)),
+374:function metadataCompleteness(items: SurveyEvidenceItem[]): number {
+382:function average(values: number[]): number {
+387:function sortText<T extends string>(values: T[]): T[] {
+388:  return [...new Set(values)].sort((a, b) => a.localeCompare(b));
+391:function stableHash(value: unknown): string {
+392:  const json = JSON.stringify(sortStable(value));
+401:function sortStable(value: unknown): unknown {
+404:    return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, nested]) => [key, sortStable(nested)]));
+409:function prohibitedRuntimeBehavior() {
+418:    'no autonomous regeneration',
+
+===== lib/engineeringIntelligence/cadReadiness.ts =====
+24:  unresolvedAssumptions: string[];
+31:  conflictingContextIds: string[];
+33:  unresolvedContextIds: string[];
+34:  fallbackDependentContextIds: string[];
+131:export function buildCADReadinessMetadata(input: {
+136:  structuredSignals?: StructuredEngineeringSignalSummary | null;
+137:  contextResolution?: EngineeringContextResolutionSummary | null;
+140:  const flags = RULES.map(rule => evaluateRule(rule, categories, input.surveyEvidence, input.structuredSignals ?? null, input.contextResolution ?? null));
+146:    readyFlags: flags.filter(flag => flag.status === 'ready').map(flag => flag.flagId).sort((a, b) => a.localeCompare(b)),
+147:    blockedFlags: flags.filter(flag => flag.status === 'blocked').map(flag => flag.flagId).sort((a, b) => a.localeCompare(b)),
+148:    partialFlags: flags.filter(flag => flag.status === 'partial').map(flag => flag.flagId).sort((a, b) => a.localeCompare(b)),
+151:      'Readiness differentiates explicit canonical evidence, deterministic structured signals, unresolved assumptions, and default policy fallbacks.',
+159:      'no computer-vision runtime dependency',
+160:      'no vision model runtime dependency',
+166:function evaluateRule(
+170:  structuredSignals: StructuredEngineeringSignalSummary | null,
+171:  contextResolution: EngineeringContextResolutionSummary | null,
+174:  const satisfiedRequired = rule.requiredAnyCategories.filter(category => categorySet.has(category)).sort((a, b) => a.localeCompare(b));
+175:  const supportive = rule.supportiveCategories.filter(category => categorySet.has(category)).sort((a, b) => a.localeCompare(b));
+176:  const signals = rule.surveySignal(evidence).sort((a, b) => a.localeCompare(b));
+177:  const linkedSignals = (structuredSignals?.signals ?? []).filter(signal => signal.cadImpacts.includes(rule.flagId));
+178:  const confirmedSignalIds = linkedSignals.filter(signal => signal.status === 'confirmed').map(signal => signal.id).sort((a, b) => a.localeCompare(b));
+179:  const partialSignalIds = linkedSignals.filter(signal => signal.status === 'partial').map(signal => signal.id).sort((a, b) => a.localeCompare(b));
+180:  const blockedSignalIds = linkedSignals.filter(signal => signal.status === 'blocked' || signal.status === 'missing').map(signal => signal.id).sort((a, b) => a.localeCompare(b));
+181:  const notApplicableSignalIds = linkedSignals.filter(signal => signal.status === 'not_applicable').map(signal => signal.id).sort((a, b) => a.localeCompare(b));
+182:  const missingCategories = rule.requiredAnyCategories.filter(category => !categorySet.has(category)).sort((a, b) => a.localeCompare(b));
+183:  const linkedContexts = (contextResolution?.contexts ?? [])
+184:    .filter(context => context.cadReadinessImpacts.includes(rule.flagId))
+185:    .sort((a, b) => a.id.localeCompare(b.id));
+186:  const resolvedContextIds = linkedContexts.map(context => context.id);
+187:  const authoritativeContextIds = linkedContexts.filter(context => context.status === 'authoritative').map(context => context.id);
+188:  const preferredContextIds = linkedContexts.filter(context => context.status === 'preferred').map(context => context.id);
+189:  const partialContextIds = linkedContexts.filter(context => context.status === 'partial').map(context => context.id);
+190:  const conflictingContextIds = linkedContexts.filter(context => context.status === 'conflicting').map(context => context.id);
+191:  const blockedContextIds = linkedContexts.filter(context => context.status === 'blocked').map(context => context.id);
+192:  const unresolvedContextIds = linkedContexts.filter(context => context.status === 'unresolved').map(context => context.id);
+193:  const fallbackDependentContextIds = linkedContexts.filter(context => context.fallbackLineage.length > 0).map(context => context.id);
+194:  const contextStatuses = linkedContexts.map(context => ({ contextId: context.id, status: context.status }));
+199:  const structuredSignalsCanPromote = !rule.requireExplicitPrimaryForStructuredSignalPromotion || hasPrimary;
+200:  const confirmedStructuredSignalsCanPromote = hasConfirmedStructuredSignal && structuredSignalsCanPromote;
+201:  const partialStructuredSignalsCanPromote = hasPartialStructuredSignal && structuredSignalsCanPromote;
+212:  const structuredSignalIds = [...confirmedSignalIds, ...partialSignalIds, ...blockedSignalIds, ...notApplicableSignalIds].sort((a, b) => a.localeCompare(b));
+213:  const unresolvedAssumptions = status === 'ready' && conflictingContextIds.length === 0 && blockedContextIds.length === 0 && unresolvedContextIds.length === 0
+218:        ...conflictingContextIds.map(contextId => `conflicting resolved context:${contextId}`),
+220:        ...unresolvedContextIds.map(contextId => `unresolved resolved context:${contextId}`),
+221:      ].sort((a, b) => a.localeCompare(b));
+222:  const defaultPolicyFallbacks = unresolvedAssumptions.length > 0 || fallbackDependentContextIds.length > 0
+224:        ...(unresolvedAssumptions.length > 0 ? [`${rule.flagId}:default_policy_requires_manual_review_until_explicit_truth_is_supplied`] : []),
+225:        ...fallbackDependentContextIds.map(contextId => `${rule.flagId}:resolved_context_fallback_dependency:${contextId}`),
+226:      ].sort((a, b) => a.localeCompare(b))
+232:    satisfiedCategories: [...satisfiedRequired, ...supportive].sort((a, b) => a.localeCompare(b)),
+236:    unresolvedAssumptions,
+238:    deterministicReason: `${rule.reason} Status ${status} from explicit categories [${[...satisfiedRequired, ...supportive].sort((a, b) => a.localeCompare(b)).join(', ') || 'none'}], explicit survey signals [${signals.join(', ') || 'none'}], structured signals [${structuredSignalIds.join(', ') || 'none'}], and resolved contexts [${resolvedContextIds.join(', ') || 'none'}].`,
+243:    conflictingContextIds,
+245:    unresolvedContextIds,
+246:    fallbackDependentContextIds,
+251:function categoriesFrom(
+258:  ])).sort((a, b) => a.localeCompare(b));
+
+===== lib/engineeringIntelligence/invalidationEngine.ts =====
+1:import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
+18:  dependencyGraph?: EngineeringDependencyGraph | null;
+20:  snapshots?: EngineeringStateSnapshot[] | null;
+21:  cadReadiness?: CADReadinessMetadataModel | null;
+31:  staleClass: EngineeringStaleClass;
+37:  dependencyNodeIds: string[];
+44:  staleClass: EngineeringStaleClass;
+55:  staleClassCounts: Record<EngineeringStaleClass, number>;
+76:  cadReadinessTransitionIds: string[];
+81:export function computeEngineeringInvalidationPropagation(input: EngineeringInvalidationPropagationInput): EngineeringInvalidationPropagationResult {
+89:    dependencyGraph: input.dependencyGraph,
+94:  const affectedStateIds = sortText(input.invalidationResult?.affectedStateIds ?? registryRecords.filter(record => record.staleStatus !== 'current').map(record => record.stateId));
+95:  const affectedRecords = sortBy(registryRecords.filter(record => affectedStateIds.includes(record.stateId) || record.staleStatus !== 'current'), record => record.stateId);
+96:  const preservedStateIds = sortText(input.invalidationResult?.unaffectedStateIds ?? registryRecords.filter(record => record.staleStatus === 'current').map(record => record.stateId));
+97:  const snapshots = input.snapshots ?? [];
+100:  const affectedOutputs = affectedRecords.map(record => outputImpactForRecord(record, snapshots, pathIdsByNode));
+101:  const affectedDocumentSectionIds = sortText(affectedOutputs.flatMap(output => output.affectedDocumentSectionIds));
+102:  const affectedRenderContextIds = sortText(affectedOutputs.flatMap(output => output.affectedRenderContextIds));
+103:  const affectedSnapshotIds = sortText(affectedOutputs.flatMap(output => output.affectedSnapshotIds));
+104:  const affectedSnapshotStateIds = sortText(snapshots.flatMap(snapshot => snapshot.stateRefs.filter(ref => affectedStateIds.includes(ref.stateId)).map(ref => `${snapshot.snapshotId}:${ref.stateId}`)));
+105:  const missingEvidenceIds = sortText(affectedOutputs.flatMap(output => output.missingEvidenceIds));
+107:  const cadReadinessTransitionIds = sortText((input.cadReadiness?.flags ?? [])
+110:  const staleClassCounts = countStaleClasses(registryRecords, affectedRecords.length > 0 || !!trigger);
+128:    staleClassCounts,
+149:    cadReadinessTransitionIds,
+155:      'Affected outputs are derived from existing engineering state records, snapshots, and graph metadata only.',
+156:      'No OCR, CV, image-byte parsing, geometry inference, CAD generation, engineering decision generation, or autonomous regeneration is performed.',
+161:export function staleClassForRecord(record: EngineeringStateRecord | null | undefined, affected = false): EngineeringStaleClass {
+163:  if (record.staleStatus === 'blocked') return 'BLOCKED';
+164:  if (record.staleStatus === 'stale') return 'STALE';
+165:  if (record.staleStatus === 'unknown') return 'REQUIRES_REVIEW';
+167:  if (record.dependencyNodeIds.length === 0 && record.canonicalEvidenceIds.length === 0 && record.requirementIds.length === 0) return 'PARTIAL';
+171:function seedNodeIdsFromTrigger(trigger: EngineeringInvalidationTrigger): string[] {
+180:function outputImpactForRecord(record: EngineeringStateRecord, snapshots: EngineeringStateSnapshot[], pathIdsByNode: Map<string, string[]>): EngineeringAffectedOutputImpact {
+182:  const affectedSnapshotIds = sortText(snapshots.filter(snapshot => snapshot.stateRefs.some(ref => ref.stateId === record.stateId)).map(snapshot => snapshot.snapshotId));
+186:    ...record.dependencyNodeIds.flatMap(id => pathIdsByNode.get(id) ?? []),
+195:    staleClass: staleClassForRecord(record, true),
+201:    dependencyNodeIds: sortText(record.dependencyNodeIds),
+207:function invalidatedDecisionImpacts(records: EngineeringStateRecord[], outputs: EngineeringAffectedOutputImpact[], pathIdsByNode: Map<string, string[]>): EngineeringInvalidatedDecisionImpact[] {
+208:  const decisionIds = sortText(records.flatMap(record => record.decisionIds));
+210:    const linkedRecords = records.filter(record => record.decisionIds.includes(decisionId));
+211:    const linkedOutputs = outputs.filter(output => linkedRecords.some(record => record.stateId === output.stateId));
+214:      staleClass: 'REQUIRES_REVIEW',
+218:      deterministicReason: `Decision ${decisionId} is linked to affected state records and requires deterministic review before any regeneration.`,
+223:function pathIdLookup(paths: PropagationTraversalPath[]): Map<string, string[]> {
+224:  const lookup = new Map<string, string[]>();
+231:function countStaleClasses(allRecords: EngineeringStateRecord[], hasTrigger: boolean): Record<EngineeringStaleClass, number> {
+241:  for (const record of allRecords) counts[staleClassForRecord(record)] += 1;
+245:function stableHash(values: Array<string | number | boolean | null | undefined>): string {
+246:  const payload = sortText(Array.from(new Set(values.filter(value => value !== null && value !== undefined && String(value).length > 0).map(String)))).join('\n');
+
+===== lib/engineeringIntelligence/propagationGraph.ts =====
+7:export type PropagationSourceGraphType = 'document_dependency_graph' | 'persistent_state_graph' | 'merged_dependency_graph';
+8:export type PropagationNodeKind = EngineeringDependencyNodeType | 'engineering_state' | 'dependency_graph_node' | 'snapshot' | 'unknown';
+11:  | 'depends_on_dependency_node'
+13:  | 'preserves_stale_state'
+14:  | 'supersedes_snapshot'
+70:  dependencyGraph?: EngineeringDependencyGraph | null;
+79:export function mergePropagationGraph(input: {
+80:  dependencyGraph?: EngineeringDependencyGraph | null;
+83:  const nodes = new Map<string, PropagationGraphNode>();
+84:  const edges = new Map<string, PropagationGraphEdge>();
+85:  const duplicateEdgeIdsSuppressed = new Set<string>();
+86:  const missingNodeIds = new Set<string>();
+87:  const sourceGraphTypes = new Set<PropagationSourceGraphType>();
+89:  for (const node of input.dependencyGraph?.nodes ?? []) {
+90:    sourceGraphTypes.add('document_dependency_graph');
+95:  for (const edge of input.dependencyGraph?.edges ?? []) {
+96:    sourceGraphTypes.add('document_dependency_graph');
+101:    sourceGraphTypes.add('persistent_state_graph');
+107:    sourceGraphTypes.add('persistent_state_graph');
+125:export function tracePropagation(input: TracePropagationInput): PropagationTraversalResult {
+131:  const nodeIds = new Set(merged.nodes.map(node => node.nodeId));
+135:  const adjacency = buildAdjacency(merged.edges, direction);
+136:  const queue: Array<{ nodeId: string; nodePath: string[]; edgePath: string[]; edgeTypes: PropagationEdgeClassification[] }> = seedNodeIds.map(nodeId => ({ nodeId, nodePath: [nodeId], edgePath: [], edgeTypes: [] }));
+137:  const visited = new Set<string>(seedNodeIds);
+138:  const paths = new Map<string, PropagationTraversalPath>();
+200:      `Traversal uses supplied dependency/persistent graph metadata only with maxDepth=${maxDepth} and traversalLimit=${traversalLimit}.`,
+201:      'Visited-node cycle protection prevents recursive graph loops; detected cycles are reported instead of hidden.',
+207:function normalizeDependencyNode(node: EngineeringDependencyNode): PropagationGraphNode {
+212:    sourceGraphType: 'document_dependency_graph',
+217:function normalizeDependencyEdge(edge: EngineeringDependencyEdge): PropagationGraphEdge {
+223:    sourceGraphType: 'document_dependency_graph',
+228:function normalizePersistentNode(node: PersistentEngineeringStateGraphNode): PropagationGraphNode {
+231:    nodeKind: node.nodeKind === 'state_record' ? 'engineering_state' : 'dependency_graph_node',
+232:    label: node.stateId ?? node.dependencyNodeId ?? node.nodeId,
+233:    sourceGraphType: 'persistent_state_graph',
+238:function normalizePersistentEdge(edge: PersistentEngineeringStateGraphEdge): PropagationGraphEdge {
+244:    sourceGraphType: 'persistent_state_graph',
+249:function putEdge(edges: Map<string, PropagationGraphEdge>, duplicateEdgeIdsSuppressed: Set<string>, edge: PropagationGraphEdge) {
+251:  const duplicate = [...edges.values()].find(existing => `${existing.fromNodeId}->${existing.toNodeId}:${existing.edgeType}` === signature);
+263:function buildAdjacency(edges: PropagationGraphEdge[], direction: PropagationTraversalDirection): Map<string, PropagationGraphEdge[]> {
+264:  const adjacency = new Map<string, PropagationGraphEdge[]>();
+269:  for (const [key, values] of adjacency) adjacency.set(key, sortBy(values, edge => edge.edgeId));
+273:function stablePathId(prefix: string, direction: PropagationTraversalDirection, source: string, target: string, edgeIds: string[]): string {
+277:function stableSmallHash(values: string[]): string {
+287:function sanitize(value: string): string {
+291:export function unique(values: string[]): string[] {
+295:export function sortText<T extends string>(values: T[]): T[] {
+296:  return [...values].sort((a, b) => a.localeCompare(b));
+299:export function sortBy<T>(values: T[], selector: (value: T) => string): T[] {
+300:  return [...values].sort((a, b) => selector(a).localeCompare(selector(b)));
+
+===== lib/engineeringIntelligence/regenerationPlanner.ts =====
+14:  staleClass: EngineeringStaleClass;
+34:  regenerationCandidateIds: string[];
+44:export function buildEngineeringRegenerationPlanV1(input: EngineeringRegenerationPlanV1Input): EngineeringRegenerationPlanV1 {
+46:  const existingBlocked = sortText(existingPlans.flatMap(plan => plan.blockedRegenerationDependencies));
+47:  const planItems = sortBy(input.propagation.affectedOutputs.map(output => ({
+49:    staleClass: output.staleClass,
+60:    blockedDependencyIds: sortText([...existingBlocked, ...output.dependencyNodeIds.filter(id => input.propagation.cycleProtection.missingNodeIds.includes(id))]),
+62:    deterministicReason: `Metadata-only regeneration planning candidate for ${output.stateId}; no output is regenerated automatically.`,
+65:    .filter(item => item.staleClass === 'BLOCKED' || item.staleClass === 'REQUIRES_REVIEW' || item.missingEvidenceIds.length > 0 || input.propagation.cycleProtection.cycleDetected)
+71:  const blockedDependencyIds = sortText([...existingBlocked, ...planItems.flatMap(item => item.blockedDependencyIds)]);
+72:  const missingEvidenceIds = sortText([...input.propagation.missingEvidenceIds, ...planItems.flatMap(item => item.missingEvidenceIds)]);
+73:  const propagationPathIds = sortText(planItems.flatMap(item => item.propagationPathIds));
+89:    regenerationCandidateIds: sortText(planItems.map(item => item.affectedStateId)),
+98:      'Every candidate is derived from V1 propagation output and existing selective-regeneration plan metadata when supplied.',
+99:      'Review-required candidates remain explicit; the planner does not silently downgrade or upgrade stale classes.',
+104:function stableHash(values: Array<string | number | boolean | null | undefined>): string {
+105:  const payload = sortText(Array.from(new Set(values.filter(value => value !== null && value !== undefined && String(value).length > 0).map(String)))).join('\n');
+111:  return `regeneration-plan-v1-${hash.toString(16).padStart(8, '0')}`;
+
+===== lib/engineeringIntelligence/snapshotDelta.ts =====
+1:import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
+11:  | 'stale_output_introduced'
+15:  | 'dependency_graph_delta'
+16:  | 'snapshot_not_loaded';
+30:  graphNodeIds: string[];
+31:  graphEdgeIds: string[];
+32:  staleClass: EngineeringStaleClass;
+44:  staleOutputsIntroduced: string[];
+48:  dependencyGraphDeltaIds: string[];
+57:  snapshotDiffs?: EngineeringStateSnapshotDiff[] | null;
+61:  cadReadiness?: CADReadinessMetadataModel | null;
+64:export function buildEngineeringSnapshotDeltaV1(input: BuildEngineeringSnapshotDeltaV1Input): EngineeringSnapshotDeltaV1 {
+69:  const previousEvidence = new Set(previous.stateRefs.flatMap(ref => ref.canonicalEvidenceIds));
+70:  const nextEvidence = new Set(next.stateRefs.flatMap(ref => ref.canonicalEvidenceIds));
+71:  const addedEvidenceIds = sortText([...nextEvidence].filter(id => !previousEvidence.has(id)));
+72:  const removedEvidenceIds = sortText([...previousEvidence].filter(id => !nextEvidence.has(id)));
+73:  const previousDecisions = new Set(previous.stateRefs.flatMap(ref => ref.decisionIds));
+74:  const nextDecisions = new Set(next.stateRefs.flatMap(ref => ref.decisionIds));
+75:  const changedDecisionIds = sortText([...new Set([...previousDecisions, ...nextDecisions])].filter(id => !previousDecisions.has(id) || !nextDecisions.has(id)));
+76:  const staleOutputsIntroduced = sortText(next.staleStateIds.filter(id => !previous.staleStateIds.includes(id)));
+79:  const changedCADReadinessIds = sortText((input.cadReadiness?.flags ?? []).filter(flag => flag.status === 'partial' || flag.status === 'blocked').map(flag => flag.flagId));
+80:  const dependencyGraphDeltaIds = computeDependencyGraphDeltaIds(input.previousGraph ?? null, input.nextGraph ?? null);
+82:    ...addedEvidenceIds.map(id => entry(input.deltaId, 'added_evidence', null, id, [id], [], [], [], [], [], [], 'PARTIAL', `Canonical evidence ${id} appears in the next snapshot only.`)),
+83:    ...removedEvidenceIds.map(id => entry(input.deltaId, 'removed_evidence', id, null, [id], [], [], [], [], [], [], 'REQUIRES_REVIEW', `Canonical evidence ${id} appears in the previous snapshot only.`)),
+84:    ...changedDecisionIds.map(id => entry(input.deltaId, 'changed_decision', id, id, [], [], [id], [], [], [], [], 'REQUIRES_REVIEW', `Decision ${id} membership changed between snapshots.`)),
+85:    ...staleOutputsIntroduced.map(id => entry(input.deltaId, 'stale_output_introduced', id, id, [], [], [], [id], [id], [], [], 'STALE', `State ${id} is stale in the next snapshot and was not stale in the previous snapshot.`)),
+86:    ...regeneratedCandidateIds.map(id => entry(input.deltaId, 'regenerated_candidate', id, id, [], [], [], [id], [id], [], [], 'INVALIDATED', `State ${id} is a metadata-only regeneration candidate from propagation output.`)),
+89:    ...dependencyGraphDeltaIds.map(id => entry(input.deltaId, 'dependency_graph_delta', id, id, [], [], [], [], [], [id], [id], 'REQUIRES_REVIEW', `Dependency graph structural id ${id} differs between compared graph metadata.`)),
+93:    previous.snapshotId,
+94:    next.snapshotId,
+100:    previousSnapshotId: previous.snapshotId,
+101:    nextSnapshotId: next.snapshotId,
+106:    staleOutputsIntroduced,
+110:    dependencyGraphDeltaIds,
+113:      'Snapshot Delta V1 compares explicit snapshot refs, graph ids, propagation metadata, and CAD-readiness metadata only.',
+115:      'Missing previous/next snapshots are reported as not-loaded metadata rather than synthesized.',
+120:function notLoadedDelta(deltaId: string, previous: EngineeringStateSnapshot | null, next: EngineeringStateSnapshot | null): EngineeringSnapshotDeltaV1 {
+121:  const entries = [entry(deltaId, 'snapshot_not_loaded', previous?.snapshotId ?? null, next?.snapshotId ?? null, [], [], [], [], [], [], [], 'NOT_LOADED', 'Previous or next snapshot was not supplied; delta remains explicit not_loaded metadata.')];
+124:    previousSnapshotId: previous?.snapshotId ?? null,
+125:    nextSnapshotId: next?.snapshotId ?? null,
+130:    staleOutputsIntroduced: [],
+134:    dependencyGraphDeltaIds: [],
+135:    deterministicHash: stableHash([deltaId, 'snapshot_not_loaded', previous?.snapshotId, next?.snapshotId]),
+136:    deterministicNotes: ['Snapshot Delta V1 could not compare because one or both snapshots were not loaded.'],
+140:function computeDependencyGraphDeltaIds(previous: PersistentEngineeringStateGraph | null, next: PersistentEngineeringStateGraph | null): string[] {
+142:  const previousIds = new Set([...previous.nodes.map(node => node.nodeId), ...previous.edges.map(edge => edge.edgeId)]);
+143:  const nextIds = new Set([...next.nodes.map(node => node.nodeId), ...next.edges.map(edge => edge.edgeId)]);
+147:function entry(
+157:  graphNodeIds: string[],
+158:  graphEdgeIds: string[],
+159:  staleClass: EngineeringStaleClass,
+175:    graphNodeIds: sortText(graphNodeIds),
+176:    graphEdgeIds: sortText(graphEdgeIds),
+177:    staleClass,
+182:function stableHash(values: Array<string | number | boolean | null | undefined>): string {
+183:  const payload = sortText(Array.from(new Set(values.filter(value => value !== null && value !== undefined && String(value).length > 0).map(String)))).join('\n');
+189:  return `snapshot-delta-v1-${hash.toString(16).padStart(8, '0')}`;
+192:function sanitize(value: string): string {
+
+===== lib/engineeringStateInvalidation/engine.ts =====
+23:export function buildEngineeringStateRegistry(input: BuildEngineeringStateRegistryInput): EngineeringStateRegistry {
+24:  const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+27:  const graph = input.dependencyGraph ?? documentProvenance?.dependencyGraph ?? null;
+30:    ...stateFromGraphNodes(graph, generatedAt),
+32:    ...stateFromRenderContexts(input.renderContextIds?.length ? input.renderContextIds : ['renderContext:primary'], documentProvenance, decisionProvenance, graph, generatedAt),
+35:  ].sort((a, b) => a.stateId.localeCompare(b.stateId));
+43:    dependencyHash: stableHash('state-dependency', records.map(record => `${record.stateId}|${record.dependencyHash}`)),
+44:    deterministicHash: stableHash('state-registry', records.map(record => `${record.stateId}|${record.generationHash}|${record.provenanceHash}|${record.dependencyHash}|${record.staleStatus}`)),
+47:      'State records are derived from canonical evidence, requirements, decision provenance, document provenance, and dependency graph ids only.',
+56:export function invalidateEngineeringState(input: InvalidateEngineeringStateInput): EngineeringInvalidationResult {
+57:  const generatedAt = input.generatedAt ?? input.trigger.triggeredAt ?? new Date(0).toISOString();
+58:  const graph = input.dependencyGraph ?? null;
+59:  const reachable = reachableDependencyIds(input.trigger, graph);
+61:  const affected = new Set<string>();
+62:  const updated = input.registry.stateRecords.map(record => {
+69:      staleStatus: blockedStatus(record),
+71:      triggeringDependencyIds: uniqueSorted([...reachable].filter(id => record.dependencyNodeIds.includes(id))),
+79:      deterministicNotes: ['Invalidation is propagated from explicit trigger ids and dependency graph edges; no heuristic matching is used.'],
+82:    return { ...record, staleStatus: event.staleStatus, invalidationReason: event.invalidationReason, invalidatedAt: generatedAt } satisfies EngineeringStateRecord;
+85:  for (const event of events) event.impactedDownstreamStateIds = affectedIds.filter(id => id !== event.stateId);
+91:    unaffectedStateIds: input.registry.stateIds.filter(id => !affected.has(id)).sort((a, b) => a.localeCompare(b)),
+92:    invalidationEvents: events.sort((a, b) => a.eventId.localeCompare(b.eventId)),
+93:    updatedStateRecords: updated.sort((a, b) => a.stateId.localeCompare(b.stateId)),
+95:    deterministicNotes: ['Invalidation result marks stale state only; it does not regenerate outputs.', 'Unrelated state records are preserved when no explicit dependency intersection or graph reachability exists.'],
+102:export function buildSelectiveRegenerationPlan(input: BuildSelectiveRegenerationPlanInput): SelectiveRegenerationPlan {
+104:  const stale = input.invalidationResult.updatedStateRecords.filter(record => record.staleStatus !== 'current');
+105:  const byType = (type: EngineeringStateType) => uniqueSorted(stale.filter(record => record.stateType === type).map(record => outputId(record)));
+106:  const blocked = uniqueSorted(stale.filter(record => record.provenanceHash.length === 0 || record.dependencyHash.length === 0 || record.dependencyNodeIds.length === 0).map(record => record.stateId));
+107:  const order = regenerationOrder(stale, input.dependencyGraph ?? null);
+119:    regenerationOrder: order,
+121:    staleStateIds: input.invalidationResult.affectedStateIds,
+122:    deterministicHash: stableHash('regeneration-plan', [...order, ...blocked, ...input.invalidationResult.unaffectedStateIds]),
+123:    deterministicNotes: ['SelectiveRegenerationPlan v1 is a bounded plan only; it performs no autonomous regeneration.', 'Regeneration order is sorted by explicit state category precedence and stable state ids.'],
+124:    snapshotReference: input.snapshotReference ?? undefined,
+129:export function buildInvalidationTrigger(input: Partial<EngineeringInvalidationTrigger> & Pick<EngineeringInvalidationTrigger, 'triggerId' | 'triggerType'>): EngineeringInvalidationTrigger {
+130:  const triggeredAt = input.triggeredAt ?? new Date(0).toISOString();
+145:export function staleMetadataForState(record: EngineeringStateRecord, events: EngineeringInvalidationEvent[] = []): EngineeringStaleStateMetadata {
+146:  const matched = events.filter(event => event.stateId === record.stateId);
+148:    staleStatus: record.staleStatus,
+149:    staleReason: record.invalidationReason,
+157:export function buildInvalidationLineageMetadata(input: { registry: EngineeringStateRegistry; invalidationResult?: EngineeringInvalidationResult | null; regenerationPlan?: SelectiveRegenerationPlan | null; snapshotReference?: import('./types').EngineeringStateSnapshotReference | null }): EngineeringInvalidationLineageMetadata {
+158:  const staleStateIds = input.invalidationResult?.affectedStateIds ?? input.registry.stateRecords.filter(record => record.staleStatus !== 'current').map(record => record.stateId);
+164:    dependencyHash: input.registry.dependencyHash,
+165:    staleStateIds: uniqueSorted(staleStateIds),
+167:    regenerationPlanId: input.regenerationPlan?.planId,
+168:    snapshotReference: input.snapshotReference ?? input.regenerationPlan?.snapshotReference,
+169:    deterministicNotes: ['Invalidation lineage metadata carries state hashes and stale ids through render/document contexts.'],
+173:function stateFromSections(doc: DocumentProvenanceBundle | null, decisions: EngineeringDecisionEvaluationBundle | null, generatedAt: string): EngineeringStateRecord[] {
+181:    dependencyNodeIds: section.engineeringDependencyIds,
+189:    notes: [`Document section ${section.sectionId} state is invalidated only by linked requirement/evidence/decision/dependency changes.`],
+193:function stateFromGraphNodes(graph: EngineeringDependencyGraph | null, generatedAt: string): EngineeringStateRecord[] {
+194:  if (!graph) return [];
+195:  return graph.nodes.map(node => makeRecord({
+196:    stateId: `state:dependencyNode:${node.id}`,
+200:    dependencyNodeIds: [node.id],
+205:    generationInputs: { ...EMPTY_INPUTS, deterministicSources: ['engineering_dependency_graph_v1'] },
+208:    notes: [`Dependency graph node ${node.id} is first-class invalidation state.`],
+212:function stateFromDecisions(bundle: EngineeringDecisionEvaluationBundle | null, generatedAt: string): EngineeringStateRecord[] {
+220:    dependencyNodeIds: decision.dependencyNodeIds,
+232:function stateFromRenderContexts(ids: string[], doc: DocumentProvenanceBundle | null, decisions: EngineeringDecisionEvaluationBundle | null, graph: EngineeringDependencyGraph | null, generatedAt: string): EngineeringStateRecord[] {
+239:    dependencyNodeIds: uniqueSorted([id, ...(graph?.nodes.map(node => node.id) ?? []), ...(decisions?.dependencyNodeIds ?? [])]),
+247:    notes: ['RenderContext state carries hashes and stale metadata; templates must not manufacture stale state.'],
+251:function stateFromBOM(bom: NonNullable<BuildEngineeringStateRegistryInput['bomMetadata']>, decisions: EngineeringDecisionEvaluationBundle | null, doc: DocumentProvenanceBundle | null, generatedAt: string): EngineeringStateRecord[] {
+258:    dependencyNodeIds: row.dependencyNodeIds,
+270:function stateFromSLD(sld: BuildEngineeringStateRegistryInput['sldMetadata'], decisions: EngineeringDecisionEvaluationBundle | null, doc: DocumentProvenanceBundle | null, generatedAt: string): EngineeringStateRecord[] {
+278:    dependencyNodeIds: sld.dependencyNodeIds,
+290:type RecordInput = Omit<EngineeringStateRecord, 'generationHash' | 'provenanceHash' | 'dependencyHash' | 'staleStatus' | 'deterministicNotes'> & { generatedAt: string; notes: string[] };
+291:function makeRecord(input: RecordInput): EngineeringStateRecord {
+294:    dependencyNodeIds: uniqueSorted(input.dependencyNodeIds),
+306:    dependencyNodeIds: base.dependencyNodeIds,
+314:    dependencyHash: stableHash('dependency', [base.stateId, ...base.dependencyNodeIds]),
+315:    staleStatus: 'current',
+323:function reachableDependencyIds(trigger: EngineeringInvalidationTrigger, graph: EngineeringDependencyGraph | null): Set<string> {
+324:  const seeds = new Set<string>([
+331:  if (!graph) return reachable;
+332:  const adjacency = new Map<string, string[]>();
+333:  for (const edge of graph.edges) adjacency.set(edge.fromNodeId, [...(adjacency.get(edge.fromNodeId) ?? []), edge.toNodeId]);
+342:function matchingTriggers(record: EngineeringStateRecord, trigger: EngineeringInvalidationTrigger, reachable: Set<string>): string[] {
+347:    ...trigger.changedDependencyNodeIds.filter(id => record.dependencyNodeIds.includes(id)),
+352:  const propagated = record.dependencyNodeIds.filter(id => reachable.has(id) && !id.startsWith('renderContext:'));
+356:function blockedStatus(record: EngineeringStateRecord): 'stale' | 'blocked' {
+357:  return record.dependencyNodeIds.length === 0 || record.provenanceHash.length === 0 ? 'blocked' : 'stale';
+359:function outputId(record: EngineeringStateRecord): string { return record.stateId.replace(/^state:(documentSection|bomRow|sldSection|renderContext|decision|dependencyNode):/, ''); }
+360:function regenerationOrder(records: EngineeringStateRecord[], graph: EngineeringDependencyGraph | null): string[] {
+361:  const rank: Record<EngineeringStateType, number> = { requirement_evaluation: 1, dependency_graph_node: 2, decision_provenance: 3, engineering_calculation: 3, layout_primitive: 4, bom_row: 5, sld_section: 6, document_section: 7, render_context: 8, render_output: 9 };
+362:  return records.slice().sort((a, b) => (rank[a.stateType] - rank[b.stateType]) || a.stateId.localeCompare(b.stateId)).map(record => record.stateId);
+364:function normalizeGenerationInputs(input: EngineeringGenerationInputs): EngineeringGenerationInputs { return { inputKeys: uniqueSorted(input.inputKeys), canonicalInputKeys: uniqueSorted(input.canonicalInputKeys), cadPrimitiveIds: uniqueSorted(input.cadPrimitiveIds), legacyFallbackKeys: uniqueSorted(input.legacyFallbackKeys), deterministicSources: uniqueSorted(input.deterministicSources) }; }
+365:function decisionIdsForSection(bundle: EngineeringDecisionEvaluationBundle | null, sectionId: string): string[] { return uniqueSorted(bundle?.decisionRecords.filter(record => record.documentSectionIds.includes(sectionId)).map(record => record.decisionId) ?? []); }
+366:function typeFromNode(node: EngineeringDependencyNode): EngineeringStateType { if (node.nodeType === 'calculation') return 'engineering_calculation'; if (node.nodeType === 'engineering_decision') return 'decision_provenance'; if (node.nodeType === 'cad_layout_primitive') return 'layout_primitive'; if (node.nodeType === 'sld_section') return 'sld_section'; if (node.nodeType === 'bom_row') return 'bom_row'; if (node.nodeType === 'render_context') return 'render_context'; if (node.nodeType === 'render_output') return 'render_output'; if (node.nodeType === 'engineering_requirement') return 'requirement_evaluation'; return 'dependency_graph_node'; }
+367:function categoryFromNode(node: EngineeringDependencyNode): EngineeringStateCategory { if (node.nodeType === 'sld_section') return 'sld'; if (node.nodeType === 'bom_row') return 'bom'; if (node.nodeType === 'cad_layout_primitive') return 'roof_layout'; if (node.nodeType === 'render_context' || node.nodeType === 'render_output') return 'rendering'; return categoryFromSection(node.id); }
+368:function categoryFromDecision(record: EngineeringDecisionProvenanceRecord): EngineeringStateCategory { if (record.engineeringDomain === 'sld') return 'sld'; if (record.engineeringDomain === 'bom') return 'bom'; if (record.engineeringDomain === 'roof_layout') return 'roof_layout'; if (record.engineeringDomain === 'interconnection') return 'interconnection'; if (record.engineeringDomain === 'structural') return 'structural'; if (record.engineeringDomain === 'document_control') return 'document_control'; return 'electrical'; }
+369:function categoryFromSection(sectionId: string): EngineeringStateCategory { if (/BOM|SCHED/i.test(sectionId)) return 'bom'; if (/SLD|E-1|single/i.test(sectionId)) return 'sld'; if (/utility|meter|interconnection/i.test(sectionId)) return 'interconnection'; if (/roof|array|layout|site/i.test(sectionId)) return 'roof_layout'; if (/structural/i.test(sectionId)) return 'structural'; if (/render/i.test(sectionId)) return 'rendering'; return 'electrical'; }
+370:function stableHash(prefix: string, values: string[]): string { const payload = uniqueSorted(values).join('\n'); let hash = 5381; for (let i = 0; i < payload.length; i += 1) { hash = ((hash << 5) + hash) ^ payload.charCodeAt(i); hash >>>= 0; } return `${prefix}-${hash.toString(16).padStart(8, '0')}`; }
+371:function uniqueSorted<T extends string>(values: Array<T | null | undefined>): T[] { return Array.from(new Set(values.filter((value): value is T => typeof value === 'string' && value.length > 0))).sort((a, b) => a.localeCompare(b)); }
+
+===== lib/engineeringStateInvalidation/hash.ts =====
+1:export function stableEngineeringStateHash(prefix: string, values: Array<string | number | boolean | null | undefined>): string {
+2:  const payload = Array.from(new Set(values.filter(value => value !== null && value !== undefined && String(value).length > 0).map(String))).sort((a, b) => a.localeCompare(b)).join('\n');
+
+===== lib/documentProvenance/builders.ts =====
+21:import { buildEngineeringDecisionProvenanceBundle } from '@/lib/engineeringDecisionProvenance/evaluator';
+31:export function buildDocumentProvenanceBundle(input: BuildDocumentProvenanceInput): DocumentProvenanceBundle {
+32:  const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+37:  const sections = buildDocumentProvenanceSections({
+45:  const requirementIds = uniqueSorted(sections.flatMap(section => section.requirementIds)) as EngineeringRequirementId[];
+46:  const canonicalEvidenceIds = uniqueSorted(sections.flatMap(section => section.canonicalEvidenceIds));
+47:  const originatingSurveyIds = uniqueSorted(sections.flatMap(section => section.originatingSurveyIds));
+49:    ? buildEngineeringDecisionProvenanceBundle({
+60:  const dependencyGraph = buildEngineeringDependencyGraph({
+61:    graphId: `${input.documentId}.dependency-graph`,
+68:  const engineeringDependencyIds = uniqueSorted(dependencyGraph.nodes.map(node => node.id));
+78:    confidenceSource: requirementEvaluation ? 'engineering_requirement_registry_v1' : 'missing_registry_evaluation',
+89:    dependencyGraph,
+98:export function buildDocumentProvenanceSections(input: {
+107:  const evaluationByRequirement = new Map<EngineeringRequirementId, EngineeringRequirementEvaluation>(
+111:  const sections = input.bindings.flatMap(binding => {
+113:    const boundSections = binding.boundDocumentSections.filter(section =>
+132:        engineeringDependencyIds: dependencyIdsForSection(boundSection.sectionId, binding.requirementId, canonicalEvidenceIds),
+133:        confidenceSource: evaluation?.confidenceSource ?? 'missing_registry_evaluation',
+148:  return sections.sort(compareSections);
+151:export function buildEngineeringDependencyGraph(input: {
+152:  graphId: string;
+159:  const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+160:  const nodes = new Map<string, EngineeringDependencyNode>();
+161:  const edges = new Map<string, EngineeringDependencyEdge>();
+218:  const geometryInputs = buildEvidenceBackedGeometryInputs({
+320:  const sortedNodes = Array.from(nodes.values()).sort((a, b) => a.id.localeCompare(b.id));
+321:  const sortedEdges = Array.from(edges.values()).sort((a, b) => a.id.localeCompare(b.id));
+325:    graphId: input.graphId,
+331:      'EngineeringDependencyGraph v1 is a deterministic mapping graph, not an AI reasoning graph.',
+338:export function buildEvidenceBackedGeometryInputs(input: {
+345:  const byRequirement = new Map<EngineeringRequirementId, EngineeringRequirementEvaluation>(
+388:  return inputs.sort((a, b) => a.geometryInputId.localeCompare(b.geometryInputId));
+391:function makeGeometryInput(
+416:function mergeEvaluations(evaluations: Array<EngineeringRequirementEvaluation | null | undefined>): EngineeringRequirementEvaluation {
+427:function resolveDocumentTruthSource(surveyEvidence: EngineeringSurveyEvidence | null): DocumentTruthSource {
+432:function normalizeRenderInputs(
+445:function dependencyIdsForSection(sectionId: string, requirementId: EngineeringRequirementId, canonicalEvidenceIds: string[]): string[] {
+453:function cadPrimitiveIds(cad: CADModel | null, family: 'roof' | 'electrical' | 'structural' | 'all'): string[] {
+464:function putNode(nodes: Map<string, EngineeringDependencyNode>, node: EngineeringDependencyNode): void {
+482:function putEdge(edges: Map<string, EngineeringDependencyEdge>, edge: EngineeringDependencyEdge): void {
+486:function compareSections(a: DocumentProvenanceSection, b: DocumentProvenanceSection): number {
+490:function deterministicGraphHash(nodes: EngineeringDependencyNode[], edges: EngineeringDependencyEdge[]): string {
+500:function uniqueSorted(values: Array<string | null | undefined>): string[] {
+501:  return Array.from(new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))).sort((a, b) => a.localeCompare(b));
+
+===== lib/engineeringDecisionProvenance/evaluator.ts =====
+21:export function buildEngineeringDecisionProvenanceBundle(
+24:  const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+26:    .flatMap(definition => buildDecisionRecord(definition.decisionType, input, generatedAt))
+27:    .sort((a, b) => a.decisionId.localeCompare(b.decisionId));
+37:    dependencyNodeIds: uniqueSorted(records.flatMap(record => record.dependencyNodeIds)),
+41:    fallbackDecisionIds: uniqueSorted(records.filter(record => isFallback(record)).map(record => record.decisionId)),
+54:export function buildDecisionAwareReadinessSummary(bundle: EngineeringDecisionEvaluationBundle, opts?: { engineeringStateSnapshot?: import('@/lib/engineeringStateInvalidation').EngineeringStateSnapshotReference | null }): DecisionAwareReadinessSummary {
+59:    fallbackDecisionCount: bundle.fallbackDecisionIds.length,
+60:    confidenceSource: bundle.fallbackDecisionIds.length > 0 ? 'explicit_default_policy_v1' : 'engineering_decision_registry_v1',
+62:    fallbackDecisionIds: bundle.fallbackDecisionIds,
+67:      `${bundle.decisionIds.length} decision(s) and ${bundle.fallbackDecisionIds.length} fallback/default event(s) are available for readiness display.`,
+69:    engineeringStateIds: bundle.decisionIds.map(id => `state:decision:${id}`).sort((a, b) => a.localeCompare(b)),
+71:    stateDependencyHash: stableEngineeringStateHash('decision-readiness-dependency', bundle.dependencyNodeIds),
+76:export function buildDecisionAwareBOMMetadata(input: {
+89:  const dependencyIds = uniqueSorted(bundle?.decisionRecords
+91:    .flatMap(record => record.dependencyNodeIds) ?? []);
+97:    dependencyNodeIds: dependencyIds,
+101:    stateDependencyHash: stableEngineeringStateHash('bom-row-dependency', dependencyIds),
+106:export function buildDecisionAwareSLDMetadata(input: {
+111:  const sldRecords = bundle?.decisionRecords.filter(record =>
+115:  const topology = sldRecords.find(record => record.decisionType === 'string_topology_selection');
+116:  const interconnection = sldRecords.find(record => record.decisionType === 'utility_interconnection_assumption');
+121:    dependencyNodeIds: uniqueSorted(sldRecords.flatMap(record => record.dependencyNodeIds)),
+122:    fallbackDecisionIds: uniqueSorted(sldRecords.filter(record => record.decisionCategory === 'fallback_default').map(record => record.decisionId)),
+128:    stateDependencyHash: stableEngineeringStateHash('sld-metadata-dependency', sldRecords.flatMap(record => record.dependencyNodeIds)),
+133:function buildDecisionRecord(
+139:  const context = buildContext(input);
+146:  const fallback = selected.usedFallback || selected.value === null;
+148:  const canonicalEvidenceIds = uniqueSorted(requirementIds.flatMap(requirementId => context.evaluationByRequirement.get(requirementId)?.canonicalEvidenceIds ?? []));
+149:  const originatingSurveyIds = uniqueSorted(requirementIds.flatMap(requirementId => context.evaluationByRequirement.get(requirementId)?.originatingSurveyIds.filter(Boolean) ?? []));
+150:  const documentSectionIds = uniqueSorted(definition.affectedDocumentSectionIds.filter(sectionId =>
+153:  const dependencyNodeIds = uniqueSorted([
+159:  const confidenceSource = resolveConfidenceSource(input, fallback);
+161:  const decisionInputs = decisionInputsForDefinition(definition.requiredInputs, definition.optionalInputs, input, selected, confidenceSource);
+166:    decisionCategory: fallback ? 'fallback_default' : definition.decisionCategory,
+175:    dependencyNodeIds,
+182:    confidenceSource,
+192:      fallback
+201:function buildContext(input: BuildEngineeringDecisionProvenanceInput): {
+202:  evaluationByRequirement: Map<EngineeringRequirementId, EngineeringRequirementEvaluation>;
+203:  documentSectionIds: Set<string>;
+212:function selectedValueForDecision(decisionType: EngineeringDecisionType, input: BuildEngineeringDecisionProvenanceInput): {
+227:      const fallback = Math.ceil((((system?.totalAcKw ?? 0) * 1000 / 240) || 32) * 1.25 / 5) * 5;
+228:      return selected(project?.backfeedBreakerA ?? project?.pvBackfeedA ?? fallback, project?.backfeedBreakerA == null && project?.pvBackfeedA == null, 'Existing breaker value selected from project input or documented deterministic fallback.');
+253:      const orientation = project?.panelPositions?.find((panel: any) => panel.orientation)?.orientation ?? project?.roofPlanes?.find((plane: any) => plane.azimuth)?.azimuth ?? cad?.systemType ?? 'unknown';
+263:function selected(value: string | number | boolean | null, usedFallback: boolean, reason: string) {
+267:function alternativesForDecision(
+284:    for (const value of [project?.backfeedBreakerA, project?.pvBackfeedA, system?.totalAcKw ? Math.ceil((system.totalAcKw * 1000 / 240) * 1.25 / 5) * 5 : null].filter(v => v != null)) {
+285:      if (value !== selectedValue) alternatives.push({ value, rejectedReason: 'Higher-priority existing breaker input or fallback policy selected another value.' });
+288:  return alternatives.sort((a, b) => String(a.value).localeCompare(String(b.value)));
+291:function decisionInputsForDefinition(
+296:  confidenceSource: DecisionConfidenceSource,
+302:      source: confidenceSource,
+311:      deterministicRole: selected.usedFallback && !hasInputValue(key, input) ? 'fallback_default' : 'constraint',
+314:  for (const key of optional.filter(key => hasInputValue(key, input)).slice(0, 8)) {
+325:function requirementIdsForDecision(
+327:  context: { evaluationByRequirement: Map<EngineeringRequirementId, EngineeringRequirementEvaluation> },
+352:function equipmentConstraintsForDecision(decisionType: EngineeringDecisionType, input: BuildEngineeringDecisionProvenanceInput): string[] {
+362:function utilityConstraintsForDecision(decisionType: EngineeringDecisionType, input: BuildEngineeringDecisionProvenanceInput): string[] {
+373:function geometryAssumptionsForDecision(decisionType: EngineeringDecisionType, input: BuildEngineeringDecisionProvenanceInput): string[] {
+383:function resolveConfidenceSource(input: BuildEngineeringDecisionProvenanceInput, fallback: boolean): DecisionConfidenceSource {
+384:  if (fallback) return 'explicit_default_policy_v1';
+391:function resolveTruthSource(input: BuildEngineeringDecisionProvenanceInput): DocumentTruthSource {
+397:function sourceForInputKey(key: string, input: BuildEngineeringDecisionProvenanceInput): DecisionConfidenceSource {
+405:function summarizeInputValue(key: string, input: BuildEngineeringDecisionProvenanceInput): string | number | boolean | null {
+445:function hasInputValue(key: string, input: BuildEngineeringDecisionProvenanceInput): boolean {
+450:function hasEssInputs(permit: PermitInput | null): boolean {
+455:function isFallback(record: EngineeringDecisionProvenanceRecord): boolean {
+456:  return record.decisionCategory === 'fallback_default'
+457:    || record.decisionInputs.some(input => input.deterministicRole === 'fallback_default');
+460:function deterministicDecisionHash(records: EngineeringDecisionProvenanceRecord[]): string {
+461:  const payload = JSON.stringify(records.map(record => ({
+466:    dependencyNodeIds: record.dependencyNodeIds,
+469:    confidenceSource: record.confidenceSource,
+480:function uniqueSorted<T extends string>(values: Array<T | null | undefined>): T[] {
+481:  return Array.from(new Set(values.filter(Boolean) as T[])).sort((a, b) => a.localeCompare(b));
+
+===== lib/survey/evidence/engineeringRequirements.ts =====
+8:  buildSurveyEvidenceTraceability,
+70:  confidencePolicy: EngineeringRequirementConfidencePolicy;
+93:  structuredSignalStatuses: Array<{ signalId: string; status: string; confidenceScore: number }>;
+103:  confidencePolicy: EngineeringRequirementConfidencePolicy;
+104:  confidenceSource: RequirementConfidenceSource | 'registry_policy' | 'inactive_requirement';
+118:  confidenceSource: 'engineering_requirement_registry_v1';
+137:  structuredSignals?: StructuredEngineeringSignalSummary | null;
+195:    confidencePolicy: 'canonical_evidence_required',
+211:    confidencePolicy: 'canonical_evidence_required',
+227:    confidencePolicy: 'canonical_evidence_required',
+243:    confidencePolicy: 'canonical_or_optional_evidence',
+259:    confidencePolicy: 'canonical_or_optional_evidence',
+275:    confidencePolicy: 'canonical_or_optional_evidence',
+291:    confidencePolicy: 'canonical_or_optional_evidence',
+307:    confidencePolicy: 'inactive_future',
+323:    confidencePolicy: 'inactive_future',
+339:    confidencePolicy: 'inactive_future',
+355:    confidencePolicy: 'canonical_or_optional_evidence',
+371:    confidencePolicy: 'inactive_future',
+380:export const ACTIVE_ENGINEERING_REQUIREMENT_DEFINITIONS = ENGINEERING_REQUIREMENT_DEFINITIONS.filter(requirement => requirement.active);
+382:export function buildEngineeringRequirementEvaluation(
+386:  const traceability = input.traceability ?? buildSurveyEvidenceTraceability({
+391:  const evaluations = ENGINEERING_REQUIREMENT_DEFINITIONS.map(definition => evaluateRequirement(definition, manifest, traceability, input.structuredSignals ?? null));
+392:  const activeEvaluations = evaluations.filter(evaluation => evaluation.active);
+393:  const satisfiedRequirements = activeEvaluations.filter(evaluation => evaluation.status === 'satisfied');
+394:  const partiallySatisfiedRequirements = activeEvaluations.filter(evaluation => evaluation.status === 'partially_satisfied' || evaluation.status === 'insufficient_metadata');
+395:  const missingRequirements = activeEvaluations.filter(evaluation => evaluation.status === 'missing');
+396:  const blockedRequirements = activeEvaluations.filter(evaluation =>
+399:  const informationalRequirements = activeEvaluations.filter(evaluation => evaluation.readinessImpact === 'informational');
+400:  const inactiveRequirements = evaluations.filter(evaluation => !evaluation.active);
+417:    confidenceSource: 'engineering_requirement_registry_v1',
+426:      input.structuredSignals
+437:function evaluateRequirement(
+441:  structuredSignals: StructuredEngineeringSignalSummary | null,
+447:  const provenanceRecords = traceability.canonicalEvidence.filter(record =>
+451:  const requiredRecords = provenanceRecords.filter(record => definition.requiredEvidenceCategories.includes(record.evidenceCategory));
+452:  const optionalRecords = provenanceRecords.filter(record => definition.optionalEvidenceCategories.includes(record.evidenceCategory));
+453:  const satisfyingRecords = definition.confidencePolicy === 'canonical_or_optional_evidence'
+457:  const traceabilityRecords = traceability.requirements.filter(record =>
+461:  const linkedSignals = signalsForRequirement(definition.requirementId, structuredSignals);
+462:  const confirmedSignals = linkedSignals.filter(signal => signal.status === 'confirmed');
+463:  const partialSignals = linkedSignals.filter(signal => signal.status === 'partial');
+464:  const failedMetadataRules = uniqueRecords.flatMap(record => failedMetadataRulesFor(record.metadataCompleteness, definition.metadataCompletenessRules, record.canonicalEvidenceId));
+482:      : partiallySatisfied || (definition.confidencePolicy === 'canonical_or_optional_evidence' && hasOptionalEvidence) || hasPartialSignalSupport
+485:  const confidenceSource = confidenceSourceFor(uniqueRecords, status);
+501:    structuredSignalIds: linkedSignals.map(signal => signal.id).sort((a, b) => a.localeCompare(b)),
+502:    structuredSignalTypes: linkedSignals.map(signal => signal.signal_type).sort((a, b) => a.localeCompare(b)),
+503:    structuredSignalStatuses: linkedSignals.map(signal => ({ signalId: signal.id, status: signal.status, confidenceScore: signal.confidence.score })).sort((a, b) => a.signalId.localeCompare(b.signalId)),
+513:    confidencePolicy: definition.confidencePolicy,
+514:    confidenceSource,
+528:      `Confidence source: ${confidenceSource}.`,
+529:      structuredSignals ? 'Evaluation is deterministic registry logic over canonical manifest/provenance plus structured signals.' : 'Evaluation is deterministic registry logic over canonical manifest/provenance only.',
+534:function inactiveEvaluation(definition: EngineeringRequirementDefinition): EngineeringRequirementEvaluation {
+561:    confidencePolicy: definition.confidencePolicy,
+562:    confidenceSource: 'inactive_requirement',
+580:function failedMetadataRulesFor(
+596:function confidenceSourceFor(
+599:): EngineeringRequirementEvaluation['confidenceSource'] {
+601:  if (records.some(record => record.requirementConfidenceSource === 'canonical_evidence_confidence')) return 'canonical_evidence_confidence';
+606:function reasoningPathFor(
+614:  const requiredLabels = definition.requiredEvidenceCategories.map(category => getSurveyEvidenceLabel(category)).join(', ') || 'none';
+615:  const optionalLabels = definition.optionalEvidenceCategories.map(category => getSurveyEvidenceLabel(category)).join(', ') || 'none';
+633:function uniqueByEvidenceId(records: CanonicalEvidenceProvenanceRecord[]): CanonicalEvidenceProvenanceRecord[] {
+634:  const seen = new Set<string>();
+636:  for (const record of records.sort((a, b) => a.canonicalEvidenceId.localeCompare(b.canonicalEvidenceId))) {
+644:export function requirementDefinitionForCategory(category: SurveyEvidenceCategory): EngineeringRequirementDefinition | null {
+650:export function requirementLabelForCategory(category: SurveyEvidenceCategory): string {
+654:function signalsForRequirement(requirementId: EngineeringRequirementId, structuredSignals: StructuredEngineeringSignalSummary | null): StructuredEngineeringSignal[] {
+655:  return (structuredSignals?.signals ?? [])
+657:    .sort((a, b) => a.id.localeCompare(b.id));
+
+===== app/admin/engineering-intelligence/project/[id]/page.tsx =====
+4:import { hydrateProjectEngineeringIntelligenceFromDb, buildEngineeringIntelligenceWorkspace, buildCADReadinessMetadata, buildEngineeringContextResolution } from '@/lib/engineeringIntelligence';
+5:import { buildDeterministicPhotoGrouping } from '@/lib/engineeringIntelligence/photoGrouping';
+6:import { buildStructuredEngineeringSignals } from '@/lib/engineeringIntelligence/signalExtraction';
+7:import { buildFieldEvidenceOrchestrationModel } from '@/lib/survey/evidence/fieldOrchestration';
+53:export default async function ProjectEngineeringIntelligencePage({ params }: { params: { id: string } }) {
+60:      ? await hydrateProjectEngineeringIntelligenceFromDb({ projectId: params.id, userId: sessionUser.id })
+63:  const fieldEvidenceOrchestration = buildFieldEvidenceOrchestrationModel();
+69:      subtitle="Project-scoped deterministic workspace hydrated from real survey evidence, state graph snapshots, invalidation metadata, and regeneration planning when project survey records are available. Empty states remain explicit and non-fabricated."
+76:      <StaleInvalidationWorkspace stale={model.staleInvalidation} />
+77:      <SnapshotTimelineWorkspace snapshots={model.snapshots} />
+78:      <DependencyGraphViewer graph={model.graph} />
+79:      <RegenerationPlanningWorkspace planning={model.regenerationPlanning} />
+81:      <DependencyTraversalWorkspace model={model.dependencyTraversal} />
+82:      <RegenerationPlanningV1Workspace model={model.regenerationPlanningV1} />
+83:      <SnapshotDeltaWorkspace model={model.snapshotDelta} />
+85:      <StaleStateTimelineWorkspace model={model.staleStateTimeline} />
+86:      <StructuredEngineeringSignalsWorkspace model={model.structuredSignals} />
+97:      <FallbackChainInspectorWorkspace model={model.fallbackChainInspector} />
+103:      <ContextResolutionTimelineWorkspace model={model.contextResolutionTimeline} />
+104:      <CADReadinessWorkspace readiness={hydration.cadReadiness} />
+112:function invalidProjectHydration(projectId: string) {
+113:  const cadReadiness = buildCADReadinessMetadata({ projectId });
+114:  const photoGrouping = buildDeterministicPhotoGrouping({ projectId, readinessFlags: cadReadiness.flags, generatedAt: new Date(0).toISOString() });
+115:  const generatedAt = new Date(0).toISOString();
+116:  const structuredSignals = buildStructuredEngineeringSignals({ projectId, photoGrouping, cadReadiness, generatedAt });
+117:  const signalAwareCADReadiness = buildCADReadinessMetadata({ projectId, structuredSignals });
+118:  const contextResolution = buildEngineeringContextResolution({ projectId, structuredSignals, photoGrouping, cadReadiness: signalAwareCADReadiness, generatedAt });
+119:  const contextAwareCADReadiness = buildCADReadinessMetadata({ projectId, structuredSignals, contextResolution });
+120:  const workspaceInput = { projectId, cadReadiness: contextAwareCADReadiness, photoGrouping, structuredSignals, contextResolution };
+121:  const workspace = buildEngineeringIntelligenceWorkspace(workspaceInput);
+132:    snapshots: [],
+134:    regenerationPlans: [],
+136:    regenerationPlanV1: null,
+137:    snapshotDelta: null,
+138:    cadReadiness: contextAwareCADReadiness,
+140:    structuredSignals,
+141:    contextResolution,
+145:      'Workspace remains registry/empty-state and does not synthesize project evidence, graph edges, snapshots, invalidation history, or CAD metadata.',
+150:function emptyProjectHydration(projectId: string) {
+151:  const cadReadiness = buildCADReadinessMetadata({ projectId });
+152:  const photoGrouping = buildDeterministicPhotoGrouping({ projectId, readinessFlags: cadReadiness.flags, generatedAt: new Date(0).toISOString() });
+153:  const generatedAt = new Date(0).toISOString();
+154:  const structuredSignals = buildStructuredEngineeringSignals({ projectId, photoGrouping, cadReadiness, generatedAt });
+155:  const signalAwareCADReadiness = buildCADReadinessMetadata({ projectId, structuredSignals });
+156:  const contextResolution = buildEngineeringContextResolution({ projectId, structuredSignals, photoGrouping, cadReadiness: signalAwareCADReadiness, generatedAt });
+157:  const contextAwareCADReadiness = buildCADReadinessMetadata({ projectId, structuredSignals, contextResolution });
+158:  const workspaceInput = { projectId, cadReadiness: contextAwareCADReadiness, photoGrouping, structuredSignals, contextResolution };
+159:  const workspace = buildEngineeringIntelligenceWorkspace(workspaceInput);
+170:    snapshots: [],
+172:    regenerationPlans: [],
+174:    regenerationPlanV1: null,
+175:    snapshotDelta: null,
+176:    cadReadiness: contextAwareCADReadiness,
+178:    structuredSignals,
+179:    contextResolution,
+
+===== app/admin/engineering-intelligence/components.tsx =====
+40:import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
+53:  stale: 'border-orange-500/30 bg-orange-500/10 text-orange-300',
+67:  conflicting: 'border-red-500/30 bg-red-500/10 text-red-300',
+68:  unresolved: 'border-slate-500/30 bg-slate-500/10 text-slate-400',
+71:function cx(...values: Array<string | false | null | undefined>) {
+77:function isRecord(value: unknown): value is Record<string, unknown> {
+78:  return typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date) && !(value instanceof Map) && !(value instanceof Set);
+81:function safeRenderValue(value: WorkspaceRenderable, fallback = 'not_loaded'): string {
+82:  if (value === null || value === undefined) return fallback;
+83:  if (typeof value === 'string') return value.length ? value : fallback;
+84:  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : fallback;
+87:  if (value instanceof Date) return Number.isNaN(value.getTime()) ? fallback : value.toISOString();
+92:    const keys = Object.keys(value).sort().slice(0, 5);
+95:  return fallback;
+98:function renderMetadataValue(value: WorkspaceRenderable, fallback = 'not_loaded'): string {
+99:  return safeRenderValue(value, fallback);
+102:function normalizeWorkspaceDisplay(value: WorkspaceRenderable): string[] {
+110:function workspaceKey(prefix: string, value: WorkspaceRenderable, index: number): string {
+114:function safeArray<T>(value: T[] | readonly T[] | null | undefined): T[];
+115:function safeArray<T = unknown>(value: unknown): T[];
+116:function safeArray<T = unknown>(value: unknown): T[] {
+120:function collectionSize(value: unknown): number {
+126:function summarizeContinuityChain(chain: unknown): string {
+131:function summarizeSequenceBreakpoint(point: unknown): string {
+136:function summarizeMetadataCompleteness(score: unknown): string {
+142:function summarizeSnapshotHash(snapshot: unknown): string {
+143:  if (!isRecord(snapshot)) return renderMetadataValue(snapshot);
+144:  return `${renderMetadataValue(snapshot.snapshotId, 'snapshot')}:${renderMetadataValue(snapshot.snapshotHash, 'hash_not_loaded')}`;
+147:function summarizeTransitionEvent(event: unknown): string {
+152:function summarizeDiffEntry(entry: unknown): string {
+157:function metadataCompletenessLabel(entry: unknown): string {
+162:export function WorkspaceShell({ model, title, subtitle, children }: {
+183:            <div className="mt-3 text-slate-400">No OCR/CV/CAD/autonomous-regeneration runtime path is exposed here.</div>
+193:export function RouteNav({ routes }: { routes: EngineeringIntelligenceRouteSummary[] }) {
+216:export function ProjectIntelligencePicker({ projects, loadState }: { projects: Project[]; loadState: 'loaded' | 'unauthenticated' | 'load_error' }) {
+249:                <div>Updated: {project.updatedAt ? new Date(project.updatedAt).toLocaleString() : 'not_loaded'}</div>
+260:        'Selecting a project only loads deterministic evidence, graph, snapshot, invalidation, regeneration-plan metadata, and CAD-readiness metadata; it does not run OCR, CV, CAD generation, or autonomous regeneration.',
+266:export function Panel({ title, eyebrow, children }: { title: string; eyebrow?: string; children: React.ReactNode }) {
+278:function EmptyState({ children, state = 'not_loaded' }: { children: React.ReactNode; state?: string }) {
+287:function StatusPill({ value }: { value: WorkspaceRenderable }) {
+292:function TokenList({ values, limit = 6 }: { values: WorkspaceRenderable; limit?: number }) {
+306:export function ProjectHydrationSummary({ hydration }: { hydration: HydratedProjectEngineeringState }) {
+312:        <Metric label="Snapshots" value={collectionSize(hydration.snapshots)} />
+313:        <Metric label="Regeneration plans" value={collectionSize(hydration.regenerationPlans)} />
+325:          <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">State graph</div>
+326:          <div className="mt-2 break-all font-mono text-violet-300">{safeRenderValue(hydration.stateGraph?.graphId)}</div>
+343:export function CADReadinessWorkspace({ readiness }: { readiness: CADReadinessMetadataModel }) {
+361:            <div className="mt-3 text-slate-500">Unresolved assumptions</div><TokenList values={flag.unresolvedAssumptions} />
+362:            <div className="mt-3 text-slate-500">Default policy fallbacks</div><TokenList values={flag.defaultPolicyFallbacks} />
+373:export function PhotoGroupingWorkspace({ grouping }: { grouping: DeterministicPhotoGroupingModel }) {
+469:export function FieldEvidenceOrchestrationWorkspace({ orchestration }: { orchestration: FieldEvidenceOrchestrationModel }) {
+505:export function EngineeringHealthDashboard({ health }: { health: EngineeringHealthDashboardModel }) {
+508:    ['Stale outputs', health.staleOutputs, 'outputs requiring review or planned regeneration'],
+511:    ['Regeneration candidates', health.regenerationCandidates, 'planned candidates only'],
+513:    ['Snapshots', health.snapshotVersions, 'durable state versions'],
+514:    ['Graph edges', health.dependencyGraphEdges, `${health.dependencyGraphNodes} graph nodes`],
+536:export function CanonicalEvidenceWorkspace({ groups }: { groups: CanonicalEvidenceWorkspaceGroupModel[] }) {
+602:                    <LineageBox title="Stale impacts" values={[...item.staleStateImpactStateIds, ...item.staleImpactReasons]} />
+603:                    <LineageBox title="Regeneration candidates" values={item.regenerationCandidateIds} />
+625:function LineageBox({ title, values }: { title: WorkspaceRenderable; values: WorkspaceRenderable }) {
+630:export function RequirementWorkspace({ requirements }: { requirements: RequirementWorkspaceItemModel[] }) {
+645:                <td className="p-3"><TokenList values={req.staleImpactStateIds} /></td>
+655:export function DecisionWorkspace({ decisions }: { decisions: DecisionWorkspaceItemModel[] }) {
+661:            <div className="flex items-start justify-between gap-3"><div><h3 className="font-bold text-white">{safeRenderValue(decision.label)}</h3><div className="mt-1 font-mono text-[10px] text-slate-500">{safeRenderValue(decision.decisionType)}</div></div><StatusPill value={safeArray(decision.fallbackDefaultChain).length ? 'partial' : 'not_loaded'} /></div>
+664:            <div className="mt-3 text-xs text-slate-400">Dependency lineage</div><TokenList values={decision.dependencyLineageIds} />
+665:            <div className="mt-3 text-xs text-slate-400">Fallback/default chain</div><TokenList values={decision.fallbackDefaultChain} />
+666:            <div className="mt-3 text-xs text-slate-400">Affected outputs / stale impact</div><TokenList values={[...decision.affectedOutputIds, ...decision.staleImpactStateIds]} />
+674:export function StaleInvalidationWorkspace({ stale }: { stale: StaleInvalidationWorkspaceModel }) {
+678:        <Metric label="Stale outputs" value={collectionSize(stale.staleOutputIds)} />
+679:        <Metric label="Invalidation chains" value={collectionSize(stale.invalidationChains)} />
+680:        <Metric label="Preserved outputs" value={collectionSize(stale.preservedOutputIds)} />
+681:        <Metric label="Regeneration scope" value={collectionSize(stale.regenerationScopeIds)} />
+684:        <ListBox title="Current stale outputs" values={stale.staleOutputIds} />
+685:        <ListBox title="Preserved outputs" values={stale.preservedOutputIds} />
+686:        <ListBox title="Regeneration candidates" values={stale.regenerationScopeIds} />
+687:        <ListBox title="No autonomous action" values={['metadata visualization only', 'operator-controlled regeneration required']} />
+690:        {safeArray(stale.invalidationChains).length ? safeArray(stale.invalidationChains).map(chain => (
+694:              <StatusPill value="stale" />
+707:      <DeterministicNotes notes={stale.deterministicNotes} />
+712:export function SnapshotTimelineWorkspace({ snapshots }: { snapshots: SnapshotTimelineWorkspaceModel }) {
+714:    <Panel title="Snapshot Timeline Workspace" eyebrow="State snapshots">
+716:        <Metric label="Snapshots" value={collectionSize(snapshots.snapshots)} />
+717:        <Metric label="Diffs" value={collectionSize(snapshots.diffs)} />
+718:        <Metric label="Transition events" value={collectionSize(snapshots.transitionHistory?.transitionEvents)} />
+719:        <Metric label="Latest" value={snapshots.latestSnapshotId ? 'loaded' : 'no_snapshot'} />
+722:        {safeArray(snapshots.snapshots).length ? safeArray(snapshots.snapshots).map(snapshot => (
+723:          <div key={snapshot.snapshotId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+726:                <div className="font-semibold text-white">{safeRenderValue(snapshot.snapshotId)}</div>
+727:                <div className="mt-1 text-xs text-slate-400">Generated: {safeRenderValue(snapshot.generatedAt)}</div>
+728:                <div className="mt-1 text-xs text-slate-500">Previous: {safeRenderValue(snapshot.previousSnapshotId, 'none')} · Superseded by: {safeRenderValue(snapshot.supersededBySnapshotId, 'none')}</div>
+730:              <div className="break-all font-mono text-xs text-sky-300">{safeRenderValue(snapshot.snapshotHash)}</div>
+733:              <Metric label="State refs" value={collectionSize(snapshot.stateRefs)} />
+734:              <Metric label="Valid" value={collectionSize(snapshot.validStateIds)} />
+735:              <Metric label="Stale" value={collectionSize(snapshot.staleStateIds)} />
+736:              <Metric label="Transitions" value={collectionSize(snapshot.transitionEventIds)} />
+739:              <LineageBox title="Valid outputs" values={snapshot.validStateIds} />
+740:              <LineageBox title="Stale outputs" values={snapshot.staleStateIds} />
+741:              <LineageBox title="Transition lineage" values={snapshot.transitionEventIds} />
+742:              <LineageBox title="Snapshot notes" values={snapshot.deterministicNotes} />
+745:        )) : <EmptyState state="no_snapshot">No persistent snapshot set is loaded.</EmptyState>}
+748:        <ListBox title="Snapshot hashes" values={safeArray(snapshots.snapshotHashes).map(summarizeSnapshotHash)} />
+749:        <ListBox title="Timeline transitions" values={safeArray(snapshots.transitionHistory?.transitionEvents).map(summarizeTransitionEvent)} />
+750:        <ListBox title="Diff entries" values={safeArray(snapshots.diffs).flatMap(diff => isRecord(diff) ? safeArray(diff.entries).map(summarizeDiffEntry) : [renderMetadataValue(diff)])} />
+751:        <ListBox title="Timeline stale states" values={snapshots.timeline?.staleStateIds ?? []} />
+753:      <DeterministicNotes notes={snapshots.deterministicNotes} />
+758:export function DependencyGraphViewer({ graph }: { graph: DependencyGraphViewerModel }) {
+759:  const nodes = safeArray(graph.nodes).slice(0, 36);
+762:  const positioned = nodes.map((node, index) => ({ ...node, x: 80 + (index % 4) * 220, y: 60 + Math.floor(index / 4) * 92 }));
+765:      {graph.sourceGraph === null && (
+766:        <div className="mb-4"><EmptyState state="no_graph">No persistent graph snapshot is loaded; graph preview is showing registry-visible requirement and decision nodes only.</EmptyState></div>
+769:        <svg width={width} height={height} role="img" aria-label="Deterministic engineering dependency graph preview">
+770:          {safeArray(graph.edges).slice(0, 60).map(edge => {
+771:            const source = positioned.find(node => node.nodeId === edge.sourceNodeId);
+772:            const target = positioned.find(node => node.nodeId === edge.targetNodeId);
+778:              <rect x="-64" y="-28" width="128" height="56" rx="12" fill={node.status === 'stale' || node.status === 'invalidated' ? 'rgba(124,45,18,0.95)' : 'rgba(15,23,42,0.95)'} stroke={node.status === 'not_loaded' ? 'rgba(148,163,184,0.45)' : node.status === 'current' ? 'rgba(56,189,248,0.45)' : 'rgba(251,146,60,0.6)'} />
+786:      <div className="mt-4 grid gap-3 md:grid-cols-2"><Metric label="Graph nodes" value={collectionSize(graph.nodes)} /><Metric label="Graph edges" value={collectionSize(graph.edges)} /></div>
+787:      <DeterministicNotes notes={graph.deterministicNotes} />
+792:export function RegenerationPlanningWorkspace({ planning }: { planning: RegenerationPlanningWorkspaceModel }) {
+795:      <div className="grid gap-3 md:grid-cols-4"><Metric label="Plans" value={collectionSize(planning.plans)} /><Metric label="Candidates" value={collectionSize(planning.regenerationCandidates)} /><Metric label="Blocked deps" value={collectionSize(planning.blockedDependencies)} /><Metric label="Preserved" value={collectionSize(planning.preservedOutputIds)} /></div>
+796:      <div className="mt-4 grid gap-4 md:grid-cols-2"><ListBox title="Regeneration order" values={planning.regenerationOrder} /><ListBox title="Blocked dependencies" values={planning.blockedDependencies} /><ListBox title="Preserved outputs" values={planning.preservedOutputIds} /><ListBox title="Candidates" values={planning.regenerationCandidates} /></div>
+802:export function InvalidationPropagationWorkspace({ model }: { model: InvalidationPropagationWorkspaceModel }) {
+808:        <Metric label="Propagation paths" value={collectionSize(model.dependencyTraversalPaths)} />
+816:        <ListBox title="Impacted snapshots" values={model.impactedSnapshots} />
+819:      <div className="mt-4"><ListBox title="Dependency traversal paths" values={model.dependencyTraversalPaths} /></div>
+825:export function DependencyTraversalWorkspace({ model }: { model: DependencyTraversalWorkspaceModel }) {
+847:export function RegenerationPlanningV1Workspace({ model }: { model: RegenerationPlanningV1WorkspaceModel }) {
+849:    <Panel title="Regeneration Planning V1 Workspace" eyebrow="No regeneration executed">
+853:        <Metric label="Dependency chains" value={collectionSize(model.dependencyChains)} />
+857:        <ListBox title="Would need regeneration/review" values={model.wouldRegenerate} />
+862:        <ListBox title="Dependency chains" values={model.dependencyChains} />
+869:export function SnapshotDeltaWorkspace({ model }: { model: SnapshotDeltaWorkspaceModel }) {
+874:        <Metric label="Stale introduced" value={collectionSize(model.staleOutputsIntroduced)} />
+875:        <Metric label="Graph delta" value={collectionSize(model.dependencyGraphDelta)} />
+882:        <ListBox title="Stale outputs introduced" values={model.staleOutputsIntroduced} />
+886:        <ListBox title="Dependency graph delta" values={model.dependencyGraphDelta} />
+893:export function AffectedOutputsWorkspace({ model }: { model: AffectedOutputsWorkspaceModel }) {
+905:            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between"><div className="break-all font-mono text-white">{safeRenderValue(output.outputId)}</div><StatusPill value={output.staleClass} /></div>
+923:export function StaleStateTimelineWorkspace({ model }: { model: StaleStateTimelineWorkspaceModel }) {
+928:        <Metric label="Stale states" value={collectionSize(model.staleStateIds)} />
+935:            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between"><div className="break-all font-mono text-white">{safeRenderValue(event.eventId)}</div><StatusPill value={event.staleClass} /></div>
+936:            <div className="mt-1 text-sky-300">Snapshot: {safeRenderValue(event.snapshotId)}</div>
+940:              <LineageBox title="Dependencies" values={event.dependencyNodeIds} />
+954:export function StructuredEngineeringSignalsWorkspace({ model }: { model: StructuredEngineeringSignalsWorkspaceModel }) {
+974:                <div className="flex flex-wrap gap-2"><StatusPill value={signal.status} /><StatusPill value={signal.confidence.band} /></div>
+984:                <LineageBox title="Stale impacts" values={signal.staleImpacts} />
+988:                <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Confidence factors · score {safeRenderValue(signal.confidence.score)}</div>
+989:                <TokenList values={signal.confidence.factors} limit={10} />
+1005:export function SignalProvenanceWorkspace({ model }: { model: SignalProvenanceWorkspaceModel }) {
+1022:              <LineageBox title="Dependency nodes" values={chain.dependencyNodes} />
+1033:export function SignalDependencyGraphWorkspace({ model }: { model: SignalDependencyGraphWorkspaceModel }) {
+1037:  const positioned = nodes.map((node, index) => ({ ...node, x: 80 + (index % 4) * 220, y: 60 + Math.floor(index / 4) * 92 }));
+1039:    <Panel title="Signal Dependency Graph" eyebrow="Signal dependency metadata">
+1040:      <div className="grid gap-3 md:grid-cols-2"><Metric label="Signal graph nodes" value={collectionSize(model.nodes)} /><Metric label="Signal graph edges" value={collectionSize(model.edges)} /></div>
+1042:        <svg width={width} height={height} role="img" aria-label="Structured engineering signal dependency graph preview">
+1044:            const source = positioned.find(node => node.nodeId === edge.sourceNodeId);
+1045:            const target = positioned.find(node => node.nodeId === edge.targetNodeId);
+1064:export function SignalRequirementMappingWorkspace({ model }: { model: SignalRequirementMappingWorkspaceModel }) {
+1089:export function SignalConfidenceWorkspace({ model }: { model: SignalConfidenceWorkspaceModel }) {
+1092:      <div className="grid gap-3 md:grid-cols-3"><Metric label="Confidence rows" value={collectionSize(model.confidenceBreakdown)} /><Metric label="AI confidence" value="not_used" /><Metric label="Scoring" value="metadata_rules" /></div>
+1094:        {safeArray(model.confidenceBreakdown).map(entry => (
+1107:export function SignalBlockingWorkspace({ model }: { model: SignalBlockingWorkspaceModel }) {
+1124:export function SignalInvalidationWorkspace({ model }: { model: SignalInvalidationWorkspaceModel }) {
+1127:      <div className="grid gap-3 md:grid-cols-3"><Metric label="Invalidation rows" value={collectionSize(model.invalidations)} /><Metric label="Propagation" value="metadata_only" /><Metric label="Auto regeneration" value="disabled" /></div>
+1132:            <div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Invalidated by" values={entry.invalidatedBy} /><LineageBox title="Stale impacts" values={entry.staleImpacts} /></div>
+1141:export function SignalStaleImpactsWorkspace({ model }: { model: SignalStaleImpactsWorkspaceModel }) {
+1144:      <div className="grid gap-3 md:grid-cols-3"><Metric label="Stale impact rows" value={collectionSize(model.staleImpacts)} /><Metric label="Fallback rows" value={collectionSize(model.fallbackParticipation)} /><Metric label="CAD certainty" value="not implied" /></div>
+1148:          {safeArray(model.staleImpacts).length ? safeArray(model.staleImpacts).map(entry => (
+1151:              <div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Stale classes" values={entry.staleClasses} /><LineageBox title="Invalidated by" values={entry.invalidatedBy} /></div>
+1153:          )) : <EmptyState state="no_stale_signal_impacts">No stale signal impact metadata is loaded.</EmptyState>}
+1157:          {safeArray(model.fallbackParticipation).length ? safeArray(model.fallbackParticipation).map(entry => (
+1160:              <div className="mt-2 text-amber-300">{safeRenderValue(entry.fallback)}</div>
+1163:          )) : <EmptyState state="no_fallback_participation">No fallback participation rows are loaded.</EmptyState>}
+1172:export function ResolvedEngineeringContextsWorkspace({ model }: { model: ResolvedEngineeringContextsWorkspaceModel }) {
+1180:        <Metric label="Conflicting" value={collectionSize(model.conflicting)} />
+1182:        <Metric label="Unresolved" value={collectionSize(model.unresolved)} />
+1191:                <div className="flex flex-wrap gap-2"><StatusPill value={context.status} /><StatusPill value={context.confidence.band} /></div>
+1200:                <LineageBox title="CAD readiness" values={context.cadReadinessImpacts} />
+1204:              <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Rank {safeRenderValue(context.confidence.rank)} · score {safeRenderValue(context.confidence.score)}</div><TokenList values={context.confidence.factors} limit={10} /></div>
+1215:export function ContextArbitrationWorkspace({ model }: { model: ContextArbitrationWorkspaceModel }) {
+1225:export function ContextConflictInspectorWorkspace({ model }: { model: ContextConflictInspectorWorkspaceModel }) {
+1226:  return <Panel title="Context Conflict Inspector" eyebrow="Conflict preservation"><div className="grid gap-3 md:grid-cols-3"><Metric label="Conflicts" value={collectionSize(model.conflicts)} /><Metric label="Contexts" value={collectionSize(model.conflictingContextIds)} /><Metric label="Signals" value={collectionSize(model.competingSignalIds)} /></div><div className="mt-4 grid gap-3 lg:grid-cols-2">{safeArray(model.conflicts).length ? safeArray(model.conflicts).map(conflict => <div key={conflict.conflictId} className="rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-xs"><div className="break-all font-mono text-white">{safeRenderValue(conflict.conflictId)}</div><div className="mt-2"><StatusPill value={conflict.domain} /></div><div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Competing contexts" values={conflict.competingContextIds} /><LineageBox title="Competing signals" values={conflict.competingSignalIds} /><LineageBox title="Reasons" values={conflict.conflictReasoning} /><LineageBox title="Policy" values={[conflict.deterministicResolutionPolicy]} /></div></div>) : <EmptyState state="no_context_conflicts">No context conflicts are loaded.</EmptyState>}</div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+1229:export function FallbackChainInspectorWorkspace({ model }: { model: FallbackChainInspectorWorkspaceModel }) {
+1230:  return <Panel title="Fallback Chain Inspector" eyebrow="Fallback visibility"><div className="grid gap-3 md:grid-cols-3"><Metric label="Fallback rows" value={collectionSize(model.fallbackParticipation)} /><Metric label="Dependent contexts" value={collectionSize(model.fallbackDependentContextIds)} /><Metric label="Penalty rows" value={collectionSize(model.fallbackConfidencePenalties)} /></div><div className="mt-4 grid gap-4 lg:grid-cols-2"><ListBox title="Fallback-dependent contexts" values={model.fallbackDependentContextIds} /><div className="space-y-3">{safeArray(model.fallbackParticipation).map(entry => <div key={`${entry.contextId}:${entry.fallback}`} className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-xs"><div className="break-all font-mono text-white">{safeRenderValue(entry.contextId)}</div><div className="mt-2 text-amber-300">{safeRenderValue(entry.fallback)}</div><p className="mt-2 text-slate-300">{safeRenderValue(entry.deterministicReason)}</p></div>)}</div></div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+1233:export function ContextProvenanceWorkspace({ model }: { model: ContextProvenanceWorkspaceModel }) {
+1234:  return <Panel title="Context Provenance" eyebrow="Signal-to-context lineage"><div className="grid gap-3 md:grid-cols-4"><Metric label="Chains" value={collectionSize(model.chains)} /><Metric label="Evidence" value="canonical_ids" /><Metric label="Metadata" value="grouping_traversal" /><Metric label="Hashing" value="stable" /></div><div className="mt-4 space-y-3">{safeArray(model.chains).length ? safeArray(model.chains).map(chain => <div key={chain.contextId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs"><div className="break-all font-mono text-white">{safeRenderValue(chain.contextId)}</div><div className="mt-3 grid gap-2 md:grid-cols-3"><LineageBox title="Signals" values={chain.sourceSignalIds} /><LineageBox title="Evidence" values={chain.sourceEvidenceIds} /><LineageBox title="Metadata" values={chain.sourceMetadataIds} /><LineageBox title="Dependencies" values={chain.dependencyLineage} /><LineageBox title="Invalidations" values={chain.invalidationLineage} /></div><div className="mt-3 break-all font-mono text-[10px] text-slate-500">hash: {safeRenderValue(chain.deterministicHash)}</div></div>) : <EmptyState state="no_context_provenance">No context provenance chains are available.</EmptyState>}</div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+1237:export function ContextDependencyGraphWorkspace({ model }: { model: ContextDependencyGraphWorkspaceModel }) {
+1238:  return <Panel title="Context Dependency Graph" eyebrow="Context dependency metadata"><div className="grid gap-3 md:grid-cols-2"><Metric label="Context graph nodes" value={collectionSize(model.nodes)} /><Metric label="Context graph edges" value={collectionSize(model.edges)} /></div><div className="mt-4 grid gap-3 lg:grid-cols-2"><ListBox title="Nodes" values={safeArray(model.nodes).slice(0, 30).map(node => `${node.nodeType}:${node.nodeId}:${node.status}`)} /><ListBox title="Edges" values={safeArray(model.edges).slice(0, 30).map(edge => `${edge.edgeType}:${edge.sourceNodeId}->${edge.targetNodeId}`)} /></div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+1241:export function ContextConfidenceBreakdownWorkspace({ model }: { model: ContextConfidenceBreakdownWorkspaceModel }) {
+1242:  return <Panel title="Context Confidence Breakdown" eyebrow="Deterministic context scoring"><div className="grid gap-3 md:grid-cols-3"><Metric label="Rows" value={collectionSize(model.confidenceBreakdown)} /><Metric label="AI confidence" value="not_used" /><Metric label="Penalties" value="visible" /></div><div className="mt-4 grid gap-3 lg:grid-cols-2">{safeArray(model.confidenceBreakdown).map(entry => <div key={entry.contextId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs"><div className="flex items-center justify-between gap-3"><span className="break-all font-mono text-white">{safeRenderValue(entry.contextId)}</span><StatusPill value={entry.status} /></div><div className="mt-2 flex flex-wrap items-center gap-2 text-slate-300"><span>Rank:</span><span className="font-mono text-sky-300">{safeRenderValue(entry.rank)}</span><span>Score:</span><span className="font-mono text-sky-300">{safeRenderValue(entry.score)}</span><StatusPill value={entry.band} /></div><div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Factors" values={entry.factors} /><LineageBox title="Penalties" values={entry.penalties} /></div></div>)}</div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+1245:export function ContextInvalidationsWorkspace({ model }: { model: ContextInvalidationsWorkspaceModel }) {
+1246:  return <Panel title="Context Invalidations" eyebrow="Invalidation lineage"><div className="grid gap-3 md:grid-cols-3"><Metric label="Rows" value={collectionSize(model.invalidations)} /><Metric label="Propagation" value="metadata_only" /><Metric label="Regeneration" value="not_triggered" /></div><div className="mt-4 grid gap-3 lg:grid-cols-2">{safeArray(model.invalidations).length ? safeArray(model.invalidations).map(entry => <div key={entry.contextId} className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-4 text-xs"><div className="break-all font-mono text-white">{safeRenderValue(entry.contextId)}</div><div className="mt-3 grid gap-2 md:grid-cols-3"><LineageBox title="Invalidations" values={entry.invalidationLineage} /><LineageBox title="Stale impacts" values={entry.staleImpactPropagation} /><LineageBox title="Regeneration participation" values={entry.regenerationParticipation} /></div></div>) : <EmptyState state="no_context_invalidations">No context invalidation rows are loaded.</EmptyState>}</div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+1249:export function ContextStaleImpactsWorkspace({ model }: { model: ContextStaleImpactsWorkspaceModel }) {
+1250:  return <Panel title="Context Stale Impacts" eyebrow="Readiness mappings"><div className="grid gap-3 md:grid-cols-3"><Metric label="Stale rows" value={collectionSize(model.staleImpacts)} /><Metric label="CAD mappings" value={collectionSize(model.cadReadinessMappings)} /><Metric label="Truth source" value="signals_only" /></div><div className="mt-4 grid gap-4 lg:grid-cols-2"><div className="space-y-3">{safeArray(model.staleImpacts).map(entry => <div key={entry.contextId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs"><div className="break-all font-mono text-white">{safeRenderValue(entry.contextId)}</div><div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Stale classes" values={entry.staleClasses} /><LineageBox title="Invalidated by" values={entry.invalidatedBy} /></div></div>)}</div><div className="space-y-3">{safeArray(model.cadReadinessMappings).map(mapping => <div key={mapping.flagId} className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-4 text-xs"><div className="font-mono text-white">{safeRenderValue(mapping.flagId)}</div><div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Contexts" values={mapping.contextIds} /><LineageBox title="Conflicting" values={mapping.conflictingContextIds} /><LineageBox title="Blocked" values={mapping.blockedContextIds} /><LineageBox title="Unresolved" values={mapping.unresolvedContextIds} /></div></div>)}</div></div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+1253:export function ContextResolutionTimelineWorkspace({ model }: { model: ContextResolutionTimelineWorkspaceModel }) {
+1257:export function AuditGuardWorkspace({ audit }: { audit: AuditGuardWorkspaceModel }) {
+1260:      <div className="grid gap-3 md:grid-cols-5"><Metric label="All guards" value={collectionSize(audit.guards)} /><Metric label="Topology" value={collectionSize(audit.topologyViolations)} /><Metric label="Provenance" value={collectionSize(audit.provenanceFailures)} /><Metric label="Orphans" value={collectionSize(audit.orphanedNodeFailures)} /><Metric label="Stale lineage" value={collectionSize(audit.staleLineageFailures)} /></div>
+1274:function Metric({ label, value }: { label: WorkspaceRenderable; value: WorkspaceRenderable }) {
+1278:function ListBox({ title, values }: { title: WorkspaceRenderable; values: WorkspaceRenderable }) {
+1282:function DeterministicNotes({ notes }: { notes: WorkspaceRenderable }) {
+

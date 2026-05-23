@@ -1,0 +1,571 @@
+--- context components ---
+81:function safeRenderValue(value: WorkspaceRenderable, fallback = 'not_loaded'): string {
+99:  return safeRenderValue(value, fallback);
+104:  if (Array.isArray(value)) return value.map(item => renderMetadataValue(item));
+105:  if (value instanceof Set) return Array.from(value).map(item => renderMetadataValue(item));
+106:  if (value instanceof Map) return Array.from(value.entries()).map(([key, item]) => `${renderMetadataValue(key)}:${renderMetadataValue(item)}`);
+111:  return `${prefix}:${index}:${safeRenderValue(value, 'empty')}`;
+176:            <h1 className="text-3xl font-black tracking-tight text-white">{safeRenderValue(title, 'Engineering Intelligence')}</h1>
+177:            <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-300">{safeRenderValue(subtitle)}</p>
+181:            <div className="mt-2 font-mono text-sky-300">{safeRenderValue(model.generatedFrom)}</div>
+182:            <div className="mt-1">Project: {safeRenderValue(model.projectId, 'not selected')}</div>
+196:      {routes.map(route => {
+204:              <div className="text-sm font-bold text-white">{safeRenderValue(route.label)}</div>
+207:            <div className="mt-2 text-xs leading-5 text-slate-400">{safeRenderValue(route.deterministicPurpose)}</div>
+236:          {projects.map(project => (
+241:                  <h3 className="font-bold text-white">{safeRenderValue(project.name)}</h3>
+242:                  <div className="mt-1 break-all font-mono text-[10px] text-sky-300">{safeRenderValue(project.id)}</div>
+244:                <StatusPill value={project.status ?? 'not_loaded'} />
+247:                <div>System: {safeRenderValue(project.systemType)}</div>
+252:              <div className="mt-3 text-xs text-slate-500">{safeRenderValue(project.address, 'No project address stored.')}</div>
+270:        {eyebrow && <div className="mb-1 text-[10px] font-black uppercase tracking-[0.24em] text-sky-300">{safeRenderValue(eyebrow)}</div>}
+271:        <h2 className="text-lg font-black text-white">{safeRenderValue(title, 'Panel')}</h2>
+281:      <div className="mb-2 inline-flex rounded-full border border-slate-500/30 bg-slate-500/10 px-2 py-0.5 font-mono text-[10px] text-slate-300">{safeRenderValue(state)}</div>
+287:function StatusPill({ value }: { value: WorkspaceRenderable }) {
+288:  const label = safeRenderValue(value);
+292:function TokenList({ values, limit = 6 }: { values: WorkspaceRenderable; limit?: number }) {
+299:      {visible.map((value, index) => <span key={workspaceKey('token', value, index)} className="rounded-md bg-white/5 px-2 py-1 font-mono text-[10px] text-slate-300">{value}</span>)}
+318:          <div className="mt-2 break-all font-mono text-sky-300">{safeRenderValue(hydration.canonicalSurveyId)}</div>
+322:          <div className="mt-2 break-all font-mono text-orange-300">{safeRenderValue(hydration.invalidationResult?.resultId)}</div>
+326:          <div className="mt-2 break-all font-mono text-violet-300">{safeRenderValue(hydration.stateGraph?.graphId)}</div>
+353:        {safeArray(readiness.flags).map(flag => (
+355:            <div className="flex items-center justify-between gap-3"><span className="font-mono text-white">{safeRenderValue(flag.flagId)}</span><StatusPill value={flag.status} /></div>
+356:            <p className="mt-2 leading-5 text-slate-400">{safeRenderValue(flag.deterministicReason)}</p>
+357:            <div className="mt-3 text-slate-500">Satisfied categories</div><TokenList values={flag.satisfiedCategories} />
+358:            <div className="mt-3 text-slate-500">Missing categories</div><TokenList values={flag.missingCategories} />
+359:            <div className="mt-3 text-slate-500">Explicit survey signals</div><TokenList values={flag.explicitSurveySignals} />
+360:            <div className="mt-3 text-slate-500">Structured engineering signals</div><TokenList values={flag.structuredSignalIds} />
+361:            <div className="mt-3 text-slate-500">Unresolved assumptions</div><TokenList values={flag.unresolvedAssumptions} />
+362:            <div className="mt-3 text-slate-500">Default policy fallbacks</div><TokenList values={flag.defaultPolicyFallbacks} />
+366:      <div className="mt-4"><ListBox title="Prohibited runtime behavior" values={readiness.prohibitedRuntimeBehavior} /></div>
+397:                {safeArray(grouping.surveyTraversalOrder).slice(0, 40).map(item => (
+399:                    <td className="p-3 font-mono text-sky-300">{safeRenderValue(item.sequenceIndex)}</td>
+400:                    <td className="p-3"><div className="break-all font-mono text-white">{safeRenderValue(item.evidenceId)}</div><div className="mt-1 break-all text-slate-500">{safeRenderValue(item.filename, 'no_filename')}</div></td>
+401:                    <td className="p-3"><div className="font-mono text-slate-200">{safeRenderValue(item.category)}</div><div className="mt-1 text-slate-500">submitted: {safeRenderValue(item.submittedCategory)}</div></td>
+402:                    <td className="p-3 text-slate-400"><div>capture: {safeRenderValue(item.captureTimestamp)}</div><div>upload: {safeRenderValue(item.uploadTimestamp)}</div></td>
+403:                    <td className="p-3 text-slate-400"><div>score: {safeRenderValue(item.metadataCompletenessScore)}</div><div>{safeRenderValue(item.widthPx, 'w?')}×{safeRenderValue(item.heightPx, 'h?')} · {safeRenderValue(item.orientation, 'orientation?')}</div></td>
+414:          {safeArray(grouping.surveyTraversalSegments).length ? safeArray(grouping.surveyTraversalSegments).map(segment => (
+416:              <div className="flex items-center justify-between gap-3"><span className="font-mono text-white">{safeRenderValue(segment.segmentId)}</span><StatusPill value={segment.continuityConfidence} /></div>
+417:              <p className="mt-2 text-slate-400">{safeRenderValue(segment.probableMovementContext)}</p>
+419:                <LineageBox title="Evidence chain" values={segment.evidenceIds} />
+420:                <LineageBox title="Categories" values={segment.dominantCategories} />
+421:                <LineageBox title="Boundary reasons" values={segment.clusterBoundaryReasons} />
+422:                <LineageBox title="Transition reasons" values={segment.clusterTransitionReasons} />
+429:          {safeArray(grouping.evidenceClusters).length ? safeArray(grouping.evidenceClusters).map(cluster => (
+431:              <div className="flex items-center justify-between gap-3"><span className="font-mono text-white">{safeRenderValue(cluster.clusterId)}</span><StatusPill value={cluster.clusterConfidence} /></div>
+432:              <div className="mt-1 text-sky-300">{safeRenderValue(cluster.label)} · sequence {safeRenderValue(cluster.sequenceStart)}-{safeRenderValue(cluster.sequenceEnd)}</div>
+434:                <LineageBox title="Evidence ids" values={cluster.evidenceIds} />
+435:                <LineageBox title="Readiness context" values={cluster.readinessPromotionContext} />
+442:        <ListBox title="Photo continuity chains" values={safeArray(grouping.photoContinuityChains).map(summarizeContinuityChain)} />
+443:        <ListBox title="Sequence breakpoints" values={safeArray(grouping.sequenceBreakpoints).map(summarizeSequenceBreakpoint)} />
+444:        <ListBox title="Detached structure groups" values={safeArray(grouping.detachedStructureGroups).map(group => isRecord(group) ? group.clusterId : group)} />
+445:        <ListBox title="Ground/trench candidate groups" values={safeArray(grouping.groundMountCandidateGroups).map(group => isRecord(group) ? group.clusterId : group)} />
+448:        {safeArray(grouping.groupedCADReadiness).map(context => (
+450:            <div className="flex items-center justify-between gap-3"><span className="font-bold text-white">{safeRenderValue(context.label)}</span><StatusPill value={context.status} /></div>
+451:            <p className="mt-2 text-slate-300">{safeRenderValue(context.deterministicReason)}</p>
+453:              <LineageBox title="Readiness flags" values={context.linkedReadinessFlagIds} />
+454:              <LineageBox title="Supporting clusters" values={context.supportingClusterIds} />
+455:              <LineageBox title="Blocking reasons" values={safeArray(context.blockingReasons).length ? context.blockingReasons : ['none']} />
+461:        <ListBox title="Metadata completeness scores" values={safeArray(grouping.metadataCompletenessScores).map(summarizeMetadataCompleteness)} />
+462:        <ListBox title="Prohibited runtime behavior" values={grouping.prohibitedRuntimeBehavior} />
+484:            {orchestration.steps.map(step => (
+490:                <td className="p-3"><TokenList values={safeArray(step.captureItems).map(item => isRecord(item) ? item.canonicalCategory : item)} limit={10} /></td>
+497:        {orchestration.groups.map(group => <ListBox key={group.groupId} title={group.label} values={group.canonicalCategories} />)}
+499:      <div className="mt-4"><ListBox title="Prohibited runtime behavior" values={orchestration.prohibitedRuntimeBehavior} /></div>
+519:        {cards.map(([label, value, sub]) => (
+520:          <div key={safeRenderValue(label)} className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+521:            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{safeRenderValue(label)}</div>
+522:            <div className="mt-2 text-3xl font-black text-white">{safeRenderValue(value)}</div>
+523:            <div className="mt-1 text-xs text-slate-400">{safeRenderValue(sub)}</div>
+528:        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-sm text-slate-300">Evidence completeness: <span className="font-mono text-sky-300">{safeRenderValue(health.evidenceCompleteness)}</span></div>
+529:        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-sm text-slate-300">Requirement satisfaction: <span className="font-mono text-sky-300">{safeRenderValue(health.requirementSatisfaction)}</span></div>
+540:        {groups.map(group => (
+544:                <h3 className="font-bold text-white">{safeRenderValue(group.label)}</h3>
+545:                <p className="mt-1 text-xs leading-5 text-slate-400">{safeRenderValue(group.description)}</p>
+552:                <TokenList values={group.requirementIds} />
+556:                <TokenList values={collectionSize(group.missingRequirementIds) ? group.missingRequirementIds : ['none']} />
+561:              <TokenList values={collectionSize(group.fieldQualitySignals) ? group.fieldQualitySignals : ['no group-level quality warnings']} limit={10} />
+567:                  {group.readinessFlags.map(flag => (
+569:                      <div className="flex items-center justify-between gap-2"><span className="font-mono text-white">{safeRenderValue(flag.flagId)}</span><StatusPill value={flag.status} /></div>
+577:              {collectionSize(group.canonicalEvidenceItems) ? group.canonicalEvidenceItems.map(item => (
+581:                      <div className="break-all font-mono text-xs text-white">{safeRenderValue(item.canonicalEvidenceId)}</div>
+582:                      <div className="mt-1 text-xs text-sky-300">{item.evidenceCategoryLabel} · {safeRenderValue(item.category)}</div>
+584:                    <div className="flex flex-wrap gap-2"><StatusPill value={item.status} /><StatusPill value={item.readinessImpact} /></div>
+587:                    <div>Representative: <span className="font-mono text-slate-200">{safeRenderValue(item.canonicalRepresentativeStatus)}</span></div>
+588:                    <div>Duplicate group size: <span className="text-slate-200">{safeRenderValue(item.duplicateCollapseCount)}</span></div>
+589:                    <div>Confidence: <span className="text-slate-200">{safeRenderValue(item.evidenceConfidence)}</span></div>
+590:                    <div>Evidence source: <span className="text-slate-200">{safeRenderValue(item.evidenceSource)}</span></div>
+591:                    <div>Truth source: <span className="text-slate-200">{safeRenderValue(item.evidenceTruthSource)}</span></div>
+594:                  <p className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3 text-xs leading-5 text-slate-300">{safeRenderValue(item.canonicalSelectionReason)}</p>
+596:                    <LineageBox title="Origin surveys" values={item.originatingSurveyIds} />
+597:                    <LineageBox title="Provenance / state refs" values={item.provenance} />
+598:                    <LineageBox title="Requirements" values={item.linkedRequirementIds} />
+599:                    <LineageBox title="Decisions" values={item.linkedDecisionIds} />
+600:                    <LineageBox title="Outputs / document sections" values={[...item.linkedOutputIds, ...item.linkedDocumentSectionIds]} />
+601:                    <LineageBox title="Graph nodes / edges" values={[...item.linkedGraphNodeIds, ...item.linkedGraphEdgeIds]} />
+602:                    <LineageBox title="Stale impacts" values={[...item.staleStateImpactStateIds, ...item.staleImpactReasons]} />
+603:                    <LineageBox title="Regeneration candidates" values={item.regenerationCandidateIds} />
+609:                        {safeArray(item.metadataCompleteness).length ? safeArray(item.metadataCompleteness).map((entry, index) => <span key={workspaceKey('metadata-completeness', isRecord(entry) ? entry.field : entry, index)} className={`rounded-full px-2 py-1 text-[10px] ${entry.present ? 'bg-emerald-500/10 text-emerald-300' : 'bg-orange-500/10 text-orange-300'}`}>{metadataCompletenessLabel(entry)}</span>) : <span className="text-xs text-slate-500">not_loaded</span>}
+612:                    <LineageBox title="Field-quality signals" values={collectionSize(item.fieldQualitySignals) ? item.fieldQualitySignals : ['no row-level quality warnings']} />
+625:function LineageBox({ title, values }: { title: WorkspaceRenderable; values: WorkspaceRenderable }) {
+627:  return <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3"><div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">{safeRenderValue(title, 'Metadata')}</div><TokenList values={normalized.length ? normalized : ['none']} limit={8} /></div>;
+639:            {requirements.map(req => (
+641:                <td className="p-3"><div className="font-semibold text-white">{safeRenderValue(req.label)}</div><div className="mt-1 text-slate-500">{safeRenderValue(req.requirementId)}</div><div className="mt-1 max-w-md text-slate-400">{safeRenderValue(req.description)}</div></td>
+642:                <td className="p-3"><StatusPill value={req.status} /></td>
+643:                <td className="p-3"><TokenList values={req.linkedEvidenceIds} /></td>
+644:                <td className="p-3"><TokenList values={req.linkedDecisionIds} /></td>
+645:                <td className="p-3"><TokenList values={req.staleImpactStateIds} /></td>
+659:        {decisions.map(decision => (
+661:            <div className="flex items-start justify-between gap-3"><div><h3 className="font-bold text-white">{safeRenderValue(decision.label)}</h3><div className="mt-1 font-mono text-[10px] text-slate-500">{safeRenderValue(decision.decisionType)}</div></div><StatusPill value={safeArray(decision.fallbackDefaultChain).length ? 'partial' : 'not_loaded'} /></div>
+662:            <div className="mt-3 grid gap-2 text-xs text-slate-400 md:grid-cols-2"><div>Category: {safeRenderValue(decision.category)}</div><div>Domain: {safeRenderValue(decision.domain)}</div></div>
+663:            <div className="mt-3 text-xs text-slate-400">Governing rules</div><TokenList values={decision.governingRuleIds} />
+664:            <div className="mt-3 text-xs text-slate-400">Dependency lineage</div><TokenList values={decision.dependencyLineageIds} />
+665:            <div className="mt-3 text-xs text-slate-400">Fallback/default chain</div><TokenList values={decision.fallbackDefaultChain} />
+666:            <div className="mt-3 text-xs text-slate-400">Affected outputs / stale impact</div><TokenList values={[...decision.affectedOutputIds, ...decision.staleImpactStateIds]} />
+684:        <ListBox title="Current stale outputs" values={stale.staleOutputIds} />
+685:        <ListBox title="Preserved outputs" values={stale.preservedOutputIds} />
+686:        <ListBox title="Regeneration candidates" values={stale.regenerationScopeIds} />
+687:        <ListBox title="No autonomous action" values={['metadata visualization only', 'operator-controlled regeneration required']} />
+690:        {safeArray(stale.invalidationChains).length ? safeArray(stale.invalidationChains).map(chain => (
+693:              <div className="font-mono text-orange-300">{safeRenderValue(chain.eventId)}</div>
+694:              <StatusPill value="stale" />
+696:            <div className="mt-1 break-all text-white">Impacted state: {safeRenderValue(chain.stateId)}</div>
+697:            <p className="mt-2 text-slate-400">{safeRenderValue(chain.reason)}</p>
+699:              <LineageBox title="Triggering evidence" values={chain.triggeringEvidenceIds} />
+700:              <LineageBox title="Triggering requirements" values={chain.triggeringRequirementIds} />
+701:              <LineageBox title="Triggering decisions" values={chain.triggeringDecisionIds} />
+702:              <LineageBox title="Downstream states" values={chain.downstreamStateIds} />
+722:        {safeArray(snapshots.snapshots).length ? safeArray(snapshots.snapshots).map(snapshot => (
+726:                <div className="font-semibold text-white">{safeRenderValue(snapshot.snapshotId)}</div>
+727:                <div className="mt-1 text-xs text-slate-400">Generated: {safeRenderValue(snapshot.generatedAt)}</div>
+728:                <div className="mt-1 text-xs text-slate-500">Previous: {safeRenderValue(snapshot.previousSnapshotId, 'none')} · Superseded by: {safeRenderValue(snapshot.supersededBySnapshotId, 'none')}</div>
+730:              <div className="break-all font-mono text-xs text-sky-300">{safeRenderValue(snapshot.snapshotHash)}</div>
+739:              <LineageBox title="Valid outputs" values={snapshot.validStateIds} />
+740:              <LineageBox title="Stale outputs" values={snapshot.staleStateIds} />
+741:              <LineageBox title="Transition lineage" values={snapshot.transitionEventIds} />
+742:              <LineageBox title="Snapshot notes" values={snapshot.deterministicNotes} />
+748:        <ListBox title="Snapshot hashes" values={safeArray(snapshots.snapshotHashes).map(summarizeSnapshotHash)} />
+749:        <ListBox title="Timeline transitions" values={safeArray(snapshots.transitionHistory?.transitionEvents).map(summarizeTransitionEvent)} />
+750:        <ListBox title="Diff entries" values={safeArray(snapshots.diffs).flatMap(diff => isRecord(diff) ? safeArray(diff.entries).map(summarizeDiffEntry) : [renderMetadataValue(diff)])} />
+751:        <ListBox title="Timeline stale states" values={snapshots.timeline?.staleStateIds ?? []} />
+762:  const positioned = nodes.map((node, index) => ({ ...node, x: 80 + (index % 4) * 220, y: 60 + Math.floor(index / 4) * 92 }));
+770:          {safeArray(graph.edges).slice(0, 60).map(edge => {
+776:          {positioned.map(node => (
+779:              <text x="0" y="-3" textAnchor="middle" fill="white" fontSize="10" fontWeight="700">{safeRenderValue(node.label).slice(0, 18)}</text>
+780:              <text x="0" y="11" textAnchor="middle" fill="rgb(125,211,252)" fontSize="8">{safeRenderValue(node.nodeType)}</text>
+781:              <text x="0" y="23" textAnchor="middle" fill="rgb(148,163,184)" fontSize="7">{safeRenderValue(node.status)}</text>
+796:      <div className="mt-4 grid gap-4 md:grid-cols-2"><ListBox title="Regeneration order" values={planning.regenerationOrder} /><ListBox title="Blocked dependencies" values={planning.blockedDependencies} /><ListBox title="Preserved outputs" values={planning.preservedOutputIds} /><ListBox title="Candidates" values={planning.regenerationCandidates} /></div>
+812:        <ListBox title="Invalidation sources" values={model.invalidationSources} />
+813:        <ListBox title="Impacted outputs" values={model.impactedOutputs} />
+814:        <ListBox title="Impacted document sections" values={model.impactedDocumentSections} />
+815:        <ListBox title="Impacted render contexts" values={model.impactedRenderContexts} />
+816:        <ListBox title="Impacted snapshots" values={model.impactedSnapshots} />
+817:        <ListBox title="Cycle protection" values={model.cycleProtectionIndicators} />
+819:      <div className="mt-4"><ListBox title="Dependency traversal paths" values={model.dependencyTraversalPaths} /></div>
+835:        <ListBox title="Downstream lineage" values={model.downstreamLineage} />
+836:        <ListBox title="Propagation depth" values={model.propagationDepths} />
+837:        <ListBox title="Missing nodes" values={model.missingNodeIds} />
+838:        <ListBox title="Duplicate edges suppressed" values={model.duplicateEdgeIdsSuppressed} />
+839:        <ListBox title="Cycle protection" values={model.cycleProtectionIndicators} />
+840:        <ListBox title="Traversal seeds" values={model.traversal?.seedNodeIds ?? []} />
+857:        <ListBox title="Would need regeneration/review" values={model.wouldRegenerate} />
+858:        <ListBox title="Why" values={model.whyRegenerate} />
+859:        <ListBox title="Upstream triggers" values={model.upstreamTriggers} />
+860:        <ListBox title="Impacted outputs" values={model.impactedOutputs} />
+861:        <ListBox title="Missing evidence" values={model.missingEvidence} />
+862:        <ListBox title="Dependency chains" values={model.dependencyChains} />
+879:        <ListBox title="Added evidence" values={model.addedEvidence} />
+880:        <ListBox title="Removed evidence" values={model.removedEvidence} />
+881:        <ListBox title="Changed decisions" values={model.changedDecisions} />
+882:        <ListBox title="Stale outputs introduced" values={model.staleOutputsIntroduced} />
+883:        <ListBox title="Regenerated candidates" values={model.regeneratedCandidates} />
+884:        <ListBox title="Invalidation causes" values={model.invalidationCauses} />
+885:        <ListBox title="Changed CAD readiness" values={model.changedCADReadiness} />
+886:        <ListBox title="Dependency graph delta" values={model.dependencyGraphDelta} />
+903:        {safeArray(model.outputs).length ? safeArray(model.outputs).slice(0, 24).map(output => (
+905:            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between"><div className="break-all font-mono text-white">{safeRenderValue(output.outputId)}</div><StatusPill value={output.staleClass} /></div>
+906:            <p className="mt-2 text-slate-300">{safeRenderValue(output.deterministicReason)}</p>
+908:              <LineageBox title="Document sections" values={output.affectedDocumentSectionIds} />
+909:              <LineageBox title="Render contexts" values={output.affectedRenderContextIds} />
+910:              <LineageBox title="Snapshots" values={output.affectedSnapshotIds} />
+911:              <LineageBox title="Decisions" values={output.invalidatedDecisionIds} />
+912:              <LineageBox title="Missing evidence" values={output.missingEvidenceIds} />
+913:              <LineageBox title="Propagation paths" values={output.propagationPathIds} />
+933:        {safeArray(model.events).length ? safeArray(model.events).slice(0, 24).map(event => (
+935:            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between"><div className="break-all font-mono text-white">{safeRenderValue(event.eventId)}</div><StatusPill value={event.staleClass} /></div>
+936:            <div className="mt-1 text-sky-300">Snapshot: {safeRenderValue(event.snapshotId)}</div>
+937:            <p className="mt-2 text-slate-300">{safeRenderValue(event.deterministicReason)}</p>
+939:              <LineageBox title="States" values={event.stateIds} />
+940:              <LineageBox title="Dependencies" values={event.dependencyNodeIds} />
+941:              <LineageBox title="Evidence" values={event.canonicalEvidenceIds} />
+942:              <LineageBox title="Requirements" values={event.requirementIds} />
+943:              <LineageBox title="Decisions" values={event.decisionIds} />
+967:          {signals.map(signal => (
+971:                  <div className="break-all font-mono text-white">{safeRenderValue(signal.id)}</div>
+972:                  <div className="mt-1 text-sky-300">{safeRenderValue(signal.signal_type)} · {safeRenderValue(signal.category)}</div>
+974:                <div className="flex flex-wrap gap-2"><StatusPill value={signal.status} /><StatusPill value={signal.confidence.band} /></div>
+976:              <p className="mt-3 leading-5 text-slate-300">{safeRenderValue(signal.explanation)}</p>
+978:                <LineageBox title="Source evidence" values={signal.sourceEvidenceIds} />
+979:                <LineageBox title="Source photos" values={signal.sourcePhotoIds} />
+980:                <LineageBox title="Source surveys" values={signal.sourceSurveyIds} />
+981:                <LineageBox title="Derived from" values={signal.derivedFrom} />
+982:                <LineageBox title="Requirement impacts" values={signal.requirementImpacts} />
+983:                <LineageBox title="CAD impacts" values={signal.cadImpacts} />
+984:                <LineageBox title="Stale impacts" values={signal.staleImpacts} />
+985:                <LineageBox title="Invalidated by" values={signal.invalidatedBy} />
+988:                <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Confidence factors · score {safeRenderValue(signal.confidence.score)}</div>
+989:                <TokenList values={signal.confidence.factors} limit={10} />
+992:                <LineageBox title="Blocking reasons" values={signal.blockingReasons} />
+993:                <LineageBox title="Partial reasons" values={signal.partialReasons} />
+995:              <div className="mt-3 break-all font-mono text-[10px] text-slate-500">hash: {safeRenderValue(signal.deterministicHash)}</div>
+1015:        {safeArray(model.chains).length ? safeArray(model.chains).map(chain => (
+1017:            <div className="break-all font-mono text-white">{safeRenderValue(chain.signalId)}</div>
+1019:              <LineageBox title="Evidence" values={chain.sourceEvidenceIds} />
+1020:              <LineageBox title="Surveys" values={chain.sourceSurveyIds} />
+1021:              <LineageBox title="Derived from" values={chain.derivedFrom} />
+1022:              <LineageBox title="Dependency nodes" values={chain.dependencyNodes} />
+1024:            <div className="mt-3 break-all font-mono text-[10px] text-slate-500">deterministic hash: {safeRenderValue(chain.deterministicHash)}</div>
+1037:  const positioned = nodes.map((node, index) => ({ ...node, x: 80 + (index % 4) * 220, y: 60 + Math.floor(index / 4) * 92 }));
+1043:          {safeArray(model.edges).slice(0, 80).map(edge => {
+1049:          {positioned.map(node => (
+1052:              <text x="0" y="-3" textAnchor="middle" fill="white" fontSize="10" fontWeight="700">{safeRenderValue(node.label).slice(0, 18)}</text>
+1053:              <text x="0" y="11" textAnchor="middle" fill="rgb(216,180,254)" fontSize="8">{safeRenderValue(node.nodeType)}</text>
+1054:              <text x="0" y="23" textAnchor="middle" fill="rgb(148,163,184)" fontSize="7">{safeRenderValue(node.status)}</text>
+1072:            {safeArray(model.mappings).map(mapping => (
+1074:                <td className="p-3 font-mono text-white">{safeRenderValue(mapping.requirementId)}</td>
+1075:                <td className="p-3"><TokenList values={mapping.signalIds} /></td>
+1076:                <td className="p-3"><TokenList values={mapping.confirmedSignalIds} /></td>
+1077:                <td className="p-3"><TokenList values={mapping.partialSignalIds} /></td>
+1078:                <td className="p-3"><TokenList values={mapping.missingSignalIds} /></td>
+1094:        {safeArray(model.confidenceBreakdown).map(entry => (
+1096:            <div className="flex items-center justify-between gap-3"><span className="break-all font-mono text-white">{safeRenderValue(entry.signalId)}</span><StatusPill value={entry.status} /></div>
+1097:            <div className="mt-2 flex items-center gap-2 text-slate-300"><span>Score:</span><span className="font-mono text-sky-300">{safeRenderValue(entry.score)}</span><StatusPill value={entry.band} /></div>
+1098:            <div className="mt-3"><TokenList values={entry.factors} limit={10} /></div>
+1112:        {safeArray(model.blockingReasons).map(entry => (
+1114:            <div className="flex items-center justify-between gap-3"><span className="break-all font-mono text-white">{safeRenderValue(entry.signalId)}</span><StatusPill value={entry.status} /></div>
+1115:            <div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Blocking reasons" values={entry.blockingReasons} /><LineageBox title="Partial reasons" values={entry.partialReasons} /></div>
+1129:        {safeArray(model.invalidations).map(entry => (
+1131:            <div className="break-all font-mono text-white">{safeRenderValue(entry.signalId)}</div>
+1132:            <div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Invalidated by" values={entry.invalidatedBy} /><LineageBox title="Stale impacts" values={entry.staleImpacts} /></div>
+1148:          {safeArray(model.staleImpacts).length ? safeArray(model.staleImpacts).map(entry => (
+1150:              <div className="break-all font-mono text-white">{safeRenderValue(entry.signalId)}</div>
+1151:              <div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Stale classes" values={entry.staleClasses} /><LineageBox title="Invalidated by" values={entry.invalidatedBy} /></div>
+1157:          {safeArray(model.fallbackParticipation).length ? safeArray(model.fallbackParticipation).map(entry => (
+1159:              <div className="break-all font-mono text-white">{safeRenderValue(entry.signalId)}</div>
+1160:              <div className="mt-2 text-amber-300">{safeRenderValue(entry.fallback)}</div>
+1161:              <p className="mt-2 text-slate-300">{safeRenderValue(entry.deterministicReason)}</p>
+1172:export function ResolvedEngineeringContextsWorkspace({ model }: { model: ResolvedEngineeringContextsWorkspaceModel }) {
+1187:          {contexts.map(context => (
+1190:                <div><div className="break-all font-mono text-white">{safeRenderValue(context.id)}</div><div className="mt-1 text-sky-300">{safeRenderValue(context.contextType)} · {safeRenderValue(context.domain)}</div></div>
+1191:                <div className="flex flex-wrap gap-2"><StatusPill value={context.status} /><StatusPill value={context.confidence.band} /></div>
+1193:              <p className="mt-3 leading-5 text-slate-300">{safeRenderValue(context.rankingReason)}</p>
+
+--- regeneration planner ---
+import type { SelectiveRegenerationPlan } from '@/lib/engineeringStateInvalidation';
+import type { EngineeringStaleClass } from './propagationGraph';
+import type { EngineeringInvalidationPropagationResult } from './invalidationEngine';
+import { sortBy, sortText } from './propagationGraph';
+
+export interface EngineeringRegenerationPlanV1Input {
+  planId: string;
+  propagation: EngineeringInvalidationPropagationResult;
+  existingPlans?: SelectiveRegenerationPlan[] | null;
+}
+
+export interface EngineeringRegenerationPlanItemV1 {
+  itemId: string;
+  staleClass: EngineeringStaleClass;
+  sourceTriggerId: string | null;
+  sourceTriggerType: string | null;
+  affectedStateId: string;
+  affectedOutputId: string;
+  affectedOutputType: string;
+  affectedDocumentSectionIds: string[];
+  affectedRenderContextIds: string[];
+  affectedSnapshotIds: string[];
+  invalidatedDecisionIds: string[];
+  missingEvidenceIds: string[];
+  blockedDependencyIds: string[];
+  propagationPathIds: string[];
+  deterministicReason: string;
+}
+
+export interface EngineeringRegenerationPlanV1 {
+  planId: string;
+  triggerId: string | null;
+  planItems: EngineeringRegenerationPlanItemV1[];
+  regenerationCandidateIds: string[];
+  preservedOutputIds: string[];
+  blockedDependencyIds: string[];
+  missingEvidenceIds: string[];
+  reviewRequiredIds: string[];
+  propagationPathIds: string[];
+  deterministicHash: string;
+  deterministicNotes: string[];
+}
+
+export function buildEngineeringRegenerationPlanV1(input: EngineeringRegenerationPlanV1Input): EngineeringRegenerationPlanV1 {
+  const existingPlans = input.existingPlans ?? [];
+  const existingBlocked = sortText(existingPlans.flatMap(plan => plan.blockedRegenerationDependencies));
+  const planItems = sortBy(input.propagation.affectedOutputs.map(output => ({
+    itemId: `${input.planId}:item:${output.stateId}`,
+    staleClass: output.staleClass,
+    sourceTriggerId: input.propagation.triggerId,
+    sourceTriggerType: input.propagation.triggerType,
+    affectedStateId: output.stateId,
+    affectedOutputId: output.outputId,
+    affectedOutputType: output.outputType,
+    affectedDocumentSectionIds: output.affectedDocumentSectionIds,
+    affectedRenderContextIds: output.affectedRenderContextIds,
+    affectedSnapshotIds: output.affectedSnapshotIds,
+    invalidatedDecisionIds: output.invalidatedDecisionIds,
+    missingEvidenceIds: output.missingEvidenceIds,
+    blockedDependencyIds: sortText([...existingBlocked, ...output.dependencyNodeIds.filter(id => input.propagation.cycleProtection.missingNodeIds.includes(id))]),
+    propagationPathIds: output.propagationPathIds,
+    deterministicReason: `Metadata-only regeneration planning candidate for ${output.stateId}; no output is regenerated automatically.`,
+  } satisfies EngineeringRegenerationPlanItemV1)), item => item.itemId);
+  const reviewRequiredIds = sortText(planItems
+    .filter(item => item.staleClass === 'BLOCKED' || item.staleClass === 'REQUIRES_REVIEW' || item.missingEvidenceIds.length > 0 || input.propagation.cycleProtection.cycleDetected)
+    .map(item => item.affectedStateId));
+  const preservedOutputIds = sortText([
+    ...input.propagation.preservedStateIds,
+    ...existingPlans.flatMap(plan => plan.unchangedPreservedOutputs),
+  ]);
+  const blockedDependencyIds = sortText([...existingBlocked, ...planItems.flatMap(item => item.blockedDependencyIds)]);
+  const missingEvidenceIds = sortText([...input.propagation.missingEvidenceIds, ...planItems.flatMap(item => item.missingEvidenceIds)]);
+  const propagationPathIds = sortText(planItems.flatMap(item => item.propagationPathIds));
+  const deterministicHash = stableHash([
+    input.planId,
+    input.propagation.triggerId,
+    ...planItems.map(item => item.itemId),
+    ...preservedOutputIds,
+    ...blockedDependencyIds,
+    ...missingEvidenceIds,
+    ...reviewRequiredIds,
+    ...propagationPathIds,
+  ]);
+
+  return {
+    planId: input.planId,
+    triggerId: input.propagation.triggerId,
+    planItems,
+    regenerationCandidateIds: sortText(planItems.map(item => item.affectedStateId)),
+    preservedOutputIds,
+    blockedDependencyIds,
+    missingEvidenceIds,
+    reviewRequiredIds,
+    propagationPathIds,
+    deterministicHash,
+    deterministicNotes: [
+      'Regeneration Planning V1 is scoped metadata only and never regenerates documents, CAD, BOM, SLD, render contexts, or calculations.',
+      'Every candidate is derived from V1 propagation output and existing selective-regeneration plan metadata when supplied.',
+      'Review-required candidates remain explicit; the planner does not silently downgrade or upgrade stale classes.',
+    ],
+  };
+}
+
+function stableHash(values: Array<string | number | boolean | null | undefined>): string {
+  const payload = sortText(Array.from(new Set(values.filter(value => value !== null && value !== undefined && String(value).length > 0).map(String)))).join('\n');
+  let hash = 5381;
+  for (let i = 0; i < payload.length; i += 1) {
+    hash = ((hash << 5) + hash) ^ payload.charCodeAt(i);
+    hash >>>= 0;
+  }
+  return `regeneration-plan-v1-${hash.toString(16).padStart(8, '0')}`;
+}
+
+--- snapshot delta ---
+import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
+import type { EngineeringStateSnapshot, EngineeringStateSnapshotDiff, PersistentEngineeringStateGraph } from '@/lib/engineeringStateInvalidation';
+import type { EngineeringInvalidationPropagationResult } from './invalidationEngine';
+import type { EngineeringStaleClass } from './propagationGraph';
+import { sortBy, sortText } from './propagationGraph';
+
+export type EngineeringSnapshotDeltaTypeV1 =
+  | 'added_evidence'
+  | 'removed_evidence'
+  | 'changed_decision'
+  | 'stale_output_introduced'
+  | 'regenerated_candidate'
+  | 'invalidation_cause'
+  | 'changed_cad_readiness'
+  | 'dependency_graph_delta'
+  | 'snapshot_not_loaded';
+
+export interface EngineeringSnapshotDeltaEntryV1 {
+  deltaId: string;
+  deltaType: EngineeringSnapshotDeltaTypeV1;
+  previousId: string | null;
+  nextId: string | null;
+  previousStatus: string | null;
+  nextStatus: string | null;
+  relatedEvidenceIds: string[];
+  requirementIds: string[];
+  decisionIds: string[];
+  stateIds: string[];
+  outputIds: string[];
+  graphNodeIds: string[];
+  graphEdgeIds: string[];
+  staleClass: EngineeringStaleClass;
+  deterministicReason: string;
+}
+
+export interface EngineeringSnapshotDeltaV1 {
+  deltaId: string;
+  previousSnapshotId: string | null;
+  nextSnapshotId: string | null;
+  entries: EngineeringSnapshotDeltaEntryV1[];
+  addedEvidenceIds: string[];
+  removedEvidenceIds: string[];
+  changedDecisionIds: string[];
+  staleOutputsIntroduced: string[];
+  regeneratedCandidateIds: string[];
+  invalidationCauseIds: string[];
+  changedCADReadinessIds: string[];
+  dependencyGraphDeltaIds: string[];
+  deterministicHash: string;
+  deterministicNotes: string[];
+}
+
+export interface BuildEngineeringSnapshotDeltaV1Input {
+  deltaId: string;
+  previousSnapshot?: EngineeringStateSnapshot | null;
+  nextSnapshot?: EngineeringStateSnapshot | null;
+  snapshotDiffs?: EngineeringStateSnapshotDiff[] | null;
+  previousGraph?: PersistentEngineeringStateGraph | null;
+  nextGraph?: PersistentEngineeringStateGraph | null;
+  propagation?: EngineeringInvalidationPropagationResult | null;
+  cadReadiness?: CADReadinessMetadataModel | null;
+}
+
+export function buildEngineeringSnapshotDeltaV1(input: BuildEngineeringSnapshotDeltaV1Input): EngineeringSnapshotDeltaV1 {
+  const previous = input.previousSnapshot ?? null;
+  const next = input.nextSnapshot ?? null;
+  if (!previous || !next) return notLoadedDelta(input.deltaId, previous, next);
+
+  const previousEvidence = new Set(previous.stateRefs.flatMap(ref => ref.canonicalEvidenceIds));
+  const nextEvidence = new Set(next.stateRefs.flatMap(ref => ref.canonicalEvidenceIds));
+  const addedEvidenceIds = sortText([...nextEvidence].filter(id => !previousEvidence.has(id)));
+  const removedEvidenceIds = sortText([...previousEvidence].filter(id => !nextEvidence.has(id)));
+  const previousDecisions = new Set(previous.stateRefs.flatMap(ref => ref.decisionIds));
+  const nextDecisions = new Set(next.stateRefs.flatMap(ref => ref.decisionIds));
+  const changedDecisionIds = sortText([...new Set([...previousDecisions, ...nextDecisions])].filter(id => !previousDecisions.has(id) || !nextDecisions.has(id)));
+  const staleOutputsIntroduced = sortText(next.staleStateIds.filter(id => !previous.staleStateIds.includes(id)));
+  const regeneratedCandidateIds = sortText(input.propagation?.affectedStateIds ?? []);
+  const invalidationCauseIds = sortText(input.propagation?.sourceNodeIds ?? []);
+  const changedCADReadinessIds = sortText((input.cadReadiness?.flags ?? []).filter(flag => flag.status === 'partial' || flag.status === 'blocked').map(flag => flag.flagId));
+  const dependencyGraphDeltaIds = computeDependencyGraphDeltaIds(input.previousGraph ?? null, input.nextGraph ?? null);
+  const entries = sortBy([
+    ...addedEvidenceIds.map(id => entry(input.deltaId, 'added_evidence', null, id, [id], [], [], [], [], [], [], 'PARTIAL', `Canonical evidence ${id} appears in the next snapshot only.`)),
+    ...removedEvidenceIds.map(id => entry(input.deltaId, 'removed_evidence', id, null, [id], [], [], [], [], [], [], 'REQUIRES_REVIEW', `Canonical evidence ${id} appears in the previous snapshot only.`)),
+    ...changedDecisionIds.map(id => entry(input.deltaId, 'changed_decision', id, id, [], [], [id], [], [], [], [], 'REQUIRES_REVIEW', `Decision ${id} membership changed between snapshots.`)),
+    ...staleOutputsIntroduced.map(id => entry(input.deltaId, 'stale_output_introduced', id, id, [], [], [], [id], [id], [], [], 'STALE', `State ${id} is stale in the next snapshot and was not stale in the previous snapshot.`)),
+    ...regeneratedCandidateIds.map(id => entry(input.deltaId, 'regenerated_candidate', id, id, [], [], [], [id], [id], [], [], 'INVALIDATED', `State ${id} is a metadata-only regeneration candidate from propagation output.`)),
+    ...invalidationCauseIds.map(id => entry(input.deltaId, 'invalidation_cause', id, id, id.startsWith('canonicalEvidence:') ? [id.replace('canonicalEvidence:', '')] : [], id.startsWith('requirement:') ? [id.replace('requirement:', '')] : [], [], [], [], [id], [], 'REQUIRES_REVIEW', `Graph node ${id} is an explicit invalidation source.`)),
+    ...changedCADReadinessIds.map(id => entry(input.deltaId, 'changed_cad_readiness', id, id, [], [], [], [], [], [id], [], 'PARTIAL', `CAD readiness flag ${id} is partial or blocked metadata and may affect review scope.`)),
+    ...dependencyGraphDeltaIds.map(id => entry(input.deltaId, 'dependency_graph_delta', id, id, [], [], [], [], [], [id], [id], 'REQUIRES_REVIEW', `Dependency graph structural id ${id} differs between compared graph metadata.`)),
+  ], item => item.deltaId);
+  const deterministicHash = stableHash([
+    input.deltaId,
+    previous.snapshotId,
+    next.snapshotId,
+    ...entries.map(item => item.deltaId),
+  ]);
+
+  return {
+    deltaId: input.deltaId,
+    previousSnapshotId: previous.snapshotId,
+    nextSnapshotId: next.snapshotId,
+    entries,
+    addedEvidenceIds,
+    removedEvidenceIds,
+    changedDecisionIds,
+    staleOutputsIntroduced,
+    regeneratedCandidateIds,
+    invalidationCauseIds,
+    changedCADReadinessIds,
+    dependencyGraphDeltaIds,
+    deterministicHash,
+    deterministicNotes: [
+      'Snapshot Delta V1 compares explicit snapshot refs, graph ids, propagation metadata, and CAD-readiness metadata only.',
+      'No semantic diffing, OCR, image-byte inspection, geometry inference, CAD generation, or autonomous engineering evaluation is performed.',
+      'Missing previous/next snapshots are reported as not-loaded metadata rather than synthesized.',
+    ],
+  };
+}
+
+function notLoadedDelta(deltaId: string, previous: EngineeringStateSnapshot | null, next: EngineeringStateSnapshot | null): EngineeringSnapshotDeltaV1 {
+  const entries = [entry(deltaId, 'snapshot_not_loaded', previous?.snapshotId ?? null, next?.snapshotId ?? null, [], [], [], [], [], [], [], 'NOT_LOADED', 'Previous or next snapshot was not supplied; delta remains explicit not_loaded metadata.')];
+  return {
+    deltaId,
+    previousSnapshotId: previous?.snapshotId ?? null,
+    nextSnapshotId: next?.snapshotId ?? null,
+    entries,
+    addedEvidenceIds: [],
+    removedEvidenceIds: [],
+    changedDecisionIds: [],
+    staleOutputsIntroduced: [],
+    regeneratedCandidateIds: [],
+    invalidationCauseIds: [],
+    changedCADReadinessIds: [],
+    dependencyGraphDeltaIds: [],
+    deterministicHash: stableHash([deltaId, 'snapshot_not_loaded', previous?.snapshotId, next?.snapshotId]),
+    deterministicNotes: ['Snapshot Delta V1 could not compare because one or both snapshots were not loaded.'],
+  };
+}
+
+function computeDependencyGraphDeltaIds(previous: PersistentEngineeringStateGraph | null, next: PersistentEngineeringStateGraph | null): string[] {
+  if (!previous || !next) return [];
+  const previousIds = new Set([...previous.nodes.map(node => node.nodeId), ...previous.edges.map(edge => edge.edgeId)]);
+  const nextIds = new Set([...next.nodes.map(node => node.nodeId), ...next.edges.map(edge => edge.edgeId)]);
+  return sortText([...new Set([...previousIds, ...nextIds])].filter(id => !previousIds.has(id) || !nextIds.has(id)));
+}
+
+function entry(
+  baseId: string,
+  deltaType: EngineeringSnapshotDeltaTypeV1,
+  previousId: string | null,
+  nextId: string | null,
+  relatedEvidenceIds: string[],
+  requirementIds: string[],
+  decisionIds: string[],
+  stateIds: string[],
+  outputIds: string[],
+  graphNodeIds: string[],
+  graphEdgeIds: string[],
+  staleClass: EngineeringStaleClass,
+  deterministicReason: string,
+): EngineeringSnapshotDeltaEntryV1 {
+  const idKey = nextId ?? previousId ?? 'not_loaded';
+  return {
+    deltaId: `${baseId}:${deltaType}:${sanitize(idKey)}`,
+    deltaType,
+    previousId,
+    nextId,
+    previousStatus: previousId ? 'loaded' : null,
+    nextStatus: nextId ? 'loaded' : null,
+    relatedEvidenceIds: sortText(relatedEvidenceIds),
+    requirementIds: sortText(requirementIds),
+    decisionIds: sortText(decisionIds),
+    stateIds: sortText(stateIds),
+    outputIds: sortText(outputIds),
+    graphNodeIds: sortText(graphNodeIds),
+    graphEdgeIds: sortText(graphEdgeIds),
+    staleClass,
+    deterministicReason,
+  };
+}
+
+function stableHash(values: Array<string | number | boolean | null | undefined>): string {
+  const payload = sortText(Array.from(new Set(values.filter(value => value !== null && value !== undefined && String(value).length > 0).map(String)))).join('\n');
+  let hash = 5381;
+  for (let i = 0; i < payload.length; i += 1) {
+    hash = ((hash << 5) + hash) ^ payload.charCodeAt(i);
+    hash >>>= 0;
+  }
+  return `snapshot-delta-v1-${hash.toString(16).padStart(8, '0')}`;
+}
+
+function sanitize(value: string): string {
+  return value.replace(/[^a-zA-Z0-9:_-]/g, '_').slice(0, 96);
+}

@@ -276,43 +276,47 @@ function buildCADMappings(contexts: ResolvedEngineeringContext[]): EngineeringCo
 
 function buildDependencyGraph(contexts: ResolvedEngineeringContext[]): EngineeringContextResolutionSummary['dependencyGraph'] {
   const nodes = new Map<string, EngineeringContextResolutionSummary['dependencyGraph']['nodes'][number]>();
-  const edges: EngineeringContextResolutionSummary['dependencyGraph']['edges'] = [];
+  const edges = new Map<string, EngineeringContextResolutionSummary['dependencyGraph']['edges'][number]>();
+  const putEdge = (edge: EngineeringContextResolutionSummary['dependencyGraph']['edges'][number]) => {
+    if (!edges.has(edge.edgeId)) edges.set(edge.edgeId, edge);
+  };
+
   for (const context of contexts) {
     nodes.set(context.id, { nodeId: context.id, label: context.contextType, nodeType: 'context', status: context.status });
     for (const signalId of [...context.sourceSignalIds, ...context.supportingSignalIds]) {
       nodes.set(signalId, { nodeId: signalId, label: signalId, nodeType: 'signal', status: 'source' });
-      edges.push({ edgeId: `edge:${signalId}->${context.id}`, sourceNodeId: signalId, targetNodeId: context.id, edgeType: 'supports', deterministicReason: 'Structured signal participates in resolved context arbitration.' });
+      putEdge({ edgeId: `edge:${signalId}->${context.id}`, sourceNodeId: signalId, targetNodeId: context.id, edgeType: 'supports', deterministicReason: 'Structured signal participates in resolved context arbitration.' });
     }
     for (const evidenceId of context.sourceEvidenceIds) {
       const nodeId = `evidence:${evidenceId}`;
       nodes.set(nodeId, { nodeId, label: evidenceId, nodeType: 'evidence', status: 'source' });
-      edges.push({ edgeId: `edge:${nodeId}->${context.id}`, sourceNodeId: nodeId, targetNodeId: context.id, edgeType: 'derived_from', deterministicReason: 'Canonical evidence id is carried through structured signal lineage.' });
+      putEdge({ edgeId: `edge:${nodeId}->${context.id}`, sourceNodeId: nodeId, targetNodeId: context.id, edgeType: 'derived_from', deterministicReason: 'Canonical evidence id is carried through structured signal lineage.' });
     }
     for (const metadataId of context.sourceMetadataIds) nodes.set(metadataId, { nodeId: metadataId, label: metadataId, nodeType: 'metadata', status: 'deterministic_metadata' });
     for (const flagId of context.cadReadinessImpacts) {
       const nodeId = `cad:${flagId}`;
       nodes.set(nodeId, { nodeId, label: flagId, nodeType: 'cad_readiness', status: 'mapped' });
-      edges.push({ edgeId: `edge:${context.id}->${nodeId}`, sourceNodeId: context.id, targetNodeId: nodeId, edgeType: 'impacts_cad_readiness', deterministicReason: 'Context status participates in CAD-readiness runtime inspection metadata.' });
+      putEdge({ edgeId: `edge:${context.id}->${nodeId}`, sourceNodeId: context.id, targetNodeId: nodeId, edgeType: 'impacts_cad_readiness', deterministicReason: 'Context status participates in CAD-readiness runtime inspection metadata.' });
     }
     for (const requirementId of context.requirementImpacts) {
       const nodeId = `requirement:${requirementId}`;
       nodes.set(nodeId, { nodeId, label: requirementId, nodeType: 'requirement', status: 'mapped' });
-      edges.push({ edgeId: `edge:${context.id}->${nodeId}`, sourceNodeId: context.id, targetNodeId: nodeId, edgeType: 'impacts_requirement', deterministicReason: 'Context definition declares requirement impact without creating a new requirement truth source.' });
+      putEdge({ edgeId: `edge:${context.id}->${nodeId}`, sourceNodeId: context.id, targetNodeId: nodeId, edgeType: 'impacts_requirement', deterministicReason: 'Context definition declares requirement impact without creating a new requirement truth source.' });
     }
     for (const decisionId of context.decisionImpacts) {
       nodes.set(decisionId, { nodeId: decisionId, label: decisionId, nodeType: 'decision', status: 'mapped' });
-      edges.push({ edgeId: `edge:${context.id}->${decisionId}`, sourceNodeId: context.id, targetNodeId: decisionId, edgeType: 'impacts_decision', deterministicReason: 'Context definition declares downstream decision participation metadata.' });
+      putEdge({ edgeId: `edge:${context.id}->${decisionId}`, sourceNodeId: context.id, targetNodeId: decisionId, edgeType: 'impacts_decision', deterministicReason: 'Context definition declares downstream decision participation metadata.' });
     }
     for (const invalidationId of context.invalidationLineage) {
       const nodeId = `invalidation:${invalidationId}`;
       nodes.set(nodeId, { nodeId, label: invalidationId, nodeType: 'invalidation', status: 'invalidates' });
-      edges.push({ edgeId: `edge:${nodeId}->${context.id}`, sourceNodeId: nodeId, targetNodeId: context.id, edgeType: 'invalidated_by', deterministicReason: 'Invalidation lineage is preserved in resolved context metadata.' });
+      putEdge({ edgeId: `edge:${nodeId}->${context.id}`, sourceNodeId: nodeId, targetNodeId: context.id, edgeType: 'invalidated_by', deterministicReason: 'Invalidation lineage is preserved in resolved context metadata.' });
     }
     for (const competingSignalId of context.competingSignalIds) {
-      edges.push({ edgeId: `edge:${competingSignalId}<->${context.id}:competes`, sourceNodeId: competingSignalId, targetNodeId: context.id, edgeType: 'competes_with', deterministicReason: 'Competing or unstable signal remains visible in context arbitration metadata.' });
+      putEdge({ edgeId: `edge:${competingSignalId}<->${context.id}:competes`, sourceNodeId: competingSignalId, targetNodeId: context.id, edgeType: 'competes_with', deterministicReason: 'Competing or unstable signal remains visible in context arbitration metadata.' });
     }
   }
-  return { nodes: [...nodes.values()].sort((a, b) => a.nodeId.localeCompare(b.nodeId)), edges: edges.sort((a, b) => a.edgeId.localeCompare(b.edgeId)) };
+  return { nodes: [...nodes.values()].sort((a, b) => a.nodeId.localeCompare(b.nodeId)), edges: [...edges.values()].sort((a, b) => a.edgeId.localeCompare(b.edgeId)) };
 }
 
 function rankingReasonFor(definition: EngineeringContextDefinition, status: EngineeringContextStatus, factors: string[], penalties: string[], competingSignals: StructuredEngineeringSignal[]): string {
