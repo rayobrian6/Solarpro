@@ -1,0 +1,959 @@
+app/admin/engineering-intelligence/components.tsx:3:  AuditGuardWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:4:  CanonicalEvidenceWorkspaceGroupModel,
+app/admin/engineering-intelligence/components.tsx:5:  DecisionWorkspaceItemModel,
+app/admin/engineering-intelligence/components.tsx:6:  AffectedOutputsWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:7:  DependencyGraphViewerModel,
+app/admin/engineering-intelligence/components.tsx:8:  DependencyTraversalWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:11:  EngineeringIntelligenceWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:12:  InvalidationPropagationWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:13:  RegenerationPlanningV1WorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:14:  RegenerationPlanningWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:15:  RequirementWorkspaceItemModel,
+app/admin/engineering-intelligence/components.tsx:16:  SnapshotDeltaWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:17:  SnapshotTimelineWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:18:  StaleInvalidationWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:19:  StaleStateTimelineWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:20:  StructuredEngineeringSignalsWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:21:  SignalProvenanceWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:22:  SignalDependencyGraphWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:23:  SignalRequirementMappingWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:24:  SignalConfidenceWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:25:  SignalBlockingWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:26:  SignalInvalidationWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:27:  SignalStaleImpactsWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:28:  ResolvedEngineeringContextsWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:29:  ContextArbitrationWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:30:  ContextConflictInspectorWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:31:  FallbackChainInspectorWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:32:  ContextProvenanceWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:33:  ContextDependencyGraphWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:34:  ContextConfidenceBreakdownWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:35:  ContextInvalidationsWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:36:  ContextStaleImpactsWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:37:  ContextResolutionTimelineWorkspaceModel,
+app/admin/engineering-intelligence/components.tsx:45:import type { AssistedEvidenceCandidate, ReviewedEvidenceProjection } from '@/lib/assistedEvidence';
+app/admin/engineering-intelligence/components.tsx:48:import type { FieldEvidenceOrchestrationModel } from '@/lib/survey/evidence/fieldOrchestration';
+app/admin/engineering-intelligence/components.tsx:59:  stale: 'border-orange-500/30 bg-orange-500/10 text-orange-300',
+app/admin/engineering-intelligence/components.tsx:81:type WorkspaceRenderable = unknown;
+app/admin/engineering-intelligence/components.tsx:87:function safeRenderValue(value: WorkspaceRenderable, fallback = 'not_loaded'): string {
+app/admin/engineering-intelligence/components.tsx:104:function renderMetadataValue(value: WorkspaceRenderable, fallback = 'not_loaded'): string {
+app/admin/engineering-intelligence/components.tsx:108:function normalizeWorkspaceDisplay(value: WorkspaceRenderable): string[] {
+app/admin/engineering-intelligence/components.tsx:116:function workspaceKey(prefix: string, value: WorkspaceRenderable, index: number): string {
+app/admin/engineering-intelligence/components.tsx:144:  const missing = normalizeWorkspaceDisplay(score.missingFields).join('|') || 'none';
+app/admin/engineering-intelligence/components.tsx:148:function summarizeSnapshotHash(snapshot: unknown): string {
+app/admin/engineering-intelligence/components.tsx:168:export function WorkspaceShell({ model, title, subtitle, children }: {
+app/admin/engineering-intelligence/components.tsx:169:  model: EngineeringIntelligenceWorkspaceModel;
+app/admin/engineering-intelligence/components.tsx:186:            <div className="font-semibold text-white">Workspace source</div>
+app/admin/engineering-intelligence/components.tsx:256:                <div>Evidence route: real project UUID</div>
+app/admin/engineering-intelligence/components.tsx:266:        'Selecting a project only loads deterministic evidence, graph, snapshot, invalidation, regeneration-plan metadata, and CAD-readiness metadata; it does not run OCR, CV, CAD generation, or autonomous regeneration.',
+app/admin/engineering-intelligence/components.tsx:293:function StatusPill({ value }: { value: WorkspaceRenderable }) {
+app/admin/engineering-intelligence/components.tsx:298:function TokenList({ values, limit = 6 }: { values: WorkspaceRenderable; limit?: number }) {
+app/admin/engineering-intelligence/components.tsx:299:  const normalized = normalizeWorkspaceDisplay(values).filter(Boolean);
+app/admin/engineering-intelligence/components.tsx:318:        <Metric label="Snapshots" value={collectionSize(hydration.snapshots)} />
+app/admin/engineering-intelligence/components.tsx:319:        <Metric label="Regeneration plans" value={collectionSize(hydration.regenerationPlans)} />
+app/admin/engineering-intelligence/components.tsx:323:          <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Canonical survey</div>
+app/admin/engineering-intelligence/components.tsx:328:          <div className="mt-2 break-all font-mono text-orange-300">{safeRenderValue(hydration.invalidationResult?.resultId)}</div>
+app/admin/engineering-intelligence/components.tsx:335:      {hydration.surveyEvidence ? (
+app/admin/engineering-intelligence/components.tsx:337:          <Metric label="Canonical evidence" value={hydration.surveyEvidence.canonicalEvidenceCount} />
+app/admin/engineering-intelligence/components.tsx:338:          <Metric label="Completeness" value={hydration.surveyEvidence.completeness} />
+app/admin/engineering-intelligence/components.tsx:339:          <Metric label="Raw photo count" value={hydration.surveyEvidence.rawPhotoCount} />
+app/admin/engineering-intelligence/components.tsx:349:export function CADReadinessWorkspace({ readiness }: { readiness: CADReadinessMetadataModel }) {
+app/admin/engineering-intelligence/components.tsx:351:    <Panel title="CAD Readiness Metadata" eyebrow="Metadata only">
+app/admin/engineering-intelligence/components.tsx:379:export function PhotoGroupingWorkspace({ grouping }: { grouping: DeterministicPhotoGroupingModel }) {
+app/admin/engineering-intelligence/components.tsx:394:            <Metric label="Utility groups" value={collectionSize(grouping.utilityEvidenceGroups)} />
+app/admin/engineering-intelligence/components.tsx:395:            <Metric label="Electrical groups" value={collectionSize(grouping.electricalEvidenceGroups)} />
+app/admin/engineering-intelligence/components.tsx:400:                <tr><th className="p-3">Order</th><th className="p-3">Evidence</th><th className="p-3">Category</th><th className="p-3">Timestamp</th><th className="p-3">Metadata</th></tr>
+app/admin/engineering-intelligence/components.tsx:425:                <LineageBox title="Evidence chain" values={segment.evidenceIds} />
+app/admin/engineering-intelligence/components.tsx:434:          <h3 className="text-sm font-bold text-white">Evidence clusters</h3>
+app/admin/engineering-intelligence/components.tsx:440:                <LineageBox title="Evidence ids" values={cluster.evidenceIds} />
+app/admin/engineering-intelligence/components.tsx:475:export function FieldEvidenceOrchestrationWorkspace({ orchestration }: { orchestration: FieldEvidenceOrchestrationModel }) {
+app/admin/engineering-intelligence/components.tsx:477:    <Panel title="Field Evidence Orchestration" eyebrow="Technician movement order">
+app/admin/engineering-intelligence/components.tsx:480:        <Metric label="Canonical groups" value={collectionSize(orchestration.groups)} />
+app/admin/engineering-intelligence/components.tsx:514:    ['Stale outputs', health.staleOutputs, 'outputs requiring review or planned regeneration'],
+app/admin/engineering-intelligence/components.tsx:517:    ['Regeneration candidates', health.regenerationCandidates, 'planned candidates only'],
+app/admin/engineering-intelligence/components.tsx:519:    ['Snapshots', health.snapshotVersions, 'durable state versions'],
+app/admin/engineering-intelligence/components.tsx:534:        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-sm text-slate-300">Evidence completeness: <span className="font-mono text-sky-300">{safeRenderValue(health.evidenceCompleteness)}</span></div>
+app/admin/engineering-intelligence/components.tsx:535:        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-sm text-slate-300">Requirement satisfaction: <span className="font-mono text-sky-300">{safeRenderValue(health.requirementSatisfaction)}</span></div>
+app/admin/engineering-intelligence/components.tsx:542:export function CanonicalEvidenceWorkspace({ groups }: { groups: CanonicalEvidenceWorkspaceGroupModel[] }) {
+app/admin/engineering-intelligence/components.tsx:544:    <Panel title="Canonical Evidence Workspace" eyebrow="Evidence lineage">
+app/admin/engineering-intelligence/components.tsx:553:              <span className="rounded-full bg-sky-400/10 px-2 py-1 text-[10px] font-bold text-sky-300">{safeArray(group.canonicalEvidenceItems).length} rows</span>
+app/admin/engineering-intelligence/components.tsx:562:                <TokenList values={collectionSize(group.missingRequirementIds) ? group.missingRequirementIds : ['none']} />
+app/admin/engineering-intelligence/components.tsx:583:              {collectionSize(group.canonicalEvidenceItems) ? group.canonicalEvidenceItems.map(item => (
+app/admin/engineering-intelligence/components.tsx:584:                <div key={item.canonicalEvidenceId} className="rounded-xl border border-white/10 bg-slate-950/70 p-4">
+app/admin/engineering-intelligence/components.tsx:587:                      <div className="break-all font-mono text-xs text-white">{safeRenderValue(item.canonicalEvidenceId)}</div>
+app/admin/engineering-intelligence/components.tsx:596:                    <div>Evidence source: <span className="text-slate-200">{safeRenderValue(item.evidenceSource)}</span></div>
+app/admin/engineering-intelligence/components.tsx:598:                    <div>Origin timestamps: <span className="text-slate-200">{normalizeWorkspaceDisplay(item.originatingSurveyCreatedAts).filter(Boolean).join(', ') || 'not_loaded'}</span></div>
+app/admin/engineering-intelligence/components.tsx:603:                    <LineageBox title="Provenance / state refs" values={item.provenance} />
+app/admin/engineering-intelligence/components.tsx:604:                    <LineageBox title="Requirements" values={item.linkedRequirementIds} />
+app/admin/engineering-intelligence/components.tsx:605:                    <LineageBox title="Decisions" values={item.linkedDecisionIds} />
+app/admin/engineering-intelligence/components.tsx:608:                    <LineageBox title="Stale impacts" values={[...item.staleStateImpactStateIds, ...item.staleImpactReasons]} />
+app/admin/engineering-intelligence/components.tsx:609:                    <LineageBox title="Regeneration candidates" values={item.regenerationCandidateIds} />
+app/admin/engineering-intelligence/components.tsx:631:function LineageBox({ title, values }: { title: WorkspaceRenderable; values: WorkspaceRenderable }) {
+app/admin/engineering-intelligence/components.tsx:632:  const normalized = normalizeWorkspaceDisplay(values);
+app/admin/engineering-intelligence/components.tsx:636:export function RequirementWorkspace({ requirements }: { requirements: RequirementWorkspaceItemModel[] }) {
+app/admin/engineering-intelligence/components.tsx:638:    <Panel title="Requirement Workspace" eyebrow="Registry status">
+app/admin/engineering-intelligence/components.tsx:642:            <tr><th className="p-3">Requirement</th><th className="p-3">Status</th><th className="p-3">Evidence</th><th className="p-3">Decisions</th><th className="p-3">Stale impact</th></tr>
+app/admin/engineering-intelligence/components.tsx:649:                <td className="p-3"><TokenList values={req.linkedEvidenceIds} /></td>
+app/admin/engineering-intelligence/components.tsx:650:                <td className="p-3"><TokenList values={req.linkedDecisionIds} /></td>
+app/admin/engineering-intelligence/components.tsx:651:                <td className="p-3"><TokenList values={req.staleImpactStateIds} /></td>
+app/admin/engineering-intelligence/components.tsx:661:export function DecisionWorkspace({ decisions }: { decisions: DecisionWorkspaceItemModel[] }) {
+app/admin/engineering-intelligence/components.tsx:663:    <Panel title="Engineering Decision Workspace" eyebrow="Decision provenance">
+app/admin/engineering-intelligence/components.tsx:670:            <div className="mt-3 text-xs text-slate-400">Dependency lineage</div><TokenList values={decision.dependencyLineageIds} />
+app/admin/engineering-intelligence/components.tsx:672:            <div className="mt-3 text-xs text-slate-400">Affected outputs / stale impact</div><TokenList values={[...decision.affectedOutputIds, ...decision.staleImpactStateIds]} />
+app/admin/engineering-intelligence/components.tsx:680:export function StaleInvalidationWorkspace({ stale }: { stale: StaleInvalidationWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:682:    <Panel title="Stale-State / Invalidation Workspace" eyebrow="Invalidation">
+app/admin/engineering-intelligence/components.tsx:684:        <Metric label="Stale outputs" value={collectionSize(stale.staleOutputIds)} />
+app/admin/engineering-intelligence/components.tsx:685:        <Metric label="Invalidation chains" value={collectionSize(stale.invalidationChains)} />
+app/admin/engineering-intelligence/components.tsx:686:        <Metric label="Preserved outputs" value={collectionSize(stale.preservedOutputIds)} />
+app/admin/engineering-intelligence/components.tsx:687:        <Metric label="Regeneration scope" value={collectionSize(stale.regenerationScopeIds)} />
+app/admin/engineering-intelligence/components.tsx:690:        <ListBox title="Current stale outputs" values={stale.staleOutputIds} />
+app/admin/engineering-intelligence/components.tsx:691:        <ListBox title="Preserved outputs" values={stale.preservedOutputIds} />
+app/admin/engineering-intelligence/components.tsx:692:        <ListBox title="Regeneration candidates" values={stale.regenerationScopeIds} />
+app/admin/engineering-intelligence/components.tsx:696:        {safeArray(stale.invalidationChains).length ? safeArray(stale.invalidationChains).map(chain => (
+app/admin/engineering-intelligence/components.tsx:700:              <StatusPill value="stale" />
+app/admin/engineering-intelligence/components.tsx:705:              <LineageBox title="Triggering evidence" values={chain.triggeringEvidenceIds} />
+app/admin/engineering-intelligence/components.tsx:706:              <LineageBox title="Triggering requirements" values={chain.triggeringRequirementIds} />
+app/admin/engineering-intelligence/components.tsx:707:              <LineageBox title="Triggering decisions" values={chain.triggeringDecisionIds} />
+app/admin/engineering-intelligence/components.tsx:711:        )) : <EmptyState state="no_invalidation_history">No invalidation transition history is loaded.</EmptyState>}
+app/admin/engineering-intelligence/components.tsx:713:      <DeterministicNotes notes={stale.deterministicNotes} />
+app/admin/engineering-intelligence/components.tsx:718:export function SnapshotTimelineWorkspace({ snapshots }: { snapshots: SnapshotTimelineWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:720:    <Panel title="Snapshot Timeline Workspace" eyebrow="State snapshots">
+app/admin/engineering-intelligence/components.tsx:722:        <Metric label="Snapshots" value={collectionSize(snapshots.snapshots)} />
+app/admin/engineering-intelligence/components.tsx:725:        <Metric label="Latest" value={snapshots.latestSnapshotId ? 'loaded' : 'no_snapshot'} />
+app/admin/engineering-intelligence/components.tsx:734:                <div className="mt-1 text-xs text-slate-500">Previous: {safeRenderValue(snapshot.previousSnapshotId, 'none')} · Superseded by: {safeRenderValue(snapshot.supersededBySnapshotId, 'none')}</div>
+app/admin/engineering-intelligence/components.tsx:741:              <Metric label="Stale" value={collectionSize(snapshot.staleStateIds)} />
+app/admin/engineering-intelligence/components.tsx:746:              <LineageBox title="Stale outputs" values={snapshot.staleStateIds} />
+app/admin/engineering-intelligence/components.tsx:747:              <LineageBox title="Transition lineage" values={snapshot.transitionEventIds} />
+app/admin/engineering-intelligence/components.tsx:748:              <LineageBox title="Snapshot notes" values={snapshot.deterministicNotes} />
+app/admin/engineering-intelligence/components.tsx:754:        <ListBox title="Snapshot hashes" values={safeArray(snapshots.snapshotHashes).map(summarizeSnapshotHash)} />
+app/admin/engineering-intelligence/components.tsx:755:        <ListBox title="Timeline transitions" values={safeArray(snapshots.transitionHistory?.transitionEvents).map(summarizeTransitionEvent)} />
+app/admin/engineering-intelligence/components.tsx:757:        <ListBox title="Timeline stale states" values={snapshots.timeline?.staleStateIds ?? []} />
+app/admin/engineering-intelligence/components.tsx:764:export function DependencyGraphViewer({ graph }: { graph: DependencyGraphViewerModel }) {
+app/admin/engineering-intelligence/components.tsx:770:    <Panel title="Dependency Graph Viewer" eyebrow="Graph">
+app/admin/engineering-intelligence/components.tsx:784:              <rect x="-64" y="-28" width="128" height="56" rx="12" fill={node.status === 'stale' || node.status === 'invalidated' ? 'rgba(124,45,18,0.95)' : 'rgba(15,23,42,0.95)'} stroke={node.status === 'not_loaded' ? 'rgba(148,163,184,0.45)' : node.status === 'current' ? 'rgba(56,189,248,0.45)' : 'rgba(251,146,60,0.6)'} />
+app/admin/engineering-intelligence/components.tsx:798:export function RegenerationPlanningWorkspace({ planning }: { planning: RegenerationPlanningWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:800:    <Panel title="Regeneration Planning Workspace" eyebrow="Plan visualization">
+app/admin/engineering-intelligence/components.tsx:802:      <div className="mt-4 grid gap-4 md:grid-cols-2"><ListBox title="Regeneration order" values={planning.regenerationOrder} /><ListBox title="Blocked dependencies" values={planning.blockedDependencies} /><ListBox title="Preserved outputs" values={planning.preservedOutputIds} /><ListBox title="Candidates" values={planning.regenerationCandidates} /></div>
+app/admin/engineering-intelligence/components.tsx:808:export function InvalidationPropagationWorkspace({ model }: { model: InvalidationPropagationWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:810:    <Panel title="Invalidation Propagation Workspace" eyebrow="Propagation V1">
+app/admin/engineering-intelligence/components.tsx:812:        <Metric label="Sources" value={collectionSize(model.invalidationSources)} />
+app/admin/engineering-intelligence/components.tsx:818:        <ListBox title="Invalidation sources" values={model.invalidationSources} />
+app/admin/engineering-intelligence/components.tsx:822:        <ListBox title="Impacted snapshots" values={model.impactedSnapshots} />
+app/admin/engineering-intelligence/components.tsx:825:      <div className="mt-4"><ListBox title="Dependency traversal paths" values={model.dependencyTraversalPaths} /></div>
+app/admin/engineering-intelligence/components.tsx:831:export function DependencyTraversalWorkspace({ model }: { model: DependencyTraversalWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:833:    <Panel title="Dependency Traversal Workspace" eyebrow="Traversal V1">
+app/admin/engineering-intelligence/components.tsx:841:        <ListBox title="Downstream lineage" values={model.downstreamLineage} />
+app/admin/engineering-intelligence/components.tsx:853:export function RegenerationPlanningV1Workspace({ model }: { model: RegenerationPlanningV1WorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:855:    <Panel title="Regeneration Planning V1 Workspace" eyebrow="No regeneration executed">
+app/admin/engineering-intelligence/components.tsx:858:        <Metric label="Missing evidence" value={collectionSize(model.missingEvidence)} />
+app/admin/engineering-intelligence/components.tsx:859:        <Metric label="Dependency chains" value={collectionSize(model.dependencyChains)} />
+app/admin/engineering-intelligence/components.tsx:867:        <ListBox title="Missing evidence" values={model.missingEvidence} />
+app/admin/engineering-intelligence/components.tsx:868:        <ListBox title="Dependency chains" values={model.dependencyChains} />
+app/admin/engineering-intelligence/components.tsx:875:export function SnapshotDeltaWorkspace({ model }: { model: SnapshotDeltaWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:877:    <Panel title="Snapshot Delta Workspace" eyebrow="Delta V1">
+app/admin/engineering-intelligence/components.tsx:880:        <Metric label="Stale introduced" value={collectionSize(model.staleOutputsIntroduced)} />
+app/admin/engineering-intelligence/components.tsx:885:        <ListBox title="Added evidence" values={model.addedEvidence} />
+app/admin/engineering-intelligence/components.tsx:886:        <ListBox title="Removed evidence" values={model.removedEvidence} />
+app/admin/engineering-intelligence/components.tsx:887:        <ListBox title="Changed decisions" values={model.changedDecisions} />
+app/admin/engineering-intelligence/components.tsx:888:        <ListBox title="Stale outputs introduced" values={model.staleOutputsIntroduced} />
+app/admin/engineering-intelligence/components.tsx:890:        <ListBox title="Invalidation causes" values={model.invalidationCauses} />
+app/admin/engineering-intelligence/components.tsx:892:        <ListBox title="Dependency graph delta" values={model.dependencyGraphDelta} />
+app/admin/engineering-intelligence/components.tsx:899:export function AffectedOutputsWorkspace({ model }: { model: AffectedOutputsWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:901:    <Panel title="Affected Outputs Workspace" eyebrow="Output impact V1">
+app/admin/engineering-intelligence/components.tsx:911:            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between"><div className="break-all font-mono text-white">{safeRenderValue(output.outputId)}</div><StatusPill value={output.staleClass} /></div>
+app/admin/engineering-intelligence/components.tsx:916:              <LineageBox title="Snapshots" values={output.affectedSnapshotIds} />
+app/admin/engineering-intelligence/components.tsx:917:              <LineageBox title="Decisions" values={output.invalidatedDecisionIds} />
+app/admin/engineering-intelligence/components.tsx:918:              <LineageBox title="Missing evidence" values={output.missingEvidenceIds} />
+app/admin/engineering-intelligence/components.tsx:929:export function StaleStateTimelineWorkspace({ model }: { model: StaleStateTimelineWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:931:    <Panel title="Stale State Timeline" eyebrow="Timeline V1">
+app/admin/engineering-intelligence/components.tsx:934:        <Metric label="Stale states" value={collectionSize(model.staleStateIds)} />
+app/admin/engineering-intelligence/components.tsx:941:            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between"><div className="break-all font-mono text-white">{safeRenderValue(event.eventId)}</div><StatusPill value={event.staleClass} /></div>
+app/admin/engineering-intelligence/components.tsx:942:            <div className="mt-1 text-sky-300">Snapshot: {safeRenderValue(event.snapshotId)}</div>
+app/admin/engineering-intelligence/components.tsx:947:              <LineageBox title="Evidence" values={event.canonicalEvidenceIds} />
+app/admin/engineering-intelligence/components.tsx:948:              <LineageBox title="Requirements" values={event.requirementIds} />
+app/admin/engineering-intelligence/components.tsx:949:              <LineageBox title="Decisions" values={event.decisionIds} />
+app/admin/engineering-intelligence/components.tsx:960:export function StructuredEngineeringSignalsWorkspace({ model }: { model: StructuredEngineeringSignalsWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:984:                <LineageBox title="Source evidence" values={signal.sourceEvidenceIds} />
+app/admin/engineering-intelligence/components.tsx:988:                <LineageBox title="Requirement impacts" values={signal.requirementImpacts} />
+app/admin/engineering-intelligence/components.tsx:990:                <LineageBox title="Stale impacts" values={signal.staleImpacts} />
+app/admin/engineering-intelligence/components.tsx:1011:export function SignalProvenanceWorkspace({ model }: { model: SignalProvenanceWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1013:    <Panel title="Signal Provenance" eyebrow="Evidence-to-signal lineage">
+app/admin/engineering-intelligence/components.tsx:1025:              <LineageBox title="Evidence" values={chain.sourceEvidenceIds} />
+app/admin/engineering-intelligence/components.tsx:1028:              <LineageBox title="Dependency nodes" values={chain.dependencyNodes} />
+app/admin/engineering-intelligence/components.tsx:1032:        )) : <EmptyState state="no_signal_provenance">No signal provenance chains are available.</EmptyState>}
+app/admin/engineering-intelligence/components.tsx:1039:export function SignalDependencyGraphWorkspace({ model }: { model: SignalDependencyGraphWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1045:    <Panel title="Signal Dependency Graph" eyebrow="Signal dependency metadata">
+app/admin/engineering-intelligence/components.tsx:1070:export function SignalRequirementMappingWorkspace({ model }: { model: SignalRequirementMappingWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1072:    <Panel title="Signal-to-Requirement Mapping" eyebrow="Requirement hydration support">
+app/admin/engineering-intelligence/components.tsx:1076:          <thead className="bg-white/[0.04] text-slate-400"><tr><th className="p-3">Requirement</th><th className="p-3">Signals</th><th className="p-3">Confirmed</th><th className="p-3">Partial</th><th className="p-3">Missing</th></tr></thead>
+app/admin/engineering-intelligence/components.tsx:1095:export function SignalConfidenceWorkspace({ model }: { model: SignalConfidenceWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1113:export function SignalBlockingWorkspace({ model }: { model: SignalBlockingWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1130:export function SignalInvalidationWorkspace({ model }: { model: SignalInvalidationWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1133:      <div className="grid gap-3 md:grid-cols-3"><Metric label="Invalidation rows" value={collectionSize(model.invalidations)} /><Metric label="Propagation" value="metadata_only" /><Metric label="Auto regeneration" value="disabled" /></div>
+app/admin/engineering-intelligence/components.tsx:1135:        {safeArray(model.invalidations).map(entry => (
+app/admin/engineering-intelligence/components.tsx:1138:            <div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Invalidated by" values={entry.invalidatedBy} /><LineageBox title="Stale impacts" values={entry.staleImpacts} /></div>
+app/admin/engineering-intelligence/components.tsx:1147:export function SignalStaleImpactsWorkspace({ model }: { model: SignalStaleImpactsWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1150:      <div className="grid gap-3 md:grid-cols-3"><Metric label="Stale impact rows" value={collectionSize(model.staleImpacts)} /><Metric label="Fallback rows" value={collectionSize(model.fallbackParticipation)} /><Metric label="CAD certainty" value="not implied" /></div>
+app/admin/engineering-intelligence/components.tsx:1154:          {safeArray(model.staleImpacts).length ? safeArray(model.staleImpacts).map(entry => (
+app/admin/engineering-intelligence/components.tsx:1157:              <div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Stale classes" values={entry.staleClasses} /><LineageBox title="Invalidated by" values={entry.invalidatedBy} /></div>
+app/admin/engineering-intelligence/components.tsx:1159:          )) : <EmptyState state="no_stale_signal_impacts">No stale signal impact metadata is loaded.</EmptyState>}
+app/admin/engineering-intelligence/components.tsx:1178:export function ResolvedEngineeringContextsWorkspace({ model }: { model: ResolvedEngineeringContextsWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1204:                <LineageBox title="Source evidence" values={context.sourceEvidenceIds} />
+app/admin/engineering-intelligence/components.tsx:1207:                <LineageBox title="Requirements" values={context.requirementImpacts} />
+app/admin/engineering-intelligence/components.tsx:1221:export function ContextArbitrationWorkspace({ model }: { model: ContextArbitrationWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1231:export function ContextConflictInspectorWorkspace({ model }: { model: ContextConflictInspectorWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1235:export function FallbackChainInspectorWorkspace({ model }: { model: FallbackChainInspectorWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1239:export function ContextProvenanceWorkspace({ model }: { model: ContextProvenanceWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1240:  return <Panel title="Context Provenance" eyebrow="Signal-to-context lineage"><div className="grid gap-3 md:grid-cols-4"><Metric label="Chains" value={collectionSize(model.chains)} /><Metric label="Evidence" value="canonical_ids" /><Metric label="Metadata" value="grouping_traversal" /><Metric label="Hashing" value="stable" /></div><div className="mt-4 space-y-3">{safeArray(model.chains).length ? safeArray(model.chains).map(chain => <div key={chain.contextId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs"><div className="break-all font-mono text-white">{safeRenderValue(chain.contextId)}</div><div className="mt-3 grid gap-2 md:grid-cols-3"><LineageBox title="Signals" values={chain.sourceSignalIds} /><LineageBox title="Evidence" values={chain.sourceEvidenceIds} /><LineageBox title="Metadata" values={chain.sourceMetadataIds} /><LineageBox title="Dependencies" values={chain.dependencyLineage} /><LineageBox title="Invalidations" values={chain.invalidationLineage} /></div><div className="mt-3 break-all font-mono text-[10px] text-slate-500">hash: {safeRenderValue(chain.deterministicHash)}</div></div>) : <EmptyState state="no_context_provenance">No context provenance chains are available.</EmptyState>}</div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1243:export function ContextDependencyGraphWorkspace({ model }: { model: ContextDependencyGraphWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1244:  return <Panel title="Context Dependency Graph" eyebrow="Context dependency metadata"><div className="grid gap-3 md:grid-cols-2"><Metric label="Context graph nodes" value={collectionSize(model.nodes)} /><Metric label="Context graph edges" value={collectionSize(model.edges)} /></div><div className="mt-4 grid gap-3 lg:grid-cols-2"><ListBox title="Nodes" values={safeArray(model.nodes).slice(0, 30).map(node => `${node.nodeType}:${node.nodeId}:${node.status}`)} /><ListBox title="Edges" values={safeArray(model.edges).slice(0, 30).map(edge => `${edge.edgeType}:${edge.sourceNodeId}->${edge.targetNodeId}`)} /></div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1247:export function ContextConfidenceBreakdownWorkspace({ model }: { model: ContextConfidenceBreakdownWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1251:export function ContextInvalidationsWorkspace({ model }: { model: ContextInvalidationsWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1252:  return <Panel title="Context Invalidations" eyebrow="Invalidation lineage"><div className="grid gap-3 md:grid-cols-3"><Metric label="Rows" value={collectionSize(model.invalidations)} /><Metric label="Propagation" value="metadata_only" /><Metric label="Regeneration" value="not_triggered" /></div><div className="mt-4 grid gap-3 lg:grid-cols-2">{safeArray(model.invalidations).length ? safeArray(model.invalidations).map(entry => <div key={entry.contextId} className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-4 text-xs"><div className="break-all font-mono text-white">{safeRenderValue(entry.contextId)}</div><div className="mt-3 grid gap-2 md:grid-cols-3"><LineageBox title="Invalidations" values={entry.invalidationLineage} /><LineageBox title="Stale impacts" values={entry.staleImpactPropagation} /><LineageBox title="Regeneration participation" values={entry.regenerationParticipation} /></div></div>) : <EmptyState state="no_context_invalidations">No context invalidation rows are loaded.</EmptyState>}</div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1255:export function ContextStaleImpactsWorkspace({ model }: { model: ContextStaleImpactsWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1256:  return <Panel title="Context Stale Impacts" eyebrow="Readiness mappings"><div className="grid gap-3 md:grid-cols-3"><Metric label="Stale rows" value={collectionSize(model.staleImpacts)} /><Metric label="CAD mappings" value={collectionSize(model.cadReadinessMappings)} /><Metric label="Truth source" value="signals_only" /></div><div className="mt-4 grid gap-4 lg:grid-cols-2"><div className="space-y-3">{safeArray(model.staleImpacts).map(entry => <div key={entry.contextId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4 text-xs"><div className="break-all font-mono text-white">{safeRenderValue(entry.contextId)}</div><div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Stale classes" values={entry.staleClasses} /><LineageBox title="Invalidated by" values={entry.invalidatedBy} /></div></div>)}</div><div className="space-y-3">{safeArray(model.cadReadinessMappings).map(mapping => <div key={mapping.flagId} className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-4 text-xs"><div className="font-mono text-white">{safeRenderValue(mapping.flagId)}</div><div className="mt-3 grid gap-2 md:grid-cols-2"><LineageBox title="Contexts" values={mapping.contextIds} /><LineageBox title="Conflicting" values={mapping.conflictingContextIds} /><LineageBox title="Blocked" values={mapping.blockedContextIds} /><LineageBox title="Unresolved" values={mapping.unresolvedContextIds} /></div></div>)}</div></div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1259:export function ContextResolutionTimelineWorkspace({ model }: { model: ContextResolutionTimelineWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1260:  return <Panel title="Context Resolution Timeline" eyebrow="Status timeline"><div className="grid gap-3 md:grid-cols-2"><Metric label="Events" value={collectionSize(model.events)} /><Metric label="Runtime actions" value="none" /></div><div className="mt-4 space-y-2">{safeArray(model.events).length ? safeArray(model.events).map(event => <div key={event.eventId} className="rounded-xl border border-white/10 bg-white/[0.025] p-3 text-xs"><div className="flex items-center justify-between gap-3"><span className="break-all font-mono text-white">{safeRenderValue(event.contextId)}</span><StatusPill value={event.status} /></div><p className="mt-2 text-slate-300">{safeRenderValue(event.deterministicReason)}</p></div>) : <EmptyState state="no_context_timeline">No context timeline events are loaded.</EmptyState>}</div><DeterministicNotes notes={model.deterministicNotes} /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1263:export function AuditGuardWorkspace({ audit }: { audit: AuditGuardWorkspaceModel }) {
+app/admin/engineering-intelligence/components.tsx:1265:    <Panel title="Audit Guard Workspace" eyebrow="Guards">
+app/admin/engineering-intelligence/components.tsx:1266:      <div className="grid gap-3 md:grid-cols-5"><Metric label="All guards" value={collectionSize(audit.guards)} /><Metric label="Topology" value={collectionSize(audit.topologyViolations)} /><Metric label="Provenance" value={collectionSize(audit.provenanceFailures)} /><Metric label="Orphans" value={collectionSize(audit.orphanedNodeFailures)} /><Metric label="Stale lineage" value={collectionSize(audit.staleLineageFailures)} /></div>
+app/admin/engineering-intelligence/components.tsx:1280:function Metric({ label, value }: { label: WorkspaceRenderable; value: WorkspaceRenderable }) {
+app/admin/engineering-intelligence/components.tsx:1284:function ListBox({ title, values }: { title: WorkspaceRenderable; values: WorkspaceRenderable }) {
+app/admin/engineering-intelligence/components.tsx:1288:function DeterministicNotes({ notes }: { notes: WorkspaceRenderable }) {
+app/admin/engineering-intelligence/components.tsx:1289:  const normalized = normalizeWorkspaceDisplay(notes);
+app/admin/engineering-intelligence/components.tsx:1293:export function ScenarioSimulationWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+app/admin/engineering-intelligence/components.tsx:1295:    <Panel title="Scenario Simulation Workspace" eyebrow="Read-only hypothetical mode">
+app/admin/engineering-intelligence/components.tsx:1297:        This workspace displays hypothetical Engineering Scenario Simulation V1 metadata only. It is not production truth, does not indicate regeneration occurred, and does not mutate canonical evidence, snapshots, decisions, outputs, or invalidation history.
+app/admin/engineering-intelligence/components.tsx:1306:        <Metric label="Affected evidence" value={collectionSize(simulation.affectedEvidenceIds)} />
+app/admin/engineering-intelligence/components.tsx:1308:        <Metric label="Regeneration candidates" value={collectionSize(simulation.regenerationCandidateIds)} />
+app/admin/engineering-intelligence/components.tsx:1316:export function HypotheticalStateDeltaWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+app/admin/engineering-intelligence/components.tsx:1325:                <div className="flex gap-2"><StatusPill value={delta.entityType} /><StatusPill value={delta.deltaType} /><StatusPill value={delta.staleClass} /></div>
+app/admin/engineering-intelligence/components.tsx:1340:export function AffectedOutputSimulationWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+app/admin/engineering-intelligence/components.tsx:1341:  const outputs = simulation.hypothetical.invalidationPropagation.affectedOutputs;
+app/admin/engineering-intelligence/components.tsx:1348:              <div className="flex items-center justify-between gap-2"><div className="font-mono text-orange-300">{safeRenderValue(output.outputId)}</div><StatusPill value={output.staleClass} /></div>
+app/admin/engineering-intelligence/components.tsx:1363:export function StalePropagationSimulationWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+app/admin/engineering-intelligence/components.tsx:1367:        {Object.entries(simulation.hypothetical.invalidationPropagation.staleClassCounts).map(([staleClass, count]) => <Metric key={staleClass} label={staleClass} value={count} />)}
+app/admin/engineering-intelligence/components.tsx:1370:        {simulation.staleImpacts.slice(0, 18).map(impact => (
+app/admin/engineering-intelligence/components.tsx:1373:            <div className="mt-2"><TokenList values={impact.staleClasses} /></div>
+app/admin/engineering-intelligence/components.tsx:1382:export function ContextImpactSimulationWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+app/admin/engineering-intelligence/components.tsx:1397:export function RequirementImpactSimulationWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+app/admin/engineering-intelligence/components.tsx:1399:    <Panel title="Requirement Impact Simulation" eyebrow="Hypothetical requirement lineage">
+app/admin/engineering-intelligence/components.tsx:1400:      <TokenList values={simulation.affectedRequirementIds} limit={32} />
+app/admin/engineering-intelligence/components.tsx:1401:      <div className="mt-4 text-xs text-slate-400">Requirement impacts are derived from existing signal/context mappings and snapshot delta metadata only; this panel does not create new requirement truth.</div>
+app/admin/engineering-intelligence/components.tsx:1420:export function RegenerationForecastWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+app/admin/engineering-intelligence/components.tsx:1422:    <Panel title="Regeneration Forecast" eyebrow="Metadata-only planning">
+app/admin/engineering-intelligence/components.tsx:1426:        <Metric label="Blocked dependencies" value={collectionSize(simulation.hypothetical.regenerationPlan.blockedDependencyIds)} />
+app/admin/engineering-intelligence/components.tsx:1427:        <Metric label="Missing evidence" value={collectionSize(simulation.hypothetical.regenerationPlan.missingEvidenceIds)} />
+app/admin/engineering-intelligence/components.tsx:1435:export function ConfidenceDeltaTimelineWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+app/admin/engineering-intelligence/components.tsx:1437:    <Panel title="Confidence Delta Timeline" eyebrow="Deterministic confidence changes">
+app/admin/engineering-intelligence/components.tsx:1448:export function SimulationDependencyTraversalWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+app/admin/engineering-intelligence/components.tsx:1450:    <Panel title="Simulation Dependency Traversal" eyebrow="Cycle-safe lineage">
+app/admin/engineering-intelligence/components.tsx:1488:        <Metric label="Dependency paths" value={collectionSize(recommendation.dependencyTraversal)} />
+app/admin/engineering-intelligence/components.tsx:1497:          <div className="mb-2 font-bold text-slate-200">Affected lineage</div>
+app/admin/engineering-intelligence/components.tsx:1498:          <TokenList values={[...recommendation.affectedEvidenceIds, ...recommendation.affectedSignalIds, ...recommendation.affectedContextIds, ...recommendation.affectedRequirementIds, ...recommendation.affectedDecisionIds, ...recommendation.affectedOutputIds]} limit={24} />
+app/admin/engineering-intelligence/components.tsx:1517:export function EngineeringRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1536:export function SurveyImprovementRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1537:  return <Panel title="Survey Improvement Recommendations" eyebrow="Evidence gaps"><RecommendationCollection recommendations={recommendations.surveyRecommendations} empty="no_survey_recommendations" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1540:export function ConflictResolutionRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1544:export function FallbackReductionRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1545:  return <Panel title="Fallback Reduction Recommendations" eyebrow="Fallback lineage visible"><RecommendationCollection recommendations={recommendations.fallbackReductionRecommendations} empty="no_fallback_recommendations" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1548:export function CADReadinessRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1549:  return <Panel title="CAD Readiness Recommendations" eyebrow="Metadata-only readiness"><RecommendationCollection recommendations={recommendations.cadReadinessRecommendations} empty="no_cad_recommendations" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1552:export function SimulationBackedRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1556:export function DependencyRiskRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1557:  return <Panel title="Dependency Risk Recommendations" eyebrow="Traversal and centrality"><RecommendationCollection recommendations={recommendations.dependencyRiskRecommendations} empty="no_dependency_recommendations" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1560:export function StaleImpactRecommendationsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1561:  return <Panel title="Stale Impact Recommendations" eyebrow="Invalidation participation"><RecommendationCollection recommendations={recommendations.staleImpactRecommendations} empty="no_stale_recommendations" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1564:export function HighestValueNextActionsWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1568:export function RecommendationConfidenceBreakdownWorkspace({ recommendations }: { recommendations: EngineeringRecommendationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1606:        <Metric label="Dependency paths" value={collectionSize(workflow.dependencyTraversal)} />
+app/admin/engineering-intelligence/components.tsx:1622:          <div className="mb-2 font-bold text-slate-200">Affected deterministic lineage</div>
+app/admin/engineering-intelligence/components.tsx:1623:          <TokenList values={[...workflow.affectedEvidenceIds, ...workflow.affectedSignalIds, ...workflow.affectedContextIds, ...workflow.affectedRequirementIds, ...workflow.affectedDecisionIds, ...workflow.affectedOutputIds]} limit={30} />
+app/admin/engineering-intelligence/components.tsx:1631:        <ListBox title="Stale / invalidation / regeneration" values={[...workflow.staleImpactParticipation.map(item => item.entityId), ...workflow.invalidationParticipation, ...workflow.regenerationParticipation]} />
+app/admin/engineering-intelligence/components.tsx:1638:        <Metric label="Hypothetical stale reduction" value={workflow.simulationOutcome.hypotheticalStaleReduction} />
+app/admin/engineering-intelligence/components.tsx:1652:export function EngineeringWorkflowOrchestrationWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1671:export function SurveyFollowUpQueueWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1675:export function EngineeringReviewQueueWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1679:export function ConflictResolutionQueueWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1683:export function FallbackRiskQueueWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1684:  return <Panel title="Fallback Risk Queue" eyebrow="Fallback lineage visible"><WorkflowCollection workflows={orchestration.fallbackRiskQueue} empty="no_fallback_workflows" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1687:export function CADReadinessEscalationsWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1688:  return <Panel title="CAD Readiness Escalations" eyebrow="No CAD generated"><WorkflowCollection workflows={orchestration.cadReadinessEscalations} empty="no_cad_escalations" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1691:export function PermitReadinessQueueWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1695:export function InstallBlockerQueueWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1699:export function RegenerationApprovalQueueWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1700:  return <Panel title="Regeneration Approval Queue" eyebrow="No regeneration executed"><WorkflowCollection workflows={orchestration.regenerationApprovalQueue} empty="no_regeneration_workflows" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1703:export function DependencyRiskEscalationsWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1704:  return <Panel title="Dependency Risk Escalations" eyebrow="Traversal centrality"><WorkflowCollection workflows={orchestration.dependencyRiskEscalations} empty="no_dependency_workflows" /></Panel>;
+app/admin/engineering-intelligence/components.tsx:1707:export function WorkflowSimulationImpactsWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
+app/admin/engineering-intelligence/components.tsx:1711:export function AssistedEvidenceSandboxWorkspace({ sandbox }: { sandbox: { candidates: AssistedEvidenceCandidate[]; projections: ReviewedEvidenceProjection[]; warning: string } }) {
+app/admin/engineering-intelligence/components.tsx:1712:  const candidates = safeArray<AssistedEvidenceCandidate>(sandbox.candidates);
+app/admin/engineering-intelligence/components.tsx:1713:  const projections = safeArray<ReviewedEvidenceProjection>(sandbox.projections);
+app/admin/engineering-intelligence/components.tsx:1724:    <Panel title="Assisted Evidence Sandbox" eyebrow="FIXTURE/RUNTIME PILOT DATA · NON-AUTHORITATIVE · Review-required quarantine">
+app/admin/engineering-intelligence/components.tsx:1750:                <div className="mt-3"><div className="mb-2 font-bold text-slate-200">Limitations</div><TokenList values={normalizeWorkspaceDisplay(candidate.candidateLimitations)} limit={12} /></div>
+app/admin/engineering-intelligence/components.tsx:1761:              <div className="mt-3 grid gap-2 md:grid-cols-3"><Metric label="Projection status" value={projection.projectionStatus} /><Metric label="Reviewer" value={projection.reviewerId} /><Metric label="Canonical mutation" value="none" /></div>
+app/admin/engineering-intelligence/components.tsx:1762:              <div className="mt-3"><div className="mb-2 font-bold text-slate-200">Accepted fields</div><TokenList values={normalizeWorkspaceDisplay(projection.acceptedFields)} limit={12} /></div>
+lib/engineeringIntelligence/workspace.ts:3:  type EngineeringRequirementDefinition,
+lib/engineeringIntelligence/workspace.ts:4:  type EngineeringRequirementEvaluation,
+lib/engineeringIntelligence/workspace.ts:5:  type EngineeringRequirementId,
+lib/engineeringIntelligence/workspace.ts:6:} from '@/lib/survey/evidence/engineeringRequirements';
+lib/engineeringIntelligence/workspace.ts:7:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+lib/engineeringIntelligence/workspace.ts:8:import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/categoryRegistry';
+lib/engineeringIntelligence/workspace.ts:9:import type { CanonicalEvidenceProvenanceRecord } from '@/lib/survey/evidence/provenance';
+lib/engineeringIntelligence/workspace.ts:14:  listEngineeringDecisionDefinitions,
+lib/engineeringIntelligence/workspace.ts:15:  type EngineeringDecisionDefinition,
+lib/engineeringIntelligence/workspace.ts:16:} from '@/lib/engineeringDecisionProvenance';
+lib/engineeringIntelligence/workspace.ts:18:  latestValidStateSnapshot,
+lib/engineeringIntelligence/workspace.ts:22:  type EngineeringStateSnapshot,
+lib/engineeringIntelligence/workspace.ts:23:  type EngineeringStateSnapshotStateRef,
+lib/engineeringIntelligence/workspace.ts:25:  type SelectiveRegenerationPlan,
+lib/engineeringIntelligence/workspace.ts:28:  AuditGuardWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:29:  BuildEngineeringIntelligenceWorkspaceInput,
+lib/engineeringIntelligence/workspace.ts:30:  CanonicalEvidenceWorkspaceGroupModel,
+lib/engineeringIntelligence/workspace.ts:31:  CanonicalEvidenceWorkspaceItemModel,
+lib/engineeringIntelligence/workspace.ts:32:  DecisionWorkspaceItemModel,
+lib/engineeringIntelligence/workspace.ts:33:  AffectedOutputsWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:34:  DependencyGraphViewerModel,
+lib/engineeringIntelligence/workspace.ts:35:  DependencyTraversalWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:36:  EngineeringEvidenceWorkspaceGroupId,
+lib/engineeringIntelligence/workspace.ts:41:  EngineeringIntelligenceWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:42:  InvalidationPropagationWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:43:  RegenerationPlanningV1WorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:44:  RegenerationPlanningWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:45:  RequirementWorkspaceItemModel,
+lib/engineeringIntelligence/workspace.ts:46:  SnapshotDeltaWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:47:  SnapshotTimelineWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:48:  StaleInvalidationWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:49:  StaleStateTimelineWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:50:  StructuredEngineeringSignalsWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:51:  SignalProvenanceWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:52:  SignalDependencyGraphWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:53:  SignalRequirementMappingWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:54:  SignalConfidenceWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:55:  SignalBlockingWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:56:  SignalInvalidationWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:57:  SignalStaleImpactsWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:58:  ResolvedEngineeringContextsWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:59:  ContextArbitrationWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:60:  ContextConflictInspectorWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:61:  FallbackChainInspectorWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:62:  ContextProvenanceWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:63:  ContextDependencyGraphWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:64:  ContextConfidenceBreakdownWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:65:  ContextInvalidationsWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:66:  ContextStaleImpactsWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:67:  ContextResolutionTimelineWorkspaceModel,
+lib/engineeringIntelligence/workspace.ts:84:    deterministicPurpose: 'Project-bound evidence, requirement, decision, invalidation, and regeneration-planning view.',
+lib/engineeringIntelligence/workspace.ts:89:    label: 'Snapshot Timeline',
+lib/engineeringIntelligence/workspace.ts:95:    label: 'Dependency Graph',
+lib/engineeringIntelligence/workspace.ts:101:  groupId: EngineeringEvidenceWorkspaceGroupId;
+lib/engineeringIntelligence/workspace.ts:104:  requirementIds: EngineeringRequirementId[];
+lib/engineeringIntelligence/workspace.ts:105:  categories: SurveyEvidenceCategory[];
+lib/engineeringIntelligence/workspace.ts:167:    description: 'Trenching, ground-mount, and route-specific evidence group reserved for canonical evidence and dependency lineage.',
+lib/engineeringIntelligence/workspace.ts:174:function stateRefs(snapshot: EngineeringStateSnapshot | null) {
+lib/engineeringIntelligence/workspace.ts:178:function buildHealth(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): EngineeringHealthDashboardModel {
+lib/engineeringIntelligence/workspace.ts:179:  const refs = stateRefs(latestSnapshot);
+lib/engineeringIntelligence/workspace.ts:180:  const staleOutputs = latestSnapshot ? listStaleEngineeringOutputs(latestSnapshot).length : 0;
+lib/engineeringIntelligence/workspace.ts:181:  const blockedOutputs = refs.filter(ref => ref.staleStatus === 'blocked').length;
+lib/engineeringIntelligence/workspace.ts:182:  const validOutputs = latestSnapshot?.validStateIds.length ?? 0;
+lib/engineeringIntelligence/workspace.ts:184:  const regenerationCandidates = (input.regenerationPlans ?? []).reduce((count, plan) => count + plan.staleStateIds.length, 0);
+lib/engineeringIntelligence/workspace.ts:189:    staleOutputs,
+lib/engineeringIntelligence/workspace.ts:197:    evidenceCompleteness: latestSnapshot ? 'snapshot-linked' : 'canonical-manifest-required',
+lib/engineeringIntelligence/workspace.ts:198:    requirementSatisfaction: latestSnapshot ? 'snapshot-linked' : 'registry-visible',
+lib/engineeringIntelligence/workspace.ts:200:      latestSnapshot
+lib/engineeringIntelligence/workspace.ts:201:        ? `Health counts derived from latest engineering state snapshot ${latestSnapshot.snapshotId}.`
+lib/engineeringIntelligence/workspace.ts:208:function buildEvidenceGroups(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): CanonicalEvidenceWorkspaceGroupModel[] {
+lib/engineeringIntelligence/workspace.ts:209:  const refs = stateRefs(latestSnapshot);
+lib/engineeringIntelligence/workspace.ts:210:  const surveyEvidence = input.surveyEvidence ?? null;
+lib/engineeringIntelligence/workspace.ts:211:  const canonicalRecords = surveyEvidence?.traceability.canonicalEvidence ?? [];
+lib/engineeringIntelligence/workspace.ts:212:  const requirementEvaluations = surveyEvidence?.requirementEvaluation.allRequirements ?? [];
+lib/engineeringIntelligence/workspace.ts:214:  const invalidationEvents = input.invalidationResult?.invalidationEvents ?? [];
+lib/engineeringIntelligence/workspace.ts:219:    const groupRequirements = requirementEvaluations.filter(requirement => group.requirementIds.includes(requirement.requirementId));
+lib/engineeringIntelligence/workspace.ts:220:    const missingRequirementIds = sortText(groupRequirements.filter(requirement => requirement.missing || requirement.insufficientMetadata).map(requirement => requirement.requirementId));
+lib/engineeringIntelligence/workspace.ts:223:      ref.canonicalEvidenceIds.some(evidenceId => recordsForGroup.some(record => record.canonicalEvidenceId === evidenceId)),
+lib/engineeringIntelligence/workspace.ts:228:        .flatMap(ref => ref.canonicalEvidenceIds))
+lib/engineeringIntelligence/workspace.ts:230:    const canonicalEvidenceItems = [
+lib/engineeringIntelligence/workspace.ts:231:      ...recordsForGroup.map(record => buildCanonicalEvidenceRow({
+lib/engineeringIntelligence/workspace.ts:237:        invalidationEvents,
+lib/engineeringIntelligence/workspace.ts:241:      ...snapshotOnlyIds.map(canonicalEvidenceId => buildSnapshotOnlyEvidenceRow({
+lib/engineeringIntelligence/workspace.ts:242:        canonicalEvidenceId,
+lib/engineeringIntelligence/workspace.ts:246:        invalidationEvents,
+lib/engineeringIntelligence/workspace.ts:250:    ].sort((a, b) => a.canonicalEvidenceId.localeCompare(b.canonicalEvidenceId));
+lib/engineeringIntelligence/workspace.ts:252:    const fieldQualitySignals = buildGroupFieldQualitySignals(group.groupId, groupRequirements, groupReadinessFlags, canonicalEvidenceItems.length, surveyEvidence);
+lib/engineeringIntelligence/workspace.ts:256:      canonicalEvidenceItems,
+lib/engineeringIntelligence/workspace.ts:257:      missingRequirementIds,
+lib/engineeringIntelligence/workspace.ts:261:        canonicalEvidenceItems.length > 0
+lib/engineeringIntelligence/workspace.ts:262:          ? 'Evidence rows are hydrated from canonical evidence provenance records and linked snapshot/graph state references.'
+lib/engineeringIntelligence/workspace.ts:267:        'CAD readiness, stale impact, and graph linkage are metadata visualizations only and do not trigger CAD or regeneration.',
+lib/engineeringIntelligence/workspace.ts:269:    } satisfies CanonicalEvidenceWorkspaceGroupModel;
+lib/engineeringIntelligence/workspace.ts:273:function buildCanonicalEvidenceRow(input: {
+lib/engineeringIntelligence/workspace.ts:274:  record: CanonicalEvidenceProvenanceRecord;
+lib/engineeringIntelligence/workspace.ts:276:  refs: EngineeringStateSnapshotStateRef[];
+lib/engineeringIntelligence/workspace.ts:277:  graph: BuildEngineeringIntelligenceWorkspaceInput['persistentGraph'];
+lib/engineeringIntelligence/workspace.ts:278:  requirementEvaluations: EngineeringRequirementEvaluation[];
+lib/engineeringIntelligence/workspace.ts:279:  invalidationEvents: EngineeringInvalidationEvent[];
+lib/engineeringIntelligence/workspace.ts:280:  plans: SelectiveRegenerationPlan[];
+lib/engineeringIntelligence/workspace.ts:282:}): CanonicalEvidenceWorkspaceItemModel {
+lib/engineeringIntelligence/workspace.ts:283:  const linkedRefs = input.refs.filter(ref => ref.canonicalEvidenceIds.includes(input.record.canonicalEvidenceId));
+lib/engineeringIntelligence/workspace.ts:284:  const linkedRequirements = input.requirementEvaluations.filter(requirement => requirement.canonicalEvidenceIds.includes(input.record.canonicalEvidenceId));
+lib/engineeringIntelligence/workspace.ts:285:  const graphNodes = input.graph?.nodes.filter(node => node.canonicalEvidenceIds.includes(input.record.canonicalEvidenceId)) ?? [];
+lib/engineeringIntelligence/workspace.ts:288:  const invalidationEvents = input.invalidationEvents.filter(event => event.triggeringCanonicalEvidenceIds.includes(input.record.canonicalEvidenceId));
+lib/engineeringIntelligence/workspace.ts:289:  const staleStateImpactStateIds = sortText([...linkedRefs.filter(ref => ref.staleStatus !== 'current').map(ref => ref.stateId), ...invalidationEvents.map(event => event.stateId)]);
+lib/engineeringIntelligence/workspace.ts:292:  const linkedDecisionIds = sortText([...linkedRefs.flatMap(ref => ref.decisionIds), ...graphNodes.flatMap(node => node.decisionIds)]);
+lib/engineeringIntelligence/workspace.ts:295:    canonicalEvidenceId: input.record.canonicalEvidenceId,
+lib/engineeringIntelligence/workspace.ts:298:    provenance: sortText([...linkedRefs.map(ref => ref.stateId), input.record.evidenceTruthSource]),
+lib/engineeringIntelligence/workspace.ts:308:    linkedRequirementIds: sortText([...linkedRequirements.map(requirement => requirement.requirementId), ...linkedRefs.flatMap(ref => ref.requirementIds)]),
+lib/engineeringIntelligence/workspace.ts:309:    linkedDecisionIds,
+lib/engineeringIntelligence/workspace.ts:310:    linkedDocumentSectionIds: sortText(linkedRequirements.flatMap(requirement => requirement.permitUsage)),
+lib/engineeringIntelligence/workspace.ts:316:    fieldQualitySignals: buildEvidenceFieldQualitySignals(input.record, linkedRequirements, readinessFlags),
+lib/engineeringIntelligence/workspace.ts:317:    staleStateImpactStateIds,
+lib/engineeringIntelligence/workspace.ts:318:    staleImpactReasons: sortText(invalidationEvents.map(event => event.invalidationReason)),
+lib/engineeringIntelligence/workspace.ts:319:    regenerationCandidateIds: sortText(input.plans.filter(plan => plan.staleStateIds.some(stateId => staleStateImpactStateIds.includes(stateId))).map(plan => plan.planId)),
+lib/engineeringIntelligence/workspace.ts:320:    status: staleStateImpactStateIds.length ? 'stale' : linkedRefs.length || graphNodeIds.length ? 'current' : 'partial',
+lib/engineeringIntelligence/workspace.ts:324:function buildSnapshotOnlyEvidenceRow(input: {
+lib/engineeringIntelligence/workspace.ts:325:  canonicalEvidenceId: string;
+lib/engineeringIntelligence/workspace.ts:327:  refs: EngineeringStateSnapshotStateRef[];
+lib/engineeringIntelligence/workspace.ts:328:  graph: BuildEngineeringIntelligenceWorkspaceInput['persistentGraph'];
+lib/engineeringIntelligence/workspace.ts:329:  invalidationEvents: EngineeringInvalidationEvent[];
+lib/engineeringIntelligence/workspace.ts:330:  plans: SelectiveRegenerationPlan[];
+lib/engineeringIntelligence/workspace.ts:332:}): CanonicalEvidenceWorkspaceItemModel {
+lib/engineeringIntelligence/workspace.ts:333:  const linkedRefs = input.refs.filter(ref => ref.canonicalEvidenceIds.includes(input.canonicalEvidenceId));
+lib/engineeringIntelligence/workspace.ts:334:  const graphNodes = input.graph?.nodes.filter(node => node.canonicalEvidenceIds.includes(input.canonicalEvidenceId)) ?? [];
+lib/engineeringIntelligence/workspace.ts:337:  const invalidationEvents = input.invalidationEvents.filter(event => event.triggeringCanonicalEvidenceIds.includes(input.canonicalEvidenceId));
+lib/engineeringIntelligence/workspace.ts:338:  const staleStateImpactStateIds = sortText([...linkedRefs.filter(ref => ref.staleStatus !== 'current').map(ref => ref.stateId), ...invalidationEvents.map(event => event.stateId)]);
+lib/engineeringIntelligence/workspace.ts:340:    canonicalEvidenceId: input.canonicalEvidenceId,
+lib/engineeringIntelligence/workspace.ts:343:    provenance: sortText(linkedRefs.map(ref => ref.stateId)),
+lib/engineeringIntelligence/workspace.ts:348:    canonicalSelectionReason: 'Snapshot referenced this canonical evidence id, but no canonical traceability record was supplied to this workspace context.',
+lib/engineeringIntelligence/workspace.ts:353:    linkedRequirementIds: sortText(linkedRefs.flatMap(ref => ref.requirementIds)),
+lib/engineeringIntelligence/workspace.ts:354:    linkedDecisionIds: sortText([...linkedRefs.flatMap(ref => ref.decisionIds), ...graphNodes.flatMap(node => node.decisionIds)]),
+lib/engineeringIntelligence/workspace.ts:362:    staleStateImpactStateIds,
+lib/engineeringIntelligence/workspace.ts:363:    staleImpactReasons: sortText(invalidationEvents.map(event => event.invalidationReason)),
+lib/engineeringIntelligence/workspace.ts:364:    regenerationCandidateIds: sortText(input.plans.filter(plan => plan.staleStateIds.some(stateId => staleStateImpactStateIds.includes(stateId))).map(plan => plan.planId)),
+lib/engineeringIntelligence/workspace.ts:365:    status: staleStateImpactStateIds.length ? 'stale' : 'current',
+lib/engineeringIntelligence/workspace.ts:369:function metadataCompletenessEntries(completeness: CanonicalEvidenceProvenanceRecord['metadataCompleteness']) {
+lib/engineeringIntelligence/workspace.ts:373:function summarizeReadinessImpact(flags: CADReadinessFlag[]): CanonicalEvidenceWorkspaceItemModel['readinessImpact'] {
+lib/engineeringIntelligence/workspace.ts:381:function buildEvidenceFieldQualitySignals(
+lib/engineeringIntelligence/workspace.ts:382:  record: CanonicalEvidenceProvenanceRecord,
+lib/engineeringIntelligence/workspace.ts:383:  requirements: EngineeringRequirementEvaluation[],
+lib/engineeringIntelligence/workspace.ts:402:  groupId: EngineeringEvidenceWorkspaceGroupId,
+lib/engineeringIntelligence/workspace.ts:403:  requirements: EngineeringRequirementEvaluation[],
+lib/engineeringIntelligence/workspace.ts:406:  surveyEvidence: EngineeringSurveyEvidence | null,
+lib/engineeringIntelligence/workspace.ts:417:  if (groupId === 'electrical' && !surveyEvidence?.fieldEvidence.hasElectricalData) signals.push('insufficient electrical evidence');
+lib/engineeringIntelligence/workspace.ts:418:  if (groupId === 'structural' && (!surveyEvidence?.fieldEvidence.hasStructuralData || evidenceCount === 0)) signals.push('no attic/framing evidence');
+lib/engineeringIntelligence/workspace.ts:419:  if (groupId === 'routing' && (!surveyEvidence?.fieldEvidence.interconnectionPoint || evidenceCount === 0)) signals.push('incomplete routing evidence');
+lib/engineeringIntelligence/workspace.ts:421:  if (groupId === 'roof' && surveyEvidence?.completeness !== 'sufficient') signals.push('low roof/completeness context for full CAD readiness');
+lib/engineeringIntelligence/workspace.ts:425:function buildPhotoGrouping(input: BuildEngineeringIntelligenceWorkspaceInput) {
+lib/engineeringIntelligence/workspace.ts:434:function buildRequirements(latestSnapshot: EngineeringStateSnapshot | null): RequirementWorkspaceItemModel[] {
+lib/engineeringIntelligence/workspace.ts:435:  const refs = stateRefs(latestSnapshot);
+lib/engineeringIntelligence/workspace.ts:436:  return sortBy(ENGINEERING_REQUIREMENT_DEFINITIONS, req => req.requirementId).map((definition: EngineeringRequirementDefinition) => {
+lib/engineeringIntelligence/workspace.ts:438:    const staleRefs = linkedRefs.filter(ref => ref.staleStatus !== 'current');
+lib/engineeringIntelligence/workspace.ts:443:      status: latestSnapshot ? (linkedRefs.length > 0 ? 'satisfied' : definition.active ? 'missing' : 'inactive') : 'not_loaded',
+lib/engineeringIntelligence/workspace.ts:445:      linkedEvidenceIds: sortText(linkedRefs.flatMap(ref => ref.canonicalEvidenceIds)),
+lib/engineeringIntelligence/workspace.ts:446:      linkedDecisionIds: sortText(linkedRefs.flatMap(ref => ref.decisionIds)),
+lib/engineeringIntelligence/workspace.ts:449:      staleImpactStateIds: sortText(staleRefs.map(ref => ref.stateId)),
+lib/engineeringIntelligence/workspace.ts:455:function buildDecisions(latestSnapshot: EngineeringStateSnapshot | null): DecisionWorkspaceItemModel[] {
+lib/engineeringIntelligence/workspace.ts:456:  const refs = stateRefs(latestSnapshot);
+lib/engineeringIntelligence/workspace.ts:457:  return sortBy(listEngineeringDecisionDefinitions(), decision => decision.decisionType).map((definition: EngineeringDecisionDefinition) => {
+lib/engineeringIntelligence/workspace.ts:468:      evidenceLineageIds: sortText(linkedRefs.flatMap(ref => ref.canonicalEvidenceIds)),
+lib/engineeringIntelligence/workspace.ts:472:      staleImpactStateIds: sortText(linkedRefs.filter(ref => ref.staleStatus !== 'current').map(ref => ref.stateId)),
+lib/engineeringIntelligence/workspace.ts:478:function buildStaleInvalidation(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): StaleInvalidationWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:482:    staleOutputIds: latestSnapshot ? listStaleEngineeringOutputs(latestSnapshot) : [],
+lib/engineeringIntelligence/workspace.ts:483:    invalidationChains: events
+lib/engineeringIntelligence/workspace.ts:489:        triggeringEvidenceIds: event.canonicalEvidenceIds,
+lib/engineeringIntelligence/workspace.ts:490:        triggeringDecisionIds: event.decisionIds,
+lib/engineeringIntelligence/workspace.ts:491:        triggeringRequirementIds: event.requirementIds,
+lib/engineeringIntelligence/workspace.ts:496:    regenerationScopeIds: sortText(plans.flatMap(plan => plan.staleStateIds)),
+lib/engineeringIntelligence/workspace.ts:499:      'Regeneration planning remains a deterministic plan visualization; no autonomous regeneration is triggered.',
+lib/engineeringIntelligence/workspace.ts:504:function buildSnapshots(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): SnapshotTimelineWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:508:    latestSnapshotId: latestSnapshot?.snapshotId ?? null,
+lib/engineeringIntelligence/workspace.ts:515:        ? 'Snapshot timeline is derived from persistent engineering state snapshots and deterministic snapshot hashes.'
+lib/engineeringIntelligence/workspace.ts:517:      'Snapshot hashes are displayed as existing durable metadata and are not recomputed client-side.',
+lib/engineeringIntelligence/workspace.ts:523:  if (node.nodeKind === 'state_record') return node.staleStatus === 'current' ? 'current' : node.staleStatus;
+lib/engineeringIntelligence/workspace.ts:527:function buildGraph(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): DependencyGraphViewerModel {
+lib/engineeringIntelligence/workspace.ts:535:      provenanceSummary: 'Engineering Requirement Registry v1 definition.',
+lib/engineeringIntelligence/workspace.ts:537:    ...listEngineeringDecisionDefinitions().map(decision => ({
+lib/engineeringIntelligence/workspace.ts:542:      provenanceSummary: 'Engineering Decision Registry deterministic definition.',
+lib/engineeringIntelligence/workspace.ts:550:        nodeType: node.nodeKind === 'state_record' ? (node.staleStatus === 'current' ? 'document_section' : 'stale_output') : 'dependency',
+lib/engineeringIntelligence/workspace.ts:552:        provenanceSummary: node.deterministicNotes.join(' '),
+lib/engineeringIntelligence/workspace.ts:564:            : edge.edgeType === 'preserves_stale_state'
+lib/engineeringIntelligence/workspace.ts:586:function buildRegenerationPlanning(input: BuildEngineeringIntelligenceWorkspaceInput): RegenerationPlanningWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:587:  const plans: SelectiveRegenerationPlan[] = sortBy(input.regenerationPlans ?? [], plan => plan.planId);
+lib/engineeringIntelligence/workspace.ts:590:    regenerationCandidates: sortText(plans.flatMap(plan => plan.staleStateIds)),
+lib/engineeringIntelligence/workspace.ts:592:    blockedDependencies: sortText(plans.flatMap(plan => plan.blockedRegenerationDependencies)),
+lib/engineeringIntelligence/workspace.ts:596:        ? 'Regeneration planning rows are derived from persisted selective regeneration plans.'
+lib/engineeringIntelligence/workspace.ts:603:function buildInvalidationPropagationWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): InvalidationPropagationWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:604:  const propagation = input.invalidationPropagation ?? null;
+lib/engineeringIntelligence/workspace.ts:607:    stalePropagationChains: sortText(propagation?.propagationPaths.map(path => `${path.pathId}:depth=${path.depth}`) ?? []),
+lib/engineeringIntelligence/workspace.ts:608:    invalidationSources: propagation?.sourceNodeIds ?? [],
+lib/engineeringIntelligence/workspace.ts:612:    impactedSnapshots: propagation?.affectedSnapshotIds ?? [],
+lib/engineeringIntelligence/workspace.ts:620:    deterministicNotes: propagation?.deterministicNotes ?? ['No V1 invalidation propagation metadata was supplied.'],
+lib/engineeringIntelligence/workspace.ts:624:function buildDependencyTraversalWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): DependencyTraversalWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:625:  const traversal = input.invalidationPropagation?.traversal ?? null;
+lib/engineeringIntelligence/workspace.ts:643:function buildRegenerationPlanningV1Workspace(input: BuildEngineeringIntelligenceWorkspaceInput): RegenerationPlanningV1WorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:651:    missingEvidence: plan?.missingEvidenceIds ?? [],
+lib/engineeringIntelligence/workspace.ts:653:    deterministicNotes: plan?.deterministicNotes ?? ['No Regeneration Planning V1 metadata was supplied; no regeneration is initiated.'],
+lib/engineeringIntelligence/workspace.ts:657:function buildSnapshotDeltaWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SnapshotDeltaWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:661:    addedEvidence: delta?.addedEvidenceIds ?? [],
+lib/engineeringIntelligence/workspace.ts:662:    removedEvidence: delta?.removedEvidenceIds ?? [],
+lib/engineeringIntelligence/workspace.ts:663:    changedDecisions: delta?.changedDecisionIds ?? [],
+lib/engineeringIntelligence/workspace.ts:664:    staleOutputsIntroduced: delta?.staleOutputsIntroduced ?? [],
+lib/engineeringIntelligence/workspace.ts:666:    invalidationCauses: delta?.invalidationCauseIds ?? [],
+lib/engineeringIntelligence/workspace.ts:669:    deterministicNotes: delta?.deterministicNotes ?? ['No Snapshot Delta V1 metadata was supplied.'],
+lib/engineeringIntelligence/workspace.ts:673:function buildAffectedOutputsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): AffectedOutputsWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:674:  const outputs = input.invalidationPropagation?.affectedOutputs ?? [];
+lib/engineeringIntelligence/workspace.ts:679:    snapshots: sortText(outputs.flatMap(output => output.affectedSnapshotIds)),
+lib/engineeringIntelligence/workspace.ts:680:    decisions: sortText(outputs.flatMap(output => output.invalidatedDecisionIds)),
+lib/engineeringIntelligence/workspace.ts:681:    reviewRequired: sortText(outputs.filter(output => output.staleClass === 'BLOCKED' || output.staleClass === 'REQUIRES_REVIEW' || output.missingEvidenceIds.length > 0).map(output => output.stateId)),
+lib/engineeringIntelligence/workspace.ts:682:    deterministicNotes: input.invalidationPropagation ? ['Affected outputs are derived from V1 propagation output only.'] : ['No affected-output propagation metadata was supplied.'],
+lib/engineeringIntelligence/workspace.ts:686:function buildStaleStateTimelineWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): StaleStateTimelineWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:690:    staleClass: event.eventType === 'state_invalidated' ? 'INVALIDATED' : event.eventType === 'stale_state_preserved' ? 'STALE' : 'VALID',
+lib/engineeringIntelligence/workspace.ts:695:    canonicalEvidenceIds: event.canonicalEvidenceIds,
+lib/engineeringIntelligence/workspace.ts:700:    staleStateIds: input.timeline?.staleStateIds ?? [],
+lib/engineeringIntelligence/workspace.ts:703:      events.length ? 'Stale-state timeline is derived from transition history events.' : 'No transition history was supplied for stale-state timeline metadata.',
+lib/engineeringIntelligence/workspace.ts:704:      'Timeline rendering is observational and does not regenerate stale outputs.',
+lib/engineeringIntelligence/workspace.ts:714:function buildStructuredSignalsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): StructuredEngineeringSignalsWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:729:function buildSignalProvenanceWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalProvenanceWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:734:      sourceEvidenceIds: signal.sourceEvidenceIds,
+lib/engineeringIntelligence/workspace.ts:740:    deterministicNotes: signals.length ? ['Signal provenance chains are derived from signal source fields and deterministic hashes.'] : ['No signal provenance is available without a signal model.'],
+lib/engineeringIntelligence/workspace.ts:744:function buildSignalDependencyGraphWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalDependencyGraphWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:752:function buildSignalRequirementMappingWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalRequirementMappingWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:759:function buildSignalConfidenceWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalConfidenceWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:767:function buildSignalBlockingWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalBlockingWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:775:function buildSignalInvalidationWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalInvalidationWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:778:    invalidations: signals.filter(signal => signal.invalidatedBy.length > 0 || signal.staleImpacts.length > 0).map(signal => ({ signalId: signal.id, invalidatedBy: signal.invalidatedBy, staleImpacts: signal.staleImpacts })),
+lib/engineeringIntelligence/workspace.ts:779:    deterministicNotes: signals.length ? ['Signal invalidation metadata is linked to evidence/state invalidation events when present.'] : ['No signal invalidation metadata was supplied.'],
+lib/engineeringIntelligence/workspace.ts:783:function buildSignalStaleImpactsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SignalStaleImpactsWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:785:    staleImpacts: input.structuredSignals?.staleImpacts ?? [],
+lib/engineeringIntelligence/workspace.ts:787:    deterministicNotes: input.structuredSignals ? ['Signal stale impacts and fallback participation are surfaced explicitly for review.'] : ['No signal stale-impact metadata was supplied.'],
+lib/engineeringIntelligence/workspace.ts:792:function buildResolvedEngineeringContextsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ResolvedEngineeringContextsWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:809:function buildContextArbitrationWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextArbitrationWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:829:function buildContextConflictInspectorWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextConflictInspectorWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:839:function buildFallbackChainInspectorWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): FallbackChainInspectorWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:848:    deterministicNotes: input.contextResolution ? ['Fallback lineage remains visible and reduces deterministic confidence; it is not promoted into truth.'] : ['No fallback-chain context metadata was supplied.'],
+lib/engineeringIntelligence/workspace.ts:852:function buildContextProvenanceWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextProvenanceWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:858:      sourceEvidenceIds: context.sourceEvidenceIds,
+lib/engineeringIntelligence/workspace.ts:861:      invalidationLineage: context.invalidationLineage,
+lib/engineeringIntelligence/workspace.ts:864:    deterministicNotes: contexts.length ? ['Context provenance chains are derived from structured signal source fields, grouping metadata, and invalidation lineage.'] : ['No context provenance is available without a context resolution model.'],
+lib/engineeringIntelligence/workspace.ts:868:function buildContextDependencyGraphWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextDependencyGraphWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:872:    deterministicNotes: input.contextResolution ? ['Context dependency graph links contexts to signals, evidence, metadata, readiness, requirements, decisions, and invalidations.'] : ['No context dependency graph was supplied.'],
+lib/engineeringIntelligence/workspace.ts:876:function buildContextConfidenceBreakdownWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextConfidenceBreakdownWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:892:function buildContextInvalidationsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextInvalidationsWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:895:    invalidations: contexts
+lib/engineeringIntelligence/workspace.ts:896:      .filter(context => context.invalidationLineage.length > 0 || context.staleImpactPropagation.length > 0 || context.regenerationParticipation.length > 0)
+lib/engineeringIntelligence/workspace.ts:897:      .map(context => ({ contextId: context.id, invalidationLineage: context.invalidationLineage, staleImpactPropagation: context.staleImpactPropagation, regenerationParticipation: context.regenerationParticipation }))
+lib/engineeringIntelligence/workspace.ts:899:    deterministicNotes: contexts.length ? ['Context invalidation participation is surfaced from upstream signal and state invalidation lineage.'] : ['No context invalidation metadata was supplied.'],
+lib/engineeringIntelligence/workspace.ts:903:function buildContextStaleImpactsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextStaleImpactsWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:905:    staleImpacts: input.contextResolution?.staleImpacts ?? [],
+lib/engineeringIntelligence/workspace.ts:907:    deterministicNotes: input.contextResolution ? ['Context stale impacts and CAD-readiness mappings are displayed as metadata only.'] : ['No context stale-impact metadata was supplied.'],
+lib/engineeringIntelligence/workspace.ts:911:function buildContextResolutionTimelineWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): ContextResolutionTimelineWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:918:function buildAuditGuards(input: BuildEngineeringIntelligenceWorkspaceInput): AuditGuardWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:924:    provenanceFailures: failures.filter(guard => includesAny(guard.guardCode, ['provenance', 'lineage'])),
+lib/engineeringIntelligence/workspace.ts:926:    staleLineageFailures: failures.filter(guard => includesAny(guard.guardCode, ['stale', 'invalidation'])),
+lib/engineeringIntelligence/workspace.ts:941:export function buildEngineeringIntelligenceWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput = {}): EngineeringIntelligenceWorkspaceModel {
+lib/engineeringIntelligence/workspace.ts:943:  const latestSnapshot = latestValidStateSnapshot(snapshots) ?? snapshots[snapshots.length - 1] ?? null;
+lib/engineeringIntelligence/workspace.ts:944:  const health = buildHealth(input, latestSnapshot);
+lib/engineeringIntelligence/workspace.ts:945:  const evidenceGroups = buildEvidenceGroups(input, latestSnapshot);
+lib/engineeringIntelligence/workspace.ts:947:  const requirements = buildRequirements(latestSnapshot);
+lib/engineeringIntelligence/workspace.ts:948:  const decisions = buildDecisions(latestSnapshot);
+lib/engineeringIntelligence/workspace.ts:949:  const staleInvalidation = buildStaleInvalidation(input, latestSnapshot);
+lib/engineeringIntelligence/workspace.ts:950:  const snapshotTimeline = buildSnapshots(input, latestSnapshot);
+lib/engineeringIntelligence/workspace.ts:951:  const graph = buildGraph(input, latestSnapshot);
+lib/engineeringIntelligence/workspace.ts:952:  const regenerationPlanning = buildRegenerationPlanning(input);
+lib/engineeringIntelligence/workspace.ts:953:  const invalidationPropagation = buildInvalidationPropagationWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:954:  const dependencyTraversal = buildDependencyTraversalWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:955:  const regenerationPlanningV1 = buildRegenerationPlanningV1Workspace(input);
+lib/engineeringIntelligence/workspace.ts:956:  const snapshotDelta = buildSnapshotDeltaWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:957:  const affectedOutputs = buildAffectedOutputsWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:958:  const staleStateTimeline = buildStaleStateTimelineWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:959:  const structuredSignals = buildStructuredSignalsWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:960:  const signalProvenance = buildSignalProvenanceWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:961:  const signalDependencyGraph = buildSignalDependencyGraphWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:962:  const signalRequirementMapping = buildSignalRequirementMappingWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:963:  const signalConfidence = buildSignalConfidenceWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:964:  const signalBlocking = buildSignalBlockingWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:965:  const signalInvalidations = buildSignalInvalidationWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:966:  const signalStaleImpacts = buildSignalStaleImpactsWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:967:  const resolvedContexts = buildResolvedEngineeringContextsWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:968:  const contextArbitration = buildContextArbitrationWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:969:  const contextConflictInspector = buildContextConflictInspectorWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:970:  const fallbackChainInspector = buildFallbackChainInspectorWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:971:  const contextProvenance = buildContextProvenanceWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:972:  const contextDependencyGraph = buildContextDependencyGraphWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:973:  const contextConfidenceBreakdown = buildContextConfidenceBreakdownWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:974:  const contextInvalidations = buildContextInvalidationsWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:975:  const contextStaleImpacts = buildContextStaleImpactsWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:976:  const contextResolutionTimeline = buildContextResolutionTimelineWorkspace(input);
+lib/engineeringIntelligence/workspace.ts:983:    invalidationPropagation: input.invalidationPropagation ?? null,
+lib/engineeringIntelligence/workspace.ts:991:    generatedFrom: latestSnapshot ? 'project-snapshot' : 'system-registries',
+lib/engineeringIntelligence/workspace.ts:998:    staleInvalidation,
+lib/engineeringIntelligence/workspace.ts:999:    snapshots: snapshotTimeline,
+lib/engineeringIntelligence/workspace.ts:1002:    invalidationPropagation,
+lib/engineeringIntelligence/workspace.ts:1007:    staleStateTimeline,
+lib/engineeringIntelligence/workspace.ts:1010:    signalDependencyGraph,
+lib/engineeringIntelligence/workspace.ts:1011:    signalRequirementMapping,
+lib/engineeringIntelligence/workspace.ts:1021:    contextDependencyGraph,
+lib/engineeringIntelligence/workspace.ts:1025:    contextResolutionTimeline,
+lib/engineeringIntelligence/workspace.ts:1029:      latestSnapshot
+lib/engineeringIntelligence/workspace.ts:1030:        ? `Workspace generated from snapshot ${latestSnapshot.snapshotId}.`
+lib/engineeringIntelligence/workspace.ts:1031:        : 'Workspace generated from deterministic registries without project-bound engineering state.',
+lib/engineeringIntelligence/types.ts:2:  EngineeringRequirementDefinition,
+lib/engineeringIntelligence/types.ts:3:  EngineeringRequirementId,
+lib/engineeringIntelligence/types.ts:4:  EngineeringRequirementStatus,
+lib/engineeringIntelligence/types.ts:5:} from '@/lib/survey/evidence/engineeringRequirements';
+lib/engineeringIntelligence/types.ts:6:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+lib/engineeringIntelligence/types.ts:9:import type { EngineeringInvalidationPropagationResult, EngineeringAffectedOutputImpact } from '@/lib/engineeringIntelligence/invalidationEngine';
+lib/engineeringIntelligence/types.ts:11:import type { EngineeringRegenerationPlanV1 } from '@/lib/engineeringIntelligence/regenerationPlanner';
+lib/engineeringIntelligence/types.ts:12:import type { EngineeringSnapshotDeltaV1 } from '@/lib/engineeringIntelligence/snapshotDelta';
+lib/engineeringIntelligence/types.ts:19:  EngineeringDecisionDefinition,
+lib/engineeringIntelligence/types.ts:20:  EngineeringDecisionType,
+lib/engineeringIntelligence/types.ts:21:} from '@/lib/engineeringDecisionProvenance';
+lib/engineeringIntelligence/types.ts:24:  EngineeringStateSnapshot,
+lib/engineeringIntelligence/types.ts:25:  EngineeringStateSnapshotDiff,
+lib/engineeringIntelligence/types.ts:27:  EngineeringStateTimeline,
+lib/engineeringIntelligence/types.ts:30:  SelectiveRegenerationPlan,
+lib/engineeringIntelligence/types.ts:39:export type EngineeringEvidenceWorkspaceGroupId =
+lib/engineeringIntelligence/types.ts:49:export type EngineeringWorkspaceStatus =
+lib/engineeringIntelligence/types.ts:56:  | 'stale'
+lib/engineeringIntelligence/types.ts:71:  staleOutputs: number;
+lib/engineeringIntelligence/types.ts:84:export interface CanonicalEvidenceWorkspaceItemModel {
+lib/engineeringIntelligence/types.ts:85:  canonicalEvidenceId: string;
+lib/engineeringIntelligence/types.ts:88:  provenance: string[];
+lib/engineeringIntelligence/types.ts:98:  linkedRequirementIds: EngineeringRequirementId[];
+lib/engineeringIntelligence/types.ts:99:  linkedDecisionIds: string[];
+lib/engineeringIntelligence/types.ts:107:  staleStateImpactStateIds: string[];
+lib/engineeringIntelligence/types.ts:108:  staleImpactReasons: string[];
+lib/engineeringIntelligence/types.ts:110:  status: EngineeringWorkspaceStatus;
+lib/engineeringIntelligence/types.ts:113:export interface CanonicalEvidenceWorkspaceGroupModel {
+lib/engineeringIntelligence/types.ts:114:  groupId: EngineeringEvidenceWorkspaceGroupId;
+lib/engineeringIntelligence/types.ts:117:  requirementIds: EngineeringRequirementId[];
+lib/engineeringIntelligence/types.ts:118:  canonicalEvidenceItems: CanonicalEvidenceWorkspaceItemModel[];
+lib/engineeringIntelligence/types.ts:119:  missingRequirementIds: EngineeringRequirementId[];
+lib/engineeringIntelligence/types.ts:125:export interface RequirementWorkspaceItemModel {
+lib/engineeringIntelligence/types.ts:126:  requirementId: EngineeringRequirementId;
+lib/engineeringIntelligence/types.ts:129:  status: EngineeringRequirementStatus | 'not_loaded';
+lib/engineeringIntelligence/types.ts:131:  linkedEvidenceIds: string[];
+lib/engineeringIntelligence/types.ts:132:  linkedDecisionIds: string[];
+lib/engineeringIntelligence/types.ts:135:  staleImpactStateIds: string[];
+lib/engineeringIntelligence/types.ts:136:  definition: EngineeringRequirementDefinition;
+lib/engineeringIntelligence/types.ts:139:export interface DecisionWorkspaceItemModel {
+lib/engineeringIntelligence/types.ts:140:  decisionType: EngineeringDecisionType;
+lib/engineeringIntelligence/types.ts:149:  staleImpactStateIds: string[];
+lib/engineeringIntelligence/types.ts:150:  definition: EngineeringDecisionDefinition;
+lib/engineeringIntelligence/types.ts:153:export interface StaleInvalidationWorkspaceModel {
+lib/engineeringIntelligence/types.ts:154:  staleOutputIds: string[];
+lib/engineeringIntelligence/types.ts:155:  invalidationChains: Array<{
+lib/engineeringIntelligence/types.ts:159:    triggeringEvidenceIds: string[];
+lib/engineeringIntelligence/types.ts:160:    triggeringDecisionIds: string[];
+lib/engineeringIntelligence/types.ts:161:    triggeringRequirementIds: string[];
+lib/engineeringIntelligence/types.ts:169:export interface SnapshotTimelineWorkspaceModel {
+lib/engineeringIntelligence/types.ts:170:  snapshots: EngineeringStateSnapshot[];
+lib/engineeringIntelligence/types.ts:171:  latestSnapshotId: string | null;
+lib/engineeringIntelligence/types.ts:173:  diffs: EngineeringStateSnapshotDiff[];
+lib/engineeringIntelligence/types.ts:174:  timeline: EngineeringStateTimeline | null;
+lib/engineeringIntelligence/types.ts:185:  | 'stale_output'
+lib/engineeringIntelligence/types.ts:203:  status: EngineeringWorkspaceStatus;
+lib/engineeringIntelligence/types.ts:204:  provenanceSummary: string;
+lib/engineeringIntelligence/types.ts:215:export interface DependencyGraphViewerModel {
+lib/engineeringIntelligence/types.ts:222:export interface RegenerationPlanningWorkspaceModel {
+lib/engineeringIntelligence/types.ts:223:  plans: SelectiveRegenerationPlan[];
+lib/engineeringIntelligence/types.ts:231:export interface InvalidationPropagationWorkspaceModel {
+lib/engineeringIntelligence/types.ts:233:  stalePropagationChains: string[];
+lib/engineeringIntelligence/types.ts:234:  invalidationSources: string[];
+lib/engineeringIntelligence/types.ts:238:  impactedSnapshots: string[];
+lib/engineeringIntelligence/types.ts:244:export interface DependencyTraversalWorkspaceModel {
+lib/engineeringIntelligence/types.ts:255:export interface RegenerationPlanningV1WorkspaceModel {
+lib/engineeringIntelligence/types.ts:256:  plan: EngineeringRegenerationPlanV1 | null;
+lib/engineeringIntelligence/types.ts:261:  missingEvidence: string[];
+lib/engineeringIntelligence/types.ts:266:export interface SnapshotDeltaWorkspaceModel {
+lib/engineeringIntelligence/types.ts:267:  delta: EngineeringSnapshotDeltaV1 | null;
+lib/engineeringIntelligence/types.ts:268:  addedEvidence: string[];
+lib/engineeringIntelligence/types.ts:269:  removedEvidence: string[];
+lib/engineeringIntelligence/types.ts:270:  changedDecisions: string[];
+lib/engineeringIntelligence/types.ts:271:  staleOutputsIntroduced: string[];
+lib/engineeringIntelligence/types.ts:273:  invalidationCauses: string[];
+lib/engineeringIntelligence/types.ts:279:export interface AffectedOutputsWorkspaceModel {
+lib/engineeringIntelligence/types.ts:289:export interface StaleStateTimelineWorkspaceModel {
+lib/engineeringIntelligence/types.ts:293:    staleClass: string;
+lib/engineeringIntelligence/types.ts:298:    canonicalEvidenceIds: string[];
+lib/engineeringIntelligence/types.ts:301:  staleStateIds: string[];
+lib/engineeringIntelligence/types.ts:307:export interface StructuredEngineeringSignalsWorkspaceModel {
+lib/engineeringIntelligence/types.ts:318:export interface SignalProvenanceWorkspaceModel {
+lib/engineeringIntelligence/types.ts:321:    sourceEvidenceIds: string[];
+lib/engineeringIntelligence/types.ts:330:export interface SignalDependencyGraphWorkspaceModel {
+lib/engineeringIntelligence/types.ts:336:export interface SignalRequirementMappingWorkspaceModel {
+lib/engineeringIntelligence/types.ts:341:export interface SignalConfidenceWorkspaceModel {
+lib/engineeringIntelligence/types.ts:346:export interface SignalBlockingWorkspaceModel {
+lib/engineeringIntelligence/types.ts:351:export interface SignalInvalidationWorkspaceModel {
+lib/engineeringIntelligence/types.ts:352:  invalidations: Array<{ signalId: string; invalidatedBy: string[]; staleImpacts: string[] }>;
+lib/engineeringIntelligence/types.ts:356:export interface SignalStaleImpactsWorkspaceModel {
+lib/engineeringIntelligence/types.ts:357:  staleImpacts: StructuredEngineeringSignalSummary['staleImpacts'];
+lib/engineeringIntelligence/types.ts:363:export interface ResolvedEngineeringContextsWorkspaceModel {
+lib/engineeringIntelligence/types.ts:376:export interface ContextArbitrationWorkspaceModel {
+lib/engineeringIntelligence/types.ts:381:export interface ContextConflictInspectorWorkspaceModel {
+lib/engineeringIntelligence/types.ts:388:export interface FallbackChainInspectorWorkspaceModel {
+lib/engineeringIntelligence/types.ts:395:export interface ContextProvenanceWorkspaceModel {
+lib/engineeringIntelligence/types.ts:396:  chains: Array<{ contextId: string; sourceSignalIds: string[]; sourceEvidenceIds: string[]; sourceMetadataIds: string[]; dependencyLineage: string[]; invalidationLineage: string[]; deterministicHash: string }>;
+lib/engineeringIntelligence/types.ts:400:export interface ContextDependencyGraphWorkspaceModel {
+lib/engineeringIntelligence/types.ts:406:export interface ContextConfidenceBreakdownWorkspaceModel {
+lib/engineeringIntelligence/types.ts:411:export interface ContextInvalidationsWorkspaceModel {
+lib/engineeringIntelligence/types.ts:412:  invalidations: Array<{ contextId: string; invalidationLineage: string[]; staleImpactPropagation: string[]; regenerationParticipation: string[] }>;
+lib/engineeringIntelligence/types.ts:416:export interface ContextStaleImpactsWorkspaceModel {
+lib/engineeringIntelligence/types.ts:417:  staleImpacts: EngineeringContextResolutionSummary['staleImpacts'];
+lib/engineeringIntelligence/types.ts:422:export interface ContextResolutionTimelineWorkspaceModel {
+lib/engineeringIntelligence/types.ts:427:export interface AuditGuardWorkspaceModel {
+lib/engineeringIntelligence/types.ts:430:  provenanceFailures: EngineeringStateAuditGuardResult[];
+lib/engineeringIntelligence/types.ts:432:  staleLineageFailures: EngineeringStateAuditGuardResult[];
+lib/engineeringIntelligence/types.ts:437:export interface EngineeringIntelligenceWorkspaceModel {
+lib/engineeringIntelligence/types.ts:442:  evidenceGroups: CanonicalEvidenceWorkspaceGroupModel[];
+lib/engineeringIntelligence/types.ts:444:  requirements: RequirementWorkspaceItemModel[];
+lib/engineeringIntelligence/types.ts:445:  decisions: DecisionWorkspaceItemModel[];
+lib/engineeringIntelligence/types.ts:446:  staleInvalidation: StaleInvalidationWorkspaceModel;
+lib/engineeringIntelligence/types.ts:447:  snapshots: SnapshotTimelineWorkspaceModel;
+lib/engineeringIntelligence/types.ts:448:  graph: DependencyGraphViewerModel;
+lib/engineeringIntelligence/types.ts:449:  regenerationPlanning: RegenerationPlanningWorkspaceModel;
+lib/engineeringIntelligence/types.ts:450:  invalidationPropagation: InvalidationPropagationWorkspaceModel;
+lib/engineeringIntelligence/types.ts:451:  dependencyTraversal: DependencyTraversalWorkspaceModel;
+lib/engineeringIntelligence/types.ts:452:  regenerationPlanningV1: RegenerationPlanningV1WorkspaceModel;
+lib/engineeringIntelligence/types.ts:453:  snapshotDelta: SnapshotDeltaWorkspaceModel;
+lib/engineeringIntelligence/types.ts:454:  affectedOutputs: AffectedOutputsWorkspaceModel;
+lib/engineeringIntelligence/types.ts:455:  staleStateTimeline: StaleStateTimelineWorkspaceModel;
+lib/engineeringIntelligence/types.ts:456:  structuredSignals: StructuredEngineeringSignalsWorkspaceModel;
+lib/engineeringIntelligence/types.ts:457:  signalProvenance: SignalProvenanceWorkspaceModel;
+lib/engineeringIntelligence/types.ts:458:  signalDependencyGraph: SignalDependencyGraphWorkspaceModel;
+lib/engineeringIntelligence/types.ts:459:  signalRequirementMapping: SignalRequirementMappingWorkspaceModel;
+lib/engineeringIntelligence/types.ts:460:  signalConfidence: SignalConfidenceWorkspaceModel;
+lib/engineeringIntelligence/types.ts:461:  signalBlocking: SignalBlockingWorkspaceModel;
+lib/engineeringIntelligence/types.ts:462:  signalInvalidations: SignalInvalidationWorkspaceModel;
+lib/engineeringIntelligence/types.ts:463:  signalStaleImpacts: SignalStaleImpactsWorkspaceModel;
+lib/engineeringIntelligence/types.ts:464:  resolvedContexts: ResolvedEngineeringContextsWorkspaceModel;
+lib/engineeringIntelligence/types.ts:465:  contextArbitration: ContextArbitrationWorkspaceModel;
+lib/engineeringIntelligence/types.ts:466:  contextConflictInspector: ContextConflictInspectorWorkspaceModel;
+lib/engineeringIntelligence/types.ts:467:  fallbackChainInspector: FallbackChainInspectorWorkspaceModel;
+lib/engineeringIntelligence/types.ts:468:  contextProvenance: ContextProvenanceWorkspaceModel;
+lib/engineeringIntelligence/types.ts:469:  contextDependencyGraph: ContextDependencyGraphWorkspaceModel;
+lib/engineeringIntelligence/types.ts:470:  contextConfidenceBreakdown: ContextConfidenceBreakdownWorkspaceModel;
+lib/engineeringIntelligence/types.ts:471:  contextInvalidations: ContextInvalidationsWorkspaceModel;
+lib/engineeringIntelligence/types.ts:472:  contextStaleImpacts: ContextStaleImpactsWorkspaceModel;
+lib/engineeringIntelligence/types.ts:473:  contextResolutionTimeline: ContextResolutionTimelineWorkspaceModel;
+lib/engineeringIntelligence/types.ts:475:  auditGuards: AuditGuardWorkspaceModel;
+lib/engineeringIntelligence/types.ts:479:export interface BuildEngineeringIntelligenceWorkspaceInput {
+lib/engineeringIntelligence/types.ts:481:  surveyEvidence?: EngineeringSurveyEvidence | null;
+lib/engineeringIntelligence/types.ts:484:  invalidationResult?: EngineeringInvalidationResult | null;
+lib/engineeringIntelligence/types.ts:485:  snapshots?: EngineeringStateSnapshot[] | null;
+lib/engineeringIntelligence/types.ts:486:  snapshotDiffs?: EngineeringStateSnapshotDiff[] | null;
+lib/engineeringIntelligence/types.ts:488:  timeline?: EngineeringStateTimeline | null;
+lib/engineeringIntelligence/types.ts:490:  regenerationPlans?: SelectiveRegenerationPlan[] | null;
+lib/engineeringIntelligence/types.ts:491:  invalidationPropagation?: EngineeringInvalidationPropagationResult | null;
+lib/engineeringIntelligence/types.ts:492:  regenerationPlanV1?: EngineeringRegenerationPlanV1 | null;
+lib/engineeringIntelligence/types.ts:493:  snapshotDelta?: EngineeringSnapshotDeltaV1 | null;
+lib/engineeringStateInvalidation/types.ts:1:import type { DocumentTruthSource, DocumentType, EngineeringDependencyGraph, EngineeringDependencyNodeType } from '@/lib/documentProvenance';
+lib/engineeringStateInvalidation/types.ts:2:import type { EngineeringRequirementId } from '@/lib/survey/evidence/engineeringRequirements';
+lib/engineeringStateInvalidation/types.ts:3:import type { EngineeringDecisionType } from '@/lib/engineeringDecisionProvenance';
+lib/engineeringStateInvalidation/types.ts:10:  | 'decision_provenance'
+lib/engineeringStateInvalidation/types.ts:28:export type EngineeringStaleStatus = 'current' | 'stale' | 'blocked' | 'unknown';
+lib/engineeringStateInvalidation/types.ts:35:  | 'provenance_hash_changed'
+lib/engineeringStateInvalidation/types.ts:53:  requirementIds: EngineeringRequirementId[];
+lib/engineeringStateInvalidation/types.ts:55:  canonicalEvidenceIds: string[];
+lib/engineeringStateInvalidation/types.ts:59:  provenanceHash: string;
+lib/engineeringStateInvalidation/types.ts:61:  staleStatus: EngineeringStaleStatus;
+lib/engineeringStateInvalidation/types.ts:62:  invalidationReason?: string;
+lib/engineeringStateInvalidation/types.ts:75:  provenanceHash: string;
+lib/engineeringStateInvalidation/types.ts:85:  changedCanonicalEvidenceIds: string[];
+lib/engineeringStateInvalidation/types.ts:86:  changedRequirementIds: EngineeringRequirementId[];
+lib/engineeringStateInvalidation/types.ts:87:  changedDecisionIds: string[];
+lib/engineeringStateInvalidation/types.ts:88:  changedDependencyNodeIds: string[];
+lib/engineeringStateInvalidation/types.ts:98:  staleStatus: Exclude<EngineeringStaleStatus, 'current'>;
+lib/engineeringStateInvalidation/types.ts:99:  invalidationReason: string;
+lib/engineeringStateInvalidation/types.ts:100:  triggeringDependencyIds: string[];
+lib/engineeringStateInvalidation/types.ts:101:  triggeringRequirementIds: EngineeringRequirementId[];
+lib/engineeringStateInvalidation/types.ts:102:  triggeringDecisionIds: string[];
+lib/engineeringStateInvalidation/types.ts:103:  triggeringCanonicalEvidenceIds: string[];
+lib/engineeringStateInvalidation/types.ts:117:  invalidationEvents: EngineeringInvalidationEvent[];
+lib/engineeringStateInvalidation/types.ts:124:export interface SelectiveRegenerationPlan {
+lib/engineeringStateInvalidation/types.ts:129:  affectedEngineeringDecisions: string[];
+lib/engineeringStateInvalidation/types.ts:134:  blockedRegenerationDependencies: string[];
+lib/engineeringStateInvalidation/types.ts:137:  staleStateIds: string[];
+lib/engineeringStateInvalidation/types.ts:140:  snapshotReference?: EngineeringStateSnapshotReference;
+lib/engineeringStateInvalidation/types.ts:144:  staleStatus: EngineeringStaleStatus;
+lib/engineeringStateInvalidation/types.ts:145:  staleReason?: string;
+lib/engineeringStateInvalidation/types.ts:146:  triggeringDependencyIds: string[];
+lib/engineeringStateInvalidation/types.ts:149:  invalidationEventIds: string[];
+lib/engineeringStateInvalidation/types.ts:156:  provenanceHash: string;
+lib/engineeringStateInvalidation/types.ts:158:  staleStateIds: string[];
+lib/engineeringStateInvalidation/types.ts:159:  invalidationEventIds: string[];
+lib/engineeringStateInvalidation/types.ts:161:  snapshotReference?: EngineeringStateSnapshotReference;
+lib/engineeringStateInvalidation/types.ts:166:  | 'rendering_from_stale_dependencies_blocked'
+lib/engineeringStateInvalidation/types.ts:167:  | 'regeneration_requires_provenance_lineage'
+lib/engineeringStateInvalidation/types.ts:170:  | 'decision_outputs_have_invalidation_tracking'
+lib/engineeringStateInvalidation/types.ts:172:  | 'persistence_requires_provenance'
+lib/engineeringStateInvalidation/types.ts:173:  | 'invalidation_requires_lineage'
+lib/engineeringStateInvalidation/types.ts:191:  decisionProvenance?: import('@/lib/engineeringDecisionProvenance').EngineeringDecisionEvaluationBundle | null;
+lib/engineeringStateInvalidation/types.ts:192:  dependencyGraph?: EngineeringDependencyGraph | null;
+lib/engineeringStateInvalidation/types.ts:194:  bomMetadata?: import('@/lib/engineeringDecisionProvenance').DecisionAwareBOMMetadata[] | null;
+lib/engineeringStateInvalidation/types.ts:195:  sldMetadata?: import('@/lib/engineeringDecisionProvenance').DecisionAwareSLDMetadata | null;
+lib/engineeringStateInvalidation/types.ts:203:  dependencyGraph?: EngineeringDependencyGraph | null;
+lib/engineeringStateInvalidation/types.ts:206:export interface BuildSelectiveRegenerationPlanInput {
+lib/engineeringStateInvalidation/types.ts:209:  invalidationResult: EngineeringInvalidationResult;
+lib/engineeringStateInvalidation/types.ts:210:  dependencyGraph?: EngineeringDependencyGraph | null;
+lib/engineeringStateInvalidation/types.ts:211:  snapshotReference?: EngineeringStateSnapshotReference | null;
+lib/engineeringStateInvalidation/types.ts:214:export type StateAwareDependencyNodeMetadata = {
+lib/engineeringStateInvalidation/types.ts:216:  staleStatus: EngineeringStaleStatus;
+lib/engineeringStateInvalidation/types.ts:219:  invalidationReason?: string;
+lib/engineeringStateInvalidation/types.ts:222:export type StateRegistryNodeType = EngineeringDependencyNodeType | 'engineering_state';
+lib/engineeringStateInvalidation/types.ts:226:  provenanceHash: string;
+lib/engineeringStateInvalidation/types.ts:228:  invalidationHash: string;
+lib/engineeringStateInvalidation/types.ts:234:export interface EngineeringStateSnapshotReference {
+lib/engineeringStateInvalidation/types.ts:239:  provenanceHash: string;
+lib/engineeringStateInvalidation/types.ts:241:  invalidationHash: string;
+lib/engineeringStateInvalidation/types.ts:246:export type PersistentEngineeringStateEdgeType = 'depends_on_dependency_node' | 'invalidates_state' | 'preserves_stale_state' | 'supersedes_snapshot';
+lib/engineeringStateInvalidation/types.ts:254:  staleStatus?: EngineeringStaleStatus;
+lib/engineeringStateInvalidation/types.ts:255:  requirementIds: EngineeringRequirementId[];
+lib/engineeringStateInvalidation/types.ts:257:  canonicalEvidenceIds: string[];
+lib/engineeringStateInvalidation/types.ts:260:  provenanceHash?: string;
+lib/engineeringStateInvalidation/types.ts:287:export interface EngineeringStateSnapshotStateRef {
+lib/engineeringStateInvalidation/types.ts:290:  staleStatus: EngineeringStaleStatus;
+lib/engineeringStateInvalidation/types.ts:292:  provenanceHash: string;
+lib/engineeringStateInvalidation/types.ts:294:  requirementIds: EngineeringRequirementId[];
+lib/engineeringStateInvalidation/types.ts:296:  canonicalEvidenceIds: string[];
+lib/engineeringStateInvalidation/types.ts:300:export interface EngineeringStateSnapshot {
+lib/engineeringStateInvalidation/types.ts:305:  previousSnapshotId?: string;
+lib/engineeringStateInvalidation/types.ts:306:  previousSnapshotHash?: string;
+lib/engineeringStateInvalidation/types.ts:307:  supersededBySnapshotId?: string;
+lib/engineeringStateInvalidation/types.ts:309:  stateRefs: EngineeringStateSnapshotStateRef[];
+lib/engineeringStateInvalidation/types.ts:310:  staleStateIds: string[];
+lib/engineeringStateInvalidation/types.ts:317:export type EngineeringStateDiffType = 'added' | 'removed' | 'unchanged' | 'hash_changed' | 'stale_status_changed' | 'lineage_changed';
+lib/engineeringStateInvalidation/types.ts:325:  changedHashFields: Array<keyof Pick<EngineeringStateSnapshotStateRef, 'generationHash' | 'provenanceHash' | 'dependencyHash'>>;
+lib/engineeringStateInvalidation/types.ts:326:  lineageChangedFields: Array<'requirementIds' | 'decisionIds' | 'canonicalEvidenceIds' | 'dependencyNodeIds'>;
+lib/engineeringStateInvalidation/types.ts:330:export interface EngineeringStateSnapshotDiff {
+lib/engineeringStateInvalidation/types.ts:332:  previousSnapshotId: string;
+lib/engineeringStateInvalidation/types.ts:333:  nextSnapshotId: string;
+lib/engineeringStateInvalidation/types.ts:334:  previousSnapshotHash: string;
+lib/engineeringStateInvalidation/types.ts:335:  nextSnapshotHash: string;
+lib/engineeringStateInvalidation/types.ts:340:  staleStateIds: string[];
+lib/engineeringStateInvalidation/types.ts:355:  | 'stale_state_preserved';
+lib/engineeringStateInvalidation/types.ts:362:  previousSnapshotId?: string;
+lib/engineeringStateInvalidation/types.ts:365:  requirementIds: EngineeringRequirementId[];
+lib/engineeringStateInvalidation/types.ts:367:  canonicalEvidenceIds: string[];
+lib/engineeringStateInvalidation/types.ts:368:  invalidationEventIds: string[];
+lib/engineeringStateInvalidation/types.ts:383:export interface EngineeringStateTimeline {
+lib/engineeringStateInvalidation/types.ts:385:  latestSnapshotId?: string;
+lib/engineeringStateInvalidation/types.ts:386:  latestValidSnapshotId?: string;
+lib/engineeringStateInvalidation/types.ts:387:  staleStateIds: string[];
+lib/engineeringStateInvalidation/types.ts:397:  dependencyGraph?: EngineeringDependencyGraph | null;
+lib/engineeringStateInvalidation/types.ts:398:  invalidationResult?: EngineeringInvalidationResult | null;
+lib/engineeringStateInvalidation/types.ts:401:export interface BuildEngineeringStateSnapshotInput {
+lib/engineeringStateInvalidation/types.ts:406:  dependencyGraph?: EngineeringDependencyGraph | null;
+lib/engineeringStateInvalidation/types.ts:407:  decisionProvenance?: import('@/lib/engineeringDecisionProvenance').EngineeringDecisionEvaluationBundle | null;
+lib/engineeringStateInvalidation/types.ts:408:  invalidationResult?: EngineeringInvalidationResult | null;
+lib/engineeringStateInvalidation/types.ts:409:  previousSnapshot?: EngineeringStateSnapshot | null;
+lib/engineeringStateInvalidation/types.ts:415:  snapshots: EngineeringStateSnapshot[];
+lib/engineeringStateInvalidation/types.ts:416:  diffs?: EngineeringStateSnapshotDiff[];
+lib/engineeringStateInvalidation/types.ts:417:  invalidationResults?: EngineeringInvalidationResult[];
+lib/engineeringStateInvalidation/types.ts:418:  regenerationPlans?: SelectiveRegenerationPlan[];
+lib/engineeringDecisionProvenance/types.ts:2:import type { EngineeringRequirementId } from '@/lib/survey/evidence/engineeringRequirements';
+lib/engineeringDecisionProvenance/types.ts:4:import type { EngineeringStateSnapshotReference, EngineeringStaleStateMetadata } from '@/lib/engineeringStateInvalidation/types';
+lib/engineeringDecisionProvenance/types.ts:6:export type EngineeringDecisionType =
+lib/engineeringDecisionProvenance/types.ts:24:export type EngineeringDecisionCategory =
+lib/engineeringDecisionProvenance/types.ts:42:export type DecisionConfidenceSource =
+lib/engineeringDecisionProvenance/types.ts:46:  | 'document_provenance_bundle_v1'
+lib/engineeringDecisionProvenance/types.ts:51:export type DecisionMissingInputBehavior =
+lib/engineeringDecisionProvenance/types.ts:58:export type DecisionConfidencePolicy =
+lib/engineeringDecisionProvenance/types.ts:65:export interface EngineeringDecisionInputRef {
+lib/engineeringDecisionProvenance/types.ts:68:  source: DecisionConfidenceSource;
+lib/engineeringDecisionProvenance/types.ts:79:export interface EngineeringDecisionDefinition {
+lib/engineeringDecisionProvenance/types.ts:80:  decisionType: EngineeringDecisionType;
+lib/engineeringDecisionProvenance/types.ts:82:  decisionCategory: EngineeringDecisionCategory;
+lib/engineeringDecisionProvenance/types.ts:90:  missingInputBehavior: DecisionMissingInputBehavior;
+lib/engineeringDecisionProvenance/types.ts:91:  confidencePolicy: DecisionConfidencePolicy;
+lib/engineeringDecisionProvenance/types.ts:95:export interface EngineeringDecisionProvenanceRecord {
+lib/engineeringDecisionProvenance/types.ts:97:  decisionType: EngineeringDecisionType;
+lib/engineeringDecisionProvenance/types.ts:98:  decisionCategory: EngineeringDecisionCategory;
+lib/engineeringDecisionProvenance/types.ts:106:  decisionInputs: EngineeringDecisionInputRef[];
+lib/engineeringDecisionProvenance/types.ts:107:  requirementIds: EngineeringRequirementId[];
+lib/engineeringDecisionProvenance/types.ts:108:  canonicalEvidenceIds: string[];
+lib/engineeringDecisionProvenance/types.ts:117:  confidenceSource: DecisionConfidenceSource;
+lib/engineeringDecisionProvenance/types.ts:124:export interface EngineeringDecisionEvaluationBundle {
+lib/engineeringDecisionProvenance/types.ts:127:  decisionRecords: EngineeringDecisionProvenanceRecord[];
+lib/engineeringDecisionProvenance/types.ts:129:  requirementIds: EngineeringRequirementId[];
+lib/engineeringDecisionProvenance/types.ts:130:  canonicalEvidenceIds: string[];
+lib/engineeringDecisionProvenance/types.ts:136:  fallbackDecisionIds: string[];
+lib/engineeringDecisionProvenance/types.ts:139:  auditGuards: EngineeringDecisionAuditGuardResult[];
+lib/engineeringDecisionProvenance/types.ts:142:export type EngineeringDecisionAuditGuardCode =
+lib/engineeringDecisionProvenance/types.ts:143:  | 'decision_lineage_required'
+lib/engineeringDecisionProvenance/types.ts:146:  | 'calculations_require_dependency_lineage'
+lib/engineeringDecisionProvenance/types.ts:147:  | 'render_outputs_require_decision_provenance';
+lib/engineeringDecisionProvenance/types.ts:149:export interface EngineeringDecisionAuditGuardResult {
+lib/engineeringDecisionProvenance/types.ts:150:  guardCode: EngineeringDecisionAuditGuardCode;
+lib/engineeringDecisionProvenance/types.ts:157:export interface BuildEngineeringDecisionProvenanceInput {
+lib/engineeringDecisionProvenance/types.ts:160:  surveyEvidence?: import('@/lib/engineering/surveyEvidence').EngineeringSurveyEvidence | null;
+lib/engineeringDecisionProvenance/types.ts:165:  includeDocumentMetadataDecisions?: boolean;
+lib/engineeringDecisionProvenance/types.ts:168:export interface DecisionAwareBOMMetadata {
+lib/engineeringDecisionProvenance/types.ts:176:  stateDependencyHash?: string;
+lib/engineeringDecisionProvenance/types.ts:177:  staleStateMetadata?: EngineeringStaleStateMetadata;
+lib/engineeringDecisionProvenance/types.ts:178:  engineeringStateSnapshot?: EngineeringStateSnapshotReference;
+lib/engineeringDecisionProvenance/types.ts:181:export interface DecisionAwareSLDMetadata {
+lib/engineeringDecisionProvenance/types.ts:186:  fallbackDecisionIds: string[];
+lib/engineeringDecisionProvenance/types.ts:188:  topologyDecisionId?: string;
+lib/engineeringDecisionProvenance/types.ts:189:  interconnectionDecisionId?: string;
+lib/engineeringDecisionProvenance/types.ts:192:  stateDependencyHash?: string;
+lib/engineeringDecisionProvenance/types.ts:193:  staleStateMetadata?: EngineeringStaleStateMetadata;
+lib/engineeringDecisionProvenance/types.ts:194:  engineeringStateSnapshot?: EngineeringStateSnapshotReference;
+lib/engineeringDecisionProvenance/types.ts:197:export interface DecisionAwareReadinessSummary {
+lib/engineeringDecisionProvenance/types.ts:199:  readinessStatus: 'decision_provenance_available' | 'decision_provenance_missing';
+lib/engineeringDecisionProvenance/types.ts:201:  fallbackDecisionCount: number;
+lib/engineeringDecisionProvenance/types.ts:202:  confidenceSource: DecisionConfidenceSource;
+lib/engineeringDecisionProvenance/types.ts:204:  fallbackDecisionIds: string[];
+lib/engineeringDecisionProvenance/types.ts:206:  canonicalEvidenceIds: string[];
+lib/engineeringDecisionProvenance/types.ts:210:  stateDependencyHash?: string;
+lib/engineeringDecisionProvenance/types.ts:211:  staleStateMetadata?: EngineeringStaleStateMetadata;
+lib/engineeringDecisionProvenance/types.ts:212:  engineeringStateSnapshot?: EngineeringStateSnapshotReference;
+lib/engineeringDecisionProvenance/types.ts:215:export type DecisionGraphSystemType = CADSystemType | 'unknown';
+lib/documentProvenance/types.ts:2:import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/manifest';
+lib/documentProvenance/types.ts:4:  EngineeringRequirementEvaluation,
+lib/documentProvenance/types.ts:5:  EngineeringRequirementId,
+lib/documentProvenance/types.ts:6:} from '@/lib/survey/evidence/engineeringRequirements';
+lib/documentProvenance/types.ts:7:import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+lib/documentProvenance/types.ts:8:import type { EvidenceTruthSource } from '@/lib/survey/evidence/provenance';
+lib/documentProvenance/types.ts:9:import type { EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance';
+lib/documentProvenance/types.ts:10:import type { EngineeringStateRegistry, EngineeringInvalidationLineageMetadata, EngineeringStateSnapshotReference } from '@/lib/engineeringStateInvalidation';
+lib/documentProvenance/types.ts:35:  | EvidenceTruthSource
+lib/documentProvenance/types.ts:67:  requirementIds: EngineeringRequirementId[];
+lib/documentProvenance/types.ts:68:  canonicalEvidenceIds: string[];
+lib/documentProvenance/types.ts:70:  provenanceSource: ProvenanceSource;
+lib/documentProvenance/types.ts:71:  engineeringDependencyIds: string[];
+lib/documentProvenance/types.ts:72:  confidenceSource: EngineeringRequirementEvaluation['confidenceSource'] | 'document_binding_registry_v1' | 'missing_registry_evaluation';
+lib/documentProvenance/types.ts:82:  requirementIds: EngineeringRequirementId[];
+lib/documentProvenance/types.ts:83:  canonicalEvidenceIds: string[];
+lib/documentProvenance/types.ts:85:  provenanceSource: ProvenanceSource;
+lib/documentProvenance/types.ts:86:  engineeringDependencyIds: string[];
+lib/documentProvenance/types.ts:94:  dependencyGraph?: EngineeringDependencyGraph;
+lib/documentProvenance/types.ts:95:  decisionProvenance?: EngineeringDecisionEvaluationBundle;
+lib/documentProvenance/types.ts:97:  invalidationLineage?: EngineeringInvalidationLineageMetadata;
+lib/documentProvenance/types.ts:98:  engineeringStateSnapshot?: EngineeringStateSnapshotReference;
+lib/documentProvenance/types.ts:101:export interface RequirementDocumentBinding {
+lib/documentProvenance/types.ts:102:  requirementId: EngineeringRequirementId;
+lib/documentProvenance/types.ts:108:  requiredEvidenceCategories: SurveyEvidenceCategory[];
+lib/documentProvenance/types.ts:109:  optionalEvidenceCategories: SurveyEvidenceCategory[];
+lib/documentProvenance/types.ts:110:  provenanceLinkage: 'canonical_evidence_ids' | 'registry_status_only' | 'inactive_future_binding';
+lib/documentProvenance/types.ts:117:export type EngineeringDependencyNodeType =
+lib/documentProvenance/types.ts:130:export interface EngineeringDependencyNode {
+lib/documentProvenance/types.ts:132:  nodeType: EngineeringDependencyNodeType;
+lib/documentProvenance/types.ts:134:  requirementIds: EngineeringRequirementId[];
+lib/documentProvenance/types.ts:135:  canonicalEvidenceIds: string[];
+lib/documentProvenance/types.ts:140:export type EngineeringDependencyEdgeType =
+lib/documentProvenance/types.ts:156:export interface EngineeringDependencyEdge {
+lib/documentProvenance/types.ts:160:  edgeType: EngineeringDependencyEdgeType;
+lib/documentProvenance/types.ts:164:export interface EngineeringDependencyGraph {
+lib/documentProvenance/types.ts:167:  nodes: EngineeringDependencyNode[];
+lib/documentProvenance/types.ts:168:  edges: EngineeringDependencyEdge[];
+lib/documentProvenance/types.ts:173:export interface EvidenceBackedGeometryInput {
+lib/documentProvenance/types.ts:183:  linkedRequirementIds: EngineeringRequirementId[];
+lib/documentProvenance/types.ts:184:  canonicalEvidenceIds: string[];
+lib/documentProvenance/types.ts:196:  | 'section_provenance_required'
+lib/documentProvenance/types.ts:197:  | 'render_context_provenance_required'
+lib/documentProvenance/types.ts:198:  | 'decision_lineage_required'
+lib/documentProvenance/types.ts:201:  | 'calculations_require_dependency_lineage'
+lib/documentProvenance/types.ts:202:  | 'render_outputs_require_decision_provenance';
+lib/documentProvenance/types.ts:215:  surveyEvidence?: EngineeringSurveyEvidence | null;
+lib/documentProvenance/types.ts:221:  decisionProvenance?: EngineeringDecisionEvaluationBundle | null;
+lib/documentProvenance/types.ts:223:  engineeringStateSnapshot?: EngineeringStateSnapshotReference | null;

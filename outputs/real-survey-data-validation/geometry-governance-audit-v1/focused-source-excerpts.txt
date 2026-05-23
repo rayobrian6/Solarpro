@@ -1,0 +1,3227 @@
+
+===== lib/panelLayoutOptimized.ts lines 1070-1370 =====
+
+===== lib/placementEngine.ts lines 1240-1700 =====
+
+===== lib/engineering/fire-setbacks.ts lines 1-260 =====
+// ============================================================
+// SolarPro Fire Setback Calculator
+// IRC R324 / IFC / CAL FIRE / NFPA 855 compliance
+// Calculates required setbacks for solar panel installations
+// ============================================================
+
+export type RoofType = 'gable' | 'hip' | 'flat' | 'shed' | 'gambrel' | 'mansard' | 'complex';
+export type FireZone  = 'standard' | 'wui' | 'hvhz' | 'cal_fire_sra' | 'cal_fire_vhfhsz';
+
+export interface FireSetbackInput {
+  roofType:        RoofType;
+  roofPitchDeg:    number;       // degrees
+  stateCode:       string;
+  fireZone?:       FireZone;
+  ahjOverride?: {
+    ridgeSetbackIn?:   number;
+    eaveSetbackIn?:    number;
+    valleySetbackIn?:  number;
+    pathwayWidthIn?:   number;
+    hipSetbackIn?:     number;
+  };
+  // System details
+  systemSizeKw?:   number;
+  roofAreaSqFt?:   number;
+  // Building details
+  stories?:        number;
+  buildingType?:   'residential' | 'commercial';
+}
+
+export interface FireSetbackResult {
+  // Required setbacks (inches)
+  ridgeSetbackIn:       number;
+  eaveSetbackIn:        number;
+  valleySetbackIn:      number;
+  hipSetbackIn:         number;
+  rakeSetbackIn:        number;   // gable end
+  pathwayWidthIn:       number;
+  // Pathway requirements
+  pathwayRequired:      boolean;
+  pathwayDescription:   string;
+  // Code references
+  codeReference:        string;
+  necVersion:           string;
+  // Special requirements
+  specialRequirements:  string[];
+  // Compliance notes
+  notes:                string[];
+  // Summary
+  summary:              string;
+  // Usable roof area after setbacks (approximate %)
+  usableRoofPct:        number;
+}
+
+// ── State-specific fire zone overrides ───────────────────────────────────────
+const STATE_FIRE_OVERRIDES: Record<string, Partial<FireSetbackResult>> = {
+  CA: {
+    ridgeSetbackIn:   18,
+    eaveSetbackIn:    0,
+    valleySetbackIn:  18,
+    pathwayWidthIn:   36,
+    codeReference:    'CAL FIRE / CBC Section 1505.1 / IRC R324',
+    specialRequirements: [
+      'CAL FIRE setbacks apply in SRA/VHFHSZ zones',
+      'Additional 18" setback from all roof edges in VHFHSZ',
+      'Class A fire rating required for all roofing materials',
+    ],
+  },
+  FL: {
+    ridgeSetbackIn:   18,
+    eaveSetbackIn:    0,
+    valleySetbackIn:  18,
+    pathwayWidthIn:   36,
+    codeReference:    'FBC (Florida Building Code) / IRC R324',
+    specialRequirements: [
+      'Miami-Dade NOA required for all equipment in HVHZ',
+      'Wind uplift calculations mandatory',
+    ],
+  },
+  NJ: {
+    ridgeSetbackIn:   18,
+    eaveSetbackIn:    0,
+    valleySetbackIn:  18,
+    pathwayWidthIn:   36,
+    codeReference:    'NJ UCC / IRC R324.4',
+    specialRequirements: [
+      'NJ requires 36" pathways on all roof planes with solar',
+    ],
+  },
+  NY: {
+    ridgeSetbackIn:   18,
+    eaveSetbackIn:    0,
+    valleySetbackIn:  18,
+    pathwayWidthIn:   36,
+    codeReference:    'NYC Building Code / IRC R324.4',
+    specialRequirements: [
+      'NYC requires PE/RA stamp on all permit drawings',
+      'Pathway requirements per NYC Fire Code',
+    ],
+  },
+  MA: {
+    ridgeSetbackIn:   18,
+    eaveSetbackIn:    0,
+    valleySetbackIn:  18,
+    pathwayWidthIn:   36,
+    codeReference:    '780 CMR (MA State Building Code) / IRC R324',
+    specialRequirements: [
+      'Massachusetts requires 36" pathways',
+      'SMART program registration required for incentives',
+    ],
+  },
+};
+
+// ── Main calculator ───────────────────────────────────────────────────────────
+export function calcFireSetbacks(input: FireSetbackInput): FireSetbackResult {
+  const {
+    roofType,
+    roofPitchDeg,
+    stateCode,
+    fireZone = 'standard',
+    ahjOverride,
+    systemSizeKw = 0,
+    stories = 1,
+    buildingType = 'residential',
+  } = input;
+
+  const notes: string[] = [];
+  const specialRequirements: string[] = [];
+
+  // ── Base setbacks per IRC R324.4 (2021) ──────────────────────────────────
+  // IRC R324.4.1: Roof access and pathways
+  // - Gable roofs: 18" from ridge, 18" from valleys
+  // - Hip roofs: 18" from all hips
+  // - All roofs: 36" wide pathways from eave to ridge
+
+  let ridgeSetbackIn   = 18;   // IRC R324.4.1(1)
+  let eaveSetbackIn    = 0;    // IRC R324.4.1 — no eave setback required by IRC
+  let valleySetbackIn  = 18;   // IRC R324.4.1(3)
+  let hipSetbackIn     = 18;   // IRC R324.4.1(2) — hip roofs
+  let rakeSetbackIn    = 0;    // Gable rake — no IRC requirement
+  let pathwayWidthIn   = 36;   // IRC R324.4.1 — 36" min pathway
+  let pathwayRequired  = true;
+
+  // ── Roof type adjustments ─────────────────────────────────────────────────
+  switch (roofType) {
+    case 'hip':
+      // Hip roofs: 18" from all hips, no ridge setback needed (no ridge access path)
+      ridgeSetbackIn  = 18;
+      hipSetbackIn    = 18;
+      valleySetbackIn = 18;
+      notes.push('Hip roof: 18" setback from all hip ridges per IRC R324.4.1(2)');
+      break;
+
+    case 'flat':
+      // Flat roofs: different pathway requirements
+      ridgeSetbackIn  = 0;
+      hipSetbackIn    = 0;
+      valleySetbackIn = 0;
+      pathwayWidthIn  = 48;   // Flat roofs need wider pathways for FF access
+      notes.push('Flat roof: 48" perimeter setback recommended for FF access');
+      notes.push('Flat roof: No ridge/hip setbacks required');
+      break;
+
+    case 'shed':
+      // Shed roofs: setback from high side only
+      ridgeSetbackIn  = 18;
+      hipSetbackIn    = 0;
+      valleySetbackIn = 0;
+      notes.push('Shed roof: 18" setback from high side (ridge equivalent)');
+      break;
+
+    case 'gable':
+    default:
+      ridgeSetbackIn  = 18;
+      hipSetbackIn    = 0;
+      valleySetbackIn = 18;
+      notes.push('Gable roof: 18" from ridge, 18" from valleys per IRC R324.4.1');
+      break;
+  }
+
+  // ── Pitch adjustments ─────────────────────────────────────────────────────
+  if (roofPitchDeg > 45) {
+    // Steep roofs (>45°): additional setback for safety
+    ridgeSetbackIn = Math.max(ridgeSetbackIn, 24);
+    notes.push(`Steep roof (${roofPitchDeg}°): increased ridge setback to 24"`);
+  }
+
+  if (roofPitchDeg < 5) {
+    // Low-slope: treated more like flat roof
+    pathwayWidthIn = 48;
+    notes.push('Low-slope roof (<5°): 48" pathway width recommended');
+  }
+
+  // ── Fire zone adjustments ─────────────────────────────────────────────────
+  if (fireZone === 'wui' || fireZone === 'cal_fire_sra') {
+    ridgeSetbackIn  = Math.max(ridgeSetbackIn, 18);
+    valleySetbackIn = Math.max(valleySetbackIn, 18);
+    pathwayWidthIn  = Math.max(pathwayWidthIn, 36);
+    specialRequirements.push('WUI zone: enhanced setbacks apply');
+    specialRequirements.push('Class A fire-rated roofing required in WUI zone');
+  }
+
+  if (fireZone === 'cal_fire_vhfhsz') {
+    ridgeSetbackIn  = Math.max(ridgeSetbackIn, 18);
+    eaveSetbackIn   = Math.max(eaveSetbackIn, 18);
+    valleySetbackIn = Math.max(valleySetbackIn, 18);
+    hipSetbackIn    = Math.max(hipSetbackIn, 18);
+    pathwayWidthIn  = Math.max(pathwayWidthIn, 36);
+    specialRequirements.push('CAL FIRE VHFHSZ: 18" setback from ALL roof edges');
+    specialRequirements.push('Class A fire-rated roofing required');
+    specialRequirements.push('Ember-resistant vents required');
+  }
+
+  if (fireZone === 'hvhz') {
+    specialRequirements.push('HVHZ: Miami-Dade NOA required for all equipment');
+    specialRequirements.push('HVHZ: Wind uplift calculations mandatory');
+    specialRequirements.push('HVHZ: Enhanced attachment requirements');
+  }
+
+  // ── State-specific overrides ──────────────────────────────────────────────
+  const stateOverride = STATE_FIRE_OVERRIDES[stateCode.toUpperCase()];
+  if (stateOverride) {
+    if (stateOverride.ridgeSetbackIn  !== undefined) ridgeSetbackIn  = Math.max(ridgeSetbackIn,  stateOverride.ridgeSetbackIn);
+    if (stateOverride.eaveSetbackIn   !== undefined) eaveSetbackIn   = Math.max(eaveSetbackIn,   stateOverride.eaveSetbackIn);
+    if (stateOverride.valleySetbackIn !== undefined) valleySetbackIn = Math.max(valleySetbackIn, stateOverride.valleySetbackIn);
+    if (stateOverride.pathwayWidthIn  !== undefined) pathwayWidthIn  = Math.max(pathwayWidthIn,  stateOverride.pathwayWidthIn);
+    if (stateOverride.specialRequirements) specialRequirements.push(...stateOverride.specialRequirements);
+  }
+
+  // ── AHJ overrides (highest priority) ─────────────────────────────────────
+  if (ahjOverride) {
+    if (ahjOverride.ridgeSetbackIn   !== undefined) ridgeSetbackIn   = ahjOverride.ridgeSetbackIn;
+    if (ahjOverride.eaveSetbackIn    !== undefined) eaveSetbackIn    = ahjOverride.eaveSetbackIn;
+    if (ahjOverride.valleySetbackIn  !== undefined) valleySetbackIn  = ahjOverride.valleySetbackIn;
+    if (ahjOverride.pathwayWidthIn   !== undefined) pathwayWidthIn   = ahjOverride.pathwayWidthIn;
+    if (ahjOverride.hipSetbackIn     !== undefined) hipSetbackIn     = ahjOverride.hipSetbackIn;
+    notes.push('AHJ-specific setback requirements applied');
+  }
+
+  // ── Pathway description ───────────────────────────────────────────────────
+  let pathwayDescription = '';
+  if (roofType === 'flat') {
+    pathwayDescription = `${pathwayWidthIn}" perimeter access pathway around array`;
+  } else {
+    pathwayDescription = `${pathwayWidthIn}" wide pathway from eave to ridge on each roof plane`;
+    if (stories > 1) {
+      pathwayDescription += '; additional pathway may be required for multi-story buildings';
+    }
+  }
+
+  // ── Code reference ────────────────────────────────────────────────────────
+  let codeReference = 'IRC R324.4 (2021) / IFC 605.11';
+  if (stateOverride?.codeReference) codeReference = stateOverride.codeReference;
+
+  // ── Usable roof area estimate ─────────────────────────────────────────────
+  // Rough estimate: setbacks reduce usable area by ~15-25% for typical residential
+  let usableRoofPct = 80;
+  if (roofType === 'hip') usableRoofPct = 70;
+  if (roofType === 'flat') usableRoofPct = 85;
+  if (fireZone === 'cal_fire_vhfhsz') usableRoofPct -= 10;
+
+
+===== lib/cad/buildCADFromSurvey.ts lines 1-260 =====
+// ============================================================================
+// lib/cad/buildCADFromSurvey.ts — Survey → CAD Bridge
+//
+// VERSION: SITE_SURVEY_PIPELINE_VERSION = 1
+//
+// PIPELINE POSITION:
+//   EnrichedSiteSurvey
+//     → buildCADFromSurvey() ← YOU ARE HERE → CADModel inputs
+//     → generateCADLayout()  → CADModel (full solved layout)
+//
+// RESPONSIBILITIES:
+//   Translate an EnrichedSiteSurvey into the input shape expected by
+//   generateCADLayout() and the CAD engine. This is a BRIDGE module:
+//   it does NOT solve the layout — it constructs the inputs.
+//
+//   For roof systems:
+//     - Converts CADReadySurface[] → CADRoofPlane[] (partial — no panels yet)
+//     - Sets usablePolygon from enriched setback-inset polygon
+//     - Populates pitch, azimuth, area from survey
+//
+//   For ground systems:
+//     - Constructs a CADGroundArray input from survey site dimensions
+//
+// CONTRACTS:
+//   - NEVER calls DB, network, or filesystem
+//   - NEVER throws — errors pushed to warnings[]
+//   - Input: EnrichedSiteSurvey (output of enrichSurvey)
+//   - Output: SurveyCADInputs — a structured input payload for generateCADLayout()
+//   - The CAD engine is NOT invoked here — caller does that with these inputs
+//
+// WHY NOT BUILD THE FULL CADModel HERE:
+//   generateCADLayout() owns panel placement, row solving, dimension generation,
+//   and bound computation. We must not duplicate that logic. This module
+//   constructs only the inputs that the CAD engine needs from survey data.
+// ============================================================================
+
+import type { Point2D } from './geometry';
+import type {
+  CADRoofPlane,
+  CADSystemType,
+} from './types';
+
+import {
+  SITE_SURVEY_PIPELINE_VERSION,
+  type EnrichedSiteSurvey,
+  type CADReadySurface,
+  type GeoPoint,
+} from '@/lib/siteSurvey/types';
+
+// ─── Output type ──────────────────────────────────────────────────────────────
+
+/**
+ * SurveyCADInputs — the structured inputs for generateCADLayout() derived
+ * from a fully enriched site survey.
+ *
+ * USAGE:
+ *   const inputs = buildCADFromSurvey(enriched);
+ *   const cadModel = await generateCADLayout({
+ *     ...existingInputs,
+ *     ...inputs.overrides,   // merge survey data into existing call
+ *   });
+ */
+export interface SurveyCADInputs {
+  /** Resolved CAD system type (matches CADSystemType) */
+  systemType: CADSystemType;
+
+  /** GPS origin for local XY projection (from survey location) */
+  origin: { lat: number; lng: number } | null;
+
+  /**
+   * Roof plane inputs derived from CADReadySurface data.
+   * Populated only for 'roof' system type.
+   * These are PARTIAL CADRoofPlane objects — panels are NOT solved here.
+   */
+  roofPlaneInputs: SurveyRoofPlaneInput[];
+
+  /**
+   * Ground array inputs derived from survey dimensions.
+   * Populated only for 'ground' system type.
+   */
+  groundArrayInputs: SurveyGroundArrayInput[];
+
+  /**
+   * Override values for the CAD engine's SystemDefinitionInput.
+   * These are the survey-sourced fields that should override project defaults.
+   */
+  overrides: SurveyCADOverrides;
+
+  /** Warnings generated during CAD input construction */
+  warnings: string[];
+
+  /** Log of all construction steps */
+  buildLog: string[];
+}
+
+/**
+ * Survey-derived roof plane input — a partial CADRoofPlane shape.
+ * The CAD engine fills in panels[], dimensions{}, and solve metadata.
+ */
+export interface SurveyRoofPlaneInput {
+  id: string;
+  /** Raw boundary polygon in local meters (from survey geo polygon) */
+  polygon: Point2D[];
+  /** Usable polygon after setbacks (from enrichment inset) */
+  usablePolygon: Point2D[];
+  pitch: number;    // degrees
+  azimuth: number;  // degrees
+  areaSqM: number;
+  /** Setback amounts in meters (converted from enrichment inches) */
+  setbacks: {
+    eaveM: number;
+    ridgeM: number;
+    rakeM: number;
+  };
+}
+
+/**
+ * Survey-derived ground array input shape.
+ * Used to construct a CADGroundArray-compatible input.
+ */
+export interface SurveyGroundArrayInput {
+  id: string;
+  tiltDeg: number;
+  azimuth: number;
+  rowSpacingM: number;
+  groundClearanceM: number;
+  /** Estimated usable area in sq meters (from survey) */
+  usableAreaSqM: number | null;
+}
+
+/**
+ * Override values to merge into the CAD engine's call params.
+ * These are the survey-sourced values that improve CAD accuracy.
+ */
+export interface SurveyCADOverrides {
+  /** Origin lat/lng for local projection */
+  originLat?: number;
+  originLng?: number;
+  /** Main panel azimuth (from primary roof plane) */
+  azimuth?: number;
+  /** Main plane tilt/pitch */
+  tilt?: number;
+  /** Rafter spacing in inches (for attachment layout) */
+  rafterSpacingIn?: number;
+  /** Rafter size string */
+  rafterSize?: string;
+  /** Roof type string (shingle, tile, metal, etc.) */
+  roofType?: string;
+  /** Total usable area sq ft (for panel count estimation) */
+  usableAreaSqFt?: number;
+}
+
+// ─── Main builder function ────────────────────────────────────────────────────
+
+/**
+ * buildCADFromSurvey — constructs CAD engine inputs from an EnrichedSiteSurvey.
+ *
+ * Pure synchronous function. Never throws.
+ *
+ * @param survey  EnrichedSiteSurvey (output of enrichSurvey)
+ * @returns       SurveyCADInputs — structured inputs for generateCADLayout()
+ */
+export function buildCADFromSurvey(survey: EnrichedSiteSurvey): SurveyCADInputs {
+  const log: string[] = [];
+  const warnings: string[] = [];
+
+  log.push(`[cadBridge] Building CAD inputs for survey=${survey.id} project=${survey.projectId} pipeline_v${SITE_SURVEY_PIPELINE_VERSION}`);
+
+  // ── Resolve CAD system type ─────────────────────────────────────────────────
+  const systemType = resolveCadSystemType(survey.systemType, log);
+
+  // ── Resolve origin ──────────────────────────────────────────────────────────
+  const origin = resolveOrigin(survey, log);
+
+  // ── Build roof plane inputs ─────────────────────────────────────────────────
+  const roofPlaneInputs = systemType === 'roof'
+    ? buildRoofPlaneInputs(survey, origin, log, warnings)
+    : [];
+
+  // ── Build ground array inputs ───────────────────────────────────────────────
+  const groundArrayInputs = systemType === 'ground_mount'
+    ? buildGroundArrayInputs(survey, log, warnings)
+    : [];
+
+  // ── Build override map ──────────────────────────────────────────────────────
+  const overrides = buildOverrides(survey, log);
+
+  log.push(`[cadBridge] Complete: system=${systemType} planes=${roofPlaneInputs.length} groundArrays=${groundArrayInputs.length} warnings=${warnings.length}`);
+
+  return {
+    systemType,
+    origin,
+    roofPlaneInputs,
+    groundArrayInputs,
+    overrides,
+    warnings,
+    buildLog: log,
+  };
+}
+
+// ─── System type resolver ─────────────────────────────────────────────────────
+
+function resolveCadSystemType(
+  surveyType: EnrichedSiteSurvey['systemType'],
+  log: string[],
+): CADSystemType {
+  switch (surveyType) {
+    case 'roof':   return 'roof';
+    case 'ground': return 'ground_mount';
+    case 'fence':  return 'solar_fence';
+    default:
+      log.push(`[cadBridge] WARN: Unrecognized surveyType="${surveyType}" — defaulting to 'roof'`);
+      return 'roof';
+  }
+}
+
+// ─── Origin resolver ──────────────────────────────────────────────────────────
+
+function resolveOrigin(
+  survey: EnrichedSiteSurvey,
+  log: string[],
+): { lat: number; lng: number } | null {
+  if (survey.location.lat !== null && survey.location.lng !== null) {
+    log.push(`[cadBridge] Origin: lat=${survey.location.lat} lng=${survey.location.lng}`);
+    return { lat: survey.location.lat, lng: survey.location.lng };
+  }
+
+  // Fall back to first roof plane vertex if GPS missing
+  const firstVertex = survey.geometry.roofPlanes[0]?.vertices?.[0];
+  if (firstVertex) {
+    log.push(`[cadBridge] WARN: No GPS location — using first roof plane vertex as origin`);
+    return { lat: firstVertex.lat, lng: firstVertex.lng };
+  }
+
+  log.push(`[cadBridge] WARN: No GPS or polygon data — origin unknown`);
+  return null;
+}
+
+// ─── Roof plane inputs ────────────────────────────────────────────────────────
+
+function buildRoofPlaneInputs(
+  survey: EnrichedSiteSurvey,
+  origin: { lat: number; lng: number } | null,
+  log: string[],
+  warnings: string[],
+): SurveyRoofPlaneInput[] {
+  const surfaces = survey.derived.cadRoofSurfaces;
+
+  if (surfaces.length === 0) {
+    warnings.push(`No CAD roof surfaces available — CAD engine will use default plane layout`);
+    log.push(`[cadBridge] WARN: No cadRoofSurfaces — returning empty roof plane inputs`);
+    return [];
+  }
+
+  const projectionOrigin = origin ?? { lat: 0, lng: 0 };
+  const inputs: SurveyRoofPlaneInput[] = [];
+
+  for (const surface of surfaces) {
+    // Get the original roof plane for polygon data
+    const roofPlane = survey.geometry.roofPlanes.find(p => p.id === surface.planeId);
+
+===== lib/cad/roof/roofCAD.ts lines 1-260 =====
+// ============================================================
+// SolarPro CAD Engine — Roof CAD Solver
+// lib/cad/roof/roofCAD.ts
+//
+// Responsibilities:
+//   1. Normalize roof planes (lat/lng → local XY meters)
+//   2. Apply TRUE polygon setbacks per plane (independent)
+//   3. Generate panel grid per plane (portrait default)
+//   4. Reject panels with ANY corner outside usablePolygon
+//   5. Maximize fill per plane
+//   6. Compute dimensions
+//
+// RULES:
+//   - NO shared transforms across planes
+//   - Portrait is DEFAULT; landscape only if portrait yields 0
+//   - NO geometry logic in rendering templates
+// ============================================================
+
+import type { PermitInputShape } from '../../drafting/permitInputShape';
+import type {
+  CADModel, CADRoofModel, CADRoofPlane, CADPanel, CADDimension,
+  CADObstruction, CADElectricalNode,
+} from '../types';
+import type { SysDefObstruction, SysDefElectricalNode } from '@/lib/system/systemDefinition';
+import {
+  Point2D, BBox,
+  latLngToXY, latlngArrayToXY, bbox,
+  insetPolygon, gridInsidePolygon, polygonArea, centroid,
+  metersToFt, ftToMeters, fmtFt,
+} from '../geometry';
+
+const INCHES_TO_METERS = 0.0254;
+
+// ── Default panel dimensions ──────────────────────────────────
+const DEFAULT_PANEL_LENGTH_IN = 66;   // ~1.676 m (portrait height)
+const DEFAULT_PANEL_WIDTH_IN  = 40;   // ~1.016 m (portrait width)
+const DEFAULT_GAP_M           = 0.02; // 2 cm between panels
+
+// ── Setback defaults ──────────────────────────────────────────
+const DEFAULT_EAVE_SETBACK_IN  = 36;  // 3 ft
+const DEFAULT_RIDGE_SETBACK_IN = 36;  // 3 ft
+const DEFAULT_RAKE_SETBACK_IN  = 36;  // 3 ft (sides)
+
+export function roofCAD(input: PermitInputShape): CADModel {
+  const t0 = Date.now();
+  console.log('[CAD ENGINE INIT] roofCAD', {
+    panelPositions: input.project?.panelPositions?.length ?? 0,
+    roofPlanes:     input.project?.roofPlanes?.length ?? 0,
+    totalPanels:    input.system?.totalPanels,
+    systemKw:       input.system?.totalDcKw,
+  });
+
+  const warnings: string[] = [];
+
+  // ── Vision obstructions from SystemDefinition ────────────────────────────
+  // If the caller has run the vision pipeline, SystemDefinition.obstructions
+  // contains world-projected obstructions. We project them to CAD space and
+  // filter panels that fall within (radiusM + setbackM) of each obstruction.
+  // This is NON-BREAKING: if obstructions is undefined/empty, nothing changes.
+  const sysDefObstructions: SysDefObstruction[] =
+    (input as any)._systemDefinition?.obstructions ?? [];
+  const sysDefElecNodes: SysDefElectricalNode[] =
+    (input as any)._systemDefinition?.electricalNodes ?? [];
+
+  // ── Panel dimensions ─────────────────────────────────────────
+  const panelLenIn = input.project?.panelLengthIn ?? DEFAULT_PANEL_LENGTH_IN;
+  const panelWidIn = input.project?.panelWidthIn  ?? DEFAULT_PANEL_WIDTH_IN;
+  // Portrait: height = length, width = width
+  const panelPortraitH = panelLenIn * INCHES_TO_METERS;   // ~1.676m
+  const panelPortraitW = panelWidIn * INCHES_TO_METERS;    // ~1.016m
+
+  // ── Setbacks ──────────────────────────────────────────────────
+  const eaveSetIn  = input.project?.ahjRoofSetbackIn  ?? DEFAULT_EAVE_SETBACK_IN;
+  const ridgeSetIn = input.project?.ahjRidgeSetbackIn ?? DEFAULT_RIDGE_SETBACK_IN;
+  const rakeSetIn  = eaveSetIn; // sides same as eave by default
+  const eaveM  = eaveSetIn  * INCHES_TO_METERS;
+  const ridgeM = ridgeSetIn * INCHES_TO_METERS;
+  const rakeM  = rakeSetIn  * INCHES_TO_METERS;
+
+  // ── Raw input data ────────────────────────────────────────────
+  const rawPlanes  = (input.project?.roofPlanes     || []).filter(
+    rp => rp.vertices && rp.vertices.length >= 3 &&
+          rp.vertices.every((v: any) => isFinite(v.lat) && isFinite(v.lng) && Math.abs(v.lat) > 0.001)
+  );
+  const rawPanels  = (input.project?.panelPositions || []).filter(
+    (p: any) => p.lat && p.lng && isFinite(p.lat) && isFinite(p.lng) && Math.abs(p.lat) > 0.001
+  );
+
+  // ── Global origin — centroid of all plane vertices ────────────
+  const allLatLngs: Array<{ lat: number; lng: number }> = rawPlanes.flatMap(
+    (rp: any) => rp.vertices
+  );
+  const originLat = allLatLngs.length > 0
+    ? allLatLngs.reduce((s, v) => s + v.lat, 0) / allLatLngs.length
+    : (rawPanels[0]?.lat ?? 37.0);
+  const originLng = allLatLngs.length > 0
+    ? allLatLngs.reduce((s, v) => s + v.lng, 0) / allLatLngs.length
+    : (rawPanels[0]?.lng ?? -122.0);
+
+  // ── GPS panel lookup map ──────────────────────────────────────
+  // Map each GPS panel to local XY
+  const gpsPanels: Array<{
+    id: string; x: number; y: number;
+    orientation: string; row?: number; col?: number; planeId?: string;
+  }> = rawPanels.map((p: any) => {
+    const xy = latLngToXY(p.lat, p.lng, originLat, originLng);
+    return {
+      id:          p.id || `p${Math.random().toString(36).slice(2)}`,
+      x:           xy.x,
+      y:           xy.y,
+      orientation: (p.orientation || 'portrait').toLowerCase(),
+      row:         p.row,
+      col:         p.col,
+      planeId:     (p as any).planeId || (p as any).arrayId,
+    };
+  });
+
+  // ── Build planes ──────────────────────────────────────────────
+  const cadPlanes: CADRoofPlane[] = [];
+
+  if (rawPlanes.length > 0) {
+    for (const rp of rawPlanes as any[]) {
+      // Convert plane vertices to local XY
+      const polyXY: Point2D[] = rp.vertices.map((v: any) =>
+        latLngToXY(v.lat, v.lng, originLat, originLng)
+      );
+
+      // Apply uniform setback (use full inset for simplicity — all sides equal)
+      // For a true AHJ permit: eave at bottom, ridge at top, rake on sides.
+      // We use a conservative uniform inset of min(eave, ridge, rake).
+      const conservativeInset = Math.min(eaveM, ridgeM, rakeM);
+      const usablePolygon = insetPolygon(polyXY, conservativeInset);
+
+      const planeBB = bbox(usablePolygon.length >= 3 ? usablePolygon : polyXY);
+      const areaSqM = polygonArea(polyXY);
+
+      // ── Panel placement ───────────────────────────────────────
+      // Strategy: if GPS panels available for this plane, use them.
+      // Otherwise generate grid inside usablePolygon.
+      const planePanels: CADPanel[] = [];
+
+      // Find GPS panels that fall inside this plane's polygon
+      const planeGpsPanels = gpsPanels.filter(p =>
+        pointInPolygonLocal({ x: p.x, y: p.y }, polyXY)
+      );
+
+      if (planeGpsPanels.length > 0) {
+        // Use GPS panel positions directly
+        for (const gp of planeGpsPanels) {
+          const isPortrait = gp.orientation !== 'landscape';
+          const pw = isPortrait ? panelPortraitW : panelPortraitH;
+          const ph = isPortrait ? panelPortraitH : panelPortraitW;
+          planePanels.push({
+            id:          gp.id,
+            x:           gp.x - pw / 2,   // store as top-left
+            y:           gp.y - ph / 2,
+            widthM:      pw,
+            heightM:     ph,
+            orientation: isPortrait ? 'portrait' : 'landscape',
+            row:         gp.row ?? 0,
+            col:         gp.col ?? 0,
+            planeId:     rp.id,
+          });
+        }
+        console.log(`[PANEL GRID GENERATED] roofCAD plane=${rp.id} source=GPS count=${planePanels.length}`);
+      } else {
+        // Generate portrait grid inside usablePolygon
+        const gridPoly = usablePolygon.length >= 3 ? usablePolygon : polyXY;
+        const gridBB   = bbox(gridPoly);
+        const cells = gridInsidePolygon(
+          gridPoly,
+          panelPortraitW,
+          panelPortraitH,
+          DEFAULT_GAP_M,
+          DEFAULT_GAP_M,
+          gridBB,
+        );
+
+        // If portrait yields 0, try landscape
+        const useCells = cells.length > 0 ? cells : (() => {
+          if (cells.length === 0) {
+            warnings.push(`plane ${rp.id}: portrait grid=0, trying landscape`);
+            return gridInsidePolygon(
+              gridPoly, panelPortraitH, panelPortraitW,
+              DEFAULT_GAP_M, DEFAULT_GAP_M, gridBB,
+            );
+          }
+          return cells;
+        })();
+
+        for (const cell of useCells) {
+          planePanels.push({
+            id:          `${rp.id}-r${cell.row}-c${cell.col}`,
+            x:           cell.x,
+            y:           cell.y,
+            widthM:      panelPortraitW,
+            heightM:     panelPortraitH,
+            orientation: 'portrait',
+            row:         cell.row,
+            col:         cell.col,
+            planeId:     rp.id,
+          });
+        }
+        console.log(`[PANEL GRID GENERATED] roofCAD plane=${rp.id} source=GRID count=${planePanels.length}`);
+      }
+
+      // ── Compute plane dimensions ──────────────────────────────
+      const panelBB = planePanels.length > 0
+        ? bbox(planePanels.flatMap(p => [
+            { x: p.x, y: p.y },
+            { x: p.x + p.widthM, y: p.y + p.heightM },
+          ]))
+        : planeBB;
+
+      const uniqueRows = new Set(planePanels.map(p => p.row)).size;
+      const uniqueCols = new Set(planePanels.map(p => p.col)).size;
+
+      console.log('[SETBACK APPLIED] roofCAD', {
+        planeId:       rp.id,
+        eaveM:         eaveM.toFixed(3),
+        ridgeM:        ridgeM.toFixed(3),
+        rakeM:         rakeM.toFixed(3),
+        insetM:        conservativeInset.toFixed(3),
+        polyPts:       polyXY.length,
+        usablePts:     usablePolygon.length,
+        areaSqM:       areaSqM.toFixed(1),
+        planePanels:   planePanels.length,
+      });
+
+      // ── Obstruction collision filtering ──────────────────────────────────
+      // Remove panels whose center falls within any obstruction exclusion zone.
+      // Exclusion zone = radiusM + setbackIn * INCHES_TO_METERS.
+      const planeObstructions = buildCADObstructions(sysDefObstructions, rp.id);
+      const filteredPanels = filterPanelsByObstructions(planePanels, planeObstructions, warnings);
+      const removedCount = planePanels.length - filteredPanels.length;
+      if (removedCount > 0) {
+        warnings.push(`[OBSTRUCTION] plane ${rp.id}: removed ${removedCount} panel(s) blocked by obstructions`);
+        console.log(`[OBSTRUCTION FILTER] roofCAD plane=${rp.id} removed=${removedCount} remaining=${filteredPanels.length}`);
+      }
+
+      // Recompute dimensions after filtering
+      const filteredBB = filteredPanels.length > 0
+        ? bbox(filteredPanels.flatMap(p => [
+            { x: p.x, y: p.y },
+            { x: p.x + p.widthM, y: p.y + p.heightM },
+          ]))
+        : panelBB;
+      const filteredRows = new Set(filteredPanels.map(p => p.row)).size;
+      const filteredCols = new Set(filteredPanels.map(p => p.col)).size;
+
+      cadPlanes.push({
+        id:            rp.id,
+        polygon:       polyXY,
+        usablePolygon: usablePolygon.length >= 3 ? usablePolygon : polyXY,
+        pitch:         rp.pitch  ?? 5,
+        azimuth:       rp.azimuth ?? 180,
+        areaSqM,
+        setbacks:      { eaveM, ridgeM, rakeM },
+        panels:        filteredPanels,
+        obstructions:  planeObstructions,
+
+===== lib/cad/types.ts lines 1-260 =====
+// ============================================================
+// SolarPro CAD Engine — Core Types
+// lib/cad/types.ts
+//
+// CADModel is the SINGLE SOURCE OF TRUTH output from the CAD engine.
+// It is consumed ONLY by adaptCADToDrafting() — never by templates directly.
+//
+// Templates receive DraftingInput (unchanged interface).
+// The CAD engine populates DraftingInput from CADModel.
+// ============================================================
+
+import type { Point2D, BBox } from './geometry';
+
+// ── System Type (mirrors DraftingEngine) ─────────────────────
+export type CADSystemType = 'roof' | 'ground_mount' | 'solar_fence';
+
+// ── CAD Panel ────────────────────────────────────────────────
+// A single panel placed in CAD space (local meters, XY).
+
+export interface CADPanel {
+  id:          string;
+  x:           number;   // center X (meters, local)
+  y:           number;   // center Y (meters, local)
+  widthM:      number;   // panel width in meters
+  heightM:     number;   // panel height in meters
+  orientation: 'portrait' | 'landscape';
+  row:         number;
+  col:         number;
+  planeId?:    string;   // roof plane ID (roof only)
+  arrayId?:    string;   // ground array ID (ground only)
+  segmentId?:  string;   // fence segment ID (fence only)
+}
+
+// ── CAD Roof Plane ───────────────────────────────────────────
+
+export interface CADRoofPlane {
+  id:             string;
+  polygon:        Point2D[];   // local XY meters — raw plane boundary
+  usablePolygon:  Point2D[];   // local XY meters — after setbacks applied
+  pitch:          number;      // degrees
+  azimuth:        number;      // degrees
+  areaSqM:        number;
+  setbacks: {
+    eaveM:   number;
+    ridgeM:  number;
+    rakeM:   number;
+  };
+  panels:         CADPanel[];
+  dimensions: {
+    widthM:     number;
+    heightM:    number;
+    panelCountX: number;
+    panelCountY: number;
+  };
+  /** Obstructions on this roof plane (subset of CADModel.obstructions) */
+  obstructions?:  CADObstruction[];
+}
+
+// ── CAD Ground Array ─────────────────────────────────────────
+
+export interface CADGroundArray {
+  id:            string;
+  originX:       number;       // local XY origin
+  originY:       number;
+  rows:          CADGroundRow[];
+  panels:        CADPanel[];
+  tiltDeg:       number;
+  azimuth:       number;
+  rowSpacingM:   number;
+  groundClearanceM: number;
+  structureType: string;
+  pileDepthM:    number;
+  pileSpacingM:  number;
+  dimensions: {
+    arrayWidthM:  number;
+    arrayDepthM:  number;
+    rowCount:     number;
+    panelsPerRow: number;
+  };
+}
+
+export interface CADGroundRow {
+  id:      string;
+  rowIndex: number;
+  x:       number;   // row left X (local meters)
+  y:       number;   // row Y (local meters)
+  widthM:  number;
+  panels:  CADPanel[];
+}
+
+// ── CAD Fence ────────────────────────────────────────────────
+
+export interface CADFenceSegment {
+  id:         string;
+  startX:     number;   // local XY meters
+  startY:     number;
+  endX:       number;
+  endY:       number;
+  lengthM:    number;
+  azimuth:    number;
+  panelCount: number;
+  panels:     CADPanel[];
+  posts:      CADFencePost[];
+  tiltDeg:    number;
+  bifacial:   boolean;
+  label:      string;
+}
+
+export interface CADFencePost {
+  id:      string;
+  x:       number;
+  y:       number;
+  embedM:  number;
+  heightM: number;
+}
+
+// ── Fence Sections (user-controlled section system) ─────────
+// Each fence segment is divided into sections. Users control the type
+// of each section: solar panels, gates, or vinyl (non-solar).
+// No automatic gap-filling — all sections are intentional.
+
+export type FenceSectionType = 'solar' | 'gate' | 'vinyl';
+
+export interface CADFenceSection {
+  id:         string;
+  segmentId:  string;       // parent fence segment
+  index:      number;       // section order within segment (0-based)
+  type:       FenceSectionType;
+  startM:     number;       // offset from segment start (meters)
+  widthM:     number;       // section width along fence line
+  heightM:    number;       // section height (matches fence height)
+  x:          number;       // local XY center position (meters)
+  y:          number;
+  panelCount: number;       // panels in this section (0 for gate/vinyl)
+}
+
+// ── CAD Dimensions (attached to model, rendered by engine) ───
+
+export interface CADDimension {
+  id:     string;
+  type:   'horizontal' | 'vertical' | 'angular';
+  x1:     number;
+  y1:     number;
+  x2:     number;
+  y2:     number;
+  valueFt: number;
+  label:  string;
+  level:  1 | 2 | 3;   // 1=panel, 2=array, 3=overall
+}
+
+// ── CAD Obstruction (vision-sourced) ──────────────────────────────────
+// Represents a roof obstruction in the CAD model.
+// Placed by roofCAD.ts using SystemDefinition.obstructions[].
+// The CAD engine renders these as exclusion zones and avoids placing panels
+// within (radiusM + setbackM) of each obstruction center.
+
+export interface CADObstruction {
+  id:          string;
+  type:        string;         // ObstructionClass value
+  x:           number;         // center X (local meters)
+  y:           number;         // center Y (local meters)
+  radiusM:     number;         // physical footprint radius
+  setbackM:    number;         // required clearance from footprint edge (NEC/AHJ)
+  totalRadiusM: number;        // radiusM + setbackM (total exclusion radius)
+  heightFt:    number;         // height above roof deck
+  roofPlaneId: string | null;  // which plane this sits on
+  source:      'vision' | 'manual' | 'merged';
+  confidence:  number;         // 0.0–1.0
+}
+
+// ── CAD Electrical Node (vision-sourced) ────────────────────────────
+// Represents a detected electrical component in the CAD model.
+// Used by conduitRouting.ts as a routing target / waypoint.
+
+export interface CADElectricalNode {
+  id:                   string;
+  type:                 string;    // ElectricalClass value
+  x:                    number;    // local meters
+  y:                    number;    // local meters
+  story:                number;    // floor/story (1=ground)
+  isPrimaryInterconnect: boolean;  // main conduit target
+  source:               'vision' | 'manual' | 'merged';
+  confidence:           number;
+}
+
+// ── CAD Conduit Route ────────────────────────────────────────────────
+// Output of conduitRouting.ts. Represents the planned conduit path
+// from the array drop point to the electrical panel.
+
+export interface CADConduitWaypoint {
+  x:      number;   // local meters
+  y:      number;   // local meters
+  label?: string;   // 'array_drop', 'roof_edge', 'panel', etc.
+}
+
+export interface CADConduitRoute {
+  id:              string;
+  waypoints:       CADConduitWaypoint[];
+  totalLengthM:    number;
+  bendCount:       number;
+  targetNodeId:    string;   // ElectricalNode id
+  routeMethod:     'vision_guided' | 'shortest_path' | 'fallback_straight';
+  warnings:        string[];
+}
+
+// ── CAD Model ────────────────────────────────────────────────
+// Top-level output from generateCADLayout().
+
+export interface CADModel {
+  systemType:  CADSystemType;
+  version:     string;
+
+  // System-specific geometry (only one will be populated)
+  roof?:   CADRoofModel;
+  ground?: CADGroundModel;
+  fence?:  CADFenceModel;
+
+  // Aggregated metrics
+  totalPanels:  number;
+  totalDcKw:    number;
+  panelWidthM:  number;
+  panelHeightM: number;
+
+  // GPS origin used for local XY projection.
+  // All local XY values in this model are relative to this origin.
+  // Required for correct lat/lng inverse conversion in adapter.
+  originLat:   number;
+  originLng:   number;
+
+  // Bounding box of entire solved layout (local meters)
+  bounds: BBox;
+
+  // Computed dimensions for drafting engine
+  dimensions: CADDimension[];
+
+  // Solve metadata
+  solveMs:   number;
+  warnings:  string[];
+
+  // System Definition — standardized system config (v48)
+  // Populated by generateCADLayout() from input data.
+  // Downstream consumers can read this instead of scattered input fields.
+  systemDefinition?: import('@/lib/system/systemDefinition').SystemDefinition;
+
+  // Vision-sourced layers (optional — present only when vision pipeline has run)
+
+  /** Roof obstructions detected via vision, projected to local XY */
+  obstructions?: CADObstruction[];
+
+  /** Electrical nodes detected via vision, projected to local XY */
+  electricalNodes?: CADElectricalNode[];
+
+  /** Planned conduit routes (from conduitRouting.ts) */
+  conduitRoutes?: CADConduitRoute[];
+}
+
+// ── System-specific model wrappers ───────────────────────────
+
+export interface CADRoofModel {
+  planes:       CADRoofPlane[];
+
+===== lib/cad/adapter.ts lines 1-260 =====
+// ============================================================
+// SolarPro CAD Engine — CAD → Drafting Adapter
+// lib/cad/adapter.ts
+//
+// adaptCADToDrafting(cadModel, originalInput): DraftingInput
+//
+// PURPOSE:
+//   Convert CADModel (geometry-solved) into the existing
+//   DraftingInput format consumed by all rendering templates.
+//
+// RULES:
+//   - Preserves ALL original PermitInput fields (pass-through)
+//   - Overwrites ONLY geometry fields with CAD-solved values
+//   - Templates receive a DraftingInput identical in shape to before
+//   - Zero breaking changes to template signatures
+//
+// FIELD MAPPING:
+//   CADRoofModel.planes[]        → project.roofPlanes + project.panelPositions
+//   CADGroundModel.arrays[]      → layout.groundArrays
+//   CADFenceModel.segments[]     → layout.fenceSegments
+//
+// COORDINATE ENCODING (roof + fence):
+//   The roof template computes:
+//     scale = (drawW - 2*margin) / lngSpan           [pixels per degree]
+//     panLenPx = (panelLenIn / 12) * scale * 0.8     [feet * pixels/degree = WRONG]
+//
+//   Fix (without touching templates): encode all XY coords as
+//   "fake lat/lng" where 1 degree == 1 foot. This gives:
+//     lngSpan = roof_width_in_feet
+//     scale   = pixels / foot
+//     panLenPx = (panelLenIn/12) * pixels/foot = correct pixels ✓
+//
+//   Also passes the template's Math.abs(lat) > 0.001 validation
+//   because house-scale offsets in feet (10–150 ft) >> 0.001.
+// ============================================================
+
+import type { DraftingInput, DraftingLayout, DraftingProject } from '../drafting/types';
+import type { PermitInputShape } from '../drafting/permitInputShape';
+import type { CADModel, CADRoofPlane, CADGroundArray, CADFenceSegment } from './types';
+import { metersToFt } from './geometry';
+
+// 1 degree == 1 foot encoding constant
+const METERS_TO_FEET = 3.280_839_895;
+
+/**
+ * Encode local XY meters (from CAD origin) as "fake degrees"
+ * where 1 degree == 1 foot. This makes template scale = pixels/ft
+ * so panLenPx = (panelLenIn/12) * scale = correct pixel size.
+ *
+ * A small offset (10ft) is added to keep all coords > 0.001° so
+ * the template's Math.abs(lat) > 0.001 validation always passes.
+ */
+const FAKE_DEG_OFFSET = 10; // feet — ensures lat/lng are always > 0.001
+
+function xyToFakeDeg(x: number, y: number): { lat: number; lng: number } {
+  return {
+    lat: y * METERS_TO_FEET + FAKE_DEG_OFFSET,
+    lng: x * METERS_TO_FEET + FAKE_DEG_OFFSET,
+  };
+}
+
+/**
+ * Converts CADModel into DraftingInput for consumption by
+ * drawRoofPlan / drawGroundArray / drawFencePlan templates.
+ *
+ * The original PermitInputShape is passed through so all
+ * non-geometry fields (electrical, compliance, etc.) are preserved.
+ */
+export function adaptCADToDrafting(
+  cad: CADModel,
+  original: PermitInputShape,
+): DraftingInput {
+  console.log('[CAD → DRAFTING ADAPTER]', {
+    systemType:   cad.systemType,
+    totalPanels:  cad.totalPanels,
+    totalDcKw:    cad.totalDcKw.toFixed(2),
+    warnings:     cad.warnings,
+    solveMs:      cad.solveMs,
+  });
+
+  // Base engineering (pass-through with CAD overrides)
+  const engineering = {
+    totalDcKw:    cad.totalDcKw   || original.system?.totalDcKw   || 0,
+    totalAcKw:    original.system?.totalAcKw  || original.system?.totalDcKw || 0,
+    totalPanels:  cad.totalPanels || original.system?.totalPanels || 0,
+    windSpeedMph:  original.project?.ahjWindSpeedMph,
+    groundSnowPsf: original.project?.ahjGroundSnowPsf,
+    panelWatts:   (original.system?.inverters?.[0]?.strings?.[0] as any)?.panelWatts
+                  ?? original.project?.['panelWatts'],
+    panelVoc:     (original.system?.inverters?.[0]?.strings?.[0] as any)?.panelVoc
+                  ?? original.project?.panelVoc,
+    panelIsc:     (original.system?.inverters?.[0]?.strings?.[0] as any)?.panelIsc
+                  ?? original.project?.panelIsc,
+  };
+
+  // Route to system-specific adapter
+  switch (cad.systemType) {
+    case 'roof':
+      return adaptRoof(cad, original, engineering);
+    case 'ground_mount':
+      return adaptGround(cad, original, engineering);
+    case 'solar_fence':
+      return adaptFence(cad, original, engineering);
+    default:
+      throw new Error(`[CAD Adapter] Unknown systemType: ${(cad as any).systemType}`);
+  }
+}
+
+// ── Roof Adapter ─────────────────────────────────────────────────────────────
+
+function adaptRoof(
+  cad: CADModel,
+  original: PermitInputShape,
+  engineering: DraftingInput['engineering'],
+): DraftingInput {
+  const roof = cad.roof!;
+
+  // Convert CAD plane polygons to fake-degree coordinates (1° == 1 ft).
+  // plane.polygon vertices are stored in local XY meters from CAD origin.
+  const adaptedRoofPlanes = roof.planes.map((plane: CADRoofPlane) => ({
+    id:       plane.id,
+    vertices: plane.polygon.map(pt => xyToFakeDeg(pt.x, pt.y)),
+    pitch:    plane.pitch,
+    azimuth:  plane.azimuth,
+    area:     plane.areaSqM,
+    _usablePolygon: plane.usablePolygon,
+    _cadSolved: true,
+  }));
+
+  // Convert CAD panels to fake-degree coordinates.
+  // panel.x, panel.y = top-left corner in meters.
+  // Template renders at center: drawRectFilled(px - pw/2, py - ph/2, pw, ph)
+  // where px = toX(p.lng). So p.lng must be the CENTER x in fake-degrees.
+  const adaptedPanelPositions = roof.planes.flatMap((plane: CADRoofPlane) =>
+    plane.panels.map(panel => {
+      // Center of panel in meters
+      const centerX = panel.x + panel.widthM  / 2;
+      const centerY = panel.y + panel.heightM / 2;
+      const fakeDeg = xyToFakeDeg(centerX, centerY);
+      return {
+        id:          panel.id,
+        lat:         fakeDeg.lat,
+        lng:         fakeDeg.lng,
+        tilt:        plane.pitch,
+        azimuth:     plane.azimuth,
+        row:         panel.row,
+        col:         panel.col,
+        orientation: panel.orientation,
+      };
+    })
+  );
+
+  console.log('[CAD → DRAFTING ADAPTER] roof encoding sample:', {
+    planes: adaptedRoofPlanes.length,
+    panels: adaptedPanelPositions.length,
+    samplePlaneVertex: adaptedRoofPlanes[0]?.vertices?.[0],
+    samplePanel: adaptedPanelPositions[0],
+    note: '1 degree == 1 foot; scale = pixels/ft; panLenPx = (in/12)*scale = correct',
+  });
+
+  const project: DraftingProject = {
+    ...originalProject(original),
+    roofPlanes:     adaptedRoofPlanes as any,
+    panelPositions: adaptedPanelPositions,
+  };
+
+  const layout: DraftingLayout = {
+    ...originalLayout(original),
+  };
+
+  return { project, layout, engineering };
+}
+
+// ── Ground Adapter ────────────────────────────────────────────────────────────
+
+function adaptGround(
+  cad: CADModel,
+  original: PermitInputShape,
+  engineering: DraftingInput['engineering'],
+): DraftingInput {
+  const ground = cad.ground!;
+
+  // Convert CAD arrays back to layout.groundArrays format
+  const adaptedGroundArrays = ground.arrays.map((arr: CADGroundArray) => ({
+    id:                arr.id,
+    rowCount:          arr.dimensions.rowCount,
+    panelsPerRow:      arr.dimensions.panelsPerRow,
+    tiltDeg:           arr.tiltDeg,
+    azimuth:           arr.azimuth,
+    rowSpacingFt:      metersToFt(arr.rowSpacingM),
+    groundClearanceIn: arr.groundClearanceM * 39.3701,
+    structureType:     arr.structureType,
+    pileDepthFt:       metersToFt(arr.pileDepthM),
+    pileSpacingFt:     metersToFt(arr.pileSpacingM),
+    // CAD-solved extras for templates
+    _cadOriginX:       arr.originX,
+    _cadOriginY:       arr.originY,
+    _cadPanels:        arr.panels,
+    _cadRows:          arr.rows,
+    _cadSolved:        true,
+  }));
+
+  const project: DraftingProject = {
+    ...originalProject(original),
+  };
+
+  const layout: DraftingLayout = {
+    ...originalLayout(original),
+    groundArrays:   adaptedGroundArrays as any,
+    groundSetbackFt: ground.setbackFt,
+  };
+
+  return { project, layout, engineering };
+}
+
+// ── Fence Adapter ─────────────────────────────────────────────────────────────
+
+function adaptFence(
+  cad: CADModel,
+  original: PermitInputShape,
+  engineering: DraftingInput['engineering'],
+): DraftingInput {
+  const fence = cad.fence!;
+
+  // Convert CAD segment endpoints to fake-degree coordinates (1° == 1 ft).
+  // seg.startX/Y and endX/Y are in meters from CAD origin.
+  const adaptedSegments = fence.segments.map((seg: CADFenceSegment) => {
+    const startFD = xyToFakeDeg(seg.startX, seg.startY);
+    const endFD   = xyToFakeDeg(seg.endX,   seg.endY);
+    return {
+      id:         seg.id,
+      startPoint: {
+        lat: startFD.lat,
+        lng: startFD.lng,
+        x:   seg.startX,
+        y:   seg.startY,
+      },
+      endPoint: {
+        lat: endFD.lat,
+        lng: endFD.lng,
+        x:   seg.endX,
+        y:   seg.endY,
+      },
+      lengthFt:   metersToFt(seg.lengthM),
+      azimuth:    seg.azimuth,
+      panelCount: seg.panelCount,
+      tilt:       seg.tiltDeg,
+      bifacial:   seg.bifacial,
+      label:      seg.label,
+      // CAD-solved extras
+      _cadPanels: seg.panels,
+      _cadPosts:  seg.posts,
+      _cadSolved: true,
+    };
+  });
+
+  const project: DraftingProject = {
+    ...originalProject(original),
+  };
+
+
+===== lib/system/conduitRouting.ts lines 1-280 =====
+// ============================================================================
+// lib/system/conduitRouting.ts — Conduit Path Routing Engine
+//
+// VERSION: 1
+//
+// PIPELINE POSITION:
+//   CADModel (after roofCAD.ts runs)
+//     + SystemDefinition.electricalNodes
+//     + SystemDefinition.obstructions
+//     → routeConduit()  ← YOU ARE HERE
+//     → CADConduitRoute[]
+//     → Written to CADModel.conduitRoutes
+//     → Rendered by plan-set / permit templates
+//
+// RESPONSIBILITIES:
+//   1. Find the array drop point (centroid of bottom-row panels on primary plane)
+//   2. Find the closest roof edge exit point to the drop point
+//   3. Route from drop point → roof edge exit → down wall → electrical node
+//   4. Avoid all obstructions (stay >= totalRadiusM from each center)
+//   5. Minimize total conduit length and number of 90° bends
+//   6. Return CADConduitRoute with waypoints and metadata
+//
+// ROUTING ALGORITHM:
+//   - Simple visibility graph + A* shortest path
+//   - Nodes: array_drop, obstruction_avoidance_waypoints, roof_edge, electrical_node
+//   - Edges: straight-line segments that don't intersect obstruction exclusion zones
+//   - Fallback: direct straight line (if no obstructions or vision data absent)
+//
+// NON-BREAKING GUARANTEE:
+//   - NEVER throws — all errors caught, fallback straight-line route returned
+//   - If no electrical nodes exist, returns empty array
+//   - If no obstructions exist, returns direct route
+// ============================================================================
+
+import type { CADModel, CADPanel, CADObstruction, CADElectricalNode, CADConduitRoute, CADConduitWaypoint } from '@/lib/cad/types';
+import type { Point2D } from '@/lib/cad/geometry';
+import { dist2D, centroid, bbox } from '@/lib/cad/geometry';
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+/** Clearance buffer added around obstructions when routing (meters) */
+const ROUTE_CLEARANCE_M = 0.15;
+
+/** Maximum conduit route length before we emit a warning (meters) */
+const WARN_ROUTE_LENGTH_M = 30;
+
+/** Maximum A* iterations before fallback */
+const MAX_ASTAR_ITERATIONS = 500;
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface RouteNode {
+  id: string;
+  x: number;
+  y: number;
+  label?: string;
+}
+
+interface AStarNode {
+  node: RouteNode;
+  gCost: number;   // cost from start
+  hCost: number;   // heuristic to end
+  fCost: number;   // g + h
+  parent: AStarNode | null;
+}
+
+// ─── Public API ──────────────────────────────────────────────────────────────
+
+export interface ConduitRoutingOptions {
+  /** Override array drop point (defaults to centroid of bottom-row panels) */
+  dropPointOverride?: Point2D;
+  /** Override roof edge exit point */
+  roofEdgeOverride?: Point2D;
+}
+
+/**
+ * routeConduit — computes conduit routes for a solved CAD model.
+ *
+ * Returns one CADConduitRoute per electrical node that is a primary
+ * interconnect target. Additional routes may be added for sub-panels.
+ *
+ * SAFETY: Returns [] on any error. Never throws.
+ */
+export function routeConduit(
+  cadModel: CADModel,
+  options: ConduitRoutingOptions = {},
+): CADConduitRoute[] {
+  try {
+    return _routeConduitInternal(cadModel, options);
+  } catch (err) {
+    console.error('[conduitRouting] routeConduit failed (non-fatal):', err);
+    return [];
+  }
+}
+
+// ─── Internal implementation ──────────────────────────────────────────────────
+
+function _routeConduitInternal(
+  cadModel: CADModel,
+  options: ConduitRoutingOptions,
+): CADConduitRoute[] {
+  const routes: CADConduitRoute[] = [];
+  const obstructions = cadModel.obstructions ?? [];
+  const electricalNodes = cadModel.electricalNodes ?? [];
+
+  if (electricalNodes.length === 0) {
+    console.log('[conduitRouting] No electrical nodes — skipping conduit routing');
+    return [];
+  }
+
+  // ── Find array drop point ─────────────────────────────────────────────────
+  const dropPoint = options.dropPointOverride
+    ? options.dropPointOverride
+    : findArrayDropPoint(cadModel);
+
+  if (!dropPoint) {
+    console.log('[conduitRouting] Could not determine array drop point — skipping');
+    return [];
+  }
+
+  // ── Route to each primary interconnect target ─────────────────────────────
+  const primaryNodes = electricalNodes.filter(n => n.isPrimaryInterconnect);
+  const targetNodes = primaryNodes.length > 0 ? primaryNodes : electricalNodes.slice(0, 1);
+
+  for (const elecNode of targetNodes) {
+    const route = routeToNode(
+      dropPoint,
+      elecNode,
+      obstructions,
+      options,
+    );
+    routes.push(route);
+    console.log(`[conduitRouting] Routed to ${elecNode.type} id=${elecNode.id} method=${route.routeMethod} length=${route.totalLengthM.toFixed(1)}m bends=${route.bendCount}`);
+  }
+
+  return routes;
+}
+
+// ─── Array drop point ─────────────────────────────────────────────────────────
+
+/**
+ * Find the array drop point — the optimal point to exit the array
+ * and begin conduit routing to the electrical panel.
+ *
+ * Strategy:
+ *   1. Bottom-row panels of the primary roof plane
+ *   2. Centroid of those panels
+ *   3. Fallback: centroid of all panels
+ */
+function findArrayDropPoint(cadModel: CADModel): Point2D | null {
+  const roofModel = cadModel.roof;
+  if (!roofModel || roofModel.planes.length === 0) return null;
+
+  // Use the primary plane (first plane)
+  const primaryPlane = roofModel.planes[0];
+  const panels = primaryPlane.panels;
+  if (panels.length === 0) return null;
+
+  // Find bottom row (highest Y value = closest to eave = nearest to ground)
+  const maxRow = Math.max(...panels.map(p => p.row));
+  const bottomPanels = panels.filter(p => p.row === maxRow);
+
+  // Centroid of bottom-row panel centers
+  const dropX = bottomPanels.reduce((s, p) => s + p.x + p.widthM / 2, 0) / bottomPanels.length;
+  const dropY = bottomPanels.reduce((s, p) => s + p.y + p.heightM / 2, 0) / bottomPanels.length;
+
+  return { x: dropX, y: dropY };
+}
+
+// ─── Route to a single node ───────────────────────────────────────────────────
+
+function routeToNode(
+  dropPoint: Point2D,
+  targetNode: CADElectricalNode,
+  obstructions: CADObstruction[],
+  options: ConduitRoutingOptions,
+): CADConduitRoute {
+  const warnings: string[] = [];
+  const target: Point2D = { x: targetNode.x, y: targetNode.y };
+
+  // ── No obstructions → direct route ────────────────────────────────────────
+  if (obstructions.length === 0) {
+    const waypoints: CADConduitWaypoint[] = [
+      { x: dropPoint.x, y: dropPoint.y, label: 'array_drop' },
+      { x: target.x, y: target.y, label: `${targetNode.type}_entry` },
+    ];
+    const length = dist2D(dropPoint, target);
+    return {
+      id: `route_${targetNode.id}`,
+      waypoints,
+      totalLengthM: length,
+      bendCount: 0,
+      targetNodeId: targetNode.id,
+      routeMethod: 'shortest_path',
+      warnings: length > WARN_ROUTE_LENGTH_M
+        ? [`Route length ${length.toFixed(1)}m exceeds ${WARN_ROUTE_LENGTH_M}m — verify conduit fill`]
+        : [],
+    };
+  }
+
+  // ── A* path through visibility graph ─────────────────────────────────────
+  const visNodes = buildVisibilityNodes(dropPoint, target, obstructions);
+  const path = astarRoute(
+    { id: 'start', x: dropPoint.x, y: dropPoint.y, label: 'array_drop' },
+    { id: 'end',   x: target.x,   y: target.y,   label: `${targetNode.type}_entry` },
+    visNodes,
+    obstructions,
+    warnings,
+  );
+
+  if (path.length < 2) {
+    // A* failed — fallback to straight line with a warning
+    warnings.push('A* routing failed — using straight-line fallback (verify clearances)');
+    const fallbackWaypoints: CADConduitWaypoint[] = [
+      { x: dropPoint.x, y: dropPoint.y, label: 'array_drop' },
+      { x: target.x, y: target.y, label: `${targetNode.type}_entry` },
+    ];
+    return {
+      id: `route_${targetNode.id}`,
+      waypoints: fallbackWaypoints,
+      totalLengthM: dist2D(dropPoint, target),
+      bendCount: 0,
+      targetNodeId: targetNode.id,
+      routeMethod: 'fallback_straight',
+      warnings,
+    };
+  }
+
+  // Convert path to waypoints
+  const waypoints: CADConduitWaypoint[] = path.map((node, i) => ({
+    x: node.x,
+    y: node.y,
+    label: node.label ?? (i === 0 ? 'array_drop' : i === path.length - 1 ? 'panel' : `waypoint_${i}`),
+  }));
+
+  // Calculate total length and bend count
+  let totalLength = 0;
+  let bendCount = 0;
+  for (let i = 1; i < path.length; i++) {
+    totalLength += dist2D({ x: path[i - 1].x, y: path[i - 1].y }, { x: path[i].x, y: path[i].y });
+    if (i >= 2) {
+      // Count direction changes > 15 degrees as a bend
+      const dx1 = path[i - 1].x - path[i - 2].x;
+      const dy1 = path[i - 1].y - path[i - 2].y;
+      const dx2 = path[i].x - path[i - 1].x;
+      const dy2 = path[i].y - path[i - 1].y;
+      const dot = dx1 * dx2 + dy1 * dy2;
+      const mag1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+      const mag2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+      if (mag1 > 0.001 && mag2 > 0.001) {
+        const cosAngle = dot / (mag1 * mag2);
+        const angleDeg = Math.acos(Math.max(-1, Math.min(1, cosAngle))) * 180 / Math.PI;
+        if (angleDeg > 15) bendCount++;
+      }
+    }
+  }
+
+  if (totalLength > WARN_ROUTE_LENGTH_M) {
+    warnings.push(`Route length ${totalLength.toFixed(1)}m exceeds ${WARN_ROUTE_LENGTH_M}m — verify conduit fill`);
+  }
+
+  return {
+    id: `route_${targetNode.id}`,
+    waypoints,
+    totalLengthM: totalLength,
+    bendCount,
+    targetNodeId: targetNode.id,
+    routeMethod: 'vision_guided',
+    warnings,
+  };
+}
+
+// ─── Visibility graph ─────────────────────────────────────────────────────────
+
+/**
+ * Build intermediate waypoint nodes around obstructions for the
+ * visibility graph. Generates 8 tangent points around each obstruction.
+ */
+function buildVisibilityNodes(
+  start: Point2D,
+
+===== lib/bom/deriveRunLengths.ts lines 1-240 =====
+/**
+ * lib/bom/deriveRunLengths.ts
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Derives wire run lengths (in feet) from CAD geometry, replacing the
+ * hardcoded defaults in computed-system.ts when real geometry is available.
+ *
+ * Strategy per segment:
+ *
+ *  DC_STRING_RUN          — roof: half-diagonal of the largest roof plane (DC
+ *                           wire from array midpoint down to eave junction box)
+ *                           ground: half of array depth + typical conduit drop
+ *  DC_DISCO_TO_INV_RUN    — short fixed run (10 ft) — not geometry-derived
+ *  ROOF_RUN               — roof: plane width × 0.6 (trunk cable along eave)
+ *                           (covers microinverter trunk + short DC homerun)
+ *  BRANCH_RUN             — microinverter: sum of branch trunk segments
+ *                           approximated as plane width × branch count factor
+ *  ARRAY_OPEN_AIR         — ground/fence: array width (open-air homerun)
+ *  ARRAY_CONDUIT_RUN      — conduitRoutes totalLengthM (vision) or array
+ *                           bounding-box diagonal as fallback
+ *  INV_TO_DISCO_RUN       — electricalNode distance if vision available;
+ *                           else 20 ft default
+ *  COMBINER_TO_DISCO_RUN  — same as INV_TO_DISCO_RUN path
+ *  DISCO_TO_METER_RUN     — conduitRoutes totalLengthM (vision) or distance
+ *                           between array centroid and MSP node; else 15 ft
+ *  METER_TO_MSP_RUN       — fixed 10 ft (meter → MSP is always very short)
+ *  MSP_TO_UTILITY_RUN     — fixed 5 ft
+ *  BATTERY_TO_BUI_RUN     — not geometry-derived (5–10 ft typical)
+ *  BUI_TO_MSP_RUN         — not geometry-derived (15 ft typical)
+ *  GENERATOR_TO_ATS_RUN   — not geometry-derived (50 ft typical)
+ *  ATS_TO_MSP_RUN         — not geometry-derived (20 ft typical)
+ *
+ * All values are in FEET. CAD geometry is in METERS → convert with M_TO_FT.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+import type { CADModel, CADRoofPlane, CADConduitRoute, CADElectricalNode } from '@/lib/cad/types';
+import type { RunSegmentId } from '@/lib/computed-system';
+
+// ── Constants ──────────────────────────────────────────────────────────────
+
+const M_TO_FT = 3.28084;
+
+/** NEC 15% slack/waste factor applied to all derived run lengths. */
+const SLACK_FACTOR = 1.15;
+
+// ── Geometry helpers ───────────────────────────────────────────────────────
+
+function mToFt(meters: number): number {
+  return meters * M_TO_FT;
+}
+
+/** Euclidean distance between two XY points (local meters → feet). */
+function distFt(ax: number, ay: number, bx: number, by: number): number {
+  return mToFt(Math.sqrt((bx - ax) ** 2 + (by - ay) ** 2));
+}
+
+/** Diagonal of a rectangle (meters → feet). */
+function diagonalFt(widthM: number, heightM: number): number {
+  return mToFt(Math.sqrt(widthM ** 2 + heightM ** 2));
+}
+
+/** Centroid of a CAD roof plane polygon. */
+function planeCentroid(plane: CADRoofPlane): { x: number; y: number } {
+  const pts = plane.polygon;
+  if (!pts || pts.length === 0) return { x: 0, y: 0 };
+  const x = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+  const y = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+  return { x, y };
+}
+
+/** Largest roof plane by area. */
+function largestPlane(planes: CADRoofPlane[]): CADRoofPlane | null {
+  if (!planes || planes.length === 0) return null;
+  return planes.reduce((a, b) => (b.areaSqM > a.areaSqM ? b : a));
+}
+
+/** Sum of all conduit route lengths (meters). Returns 0 if no routes. */
+function totalConduitLengthFt(routes: CADConduitRoute[] | undefined): number {
+  if (!routes || routes.length === 0) return 0;
+  const totalM = routes.reduce((s, r) => s + (r.totalLengthM ?? 0), 0);
+  return mToFt(totalM);
+}
+
+/** Find the primary MSP / interconnect node from electricalNodes. */
+function findMspNode(nodes: CADElectricalNode[] | undefined): CADElectricalNode | null {
+  if (!nodes || nodes.length === 0) return null;
+  // Prefer isPrimaryInterconnect, then type containing 'msp' or 'panel' or 'meter'
+  const primary = nodes.find(n => n.isPrimaryInterconnect);
+  if (primary) return primary;
+  const byType = nodes.find(n =>
+    /msp|main.?panel|meter|interconnect/i.test(n.type),
+  );
+  return byType ?? null;
+}
+
+/** Centroid of the entire CAD model bounding box. */
+function modelCentroid(cad: CADModel): { x: number; y: number } {
+  const b = cad.bounds;
+  if (!b) return { x: 0, y: 0 };
+  return {
+    x: (b.minX + b.maxX) / 2,
+    y: (b.minY + b.maxY) / 2,
+  };
+}
+
+// ── Main export ────────────────────────────────────────────────────────────
+
+export interface DerivedRunLengths {
+  /** The derived run lengths in feet, ready for ComputedSystemInput.runLengths */
+  runLengths: Partial<Record<RunSegmentId, number>>;
+  /** Human-readable derivation notes for each segment (for debugging/logging) */
+  derivationNotes: Partial<Record<RunSegmentId, string>>;
+}
+
+/**
+ * Derive wire run lengths from CAD geometry.
+ *
+ * Returns a `Partial<Record<RunSegmentId, number>>` that can be spread directly
+ * into `ComputedSystemInput.runLengths`. Segments where geometry is insufficient
+ * are omitted — the caller's existing defaults will apply.
+ *
+ * All returned values include the 15% NEC slack factor.
+ */
+export function deriveRunLengths(cad: CADModel): DerivedRunLengths {
+  const result: Partial<Record<RunSegmentId, number>> = {};
+  const notes: Partial<Record<RunSegmentId, string>> = {};
+
+  const isRoof   = cad.systemType === 'roof'         || !cad.systemType;
+  const isGround = cad.systemType === 'ground_mount';
+  const isFence  = cad.systemType === 'solar_fence';
+
+  const conduitFt   = totalConduitLengthFt(cad.conduitRoutes);
+  const mspNode     = findMspNode(cad.electricalNodes);
+  const arrayCentroid = modelCentroid(cad);
+
+  // ── ROOF system ──────────────────────────────────────────────────────────
+  if (isRoof && cad.roof) {
+    const planes = cad.roof.planes ?? [];
+    const main   = largestPlane(planes);
+
+    if (main) {
+      const { widthM, heightM } = main.dimensions;
+
+      // DC_STRING_RUN: half-diagonal of the main plane (DC wire from panel
+      // at far corner down to eave junction, + 15% slack)
+      const halfDiagFt = diagonalFt(widthM, heightM) / 2;
+      result.DC_STRING_RUN = round(halfDiagFt * SLACK_FACTOR);
+      notes.DC_STRING_RUN  = `roof plane half-diagonal ${halfDiagFt.toFixed(1)} ft × ${SLACK_FACTOR} slack`;
+
+      // ROOF_RUN: trunk cable along the eave (≈ plane width × 0.6)
+      // 0.6 factor: cable runs to midpoint of each row, not full width
+      const trunkFt = mToFt(widthM) * 0.6;
+      result.ROOF_RUN = round(trunkFt * SLACK_FACTOR);
+      notes.ROOF_RUN  = `roof plane width ${mToFt(widthM).toFixed(1)} ft × 0.6 eave factor × ${SLACK_FACTOR} slack`;
+
+      // BRANCH_RUN: sum of plane widths (microinverter trunk along all planes)
+      const totalWidthFt = planes.reduce((s, p) => s + mToFt(p.dimensions.widthM), 0);
+      result.BRANCH_RUN = round(totalWidthFt * SLACK_FACTOR);
+      notes.BRANCH_RUN  = `sum of all plane widths ${totalWidthFt.toFixed(1)} ft × ${SLACK_FACTOR} slack`;
+
+      // ARRAY_CONDUIT_RUN: vision conduit routes if available, else plane height
+      // (conduit from roof eave drop to inverter/disconnect)
+      if (conduitFt > 0) {
+        result.ARRAY_CONDUIT_RUN = round(conduitFt * SLACK_FACTOR);
+        notes.ARRAY_CONDUIT_RUN  = `vision conduit route ${conduitFt.toFixed(1)} ft × ${SLACK_FACTOR} slack`;
+      } else {
+        // Estimate: conduit runs down the wall (plane height as proxy for roof run-to-eave)
+        const wallDropFt = mToFt(heightM) * 0.5 + 10; // half-height + 10 ft wall drop
+        result.ARRAY_CONDUIT_RUN = round(wallDropFt * SLACK_FACTOR);
+        notes.ARRAY_CONDUIT_RUN  = `estimated wall drop ${wallDropFt.toFixed(1)} ft × ${SLACK_FACTOR} slack`;
+      }
+
+      // ARRAY_OPEN_AIR: open-air homerun on roof (short - panel row to j-box)
+      result.ARRAY_OPEN_AIR = round(mToFt(widthM / planes.length) * 0.5 * SLACK_FACTOR);
+      notes.ARRAY_OPEN_AIR  = `per-plane width ${mToFt(widthM / planes.length).toFixed(1)} ft × 0.5 × slack`;
+    }
+
+    // INV_TO_DISCO_RUN / COMBINER_TO_DISCO_RUN: inverter to AC disconnect
+    // Use MSP node distance from array centroid if vision available
+    if (mspNode) {
+      const dFt = distFt(arrayCentroid.x, arrayCentroid.y, mspNode.x, mspNode.y);
+      // Inverter is typically near the array drop; disconnect is partway to MSP
+      const invToDiscoFt = Math.min(dFt * 0.35, 30); // at most 30 ft
+      result.INV_TO_DISCO_RUN       = round(invToDiscoFt * SLACK_FACTOR);
+      result.COMBINER_TO_DISCO_RUN  = round(invToDiscoFt * SLACK_FACTOR);
+      notes.INV_TO_DISCO_RUN        = `35% of array→MSP dist ${dFt.toFixed(1)} ft = ${invToDiscoFt.toFixed(1)} ft × slack`;
+      notes.COMBINER_TO_DISCO_RUN   = notes.INV_TO_DISCO_RUN;
+    }
+
+    // DISCO_TO_METER_RUN: AC disconnect to MSP
+    if (conduitFt > 0) {
+      // Vision conduit covers the full array-drop → MSP path; subtract the
+      // roof portion (ARRAY_CONDUIT_RUN already set above)
+      const acRunFt = Math.max(conduitFt - (result.ARRAY_CONDUIT_RUN ?? 20), 10);
+      result.DISCO_TO_METER_RUN = round(acRunFt * SLACK_FACTOR);
+      notes.DISCO_TO_METER_RUN  = `vision conduit ${conduitFt.toFixed(1)} ft minus roof portion = ${acRunFt.toFixed(1)} ft × slack`;
+    } else if (mspNode) {
+      const dFt = distFt(arrayCentroid.x, arrayCentroid.y, mspNode.x, mspNode.y);
+      const discoToMeterFt = Math.max(dFt * 0.65, 10); // remaining 65% of path
+      result.DISCO_TO_METER_RUN = round(discoToMeterFt * SLACK_FACTOR);
+      notes.DISCO_TO_METER_RUN  = `65% of array→MSP dist ${dFt.toFixed(1)} ft = ${discoToMeterFt.toFixed(1)} ft × slack`;
+    }
+  }
+
+  // ── GROUND system ────────────────────────────────────────────────────────
+  if (isGround && cad.ground) {
+    const arrays = cad.ground.arrays ?? [];
+    if (arrays.length > 0) {
+      // Use the first (or largest) array for DC run derivation
+      const arr = arrays.reduce((a, b) =>
+        (b.dimensions.arrayWidthM * b.dimensions.arrayDepthM) >
+        (a.dimensions.arrayWidthM * a.dimensions.arrayDepthM) ? b : a,
+      );
+
+      const { arrayWidthM, arrayDepthM } = arr.dimensions;
+
+      // DC_STRING_RUN: half the array diagonal (DC wire from far panel to combiner)
+      const halfDiagFt = diagonalFt(arrayWidthM, arrayDepthM) / 2;
+      result.DC_STRING_RUN = round(halfDiagFt * SLACK_FACTOR);
+      notes.DC_STRING_RUN  = `ground array half-diagonal ${halfDiagFt.toFixed(1)} ft × slack`;
+
+      // ARRAY_OPEN_AIR: open-air homerun from array edge to combiner/inverter
+      const openAirFt = mToFt(arrayDepthM) * 0.5 + 5;
+      result.ARRAY_OPEN_AIR = round(openAirFt * SLACK_FACTOR);
+      notes.ARRAY_OPEN_AIR  = `ground array depth/2 ${(mToFt(arrayDepthM) * 0.5).toFixed(1)} ft + 5 ft drop × slack`;
+
+      // ARRAY_CONDUIT_RUN: vision conduit or bounding box diagonal to MSP
+      if (conduitFt > 0) {
+        result.ARRAY_CONDUIT_RUN = round(conduitFt * SLACK_FACTOR);
+        notes.ARRAY_CONDUIT_RUN  = `vision conduit ${conduitFt.toFixed(1)} ft × slack`;
+      } else if (mspNode) {
+        const dFt = distFt(arr.originX, arr.originY, mspNode.x, mspNode.y);
+        result.ARRAY_CONDUIT_RUN = round(dFt * SLACK_FACTOR);
+        notes.ARRAY_CONDUIT_RUN  = `ground array origin→MSP node ${dFt.toFixed(1)} ft × slack`;
+      } else {
+        // Fallback: array diagonal as proxy for conduit run
+        const fullDiagFt = diagonalFt(arrayWidthM, arrayDepthM);
+        result.ARRAY_CONDUIT_RUN = round(fullDiagFt * SLACK_FACTOR);
+        notes.ARRAY_CONDUIT_RUN  = `ground array full diagonal ${fullDiagFt.toFixed(1)} ft × slack`;
+      }
+
+===== lib/engineeringIntelligence/cadReadiness.ts lines 1-260 =====
+import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/categoryRegistry';
+import type { SurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
+import type { StructuredEngineeringSignalSummary } from './signalTypes';
+import type { EngineeringContextResolutionSummary, EngineeringContextStatus } from './contextTypes';
+
+export type CADReadinessFlagId =
+  | 'roof-plane-ready'
+  | 'routing-ready'
+  | 'setback-ready'
+  | 'trench-route-ready'
+  | 'detached-structure-ready'
+  | 'ESS-location-ready';
+
+export type CADReadinessStatus = 'ready' | 'partial' | 'blocked' | 'not_applicable';
+
+export interface CADReadinessFlag {
+  flagId: CADReadinessFlagId;
+  status: CADReadinessStatus;
+  satisfiedCategories: SurveyEvidenceCategory[];
+  missingCategories: SurveyEvidenceCategory[];
+  explicitSurveySignals: string[];
+  structuredSignalIds: string[];
+  unresolvedAssumptions: string[];
+  defaultPolicyFallbacks: string[];
+  deterministicReason: string;
+  resolvedContextIds: string[];
+  authoritativeContextIds: string[];
+  preferredContextIds: string[];
+  partialContextIds: string[];
+  conflictingContextIds: string[];
+  blockedContextIds: string[];
+  unresolvedContextIds: string[];
+  fallbackDependentContextIds: string[];
+  contextStatuses: Array<{ contextId: string; status: EngineeringContextStatus }>;
+}
+
+export interface CADReadinessMetadataModel {
+  modelVersion: 'cad_readiness_metadata_v1';
+  projectId: string | null;
+  surveyId: string | null;
+  flags: CADReadinessFlag[];
+  readyFlags: CADReadinessFlagId[];
+  blockedFlags: CADReadinessFlagId[];
+  partialFlags: CADReadinessFlagId[];
+  deterministicNotes: string[];
+  prohibitedRuntimeBehavior: string[];
+}
+
+interface CADReadinessRule {
+  flagId: CADReadinessFlagId;
+  requiredAnyCategories: SurveyEvidenceCategory[];
+  supportiveCategories: SurveyEvidenceCategory[];
+  surveySignal: (evidence: EngineeringSurveyEvidence | null | undefined) => string[];
+  signalTypes: string[];
+  reason: string;
+  requireExplicitPrimaryForStructuredSignalPromotion?: boolean;
+}
+
+const RULES: CADReadinessRule[] = [
+  {
+    flagId: 'roof-plane-ready',
+    requiredAnyCategories: ['roof_plane'],
+    supportiveCategories: ['ridge', 'roof_edge', 'roof_surface', 'attic_access', 'rafters'],
+    surveySignal: evidence => {
+      const signals: string[] = [];
+      if (evidence?.fieldEvidence.hasRoofGeometry) signals.push('fieldEvidence.hasRoofGeometry');
+      if ((evidence?.fieldEvidence.roofPlaneCount ?? 0) > 0) signals.push(`fieldEvidence.roofPlaneCount:${evidence?.fieldEvidence.roofPlaneCount}`);
+      if (evidence?.fieldEvidence.roofPitchDegrees !== null && evidence?.fieldEvidence.roofPitchDegrees !== undefined) signals.push('fieldEvidence.roofPitchDegrees');
+      if (evidence?.fieldEvidence.roofMaterial) signals.push('fieldEvidence.roofMaterial');
+      return signals;
+    },
+    signalTypes: ['roof_plane_context_present', 'roof_surface_context_present', 'roof_layout_candidate_present', 'structural_access_context_present'],
+    reason: 'Roof-plane readiness requires explicit roof-plane canonical evidence or explicit roof geometry fields, with supporting ridge/edge/surface/framing context when available.',
+  },
+  {
+    flagId: 'routing-ready',
+    requiredAnyCategories: ['main_service_panel', 'meter', 'utility_connection', 'disconnect', 'inverter_location', 'garage_interior_wall'],
+    supportiveCategories: ['grounding', 'subpanel', 'utility_access', 'battery_location', 'gateway_location'],
+    surveySignal: evidence => {
+      const signals: string[] = [];
+      if (evidence?.fieldEvidence.hasElectricalData) signals.push('fieldEvidence.hasElectricalData');
+      if (evidence?.fieldEvidence.interconnectionPoint) signals.push(`fieldEvidence.interconnectionPoint:${evidence.fieldEvidence.interconnectionPoint}`);
+      if (evidence?.fieldEvidence.mainPanelRatingAmps !== null && evidence?.fieldEvidence.mainPanelRatingAmps !== undefined) signals.push('fieldEvidence.mainPanelRatingAmps');
+      return signals;
+    },
+    signalTypes: ['routing_continuity_present', 'utility_to_inverter_route_candidate', 'inverter_to_msp_route_candidate', 'electrical_equipment_cluster_present', 'main_service_panel_present'],
+    reason: 'Routing readiness requires explicit electrical/service evidence, deterministic route-continuity metadata, or explicit interconnection fields sufficient to trace route context.',
+  },
+  {
+    flagId: 'setback-ready',
+    requiredAnyCategories: ['roof_edge', 'ridge', 'obstructions'],
+    supportiveCategories: ['roof_plane', 'roof_surface'],
+    surveySignal: evidence => {
+      const signals: string[] = [];
+      if ((evidence?.fieldEvidence.obstructionCount ?? 0) > 0) signals.push(`fieldEvidence.obstructionCount:${evidence?.fieldEvidence.obstructionCount}`);
+      if (evidence?.fieldEvidence.usableAreaSqFt !== null && evidence?.fieldEvidence.usableAreaSqFt !== undefined) signals.push('fieldEvidence.usableAreaSqFt');
+      return signals;
+    },
+    signalTypes: ['roof_edge_context_present', 'ridge_context_present', 'obstruction_context_present', 'roof_layout_candidate_present'],
+    reason: 'Setback readiness requires explicit edge/ridge/obstruction categories or explicit usable-area/obstruction survey fields.',
+  },
+  {
+    flagId: 'trench-route-ready',
+    requiredAnyCategories: ['trench_path'],
+    supportiveCategories: ['overview', 'utility_access', 'utility_connection', 'detached_structures'],
+    surveySignal: () => [],
+    signalTypes: ['trench_path_explicit', 'trench_context_present', 'detached_structure_route_candidate'],
+    reason: 'Trench-route readiness requires explicit trench-path evidence; it is never inferred from generic exterior photos alone.',
+    requireExplicitPrimaryForStructuredSignalPromotion: true,
+  },
+  {
+    flagId: 'detached-structure-ready',
+    requiredAnyCategories: ['detached_structures'],
+    supportiveCategories: ['overview', 'roof_plane', 'trench_path'],
+    surveySignal: () => [],
+    signalTypes: ['detached_structure_present', 'detached_structure_route_candidate'],
+    reason: 'Detached-structure readiness requires explicit detached-structure evidence or remains blocked/not applicable depending project scope.',
+    requireExplicitPrimaryForStructuredSignalPromotion: true,
+  },
+  {
+    flagId: 'ESS-location-ready',
+    requiredAnyCategories: ['battery_location', 'garage_interior_wall', 'gateway_location'],
+    supportiveCategories: ['overview', 'utility_access', 'inverter_location'],
+    surveySignal: () => [],
+    signalTypes: ['ess_location_candidate_present', 'battery_wall_candidate_present', 'energy_storage_context_present', 'garage_interior_wall_present'],
+    reason: 'ESS location readiness requires explicit battery, gateway, or garage-wall evidence; storage location is not inferred from generic site photos.',
+  },
+];
+
+export function buildCADReadinessMetadata(input: {
+  projectId?: string | null;
+  surveyId?: string | null;
+  canonicalManifest?: SurveyEvidenceManifest | null;
+  surveyEvidence?: EngineeringSurveyEvidence | null;
+  structuredSignals?: StructuredEngineeringSignalSummary | null;
+  contextResolution?: EngineeringContextResolutionSummary | null;
+} = {}): CADReadinessMetadataModel {
+  const categories = categoriesFrom(input.canonicalManifest, input.surveyEvidence);
+  const flags = RULES.map(rule => evaluateRule(rule, categories, input.surveyEvidence, input.structuredSignals ?? null, input.contextResolution ?? null));
+  return {
+    modelVersion: 'cad_readiness_metadata_v1',
+    projectId: input.projectId ?? input.canonicalManifest?.projectId ?? input.surveyEvidence?.projectId ?? null,
+    surveyId: input.surveyId ?? input.canonicalManifest?.surveyId ?? input.surveyEvidence?.surveyId ?? null,
+    flags,
+    readyFlags: flags.filter(flag => flag.status === 'ready').map(flag => flag.flagId).sort((a, b) => a.localeCompare(b)),
+    blockedFlags: flags.filter(flag => flag.status === 'blocked').map(flag => flag.flagId).sort((a, b) => a.localeCompare(b)),
+    partialFlags: flags.filter(flag => flag.status === 'partial').map(flag => flag.flagId).sort((a, b) => a.localeCompare(b)),
+    deterministicNotes: [
+      'CAD readiness metadata is deterministic metadata only; it does not run CAD generation.',
+      'Readiness differentiates explicit canonical evidence, deterministic structured signals, unresolved assumptions, and default policy fallbacks.',
+      'Readiness is derived from canonical evidence categories, explicit survey physical fields, and structured engineering signals only.',
+      'Pixel inspection, text extraction over imagery, computer-vision runtime dependencies, semantic visual interpretation, and fabricated geometry are not used.',
+    ],
+    prohibitedRuntimeBehavior: [
+      'no operator-free plan-output creation',
+      'no pixel inspection or image-byte inspection',
+      'no text extraction runtime over survey imagery',
+      'no computer-vision runtime dependency',
+      'no vision model runtime dependency',
+      'no geometry fabrication',
+    ],
+  };
+}
+
+function evaluateRule(
+  rule: CADReadinessRule,
+  categories: SurveyEvidenceCategory[],
+  evidence: EngineeringSurveyEvidence | null | undefined,
+  structuredSignals: StructuredEngineeringSignalSummary | null,
+  contextResolution: EngineeringContextResolutionSummary | null,
+): CADReadinessFlag {
+  const categorySet = new Set(categories);
+  const satisfiedRequired = rule.requiredAnyCategories.filter(category => categorySet.has(category)).sort((a, b) => a.localeCompare(b));
+  const supportive = rule.supportiveCategories.filter(category => categorySet.has(category)).sort((a, b) => a.localeCompare(b));
+  const signals = rule.surveySignal(evidence).sort((a, b) => a.localeCompare(b));
+  const linkedSignals = (structuredSignals?.signals ?? []).filter(signal => signal.cadImpacts.includes(rule.flagId));
+  const confirmedSignalIds = linkedSignals.filter(signal => signal.status === 'confirmed').map(signal => signal.id).sort((a, b) => a.localeCompare(b));
+  const partialSignalIds = linkedSignals.filter(signal => signal.status === 'partial').map(signal => signal.id).sort((a, b) => a.localeCompare(b));
+  const blockedSignalIds = linkedSignals.filter(signal => signal.status === 'blocked' || signal.status === 'missing').map(signal => signal.id).sort((a, b) => a.localeCompare(b));
+  const notApplicableSignalIds = linkedSignals.filter(signal => signal.status === 'not_applicable').map(signal => signal.id).sort((a, b) => a.localeCompare(b));
+  const missingCategories = rule.requiredAnyCategories.filter(category => !categorySet.has(category)).sort((a, b) => a.localeCompare(b));
+  const linkedContexts = (contextResolution?.contexts ?? [])
+    .filter(context => context.cadReadinessImpacts.includes(rule.flagId))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const resolvedContextIds = linkedContexts.map(context => context.id);
+  const authoritativeContextIds = linkedContexts.filter(context => context.status === 'authoritative').map(context => context.id);
+  const preferredContextIds = linkedContexts.filter(context => context.status === 'preferred').map(context => context.id);
+  const partialContextIds = linkedContexts.filter(context => context.status === 'partial').map(context => context.id);
+  const conflictingContextIds = linkedContexts.filter(context => context.status === 'conflicting').map(context => context.id);
+  const blockedContextIds = linkedContexts.filter(context => context.status === 'blocked').map(context => context.id);
+  const unresolvedContextIds = linkedContexts.filter(context => context.status === 'unresolved').map(context => context.id);
+  const fallbackDependentContextIds = linkedContexts.filter(context => context.fallbackLineage.length > 0).map(context => context.id);
+  const contextStatuses = linkedContexts.map(context => ({ contextId: context.id, status: context.status }));
+  const hasPrimary = satisfiedRequired.length > 0;
+  const hasExplicitSignal = signals.length > 0;
+  const hasConfirmedStructuredSignal = confirmedSignalIds.length > 0;
+  const hasPartialStructuredSignal = partialSignalIds.length > 0;
+  const structuredSignalsCanPromote = !rule.requireExplicitPrimaryForStructuredSignalPromotion || hasPrimary;
+  const confirmedStructuredSignalsCanPromote = hasConfirmedStructuredSignal && structuredSignalsCanPromote;
+  const partialStructuredSignalsCanPromote = hasPartialStructuredSignal && structuredSignalsCanPromote;
+  const allLinkedSignalsNotApplicable = linkedSignals.length > 0 && linkedSignals.length === notApplicableSignalIds.length;
+  const status: CADReadinessStatus = hasPrimary && (supportive.length > 0 || hasExplicitSignal || confirmedStructuredSignalsCanPromote)
+    ? 'ready'
+    : confirmedStructuredSignalsCanPromote && (hasPrimary || hasExplicitSignal)
+      ? 'ready'
+      : hasPrimary || hasExplicitSignal || confirmedStructuredSignalsCanPromote || partialStructuredSignalsCanPromote
+        ? 'partial'
+        : allLinkedSignalsNotApplicable
+          ? 'not_applicable'
+          : 'blocked';
+  const structuredSignalIds = [...confirmedSignalIds, ...partialSignalIds, ...blockedSignalIds, ...notApplicableSignalIds].sort((a, b) => a.localeCompare(b));
+  const unresolvedAssumptions = status === 'ready' && conflictingContextIds.length === 0 && blockedContextIds.length === 0 && unresolvedContextIds.length === 0
+    ? []
+    : [
+        ...missingCategories.map(category => `missing explicit category:${category}`),
+        ...blockedSignalIds.map(signalId => `blocked structured signal:${signalId}`),
+        ...conflictingContextIds.map(contextId => `conflicting resolved context:${contextId}`),
+        ...blockedContextIds.map(contextId => `blocked resolved context:${contextId}`),
+        ...unresolvedContextIds.map(contextId => `unresolved resolved context:${contextId}`),
+      ].sort((a, b) => a.localeCompare(b));
+  const defaultPolicyFallbacks = unresolvedAssumptions.length > 0 || fallbackDependentContextIds.length > 0
+    ? [
+        ...(unresolvedAssumptions.length > 0 ? [`${rule.flagId}:default_policy_requires_manual_review_until_explicit_truth_is_supplied`] : []),
+        ...fallbackDependentContextIds.map(contextId => `${rule.flagId}:resolved_context_fallback_dependency:${contextId}`),
+      ].sort((a, b) => a.localeCompare(b))
+    : [];
+
+  return {
+    flagId: rule.flagId,
+    status,
+    satisfiedCategories: [...satisfiedRequired, ...supportive].sort((a, b) => a.localeCompare(b)),
+    missingCategories,
+    explicitSurveySignals: signals,
+    structuredSignalIds,
+    unresolvedAssumptions,
+    defaultPolicyFallbacks,
+    deterministicReason: `${rule.reason} Status ${status} from explicit categories [${[...satisfiedRequired, ...supportive].sort((a, b) => a.localeCompare(b)).join(', ') || 'none'}], explicit survey signals [${signals.join(', ') || 'none'}], structured signals [${structuredSignalIds.join(', ') || 'none'}], and resolved contexts [${resolvedContextIds.join(', ') || 'none'}].`,
+    resolvedContextIds,
+    authoritativeContextIds,
+    preferredContextIds,
+    partialContextIds,
+    conflictingContextIds,
+    blockedContextIds,
+    unresolvedContextIds,
+    fallbackDependentContextIds,
+    contextStatuses,
+  };
+}
+
+function categoriesFrom(
+  manifest: SurveyEvidenceManifest | null | undefined,
+  evidence: EngineeringSurveyEvidence | null | undefined,
+): SurveyEvidenceCategory[] {
+  return Array.from(new Set([
+    ...(manifest?.items.map(item => item.category) ?? []),
+    ...(evidence?.photos.map(photo => photo.category) ?? []),
+  ])).sort((a, b) => a.localeCompare(b));
+}
+
+===== lib/engineeringIntelligence/workspace.ts lines 1-260 =====
+import {
+  ENGINEERING_REQUIREMENT_DEFINITIONS,
+  type EngineeringRequirementDefinition,
+  type EngineeringRequirementEvaluation,
+  type EngineeringRequirementId,
+} from '@/lib/survey/evidence/engineeringRequirements';
+import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/categoryRegistry';
+import type { CanonicalEvidenceProvenanceRecord } from '@/lib/survey/evidence/provenance';
+import type { CADReadinessFlag } from './cadReadiness';
+import { buildDeterministicPhotoGrouping } from './photoGrouping';
+import { buildEngineeringWorkflowOrchestration } from './workflowOrchestration';
+import {
+  listEngineeringDecisionDefinitions,
+  type EngineeringDecisionDefinition,
+} from '@/lib/engineeringDecisionProvenance';
+import {
+  latestValidStateSnapshot,
+  listStaleEngineeringOutputs,
+  type EngineeringInvalidationEvent,
+  type EngineeringStateAuditGuardResult,
+  type EngineeringStateSnapshot,
+  type EngineeringStateSnapshotStateRef,
+  type PersistentEngineeringStateGraphNode,
+  type SelectiveRegenerationPlan,
+} from '@/lib/engineeringStateInvalidation';
+import type {
+  AuditGuardWorkspaceModel,
+  BuildEngineeringIntelligenceWorkspaceInput,
+  CanonicalEvidenceWorkspaceGroupModel,
+  CanonicalEvidenceWorkspaceItemModel,
+  DecisionWorkspaceItemModel,
+  AffectedOutputsWorkspaceModel,
+  DependencyGraphViewerModel,
+  DependencyTraversalWorkspaceModel,
+  EngineeringEvidenceWorkspaceGroupId,
+  EngineeringHealthDashboardModel,
+  EngineeringIntelligenceGraphEdgeModel,
+  EngineeringIntelligenceGraphNodeModel,
+  EngineeringIntelligenceRouteSummary,
+  EngineeringIntelligenceWorkspaceModel,
+  InvalidationPropagationWorkspaceModel,
+  RegenerationPlanningV1WorkspaceModel,
+  RegenerationPlanningWorkspaceModel,
+  RequirementWorkspaceItemModel,
+  SnapshotDeltaWorkspaceModel,
+  SnapshotTimelineWorkspaceModel,
+  StaleInvalidationWorkspaceModel,
+  StaleStateTimelineWorkspaceModel,
+  StructuredEngineeringSignalsWorkspaceModel,
+  SignalProvenanceWorkspaceModel,
+  SignalDependencyGraphWorkspaceModel,
+  SignalRequirementMappingWorkspaceModel,
+  SignalConfidenceWorkspaceModel,
+  SignalBlockingWorkspaceModel,
+  SignalInvalidationWorkspaceModel,
+  SignalStaleImpactsWorkspaceModel,
+  ResolvedEngineeringContextsWorkspaceModel,
+  ContextArbitrationWorkspaceModel,
+  ContextConflictInspectorWorkspaceModel,
+  FallbackChainInspectorWorkspaceModel,
+  ContextProvenanceWorkspaceModel,
+  ContextDependencyGraphWorkspaceModel,
+  ContextConfidenceBreakdownWorkspaceModel,
+  ContextInvalidationsWorkspaceModel,
+  ContextStaleImpactsWorkspaceModel,
+  ContextResolutionTimelineWorkspaceModel,
+} from './types';
+
+const sortText = <T extends string>(values: T[]): T[] => [...new Set(values)].sort((a, b) => a.localeCompare(b));
+const sortBy = <T>(values: T[], selector: (value: T) => string): T[] => [...values].sort((a, b) => selector(a).localeCompare(selector(b)));
+
+const ROUTES: EngineeringIntelligenceRouteSummary[] = [
+  {
+    routeId: 'overview',
+    href: '/admin/engineering-intelligence',
+    label: 'Engineering Intelligence',
+    deterministicPurpose: 'System-level engineering-state dashboard and deterministic workspace entry point.',
+  },
+  {
+    routeId: 'project',
+    href: '/admin/engineering-intelligence/project/[id]',
+    label: 'Project Intelligence',
+    deterministicPurpose: 'Project-bound evidence, requirement, decision, invalidation, and regeneration-planning view.',
+  },
+  {
+    routeId: 'snapshots',
+    href: '/admin/engineering-intelligence/snapshots',
+    label: 'Snapshot Timeline',
+    deterministicPurpose: 'Persistent engineering state snapshots, hashes, diffs, and transition timeline.',
+  },
+  {
+    routeId: 'graph',
+    href: '/admin/engineering-intelligence/graph',
+    label: 'Dependency Graph',
+    deterministicPurpose: 'Queryable deterministic graph nodes and edges across evidence, requirements, decisions, outputs, and plans.',
+  },
+];
+
+const EVIDENCE_GROUPS: Array<{
+  groupId: EngineeringEvidenceWorkspaceGroupId;
+  label: string;
+  description: string;
+  requirementIds: EngineeringRequirementId[];
+  categories: SurveyEvidenceCategory[];
+  readinessFlagIds: string[];
+}> = [
+  {
+    groupId: 'utility',
+    label: 'Utility',
+    description: 'Meter, utility bill, utility access, and interconnection evidence required by deterministic registry rules.',
+    requirementIds: ['utility_meter', 'utility_bill'],
+    categories: ['meter', 'utility_access', 'utility_connection'],
+    readinessFlagIds: ['routing-ready'],
+  },
+  {
+    groupId: 'electrical',
+    label: 'Electrical',
+    description: 'Main service equipment, disconnects, subpanels, grounding, rapid shutdown, placards, and service labeling.',
+    requirementIds: ['main_service_panel', 'subpanel', 'main_disconnect', 'rapid_shutdown', 'placards', 'service_equipment_label'],
+    categories: ['main_service_panel', 'subpanel', 'disconnect', 'grounding', 'utility_connection', 'inverter_location', 'gateway_location', 'garage_interior_wall'],
+    readinessFlagIds: ['routing-ready'],
+  },
+  {
+    groupId: 'roof',
+    label: 'Roof',
+    description: 'Roof plane, edge, ridge, surface, and obstruction evidence used for roof-layout traceability.',
+    requirementIds: ['roof_overview'],
+    categories: ['roof_plane', 'roof_edge', 'ridge', 'roof_surface', 'obstructions', 'overview'],
+    readinessFlagIds: ['roof-plane-ready', 'setback-ready'],
+  },
+  {
+    groupId: 'structural',
+    label: 'Structural',
+    description: 'Attic, structural access, framing-context, and review-supporting canonical evidence.',
+    requirementIds: ['attic_access', 'structural_access'],
+    categories: ['attic', 'attic_access', 'rafters'],
+    readinessFlagIds: ['roof-plane-ready'],
+  },
+  {
+    groupId: 'routing',
+    label: 'Routing',
+    description: 'Conduit, grounding, service access, and path context that affects routed engineering outputs.',
+    requirementIds: ['main_service_panel', 'utility_meter', 'main_disconnect'],
+    categories: ['utility_connection', 'utility_access', 'disconnect', 'grounding', 'inverter_location', 'garage_interior_wall'],
+    readinessFlagIds: ['routing-ready'],
+  },
+  {
+    groupId: 'detached_structures',
+    label: 'Detached Structures',
+    description: 'Detached-structure evidence group reserved for explicit canonical evidence and future requirement expansion.',
+    requirementIds: [],
+    categories: ['detached_structures'],
+    readinessFlagIds: ['detached-structure-ready'],
+  },
+  {
+    groupId: 'ess',
+    label: 'ESS',
+    description: 'Battery location and energy-storage assumptions, surfaced only through explicit deterministic requirements/decisions.',
+    requirementIds: ['battery_location'],
+    categories: ['battery_location', 'gateway_location'],
+    readinessFlagIds: ['routing-ready'],
+  },
+  {
+    groupId: 'trench_ground_mount',
+    label: 'Trench / Ground Mount',
+    description: 'Trenching, ground-mount, and route-specific evidence group reserved for canonical evidence and dependency lineage.',
+    requirementIds: [],
+    categories: ['trench_path'],
+    readinessFlagIds: ['trench-route-ready'],
+  },
+];
+
+function stateRefs(snapshot: EngineeringStateSnapshot | null) {
+  return snapshot?.stateRefs ?? [];
+}
+
+function buildHealth(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): EngineeringHealthDashboardModel {
+  const refs = stateRefs(latestSnapshot);
+  const staleOutputs = latestSnapshot ? listStaleEngineeringOutputs(latestSnapshot).length : 0;
+  const blockedOutputs = refs.filter(ref => ref.staleStatus === 'blocked').length;
+  const validOutputs = latestSnapshot?.validStateIds.length ?? 0;
+  const invalidatedOutputs = input.transitionHistory?.transitionEvents.filter(event => event.eventType === 'state_invalidated').length ?? 0;
+  const regenerationCandidates = (input.regenerationPlans ?? []).reduce((count, plan) => count + plan.staleStateIds.length, 0);
+  const warningGuards = (input.auditGuards ?? []).filter(guard => !guard.passed || guard.severity === 'warning').length;
+
+  return {
+    validOutputs,
+    staleOutputs,
+    invalidatedOutputs,
+    blockedOutputs,
+    regenerationCandidates,
+    activeAuditGuardWarnings: warningGuards,
+    snapshotVersions: input.snapshots?.length ?? 0,
+    dependencyGraphNodes: input.persistentGraph?.nodes.length ?? 0,
+    dependencyGraphEdges: input.persistentGraph?.edges.length ?? 0,
+    evidenceCompleteness: latestSnapshot ? 'snapshot-linked' : 'canonical-manifest-required',
+    requirementSatisfaction: latestSnapshot ? 'snapshot-linked' : 'registry-visible',
+    deterministicNotes: [
+      latestSnapshot
+        ? `Health counts derived from latest engineering state snapshot ${latestSnapshot.snapshotId}.`
+        : 'No project snapshot was supplied; health dashboard shows registry/empty-state counts only.',
+      'Raw uploads, raw survey arrays, and photo counts are not used as engineering truth.',
+    ],
+  };
+}
+
+function buildEvidenceGroups(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): CanonicalEvidenceWorkspaceGroupModel[] {
+  const refs = stateRefs(latestSnapshot);
+  const surveyEvidence = input.surveyEvidence ?? null;
+  const canonicalRecords = surveyEvidence?.traceability.canonicalEvidence ?? [];
+  const requirementEvaluations = surveyEvidence?.requirementEvaluation.allRequirements ?? [];
+  const graph = input.persistentGraph ?? null;
+  const invalidationEvents = input.invalidationResult?.invalidationEvents ?? [];
+  const plans = input.regenerationPlans ?? [];
+  const readinessFlags = input.cadReadiness?.flags ?? [];
+
+  return EVIDENCE_GROUPS.map(group => {
+    const groupRequirements = requirementEvaluations.filter(requirement => group.requirementIds.includes(requirement.requirementId));
+    const missingRequirementIds = sortText(groupRequirements.filter(requirement => requirement.missing || requirement.insufficientMetadata).map(requirement => requirement.requirementId));
+    const recordsForGroup = canonicalRecords.filter(record => group.categories.includes(record.evidenceCategory));
+    const linkedStateRefs = refs.filter(ref =>
+      ref.canonicalEvidenceIds.some(evidenceId => recordsForGroup.some(record => record.canonicalEvidenceId === evidenceId)),
+    );
+    const snapshotOnlyIds = canonicalRecords.length === 0
+      ? sortText(refs
+        .filter(ref => ref.requirementIds.some(requirementId => group.requirementIds.includes(requirementId)))
+        .flatMap(ref => ref.canonicalEvidenceIds))
+      : [];
+    const canonicalEvidenceItems = [
+      ...recordsForGroup.map(record => buildCanonicalEvidenceRow({
+        record,
+        status: 'canonical_representative',
+        refs,
+        graph,
+        requirementEvaluations,
+        invalidationEvents,
+        plans,
+        readinessFlags,
+      })),
+      ...snapshotOnlyIds.map(canonicalEvidenceId => buildSnapshotOnlyEvidenceRow({
+        canonicalEvidenceId,
+        groupLabel: group.label,
+        refs,
+        graph,
+        invalidationEvents,
+        plans,
+        readinessFlags: readinessFlags.filter(flag => group.readinessFlagIds.includes(flag.flagId)),
+      })),
+    ].sort((a, b) => a.canonicalEvidenceId.localeCompare(b.canonicalEvidenceId));
+    const groupReadinessFlags = readinessFlags.filter(flag => group.readinessFlagIds.includes(flag.flagId));
+    const fieldQualitySignals = buildGroupFieldQualitySignals(group.groupId, groupRequirements, groupReadinessFlags, canonicalEvidenceItems.length, surveyEvidence);
+
+    return {
+      ...group,
+      canonicalEvidenceItems,
+      missingRequirementIds,
+      fieldQualitySignals,
+      readinessFlags: groupReadinessFlags,
+      deterministicNotes: [
+
+===== lib/engineeringIntelligence/propagationGraph.ts lines 1-280 =====
+import type { EngineeringDependencyEdge, EngineeringDependencyEdgeType, EngineeringDependencyGraph, EngineeringDependencyNode, EngineeringDependencyNodeType } from '@/lib/documentProvenance';
+import type { PersistentEngineeringStateGraph, PersistentEngineeringStateGraphEdge, PersistentEngineeringStateGraphNode } from '@/lib/engineeringStateInvalidation';
+
+export type EngineeringStaleClass = 'VALID' | 'PARTIAL' | 'STALE' | 'INVALIDATED' | 'BLOCKED' | 'NOT_LOADED' | 'REQUIRES_REVIEW';
+
+export type PropagationTraversalDirection = 'downstream' | 'upstream';
+export type PropagationSourceGraphType = 'document_dependency_graph' | 'persistent_state_graph' | 'merged_dependency_graph';
+export type PropagationNodeKind = EngineeringDependencyNodeType | 'engineering_state' | 'dependency_graph_node' | 'snapshot' | 'unknown';
+export type PropagationEdgeClassification =
+  | EngineeringDependencyEdgeType
+  | 'depends_on_dependency_node'
+  | 'invalidates_state'
+  | 'preserves_stale_state'
+  | 'supersedes_snapshot'
+  | 'reverse_lookup'
+  | 'unknown';
+
+export interface PropagationGraphNode {
+  nodeId: string;
+  nodeKind: PropagationNodeKind;
+  label: string;
+  sourceGraphType: PropagationSourceGraphType;
+  deterministicNotes: string[];
+}
+
+export interface PropagationGraphEdge {
+  edgeId: string;
+  fromNodeId: string;
+  toNodeId: string;
+  edgeType: PropagationEdgeClassification;
+  sourceGraphType: PropagationSourceGraphType;
+  deterministicReason: string;
+}
+
+export interface PropagationTraversalPath {
+  pathId: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  direction: PropagationTraversalDirection;
+  nodeIds: string[];
+  edgeIds: string[];
+  edgeTypes: PropagationEdgeClassification[];
+  depth: number;
+  cycleDetected: boolean;
+  truncated: boolean;
+  deterministicReason: string;
+}
+
+export interface PropagationTraversalResult {
+  traversalId: string;
+  sourceGraphTypes: PropagationSourceGraphType[];
+  direction: PropagationTraversalDirection;
+  seedNodeIds: string[];
+  visitedNodeIds: string[];
+  impactedNodeIds: string[];
+  paths: PropagationTraversalPath[];
+  maxDepth: number;
+  traversalLimit: number;
+  cycleDetected: boolean;
+  truncated: boolean;
+  duplicateEdgeIdsSuppressed: string[];
+  missingNodeIds: string[];
+  deterministicNotes: string[];
+}
+
+export interface TracePropagationInput {
+  traversalId: string;
+  seedNodeIds: string[];
+  direction?: PropagationTraversalDirection;
+  dependencyGraph?: EngineeringDependencyGraph | null;
+  persistentGraph?: PersistentEngineeringStateGraph | null;
+  maxDepth?: number;
+  traversalLimit?: number;
+}
+
+const DEFAULT_MAX_DEPTH = 12;
+const DEFAULT_TRAVERSAL_LIMIT = 750;
+
+export function mergePropagationGraph(input: {
+  dependencyGraph?: EngineeringDependencyGraph | null;
+  persistentGraph?: PersistentEngineeringStateGraph | null;
+}): { nodes: PropagationGraphNode[]; edges: PropagationGraphEdge[]; duplicateEdgeIdsSuppressed: string[]; missingNodeIds: string[]; sourceGraphTypes: PropagationSourceGraphType[] } {
+  const nodes = new Map<string, PropagationGraphNode>();
+  const edges = new Map<string, PropagationGraphEdge>();
+  const duplicateEdgeIdsSuppressed = new Set<string>();
+  const missingNodeIds = new Set<string>();
+  const sourceGraphTypes = new Set<PropagationSourceGraphType>();
+
+  for (const node of input.dependencyGraph?.nodes ?? []) {
+    sourceGraphTypes.add('document_dependency_graph');
+    const normalized = normalizeDependencyNode(node);
+    if (!nodes.has(normalized.nodeId)) nodes.set(normalized.nodeId, normalized);
+  }
+
+  for (const edge of input.dependencyGraph?.edges ?? []) {
+    sourceGraphTypes.add('document_dependency_graph');
+    putEdge(edges, duplicateEdgeIdsSuppressed, normalizeDependencyEdge(edge));
+  }
+
+  for (const node of input.persistentGraph?.nodes ?? []) {
+    sourceGraphTypes.add('persistent_state_graph');
+    const normalized = normalizePersistentNode(node);
+    if (!nodes.has(normalized.nodeId)) nodes.set(normalized.nodeId, normalized);
+  }
+
+  for (const edge of input.persistentGraph?.edges ?? []) {
+    sourceGraphTypes.add('persistent_state_graph');
+    putEdge(edges, duplicateEdgeIdsSuppressed, normalizePersistentEdge(edge));
+  }
+
+  for (const edge of edges.values()) {
+    if (!nodes.has(edge.fromNodeId)) missingNodeIds.add(edge.fromNodeId);
+    if (!nodes.has(edge.toNodeId)) missingNodeIds.add(edge.toNodeId);
+  }
+
+  return {
+    nodes: sortBy([...nodes.values()], node => node.nodeId),
+    edges: sortBy([...edges.values()], edge => edge.edgeId),
+    duplicateEdgeIdsSuppressed: sortText([...duplicateEdgeIdsSuppressed]),
+    missingNodeIds: sortText([...missingNodeIds]),
+    sourceGraphTypes: sortText([...sourceGraphTypes]) as PropagationSourceGraphType[],
+  };
+}
+
+export function tracePropagation(input: TracePropagationInput): PropagationTraversalResult {
+  const merged = mergePropagationGraph(input);
+  const direction = input.direction ?? 'downstream';
+  const maxDepth = input.maxDepth ?? DEFAULT_MAX_DEPTH;
+  const traversalLimit = input.traversalLimit ?? DEFAULT_TRAVERSAL_LIMIT;
+  const seedNodeIds = sortText(unique(input.seedNodeIds));
+  const nodeIds = new Set(merged.nodes.map(node => node.nodeId));
+  const missingNodeIds = new Set(merged.missingNodeIds);
+  for (const seed of seedNodeIds) if (!nodeIds.has(seed)) missingNodeIds.add(seed);
+
+  const adjacency = buildAdjacency(merged.edges, direction);
+  const queue: Array<{ nodeId: string; nodePath: string[]; edgePath: string[]; edgeTypes: PropagationEdgeClassification[] }> = seedNodeIds.map(nodeId => ({ nodeId, nodePath: [nodeId], edgePath: [], edgeTypes: [] }));
+  const visited = new Set<string>(seedNodeIds);
+  const paths = new Map<string, PropagationTraversalPath>();
+  let cycleDetected = false;
+  let truncated = false;
+  let visitCount = 0;
+
+  while (queue.length) {
+    if (visitCount >= traversalLimit) {
+      truncated = true;
+      break;
+    }
+    const current = queue.shift()!;
+    visitCount += 1;
+    if (current.nodePath.length - 1 >= maxDepth) {
+      if ((adjacency.get(current.nodeId) ?? []).length) truncated = true;
+      continue;
+    }
+
+    for (const edge of adjacency.get(current.nodeId) ?? []) {
+      const nextNodeId = direction === 'downstream' ? edge.toNodeId : edge.fromNodeId;
+      const nextNodePath = [...current.nodePath, nextNodeId];
+      const nextEdgePath = [...current.edgePath, edge.edgeId];
+      const nextEdgeTypes = [...current.edgeTypes, edge.edgeType];
+      const pathHasCycle = current.nodePath.includes(nextNodeId);
+      cycleDetected = cycleDetected || pathHasCycle;
+      const pathId = stablePathId(input.traversalId, direction, current.nodePath[0], nextNodeId, nextEdgePath);
+      if (!paths.has(pathId)) {
+        paths.set(pathId, {
+          pathId,
+          sourceNodeId: current.nodePath[0],
+          targetNodeId: nextNodeId,
+          direction,
+          nodeIds: nextNodePath,
+          edgeIds: nextEdgePath,
+          edgeTypes: nextEdgeTypes,
+          depth: nextEdgePath.length,
+          cycleDetected: pathHasCycle,
+          truncated: nextEdgePath.length >= maxDepth && (adjacency.get(nextNodeId) ?? []).length > 0,
+          deterministicReason: `Traversal ${direction} from ${current.nodePath[0]} reaches ${nextNodeId} through ${nextEdgePath.length} edge(s).`,
+        });
+      }
+      if (!visited.has(nextNodeId)) {
+        visited.add(nextNodeId);
+        queue.push({ nodeId: nextNodeId, nodePath: nextNodePath, edgePath: nextEdgePath, edgeTypes: nextEdgeTypes });
+      }
+    }
+  }
+
+  return {
+    traversalId: input.traversalId,
+    sourceGraphTypes: merged.sourceGraphTypes,
+    direction,
+    seedNodeIds,
+    visitedNodeIds: sortText([...visited]),
+    impactedNodeIds: sortText([...visited].filter(nodeId => !seedNodeIds.includes(nodeId))),
+    paths: sortBy([...paths.values()], path => path.pathId),
+    maxDepth,
+    traversalLimit,
+    cycleDetected,
+    truncated,
+    duplicateEdgeIdsSuppressed: merged.duplicateEdgeIdsSuppressed,
+    missingNodeIds: sortText([...missingNodeIds]),
+    deterministicNotes: [
+      `Traversal uses supplied dependency/persistent graph metadata only with maxDepth=${maxDepth} and traversalLimit=${traversalLimit}.`,
+      'Visited-node cycle protection prevents recursive graph loops; detected cycles are reported instead of hidden.',
+      'Missing nodes are reported as not-loaded metadata; no node or engineering state is fabricated.',
+    ],
+  };
+}
+
+function normalizeDependencyNode(node: EngineeringDependencyNode): PropagationGraphNode {
+  return {
+    nodeId: node.id,
+    nodeKind: node.nodeType,
+    label: node.label,
+    sourceGraphType: 'document_dependency_graph',
+    deterministicNotes: node.deterministicNotes,
+  };
+}
+
+function normalizeDependencyEdge(edge: EngineeringDependencyEdge): PropagationGraphEdge {
+  return {
+    edgeId: edge.id,
+    fromNodeId: edge.fromNodeId,
+    toNodeId: edge.toNodeId,
+    edgeType: edge.edgeType,
+    sourceGraphType: 'document_dependency_graph',
+    deterministicReason: edge.deterministicReason,
+  };
+}
+
+function normalizePersistentNode(node: PersistentEngineeringStateGraphNode): PropagationGraphNode {
+  return {
+    nodeId: node.nodeId,
+    nodeKind: node.nodeKind === 'state_record' ? 'engineering_state' : 'dependency_graph_node',
+    label: node.stateId ?? node.dependencyNodeId ?? node.nodeId,
+    sourceGraphType: 'persistent_state_graph',
+    deterministicNotes: node.deterministicNotes,
+  };
+}
+
+function normalizePersistentEdge(edge: PersistentEngineeringStateGraphEdge): PropagationGraphEdge {
+  return {
+    edgeId: edge.edgeId,
+    fromNodeId: edge.fromNodeId,
+    toNodeId: edge.toNodeId,
+    edgeType: edge.edgeType,
+    sourceGraphType: 'persistent_state_graph',
+    deterministicReason: edge.deterministicReason,
+  };
+}
+
+function putEdge(edges: Map<string, PropagationGraphEdge>, duplicateEdgeIdsSuppressed: Set<string>, edge: PropagationGraphEdge) {
+  const signature = `${edge.fromNodeId}->${edge.toNodeId}:${edge.edgeType}`;
+  const duplicate = [...edges.values()].find(existing => `${existing.fromNodeId}->${existing.toNodeId}:${existing.edgeType}` === signature);
+  if (duplicate) {
+    duplicateEdgeIdsSuppressed.add(edge.edgeId);
+    return;
+  }
+  if (edges.has(edge.edgeId)) {
+    duplicateEdgeIdsSuppressed.add(edge.edgeId);
+    return;
+  }
+  edges.set(edge.edgeId, edge);
+}
+
+function buildAdjacency(edges: PropagationGraphEdge[], direction: PropagationTraversalDirection): Map<string, PropagationGraphEdge[]> {
+  const adjacency = new Map<string, PropagationGraphEdge[]>();
+  for (const edge of edges) {
+    const key = direction === 'downstream' ? edge.fromNodeId : edge.toNodeId;
+    adjacency.set(key, [...(adjacency.get(key) ?? []), edge]);
+  }
+  for (const [key, values] of adjacency) adjacency.set(key, sortBy(values, edge => edge.edgeId));
+  return adjacency;
+}
+
+function stablePathId(prefix: string, direction: PropagationTraversalDirection, source: string, target: string, edgeIds: string[]): string {
+  return `${prefix}:path:${direction}:${sanitize(source)}:${sanitize(target)}:${stableSmallHash(edgeIds)}`;
+}
+
+function stableSmallHash(values: string[]): string {
+  const payload = values.join('\n');
+  let hash = 5381;
+  for (let i = 0; i < payload.length; i += 1) {
+
+===== lib/engineeringStateInvalidation/engine.ts lines 1-260 =====
+import type { DocumentProvenanceBundle, DocumentProvenanceSection, EngineeringDependencyGraph, EngineeringDependencyNode } from '@/lib/documentProvenance';
+import type { EngineeringDecisionEvaluationBundle, EngineeringDecisionProvenanceRecord } from '@/lib/engineeringDecisionProvenance';
+import { runEngineeringStateAuditGuards } from './guards';
+import type {
+  BuildEngineeringStateRegistryInput,
+  BuildSelectiveRegenerationPlanInput,
+  EngineeringGenerationInputs,
+  EngineeringInvalidationEvent,
+  EngineeringInvalidationLineageMetadata,
+  EngineeringInvalidationResult,
+  EngineeringInvalidationTrigger,
+  EngineeringStateCategory,
+  EngineeringStateRecord,
+  EngineeringStateRegistry,
+  EngineeringStateType,
+  EngineeringStaleStateMetadata,
+  InvalidateEngineeringStateInput,
+  SelectiveRegenerationPlan,
+} from './types';
+
+const EMPTY_INPUTS: EngineeringGenerationInputs = { inputKeys: [], canonicalInputKeys: [], cadPrimitiveIds: [], legacyFallbackKeys: [], deterministicSources: [] };
+
+export function buildEngineeringStateRegistry(input: BuildEngineeringStateRegistryInput): EngineeringStateRegistry {
+  const generatedAt = input.generatedAt ?? new Date(0).toISOString();
+  const documentProvenance = input.documentProvenance ?? null;
+  const decisionProvenance = input.decisionProvenance ?? documentProvenance?.decisionProvenance ?? null;
+  const graph = input.dependencyGraph ?? documentProvenance?.dependencyGraph ?? null;
+  const records: EngineeringStateRecord[] = [
+    ...stateFromSections(documentProvenance, decisionProvenance, generatedAt),
+    ...stateFromGraphNodes(graph, generatedAt),
+    ...stateFromDecisions(decisionProvenance, generatedAt),
+    ...stateFromRenderContexts(input.renderContextIds?.length ? input.renderContextIds : ['renderContext:primary'], documentProvenance, decisionProvenance, graph, generatedAt),
+    ...stateFromBOM(input.bomMetadata ?? [], decisionProvenance, documentProvenance, generatedAt),
+    ...stateFromSLD(input.sldMetadata ?? null, decisionProvenance, documentProvenance, generatedAt),
+  ].sort((a, b) => a.stateId.localeCompare(b.stateId));
+  const registry: EngineeringStateRegistry = {
+    registryId: input.registryId,
+    generatedAt,
+    stateRecords: records,
+    stateIds: records.map(record => record.stateId),
+    generationHash: stableHash('state-generation', records.map(record => `${record.stateId}|${record.generationHash}`)),
+    provenanceHash: stableHash('state-provenance', records.map(record => `${record.stateId}|${record.provenanceHash}`)),
+    dependencyHash: stableHash('state-dependency', records.map(record => `${record.stateId}|${record.dependencyHash}`)),
+    deterministicHash: stableHash('state-registry', records.map(record => `${record.stateId}|${record.generationHash}|${record.provenanceHash}|${record.dependencyHash}|${record.staleStatus}`)),
+    deterministicNotes: [
+      'EngineeringStateRegistry v1 tracks generated engineering outputs as deterministic state records.',
+      'State records are derived from canonical evidence, requirements, decision provenance, document provenance, and dependency graph ids only.',
+      'Raw uploads are not generation truth and are intentionally excluded from state hashes.',
+    ],
+    auditGuards: [],
+  };
+  registry.auditGuards = runEngineeringStateAuditGuards({ records, renderOutputExpected: false });
+  return registry;
+}
+
+export function invalidateEngineeringState(input: InvalidateEngineeringStateInput): EngineeringInvalidationResult {
+  const generatedAt = input.generatedAt ?? input.trigger.triggeredAt ?? new Date(0).toISOString();
+  const graph = input.dependencyGraph ?? null;
+  const reachable = reachableDependencyIds(input.trigger, graph);
+  const events: EngineeringInvalidationEvent[] = [];
+  const affected = new Set<string>();
+  const updated = input.registry.stateRecords.map(record => {
+    const triggers = matchingTriggers(record, input.trigger, reachable);
+    if (triggers.length === 0) return record;
+    affected.add(record.stateId);
+    const event: EngineeringInvalidationEvent = {
+      eventId: `invalidation:${input.trigger.triggerId}:${record.stateId}`,
+      stateId: record.stateId,
+      staleStatus: blockedStatus(record),
+      invalidationReason: `State ${record.stateId} depends on changed ${triggers.join(', ')}.`,
+      triggeringDependencyIds: uniqueSorted([...reachable].filter(id => record.dependencyNodeIds.includes(id))),
+      triggeringRequirementIds: uniqueSorted(input.trigger.changedRequirementIds.filter(id => record.requirementIds.includes(id))) as any,
+      triggeringDecisionIds: uniqueSorted(input.trigger.changedDecisionIds.filter(id => record.decisionIds.includes(id))),
+      triggeringCanonicalEvidenceIds: uniqueSorted(input.trigger.changedCanonicalEvidenceIds.filter(id => record.canonicalEvidenceIds.includes(id))),
+      impactedDownstreamStateIds: [],
+      lastValidGenerationHash: record.generationHash,
+      lastValidProvenanceHash: record.provenanceHash,
+      invalidatedAt: generatedAt,
+      deterministicNotes: ['Invalidation is propagated from explicit trigger ids and dependency graph edges; no heuristic matching is used.'],
+    };
+    events.push(event);
+    return { ...record, staleStatus: event.staleStatus, invalidationReason: event.invalidationReason, invalidatedAt: generatedAt } satisfies EngineeringStateRecord;
+  });
+  const affectedIds = uniqueSorted([...affected]);
+  for (const event of events) event.impactedDownstreamStateIds = affectedIds.filter(id => id !== event.stateId);
+  const result: EngineeringInvalidationResult = {
+    resultId: input.resultId,
+    generatedAt,
+    trigger: input.trigger,
+    affectedStateIds: affectedIds,
+    unaffectedStateIds: input.registry.stateIds.filter(id => !affected.has(id)).sort((a, b) => a.localeCompare(b)),
+    invalidationEvents: events.sort((a, b) => a.eventId.localeCompare(b.eventId)),
+    updatedStateRecords: updated.sort((a, b) => a.stateId.localeCompare(b.stateId)),
+    deterministicHash: stableHash('invalidation-result', [...affectedIds, ...events.map(event => `${event.eventId}|${event.invalidationReason}`)]),
+    deterministicNotes: ['Invalidation result marks stale state only; it does not regenerate outputs.', 'Unrelated state records are preserved when no explicit dependency intersection or graph reachability exists.'],
+    auditGuards: [],
+  };
+  result.auditGuards = runEngineeringStateAuditGuards({ records: result.updatedStateRecords, invalidationResult: result, renderOutputExpected: false });
+  return result;
+}
+
+export function buildSelectiveRegenerationPlan(input: BuildSelectiveRegenerationPlanInput): SelectiveRegenerationPlan {
+  const generatedAt = input.generatedAt ?? input.invalidationResult.generatedAt;
+  const stale = input.invalidationResult.updatedStateRecords.filter(record => record.staleStatus !== 'current');
+  const byType = (type: EngineeringStateType) => uniqueSorted(stale.filter(record => record.stateType === type).map(record => outputId(record)));
+  const blocked = uniqueSorted(stale.filter(record => record.provenanceHash.length === 0 || record.dependencyHash.length === 0 || record.dependencyNodeIds.length === 0).map(record => record.stateId));
+  const order = regenerationOrder(stale, input.dependencyGraph ?? null);
+  const plan: SelectiveRegenerationPlan = {
+    planId: input.planId,
+    generatedAt,
+    triggerId: input.invalidationResult.trigger.triggerId,
+    affectedDocumentSections: uniqueSorted([...byType('document_section'), ...byType('render_output')]),
+    affectedEngineeringDecisions: byType('decision_provenance'),
+    affectedRenderContexts: byType('render_context'),
+    affectedBOMRows: byType('bom_row'),
+    affectedSLDSections: byType('sld_section'),
+    affectedLayoutPrimitives: byType('layout_primitive'),
+    blockedRegenerationDependencies: blocked,
+    regenerationOrder: order,
+    unchangedPreservedOutputs: input.invalidationResult.unaffectedStateIds,
+    staleStateIds: input.invalidationResult.affectedStateIds,
+    deterministicHash: stableHash('regeneration-plan', [...order, ...blocked, ...input.invalidationResult.unaffectedStateIds]),
+    deterministicNotes: ['SelectiveRegenerationPlan v1 is a bounded plan only; it performs no autonomous regeneration.', 'Regeneration order is sorted by explicit state category precedence and stable state ids.'],
+    snapshotReference: input.snapshotReference ?? undefined,
+  };
+  return plan;
+}
+
+export function buildInvalidationTrigger(input: Partial<EngineeringInvalidationTrigger> & Pick<EngineeringInvalidationTrigger, 'triggerId' | 'triggerType'>): EngineeringInvalidationTrigger {
+  const triggeredAt = input.triggeredAt ?? new Date(0).toISOString();
+  return {
+    triggerId: input.triggerId,
+    triggerType: input.triggerType,
+    changedCanonicalEvidenceIds: uniqueSorted(input.changedCanonicalEvidenceIds ?? []),
+    changedRequirementIds: uniqueSorted(input.changedRequirementIds ?? []) as any,
+    changedDecisionIds: uniqueSorted(input.changedDecisionIds ?? []),
+    changedDependencyNodeIds: uniqueSorted(input.changedDependencyNodeIds ?? []),
+    previousHash: input.previousHash,
+    nextHash: input.nextHash,
+    triggeredAt,
+    deterministicReason: input.deterministicReason ?? `Deterministic invalidation trigger ${input.triggerId}.`,
+  };
+}
+
+export function staleMetadataForState(record: EngineeringStateRecord, events: EngineeringInvalidationEvent[] = []): EngineeringStaleStateMetadata {
+  const matched = events.filter(event => event.stateId === record.stateId);
+  return {
+    staleStatus: record.staleStatus,
+    staleReason: record.invalidationReason,
+    triggeringDependencyIds: uniqueSorted(matched.flatMap(event => event.triggeringDependencyIds)),
+    lastValidGenerationHash: matched[0]?.lastValidGenerationHash ?? record.generationHash,
+    impactedDownstreamStateIds: uniqueSorted(matched.flatMap(event => event.impactedDownstreamStateIds)),
+    invalidationEventIds: uniqueSorted(matched.map(event => event.eventId)),
+  };
+}
+
+export function buildInvalidationLineageMetadata(input: { registry: EngineeringStateRegistry; invalidationResult?: EngineeringInvalidationResult | null; regenerationPlan?: SelectiveRegenerationPlan | null; snapshotReference?: import('./types').EngineeringStateSnapshotReference | null }): EngineeringInvalidationLineageMetadata {
+  const staleStateIds = input.invalidationResult?.affectedStateIds ?? input.registry.stateRecords.filter(record => record.staleStatus !== 'current').map(record => record.stateId);
+  return {
+    stateRegistryId: input.registry.registryId,
+    stateIds: input.registry.stateIds,
+    generationHash: input.registry.generationHash,
+    provenanceHash: input.registry.provenanceHash,
+    dependencyHash: input.registry.dependencyHash,
+    staleStateIds: uniqueSorted(staleStateIds),
+    invalidationEventIds: uniqueSorted(input.invalidationResult?.invalidationEvents.map(event => event.eventId) ?? []),
+    regenerationPlanId: input.regenerationPlan?.planId,
+    snapshotReference: input.snapshotReference ?? input.regenerationPlan?.snapshotReference,
+    deterministicNotes: ['Invalidation lineage metadata carries state hashes and stale ids through render/document contexts.'],
+  };
+}
+
+function stateFromSections(doc: DocumentProvenanceBundle | null, decisions: EngineeringDecisionEvaluationBundle | null, generatedAt: string): EngineeringStateRecord[] {
+  if (!doc) return [];
+  return doc.sections.map(section => makeRecord({
+    stateId: `state:documentSection:${section.sectionId}`,
+    stateType: section.sectionId.startsWith('SLD.') ? 'sld_section' : 'document_section',
+    stateCategory: categoryFromSection(section.sectionId),
+    documentType: section.documentType,
+    renderContextId: 'renderContext:primary',
+    dependencyNodeIds: section.engineeringDependencyIds,
+    requirementIds: section.requirementIds,
+    decisionIds: decisionIdsForSection(decisions, section.sectionId),
+    canonicalEvidenceIds: section.canonicalEvidenceIds,
+    originatingSurveyIds: section.originatingSurveyIds,
+    generationInputs: { ...section.renderInputs, deterministicSources: ['document_provenance_bundle_v1', 'engineering_requirement_registry_v1'] },
+    truthSource: section.truthSource,
+    generatedAt,
+    notes: [`Document section ${section.sectionId} state is invalidated only by linked requirement/evidence/decision/dependency changes.`],
+  }));
+}
+
+function stateFromGraphNodes(graph: EngineeringDependencyGraph | null, generatedAt: string): EngineeringStateRecord[] {
+  if (!graph) return [];
+  return graph.nodes.map(node => makeRecord({
+    stateId: `state:dependencyNode:${node.id}`,
+    stateType: typeFromNode(node),
+    stateCategory: categoryFromNode(node),
+    documentType: 'not_document_bound',
+    dependencyNodeIds: [node.id],
+    requirementIds: node.requirementIds,
+    decisionIds: node.nodeType === 'engineering_decision' || node.nodeType === 'calculation' ? [node.id] : [],
+    canonicalEvidenceIds: node.canonicalEvidenceIds,
+    originatingSurveyIds: [],
+    generationInputs: { ...EMPTY_INPUTS, deterministicSources: ['engineering_dependency_graph_v1'] },
+    truthSource: node.truthSource,
+    generatedAt,
+    notes: [`Dependency graph node ${node.id} is first-class invalidation state.`],
+  }));
+}
+
+function stateFromDecisions(bundle: EngineeringDecisionEvaluationBundle | null, generatedAt: string): EngineeringStateRecord[] {
+  if (!bundle) return [];
+  return bundle.decisionRecords.map(decision => makeRecord({
+    stateId: `state:decision:${decision.decisionId}`,
+    stateType: decision.decisionCategory === 'calculation' ? 'engineering_calculation' : 'decision_provenance',
+    stateCategory: categoryFromDecision(decision),
+    documentType: 'document_summary',
+    renderContextId: decision.renderContextIds[0],
+    dependencyNodeIds: decision.dependencyNodeIds,
+    requirementIds: decision.requirementIds,
+    decisionIds: [decision.decisionId],
+    canonicalEvidenceIds: decision.canonicalEvidenceIds,
+    originatingSurveyIds: decision.originatingSurveyIds,
+    generationInputs: { ...EMPTY_INPUTS, inputKeys: decision.derivedFrom, canonicalInputKeys: decision.canonicalEvidenceIds, deterministicSources: ['engineering_decision_registry_v1'] },
+    truthSource: decision.truthSource,
+    generatedAt,
+    notes: [`Decision ${decision.decisionType} state tracks selected value and deterministic lineage only.`],
+  }));
+}
+
+function stateFromRenderContexts(ids: string[], doc: DocumentProvenanceBundle | null, decisions: EngineeringDecisionEvaluationBundle | null, graph: EngineeringDependencyGraph | null, generatedAt: string): EngineeringStateRecord[] {
+  return uniqueSorted(ids).map(id => makeRecord({
+    stateId: `state:renderContext:${id}`,
+    stateType: 'render_context',
+    stateCategory: 'rendering',
+    documentType: 'render_context',
+    renderContextId: id,
+    dependencyNodeIds: uniqueSorted([id, ...(graph?.nodes.map(node => node.id) ?? []), ...(decisions?.dependencyNodeIds ?? [])]),
+    requirementIds: uniqueSorted([...(doc?.requirementIds ?? []), ...(decisions?.requirementIds ?? [])]) as any,
+    decisionIds: decisions?.decisionIds ?? [],
+    canonicalEvidenceIds: uniqueSorted([...(doc?.canonicalEvidenceIds ?? []), ...(decisions?.canonicalEvidenceIds ?? [])]),
+    originatingSurveyIds: uniqueSorted([...(doc?.originatingSurveyIds ?? []), ...(decisions?.originatingSurveyIds ?? [])]),
+    generationInputs: { ...(doc?.renderInputs ?? EMPTY_INPUTS), deterministicSources: ['render_context_v1', 'document_provenance_bundle_v1', 'engineering_decision_registry_v1'] },
+    truthSource: doc?.truthSource ?? 'legacy_design_input',
+    generatedAt,
+    notes: ['RenderContext state carries hashes and stale metadata; templates must not manufacture stale state.'],
+  }));
+}
+
+function stateFromBOM(bom: NonNullable<BuildEngineeringStateRegistryInput['bomMetadata']>, decisions: EngineeringDecisionEvaluationBundle | null, doc: DocumentProvenanceBundle | null, generatedAt: string): EngineeringStateRecord[] {
+  return bom.map(row => makeRecord({
+    stateId: `state:bomRow:${row.bomRowId}`,
+    stateType: 'bom_row',
+    stateCategory: 'bom',
+    documentType: 'bom',
+    renderContextId: 'renderContext:primary',
+    dependencyNodeIds: row.dependencyNodeIds,
+    requirementIds: uniqueSorted(decisions?.decisionRecords.filter(record => row.decisionIds.includes(record.decisionId)).flatMap(record => record.requirementIds) ?? []) as any,
+    decisionIds: row.decisionIds,
+
+===== app/admin/engineering-intelligence/components.tsx lines 1-320 =====
+import Link from 'next/link';
+import type {
+  AuditGuardWorkspaceModel,
+  CanonicalEvidenceWorkspaceGroupModel,
+  DecisionWorkspaceItemModel,
+  AffectedOutputsWorkspaceModel,
+  DependencyGraphViewerModel,
+  DependencyTraversalWorkspaceModel,
+  EngineeringHealthDashboardModel,
+  EngineeringIntelligenceRouteSummary,
+  EngineeringIntelligenceWorkspaceModel,
+  InvalidationPropagationWorkspaceModel,
+  RegenerationPlanningV1WorkspaceModel,
+  RegenerationPlanningWorkspaceModel,
+  RequirementWorkspaceItemModel,
+  SnapshotDeltaWorkspaceModel,
+  SnapshotTimelineWorkspaceModel,
+  StaleInvalidationWorkspaceModel,
+  StaleStateTimelineWorkspaceModel,
+  StructuredEngineeringSignalsWorkspaceModel,
+  SignalProvenanceWorkspaceModel,
+  SignalDependencyGraphWorkspaceModel,
+  SignalRequirementMappingWorkspaceModel,
+  SignalConfidenceWorkspaceModel,
+  SignalBlockingWorkspaceModel,
+  SignalInvalidationWorkspaceModel,
+  SignalStaleImpactsWorkspaceModel,
+  ResolvedEngineeringContextsWorkspaceModel,
+  ContextArbitrationWorkspaceModel,
+  ContextConflictInspectorWorkspaceModel,
+  FallbackChainInspectorWorkspaceModel,
+  ContextProvenanceWorkspaceModel,
+  ContextDependencyGraphWorkspaceModel,
+  ContextConfidenceBreakdownWorkspaceModel,
+  ContextInvalidationsWorkspaceModel,
+  ContextStaleImpactsWorkspaceModel,
+  ContextResolutionTimelineWorkspaceModel,
+  EngineeringScenarioSimulationResult,
+  EngineeringRecommendationSummary,
+  EngineeringRecommendation,
+  EngineeringWorkflowOrchestrationSummary,
+  EngineeringWorkflowItem,
+} from '@/lib/engineeringIntelligence';
+import type { HydratedProjectEngineeringState } from '@/lib/engineeringIntelligence/projectHydration';
+import type { AssistedEvidenceCandidate, ReviewedEvidenceProjection } from '@/lib/assistedEvidence';
+import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
+import type { DeterministicPhotoGroupingModel } from '@/lib/engineeringIntelligence/photoGrouping';
+import type { FieldEvidenceOrchestrationModel } from '@/lib/survey/evidence/fieldOrchestration';
+import type { Project } from '@/types';
+
+const statusColor: Record<string, string> = {
+  satisfied: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+  partial: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+  partially_satisfied: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+  blocked: 'border-red-500/30 bg-red-500/10 text-red-300',
+  missing: 'border-red-500/30 bg-red-500/10 text-red-300',
+  inactive: 'border-slate-500/30 bg-slate-500/10 text-slate-300',
+  current: 'border-sky-500/30 bg-sky-500/10 text-sky-300',
+  stale: 'border-orange-500/30 bg-orange-500/10 text-orange-300',
+  invalidated: 'border-red-500/30 bg-red-500/10 text-red-300',
+  preserved: 'border-violet-500/30 bg-violet-500/10 text-violet-300',
+  not_loaded: 'border-slate-500/30 bg-slate-500/10 text-slate-400',
+  insufficient_metadata: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+  ready: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+  confirmed: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+  high: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+  medium: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+  low: 'border-orange-500/30 bg-orange-500/10 text-orange-300',
+  none: 'border-slate-500/30 bg-slate-500/10 text-slate-400',
+  not_applicable: 'border-slate-500/30 bg-slate-500/10 text-slate-400',
+  authoritative: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+  preferred: 'border-sky-500/30 bg-sky-500/10 text-sky-300',
+  conflicting: 'border-red-500/30 bg-red-500/10 text-red-300',
+  unresolved: 'border-slate-500/30 bg-slate-500/10 text-slate-400',
+};
+
+function cx(...values: Array<string | false | null | undefined>) {
+  return values.filter(Boolean).join(' ');
+}
+
+type WorkspaceRenderable = unknown;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date) && !(value instanceof Map) && !(value instanceof Set);
+}
+
+function safeRenderValue(value: WorkspaceRenderable, fallback = 'not_loaded'): string {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'string') return value.length ? value : fallback;
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : fallback;
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'bigint') return value.toString();
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? fallback : value.toISOString();
+  if (Array.isArray(value)) return `array(${value.length})`;
+  if (value instanceof Map) return `Map(${value.size})`;
+  if (value instanceof Set) return `Set(${value.size})`;
+  if (isRecord(value)) {
+    const keys = Object.keys(value).sort().slice(0, 5);
+    return keys.length ? `object(keys=${keys.join('|')}${Object.keys(value).length > keys.length ? '|…' : ''})` : 'object(empty)';
+  }
+  return fallback;
+}
+
+function renderMetadataValue(value: WorkspaceRenderable, fallback = 'not_loaded'): string {
+  return safeRenderValue(value, fallback);
+}
+
+function normalizeWorkspaceDisplay(value: WorkspaceRenderable): string[] {
+  if (value === null || value === undefined) return [];
+  if (Array.isArray(value)) return value.map(item => renderMetadataValue(item));
+  if (value instanceof Set) return Array.from(value).map(item => renderMetadataValue(item));
+  if (value instanceof Map) return Array.from(value.entries()).map(([key, item]) => `${renderMetadataValue(key)}:${renderMetadataValue(item)}`);
+  return [renderMetadataValue(value)];
+}
+
+function workspaceKey(prefix: string, value: WorkspaceRenderable, index: number): string {
+  return `${prefix}:${index}:${safeRenderValue(value, 'empty')}`;
+}
+
+function safeArray<T>(value: T[] | readonly T[] | null | undefined): T[];
+function safeArray<T = unknown>(value: unknown): T[];
+function safeArray<T = unknown>(value: unknown): T[] {
+  return Array.isArray(value) ? value as T[] : [];
+}
+
+function collectionSize(value: unknown): number {
+  if (Array.isArray(value) || typeof value === 'string') return value.length;
+  if (value instanceof Map || value instanceof Set) return value.size;
+  return 0;
+}
+
+function summarizeContinuityChain(chain: unknown): string {
+  if (!isRecord(chain)) return renderMetadataValue(chain);
+  return `${renderMetadataValue(chain.chainId, 'chain')}:${renderMetadataValue(chain.sequenceStart, '?')}-${renderMetadataValue(chain.sequenceEnd, '?')}:${renderMetadataValue(chain.continuityConfidence, 'unknown')}`;
+}
+
+function summarizeSequenceBreakpoint(point: unknown): string {
+  if (!isRecord(point)) return renderMetadataValue(point);
+  return `${renderMetadataValue(point.breakpointId, 'breakpoint')}:${renderMetadataValue(point.reason, 'reason_not_loaded')}`;
+}
+
+function summarizeMetadataCompleteness(score: unknown): string {
+  if (!isRecord(score)) return renderMetadataValue(score);
+  const missing = normalizeWorkspaceDisplay(score.missingFields).join('|') || 'none';
+  return `${renderMetadataValue(score.evidenceId, 'evidence')}:${renderMetadataValue(score.score, 'score_not_loaded')}:missing=${missing}`;
+}
+
+function summarizeSnapshotHash(snapshot: unknown): string {
+  if (!isRecord(snapshot)) return renderMetadataValue(snapshot);
+  return `${renderMetadataValue(snapshot.snapshotId, 'snapshot')}:${renderMetadataValue(snapshot.snapshotHash, 'hash_not_loaded')}`;
+}
+
+function summarizeTransitionEvent(event: unknown): string {
+  if (!isRecord(event)) return renderMetadataValue(event);
+  return `${renderMetadataValue(event.eventType, 'event')}:${renderMetadataValue(event.transitionEventId, 'transition_not_loaded')}`;
+}
+
+function summarizeDiffEntry(entry: unknown): string {
+  if (!isRecord(entry)) return renderMetadataValue(entry);
+  return `${renderMetadataValue(entry.diffType, 'diff')}:${renderMetadataValue(entry.stateId, 'state_not_loaded')}`;
+}
+
+function metadataCompletenessLabel(entry: unknown): string {
+  if (!isRecord(entry)) return renderMetadataValue(entry);
+  return `${renderMetadataValue(entry.field, 'field')}:${entry.present ? 'present' : 'missing'}`;
+}
+
+export function WorkspaceShell({ model, title, subtitle, children }: {
+  model: EngineeringIntelligenceWorkspaceModel;
+  title: string;
+  subtitle: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-6 text-slate-100">
+      <div className="rounded-2xl border border-sky-500/20 bg-gradient-to-br from-slate-950 via-slate-950 to-sky-950/40 p-6 shadow-2xl shadow-sky-950/10">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="mb-3 inline-flex rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.28em] text-sky-300">
+              Deterministic Engineering Intelligence
+            </div>
+            <h1 className="text-3xl font-black tracking-tight text-white">{safeRenderValue(title, 'Engineering Intelligence')}</h1>
+            <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-300">{safeRenderValue(subtitle)}</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-xs text-slate-300 lg:w-80">
+            <div className="font-semibold text-white">Workspace source</div>
+            <div className="mt-2 font-mono text-sky-300">{safeRenderValue(model.generatedFrom)}</div>
+            <div className="mt-1">Project: {safeRenderValue(model.projectId, 'not selected')}</div>
+            <div className="mt-3 text-slate-400">No OCR/CV/CAD/autonomous-regeneration runtime path is exposed here.</div>
+          </div>
+        </div>
+      </div>
+      <RouteNav routes={model.routes} />
+      {children}
+    </div>
+  );
+}
+
+export function RouteNav({ routes }: { routes: EngineeringIntelligenceRouteSummary[] }) {
+  return (
+    <div className="grid gap-3 md:grid-cols-4">
+      {routes.map(route => {
+        const isProjectRoute = route.href.includes('[id]');
+        const href = isProjectRoute ? '/admin/engineering-intelligence' : route.href;
+        const stateLabel = isProjectRoute ? 'select_real_project' : 'registered route';
+        return (
+          <Link key={route.routeId} href={href}
+            className="rounded-xl border border-white/10 bg-white/[0.03] p-4 transition hover:border-sky-400/40 hover:bg-sky-400/10">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-bold text-white">{safeRenderValue(route.label)}</div>
+              <span className="rounded-full border border-slate-500/30 bg-slate-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-400">{stateLabel}</span>
+            </div>
+            <div className="mt-2 text-xs leading-5 text-slate-400">{safeRenderValue(route.deterministicPurpose)}</div>
+            {isProjectRoute && <div className="mt-3 text-[10px] font-mono text-sky-300">Project route requires an actual project UUID selected below.</div>}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+export function ProjectIntelligencePicker({ projects, loadState }: { projects: Project[]; loadState: 'loaded' | 'unauthenticated' | 'load_error' }) {
+  return (
+    <Panel title="Project Intelligence Picker" eyebrow="Real project routing">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Route mode" value="real_uuid_only" />
+        <Metric label="Selectable projects" value={collectionSize(projects)} />
+        <Metric label="Demo route" value="removed" />
+        <Metric label="Load state" value={loadState} />
+      </div>
+      <p className="mt-4 text-sm leading-6 text-slate-300">
+        Select an existing project to open live Engineering Intelligence hydration. Links are built only from real project records returned for the authenticated user; this workspace never falls back to a placeholder, demo, or fabricated project id.
+      </p>
+      {loadState === 'unauthenticated' ? (
+        <div className="mt-4"><EmptyState state="not_authenticated">Project records were not loaded because no valid admin session user was available. No placeholder project intelligence route is rendered.</EmptyState></div>
+      ) : loadState === 'load_error' ? (
+        <div className="mt-4"><EmptyState state="project_list_load_error">Project records could not be loaded from the database. No placeholder project intelligence route is rendered.</EmptyState></div>
+      ) : collectionSize(projects) === 0 ? (
+        <div className="mt-4"><EmptyState state="no_projects">No real projects are available for selection. Create or load a project first; Engineering Intelligence will not synthesize a project route.</EmptyState></div>
+      ) : (
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {projects.map(project => (
+            <Link key={project.id} href={`/admin/engineering-intelligence/project/${project.id}`}
+              className="rounded-xl border border-white/10 bg-white/[0.025] p-4 transition hover:border-sky-400/40 hover:bg-sky-400/10">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-white">{safeRenderValue(project.name)}</h3>
+                  <div className="mt-1 break-all font-mono text-[10px] text-sky-300">{safeRenderValue(project.id)}</div>
+                </div>
+                <StatusPill value={project.status ?? 'not_loaded'} />
+              </div>
+              <div className="mt-3 grid gap-2 text-xs text-slate-400 md:grid-cols-2">
+                <div>System: {safeRenderValue(project.systemType)}</div>
+                <div>Size: {project.systemSizeKw ? `${project.systemSizeKw} kW` : 'not_loaded'}</div>
+                <div>Updated: {project.updatedAt ? new Date(project.updatedAt).toLocaleString() : 'not_loaded'}</div>
+                <div>Evidence route: real project UUID</div>
+              </div>
+              <div className="mt-3 text-xs text-slate-500">{safeRenderValue(project.address, 'No project address stored.')}</div>
+            </Link>
+          ))}
+        </div>
+      )}
+      <DeterministicNotes notes={[
+        'Project Intelligence links are emitted only from persisted project ids returned by getProjectsByUser.',
+        'If no project list is available, the picker renders explicit no_projects/not_authenticated/load_error states instead of fake engineering state.',
+        'Selecting a project only loads deterministic evidence, graph, snapshot, invalidation, regeneration-plan metadata, and CAD-readiness metadata; it does not run OCR, CV, CAD generation, or autonomous regeneration.',
+      ]} />
+    </Panel>
+  );
+}
+
+export function Panel({ title, eyebrow, children }: { title: string; eyebrow?: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-2xl border border-white/10 bg-slate-950/80 p-5 shadow-xl shadow-black/10">
+      <div className="mb-4">
+        {eyebrow && <div className="mb-1 text-[10px] font-black uppercase tracking-[0.24em] text-sky-300">{safeRenderValue(eyebrow)}</div>}
+        <h2 className="text-lg font-black text-white">{safeRenderValue(title, 'Panel')}</h2>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function EmptyState({ children, state = 'not_loaded' }: { children: React.ReactNode; state?: string }) {
+  return (
+    <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] p-4 text-sm text-slate-400">
+      <div className="mb-2 inline-flex rounded-full border border-slate-500/30 bg-slate-500/10 px-2 py-0.5 font-mono text-[10px] text-slate-300">{safeRenderValue(state)}</div>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+function StatusPill({ value }: { value: WorkspaceRenderable }) {
+  const label = safeRenderValue(value);
+  return <span className={cx('rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide', statusColor[label] ?? statusColor.not_loaded)}>{label}</span>;
+}
+
+function TokenList({ values, limit = 6 }: { values: WorkspaceRenderable; limit?: number }) {
+  const normalized = normalizeWorkspaceDisplay(values).filter(Boolean);
+  if (!normalized.length) return <span className="text-slate-500">none</span>;
+  const visible = normalized.slice(0, limit);
+  const remaining = normalized.length - visible.length;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {visible.map((value, index) => <span key={workspaceKey('token', value, index)} className="rounded-md bg-white/5 px-2 py-1 font-mono text-[10px] text-slate-300">{value}</span>)}
+      {remaining > 0 && <span className="rounded-md bg-white/5 px-2 py-1 text-[10px] text-slate-400">+{remaining}</span>}
+    </div>
+  );
+}
+
+
+export function ProjectHydrationSummary({ hydration }: { hydration: HydratedProjectEngineeringState }) {
+  return (
+    <Panel title="Live Project Engineering Hydration" eyebrow="Project state">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Hydration source" value={hydration.source} />
+        <Metric label="Survey sessions" value={hydration.surveyCount} />
+        <Metric label="Snapshots" value={collectionSize(hydration.snapshots)} />
+        <Metric label="Regeneration plans" value={collectionSize(hydration.regenerationPlans)} />
+      </div>

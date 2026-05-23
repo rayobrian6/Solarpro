@@ -1,0 +1,43 @@
+=== check-engineering-boundaries ===
+command: npm run check:engineering-boundaries
+exit_code: 0
+log: outputs/real-survey-data-validation/geometry-governance-validation-v1/check-engineering-boundaries.log
+exit_file: outputs/real-survey-data-validation/geometry-governance-validation-v1/check-engineering-boundaries.exit
+
+=== check-topology ===
+command: npm run check:topology
+exit_code: 0
+log: outputs/real-survey-data-validation/geometry-governance-validation-v1/check-topology.log
+exit_file: outputs/real-survey-data-validation/geometry-governance-validation-v1/check-topology.exit
+
+=== check-assisted-evidence-boundaries ===
+command: npm run check:assisted-evidence-boundaries
+exit_code: 0
+log: outputs/real-survey-data-validation/geometry-governance-validation-v1/check-assisted-evidence-boundaries.log
+exit_file: outputs/real-survey-data-validation/geometry-governance-validation-v1/check-assisted-evidence-boundaries.exit
+
+=== type-check ===
+command: npm run type-check
+exit_code: 0
+log: outputs/real-survey-data-validation/geometry-governance-validation-v1/type-check.log
+exit_file: outputs/real-survey-data-validation/geometry-governance-validation-v1/type-check.exit
+
+=== npm-test ===
+command: npm test
+exit_code: 0
+log: outputs/real-survey-data-validation/geometry-governance-validation-v1/npm-test.log
+exit_file: outputs/real-survey-data-validation/geometry-governance-validation-v1/npm-test.exit
+
+=== build ===
+command: npm run build
+exit_code: 0
+log: outputs/real-survey-data-validation/geometry-governance-validation-v1/build.log
+exit_file: outputs/real-survey-data-validation/geometry-governance-validation-v1/build.exit
+
+=== lint ===
+command: npm run lint
+exit_code: 0
+log: outputs/real-survey-data-validation/geometry-governance-validation-v1/lint.log
+exit_file: outputs/real-survey-data-validation/geometry-governance-validation-v1/lint.exit
+
+VALIDATION_STATUS=passed

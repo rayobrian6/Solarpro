@@ -1,0 +1,1034 @@
+
+===== lib/panelLayoutOptimized.ts =====
+2: * panelLayoutOptimized.ts — Panel Grid Generation (CAD Geometry Engine)  v50.23
+4: * v50.23: Added 'hybrid' orientation mode — per-plane auto-optimised mix.
+7: *   'portrait'  → Portrait pass first. If result=0, try landscape as fallback.
+8: *   'landscape' → Landscape pass first. If result=0, try portrait as fallback.
+9: *   'hybrid'    → Run full 3-pass solver (portrait / landscape / mixed) on the
+12: *                 the user can lock a specific plane to hybrid mode.
+13: *   undefined   → Same as 'hybrid' (3-pass auto solver, portrait-first scoring).
+15: * v47.101: Portrait-First Solver — fixed orientation control + row iteration
+19: *      - 'portrait'  → run portrait pass; only try landscape if portrait = 0 panels
+20: *      - 'landscape' → run landscape pass; only try portrait if landscape = 0 panels
+21: *      - undefined   → run 3-pass solver (portrait-first auto mode)
+22: *   2. Mixed-fill no longer reimplements geometry — it delegates to generatePanelGridCAD
+23: *      for portrait rows, then calls a second pass for landscape in the Y-remainder.
+24: *   3. Row iteration is entirely inside generatePanelGridCAD (roofGeometry.ts) which
+26: *      calls it twice (portrait + landscape) and merges.
+29: * Algorithm (hybrid/auto mode):
+30: *   Pass 1: portrait-only  → score = count + 0.5   (portrait preference bonus)
+31: *   Pass 2: landscape-only → score = count          (no bonus)
+33: *              mixed = portrait rows (full bbox) + landscape in Y-remainder
+34: *   Winner = highest score. Ties: portrait > mixed > landscape.
+38: * Each PlacedPanel.layoutStrategy = 'PORTRAIT' | 'MIXED' | 'LANDSCAPE' for debug overlay.
+44:  generatePanelGridCAD,
+58:} from './roofGeometry';
+75:export type LayoutStrategy = 'PORTRAIT' | 'MIXED' | 'LANDSCAPE';
+77:export interface RoofLayoutResult {
+83:// Portrait preference bonus — portrait wins over landscape on equal count
+95: * Main entry point for roof panel layout.
+98: *   'portrait'  → Portrait pass first. If result=0, try landscape as fallback.
+99: *   'landscape' → Landscape pass first. If result=0, try portrait as fallback.
+100: *   'hybrid'    → Run full 3-pass auto solver on this plane independently,
+101: *                 picking portrait / landscape / mixed for maximum panel count.
+102: *   undefined   → Same as 'hybrid' (3-pass auto solver).
+104:export function generateRoofLayoutOptimized(params: {
+105:  layoutId:        string;
+106:  roofPlane:       RoofPlane;
+108:  setback:         number;
+110:  rowSpacing:      number;
+113:  orientation?:    'portrait' | 'landscape' | 'hybrid';
+117:  /** Per-edge setbacks (v47.111) -- override uniform setback */
+121:  /** v47.118: Align grid to longest roof edge instead of pure azimuth */
+124:  const { layoutId, roofPlane, panel, rowSpacing, tilt, azimuth } = params;
+126:  if (roofPlane.vertices.length < 3) return [];
+131:  // Fire setback: use larger of manual setback or fire setback (legacy uniform)
+132:  const setback = Math.max(params.setback, params.fireSetbackM ?? 0);
+134:  const orientation = params.orientation; // undefined or 'hybrid' = auto
+135:  // Per-edge setbacks (v47.111)
+142:  if (orientation === 'portrait') {
+143:    const panels = runPass(layoutId, roofPlane, panel, setback,
+144:      panelSpacing, rowSpacing, tilt, azimuth, 'portrait', eaveSetbackM, ridgeSetbackM, sideSetbackM, alignToEdge);
+151:    // Fallback: try landscape if portrait produces nothing (very narrow roof)
+153:    const lsPanels = runPass(layoutId, roofPlane, panel, setback,
+154:      panelSpacing, rowSpacing, tilt, azimuth, 'landscape', eaveSetbackM, ridgeSetbackM, sideSetbackM, alignToEdge);
+159:  if (orientation === 'landscape') {
+160:    const panels = runPass(layoutId, roofPlane, panel, setback,
+161:      panelSpacing, rowSpacing, tilt, azimuth, 'landscape', eaveSetbackM, ridgeSetbackM, sideSetbackM, alignToEdge);
+168:    // Fallback: try portrait if landscape produces nothing
+170:    const pPanels = runPass(layoutId, roofPlane, panel, setback,
+171:      panelSpacing, rowSpacing, tilt, azimuth, 'portrait', eaveSetbackM, ridgeSetbackM, sideSetbackM, alignToEdge);
+175:  // ── HYBRID / AUTO MODE (orientation === 'hybrid' | undefined) — 3-pass solver ──
+177:  //   portrait-only / landscape-only / mixed-fill (portrait rows + landscape ridge strip)
+178:  // Picks whichever strategy yields the most panels, honouring all fire setbacks.
+179:  // 'hybrid' is identical to undefined (auto) — exposed explicitly for per-plane UI control.
+181:    layoutId, roofPlane, panel,
+182:    setbackM:       setback,
+184:    rowSpacingM:    rowSpacing,
+198: * Portrait-first 3-pass solver (hybrid/auto mode).
+199: * Used when orientation is undefined or 'hybrid'.
+201:export function solveRoofLayout(params: {
+202:  layoutId:        string;
+203:  roofPlane:       RoofPlane;
+205:  setbackM:        number;
+207:  rowSpacingM:     number;
+219:    layoutId, roofPlane, panel, panelSpacingM, rowSpacingM, tilt, azimuth,
+221:  const setbackM = Math.max(params.setbackM, params.fireSetbackM ?? 0);
+228:  const portraitPanels = runPass(layoutId, roofPlane, panel, setbackM,
+229:    panelSpacingM, rowSpacingM, tilt, azimuth, 'portrait', eaveSetbackM, ridgeSetbackM, sideSetbackM, alignToEdge);
+230:  const portraitScore = portraitPanels.length + PORTRAIT_BONUS;
+233:  const landscapePanels = runPass(layoutId, roofPlane, panel, setbackM,
+234:    panelSpacingM, rowSpacingM, tilt, azimuth, 'landscape', eaveSetbackM, ridgeSetbackM, sideSetbackM, alignToEdge);
+235:  const landscapeScore = landscapePanels.length; // no bonus
+237:  // Pass 3: Mixed-fill (portrait rows + landscape in Y-remainder)
+239:    layoutId, roofPlane, panel, setbackM, panelSpacingM, rowSpacingM, tilt, azimuth,
+245:    portrait:  { count: portraitPanels.length,  score: portraitScore  },
+247:    landscape: { count: landscapePanels.length,  score: landscapeScore },
+250:  // Select highest score — ties broken by portrait > mixed > landscape
+251:  const best = Math.max(portraitScore, mixedScore, landscapeScore);
+253:  if (portraitScore >= best) {
+255:    return { panels: tagStrategy(portraitPanels, 'PORTRAIT'), strategy: 'PORTRAIT', score: portraitScore };
+262:  return { panels: tagStrategy(landscapePanels, 'LANDSCAPE'), strategy: 'LANDSCAPE', score: landscapeScore };
+268: * Run one orientation pass by delegating entirely to generatePanelGridCAD.
+269: * generatePanelGridCAD contains the authoritative row iteration loop.
+271:function runPass(
+272:  layoutId:      string,
+273:  roofPlane:     RoofPlane,
+275:  setbackM:      number,
+277:  rowSpacingM:   number,
+280:  orientation:   'portrait' | 'landscape',
+286:  return generatePanelGridCAD({
+287:    layoutId,
+288:    roofPlane,
+290:    setbackM,
+292:    rowSpacingM,
+306: * Mixed-fill: portrait rows fill the full usable roof.
+307: * Then detect the Y-remainder strip above the last portrait row.
+308: * If a landscape row fits in the remainder, sweep it there.
+309: * Merge portrait + landscape panels.
+311: * This works entirely in LECS feet (rotated CAD frame) matching exactly
+312: * how generatePanelGridCAD computes the bbox and grid.
+314: * Returns portrait-only panels if no landscape row fits in the remainder.
+316:function buildMixedFill(
+317:  layoutId:      string,
+318:  roofPlane:     RoofPlane,
+320:  setbackM:      number,
+322:  rowSpacingM:   number,
+331:  if (roofPlane.vertices.length < 3) return [];
+333:  // Step 1: Get full portrait layout from the CAD engine (authoritative geometry)
+334:  const portraitPanels = runPass(layoutId, roofPlane, panel, setbackM,
+335:    panelSpacingM, rowSpacingM, tilt, azimuth, 'portrait', eaveSetbackM, ridgeSetbackM, sideSetbackM, alignToEdge);
+337:  if (portraitPanels.length === 0) {
+338:    // No portrait rows fit — try landscape fill instead
+339:    return runPass(layoutId, roofPlane, panel, setbackM,
+340:      panelSpacingM, rowSpacingM, tilt, azimuth, 'landscape', eaveSetbackM, ridgeSetbackM, sideSetbackM, alignToEdge);
+343:  // Step 2: Recompute the rotated bbox using LECS — same math as generatePanelGridCAD.
+344:  // IMPORTANT: Use full unshrunken polygon (no shrinkPolygonFeet) — per-edge setbacks
+345:  // are applied as bbox adjustments below, matching the CAD engine exactly.
+346:  const originLat = roofPlane.centroidLat
+347:    ?? roofPlane.vertices.reduce((s, v) => s + v.lat, 0) / roofPlane.vertices.length;
+348:  const originLng = roofPlane.centroidLng
+349:    ?? roofPlane.vertices.reduce((s, v) => s + v.lng, 0) / roofPlane.vertices.length;
+351:  const localFt: LocalFeetPoint[] = roofPlane.vertices.map(v =>
+355:  // Full unshrunken polygon for containment test (same as CAD engine step 4)
+357:  if (usableFt.length < 3) return portraitPanels;
+359:  // v47.118: rotAngle must match generatePanelGridCAD exactly.
+360:  // If alignToEdge and roofEdgeAngleDeg is set, use edge-aligned rotation.
+361:  const rotAngle = (alignToEdge && roofPlane.roofEdgeAngleDeg !== undefined)
+362:    ? computeEdgeAlignedRotAngle(roofPlane.roofEdgeAngleDeg, azimuth)
+367:  // Per-edge setbacks matching CAD engine step 8b exactly
+369:  const _ridgeSetbackFt = (ridgeSetbackM ?? setbackM)  * FEET_PER_METER;  // default 18"
+370:  const _sideSetbackFt  = (sideSetbackM  ?? setbackM)  * FEET_PER_METER;  // default 18"
+372:  // Zone bounds computed below from full bb + per-edge setbacks (no pre-restriction)
+377:  // Portrait panel dimensions (feet) — mirror generatePanelGridCAD ridgeIsNS logic exactly
+380:    ? panel.width  * FEET_PER_METER   // portrait Y up-slope for east/west roof
+381:    : panel.height * FEET_PER_METER;  // portrait Y up-slope for south/north roof
+383:    ? panel.width  * FEET_PER_METER   // landscape X along N-S ridge
+384:    : panel.height * FEET_PER_METER;  // landscape X along E-W ridge
+386:    ? panel.height * FEET_PER_METER   // landscape Y up E-W slope
+387:    : panel.width  * FEET_PER_METER;  // landscape Y up N-S slope
+389:  const rowSpacingFt   = rowSpacingM   * FEET_PER_METER;
+391:  const stepYft_p      = pYft_p + rowSpacingFt;
+393:  const stepYft_l      = pYft_l + rowSpacingFt;
+395:  // Full roof bbox (no pre-restriction) -- setbacks are zone filters below
+396:  const roofHeightFt   = bb.maxY - bb.minY;
+403:  // Count portrait rows from eaveZoneY up to ridgeZoneY
+404:  let portraitRowCount = 0;
+405:  for (let rowY = eaveZoneY; rowY + pYft_p <= ridgeZoneY + 1e-9; rowY += stepYft_p) {
+406:    portraitRowCount++;
+409:  const lastPortraitRowTop = portraitRowCount > 0
+410:    ? eaveZoneY + (portraitRowCount - 1) * stepYft_p + pYft_p
+413:  const remainderStart  = lastPortraitRowTop + rowSpacingFt;
+417:    roofHeightFt:     roofHeightFt.toFixed(3) + 'ft (' + (roofHeightFt / FEET_PER_METER).toFixed(2) + 'm)',
+419:    panelHeightFt:    pYft_p.toFixed(3) + 'ft portrait up-slope',
+420:    portraitRows:     portraitRowCount,
+426:    landscapeRowFits: remainderHeight >= pYft_l - 1e-9,
+429:  if (roofHeightFt / FEET_PER_METER > 5.0 && portraitRowCount < 2) {
+430:    console.warn('[MIXED_FILL_DEBUG] WARNING: roof', (roofHeightFt/FEET_PER_METER).toFixed(1),
+431:      'm > 5m but only', portraitRowCount, 'portrait rows.',
+435:  if (remainderHeight < pYft_l - 1e-9) { return portraitPanels; }
+437:  // Step 3: Sweep landscape panels in remainder [remainderStart, ridgeZoneY]
+439:  const landscapePanels: PlacedPanel[] = [];
+440:  let lsGridRow = Math.max(...portraitPanels.map(p => p.row ?? 0)) + 1;
+444:    let rowY = remainderStart;
+445:    rowY + pYft_l <= ridgeZoneY + 1e-9;
+446:    rowY += stepYft_l, lsGridRow++
+448:    const centerY = rowY + pYft_l / 2;
+458:      // All-4-corners test with EPS inset (matches CAD engine)
+473:      landscapePanels.push({
+474:        id: uuidv4(), layoutId, lat, lng,
+480:        row: lsGridRow, col: lsCol,
+481:        orientation: 'landscape',
+482:        layoutSource: 'AUTO', placementType: 'ROOF', systemType: 'roof',
+
+===== lib/placementEngine.ts =====
+5: *   1. Grid-based snapping system (portrait/landscape aware)
+6: *   2. Fire setback zone calculation (NEC/IFC compliant defaults)
+7: *   3. Azimuth-aligned grid rotation for roof arrays
+8: *   4. Multi-row generation with auto-spacing
+25:function metersPerDegLng(lat: number): number {
+31:export type PanelOrientation = 'portrait' | 'landscape' | 'hybrid';
+34: * Fire setback configuration — configurable per AHJ.
+37:export interface FireSetbackConfig {
+38:  /** Side (rake/gable end) setback in meters (default: 0.457m = 18 inches) */
+42:  /** Ridge (top) setback in meters (default: 0.457m = 18 inches) */
+44:  /** Eave (bottom/gutter) setback in meters (default: 0 -- no IRC eave requirement) */
+69:export interface GridSnapConfig {
+73:  rowSpacingM: number;
+83:export interface SetbackZone {
+90: * Multi-row generation parameters.
+92:export interface MultiRowParams {
+93:  layoutId: string;
+98:  rowCount: number;
+99:  rowSpacingM: number;
+105:  systemType: 'roof' | 'ground' | 'fence';
+111:export interface AutoFillParams {
+112:  layoutId: string;
+113:  roofPlane: RoofPlane;
+116:  setbacks: FireSetbackConfig;
+118:  rowSpacingM: number;
+132:export function getPanelDimensions(
+136:  if (orientation === 'landscape') {
+137:    // Swap width and height for landscape
+148: * Supports azimuth-rotated grids for roof alignment.
+150:export function snapToGrid(
+171:  const cellH = config.panelHeightM + config.rowSpacingM;
+190:export function buildGridConfig(
+195:  rowSpacingM: number,
+209:      rowSpacingM,
+220:    rowSpacingM,
+230: * Calculate the effective setback distance for a roof polygon.
+233: * For a simple rectangular roof:
+238: * For the 2D canvas layout engine, we use a uniform inset equal to the
+239: * maximum setback value. The 3D engine uses per-edge setbacks.
+241:export function calcEffectiveSetback(config: FireSetbackConfig): number {
+242:  // v47.111: Returns SIDE setback only (used as uniform polygon shrink for the visual overlay).
+243:  // The CAD solver now uses per-edge setbacks directly (ridge/eave/side separate).
+249: * Returns per-edge setbacks for the CAD solver.
+254:export function getPerEdgeSetbacks(config: FireSetbackConfig): {
+267: * Generate setback zone overlay polygons for canvas rendering.
+270: * The restricted zone is the ring between the roof edge and the setback line.
+273:export function generateSetbackZones(
+274:  roofVertices: { lat: number; lng: number }[],
+277:  if (roofVertices.length < 3) return [];
+281:  // Restricted zone = the full roof outline (shown as red background)
+284:    vertices: roofVertices,
+285:    label: `Edge setback ${(config.edgeSetbackM * 39.37).toFixed(0)}"`,
+289:  const buildable = insetPolygon(roofVertices, config.edgeSetbackM);
+306:export function insetPolygon(
+336: * Generate a panel grid aligned to the roof azimuth.
+337: * Panels are placed in rows perpendicular to the azimuth direction,
+338: * ensuring arrays follow the roof slope direction.
+340: * This is the core grid generation function used by all placement modes.
+342:export function generateAlignedGrid(params: {
+343:  layoutId: string;
+347:  setbackM: number;
+349:  rowSpacingM: number;
+352:  systemType: 'roof' | 'ground' | 'fence';
+356:    layoutId, vertices, panel, orientation, setbackM,
+357:    panelSpacingM, rowSpacingM, tilt, azimuth, systemType, targetKw,
+376:  // Azimuth 180° = south-facing → rows run east-west
+396:  // Apply setback inset
+397:  minX += setbackM; maxX -= setbackM;
+398:  minY += setbackM; maxY -= setbackM;
+407:  const stepY = heightM + rowSpacingM;
+412:  let row = 0;
+415:  for (let y = minY + halfH; y + halfH <= maxY; y += stepY, row++) {
+433:        layoutId,
+437:        y: row * stepY,
+442:        row,
+459: * Generate multiple rows of panels from a start/end line definition.
+460: * User places first row (start → end), then specifies row count.
+461: * Additional rows are auto-generated at rowSpacingM intervals.
+463: * Row direction: perpendicular to the azimuth (rows run east-west for south-facing).
+466:export function generateMultipleRows(params: MultiRowParams): PlacedPanel[] {
+468:    layoutId, startLat, startLng, endLat, endLng,
+469:    rowCount, rowSpacingM, panel, orientation, tilt, azimuth, panelSpacingM, systemType,
+476:  const rowDx = (endLng - startLng) * mPerDegLng;
+477:  const rowDy = (endLat - startLat) * METERS_PER_DEG_LAT;
+478:  const rowLen = Math.sqrt(rowDx * rowDx + rowDy * rowDy);
+479:  if (rowLen < 0.01) return [];
+481:  const rowUx = rowDx / rowLen; // unit vector along row
+482:  const rowUy = rowDy / rowLen;
+484:  // Offset direction: perpendicular to row, pointing "north" for south-facing
+491:  const totalRowSpacing = heightM + rowSpacingM;
+495:  for (let r = 0; r < rowCount; r++) {
+496:    // Offset this row from the first row
+498:    const rowStartLat = startLat + (offsetUy * offsetM) / METERS_PER_DEG_LAT;
+499:    const rowStartLng = startLng + (offsetUx * offsetM) / mPerDegLng;
+501:    // Place panels along this row
+503:    const panelCount = Math.floor(rowLen / panelStep);
+507:      const panelLat = rowStartLat + (rowUy * distAlongRow) / METERS_PER_DEG_LAT;
+508:      const panelLng = rowStartLng + (rowUx * distAlongRow) / mPerDegLng;
+512:        layoutId,
+521:        row: r,
+535: * Auto-fill a roof plane with panels, respecting fire setbacks.
+536: * This is the upgraded version of fillRoof() that uses proper setback zones.
+538:export function autoFillWithSetbacks(params: AutoFillParams): PlacedPanel[] {
+540:    layoutId, roofPlane, panel, orientation, setbacks,
+541:    panelSpacingM, rowSpacingM, tilt, azimuth, targetKw,
+544:  const effectiveSetback = calcEffectiveSetback(setbacks);
+547:    layoutId,
+548:    vertices: roofPlane.vertices,
+551:    setbackM: effectiveSetback,
+553:    rowSpacingM,
+556:    systemType: 'roof',
+564: * Generate a ground mount array with azimuth-aligned rows.
+565: * Uses the same aligned grid engine as roof arrays.
+567:export function generateGroundArray(params: {
+568:  layoutId: string;
+574:  rowSpacingM: number;
+578:  const { layoutId, area, panel, orientation, tilt, azimuth, rowSpacingM, panelSpacingM, marginM = 0.5 } = params;
+590:    layoutId,
+594:    setbackM: marginM,
+596:    rowSpacingM,
+609:export function generateFenceArray(params: {
+610:  layoutId: string;
+619:  const { layoutId, fenceLine, panel, orientation, azimuth, panelSpacingM, fenceHeightM, bifacialOptimized } = params;
+653:        layoutId,
+662:        row: 0,
+677: * Calculate minimum row spacing to avoid inter-row shading.
+681:export function calcMinRowSpacing(
+704:export function regenerateWithOrientation(
+709:  rowSpacingM: number
+715:  // Group panels by layoutId
+718:    const key = p.layoutId;
+725:  for (const [layoutId, layoutPanels] of byLayout) {
+726:    // Find bounding box of this layout's panels
+729:    for (const p of layoutPanels) {
+741:    const stepLat = (heightM + rowSpacingM) / METERS_PER_DEG_LAT;
+745:    const sample = layoutPanels[0];
+746:    let row = 0;
+747:    for (let lat = minLat; lat + heightM / METERS_PER_DEG_LAT <= maxLat + stepLat; lat += stepLat, row++) {
+752:          layoutId,
+756:          y: row * (heightM + rowSpacingM),
+761:          row,
+783:function precomputeLocalPolygon(verts: { x: number; y: number }[]): LocalPolygon {
+800:function fastLocalPIP(px: number, py: number, poly: LocalPolygon): boolean {
+820:export function panelCountForKw(targetKw: number, panelWattage: number): number {
+827:export function calcSystemSizeKw(panels: PlacedPanel[]): number {
+
+===== app/admin/engineering-intelligence/components.tsx =====
+46:import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
+59:  stale: 'border-orange-500/30 bg-orange-500/10 text-orange-300',
+77:function cx(...values: Array<string | false | null | undefined>) {
+83:function isRecord(value: unknown): value is Record<string, unknown> {
+87:function safeRenderValue(value: WorkspaceRenderable, fallback = 'not_loaded'): string {
+104:function renderMetadataValue(value: WorkspaceRenderable, fallback = 'not_loaded'): string {
+108:function normalizeWorkspaceDisplay(value: WorkspaceRenderable): string[] {
+116:function workspaceKey(prefix: string, value: WorkspaceRenderable, index: number): string {
+120:function safeArray<T>(value: T[] | readonly T[] | null | undefined): T[];
+121:function safeArray<T = unknown>(value: unknown): T[];
+122:function safeArray<T = unknown>(value: unknown): T[] {
+126:function collectionSize(value: unknown): number {
+132:function summarizeContinuityChain(chain: unknown): string {
+137:function summarizeSequenceBreakpoint(point: unknown): string {
+142:function summarizeMetadataCompleteness(score: unknown): string {
+148:function summarizeSnapshotHash(snapshot: unknown): string {
+149:  if (!isRecord(snapshot)) return renderMetadataValue(snapshot);
+150:  return `${renderMetadataValue(snapshot.snapshotId, 'snapshot')}:${renderMetadataValue(snapshot.snapshotHash, 'hash_not_loaded')}`;
+153:function summarizeTransitionEvent(event: unknown): string {
+158:function summarizeDiffEntry(entry: unknown): string {
+163:function metadataCompletenessLabel(entry: unknown): string {
+168:export function WorkspaceShell({ model, title, subtitle, children }: {
+177:        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+189:            <div className="mt-3 text-slate-400">No OCR/CV/CAD/autonomous-regeneration runtime path is exposed here.</div>
+199:export function RouteNav({ routes }: { routes: EngineeringIntelligenceRouteSummary[] }) {
+222:export function ProjectIntelligencePicker({ projects, loadState }: { projects: Project[]; loadState: 'loaded' | 'unauthenticated' | 'load_error' }) {
+224:    <Panel title="Project Intelligence Picker" eyebrow="Real project routing">
+266:        'Selecting a project only loads deterministic evidence, graph, snapshot, invalidation, regeneration-plan metadata, and CAD-readiness metadata; it does not run OCR, CV, CAD generation, or autonomous regeneration.',
+272:export function Panel({ title, eyebrow, children }: { title: string; eyebrow?: string; children: React.ReactNode }) {
+276:        {eyebrow && <div className="mb-1 text-[10px] font-black uppercase tracking-[0.24em] text-sky-300">{safeRenderValue(eyebrow)}</div>}
+284:function EmptyState({ children, state = 'not_loaded' }: { children: React.ReactNode; state?: string }) {
+293:function StatusPill({ value }: { value: WorkspaceRenderable }) {
+298:function TokenList({ values, limit = 6 }: { values: WorkspaceRenderable; limit?: number }) {
+312:export function ProjectHydrationSummary({ hydration }: { hydration: HydratedProjectEngineeringState }) {
+314:    <Panel title="Live Project Engineering Hydration" eyebrow="Project state">
+318:        <Metric label="Snapshots" value={collectionSize(hydration.snapshots)} />
+319:        <Metric label="Regeneration plans" value={collectionSize(hydration.regenerationPlans)} />
+324:          <div className="mt-2 break-all font-mono text-sky-300">{safeRenderValue(hydration.canonicalSurveyId)}</div>
+328:          <div className="mt-2 break-all font-mono text-orange-300">{safeRenderValue(hydration.invalidationResult?.resultId)}</div>
+337:          <Metric label="Canonical evidence" value={hydration.surveyEvidence.canonicalEvidenceCount} />
+349:export function CADReadinessWorkspace({ readiness }: { readiness: CADReadinessMetadataModel }) {
+351:    <Panel title="CAD Readiness Metadata" eyebrow="Metadata only">
+356:        <Metric label="Runtime CAD" value="disabled" />
+379:export function PhotoGroupingWorkspace({ grouping }: { grouping: DeterministicPhotoGroupingModel }) {
+381:    <Panel title="Deterministic Photo Grouping + Survey Sequence" eyebrow="Metadata-only grouping">
+383:        <Metric label="Traversal rows" value={collectionSize(grouping.surveyTraversalOrder)} />
+389:        <div className="mt-4"><EmptyState state="not_loaded">No canonical manifest metadata was loaded, so traversal order, photo continuity, evidence clusters, and grouped readiness are not fabricated.</EmptyState></div>
+393:            <Metric label="Roof-side groups" value={collectionSize(grouping.roofSideCandidateGroups)} />
+451:        <ListBox title="Ground/trench candidate groups" values={safeArray(grouping.groundMountCandidateGroups).map(group => isRecord(group) ? group.clusterId : group)} />
+454:        {safeArray(grouping.groupedCADReadiness).map(context => (
+475:export function FieldEvidenceOrchestrationWorkspace({ orchestration }: { orchestration: FieldEvidenceOrchestrationModel }) {
+477:    <Panel title="Field Evidence Orchestration" eyebrow="Technician movement order">
+496:                <td className="p-3"><TokenList values={safeArray(step.captureItems).map(item => isRecord(item) ? item.canonicalCategory : item)} limit={10} /></td>
+503:        {orchestration.groups.map(group => <ListBox key={group.groupId} title={group.label} values={group.canonicalCategories} />)}
+511:export function EngineeringHealthDashboard({ health }: { health: EngineeringHealthDashboardModel }) {
+514:    ['Stale outputs', health.staleOutputs, 'outputs requiring review or planned regeneration'],
+517:    ['Regeneration candidates', health.regenerationCandidates, 'planned candidates only'],
+519:    ['Snapshots', health.snapshotVersions, 'durable state versions'],
+520:    ['Graph edges', health.dependencyGraphEdges, `${health.dependencyGraphNodes} graph nodes`],
+523:    <Panel title="Engineering Health Dashboard" eyebrow="Health">
+542:export function CanonicalEvidenceWorkspace({ groups }: { groups: CanonicalEvidenceWorkspaceGroupModel[] }) {
+544:    <Panel title="Canonical Evidence Workspace" eyebrow="Evidence lineage">
+553:              <span className="rounded-full bg-sky-400/10 px-2 py-1 text-[10px] font-bold text-sky-300">{safeArray(group.canonicalEvidenceItems).length} rows</span>
+570:              <div className="text-[10px] font-bold uppercase tracking-wide text-violet-300">CAD readiness flags from real evidence</div>
+580:              ) : <EmptyState state="not_loaded">No CAD-readiness metadata is linked to this group.</EmptyState>}
+583:              {collectionSize(group.canonicalEvidenceItems) ? group.canonicalEvidenceItems.map(item => (
+584:                <div key={item.canonicalEvidenceId} className="rounded-xl border border-white/10 bg-slate-950/70 p-4">
+585:                  <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+587:                      <div className="break-all font-mono text-xs text-white">{safeRenderValue(item.canonicalEvidenceId)}</div>
+593:                    <div>Representative: <span className="font-mono text-slate-200">{safeRenderValue(item.canonicalRepresentativeStatus)}</span></div>
+600:                  <p className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3 text-xs leading-5 text-slate-300">{safeRenderValue(item.canonicalSelectionReason)}</p>
+603:                    <LineageBox title="Provenance / state refs" values={item.provenance} />
+608:                    <LineageBox title="Stale impacts" values={[...item.staleStateImpactStateIds, ...item.staleImpactReasons]} />
+609:                    <LineageBox title="Regeneration candidates" values={item.regenerationCandidateIds} />
+618:                    <LineageBox title="Field-quality signals" values={collectionSize(item.fieldQualitySignals) ? item.fieldQualitySignals : ['no row-level quality warnings']} />
+621:              )) : <EmptyState state="no_evidence">No canonical evidence rows are loaded for this group. Missing evidence is explicit; no MSP, attic, routing, trench, ESS, or detached-structure evidence is synthesized.</EmptyState>}
+631:function LineageBox({ title, values }: { title: WorkspaceRenderable; values: WorkspaceRenderable }) {
+636:export function RequirementWorkspace({ requirements }: { requirements: RequirementWorkspaceItemModel[] }) {
+638:    <Panel title="Requirement Workspace" eyebrow="Registry status">
+651:                <td className="p-3"><TokenList values={req.staleImpactStateIds} /></td>
+661:export function DecisionWorkspace({ decisions }: { decisions: DecisionWorkspaceItemModel[] }) {
+663:    <Panel title="Engineering Decision Workspace" eyebrow="Decision provenance">
+670:            <div className="mt-3 text-xs text-slate-400">Dependency lineage</div><TokenList values={decision.dependencyLineageIds} />
+672:            <div className="mt-3 text-xs text-slate-400">Affected outputs / stale impact</div><TokenList values={[...decision.affectedOutputIds, ...decision.staleImpactStateIds]} />
+680:export function StaleInvalidationWorkspace({ stale }: { stale: StaleInvalidationWorkspaceModel }) {
+682:    <Panel title="Stale-State / Invalidation Workspace" eyebrow="Invalidation">
+684:        <Metric label="Stale outputs" value={collectionSize(stale.staleOutputIds)} />
+685:        <Metric label="Invalidation chains" value={collectionSize(stale.invalidationChains)} />
+686:        <Metric label="Preserved outputs" value={collectionSize(stale.preservedOutputIds)} />
+687:        <Metric label="Regeneration scope" value={collectionSize(stale.regenerationScopeIds)} />
+690:        <ListBox title="Current stale outputs" values={stale.staleOutputIds} />
+691:        <ListBox title="Preserved outputs" values={stale.preservedOutputIds} />
+692:        <ListBox title="Regeneration candidates" values={stale.regenerationScopeIds} />
+693:        <ListBox title="No autonomous action" values={['metadata visualization only', 'operator-controlled regeneration required']} />
+696:        {safeArray(stale.invalidationChains).length ? safeArray(stale.invalidationChains).map(chain => (
+698:            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+700:              <StatusPill value="stale" />
+711:        )) : <EmptyState state="no_invalidation_history">No invalidation transition history is loaded.</EmptyState>}
+713:      <DeterministicNotes notes={stale.deterministicNotes} />
+718:export function SnapshotTimelineWorkspace({ snapshots }: { snapshots: SnapshotTimelineWorkspaceModel }) {
+720:    <Panel title="Snapshot Timeline Workspace" eyebrow="State snapshots">
+722:        <Metric label="Snapshots" value={collectionSize(snapshots.snapshots)} />
+723:        <Metric label="Diffs" value={collectionSize(snapshots.diffs)} />
+724:        <Metric label="Transition events" value={collectionSize(snapshots.transitionHistory?.transitionEvents)} />
+725:        <Metric label="Latest" value={snapshots.latestSnapshotId ? 'loaded' : 'no_snapshot'} />
+728:        {safeArray(snapshots.snapshots).length ? safeArray(snapshots.snapshots).map(snapshot => (
+729:          <div key={snapshot.snapshotId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+730:            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+732:                <div className="font-semibold text-white">{safeRenderValue(snapshot.snapshotId)}</div>
+733:                <div className="mt-1 text-xs text-slate-400">Generated: {safeRenderValue(snapshot.generatedAt)}</div>
+734:                <div className="mt-1 text-xs text-slate-500">Previous: {safeRenderValue(snapshot.previousSnapshotId, 'none')} · Superseded by: {safeRenderValue(snapshot.supersededBySnapshotId, 'none')}</div>
+736:              <div className="break-all font-mono text-xs text-sky-300">{safeRenderValue(snapshot.snapshotHash)}</div>
+739:              <Metric label="State refs" value={collectionSize(snapshot.stateRefs)} />
+740:              <Metric label="Valid" value={collectionSize(snapshot.validStateIds)} />
+741:              <Metric label="Stale" value={collectionSize(snapshot.staleStateIds)} />
+742:              <Metric label="Transitions" value={collectionSize(snapshot.transitionEventIds)} />
+745:              <LineageBox title="Valid outputs" values={snapshot.validStateIds} />
+746:              <LineageBox title="Stale outputs" values={snapshot.staleStateIds} />
+747:              <LineageBox title="Transition lineage" values={snapshot.transitionEventIds} />
+748:              <LineageBox title="Snapshot notes" values={snapshot.deterministicNotes} />
+751:        )) : <EmptyState state="no_snapshot">No persistent snapshot set is loaded.</EmptyState>}
+754:        <ListBox title="Snapshot hashes" values={safeArray(snapshots.snapshotHashes).map(summarizeSnapshotHash)} />
+755:        <ListBox title="Timeline transitions" values={safeArray(snapshots.transitionHistory?.transitionEvents).map(summarizeTransitionEvent)} />
+756:        <ListBox title="Diff entries" values={safeArray(snapshots.diffs).flatMap(diff => isRecord(diff) ? safeArray(diff.entries).map(summarizeDiffEntry) : [renderMetadataValue(diff)])} />
+757:        <ListBox title="Timeline stale states" values={snapshots.timeline?.staleStateIds ?? []} />
+759:      <DeterministicNotes notes={snapshots.deterministicNotes} />
+764:export function DependencyGraphViewer({ graph }: { graph: DependencyGraphViewerModel }) {
+770:    <Panel title="Dependency Graph Viewer" eyebrow="Graph">
+772:        <div className="mb-4"><EmptyState state="no_graph">No persistent graph snapshot is loaded; graph preview is showing registry-visible requirement and decision nodes only.</EmptyState></div>
+775:        <svg width={width} height={height} role="img" aria-label="Deterministic engineering dependency graph preview">
+784:              <rect x="-64" y="-28" width="128" height="56" rx="12" fill={node.status === 'stale' || node.status === 'invalidated' ? 'rgba(124,45,18,0.95)' : 'rgba(15,23,42,0.95)'} stroke={node.status === 'not_loaded' ? 'rgba(148,163,184,0.45)' : node.status === 'current' ? 'rgba(56,189,248,0.45)' : 'rgba(251,146,60,0.6)'} />
+798:export function RegenerationPlanningWorkspace({ planning }: { planning: RegenerationPlanningWorkspaceModel }) {
+800:    <Panel title="Regeneration Planning Workspace" eyebrow="Plan visualization">
+801:      <div className="grid gap-3 md:grid-cols-4"><Metric label="Plans" value={collectionSize(planning.plans)} /><Metric label="Candidates" value={collectionSize(planning.regenerationCandidates)} /><Metric label="Blocked deps" value={collectionSize(planning.blockedDependencies)} /><Metric label="Preserved" value={collectionSize(planning.preservedOutputIds)} /></div>
+802:      <div className="mt-4 grid gap-4 md:grid-cols-2"><ListBox title="Regeneration order" values={planning.regenerationOrder} /><ListBox title="Blocked dependencies" values={planning.blockedDependencies} /><ListBox title="Preserved outputs" values={planning.preservedOutputIds} /><ListBox title="Candidates" values={planning.regenerationCandidates} /></div>
+808:export function InvalidationPropagationWorkspace({ model }: { model: InvalidationPropagationWorkspaceModel }) {
+810:    <Panel title="Invalidation Propagation Workspace" eyebrow="Propagation V1">
+812:        <Metric label="Sources" value={collectionSize(model.invalidationSources)} />
+814:        <Metric label="Propagation paths" value={collectionSize(model.dependencyTraversalPaths)} />
+818:        <ListBox title="Invalidation sources" values={model.invalidationSources} />
+822:        <ListBox title="Impacted snapshots" values={model.impactedSnapshots} />
+825:      <div className="mt-4"><ListBox title="Dependency traversal paths" values={model.dependencyTraversalPaths} /></div>
+831:export function DependencyTraversalWorkspace({ model }: { model: DependencyTraversalWorkspaceModel }) {
+833:    <Panel title="Dependency Traversal Workspace" eyebrow="Traversal V1">
+841:        <ListBox title="Downstream lineage" values={model.downstreamLineage} />
+853:export function RegenerationPlanningV1Workspace({ model }: { model: RegenerationPlanningV1WorkspaceModel }) {
+855:    <Panel title="Regeneration Planning V1 Workspace" eyebrow="No regeneration executed">
+859:        <Metric label="Dependency chains" value={collectionSize(model.dependencyChains)} />
+863:        <ListBox title="Would need regeneration/review" values={model.wouldRegenerate} />
+868:        <ListBox title="Dependency chains" values={model.dependencyChains} />
+875:export function SnapshotDeltaWorkspace({ model }: { model: SnapshotDeltaWorkspaceModel }) {
+877:    <Panel title="Snapshot Delta Workspace" eyebrow="Delta V1">
+880:        <Metric label="Stale introduced" value={collectionSize(model.staleOutputsIntroduced)} />
+881:        <Metric label="Graph delta" value={collectionSize(model.dependencyGraphDelta)} />
+882:        <Metric label="CAD readiness changes" value={collectionSize(model.changedCADReadiness)} />
+888:        <ListBox title="Stale outputs introduced" values={model.staleOutputsIntroduced} />
+889:        <ListBox title="Regenerated candidates" values={model.regeneratedCandidates} />
+890:        <ListBox title="Invalidation causes" values={model.invalidationCauses} />
+891:        <ListBox title="Changed CAD readiness" values={model.changedCADReadiness} />
+892:        <ListBox title="Dependency graph delta" values={model.dependencyGraphDelta} />
+899:export function AffectedOutputsWorkspace({ model }: { model: AffectedOutputsWorkspaceModel }) {
+901:    <Panel title="Affected Outputs Workspace" eyebrow="Output impact V1">
+906:        <Metric label="Review required" value={collectionSize(model.reviewRequired)} />
+911:            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between"><div className="break-all font-mono text-white">{safeRenderValue(output.outputId)}</div><StatusPill value={output.staleClass} /></div>
+929:export function StaleStateTimelineWorkspace({ model }: { model: StaleStateTimelineWorkspaceModel }) {
+931:    <Panel title="Stale State Timeline" eyebrow="Timeline V1">
+934:        <Metric label="Stale states" value={collectionSize(model.staleStateIds)} />
+941:            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between"><div className="break-all font-mono text-white">{safeRenderValue(event.eventId)}</div><StatusPill value={event.staleClass} /></div>
+942:            <div className="mt-1 text-sky-300">Snapshot: {safeRenderValue(event.snapshotId)}</div>
+946:              <LineageBox title="Dependencies" values={event.dependencyNodeIds} />
+947:              <LineageBox title="Evidence" values={event.canonicalEvidenceIds} />
+960:export function StructuredEngineeringSignalsWorkspace({ model }: { model: StructuredEngineeringSignalsWorkspaceModel }) {
+963:    <Panel title="Structured Engineering Signals" eyebrow="Signal extraction V1">
+975:              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+989:                <LineageBox title="CAD impacts" values={signal.cadImpacts} />
+990:                <LineageBox title="Stale impacts" values={signal.staleImpacts} />
+1011:export function SignalProvenanceWorkspace({ model }: { model: SignalProvenanceWorkspaceModel }) {
+1013:    <Panel title="Signal Provenance" eyebrow="Evidence-to-signal lineage">
+1018:        <Metric label="CAD generation" value="disabled" />
+1028:              <LineageBox title="Dependency nodes" values={chain.dependencyNodes} />
+
+===== lib/engineeringIntelligence/workspace.ts =====
+9:import type { CanonicalEvidenceProvenanceRecord } from '@/lib/survey/evidence/provenance';
+10:import type { CADReadinessFlag } from './cadReadiness';
+84:    deterministicPurpose: 'Project-bound evidence, requirement, decision, invalidation, and regeneration-planning view.',
+87:    routeId: 'snapshots',
+88:    href: '/admin/engineering-intelligence/snapshots',
+90:    deterministicPurpose: 'Persistent engineering state snapshots, hashes, diffs, and transition timeline.',
+125:    groupId: 'roof',
+127:    description: 'Roof plane, edge, ridge, surface, and obstruction evidence used for roof-layout traceability.',
+128:    requirementIds: ['roof_overview'],
+129:    categories: ['roof_plane', 'roof_edge', 'ridge', 'roof_surface', 'obstructions', 'overview'],
+130:    readinessFlagIds: ['roof-plane-ready', 'setback-ready'],
+135:    description: 'Attic, structural access, framing-context, and review-supporting canonical evidence.',
+138:    readinessFlagIds: ['roof-plane-ready'],
+151:    description: 'Detached-structure evidence group reserved for explicit canonical evidence and future requirement expansion.',
+167:    description: 'Trenching, ground-mount, and route-specific evidence group reserved for canonical evidence and dependency lineage.',
+174:function stateRefs(snapshot: EngineeringStateSnapshot | null) {
+175:  return snapshot?.stateRefs ?? [];
+178:function buildHealth(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): EngineeringHealthDashboardModel {
+180:  const staleOutputs = latestSnapshot ? listStaleEngineeringOutputs(latestSnapshot).length : 0;
+181:  const blockedOutputs = refs.filter(ref => ref.staleStatus === 'blocked').length;
+184:  const regenerationCandidates = (input.regenerationPlans ?? []).reduce((count, plan) => count + plan.staleStateIds.length, 0);
+189:    staleOutputs,
+192:    regenerationCandidates,
+194:    snapshotVersions: input.snapshots?.length ?? 0,
+195:    dependencyGraphNodes: input.persistentGraph?.nodes.length ?? 0,
+196:    dependencyGraphEdges: input.persistentGraph?.edges.length ?? 0,
+197:    evidenceCompleteness: latestSnapshot ? 'snapshot-linked' : 'canonical-manifest-required',
+198:    requirementSatisfaction: latestSnapshot ? 'snapshot-linked' : 'registry-visible',
+201:        ? `Health counts derived from latest engineering state snapshot ${latestSnapshot.snapshotId}.`
+202:        : 'No project snapshot was supplied; health dashboard shows registry/empty-state counts only.',
+208:function buildEvidenceGroups(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): CanonicalEvidenceWorkspaceGroupModel[] {
+211:  const canonicalRecords = surveyEvidence?.traceability.canonicalEvidence ?? [];
+214:  const invalidationEvents = input.invalidationResult?.invalidationEvents ?? [];
+215:  const plans = input.regenerationPlans ?? [];
+216:  const readinessFlags = input.cadReadiness?.flags ?? [];
+221:    const recordsForGroup = canonicalRecords.filter(record => group.categories.includes(record.evidenceCategory));
+223:      ref.canonicalEvidenceIds.some(evidenceId => recordsForGroup.some(record => record.canonicalEvidenceId === evidenceId)),
+225:    const snapshotOnlyIds = canonicalRecords.length === 0
+228:        .flatMap(ref => ref.canonicalEvidenceIds))
+230:    const canonicalEvidenceItems = [
+233:        status: 'canonical_representative',
+237:        invalidationEvents,
+241:      ...snapshotOnlyIds.map(canonicalEvidenceId => buildSnapshotOnlyEvidenceRow({
+242:        canonicalEvidenceId,
+246:        invalidationEvents,
+250:    ].sort((a, b) => a.canonicalEvidenceId.localeCompare(b.canonicalEvidenceId));
+252:    const fieldQualitySignals = buildGroupFieldQualitySignals(group.groupId, groupRequirements, groupReadinessFlags, canonicalEvidenceItems.length, surveyEvidence);
+256:      canonicalEvidenceItems,
+261:        canonicalEvidenceItems.length > 0
+262:          ? 'Evidence rows are hydrated from canonical evidence provenance records and linked snapshot/graph state references.'
+263:          : 'No canonical evidence rows are loaded for this group; missing or partial state is shown explicitly rather than fabricated.',
+265:          ? 'Survey origin, duplicate collapse, and canonical selection reason are sourced from the canonical evidence traceability bundle.'
+266:          : 'No canonical traceability records matched this group category set.',
+267:        'CAD readiness, stale impact, and graph linkage are metadata visualizations only and do not trigger CAD or regeneration.',
+273:function buildCanonicalEvidenceRow(input: {
+275:  status: 'canonical_representative';
+279:  invalidationEvents: EngineeringInvalidationEvent[];
+281:  readinessFlags: CADReadinessFlag[];
+283:  const linkedRefs = input.refs.filter(ref => ref.canonicalEvidenceIds.includes(input.record.canonicalEvidenceId));
+284:  const linkedRequirements = input.requirementEvaluations.filter(requirement => requirement.canonicalEvidenceIds.includes(input.record.canonicalEvidenceId));
+285:  const graphNodes = input.graph?.nodes.filter(node => node.canonicalEvidenceIds.includes(input.record.canonicalEvidenceId)) ?? [];
+288:  const invalidationEvents = input.invalidationEvents.filter(event => event.triggeringCanonicalEvidenceIds.includes(input.record.canonicalEvidenceId));
+289:  const staleStateImpactStateIds = sortText([...linkedRefs.filter(ref => ref.staleStatus !== 'current').map(ref => ref.stateId), ...invalidationEvents.map(event => event.stateId)]);
+295:    canonicalEvidenceId: input.record.canonicalEvidenceId,
+298:    provenance: sortText([...linkedRefs.map(ref => ref.stateId), input.record.evidenceTruthSource]),
+302:    canonicalRepresentativeStatus: input.status,
+303:    canonicalSelectionReason: input.record.selectionReason,
+314:    linkedCADReadinessFlags: readinessFlags,
+317:    staleStateImpactStateIds,
+318:    staleImpactReasons: sortText(invalidationEvents.map(event => event.invalidationReason)),
+319:    regenerationCandidateIds: sortText(input.plans.filter(plan => plan.staleStateIds.some(stateId => staleStateImpactStateIds.includes(stateId))).map(plan => plan.planId)),
+320:    status: staleStateImpactStateIds.length ? 'stale' : linkedRefs.length || graphNodeIds.length ? 'current' : 'partial',
+324:function buildSnapshotOnlyEvidenceRow(input: {
+325:  canonicalEvidenceId: string;
+329:  invalidationEvents: EngineeringInvalidationEvent[];
+331:  readinessFlags: CADReadinessFlag[];
+333:  const linkedRefs = input.refs.filter(ref => ref.canonicalEvidenceIds.includes(input.canonicalEvidenceId));
+334:  const graphNodes = input.graph?.nodes.filter(node => node.canonicalEvidenceIds.includes(input.canonicalEvidenceId)) ?? [];
+337:  const invalidationEvents = input.invalidationEvents.filter(event => event.triggeringCanonicalEvidenceIds.includes(input.canonicalEvidenceId));
+338:  const staleStateImpactStateIds = sortText([...linkedRefs.filter(ref => ref.staleStatus !== 'current').map(ref => ref.stateId), ...invalidationEvents.map(event => event.stateId)]);
+340:    canonicalEvidenceId: input.canonicalEvidenceId,
+343:    provenance: sortText(linkedRefs.map(ref => ref.stateId)),
+347:    canonicalRepresentativeStatus: 'snapshot_reference_only',
+348:    canonicalSelectionReason: 'Snapshot referenced this canonical evidence id, but no canonical traceability record was supplied to this workspace context.',
+349:    evidenceTruthSource: 'snapshot_state_reference',
+359:    linkedCADReadinessFlags: input.readinessFlags,
+361:    fieldQualitySignals: ['canonical traceability record unavailable for this snapshot-referenced evidence id'],
+362:    staleStateImpactStateIds,
+363:    staleImpactReasons: sortText(invalidationEvents.map(event => event.invalidationReason)),
+364:    regenerationCandidateIds: sortText(input.plans.filter(plan => plan.staleStateIds.some(stateId => staleStateImpactStateIds.includes(stateId))).map(plan => plan.planId)),
+365:    status: staleStateImpactStateIds.length ? 'stale' : 'current',
+369:function metadataCompletenessEntries(completeness: CanonicalEvidenceProvenanceRecord['metadataCompleteness']) {
+373:function summarizeReadinessImpact(flags: CADReadinessFlag[]): CanonicalEvidenceWorkspaceItemModel['readinessImpact'] {
+381:function buildEvidenceFieldQualitySignals(
+384:  readinessFlags: CADReadinessFlag[],
+401:function buildGroupFieldQualitySignals(
+404:  readinessFlags: CADReadinessFlag[],
+409:  if (evidenceCount === 0) signals.push('no canonical evidence rows loaded for this group');
+421:  if (groupId === 'roof' && surveyEvidence?.completeness !== 'sufficient') signals.push('low roof/completeness context for full CAD readiness');
+425:function buildPhotoGrouping(input: BuildEngineeringIntelligenceWorkspaceInput) {
+429:    canonicalManifest: null,
+430:    readinessFlags: input.cadReadiness?.flags ?? [],
+434:function buildRequirements(latestSnapshot: EngineeringStateSnapshot | null): RequirementWorkspaceItemModel[] {
+438:    const staleRefs = linkedRefs.filter(ref => ref.staleStatus !== 'current');
+445:      linkedEvidenceIds: sortText(linkedRefs.flatMap(ref => ref.canonicalEvidenceIds)),
+448:      dependencyReferences: sortText(linkedRefs.flatMap(ref => ref.dependencyNodeIds)),
+449:      staleImpactStateIds: sortText(staleRefs.map(ref => ref.stateId)),
+455:function buildDecisions(latestSnapshot: EngineeringStateSnapshot | null): DecisionWorkspaceItemModel[] {
+468:      evidenceLineageIds: sortText(linkedRefs.flatMap(ref => ref.canonicalEvidenceIds)),
+469:      dependencyLineageIds: sortText([...definition.engineeringDependencies, ...linkedRefs.flatMap(ref => ref.dependencyNodeIds)]),
+472:      staleImpactStateIds: sortText(linkedRefs.filter(ref => ref.staleStatus !== 'current').map(ref => ref.stateId)),
+478:function buildStaleInvalidation(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): StaleInvalidationWorkspaceModel {
+480:  const plans = input.regenerationPlans ?? [];
+482:    staleOutputIds: latestSnapshot ? listStaleEngineeringOutputs(latestSnapshot) : [],
+483:    invalidationChains: events
+489:        triggeringEvidenceIds: event.canonicalEvidenceIds,
+496:    regenerationScopeIds: sortText(plans.flatMap(plan => plan.staleStateIds)),
+499:      'Regeneration planning remains a deterministic plan visualization; no autonomous regeneration is triggered.',
+504:function buildSnapshots(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): SnapshotTimelineWorkspaceModel {
+505:  const snapshots = sortBy(input.snapshots ?? [], snapshot => snapshot.snapshotId);
+507:    snapshots,
+508:    latestSnapshotId: latestSnapshot?.snapshotId ?? null,
+509:    snapshotHashes: snapshots.map(snapshot => ({ snapshotId: snapshot.snapshotId, snapshotHash: snapshot.snapshotHash })),
+510:    diffs: sortBy(input.snapshotDiffs ?? [], diff => diff.diffId),
+514:      snapshots.length > 0
+515:        ? 'Snapshot timeline is derived from persistent engineering state snapshots and deterministic snapshot hashes.'
+516:        : 'No persisted snapshots were supplied to this workspace context.',
+522:function graphNodeStatus(node: PersistentEngineeringStateGraphNode): EngineeringIntelligenceGraphNodeModel['status'] {
+523:  if (node.nodeKind === 'state_record') return node.staleStatus === 'current' ? 'current' : node.staleStatus;
+527:function buildGraph(input: BuildEngineeringIntelligenceWorkspaceInput, latestSnapshot: EngineeringStateSnapshot | null): DependencyGraphViewerModel {
+535:      provenanceSummary: 'Engineering Requirement Registry v1 definition.',
+542:      provenanceSummary: 'Engineering Decision Registry deterministic definition.',
+549:        label: node.stateId ?? node.dependencyNodeId ?? node.nodeId,
+550:        nodeType: node.nodeKind === 'state_record' ? (node.staleStatus === 'current' ? 'document_section' : 'stale_output') : 'dependency',
+552:        provenanceSummary: node.deterministicNotes.join(' '),
+564:            : edge.edgeType === 'preserves_stale_state'
+566:              : edge.edgeType === 'supersedes_snapshot'
+581:      'Graph rendering is deterministic HTML/SVG layout; no semantic inference or image-byte inspection is performed.',
+586:function buildRegenerationPlanning(input: BuildEngineeringIntelligenceWorkspaceInput): RegenerationPlanningWorkspaceModel {
+587:  const plans: SelectiveRegenerationPlan[] = sortBy(input.regenerationPlans ?? [], plan => plan.planId);
+590:    regenerationCandidates: sortText(plans.flatMap(plan => plan.staleStateIds)),
+591:    regenerationOrder: sortText(plans.flatMap(plan => plan.regenerationOrder)),
+596:        ? 'Regeneration planning rows are derived from persisted selective regeneration plans.'
+597:        : 'No regeneration plans were supplied; this workspace does not initiate generation.',
+598:      'The UI visualizes candidates, order, blockers, and preserved outputs only.',
+603:function buildInvalidationPropagationWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): InvalidationPropagationWorkspaceModel {
+604:  const propagation = input.invalidationPropagation ?? null;
+607:    stalePropagationChains: sortText(propagation?.propagationPaths.map(path => `${path.pathId}:depth=${path.depth}`) ?? []),
+608:    invalidationSources: propagation?.sourceNodeIds ?? [],
+613:    dependencyTraversalPaths: sortText(propagation?.propagationPaths.map(path => path.nodeIds.join(' -> ')) ?? []),
+620:    deterministicNotes: propagation?.deterministicNotes ?? ['No V1 invalidation propagation metadata was supplied.'],
+624:function buildDependencyTraversalWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): DependencyTraversalWorkspaceModel {
+625:  const traversal = input.invalidationPropagation?.traversal ?? null;
+639:    deterministicNotes: traversal?.deterministicNotes ?? ['No traversal result was supplied; dependency traversal remains explicit not_loaded metadata.'],
+643:function buildRegenerationPlanningV1Workspace(input: BuildEngineeringIntelligenceWorkspaceInput): RegenerationPlanningV1WorkspaceModel {
+644:  const plan = input.regenerationPlanV1 ?? null;
+647:    wouldRegenerate: plan?.regenerationCandidateIds ?? [],
+652:    dependencyChains: plan?.propagationPathIds ?? [],
+653:    deterministicNotes: plan?.deterministicNotes ?? ['No Regeneration Planning V1 metadata was supplied; no regeneration is initiated.'],
+657:function buildSnapshotDeltaWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): SnapshotDeltaWorkspaceModel {
+658:  const delta = input.snapshotDelta ?? null;
+664:    staleOutputsIntroduced: delta?.staleOutputsIntroduced ?? [],
+666:    invalidationCauses: delta?.invalidationCauseIds ?? [],
+667:    changedCADReadiness: delta?.changedCADReadinessIds ?? [],
+668:    dependencyGraphDelta: delta?.dependencyGraphDeltaIds ?? [],
+673:function buildAffectedOutputsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): AffectedOutputsWorkspaceModel {
+674:  const outputs = input.invalidationPropagation?.affectedOutputs ?? [];
+679:    snapshots: sortText(outputs.flatMap(output => output.affectedSnapshotIds)),
+681:    reviewRequired: sortText(outputs.filter(output => output.staleClass === 'BLOCKED' || output.staleClass === 'REQUIRES_REVIEW' || output.missingEvidenceIds.length > 0).map(output => output.stateId)),
+682:    deterministicNotes: input.invalidationPropagation ? ['Affected outputs are derived from V1 propagation output only.'] : ['No affected-output propagation metadata was supplied.'],
+686:function buildStaleStateTimelineWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): StaleStateTimelineWorkspaceModel {
+690:    staleClass: event.eventType === 'state_invalidated' ? 'INVALIDATED' : event.eventType === 'stale_state_preserved' ? 'STALE' : 'VALID',
+691:    snapshotId: event.snapshotId,
+692:    dependencyNodeIds: event.dependencyNodeIds,
+695:    canonicalEvidenceIds: event.canonicalEvidenceIds,
+700:    staleStateIds: input.timeline?.staleStateIds ?? [],
+703:      events.length ? 'Stale-state timeline is derived from transition history events.' : 'No transition history was supplied for stale-state timeline metadata.',
+704:      'Timeline rendering is observational and does not regenerate stale outputs.',
+709:function includesAny(value: string, tokens: string[]) {
+714:function buildStructuredSignalsWorkspace(input: BuildEngineeringIntelligenceWorkspaceInput): StructuredEngineeringSignalsWorkspaceModel {
+
+===== lib/engineeringIntelligence/propagationGraph.ts =====
+4:export type EngineeringStaleClass = 'VALID' | 'PARTIAL' | 'STALE' | 'INVALIDATED' | 'BLOCKED' | 'NOT_LOADED' | 'REQUIRES_REVIEW';
+6:export type PropagationTraversalDirection = 'downstream' | 'upstream';
+7:export type PropagationSourceGraphType = 'document_dependency_graph' | 'persistent_state_graph' | 'merged_dependency_graph';
+8:export type PropagationNodeKind = EngineeringDependencyNodeType | 'engineering_state' | 'dependency_graph_node' | 'snapshot' | 'unknown';
+9:export type PropagationEdgeClassification =
+11:  | 'depends_on_dependency_node'
+13:  | 'preserves_stale_state'
+14:  | 'supersedes_snapshot'
+18:export interface PropagationGraphNode {
+26:export interface PropagationGraphEdge {
+35:export interface PropagationTraversalPath {
+49:export interface PropagationTraversalResult {
+66:export interface TracePropagationInput {
+70:  dependencyGraph?: EngineeringDependencyGraph | null;
+79:export function mergePropagationGraph(input: {
+80:  dependencyGraph?: EngineeringDependencyGraph | null;
+89:  for (const node of input.dependencyGraph?.nodes ?? []) {
+90:    sourceGraphTypes.add('document_dependency_graph');
+95:  for (const edge of input.dependencyGraph?.edges ?? []) {
+96:    sourceGraphTypes.add('document_dependency_graph');
+125:export function tracePropagation(input: TracePropagationInput): PropagationTraversalResult {
+200:      `Traversal uses supplied dependency/persistent graph metadata only with maxDepth=${maxDepth} and traversalLimit=${traversalLimit}.`,
+207:function normalizeDependencyNode(node: EngineeringDependencyNode): PropagationGraphNode {
+212:    sourceGraphType: 'document_dependency_graph',
+217:function normalizeDependencyEdge(edge: EngineeringDependencyEdge): PropagationGraphEdge {
+223:    sourceGraphType: 'document_dependency_graph',
+228:function normalizePersistentNode(node: PersistentEngineeringStateGraphNode): PropagationGraphNode {
+231:    nodeKind: node.nodeKind === 'state_record' ? 'engineering_state' : 'dependency_graph_node',
+232:    label: node.stateId ?? node.dependencyNodeId ?? node.nodeId,
+238:function normalizePersistentEdge(edge: PersistentEngineeringStateGraphEdge): PropagationGraphEdge {
+249:function putEdge(edges: Map<string, PropagationGraphEdge>, duplicateEdgeIdsSuppressed: Set<string>, edge: PropagationGraphEdge) {
+263:function buildAdjacency(edges: PropagationGraphEdge[], direction: PropagationTraversalDirection): Map<string, PropagationGraphEdge[]> {
+273:function stablePathId(prefix: string, direction: PropagationTraversalDirection, source: string, target: string, edgeIds: string[]): string {
+277:function stableSmallHash(values: string[]): string {
+287:function sanitize(value: string): string {
+291:export function unique(values: string[]): string[] {
+295:export function sortText<T extends string>(values: T[]): T[] {
+299:export function sortBy<T>(values: T[], selector: (value: T) => string): T[] {
+
+===== lib/engineeringDecisionProvenance/decisionRegistry.ts =====
+14:const AHJ_SETBACK = { ruleId: 'AHJ-ROOF-SETBACK', label: 'Roof access and setback policy', reference: 'AHJ fire setback requirements', ruleType: 'AHJ' as const };
+16:const DOC_POLICY = { ruleId: 'DOC-PROVENANCE-V1', label: 'Document provenance policy', reference: 'Document Provenance + Requirement Binding Foundation v1', ruleType: 'DOCUMENT_POLICY' as const };
+21:    label: 'Conductor sizing provenance',
+29:    downstreamImpacts: ['permit validation electrical row', 'BOM conductor rows', 'SLD conductor callouts'],
+36:    label: 'Breaker sizing provenance',
+44:    downstreamImpacts: ['permit validation electrical row', 'SLD AC OCPD label', 'BOM AC hardware row'],
+51:    label: 'OCPD selection provenance',
+59:    downstreamImpacts: ['SLD OCPD callouts', 'BOM protection rows'],
+66:    label: 'String topology selection provenance',
+70:    engineeringDependencies: ['requirement:roof_overview', 'requirement:main_service_panel'],
+71:    requiredInputs: ['system.topology', 'system.inverters[].strings[]', 'cad.totalPanels'],
+73:    affectedDocumentSectionIds: ['PV-2.layout-verification', 'SLD.service-equipment'],
+74:    downstreamImpacts: ['SLD topology block', 'MPPT assignment metadata', 'BOM inverter rows'],
+81:    label: 'MPPT assignment provenance',
+87:    optionalInputs: ['cad.totalPanels'],
+92:    deterministicEvaluationNotes: ['Fallback MPPT count is an explicit provenance event when no MPPT input exists.'],
+96:    label: 'Inverter selection provenance',
+104:    downstreamImpacts: ['Equipment schedule', 'SLD inverter node', 'BOM inverter row'],
+105:    missingInputBehavior: 'emit_review_required_decision',
+111:    label: 'ESS placement provenance',
+112:    decisionCategory: 'layout_assumption',
+126:    label: 'Rapid shutdown placement provenance',
+141:    label: 'Utility interconnection assumption provenance',
+154:  setback_assumption: {
+155:    decisionType: 'setback_assumption',
+156:    label: 'Setback assumption provenance',
+157:    decisionCategory: 'layout_assumption',
+158:    engineeringDomain: 'roof_layout',
+160:    engineeringDependencies: ['requirement:roof_overview', 'geometry:roof-layout-context'],
+161:    requiredInputs: ['project.ahjRoofSetbackIn', 'project.ahjRidgeSetbackIn', 'cad.roof.setbackIn'],
+162:    optionalInputs: ['project.roofPlanes'],
+163:    affectedDocumentSectionIds: ['PV-1.site-verification', 'PV-2.layout-verification'],
+164:    downstreamImpacts: ['Layout verification notes', 'plan-set layout context'],
+166:    confidencePolicy: 'canonical_evidence_preferred',
+167:    deterministicEvaluationNotes: ['Documents available setback values from AHJ/project/CAD metadata only.'],
+171:    label: 'Conduit routing assumption provenance',
+172:    decisionCategory: 'layout_assumption',
+177:    optionalInputs: ['cad.dimensions[]'],
+178:    affectedDocumentSectionIds: ['E-1.interconnection', 'PV-2.layout-context'],
+182:    deterministicEvaluationNotes: ['Documents routing metadata and defaults; does not solve conduit route geometry.'],
+186:    label: 'Grounding and bonding assumption provenance',
+201:    label: 'Placard requirement provenance',
+214:  layout_orientation_assumption: {
+215:    decisionType: 'layout_orientation_assumption',
+216:    label: 'Layout orientation assumption provenance',
+217:    decisionCategory: 'layout_assumption',
+218:    engineeringDomain: 'roof_layout',
+220:    engineeringDependencies: ['requirement:roof_overview', 'geometry:roof-layout-context'],
+221:    requiredInputs: ['project.panelPositions[].orientation', 'cad.systemType'],
+222:    optionalInputs: ['project.roofPlanes[].azimuth'],
+223:    affectedDocumentSectionIds: ['PV-2.layout-verification', 'PV-2.layout-context'],
+224:    downstreamImpacts: ['Plan-set layout context', 'permit validation layout row'],
+226:    confidencePolicy: 'canonical_evidence_preferred',
+231:    label: 'BOM derivation provenance',
+239:    downstreamImpacts: ['Equipment schedule provenance', 'BOM row lineage metadata'],
+242:    deterministicEvaluationNotes: ['Summarizes existing BOM row metadata; does not recalculate BOM quantities.'],
+246:    label: 'SLD metadata provenance',
+254:    downstreamImpacts: ['SLD provenance metadata', 'permit validation SLD row'],
+257:    deterministicEvaluationNotes: ['Captures SLD data-binding lineage only.'],
+261:export function getEngineeringDecisionDefinition(decisionType: EngineeringDecisionType): EngineeringDecisionDefinition {
+265:export function listEngineeringDecisionDefinitions(): EngineeringDecisionDefinition[] {
+
+===== lib/engineeringStateInvalidation/engine.ts =====
+21:const EMPTY_INPUTS: EngineeringGenerationInputs = { inputKeys: [], canonicalInputKeys: [], cadPrimitiveIds: [], legacyFallbackKeys: [], deterministicSources: [] };
+23:export function buildEngineeringStateRegistry(input: BuildEngineeringStateRegistryInput): EngineeringStateRegistry {
+27:  const graph = input.dependencyGraph ?? documentProvenance?.dependencyGraph ?? null;
+42:    provenanceHash: stableHash('state-provenance', records.map(record => `${record.stateId}|${record.provenanceHash}`)),
+43:    dependencyHash: stableHash('state-dependency', records.map(record => `${record.stateId}|${record.dependencyHash}`)),
+44:    deterministicHash: stableHash('state-registry', records.map(record => `${record.stateId}|${record.generationHash}|${record.provenanceHash}|${record.dependencyHash}|${record.staleStatus}`)),
+47:      'State records are derived from canonical evidence, requirements, decision provenance, document provenance, and dependency graph ids only.',
+56:export function invalidateEngineeringState(input: InvalidateEngineeringStateInput): EngineeringInvalidationResult {
+58:  const graph = input.dependencyGraph ?? null;
+67:      eventId: `invalidation:${input.trigger.triggerId}:${record.stateId}`,
+69:      staleStatus: blockedStatus(record),
+70:      invalidationReason: `State ${record.stateId} depends on changed ${triggers.join(', ')}.`,
+71:      triggeringDependencyIds: uniqueSorted([...reachable].filter(id => record.dependencyNodeIds.includes(id))),
+74:      triggeringCanonicalEvidenceIds: uniqueSorted(input.trigger.changedCanonicalEvidenceIds.filter(id => record.canonicalEvidenceIds.includes(id))),
+77:      lastValidProvenanceHash: record.provenanceHash,
+79:      deterministicNotes: ['Invalidation is propagated from explicit trigger ids and dependency graph edges; no heuristic matching is used.'],
+82:    return { ...record, staleStatus: event.staleStatus, invalidationReason: event.invalidationReason, invalidatedAt: generatedAt } satisfies EngineeringStateRecord;
+92:    invalidationEvents: events.sort((a, b) => a.eventId.localeCompare(b.eventId)),
+94:    deterministicHash: stableHash('invalidation-result', [...affectedIds, ...events.map(event => `${event.eventId}|${event.invalidationReason}`)]),
+95:    deterministicNotes: ['Invalidation result marks stale state only; it does not regenerate outputs.', 'Unrelated state records are preserved when no explicit dependency intersection or graph reachability exists.'],
+98:  result.auditGuards = runEngineeringStateAuditGuards({ records: result.updatedStateRecords, invalidationResult: result, renderOutputExpected: false });
+102:export function buildSelectiveRegenerationPlan(input: BuildSelectiveRegenerationPlanInput): SelectiveRegenerationPlan {
+103:  const generatedAt = input.generatedAt ?? input.invalidationResult.generatedAt;
+104:  const stale = input.invalidationResult.updatedStateRecords.filter(record => record.staleStatus !== 'current');
+105:  const byType = (type: EngineeringStateType) => uniqueSorted(stale.filter(record => record.stateType === type).map(record => outputId(record)));
+106:  const blocked = uniqueSorted(stale.filter(record => record.provenanceHash.length === 0 || record.dependencyHash.length === 0 || record.dependencyNodeIds.length === 0).map(record => record.stateId));
+107:  const order = regenerationOrder(stale, input.dependencyGraph ?? null);
+111:    triggerId: input.invalidationResult.trigger.triggerId,
+113:    affectedEngineeringDecisions: byType('decision_provenance'),
+115:    affectedBOMRows: byType('bom_row'),
+117:    affectedLayoutPrimitives: byType('layout_primitive'),
+119:    regenerationOrder: order,
+120:    unchangedPreservedOutputs: input.invalidationResult.unaffectedStateIds,
+121:    staleStateIds: input.invalidationResult.affectedStateIds,
+122:    deterministicHash: stableHash('regeneration-plan', [...order, ...blocked, ...input.invalidationResult.unaffectedStateIds]),
+123:    deterministicNotes: ['SelectiveRegenerationPlan v1 is a bounded plan only; it performs no autonomous regeneration.', 'Regeneration order is sorted by explicit state category precedence and stable state ids.'],
+124:    snapshotReference: input.snapshotReference ?? undefined,
+129:export function buildInvalidationTrigger(input: Partial<EngineeringInvalidationTrigger> & Pick<EngineeringInvalidationTrigger, 'triggerId' | 'triggerType'>): EngineeringInvalidationTrigger {
+141:    deterministicReason: input.deterministicReason ?? `Deterministic invalidation trigger ${input.triggerId}.`,
+145:export function staleMetadataForState(record: EngineeringStateRecord, events: EngineeringInvalidationEvent[] = []): EngineeringStaleStateMetadata {
+148:    staleStatus: record.staleStatus,
+149:    staleReason: record.invalidationReason,
+153:    invalidationEventIds: uniqueSorted(matched.map(event => event.eventId)),
+157:export function buildInvalidationLineageMetadata(input: { registry: EngineeringStateRegistry; invalidationResult?: EngineeringInvalidationResult | null; regenerationPlan?: SelectiveRegenerationPlan | null; snapshotReference?: import('./types').EngineeringStateSnapshotReference | null }): EngineeringInvalidationLineageMetadata {
+158:  const staleStateIds = input.invalidationResult?.affectedStateIds ?? input.registry.stateRecords.filter(record => record.staleStatus !== 'current').map(record => record.stateId);
+163:    provenanceHash: input.registry.provenanceHash,
+164:    dependencyHash: input.registry.dependencyHash,
+165:    staleStateIds: uniqueSorted(staleStateIds),
+166:    invalidationEventIds: uniqueSorted(input.invalidationResult?.invalidationEvents.map(event => event.eventId) ?? []),
+167:    regenerationPlanId: input.regenerationPlan?.planId,
+168:    snapshotReference: input.snapshotReference ?? input.regenerationPlan?.snapshotReference,
+169:    deterministicNotes: ['Invalidation lineage metadata carries state hashes and stale ids through render/document contexts.'],
+173:function stateFromSections(doc: DocumentProvenanceBundle | null, decisions: EngineeringDecisionEvaluationBundle | null, generatedAt: string): EngineeringStateRecord[] {
+181:    dependencyNodeIds: section.engineeringDependencyIds,
+184:    canonicalEvidenceIds: section.canonicalEvidenceIds,
+186:    generationInputs: { ...section.renderInputs, deterministicSources: ['document_provenance_bundle_v1', 'engineering_requirement_registry_v1'] },
+189:    notes: [`Document section ${section.sectionId} state is invalidated only by linked requirement/evidence/decision/dependency changes.`],
+193:function stateFromGraphNodes(graph: EngineeringDependencyGraph | null, generatedAt: string): EngineeringStateRecord[] {
+196:    stateId: `state:dependencyNode:${node.id}`,
+200:    dependencyNodeIds: [node.id],
+203:    canonicalEvidenceIds: node.canonicalEvidenceIds,
+205:    generationInputs: { ...EMPTY_INPUTS, deterministicSources: ['engineering_dependency_graph_v1'] },
+208:    notes: [`Dependency graph node ${node.id} is first-class invalidation state.`],
+212:function stateFromDecisions(bundle: EngineeringDecisionEvaluationBundle | null, generatedAt: string): EngineeringStateRecord[] {
+216:    stateType: decision.decisionCategory === 'calculation' ? 'engineering_calculation' : 'decision_provenance',
+220:    dependencyNodeIds: decision.dependencyNodeIds,
+223:    canonicalEvidenceIds: decision.canonicalEvidenceIds,
+225:    generationInputs: { ...EMPTY_INPUTS, inputKeys: decision.derivedFrom, canonicalInputKeys: decision.canonicalEvidenceIds, deterministicSources: ['engineering_decision_registry_v1'] },
+228:    notes: [`Decision ${decision.decisionType} state tracks selected value and deterministic lineage only.`],
+232:function stateFromRenderContexts(ids: string[], doc: DocumentProvenanceBundle | null, decisions: EngineeringDecisionEvaluationBundle | null, graph: EngineeringDependencyGraph | null, generatedAt: string): EngineeringStateRecord[] {
+239:    dependencyNodeIds: uniqueSorted([id, ...(graph?.nodes.map(node => node.id) ?? []), ...(decisions?.dependencyNodeIds ?? [])]),
+242:    canonicalEvidenceIds: uniqueSorted([...(doc?.canonicalEvidenceIds ?? []), ...(decisions?.canonicalEvidenceIds ?? [])]),
+244:    generationInputs: { ...(doc?.renderInputs ?? EMPTY_INPUTS), deterministicSources: ['render_context_v1', 'document_provenance_bundle_v1', 'engineering_decision_registry_v1'] },
+247:    notes: ['RenderContext state carries hashes and stale metadata; templates must not manufacture stale state.'],
+251:function stateFromBOM(bom: NonNullable<BuildEngineeringStateRegistryInput['bomMetadata']>, decisions: EngineeringDecisionEvaluationBundle | null, doc: DocumentProvenanceBundle | null, generatedAt: string): EngineeringStateRecord[] {
+252:  return bom.map(row => makeRecord({
+253:    stateId: `state:bomRow:${row.bomRowId}`,
+254:    stateType: 'bom_row',
+258:    dependencyNodeIds: row.dependencyNodeIds,
+259:    requirementIds: uniqueSorted(decisions?.decisionRecords.filter(record => row.decisionIds.includes(record.decisionId)).flatMap(record => record.requirementIds) ?? []) as any,
+260:    decisionIds: row.decisionIds,
+261:    canonicalEvidenceIds: uniqueSorted(decisions?.decisionRecords.filter(record => row.decisionIds.includes(record.decisionId)).flatMap(record => record.canonicalEvidenceIds) ?? []),
+263:    generationInputs: { ...EMPTY_INPUTS, inputKeys: row.derivedFrom, deterministicSources: ['decision_aware_bom_metadata_v1'] },
+266:    notes: [`BOM row ${row.bomRowId} is invalidated only by linked BOM decisions and dependencies.`],
+270:function stateFromSLD(sld: BuildEngineeringStateRegistryInput['sldMetadata'], decisions: EngineeringDecisionEvaluationBundle | null, doc: DocumentProvenanceBundle | null, generatedAt: string): EngineeringStateRecord[] {
+278:    dependencyNodeIds: sld.dependencyNodeIds,
+281:    canonicalEvidenceIds: uniqueSorted(decisions?.decisionRecords.filter(record => sld.decisionIds.includes(record.decisionId)).flatMap(record => record.canonicalEvidenceIds) ?? []),
+290:type RecordInput = Omit<EngineeringStateRecord, 'generationHash' | 'provenanceHash' | 'dependencyHash' | 'staleStatus' | 'deterministicNotes'> & { generatedAt: string; notes: string[] };
+291:function makeRecord(input: RecordInput): EngineeringStateRecord {
+294:    dependencyNodeIds: uniqueSorted(input.dependencyNodeIds),
+297:    canonicalEvidenceIds: uniqueSorted(input.canonicalEvidenceIds),
+306:    dependencyNodeIds: base.dependencyNodeIds,
+309:    canonicalEvidenceIds: base.canonicalEvidenceIds,
+312:    generationHash: stableHash('generation', [base.stateId, base.stateType, ...base.generationInputs.inputKeys, ...base.generationInputs.canonicalInputKeys]),
+313:    provenanceHash: stableHash('provenance', [base.stateId, ...base.requirementIds, ...base.decisionIds, ...base.canonicalEvidenceIds, ...base.originatingSurveyIds]),
+314:    dependencyHash: stableHash('dependency', [base.stateId, ...base.dependencyNodeIds]),
+315:    staleStatus: 'current',
+323:function reachableDependencyIds(trigger: EngineeringInvalidationTrigger, graph: EngineeringDependencyGraph | null): Set<string> {
+326:    ...trigger.changedCanonicalEvidenceIds.map(id => `canonicalEvidence:${id}`),
+342:function matchingTriggers(record: EngineeringStateRecord, trigger: EngineeringInvalidationTrigger, reachable: Set<string>): string[] {
+344:    ...trigger.changedCanonicalEvidenceIds.filter(id => record.canonicalEvidenceIds.includes(id)).map(id => `canonicalEvidence:${id}`),
+347:    ...trigger.changedDependencyNodeIds.filter(id => record.dependencyNodeIds.includes(id)),
+349:  if (['decision_provenance', 'engineering_calculation', 'requirement_evaluation'].includes(record.stateType)) {
+352:  const propagated = record.dependencyNodeIds.filter(id => reachable.has(id) && !id.startsWith('renderContext:'));
+356:function blockedStatus(record: EngineeringStateRecord): 'stale' | 'blocked' {
+357:  return record.dependencyNodeIds.length === 0 || record.provenanceHash.length === 0 ? 'blocked' : 'stale';
+359:function outputId(record: EngineeringStateRecord): string { return record.stateId.replace(/^state:(documentSection|bomRow|sldSection|renderContext|decision|dependencyNode):/, ''); }
+360:function regenerationOrder(records: EngineeringStateRecord[], graph: EngineeringDependencyGraph | null): string[] {
+361:  const rank: Record<EngineeringStateType, number> = { requirement_evaluation: 1, dependency_graph_node: 2, decision_provenance: 3, engineering_calculation: 3, layout_primitive: 4, bom_row: 5, sld_section: 6, document_section: 7, render_context: 8, render_output: 9 };
+364:function normalizeGenerationInputs(input: EngineeringGenerationInputs): EngineeringGenerationInputs { return { inputKeys: uniqueSorted(input.inputKeys), canonicalInputKeys: uniqueSorted(input.canonicalInputKeys), cadPrimitiveIds: uniqueSorted(input.cadPrimitiveIds), legacyFallbackKeys: uniqueSorted(input.legacyFallbackKeys), deterministicSources: uniqueSorted(input.deterministicSources) }; }
+365:function decisionIdsForSection(bundle: EngineeringDecisionEvaluationBundle | null, sectionId: string): string[] { return uniqueSorted(bundle?.decisionRecords.filter(record => record.documentSectionIds.includes(sectionId)).map(record => record.decisionId) ?? []); }
+366:function typeFromNode(node: EngineeringDependencyNode): EngineeringStateType { if (node.nodeType === 'calculation') return 'engineering_calculation'; if (node.nodeType === 'engineering_decision') return 'decision_provenance'; if (node.nodeType === 'cad_layout_primitive') return 'layout_primitive'; if (node.nodeType === 'sld_section') return 'sld_section'; if (node.nodeType === 'bom_row') return 'bom_row'; if (node.nodeType === 'render_context') return 'render_context'; if (node.nodeType === 'render_output') return 'render_output'; if (node.nodeType === 'engineering_requirement') return 'requirement_evaluation'; return 'dependency_graph_node'; }
+367:function categoryFromNode(node: EngineeringDependencyNode): EngineeringStateCategory { if (node.nodeType === 'sld_section') return 'sld'; if (node.nodeType === 'bom_row') return 'bom'; if (node.nodeType === 'cad_layout_primitive') return 'roof_layout'; if (node.nodeType === 'render_context' || node.nodeType === 'render_output') return 'rendering'; return categoryFromSection(node.id); }
+368:function categoryFromDecision(record: EngineeringDecisionProvenanceRecord): EngineeringStateCategory { if (record.engineeringDomain === 'sld') return 'sld'; if (record.engineeringDomain === 'bom') return 'bom'; if (record.engineeringDomain === 'roof_layout') return 'roof_layout'; if (record.engineeringDomain === 'interconnection') return 'interconnection'; if (record.engineeringDomain === 'structural') return 'structural'; if (record.engineeringDomain === 'document_control') return 'document_control'; return 'electrical'; }
+369:function categoryFromSection(sectionId: string): EngineeringStateCategory { if (/BOM|SCHED/i.test(sectionId)) return 'bom'; if (/SLD|E-1|single/i.test(sectionId)) return 'sld'; if (/utility|meter|interconnection/i.test(sectionId)) return 'interconnection'; if (/roof|array|layout|site/i.test(sectionId)) return 'roof_layout'; if (/structural/i.test(sectionId)) return 'structural'; if (/render/i.test(sectionId)) return 'rendering'; return 'electrical'; }
+370:function stableHash(prefix: string, values: string[]): string { const payload = uniqueSorted(values).join('\n'); let hash = 5381; for (let i = 0; i < payload.length; i += 1) { hash = ((hash << 5) + hash) ^ payload.charCodeAt(i); hash >>>= 0; } return `${prefix}-${hash.toString(16).padStart(8, '0')}`; }
+371:function uniqueSorted<T extends string>(values: Array<T | null | undefined>): T[] { return Array.from(new Set(values.filter((value): value is T => typeof value === 'string' && value.length > 0))).sort((a, b) => a.localeCompare(b)); }
+
+===== lib/documentProvenance/builders.ts =====
+1:import type { CADModel } from '@/lib/cad/types';
+26:  canonicalInputKeys: [],
+27:  cadPrimitiveIds: [],
+31:export function buildDocumentProvenanceBundle(input: BuildDocumentProvenanceInput): DocumentProvenanceBundle {
+35:  const renderInputs = normalizeRenderInputs(input.renderInputs, input.cad, input.includeLegacyDesignInput ?? false);
+46:  const canonicalEvidenceIds = uniqueSorted(sections.flatMap(section => section.canonicalEvidenceIds));
+50:        bundleId: `${input.documentId}.decision-provenance`,
+54:        cad: input.cad ?? null,
+60:  const dependencyGraph = buildEngineeringDependencyGraph({
+61:    graphId: `${input.documentId}.dependency-graph`,
+65:    cad: input.cad ?? null,
+68:  const engineeringDependencyIds = uniqueSorted(dependencyGraph.nodes.map(node => node.id));
+74:    canonicalEvidenceIds,
+76:    provenanceSource: requirementEvaluation ? 'document_binding_registry_v1' : 'legacy_design_input',
+84:      'Canonical evidence ids are de-duplicated before document provenance is emitted, so duplicate uploads cannot inflate document provenance.',
+89:    dependencyGraph,
+98:export function buildDocumentProvenanceSections(input: {
+120:      const canonicalEvidenceIds = uniqueSorted(evaluation?.canonicalEvidenceIds ?? []);
+129:        canonicalEvidenceIds,
+131:        provenanceSource: evaluation ? 'document_binding_registry_v1' : 'legacy_design_input',
+132:        engineeringDependencyIds: dependencyIdsForSection(boundSection.sectionId, binding.requirementId, canonicalEvidenceIds),
+140:          canonicalEvidenceIds.length > 0
+141:            ? `Canonical evidence ids linked: ${canonicalEvidenceIds.join(', ')}.`
+142:            : 'No canonical evidence ids linked; section must render registry warning or informational status only.',
+151:export function buildEngineeringDependencyGraph(input: {
+156:  cad?: CADModel | null;
+172:      canonicalEvidenceIds: uniqueSorted(evaluation.canonicalEvidenceIds),
+177:    for (const evidenceId of uniqueSorted(evaluation.canonicalEvidenceIds)) {
+179:        id: `canonicalEvidence:${evidenceId}`,
+180:        nodeType: 'canonical_evidence',
+183:        canonicalEvidenceIds: [evidenceId],
+184:        truthSource: input.surveyEvidence?.evidenceTruthSource ?? 'canonical_manifest_v1',
+189:        fromNodeId: `canonicalEvidence:${evidenceId}`,
+203:      canonicalEvidenceIds: section.canonicalEvidenceIds,
+212:        edgeType: section.canonicalEvidenceIds.length > 0 ? 'binds_requirement_to_document' : 'documents_missing_requirement',
+218:  const geometryInputs = buildEvidenceBackedGeometryInputs({
+220:    cad: input.cad ?? null,
+222:  for (const geometryInput of geometryInputs) {
+224:      id: `geometryInput:${geometryInput.geometryInputId}`,
+225:      nodeType: 'cad_layout_primitive',
+226:      label: geometryInput.geometryAssumptionType,
+227:      requirementIds: geometryInput.linkedRequirementIds,
+228:      canonicalEvidenceIds: geometryInput.canonicalEvidenceIds,
+229:      truthSource: geometryInput.truthSource,
+230:      deterministicNotes: geometryInput.deterministicNotes,
+232:    for (const requirementId of geometryInput.linkedRequirementIds) {
+234:        id: `edge:requirement:${requirementId}->geometry:${geometryInput.geometryInputId}`,
+236:        toNodeId: `geometryInput:${geometryInput.geometryInputId}`,
+237:        edgeType: 'supports_geometry_assumption',
+238:        deterministicReason: `Requirement ${requirementId} supports deterministic geometry input ${geometryInput.geometryInputId}.`,
+246:    label: 'Primary RenderContext provenance carrier',
+248:    canonicalEvidenceIds: uniqueSorted(evaluations.flatMap(evaluation => evaluation.canonicalEvidenceIds)),
+250:    deterministicNotes: ['RenderContext carries provenance as additive metadata and does not make sizing or geometry decisions.'],
+258:      deterministicReason: `RenderContext carries provenance metadata for ${section.sectionId}.`,
+269:      canonicalEvidenceIds: decision.canonicalEvidenceIds,
+282:    for (const evidenceId of decision.canonicalEvidenceIds) {
+284:        id: `edge:canonicalEvidence:${evidenceId}->${decision.decisionId}`,
+285:        fromNodeId: `canonicalEvidence:${evidenceId}`,
+288:        deterministicReason: `Decision ${decision.decisionType} is linked to canonical evidence ${evidenceId}.`,
+297:        canonicalEvidenceIds: decision.canonicalEvidenceIds,
+299:        deterministicNotes: [`Decision-linked section node created for ${decision.decisionType} provenance when no explicit document binding node exists.`],
+333:      'Graph links requirements, canonical evidence, document sections, geometry wrappers, render context metadata, and engineering decision nodes when supplied.',
+338:export function buildEvidenceBackedGeometryInputs(input: {
+340:  cad?: CADModel | null;
+343:  const cad = input.cad ?? null;
+348:  const systemType = cad?.systemType ?? 'unknown';
+349:  const roof = byRequirement.get('roof_overview');
+355:  if (roof) {
+356:    inputs.push(makeGeometryInput('geometry:roof-layout-context', systemType, 'roof_plane_boundary', ['roof_overview'], roof, cadPrimitiveIds(cad, 'roof')));
+360:      'geometry:electrical-equipment-context',
+365:      cadPrimitiveIds(cad, 'electrical'),
+369:    inputs.push(makeGeometryInput('geometry:structural-access-context', systemType, 'structural_access_context', [structural.requirementId], structural, cadPrimitiveIds(cad, 'structural')));
+371:  if (cad) {
+373:      geometryInputId: 'geometry:cad-model-summary',
+375:      geometryAssumptionType: 'generic_layout_context',
+377:      canonicalEvidenceIds: uniqueSorted(evaluations.flatMap(evaluation => evaluation.canonicalEvidenceIds)),
+379:      cadPrimitiveIds: cadPrimitiveIds(cad, 'all'),
+381:      truthSource: 'cad_model_deterministic',
+383:        'CADModel summary is linked to available registry evidence as provenance metadata only.',
+384:        'No geometry extraction or non-deterministic visual analysis is performed.',
+388:  return inputs.sort((a, b) => a.geometryInputId.localeCompare(b.geometryInputId));
+391:function makeGeometryInput(
+392:  geometryInputId: string,
+394:  geometryAssumptionType: EvidenceBackedGeometryInput['geometryAssumptionType'],
+400:    geometryInputId,
+402:    geometryAssumptionType,
+404:    canonicalEvidenceIds: uniqueSorted(evaluation.canonicalEvidenceIds),
+406:    cadPrimitiveIds: primitiveIds,
+408:    truthSource: 'canonical_manifest_v1',
+410:      `Geometry wrapper links ${geometryAssumptionType} to registry requirement(s): ${linkedRequirementIds.join(', ')}.`,
+411:      'Wrapper carries provenance only; it does not extract geometry, infer dimensions, or generate CAD.',
+416:function mergeEvaluations(evaluations: Array<EngineeringRequirementEvaluation | null | undefined>): EngineeringRequirementEvaluation {
+419:  if (!first) throw new Error('mergeEvaluations requires at least one evaluation');
+422:    canonicalEvidenceIds: uniqueSorted(present.flatMap(evaluation => evaluation.canonicalEvidenceIds)),
+427:function resolveDocumentTruthSource(surveyEvidence: EngineeringSurveyEvidence | null): DocumentTruthSource {
+432:function normalizeRenderInputs(
+434:  cad: CADModel | null | undefined,
+439:    canonicalInputKeys: uniqueSorted(partial?.canonicalInputKeys ?? []),
+440:    cadPrimitiveIds: uniqueSorted([...(partial?.cadPrimitiveIds ?? []), ...cadPrimitiveIds(cad ?? null, 'all')]),
+445:function dependencyIdsForSection(sectionId: string, requirementId: EngineeringRequirementId, canonicalEvidenceIds: string[]): string[] {
+449:    ...canonicalEvidenceIds.map(id => `canonicalEvidence:${id}`),
+453:function cadPrimitiveIds(cad: CADModel | null, family: 'roof' | 'electrical' | 'structural' | 'all'): string[] {
+454:  if (!cad) return [];
+455:  const ids: string[] = [`cad:${cad.systemType}:model`];
+456:  if ((family === 'roof' || family === 'all') && cad.roof?.planes) ids.push(...cad.roof.planes.map(plane => `cad:roofPlane:${plane.id}`));
+457:  if ((family === 'all') && cad.ground?.arrays) ids.push(...cad.ground.arrays.map(array => `cad:groundArray:${array.id}`));
+458:  if ((family === 'all') && cad.fence?.segments) ids.push(...cad.fence.segments.map(segment => `cad:fenceSegment:${segment.id}`));
+459:  if ((family === 'electrical' || family === 'all') && cad.electricalNodes) ids.push(...cad.electricalNodes.map(node => `cad:electricalNode:${node.id}`));
+460:  if ((family === 'structural' || family === 'all') && cad.dimensions) ids.push(...cad.dimensions.map(dimension => `cad:dimension:${dimension.id}`));
+464:function putNode(nodes: Map<string, EngineeringDependencyNode>, node: EngineeringDependencyNode): void {
+470:      canonicalEvidenceIds: uniqueSorted(node.canonicalEvidenceIds),
+477:    canonicalEvidenceIds: uniqueSorted([...existing.canonicalEvidenceIds, ...node.canonicalEvidenceIds]),
+482:function putEdge(edges: Map<string, EngineeringDependencyEdge>, edge: EngineeringDependencyEdge): void {
+486:function compareSections(a: DocumentProvenanceSection, b: DocumentProvenanceSection): number {
+490:function deterministicGraphHash(nodes: EngineeringDependencyNode[], edges: EngineeringDependencyEdge[]): string {
+492:    ...nodes.map(node => `N|${node.id}|${node.nodeType}|${node.requirementIds.join(',')}|${node.canonicalEvidenceIds.join(',')}`),
+500:function uniqueSorted(values: Array<string | null | undefined>): string[] {
