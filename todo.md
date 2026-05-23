@@ -1,21 +1,15 @@
-# First Controlled Runtime Pilot V1 Todo
+# SolarPro Master Roadmap Todo
 
-## Baseline and Runtime Intake
-- [x] Confirm repository is on dev and inspect current state
-- [x] Audit existing assisted evidence source registry, adapters, tests, and boundary guard
-- [x] Select safest metadata/photo-quality runtime package and document intake decision
+## Baseline
+- [x] Confirm current dev branch and clean working tree
+- [x] Inspect existing roadmap, governance, and validation artifact conventions
 
-## Implementation
-- [x] Register governed metadata/photo-quality runtime with fail-closed validation
-- [x] Implement adapter-contained real metadata/photo-quality runtime execution
-- [x] Ensure deterministic normalization, provenance, confidence bounds, and review-required candidate flow
-- [x] Expand assisted evidence boundary guard for runtime import containment and escalation protection
-- [x] Expand review-only admin surfacing with fixture versus runtime labeling
-- [x] Add deterministic runtime governance, adapter, boundary, and replay tests
+## Roadmap Artifact
+- [x] Create master roadmap document aligned to the Engineering OS + Controlled Intelligence Platform directive
+- [x] Ensure roadmap preserves deterministic engineering truth, governance, replay, provenance, and review boundaries
 
-## Reports and Validation
-- [x] Generate metadata runtime pilot, governance validation, and boundary reports
-- [x] Run required validations and capture logs/exits
+## Validation and Delivery
+- [x] Validate formatting and repository diff
 - [x] Stage intended files and commit directly to dev
-- [x] Push dev only
-- [x] Provide final summary and safety guarantees
+- [ ] Push dev only
+- [ ] Provide final summary
