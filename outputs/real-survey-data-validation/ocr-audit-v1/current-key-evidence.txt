@@ -1,0 +1,446 @@
+=== package deps ===
+package.json:29:    "@types/pdf-parse": "^1.1.5",
+package.json:43:    "html2canvas": "^1.4.1",
+package.json:45:    "jspdf": "^4.2.0",
+package.json:49:    "pdf-parse": "^2.4.5",
+package.json:59:    "sharp": "^0.34.5",
+package.json:63:    "tesseract.js": "^7.0.0",
+package.json:83:    "canvas": "^3.2.1",
+package-lock.json:15:        "@types/pdf-parse": "^1.1.5",
+package-lock.json:29:        "html2canvas": "^1.4.1",
+package-lock.json:31:        "jspdf": "^4.2.0",
+package-lock.json:35:        "pdf-parse": "^2.4.5",
+package-lock.json:45:        "sharp": "^0.34.5",
+package-lock.json:49:        "tesseract.js": "^7.0.0",
+package-lock.json:69:        "canvas": "^3.2.1",
+package-lock.json:1615:    "node_modules/@img/sharp-darwin-arm64": {
+package-lock.json:1617:      "resolved": "https://registry.npmjs.org/@img/sharp-darwin-arm64/-/sharp-darwin-arm64-0.34.5.tgz",
+package-lock.json:1634:        "@img/sharp-libvips-darwin-arm64": "1.2.4"
+package-lock.json:1637:    "node_modules/@img/sharp-darwin-x64": {
+package-lock.json:1639:      "resolved": "https://registry.npmjs.org/@img/sharp-darwin-x64/-/sharp-darwin-x64-0.34.5.tgz",
+package-lock.json:1656:        "@img/sharp-libvips-darwin-x64": "1.2.4"
+package-lock.json:1659:    "node_modules/@img/sharp-libvips-darwin-arm64": {
+package-lock.json:1661:      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-arm64/-/sharp-libvips-darwin-arm64-1.2.4.tgz",
+package-lock.json:1675:    "node_modules/@img/sharp-libvips-darwin-x64": {
+package-lock.json:1677:      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-darwin-x64/-/sharp-libvips-darwin-x64-1.2.4.tgz",
+package-lock.json:1691:    "node_modules/@img/sharp-libvips-linux-arm": {
+package-lock.json:1693:      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm/-/sharp-libvips-linux-arm-1.2.4.tgz",
+package-lock.json:1707:    "node_modules/@img/sharp-libvips-linux-arm64": {
+package-lock.json:1709:      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-arm64/-/sharp-libvips-linux-arm64-1.2.4.tgz",
+package-lock.json:1723:    "node_modules/@img/sharp-libvips-linux-ppc64": {
+package-lock.json:1725:      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-ppc64/-/sharp-libvips-linux-ppc64-1.2.4.tgz",
+package-lock.json:1739:    "node_modules/@img/sharp-libvips-linux-riscv64": {
+package-lock.json:1741:      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-riscv64/-/sharp-libvips-linux-riscv64-1.2.4.tgz",
+package-lock.json:1755:    "node_modules/@img/sharp-libvips-linux-s390x": {
+package-lock.json:1757:      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-s390x/-/sharp-libvips-linux-s390x-1.2.4.tgz",
+package-lock.json:1771:    "node_modules/@img/sharp-libvips-linux-x64": {
+package-lock.json:1773:      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-x64/-/sharp-libvips-linux-x64-1.2.4.tgz",
+package-lock.json:1787:    "node_modules/@img/sharp-libvips-linuxmusl-arm64": {
+package-lock.json:1789:      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-arm64/-/sharp-libvips-linuxmusl-arm64-1.2.4.tgz",
+package-lock.json:1803:    "node_modules/@img/sharp-libvips-linuxmusl-x64": {
+package-lock.json:1805:      "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-x64/-/sharp-libvips-linuxmusl-x64-1.2.4.tgz",
+package-lock.json:1819:    "node_modules/@img/sharp-linux-arm": {
+package-lock.json:1821:      "resolved": "https://registry.npmjs.org/@img/sharp-linux-arm/-/sharp-linux-arm-0.34.5.tgz",
+package-lock.json:1838:        "@img/sharp-libvips-linux-arm": "1.2.4"
+package-lock.json:1841:    "node_modules/@img/sharp-linux-arm64": {
+package-lock.json:1843:      "resolved": "https://registry.npmjs.org/@img/sharp-linux-arm64/-/sharp-linux-arm64-0.34.5.tgz",
+package-lock.json:1860:        "@img/sharp-libvips-linux-arm64": "1.2.4"
+package-lock.json:1863:    "node_modules/@img/sharp-linux-ppc64": {
+package-lock.json:1865:      "resolved": "https://registry.npmjs.org/@img/sharp-linux-ppc64/-/sharp-linux-ppc64-0.34.5.tgz",
+package-lock.json:1882:        "@img/sharp-libvips-linux-ppc64": "1.2.4"
+package-lock.json:1885:    "node_modules/@img/sharp-linux-riscv64": {
+package-lock.json:1887:      "resolved": "https://registry.npmjs.org/@img/sharp-linux-riscv64/-/sharp-linux-riscv64-0.34.5.tgz",
+package-lock.json:1904:        "@img/sharp-libvips-linux-riscv64": "1.2.4"
+package-lock.json:1907:    "node_modules/@img/sharp-linux-s390x": {
+package-lock.json:1909:      "resolved": "https://registry.npmjs.org/@img/sharp-linux-s390x/-/sharp-linux-s390x-0.34.5.tgz",
+package-lock.json:1926:        "@img/sharp-libvips-linux-s390x": "1.2.4"
+package-lock.json:1929:    "node_modules/@img/sharp-linux-x64": {
+package-lock.json:1931:      "resolved": "https://registry.npmjs.org/@img/sharp-linux-x64/-/sharp-linux-x64-0.34.5.tgz",
+package-lock.json:1948:        "@img/sharp-libvips-linux-x64": "1.2.4"
+package-lock.json:1951:    "node_modules/@img/sharp-linuxmusl-arm64": {
+package-lock.json:1953:      "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-arm64/-/sharp-linuxmusl-arm64-0.34.5.tgz",
+package-lock.json:1970:        "@img/sharp-libvips-linuxmusl-arm64": "1.2.4"
+package-lock.json:1973:    "node_modules/@img/sharp-linuxmusl-x64": {
+package-lock.json:1975:      "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-x64/-/sharp-linuxmusl-x64-0.34.5.tgz",
+package-lock.json:1992:        "@img/sharp-libvips-linuxmusl-x64": "1.2.4"
+package-lock.json:1995:    "node_modules/@img/sharp-wasm32": {
+package-lock.json:1997:      "resolved": "https://registry.npmjs.org/@img/sharp-wasm32/-/sharp-wasm32-0.34.5.tgz",
+package-lock.json:2014:    "node_modules/@img/sharp-win32-arm64": {
+package-lock.json:2016:      "resolved": "https://registry.npmjs.org/@img/sharp-win32-arm64/-/sharp-win32-arm64-0.34.5.tgz",
+package-lock.json:2033:    "node_modules/@img/sharp-win32-ia32": {
+package-lock.json:2035:      "resolved": "https://registry.npmjs.org/@img/sharp-win32-ia32/-/sharp-win32-ia32-0.34.5.tgz",
+package-lock.json:2052:    "node_modules/@img/sharp-win32-x64": {
+package-lock.json:2054:      "resolved": "https://registry.npmjs.org/@img/sharp-win32-x64/-/sharp-win32-x64-0.34.5.tgz",
+package-lock.json:2746:    "node_modules/@napi-rs/canvas": {
+package-lock.json:2748:      "resolved": "https://registry.npmjs.org/@napi-rs/canvas/-/canvas-0.1.80.tgz",
+package-lock.json:2758:        "@napi-rs/canvas-android-arm64": "0.1.80",
+package-lock.json:2759:        "@napi-rs/canvas-darwin-arm64": "0.1.80",
+package-lock.json:2760:        "@napi-rs/canvas-darwin-x64": "0.1.80",
+package-lock.json:2761:        "@napi-rs/canvas-linux-arm-gnueabihf": "0.1.80",
+package-lock.json:2762:        "@napi-rs/canvas-linux-arm64-gnu": "0.1.80",
+package-lock.json:2763:        "@napi-rs/canvas-linux-arm64-musl": "0.1.80",
+package-lock.json:2764:        "@napi-rs/canvas-linux-riscv64-gnu": "0.1.80",
+package-lock.json:2765:        "@napi-rs/canvas-linux-x64-gnu": "0.1.80",
+package-lock.json:2766:        "@napi-rs/canvas-linux-x64-musl": "0.1.80",
+package-lock.json:2767:        "@napi-rs/canvas-win32-x64-msvc": "0.1.80"
+package-lock.json:2770:    "node_modules/@napi-rs/canvas-android-arm64": {
+package-lock.json:2772:      "resolved": "https://registry.npmjs.org/@napi-rs/canvas-android-arm64/-/canvas-android-arm64-0.1.80.tgz",
+package-lock.json:2786:    "node_modules/@napi-rs/canvas-darwin-arm64": {
+package-lock.json:2788:      "resolved": "https://registry.npmjs.org/@napi-rs/canvas-darwin-arm64/-/canvas-darwin-arm64-0.1.80.tgz",
+package-lock.json:2802:    "node_modules/@napi-rs/canvas-darwin-x64": {
+package-lock.json:2804:      "resolved": "https://registry.npmjs.org/@napi-rs/canvas-darwin-x64/-/canvas-darwin-x64-0.1.80.tgz",
+package-lock.json:2818:    "node_modules/@napi-rs/canvas-linux-arm-gnueabihf": {
+package-lock.json:2820:      "resolved": "https://registry.npmjs.org/@napi-rs/canvas-linux-arm-gnueabihf/-/canvas-linux-arm-gnueabihf-0.1.80.tgz",
+package-lock.json:2834:    "node_modules/@napi-rs/canvas-linux-arm64-gnu": {
+package-lock.json:2836:      "resolved": "https://registry.npmjs.org/@napi-rs/canvas-linux-arm64-gnu/-/canvas-linux-arm64-gnu-0.1.80.tgz",
+package-lock.json:2850:    "node_modules/@napi-rs/canvas-linux-arm64-musl": {
+package-lock.json:2852:      "resolved": "https://registry.npmjs.org/@napi-rs/canvas-linux-arm64-musl/-/canvas-linux-arm64-musl-0.1.80.tgz",
+package-lock.json:2866:    "node_modules/@napi-rs/canvas-linux-riscv64-gnu": {
+package-lock.json:2868:      "resolved": "https://registry.npmjs.org/@napi-rs/canvas-linux-riscv64-gnu/-/canvas-linux-riscv64-gnu-0.1.80.tgz",
+package-lock.json:2882:    "node_modules/@napi-rs/canvas-linux-x64-gnu": {
+package-lock.json:2884:      "resolved": "https://registry.npmjs.org/@napi-rs/canvas-linux-x64-gnu/-/canvas-linux-x64-gnu-0.1.80.tgz",
+package-lock.json:2898:    "node_modules/@napi-rs/canvas-linux-x64-musl": {
+package-lock.json:2900:      "resolved": "https://registry.npmjs.org/@napi-rs/canvas-linux-x64-musl/-/canvas-linux-x64-musl-0.1.80.tgz",
+package-lock.json:2914:    "node_modules/@napi-rs/canvas-win32-x64-msvc": {
+package-lock.json:2916:      "resolved": "https://registry.npmjs.org/@napi-rs/canvas-win32-x64-msvc/-/canvas-win32-x64-msvc-0.1.80.tgz",
+package-lock.json:4332:    "node_modules/@types/pdf-parse": {
+package-lock.json:4334:      "resolved": "https://registry.npmjs.org/@types/pdf-parse/-/pdf-parse-1.1.5.tgz",
+package-lock.json:6363:    "node_modules/canvas": {
+package-lock.json:6365:      "resolved": "https://registry.npmjs.org/canvas/-/canvas-3.2.1.tgz",
+package-lock.json:6391:        "stackblur-canvas": "^2.0.0",
+package-lock.json:9303:    "node_modules/html2canvas": {
+package-lock.json:9305:      "resolved": "https://registry.npmjs.org/html2canvas/-/html2canvas-1.4.1.tgz",
+package-lock.json:10998:        "canvas": "^3.0.0"
+package-lock.json:11001:        "canvas": {
+package-lock.json:11147:    "node_modules/jspdf": {
+package-lock.json:11149:      "resolved": "https://registry.npmjs.org/jspdf/-/jspdf-4.2.0.tgz",
+package-lock.json:11161:        "html2canvas": "^1.0.0-rc.5"
+package-lock.json:12747:    "node_modules/pdf-parse": {
+package-lock.json:12749:      "resolved": "https://registry.npmjs.org/pdf-parse/-/pdf-parse-2.4.5.tgz",
+package-lock.json:12753:        "@napi-rs/canvas": "0.1.80",
+package-lock.json:12754:        "pdfjs-dist": "5.4.296"
+\n=== app/api/ocr route key lines ===
+3: * Dedicated server-side OCR endpoint using Tesseract.
+6: * Tesseract.js uses worker_threads internally. When imported in a Next.js
+10: * By isolating Tesseract in its own route file and declaring it in
+12: * Node.js loads it natively at runtime — zero bundling issues.
+18: * Returns: { success: true, text: string, confidence: number, method: string, debugLog: string[] }
+24: *   - Raw OCR text logged before any parsing
+25: *   - Tesseract CLI preferred over WASM (faster, better accuracy on Tesseract 5.x)
+32:import { requireAuth } from '@/lib/security';
+33:import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+35:// This directive tells Next.js to use the Node.js runtime (not Edge).
+37:export const runtime = 'nodejs';
+42:// ── OCR confidence thresholds ──────────────────────────────────────────────
+43:// Tesseract returns 0–100. Below 40 = likely garbage output.
+48:// Tesseract needs no API key; Vision fallbacks (OpenAI/Google) do.
+60:  const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
+62:  // SECURITY: Rate limit OCR — Tesseract is CPU-intensive; prevent abuse
+63:    const _rl = await checkRateLimit('ocr', getClientIp(req));
+120:    // This dramatically improves Tesseract accuracy on phone bill photos.
+123:      const { preprocessBillImage } = await import('@/lib/billImagePreprocess');
+124:      const prepResult = await preprocessBillImage(rawBuffer, debugLog);
+132:    const result = await runMultiPassTesseract(ocrBuffer, safeMime, debugLog);
+134:    // ── Step 3: Log raw OCR text (critical for debugging) ─────────────────────
+135:    debugLog.push(`[ocr] === RAW OCR TEXT (${result.text.length} chars) ===`);
+136:    // Log first 1000 chars of raw text in chunks for readability
+137:    const preview = result.text.slice(0, 1000);
+141:    if (result.text.length > 1000) {
+142:      debugLog.push(`[ocr-raw] ... (${result.text.length - 1000} more chars)`);
+151:    debugLog.push(`[ocr] Result: method=${result.method}, confidence=${result.confidence}, chars=${result.text.length}`);
+154:      success: result.confidence >= MIN_USABLE_CONFIDENCE || result.text.length > 50,
+155:      text: result.text,
+156:      confidence: result.confidence,
+157:      method: result.method,
+166:    // (e.g. Tesseract crash messages, file paths) to callers.
+168:      { success: false, error: 'OCR processing failed. Please try again.', text: '', confidence: 0, debugLog },
+174:// ── Multi-pass Tesseract runner ──────────────────────────────────────────────
+175:interface TesseractResult {
+176:  text: string;
+177:  confidence: number;
+178:  method: 'tesseract-cli' | 'tesseract-js' | 'none';
+184: * result with the most text content.
+187: * PSM 6 = Assume a single uniform block of text — good for structured tables
+189: * We prefer CLI (Tesseract 5.x binary) over WASM for better accuracy.
+191:async function runMultiPassTesseract(
+195:): Promise<TesseractResult> {
+196:  // Try CLI first — Tesseract 5.x binary is more accurate than WASM
+197:  const cliAvailable = await checkTesseractCli();
+200:    log.push('[ocr] Tesseract CLI available — running multi-pass OCR');
+203:    const pass1 = await tryTesseractCli(buffer, mimeType, 3, log);
+204:    log.push(`[ocr] CLI PSM 3: ${pass1.text.length} chars, confidence=${pass1.confidence}`);
+206:    // Pass 2: PSM 6 — single uniform text block (supplement only)
+207:    const pass2 = await tryTesseractCli(buffer, mimeType, 6, log);
+208:    log.push(`[ocr] CLI PSM 6: ${pass2.text.length} chars, confidence=${pass2.confidence}`);
+212:    // PSM 6 assumes a single uniform text block which causes digit misreads on
+215:    const best = pass1.text.length >= 50 ? pass1 : (pass2.text.length > pass1.text.length ? pass2 : pass1);
+217:    log.push(`[ocr] Best pass: PSM ${bestPsm} (${best.text.length} chars) — PSM3 preferred for bill accuracy`);
+219:    if (best.text.length > 30) {
+224:  // Fallback: Tesseract.js WASM (works on any cloud without binary install)
+225:  log.push('[ocr] Falling back to Tesseract.js WASM...');
+228:  const wasm1 = await tryTesseractJs(buffer, mimeType, log);
+229:  log.push(`[ocr] WASM PSM 3: ${wasm1.text.length} chars, confidence=${wasm1.confidence}`);
+231:  if (wasm1.text.length > 30) {
+235:  log.push('[ocr] All Tesseract passes returned minimal text');
+237:    text: wasm1.text,
+238:    confidence: wasm1.confidence,
+239:    method: 'none',
+240:    error: 'Minimal text extracted from all passes',
+244:// ── Check if Tesseract CLI is available ──────────────────────────────────────
+246:async function checkTesseractCli(): Promise<boolean> {
+252:    await execFileAsync('tesseract', ['--version'], { timeout: 3000 });
+260:// ── Tesseract CLI (binary — Tesseract 5.x) ───────────────────────────────────
+261:async function tryTesseractCli(
+266:): Promise<TesseractResult> {
+285:        'tesseract',
+293:      // Estimate confidence from word count (CLI doesn't emit numeric confidence)
+295:      const confidence = wordCount > 100 ? 85 : wordCount > 50 ? 80 : wordCount > 20 ? 70 : wordCount > 5 ? 55 : 25;
+297:      log.push(`[ocr] CLI PSM${psm}: chars=${normalisedText.length}, words=${wordCount}, conf=${confidence}`);
+298:      return { text: normalisedText, confidence, method: 'tesseract-cli' };
+311:    return { text: '', confidence: 0, method: 'none', error: msg };
+315:// ── Tesseract.js (WASM — no install required) ─────────────────────────────────
+316:async function tryTesseractJs(
+320:): Promise<TesseractResult> {
+321:  log.push('[ocr] Trying Tesseract.js (WASM)...');
+324:    const { createWorker } = require('tesseract.js');
+327:      cachePath: '/tmp/tesseract-cache',
+329:        if (m.status === 'recognizing text' && (m.progress === 0 || m.progress === 1)) {
+339:      const { data } = await worker.recognize(dataUrl);
+341:      const rawText: string = data.text ?? '';
+342:      const confidence: number = Math.round(data.confidence ?? 0);
+345:      log.push(`[ocr] WASM: confidence=${confidence}, chars=${normalisedText.length}`);
+346:      return { text: normalisedText, confidence, method: 'tesseract-js' };
+355:    return { text: '', confidence: 0, method: 'none', error: msg };
+359:// ── OCR text normalisation ────────────────────────────────────────────────────
+361: * Fix common Tesseract OCR errors on utility bills:
+369:function normaliseOcrText(text: string): string {
+370:  return text
+\n=== bill upload key lines ===
+6:import { parseBillText, validateBillData, extractBillDataWithAI } from '@/lib/billOcr';
+9:import { extractPdfTextPure } from '@/lib/pdfExtract';
+15:// v48.0: Claude 3.5 Sonnet LMM Extraction Engine (direct image path)
+16:import { extractBillWithClaude } from '@/lib/billClaudeExtractor';
+100:// billOcrEngine and billParser are imported dynamically inside extractImageTextSmart()
+101:// to prevent webpack from bundling tesseract.js worker_threads at module load time.
+102:// Static import of tesseract.js causes HTML 500 errors before the route handler runs.
+104:// Top-level reference so webpack marks pdf-parse as external (not bundled)
+107:  const pdfParseModule = require('pdf-parse');
+110:  logger.warn('BILL', '[bill-upload] pdf-parse not available:', e instanceof Error ? e.message : e);
+115:export const maxDuration = 60; // v47.25: increased for OpenAI Vision fallback on Vercel
+138:    // v48.6: Rate limiting — 5 req / 30s per IP (protects Claude + OCR costs)
+258:            extractionMethod = pr.extractionMethod ?? 'pdf-parse';
+269:            extractPdfText(buffer),
+286:        // v48.0: Claude 3.5 Sonnet direct image path — no OCR pre-processing needed.
+287:        // Claude reads bar charts, tables, and non-standard layouts directly from the image.
+288:        // Falls back to existing Tesseract/Vision OCR pipeline if Claude fails or key absent.
+296:              extractBillWithClaude({ imageBuffer: buffer, mimeType: safeMime }, { timeoutMs: 40000 }),
+300:            const cr = claudeResult as Awaited<ReturnType<typeof extractBillWithClaude>>;
+305:              // Map Claude AiBillData → BillExtractResult and return immediately
+321:                  monthlyEvidence: `Claude 3.5 Sonnet image: ${billData.extractedFields.join(', ')}`,
+358:        // Fallback: existing Tesseract / OpenAI Vision / Google Vision OCR pipeline
+361:          extractImageTextSmart(buffer, safeMime),
+393:          hasOpenAI: !!process.env.OPENAI_API_KEY,
+417:    const { parseBill } = await import('@/lib/billParser');
+419:    const parseResult = parseBill(extractedText);
+428:    const legacyResult = parseBillText(extractedText);
+577:          hasOpenAI: !!process.env.OPENAI_API_KEY,
+650:async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: string }> {
+664:  // Method 1: pdftotext CLI (poppler)
+665:  // v47.25: Skip on Vercel — pdftotext binary not available in serverless runtime
+667:  logger.debug('BILL', '[PDF_PARSE_STARTED] method=pdftotext isVercel=' + _isVercel);
+669:    const text = await extractPdfTextCli(buffer);
+671:      logger.debug('BILL', `[PDF_PARSE_SUCCESS] method=pdftotext chars=${text.length}`);
+672:      return { text, method: 'pdftotext' };
+674:    logger.warn('BILL', `[bill-upload] pdftotext returned low-quality text (${text.length} chars) — trying next method`);
+676:    logger.warn('BILL', '[PDF_PARSE_FAILED] method=pdftotext error:', err instanceof Error ? (err as Error).message : err);
+679:  // Method 2: pdf-parse (npm library)
+680:  // v47.211: pdf-parse v2.4.5 uses a class-based API:
+684:  logger.debug('BILL', '[PDF_PARSE_STARTED] method=pdf-parse');
+686:    const ppMod = require('pdf-parse') as any;
+705:        logger.warn('BILL', '[PDF_PARSE_WARN] method=pdf-parse v2-api failed:', classErr instanceof Error ? (classErr as Error).message : classErr);
+719:        logger.warn('BILL', '[PDF_PARSE_WARN] method=pdf-parse v1-api failed:', legacyErr instanceof Error ? (legacyErr as Error).message : legacyErr);
+732:        logger.warn('BILL', '[PDF_PARSE_WARN] method=pdf-parse default-export failed:', defaultErr instanceof Error ? (defaultErr as Error).message : defaultErr);
+737:      logger.debug('BILL', `[PDF_PARSE_SUCCESS] method=pdf-parse chars=${text.length} pages=${numpages}`);
+738:      return { text, method: 'pdf-parse' };
+741:      logger.warn('BILL', `[bill-upload] pdf-parse returned low-quality text (${text.length} chars)`);
+743:      logger.warn('BILL', '[bill-upload] pdf-parse: all strategies returned empty text');
+746:    logger.warn('BILL', '[PDF_PARSE_FAILED] method=pdf-parse error:', err instanceof Error ? (err as Error).message : err);
+752:    const text = extractPdfTextPure(buffer);
+762:  // Method 4: pdfjs-dist
+764:  // getDocument().promise can hang forever if pdfjs-dist tries to spawn Web Workers in a
+767:  logger.debug('BILL', '[PDF_PARSE_STARTED] method=pdfjs-dist');
+769:    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs' as any);
+770:    const getDocument = pdfjsLib.getDocument ?? pdfjsLib.default?.getDocument;
+771:    if (!getDocument) throw new Error('getDocument not found in pdfjs-dist');
+785:        setTimeout(() => reject(new Error('pdfjs-dist getDocument timed out after 8s')), 8000)
+794:          setTimeout(() => reject(new Error(`pdfjs-dist getPage(${i}) timed out`)), 5000)
+800:          setTimeout(() => reject(new Error(`pdfjs-dist getTextContent(${i}) timed out`)), 5000)
+807:      logger.debug('BILL', `[PDF_PARSE_SUCCESS] method=pdfjs-dist chars=${text.length}`);
+808:      return { text, method: 'pdfjs-dist' };
+810:    logger.warn('BILL', `[bill-upload] pdfjs-dist returned low-quality text (${text.length} chars)`);
+812:    logger.warn('BILL', '[PDF_PARSE_FAILED] method=pdfjs-dist error:', err instanceof Error ? (err as Error).message : err);
+815:  // Method 5: OpenAI Files API + Responses API
+877:  // Method 6: Google Vision
+910:async function extractPdfTextCli(buffer: Buffer): Promise<string> {
+919:  execFileSync('pdftotext', ['-layout', tmpIn, tmpOut], { timeout: 15000 });
+927:async function runTesseractCliInline(buffer: Buffer, mimeType: string): Promise<string> {
+936:    await execFileAsync('tesseract', ['--version'], { timeout: 3000 }).catch(() => {
+937:      throw new Error('tesseract CLI not available');
+948:        'tesseract',
+965:async function extractImageTextSmart(
+973:  const { recognizeImage, recognizeImageWithVision, recognizeImageWithGoogle } =
+993:  let tesseractBuffer = buffer;      // preprocessed PNG for Tesseract/WASM
+994:  let tesseractMime   = mimeType;    // mime type for preprocessed buffer
+997:    tesseractBuffer = await preprocessBillImageSafe(buffer, preprocessLog);
+998:    tesseractMime   = 'image/png';   // preprocessor always outputs PNG
+1000:    logger.debug('BILL', `[PREPROCESS_COMPLETE] original=${buffer.length}b processed=${tesseractBuffer.length}b`);
+1004:  // Vision and Google Vision always use the original buffer (better for handwriting)
+1011:  logger.debug('BILL', '[OCR_STARTED] stage=1 method=tesseract-cli-inline');
+1012:  let tesseractText = '';
+1014:    tesseractText = await runTesseractCliInline(tesseractBuffer, tesseractMime);
+1015:    logger.debug('BILL', `[OCR_COMPLETED] stage=1 method=tesseract-cli chars=${tesseractText.length}`);
+1017:    logger.warn('BILL', '[OCR_COMPLETED] stage=1 method=tesseract-cli failed:', cliErr instanceof Error ? cliErr.message : String(cliErr));
+1023:  // When CLI fails, go directly to OpenAI Vision (Stage 2) which is fast (~5s).
+1026:  if (tesseractText.length < 20 && !isVercel) {
+1027:    logger.debug('BILL', '[OCR_STARTED] stage=1b method=tesseract-wasm-http (local-dev only)');
+1029:      const wasmResult = await recognizeImage(tesseractBuffer, tesseractMime);
+1030:      if (wasmResult.rawText.length > tesseractText.length) {
+1031:        tesseractText = wasmResult.rawText;
+1032:        logger.debug('BILL', `[OCR_COMPLETED] stage=1b method=tesseract-wasm chars=${tesseractText.length} confidence=${wasmResult.confidence}`);
+1035:      logger.warn('BILL', '[OCR_COMPLETED] stage=1b method=tesseract-wasm failed:', wasmErr instanceof Error ? wasmErr.message : String(wasmErr));
+1037:  } else if (tesseractText.length < 20 && isVercel) {
+1038:    logger.debug('BILL', '[OCR_SKIPPED] stage=1b reason=vercel_no_wasm_binary — escalating directly to OpenAI Vision');
+1040:  logger.debug('BILL', `[OCR_TEXT_LENGTH] after_tesseract=${tesseractText.length}`);
+1043:  if (tesseractText.length >= 20) {
+1044:    const parseCheck = parseMonthlyUsage(tesseractText);
+1046:    logger.debug('BILL', `[OCR_COMPLETED] tesseract_sufficient=${hasUsage} monthsFound=${parseCheck.monthsFound} chars=${tesseractText.length}`);
+1049:    if (hasUsage && tesseractText.length > 100) {
+1050:      logger.debug('BILL', '[OCR_COMPLETED] stage=tesseract method=tesseract-cli sufficient — skipping Vision (cost $0)');
+1051:      return { text: tesseractText, method: 'tesseract-cli', confidence: 75 };
+1054:    logger.debug('BILL', '[OCR_STARTED] stage=2 reason=no_usage_in_tesseract_text — trying Vision');
+1057:    logger.warn('BILL', `[OCR_FAILED] stage=1 chars=${tesseractText.length} — escalating to Vision`);
+1060:  // ── Stage 2: OpenAI Vision (direct call, not via /api/ocr) ─────────────────
+1072:        const tesseractParse = tesseractText.length >= 20 ? parseMonthlyUsage(tesseractText) : null;
+1075:        const tessMonths = tesseractParse?.monthsFound ?? 0;
+1077:        if (visionMonths >= tessMonths || (visionParse.annualUsage !== null && (tesseractParse?.annualUsage ?? null) === null)) {
+1078:          logger.debug('BILL', `[OCR_COMPLETED] method=openai-vision chosen months=${visionMonths} vs tesseract=${tessMonths}`);
+1081:          logger.debug('BILL', `[OCR_COMPLETED] method=tesseract-kept months=${tessMonths} > vision=${visionMonths}`);
+1082:          return { text: tesseractText, method: 'tesseract-kept', confidence: 70 };
+1092:  // ── Stage 3: Google Vision (last resort) ────────────────────────────────────
+1096:      const googleResult = await recognizeImageWithGoogle(visionBuffer, googleVisionKey);
+1108:  if (tesseractText.length > 0) {
+1109:    logger.warn('BILL', `[OCR_COMPLETED] method=tesseract-low-confidence chars=${tesseractText.length} — returning partial`);
+1110:    return { text: tesseractText, method: 'tesseract-low-confidence', confidence: 30 };
+\n=== bill engine key lines ===
+6: * This module calls the internal /api/ocr route for Tesseract OCR.
+11: *   1. Internal /api/ocr  (Tesseract.js WASM — free, no install required)
+13: *   3. OpenAI Vision       (paid — only if Tesseract confidence < 60 or no usage)
+17:export interface OcrResult {
+18:  rawText: string;
+19:  confidence: number;       // 0–100
+20:  method: 'tesseract-js' | 'tesseract-cli' | 'openai-vision' | 'google-vision' | 'none';
+28: * Call the internal /api/ocr endpoint which runs Tesseract.js in isolation.
+34:export async function recognizeImage(
+37:): Promise<OcrResult> {
+41:  console.log(`[bill-ocr] Calling internal /api/ocr: mime=${safeMime}, buffer=${buffer.length}b`);
+45:    const res = await fetch(`${baseUrl}/api/ocr`, {
+46:      method: 'POST',
+51:        // same env var checked in /api/ocr/route.ts.
+62:      console.warn(`[bill-ocr] /api/ocr returned HTTP ${res.status}: ${errText.slice(0, 200)}`);
+64:        rawText: '',
+65:        confidence: 0,
+66:        method: 'none',
+74:      console.warn(`[bill-ocr] /api/ocr failed: ${json.error}`);
+76:        rawText: '',
+77:        confidence: 0,
+78:        method: 'none',
+83:    const rawText: string = json.text ?? '';
+84:    const confidence: number = json.confidence ?? 0;
+85:    const method = (json.method ?? 'tesseract-js') as OcrResult['method'];
+87:    console.log(`[bill-ocr] /api/ocr success: method=${method}, confidence=${confidence}, chars=${rawText.length}`);
+89:    return { rawText, confidence, method };
+93:    console.warn(`[bill-ocr] /api/ocr call failed: ${msg}`);
+94:    return { rawText: '', confidence: 0, method: 'none', error: msg };
+101: * Only used when Tesseract confidence < 60 OR no monthly usage detected.
+103:export async function recognizeImageWithVision(
+106:  openaiKey: string,
+107:): Promise<OcrResult> {
+116:    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+117:      method: 'POST',
+120:        'Authorization': `Bearer ${openaiKey}`,
+146:        rawText: '',
+147:        confidence: 0,
+148:        method: 'none',
+158:      return { rawText: '', confidence: 0, method: 'openai-vision', error: 'Empty response' };
+162:    return { rawText: text, confidence: 85, method: 'openai-vision' };
+167:    return { rawText: '', confidence: 0, method: 'none', error: msg };
+175:export async function recognizeImageWithGoogle(
+177:  googleKey: string,
+178:): Promise<OcrResult> {
+183:      `https://vision.googleapis.com/v1/images:annotate?key=${googleKey}`,
+185:        method: 'POST',
+190:        // same env var checked in /api/ocr/route.ts.
+207:      return { rawText: '', confidence: 0, method: 'none' };
+215:      return { rawText: '', confidence: 0, method: 'google-vision' };
+219:    return { rawText: text, confidence: 80, method: 'google-vision' };
+224:    return { rawText: '', confidence: 0, method: 'none', error: msg };
+\n=== OCR fixture key lines ===
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:2:import { createReviewRequiredCandidates } from './candidateNormalization';
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:7:const TOOL_NAME = 'fixture-ocr-text-adapter';
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:13:  toolName: TOOL_NAME,
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:19:        candidateType: 'text_region_candidate',
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:20:        candidateCategory: signal.field === 'possible_equipment_label_text' ? 'electrical_context' : 'field_context',
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:27:          fixtureOnly: true,
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:37:        candidateLimitations: [...signal.limitationRefs, 'no-ocr-runtime', 'text-fixture-only', 'review-required'],
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:42:    return createReviewRequiredCandidates(input.tool, input.sourceContext, this.normalize(input));
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:47:  const tool = getRegisteredOpenSourceTool(TOOL_NAME, TOOL_VERSION);
+lib/assistedEvidenceSources/candidateAdapterTypes.ts:77:    | 'possible_image_orientation'
+lib/assistedEvidenceSources/candidateAdapterTypes.ts:78:    | 'possible_low_resolution_photo'
+lib/assistedEvidenceSources/candidateAdapterTypes.ts:79:    | 'possible_large_image_file'
+lib/assistedEvidenceSources/candidateAdapterTypes.ts:80:    | 'possible_missing_exif_metadata'
+lib/assistedEvidenceSources/candidateAdapterTypes.ts:81:    | 'possible_invalid_photo_dimensions'
+lib/assistedEvidenceSources/candidateAdapterTypes.ts:82:    | 'possible_duplicate_photo';
+lib/assistedEvidenceSources/candidateAdapterTypes.ts:90:  field: 'possible_image_orientation' | 'possible_low_resolution_photo' | 'possible_duplicate_photo';
+lib/assistedEvidenceSources/candidateAdapterTypes.ts:107:  field: 'possible_meter_label_text' | 'possible_equipment_label_text';
+\n=== registry OCR/runtime key lines ===
+10:    runtimeCategory: 'fixture_only',
+11:    allowedCandidateTypes: ['orientation_candidate', 'photo_quality_candidate', 'duplicate_similarity_candidate'],
+18:    reviewRequired: true,
+19:    canonicalMutationAllowed: false,
+21:    deterministicReplaySupport: 'fixture_replay_only',
+28:    toolName: 'fixture-ocr-text-adapter',
+32:    runtimeCategory: 'fixture_only',
+33:    allowedCandidateTypes: ['text_region_candidate'],
+40:    reviewRequired: true,
+41:    canonicalMutationAllowed: false,
+43:    deterministicReplaySupport: 'fixture_replay_only',
+51:export const OPEN_SOURCE_RUNTIME_TOOLS: readonly OpenSourceToolDefinition[] = [
+53:    toolName: 'sharp-metadata-runtime',
+57:    runtimeCategory: 'image_metadata',
+58:    allowedCandidateTypes: ['orientation_candidate', 'photo_quality_candidate', 'duplicate_similarity_candidate'],
+65:    reviewRequired: true,
+66:    canonicalMutationAllowed: false,
+68:    deterministicReplaySupport: 'runtime_payload_hash_required',
+82:  ...OPEN_SOURCE_RUNTIME_TOOLS,
+86:export const VALIDATED_OPEN_SOURCE_RUNTIME_TOOLS: readonly ValidatedOpenSourceToolDefinition[] = validateOpenSourceToolRegistry(OPEN_SOURCE_RUNTIME_TOOLS);
+96:  if (!tool.allowedCandidateTypes.includes(candidateType as never)) {
+\n=== boundary OCR key lines ===
+14:  'lib/engineeringIntelligence/recommendationEngine.ts',
+15:  'lib/engineeringIntelligence/workflowOrchestration.ts',
+18:const APPROVED_METADATA_RUNTIME_IMPORT_FILES = new Set([
+22:const APPROVED_SURVEY_ALIGNMENT_FILES = new Set([
+26:const APPROVED_CORE_HASH_FILES = new Set([
+30:const APPROVED_METADATA_RUNTIME_IMPORTS = new Set([
+42:  'lib/engineeringIntelligence/recommendationEngine',
+43:  'lib/engineeringIntelligence/workflowOrchestration',
+48:const PROHIBITED_RUNTIME_PATTERNS = [
+49:  { label: 'tesseract runtime', regex: /tesseract|createWorker\(|recognize\(/i },
+59:  { label: 'direct canonical mutation', regex: /buildSurveyEvidenceManifest|evaluateEngineeringRequirements|buildCADReadinessMetadata|buildEngineeringRecommendations|buildEngineeringWorkflowOrchestration|INSERT INTO|UPDATE\s+/i },
+60:  { label: 'canonical mutation enabled', regex: /canonicalMutationAllowed\s*:\s*true/i },
+62:  { label: 'survey table mutation', regex: /site_surveys|site_survey_files|project_physical_data/i },
+112:    if (APPROVED_METADATA_RUNTIME_IMPORTS.has(specifier) && !APPROVED_METADATA_RUNTIME_IMPORT_FILES.has(relative)) {
+118:    for (const pattern of PROHIBITED_RUNTIME_PATTERNS) {
+125:        const isApprovedSurveyAlignmentReference = APPROVED_SURVEY_ALIGNMENT_FILES.has(relative)
+127:        const isApprovedCoreHashing = APPROVED_CORE_HASH_FILES.has(relative)
+129:        const isApprovedMetadataAdapterHashing = APPROVED_METADATA_RUNTIME_IMPORT_FILES.has(relative)
+147:  const delegatesToRegisteredMetadataRuntime = APPROVED_SURVEY_ALIGNMENT_FILES.has(relative)

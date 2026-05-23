@@ -18,13 +18,15 @@ export function validateOpenSourceToolDefinition(tool: OpenSourceToolDefinition)
   if (licenseIsBlocked(tool.license)) throw new Error(`${tool.toolName} uses a blocked or unknown license posture.`);
   if (tool.maintainedStatus === 'abandoned' || tool.maintainedStatus === 'unknown') throw new Error(`${tool.toolName} is not allowed because maintenance status is ${tool.maintainedStatus}.`);
   if (tool.riskLevel === 'blocked' || tool.enabledStatus === 'blocked') throw new Error(`${tool.toolName} is blocked by registry risk policy.`);
-  if (tool.runtimeCategory === 'ocr_text_candidate' || tool.runtimeCategory === 'visual_categorization_candidate') throw new Error(`${tool.toolName} runtime category ${tool.runtimeCategory} is not approved in the metadata pilot.`);
+  if (tool.runtimeCategory === 'visual_categorization_candidate') throw new Error(`${tool.toolName} runtime category ${tool.runtimeCategory} is not approved in the metadata/OCR pilot.`);
   if (tool.requiresNativeBinaries && tool.runtimeCategory !== 'fixture_only' && tool.runtimeCategory !== 'image_metadata') throw new Error(`${tool.toolName} requires unapproved native binaries.`);
   if (tool.requiresModelWeights && tool.runtimeCategory !== 'fixture_only') throw new Error(`${tool.toolName} requires unapproved model weights.`);
-  if (tool.runtimeCategory === 'image_metadata' && tool.allowedRuntimeBoundary !== 'server_adapter_contract') throw new Error(`${tool.toolName} image metadata runtime must use the server adapter contract boundary.`);
-  if (tool.runtimeCategory === 'image_metadata' && tool.enabledStatus !== 'enabled_for_runtime_pilot') throw new Error(`${tool.toolName} image metadata runtime must be explicitly enabled for runtime pilot execution.`);
-  if (tool.runtimeCategory === 'image_metadata' && !tool.serverOnly) throw new Error(`${tool.toolName} image metadata runtime must be server-only.`);
-  if (tool.runtimeCategory === 'image_metadata' && tool.requiresModelWeights) throw new Error(`${tool.toolName} image metadata runtime cannot require model weights.`);
+  if ((tool.runtimeCategory === 'image_metadata' || tool.runtimeCategory === 'ocr_text_candidate') && tool.allowedRuntimeBoundary !== 'server_adapter_contract') throw new Error(`${tool.toolName} runtime must use the server adapter contract boundary.`);
+  if ((tool.runtimeCategory === 'image_metadata' || tool.runtimeCategory === 'ocr_text_candidate') && tool.enabledStatus !== 'enabled_for_runtime_pilot') throw new Error(`${tool.toolName} runtime must be explicitly enabled for runtime pilot execution.`);
+  if ((tool.runtimeCategory === 'image_metadata' || tool.runtimeCategory === 'ocr_text_candidate') && !tool.serverOnly) throw new Error(`${tool.toolName} runtime must be server-only.`);
+  if ((tool.runtimeCategory === 'image_metadata' || tool.runtimeCategory === 'ocr_text_candidate') && tool.requiresModelWeights) throw new Error(`${tool.toolName} runtime cannot require model weights.`);
+  if (tool.runtimeCategory === 'ocr_text_candidate' && !tool.allowedCandidateTypes.every(type => type === 'text_region_candidate')) throw new Error(`${tool.toolName} OCR runtime may emit text_region_candidate only.`);
+  if (tool.runtimeCategory === 'ocr_text_candidate' && tool.browserCompatible) throw new Error(`${tool.toolName} OCR runtime pilot must not be browser-executed.`);
   if (tool.allowedRuntimeBoundary === 'blocked_future_geometry') throw new Error(`${tool.toolName} is assigned a blocked future geometry boundary.`);
   if (tool.runtimeCategory === 'future_geometry_placeholder') throw new Error(`${tool.toolName} future geometry runtime is not approved in this phase.`);
 

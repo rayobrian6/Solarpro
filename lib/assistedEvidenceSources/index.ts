@@ -10,3 +10,5 @@ export * from './metadataFixtureAdapter';
 export * from './ocrFixtureAdapter';
 export * from './metadataRuntimeAdapter';
 export * from './surveyIngestionRuntimeBridge';
+export * from './ocrRuntimeAdapter';
+export * from './ocrRuntimeBridge';

@@ -115,33 +115,3 @@ export interface OcrFixturePayload {
   textRegionCount: number;
   signals: OcrFixtureSignal[];
 }
-
-export type OcrRuntimeField =
-  | 'possible_utility_account_number'
-  | 'possible_meter_number'
-  | 'possible_service_panel_rating_text'
-  | 'possible_breaker_rating_text'
-  | 'possible_equipment_label_text'
-  | 'possible_address_text'
-  | 'possible_placard_text'
-  | 'possible_invoice_or_bill_text'
-  | 'possible_nameplate_text';
-
-export interface OcrRuntimeSignal {
-  signalId: string;
-  field: OcrRuntimeField;
-  text: string;
-  confidence: number;
-  limitationRefs: string[];
-}
-
-export interface OcrRuntimePayload {
-  runtimePayloadHash: string;
-  inputByteLength: number;
-  method: 'tesseract-js' | 'none';
-  confidence: number;
-  text: string;
-  textLength: number;
-  textLineCount: number;
-  derivedSignals: OcrRuntimeSignal[];
-}

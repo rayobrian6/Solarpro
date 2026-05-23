@@ -1,0 +1,184 @@
+lib/assistedEvidence/candidateRegistry.ts:29:    candidateStatus: candidate.candidateStatus,
+lib/assistedEvidence/candidateRegistry.ts:36:    candidatePayload: candidate.candidatePayload,
+lib/assistedEvidence/candidateRegistry.ts:40:    nonAuthoritative: candidate.nonAuthoritative,
+lib/assistedEvidence/candidateRegistry.ts:53:export function projectionHashInput(projection: Omit<ReviewedEvidenceProjection, 'deterministicHash'>): Record<string, unknown> {
+lib/assistedEvidence/candidateRegistry.ts:56:    projectionId: projection.projectionId,
+lib/assistedEvidence/candidateRegistry.ts:57:    sourceCandidateId: projection.sourceCandidateId,
+lib/assistedEvidence/candidateRegistry.ts:58:    projectId: projection.projectId,
+lib/assistedEvidence/candidateRegistry.ts:59:    surveyId: projection.surveyId,
+lib/assistedEvidence/candidateRegistry.ts:60:    reviewerId: projection.reviewerId,
+lib/assistedEvidence/candidateRegistry.ts:61:    acceptedFields: projection.acceptedFields,
+lib/assistedEvidence/candidateRegistry.ts:62:    projectionCategory: projection.projectionCategory,
+lib/assistedEvidence/candidateRegistry.ts:63:    projectionPayload: projection.projectionPayload,
+lib/assistedEvidence/candidateRegistry.ts:64:    projectionConfidence: projection.projectionConfidence,
+lib/assistedEvidence/candidateRegistry.ts:65:    projectionLimitations: projection.projectionLimitations,
+lib/assistedEvidence/candidateRegistry.ts:66:    projectionStatus: projection.projectionStatus,
+lib/assistedEvidence/candidateRegistry.ts:67:    createdAt: projection.createdAt,
+lib/assistedEvidence/candidateRegistry.ts:68:    canonicalParticipationStatus: projection.canonicalParticipationStatus,
+lib/assistedEvidence/candidateRegistry.ts:69:    reviewProvenance: projection.reviewProvenance,
+lib/assistedEvidence/candidateRegistry.ts:73:export function withProjectionHash(projection: Omit<ReviewedEvidenceProjection, 'deterministicHash'>): ReviewedEvidenceProjection {
+lib/assistedEvidence/candidateRegistry.ts:74:  return { ...projection, deterministicHash: deterministicHash(projectionHashInput(projection)) };
+lib/assistedEvidence/types.ts:3:  | 'review_required'
+lib/assistedEvidence/types.ts:36:export type AssistedEvidenceProjectionStatus = 'active_reviewed_projection' | 'inactive_rejected' | 'inactive_invalidated' | 'inactive_superseded';
+lib/assistedEvidence/types.ts:77:  candidateStatus: AssistedEvidenceCandidateStatus;
+lib/assistedEvidence/types.ts:84:  candidatePayload: Record<string, unknown>;
+lib/assistedEvidence/types.ts:88:  nonAuthoritative: true;
+lib/assistedEvidence/types.ts:110:  projectionId: string;
+lib/assistedEvidence/types.ts:116:  projectionCategory: AssistedEvidenceCandidateCategory;
+lib/assistedEvidence/types.ts:117:  projectionPayload: Record<string, unknown>;
+lib/assistedEvidence/types.ts:118:  projectionConfidence: number;
+lib/assistedEvidence/types.ts:119:  projectionLimitations: string[];
+lib/assistedEvidence/types.ts:120:  projectionStatus: AssistedEvidenceProjectionStatus;
+lib/assistedEvidence/types.ts:141:  candidatePayload: Record<string, unknown>;
+lib/assistedEvidence/assistedEvidence.test.ts:6:  candidateCanInfluenceCADReadiness,
+lib/assistedEvidence/assistedEvidence.test.ts:9:  createCandidate,
+lib/assistedEvidence/assistedEvidence.test.ts:12:  markReviewRequired,
+lib/assistedEvidence/assistedEvidence.test.ts:13:  projectionAutomaticallyMutatesCanonicalEvidence,
+lib/assistedEvidence/assistedEvidence.test.ts:14:  projectionIsEligibleForFutureMappingOnly,
+lib/assistedEvidence/assistedEvidence.test.ts:35:  candidatePayload: { suggestedCategory: 'roof_edge', qualityNote: 'fixture metadata only' },
+lib/assistedEvidence/assistedEvidence.test.ts:46:    deterministicInputs: ['sourceFileId', 'candidatePayload'],
+lib/assistedEvidence/assistedEvidence.test.ts:52:  return markReviewRequired(createCandidate(baseInput));
+lib/assistedEvidence/assistedEvidence.test.ts:57:    const candidate = createCandidate(baseInput);
+lib/assistedEvidence/assistedEvidence.test.ts:58:    const replay = createCandidate({ ...baseInput, candidateClaims: [...baseInput.candidateClaims].reverse() });
+lib/assistedEvidence/assistedEvidence.test.ts:60:    expect(candidate.candidateStatus).toBe('created');
+lib/assistedEvidence/assistedEvidence.test.ts:61:    expect(candidate.nonAuthoritative).toBe(true);
+lib/assistedEvidence/assistedEvidence.test.ts:71:    expect(candidate.candidateStatus).toBe('review_required');
+lib/assistedEvidence/assistedEvidence.test.ts:75:  it('proves unreviewed candidates cannot satisfy requirements, CAD readiness, recommendations, or workflows', () => {
+lib/assistedEvidence/assistedEvidence.test.ts:78:    expect(candidateCanInfluenceCADReadiness(candidate)).toBe(false);
+lib/assistedEvidence/assistedEvidence.test.ts:91:    expect(result.projection).toBeNull();
+lib/assistedEvidence/assistedEvidence.test.ts:92:    expect(result.candidate.candidateStatus).toBe('rejected_by_reviewer');
+lib/assistedEvidence/assistedEvidence.test.ts:96:  it('invalidates candidates and blocks downstream projection', () => {
+lib/assistedEvidence/assistedEvidence.test.ts:98:    expect(invalidated.candidateStatus).toBe('invalidated');
+lib/assistedEvidence/assistedEvidence.test.ts:106:    expect(superseded.candidateStatus).toBe('superseded');
+lib/assistedEvidence/assistedEvidence.test.ts:111:  it('accepts review-required candidates into reviewed projections only', () => {
+lib/assistedEvidence/assistedEvidence.test.ts:120:    expect(result.candidate.candidateStatus).toBe('accepted_by_reviewer');
+lib/assistedEvidence/assistedEvidence.test.ts:121:    expect(result.projection.sourceCandidateId).toBe(result.candidate.candidateId);
+lib/assistedEvidence/assistedEvidence.test.ts:122:    expect(result.projection.projectionPayload).toEqual({ suggestedCategory: 'roof_edge' });
+lib/assistedEvidence/assistedEvidence.test.ts:123:    expect(result.projection.canonicalParticipationStatus).toBe('eligible_for_mapping');
+lib/assistedEvidence/assistedEvidence.test.ts:124:    expect(projectionIsEligibleForFutureMappingOnly(result.projection)).toBe(true);
+lib/assistedEvidence/assistedEvidence.test.ts:125:    expect(projectionAutomaticallyMutatesCanonicalEvidence(result.projection)).toBe(false);
+lib/assistedEvidence/assistedEvidence.test.ts:128:  it('does not allow accepted projection creation without explicit accepted fields', () => {
+lib/assistedEvidence/assistedEvidence.test.ts:137:    const a = createCandidate(baseInput);
+lib/assistedEvidence/assistedEvidence.test.ts:138:    const b = createCandidate({
+lib/assistedEvidence/assistedEvidence.test.ts:140:      candidatePayload: { qualityNote: 'fixture metadata only', suggestedCategory: 'roof_edge' },
+lib/assistedEvidence/reviewProjection.ts:17:  if (candidate.candidateStatus !== 'review_required') {
+lib/assistedEvidence/reviewProjection.ts:18:    throw new Error('Only review-required assisted evidence candidates can create reviewed projections.');
+lib/assistedEvidence/reviewProjection.ts:21:  if (acceptedFields.length === 0) throw new Error('Accepted assisted evidence projections require at least one accepted field.');
+lib/assistedEvidence/reviewProjection.ts:24:  const projectionPayload = buildProjectionPayload(candidate, acceptedFields);
+lib/assistedEvidence/reviewProjection.ts:25:  const projectionSeed = {
+lib/assistedEvidence/reviewProjection.ts:30:    projectionPayload,
+lib/assistedEvidence/reviewProjection.ts:32:  const projectionId = `aep_${deterministicHash(projectionSeed).slice(0, 24)}`;
+lib/assistedEvidence/reviewProjection.ts:33:  const projectionWithoutReviewHash = {
+lib/assistedEvidence/reviewProjection.ts:34:    projectionId,
+lib/assistedEvidence/reviewProjection.ts:40:    projectionCategory: candidate.candidateCategory,
+lib/assistedEvidence/reviewProjection.ts:41:    projectionPayload,
+lib/assistedEvidence/reviewProjection.ts:42:    projectionConfidence: candidate.candidateConfidence,
+lib/assistedEvidence/reviewProjection.ts:43:    projectionLimitations: candidate.candidateLimitations,
+lib/assistedEvidence/reviewProjection.ts:44:    projectionStatus: 'active_reviewed_projection' as const,
+lib/assistedEvidence/reviewProjection.ts:59:  const reviewProjectionHash = deterministicHash({ ...projectionWithoutReviewHash, reviewProvenance: { ...projectionWithoutReviewHash.reviewProvenance, reviewProjectionHash: 'pending' } });
+lib/assistedEvidence/reviewProjection.ts:61:    ...projectionWithoutReviewHash,
+lib/assistedEvidence/reviewProjection.ts:62:    reviewProvenance: { ...projectionWithoutReviewHash.reviewProvenance, reviewProjectionHash },
+lib/assistedEvidence/candidateLifecycle.ts:15:export function createCandidate(input: CreateAssistedEvidenceCandidateInput): AssistedEvidenceCandidate {
+lib/assistedEvidence/candidateLifecycle.ts:23:    candidatePayload: input.candidatePayload,
+lib/assistedEvidence/candidateLifecycle.ts:35:    candidateStatus: 'created',
+lib/assistedEvidence/candidateLifecycle.ts:42:    candidatePayload: input.candidatePayload,
+lib/assistedEvidence/candidateLifecycle.ts:46:    nonAuthoritative: true,
+lib/assistedEvidence/candidateLifecycle.ts:69:export function markReviewRequired(candidate: AssistedEvidenceCandidate): AssistedEvidenceCandidate {
+lib/assistedEvidence/candidateLifecycle.ts:70:  if (candidate.candidateStatus === 'invalidated' || candidate.candidateStatus === 'superseded') return candidate;
+lib/assistedEvidence/candidateLifecycle.ts:71:  return withCandidateHash({ ...withoutCandidateHash(candidate), candidateStatus: 'review_required' });
+lib/assistedEvidence/candidateLifecycle.ts:75:  return withCandidateHash({ ...withoutCandidateHash(candidate), candidateStatus: 'invalidated', invalidatedAt });
+lib/assistedEvidence/candidateLifecycle.ts:80:  return withCandidateHash({ ...withoutCandidateHash(candidate), candidateStatus: 'superseded', supersededBy });
+lib/assistedEvidence/sandboxGuards.ts:4:  if (candidate.nonAuthoritative !== true || candidate.reviewRequired !== true) {
+lib/assistedEvidence/sandboxGuards.ts:14:export function candidateCanInfluenceCADReadiness(_candidate: AssistedEvidenceCandidate): false {
+lib/assistedEvidence/sandboxGuards.ts:27:  return candidate.candidateStatus === 'review_required';
+lib/assistedEvidence/sandboxGuards.ts:31:  if (candidate.candidateStatus !== 'invalidated') return false;
+lib/assistedEvidence/sandboxGuards.ts:36:  return candidate.candidateStatus === 'rejected_by_reviewer' && candidate.nonAuthoritative === true && candidate.reviewRequired === true;
+lib/assistedEvidence/sandboxGuards.ts:39:export function projectionAutomaticallyMutatesCanonicalEvidence(_projection: ReviewedEvidenceProjection): false {
+lib/assistedEvidence/sandboxGuards.ts:43:export function projectionIsEligibleForFutureMappingOnly(projection: ReviewedEvidenceProjection): boolean {
+lib/assistedEvidence/sandboxGuards.ts:44:  return projection.projectionStatus === 'active_reviewed_projection'
+lib/assistedEvidence/sandboxGuards.ts:45:    && projection.canonicalParticipationStatus === 'eligible_for_mapping';
+lib/assistedEvidence/reviewWorkflow.ts:13:  projection: ReviewedEvidenceProjection;
+lib/assistedEvidence/reviewWorkflow.ts:18:  projection: null;
+lib/assistedEvidence/reviewWorkflow.ts:22:  if (candidate.candidateStatus !== 'review_required') {
+lib/assistedEvidence/reviewWorkflow.ts:26:  const projection = createReviewedEvidenceProjection(candidate, {
+lib/assistedEvidence/reviewWorkflow.ts:33:  const acceptedCandidate = withCandidateHash({ ...withoutCandidateHash(candidate), candidateStatus: 'accepted_by_reviewer' });
+lib/assistedEvidence/reviewWorkflow.ts:34:  return { candidate: acceptedCandidate, projection };
+lib/assistedEvidence/reviewWorkflow.ts:38:  if (candidate.candidateStatus !== 'review_required') {
+lib/assistedEvidence/reviewWorkflow.ts:42:  return { candidate: withCandidateHash({ ...withoutCandidateHash(candidate), candidateStatus: 'rejected_by_reviewer' }), projection: null };
+lib/assistedEvidenceSources/candidateAdapterContracts.ts:11:  'Adapters must route candidate creation through createCandidate() and markReviewRequired().',
+lib/assistedEvidenceSources/candidateAdapterContracts.ts:13:  'Adapters must not import canonical evidence, engineering requirements, CAD readiness, recommendations, or workflows.',
+lib/assistedEvidenceSources/metadataFixtureAdapter.ts:2:import { createReviewRequiredCandidates } from './candidateNormalization';
+lib/assistedEvidenceSources/metadataFixtureAdapter.ts:29:          candidatePayload: {
+lib/assistedEvidenceSources/metadataFixtureAdapter.ts:52:    return createReviewRequiredCandidates(input.tool, input.sourceContext, this.normalize(input));
+lib/assistedEvidenceSources/metadataRuntimeAdapter.test.ts:75:      expect(candidate.candidateStatus).toBe('review_required');
+lib/assistedEvidenceSources/metadataRuntimeAdapter.test.ts:76:      expect(candidate.nonAuthoritative).toBe(true);
+lib/assistedEvidenceSources/metadataRuntimeAdapter.test.ts:80:      expect(candidate.candidatePayload.runtimePilot).toBe(true);
+lib/assistedEvidenceSources/metadataRuntimeAdapter.test.ts:81:      expect(candidate.candidatePayload.fixtureOnly).toBe(false);
+lib/assistedEvidenceSources/metadataRuntimeAdapter.test.ts:82:      expect(candidate.candidatePayload.runtimeCategory).toBe('image_metadata');
+lib/assistedEvidenceSources/metadataRuntimeAdapter.test.ts:92:  it('keeps runtime output out of canonical, CAD, recommendation, and workflow authority', async () => {
+lib/assistedEvidenceSources/metadataRuntimeAdapter.test.ts:96:    expect(serialized).not.toMatch(/buildSurveyEvidenceManifest|buildCADReadinessMetadata|buildEngineeringRecommendations|buildEngineeringWorkflowOrchestration/);
+lib/assistedEvidenceSources/metadataRuntimeAdapter.test.ts:97:    expect(result.candidates.every(candidate => candidate.candidatePayload.runtimePilot === true)).toBe(true);
+lib/assistedEvidenceSources/metadataRuntimeAdapter.test.ts:98:    expect(result.candidates.every(candidate => candidate.candidateStatus === 'review_required')).toBe(true);
+lib/assistedEvidenceSources/candidateAdapterTypes.ts:1:import type { AssistedEvidenceCandidate, AssistedEvidenceCandidateCategory, AssistedEvidenceCandidateClaim, AssistedEvidenceCandidateType, CreateAssistedEvidenceCandidateInput } from '@/lib/assistedEvidence';
+lib/assistedEvidenceSources/candidateAdapterTypes.ts:20:  candidatePayload: Record<string, unknown>;
+lib/assistedEvidenceSources/metadataRuntimeAdapter.ts:3:import { deterministicHash } from '@/lib/assistedEvidence';
+lib/assistedEvidenceSources/metadataRuntimeAdapter.ts:4:import { createReviewRequiredCandidates } from './candidateNormalization';
+lib/assistedEvidenceSources/metadataRuntimeAdapter.ts:149:        candidatePayload: {
+lib/assistedEvidenceSources/metadataRuntimeAdapter.ts:183:    return createReviewRequiredCandidates(input.tool, input.sourceContext, this.normalize(input));
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts:26:  canonicalSourceOfTruth: 'site_surveys+site_survey_files',
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts:67:      sourceOfTruth: 'site_surveys+site_survey_files',
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts:81:    expect(result.candidates.map(candidate => candidate.candidatePayload.field)).not.toContain('possible_blurry_photo');
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts:92:      expect(candidate.candidateStatus).toBe('review_required');
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts:93:      expect(candidate.nonAuthoritative).toBe(true);
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts:95:      expect(candidate.candidatePayload.runtimePilot).toBe(true);
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts:96:      expect(candidate.candidatePayload.surveyRuntimeBridge).toBe(true);
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts:97:      expect(candidate.candidatePayload.canonicalSourceOfTruth).toBe('site_surveys+site_survey_files');
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts:98:      expect(candidate.candidatePayload.siteSurveyFileId).toBe(source.siteSurveyFileId);
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts:99:      expect(candidate.candidatePayload.surveyEvidenceId).toBe(source.evidenceId);
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts:100:      expect(candidate.candidatePayload.canonicalMutationAllowed).toBe(false);
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts:105:      expect(candidate.provenance.deterministicInputs).toContain('site_surveys+site_survey_files-source-ref');
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts:106:      expect(candidate.provenance.notes.join(' ')).toContain('preserved site_surveys+site_survey_files as canonical attachment truth');
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts:110:  it('keeps survey-aligned runtime candidates out of canonical, CAD, recommendation, and workflow authority', async () => {
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts:114:    expect(serialized).not.toMatch(/buildSurveyEvidenceManifest|evaluateEngineeringRequirements|buildCADReadinessMetadata|buildEngineeringRecommendations|buildEngineeringWorkflowOrchestration/);
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts:115:    expect(result.candidates.every(candidate => candidate.candidatePayload.canonicalMutationAllowed === false)).toBe(true);
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts:116:    expect(result.candidates.every(candidate => candidate.candidateStatus === 'review_required')).toBe(true);
+lib/assistedEvidenceSources/candidateNormalization.ts:1:import { createCandidate, deterministicHash, markReviewRequired } from '@/lib/assistedEvidence';
+lib/assistedEvidenceSources/candidateNormalization.ts:2:import type { AssistedEvidenceCandidate, CreateAssistedEvidenceCandidateInput } from '@/lib/assistedEvidence';
+lib/assistedEvidenceSources/candidateNormalization.ts:52:    candidatePayload: {
+lib/assistedEvidenceSources/candidateNormalization.ts:53:      ...normalized.candidatePayload,
+lib/assistedEvidenceSources/candidateNormalization.ts:88:export function createReviewRequiredCandidates(
+lib/assistedEvidenceSources/candidateNormalization.ts:96:  const candidates: AssistedEvidenceCandidate[] = candidateInputs.map(input => markReviewRequired(createCandidate(input)));
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.ts:1:import { deterministicHash } from '@/lib/assistedEvidence';
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.ts:3:import type { AssistedEvidenceCandidate } from '@/lib/assistedEvidence';
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.ts:16:  canonicalSourceOfTruth: 'site_surveys+site_survey_files';
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.ts:43:    sourceOfTruth: 'site_surveys+site_survey_files';
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.ts:95:    candidatePayload: {
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.ts:96:      ...candidate.candidatePayload,
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.ts:120:        'site_surveys+site_survey_files-source-ref',
+lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.ts:125:        'Survey ingestion alignment bridge preserved site_surveys+site_survey_files as canonical attachment truth.',
+lib/assistedEvidenceSources/openSourceToolTypes.ts:1:import type { AssistedEvidenceCandidateCategory, AssistedEvidenceCandidateType } from '@/lib/assistedEvidence';
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:2:import { createReviewRequiredCandidates } from './candidateNormalization';
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:22:        candidatePayload: {
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:42:    return createReviewRequiredCandidates(input.tool, input.sourceContext, this.normalize(input));
+lib/assistedEvidenceSources/assistedEvidenceSources.test.ts:77:    expect(first.candidates.map(candidate => candidate.candidateStatus)).toEqual(['review_required', 'review_required']);
+lib/assistedEvidenceSources/assistedEvidenceSources.test.ts:78:    expect(first.candidates.map(candidate => candidate.nonAuthoritative)).toEqual([true, true]);
+lib/assistedEvidenceSources/assistedEvidenceSources.test.ts:81:    expect(first.candidates[0].candidatePayload.fixtureOnly).toBe(true);
+lib/assistedEvidenceSources/assistedEvidenceSources.test.ts:92:    expect(first.candidates.map(candidate => candidate.candidateStatus)).toEqual(['review_required', 'review_required']);
+lib/assistedEvidenceSources/assistedEvidenceSources.test.ts:95:    expect(first.candidates[0].candidatePayload.fixtureOnly).toBe(true);
+scripts/check-assisted-evidence-boundaries.js:6:const ASSISTED_DIR = path.join(ROOT, 'lib', 'assistedEvidence');
+scripts/check-assisted-evidence-boundaries.js:7:const ASSISTED_SOURCES_DIR = path.join(ROOT, 'lib', 'assistedEvidenceSources');
+scripts/check-assisted-evidence-boundaries.js:14:  'lib/engineeringIntelligence/recommendationEngine.ts',
+scripts/check-assisted-evidence-boundaries.js:15:  'lib/engineeringIntelligence/workflowOrchestration.ts',
+scripts/check-assisted-evidence-boundaries.js:19:  'lib/assistedEvidenceSources/metadataRuntimeAdapter.ts',
+scripts/check-assisted-evidence-boundaries.js:23:  'lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.ts',
+scripts/check-assisted-evidence-boundaries.js:27:  'lib/assistedEvidence/candidateRegistry.ts',
+scripts/check-assisted-evidence-boundaries.js:42:  'lib/engineeringIntelligence/recommendationEngine',
+scripts/check-assisted-evidence-boundaries.js:43:  'lib/engineeringIntelligence/workflowOrchestration',
+scripts/check-assisted-evidence-boundaries.js:59:  { label: 'direct canonical mutation', regex: /buildSurveyEvidenceManifest|evaluateEngineeringRequirements|buildCADReadinessMetadata|buildEngineeringRecommendations|buildEngineeringWorkflowOrchestration|INSERT INTO|UPDATE\s+/i },
+scripts/check-assisted-evidence-boundaries.js:62:  { label: 'survey table mutation', regex: /site_surveys|site_survey_files|project_physical_data/i },
+scripts/check-assisted-evidence-boundaries.js:96:  if (/assistedEvidence|assistedEvidenceSources|assisted-evidence/i.test(text)) {
+scripts/check-assisted-evidence-boundaries.js:138:    if (!/createCandidate|createReviewRequiredCandidates/.test(text)) {
+scripts/check-assisted-evidence-boundaries.js:139:      violations.push(`${relative}: adapter foundation must route candidate creation through createCandidate() or the shared createReviewRequiredCandidates() helper.`);
+scripts/check-assisted-evidence-boundaries.js:141:    if (!/markReviewRequired|createReviewRequiredCandidates/.test(text)) {
+scripts/check-assisted-evidence-boundaries.js:142:      violations.push(`${relative}: adapter foundation must mark generated candidates review_required directly or through the shared helper.`);
+scripts/check-assisted-evidence-boundaries.js:162:console.log(`Assisted evidence boundary guard passed. Scanned ${walk(ASSISTED_DIR).length} assistedEvidence files, ${walk(ASSISTED_SOURCES_DIR).length} assistedEvidenceSources files, and ${CANONICAL_FORBIDDEN_IMPORT_TARGETS.length} canonical/Engineering Intelligence boundary files.`);

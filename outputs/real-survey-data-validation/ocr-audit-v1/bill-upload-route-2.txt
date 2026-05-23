@@ -1,0 +1,361 @@
+          }
+        } catch (pipelineErr: unknown) {
+          logger.warn('BILL', '[PDF_PIPELINE_ERROR]', pipelineErr instanceof Error ? (pipelineErr as Error).message : pipelineErr);
+        }
+
+        // Legacy extraction fallback (when pipeline failed or data was insufficient)
+        if (!extractedText) {
+          logger.debug('BILL', `[PDF_LEGACY_STARTED] ms=${Date.now() - startMs}`);
+          const result = await Promise.race([
+            extractPdfText(buffer),
+            timeoutAfter(20000).catch(() => ({ text: '', method: 'timeout' })),
+          ]) as { text: string; method: string };
+          extractedText = result.text;
+          extractionMethod = result.method;
+          logger.debug('BILL', `[OCR_COMPLETED] method=${result.method} chars=${result.text.length} path=legacy`);
+        }
+      } else if (
+        (['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/tiff', 'image/bmp'].includes(fileType)) ||
+        fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') ||
+        fileName.endsWith('.png') || fileName.endsWith('.jfif') ||
+        fileName.endsWith('.webp')
+      ) {
+        const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/tiff', 'image/bmp'];
+        const safeMime = ALLOWED_IMAGE_MIMES.includes(fileType) ? fileType : 'image/jpeg';
+        logger.debug('BILL', `[IMAGE_PIPELINE_STARTED] name=${fileName} type=${safeMime} size=${buffer.length} ms=${Date.now() - startMs}`);
+
+        // v48.0: Claude 3.5 Sonnet direct image path — no OCR pre-processing needed.
+        // Claude reads bar charts, tables, and non-standard layouts directly from the image.
+        // Falls back to existing Tesseract/Vision OCR pipeline if Claude fails or key absent.
+        const anthropicKey = process.env.ANTHROPIC_API_KEY;
+        let claudeImageHandled = false;
+
+        if (anthropicKey) {
+          logger.debug('BILL', `[CLAUDE_IMAGE_STARTED] ms=${Date.now() - startMs}`);
+          try {
+            const claudeResult = await Promise.race([
+              extractBillWithClaude({ imageBuffer: buffer, mimeType: safeMime }, { timeoutMs: 40000 }),
+              timeoutAfter(42000).catch(() => null),
+            ]);
+
+            const cr = claudeResult as Awaited<ReturnType<typeof extractBillWithClaude>>;
+
+            if (cr && cr.status !== 'failed') {
+              logger.debug('BILL', `[CLAUDE_IMAGE_SUCCESS] status=${cr.status} utility=${cr.data.utility_name} kwh=${cr.data.total_kwh} months=${cr.data.monthly_kwh?.length ?? 0} ms=${Date.now() - startMs}`);
+
+              // Map Claude AiBillData → BillExtractResult and return immediately
+              const billData = mapAiResultToBillExtractResult(
+                cr.data,
+                `[claude-image] status=${cr.status}`,
+                'claude-3-5-sonnet',
+              );
+
+              const hasUsefulData = (billData.extractedFields?.length ?? 0) >= 2
+                || (billData.monthlyKwh !== undefined && billData.monthlyKwh > 0)
+                || (billData.monthlyUsageHistory?.length ?? 0) >= 3;
+
+              if (hasUsefulData) {
+                const extractionEvidence = {
+                  monthlySource: 'claude-image' as const,
+                  monthlyConfidence: cr.status === 'complete' ? 95 : 65,
+                  monthsFound: billData.monthlyUsageHistory?.length ?? 0,
+                  monthlyEvidence: `Claude 3.5 Sonnet image: ${billData.extractedFields.join(', ')}`,
+                  annualSource: billData.annualKwh ? 'claude' : 'derived',
+                  annualSourceText: null,
+                  utilitySource: billData.utilityProvider ? 'claude' : 'none',
+                  rateSource: billData.electricityRate ? 'claude' : 'none',
+                  debugLog: [`[claude-image] status=${cr.status} validationFlags=${JSON.stringify(cr.validationFlags)}`],
+                };
+
+                const elapsedMs = Date.now() - startMs;
+                logger.debug('BILL', `[BILL_UPLOAD_RETURNING] fields=${billData.extractedFields.length} confidence=${billData.confidence} elapsedMs=${elapsedMs} path=claude-image`);
+                // v48.1: Fire-and-forget enrichment (normalize utility, upsert DB, validate rate)
+                runEnrichmentAsync(billData);
+                return NextResponse.json({
+                  success: true,
+                  billData,
+                  extractionEvidence,
+                  extractionMethod: 'claude-3-5-sonnet',
+                  locationData: null,
+                  utilityData: null,
+                  matchedUtility: null,
+                  systemSizing: null,
+                  rateValidation: null,
+                  validation: { valid: true, warnings: [], errors: [] },
+                });
+              }
+
+              logger.debug('BILL', `[CLAUDE_IMAGE_INSUFFICIENT] fields=${billData.extractedFields?.length ?? 0} — falling through to OCR pipeline`);
+            } else {
+              logger.warn('BILL', `[CLAUDE_IMAGE_FAILED] status=${cr?.status ?? 'null'} — falling through to OCR pipeline`);
+            }
+          } catch (claudeErr: unknown) {
+            logger.warn('BILL', '[CLAUDE_IMAGE_ERROR]', claudeErr instanceof Error ? (claudeErr as Error).message : claudeErr);
+          }
+        } else {
+          logger.debug('BILL', '[CLAUDE_IMAGE_SKIPPED] ANTHROPIC_API_KEY not set — using OCR pipeline');
+        }
+
+        // Fallback: existing Tesseract / OpenAI Vision / Google Vision OCR pipeline
+        logger.debug('BILL', `[OCR_STARTED] name=${fileName} type=${safeMime} size=${buffer.length} claudeHandled=${claudeImageHandled}`);
+        const ocrResult = await Promise.race([
+          extractImageTextSmart(buffer, safeMime),
+          timeoutAfter(20000).catch(() => ({ text: '', method: 'timeout', confidence: 0 })),
+        ]) as { text: string; method: string; confidence: number };
+        extractedText = ocrResult.text;
+        extractionMethod = ocrResult.method;
+
+        logger.debug('BILL', `[OCR_COMPLETED] chars=${extractedText.length} method=${ocrResult.method} confidence=${ocrResult.confidence}`);
+        logger.debug('BILL', `[TEXT_LENGTH] chars=${extractedText.length} ms=${Date.now() - startMs}`);
+
+        if (extractedText.length > 50) {
+          logger.debug('BILL', `[OCR_SUCCESS] method=${ocrResult.method} chars=${extractedText.length}`);
+        } else {
+          logger.warn('BILL', `[OCR_FAILED] method=${ocrResult.method} chars=${extractedText.length}`);
+        }
+      } else {
+        return NextResponse.json({ success: false, error: 'Unsupported file type. Please upload PDF, JPG, or PNG.' }, { status: 400 });
+      }
+
+      logger.debug('BILL', `[FILE_SAVED] buffer_intact=${buffer.length > 0} extracted_chars=${extractedText.length}`);
+    }
+
+    if (!extractedText.trim()) {
+      // OCR failed completely — return a soft failure that lets the UI show manual entry
+      // rather than a hard error. This matches Step 5 of the OCR reliability spec.
+      logger.warn('BILL', `[OCR_FAILED] all methods returned empty text name=${file?.name ?? 'none'} mime=${file?.type ?? 'none'} size=${file?.size ?? 0} openai=${!!process.env.OPENAI_API_KEY}`);
+      return NextResponse.json({
+        success: false,
+        status: 'ocr_failed',
+        error: 'Bill text could not be extracted. Please try a clearer image or enter your usage manually.',
+        allow_manual_entry: true,
+        stage: extractionMethod,
+        debug: {
+          hasOpenAI: !!process.env.OPENAI_API_KEY,
+          pdfParseLoaded: !!PDFParse,
+          fileType: file?.type,
+          fileSize: file?.size,
+        },
+      }, { status: 422 });
+    }
+
+    logger.debug('BILL', `[TEXT_LENGTH] chars=${extractedText.length} method=${extractionMethod} ms=${Date.now() - startMs}`);
+    logger.debug('BILL', `[OCR_TEXT_FIRST_500] method=${extractionMethod} preview=${JSON.stringify(extractedText.slice(0, 500))}`);
+
+    // ── RAW OCR TEXT LOG ──────────────────────────────────────────────────────
+    logger.debug('BILL', '[bill-upload] === RAW OCR TEXT ===');
+    const ocrLines = extractedText.split('\n');
+    for (const line of ocrLines.slice(0, 60)) {
+      if (line.trim()) logger.debug('BILL', `[ocr-raw] ${line}`);
+    }
+    if (ocrLines.length > 60) {
+      logger.debug('BILL', `[ocr-raw] ... (${ocrLines.length - 60} more lines)`);
+    }
+    logger.debug('BILL', '[bill-upload] === END RAW OCR TEXT ===');
+
+    // ── Deterministic parsing ──────────────────────────────────────────────────
+    logger.debug('BILL', '[bill-upload] Parsing bill text (deterministic)...');
+    const { parseBill } = await import('@/lib/billParser');
+
+    const parseResult = parseBill(extractedText);
+
+    if (process.env.NODE_ENV !== 'production') {
+      for (const line of parseResult.debugLog) {
+        console.log(line);
+      }
+    }
+
+    // Stage B: extract non-usage fields (address, account, charges)
+    const legacyResult = parseBillText(extractedText);
+
+    // ── Map BillParseResult → BillExtractResult ────────────────────────────────
+    const monthlyArray = parseResult.monthlyArray;
+    const monthsFound  = parseResult.monthsFound;
+    const annualKwh    = parseResult.annual?.value ?? undefined;
+
+    const monthlyKwh: number | undefined =
+      parseResult.currentMonthKwh ??
+      (monthsFound > 0 ? Math.round(monthlyArray.reduce((s, v) => s + v, 0) / monthsFound) : undefined);
+
+    const estimatedAnnualKwh: number | undefined =
+      annualKwh ??
+      (monthsFound >= 10 ? monthlyArray.reduce((s, v) => s + v, 0) : undefined) ??
+      (monthsFound >= 3 ? Math.round((monthlyArray.reduce((s, v) => s + v, 0) / monthsFound) * 12) : undefined) ??
+      legacyResult.estimatedAnnualKwh;
+
+    const electricityRate: number | undefined =
+      parseResult.rate?.value ?? legacyResult.electricityRate ?? undefined;
+
+    const utilityProvider: string | undefined =
+      parseResult.utility?.value ?? legacyResult.utilityProvider ?? undefined;
+
+    const extractedFields: string[] = [];
+    if (utilityProvider)              extractedFields.push('utilityProvider');
+    if (legacyResult.customerName)    extractedFields.push('customerName');
+    if (legacyResult.serviceAddress)  extractedFields.push('serviceAddress');
+    if (legacyResult.accountNumber)   extractedFields.push('accountNumber');
+    if (monthlyKwh !== undefined)     extractedFields.push('monthlyKwh');
+    if (annualKwh !== undefined)      extractedFields.push('annualKwh');
+    if (monthsFound > 0)              extractedFields.push('monthlyUsageHistory');
+    if (electricityRate !== undefined) extractedFields.push('electricityRate');
+    if (legacyResult.totalAmount)     extractedFields.push('totalAmount');
+    if (legacyResult.billingPeriodStart) extractedFields.push('billingPeriod');
+
+    const confidence: 'high' | 'medium' | 'low' =
+      (monthsFound >= 10 || (annualKwh !== undefined && monthsFound >= 3)) ? 'high' :
+      (monthsFound >= 3  || annualKwh !== undefined) ? 'medium' : 'low';
+
+    const billData: BillExtractResult = {
+      success: extractedFields.length > 0,
+      customerName:       legacyResult.customerName,
+      serviceAddress:     legacyResult.serviceAddress,
+      utilityProvider,
+      accountNumber:      legacyResult.accountNumber,
+      billingPeriodStart: legacyResult.billingPeriodStart,
+      billingPeriodEnd:   legacyResult.billingPeriodEnd,
+      billingDays:        legacyResult.billingDays,
+      monthlyKwh,
+      annualKwh,
+      monthlyUsageHistory: monthsFound > 0 ? monthlyArray.filter(v => v > 0) : legacyResult.monthlyUsageHistory,
+      totalAmount:        legacyResult.totalAmount,
+      electricityRate,
+      fixedCharges:       legacyResult.fixedCharges,
+      demandCharge:       legacyResult.demandCharge,
+      demandKw:           legacyResult.demandKw,
+      tier1Kwh:           legacyResult.tier1Kwh,
+      tier2Kwh:           legacyResult.tier2Kwh,
+      tier1Rate:          legacyResult.tier1Rate,
+      tier2Rate:          legacyResult.tier2Rate,
+      billType:           legacyResult.billType,
+      gasUsageTherm:      legacyResult.gasUsageTherm,
+      estimatedAnnualKwh,
+      estimatedMonthlyBill: legacyResult.estimatedMonthlyBill,
+      confidence,
+      extractedFields,
+      usedLlmFallback: false,
+      rawText: extractedText,
+      // v47.306: Bill Intelligence Layer — additive, never replaces existing fields
+      billInsights: computeBillInsights(
+        extractedText,
+        legacyResult.totalAmount ?? undefined,
+        monthlyKwh ?? undefined,
+        electricityRate ?? undefined,
+      ),
+    };
+
+    logger.debug('BILL', `[FIELDS_EXTRACTED] count=${extractedFields.length} fields=${extractedFields.join(',') || 'none'} monthlyKwh=${monthlyKwh ?? 'null'} annualKwh=${annualKwh ?? 'null'} confidence=${confidence} ms=${Date.now() - startMs}`);
+    logger.debug('BILL', `[AI_FIELDS_EXTRACTED] deterministic: utility="${utilityProvider ?? 'none'}" monthlyKwh=${monthlyKwh ?? 'null'} annualKwh=${annualKwh ?? 'null'} rate=${electricityRate ?? 'null'} address="${legacyResult.serviceAddress ?? 'none'}" customer="${legacyResult.customerName ?? 'none'}"`);
+    logger.debug('BILL', `[PARSED_DATA_OBJECT] ${JSON.stringify({ utilityProvider, monthlyKwh, annualKwh, electricityRate, address: legacyResult.serviceAddress, customer: legacyResult.customerName, confidence, fieldCount: extractedFields.length })}`);
+
+    // ── AI Extraction Fallback ────────────────────────────────────────────────
+    let finalBillData = billData;
+    // AI Extraction Fallback triggers:
+    //   1. Zero fields extracted from OCR text
+    //   2. Very few fields (<2) from short/garbled OCR
+    //   3. Monthly kWh is suspiciously low (<150) despite a long OCR text -- likely OCR misread
+    //      (e.g. Ameren bill where 739 avg kWh was read as 68 due to bar chart label confusion)
+    //   4. No monthly history found at all despite sufficient text
+    const monthlyKwhSuspicious = (monthlyKwh !== undefined && monthlyKwh < 150 && extractedText.length > 300);
+    const noUsageData = (monthlyKwh === undefined && annualKwh === undefined && parseResult.monthsFound === 0 && extractedText.trim().length > 300);
+    // v47.177: Don't trigger AI fallback when we already have a full year of monthly data
+    // (10+ months = high confidence deterministic parse, AI would only corrupt it)
+    const hasFullYearHistory = parseResult.monthsFound >= 10;
+    // v47.178: When openai-responses extracted the text, GPT may have summarized bar charts
+    // instead of outputting raw numbers. Always run structured AI extraction in this case
+    // so we get accurate monthly history from the same model that read the PDF.
+    const usedOpenAiOcr = extractionMethod === 'openai-responses';
+    const needsAiFallback =
+      (usedOpenAiOcr && !hasFullYearHistory) ||  // GPT OCR path: always extract structured data unless full year already found
+      (!hasFullYearHistory && (
+        (extractedFields.length === 0 && extractedText.trim().length > 50) ||
+        (extractedFields.length < 2 && extractedText.trim().length > 100) ||
+        monthlyKwhSuspicious ||
+        noUsageData
+      ));
+
+    if (needsAiFallback) {
+      const reason = extractedFields.length === 0 ? 'zero_fields'
+        : extractedFields.length < 2 ? 'low_field_count'
+        : monthlyKwhSuspicious ? `suspicious_low_kwh(${monthlyKwh})`
+        : 'no_usage_data';
+      logger.debug('BILL', `[AI_EXTRACTION_STARTED] reason=${reason} fields=${extractedFields.length} monthlyKwh=${monthlyKwh ?? 'null'} textLen=${extractedText.length}`);
+      finalBillData = await Promise.race([
+        extractBillDataWithAI(extractedText, billData),
+        timeoutAfter(15000).catch(() => billData),
+      ]) as BillExtractResult;
+      logger.debug('BILL', `[AI_EXTRACTION_COMPLETE] fields=${finalBillData.extractedFields?.join(',') || 'none'} confidence=${finalBillData.confidence}`);
+      // v47.306: Recompute billInsights with AI-updated values (still additive only)
+      finalBillData = {
+        ...finalBillData,
+        billInsights: computeBillInsights(
+          extractedText,
+          finalBillData.totalAmount ?? undefined,
+          finalBillData.monthlyKwh ?? undefined,
+          finalBillData.electricityRate ?? undefined,
+        ),
+      };
+    }
+
+    const aiFieldCount = finalBillData.extractedFields?.length ?? 0;
+    logger.debug('BILL', `[AI_EXTRACTION_RESULT] totalFields=${aiFieldCount} usedAI=${finalBillData.usedLlmFallback} monthlyKwh=${finalBillData.monthlyKwh ?? 'null'} annualKwh=${finalBillData.estimatedAnnualKwh ?? 'null'} utility="${finalBillData.utilityProvider ?? 'none'}" address="${finalBillData.serviceAddress ?? 'none'}"`);
+
+    // ── Hard fail on completely empty parse ───────────────────────────────────
+    const hasAnyKwh = (finalBillData.monthlyKwh ?? 0) > 0
+      || (finalBillData.estimatedAnnualKwh ?? 0) > 0
+      || (finalBillData.annualKwh ?? 0) > 0
+      || (finalBillData.monthlyUsageHistory?.length ?? 0) > 0;
+    const hasLocation = !!(finalBillData.serviceAddress || finalBillData.utilityProvider);
+    const totalFinalFields = finalBillData.extractedFields?.length ?? 0;
+
+    if (totalFinalFields === 0 && !hasAnyKwh && !hasLocation && file) {
+      logger.warn('BILL', `[PARSE_EMPTY_FAIL] name=${file.name} extractedChars=${extractedText.length} method=${extractionMethod} — returning 422`);
+      return NextResponse.json({
+        success: false,
+        error: 'Bill text could not be extracted. Please re-upload a clearer image or enter manually.',
+        stage: extractionMethod,
+        parseEmpty: true,
+        debug: {
+          hasOpenAI: !!process.env.OPENAI_API_KEY,
+          extractedChars: extractedText.length,
+          method: extractionMethod,
+          fieldsFound: totalFinalFields,
+        },
+      }, { status: 422 });
+    }
+
+    // Extraction evidence — returned to UI for transparency
+    const extractionEvidence = {
+      monthlySource:       parseResult.monthlySource,
+      monthlyConfidence:   parseResult.monthlyConfidence,
+      monthsFound,
+      monthlyEvidence:     parseResult.monthlyEvidence,
+      annualSource:        parseResult.annual?.source_type ?? 'none',
+      annualSourceText:    parseResult.annual?.source_text ?? null,
+      utilitySource:       parseResult.utility?.source_type ?? 'none',
+      rateSource:          parseResult.rate?.source_type ?? 'none',
+      debugLog:            parseResult.debugLog,
+    };
+
+    const elapsedMs = Date.now() - startMs;
+    logger.debug('BILL', `[BILL_UPLOAD_RETURNING] fields=${totalFinalFields} confidence=${finalBillData.confidence} elapsedMs=${elapsedMs}`);
+    logger.debug('BILL', `[API_RESPONSE_SENT] success=true fields=${totalFinalFields} hasKwh=${hasAnyKwh} hasLocation=${hasLocation} usedAI=${finalBillData.usedLlmFallback} elapsedMs=${elapsedMs}`);
+    logger.debug('BILL', `[DB_SAVE_STARTED] note=bill-upload-route-does-not-save-to-DB — frontend calls /api/bills after project creation`);
+    logger.debug('BILL', `[DB_SAVE_COMPLETE] note=DB-save-handled-by-frontend-after-project-creation`);
+
+    // v48.1: Fire-and-forget enrichment (normalize utility, upsert DB, validate rate)
+    runEnrichmentAsync(finalBillData);
+
+    // ── Return parsed bill data only ──────────────────────────────────────────
+    // Geocoding, utility matching, rate validation, and system sizing
+    // are handled by the frontend calling /api/system-size separately.
+    return NextResponse.json({
+      success: true,
+      billData: finalBillData,
+      extractionEvidence,
+      extractionMethod,
+      // These are null — frontend must call /api/system-size for these
+      locationData: null,
+      utilityData: null,
+      matchedUtility: null,
+      systemSizing: null,
+      rateValidation: null,

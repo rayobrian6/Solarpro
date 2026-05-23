@@ -1,0 +1,16 @@
+
+> solar-platform@1.0.0 test
+> vitest run --run lib/assistedEvidenceSources/ocrRuntimeAdapter.test.ts lib/assistedEvidenceSources/metadataRuntimeAdapter.test.ts lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts
+
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90m/workspace/Solarpro-dev-fix[39m
+
+ [32m✓[39m lib/assistedEvidenceSources/metadataRuntimeAdapter.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 187[2mms[22m[39m
+ [32m✓[39m lib/assistedEvidenceSources/ocrRuntimeAdapter.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 169[2mms[22m[39m
+ [32m✓[39m lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[32m18 passed[39m[22m[90m (18)[39m
+[2m   Start at [22m 22:04:01
+[2m   Duration [22m 1.16s[2m (transform 140ms, setup 0ms, import 325ms, tests 382ms, environment 0ms)[22m
+

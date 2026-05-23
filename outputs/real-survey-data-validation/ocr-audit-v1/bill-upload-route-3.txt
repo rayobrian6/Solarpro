@@ -1,0 +1,421 @@
+      rateValidation: null,
+      validation: { valid: true, warnings: [], errors: [] },
+    });
+
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? (err as Error).message : 'Unknown error';
+    const stack = err instanceof Error ? (err as Error).stack?.split('\n').slice(0, 5).join(' | ') : '';
+    console.error('[BILL_UPLOAD_ERROR] Fatal error:', msg);
+    console.error('[BILL_UPLOAD_ERROR] Stack:', stack);
+
+    let friendlyMsg = 'Bill processing failed. Please try again.';
+    if (msg.includes('extract') || msg.includes('OCR') || msg.includes('text')) {
+      friendlyMsg = 'Bill processing failed — could not extract readable text from the file.';
+    } else if (msg.includes('timeout') || msg.includes('ETIMEDOUT')) {
+      friendlyMsg = 'Bill processing timed out. Please try a smaller file or try again.';
+    } else if (msg.includes('Unauthorized') || msg.includes('401')) {
+      friendlyMsg = 'Session expired. Please log in again.';
+    } else if (msg.includes('size') || msg.includes('large')) {
+      friendlyMsg = 'File is too large. Please upload a file under 10MB.';
+    }
+
+    return NextResponse.json({
+      success: false,
+      error: friendlyMsg,
+      detail: msg,
+    }, { status: 500 });
+  }
+}
+
+// ── PDF extraction ─────────────────────────────────────────────────────────────
+async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: string }> {
+  const openaiKey = process.env.OPENAI_API_KEY;
+
+  function isUsefulText(t: string): boolean {
+    if (t.length < 100) return false;
+    const hasMoney    = /\$\s*\d/.test(t);
+    const hasKwh      = /\d\s*kwh/i.test(t);
+    const hasDigits   = (/\d{3,}/.exec(t) || []).length > 0;
+    const hasAddress  = /street|ave|road|blvd|drive|lane|pl\b|st\b/i.test(t);
+    const hasAccount  = /account|service|billing|meter|customer/i.test(t);
+    const score = [hasMoney, hasKwh, hasDigits, hasAddress, hasAccount].filter(Boolean).length;
+    return score >= 2;
+  }
+
+  // Method 1: pdftotext CLI (poppler)
+  // v47.25: Skip on Vercel — pdftotext binary not available in serverless runtime
+  const _isVercel = !!(process.env.VERCEL || process.env.VERCEL_ENV || process.env.VERCEL_URL);
+  logger.debug('BILL', '[PDF_PARSE_STARTED] method=pdftotext isVercel=' + _isVercel);
+  if (!_isVercel) try {
+    const text = await extractPdfTextCli(buffer);
+    if (isUsefulText(text)) {
+      logger.debug('BILL', `[PDF_PARSE_SUCCESS] method=pdftotext chars=${text.length}`);
+      return { text, method: 'pdftotext' };
+    }
+    logger.warn('BILL', `[bill-upload] pdftotext returned low-quality text (${text.length} chars) — trying next method`);
+  } catch (err: unknown) {
+    logger.warn('BILL', '[PDF_PARSE_FAILED] method=pdftotext error:', err instanceof Error ? (err as Error).message : err);
+  } // end if (!_isVercel)
+
+  // Method 2: pdf-parse (npm library)
+  // v47.211: pdf-parse v2.4.5 uses a class-based API:
+  //   new PDFParse({ data: buffer }) -> instance.load() -> instance.getText() -> { text, total }
+  // Calling PDFParse as a plain function throws "Class constructors cannot be invoked without 'new'".
+  // v47.212: Added diagnostic logging for which strategy is detected/used.
+  logger.debug('BILL', '[PDF_PARSE_STARTED] method=pdf-parse');
+  try {
+    const ppMod = require('pdf-parse') as any;
+    // v47.212: Log what the module exports so we can diagnose Vercel-specific failures
+    logger.debug('BILL', `[PDF_PARSE_MODULE] hasPDFParse=${typeof ppMod?.PDFParse} isFunction=${typeof ppMod === 'function'} hasDefault=${typeof ppMod?.default} keys=${Object.keys(ppMod || {}).slice(0, 8).join(',')}`);
+    let text = '';
+    let numpages = 0;
+
+    // Strategy A: v2.x class-based API
+    // Constructor takes options object with data; then load() + getText()
+    if (typeof ppMod?.PDFParse === 'function') {
+      logger.debug('BILL', '[PDF_PARSE_STRATEGY] trying=A (v2 class-based)');
+      try {
+        const instance = new ppMod.PDFParse({ data: buffer });
+        await instance.load();
+        const textResult = await instance.getText();
+        // getText() returns { text: string, pages: array, total: number }
+        text = (typeof textResult === 'string' ? textResult : textResult?.text ?? '').trim();
+        numpages = textResult?.total ?? 0;
+        logger.debug('BILL', `[PDF_PARSE_STRATEGY] A succeeded chars=${text.length} pages=${numpages}`);
+      } catch (classErr: unknown) {
+        logger.warn('BILL', '[PDF_PARSE_WARN] method=pdf-parse v2-api failed:', classErr instanceof Error ? (classErr as Error).message : classErr);
+        text = '';
+      }
+    }
+
+    // Strategy B: v1.x legacy function API (module itself is a callable function)
+    if (!text && typeof ppMod === 'function') {
+      logger.debug('BILL', '[PDF_PARSE_STRATEGY] trying=B (v1 function call)');
+      try {
+        const result = await ppMod(buffer);
+        text = (result?.text || '').trim();
+        numpages = result?.numpages ?? 0;
+        logger.debug('BILL', `[PDF_PARSE_STRATEGY] B succeeded chars=${text.length} pages=${numpages}`);
+      } catch (legacyErr: unknown) {
+        logger.warn('BILL', '[PDF_PARSE_WARN] method=pdf-parse v1-api failed:', legacyErr instanceof Error ? (legacyErr as Error).message : legacyErr);
+      }
+    }
+
+    // Strategy C: default export function
+    if (!text && typeof ppMod?.default === 'function') {
+      logger.debug('BILL', '[PDF_PARSE_STRATEGY] trying=C (default export)');
+      try {
+        const result = await ppMod.default(buffer);
+        text = (result?.text || '').trim();
+        numpages = result?.numpages ?? 0;
+        logger.debug('BILL', `[PDF_PARSE_STRATEGY] C succeeded chars=${text.length} pages=${numpages}`);
+      } catch (defaultErr: unknown) {
+        logger.warn('BILL', '[PDF_PARSE_WARN] method=pdf-parse default-export failed:', defaultErr instanceof Error ? (defaultErr as Error).message : defaultErr);
+      }
+    }
+
+    if (isUsefulText(text)) {
+      logger.debug('BILL', `[PDF_PARSE_SUCCESS] method=pdf-parse chars=${text.length} pages=${numpages}`);
+      return { text, method: 'pdf-parse' };
+    }
+    if (text.length > 0) {
+      logger.warn('BILL', `[bill-upload] pdf-parse returned low-quality text (${text.length} chars)`);
+    } else {
+      logger.warn('BILL', '[bill-upload] pdf-parse: all strategies returned empty text');
+    }
+  } catch (err: unknown) {
+    logger.warn('BILL', '[PDF_PARSE_FAILED] method=pdf-parse error:', err instanceof Error ? (err as Error).message : err);
+  }
+
+  // Method 3: Pure Node.js stream extractor
+  logger.debug('BILL', '[PDF_PARSE_STARTED] method=pure-extract');
+  try {
+    const text = extractPdfTextPure(buffer);
+    if (isUsefulText(text)) {
+      logger.debug('BILL', `[PDF_PARSE_SUCCESS] method=pure-extract chars=${text.length}`);
+      return { text, method: 'pure-extract' };
+    }
+    logger.warn('BILL', `[bill-upload] Pure extractor returned low-quality text (${text.length} chars)`);
+  } catch (err: unknown) {
+    logger.warn('BILL', '[PDF_PARSE_FAILED] method=pure-extract error:', err instanceof Error ? (err as Error).message : err);
+  }
+
+  // Method 4: pdfjs-dist
+  // v47.212: Added per-operation timeouts to prevent indefinite hang on Vercel serverless.
+  // getDocument().promise can hang forever if pdfjs-dist tries to spawn Web Workers in a
+  // serverless environment where worker threads are unavailable. disableRange/disableStream
+  // prevent additional network calls that could also hang.
+  logger.debug('BILL', '[PDF_PARSE_STARTED] method=pdfjs-dist');
+  try {
+    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs' as any);
+    const getDocument = pdfjsLib.getDocument ?? pdfjsLib.default?.getDocument;
+    if (!getDocument) throw new Error('getDocument not found in pdfjs-dist');
+    const uint8 = new Uint8Array(buffer);
+    // v47.212: Wrap getDocument().promise in a race to prevent indefinite hang on Vercel
+    const doc = await Promise.race([
+      getDocument({
+        data: uint8,
+        useWorkerFetch: false,
+        isEvalSupported: false,
+        useSystemFonts: true,
+        disableFontFace: true,
+        disableRange: true,
+        disableStream: true,
+      }).promise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('pdfjs-dist getDocument timed out after 8s')), 8000)
+      ),
+    ]);
+    let text = '';
+    for (let i = 1; i <= doc.numPages; i++) {
+      // v47.212: Also guard each page operation to avoid per-page hangs
+      const page = await Promise.race([
+        doc.getPage(i),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`pdfjs-dist getPage(${i}) timed out`)), 5000)
+        ),
+      ]);
+      const content = await Promise.race([
+        page.getTextContent(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`pdfjs-dist getTextContent(${i}) timed out`)), 5000)
+        ),
+      ]);
+      text += content.items.map((item: any) => ('str' in item ? item.str : '')).join(' ') + '\n';
+    }
+    text = text.trim();
+    if (isUsefulText(text)) {
+      logger.debug('BILL', `[PDF_PARSE_SUCCESS] method=pdfjs-dist chars=${text.length}`);
+      return { text, method: 'pdfjs-dist' };
+    }
+    logger.warn('BILL', `[bill-upload] pdfjs-dist returned low-quality text (${text.length} chars)`);
+  } catch (err: unknown) {
+    logger.warn('BILL', '[PDF_PARSE_FAILED] method=pdfjs-dist error:', err instanceof Error ? (err as Error).message : err);
+  }
+
+  // Method 5: OpenAI Files API + Responses API
+  if (openaiKey) {
+    logger.debug('BILL', '[PDF_PARSE_STARTED] method=openai-files-api');
+    try {
+      const fd = new FormData();
+      fd.append('file', new Blob([new Uint8Array(buffer)], { type: 'application/pdf' }), 'bill.pdf');
+      fd.append('purpose', 'user_data');
+
+      const uploadRes = await fetch('https://api.openai.com/v1/files', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${openaiKey}` },
+        body: fd,
+        signal: AbortSignal.timeout(20000),
+      });
+
+      if (uploadRes.ok) {
+        const uploadData = await uploadRes.json();
+        const fileId = uploadData.id;
+
+        const respRes = await fetch('https://api.openai.com/v1/responses', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openaiKey}` },
+          body: JSON.stringify({
+            model: 'gpt-4o',
+            input: [{
+              role: 'user',
+              content: [
+                { type: 'input_file', file_id: fileId },
+                { type: 'input_text', text: `Extract ALL text from this utility bill PDF exactly as it appears.
+
+CRITICAL: For any bar chart, graph, or table showing monthly electricity usage (kWh):
+- Output every single number from the chart/table as raw digits
+- Format them on one line like: "Monthly kWh history: 4188 2311 1418 761 318 460 881 901 1660 2296 1509 1354"
+- Do NOT summarize, average, or describe the chart — output the exact numbers
+
+Output the complete raw text including all numbers, addresses, account numbers, dates, and kWh values. Preserve original formatting.` },
+              ],
+            }],
+          }),
+          signal: AbortSignal.timeout(25000),
+        });
+
+        fetch(`https://api.openai.com/v1/files/${fileId}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${openaiKey}` },
+        }).catch(() => {});
+
+        if (respRes.ok) {
+          const respData = await respRes.json();
+          const text = respData?.output?.[0]?.content?.[0]?.text?.trim()
+            ?? respData?.output?.[0]?.content?.trim();
+          if (text && text.length > 50) {
+            logger.debug('BILL', `[PDF_PARSE_SUCCESS] method=openai-files-api chars=${text.length}`);
+            return { text, method: 'openai-responses' };
+          }
+        }
+      }
+    } catch (err: unknown) {
+      logger.warn('BILL', '[PDF_PARSE_FAILED] method=openai-files-api error:', err instanceof Error ? (err as Error).message : err);
+    }
+  }
+
+  // Method 6: Google Vision
+  const googleKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (googleKey) {
+    logger.debug('BILL', '[PDF_PARSE_STARTED] method=google-vision');
+    try {
+      const base64 = buffer.toString('base64');
+      const res = await fetch(
+        `https://vision.googleapis.com/v1/images:annotate?key=${googleKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requests: [{ image: { content: base64 }, features: [{ type: 'DOCUMENT_TEXT_DETECTION' }] }] }),
+          signal: AbortSignal.timeout(20000),
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const text = data?.responses?.[0]?.fullTextAnnotation?.text;
+        if (text?.trim().length > 50) {
+          logger.debug('BILL', `[PDF_PARSE_SUCCESS] method=google-vision chars=${text.length}`);
+          return { text, method: 'google-vision' };
+        }
+      }
+    } catch (err: unknown) {
+      logger.warn('BILL', '[PDF_PARSE_FAILED] method=google-vision error:', err instanceof Error ? (err as Error).message : err);
+    }
+  }
+
+  console.error('[PDF_PARSE_FAILED] All PDF extraction methods exhausted — no usable text');
+  return { text: '', method: 'failed' };
+}
+
+// ── PDF CLI fallback ────────────────────────────────────────────────────────────
+async function extractPdfTextCli(buffer: Buffer): Promise<string> {
+  const { execSync, execFileSync } = await import('child_process');
+  const { writeFileSync, readFileSync, unlinkSync } = await import('fs');
+  const { tmpdir } = await import('os');
+  const { join } = await import('path');
+  const tmpIn = join(tmpdir(), `bill_${Date.now()}.pdf`);
+  const tmpOut = join(tmpdir(), `bill_${Date.now()}.txt`);
+  writeFileSync(tmpIn, buffer);
+  // SECURITY: execFileSync with argument array — avoids spawning a shell.
+  execFileSync('pdftotext', ['-layout', tmpIn, tmpOut], { timeout: 15000 });
+  const text = readFileSync(tmpOut, 'utf-8');
+  try { unlinkSync(tmpIn); } catch {}
+  try { unlinkSync(tmpOut); } catch {}
+  return text;
+}
+
+// ── Inline Tesseract CLI runner ────────────────────────────────────────────────
+async function runTesseractCliInline(buffer: Buffer, mimeType: string): Promise<string> {
+  try {
+    const { execFile } = await import('child_process');
+    const { writeFile, readFile, unlink } = await import('fs/promises');
+    const { join } = await import('path');
+    const { tmpdir } = await import('os');
+    const { promisify } = await import('util');
+    const execFileAsync = promisify(execFile);
+
+    await execFileAsync('tesseract', ['--version'], { timeout: 3000 }).catch(() => {
+      throw new Error('tesseract CLI not available');
+    });
+
+    const id = `ocr_inline_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const ext = mimeType.includes('png') ? 'png' : 'jpg';
+    const tmpImg  = join(tmpdir(), `${id}.${ext}`);
+    const tmpBase = join(tmpdir(), id);
+
+    await writeFile(tmpImg, buffer);
+    try {
+      await execFileAsync(
+        'tesseract',
+        [tmpImg, tmpBase, '-l', 'eng', '--psm', '3', '--oem', '3'],
+        { timeout: 30000 },
+      );
+      const raw = await readFile(`${tmpBase}.txt`, 'utf-8');
+      return raw.trim();
+    } finally {
+      for (const f of [tmpImg, `${tmpBase}.txt`]) {
+        try { await unlink(f); } catch { /* ignore */ }
+      }
+    }
+  } catch {
+    return '';
+  }
+}
+
+// ── Smart 3-stage image extraction ────────────────────────────────────────────
+async function extractImageTextSmart(
+  buffer: Buffer,
+  mimeType: string,
+): Promise<{ text: string; method: string; confidence: number }> {
+  const openaiKey = process.env.OPENAI_API_KEY;
+  // Note: GOOGLE_VISION_API_KEY is separate from GOOGLE_MAPS_API_KEY
+  const googleVisionKey = process.env.GOOGLE_VISION_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
+
+  const { recognizeImage, recognizeImageWithVision, recognizeImageWithGoogle } =
+    await import('@/lib/billOcrEngine');
+  const { parseMonthlyUsage } = await import('@/lib/billParser');
+
+  // ── Log OCR input for observability (Step 1 of audit) ──────────────────────
+  logger.debug('BILL', `[OCR_INPUT_BUFFER_LENGTH] bytes=${buffer.length}`);
+  logger.debug('BILL', `[OCR_INPUT_MIME_TYPE] mime=${mimeType}`);
+  logger.debug('BILL', `[OCR_INPUT_FILE_SIZE] kb=${Math.round(buffer.length / 1024)}`);
+
+  if (buffer.length === 0) {
+    console.error('[OCR_INPUT_BUFFER_LENGTH] ERROR: buffer is empty — upload pipeline broken');
+    return { text: '', method: 'empty-buffer', confidence: 0 };
+  }
+
+  // ── Stage 0: Image preprocessing for Tesseract only ──────────────────────────
+  // Preprocessed buffer: EXIF-rotate, upscale to 2400px, grayscale, normalize,
+  // sharpen, threshold — dramatically improves Tesseract accuracy on phone photos.
+  // NOTE: Vision (GPT-4o) receives the ORIGINAL buffer, not the preprocessed one,
+  // because threshold binarization can degrade Vision's ability to read handwriting.
+  const preprocessLog: string[] = [];
+  let tesseractBuffer = buffer;      // preprocessed PNG for Tesseract/WASM
+  let tesseractMime   = mimeType;    // mime type for preprocessed buffer
+  try {
+    const { preprocessBillImageSafe } = await import('@/lib/billImagePreprocess');
+    tesseractBuffer = await preprocessBillImageSafe(buffer, preprocessLog);
+    tesseractMime   = 'image/png';   // preprocessor always outputs PNG
+    preprocessLog.forEach(l => console.log(l));
+    logger.debug('BILL', `[PREPROCESS_COMPLETE] original=${buffer.length}b processed=${tesseractBuffer.length}b`);
+  } catch (prepErr) {
+    logger.warn('BILL', '[PREPROCESS_FAILED] falling back to raw buffer:', prepErr instanceof Error ? prepErr.message : String(prepErr));
+  }
+  // Vision and Google Vision always use the original buffer (better for handwriting)
+  const visionBuffer = buffer;
+  const visionMime   = mimeType;
+
+  // ── Stage 1: Inline Tesseract CLI (fastest, most reliable on Vercel) ───────
+  // Try CLI directly FIRST — avoids the HTTP round-trip to /api/ocr which
+  // can fail on cold start when NEXTAUTH_URL / NEXT_PUBLIC_APP_URL is not set.
+  logger.debug('BILL', '[OCR_STARTED] stage=1 method=tesseract-cli-inline');
+  let tesseractText = '';
+  try {
+    tesseractText = await runTesseractCliInline(tesseractBuffer, tesseractMime);
+    logger.debug('BILL', `[OCR_COMPLETED] stage=1 method=tesseract-cli chars=${tesseractText.length}`);
+  } catch (cliErr) {
+    logger.warn('BILL', '[OCR_COMPLETED] stage=1 method=tesseract-cli failed:', cliErr instanceof Error ? cliErr.message : String(cliErr));
+  }
+
+  // ── Stage 1b: /api/ocr HTTP (Tesseract.js WASM fallback) ───────────────────
+  // v47.25: SKIP on Vercel — WASM init downloads ~400MB and exceeds the 60s budget.
+  // Tesseract CLI is not available on Vercel serverless (no binary install).
+  // When CLI fails, go directly to OpenAI Vision (Stage 2) which is fast (~5s).
+  // Only try WASM HTTP in local dev where CLI might also be missing but WASM is cached.
+  const isVercel = !!(process.env.VERCEL || process.env.VERCEL_ENV || process.env.VERCEL_URL);
+  if (tesseractText.length < 20 && !isVercel) {
+    logger.debug('BILL', '[OCR_STARTED] stage=1b method=tesseract-wasm-http (local-dev only)');
+    try {
+      const wasmResult = await recognizeImage(tesseractBuffer, tesseractMime);
+      if (wasmResult.rawText.length > tesseractText.length) {
+        tesseractText = wasmResult.rawText;
+        logger.debug('BILL', `[OCR_COMPLETED] stage=1b method=tesseract-wasm chars=${tesseractText.length} confidence=${wasmResult.confidence}`);
+      }
+    } catch (wasmErr) {
+      logger.warn('BILL', '[OCR_COMPLETED] stage=1b method=tesseract-wasm failed:', wasmErr instanceof Error ? wasmErr.message : String(wasmErr));
+    }
+  } else if (tesseractText.length < 20 && isVercel) {
+    logger.debug('BILL', '[OCR_SKIPPED] stage=1b reason=vercel_no_wasm_binary — escalating directly to OpenAI Vision');
+  }
+  logger.debug('BILL', `[OCR_TEXT_LENGTH] after_tesseract=${tesseractText.length}`);

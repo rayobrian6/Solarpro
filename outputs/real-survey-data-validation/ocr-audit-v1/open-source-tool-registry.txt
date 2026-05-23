@@ -75,32 +75,6 @@ export const OPEN_SOURCE_RUNTIME_TOOLS: readonly OpenSourceToolDefinition[] = [
       'Runtime execution is server-only and adapter-contained.',
     ],
   },
-  {
-    toolName: 'tesseract-js-ocr-runtime',
-    toolVersion: '7.0.0',
-    sourceUrl: 'https://github.com/naptha/tesseract.js',
-    license: 'Apache-2.0',
-    runtimeCategory: 'ocr_text_candidate',
-    allowedCandidateTypes: ['text_region_candidate'],
-    allowedCandidateCategories: ['field_context', 'electrical_context'],
-    requiresImageBytes: true,
-    requiresNativeBinaries: false,
-    requiresModelWeights: false,
-    browserCompatible: false,
-    serverOnly: true,
-    reviewRequired: true,
-    canonicalMutationAllowed: false,
-    allowedRuntimeBoundary: 'server_adapter_contract',
-    deterministicReplaySupport: 'runtime_payload_hash_required',
-    riskLevel: 'moderate',
-    enabledStatus: 'enabled_for_runtime_pilot',
-    maintainedStatus: 'maintained',
-    registryNotes: [
-      'Controlled OCR runtime pilot for text extraction only.',
-      'Uses tesseract.js only; no external vision services and no engineering inference.',
-      'Runtime output must remain non-authoritative review-required text_region_candidate evidence.',
-    ],
-  },
 ] as const;
 
 export const OPEN_SOURCE_ASSISTED_EVIDENCE_TOOLS: readonly OpenSourceToolDefinition[] = [

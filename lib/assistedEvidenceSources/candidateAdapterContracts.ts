@@ -1,8 +1,9 @@
-import type { FixtureCandidateAdapter, MetadataFixturePayload, MetadataRuntimePayload, OcrFixturePayload, RuntimeCandidateAdapter } from './candidateAdapterTypes';
+import type { FixtureCandidateAdapter, MetadataFixturePayload, MetadataRuntimePayload, OcrFixturePayload, OcrRuntimePayload, RuntimeCandidateAdapter } from './candidateAdapterTypes';
 
 export type MetadataCandidateFixtureAdapter = FixtureCandidateAdapter<MetadataFixturePayload>;
 export type OcrCandidateFixtureAdapter = FixtureCandidateAdapter<OcrFixturePayload>;
 export type MetadataCandidateRuntimeAdapter = RuntimeCandidateAdapter<MetadataRuntimePayload>;
+export type OcrCandidateRuntimeAdapter = RuntimeCandidateAdapter<OcrRuntimePayload>;
 export type VisualCategorizationFixtureAdapter = FixtureCandidateAdapter<Record<string, never>>;
 export type FutureGeometryAdapterPlaceholder = never;
 

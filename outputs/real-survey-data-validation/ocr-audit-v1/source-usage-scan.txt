@@ -1,0 +1,847 @@
+app/free-solar-estimate/page.tsx:184:      `Utility bill file selected: ${billFile.name} (${Math.round(billFile.size / 1024)} KB). The intake endpoint stores any non-empty utility bill file and links the attachment metadata to the canonical intake event.`,
+app/free-solar-estimate/page.tsx:1044:        Utility bill upload
+app/free-solar-estimate/page.tsx:1051:            : "Optional — upload any utility bill file for review"}
+app/onboarding/page.tsx:286:                <p className="text-xs text-slate-500 mt-2">Upload a utility bill → auto-size the system → draw the design → generate engineering docs → send a signed proposal → track the install.</p>
+app/portal/dashboard/page.tsx:114:  bill_uploaded:            'Your utility bill was received',
+app/portal/dashboard/page.tsx:262:  'Projected utility bill savings over 25 years',
+app/portal/dashboard/page.tsx:636:// Shows files the homeowner uploaded (utility bills + portal uploads).
+app/dashboard/page.tsx:1371:                <p className="empty-state-sub">Upload a utility bill to auto-create your first client and project in one step</p>
+app/proposals/view/[id]/page.tsx:397:    // v48.14: parsedBillRate intentionally undefined — OCR-extracted rates (_utilityRatePerKwh,
+app/proposals/view/[id]/page.tsx:1369:                  <div className="text-xs text-slate-500 mt-0.5">Offsets utility bill at full retail rate — highest-value use of your solar</div>
+app/proposals/view/[id]/page.tsx:1508:                  You will still have a reduced utility bill for the remaining {100 - energyOffset}%
+app/proposals/view/[id]/page.tsx:1722:                  note: 'From utility bill analysis',
+app/proposals/page.tsx:1284:    // v48.14: parsedBillRate intentionally undefined — OCR-extracted rates are supply-only.
+app/proposals/page.tsx:1404:  // Is financing payment higher than current utility bill?
+app/proposals/page.tsx:2209:                  <div className="text-xs text-slate-500 mt-0.5">Offsets utility bill at full retail rate — highest-value use of your solar</div>
+app/proposals/page.tsx:2348:                  You will still have a reduced utility bill for the remaining {100 - energyOffset}%
+app/proposals/page.tsx:2562:                  note: 'From utility bill analysis',
+app/admin/topography/page.tsx:534:              sublabel="OpenCV / YOLO / OCR / Claude / Open3D / FreeCAD — NOT started"
+app/admin/topography/page.tsx:668:  { id: 'bill', group: 'Bill Intelligence', title: 'Utility Bill Storage + Intelligence', detail: 'Bill attachments use Vercel Blob or local fallback, then OCR/parser/Claude/enrichment/confidence/insights prepare bill intelligence.', evidence: ['/api/bill-upload', '/api/admin/network/intake/bill-intelligence', 'lib/intake/utilityBillAttachment.ts', 'lib/intake/utilityBillIntelligence.ts'], tables: ['project_files', 'projects.bill_data', 'opportunity_intelligence'], status: 'live', layer: 'cloud' },
+app/admin/topography/page.tsx:673:  { id: 'portal', group: 'Homeowner Portal', title: 'OTP Portal + Dashboard', detail: 'Homeowners access project dashboard, stage state, bill upload, files, proposals, and logout flows.', evidence: ['/portal/dashboard', '/api/portal/dashboard', '/api/portal/bill-upload', '/api/portal/logout'], tables: ['portal_otp_tokens', 'projects', 'project_homeowner_stage_history', 'project_micro_stages'], status: 'live', layer: 'solarpro' },
+app/admin/topography/page.tsx:676:  { id: 'survey-partial', group: 'Survey Evidence Foundation', title: 'Future Worker Boundary — AI/CV/CAD Not Started', detail: 'OpenCV blur scoring, YOLO/Supervision detection, OCR extraction, Claude reasoning, Open3D geometry, and FreeCAD/CAD automation remain future-only and must map back into the canonical evidence registry.', evidence: ['lib/topography/getTopographyState.ts', 'lib/survey/evidence/categoryRegistry.ts', 'lib/survey/evidence/manifest.ts'], tables: ['site_surveys', 'site_survey_files'], status: 'blocked', layer: 'blocked' },
+app/admin/topography/page.tsx:681:  { id: 'external', group: 'External Services', title: 'External AI, Storage, Maps, Payments, Email', detail: 'External integrations appear in source/dependencies and should be marked external rather than treated as SolarPro-owned database systems.', evidence: ['Vercel Blob', 'Claude/OpenAI/OCR hints', 'Google Maps/Solar', 'NREL/PVWATTS', 'Stripe', 'Resend', PARTNER_API_URL], status: 'external', layer: 'cloud' },
+app/admin/topography/page.tsx:701:  { from: 'external', to: 'bill', label: 'AI/OCR/storage services support bill intelligence', status: 'external' },
+app/admin/topography/page.tsx:827:              ['Bill intelligence → OCR/parser/AI/enrichment', 'LIVE', 'text-emerald-400'],
+app/admin/network/page.tsx:3418:                                      bill uploads create Open Bill / Download
+app/admin/network/page.tsx:3477:                                      Parse output remains on the intake event until an operator releases the lead to marketplace inventory. These values come from the stored utility bill parser, not from homeowner-entered intake fields.
+app/admin/network/page.tsx:3487:                                        ? "Run or retry the canonical utility bill parser"
+app/admin/network/page.tsx:4216:                      placeholder="Customer asked for a callback in two weeks after reviewing current utility bill."
+app/admin/engineering-intelligence/page.tsx:161:  const ocrFixtures = generateOcrFixtureCandidates(sourceContext, {
+app/admin/engineering-intelligence/page.tsx:162:    fixtureId: 'admin-ocr-fixture-1',
+app/admin/engineering-intelligence/page.tsx:165:      { signalId: 'admin-ocr-signal-meter-label', field: 'possible_meter_label_text', text: 'METER FIXTURE 123', confidence: 0.46, limitationRefs: ['fixture-text-only'] },
+app/admin/engineering-intelligence/page.tsx:166:      { signalId: 'admin-ocr-signal-equipment-label', field: 'possible_equipment_label_text', text: 'INV-1 FIXTURE', confidence: 0.51, limitationRefs: ['fixture-text-only'] },
+app/admin/engineering-intelligence/page.tsx:188:    candidates: [candidate, accepted.candidate, ...metadataFixtures.candidates, ...ocrFixtures.candidates, ...runtimeMetadata.candidates],
+app/admin/engineering-intelligence/components.tsx:189:            <div className="mt-3 text-slate-400">No OCR/CV/CAD/autonomous-regeneration runtime path is exposed here.</div>
+app/admin/engineering-intelligence/components.tsx:266:        'Selecting a project only loads deterministic evidence, graph, snapshot, invalidation, regeneration-plan metadata, and CAD-readiness metadata; it does not run OCR, CV, CAD generation, or autonomous regeneration.',
+app/admin/engineering/page.tsx:70:              Inspect canonical evidence lineage, requirement status, decision provenance, stale-state invalidation, snapshots, dependency graph metadata, regeneration planning, and audit guards. This launcher does not trigger generation, OCR, CV, CAD automation, or AI engineering decisions.
+app/page.tsx:724:            From utility bill to permitted install — SolarPro runs your entire solar operation. Design studio, field survey app, homeowner portal, lead pipeline, and permit outputs. One platform.
+app/page.tsx:951:                  'Document upload — utility bills, contracts',
+app/page.tsx:984:                Upload a utility bill.
+app/page.tsx:989:                Drop any utility bill — PDF, photo, or scan — and SolarPro's AI extracts the customer's usage history, rate schedule, and account details automatically. The system size, offset target, and financial analysis are calculated before you've had a chance to close the file.
+app/page.tsx:999:                  'Works with any U.S. utility bill format',
+app/engineering/page.tsx:1236:            source: layoutPanelCount > 0 ? 'LAYOUT (design studio)' : 'SEED (bill upload)',
+app/engineering/page.tsx:2658:      // Primary inverter's nameplate cap is used when present; evaluator
+app/engineering/page.tsx:4071:        // of the optimizer nameplate cap. See lib/system/feasibilityEvaluator.ts
+app/engineering/page.tsx:4268:        panelModel:          panelData ? `${panelData.manufacturer ?? ''} ${panelData.model ?? ''} ${panelData.watts ?? ''}W`.trim() : 'Generic 400W Monocrystalline',
+app/engineering/page.tsx:13676:                    Auto-generated from bill upload · Bill Data · System Estimate · Engineering Packet · SLD · BOM
+app/api/migrate/route.ts:3290:          ('bill-upload',      'Bill Upload Flow',        'Upload utility bill to get savings estimate', 'bill_upload', 'web',    true),
+app/api/system-size/route.ts:187:    // Priority: bill-extracted (from OCR/parse) > DB retail (matched utility) > state/geo average > canonical/state-fallback > national default
+app/api/intake/homeowner/route.ts:101:  // real utility bill file for the public homeowner form.
+app/api/intake/homeowner/route.ts:204:            error: message || 'Utility bill upload failed. Please try again without the file or choose a smaller non-empty file.',
+app/api/portal/bill-upload/route.ts:4:// Portal-specific bill upload endpoint.
+app/api/portal/bill-upload/route.ts:201:             'Auto-advanced: homeowner uploaded utility bill via portal')
+app/api/debug/ocr/route.ts:2: * app/api/debug/ocr/route.ts
+app/api/debug/ocr/route.ts:4: * Debug endpoint for testing OCR in isolation.
+app/api/debug/ocr/route.ts:7: *   - ocr_text_length, first_500_chars
+app/api/debug/ocr/route.ts:8: *   - which OCR method succeeded
+app/api/debug/ocr/route.ts:11: * POST /api/debug/ocr
+app/api/debug/ocr/route.ts:57:    debugLog.push(`[debug-ocr] file=${file.name} mime=${mimeType} size=${fileSize}`);
+app/api/debug/ocr/route.ts:61:    debugLog.push(`[debug-ocr] buffer_length=${buffer.length}`);
+app/api/debug/ocr/route.ts:83:    debugLog.push(`[debug-ocr] isPdf=${isPdf} isImage=${isImage}`);
+app/api/debug/ocr/route.ts:85:    let ocrText = '';
+app/api/debug/ocr/route.ts:86:    let ocrMethod = 'none';
+app/api/debug/ocr/route.ts:87:    let ocrConfidence = 0;
+app/api/debug/ocr/route.ts:91:      debugLog.push('[debug-ocr] Trying pdftotext CLI...');
+app/api/debug/ocr/route.ts:100:        const id = `debug_ocr_${Date.now()}`;
+app/api/debug/ocr/route.ts:106:          await execFileAsync('pdftotext', ['-layout', tmpPdf, tmpTxt], { timeout: 15000 });
+app/api/debug/ocr/route.ts:108:          ocrText = raw.trim();
+app/api/debug/ocr/route.ts:109:          ocrMethod = 'pdftotext';
+app/api/debug/ocr/route.ts:110:          ocrConfidence = 90;
+app/api/debug/ocr/route.ts:111:          debugLog.push(`[debug-ocr] pdftotext success: ${ocrText.length} chars`);
+app/api/debug/ocr/route.ts:119:        debugLog.push(`[debug-ocr] pdftotext failed: ${msg}`);
+app/api/debug/ocr/route.ts:122:      // pdf-parse fallback
+app/api/debug/ocr/route.ts:123:      if (ocrText.length < 50) {
+app/api/debug/ocr/route.ts:124:        debugLog.push('[debug-ocr] Trying pdf-parse...');
+app/api/debug/ocr/route.ts:126:          const ppMod = require('pdf-parse') as any;
+app/api/debug/ocr/route.ts:134:            if (text.length > ocrText.length) {
+app/api/debug/ocr/route.ts:135:              ocrText = text;
+app/api/debug/ocr/route.ts:136:              ocrMethod = 'pdf-parse';
+app/api/debug/ocr/route.ts:137:              ocrConfidence = 80;
+app/api/debug/ocr/route.ts:138:              debugLog.push(`[debug-ocr] pdf-parse success: ${ocrText.length} chars`);
+app/api/debug/ocr/route.ts:143:          debugLog.push(`[debug-ocr] pdf-parse failed: ${msg}`);
+app/api/debug/ocr/route.ts:149:      debugLog.push('[debug-ocr] Trying Tesseract CLI...');
+app/api/debug/ocr/route.ts:159:        await execFileAsync('tesseract', ['--version'], { timeout: 3000 });
+app/api/debug/ocr/route.ts:161:        const id = `debug_ocr_${Date.now()}`;
+app/api/debug/ocr/route.ts:169:            'tesseract',
+app/api/debug/ocr/route.ts:174:          ocrText = raw.trim();
+app/api/debug/ocr/route.ts:175:          ocrMethod = 'tesseract-cli';
+app/api/debug/ocr/route.ts:176:          const wordCount = ocrText.split(/\s+/).filter(w => w.length > 2).length;
+app/api/debug/ocr/route.ts:177:          ocrConfidence = wordCount > 100 ? 85 : wordCount > 50 ? 80 : wordCount > 20 ? 70 : 50;
+app/api/debug/ocr/route.ts:178:          debugLog.push(`[debug-ocr] tesseract CLI success: ${ocrText.length} chars confidence=${ocrConfidence}`);
+app/api/debug/ocr/route.ts:186:        debugLog.push(`[debug-ocr] tesseract CLI failed: ${msg}`);
+app/api/debug/ocr/route.ts:190:      if (ocrText.length < 20 && process.env.OPENAI_API_KEY) {
+app/api/debug/ocr/route.ts:191:        debugLog.push('[debug-ocr] Trying OpenAI Vision...');
+app/api/debug/ocr/route.ts:209:                  { type: 'text', text: 'Extract ALL text from this utility bill image. Output only raw extracted text.' },
+app/api/debug/ocr/route.ts:220:            if (text.length > ocrText.length) {
+app/api/debug/ocr/route.ts:221:              ocrText = text;
+app/api/debug/ocr/route.ts:222:              ocrMethod = 'openai-vision';
+app/api/debug/ocr/route.ts:223:              ocrConfidence = 85;
+app/api/debug/ocr/route.ts:224:              debugLog.push(`[debug-ocr] OpenAI Vision success: ${ocrText.length} chars`);
+app/api/debug/ocr/route.ts:227:            debugLog.push(`[debug-ocr] OpenAI Vision HTTP ${res.status}`);
+app/api/debug/ocr/route.ts:231:          debugLog.push(`[debug-ocr] OpenAI Vision failed: ${msg}`);
+app/api/debug/ocr/route.ts:233:      } else if (ocrText.length < 20) {
+app/api/debug/ocr/route.ts:234:        debugLog.push('[debug-ocr] OpenAI Vision skipped — OPENAI_API_KEY not set');
+app/api/debug/ocr/route.ts:238:      debugLog.push(`[debug-ocr] Unsupported file type: ${mimeType}`);
+app/api/debug/ocr/route.ts:242:    debugLog.push(`[debug-ocr] Done in ${elapsedMs}ms method=${ocrMethod} chars=${ocrText.length}`);
+app/api/debug/ocr/route.ts:244:    console.log(`[DEBUG_OCR] file=${file.name} mime=${mimeType} size=${fileSize} method=${ocrMethod} chars=${ocrText.length} elapsed=${elapsedMs}ms`);
+app/api/debug/ocr/route.ts:247:      success: ocrText.length > 0,
+app/api/debug/ocr/route.ts:252:      ocr_method: ocrMethod,
+app/api/debug/ocr/route.ts:253:      ocr_confidence: ocrConfidence,
+app/api/debug/ocr/route.ts:254:      ocr_text_length: ocrText.length,
+app/api/debug/ocr/route.ts:255:      first_500_chars: ocrText.slice(0, 500),
+app/api/debug/ocr/route.ts:267:    console.error('[DEBUG_OCR] Fatal error:', msg);
+app/api/debug/ocr/route.ts:268:    debugLog.push(`[debug-ocr] FATAL: ${msg}`);
+app/api/debug/bill/route.ts:12: *   2. OCR text extraction (Tesseract CLI / WASM / Vision)
+app/api/debug/bill/route.ts:40:// Minimal inline OCR runner for diagnostics
+app/api/debug/bill/route.ts:51:    // Try pdftotext CLI
+app/api/debug/bill/route.ts:62:        execFileSync('pdftotext', ['-layout', tmpIn, tmpOut], { timeout: 10000 });
+app/api/debug/bill/route.ts:67:          return { text, method: 'pdftotext-cli', chars: text.length };
+app/api/debug/bill/route.ts:69:        debugLog.push(`pdftotext returned ${text.length} chars (below threshold)`);
+app/api/debug/bill/route.ts:71:        debugLog.push(`pdftotext failed: ${(e as Error).message}`);
+app/api/debug/bill/route.ts:75:      debugLog.push(`pdftotext setup error: ${(e as Error).message}`);
+app/api/debug/bill/route.ts:78:    // Try pdf-parse
+app/api/debug/bill/route.ts:80:      const pdfParseMod = await import('pdf-parse');
+app/api/debug/bill/route.ts:84:        return { text: result.text.trim(), method: 'pdf-parse', chars: result.text.length };
+app/api/debug/bill/route.ts:86:      debugLog.push(`pdf-parse returned ${result?.text?.length ?? 0} chars (below threshold)`);
+app/api/debug/bill/route.ts:88:      debugLog.push(`pdf-parse failed: ${(e as Error).message}`);
+app/api/debug/bill/route.ts:113:      execFileSync('tesseract', [tmpIn, tmpOut, '--oem', '1', '--psm', '3', '-l', 'eng'], { timeout: 15000 });
+app/api/debug/bill/route.ts:120:          return { text, method: 'tesseract-cli', chars: text.length };
+app/api/debug/bill/route.ts:122:        debugLog.push(`tesseract-cli returned ${text.length} chars (below threshold)`);
+app/api/debug/bill/route.ts:125:      debugLog.push(`tesseract-cli failed: ${(e as Error).message}`);
+app/api/debug/bill/route.ts:129:    debugLog.push(`tesseract-cli setup error: ${(e as Error).message}`);
+app/api/debug/bill/route.ts:147:              { type: 'text', text: 'Extract ALL text from this utility bill image. Return only raw text, no formatting.' },
+app/api/debug/bill/route.ts:175:    error: `All image OCR methods failed. Log: ${debugLog.join(' | ')}`,
+app/api/debug/bill/route.ts:242:  // -- Stage 2: OCR text extraction -------------------------------------------
+app/api/debug/bill/route.ts:243:  let ocrText = '';
+app/api/debug/bill/route.ts:244:  let ocrMethod = '';
+app/api/debug/bill/route.ts:247:    const ocrStart = Date.now();
+app/api/debug/bill/route.ts:248:    const ocrResult = await runOcr(buf, mime, fileName);
+app/api/debug/bill/route.ts:249:    const ocrMs = Date.now() - ocrStart;
+app/api/debug/bill/route.ts:251:    ocrText   = ocrResult.text;
+app/api/debug/bill/route.ts:252:    ocrMethod = ocrResult.method;
+app/api/debug/bill/route.ts:254:    trace.stages.ocr = {
+app/api/debug/bill/route.ts:255:      ok: ocrResult.chars > 0,
+app/api/debug/bill/route.ts:256:      method: ocrResult.method,
+app/api/debug/bill/route.ts:257:      chars: ocrResult.chars,
+app/api/debug/bill/route.ts:258:      elapsedMs: ocrMs,
+app/api/debug/bill/route.ts:259:      first500: ocrText.slice(0, 500),
+app/api/debug/bill/route.ts:260:      error: ocrResult.error || null,
+app/api/debug/bill/route.ts:263:    console.log(`[DEBUG_BILL_STAGE2] ocr_method=${ocrMethod} chars=${ocrResult.chars} elapsedMs=${ocrMs}`);
+app/api/debug/bill/route.ts:265:    trace.stages.ocr = { ok: false, error: (e as Error).message };
+app/api/debug/bill/route.ts:266:    console.warn(`[DEBUG_BILL_STAGE2] OCR threw: ${(e as Error).message}`);
+app/api/debug/bill/route.ts:283:    const parsed = ocrText ? parseBill(ocrText) : null;
+app/api/debug/bill/route.ts:325:  if (parsedFields < 3 && ocrText.length > 50) {
+app/api/debug/bill/route.ts:328:      const aiResult = await extractBillDataWithAI(ocrText, emptyExtract);
+app/api/debug/bill/route.ts:369:        : `ocr_text_too_short (${ocrText.length} chars)`,
+app/api/debug/bill/route.ts:443:    ocrSuccess:   (trace.stages.ocr?.chars || 0) > 0,
+app/api/debug/bill/route.ts:459:      : 'INSUFFICIENT: no kWh extracted -- bill may need manual entry or better OCR',
+app/api/debug/bill/route.ts:462:  console.log(`[DEBUG_BILL_COMPLETE] elapsedMs=${totalElapsedMs} hasKwh=${hasKwh} usedAI=${usedAI} ocrMethod=${ocrMethod}`);
+app/api/bill-upload/route.ts:24:// ── Magic byte validation for bill uploads ──────────────────────────────────
+app/api/bill-upload/route.ts:101:// to prevent webpack from bundling tesseract.js worker_threads at module load time.
+app/api/bill-upload/route.ts:102:// Static import of tesseract.js causes HTML 500 errors before the route handler runs.
+app/api/bill-upload/route.ts:104:// Top-level reference so webpack marks pdf-parse as external (not bundled)
+app/api/bill-upload/route.ts:107:  const pdfParseModule = require('pdf-parse');
+app/api/bill-upload/route.ts:110:  logger.warn('BILL', '[bill-upload] pdf-parse not available:', e instanceof Error ? e.message : e);
+app/api/bill-upload/route.ts:113:// Vercel: OCR+parse only — must complete in < 30s (well under 60s limit)
+app/api/bill-upload/route.ts:118:// Responsibilities: buffer creation, OCR/text extraction, bill field parsing.
+app/api/bill-upload/route.ts:138:    // v48.6: Rate limiting — 5 req / 30s per IP (protects Claude + OCR costs)
+app/api/bill-upload/route.ts:177:      // Create buffer ONCE — used for ALL downstream operations (OCR, PDF parse, save)
+app/api/bill-upload/route.ts:258:            extractionMethod = pr.extractionMethod ?? 'pdf-parse';
+app/api/bill-upload/route.ts:274:          logger.debug('BILL', `[OCR_COMPLETED] method=${result.method} chars=${result.text.length} path=legacy`);
+app/api/bill-upload/route.ts:286:        // v48.0: Claude 3.5 Sonnet direct image path — no OCR pre-processing needed.
+app/api/bill-upload/route.ts:288:        // Falls back to existing Tesseract/Vision OCR pipeline if Claude fails or key absent.
+app/api/bill-upload/route.ts:347:              logger.debug('BILL', `[CLAUDE_IMAGE_INSUFFICIENT] fields=${billData.extractedFields?.length ?? 0} — falling through to OCR pipeline`);
+app/api/bill-upload/route.ts:349:              logger.warn('BILL', `[CLAUDE_IMAGE_FAILED] status=${cr?.status ?? 'null'} — falling through to OCR pipeline`);
+app/api/bill-upload/route.ts:355:          logger.debug('BILL', '[CLAUDE_IMAGE_SKIPPED] ANTHROPIC_API_KEY not set — using OCR pipeline');
+app/api/bill-upload/route.ts:358:        // Fallback: existing Tesseract / OpenAI Vision / Google Vision OCR pipeline
+app/api/bill-upload/route.ts:359:        logger.debug('BILL', `[OCR_STARTED] name=${fileName} type=${safeMime} size=${buffer.length} claudeHandled=${claudeImageHandled}`);
+app/api/bill-upload/route.ts:360:        const ocrResult = await Promise.race([
+app/api/bill-upload/route.ts:364:        extractedText = ocrResult.text;
+app/api/bill-upload/route.ts:365:        extractionMethod = ocrResult.method;
+app/api/bill-upload/route.ts:367:        logger.debug('BILL', `[OCR_COMPLETED] chars=${extractedText.length} method=${ocrResult.method} confidence=${ocrResult.confidence}`);
+app/api/bill-upload/route.ts:371:          logger.debug('BILL', `[OCR_SUCCESS] method=${ocrResult.method} chars=${extractedText.length}`);
+app/api/bill-upload/route.ts:373:          logger.warn('BILL', `[OCR_FAILED] method=${ocrResult.method} chars=${extractedText.length}`);
+app/api/bill-upload/route.ts:383:      // OCR failed completely — return a soft failure that lets the UI show manual entry
+app/api/bill-upload/route.ts:384:      // rather than a hard error. This matches Step 5 of the OCR reliability spec.
+app/api/bill-upload/route.ts:385:      logger.warn('BILL', `[OCR_FAILED] all methods returned empty text name=${file?.name ?? 'none'} mime=${file?.type ?? 'none'} size=${file?.size ?? 0} openai=${!!process.env.OPENAI_API_KEY}`);
+app/api/bill-upload/route.ts:388:        status: 'ocr_failed',
+app/api/bill-upload/route.ts:402:    logger.debug('BILL', `[OCR_TEXT_FIRST_500] method=${extractionMethod} preview=${JSON.stringify(extractedText.slice(0, 500))}`);
+app/api/bill-upload/route.ts:404:    // ── RAW OCR TEXT LOG ──────────────────────────────────────────────────────
+app/api/bill-upload/route.ts:405:    logger.debug('BILL', '[bill-upload] === RAW OCR TEXT ===');
+app/api/bill-upload/route.ts:406:    const ocrLines = extractedText.split('\n');
+app/api/bill-upload/route.ts:407:    for (const line of ocrLines.slice(0, 60)) {
+app/api/bill-upload/route.ts:408:      if (line.trim()) logger.debug('BILL', `[ocr-raw] ${line}`);
+app/api/bill-upload/route.ts:410:    if (ocrLines.length > 60) {
+app/api/bill-upload/route.ts:411:      logger.debug('BILL', `[ocr-raw] ... (${ocrLines.length - 60} more lines)`);
+app/api/bill-upload/route.ts:413:    logger.debug('BILL', '[bill-upload] === END RAW OCR TEXT ===');
+app/api/bill-upload/route.ts:512:    //   1. Zero fields extracted from OCR text
+app/api/bill-upload/route.ts:513:    //   2. Very few fields (<2) from short/garbled OCR
+app/api/bill-upload/route.ts:514:    //   3. Monthly kWh is suspiciously low (<150) despite a long OCR text -- likely OCR misread
+app/api/bill-upload/route.ts:527:      (usedOpenAiOcr && !hasFullYearHistory) ||  // GPT OCR path: always extract structured data unless full year already found
+app/api/bill-upload/route.ts:631:    if (msg.includes('extract') || msg.includes('OCR') || msg.includes('text')) {
+app/api/bill-upload/route.ts:664:  // Method 1: pdftotext CLI (poppler)
+app/api/bill-upload/route.ts:665:  // v47.25: Skip on Vercel — pdftotext binary not available in serverless runtime
+app/api/bill-upload/route.ts:667:  logger.debug('BILL', '[PDF_PARSE_STARTED] method=pdftotext isVercel=' + _isVercel);
+app/api/bill-upload/route.ts:671:      logger.debug('BILL', `[PDF_PARSE_SUCCESS] method=pdftotext chars=${text.length}`);
+app/api/bill-upload/route.ts:672:      return { text, method: 'pdftotext' };
+app/api/bill-upload/route.ts:674:    logger.warn('BILL', `[bill-upload] pdftotext returned low-quality text (${text.length} chars) — trying next method`);
+app/api/bill-upload/route.ts:676:    logger.warn('BILL', '[PDF_PARSE_FAILED] method=pdftotext error:', err instanceof Error ? (err as Error).message : err);
+app/api/bill-upload/route.ts:679:  // Method 2: pdf-parse (npm library)
+app/api/bill-upload/route.ts:680:  // v47.211: pdf-parse v2.4.5 uses a class-based API:
+app/api/bill-upload/route.ts:684:  logger.debug('BILL', '[PDF_PARSE_STARTED] method=pdf-parse');
+app/api/bill-upload/route.ts:686:    const ppMod = require('pdf-parse') as any;
+app/api/bill-upload/route.ts:705:        logger.warn('BILL', '[PDF_PARSE_WARN] method=pdf-parse v2-api failed:', classErr instanceof Error ? (classErr as Error).message : classErr);
+app/api/bill-upload/route.ts:719:        logger.warn('BILL', '[PDF_PARSE_WARN] method=pdf-parse v1-api failed:', legacyErr instanceof Error ? (legacyErr as Error).message : legacyErr);
+app/api/bill-upload/route.ts:732:        logger.warn('BILL', '[PDF_PARSE_WARN] method=pdf-parse default-export failed:', defaultErr instanceof Error ? (defaultErr as Error).message : defaultErr);
+app/api/bill-upload/route.ts:737:      logger.debug('BILL', `[PDF_PARSE_SUCCESS] method=pdf-parse chars=${text.length} pages=${numpages}`);
+app/api/bill-upload/route.ts:738:      return { text, method: 'pdf-parse' };
+app/api/bill-upload/route.ts:741:      logger.warn('BILL', `[bill-upload] pdf-parse returned low-quality text (${text.length} chars)`);
+app/api/bill-upload/route.ts:743:      logger.warn('BILL', '[bill-upload] pdf-parse: all strategies returned empty text');
+app/api/bill-upload/route.ts:746:    logger.warn('BILL', '[PDF_PARSE_FAILED] method=pdf-parse error:', err instanceof Error ? (err as Error).message : err);
+app/api/bill-upload/route.ts:762:  // Method 4: pdfjs-dist
+app/api/bill-upload/route.ts:764:  // getDocument().promise can hang forever if pdfjs-dist tries to spawn Web Workers in a
+app/api/bill-upload/route.ts:767:  logger.debug('BILL', '[PDF_PARSE_STARTED] method=pdfjs-dist');
+app/api/bill-upload/route.ts:769:    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs' as any);
+app/api/bill-upload/route.ts:770:    const getDocument = pdfjsLib.getDocument ?? pdfjsLib.default?.getDocument;
+app/api/bill-upload/route.ts:771:    if (!getDocument) throw new Error('getDocument not found in pdfjs-dist');
+app/api/bill-upload/route.ts:785:        setTimeout(() => reject(new Error('pdfjs-dist getDocument timed out after 8s')), 8000)
+app/api/bill-upload/route.ts:794:          setTimeout(() => reject(new Error(`pdfjs-dist getPage(${i}) timed out`)), 5000)
+app/api/bill-upload/route.ts:800:          setTimeout(() => reject(new Error(`pdfjs-dist getTextContent(${i}) timed out`)), 5000)
+app/api/bill-upload/route.ts:807:      logger.debug('BILL', `[PDF_PARSE_SUCCESS] method=pdfjs-dist chars=${text.length}`);
+app/api/bill-upload/route.ts:808:      return { text, method: 'pdfjs-dist' };
+app/api/bill-upload/route.ts:810:    logger.warn('BILL', `[bill-upload] pdfjs-dist returned low-quality text (${text.length} chars)`);
+app/api/bill-upload/route.ts:812:    logger.warn('BILL', '[PDF_PARSE_FAILED] method=pdfjs-dist error:', err instanceof Error ? (err as Error).message : err);
+app/api/bill-upload/route.ts:843:                { type: 'input_text', text: `Extract ALL text from this utility bill PDF exactly as it appears.
+app/api/bill-upload/route.ts:850:Output the complete raw text including all numbers, addresses, account numbers, dates, and kWh values. Preserve original formatting.` },
+app/api/bill-upload/route.ts:919:  execFileSync('pdftotext', ['-layout', tmpIn, tmpOut], { timeout: 15000 });
+app/api/bill-upload/route.ts:936:    await execFileAsync('tesseract', ['--version'], { timeout: 3000 }).catch(() => {
+app/api/bill-upload/route.ts:937:      throw new Error('tesseract CLI not available');
+app/api/bill-upload/route.ts:940:    const id = `ocr_inline_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+app/api/bill-upload/route.ts:948:        'tesseract',
+app/api/bill-upload/route.ts:977:  // ── Log OCR input for observability (Step 1 of audit) ──────────────────────
+app/api/bill-upload/route.ts:978:  logger.debug('BILL', `[OCR_INPUT_BUFFER_LENGTH] bytes=${buffer.length}`);
+app/api/bill-upload/route.ts:979:  logger.debug('BILL', `[OCR_INPUT_MIME_TYPE] mime=${mimeType}`);
+app/api/bill-upload/route.ts:980:  logger.debug('BILL', `[OCR_INPUT_FILE_SIZE] kb=${Math.round(buffer.length / 1024)}`);
+app/api/bill-upload/route.ts:983:    console.error('[OCR_INPUT_BUFFER_LENGTH] ERROR: buffer is empty — upload pipeline broken');
+app/api/bill-upload/route.ts:993:  let tesseractBuffer = buffer;      // preprocessed PNG for Tesseract/WASM
+app/api/bill-upload/route.ts:994:  let tesseractMime   = mimeType;    // mime type for preprocessed buffer
+app/api/bill-upload/route.ts:997:    tesseractBuffer = await preprocessBillImageSafe(buffer, preprocessLog);
+app/api/bill-upload/route.ts:998:    tesseractMime   = 'image/png';   // preprocessor always outputs PNG
+app/api/bill-upload/route.ts:1000:    logger.debug('BILL', `[PREPROCESS_COMPLETE] original=${buffer.length}b processed=${tesseractBuffer.length}b`);
+app/api/bill-upload/route.ts:1009:  // Try CLI directly FIRST — avoids the HTTP round-trip to /api/ocr which
+app/api/bill-upload/route.ts:1011:  logger.debug('BILL', '[OCR_STARTED] stage=1 method=tesseract-cli-inline');
+app/api/bill-upload/route.ts:1012:  let tesseractText = '';
+app/api/bill-upload/route.ts:1014:    tesseractText = await runTesseractCliInline(tesseractBuffer, tesseractMime);
+app/api/bill-upload/route.ts:1015:    logger.debug('BILL', `[OCR_COMPLETED] stage=1 method=tesseract-cli chars=${tesseractText.length}`);
+app/api/bill-upload/route.ts:1017:    logger.warn('BILL', '[OCR_COMPLETED] stage=1 method=tesseract-cli failed:', cliErr instanceof Error ? cliErr.message : String(cliErr));
+app/api/bill-upload/route.ts:1020:  // ── Stage 1b: /api/ocr HTTP (Tesseract.js WASM fallback) ───────────────────
+app/api/bill-upload/route.ts:1026:  if (tesseractText.length < 20 && !isVercel) {
+app/api/bill-upload/route.ts:1027:    logger.debug('BILL', '[OCR_STARTED] stage=1b method=tesseract-wasm-http (local-dev only)');
+app/api/bill-upload/route.ts:1029:      const wasmResult = await recognizeImage(tesseractBuffer, tesseractMime);
+app/api/bill-upload/route.ts:1030:      if (wasmResult.rawText.length > tesseractText.length) {
+app/api/bill-upload/route.ts:1031:        tesseractText = wasmResult.rawText;
+app/api/bill-upload/route.ts:1032:        logger.debug('BILL', `[OCR_COMPLETED] stage=1b method=tesseract-wasm chars=${tesseractText.length} confidence=${wasmResult.confidence}`);
+app/api/bill-upload/route.ts:1035:      logger.warn('BILL', '[OCR_COMPLETED] stage=1b method=tesseract-wasm failed:', wasmErr instanceof Error ? wasmErr.message : String(wasmErr));
+app/api/bill-upload/route.ts:1037:  } else if (tesseractText.length < 20 && isVercel) {
+app/api/bill-upload/route.ts:1038:    logger.debug('BILL', '[OCR_SKIPPED] stage=1b reason=vercel_no_wasm_binary — escalating directly to OpenAI Vision');
+app/api/bill-upload/route.ts:1040:  logger.debug('BILL', `[OCR_TEXT_LENGTH] after_tesseract=${tesseractText.length}`);
+app/api/bill-upload/route.ts:1043:  if (tesseractText.length >= 20) {
+app/api/bill-upload/route.ts:1044:    const parseCheck = parseMonthlyUsage(tesseractText);
+app/api/bill-upload/route.ts:1046:    logger.debug('BILL', `[OCR_COMPLETED] tesseract_sufficient=${hasUsage} monthsFound=${parseCheck.monthsFound} chars=${tesseractText.length}`);
+app/api/bill-upload/route.ts:1049:    if (hasUsage && tesseractText.length > 100) {
+app/api/bill-upload/route.ts:1050:      logger.debug('BILL', '[OCR_COMPLETED] stage=tesseract method=tesseract-cli sufficient — skipping Vision (cost $0)');
+app/api/bill-upload/route.ts:1051:      return { text: tesseractText, method: 'tesseract-cli', confidence: 75 };
+app/api/bill-upload/route.ts:1054:    logger.debug('BILL', '[OCR_STARTED] stage=2 reason=no_usage_in_tesseract_text — trying Vision');
+app/api/bill-upload/route.ts:1057:    logger.warn('BILL', `[OCR_FAILED] stage=1 chars=${tesseractText.length} — escalating to Vision`);
+app/api/bill-upload/route.ts:1060:  // ── Stage 2: OpenAI Vision (direct call, not via /api/ocr) ─────────────────
+app/api/bill-upload/route.ts:1063:    logger.debug('BILL', '[OCR_STARTED] stage=2 method=openai-vision');
+app/api/bill-upload/route.ts:1066:      logger.debug('BILL', `[OCR_COMPLETED] stage=2 method=openai-vision chars=${visionResult.rawText.length} confidence=${visionResult.confidence}`);
+app/api/bill-upload/route.ts:1067:      logger.debug('BILL', `[OCR_TEXT_LENGTH] after_vision=${visionResult.rawText.length}`);
+app/api/bill-upload/route.ts:1072:        const tesseractParse = tesseractText.length >= 20 ? parseMonthlyUsage(tesseractText) : null;
+app/api/bill-upload/route.ts:1075:        const tessMonths = tesseractParse?.monthsFound ?? 0;
+app/api/bill-upload/route.ts:1077:        if (visionMonths >= tessMonths || (visionParse.annualUsage !== null && (tesseractParse?.annualUsage ?? null) === null)) {
+app/api/bill-upload/route.ts:1078:          logger.debug('BILL', `[OCR_COMPLETED] method=openai-vision chosen months=${visionMonths} vs tesseract=${tessMonths}`);
+app/api/bill-upload/route.ts:1081:          logger.debug('BILL', `[OCR_COMPLETED] method=tesseract-kept months=${tessMonths} > vision=${visionMonths}`);
+app/api/bill-upload/route.ts:1082:          return { text: tesseractText, method: 'tesseract-kept', confidence: 70 };
+app/api/bill-upload/route.ts:1086:      logger.warn('BILL', '[OCR_COMPLETED] stage=2 method=openai-vision failed:', vErr instanceof Error ? vErr.message : String(vErr));
+app/api/bill-upload/route.ts:1089:    logger.warn('BILL', '[OCR_STARTED] stage=2 SKIPPED — OPENAI_API_KEY not set');
+app/api/bill-upload/route.ts:1094:    logger.debug('BILL', '[OCR_STARTED] stage=3 method=google-vision');
+app/api/bill-upload/route.ts:1097:      logger.debug('BILL', `[OCR_COMPLETED] stage=3 method=google-vision chars=${googleResult.rawText.length}`);
+app/api/bill-upload/route.ts:1098:      logger.debug('BILL', `[OCR_TEXT_LENGTH] after_google=${googleResult.rawText.length}`);
+app/api/bill-upload/route.ts:1103:      logger.warn('BILL', '[OCR_COMPLETED] stage=3 method=google-vision failed:', gErr instanceof Error ? gErr.message : String(gErr));
+app/api/bill-upload/route.ts:1108:  if (tesseractText.length > 0) {
+app/api/bill-upload/route.ts:1109:    logger.warn('BILL', `[OCR_COMPLETED] method=tesseract-low-confidence chars=${tesseractText.length} — returning partial`);
+app/api/bill-upload/route.ts:1110:    return { text: tesseractText, method: 'tesseract-low-confidence', confidence: 30 };
+app/api/bill-upload/route.ts:1113:  console.error('[OCR_FAILED] all stages exhausted — returning empty');
+app/api/bill-upload/test/route.ts:12:  const m = require('pdf-parse');
+app/api/bill-upload/test/route.ts:69:  // Step 1: pdf-parse
+app/api/bill-upload/test/route.ts:76:      debug.steps.push({ method: 'pdf-parse', chars: text.length, preview: text.substring(0, 150), success: text.length > 50 });
+app/api/bill-upload/test/route.ts:78:      debug.steps.push({ method: 'pdf-parse', error: 'PDFParse class not loaded: ' + pdfParseError, success: false });
+app/api/bill-upload/test/route.ts:81:    debug.steps.push({ method: 'pdf-parse', error: e instanceof Error ? (e as Error).message : String(e), success: false });
+app/api/bill-upload/test/route.ts:84:  // Step 2: Raw text extraction from PDF buffer
+app/api/bill-upload/test/route.ts:137:                  { type: 'input_text', text: 'Extract all text from this utility bill. Output only raw text.' },
+app/api/bill-upload/test/route.ts:187:              { role: 'system', content: 'You are a utility bill parser. Reconstruct bill info from raw PDF text.' },
+app/api/bill-upload/provision/route.ts:187:    // Always use validated retail rate — OCR often extracts supply-only component (e.g. CMP $0.069)
+app/api/bill-upload/provision/route.ts:250:        rawText: undefined, // Don't store full OCR text in project record
+app/api/bill-upload/provision/route.ts:301:      notes:     'Auto-generated from utility bill upload. Contains client energy profile for all downstream engines.',
+app/api/bill-upload/provision/route.ts:345:      notes:     'Utility bill data extracted via OCR/AI. Used by engineering engine for system sizing and permit documents.',
+app/api/ocr/route.ts:2: * app/api/ocr/route.ts
+app/api/ocr/route.ts:3: * Dedicated server-side OCR endpoint using Tesseract.
+app/api/ocr/route.ts:16: * POST /api/ocr
+app/api/ocr/route.ts:23: *   - Multi-pass OCR: PSM 3 (auto) + PSM 6 (single block), best result wins
+app/api/ocr/route.ts:24: *   - Raw OCR text logged before any parsing
+app/api/ocr/route.ts:39:// Max duration: 60s for OCR on large high-res bill images
+app/api/ocr/route.ts:42:// ── OCR confidence thresholds ──────────────────────────────────────────────
+app/api/ocr/route.ts:52:  const _hasSecret = !!process.env.INTERNAL_OCR_SECRET;
+app/api/ocr/route.ts:53:  console.log(`[OCR_STARTUP] openai=${_hasOpenAI} google=${_hasGoogle} internal_secret=${_hasSecret}`);
+app/api/ocr/route.ts:54:  if (!_hasOpenAI) console.warn('[OCR_STARTUP] OPENAI_API_KEY not set — Vision fallback disabled in OCR route');
+app/api/ocr/route.ts:62:  // SECURITY: Rate limit OCR — Tesseract is CPU-intensive; prevent abuse
+app/api/ocr/route.ts:63:    const _rl = await checkRateLimit('ocr', getClientIp(req));
+app/api/ocr/route.ts:75:  // /api/ocr is in PUBLIC_PATHS (middleware.ts) so this normally passes through.
+app/api/ocr/route.ts:77:  const internalSecret = process.env.INTERNAL_OCR_SECRET;
+app/api/ocr/route.ts:88:        console.warn('[OCR] Invalid internal secret — rejecting request');
+app/api/ocr/route.ts:116:    debugLog.push(`[ocr] Request: mime=${safeMime}, buffer=${rawBuffer.length}b`);
+app/api/ocr/route.ts:121:    let ocrBuffer: Buffer = rawBuffer;
+app/api/ocr/route.ts:125:      ocrBuffer = prepResult.buffer;
+app/api/ocr/route.ts:128:      debugLog.push(`[ocr] Preprocessing failed (${msg}) — using original image`);
+app/api/ocr/route.ts:131:    // ── Step 2: Multi-pass OCR ────────────────────────────────────────────────
+app/api/ocr/route.ts:132:    const result = await runMultiPassTesseract(ocrBuffer, safeMime, debugLog);
+app/api/ocr/route.ts:134:    // ── Step 3: Log raw OCR text (critical for debugging) ─────────────────────
+app/api/ocr/route.ts:135:    debugLog.push(`[ocr] === RAW OCR TEXT (${result.text.length} chars) ===`);
+app/api/ocr/route.ts:139:      if (line.trim()) debugLog.push(`[ocr-raw] ${line}`);
+app/api/ocr/route.ts:142:      debugLog.push(`[ocr-raw] ... (${result.text.length - 1000} more chars)`);
+app/api/ocr/route.ts:144:    debugLog.push(`[ocr] === END RAW OCR TEXT ===`);
+app/api/ocr/route.ts:151:    debugLog.push(`[ocr] Result: method=${result.method}, confidence=${result.confidence}, chars=${result.text.length}`);
+app/api/ocr/route.ts:163:    console.error('[ocr] Fatal error:', msg);
+app/api/ocr/route.ts:164:    debugLog.push(`[ocr] FATAL: ${msg}`);
+app/api/ocr/route.ts:168:      { success: false, error: 'OCR processing failed. Please try again.', text: '', confidence: 0, debugLog },
+app/api/ocr/route.ts:178:  method: 'tesseract-cli' | 'tesseract-js' | 'none';
+app/api/ocr/route.ts:183: * Run two OCR passes with different page segmentation modes and return the
+app/api/ocr/route.ts:200:    log.push('[ocr] Tesseract CLI available — running multi-pass OCR');
+app/api/ocr/route.ts:204:    log.push(`[ocr] CLI PSM 3: ${pass1.text.length} chars, confidence=${pass1.confidence}`);
+app/api/ocr/route.ts:208:    log.push(`[ocr] CLI PSM 6: ${pass2.text.length} chars, confidence=${pass2.confidence}`);
+app/api/ocr/route.ts:211:    // multi-column utility bills, bar charts, and mixed layouts.
+app/api/ocr/route.ts:217:    log.push(`[ocr] Best pass: PSM ${bestPsm} (${best.text.length} chars) — PSM3 preferred for bill accuracy`);
+app/api/ocr/route.ts:225:  log.push('[ocr] Falling back to Tesseract.js WASM...');
+app/api/ocr/route.ts:229:  log.push(`[ocr] WASM PSM 3: ${wasm1.text.length} chars, confidence=${wasm1.confidence}`);
+app/api/ocr/route.ts:235:  log.push('[ocr] All Tesseract passes returned minimal text');
+app/api/ocr/route.ts:252:    await execFileAsync('tesseract', ['--version'], { timeout: 3000 });
+app/api/ocr/route.ts:276:    const id = `ocr_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+app/api/ocr/route.ts:285:        'tesseract',
+app/api/ocr/route.ts:297:      log.push(`[ocr] CLI PSM${psm}: chars=${normalisedText.length}, words=${wordCount}, conf=${confidence}`);
+app/api/ocr/route.ts:298:      return { text: normalisedText, confidence, method: 'tesseract-cli' };
+app/api/ocr/route.ts:309:      log.push(`[ocr] CLI PSM${psm} failed: ${msg}`);
+app/api/ocr/route.ts:321:  log.push('[ocr] Trying Tesseract.js (WASM)...');
+app/api/ocr/route.ts:324:    const { createWorker } = require('tesseract.js');
+app/api/ocr/route.ts:326:    const worker = await createWorker('eng', 1, {
+app/api/ocr/route.ts:327:      cachePath: '/tmp/tesseract-cache',
+app/api/ocr/route.ts:330:          log.push(`[ocr] WASM: ${m.status} ${Math.round(m.progress * 100)}%`);
+app/api/ocr/route.ts:339:      const { data } = await worker.recognize(dataUrl);
+app/api/ocr/route.ts:345:      log.push(`[ocr] WASM: confidence=${confidence}, chars=${normalisedText.length}`);
+app/api/ocr/route.ts:346:      return { text: normalisedText, confidence, method: 'tesseract-js' };
+app/api/ocr/route.ts:354:    log.push(`[ocr] WASM failed: ${msg}`);
+app/api/ocr/route.ts:359:// ── OCR text normalisation ────────────────────────────────────────────────────
+app/api/ocr/route.ts:361: * Fix common Tesseract OCR errors on utility bills:
+app/api/ocr/route.ts:378:    // Month name OCR fixes
+app/api/proposals/[id]/pdf/route.ts:199:        // v48.14: parsedBillRate intentionally undefined — OCR-extracted rates are supply-only.
+app/api/admin/projects/[id]/route.ts:260:            under_review:    { label: 'Under Review',    body: 'Our team is reviewing your utility bill and project details.',          next: 'We\'ll complete our review and schedule a site survey.' },
+app/api/engineering/preliminary/route.ts:45:  panelModel:           'Generic 440W Monocrystalline',
+app/api/engineering/preliminary/route.ts:598:      // This populates the Engineering tab immediately after bill upload onboarding.
+app/api/engineering/preliminary/route.ts:615:            model: `${DEFAULTS.panelWatts}W Monocrystalline`,
+app/api/engineering/preliminary/route.ts:786:        notes:     'Preliminary engineering packet — auto-generated from bill upload',
+app/api/engineering/preliminary/route.ts:839:          panel:    `${DEFAULTS.panelWatts}W Monocrystalline Module`,
+app/api/engineering/preliminary/route.ts:851:        disclaimer:   'PRELIMINARY ESTIMATE — Generated from utility bill data. Final design and pricing will be provided by a selected installation contractor.',
+app/api/engineering/preliminary/route.ts:884:Source: Auto-extracted from uploaded utility bill
+app/api/engineering/preliminary/route.ts:947:   Generated from utility bill data only.
+app/api/engineering/preliminary/route.ts:973:Solar Panels:          ${p.panelCount} × 440W Monocrystalline
+app/api/engineering/preliminary/route.ts:1010:This is a preliminary engineering estimate generated from utility bill data.
+app/api/engineering/save-outputs/route.ts:390:    `  Panel Model:            ${p.panelModel ?? 'Generic 400W Monocrystalline'}`,
+app/api/engineering/save-outputs/route.ts:483:    `  Panel Model:            ${p.panelModel ?? 'Generic 400W Monocrystalline'}`,
+app/api/project-files/route.ts:3:// Stores utility bills, engineering packets, proposals, photos, permits
+app/projects/[id]/page.tsx:4:// ── Error boundary for bill upload modal ──────────────────────────────────────
+app/projects/[id]/page.tsx:190:    title:       'How to upload a utility bill',
+app/projects/[id]/page.tsx:197:    description: 'After bill upload, SolarPro sizes the system from annual usage and local irradiance. Review the recommended size and override it if needed.',
+app/projects/[id]/page.tsx:230:    warnings.push({ label: 'No utility bill uploaded', action: 'Upload Bill', tab: 'bill' });
+app/projects/[id]/page.tsx:517:      // FIX v47.12 Issue 1: If bill OCR extracted a customerName AND the client record
+app/projects/[id]/survey/[surveyId]/page.tsx:796:                    <p className="text-[10px] text-slate-600">OCR: {requirement.futureCapabilities.supportsOCR ? 'documented' : 'off'} | CV: {requirement.futureCapabilities.supportsCVClassification ? 'documented' : 'off'} | CAD: {requirement.futureCapabilities.supportsCADInference ? 'documented' : 'off'} | Semantic: {requirement.futureCapabilities.supportsSemanticExtraction ? 'documented' : 'off'}</p>
+app/projects/[id]/survey/[surveyId]/page.tsx:866:            YOLO/Supervision, OCR, Claude reasoning, Open3D, and FreeCAD remain external worker or future-only stages.
+app/terms/page.tsx:137:                ['"Proprietary Technology"', 'All algorithms, automation workflows, OCR extraction logic, system sizing methods, proposal generation processes, engineering workflows, data models, and any other technical processes embodied in the Platform.'],
+app/terms/page.tsx:191:              The SolarPro Platform, including without limitation all source code, object code, software architecture, database schemas, algorithms, automation workflows, OCR extraction systems, solar system sizing models, proposal generation logic, engineering calculation methods, user interface designs, documentation, and all other components thereof (collectively, the &quot;Platform&quot;), is the exclusive proprietary intellectual property of <strong>Raymond O&apos;Brian</strong>. All rights, title, and interest in and to the Platform are and shall remain vested exclusively in Raymond O&apos;Brian.
+app/terms/page.tsx:210:                'Utility bill OCR extraction algorithms and logic, including preprocessing pipelines and text parsing methods',
+app/terms/page.tsx:290:                ['Automation Processes:', 'All automated workflows including bill intake, OCR processing, data extraction, system sizing, proposal generation, and engineering preparation sequences'],
+app/terms/page.tsx:434:                'Uploading client utility bills for energy usage analysis',
+app/terms/page.tsx:669:              In the course of using the Platform, you may submit client utility bills, project addresses, energy usage data, customer information, and other materials (&quot;User Data&quot;). You represent and warrant that you have obtained all necessary consents and permissions to submit such data to the Platform and to authorize the processing described in this Section.
+app/terms/page.tsx:711:              You retain ownership of the raw client data you submit to the Platform (e.g., your clients&apos; utility bills and contact information). The Owner retains all rights in the Outputs produced by the Platform&apos;s Proprietary Technology, including the formats, structures, and methodology embodied therein.
+lib/billInsights.ts:9: *   2. Combined utility detection (keyword scan on raw OCR text)
+lib/billInsights.ts:49:   *   "bill-derived"     — clean single-utility bill: billDerivedRate is reliable
+lib/billInsights.ts:76: * Any of these present in the raw bill text indicates a combined utility bill.
+lib/billInsights.ts:155: * @param rawText      Raw OCR/extracted text from the bill
+lib/utilityNormalizer.ts:1079: * @param rawName    Raw utility name from Claude/OCR (e.g. "ComEd", "Commonwealth Edison")
+lib/siteSurvey/enrichSurvey.ts:50: * Max backfeed breaker = (busbar rating × 1.2) - main breaker rating
+lib/proposal/renderProposalHTML.test.ts:22:      cellType: 'Monocrystalline PERC',
+lib/proposal/renderProposalHTML.test.ts:193:        type: 'monocrystalline' as any,
+lib/proposal/buildCanonicalProposal.ts:92:  parsedBillRate?: number;        // v48.3: rate extracted from uploaded utility bill (highest priority)
+lib/proposal/buildCanonicalProposal.ts:397:  // Tier 1: parsedBillRate    — extracted directly from uploaded utility bill (most accurate)
+lib/proposal/buildCanonicalProposal.ts:411:  // Strong overrides: parsedBillRate (OCR bill), dbUtilityRate, utilityRateOverride (manual).
+lib/proposal/renderProposalHTML.ts:458:          <div class="highlight-box-sub">Total money saved vs. continuing to pay utility bills over 25 years.</div>
+lib/proposal/renderProposalHTML.ts:604:      ${cp.truth25yr.netDifference > 0 ? `This system is projected to save you ${fmt$(cp.truth25yr.netDifference)} over 25 years compared to paying utility bills without solar.` : ''}
+lib/proposal/renderProposalHTML.ts:756:        <tr><td>System Size</td><td>${fmtKw(cp.panel.systemSizeKw)} DC</td><td>Cell Type</td><td>${cp.panel.cellType ?? 'Monocrystalline'}</td></tr>
+lib/proposal/renderProposalHTML.ts:870:          <div class="highlight-box-sub">Projected net savings vs. continuing to pay utility bills for 25 years.</div>
+lib/proposal/financialNarrativeEngine.ts:24:  /** Current monthly utility bill before solar */
+lib/proposal/financialNarrativeEngine.ts:28:  /** Remaining monthly utility bill after solar offset */
+lib/proposal/financialNarrativeEngine.ts:96:      monthlyImpact = `Today, your combined solar payment (${fmt(solarPaymentMonthly)}/mo) and remaining utility bill (${fmt(utilityBillMonthly)}/mo) is ${fmt(delta)}/month more than your current bill — but your solar payment is fixed while utility rates rise at ${escalationPct}%/yr (${escalationRateSourceLabel}).`;
+lib/proposal/financialNarrativeEngine.ts:99:      monthlyImpact = `From day one, your combined solar payment and remaining utility bill is approximately equal to your current utility cost — with the added benefit of a fixed payment and ownership.`;
+lib/proposal/financialNarrativeEngine.ts:102:      monthlyImpact = `From day one, your combined solar payment (${fmt(solarPaymentMonthly)}/mo) and remaining utility bill (${fmt(utilityBillMonthly)}/mo) is ${fmt(Math.abs(delta))}/month less than your current bill of ${fmt(currentMonthlyBill)}/mo.`;
+lib/proposal/financialNarrativeEngine.ts:118:      primaryStory = `This system replaces a rising utility bill with a fixed solar payment — and as utility rates increase at ${escalationPct}%/yr (${escalationRateSourceLabel}), the financial advantage compounds to ${fmt(netSavings25yr)} in net savings over 25 years.`;
+lib/proposal/financialNarrativeEngine.ts:141:      : `Over 25 years, this system produces ${fmt(netSavings25yr)} more in value than it costs — while essentially eliminating your utility bill after payoff.`;
+lib/proposal/canonicalProposal.ts:291:   * Monthly remaining utility bill after solar offset.
+lib/proposal/canonicalProposal.ts:298:   * Current average monthly utility bill (before solar).
+lib/proposal/canonicalProposal.ts:314:   * Year 1 utility bill total WITHOUT solar (annualUsageKwh x rate x escalation year 0).
+lib/proposal/canonicalProposal.ts:319:   * Year 1 utility bill total WITH solar (remaining usage after offset x rate).
+lib/proposal/canonicalProposal.ts:380:   * Total remaining utility bills after solar offset, over 25yr.
+lib/sld-symbols.ts:15://   Label bar:       #1A1A1A   (dark nameplate)
+lib/segment-schedule.ts:92:  mainPanelAmps: number;         // A — service panel rating (e.g. 200A) for MSP_TO_UTILITY sizing
+lib/billClaudeExtractor.ts:5: * Claude receives the bill as a BASE64 IMAGE directly — no OCR pre-processing needed.
+lib/billClaudeExtractor.ts:58:const BILL_PARSER_SYSTEM_PROMPT = `You are an expert utility bill parsing engine for SolarPro, a solar installation platform operating across all 50 US states and internationally.
+lib/billClaudeExtractor.ts:60:Your job is to extract structured energy usage and billing data from utility bills in any format — digital PDFs, scans, photos, screenshots. Bills come from every US utility company and beyond.
+lib/billClaudeExtractor.ts:134: *   - imageBuffer + mimeType: sends image directly to Claude (best path — no OCR loss)
+lib/billClaudeExtractor.ts:224:      text: 'Extract all bill data from this utility bill image. Return ONLY the JSON object as instructed.',
+lib/billClaudeExtractor.ts:234:      text: `Extract all bill data from this utility bill text. Return ONLY the JSON object as instructed.\n\n${sanitizedText}`,
+lib/db/core.ts:248:    // Read both the _prefixed form (new format) and the flat form (legacy OCR).
+lib/db/production.ts:259:    // Read both the _prefixed form (new format) and the flat form (legacy OCR).
+lib/intake/operationalQueues.ts:347:      next_action: "Review or waive utility bill evidence",
+lib/intake/utilityBillIntelligence.ts:325:  if (!url) throw new Error("Stored utility bill metadata does not include a downloadable URL.");
+lib/intake/homeownerQualification.ts:317:    bill != null ? `• $${Math.round(bill)} utility bill` : null,
+lib/intake/utilityBillAttachment.ts:189:        "Utility bill upload storage is temporarily unavailable.",
+lib/intake/utilityBillAttachment.ts:222:      "Utility bill upload storage is not configured. Set BLOB_READ_WRITE_TOKEN for production uploads.",
+lib/intake/utilityBillAttachment.ts:232:      "Utility bill upload storage is temporarily unavailable.",
+lib/intake/utilityBillAttachment.ts:242:      "Utility bill upload storage is temporarily unavailable.",
+lib/system/hardConstraint.test.ts:42:// 400W panel with Isc = 9.8A (realistic high-efficiency monocrystalline).
+lib/system/mpptAllocator.test.ts:407:    // fixed DC bus: 9 × 400W / 400V ≈ 9.0 A (NOT the 15 A optimizer nameplate;
+lib/system/feasibilityEvaluator.ts:160:   * selected optimizer SKU has a different nameplate max output current.
+lib/system/feasibilityEvaluator.ts:259:  // optimizer nameplate already accounts for continuous-duty output). For
+lib/system/feasibilityEvaluator.ts:350:  // The optimizer cap is the regulated nameplate max output — already a
+lib/system/feasibilityEvaluator.ts:362:  // The 15A optimizer nameplate is reached ONLY at max string power.
+lib/system/feasibilityEvaluator.test.ts:542:    // the NEC conductor-sizing current (15.0A optimizer nameplate). The
+lib/system/feasibilityEvaluator.test.ts:552:  // (stringPower / nominalDcV), NOT the NEC nameplate cap (15A), for per-channel
+lib/system/feasibilityEvaluator.test.ts:587:    //   rather than the NEC nameplate cap (15A × 2 = 30A would have been rejected).
+lib/system/sizingEngine.ts:104:   * when the selected optimizer SKU has a different nameplate max output.
+lib/system/sizingEngine.ts:424:  // String/optimizer: no supplemental source → DC must meet or exceed AC nameplate.
+lib/system/sizingEngine.ts:668:// nameplate continuously at peak irradiance. Industry best-practice: 1.20-1.40.
+lib/system/sizingEngine.ts:856:  // Hybrid ESS: battery supplements AC when DC below AC nameplate, floor=0.75.
+lib/system/sizingEngineFeasibility.test.ts:19:// Standard 400W monocrystalline panel spec for feasibility-aware tests.
+lib/permit_gen.mjs:95:    `Warning labels and placards shall be installed per NEC 690.54, 690.56, 705.12, IFC ${necVer === "2023" ? "2024" : "2021"}, and local amendments. See sheet PV-5 for label schedule.`,
+lib/bom/distributorPricing.ts:89:    description: 'Qcells Q.Peak Duo BLK ML-G10+ 400W Monocrystalline',
+lib/billPipeline.ts:74: *   PDF:   pdftotext CLI → pdf-parse (v2 class / v1 fn / default) → pure-extract → pdfjs-dist → OpenAI Files API
+lib/billPipeline.ts:112:  // Method 1: pdftotext CLI (skipped on Vercel — binary not available)
+lib/billPipeline.ts:115:      logger.debug('billPipeline', '[billPipeline] PDF method=pdftotext');
+lib/billPipeline.ts:116:      const text = await raceTimeout(extractPdfCli(buffer), 15000, 'pdftotext');
+lib/billPipeline.ts:118:        logger.debug('billPipeline', `[billPipeline] PDF method=pdftotext SUCCESS chars=${text.length}`);
+lib/billPipeline.ts:119:        return { text: normalizeOcrText(text), method: 'pdftotext' };
+lib/billPipeline.ts:122:      logger.warn('billPipeline', '[billPipeline] pdftotext failed:', e instanceof Error ? e.message : e);
+lib/billPipeline.ts:126:  // Method 2: pdf-parse (v2.4.5 class-based API; falls back to v1 and default export)
+lib/billPipeline.ts:128:    logger.debug('billPipeline', '[billPipeline] PDF method=pdf-parse');
+lib/billPipeline.ts:129:    const text = await raceTimeout(extractPdfParse(buffer), 15000, 'pdf-parse');
+lib/billPipeline.ts:131:      logger.debug('billPipeline', `[billPipeline] PDF method=pdf-parse SUCCESS chars=${text.length}`);
+lib/billPipeline.ts:132:      return { text: normalizeOcrText(text), method: 'pdf-parse' };
+lib/billPipeline.ts:135:    logger.warn('billPipeline', '[billPipeline] pdf-parse failed:', e instanceof Error ? e.message : e);
+lib/billPipeline.ts:150:  // Method 4: pdfjs-dist (with hard timeouts on every operation to prevent Vercel hangs)
+lib/billPipeline.ts:152:    logger.debug('billPipeline', '[billPipeline] PDF method=pdfjs-dist');
+lib/billPipeline.ts:153:    const text = await raceTimeout(extractPdfJs(buffer), 20000, 'pdfjs-dist');
+lib/billPipeline.ts:155:      logger.debug('billPipeline', `[billPipeline] PDF method=pdfjs-dist SUCCESS chars=${text.length}`);
+lib/billPipeline.ts:156:      return { text: normalizeOcrText(text), method: 'pdfjs-dist' };
+lib/billPipeline.ts:159:    logger.warn('billPipeline', '[billPipeline] pdfjs-dist failed:', e instanceof Error ? e.message : e);
+lib/billPipeline.ts:191:  execFileSync('pdftotext', ['-layout', tmpIn, tmpOut], { timeout: 14000 });
+lib/billPipeline.ts:199:  const ppMod = require('pdf-parse') as any;
+lib/billPipeline.ts:200:  logger.debug('billPipeline', `[billPipeline] pdf-parse module: hasPDFParse=${typeof ppMod?.PDFParse} isFunction=${typeof ppMod === 'function'}`);
+lib/billPipeline.ts:210:        logger.debug('billPipeline', `[billPipeline] pdf-parse strategy=A chars=${text.length}`);
+lib/billPipeline.ts:214:      logger.warn('billPipeline', '[billPipeline] pdf-parse strategy A failed:', e instanceof Error ? e.message : e);
+lib/billPipeline.ts:224:        logger.debug('billPipeline', `[billPipeline] pdf-parse strategy=B chars=${text.length}`);
+lib/billPipeline.ts:228:      logger.warn('billPipeline', '[billPipeline] pdf-parse strategy B failed:', e instanceof Error ? e.message : e);
+lib/billPipeline.ts:238:        logger.debug('billPipeline', `[billPipeline] pdf-parse strategy=C chars=${text.length}`);
+lib/billPipeline.ts:242:      logger.warn('billPipeline', '[billPipeline] pdf-parse strategy C failed:', e instanceof Error ? e.message : e);
+lib/billPipeline.ts:250:  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs' as any);
+lib/billPipeline.ts:251:  const getDocument = pdfjsLib.getDocument ?? pdfjsLib.default?.getDocument;
+lib/billPipeline.ts:252:  if (!getDocument) throw new Error('getDocument not found in pdfjs-dist');
+lib/billPipeline.ts:266:    'pdfjs-dist getDocument'
+lib/billPipeline.ts:271:    const page = await raceTimeout(doc.getPage(i), 5000, `pdfjs getPage(${i})`);
+lib/billPipeline.ts:275:      `pdfjs getTextContent(${i})`
+lib/billPipeline.ts:314:            { type: 'input_text', text: `Extract ALL text from this utility bill PDF exactly as it appears.\n\nCRITICAL: For any bar chart, graph, or table showing monthly electricity usage (kWh):\n- Output every single number from the chart/table as raw digits\n- Format them on one line like: "Monthly kWh history: 4188 2311 1418 761 318 460 881 901 1660 2296 1509 1354"\n- Do NOT summarize, average, or describe the chart — output the exact numbers\n\nOutput the complete raw text including all numbers, addresses, account numbers, dates, and kWh values. Preserve original formatting.` },
+lib/billPipeline.ts:342:    logger.debug('billPipeline', '[billPipeline] Image method=tesseract-cli');
+lib/billPipeline.ts:343:    const text = await raceTimeout(runTesseractCli(buffer, mimeType), 30000, 'tesseract-cli');
+lib/billPipeline.ts:345:      logger.debug('billPipeline', `[billPipeline] Image method=tesseract-cli SUCCESS chars=${text.length}`);
+lib/billPipeline.ts:346:      return { text: normalizeOcrText(text), method: 'tesseract-cli' };
+lib/billPipeline.ts:349:    logger.warn('billPipeline', '[billPipeline] tesseract-cli failed:', e instanceof Error ? e.message : e);
+lib/billPipeline.ts:392:  // Check tesseract is available
+lib/billPipeline.ts:393:  await execFileAsync('tesseract', ['--version'], { timeout: 3000 }).catch(() => {
+lib/billPipeline.ts:394:    throw new Error('tesseract CLI not available');
+lib/billPipeline.ts:397:  const id = `bp_ocr_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+lib/billPipeline.ts:404:    await execFileAsync('tesseract', [tmpImg, tmpBase, '-l', 'eng', '--psm', '3', '--oem', '3'], { timeout: 28000 });
+lib/billPipeline.ts:426:          { type: 'text', text: 'Extract ALL text from this utility bill image exactly as it appears. Include all numbers, addresses, kWh values, account numbers, and dates. For bar charts or usage graphs, output each monthly number explicitly.' },
+lib/billPipeline.ts:453:// ─── OCR Normalization ────────────────────────────────────────────────────────
+lib/billPipeline.ts:456: * normalizeOcrText — fix common OCR errors in utility bill text
+lib/billPipeline.ts:461: *   - NWH / N.W.H / KWH → kWh  (OCR misread of kWh abbreviation)
+lib/billPipeline.ts:471:    // OCR: NWH / N.W.H / KWH → kWh
+lib/billPipeline.ts:475:    // OCR: lowercase l between digits → 1  (e.g. 4l8 → 418)
+lib/billPipeline.ts:477:    // OCR: uppercase O between digits → 0  (e.g. 4O2 → 402)
+lib/billPipeline.ts:504: * Accepts either an image buffer (best — no OCR loss) or raw text.
+lib/billPipeline.ts:538:  // Fallback: GPT-4o-mini text extraction
+lib/billPipeline.ts:553: * Format-agnostic: works on ANY utility bill text regardless of layout.
+lib/billPipeline.ts:572:  // PII REDACTED: raw OCR text must not appear in server logs
+lib/billPipeline.ts:578:  const SYSTEM_PROMPT = `You are a utility bill data extraction expert. Extract structured data from utility bill text.
+lib/billPipeline.ts:615:          { role: 'user', content: `Extract data from this utility bill:\n\n${sanitizeForPrompt(text)}` },
+lib/billPipeline.ts:1000: *   2. Log raw OCR output
+lib/billPipeline.ts:1037:    // ── Step 2: Log raw OCR text ─────────────────────────────────────────────
+lib/billPipeline.ts:1038:    logger.debug('billPipeline', '[billPipeline] === RAW OCR TEXT START ===');
+lib/billPipeline.ts:1040:      if (line.trim()) console.log(`[ocr] ${line}`);
+lib/billPipeline.ts:1042:    logger.debug('billPipeline', '[billPipeline] === RAW OCR TEXT END ===');
+lib/billPipeline.ts:1097:        error: 'Unable to parse bill. Please check the file is a utility bill and try again, or enter your usage manually.',
+lib/utility-rules.ts:122:      "Ameren requires 'SOLAR ELECTRIC SYSTEM CONNECTED' placard at main panel",
+lib/utility-rules.ts:151:      "ComEd requires 'SOLAR ELECTRIC SYSTEM CONNECTED' placard at utility meter",
+lib/utility-rules.ts:179:      "Duke Energy requires 'SOLAR ELECTRIC SYSTEM' placard at main panel and meter",
+lib/utility-rules.ts:210:      "PG&E requires 'SOLAR ELECTRIC SYSTEM CONNECTED' placard at utility meter",
+lib/utility-rules.ts:242:      "SCE requires 'SOLAR ELECTRIC SYSTEM CONNECTED' placard at utility meter",
+lib/utility-rules.ts:271:      "FPL requires 'SOLAR ELECTRIC SYSTEM CONNECTED' placard at utility meter",
+lib/utility-rules.ts:604:      "PSE&G requires 'SOLAR ELECTRIC SYSTEM CONNECTED' placard at utility meter",
+lib/utility-rules.ts:605:      'NJ SREC-II registration placard required',
+lib/utility-rules.ts:634:      "CMP requires 'SOLAR ELECTRIC SYSTEM CONNECTED' placard at main panel",
+lib/utility-rules.ts:689:      "Eversource requires 'SOLAR ELECTRIC SYSTEM CONNECTED' placard at utility meter",
+lib/utility-rules.ts:1130:  // extracted rate (< $0.10). OCR frequently picks up supply-only line items (e.g. CMP $0.069)
+lib/utility-rules.ts:1150:    // v48.10: threshold raised from 50% → 75% to catch supply-only OCR extractions.
+lib/network/marketplaceConfidence.ts:60:    reasons.push("Verified stored utility bill evidence");
+lib/network/marketplaceExperience.ts:258:      "Stored utility bill attachment is present.",
+lib/network/marketplaceExperience.ts:304:    pushUnique(why, "Verified utility bill evidence");
+lib/network/marketplaceNarratives.ts:91:  if (badgeLabels.has("Verified Bill")) bullets.push("Stored utility bill evidence supports the marketplace projection.");
+lib/network/marketplaceBadges.ts:83:    push({ label: "Verified Bill", tone: "emerald", reason: "Stored utility bill attachment is present", source: "release_gate" });
+lib/documentProvenance/requirementDocumentBindings.ts:42:  placards: [
+lib/string-generator.test.ts:572:// v47.415 — MPPT allocator uses OPERATING current, not NEC nameplate cap
+lib/string-generator.test.ts:578:// The 15A optimizer nameplate is reached ONLY at max string power. Shorter
+lib/string-generator.test.ts:658:  it('NEC conductor-sizing fields (stringIsc, ocpd, dcWire) stay at 15A nameplate', () => {
+lib/solardog/siteMap.ts:170:      'invoice', 'invoices', 'plan', 'my plan', 'upgrade', 'pricing page',
+lib/solardog/knowledgeSeed.ts:138:    description: 'Subscription and billing management — current plan, payment method, invoices, plan upgrades.',
+lib/utilityPrograms.ts:2064:    solar_pro_note: 'West Virginia is an emerging solar market. Mon Power and Appalachian Power TOU plans allow daytime solar self-consumption during 17¢/kWh on-peak hours. West Virginia retail NEM (≤ 25 kW) provides fair export value. Limited state incentives beyond federal ITC. Straightforward sales pitch — focus on utility bill reduction and federal ITC.',
+lib/utilityPrograms.ts:3341:      'SMART provides incentive payments for solar energy production through a 10-year contract, paid directly on the monthly utility bill. Base compensation rate varies by utility and program block (~$0.06–0.15/kWh depending on block and adders). Enhanced rates available for low-income customers, dual-axis trackers, and storage-paired systems.',
+lib/env.ts:102: * When null, AI bill extraction falls back to Tesseract OCR.
+lib/engineeringDecisionProvenance/decisionRegistry.ts:133:    affectedDocumentSectionIds: ['E-2.placards', 'SLD.rapid-shutdown'],
+lib/engineeringDecisionProvenance/decisionRegistry.ts:193:    affectedDocumentSectionIds: ['E-1.interconnection', 'E-2.placards'],
+lib/engineeringDecisionProvenance/decisionRegistry.ts:199:  placard_requirement: {
+lib/engineeringDecisionProvenance/decisionRegistry.ts:200:    decisionType: 'placard_requirement',
+lib/engineeringDecisionProvenance/decisionRegistry.ts:205:    engineeringDependencies: ['requirement:placards', 'decision:rapid_shutdown_placement'],
+lib/engineeringDecisionProvenance/decisionRegistry.ts:208:    affectedDocumentSectionIds: ['E-2.placards', 'VAL-1.registry'],
+lib/engineeringDecisionProvenance/decisionRegistry.ts:212:    deterministicEvaluationNotes: ['Documents placard governing rules and source inputs without creating label artwork.'],
+lib/engineeringDecisionProvenance/types.ts:19:  | 'placard_requirement'
+lib/engineeringDecisionProvenance/evaluator.ts:250:    case 'placard_requirement':
+lib/engineeringDecisionProvenance/evaluator.ts:251:      return selected(`PV placards for ${system?.totalDcKw ?? 0} kW DC / rapid shutdown ${Boolean(project?.rapidShutdown)}`, system?.totalDcKw == null, 'Placard requirement metadata selected from project/system inputs.');
+lib/engineeringDecisionProvenance/evaluator.ts:342:    placard_requirement: ['placards', 'rapid_shutdown'],
+lib/env-check.ts:60: *                           Without this, falls back to GPT-4o-mini for text extraction
+lib/env-check.ts:63: *                           Without this AND ANTHROPIC_API_KEY, falls back to Tesseract OCR only
+lib/env-check.ts:206:    OPENAI_API_KEY:         'GPT-4o-mini bill extraction fallback disabled (Tesseract OCR only if Claude also absent)',
+lib/engineering/artifactBuilders.ts:43:    `  Panel Model:            ${sys.panelModel ?? 'Generic 400W Monocrystalline'}`,
+lib/engineering/artifactBuilders.ts:124:    rows.push(`PV,Solar Panel,${panelMfr},${sys.panelModel ?? '400W Panel'},${sys.panelCount ?? 0},EA,${sys.panelWattage ?? 400}W monocrystalline`);
+lib/engineering/artifactBuilders.ts:249:    `  Panel Model:            ${sys.panelModel ?? 'Generic 400W Monocrystalline'}`,
+lib/engineering/artifactBuilders.ts:303:    `  Panel Model:            ${sys.panelModel ?? 'Generic 400W Monocrystalline'}`,
+lib/engineering/designSnapshot.ts:10:// Default panel specs (400W monocrystalline) used when no panel selected
+lib/engineering/designSnapshot.ts:14:  model: '400W Monocrystalline',
+lib/billOcrEngine.ts:3: * OCR engine for utility bill images.
+lib/billOcrEngine.ts:6: * This module calls the internal /api/ocr route for Tesseract OCR.
+lib/billOcrEngine.ts:11: *   1. Internal /api/ocr  (Tesseract.js WASM — free, no install required)
+lib/billOcrEngine.ts:20:  method: 'tesseract-js' | 'tesseract-cli' | 'openai-vision' | 'google-vision' | 'none';
+lib/billOcrEngine.ts:26:// ── Stage 1: Internal OCR route (Tesseract.js WASM) ──────────────────────────
+lib/billOcrEngine.ts:28: * Call the internal /api/ocr endpoint which runs Tesseract.js in isolation.
+lib/billOcrEngine.ts:29: * This is the primary OCR path — free, no API key required.
+lib/billOcrEngine.ts:41:  console.log(`[bill-ocr] Calling internal /api/ocr: mime=${safeMime}, buffer=${buffer.length}b`);
+lib/billOcrEngine.ts:45:    const res = await fetch(`${baseUrl}/api/ocr`, {
+lib/billOcrEngine.ts:50:        // even if PUBLIC_PATHS ever changes. INTERNAL_OCR_SECRET must match the
+lib/billOcrEngine.ts:51:        // same env var checked in /api/ocr/route.ts.
+lib/billOcrEngine.ts:52:        ...(process.env.INTERNAL_OCR_SECRET
+lib/billOcrEngine.ts:53:          ? { 'x-internal-secret': process.env.INTERNAL_OCR_SECRET }
+lib/billOcrEngine.ts:57:      signal: AbortSignal.timeout(55000), // OCR can take 30–50s on first cold start
+lib/billOcrEngine.ts:62:      console.warn(`[bill-ocr] /api/ocr returned HTTP ${res.status}: ${errText.slice(0, 200)}`);
+lib/billOcrEngine.ts:67:        error: `OCR route HTTP ${res.status}`,
+lib/billOcrEngine.ts:74:      console.warn(`[bill-ocr] /api/ocr failed: ${json.error}`);
+lib/billOcrEngine.ts:85:    const method = (json.method ?? 'tesseract-js') as OcrResult['method'];
+lib/billOcrEngine.ts:87:    console.log(`[bill-ocr] /api/ocr success: method=${method}, confidence=${confidence}, chars=${rawText.length}`);
+lib/billOcrEngine.ts:93:    console.warn(`[bill-ocr] /api/ocr call failed: ${msg}`);
+lib/billOcrEngine.ts:100: * Call OpenAI gpt-4o Vision as a fallback OCR engine.
+lib/billOcrEngine.ts:113:  console.log(`[bill-ocr] OpenAI Vision fallback: mime=${safeMime}, ~${base64SizeKb}KB`);
+lib/billOcrEngine.ts:130:              text: `You are reading an electric utility bill image. Extract ALL text exactly as it appears on the bill.\n\nPAY SPECIAL ATTENTION TO:\n1. The utility company name at the top of the bill (e.g. "Central Maine Power", "Eversource", "National Grid", "Versant Power").\n2. Handwritten month lists such as "Jan 555 kWh", "Feb 609 NWH", "Mar 736" — a list of month names with numbers next to them. Also look for handwritten annual totals like "Total For 2025 6723 NWH" or "Total 2024 6447 kWh".\n3. Printed monthly usage tables labeled "Your Monthly Usage Summary(kWh)" or "Monthly Usage Summary" — rows of month names followed by numbers (e.g. "Jan  362  324  298"). Each row is one month; the FIRST number is the most recent year kWh.\n4. IMPORTANT: An "Average Daily Usage" table showing values like "20 kWh/day" or "24 kWh/day" is NOT a monthly usage table — do NOT treat daily averages as monthly totals. Monthly kWh values are typically 200–900 kWh.\n5. The electricity rate — lines like "Energy Charge 362 kWh @ $0.12534" or "0.12534 per kWh" or "Rate: $0.198/kWh".\n6. Any annual or 12-month total kWh line (e.g. "Total annual usage: 6447 kWh", "Total For 2025 6723 NWH").\n7. The service address.\n\nOutput ONLY the raw extracted text. Preserve table layout — keep month names and numbers on the same line. Do NOT summarize.`,
+lib/billOcrEngine.ts:144:      console.warn(`[bill-ocr] OpenAI Vision HTTP ${res.status}: ${errBody.slice(0, 300)}`);
+lib/billOcrEngine.ts:157:      console.warn(`[bill-ocr] OpenAI Vision short response (${text.length} chars)`);
+lib/billOcrEngine.ts:161:    console.log(`[bill-ocr] OpenAI Vision: ${text.length} chars`);
+lib/billOcrEngine.ts:166:    console.warn(`[bill-ocr] OpenAI Vision failed: ${msg}`);
+lib/billOcrEngine.ts:179:  console.log(`[bill-ocr] Google Vision fallback: buffer=${buffer.length}b`);
+lib/billOcrEngine.ts:189:        // even if PUBLIC_PATHS ever changes. INTERNAL_OCR_SECRET must match the
+lib/billOcrEngine.ts:190:        // same env var checked in /api/ocr/route.ts.
+lib/billOcrEngine.ts:191:        ...(process.env.INTERNAL_OCR_SECRET
+lib/billOcrEngine.ts:192:          ? { 'x-internal-secret': process.env.INTERNAL_OCR_SECRET }
+lib/billOcrEngine.ts:206:      console.warn(`[bill-ocr] Google Vision HTTP ${res.status}`);
+lib/billOcrEngine.ts:214:      console.warn('[bill-ocr] Google Vision returned empty text');
+lib/billOcrEngine.ts:218:    console.log(`[bill-ocr] Google Vision: ${text.length} chars`);
+lib/billOcrEngine.ts:223:    console.warn(`[bill-ocr] Google Vision failed: ${msg}`);
+lib/systemEquipmentResolver.ts:319:      'High-efficiency monocrystalline panels are flush-mounted using an engineered aluminum rail system secured with waterproof flashing attachments. ',
+lib/engineeringStateInvalidation/persistence.ts:120:      'No CV, OCR, CAD generation, image-byte inspection, or autonomous regeneration is performed.',
+lib/pdfExtract.ts:41:      const extracted = extractTextFromContentStream(text);
+lib/pdfExtract.ts:47:        const extracted = extractTextFromContentStream(text);
+lib/pdfExtract.ts:67:function extractTextFromContentStream(stream: string): string {
+lib/utilityInterconnection.ts:209:        how_to_avoid: 'Use PG&E\'s SLD template. Include: main service panel rating, utility meter location, dedicated solar disconnect, and inverter AC output breaker size.',
+lib/utilityInterconnection.ts:431:        how_to_avoid: 'ComEd caps net metering at 110% of prior 12-month load. Size system to match annual consumption. Provide 12-month utility bills at application.',
+lib/migrations/060_campaign_seeds.sql:107:    'Meta Lead Ad using instant form. 3 questions: monthly electric bill, roof age, timeline to go solar. Use Lookalike Audience (1%) seeded from existing converted customers. Creative: before/after utility bill savings. Test carousel vs single image.'
+lib/migrations/060_campaign_seeds.sql:127:    'TikTok In-Feed video + Lead Generation form. 15-30 second video hook: show dramatic utility bill vs $0 solar bill. CTA: "Get your free solar savings estimate." Test UGC-style vs polished video creative.'
+lib/migrations/007_bill_data.sql:4:-- Stores extracted utility bill data from bill upload feature
+lib/migrations/007_bill_data.sql:16:  'Extracted utility bill data from BillUploadFlow — includes kWh usage, rate, utility provider, address, confidence score';
+lib/migrations/058_intake_funnels.sql:32:  ('bill-upload',     'Bill Upload Flow',         'Upload utility bill to get savings estimate', 'bill_upload',  'web', true),
+lib/billParser.ts:3: * Deterministic, source-ranked utility bill usage extractor.
+lib/billParser.ts:158:  // 1000 chars instead of 500 because some OCR engines output logo/noise text before
+lib/billParser.ts:179:  // Case-insensitive start (removed [A-Z] anchor that failed on all-caps OCR like "CENTRAL MAINE POWER").
+lib/billParser.ts:242: * is in the 100–5000 range (avoids matching dates, account numbers, etc.)
+lib/billParser.ts:325: *     OCR produces: "4188 2311 1418 761 318 460 881 901 1660 2296 1509 1354"
+lib/billParser.ts:389:  // OCR produces: "4188 2311 1418 761 318 460 881 901 1660 2296 1509 1354"
+lib/billParser.ts:392:  // instead of line-based scanning. pdfjs-dist joins all page text onto 1-2 giant lines,
+lib/billParser.ts:540: * Patterns are OCR-robust: handle mangled "@" (4, ©, @, at), missing "$",
+lib/billParser.ts:550:    // "kWh @ $0.12534" — OCR-robust: "@" may appear as "4", "©", "a", "@", "at", "©"
+lib/billParser.ts:792: * Parse a utility bill OCR text deterministically.
+lib/billParser.ts:861: * to check if OCR text has usable usage data.
+lib/sld-device-illustrations.ts:257:  // Bottom nameplate
+lib/sld-device-illustrations.ts:268:// service-door seam, status LED bar along the top, Tesla nameplate on the
+lib/sld-device-illustrations.ts:300:  // TESLA nameplate
+lib/sld-types.ts:276:  acOCPD?: number;              // AC OCPD / breaker rating (A)
+lib/rateLimiter.ts:52:const _billUploadLimiter     = makeLimiter(5,  '30 s');  // Claude + OCR calls
+lib/rateLimiter.ts:54:const _ocrLimiter            = makeLimiter(10, '60 s');  // CPU-intensive Tesseract
+lib/rateLimiter.ts:97:  | 'ocr'
+lib/rateLimiter.ts:144:  'ocr':                    _ocrLimiter,
+lib/sld-device-illustrations.test.ts:227:  it('Tesla Powerwall illustration carries the TESLA nameplate', () => {
+lib/survey/ingest/ingestPipeline.ts:500:  // history without launching CV/OCR/AI/image-byte analysis or mutating
+lib/survey/evidence/engineeringRequirements.ts:25:  | 'placards'
+lib/survey/evidence/engineeringRequirements.ts:44:  supportsOCR: boolean;
+lib/survey/evidence/engineeringRequirements.ts:171:  supportsOCR: false,
+lib/survey/evidence/engineeringRequirements.ts:178:  supportsOCR: true,
+lib/survey/evidence/engineeringRequirements.ts:313:  placards: {
+lib/survey/evidence/engineeringRequirements.ts:314:    requirementId: 'placards',
+lib/survey/evidence/engineeringRequirements.ts:316:    description: 'Future placard/label evidence requirement; inactive in registry v1.',
+lib/survey/evidence/engineeringRequirements.ts:322:    permitUsage: ['Future placard verification support'],
+lib/survey/evidence/engineeringRequirements.ts:364:    description: 'Future service-equipment label evidence requirement; inactive in registry v1.',
+lib/survey/evidence/engineeringRequirements.ts:370:    permitUsage: ['Future service equipment label verification'],
+lib/survey/evidence/engineeringRequirements.ts:432:      'Future capability flags are informational and do not activate OCR, CV, semantic extraction, CAD inference, or image-byte inspection.',
+lib/survey/evidence/engineeringRequirements.ts:575:      'No OCR, CV, semantic extraction, CAD inference, or image-byte processing is activated by this flag set.',
+lib/survey/evidence/fieldOrchestration.test.ts:91:      'no OCR runtime',
+lib/survey/evidence/provenance.ts:133:          `Confidence provenance: ${record.requirementConfidenceSource}; no CV/OCR/CAD/image-byte inference is used.`,
+lib/survey/evidence/engineeringRequirements.test.ts:175:      'placards',
+lib/survey/evidence/engineeringRequirements.test.ts:182:    expect(evaluation.deterministicSummary.join(' ')).toContain('do not activate OCR, CV, semantic extraction, CAD inference, or image-byte inspection');
+lib/survey/evidence/manifest.ts:241:        'targeted OCR extraction candidates',
+lib/survey/evidence/fieldOrchestration.ts:129:    technicianInstruction: 'Move from meter/service to MSP and nearby electrical equipment. Capture overview, interior, labels, breakers, grounding, disconnects, subpanels, rapid shutdown, placards, and inverter mounting wall.',
+lib/survey/evidence/fieldOrchestration.ts:133:      item('electrical.disconnects', 'Disconnects and rapid shutdown', 'disconnect', 'conditional', 'AC/DC disconnects, rapid shutdown, and placard locations.', ['shutdown equipment locations'], ['electrical design', 'permit validation'], ['routing-ready']),
+lib/survey/evidence/fieldOrchestration.ts:259:      'no OCR runtime',
+lib/survey/evidence/fieldOrchestration.ts:269:      'Future CV/OCR/CAD capabilities may be documented as metadata only and are not activated by this model.',
+lib/survey/evidence/fieldOrchestration.ts:293:    utility: 'Utility meter, utility bill/context, meter socket, access path, labeling, and interconnection context.',
+lib/survey/evidence/fieldOrchestration.ts:294:    electrical: 'MSP overview/interior, breaker, bus label, panel schedule, grounding, disconnects, subpanels, placards, rapid shutdown, inverter wall, and conduit entries/exits.',
+lib/permit/sections/compliancePages.ts:402:            <tr><td class="il">Cell Type</td><td class="iv">Monocrystalline PERC / TOPCon</td></tr>
+lib/permit/sections/coverSheet.ts:115:  const compKw   = ['warning label','placard','NEC 690.54','IFC','listed','labeled','UL ','NFPA','IEEE','anti-island','production estimate','battery','BESS','generator','ATS'];
+lib/permit/utils/titleBlock.ts:99:    `Warning labels and placards shall be installed per NEC 690.54, NEC 690.56(C), NEC 705.12(B)(2)(3)(e), and IFC ${ifcVer} \u00a7605.11.6. See sheet PV-5 for complete label schedule and placement diagram.`,
+lib/bill/hydrateBillData.ts:12: *   2. Flat/legacy — bill_data contains raw OCR fields; synthesized here on read
+lib/bill/hydrateBillData.ts:62:      // bill_data contains raw OCR fields (from provision or legacy save).
+lib/billImagePreprocess.ts:3: * Image preprocessing pipeline for utility bill OCR.
+lib/billImagePreprocess.ts:6: * Tesseract OCR accuracy on bill photos (phone camera, scanner, fax, etc.).
+lib/billImagePreprocess.ts:30: * Preprocess a bill image buffer for optimal OCR accuracy.
+lib/billImagePreprocess.ts:108: * This prevents preprocessing errors from breaking the entire OCR pipeline.
+lib/proposalTruthEngine.ts:29911:  // accurate than a client's manually-entered or OCR-parsed bill rate, which often
+lib/proposalTruthEngine.ts:63052:  //   likely a supply-only OCR extraction (e.g. $0.107 when full rate is $0.155).
+lib/proposalTruthEngine.ts:63059:  // Supply-only OCR rates (e.g. $0.107 energy charge only) are typically 45–70% of the
+lib/proposalTruthEngine.ts:63611:    // SPEC §6: remaining utility bill with solar
+lib/equipment-db.ts:277:    // Low-Isc / high-Voc monocrystalline IBC design (Maxeon Gen III cells).
+lib/billOcr.ts:3: * Utility bill OCR extraction — parses PDF/JPG/PNG electric bills.
+lib/billOcr.ts:165:  // Normalise handwritten / OCR kWh aliases before all pattern matching
+lib/billOcr.ts:171:  console.log(`[bill-upload] OCR text length: ${text.length} chars`);
+lib/billOcr.ts:593:    /(?:bill(?:ed)?\s+to|invoice\s+to)[:\s]+([A-Z][a-zA-Z\s,]+?)(?:\n|$)/,
+lib/billOcr.ts:666:// ── Extract account number ────────────────────────────────────────────────────
+lib/billOcr.ts:819:            content: `You are a utility bill data extractor. Extract structured data from utility bill text and return ONLY valid JSON with these fields (use null for missing):\n{\n  "monthlyKwh": number or null,\n  "annualKwh": number or null,\n  "electricityRate": number ($/kWh) or null,\n  "totalAmount": number ($) or null,\n  "utilityProvider": string or null,\n  "serviceAddress": string or null,\n  "customerName": string or null,\n  "accountNumber": string or null,\n  "billingPeriodStart": string or null,\n  "billingPeriodEnd": string or null,\n  "demandCharge": number ($) or null,\n  "billType": "electric" | "gas" | "combined" | "unknown"\n}\nOnly extract values clearly present in the text. Do not guess.`,
+lib/billOcr.ts:823:            content: `Extract data from this utility bill:\n\n${text.substring(0, 4000)}`,
+lib/billOcr.ts:902: * Called when parseBillText() extracts ZERO fields from OCR text.
+lib/billOcr.ts:903: * Sends raw OCR text to OpenAI with a structured JSON schema prompt.
+lib/billOcr.ts:911:  ocrText: string,
+lib/billOcr.ts:920:  if (!ocrText || ocrText.trim().length < 20) {
+lib/billOcr.ts:921:    console.log('[billOcr] AI fallback skipped — OCR text too short');
+lib/billOcr.ts:925:  console.log(`[billOcr] AI structured extraction fallback — text length: ${ocrText.length}`);
+lib/billOcr.ts:941:            content: `You are an expert utility bill parser. Extract structured data from OCR text of an electric utility bill.
+lib/billOcr.ts:960:- Use semantic reasoning — labels may be absent or OCR-garbled
+lib/billOcr.ts:970:            content: `Extract data from this utility bill OCR text:
+lib/billOcr.ts:972:${sanitizeForPrompt(ocrText.substring(0, 4000))}`,
+lib/billOcr.ts:1086:    errors.push('This appears to be a gas-only bill. Please upload your electric utility bill to size a solar system.');
+lib/billOcr.ts:1091:    errors.push('Could not extract kWh usage from bill. Please verify this is an electric utility bill.');
+lib/string-generator.ts:511:  // The optimizer's nameplate 15A is reached ONLY when the string operates
+lib/utilityMatcher.ts:59: * @param parsedName   Raw utility name from OCR/LLM (e.g. "CENTRAL MAINE POWER CO.")
+lib/assistedEvidenceSources/metadataRuntimeAdapter.test.ts:48:    expect(() => validateOpenSourceToolDefinition({ ...tool, toolName: 'ocr-runtime', runtimeCategory: 'ocr_text_candidate' })).toThrow(/not approved/i);
+lib/assistedEvidenceSources/candidateAdapterTypes.ts:107:  field: 'possible_meter_label_text' | 'possible_equipment_label_text';
+lib/assistedEvidenceSources/metadataRuntimeAdapter.ts:178:        candidateLimitations: [...signal.limitationRefs, 'runtime-metadata-only', 'no-ocr-runtime', 'no-cv-runtime', 'no-engineering-authority'],
+lib/assistedEvidenceSources/candidateNormalization.ts:79:          ? 'Fixture-only adapter output; no runtime OCR/CV/image processing executed.'
+lib/assistedEvidenceSources/candidateNormalization.ts:80:          : 'Controlled metadata runtime pilot output; no OCR/CV/semantic image understanding executed.',
+lib/assistedEvidenceSources/openSourceToolRegistry.ts:28:    toolName: 'fixture-ocr-text-adapter',
+lib/assistedEvidenceSources/openSourceToolRegistry.ts:30:    sourceUrl: 'internal://solarpro/fixtures/ocr-text-adapter',
+lib/assistedEvidenceSources/openSourceToolRegistry.ts:47:    registryNotes: ['Fixture-only OCR-like text adapter. No OCR runtime is executed.'],
+lib/assistedEvidenceSources/index.ts:10:export * from './ocrFixtureAdapter';
+lib/assistedEvidenceSources/openSourceToolValidation.ts:21:  if (tool.runtimeCategory === 'ocr_text_candidate' || tool.runtimeCategory === 'visual_categorization_candidate') throw new Error(`${tool.toolName} runtime category ${tool.runtimeCategory} is not approved in the metadata pilot.`);
+lib/assistedEvidenceSources/openSourceToolTypes.ts:8:  | 'ocr_text_candidate'
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:7:const TOOL_NAME = 'fixture-ocr-text-adapter';
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:10:export const ocrFixtureAdapter: OcrCandidateFixtureAdapter = {
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:11:  adapterId: 'ocr-fixture-adapter-v1',
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:20:        candidateCategory: signal.field === 'possible_equipment_label_text' ? 'electrical_context' : 'field_context',
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:29:        candidateSummary: `Fixture OCR-like text candidate for ${signal.field}; not extracted by runtime OCR.`,
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:37:        candidateLimitations: [...signal.limitationRefs, 'no-ocr-runtime', 'text-fixture-only', 'review-required'],
+lib/assistedEvidenceSources/ocrFixtureAdapter.ts:48:  return ocrFixtureAdapter.generateCandidates({ tool, sourceContext, rawPayload });
+lib/assistedEvidenceSources/assistedEvidenceSources.test.ts:36:const ocrPayload: OcrFixturePayload = {
+lib/assistedEvidenceSources/assistedEvidenceSources.test.ts:37:  fixtureId: 'ocr-fixture-1',
+lib/assistedEvidenceSources/assistedEvidenceSources.test.ts:40:    { signalId: 'ocr-signal-2', field: 'possible_equipment_label_text', text: 'INV-1 FIXTURE', confidence: 0.51, limitationRefs: ['fixture-text-only'] },
+lib/assistedEvidenceSources/assistedEvidenceSources.test.ts:41:    { signalId: 'ocr-signal-1', field: 'possible_meter_label_text', text: 'METER FIXTURE 123', confidence: 0.46, limitationRefs: ['fixture-text-only'] },
+lib/assistedEvidenceSources/assistedEvidenceSources.test.ts:83:    expect(first.candidates[0].provenance.notes.join(' ')).toContain('no runtime OCR/CV/image processing executed');
+lib/assistedEvidenceSources/assistedEvidenceSources.test.ts:86:  it('OCR fixture adapter generates deterministic text candidates without OCR runtime authority', () => {
+lib/assistedEvidenceSources/assistedEvidenceSources.test.ts:87:    const first = generateOcrFixtureCandidates(sourceContext, ocrPayload);
+lib/assistedEvidenceSources/assistedEvidenceSources.test.ts:88:    const second = generateOcrFixtureCandidates(sourceContext, { ...ocrPayload, signals: [...ocrPayload.signals].reverse() });
+lib/assistedEvidenceSources/assistedEvidenceSources.test.ts:94:    expect(first.candidates[0].candidateLimitations).toContain('no-ocr-runtime');
+lib/billConfidence.ts:170: *   customer name, utility name, service address, account number, billing period
+lib/stripe.ts:374:    case 'invoice.payment_succeeded': {
+lib/stripe.ts:383:    case 'invoice.payment_failed': {
+lib/engineeringIntelligence/photoGrouping.ts:533:    'no OCR',
+lib/engineeringIntelligence/signalExtraction.test.ts:153:    expect(summary.prohibitedRuntimeBehavior).toEqual(expect.arrayContaining(['no OCR', 'no CV classification', 'no image-byte inspection', 'no autonomous CAD generation']));
+lib/engineeringIntelligence/scenarioSimulation.ts:519:    'no OCR',
+lib/engineeringIntelligence/workspace.ts:111:    description: 'Meter, utility bill, utility access, and interconnection evidence required by deterministic registry rules.',
+lib/engineeringIntelligence/workspace.ts:119:    description: 'Main service equipment, disconnects, subpanels, grounding, rapid shutdown, placards, and service labeling.',
+lib/engineeringIntelligence/workspace.ts:120:    requirementIds: ['main_service_panel', 'subpanel', 'main_disconnect', 'rapid_shutdown', 'placards', 'service_equipment_label'],
+lib/engineeringIntelligence/workspace.ts:1032:      'No client-side backend logic duplication, OCR, CV, CAD generation, image-byte inspection, semantic inference, or autonomous regeneration is introduced.',
+lib/engineeringIntelligence/signalExtraction.ts:411:    'no OCR',
+lib/engineeringIntelligence/recommendationEngine.ts:516:    'no OCR',
+lib/engineeringIntelligence/invalidationEngine.ts:156:      'No OCR, CV, image-byte parsing, geometry inference, CAD generation, engineering decision generation, or autonomous regeneration is performed.',
+lib/engineeringIntelligence/scenarioSimulation.test.ts:103:    expect(first.prohibitedRuntimeBehavior).toEqual(expect.arrayContaining(['no OCR', 'no autonomous CAD generation', 'no production engineering state mutation']));
+lib/engineeringIntelligence/scenarioSimulation.test.ts:115:    expect(result.hypothetical.invalidationPropagation.deterministicNotes.join(' ')).toContain('No OCR');
+lib/engineeringIntelligence/recommendationEngine.test.ts:103:    expect(recommendations.prohibitedRuntimeBehavior).toEqual(expect.arrayContaining(['no OCR', 'no autonomous CAD generation', 'no hidden confidence boosting']));
+lib/engineeringIntelligence/workflowOrchestration.ts:314:    'no OCR',
+lib/engineeringIntelligence/cadReadiness.ts:153:      'Pixel inspection, text extraction over imagery, computer-vision runtime dependencies, semantic visual interpretation, and fabricated geometry are not used.',
+lib/engineeringIntelligence/cadReadiness.ts:158:      'no text extraction runtime over survey imagery',
+lib/engineeringIntelligence/contextResolution.test.ts:139:    expect(contexts.prohibitedRuntimeBehavior).toEqual(expect.arrayContaining(['no text extraction runtime over survey imagery', 'no computer-vision runtime dependency', 'no operator-free plan-output creation']));
+lib/engineeringIntelligence/contextResolution.ts:340:    'no text extraction runtime over survey imagery',
+lib/engineeringIntelligence/photoGrouping.test.ts:133:    expect(grouping.prohibitedRuntimeBehavior).toEqual(expect.arrayContaining(['no OCR', 'no OpenCV', 'no CAD generation', 'no autonomous engineering decisions']));
+lib/engineeringIntelligence/projectHydration.test.ts:119:    expect(hydrated.photoGrouping.prohibitedRuntimeBehavior).toEqual(expect.arrayContaining(['no OCR', 'no CAD generation']));
+lib/engineeringIntelligence/cadReadiness.test.ts:168:  it('does not expose runtime CAD, CV, OCR, YOLO, or image-byte behavior', () => {
+lib/engineeringIntelligence/cadReadiness.test.ts:174:      'no text extraction runtime over survey imagery',
+lib/engineeringIntelligence/snapshotDelta.ts:114:      'No semantic diffing, OCR, image-byte inspection, geometry inference, CAD generation, or autonomous engineering evaluation is performed.',
+lib/plan-set/compliance-sheet.ts:326:    note: 'Inverter UL listing number shall be verified on equipment nameplate at time of inspection.',
+lib/plan-set/equipment-schedule.ts:204:    description: `${params.panelWatts}W Monocrystalline PV Module`,
+lib/billEnrichment.ts:4: * Runs AFTER every successful bill parse (Claude or OCR+GPT).
+scripts/audit-pre-cv-evidence-assistance.js:16:  { token: 'tesseract', regex: /\btesseract(?:\.js)?\b|createWorker\(|recognize\(/i, severity: 'ocr_runtime_reference' },
+scripts/audit-pre-cv-evidence-assistance.js:17:  { token: 'ocr', regex: /\bOCR\b|\bocr\b|pdftotext|pdf-parse/i, severity: 'ocr_or_text_extraction_reference' },
+scripts/audit-pre-cv-evidence-assistance.js:18:  { token: 'pdf_parse', regex: /pdf-parse|pdftotext|pdfjs-dist/i, severity: 'pdf_text_extraction_reference' },
+scripts/audit-pre-cv-evidence-assistance.js:79:  if (/^app\/api\/ocr\//.test(rel) || /^app\/api\/bill-upload\//.test(rel) || /^app\/api\/portal\/bill-upload\//.test(rel)) return 'active-production-path';
+scripts/audit-pre-cv-evidence-assistance.js:88:  if (/from ['"]tesseract\.js|require\(['"]tesseract\.js|createWorker\(|recognize\(/i.test(line)) return 'direct_tesseract_runtime';
+scripts/audit-pre-cv-evidence-assistance.js:92:  if (/pdftotext|pdf-parse|OpenAI Vision|image_url|Extract ALL text/i.test(line)) return 'ocr_text_extraction_runtime';
+scripts/audit-pre-cv-evidence-assistance.js:137:  ['direct_tesseract_runtime', 'direct_sharp_runtime', 'direct_exif_runtime', 'ocr_text_extraction_runtime'].includes(finding.lineCategory)
+scripts/audit-pre-cv-evidence-assistance.js:142:  ['direct_tesseract_runtime', 'direct_sharp_runtime', 'direct_exif_runtime', 'ocr_text_extraction_runtime', 'prohibited_keyword_reference'].includes(finding.lineCategory) &&
+scripts/audit-pre-cv-evidence-assistance.js:143:  !/prohibited|No OCR|no OCR|not run|future-only|must not|does not/i.test(finding.text)
+scripts/audit-pre-cv-evidence-assistance.js:158:    return Object.fromEntries(Object.entries(deps).filter(([name]) => /tesseract|sharp|exif|pdf-parse|pdfjs|opencv|yolo|tensorflow|torch|onnx|mediapipe/i.test(name)));
+scripts/generate-pre-cv-evidence-assistance-reports.js:30:  ['app/api/ocr/route.ts', 'active production path', 'Tesseract CLI/WASM OCR endpoint used internally by bill upload; direct createWorker/recognize references found at lines 324, 326, and 339.', 'Do not reuse for engineering evidence assistance. Fence from survey/canonical evidence workflows.'],
+scripts/generate-pre-cv-evidence-assistance-reports.js:31:  ['app/api/bill-upload/route.ts', 'active production path', 'Utility-bill parser with pdf-parse, pdftotext, Tesseract, OpenAI Vision, Google Vision, and Claude image extraction references; scan found 31 OCR/text-extraction runtime references.', 'Treat as legacy/business intake OCR, not engineering evidence. Must not write engineering truth.'],
+scripts/generate-pre-cv-evidence-assistance-reports.js:32:  ['app/api/portal/bill-upload/route.ts', 'active production path', 'Portal wrapper that forwards bill files into /api/bill-upload and writes bill upload stages.', 'Indirectly reaches bill OCR. Keep out of engineering evidence assistance.'],
+scripts/generate-pre-cv-evidence-assistance-reports.js:33:  ['app/api/survey/upload-photo/route.ts', 'active production path', 'Survey photo upload stores validated image files and upload keys; uses arrayBuffer/Buffer/writeFile for storage only; no OCR/CV import found.', 'Safe as raw evidence ingress only if future assistance reads from quarantine, not canonical truth.'],
+scripts/generate-pre-cv-evidence-assistance-reports.js:34:  ['app/api/project-files/route.ts', 'active production path', 'Project-file upload/download handles image MIME validation, magic bytes, and storage; no OCR/CV import found.', 'Storage-only handling is acceptable; assisted metadata must not be produced here.'],
+scripts/generate-pre-cv-evidence-assistance-reports.js:36:  ['app/api/debug/ocr/route.ts', 'reachable debug route', 'Debug endpoint with pdftotext, pdf-parse, Tesseract CLI, and OpenAI Vision fallback.', 'High-risk debug surface; must not become evidence-assistance path. Gate, isolate, or disable before V1.'],
+scripts/generate-pre-cv-evidence-assistance-reports.js:37:  ['app/api/debug/bill/route.ts', 'reachable debug route', 'Debug endpoint for bill extraction with pdftotext, pdf-parse, Tesseract CLI, and OpenAI Vision fallback.', 'High-risk debug surface; keep separate from engineering evidence.'],
+scripts/generate-pre-cv-evidence-assistance-reports.js:38:  ['lib/billClaudeExtractor.ts', 'active utility-bill helper', 'Claude vision utility-bill extraction helper discovered by grep; invoked by bill upload/intake paths.', 'Unsafe for engineering evidence assistance because it is an external vision/LLM extraction path.'],
+scripts/generate-pre-cv-evidence-assistance-reports.js:45:  ['lib/survey/evidence/engineeringRequirements.ts', 'Requirement satisfaction is based on canonical evidence policies; future capabilities include supportsOCR flags but requirements use canonical evidence and registry policy.', 'Assisted metadata cannot satisfy requirements directly. Human review must create/confirm canonical evidence before requirement impact.'],
+scripts/generate-pre-cv-evidence-assistance-reports.js:46:  ['lib/survey/evidence/fieldOrchestration.ts', 'Technician workflow items explicitly state deterministic category satisfaction and no image-byte inspection; report metadata includes no OpenCV/OCR/YOLO runtime.', 'Safe planning surface for future hints; not a runtime analysis surface.'],
+scripts/generate-pre-cv-evidence-assistance-reports.js:47:  ['lib/engineeringIntelligence/photoGrouping.ts', 'Groups photos by canonical manifest metadata, timestamps, filenames, submitted category, dimensions/orientation metadata, and stable ids; states no OCR/OpenCV/YOLO/ML.', 'Future EXIF/orientation candidates can feed a quarantine table; current grouping should remain deterministic and metadata-only.'],
+scripts/generate-pre-cv-evidence-assistance-reports.js:55:const depsRows = Object.entries(scan.packageDependencies).map(([Dependency, Version]) => ({ Dependency, Version, AuditClassification: /tesseract/i.test(Dependency) ? 'OCR runtime dependency present' : /sharp/i.test(Dependency) ? 'Image-processing dependency present' : /exif/i.test(Dependency) ? 'Image metadata dependency present' : 'Image/OCR adjacent dependency present' }));
+scripts/generate-pre-cv-evidence-assistance-reports.js:68:The audit found existing image/OCR/text-extraction runtime in SolarPro, but the active runtime is concentrated in utility-bill and diagnostic routes rather than the Engineering Intelligence canonical evidence stack. The scan covered ${scan.scannedFileCount} files and produced ${scan.findingCount} token findings. It identified ${scan.directRuntimeFindingCount} direct runtime findings and dependency references for ${Object.keys(scan.packageDependencies).join(', ') || 'none'}.
+scripts/generate-pre-cv-evidence-assistance-reports.js:70:The active OCR/vision paths are not appropriate plug-in points for bounded engineering evidence assistance. They exist for utility-bill intake and debugging, include Tesseract, pdftotext/pdf-parse, OpenAI Vision, Google Vision, and Claude image extraction references, and should remain fenced from survey evidence, requirement satisfaction, CAD readiness, recommendation ranking, and workflow orchestration.
+scripts/generate-pre-cv-evidence-assistance-reports.js:82:The raw scan reported ${scan.engineeringBoundaryRuntimeRiskCount} engineering-boundary keyword findings. Manual review classifies the examples as explicit guardrail or future-only text, not active Engineering Intelligence OCR/CV runtime imports. The current boundary scan remains important because these text references could otherwise mask future runtime imports if not continuously monitored.
+scripts/generate-pre-cv-evidence-assistance-reports.js:88:SolarPro already has active OCR/vision-style code, but it is utility-bill specific and not a safe reusable foundation for Engineering Intelligence evidence assistance. Engineering Intelligence and survey-evidence modules currently rely on canonical rows, explicit survey fields, deterministic metadata, and review-visible states. No direct OpenCV, YOLO, TensorFlow, PyTorch, ONNX, MediaPipe, perceptual hashing, semantic scene classification, object detection, roof segmentation, geometry extraction, or autonomous CAD generation runtime was verified in the Engineering Intelligence/survey evidence path during this audit.
+scripts/generate-pre-cv-evidence-assistance-reports.js:102:The system is not ready for direct CV/OCR integration into engineering state, requirement satisfaction, CAD readiness, recommendations, or workflow orchestration. It is ready to design a bounded assistance layer only if the layer is quarantined, candidate-only, review-required, provenance-linked, confidence-labeled, invalidatable, and blocked from canonical evidence mutation until a human reviewer accepts or translates the candidate into explicit canonical survey evidence metadata.
+scripts/generate-pre-cv-evidence-assistance-reports.js:106:The audit covered Engineering Intelligence, survey evidence manifests, canonical evidence hydration, duplicate hygiene, deterministic photo grouping, structured signals, context resolution, CAD readiness, recommendation ranking, workflow orchestration, UI-adjacent references, active upload routes, bill OCR routes, debug routes, dependencies, scripts, and tests. The audit added scan/report artifacts only and did not add OpenCV, OCR, YOLO, TensorFlow, PyTorch, MediaPipe, ONNX, image-byte inspection, perceptual hashing, semantic classification, object detection, roof segmentation, geometry extraction, autonomous CAD generation, or autonomous engineering decisions.
+scripts/generate-pre-cv-evidence-assistance-reports.js:110:The audit scan examined ${scan.scannedFileCount} files and found ${scan.findingCount} references across OCR/CV/image-byte/upload/canonical-mutation keyword categories. It found ${scan.directRuntimeFindingCount} direct runtime findings, concentrated in utility bill OCR/debug/test/dependency paths. Package-level image/OCR dependencies are ${Object.entries(scan.packageDependencies).map(([name, version]) => `${name}@${version}`).join(', ')}.
+scripts/generate-pre-cv-evidence-assistance-reports.js:112:## Existing image/CV/OCR inventory
+scripts/generate-pre-cv-evidence-assistance-reports.js:118:No active prohibited Engineering Intelligence path was verified. The active prohibited-adjacent runtime paths are existing business/diagnostic OCR and vision routes, especially app/api/ocr/route.ts, app/api/bill-upload/route.ts, app/api/debug/ocr/route.ts, app/api/debug/bill/route.ts, lib/billClaudeExtractor.ts, and lib/intake/utilityBillIntelligence.ts. They are prohibited as sources for engineering evidence assistance unless they are redesigned behind the future sandbox and stripped of direct canonical influence. Existing survey photo/project file upload routes read file bytes for validation/storage, but no OCR/CV/ML runtime was verified there.
+scripts/generate-pre-cv-evidence-assistance-reports.js:126:The required guards are: a separate assisted_metadata_candidate model; no writes into SurveyEvidenceManifest items; no direct requirementSatisfied changes; no direct CAD readiness promotion; no direct structured-signal confirmed state; no direct authoritative/preferred context state; no workflow queue auto-action beyond human review; no hidden debug/utility OCR route reuse; no cloud-vision/LLM vision reuse for engineering evidence V1; no image-byte analysis outside a single sandbox module; deterministic invalidation of candidates when source files, tool versions, thresholds, or reviewer decisions change; and audit logs for every candidate and reviewer action.
+scripts/generate-pre-cv-evidence-assistance-reports.js:130:The Engineering Intelligence architecture is review-visible and deterministic enough to accept candidate metadata as long as candidates remain non-authoritative. Existing utility-bill OCR/vision paths create material risk because they normalize the presence of OCR/vision code in active routes. Therefore the recommendation is GO WITH GUARDS, not full GO. Without the guards, the answer becomes NO-GO because candidate metadata could be mistaken for canonical truth or because existing OCR/debug routes could be reused improperly.
+scripts/generate-pre-cv-evidence-assistance-reports.js:153:Unsafe paths for Bounded Evidence Assistance V1 include reusing app/api/ocr/route.ts, app/api/bill-upload/route.ts, app/api/debug/ocr/route.ts, app/api/debug/bill/route.ts, lib/billClaudeExtractor.ts, OpenAI Vision, Google Vision, Claude image extraction, YOLO/Supervision object detection, OpenCV segmentation, TensorFlow/PyTorch/ONNX models, MediaPipe, perceptual hashing as canonical duplicate truth, roof segmentation, geometry extraction, autonomous CAD generation, and hidden remediation that updates canonical evidence. These may be research topics later, but not V1 plug-ins.
+scripts/generate-pre-cv-evidence-assistance-reports.js:165:Before implementation, add boundary scans that fail on OCR/CV/ML imports outside the sandbox, fail if candidate metadata appears in requirementSatisfied logic, fail if candidate metadata can mark CAD readiness ready, fail if candidate metadata can create confirmed structured signals, fail if any debug OCR route is imported by engineering evidence modules, and fail if a route writes assisted outputs directly into canonical survey evidence tables.
+scripts/generate-pre-cv-evidence-assistance-reports.js:205:  { Risk: 'Existing utility-bill OCR reused for engineering evidence', Evidence: 'app/api/ocr/route.ts and app/api/bill-upload/route.ts contain active Tesseract/OCR/vision paths.', Severity: 'High', Disposition: 'Do not reuse. Create a separate future sandbox with candidate-only output.' },
+scripts/generate-pre-cv-evidence-assistance-reports.js:206:  { Risk: 'Reachable debug OCR endpoints become hidden evidence paths', Evidence: 'app/api/debug/ocr/route.ts and app/api/debug/bill/route.ts contain pdftotext, pdf-parse, Tesseract, and OpenAI Vision references.', Severity: 'High', Disposition: 'Gate, isolate, or disable before assistance V1; fail scans if imported by evidence modules.' },
+scripts/generate-pre-cv-evidence-assistance-reports.js:207:  { Risk: 'Candidate metadata satisfies requirements without review', Evidence: 'Requirement registry currently uses canonical evidence policies; future OCR flags are documented but inactive.', Severity: 'High', Disposition: 'Add tests that candidate metadata cannot set requirementSatisfied or confidenceSource canonical.' },
+scripts/generate-pre-cv-evidence-assistance-reports.js:214:  { Risk: 'Debug/test-only routes remain publicly reachable', Evidence: 'Scan classifies debug OCR routes as reachable-debug-route.', Severity: 'Medium', Disposition: 'Require auth/admin gating validation before production CV assistance.' },
+scripts/generate-pre-cv-evidence-assistance-reports.js:227:GO WITH GUARDS. The current architecture has adequate deterministic boundaries to host a future candidate-only sandbox, but the existing OCR/vision/bill/debug paths are too risky to reuse and must remain fenced. If candidate metadata is allowed to affect canonical evidence, requirements, CAD readiness, recommendations, or workflow orchestration before review, the recommendation changes to NO-GO.
+scripts/check-assisted-evidence-boundaries.js:49:  { label: 'tesseract runtime', regex: /tesseract|createWorker\(|recognize\(/i },
+scripts/full-system-regression-audit-scans.sh:35:run_scan prohibited-boundary 'OCR|YOLO|computer vision|image-byte|image byte|semantic inference|autonomous regeneration|CAD generation|AI-generated|OpenAI|Anthropic|generate.*CAD|inspect.*image|vision'
+scripts/check-env.js:40:  'INTERNAL_OCR_SECRET',
+scripts/check-engineering-boundaries.js:12: * bill OCR/image-processing features; those are outside this directive and must
+scripts/check-engineering-boundaries.js:40:  /supportsOCR|supportsCVClassification|supportsCADInference|supportsSemanticExtraction/,
+scripts/check-engineering-boundaries.js:41:  /No OCR|no OCR|OCR\/CV|OpenCV|YOLO|TensorFlow|PyTorch|image-byte|semantic inference|hallucinated geometry|autonomous regeneration/i,
+scripts/check-engineering-boundaries.js:52:  { code: 'ocr_runtime', pattern: /\b(tesseract|ocrad|easyocr|paddleocr|OCRWorker)\b/i },
+scripts/check-engineering-boundaries.js:104:console.log(`Engineering Intelligence boundary scan passed: no prohibited OCR/CV/ML/image-byte/CAD-autogeneration runtime patterns found in ${scannedFiles.size} scoped file(s).`);
+tests/auth-health.test.ts:229:    '/api/ocr',
+tests/auth-health.test.ts:263:  it('/api/ocr is public (internal route)', () => {
+tests/auth-health.test.ts:264:    expect(isPublic('/api/ocr')).toBe(true);
+tests/auth-health.test.ts:279:  it('/api/debug/ocr is NOT public (requires auth for diagnostics)', () => {
+tests/auth-health.test.ts:280:    expect(isPublic('/api/debug/ocr')).toBe(false);
+tests/homeowner-qualification.test.ts:105:    expect(intelligence.contractor_summary).toContain("$350 utility bill");
+tests/homeowner-qualification.test.ts:357:            contractor_summary: "A-Grade Opportunity\n\n• $350 utility bill",
+tests/utility-bill-attachment.test.ts:21:function pdfFile(name = 'utility bill.pdf') {
+tests/utility-bill-attachment.test.ts:22:  return new File([Buffer.from('%PDF-1.7\nmock utility bill\n%%EOF')], name, { type: 'application/pdf' })
+tests/utility-bill-attachment.test.ts:35:describe('utility bill attachment storage', () => {
+tests/utility-bill-attachment.test.ts:49:  it('stores utility bills to the existing local public upload fallback when Blob is not configured', async () => {
+tests/utility-bill-attachment.test.ts:58:      filename: 'utility bill.pdf',
+tests/opportunity-enrichment-display.test.ts:13:  enrichment_warnings: ['missing utility bill'],
+tests/engineering-intelligence-render-safety.test.tsx:142:      prohibitedRuntimeBehavior: ['no OCR', { guard: 'no CV' }],
+tests/engineering-intelligence-render-safety.test.tsx:407:      prohibitedRuntimeBehavior: ['no OCR', { guard: 'no production mutation' }],
+tests/engineering-intelligence-render-safety.test.tsx:581:      prohibitedRuntimeBehavior: ['no OCR', { guard: 'no autonomous engineering' }],
+tests/free-solar-estimate-page.test.ts:60:  it("preserves non-canonical operational fields and submits utility bills through canonical multipart intake", () => {
+tests/free-solar-estimate-page.test.ts:66:      "The intake endpoint stores any non-empty utility bill file and links the attachment metadata to the canonical intake event.",
+tests/free-solar-estimate-page.test.ts:69:      "Optional — upload any utility bill file for review",
+tests/operational-lifecycle.test.ts:227:          "Customer asked for a callback in two weeks after reviewing current utility bill.",
+tests/operational-lifecycle.test.ts:230:          callback_reason: "Reviewing utility bill",
+tests/operational-lifecycle.test.ts:242:    expect(callback.callback_reason).toBe("Reviewing utility bill");
+tests/operational-lifecycle.test.ts:359:      notes: "Discussed utility bill and roof age.",
+tests/operational-lifecycle.test.ts:382:    expect(summary.latest_note).toBe("Discussed utility bill and roof age.");
+tests/operational-lifecycle.test.ts:618:      details: { workflow_reason: "Updated utility bill needed" },
+tests/marketplace-intelligence.test.ts:89:      "Verified stored utility bill evidence",
+tests/marketplace-intelligence.test.ts:362:        "Verified utility bill evidence",
+tests/security-debug-routes.test.ts:207:    { file: 'app/api/debug/ocr/route.ts',                   guard: 'getUserFromRequest' },
+tests/bill-upload.test.ts:5: * All OCR, AI, and geocoding dependencies are mocked.
+tests/bill-upload.test.ts:8: *   1. JPG bill — high-quality OCR text from a real utility bill
+tests/bill-upload.test.ts:9: *   2. PDF bill — pdftotext-style extracted text
+tests/bill-upload.test.ts:10: *   3. Low-quality image — sparse OCR output, triggers AI fallback path
+tests/bill-upload.test.ts:25:/** Realistic CMP (Central Maine Power) bill text from pdftotext */
+tests/bill-upload.test.ts:85:/** Low-quality OCR output — sparse, garbled text */
+tests/bill-upload.test.ts:86:const FIXTURE_LOW_QUALITY_OCR = `
+tests/bill-upload.test.ts:162:  it('TC3: handles low-quality OCR text — extracts partial data', () => {
+tests/bill-upload.test.ts:163:    const result = parseBill(FIXTURE_LOW_QUALITY_OCR);
+tests/bill-upload.test.ts:188:    const texts = [FIXTURE_CMP_BILL, FIXTURE_NATIONAL_GRID_PDF, FIXTURE_LOW_QUALITY_OCR, FIXTURE_NO_KWH];
+tests/bill-upload.test.ts:218:    const texts = [FIXTURE_CMP_BILL, FIXTURE_NATIONAL_GRID_PDF, FIXTURE_LOW_QUALITY_OCR, FIXTURE_NO_KWH, ''];
+tests/bill-upload.test.ts:394:      extractionMethod: 'pdftotext',
+tests/bill-upload.test.ts:445:      stage: 'tesseract',
+tests/hydrate-bill-data.test.ts:9: *   3. Flat/legacy format → BillAnalysis synthesized from raw OCR fields
+tests/utility-bill-intelligence-projection.test.ts:90:describe("utility bill intelligence projection", () => {
+tests/utility-bill-intelligence-projection.test.ts:110:      extractionMethod: "pdf-parser",
+tests/engineering-intelligence-invalidation-v1.test.ts:194:    expect(propagation.deterministicNotes.join(' ')).toContain('No OCR');
+tests/homeowner-intake-event-first.test.ts:59:function pdfUploadFile(name = "utility bill.pdf"): File {
+tests/homeowner-intake-event-first.test.ts:60:  return new File([Buffer.from("%PDF-1.7\nmock utility bill\n%%EOF")], name, {
+tests/homeowner-intake-event-first.test.ts:165:            contractor_summary: "A-Grade Opportunity\n\n• $350 utility bill",
+tests/homeowner-intake-event-first.test.ts:190:            extraction: { success: true, method: "ocr", confidence: 0.88 },
+tests/homeowner-intake-event-first.test.ts:524:  it("does not block arbitrary unknown utility bill files solely because of MIME type", async () => {
+tests/homeowner-intake-event-first.test.ts:829:  it("utility bill intelligence adapter preserves dashboard parser parity for stored image bills", () => {
+tests/homeowner-intake-event-first.test.ts:927:    expect(section).toContain("bill uploads create Open Bill / Download");

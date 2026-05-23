@@ -21,11 +21,6 @@ const APPROVED_METADATA_RUNTIME_IMPORT_FILES = new Set([
 
 const APPROVED_SURVEY_ALIGNMENT_FILES = new Set([
   'lib/assistedEvidenceSources/surveyIngestionRuntimeBridge.ts',
-  'lib/assistedEvidenceSources/ocrRuntimeBridge.ts',
-]);
-
-const APPROVED_OCR_RUNTIME_IMPORT_FILES = new Set([
-  'lib/assistedEvidenceSources/ocrRuntimeAdapter.ts',
 ]);
 
 const APPROVED_CORE_HASH_FILES = new Set([
@@ -35,23 +30,6 @@ const APPROVED_CORE_HASH_FILES = new Set([
 const APPROVED_METADATA_RUNTIME_IMPORTS = new Set([
   'sharp',
 ]);
-
-const APPROVED_OCR_RUNTIME_IMPORTS = new Set([
-  'tesseract.js',
-]);
-
-const FORBIDDEN_OCR_SOURCE_IMPORTS = [
-  'app/api/bill-upload',
-  'app/api/debug/ocr',
-  'app/api/debug/bill',
-  'app/api/ocr',
-  'lib/billOcr',
-  'lib/billOcrEngine',
-  'lib/billParser',
-  'lib/billPipeline',
-  'lib/billClaudeExtractor',
-  'lib/intake/utilityBillIntelligence',
-];
 
 const FORBIDDEN_SOURCE_IMPORTS = [
   'lib/survey/evidence',
@@ -134,14 +112,6 @@ for (const file of sourceFiles()) {
     if (APPROVED_METADATA_RUNTIME_IMPORTS.has(specifier) && !APPROVED_METADATA_RUNTIME_IMPORT_FILES.has(relative)) {
       violations.push(`${relative}: metadata runtime import '${specifier}' is only allowed in approved source adapter files.`);
     }
-    if (APPROVED_OCR_RUNTIME_IMPORTS.has(specifier) && !APPROVED_OCR_RUNTIME_IMPORT_FILES.has(relative)) {
-      violations.push(`${relative}: OCR runtime import '${specifier}' is only allowed in the approved OCR runtime adapter.`);
-    }
-    for (const forbiddenOcr of FORBIDDEN_OCR_SOURCE_IMPORTS) {
-      if (specifier.includes(forbiddenOcr) || specifier.includes(`@/${forbiddenOcr}`)) {
-        violations.push(`${relative}: forbidden OCR/bill/debug import '${specifier}' inside assisted evidence runtime boundary.`);
-      }
-    }
   }
 
   lines.forEach((line, index) => {
@@ -149,7 +119,7 @@ for (const file of sourceFiles()) {
       if (pattern.regex.test(line)) {
         const isAllowedGuardText = /prohibit|forbid|must not|not implement|no |blocked|without/i.test(line)
           && (relative.endsWith('sandboxGuards.ts') || relative.endsWith('candidateAdapterContracts.ts'));
-        const isAllowedNegativeTest = relative.endsWith('.test.ts') && (/toThrow|expect\(/.test(line) || pattern.label === 'tesseract runtime');
+        const isAllowedNegativeTest = relative.endsWith('.test.ts') && /toThrow|expect\(/.test(line);
         const isTestFixtureReference = relative.endsWith('.test.ts')
           && ['survey table mutation', 'duplicate blur system', 'duplicate metadata system', 'duplicate hashing system'].includes(pattern.label);
         const isApprovedSurveyAlignmentReference = APPROVED_SURVEY_ALIGNMENT_FILES.has(relative)
@@ -158,14 +128,7 @@ for (const file of sourceFiles()) {
           && pattern.label === 'duplicate hashing system';
         const isApprovedMetadataAdapterHashing = APPROVED_METADATA_RUNTIME_IMPORT_FILES.has(relative)
           && pattern.label === 'duplicate hashing system';
-        const isApprovedOcrRuntime = APPROVED_OCR_RUNTIME_IMPORT_FILES.has(relative)
-          && ['tesseract runtime', 'image-byte analysis'].includes(pattern.label);
-        const isApprovedOcrMetadataReference = ['lib/assistedEvidenceSources/openSourceToolRegistry.ts', 'lib/assistedEvidenceSources/candidateAdapterTypes.ts'].includes(relative)
-          && pattern.label === 'tesseract runtime';
-        const isApprovedOcrRuntimeHashing = APPROVED_OCR_RUNTIME_IMPORT_FILES.has(relative)
-          && pattern.label === 'duplicate hashing system'
-          && /runtimePayloadHash|deterministicHash/.test(line);
-        if (!isAllowedGuardText && !isAllowedNegativeTest && !isTestFixtureReference && !isApprovedSurveyAlignmentReference && !isApprovedCoreHashing && !isApprovedMetadataAdapterHashing && !isApprovedOcrRuntime && !isApprovedOcrRuntimeHashing && !isApprovedOcrMetadataReference) violations.push(`${relative}:${index + 1}: ${pattern.label}: ${line.trim()}`);
+        if (!isAllowedGuardText && !isAllowedNegativeTest && !isTestFixtureReference && !isApprovedSurveyAlignmentReference && !isApprovedCoreHashing && !isApprovedMetadataAdapterHashing) violations.push(`${relative}:${index + 1}: ${pattern.label}: ${line.trim()}`);
       }
     }
   });
@@ -181,20 +144,12 @@ for (const file of sourceFiles()) {
   }
 
   const usesCandidateGeneration = /generate[A-Za-z0-9]*Candidates\s*\(/.test(text);
-  const delegatesToRegisteredRuntime = APPROVED_SURVEY_ALIGNMENT_FILES.has(relative)
-    && /generate(?:Metadata|Ocr)RuntimeCandidates\s*\(/.test(text)
+  const delegatesToRegisteredMetadataRuntime = APPROVED_SURVEY_ALIGNMENT_FILES.has(relative)
+    && /generateMetadataRuntimeCandidates\s*\(/.test(text)
     && !/getRegisteredOpenSourceTool/.test(text);
   const isCandidateGenerationTest = relative.endsWith('.test.ts');
-  if (usesCandidateGeneration && !isCandidateGenerationTest && !/getRegisteredOpenSourceTool/.test(text) && !delegatesToRegisteredRuntime && !relative.endsWith('candidateNormalization.ts') && !relative.endsWith('candidateAdapterTypes.ts')) {
+  if (usesCandidateGeneration && !isCandidateGenerationTest && !/getRegisteredOpenSourceTool/.test(text) && !delegatesToRegisteredMetadataRuntime && !relative.endsWith('candidateNormalization.ts') && !relative.endsWith('candidateAdapterTypes.ts')) {
     violations.push(`${relative}: runtime/candidate generation must resolve a registered tool before execution or delegate to an approved registered runtime bridge.`);
-  }
-
-  if (relative.includes('ocrRuntime') && /panelRating\s*[:=]|breakerSize\s*[:=]|serviceSize\s*[:=]|project_physical_data|buildCADReadinessMetadata|buildEngineeringRecommendations|buildEngineeringWorkflowOrchestration|evaluateEngineeringRequirements/.test(text)) {
-    violations.push(`${relative}: OCR runtime must not convert text into engineering facts or downstream engineering authority.`);
-  }
-
-  if (relative.includes('ocrRuntime') && /confidence\s*[:=]\s*(?:0\.[89]|1(?:\.0+)?|8[5-9]|9\d|100)/.test(text) && !relative.endsWith('.test.ts')) {
-    violations.push(`${relative}: OCR runtime must not silently upgrade OCR confidence with hard-coded high confidence values.`);
   }
 }
 

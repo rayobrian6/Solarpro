@@ -45,7 +45,7 @@ describe('Controlled metadata runtime adapter pilot', () => {
     const tool = getRegisteredOpenSourceTool('sharp-metadata-runtime', '0.34.5');
     expect(() => validateOpenSourceToolDefinition({ ...tool, toolName: 'blocked-runtime', license: 'AGPL-3.0' })).toThrow(/blocked/i);
     expect(() => validateOpenSourceToolDefinition({ ...tool, toolName: 'canonical-runtime', canonicalMutationAllowed: true as false })).toThrow(/canonical mutation/i);
-    expect(() => validateOpenSourceToolDefinition({ ...tool, toolName: 'ocr-runtime', runtimeCategory: 'ocr_text_candidate' })).toThrow(/not approved/i);
+    expect(() => validateOpenSourceToolDefinition({ ...tool, toolName: 'visual-runtime', runtimeCategory: 'visual_categorization_candidate' })).toThrow(/not approved/i);
     expect(() => validateOpenSourceToolDefinition({ ...tool, toolName: 'browser-runtime', serverOnly: false })).toThrow(/server-only/i);
   });
 

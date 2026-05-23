@@ -1,0 +1,1305 @@
+### lib/billOcr.ts
+/**
+ * lib/billOcr.ts
+ * Utility bill OCR extraction — parses PDF/JPG/PNG electric bills.
+ * Uses pattern matching on extracted text to find kWh, rate, provider, address.
+ * Falls back to GPT-4o-mini when regex confidence is low.
+ */
+
+export interface BillExtractResult {
+  success: boolean;
+  // Customer info
+  customerName?: string;
+  serviceAddress?: string;
+  // Utility info
+  utilityProvider?: string;
+  accountNumber?: string;
+  // Billing period
+  billingPeriodStart?: string;
+  billingPeriodEnd?: string;
+  billingDays?: number;
+  // Usage
+  monthlyKwh?: number;
+  annualKwh?: number;        // if shown on bill
+  monthlyUsageHistory?: number[];  // up to 12 months of usage
+  // Charges
+  totalAmount?: number;
+  electricityRate?: number;  // $/kWh
+  fixedCharges?: number;
+  demandCharge?: number;     // $/kW or $ for commercial bills
+  demandKw?: number;         // peak demand in kW
+  // Tiered usage
+  tier1Kwh?: number;
+  tier2Kwh?: number;
+  tier1Rate?: number;
+  tier2Rate?: number;
+  // Bill type
+  billType?: 'electric' | 'gas' | 'combined' | 'unknown';
+  gasUsageTherm?: number;    // therms for gas bills
+  // Derived
+  estimatedAnnualKwh?: number;  // monthlyKwh * 12 if annual not available
+  estimatedMonthlyBill?: number;
+  // Confidence
+  confidence: 'high' | 'medium' | 'low';
+  extractedFields: string[];
+  usedLlmFallback?: boolean;
+  rawText?: string;
+  error?: string;
+  // v47.306: Bill Intelligence Layer — additive only, never replaces existing fields
+  billInsights?: import('@/lib/billInsights').BillInsights;
+}
+
+// ── Known utility name patterns ───────────────────────────────────────────────
+const UTILITY_PATTERNS: [RegExp, string][] = [
+  [/pacific\s+gas\s+(?:and|&)\s+electric|pg&e|pge/i, 'PG&E'],
+  [/southern\s+california\s+edison|sce\b/i, 'Southern California Edison'],
+  [/san\s+diego\s+gas\s+(?:and|&)\s+electric|sdg&e/i, 'SDG&E'],
+  [/los\s+angeles\s+dept\s+of\s+water|ladwp/i, 'LADWP'],
+  [/florida\s+power\s+(?:and|&)\s+light|fpl\b/i, 'Florida Power & Light'],
+  [/duke\s+energy/i, 'Duke Energy'],
+  [/dominion\s+energy/i, 'Dominion Energy'],
+  [/con\s+edison|consolidated\s+edison/i, 'Con Edison'],
+  [/national\s+grid/i, 'National Grid'],
+  [/xcel\s+energy/i, 'Xcel Energy'],
+  [/ameren/i, 'Ameren'],
+  [/comed\b|commonwealth\s+edison/i, 'ComEd'],
+  [/pse&g|public\s+service\s+electric/i, 'PSE&G'],
+  [/georgia\s+power/i, 'Georgia Power'],
+  [/entergy/i, 'Entergy'],
+  [/oncor/i, 'Oncor'],
+  [/centerpoint\s+energy/i, 'CenterPoint Energy'],
+  [/aep\b|american\s+electric\s+power/i, 'AEP'],
+  [/eversource/i, 'Eversource'],
+  [/nv\s+energy/i, 'NV Energy'],
+  [/rocky\s+mountain\s+power/i, 'Rocky Mountain Power'],
+  [/puget\s+sound\s+energy|pse\b/i, 'Puget Sound Energy'],
+  [/hawaiian\s+electric|heco/i, 'Hawaiian Electric'],
+  [/pepco/i, 'Pepco'],
+  [/bge\b|baltimore\s+gas/i, 'BGE'],
+  [/ppl\s+electric/i, 'PPL Electric'],
+  [/peco\b/i, 'PECO'],
+  [/consumers\s+energy/i, 'Consumers Energy'],
+  [/dte\s+energy/i, 'DTE Energy'],
+  [/cleco/i, 'Cleco'],
+  [/westar|evergy/i, 'Evergy'],
+  [/midamerican/i, 'MidAmerican Energy'],
+  [/alliant\s+energy/i, 'Alliant Energy'],
+  [/tva\b|tennessee\s+valley/i, 'TVA'],
+  [/appalachian\s+power/i, 'Appalachian Power'],
+  [/black\s+hills\s+energy/i, 'Black Hills Energy'],
+  [/green\s+mountain\s+power/i, 'Green Mountain Power'],
+  [/central\s+maine\s+power/i, 'Central Maine Power'],
+  [/salt\s+river\s+project|srp\b/i, 'SRP'],
+  [/tucson\s+electric|tep\b/i, 'Tucson Electric Power'],
+  [/arizona\s+public\s+service|aps\b/i, 'APS'],
+  [/pacific\s+power/i, 'Pacific Power'],
+  [/portland\s+general\s+electric|pge\b/i, 'Portland General Electric'],
+  [/puget\s+sound\s+energy/i, 'Puget Sound Energy'],
+  [/avista/i, 'Avista Utilities'],
+  [/idaho\s+power/i, 'Idaho Power'],
+  [/nevada\s+power/i, 'Nevada Power'],
+  [/el\s+paso\s+electric/i, 'El Paso Electric'],
+  [/southwestern\s+electric\s+cooperative/i, 'Southwestern Electric Cooperative'],
+  [/southwestern\s+public\s+service|sps\b/i, 'Southwestern Public Service'],
+];
+
+// ── Detect bill type (electric vs gas vs combined) ────────────────────────────
+/**
+ * sanitizeForPrompt — strips prompt injection patterns from bill text before
+ * sending to any LLM. Prevents malicious bill content from overriding system prompts.
+ */
+function sanitizeForPrompt(text: string): string {
+  const injectionPatterns = [
+    /ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|context)/gi,
+    /disregard\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|context)/gi,
+    /forget\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|context)/gi,
+    /you\s+are\s+now\s+[a-z]/gi,
+    /act\s+as\s+(a|an|the)\s+[a-z]/gi,
+    /pretend\s+(to\s+be|you\s+are)/gi,
+    /return\s+(your\s+)?(system\s+prompt|instructions)/gi,
+    /reveal\s+(your\s+)?(system\s+prompt|instructions|secrets?)/gi,
+    /new\s+instruction[s]?:/gi,
+    /system\s*:\s*[^\n]{0,100}/gi,
+    /\[\s*system\s*\]/gi,
+    /<\s*system\s*>/gi,
+  ];
+  let sanitized = text;
+  for (const pattern of injectionPatterns) {
+    sanitized = sanitized.replace(pattern, '[REDACTED]');
+  }
+  return sanitized;
+}
+
+function detectBillType(text: string): 'electric' | 'gas' | 'combined' | 'unknown' {
+  const hasElectric = /\bkwh\b|kilowatt.?hour|electric(?:ity)?\s+(?:usage|charge|service)/i.test(text);
+  const hasGas = /\btherm\b|\bccf\b|\bcubic\s+feet\b|natural\s+gas\s+(?:usage|charge|service)/i.test(text);
+  if (hasElectric && hasGas) return 'combined';
+  if (hasElectric) return 'electric';
+  if (hasGas) return 'gas';
+  return 'unknown';
+}
+
+// ── Extract utility name ──────────────────────────────────────────────────────
+function extractUtilityName(text: string): string | undefined {
+  for (const [pattern, name] of UTILITY_PATTERNS) {
+    if (pattern.test(text)) return name;
+  }
+  // Generic fallback: "X Electric" / "X Power" / "X Energy" / "X Utilities"
+  const genericMatch = text.match(/([A-Z][a-zA-Z\s]{2,30}(?:Electric(?:ity)?|Power|Energy|Light(?:ing)?|Gas|Utilities?|Cooperative|Coop\b))/);
+  if (genericMatch) {
+    const name = genericMatch[1].trim();
+    if (name.length > 4 && name.length < 60) return name;
+  }
+  return undefined;
+}
+
+// ── Extract kWh usage ───────────────────────────────────────────────────────
+// Priority 1: Handwritten month lines        (Jan 555 NWH)
+// Priority 2: Monthly Usage Summary table    (Jan 20 24 20 — col1 = current year)
+// Priority 3: Yearly total line              (Total For 2025 6723 kWh)
+function extractKwh(text: string): { monthly?: number; annual?: number; monthlyHistory?: number[] } {
+  const result: { monthly?: number; annual?: number; monthlyHistory?: number[] } = {};
+
+  const MONTH_ORDER = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+  const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+  // Normalise handwritten / OCR kWh aliases before all pattern matching
+  const t = text
+    .replace(/\bN\.?W\.?H\.?\b/gi, 'kWh')
+    .replace(/\bK\.?W\.?H\.?\b/g,  'kWh')
+    .replace(/\bkw-h\b/gi,         'kWh');
+
+  console.log(`[bill-upload] OCR text length: ${text.length} chars`);
+
+  // ── PRIORITY 1: Handwritten month lines ───────────────────────────────────
+  // "Jan 555 kWh"  "Feb 609 kWh" (after NWH normalisation)
+  const MONTH_RE_SRC = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+  const handwrittenPat = new RegExp(`(${MONTH_RE_SRC})[a-z]*[\\s\\.\\:]+([1-9][0-9]{2,4})\\s*kwh`, 'gi');
+  const handwrittenMonths: Record<string, number> = {};
+  let hwMatch: RegExpExecArray | null;
+  while ((hwMatch = handwrittenPat.exec(t)) !== null) {
+    const key = hwMatch[1].slice(0, 3).toLowerCase();
+    const val = parseInt(hwMatch[2], 10);
+    if (val > 50 && val < 50000) handwrittenMonths[key] = val;
+  }
+  const hwCount = Object.keys(handwrittenMonths).length;
+  console.log(`[bill-upload] Handwritten months detected: ${hwCount}`, hwCount > 0 ? JSON.stringify(handwrittenMonths) : '');
+
+  // ── PRIORITY 2: Electric Usage History / Monthly Usage Summary ───────────
+  // Handles two bill layouts:
+  //   CMP/Eversource row-per-month: "Jan  20  24  20" (daily avg × days-in-month = monthly kWh)
+  //   Ameren/ComEd inline list:     "4188 2311 1418 761 318 460 881 901 ..." (already monthly kWh)
+  const barGraphMonths: Record<string, number> = {};
+  const USAGE_HISTORY_HEADER_RE = /monthly\s+usage\s+summary|electric(?:ity)?\s+usage\s+history|energy\s+usage\s+history|usage\s+history\s+(?:in\s+)?(?:kilowatt.?hours?|kwh)|kwh\s+usage\s+history/i;
+  const hasSummaryHeader = USAGE_HISTORY_HEADER_RE.test(text);
+  console.log(`[bill-upload] Bar graph section header found: ${hasSummaryHeader}`);
+
+  // Mode A: Row-per-month (CMP / Eversource) -- values 0-200 treated as daily averages
+  const barRowPat = new RegExp(
+    `^\\s*(${MONTH_RE_SRC})[a-z]*\\s+([0-9]{1,3})(?:\\s+[0-9]{1,4})*\\s*$`,
+    'gim'
+  );
+  let barMatch: RegExpExecArray | null;
+  const rowBasedMonths: Record<string, number> = {};
+  while ((barMatch = barRowPat.exec(text)) !== null) {
+    const key = barMatch[1].slice(0, 3).toLowerCase();
+    const val = parseInt(barMatch[2], 10);
+    if (val >= 0 && val <= 200) rowBasedMonths[key] = val;
+  }
+  const rowBasedCount = Object.keys(rowBasedMonths).length;
+
+  // Mode B: Inline kWh list (Ameren / ComEd) -- values 50-5000 = already monthly kWh
+  let inlineMonths: Record<string, number> = {};
+  if (hasSummaryHeader) {
+    const headerIdx = text.search(USAGE_HISTORY_HEADER_RE);
+    const scanText = headerIdx >= 0 ? text.slice(headerIdx, headerIdx + 2000) : text;
+    const inlineNums: number[] = [];
+    for (const m of scanText.matchAll(/\b([0-9]{2,4})\b/g)) {
+      const v = parseInt(m[1], 10);
+      if (v >= 50 && v <= 5000) inlineNums.push(v);
+    }
+    // Find a run of 8-13 plausible monthly kWh values
+    let bestRun: number[] = [];
+    for (let start = 0; start <= inlineNums.length - 8; start++) {
+      for (let len = Math.min(13, inlineNums.length - start); len >= 8; len--) {
+        const run = inlineNums.slice(start, start + len);
+        const minV = Math.min(...run), maxV = Math.max(...run);
+        if (maxV > minV * 15) continue;
+        if (run.length > bestRun.length) { bestRun = run; break; }
+      }
+    }
+    if (bestRun.length >= 8) {
+      console.log(`[bill-upload] Mode-B inline run: ${bestRun.length} values -> [${bestRun.join(', ')}]`);
+      MONTH_ORDER.forEach((m, i) => {
+        if (i < bestRun.length) inlineMonths[m] = bestRun[i];
+      });
+    }
+  }
+  const inlineCount = Object.keys(inlineMonths).length;
+
+  const barCount = rowBasedCount >= 6 ? rowBasedCount : inlineCount;
+  // Merge: prefer row-based if it found 6+ months, else use inline
+  if (rowBasedCount >= 6) {
+    Object.assign(barGraphMonths, rowBasedMonths);
+  } else if (inlineCount >= 6) {
+    Object.assign(barGraphMonths, inlineMonths);
+  } else if (rowBasedCount > 0) {
+    Object.assign(barGraphMonths, rowBasedMonths);
+  }
+  console.log(`[bill-upload] Bar graph rows detected: ${barCount}`, barCount > 0 ? JSON.stringify(barGraphMonths) : '');
+
+  // ── Choose source and build history ───────────────────────────────────────
+  let chosenMonths: Record<string, number> | null = null;
+  let sourceLabel = 'none';
+
+  if (hwCount >= 6) {
+    chosenMonths = handwrittenMonths;
+    sourceLabel = 'handwritten';
+  } else if (Object.keys(barGraphMonths).length >= 6) {
+    // Determine if values are daily averages (0-200) or monthly totals (50-5000)
+    const barVals = Object.values(barGraphMonths);
+    const isLikelyDailyAvg = barVals.every(v => v <= 200);
+### lib/billParser.ts
+/**
+ * lib/billParser.ts
+ * Deterministic, source-ranked utility bill usage extractor.
+ *
+ * DESIGN PRINCIPLES:
+ *   1. Every extracted value carries source metadata (type, text, confidence).
+ *   2. Source priority is strict and never reversed by fallback logic.
+ *   3. The same input always produces the same output (no randomness, no AI rewrites).
+ *   4. OpenAI/LLM may only FILL gaps — never override a stronger source.
+ *
+ * MONTHLY USAGE PRIORITY (highest → lowest):
+ *   P1  Printed monthly table    (explicit month + kWh label, full 12-month)
+ *   P2  Handwritten month list   (Jan 555 kWh / NWH — 6+ months)
+ *   P3  Monthly usage summary    (Monthly Usage Summary kWh -- use values directly)
+ *   P4  Partial handwritten      (< 6 months but ≥ 3 — use with lower confidence)
+ *   P5  Annual ÷ 12              (last resort — only if no monthly data at all)
+ *
+ * ANNUAL USAGE PRIORITY:
+ *   A1  Explicit handwritten/printed total ("Total for 2025 6723 kWh")
+ *   A2  Sum of P1/P2/P3 monthly values (≥ 10 months present)
+ *   A3  Extrapolation from partial monthly (avg × 12, ≥ 3 months)
+ *   A4  None — do not guess
+ *
+ * UTILITY IDENTIFICATION PRIORITY:
+ *   U1  Bill header / logo text (printed — highest confidence)
+ *   U2  Known alias match in any part of text
+ *   U3  Generic "X Electric / X Power / X Energy" pattern
+ *   U4  None — do not fall back to location-based in this module
+ */
+
+// ── Month metadata ────────────────────────────────────────────────────────────
+export const MONTH_ORDER = [
+  'jan', 'feb', 'mar', 'apr', 'may', 'jun',
+  'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+] as const;
+export type MonthKey = typeof MONTH_ORDER[number];
+
+export const DAYS_IN_MONTH: Record<MonthKey, number> = {
+  jan: 31, feb: 28, mar: 31, apr: 30, may: 31, jun: 30,
+  jul: 31, aug: 31, sep: 30, oct: 31, nov: 30, dec: 31,
+};
+
+const MONTH_RE_SRC =
+  '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?' +
+  '|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+
+// ── Source evidence types ─────────────────────────────────────────────────────
+export type SourceType =
+  | 'printed_table'        // Explicit month + kWh column in a printed table
+  | 'handwritten_list'     // Handwritten Jan–Dec list with kWh values
+  | 'bar_graph_table'      // Monthly Usage Summary table -- monthly kWh totals
+  | 'explicit_annual'      // "Total for 2025 6723 kWh" line
+  | 'monthly_sum'          // Computed: sum of monthly values
+  | 'extrapolated'         // Computed: avg × 12 from partial months
+  | 'printed_header'       // Utility name from bill header
+  | 'utility_alias'        // Utility name from known alias match
+  | 'generic_pattern'      // Utility name from generic regex
+  | 'none';
+
+export interface ExtractedValue<T> {
+  value: T;
+  source_type: SourceType;
+  source_text: string;     // The actual text that was matched
+  confidence: number;      // 0.0 – 1.0
+}
+
+export interface BillParseResult {
+  // Utility
+  utility: ExtractedValue<string> | null;
+
+  // Monthly usage (Jan–Dec aligned, 0 = missing)
+  monthlyArray: number[];
+  monthlySource: SourceType;
+  monthlyConfidence: number;
+  monthsFound: number;
+  monthlyEvidence: string;   // Human-readable description of what was found
+
+  // Annual usage
+  annual: ExtractedValue<number> | null;
+  annualCorroboration: number | null;  // explicit total if monthly sum exists
+
+  // Current month usage (most recent bill period)
+  currentMonthKwh: number | null;
+
+  // Rate
+  rate: ExtractedValue<number> | null;
+
+  // Debug log lines (deterministic, same input = same log)
+  debugLog: string[];
+}
+
+// ── NWH / KWH normalisation ───────────────────────────────────────────────────
+function normalise(text: string): string {
+  return text
+    .replace(/\bN\.?W\.?H\.?\b/gi, 'kWh')
+    .replace(/\bK\.?W\.?H\.?\b/g,  'kWh')
+    .replace(/\bkw-h\b/gi,         'kWh')
+    .replace(/\bki[vwN]h?\b/gi,    'kWh')   // Tesseract font artefacts: kivh, kiwh
+    .replace(/\bkVVh\b/gi,         'kWh')   // double-V artefact
+    .replace(/\bkWFh?\b/gi,        'kWh');  // kWF artefact
+}
+
+function isValidMonthly(v: number): boolean {
+  return Number.isFinite(v) && v > 0 && v <= 5000;
+}
+
+// ── U1/U2/U3: Utility identification ─────────────────────────────────────────
+const UTILITY_ALIASES: [RegExp, string][] = [
+  [/central\s+maine\s+power|cmp\b/i,                   'Central Maine Power'],
+  [/pacific\s+gas\s+(?:and|&)\s+electric|pg&e|pge/i,   'PG&E'],
+  [/southern\s+california\s+edison|sce\b/i,             'Southern California Edison'],
+  [/san\s+diego\s+gas\s+(?:and|&)\s+electric|sdg&e/i,  'SDG&E'],
+  [/florida\s+power\s+(?:and|&)\s+light|fpl\b/i,       'Florida Power & Light'],
+  [/duke\s+energy/i,                                    'Duke Energy'],
+  [/dominion\s+energy/i,                                'Dominion Energy'],
+  [/con\s+edison|consolidated\s+edison/i,               'Con Edison'],
+  [/national\s+grid/i,                                  'National Grid'],
+  [/xcel\s+energy/i,                                    'Xcel Energy'],
+  [/ameren/i,                                           'Ameren'],
+  [/comed\b|commonwealth\s+edison/i,                    'ComEd'],
+  [/pse&g|public\s+service\s+electric/i,               'PSE&G'],
+  [/georgia\s+power/i,                                  'Georgia Power'],
+  [/entergy/i,                                          'Entergy'],
+  [/centerpoint\s+energy/i,                             'CenterPoint Energy'],
+  [/aep\b|american\s+electric\s+power/i,               'AEP'],
+  [/eversource/i,                                       'Eversource'],
+  [/nv\s+energy/i,                                      'NV Energy'],
+  [/rocky\s+mountain\s+power/i,                         'Rocky Mountain Power'],
+  [/puget\s+sound\s+energy|pse\b/i,                    'Puget Sound Energy'],
+  [/hawaiian\s+electric|heco/i,                         'Hawaiian Electric'],
+  [/pepco/i,                                            'Pepco'],
+  [/bge\b|baltimore\s+gas/i,                           'BGE'],
+  [/ppl\s+electric/i,                                   'PPL Electric'],
+  [/peco\b/i,                                           'PECO'],
+  [/consumers\s+energy/i,                               'Consumers Energy'],
+  [/dte\s+energy/i,                                     'DTE Energy'],
+  [/green\s+mountain\s+power/i,                         'Green Mountain Power'],
+  [/salt\s+river\s+project|srp\b/i,                    'SRP'],
+  [/tucson\s+electric|tep\b/i,                          'Tucson Electric Power'],
+  [/arizona\s+public\s+service|aps\b/i,                'APS'],
+  [/portland\s+general\s+electric/i,                    'Portland General Electric'],
+  [/avista/i,                                           'Avista Utilities'],
+  [/idaho\s+power/i,                                    'Idaho Power'],
+  [/oncor/i,                                            'Oncor'],
+  [/appalachian\s+power/i,                              'Appalachian Power'],
+  [/black\s+hills\s+energy/i,                           'Black Hills Energy'],
+  [/alliant\s+energy/i,                                 'Alliant Energy'],
+  [/midamerican/i,                                      'MidAmerican Energy'],
+  [/evergy|westar/i,                                    'Evergy'],
+  [/cleco/i,                                            'Cleco'],
+];
+
+function extractUtility(text: string, log: string[]): ExtractedValue<string> | null {
+  // Log text length only — raw bill text must not appear in server logs (PII)
+  log.push(`[bill-parser] utility detection: text length=${text.length}`);
+
+  // U1: Check first 1000 chars (bill header area) — highest confidence.
+  // 1000 chars instead of 500 because some OCR engines output logo/noise text before
+  // the actual utility name, pushing it past the 500-char mark.
+  const header = text.slice(0, 1000);
+  for (const [pat, name] of UTILITY_ALIASES) {
+    if (pat.test(header)) {
+      const matchText = header.match(pat)?.[0] ?? name;
+      log.push(`[bill-parser] utility: "${name}" from printed header (U1) — matched: "${matchText}"`);
+      return { value: name, source_type: 'printed_header', source_text: matchText, confidence: 0.97 };
+    }
+  }
+
+  // U2: Search full text for known alias
+  for (const [pat, name] of UTILITY_ALIASES) {
+    if (pat.test(text)) {
+      const matchText = text.match(pat)?.[0] ?? name;
+      log.push(`[bill-parser] utility: "${name}" from alias match in full text (U2) — matched: "${matchText}"`);
+      return { value: name, source_type: 'utility_alias', source_text: matchText, confidence: 0.85 };
+    }
+  }
+
+  // U3: Generic pattern — "X Electric / X Power / X Energy"
+  // Case-insensitive start (removed [A-Z] anchor that failed on all-caps OCR like "CENTRAL MAINE POWER").
+  const genericMatch = text.match(
+    /\b([A-Za-z][a-zA-Z\s]{2,30}(?:Electric(?:ity)?|Power|Energy|Light(?:ing)?|Gas|Utilities?|Cooperative))\b/
+  );
+  if (genericMatch) {
+    const name = genericMatch[1].trim();
+    if (name.length > 4 && name.length < 60) {
+      log.push(`[bill-parser] utility: "${name}" from generic pattern (U3)`);
+      return { value: name, source_type: 'generic_pattern', source_text: genericMatch[0], confidence: 0.55 };
+    }
+  }
+
+  log.push('[bill-parser] utility: not found — no alias or generic pattern matched');
+  return null;
+}
+
+// ── P1: Printed monthly table ─────────────────────────────────────────────────
+/**
+ * Matches rows like:
+ *   "Jan    555  kWh"
+ *   "January  555  kWh"
+ *   "Jan    555"     (when in a table context — preceded by kWh column header)
+ *
+ * This is distinct from P2 (handwritten) by requiring explicit "kWh" suffix OR
+ * appearing inside a section with a kWh column header within 5 lines.
+ *
+ * Returns months AND the matched source texts for evidence logging.
+ */
+function parsePrintedTable(
+  text: string,
+  log: string[],
+): { months: Partial<Record<MonthKey, number>>; evidence: string[] } {
+  const t = normalise(text);
+  const evidence: string[] = [];
+  const months: Partial<Record<MonthKey, number>> = {};
+
+  // Look for rows explicitly labeled with kWh
+  const explicitPat = new RegExp(
+    `(${MONTH_RE_SRC})[a-z]*\\s+([1-9][0-9]{0,3}(?:,[0-9]{3})?)\\s+kwh`,
+    'gi',
+  );
+  let m: RegExpExecArray | null;
+  while ((m = explicitPat.exec(t)) !== null) {
+    const key = m[1].slice(0, 3).toLowerCase() as MonthKey;
+    const val = parseInt(m[2].replace(/,/g, ''), 10);
+    if (isValidMonthly(val) && val >= 100) {  // printed table values always >= 100 kWh
+      months[key] = val;
+      evidence.push(m[0].trim());
+    }
+  }
+
+  const count = Object.keys(months).length;
+  log.push(`[bill-parser] P1 printed table: ${count} months${count > 0 ? ' → ' + JSON.stringify(months) : ''}`);
+  return { months, evidence };
+}
+
+// ── P2: Handwritten month list ────────────────────────────────────────────────
+/**
+ * Matches lines like:
+ *   "Jan 555 kWh"  "Feb: 609"  "January 736"  "JAN 555"
+ *   After NWH→kWh normalisation: "Jan 555 NWH" → "Jan 555 kWh"
+ *
+ * Does NOT require "kWh" suffix — bare "Jan 555" is accepted when value
+ * is in the 100–5000 range (avoids matching dates, account numbers, etc.)
+ *
+ * Returns months AND matched source texts.
+ */
+function parseHandwrittenList(
+  text: string,
+  log: string[],
+): { months: Partial<Record<MonthKey, number>>; evidence: string[] } {
+  const t = normalise(text);
+  const evidence: string[] = [];
+  const months: Partial<Record<MonthKey, number>> = {};
+
+  // Match: MonthName [optional year like 2024/2025] number [optional kWh]
+  // e.g. "Jan 2025  362 kWh"  or  "Jan  362"  or  "January    1,234 kWh"
+  // The year (1900-2099) is optional and must be skipped to get the kWh value.
+  // IMPORTANT: Must NOT match billing period dates like "Jan 15, 2025" where
+  // 15 is a day number, not a kWh value. We detect this by checking if the
+  // number is followed by a comma (date separator) or is a plausible day (1-31)
+  // without a kWh suffix in a date context.
+### lib/billClaudeExtractor.ts
+/**
+ * lib/billClaudeExtractor.ts — Claude 3.5 Sonnet Multimodal Bill Extraction Engine
+ *
+ * Replaces gpt-4o-mini text-only extraction with Claude 3.5 Sonnet vision extraction.
+ * Claude receives the bill as a BASE64 IMAGE directly — no OCR pre-processing needed.
+ *
+ * Why Claude 3.5 Sonnet over GPT-4o for this task:
+ *   - Superior chart/graph reading: accurately extracts values from bar charts
+ *   - Better table parsing across non-standard utility layouts
+ *   - Stronger structured output adherence with complex nested JSON
+ *   - More reliable null-vs-guess behavior (never hallucinates bill data)
+ *
+ * Architecture:
+ *   Input:  image buffer (PDF page rasterized, PNG, JPG, JFIF) OR raw text string
+ *   Output: AiBillData (same interface as existing aiExtractBillData — drop-in)
+ *
+ * Integration:
+ *   - Called by billPipeline.ts as the primary AI extraction step
+ *   - Falls back gracefully to existing GPT-4o-mini path if ANTHROPIC_API_KEY not set
+ *   - Preserves full backward compatibility with BillExtractResult shape
+ *
+ * Validation (per spec):
+ *   - annualMismatch: sum(monthlyUsage) vs annualUsage delta > 5%
+ *   - costOutOfRange: costPerKwh outside $0.05–$0.80
+ *   - totalBillInvalid: totalBill not positive/non-zero
+ *   - missingBillingPeriod: no {start, end} pair found
+ *
+ * Status tagging:
+ *   complete  — customerName, address, utility, monthlyUsage, totalBill all non-null
+ *   partial   — at least utility AND (monthlyUsage OR annualUsage) non-null
+ *   failed    — everything else
+ */
+
+import type { AiBillData } from '@/lib/billPipeline';
+
+// ─── Types ─────────────────────────────────────────────────────────────────────
+
+export interface ClaudeValidationFlags {
+  annualMismatch: boolean;       // sum(monthly) vs annual delta > 5%
+  costOutOfRange: boolean;       // costPerKwh outside $0.05–$0.80
+  totalBillInvalid: boolean;     // totalBill missing or <= 0
+  missingBillingPeriod: boolean; // no billing period found
+}
+
+export type ClaudeExtractionStatus = 'complete' | 'partial' | 'failed';
+
+export interface ClaudeExtractionResult {
+  status: ClaudeExtractionStatus;
+  validationFlags: ClaudeValidationFlags;
+  data: AiBillData;
+  rawClaudeOutput: string;       // for audit logging
+  model: string;                 // which model version was used
+  inputType: 'image' | 'text';   // whether Claude received image or text
+}
+
+// ─── System Prompt ──────────────────────────────────────────────────────────────
+
+const BILL_PARSER_SYSTEM_PROMPT = `You are an expert utility bill parsing engine for SolarPro, a solar installation platform operating across all 50 US states and internationally.
+
+Your job is to extract structured energy usage and billing data from utility bills in any format — digital PDFs, scans, photos, screenshots. Bills come from every US utility company and beyond.
+
+EXTRACTION RULES:
+1. Extract ALL fields you can find with high confidence
+2. Return null for any field you cannot determine with confidence — NEVER guess or infer
+3. Read bar graphs and line charts directly — extract the numeric values from each bar/point
+4. Parse tables, even non-standard layouts
+5. Handle multi-column bills by reading all columns before concluding
+6. For billing dates in MM/DD/YY format: 07/18/25 = 2025-07-18
+
+MONTHLY USAGE EXTRACTION (critical):
+- Look for a usage history section, bar chart, or 12-month table
+- Each bar or row represents one month — extract ALL months shown, oldest to newest
+- Output as a 12-element array, null-pad if fewer months shown
+- If only current month shown (no history), put that value in the array at the correct position
+- A typical residential monthly bill is 300–4,000 kWh
+
+CURRENT MONTH kWh (total_kwh):
+Priority order:
+1. "Billable Usage (kWh)" or "Billable Usage" line
+2. "Total Usage", "Electric Usage", "kWh Used", "kWh This Period"
+3. Meter reading difference (current minus previous)
+IGNORE: average daily usage (e.g. "23 kWh/day"), prior year values, numbers under 100 unless the bill is genuinely tiny
+
+COST EXTRACTION (total_cost):
+Priority order:
+1. "Current Electric Charges" or "Current Charges"
+2. "Total Current Charges"
+3. "Amount Due" ONLY if no separate current charges line exists
+IGNORE: Balance Forward, Previous Balance, Account Balance (may include prior unpaid amounts)
+
+RATE EXTRACTION (electricity_rate):
+- Express in dollars per kWh (e.g. 0.125 for 12.5 cents/kWh)
+- Convert cents to dollars if shown as cents
+
+SUPPLY vs DELIVERY:
+- supply_charges: the generation/supply portion of the bill
+- delivery_charges: the distribution/delivery portion
+
+Return ONLY a valid JSON object matching this exact schema. No explanation, no markdown, no code blocks — just the raw JSON:
+
+{
+  "customerName": "string or null",
+  "address": "string — service/property address (not mailing address) or null",
+  "utility": "string — utility company name (e.g. Dominion Energy, PG&E, Duke Energy) or null",
+  "state": "string — 2-letter state code (e.g. VA, CA) or null",
+  "monthlyUsage": "array of 12 numbers oldest-to-newest, null-padded, or null if no history shown",
+  "annualUsage": "number — total annual kWh if explicitly shown, or null",
+  "peakMonth": "string — month name of highest usage (e.g. July) or null",
+  "costPerKwh": "number in dollars (e.g. 0.125) or null",
+  "totalBill": "number in dollars — current period charges only, or null",
+  "supplyCharges": "number or null",
+  "deliveryCharges": "number or null",
+  "rateStructure": "fixed or tiered or TOU or null",
+  "billingPeriods": [{"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}],
+  "total_kwh": "number — current month kWh usage or null",
+  "monthly_kwh": "same as monthlyUsage array — oldest to newest or null",
+  "total_cost": "same as totalBill or null",
+  "electricity_rate": "same as costPerKwh in dollars or null",
+  "utility_name": "same as utility or null",
+  "billing_period_start": "YYYY-MM-DD or null",
+  "billing_period_end": "YYYY-MM-DD or null",
+  "customer_name": "same as customerName or null",
+  "service_address": "same as address or null",
+  "account_number": "string or null",
+  "bill_type": "electric or gas or combined or unknown"
+}`;
+
+// ─── Main extraction function ───────────────────────────────────────────────────
+
+/**
+ * extractBillWithClaude — Primary entry point
+ *
+ * Accepts either:
+ *   - imageBuffer + mimeType: sends image directly to Claude (best path — no OCR loss)
+ *   - rawText: sends extracted text to Claude (fallback when image unavailable)
+ *
+ * Returns ClaudeExtractionResult with status tag and validation flags.
+ * If ANTHROPIC_API_KEY is not set, returns null so caller can fall back to GPT.
+ */
+export async function extractBillWithClaude(
+  input: { imageBuffer: Buffer; mimeType: string } | { rawText: string },
+  options?: { timeoutMs?: number },
+): Promise<ClaudeExtractionResult | null> {
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (!anthropicKey) {
+    console.log('[claudeExtractor] ANTHROPIC_API_KEY not set — skipping Claude extraction');
+    return null;
+  }
+
+  const timeoutMs = options?.timeoutMs ?? 45000;
+  const inputType = 'imageBuffer' in input ? 'image' : 'text';
+
+  console.log(`[claudeExtractor] Starting extraction inputType=${inputType} timeout=${timeoutMs}ms`);
+
+  try {
+    const rawOutput = await Promise.race([
+      callClaudeAPI(input, anthropicKey),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`[claudeExtractor] Claude API timed out after ${timeoutMs}ms`)), timeoutMs)
+      ),
+    ]);
+
+    console.log(`[claudeExtractor] Raw output length=${rawOutput.length}`);
+
+    const parsed = parseClaudeOutput(rawOutput);
+    const aiBillData = mapToAiBillData(parsed);
+    const validationFlags = validateExtraction(parsed);
+    const status = computeStatus(parsed);
+
+    console.log(`[claudeExtractor] Result: status=${status} months=${aiBillData.monthly_kwh?.length ?? 0}`);
+    console.log(`[claudeExtractor] Validation: annualMismatch=${validationFlags.annualMismatch} costOutOfRange=${validationFlags.costOutOfRange} totalBillInvalid=${validationFlags.totalBillInvalid} missingBillingPeriod=${validationFlags.missingBillingPeriod}`);
+
+    return {
+      status,
+      validationFlags,
+      data: aiBillData,
+      rawClaudeOutput: rawOutput,
+      model: 'claude-sonnet-4-5-20250929',
+      inputType,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[claudeExtractor] Extraction failed: ${msg}`);
+    return null;
+  }
+}
+
+// ─── Claude API call ────────────────────────────────────────────────────────────
+
+async function callClaudeAPI(
+  input: { imageBuffer: Buffer; mimeType: string } | { rawText: string },
+  apiKey: string,
+): Promise<string> {
+  // Build the user message content
+  const messageContent: object[] = [];
+
+  if ('imageBuffer' in input) {
+    // Image path: send bill as base64 image — Claude reads layout, charts, tables directly
+    const { imageBuffer, mimeType } = input;
+
+    // Normalize mime type to what Claude accepts
+    const claudeMime = normalizeMimeType(mimeType);
+
+    // Claude's max image size is 5MB base64 (~3.75MB raw). Warn but don't fail.
+    const base64 = imageBuffer.toString('base64');
+    const base64SizeKb = Math.round(base64.length / 1024);
+    console.log(`[claudeExtractor] Image size: ${base64SizeKb}KB base64 mime=${claudeMime}`);
+
+    if (base64.length > 5 * 1024 * 1024) {
+      console.warn(`[claudeExtractor] Image base64 is ${base64SizeKb}KB — may exceed Claude's 5MB limit`);
+    }
+
+    messageContent.push({
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: claudeMime,
+        data: base64,
+      },
+    });
+
+    messageContent.push({
+      type: 'text',
+      text: 'Extract all bill data from this utility bill image. Return ONLY the JSON object as instructed.',
+    });
+  } else {
+    // Text path: send extracted text to Claude for structured interpretation
+    const { rawText } = input;
+    console.log(`[claudeExtractor] Text input length=${rawText.length}`);
+
+    const sanitizedText = sanitizeForPrompt(rawText.slice(0, 8000));
+    messageContent.push({
+      type: 'text',
+      text: `Extract all bill data from this utility bill text. Return ONLY the JSON object as instructed.\n\n${sanitizedText}`,
+    });
+  }
+
+  const requestBody = {
+    model: 'claude-sonnet-4-5-20250929',
+    max_tokens: 2048,
+    system: BILL_PARSER_SYSTEM_PROMPT,
+    messages: [
+      {
+        role: 'user',
+        content: messageContent,
+      },
+    ],
+  };
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify(requestBody),
+    signal: AbortSignal.timeout(40000),
+  });
+
+### lib/intake/utilityBillAttachment.ts
+import { mkdir, writeFile } from "fs/promises";
+import { join } from "path";
+import { randomUUID } from "crypto";
+
+const MAX_UTILITY_BILL_BYTES = 10 * 1024 * 1024;
+const GENERIC_BINARY_MIME = "application/octet-stream";
+
+const MIME_EXTENSION: Record<string, string> = {
+  "application/pdf": "pdf",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "image/tiff": "tif",
+  "image/bmp": "bmp",
+  "text/plain": "txt",
+  "text/csv": "csv",
+  "application/json": "json",
+  "application/xml": "xml",
+  "text/xml": "xml",
+  "application/zip": "zip",
+};
+
+type UtilityBillAttachmentErrorCode =
+  | "empty_file"
+  | "too_large"
+  | "storage_unconfigured"
+  | "storage_failed";
+
+export class UtilityBillAttachmentError extends Error {
+  code: UtilityBillAttachmentErrorCode;
+
+  constructor(code: UtilityBillAttachmentErrorCode, message: string, options?: { cause?: unknown }) {
+    super(message);
+    this.name = "UtilityBillAttachmentError";
+    this.code = code;
+    if (options && "cause" in options) {
+      this.cause = options.cause;
+    }
+  }
+}
+
+export function isUtilityBillStorageFailure(err: unknown): boolean {
+  return err instanceof UtilityBillAttachmentError && (
+    err.code === "storage_unconfigured" || err.code === "storage_failed"
+  );
+}
+
+export interface StoredUtilityBillAttachment {
+  filename: string;
+  size_bytes: number;
+  content_type: string;
+  original_content_type: string | null;
+  detected_content_type: string | null;
+  file_extension: string;
+  storage_status: "stored";
+  storage_provider: "vercel_blob" | "local_public_uploads";
+  storage_key: string;
+  uploaded_at: string;
+  accessible_url: string;
+  download_url: string;
+}
+
+function cleanSegment(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "utility-bill";
+}
+
+function cleanMime(value: string | undefined | null): string | null {
+  const normalized = (value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (!/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(normalized)) return null;
+  return normalized;
+}
+
+function originalExtension(fileName: string): string | null {
+  const ext = fileName.split(".").pop()?.toLowerCase();
+  return ext && /^[a-z0-9]{1,10}$/.test(ext) ? ext : null;
+}
+
+function extensionFor(contentType: string, fileName: string): string {
+  const fromMime = MIME_EXTENSION[contentType];
+  if (fromMime) return fromMime;
+  return originalExtension(fileName) || "bin";
+}
+
+function detectContentType(bytes: Uint8Array): string | null {
+  if (bytes.length >= 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
+    return "application/pdf";
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a) {
+    return "image/png";
+  }
+  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
+    return "image/webp";
+  }
+  if (bytes.length >= 4 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) {
+    return "image/gif";
+  }
+  if (bytes.length >= 4 && ((bytes[0] === 0x49 && bytes[1] === 0x49 && bytes[2] === 0x2a && bytes[3] === 0x00) || (bytes[0] === 0x4d && bytes[1] === 0x4d && bytes[2] === 0x00 && bytes[3] === 0x2a))) {
+    return "image/tiff";
+  }
+  if (bytes.length >= 2 && bytes[0] === 0x42 && bytes[1] === 0x4d) {
+    return "image/bmp";
+  }
+  if (bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04) {
+    return "application/zip";
+  }
+  return null;
+}
+
+function effectiveContentType(file: File, bytes: Uint8Array): { contentType: string; originalContentType: string | null; detectedContentType: string | null } {
+  const originalContentType = cleanMime(file.type);
+  const detectedContentType = detectContentType(bytes);
+
+  if (detectedContentType) {
+    return { contentType: detectedContentType, originalContentType, detectedContentType };
+  }
+
+  return {
+    contentType: originalContentType || GENERIC_BINARY_MIME,
+    originalContentType,
+    detectedContentType,
+  };
+}
+
+export function metadataOnlyUtilityBill(file: File | null): Record<string, unknown> | null {
+  if (!file) return null;
+  return {
+    filename: file.name,
+    size_bytes: file.size,
+    content_type: cleanMime(file.type) || GENERIC_BINARY_MIME,
+    original_content_type: cleanMime(file.type),
+    storage_status: "metadata_only_not_uploaded",
+    accessible_url: null,
+    download_url: null,
+  };
+}
+
+export async function storeUtilityBillAttachment(file: File, input: { eventId: string; funnelSlug?: string | null }): Promise<StoredUtilityBillAttachment> {
+  const originalContentType = cleanMime(file.type);
+  console.info("[UTILITY BILL UPLOAD]", {
+    event_id: input.eventId,
+    filename: file.name,
+    size_bytes: file.size,
+    content_type: originalContentType,
+  });
+
+  if (file.size <= 0) {
+    throw new UtilityBillAttachmentError("empty_file", "Utility bill file is empty.");
+  }
+  if (file.size > MAX_UTILITY_BILL_BYTES) {
+    throw new UtilityBillAttachmentError(
+      "too_large",
+      "Utility bill file is too large. Maximum size is 10MB.",
+    );
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const bytes = Buffer.from(arrayBuffer);
+  const header = new Uint8Array(arrayBuffer, 0, Math.min(32, arrayBuffer.byteLength));
+  const typeInfo = effectiveContentType(file, header);
+  const uploadedAt = new Date().toISOString();
+  const ext = extensionFor(typeInfo.contentType, file.name);
+  const safeName = cleanSegment(file.name.replace(/\.[^.]+$/, ""));
+  const funnel = cleanSegment(input.funnelSlug || "free-solar-estimate");
+  const storageKey = `intake/utility-bills/${funnel}/${input.eventId}/${Date.now()}-${randomUUID()}-${safeName}.${ext}`;
+  const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+  const allowLocalFallback = process.env.NODE_ENV !== "production";
+
+  if (blobToken) {
+    let blob: { url: string; downloadUrl?: string | null };
+    try {
+      const { put } = await import("@vercel/blob");
+      blob = await put(storageKey, bytes, {
+        access: "public",
+        contentType: typeInfo.contentType,
+        token: blobToken,
+      });
+    } catch (err) {
+      throw new UtilityBillAttachmentError(
+        "storage_failed",
+        "Utility bill upload storage is temporarily unavailable.",
+        { cause: err },
+      );
+    }
+    const stored = {
+      filename: file.name,
+      size_bytes: file.size,
+      content_type: typeInfo.contentType,
+      original_content_type: typeInfo.originalContentType,
+      detected_content_type: typeInfo.detectedContentType,
+      file_extension: ext,
+      storage_status: "stored" as const,
+      storage_provider: "vercel_blob" as const,
+      storage_key: storageKey,
+      uploaded_at: uploadedAt,
+      accessible_url: blob.url,
+      download_url: blob.downloadUrl || blob.url,
+    };
+    console.info("[ATTACHMENT STORED]", {
+      event_id: input.eventId,
+      storage_provider: stored.storage_provider,
+      storage_key: stored.storage_key,
+      size_bytes: stored.size_bytes,
+      content_type: stored.content_type,
+      original_content_type: stored.original_content_type,
+      detected_content_type: stored.detected_content_type,
+    });
+    return stored;
+  }
+
+  if (!allowLocalFallback) {
+    throw new UtilityBillAttachmentError(
+      "storage_unconfigured",
+      "Utility bill upload storage is not configured. Set BLOB_READ_WRITE_TOKEN for production uploads.",
+    );
+  }
+
+  const uploadsDir = join(process.cwd(), "public", "uploads", "intake", "utility-bills", funnel, input.eventId);
+  try {
+    await mkdir(uploadsDir, { recursive: true });
+  } catch (err) {
+    throw new UtilityBillAttachmentError(
+      "storage_failed",
+      "Utility bill upload storage is temporarily unavailable.",
+      { cause: err },
+    );
+  }
+  const localFileName = `${Date.now()}-${randomUUID()}-${safeName}.${ext}`;
+  try {
+    await writeFile(join(uploadsDir, localFileName), bytes);
+  } catch (err) {
+    throw new UtilityBillAttachmentError(
+      "storage_failed",
+      "Utility bill upload storage is temporarily unavailable.",
+      { cause: err },
+    );
+  }
+  const publicUrl = `/uploads/intake/utility-bills/${funnel}/${input.eventId}/${localFileName}`;
+  const stored = {
+    filename: file.name,
+    size_bytes: file.size,
+    content_type: typeInfo.contentType,
+    original_content_type: typeInfo.originalContentType,
+    detected_content_type: typeInfo.detectedContentType,
+    file_extension: ext,
+    storage_status: "stored" as const,
+    storage_provider: "local_public_uploads" as const,
+    storage_key: `public${publicUrl}`,
+    uploaded_at: uploadedAt,
+    accessible_url: publicUrl,
+    download_url: publicUrl,
+  };
+### lib/intake/utilityBillIntelligence.ts
+import { getDbReady } from "@/lib/db-neon";
+import { mapAiResultToBillExtractResult, parseUtilityBill } from "@/lib/billPipeline";
+import { extractBillWithClaude } from "@/lib/billClaudeExtractor";
+import { enrichBillData, type BillEnrichmentInput } from "@/lib/billEnrichment";
+import { confidenceFromBillExtractResult } from "@/lib/billConfidence";
+import { estimateSystemSize } from "@/lib/billParser";
+import { computeBillInsights } from "@/lib/billInsights";
+import { enrichAndPersistOpportunity } from "@/lib/network/opportunityEnrichment";
+import type { BillExtractResult } from "@/lib/billOcr";
+
+type SqlClient = Awaited<ReturnType<typeof getDbReady>>;
+type StoredBillMetadata = Record<string, unknown>;
+
+export const UTILITY_BILL_INTELLIGENCE_VERSION = "utility-bill-intelligence.v1";
+
+export interface UtilityBillIntelligenceInput {
+  eventId: string;
+  billMetadata?: StoredBillMetadata | null;
+  trigger?: "homeowner_intake" | "operator_review" | "system";
+}
+
+interface IntakeRow {
+  id: string;
+  event_id: string;
+  opportunity_id: string | null;
+  payload: Record<string, unknown> | null;
+  pipeline_result: Record<string, unknown> | null;
+  source_system: string | null;
+  source_channel: string | null;
+  funnel_id: string | null;
+  campaign_id: string | null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function str(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function num(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function bool(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return ["true", "yes", "1", "y"].includes(value.toLowerCase());
+  return false;
+}
+
+function average(values: number[]): number | null {
+  const clean = values.filter((value) => Number.isFinite(value) && value > 0);
+  if (!clean.length) return null;
+  return Math.round(clean.reduce((sum, value) => sum + value, 0) / clean.length);
+}
+
+function round2(value: number | null): number | null {
+  return value == null || !Number.isFinite(value) ? null : Math.round(value * 100) / 100;
+}
+
+function safeRawTextSample(text: string | undefined): string | null {
+  if (!text || !text.trim()) return null;
+  return text.replace(/\s+/g, " ").trim().slice(0, 1200);
+}
+
+function isImageMimeType(mimeType: string | null | undefined): boolean {
+  return typeof mimeType === "string" && mimeType.toLowerCase().startsWith("image/");
+}
+
+function safeObjectKeys(value: unknown): string[] {
+  return isRecord(value) ? Object.keys(value).sort() : [];
+}
+
+function extractedFieldCount(parsed: BillExtractResult | null | undefined): number {
+  return parsed?.extractedFields?.length ?? 0;
+}
+
+function monthsFound(parsed: BillExtractResult | null | undefined): number {
+  return parsed?.monthlyUsageHistory?.filter((value) => Number.isFinite(value) && value > 0).length ?? 0;
+}
+
+function logAdminBillAudit(label: string, payload: Record<string, unknown>): void {
+  console.info(label, payload);
+}
+
+function hasUsefulBillData(parsed: BillExtractResult): boolean {
+  return (
+    (parsed.extractedFields?.length ?? 0) >= 2 ||
+    ((parsed.monthlyKwh ?? 0) > 0) ||
+    (parsed.monthlyUsageHistory?.length ?? 0) >= 3
+  );
+}
+
+function buildExtractionEvidence(input: {
+  parsed: BillExtractResult;
+  source: "claude-image" | "pipeline";
+  extractionMethod: string | null;
+  claudeStatus?: string | null;
+  claudeValidationFlags?: unknown;
+}) {
+  const parsed = input.parsed;
+  return {
+    monthlySource: input.source,
+    monthlyConfidence:
+      input.source === "claude-image"
+        ? input.claudeStatus === "complete"
+          ? 95
+          : 65
+        : parsed.confidence === "high"
+          ? 90
+          : parsed.confidence === "medium"
+            ? 60
+            : 30,
+    monthsFound: parsed.monthlyUsageHistory?.length ?? 0,
+    monthlyEvidence:
+      input.source === "claude-image"
+        ? `Claude image parser: ${(parsed.extractedFields ?? []).join(", ")}`
+        : `AI pipeline: ${(parsed.extractedFields ?? []).join(", ")}`,
+    annualSource: parsed.annualKwh || parsed.estimatedAnnualKwh ? (input.source === "claude-image" ? "claude" : "ai") : "derived",
+    annualSourceText: null,
+    utilitySource: parsed.utilityProvider ? (input.source === "claude-image" ? "claude" : "ai") : "none",
+    rateSource: parsed.electricityRate ? (input.source === "claude-image" ? "claude" : "ai") : "none",
+    debugLog: [
+      input.source === "claude-image"
+        ? `[claude-image] status=${input.claudeStatus ?? "unknown"} validationFlags=${JSON.stringify(input.claudeValidationFlags ?? {})}`
+        : `[pipeline] method=${input.extractionMethod ?? "pipeline"} fields=${(parsed.extractedFields ?? []).join(",")}`,
+    ],
+  };
+}
+
+function buildDashboardParserResult(input: {
+  parsed: BillExtractResult;
+  extractionMethod: string | null;
+  extractionEvidence: Record<string, unknown>;
+  durationMs: number;
+  parserPath: "claude-image" | "pipeline";
+  claude?: {
+    status: string | null;
+    model: string | null;
+    inputType: string | null;
+    validationFlags: unknown;
+  } | null;
+}) {
+  const { rawText: _rawText, ...safeBillData } = input.parsed;
+  return {
+    success: true,
+    billData: {
+      ...safeBillData,
+      rawTextSample: safeRawTextSample(input.parsed.rawText),
+    },
+    extractionEvidence: input.extractionEvidence,
+    extractionMethod: input.extractionMethod,
+    parserPath: input.parserPath,
+    elapsedMs: input.durationMs,
+    claude: input.claude ?? null,
+    locationData: null,
+    utilityData: null,
+    matchedUtility: null,
+    systemSizing: null,
+    rateValidation: null,
+    validation: { valid: true, warnings: [], errors: [] },
+  };
+}
+
+type IntakeBillParseResult = {
+  success: boolean;
+  data?: BillExtractResult;
+  rawText?: string;
+  extractionMethod?: string;
+  error?: string;
+  parserPath?: "claude-image" | "pipeline";
+  extractionEvidence?: Record<string, unknown>;
+  claude?: {
+    status: string | null;
+    model: string | null;
+    inputType: string | null;
+    validationFlags: unknown;
+  } | null;
+};
+
+async function parseStoredBillWithDashboardParity(buffer: Buffer, mimeType: string, eventId: string): Promise<IntakeBillParseResult> {
+  const imageMimeType = isImageMimeType(mimeType);
+  const anthropicKeyPresent = !!process.env.ANTHROPIC_API_KEY;
+  logAdminBillAudit("[ADMIN_BILL_PARSER_SELECTED]", {
+    intake_event_id: eventId,
+    mime_type: mimeType,
+    buffer_byte_length: buffer.length,
+    is_image_mime_type: imageMimeType,
+    anthropic_key_present: anthropicKeyPresent,
+    selected_parser_path: imageMimeType && anthropicKeyPresent ? "claude-image" : "pipeline",
+  });
+
+  if (imageMimeType && anthropicKeyPresent) {
+    try {
+      logAdminBillAudit("[ADMIN_BILL_CLAUDE_START]", {
+        intake_event_id: eventId,
+        mime_type: mimeType,
+        buffer_byte_length: buffer.length,
+      });
+      const claudeResult = await extractBillWithClaude({ imageBuffer: buffer, mimeType }, { timeoutMs: 40000 });
+      if (claudeResult && claudeResult.status !== "failed") {
+        const parsed = mapAiResultToBillExtractResult(
+          claudeResult.data,
+          `[claude-image] status=${claudeResult.status}`,
+          "claude-3-5-sonnet",
+        );
+        const useful = hasUsefulBillData(parsed);
+        logAdminBillAudit("[ADMIN_BILL_CLAUDE_RESULT]", {
+          intake_event_id: eventId,
+          claude_executed: true,
+          claude_status: claudeResult.status,
+          claude_model: claudeResult.model,
+          claude_input_type: claudeResult.inputType,
+          extracted_field_count: extractedFieldCount(parsed),
+          months_found: monthsFound(parsed),
+          has_useful_bill_data: useful,
+          validation_flag_keys: safeObjectKeys(claudeResult.validationFlags),
+        });
+        if (useful) {
+          const extractionEvidence = buildExtractionEvidence({
+            parsed,
+            source: "claude-image",
+            extractionMethod: "claude-3-5-sonnet",
+            claudeStatus: claudeResult.status,
+            claudeValidationFlags: claudeResult.validationFlags,
+          });
+          return {
+            success: true,
+            data: parsed,
+            rawText: parsed.rawText,
+            extractionMethod: "claude-3-5-sonnet",
+            parserPath: "claude-image",
+            extractionEvidence,
+            claude: {
+              status: claudeResult.status,
+              model: claudeResult.model,
+              inputType: claudeResult.inputType,
+              validationFlags: claudeResult.validationFlags,
+            },
+          };
+        }
+      }
+    } catch (err) {
+      console.warn("[ADMIN_BILL_CLAUDE_RESULT]", {
+        intake_event_id: eventId,
+        claude_executed: true,
+        claude_status: "error",
+        error: err instanceof Error ? err.message : String(err),
+      });
+      console.warn("[UTILITY BILL INTELLIGENCE] claude_image_failed_falling_back", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  } else {

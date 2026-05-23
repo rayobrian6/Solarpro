@@ -1,0 +1,260 @@
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const revalidate = 0;
+
+import { NextRequest, NextResponse } from 'next/server';
+import { parseBillText, validateBillData, extractBillDataWithAI } from '@/lib/billOcr';
+import type { BillExtractResult } from '@/lib/billOcr';
+import { getUserFromRequest } from '@/lib/auth';
+import { extractPdfTextPure } from '@/lib/pdfExtract';
+import { logEnvStatus } from '@/lib/env-check';
+// v47.213: Universal bill parsing pipeline (Layer 1 + 2 + 3)
+import { parseUtilityBill, mapAiResultToBillExtractResult } from '@/lib/billPipeline';
+// v47.306: Bill Intelligence Layer
+import { computeBillInsights } from '@/lib/billInsights';
+// v48.0: Claude 3.5 Sonnet LMM Extraction Engine (direct image path)
+import { extractBillWithClaude } from '@/lib/billClaudeExtractor';
+// v48.1: Post-parse utility normalization + DB enrichment layer
+import { enrichBillData, type BillEnrichmentInput } from '@/lib/billEnrichment';
+// v48.2: Confidence scoring layer
+import { confidenceFromBillExtractResult } from '@/lib/billConfidence';
+import { logger } from '@/lib/logger';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+
+// ── Magic byte validation for bill uploads ──────────────────────────────────
+// Accepted: PDF, JPEG, PNG, WebP, GIF, TIFF, BMP
+function isValidBillFileMagic(buf: Buffer): boolean {
+  if (buf.length < 4) return false;
+  // PDF: %PDF (25 50 44 46)
+  if (buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46) return true;
+  // JPEG: FF D8 FF
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return true;
+  // PNG: 89 50 4E 47
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return true;
+  // WebP: RIFF????WEBP
+  if (buf.length >= 12 &&
+      buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+      buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return true;
+  // GIF: GIF87a or GIF89a (47 49 46)
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return true;
+  // TIFF: little-endian (49 49 2A 00) or big-endian (4D 4D 00 2A)
+  if (buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2A && buf[3] === 0x00) return true;
+  if (buf[0] === 0x4D && buf[1] === 0x4D && buf[2] === 0x00 && buf[3] === 0x2A) return true;
+  // BMP: BM (42 4D)
+  if (buf[0] === 0x42 && buf[1] === 0x4D) return true;
+  return false;
+}
+
+// Log env status once per cold start for deployment observability
+logEnvStatus('bill-upload');
+
+// v48.1: Fire-and-forget enrichment helper — runs after every successful parse.
+// v48.2: Also computes full confidence score using all available BillExtractResult fields.
+// Never throws, never blocks the response. Logs results for observability.
+function runEnrichmentAsync(billData: BillExtractResult, stateHint?: string | null): void {
+  const input: BillEnrichmentInput = {
+    utilityName:        billData.utilityProvider ?? null,
+    state:              stateHint ?? null,
+    parsedRate:         billData.electricityRate ?? null,
+    monthlyKwh:         billData.monthlyKwh ?? null,
+    annualKwh:          billData.annualKwh ?? billData.estimatedAnnualKwh ?? null,
+    monthlyHistory:     billData.monthlyUsageHistory ?? null,
+    billingPeriodStart: billData.billingPeriodStart ?? null,
+    billingPeriodEnd:   billData.billingPeriodEnd ?? null,
+  };
+  enrichBillData(input).then(result => {
+    console.log(
+      `[ENRICHMENT_COMPLETE] canonicalId=${result.canonicalId ?? 'none'}` +
+      ` rateSource=${result.rateSource} effectiveRate=${result.effectiveRate ?? 'null'}` +
+      ` dbAction=${result.dbAction} rateCorrected=${result.rateCorrected}` +
+      ` validation=${JSON.stringify(result.validation)}`
+    );
+
+    // v48.2: Compute full confidence using all BillExtractResult fields
+    // (enrichment confidence uses a subset; this one has customer, address, account, etc.)
+    const confidence = confidenceFromBillExtractResult(billData, result.rateSource);
+
+    // Phase 4: Dev-only confidence debug log
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(
+        `[CONFIDENCE_SCORE] overall=${confidence.overall}` +
+        ` usage=${confidence.usage} rate=${confidence.rate} completeness=${confidence.completeness}` +
+        ` rateSource=${confidence._debug.rateSource}` +
+        ` months=${confidence._debug.monthsFound} hasAnnual=${confidence._debug.hasAnnual}` +
+        ` fields=${confidence._debug.fieldsPresent}/5`
+      );
+    }
+
+    // Attach to billData.meta (additive — never overwrites existing fields)
+    // This mutates the local copy only; the HTTP response is already sent.
+    // The confidence is available in Vercel logs for observability.
+    (billData as any).meta = {
+      ...((billData as any).meta ?? {}),
+      confidence,
+    };
+  }).catch(err => {
+    logger.warn('BILL', '[ENRICHMENT_ERROR] background enrichment threw (non-fatal):', err instanceof Error ? (err as Error).message : err);
+  });
+}
+
+// billOcrEngine and billParser are imported dynamically inside extractImageTextSmart()
+// to prevent webpack from bundling tesseract.js worker_threads at module load time.
+// Static import of tesseract.js causes HTML 500 errors before the route handler runs.
+
+// Top-level reference so webpack marks pdf-parse as external (not bundled)
+let PDFParse: any = null;
+try {
+  const pdfParseModule = require('pdf-parse');
+  PDFParse = pdfParseModule.PDFParse ?? pdfParseModule.default?.PDFParse ?? null;
+} catch (e) {
+  logger.warn('BILL', '[bill-upload] pdf-parse not available:', e instanceof Error ? e.message : e);
+}
+
+// Vercel: OCR+parse only — must complete in < 30s (well under 60s limit)
+// Geocoding, utility matching, sizing moved to /api/system-size
+export const maxDuration = 60; // v47.25: increased for OpenAI Vision fallback on Vercel
+
+// POST /api/bill-upload
+// Responsibilities: buffer creation, OCR/text extraction, bill field parsing.
+// Does NOT: geocode, match utility, validate rate, calculate system size, create DB records.
+// All heavy async work happens in /api/system-size (called by frontend after this returns).
+
+function safeJsonError(msg: string, status = 500): NextResponse {
+  return NextResponse.json({ success: false, error: msg }, { status });
+}
+
+// 6-second timeout guard — returns a rejected promise after ms
+function timeoutAfter(ms: number): Promise<never> {
+  return new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`Operation timed out after ${ms}ms`)), ms)
+  );
+}
+
+export async function POST(req: NextRequest) {
+  const startMs = Date.now();
+
+  // ── JSON Error Boundary ────────────────────────────────────────────────────
+  try {
+    // v48.6: Rate limiting — 5 req / 30s per IP (protects Claude + OCR costs)
+    const rl = await checkRateLimit('bill-upload', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { success: false, error: 'Too many requests. Please wait before uploading another bill.' },
+        { status: 429 }
+      );
+    }
+
+    const user = await getUserFromRequest(req);
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const formData = await req.formData();
+    const file = formData.get('file') as File | null;
+    const rawText = formData.get('text') as string | null;
+
+    if (!file && !rawText) {
+      return NextResponse.json({ success: false, error: 'No file or text provided' }, { status: 400 });
+    }
+
+    logger.debug('BILL', `[UPLOAD_RECEIVED] file=${file?.name ?? 'none'} size=${file?.size ?? 0} hasText=${!!rawText} openai=${!!process.env.OPENAI_API_KEY} ts=${new Date().toISOString()}`);
+    logger.debug('BILL', `[BILL_UPLOAD_STARTED] file=${file?.name ?? 'none'} size=${file?.size ?? 0} hasText=${!!rawText} openai=${!!process.env.OPENAI_API_KEY}`);
+
+    let extractedText = rawText || '';
+    let extractionMethod = 'text';
+
+    if (file) {
+      const MAX_SIZE = 10 * 1024 * 1024;
+      if (file.size > MAX_SIZE) {
+        return NextResponse.json({ success: false, error: 'File too large. Maximum size is 10MB.' }, { status: 413 });
+      }
+
+      const fileType = file.type;
+      const fileName = file.name.toLowerCase();
+
+      logger.debug('BILL', `[FILE_RECEIVED] name=${fileName} type=${fileType} size=${file.size} openai=${!!process.env.OPENAI_API_KEY}`);
+
+      // Create buffer ONCE — used for ALL downstream operations (OCR, PDF parse, save)
+      const buffer = Buffer.from(await file.arrayBuffer());
+      logger.debug('BILL', `[FILE_BUFFER_CREATED] bytes=${buffer.length} mime=${fileType}`);
+      logger.debug('BILL', `[FILE_SIZE_BYTES] bytes=${buffer.length} kb=${Math.round(buffer.length/1024)} mime=${fileType} name=${fileName}`);
+      if (buffer.length === 0) {
+        console.error('[FILE_BUFFER_CREATED] ERROR: buffer is 0 bytes — file.arrayBuffer() returned empty');
+        return NextResponse.json({ success: false, error: 'File buffer is empty. Please try uploading again.', stage: 'buffer' }, { status: 422 });
+      }
+
+      // ── Magic byte validation — reject files whose binary signature doesn't match their declared type ──
+      if (!isValidBillFileMagic(buffer)) {
+        logger.warn('BILL', `[MAGIC_BYTE_REJECTED] name=${fileName} mime=${fileType} size=${buffer.length}`);
+        return NextResponse.json(
+          { success: false, error: 'Unsupported or invalid file format. Please upload a PDF, JPG, PNG, WebP, GIF, TIFF, or BMP.' },
+          { status: 400 }
+        );
+      }
+
+      if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
+        // v47.213: Try universal pipeline (extract + AI parse) first.
+        // If it succeeds with enough data, return immediately (bypass legacy deterministic path).
+        // If it fails or returns insufficient data, fall through to legacy path as safety net.
+        logger.debug('BILL', `[PDF_PIPELINE_STARTED] ms=${Date.now() - startMs}`);
+        try {
+          const pipelineResult = await Promise.race([
+            parseUtilityBill(buffer, 'application/pdf'),
+            timeoutAfter(55000).catch(() => ({
+              success: false as const,
+              error: 'pipeline timeout',
+              rawText: '',
+              extractionMethod: 'timeout',
+            })),
+          ]);
+
+          const pr = pipelineResult as { success: boolean; data?: BillExtractResult; rawText?: string; extractionMethod?: string; error?: string };
+          logger.debug('BILL', `[PDF_PIPELINE_RESULT] success=${pr.success} method=${pr.extractionMethod} fields=${pr.data?.extractedFields?.length ?? 0} ms=${Date.now() - startMs}`);
+
+          if (pr.success && pr.data) {
+            const pd = pr.data;
+            const hasUsefulData = (pd.extractedFields?.length ?? 0) >= 2
+              || (pd.monthlyKwh !== undefined && pd.monthlyKwh > 0)
+              || (pd.monthlyUsageHistory?.length ?? 0) >= 3;
+
+            if (hasUsefulData) {
+              logger.debug('BILL', `[PDF_PIPELINE_SUCCESS] fields=${pd.extractedFields.length} confidence=${pd.confidence} returning early`);
+              const extractionEvidence = {
+                monthlySource: 'ai-pipeline',
+                monthlyConfidence: pd.confidence === 'high' ? 90 : pd.confidence === 'medium' ? 60 : 30,
+                monthsFound: pd.monthlyUsageHistory?.length ?? 0,
+                monthlyEvidence: `AI pipeline: ${pd.extractedFields.join(', ')}`,
+                annualSource: pd.annualKwh ? 'ai' : 'derived',
+                annualSourceText: null,
+                utilitySource: pd.utilityProvider ? 'ai' : 'none',
+                rateSource: pd.electricityRate ? 'ai' : 'none',
+                debugLog: [`[pipeline] method=${pr.extractionMethod} fields=${pd.extractedFields.join(',')}`],
+              };
+              const elapsedMs = Date.now() - startMs;
+              logger.debug('BILL', `[BILL_UPLOAD_RETURNING] fields=${pd.extractedFields.length} confidence=${pd.confidence} elapsedMs=${elapsedMs} path=pipeline`);
+              // v48.1: Fire-and-forget enrichment (normalize utility, upsert DB, validate rate)
+              runEnrichmentAsync(pd);
+              return NextResponse.json({
+                success: true,
+                billData: pd,
+                extractionEvidence,
+                extractionMethod: pr.extractionMethod ?? 'pipeline',
+                locationData: null,
+                utilityData: null,
+                matchedUtility: null,
+                systemSizing: null,
+                rateValidation: null,
+                validation: { valid: true, warnings: [], errors: [] },
+              });
+            }
+            logger.debug('BILL', `[PDF_PIPELINE_INSUFFICIENT] fields=${pd.extractedFields?.length ?? 0} falling through to legacy`);
+          } else {
+            logger.debug('BILL', `[PDF_PIPELINE_FAILED] error=${pr.error ?? 'unknown'} falling through to legacy`);
+          }
+
+          // Reuse pipeline's extracted text for the legacy path if available
+          if (pr.rawText && pr.rawText.length > 50) {
+            extractedText = pr.rawText;
+            extractionMethod = pr.extractionMethod ?? 'pdf-parse';
+            logger.debug('BILL', `[PDF_PIPELINE_TEXT_REUSE] chars=${extractedText.length} method=${extractionMethod}`);
+          }
