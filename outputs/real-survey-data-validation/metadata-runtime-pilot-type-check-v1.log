@@ -1,0 +1,6 @@
+== Running type-check: npm run type-check ==
+
+> solar-platform@1.0.0 type-check
+> tsc --noEmit
+
+== Exit type-check: 0 ==

@@ -3,7 +3,7 @@ import { verifyToken } from '@/lib/auth';
 import { getProjectsByUser } from '@/lib/db-neon';
 import { buildEngineeringIntelligenceWorkspace } from '@/lib/engineeringIntelligence';
 import { acceptCandidate, createCandidate, markReviewRequired } from '@/lib/assistedEvidence';
-import { generateMetadataFixtureCandidates, generateOcrFixtureCandidates } from '@/lib/assistedEvidenceSources';
+import { generateMetadataFixtureCandidates, generateMetadataRuntimeCandidates, generateOcrFixtureCandidates } from '@/lib/assistedEvidenceSources';
 import type { Project } from '@/types';
 import {
   AssistedEvidenceSandboxWorkspace,
@@ -40,6 +40,7 @@ export default async function EngineeringIntelligencePage() {
   const sessionUser = token ? verifyToken(token) : null;
   const projectList = await loadProjectPickerRecords(sessionUser?.id);
   const model = buildEngineeringIntelligenceWorkspace();
+  const assistedEvidenceSandbox = await buildAssistedEvidenceSandboxPanel();
 
   return (
     <WorkspaceShell
@@ -49,7 +50,7 @@ export default async function EngineeringIntelligencePage() {
     >
       <ProjectIntelligencePicker projects={projectList.projects} loadState={projectList.loadState} />
       <EngineeringHealthDashboard health={model.health} />
-      <AssistedEvidenceSandboxWorkspace sandbox={buildAssistedEvidenceSandboxPanel()} />
+      <AssistedEvidenceSandboxWorkspace sandbox={assistedEvidenceSandbox} />
       <EngineeringWorkflowOrchestrationWorkspace orchestration={model.workflowOrchestration} />
       <div className="grid gap-6 2xl:grid-cols-2">
         <SurveyFollowUpQueueWorkspace orchestration={model.workflowOrchestration} />
@@ -101,7 +102,7 @@ async function loadProjectPickerRecords(userId: string | undefined): Promise<{ p
 }
 
 
-function buildAssistedEvidenceSandboxPanel() {
+async function buildAssistedEvidenceSandboxPanel() {
   const candidate = markReviewRequired(createCandidate({
     sourceFileId: 'fixture-assisted-file-1',
     sourceUploadKey: 'fixtures/assisted-evidence/manual-roof-edge.jpg',
@@ -165,9 +166,27 @@ function buildAssistedEvidenceSandboxPanel() {
       { signalId: 'admin-ocr-signal-equipment-label', field: 'possible_equipment_label_text', text: 'INV-1 FIXTURE', confidence: 0.51, limitationRefs: ['fixture-text-only'] },
     ],
   });
+  const runtimeContext = {
+    sourceFileId: 'runtime-source-open-source-1',
+    sourceUploadKey: 'runtime/assisted-evidence-sources/runtime-source-open-source-1.png',
+    projectId: 'fixture-project-assisted',
+    surveyId: 'fixture-survey-assisted',
+    toolRunId: 'metadata-runtime-run-1',
+    toolConfigHash: 'metadata-runtime-config-v1',
+    sourceMetadataHash: 'metadata-runtime-source-hash-v1',
+    createdAt: '2025-01-04T00:00:00.000Z',
+    createdBy: 'engineering-intelligence-demo',
+  };
+  const runtimeMetadata = await generateMetadataRuntimeCandidates(runtimeContext, new Uint8Array([
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
+    0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, 144, 119, 83, 222,
+    0, 0, 0, 12, 73, 68, 65, 84, 8, 153, 99, 248, 207, 192, 0, 0,
+    3, 1, 1, 0, 24, 221, 141, 176, 0, 0, 0, 0, 73, 69, 78, 68,
+    174, 66, 96, 130,
+  ]));
   return {
-    candidates: [candidate, accepted.candidate, ...metadataFixtures.candidates, ...ocrFixtures.candidates],
+    candidates: [candidate, accepted.candidate, ...metadataFixtures.candidates, ...ocrFixtures.candidates, ...runtimeMetadata.candidates],
     projections: [accepted.projection],
-    warning: 'FIXTURE DATA ONLY: candidate metadata is non-authoritative, review-required, and cannot affect engineering truth until separately reviewed and explicitly mapped in a future approved layer.',
+    warning: 'FIXTURE AND RUNTIME PILOT DATA ONLY: candidate metadata is non-authoritative, review-required, and cannot affect engineering truth until separately reviewed and explicitly mapped in a future approved layer.',
   };
 }

@@ -58,19 +58,26 @@ export function toCreateCandidateInput(
     },
     candidateSummary: normalized.candidateSummary,
     candidateClaims: normalized.candidateClaims,
-    candidateLimitations: sortedUnique([...normalized.candidateLimitations, 'fixture-only', 'non-authoritative', 'review-required']),
+    candidateLimitations: sortedUnique([
+      ...normalized.candidateLimitations,
+      tool.runtimeCategory === 'fixture_only' ? 'fixture-only' : 'runtime-pilot',
+      'non-authoritative',
+      'review-required',
+    ]),
     createdAt: sourceContext.createdAt,
     provenance: {
       source: 'future_assisted_tool_placeholder',
       createdBy: sourceContext.createdBy,
       deterministicInputs: sortedUnique([
         'registered-open-source-tool',
-        'fixture-payload',
+        tool.runtimeCategory === 'fixture_only' ? 'fixture-payload' : 'runtime-payload',
         'source-context',
         ...normalized.deterministicInputRefs,
       ]),
       notes: sortedUnique([
-        'Fixture-only adapter output; no runtime OCR/CV/image processing executed.',
+        tool.runtimeCategory === 'fixture_only'
+          ? 'Fixture-only adapter output; no runtime OCR/CV/image processing executed.'
+          : 'Controlled metadata runtime pilot output; no OCR/CV/semantic image understanding executed.',
         `Registered source tool ${tool.toolName}@${tool.toolVersion}.`,
         `License posture ${tool.licensePosture}.`,
       ]),

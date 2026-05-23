@@ -48,10 +48,46 @@ export const OPEN_SOURCE_FIXTURE_TOOLS: readonly OpenSourceToolDefinition[] = [
   },
 ] as const;
 
+export const OPEN_SOURCE_RUNTIME_TOOLS: readonly OpenSourceToolDefinition[] = [
+  {
+    toolName: 'sharp-metadata-runtime',
+    toolVersion: '0.34.5',
+    sourceUrl: 'https://github.com/lovell/sharp',
+    license: 'Apache-2.0',
+    runtimeCategory: 'image_metadata',
+    allowedCandidateTypes: ['orientation_candidate', 'photo_quality_candidate', 'duplicate_similarity_candidate'],
+    allowedCandidateCategories: ['orientation', 'quality', 'duplicate_hygiene'],
+    requiresImageBytes: true,
+    requiresNativeBinaries: true,
+    requiresModelWeights: false,
+    browserCompatible: false,
+    serverOnly: true,
+    reviewRequired: true,
+    canonicalMutationAllowed: false,
+    allowedRuntimeBoundary: 'server_adapter_contract',
+    deterministicReplaySupport: 'runtime_payload_hash_required',
+    riskLevel: 'low',
+    enabledStatus: 'enabled_for_runtime_pilot',
+    maintainedStatus: 'maintained',
+    registryNotes: [
+      'First controlled runtime pilot for metadata and photo quality extraction only.',
+      'Uses sharp metadata APIs only; excluded capabilities remain outside this pilot by boundary policy.',
+      'Runtime execution is server-only and adapter-contained.',
+    ],
+  },
+] as const;
+
+export const OPEN_SOURCE_ASSISTED_EVIDENCE_TOOLS: readonly OpenSourceToolDefinition[] = [
+  ...OPEN_SOURCE_FIXTURE_TOOLS,
+  ...OPEN_SOURCE_RUNTIME_TOOLS,
+] as const;
+
 export const VALIDATED_OPEN_SOURCE_FIXTURE_TOOLS: readonly ValidatedOpenSourceToolDefinition[] = validateOpenSourceToolRegistry(OPEN_SOURCE_FIXTURE_TOOLS);
+export const VALIDATED_OPEN_SOURCE_RUNTIME_TOOLS: readonly ValidatedOpenSourceToolDefinition[] = validateOpenSourceToolRegistry(OPEN_SOURCE_RUNTIME_TOOLS);
+export const VALIDATED_OPEN_SOURCE_ASSISTED_EVIDENCE_TOOLS: readonly ValidatedOpenSourceToolDefinition[] = validateOpenSourceToolRegistry(OPEN_SOURCE_ASSISTED_EVIDENCE_TOOLS);
 
 export function getRegisteredOpenSourceTool(toolName: string, toolVersion: string): ValidatedOpenSourceToolDefinition {
-  const tool = VALIDATED_OPEN_SOURCE_FIXTURE_TOOLS.find(candidate => candidate.toolName === toolName && candidate.toolVersion === toolVersion);
+  const tool = VALIDATED_OPEN_SOURCE_ASSISTED_EVIDENCE_TOOLS.find(candidate => candidate.toolName === toolName && candidate.toolVersion === toolVersion);
   if (!tool) throw new Error(`Unregistered open-source assisted evidence tool cannot execute: ${toolName}@${toolVersion}.`);
   return tool;
 }

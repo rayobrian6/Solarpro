@@ -8,3 +8,4 @@ export * from './candidateConfidenceRules';
 export * from './candidateNormalization';
 export * from './metadataFixtureAdapter';
 export * from './ocrFixtureAdapter';
+export * from './metadataRuntimeAdapter';

@@ -1,6 +1,6 @@
 import type { OpenSourceToolLicensePosture } from './openSourceToolTypes';
 
-const APPROVED_LICENSES = new Set(['MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', 'ISC']);
+const APPROVED_LICENSES = new Set(['MIT', 'APACHE-2.0', 'BSD-2-CLAUSE', 'BSD-3-CLAUSE', 'ISC']);
 const CAUTION_LICENSES = new Set(['MPL-2.0', 'LGPL-2.1', 'LGPL-3.0']);
 const BLOCKED_LICENSES = new Set(['GPL', 'GPL-2.0', 'GPL-3.0', 'AGPL', 'AGPL-3.0', 'SSPL', 'UNKNOWN', 'UNLICENSED', 'NON-COMMERCIAL', 'RESEARCH-ONLY']);
 

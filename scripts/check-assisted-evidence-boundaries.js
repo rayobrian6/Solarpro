@@ -15,6 +15,14 @@ const CANONICAL_FORBIDDEN_IMPORT_TARGETS = [
   'lib/engineeringIntelligence/workflowOrchestration.ts',
 ];
 
+const APPROVED_METADATA_RUNTIME_IMPORT_FILES = new Set([
+  'lib/assistedEvidenceSources/metadataRuntimeAdapter.ts',
+]);
+
+const APPROVED_METADATA_RUNTIME_IMPORTS = new Set([
+  'sharp',
+]);
+
 const FORBIDDEN_SOURCE_IMPORTS = [
   'lib/survey/evidence',
   'lib/engineeringIntelligence/signalExtraction',
@@ -86,6 +94,9 @@ for (const file of sourceFiles()) {
         violations.push(`${relative}: forbidden canonical/engineering import '${specifier}'.`);
       }
     }
+    if (APPROVED_METADATA_RUNTIME_IMPORTS.has(specifier) && !APPROVED_METADATA_RUNTIME_IMPORT_FILES.has(relative)) {
+      violations.push(`${relative}: metadata runtime import '${specifier}' is only allowed in approved source adapter files.`);
+    }
   }
 
   lines.forEach((line, index) => {
@@ -99,7 +110,7 @@ for (const file of sourceFiles()) {
     }
   });
 
-  const isAdapterFile = /FixtureAdapter\.ts$/.test(relative) || /candidateNormalization\.ts$/.test(relative);
+  const isAdapterFile = /FixtureAdapter\.ts$/.test(relative) || /RuntimeAdapter\.ts$/.test(relative) || /candidateNormalization\.ts$/.test(relative);
   if (isAdapterFile) {
     if (!/createCandidate|createReviewRequiredCandidates/.test(text)) {
       violations.push(`${relative}: adapter foundation must route candidate creation through createCandidate() or the shared createReviewRequiredCandidates() helper.`);

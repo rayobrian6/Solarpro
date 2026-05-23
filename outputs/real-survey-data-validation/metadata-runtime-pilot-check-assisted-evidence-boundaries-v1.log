@@ -1,0 +1,7 @@
+== Running check-assisted-evidence-boundaries: npm run check:assisted-evidence-boundaries ==
+
+> solar-platform@1.0.0 check:assisted-evidence-boundaries
+> node scripts/check-assisted-evidence-boundaries.js
+
+Assisted evidence boundary guard passed. Scanned 8 assistedEvidence files, 14 assistedEvidenceSources files, and 7 canonical/Engineering Intelligence boundary files.
+== Exit check-assisted-evidence-boundaries: 0 ==

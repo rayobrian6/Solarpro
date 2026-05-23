@@ -13,7 +13,7 @@ export type OpenSourceRuntimeBoundary = 'fixture_static' | 'server_adapter_contr
 
 export type OpenSourceToolRiskLevel = 'low' | 'moderate' | 'high' | 'blocked';
 
-export type OpenSourceToolEnabledStatus = 'enabled_for_fixtures' | 'disabled_pending_runtime_review' | 'blocked';
+export type OpenSourceToolEnabledStatus = 'enabled_for_fixtures' | 'enabled_for_runtime_pilot' | 'disabled_pending_runtime_review' | 'blocked';
 
 export type DeterministicReplaySupport = 'fixture_replay_only' | 'runtime_payload_hash_required' | 'blocked_not_replayable';
 
