@@ -1,0 +1,13 @@
+
+> solar-platform@1.0.0 check:topology
+> node scripts/check-dependency-topology.js
+
+Dependency topology guard scanned 747 source files.
+Circular dependencies: 1
+1) [unprotected] lib/utilityDetector.ts > lib/proposalTruthEngine.ts > lib/utilityDetector.ts
+Directional architecture warnings: 3
+Hard directional violations: 0
+1) lib/documentProvenance/builders.ts (document-provenance-bindings) -> lib/engineeringDecisionProvenance/evaluator.ts (engineering-decision-provenance)
+2) lib/engineeringDecisionProvenance/evaluator.ts (engineering-decision-provenance) -> lib/engineeringStateInvalidation/hash.ts (state-invalidation-regeneration)
+3) lib/survey/evidence/engineeringRequirements.ts (requirement-registry-evaluation) -> lib/survey/evidence/provenance.ts (provenance-traceability)
+Dependency topology guard passed.

@@ -1,0 +1,716 @@
+{
+  "generatedAt": "2026-05-23T19:53:12.417Z",
+  "scannedFileCount": 578,
+  "findingCount": 7361,
+  "directRuntimeFindingCount": 191,
+  "engineeringBoundaryRuntimeRiskCount": 21,
+  "packageDependencies": {
+    "@types/pdf-parse": "^1.1.5",
+    "exif-reader": "^2.0.3",
+    "pdf-parse": "^2.4.5",
+    "sharp": "^0.34.5",
+    "tesseract.js": "^7.0.0"
+  },
+  "classificationCounts": {
+    "engineering-evidence-boundary": 43,
+    "active-production-path": 18,
+    "reachable-or-ui-adjacent": 236,
+    "audit-or-maintenance-script": 16,
+    "dependency-only": 2,
+    "test-only": 63,
+    "reachable-debug-route": 7
+  },
+  "activeRuntimeFiles": [
+    {
+      "file": "app/api/bill-upload/route.ts",
+      "tokens": {
+        "claude_vision": 7,
+        "upload_transform": 57,
+        "canonical_mutation": 4,
+        "tesseract": 33,
+        "ocr": 50,
+        "pdf_parse": 36,
+        "cloud_vision": 24,
+        "image_byte": 3,
+        "exif": 1
+      },
+      "lineCategories": {
+        "general_reference": 148,
+        "truth_boundary_reference": 4,
+        "ocr_text_extraction_runtime": 60,
+        "file_buffer_or_storage_runtime": 3
+      },
+      "count": 215
+    },
+    {
+      "file": "app/api/ocr/route.ts",
+      "tokens": {
+        "ocr": 41,
+        "tesseract": 30,
+        "upload_transform": 18,
+        "exif": 2,
+        "image_byte": 4
+      },
+      "lineCategories": {
+        "general_reference": 88,
+        "file_buffer_or_storage_runtime": 4,
+        "direct_tesseract_runtime": 3
+      },
+      "count": 95
+    },
+    {
+      "file": "app/api/project-files/route.ts",
+      "tokens": {
+        "upload_transform": 52,
+        "image_byte": 2,
+        "canonical_mutation": 2
+      },
+      "lineCategories": {
+        "general_reference": 54,
+        "file_buffer_or_storage_runtime": 2
+      },
+      "count": 56
+    },
+    {
+      "file": "lib/intake/utilityBillAttachment.ts",
+      "tokens": {
+        "upload_transform": 54,
+        "image_byte": 2
+      },
+      "lineCategories": {
+        "general_reference": 53,
+        "file_buffer_or_storage_runtime": 3
+      },
+      "count": 56
+    },
+    {
+      "file": "app/api/survey/upload-photo/route.ts",
+      "tokens": {
+        "upload_transform": 46,
+        "image_byte": 3
+      },
+      "lineCategories": {
+        "general_reference": 45,
+        "file_buffer_or_storage_runtime": 4
+      },
+      "count": 49
+    },
+    {
+      "file": "lib/intake/utilityBillIntelligence.ts",
+      "tokens": {
+        "claude_vision": 17,
+        "upload_transform": 22,
+        "image_byte": 2,
+        "canonical_mutation": 6
+      },
+      "lineCategories": {
+        "general_reference": 43,
+        "file_buffer_or_storage_runtime": 2,
+        "truth_boundary_reference": 2
+      },
+      "count": 47
+    },
+    {
+      "file": "app/api/portal/bill-upload/route.ts",
+      "tokens": {
+        "upload_transform": 30,
+        "image_byte": 1,
+        "canonical_mutation": 5
+      },
+      "lineCategories": {
+        "general_reference": 35,
+        "file_buffer_or_storage_runtime": 1
+      },
+      "count": 36
+    },
+    {
+      "file": "lib/intake/enrichmentQueue.ts",
+      "tokens": {
+        "canonical_mutation": 32
+      },
+      "lineCategories": {
+        "general_reference": 32
+      },
+      "count": 32
+    },
+    {
+      "file": "app/api/bill-upload/provision/route.ts",
+      "tokens": {
+        "upload_transform": 17,
+        "canonical_mutation": 5,
+        "image_byte": 2,
+        "ocr": 3
+      },
+      "lineCategories": {
+        "general_reference": 23,
+        "file_buffer_or_storage_runtime": 2,
+        "truth_boundary_reference": 2
+      },
+      "count": 27
+    },
+    {
+      "file": "lib/intake/homeownerEventIntake.ts",
+      "tokens": {
+        "canonical_mutation": 5,
+        "upload_transform": 17
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 4,
+        "general_reference": 18
+      },
+      "count": 22
+    },
+    {
+      "file": "lib/intake/homeownerQualification.ts",
+      "tokens": {
+        "canonical_mutation": 21
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 21
+      },
+      "count": 21
+    },
+    {
+      "file": "app/api/project-files/download/route.ts",
+      "tokens": {
+        "upload_transform": 15,
+        "image_byte": 1
+      },
+      "lineCategories": {
+        "general_reference": 15,
+        "file_buffer_or_storage_runtime": 1
+      },
+      "count": 16
+    },
+    {
+      "file": "app/api/site-surveys/[surveyId]/route.ts",
+      "tokens": {
+        "canonical_mutation": 11
+      },
+      "lineCategories": {
+        "general_reference": 3,
+        "truth_boundary_reference": 8
+      },
+      "count": 11
+    },
+    {
+      "file": "lib/intake/funnelUrls.ts",
+      "tokens": {
+        "canonical_mutation": 8
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 8
+      },
+      "count": 8
+    },
+    {
+      "file": "lib/intake/intakePipeline.ts",
+      "tokens": {
+        "canonical_mutation": 8
+      },
+      "lineCategories": {
+        "general_reference": 8
+      },
+      "count": 8
+    },
+    {
+      "file": "lib/intake/operationalQueues.ts",
+      "tokens": {
+        "canonical_mutation": 2
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 2
+      },
+      "count": 2
+    },
+    {
+      "file": "lib/intake/webhookVerifier.ts",
+      "tokens": {
+        "image_byte": 2
+      },
+      "lineCategories": {
+        "file_buffer_or_storage_runtime": 2
+      },
+      "count": 2
+    },
+    {
+      "file": "lib/intake/intakeValidator.ts",
+      "tokens": {
+        "canonical_mutation": 1
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 1
+      },
+      "count": 1
+    }
+  ],
+  "debugRuntimeFiles": [
+    {
+      "file": "app/api/debug/ocr/route.ts",
+      "tokens": {
+        "ocr": 29,
+        "upload_transform": 18,
+        "image_byte": 3,
+        "pdf_parse": 11,
+        "tesseract": 7,
+        "cloud_vision": 9,
+        "canonical_mutation": 1
+      },
+      "lineCategories": {
+        "general_reference": 40,
+        "file_buffer_or_storage_runtime": 3,
+        "ocr_text_extraction_runtime": 34,
+        "truth_boundary_reference": 1
+      },
+      "count": 78
+    },
+    {
+      "file": "app/api/debug/bill/route.ts",
+      "tokens": {
+        "upload_transform": 14,
+        "tesseract": 7,
+        "ocr": 20,
+        "pdf_parse": 11,
+        "cloud_vision": 7,
+        "canonical_mutation": 1,
+        "image_byte": 1
+      },
+      "lineCategories": {
+        "general_reference": 35,
+        "ocr_text_extraction_runtime": 24,
+        "truth_boundary_reference": 1,
+        "file_buffer_or_storage_runtime": 1
+      },
+      "count": 61
+    },
+    {
+      "file": "app/api/debug/force-ingest/route.ts",
+      "tokens": {
+        "upload_transform": 6,
+        "canonical_mutation": 9
+      },
+      "lineCategories": {
+        "general_reference": 15
+      },
+      "count": 15
+    },
+    {
+      "file": "app/api/debug/aerial/route.ts",
+      "tokens": {
+        "canonical_mutation": 4,
+        "upload_transform": 3,
+        "image_byte": 2
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 4,
+        "general_reference": 3,
+        "file_buffer_or_storage_runtime": 2
+      },
+      "count": 9
+    },
+    {
+      "file": "app/api/debug/backfill-site-surveys/route.ts",
+      "tokens": {
+        "canonical_mutation": 2,
+        "upload_transform": 2
+      },
+      "lineCategories": {
+        "general_reference": 4
+      },
+      "count": 4
+    },
+    {
+      "file": "app/api/debug/project/route.ts",
+      "tokens": {
+        "upload_transform": 4
+      },
+      "lineCategories": {
+        "general_reference": 4
+      },
+      "count": 4
+    },
+    {
+      "file": "app/api/debug/auth/route.ts",
+      "tokens": {
+        "canonical_mutation": 2
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 2
+      },
+      "count": 2
+    }
+  ],
+  "engineeringBoundaryExamples": [
+    {
+      "file": "lib/engineeringIntelligence/workspace.ts",
+      "tokens": {
+        "canonical_mutation": 310,
+        "upload_transform": 1,
+        "ocr": 1
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 310,
+        "general_reference": 2
+      },
+      "count": 312
+    },
+    {
+      "file": "lib/survey/evidence/engineeringRequirements.ts",
+      "tokens": {
+        "canonical_mutation": 235,
+        "upload_transform": 6,
+        "ocr": 2
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 235,
+        "general_reference": 8
+      },
+      "count": 243
+    },
+    {
+      "file": "lib/engineeringIntelligence/contextResolution.ts",
+      "tokens": {
+        "canonical_mutation": 169
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 169
+      },
+      "count": 169
+    },
+    {
+      "file": "lib/engineeringIntelligence/signalExtraction.ts",
+      "tokens": {
+        "canonical_mutation": 165,
+        "upload_transform": 1,
+        "ocr": 1
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 165,
+        "general_reference": 2
+      },
+      "count": 167
+    },
+    {
+      "file": "lib/engineeringIntelligence/scenarioSimulation.ts",
+      "tokens": {
+        "canonical_mutation": 158,
+        "upload_transform": 1,
+        "ocr": 1,
+        "opencv": 1,
+        "yolo": 1,
+        "tensorflow": 1,
+        "pytorch": 1
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 157,
+        "general_reference": 3,
+        "prohibited_keyword_reference": 4
+      },
+      "count": 164
+    },
+    {
+      "file": "lib/engineeringIntelligence/recommendationEngine.ts",
+      "tokens": {
+        "canonical_mutation": 148,
+        "ocr": 1,
+        "opencv": 1,
+        "yolo": 1,
+        "tensorflow": 1,
+        "pytorch": 1
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 147,
+        "general_reference": 2,
+        "prohibited_keyword_reference": 4
+      },
+      "count": 153
+    },
+    {
+      "file": "lib/engineeringIntelligence/cadReadiness.ts",
+      "tokens": {
+        "canonical_mutation": 113
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 113
+      },
+      "count": 113
+    },
+    {
+      "file": "lib/engineeringIntelligence/types.ts",
+      "tokens": {
+        "canonical_mutation": 99
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 99
+      },
+      "count": 99
+    },
+    {
+      "file": "lib/survey/evidence/sessionGrouping.ts",
+      "tokens": {
+        "canonical_mutation": 78,
+        "upload_transform": 8,
+        "opencv": 1,
+        "perceptual_hash": 1
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 81,
+        "general_reference": 6,
+        "prohibited_keyword_reference": 1
+      },
+      "count": 88
+    },
+    {
+      "file": "lib/survey/evidence/provenance.ts",
+      "tokens": {
+        "canonical_mutation": 70,
+        "upload_transform": 7,
+        "ocr": 1
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 73,
+        "general_reference": 5
+      },
+      "count": 78
+    },
+    {
+      "file": "lib/engineeringIntelligence/photoGrouping.ts",
+      "tokens": {
+        "canonical_mutation": 53,
+        "upload_transform": 18,
+        "ocr": 1,
+        "opencv": 1,
+        "yolo": 1,
+        "tensorflow": 1,
+        "pytorch": 1
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 54,
+        "general_reference": 18,
+        "prohibited_keyword_reference": 4
+      },
+      "count": 76
+    },
+    {
+      "file": "lib/engineeringIntelligence/contextTypes.ts",
+      "tokens": {
+        "canonical_mutation": 74
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 74
+      },
+      "count": 74
+    },
+    {
+      "file": "lib/engineeringIntelligence/projectHydration.ts",
+      "tokens": {
+        "canonical_mutation": 68
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 68
+      },
+      "count": 68
+    },
+    {
+      "file": "lib/engineeringIntelligence/signalRegistry.ts",
+      "tokens": {
+        "canonical_mutation": 66
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 66
+      },
+      "count": 66
+    },
+    {
+      "file": "lib/engineeringIntelligence/workflowOrchestration.ts",
+      "tokens": {
+        "canonical_mutation": 60,
+        "ocr": 1,
+        "opencv": 1,
+        "yolo": 1,
+        "tensorflow": 1,
+        "pytorch": 1
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 59,
+        "general_reference": 2,
+        "prohibited_keyword_reference": 4
+      },
+      "count": 65
+    },
+    {
+      "file": "lib/engineeringIntelligence/signalTypes.ts",
+      "tokens": {
+        "canonical_mutation": 60
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 60
+      },
+      "count": 60
+    },
+    {
+      "file": "lib/survey/evidence/fieldOrchestration.ts",
+      "tokens": {
+        "canonical_mutation": 54,
+        "opencv": 1,
+        "ocr": 2,
+        "yolo": 1,
+        "upload_transform": 1
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 54,
+        "prohibited_keyword_reference": 2,
+        "general_reference": 3
+      },
+      "count": 59
+    },
+    {
+      "file": "lib/survey/ingest/ingestPipeline.ts",
+      "tokens": {
+        "canonical_mutation": 52,
+        "upload_transform": 2,
+        "ocr": 1
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 32,
+        "general_reference": 23
+      },
+      "count": 55
+    },
+    {
+      "file": "lib/engineeringIntelligence/contextRegistry.ts",
+      "tokens": {
+        "canonical_mutation": 50
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 50
+      },
+      "count": 50
+    },
+    {
+      "file": "lib/survey/evidence/engineeringBridge.ts",
+      "tokens": {
+        "canonical_mutation": 33
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 33
+      },
+      "count": 33
+    },
+    {
+      "file": "lib/engineeringIntelligence/workflowTypes.ts",
+      "tokens": {
+        "canonical_mutation": 24
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 24
+      },
+      "count": 24
+    },
+    {
+      "file": "lib/survey/evidence/manifest.ts",
+      "tokens": {
+        "upload_transform": 12,
+        "canonical_mutation": 8,
+        "opencv": 1,
+        "yolo": 1,
+        "ocr": 1
+      },
+      "lineCategories": {
+        "general_reference": 13,
+        "truth_boundary_reference": 8,
+        "prohibited_keyword_reference": 2
+      },
+      "count": 23
+    },
+    {
+      "file": "lib/survey/ingest/transformLayer.ts",
+      "tokens": {
+        "canonical_mutation": 9,
+        "pytorch": 1,
+        "upload_transform": 12
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 9,
+        "general_reference": 13
+      },
+      "count": 22
+    },
+    {
+      "file": "lib/engineeringIntelligence/recommendationTypes.ts",
+      "tokens": {
+        "canonical_mutation": 21
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 21
+      },
+      "count": 21
+    },
+    {
+      "file": "lib/engineeringIntelligence/workflowRegistry.ts",
+      "tokens": {
+        "canonical_mutation": 18
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 18
+      },
+      "count": 18
+    },
+    {
+      "file": "lib/engineeringIntelligence/recommendationRegistry.ts",
+      "tokens": {
+        "canonical_mutation": 15
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 15
+      },
+      "count": 15
+    },
+    {
+      "file": "lib/engineeringIntelligence/invalidationEngine.ts",
+      "tokens": {
+        "canonical_mutation": 12,
+        "ocr": 1
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 12,
+        "general_reference": 1
+      },
+      "count": 13
+    },
+    {
+      "file": "lib/survey/getProjectSurveyContext.ts",
+      "tokens": {
+        "canonical_mutation": 12
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 12
+      },
+      "count": 12
+    },
+    {
+      "file": "lib/survey/evidence/sessionTypes.ts",
+      "tokens": {
+        "canonical_mutation": 10,
+        "upload_transform": 1
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 10,
+        "general_reference": 1
+      },
+      "count": 11
+    },
+    {
+      "file": "lib/survey/ingest/types.ts",
+      "tokens": {
+        "canonical_mutation": 7,
+        "upload_transform": 3
+      },
+      "lineCategories": {
+        "truth_boundary_reference": 5,
+        "general_reference": 5
+      },
+      "count": 10
+    }
+  ]
+}
