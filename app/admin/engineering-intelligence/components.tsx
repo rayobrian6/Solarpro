@@ -42,6 +42,7 @@ import type {
   EngineeringWorkflowItem,
 } from '@/lib/engineeringIntelligence';
 import type { HydratedProjectEngineeringState } from '@/lib/engineeringIntelligence/projectHydration';
+import type { AssistedEvidenceCandidate, ReviewedEvidenceProjection } from '@/lib/assistedEvidence';
 import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
 import type { DeterministicPhotoGroupingModel } from '@/lib/engineeringIntelligence/photoGrouping';
 import type { FieldEvidenceOrchestrationModel } from '@/lib/survey/evidence/fieldOrchestration';
@@ -1705,4 +1706,60 @@ export function DependencyRiskEscalationsWorkspace({ orchestration }: { orchestr
 
 export function WorkflowSimulationImpactsWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
   return <Panel title="Workflow Simulation Impacts" eyebrow="Read-only hypothetical outcomes"><WorkflowCollection workflows={orchestration.workflowSimulationImpacts} empty="no_simulation_workflows" /></Panel>;
+}
+
+export function AssistedEvidenceSandboxWorkspace({ sandbox }: { sandbox: { candidates: AssistedEvidenceCandidate[]; projections: ReviewedEvidenceProjection[]; warning: string } }) {
+  const candidates = safeArray<AssistedEvidenceCandidate>(sandbox.candidates);
+  const projections = safeArray<ReviewedEvidenceProjection>(sandbox.projections);
+  const statusCounts = candidates.reduce<Record<string, number>>((acc, candidate) => {
+    const status = safeRenderValue(candidate.candidateStatus, 'unknown');
+    acc[status] = (acc[status] ?? 0) + 1;
+    return acc;
+  }, {});
+  const reviewRequiredCount = statusCounts.review_required ?? 0;
+  const acceptedCount = statusCounts.accepted_by_reviewer ?? 0;
+  const rejectedCount = statusCounts.rejected_by_reviewer ?? 0;
+  const invalidatedCount = statusCounts.invalidated ?? 0;
+  return (
+    <Panel title="Assisted Evidence Sandbox" eyebrow="Review-required quarantine">
+      <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm font-semibold leading-6 text-amber-100">
+        {safeRenderValue(sandbox.warning)}
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-5">
+        <Metric label="Candidates" value={collectionSize(candidates)} />
+        <Metric label="Review required" value={reviewRequiredCount} />
+        <Metric label="Accepted" value={acceptedCount} />
+        <Metric label="Rejected" value={rejectedCount} />
+        <Metric label="Invalidated" value={invalidatedCount} />
+      </div>
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <div className="space-y-3">
+          <div className="text-sm font-bold uppercase tracking-wide text-slate-300">Candidates</div>
+          {candidates.map((candidate, index) => (
+            <div key={workspaceKey('assisted-candidate', candidate.candidateId, index)} className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-xs text-slate-300">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div><div className="font-mono text-sky-300">{safeRenderValue(candidate.candidateId)}</div><div className="mt-1 text-sm font-semibold text-white">{safeRenderValue(candidate.candidateType)}</div></div>
+                <div className="flex flex-wrap gap-2"><StatusPill value={safeRenderValue(candidate.candidateStatus)} /><StatusPill value={safeRenderValue(candidate.candidateCategory)} /></div>
+              </div>
+              <div className="mt-3 grid gap-2 md:grid-cols-3"><Metric label="Confidence" value={candidate.candidateConfidence} /><Metric label="Non-authoritative" value={candidate.nonAuthoritative} /><Metric label="Review required" value={candidate.reviewRequired} /></div>
+              <div className="mt-3 leading-5 text-slate-300">{safeRenderValue(candidate.candidateSummary)}</div>
+              <div className="mt-3"><div className="mb-2 font-bold text-slate-200">Limitations</div><TokenList values={normalizeWorkspaceDisplay(candidate.candidateLimitations)} limit={12} /></div>
+              <div className="mt-3"><div className="mb-2 font-bold text-slate-200">Provenance</div><TokenList values={[safeRenderValue(candidate.toolName), safeRenderValue(candidate.toolVersion), safeRenderValue(candidate.toolRunId), safeRenderValue(candidate.sourceFileId), safeRenderValue(candidate.sourceUploadKey)]} limit={12} /></div>
+            </div>
+          ))}
+        </div>
+        <div className="space-y-3">
+          <div className="text-sm font-bold uppercase tracking-wide text-slate-300">Reviewed projections</div>
+          {projections.length === 0 ? <EmptyState state="no_reviewed_projections">No reviewed projections are available.</EmptyState> : projections.map((projection, index) => (
+            <div key={workspaceKey('assisted-projection', projection.projectionId, index)} className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4 text-xs text-slate-300">
+              <div className="flex flex-wrap items-start justify-between gap-2"><div><div className="font-mono text-emerald-300">{safeRenderValue(projection.projectionId)}</div><div className="mt-1 text-sm font-semibold text-white">{safeRenderValue(projection.projectionCategory)}</div></div><StatusPill value={safeRenderValue(projection.canonicalParticipationStatus)} /></div>
+              <div className="mt-3 grid gap-2 md:grid-cols-3"><Metric label="Projection status" value={projection.projectionStatus} /><Metric label="Reviewer" value={projection.reviewerId} /><Metric label="Canonical mutation" value="none" /></div>
+              <div className="mt-3"><div className="mb-2 font-bold text-slate-200">Accepted fields</div><TokenList values={normalizeWorkspaceDisplay(projection.acceptedFields)} limit={12} /></div>
+              <div className="mt-3 rounded-lg border border-emerald-400/20 bg-emerald-400/10 p-3 text-emerald-100">Reviewed projections are eligible for future explicit mapping only. This panel performs no canonical evidence mutation.</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Panel>
+  );
 }

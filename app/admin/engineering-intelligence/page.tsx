@@ -2,8 +2,10 @@ import { cookies } from 'next/headers';
 import { verifyToken } from '@/lib/auth';
 import { getProjectsByUser } from '@/lib/db-neon';
 import { buildEngineeringIntelligenceWorkspace } from '@/lib/engineeringIntelligence';
+import { acceptCandidate, createCandidate, markReviewRequired } from '@/lib/assistedEvidence';
 import type { Project } from '@/types';
 import {
+  AssistedEvidenceSandboxWorkspace,
   AuditGuardWorkspace,
   CADReadinessEscalationsWorkspace,
   CanonicalEvidenceWorkspace,
@@ -46,6 +48,7 @@ export default async function EngineeringIntelligencePage() {
     >
       <ProjectIntelligencePicker projects={projectList.projects} loadState={projectList.loadState} />
       <EngineeringHealthDashboard health={model.health} />
+      <AssistedEvidenceSandboxWorkspace sandbox={buildAssistedEvidenceSandboxPanel()} />
       <EngineeringWorkflowOrchestrationWorkspace orchestration={model.workflowOrchestration} />
       <div className="grid gap-6 2xl:grid-cols-2">
         <SurveyFollowUpQueueWorkspace orchestration={model.workflowOrchestration} />
@@ -94,4 +97,46 @@ async function loadProjectPickerRecords(userId: string | undefined): Promise<{ p
     console.warn('[EngineeringIntelligencePage] Project picker load failed:', error instanceof Error ? error.message : String(error));
     return { projects: [], loadState: 'load_error' };
   }
+}
+
+
+function buildAssistedEvidenceSandboxPanel() {
+  const candidate = markReviewRequired(createCandidate({
+    sourceFileId: 'fixture-assisted-file-1',
+    sourceUploadKey: 'fixtures/assisted-evidence/manual-roof-edge.jpg',
+    projectId: 'fixture-project-assisted',
+    surveyId: 'fixture-survey-assisted',
+    candidateType: 'roof_edge_candidate',
+    candidateCategory: 'roof_context',
+    candidateConfidence: 0.72,
+    toolName: 'manual-fixture-assisted-evidence',
+    toolVersion: '1.0.0',
+    toolRunId: 'manual-fixture-run-1',
+    toolConfigHash: 'manual-config-v1',
+    sourceMetadataHash: 'manual-source-metadata-v1',
+    candidatePayload: { suggestedCategory: 'roof_edge', note: 'deterministic fixture metadata only' },
+    candidateSummary: 'Manual fixture candidate for sandbox review demonstration; not canonical evidence.',
+    candidateClaims: [
+      { claimId: 'fixture-claim-roof-edge', field: 'suggestedCategory', value: 'roof_edge', confidence: 0.72, limitationRefs: ['fixture-only', 'review-required'] },
+    ],
+    candidateLimitations: ['fixture-only', 'no-image-processing', 'review-required', 'non-authoritative'],
+    createdAt: '2025-01-01T00:00:00.000Z',
+    provenance: {
+      source: 'manual_fixture',
+      createdBy: 'engineering-intelligence-demo',
+      deterministicInputs: ['sourceFileId', 'candidatePayload', 'createdAt'],
+      notes: ['Candidate metadata is manually seeded for review UI only.', 'No image bytes are inspected.'],
+    },
+  }));
+  const accepted = acceptCandidate(candidate, {
+    reviewerId: 'fixture-reviewer',
+    reviewedAt: '2025-01-02T00:00:00.000Z',
+    acceptedFields: ['suggestedCategory'],
+    reviewNotes: ['Accepted into reviewed projection fixture only; no canonical mapping performed.'],
+  });
+  return {
+    candidates: [candidate, accepted.candidate],
+    projections: [accepted.projection],
+    warning: 'Candidate metadata is non-authoritative and does not affect engineering truth until reviewed and explicitly mapped.',
+  };
 }

@@ -1,0 +1,17 @@
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90m/workspace/Solarpro-dev-fix[39m
+
+ [32m✓[39m lib/assistedEvidence/assistedEvidence.test.ts[2m > [22mAssisted Evidence Sandbox Architecture V1[2m > [22mcreates deterministic non-authoritative candidates from fixture metadata only[32m 14[2mms[22m[39m
+ [32m✓[39m lib/assistedEvidence/assistedEvidence.test.ts[2m > [22mAssisted Evidence Sandbox Architecture V1[2m > [22mmoves candidates into review-required quarantine[32m 1[2mms[22m[39m
+ [32m✓[39m lib/assistedEvidence/assistedEvidence.test.ts[2m > [22mAssisted Evidence Sandbox Architecture V1[2m > [22mproves unreviewed candidates cannot satisfy requirements, CAD readiness, recommendations, or workflows[32m 1[2mms[22m[39m
+ [32m✓[39m lib/assistedEvidence/assistedEvidence.test.ts[2m > [22mAssisted Evidence Sandbox Architecture V1[2m > [22mrejects candidates while preserving auditable inactive candidate history[32m 1[2mms[22m[39m
+ [32m✓[39m lib/assistedEvidence/assistedEvidence.test.ts[2m > [22mAssisted Evidence Sandbox Architecture V1[2m > [22minvalidates candidates and blocks downstream projection[32m 3[2mms[22m[39m
+ [32m✓[39m lib/assistedEvidence/assistedEvidence.test.ts[2m > [22mAssisted Evidence Sandbox Architecture V1[2m > [22msupersedes candidates while keeping source candidate auditable[32m 1[2mms[22m[39m
+ [32m✓[39m lib/assistedEvidence/assistedEvidence.test.ts[2m > [22mAssisted Evidence Sandbox Architecture V1[2m > [22maccepts review-required candidates into reviewed projections only[32m 1[2mms[22m[39m
+ [32m✓[39m lib/assistedEvidence/assistedEvidence.test.ts[2m > [22mAssisted Evidence Sandbox Architecture V1[2m > [22mdoes not allow accepted projection creation without explicit accepted fields[32m 1[2mms[22m[39m
+ [32m✓[39m lib/assistedEvidence/assistedEvidence.test.ts[2m > [22mAssisted Evidence Sandbox Architecture V1[2m > [22mkeeps deterministic hash stability and stable stringify replay behavior[32m 0[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m9 passed[39m[22m[90m (9)[39m
+[2m   Start at [22m 20:22:28
+[2m   Duration [22m 392ms[2m (transform 72ms, setup 0ms, import 198ms, tests 23ms, environment 0ms)[22m

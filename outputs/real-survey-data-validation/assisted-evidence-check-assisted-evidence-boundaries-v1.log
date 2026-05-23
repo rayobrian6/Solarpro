@@ -1,0 +1,5 @@
+
+> solar-platform@1.0.0 check:assisted-evidence-boundaries
+> node scripts/check-assisted-evidence-boundaries.js
+
+Assisted evidence boundary guard passed. Scanned 8 assistedEvidence files and 7 canonical/Engineering Intelligence boundary files.
