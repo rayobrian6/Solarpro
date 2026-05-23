@@ -1,0 +1,1026 @@
+# Scenario Impact Analysis V1 Report
+
+Generated at: 2025-01-01T00:00:00.000Z
+
+This impact analysis summarizes hypothetical affected signals, contexts, requirements, outputs, stale propagation, regeneration forecast metadata, and dependency traversal. It is not production truth and does not represent completed regeneration.
+
+## scenario:report:evidence-removal
+
+### Affected Outputs
+- attic_route_review
+- battery_location_review
+- bom_service_equipment
+- cad_layout_readiness
+- cad_layout_readiness
+- cad_roof_plane_context
+- cad_routing_readiness
+- conduit_notes
+- detached_structure_review
+- equipment_cluster_review
+- ess_location_review
+- exterior_route_review
+- inverter_to_msp_review
+- metadata_quality_review
+- obstruction_review
+- permit_plan_set
+- permit_setback_notes
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- routing_review
+- sld_disconnect_context
+- sld_interconnection_context
+- sld_service_panel_context
+- sld_utility_meter_context
+- state:decision:decision:bom_derivation
+- state:decision:decision:breaker_sizing
+- state:decision:decision:conductor_sizing
+- state:decision:decision:conduit_routing_assumption
+- state:decision:decision:grounding_bonding_assumption
+- state:decision:decision:inverter_selection
+- state:decision:decision:ocpd_selection
+- state:decision:decision:sld_metadata
+- state:decision:decision:string_topology_selection
+- state:decision:decision:utility_interconnection_assumption
+- state:dependencyNode:canonicalEvidence:ev_jd1zvj
+- state:dependencyNode:canonicalEvidence:ev_jd1zvj
+- state:dependencyNode:decision:bom_derivation
+- state:dependencyNode:decision:bom_derivation
+- state:dependencyNode:decision:breaker_sizing
+- state:dependencyNode:decision:breaker_sizing
+- state:dependencyNode:decision:conductor_sizing
+- state:dependencyNode:decision:conductor_sizing
+- state:dependencyNode:decision:conduit_routing_assumption
+- state:dependencyNode:decision:conduit_routing_assumption
+- state:dependencyNode:decision:grounding_bonding_assumption
+- state:dependencyNode:decision:grounding_bonding_assumption
+- state:dependencyNode:decision:inverter_selection
+- state:dependencyNode:decision:inverter_selection
+- state:dependencyNode:decision:ocpd_selection
+- state:dependencyNode:decision:ocpd_selection
+- state:dependencyNode:decision:sld_metadata
+- state:dependencyNode:decision:sld_metadata
+- state:dependencyNode:decision:string_topology_selection
+- state:dependencyNode:decision:string_topology_selection
+- state:dependencyNode:decision:utility_interconnection_assumption
+- state:dependencyNode:decision:utility_interconnection_assumption
+- state:dependencyNode:documentSection:BOM.equipment-schedule
+- state:dependencyNode:documentSection:BOM.equipment-schedule
+- state:dependencyNode:documentSection:E-1.disconnect
+- state:dependencyNode:documentSection:E-1.disconnect
+- state:dependencyNode:documentSection:E-1.interconnection
+- state:dependencyNode:documentSection:E-1.interconnection
+- state:dependencyNode:documentSection:E-1.optional-subpanel
+- state:dependencyNode:documentSection:E-1.optional-subpanel
+- state:dependencyNode:documentSection:E-1.utility-meter
+- state:dependencyNode:documentSection:E-1.utility-meter
+- state:dependencyNode:documentSection:E-2.placards
+- state:dependencyNode:documentSection:E-2.placards
+- state:dependencyNode:documentSection:ESS.location-context
+- state:dependencyNode:documentSection:ESS.location-context
+- state:dependencyNode:documentSection:PV-1.ess-location
+- state:dependencyNode:documentSection:PV-1.ess-location
+- state:dependencyNode:documentSection:PV-1.site-verification
+- state:dependencyNode:documentSection:PV-1.site-verification
+- state:dependencyNode:documentSection:PV-2.layout-context
+- state:dependencyNode:documentSection:PV-2.layout-context
+- state:dependencyNode:documentSection:PV-2.layout-verification
+- state:dependencyNode:documentSection:PV-2.layout-verification
+- state:dependencyNode:documentSection:PV-3.structural-access
+- state:dependencyNode:documentSection:PV-3.structural-access
+- state:dependencyNode:documentSection:PV-3.structural-review
+- state:dependencyNode:documentSection:PV-3.structural-review
+- state:dependencyNode:documentSection:PV-5.labels
+- state:dependencyNode:documentSection:PV-5.labels
+- state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes
+- state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes
+- state:dependencyNode:documentSection:SLD.disconnect
+- state:dependencyNode:documentSection:SLD.disconnect
+- state:dependencyNode:documentSection:SLD.rapid-shutdown
+- state:dependencyNode:documentSection:SLD.rapid-shutdown
+- state:dependencyNode:documentSection:SLD.service-equipment
+- state:dependencyNode:documentSection:SLD.service-equipment
+- state:dependencyNode:documentSection:SLD.utility-meter
+- state:dependencyNode:documentSection:SLD.utility-meter
+- state:dependencyNode:documentSection:VAL-1.inactive-future
+- state:dependencyNode:documentSection:VAL-1.inactive-future
+- state:dependencyNode:documentSection:VAL-1.registry
+- state:dependencyNode:documentSection:VAL-1.registry
+- state:dependencyNode:geometryInput:geometry:electrical-equipment-context
+- state:dependencyNode:geometryInput:geometry:electrical-equipment-context
+- state:dependencyNode:renderContext:primary
+- state:dependencyNode:renderContext:primary
+- state:dependencyNode:requirement:main_disconnect
+- state:dependencyNode:requirement:main_disconnect
+- state:dependencyNode:requirement:main_service_panel
+- state:dependencyNode:requirement:main_service_panel
+- state:dependencyNode:requirement:subpanel
+- state:dependencyNode:requirement:subpanel
+- state:documentSection:E-1.disconnect
+- state:documentSection:E-1.interconnection
+- state:documentSection:E-1.optional-subpanel
+- state:documentSection:E-1.utility-meter
+- state:documentSection:ESS.location-context
+- state:documentSection:PV-1.ess-location
+- state:documentSection:PV-1.site-verification
+- state:documentSection:PV-2.layout-context
+- state:documentSection:PV-2.layout-verification
+- state:documentSection:PV-3.structural-access
+- state:documentSection:PV-3.structural-review
+- state:documentSection:PV-5.labels
+- state:documentSection:PV-5.rapid-shutdown-notes
+- state:documentSection:SLD.disconnect
+- state:documentSection:SLD.rapid-shutdown
+- state:documentSection:SLD.service-equipment
+- state:documentSection:SLD.utility-meter
+- state:documentSection:VAL-1.inactive-future
+- state:documentSection:VAL-1.inactive-future
+- state:documentSection:VAL-1.inactive-future
+- state:documentSection:VAL-1.inactive-future
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:renderContext:renderContext:primary
+- state:sldSection:permit:project-scenario-report-1:survey-scenario-report-1.decision-provenance.sld
+- survey_grouping_review
+- survey_quality_review
+- trench_route_review
+- utility_access_review
+- utility_to_inverter_review
+
+### Stale Impacts
+- context:preferred_attic_route_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_battery_location_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_conduit_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_detached_structure_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_disconnect_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_equipment_cluster_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_ess_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_exterior_route_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_grouping_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_interconnection_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_inverter_to_msp_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_layout_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_metadata_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_msp_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_obstruction_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_roof_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_roof_plane_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_routing_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_setback_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_traversal_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_trench_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_utility_access_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_utility_meter_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_utility_to_inverter_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- renderContext:primary: STALE; State state:decision:decision:bom_derivation is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:breaker_sizing is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:conductor_sizing is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:conduit_routing_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:grounding_bonding_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:inverter_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:ocpd_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:sld_metadata is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:string_topology_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:utility_interconnection_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:E-1.disconnect is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:E-1.interconnection is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:E-1.optional-subpanel is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:E-1.utility-meter is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:ESS.location-context is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-1.ess-location is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-1.site-verification is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-2.layout-context is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-2.layout-verification is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-3.structural-access is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-3.structural-review is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-5.labels is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-5.rapid-shutdown-notes is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:SLD.disconnect is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:SLD.rapid-shutdown is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:SLD.service-equipment is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:SLD.utility-meter is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.inactive-future is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.inactive-future is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.inactive-future is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.inactive-future is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:renderContext:renderContext:primary is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:sldSection:permit:project-scenario-report-1:survey-scenario-report-1.decision-provenance.sld is included because existing invalidation/state metadata marks it affected or non-current.
+- signal:attic_access_confirmed: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:attic_route_candidate: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:battery_wall_candidate_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:conduit_route_candidate_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:detached_structure_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:detached_structure_route_candidate: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:electrical_equipment_cluster_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:energy_storage_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:ess_location_candidate_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:evidence_grouping_stable: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:exterior_wall_route_candidate: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:framing_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:garage_interior_wall_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:interconnection_zone_known: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:inverter_location_candidate_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:inverter_to_msp_route_candidate: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:main_disconnect_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:main_service_panel_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:metadata_completeness_sufficient: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:obstruction_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:photo_cluster_confidence_high: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:ridge_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:roof_edge_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:roof_layout_candidate_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:roof_plane_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:roof_surface_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:routing_continuity_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:structural_access_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:subpanel_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:survey_sequence_continuity_good: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:survey_traversal_complete: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:trench_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:trench_path_explicit: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:utility_access_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:utility_meter_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:utility_meter_side_known: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:utility_to_inverter_route_candidate: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- state:dependencyNode:canonicalEvidence:ev_jd1zvj: STALE; State state:dependencyNode:canonicalEvidence:ev_jd1zvj is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:bom_derivation: STALE; State state:dependencyNode:decision:bom_derivation is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:breaker_sizing: STALE; State state:dependencyNode:decision:breaker_sizing is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:conductor_sizing: STALE; State state:dependencyNode:decision:conductor_sizing is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:conduit_routing_assumption: STALE; State state:dependencyNode:decision:conduit_routing_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:grounding_bonding_assumption: STALE; State state:dependencyNode:decision:grounding_bonding_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:inverter_selection: STALE; State state:dependencyNode:decision:inverter_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:ocpd_selection: STALE; State state:dependencyNode:decision:ocpd_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:sld_metadata: STALE; State state:dependencyNode:decision:sld_metadata is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:string_topology_selection: STALE; State state:dependencyNode:decision:string_topology_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:utility_interconnection_assumption: STALE; State state:dependencyNode:decision:utility_interconnection_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:BOM.equipment-schedule: STALE; State state:dependencyNode:documentSection:BOM.equipment-schedule is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:E-1.disconnect: STALE; State state:dependencyNode:documentSection:E-1.disconnect is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:E-1.interconnection: STALE; State state:dependencyNode:documentSection:E-1.interconnection is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:E-1.optional-subpanel: STALE; State state:dependencyNode:documentSection:E-1.optional-subpanel is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:E-1.utility-meter: STALE; State state:dependencyNode:documentSection:E-1.utility-meter is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:E-2.placards: STALE; State state:dependencyNode:documentSection:E-2.placards is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:ESS.location-context: STALE; State state:dependencyNode:documentSection:ESS.location-context is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-1.ess-location: STALE; State state:dependencyNode:documentSection:PV-1.ess-location is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-1.site-verification: STALE; State state:dependencyNode:documentSection:PV-1.site-verification is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-2.layout-context: STALE; State state:dependencyNode:documentSection:PV-2.layout-context is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-2.layout-verification: STALE; State state:dependencyNode:documentSection:PV-2.layout-verification is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-3.structural-access: STALE; State state:dependencyNode:documentSection:PV-3.structural-access is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-3.structural-review: STALE; State state:dependencyNode:documentSection:PV-3.structural-review is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-5.labels: STALE; State state:dependencyNode:documentSection:PV-5.labels is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes: STALE; State state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:SLD.disconnect: STALE; State state:dependencyNode:documentSection:SLD.disconnect is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:SLD.rapid-shutdown: STALE; State state:dependencyNode:documentSection:SLD.rapid-shutdown is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:SLD.service-equipment: STALE; State state:dependencyNode:documentSection:SLD.service-equipment is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:SLD.utility-meter: STALE; State state:dependencyNode:documentSection:SLD.utility-meter is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:VAL-1.inactive-future: STALE; State state:dependencyNode:documentSection:VAL-1.inactive-future is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:VAL-1.registry: STALE; State state:dependencyNode:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:geometryInput:geometry:electrical-equipment-context: STALE; State state:dependencyNode:geometryInput:geometry:electrical-equipment-context is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:renderContext:primary: STALE; State state:dependencyNode:renderContext:primary is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:requirement:main_disconnect: STALE; State state:dependencyNode:requirement:main_disconnect is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:requirement:main_service_panel: STALE; State state:dependencyNode:requirement:main_service_panel is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:requirement:subpanel: STALE; State state:dependencyNode:requirement:subpanel is included because existing invalidation/state metadata marks it affected or non-current.
+
+### Regeneration Forecast
+- Candidate ids: state:decision:decision:bom_derivation, state:decision:decision:breaker_sizing, state:decision:decision:conductor_sizing, state:decision:decision:conduit_routing_assumption, state:decision:decision:grounding_bonding_assumption, state:decision:decision:inverter_selection, state:decision:decision:ocpd_selection, state:decision:decision:sld_metadata, state:decision:decision:string_topology_selection, state:decision:decision:utility_interconnection_assumption, state:dependencyNode:canonicalEvidence:ev_jd1zvj, state:dependencyNode:decision:bom_derivation, state:dependencyNode:decision:breaker_sizing, state:dependencyNode:decision:conductor_sizing, state:dependencyNode:decision:conduit_routing_assumption, state:dependencyNode:decision:grounding_bonding_assumption, state:dependencyNode:decision:inverter_selection, state:dependencyNode:decision:ocpd_selection, state:dependencyNode:decision:sld_metadata, state:dependencyNode:decision:string_topology_selection, state:dependencyNode:decision:utility_interconnection_assumption, state:dependencyNode:documentSection:BOM.equipment-schedule, state:dependencyNode:documentSection:E-1.disconnect, state:dependencyNode:documentSection:E-1.interconnection, state:dependencyNode:documentSection:E-1.optional-subpanel, state:dependencyNode:documentSection:E-1.utility-meter, state:dependencyNode:documentSection:E-2.placards, state:dependencyNode:documentSection:ESS.location-context, state:dependencyNode:documentSection:PV-1.ess-location, state:dependencyNode:documentSection:PV-1.site-verification, state:dependencyNode:documentSection:PV-2.layout-context, state:dependencyNode:documentSection:PV-2.layout-verification, state:dependencyNode:documentSection:PV-3.structural-access, state:dependencyNode:documentSection:PV-3.structural-review, state:dependencyNode:documentSection:PV-5.labels, state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes, state:dependencyNode:documentSection:SLD.disconnect, state:dependencyNode:documentSection:SLD.rapid-shutdown, state:dependencyNode:documentSection:SLD.service-equipment, state:dependencyNode:documentSection:SLD.utility-meter, state:dependencyNode:documentSection:VAL-1.inactive-future, state:dependencyNode:documentSection:VAL-1.registry, state:dependencyNode:geometryInput:geometry:electrical-equipment-context, state:dependencyNode:renderContext:primary, state:dependencyNode:requirement:main_disconnect, state:dependencyNode:requirement:main_service_panel, state:dependencyNode:requirement:subpanel, state:documentSection:E-1.disconnect, state:documentSection:E-1.interconnection, state:documentSection:E-1.optional-subpanel, state:documentSection:E-1.utility-meter, state:documentSection:ESS.location-context, state:documentSection:PV-1.ess-location, state:documentSection:PV-1.site-verification, state:documentSection:PV-2.layout-context, state:documentSection:PV-2.layout-verification, state:documentSection:PV-3.structural-access, state:documentSection:PV-3.structural-review, state:documentSection:PV-5.labels, state:documentSection:PV-5.rapid-shutdown-notes, state:documentSection:SLD.disconnect, state:documentSection:SLD.rapid-shutdown, state:documentSection:SLD.service-equipment, state:documentSection:SLD.utility-meter, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:renderContext:renderContext:primary, state:sldSection:permit:project-scenario-report-1:survey-scenario-report-1.decision-provenance.sld
+- Review-required ids: state:dependencyNode:documentSection:PV-5.labels, state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes, state:dependencyNode:documentSection:VAL-1.inactive-future, state:documentSection:PV-5.labels, state:documentSection:PV-5.rapid-shutdown-notes, state:documentSection:SLD.rapid-shutdown, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future
+- Blocked dependency ids: canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj
+- Missing evidence ids: missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:service_equipment_label, missingEvidenceForRequirement:service_equipment_label, missingEvidenceForRequirement:service_equipment_label, missingEvidenceForRequirement:service_equipment_label, missingEvidenceForRequirement:utility_bill, missingEvidenceForRequirement:utility_bill, missingEvidenceForRequirement:utility_bill, missingEvidenceForRequirement:utility_bill
+
+### Dependency Traversal
+- Visited nodes: 69
+- Paths: 0
+- Cycle detected: false
+- Truncated: false
+
+## scenario:report:signal-context-invalidation
+
+### Affected Outputs
+- attic_route_review
+- battery_location_review
+- bom_service_equipment
+- cad_layout_readiness
+- cad_layout_readiness
+- cad_roof_plane_context
+- cad_routing_readiness
+- conduit_notes
+- detached_structure_review
+- equipment_cluster_review
+- ess_location_review
+- exterior_route_review
+- inverter_to_msp_review
+- metadata_quality_review
+- obstruction_review
+- permit_plan_set
+- permit_setback_notes
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- routing_review
+- sld_disconnect_context
+- sld_interconnection_context
+- sld_service_panel_context
+- sld_utility_meter_context
+- state:decision:decision:bom_derivation
+- state:decision:decision:breaker_sizing
+- state:decision:decision:conductor_sizing
+- state:decision:decision:conduit_routing_assumption
+- state:decision:decision:grounding_bonding_assumption
+- state:decision:decision:inverter_selection
+- state:decision:decision:ocpd_selection
+- state:decision:decision:sld_metadata
+- state:decision:decision:string_topology_selection
+- state:decision:decision:utility_interconnection_assumption
+- state:dependencyNode:canonicalEvidence:ev_jd1zvj
+- state:dependencyNode:canonicalEvidence:ev_jd1zvj
+- state:dependencyNode:decision:bom_derivation
+- state:dependencyNode:decision:bom_derivation
+- state:dependencyNode:decision:breaker_sizing
+- state:dependencyNode:decision:breaker_sizing
+- state:dependencyNode:decision:conductor_sizing
+- state:dependencyNode:decision:conductor_sizing
+- state:dependencyNode:decision:conduit_routing_assumption
+- state:dependencyNode:decision:conduit_routing_assumption
+- state:dependencyNode:decision:grounding_bonding_assumption
+- state:dependencyNode:decision:grounding_bonding_assumption
+- state:dependencyNode:decision:inverter_selection
+- state:dependencyNode:decision:inverter_selection
+- state:dependencyNode:decision:ocpd_selection
+- state:dependencyNode:decision:ocpd_selection
+- state:dependencyNode:decision:sld_metadata
+- state:dependencyNode:decision:sld_metadata
+- state:dependencyNode:decision:string_topology_selection
+- state:dependencyNode:decision:string_topology_selection
+- state:dependencyNode:decision:utility_interconnection_assumption
+- state:dependencyNode:decision:utility_interconnection_assumption
+- state:dependencyNode:documentSection:BOM.equipment-schedule
+- state:dependencyNode:documentSection:BOM.equipment-schedule
+- state:dependencyNode:documentSection:E-1.disconnect
+- state:dependencyNode:documentSection:E-1.disconnect
+- state:dependencyNode:documentSection:E-1.interconnection
+- state:dependencyNode:documentSection:E-1.interconnection
+- state:dependencyNode:documentSection:E-1.optional-subpanel
+- state:dependencyNode:documentSection:E-1.optional-subpanel
+- state:dependencyNode:documentSection:E-1.utility-meter
+- state:dependencyNode:documentSection:E-1.utility-meter
+- state:dependencyNode:documentSection:E-2.placards
+- state:dependencyNode:documentSection:E-2.placards
+- state:dependencyNode:documentSection:ESS.location-context
+- state:dependencyNode:documentSection:ESS.location-context
+- state:dependencyNode:documentSection:PV-1.ess-location
+- state:dependencyNode:documentSection:PV-1.ess-location
+- state:dependencyNode:documentSection:PV-1.site-verification
+- state:dependencyNode:documentSection:PV-1.site-verification
+- state:dependencyNode:documentSection:PV-2.layout-context
+- state:dependencyNode:documentSection:PV-2.layout-context
+- state:dependencyNode:documentSection:PV-2.layout-verification
+- state:dependencyNode:documentSection:PV-2.layout-verification
+- state:dependencyNode:documentSection:PV-3.structural-access
+- state:dependencyNode:documentSection:PV-3.structural-access
+- state:dependencyNode:documentSection:PV-3.structural-review
+- state:dependencyNode:documentSection:PV-3.structural-review
+- state:dependencyNode:documentSection:PV-5.labels
+- state:dependencyNode:documentSection:PV-5.labels
+- state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes
+- state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes
+- state:dependencyNode:documentSection:SLD.disconnect
+- state:dependencyNode:documentSection:SLD.disconnect
+- state:dependencyNode:documentSection:SLD.rapid-shutdown
+- state:dependencyNode:documentSection:SLD.rapid-shutdown
+- state:dependencyNode:documentSection:SLD.service-equipment
+- state:dependencyNode:documentSection:SLD.service-equipment
+- state:dependencyNode:documentSection:SLD.utility-meter
+- state:dependencyNode:documentSection:SLD.utility-meter
+- state:dependencyNode:documentSection:VAL-1.inactive-future
+- state:dependencyNode:documentSection:VAL-1.inactive-future
+- state:dependencyNode:documentSection:VAL-1.registry
+- state:dependencyNode:documentSection:VAL-1.registry
+- state:dependencyNode:geometryInput:geometry:electrical-equipment-context
+- state:dependencyNode:geometryInput:geometry:electrical-equipment-context
+- state:dependencyNode:renderContext:primary
+- state:dependencyNode:renderContext:primary
+- state:dependencyNode:requirement:main_disconnect
+- state:dependencyNode:requirement:main_disconnect
+- state:dependencyNode:requirement:main_service_panel
+- state:dependencyNode:requirement:main_service_panel
+- state:dependencyNode:requirement:subpanel
+- state:dependencyNode:requirement:subpanel
+- state:documentSection:E-1.disconnect
+- state:documentSection:E-1.interconnection
+- state:documentSection:E-1.optional-subpanel
+- state:documentSection:E-1.utility-meter
+- state:documentSection:ESS.location-context
+- state:documentSection:PV-1.ess-location
+- state:documentSection:PV-1.site-verification
+- state:documentSection:PV-2.layout-context
+- state:documentSection:PV-2.layout-verification
+- state:documentSection:PV-3.structural-access
+- state:documentSection:PV-3.structural-review
+- state:documentSection:PV-5.labels
+- state:documentSection:PV-5.rapid-shutdown-notes
+- state:documentSection:SLD.disconnect
+- state:documentSection:SLD.rapid-shutdown
+- state:documentSection:SLD.service-equipment
+- state:documentSection:SLD.utility-meter
+- state:documentSection:VAL-1.inactive-future
+- state:documentSection:VAL-1.inactive-future
+- state:documentSection:VAL-1.inactive-future
+- state:documentSection:VAL-1.inactive-future
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:renderContext:renderContext:primary
+- state:sldSection:permit:project-scenario-report-1:survey-scenario-report-1.decision-provenance.sld
+- survey_grouping_review
+- survey_quality_review
+- trench_route_review
+- utility_access_review
+- utility_to_inverter_review
+
+### Stale Impacts
+- context:preferred_attic_route_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_battery_location_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_conduit_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_detached_structure_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_disconnect_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_equipment_cluster_context: BLOCKED, NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_ess_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_exterior_route_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_grouping_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_interconnection_context: BLOCKED, NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_inverter_to_msp_context: BLOCKED, NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_layout_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_metadata_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_msp_context: BLOCKED, BLOCKED, NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_obstruction_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_roof_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_roof_plane_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_routing_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_setback_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_traversal_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_trench_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_utility_access_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_utility_meter_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_utility_to_inverter_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- renderContext:primary: STALE; State state:decision:decision:bom_derivation is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:breaker_sizing is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:conductor_sizing is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:conduit_routing_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:grounding_bonding_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:inverter_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:ocpd_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:sld_metadata is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:string_topology_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:utility_interconnection_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:E-1.disconnect is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:E-1.interconnection is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:E-1.optional-subpanel is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:E-1.utility-meter is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:ESS.location-context is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-1.ess-location is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-1.site-verification is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-2.layout-context is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-2.layout-verification is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-3.structural-access is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-3.structural-review is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-5.labels is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-5.rapid-shutdown-notes is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:SLD.disconnect is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:SLD.rapid-shutdown is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:SLD.service-equipment is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:SLD.utility-meter is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.inactive-future is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.inactive-future is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.inactive-future is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.inactive-future is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:renderContext:renderContext:primary is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:sldSection:permit:project-scenario-report-1:survey-scenario-report-1.decision-provenance.sld is included because existing invalidation/state metadata marks it affected or non-current.
+- signal:attic_access_confirmed: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:attic_route_candidate: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:battery_wall_candidate_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:conduit_route_candidate_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:detached_structure_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:detached_structure_route_candidate: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:electrical_equipment_cluster_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:energy_storage_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:ess_location_candidate_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:evidence_grouping_stable: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:exterior_wall_route_candidate: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:framing_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:garage_interior_wall_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:interconnection_zone_known: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:inverter_location_candidate_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:inverter_to_msp_route_candidate: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:main_disconnect_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:main_service_panel_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:metadata_completeness_sufficient: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:obstruction_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:photo_cluster_confidence_high: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:ridge_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:roof_edge_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:roof_layout_candidate_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:roof_plane_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:roof_surface_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:routing_continuity_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:structural_access_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:subpanel_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:survey_sequence_continuity_good: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:survey_traversal_complete: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:trench_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:trench_path_explicit: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:utility_access_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:utility_meter_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:utility_meter_side_known: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:utility_to_inverter_route_candidate: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- state:dependencyNode:canonicalEvidence:ev_jd1zvj: STALE; State state:dependencyNode:canonicalEvidence:ev_jd1zvj is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:bom_derivation: STALE; State state:dependencyNode:decision:bom_derivation is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:breaker_sizing: STALE; State state:dependencyNode:decision:breaker_sizing is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:conductor_sizing: STALE; State state:dependencyNode:decision:conductor_sizing is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:conduit_routing_assumption: STALE; State state:dependencyNode:decision:conduit_routing_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:grounding_bonding_assumption: STALE; State state:dependencyNode:decision:grounding_bonding_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:inverter_selection: STALE; State state:dependencyNode:decision:inverter_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:ocpd_selection: STALE; State state:dependencyNode:decision:ocpd_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:sld_metadata: STALE; State state:dependencyNode:decision:sld_metadata is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:string_topology_selection: STALE; State state:dependencyNode:decision:string_topology_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:utility_interconnection_assumption: STALE; State state:dependencyNode:decision:utility_interconnection_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:BOM.equipment-schedule: STALE; State state:dependencyNode:documentSection:BOM.equipment-schedule is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:E-1.disconnect: STALE; State state:dependencyNode:documentSection:E-1.disconnect is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:E-1.interconnection: STALE; State state:dependencyNode:documentSection:E-1.interconnection is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:E-1.optional-subpanel: STALE; State state:dependencyNode:documentSection:E-1.optional-subpanel is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:E-1.utility-meter: STALE; State state:dependencyNode:documentSection:E-1.utility-meter is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:E-2.placards: STALE; State state:dependencyNode:documentSection:E-2.placards is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:ESS.location-context: STALE; State state:dependencyNode:documentSection:ESS.location-context is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-1.ess-location: STALE; State state:dependencyNode:documentSection:PV-1.ess-location is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-1.site-verification: STALE; State state:dependencyNode:documentSection:PV-1.site-verification is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-2.layout-context: STALE; State state:dependencyNode:documentSection:PV-2.layout-context is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-2.layout-verification: STALE; State state:dependencyNode:documentSection:PV-2.layout-verification is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-3.structural-access: STALE; State state:dependencyNode:documentSection:PV-3.structural-access is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-3.structural-review: STALE; State state:dependencyNode:documentSection:PV-3.structural-review is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-5.labels: STALE; State state:dependencyNode:documentSection:PV-5.labels is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes: STALE; State state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:SLD.disconnect: STALE; State state:dependencyNode:documentSection:SLD.disconnect is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:SLD.rapid-shutdown: STALE; State state:dependencyNode:documentSection:SLD.rapid-shutdown is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:SLD.service-equipment: STALE; State state:dependencyNode:documentSection:SLD.service-equipment is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:SLD.utility-meter: STALE; State state:dependencyNode:documentSection:SLD.utility-meter is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:VAL-1.inactive-future: STALE; State state:dependencyNode:documentSection:VAL-1.inactive-future is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:VAL-1.registry: STALE; State state:dependencyNode:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:geometryInput:geometry:electrical-equipment-context: STALE; State state:dependencyNode:geometryInput:geometry:electrical-equipment-context is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:renderContext:primary: STALE; State state:dependencyNode:renderContext:primary is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:requirement:main_disconnect: STALE; State state:dependencyNode:requirement:main_disconnect is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:requirement:main_service_panel: STALE; State state:dependencyNode:requirement:main_service_panel is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:requirement:subpanel: STALE; State state:dependencyNode:requirement:subpanel is included because existing invalidation/state metadata marks it affected or non-current.
+
+### Regeneration Forecast
+- Candidate ids: state:decision:decision:bom_derivation, state:decision:decision:breaker_sizing, state:decision:decision:conductor_sizing, state:decision:decision:conduit_routing_assumption, state:decision:decision:grounding_bonding_assumption, state:decision:decision:inverter_selection, state:decision:decision:ocpd_selection, state:decision:decision:sld_metadata, state:decision:decision:string_topology_selection, state:decision:decision:utility_interconnection_assumption, state:dependencyNode:canonicalEvidence:ev_jd1zvj, state:dependencyNode:decision:bom_derivation, state:dependencyNode:decision:breaker_sizing, state:dependencyNode:decision:conductor_sizing, state:dependencyNode:decision:conduit_routing_assumption, state:dependencyNode:decision:grounding_bonding_assumption, state:dependencyNode:decision:inverter_selection, state:dependencyNode:decision:ocpd_selection, state:dependencyNode:decision:sld_metadata, state:dependencyNode:decision:string_topology_selection, state:dependencyNode:decision:utility_interconnection_assumption, state:dependencyNode:documentSection:BOM.equipment-schedule, state:dependencyNode:documentSection:E-1.disconnect, state:dependencyNode:documentSection:E-1.interconnection, state:dependencyNode:documentSection:E-1.optional-subpanel, state:dependencyNode:documentSection:E-1.utility-meter, state:dependencyNode:documentSection:E-2.placards, state:dependencyNode:documentSection:ESS.location-context, state:dependencyNode:documentSection:PV-1.ess-location, state:dependencyNode:documentSection:PV-1.site-verification, state:dependencyNode:documentSection:PV-2.layout-context, state:dependencyNode:documentSection:PV-2.layout-verification, state:dependencyNode:documentSection:PV-3.structural-access, state:dependencyNode:documentSection:PV-3.structural-review, state:dependencyNode:documentSection:PV-5.labels, state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes, state:dependencyNode:documentSection:SLD.disconnect, state:dependencyNode:documentSection:SLD.rapid-shutdown, state:dependencyNode:documentSection:SLD.service-equipment, state:dependencyNode:documentSection:SLD.utility-meter, state:dependencyNode:documentSection:VAL-1.inactive-future, state:dependencyNode:documentSection:VAL-1.registry, state:dependencyNode:geometryInput:geometry:electrical-equipment-context, state:dependencyNode:renderContext:primary, state:dependencyNode:requirement:main_disconnect, state:dependencyNode:requirement:main_service_panel, state:dependencyNode:requirement:subpanel, state:documentSection:E-1.disconnect, state:documentSection:E-1.interconnection, state:documentSection:E-1.optional-subpanel, state:documentSection:E-1.utility-meter, state:documentSection:ESS.location-context, state:documentSection:PV-1.ess-location, state:documentSection:PV-1.site-verification, state:documentSection:PV-2.layout-context, state:documentSection:PV-2.layout-verification, state:documentSection:PV-3.structural-access, state:documentSection:PV-3.structural-review, state:documentSection:PV-5.labels, state:documentSection:PV-5.rapid-shutdown-notes, state:documentSection:SLD.disconnect, state:documentSection:SLD.rapid-shutdown, state:documentSection:SLD.service-equipment, state:documentSection:SLD.utility-meter, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:renderContext:renderContext:primary, state:sldSection:permit:project-scenario-report-1:survey-scenario-report-1.decision-provenance.sld
+- Review-required ids: state:dependencyNode:documentSection:PV-5.labels, state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes, state:dependencyNode:documentSection:VAL-1.inactive-future, state:documentSection:PV-5.labels, state:documentSection:PV-5.rapid-shutdown-notes, state:documentSection:SLD.rapid-shutdown, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future
+- Blocked dependency ids: canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj
+- Missing evidence ids: missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:service_equipment_label, missingEvidenceForRequirement:service_equipment_label, missingEvidenceForRequirement:service_equipment_label, missingEvidenceForRequirement:service_equipment_label, missingEvidenceForRequirement:utility_bill, missingEvidenceForRequirement:utility_bill, missingEvidenceForRequirement:utility_bill, missingEvidenceForRequirement:utility_bill
+
+### Dependency Traversal
+- Visited nodes: 69
+- Paths: 0
+- Cycle detected: false
+- Truncated: false
+
+## scenario:report:conflict-fallback-cad
+
+### Affected Outputs
+- attic_route_review
+- battery_location_review
+- bom_service_equipment
+- cad_layout_readiness
+- cad_layout_readiness
+- cad_roof_plane_context
+- cad_routing_readiness
+- conduit_notes
+- detached_structure_review
+- equipment_cluster_review
+- ess_location_review
+- exterior_route_review
+- inverter_to_msp_review
+- metadata_quality_review
+- obstruction_review
+- permit_plan_set
+- permit_setback_notes
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- renderContext:primary
+- routing_review
+- sld_disconnect_context
+- sld_interconnection_context
+- sld_service_panel_context
+- sld_utility_meter_context
+- state:decision:decision:bom_derivation
+- state:decision:decision:breaker_sizing
+- state:decision:decision:conductor_sizing
+- state:decision:decision:conduit_routing_assumption
+- state:decision:decision:grounding_bonding_assumption
+- state:decision:decision:inverter_selection
+- state:decision:decision:ocpd_selection
+- state:decision:decision:sld_metadata
+- state:decision:decision:string_topology_selection
+- state:decision:decision:utility_interconnection_assumption
+- state:dependencyNode:canonicalEvidence:ev_jd1zvj
+- state:dependencyNode:canonicalEvidence:ev_jd1zvj
+- state:dependencyNode:decision:bom_derivation
+- state:dependencyNode:decision:bom_derivation
+- state:dependencyNode:decision:breaker_sizing
+- state:dependencyNode:decision:breaker_sizing
+- state:dependencyNode:decision:conductor_sizing
+- state:dependencyNode:decision:conductor_sizing
+- state:dependencyNode:decision:conduit_routing_assumption
+- state:dependencyNode:decision:conduit_routing_assumption
+- state:dependencyNode:decision:grounding_bonding_assumption
+- state:dependencyNode:decision:grounding_bonding_assumption
+- state:dependencyNode:decision:inverter_selection
+- state:dependencyNode:decision:inverter_selection
+- state:dependencyNode:decision:ocpd_selection
+- state:dependencyNode:decision:ocpd_selection
+- state:dependencyNode:decision:sld_metadata
+- state:dependencyNode:decision:sld_metadata
+- state:dependencyNode:decision:string_topology_selection
+- state:dependencyNode:decision:string_topology_selection
+- state:dependencyNode:decision:utility_interconnection_assumption
+- state:dependencyNode:decision:utility_interconnection_assumption
+- state:dependencyNode:documentSection:BOM.equipment-schedule
+- state:dependencyNode:documentSection:BOM.equipment-schedule
+- state:dependencyNode:documentSection:E-1.disconnect
+- state:dependencyNode:documentSection:E-1.disconnect
+- state:dependencyNode:documentSection:E-1.interconnection
+- state:dependencyNode:documentSection:E-1.interconnection
+- state:dependencyNode:documentSection:E-1.optional-subpanel
+- state:dependencyNode:documentSection:E-1.optional-subpanel
+- state:dependencyNode:documentSection:E-1.utility-meter
+- state:dependencyNode:documentSection:E-1.utility-meter
+- state:dependencyNode:documentSection:E-2.placards
+- state:dependencyNode:documentSection:E-2.placards
+- state:dependencyNode:documentSection:ESS.location-context
+- state:dependencyNode:documentSection:ESS.location-context
+- state:dependencyNode:documentSection:PV-1.ess-location
+- state:dependencyNode:documentSection:PV-1.ess-location
+- state:dependencyNode:documentSection:PV-1.site-verification
+- state:dependencyNode:documentSection:PV-1.site-verification
+- state:dependencyNode:documentSection:PV-2.layout-context
+- state:dependencyNode:documentSection:PV-2.layout-context
+- state:dependencyNode:documentSection:PV-2.layout-verification
+- state:dependencyNode:documentSection:PV-2.layout-verification
+- state:dependencyNode:documentSection:PV-3.structural-access
+- state:dependencyNode:documentSection:PV-3.structural-access
+- state:dependencyNode:documentSection:PV-3.structural-review
+- state:dependencyNode:documentSection:PV-3.structural-review
+- state:dependencyNode:documentSection:PV-5.labels
+- state:dependencyNode:documentSection:PV-5.labels
+- state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes
+- state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes
+- state:dependencyNode:documentSection:SLD.disconnect
+- state:dependencyNode:documentSection:SLD.disconnect
+- state:dependencyNode:documentSection:SLD.rapid-shutdown
+- state:dependencyNode:documentSection:SLD.rapid-shutdown
+- state:dependencyNode:documentSection:SLD.service-equipment
+- state:dependencyNode:documentSection:SLD.service-equipment
+- state:dependencyNode:documentSection:SLD.utility-meter
+- state:dependencyNode:documentSection:SLD.utility-meter
+- state:dependencyNode:documentSection:VAL-1.inactive-future
+- state:dependencyNode:documentSection:VAL-1.inactive-future
+- state:dependencyNode:documentSection:VAL-1.registry
+- state:dependencyNode:documentSection:VAL-1.registry
+- state:dependencyNode:geometryInput:geometry:electrical-equipment-context
+- state:dependencyNode:geometryInput:geometry:electrical-equipment-context
+- state:dependencyNode:renderContext:primary
+- state:dependencyNode:renderContext:primary
+- state:dependencyNode:requirement:main_disconnect
+- state:dependencyNode:requirement:main_disconnect
+- state:dependencyNode:requirement:main_service_panel
+- state:dependencyNode:requirement:main_service_panel
+- state:dependencyNode:requirement:subpanel
+- state:dependencyNode:requirement:subpanel
+- state:documentSection:E-1.disconnect
+- state:documentSection:E-1.interconnection
+- state:documentSection:E-1.optional-subpanel
+- state:documentSection:E-1.utility-meter
+- state:documentSection:ESS.location-context
+- state:documentSection:PV-1.ess-location
+- state:documentSection:PV-1.site-verification
+- state:documentSection:PV-2.layout-context
+- state:documentSection:PV-2.layout-verification
+- state:documentSection:PV-3.structural-access
+- state:documentSection:PV-3.structural-review
+- state:documentSection:PV-5.labels
+- state:documentSection:PV-5.rapid-shutdown-notes
+- state:documentSection:SLD.disconnect
+- state:documentSection:SLD.rapid-shutdown
+- state:documentSection:SLD.service-equipment
+- state:documentSection:SLD.utility-meter
+- state:documentSection:VAL-1.inactive-future
+- state:documentSection:VAL-1.inactive-future
+- state:documentSection:VAL-1.inactive-future
+- state:documentSection:VAL-1.inactive-future
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:documentSection:VAL-1.registry
+- state:renderContext:renderContext:primary
+- state:sldSection:permit:project-scenario-report-1:survey-scenario-report-1.decision-provenance.sld
+- survey_grouping_review
+- survey_quality_review
+- trench_route_review
+- utility_access_review
+- utility_to_inverter_review
+
+### Stale Impacts
+- context:preferred_attic_route_context: NOT_LOADED, PARTIAL; Context invalidated by hypothetical-conflict:conflict-routing.
+- context:preferred_battery_location_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_conduit_context: NOT_LOADED, PARTIAL; Context invalidated by hypothetical-conflict:conflict-routing.
+- context:preferred_detached_structure_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_disconnect_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_equipment_cluster_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_ess_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_exterior_route_context: NOT_LOADED, PARTIAL; Context invalidated by hypothetical-conflict:conflict-routing.
+- context:preferred_grouping_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_interconnection_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_inverter_to_msp_context: NOT_LOADED, PARTIAL; Context invalidated by hypothetical-conflict:conflict-routing.
+- context:preferred_layout_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_metadata_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_msp_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_obstruction_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_roof_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_roof_plane_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_routing_context: NOT_LOADED, PARTIAL; Context invalidated by hypothetical-conflict:conflict-routing.
+- context:preferred_setback_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_traversal_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_trench_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_utility_access_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_utility_meter_context: NOT_LOADED; Context invalidated by no invalidation lineage.
+- context:preferred_utility_to_inverter_context: NOT_LOADED, PARTIAL; Context invalidated by hypothetical-conflict:conflict-routing.
+- renderContext:primary: STALE; State state:decision:decision:bom_derivation is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:breaker_sizing is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:conductor_sizing is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:conduit_routing_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:grounding_bonding_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:inverter_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:ocpd_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:sld_metadata is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:string_topology_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:decision:decision:utility_interconnection_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:E-1.disconnect is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:E-1.interconnection is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:E-1.optional-subpanel is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:E-1.utility-meter is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:ESS.location-context is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-1.ess-location is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-1.site-verification is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-2.layout-context is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-2.layout-verification is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-3.structural-access is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-3.structural-review is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-5.labels is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:PV-5.rapid-shutdown-notes is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:SLD.disconnect is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:SLD.rapid-shutdown is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:SLD.service-equipment is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:SLD.utility-meter is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.inactive-future is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.inactive-future is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.inactive-future is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.inactive-future is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:renderContext:renderContext:primary is included because existing invalidation/state metadata marks it affected or non-current.
+- renderContext:primary: STALE; State state:sldSection:permit:project-scenario-report-1:survey-scenario-report-1.decision-provenance.sld is included because existing invalidation/state metadata marks it affected or non-current.
+- signal:attic_access_confirmed: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:attic_route_candidate: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:battery_wall_candidate_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:conduit_route_candidate_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:detached_structure_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:detached_structure_route_candidate: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:electrical_equipment_cluster_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:energy_storage_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:ess_location_candidate_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:evidence_grouping_stable: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:exterior_wall_route_candidate: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:framing_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:garage_interior_wall_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:interconnection_zone_known: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:inverter_location_candidate_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:inverter_to_msp_route_candidate: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:main_disconnect_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:main_service_panel_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:metadata_completeness_sufficient: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:obstruction_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:photo_cluster_confidence_high: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:ridge_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:roof_edge_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:roof_layout_candidate_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:roof_plane_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:roof_surface_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:routing_continuity_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:structural_access_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:subpanel_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:survey_sequence_continuity_good: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:survey_traversal_complete: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:trench_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:trench_path_explicit: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:utility_access_context_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:utility_meter_present: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:utility_meter_side_known: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- signal:utility_to_inverter_route_candidate: NOT_LOADED; Signal invalidated by no invalidation lineage.
+- state:dependencyNode:canonicalEvidence:ev_jd1zvj: STALE; State state:dependencyNode:canonicalEvidence:ev_jd1zvj is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:bom_derivation: STALE; State state:dependencyNode:decision:bom_derivation is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:breaker_sizing: STALE; State state:dependencyNode:decision:breaker_sizing is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:conductor_sizing: STALE; State state:dependencyNode:decision:conductor_sizing is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:conduit_routing_assumption: STALE; State state:dependencyNode:decision:conduit_routing_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:grounding_bonding_assumption: STALE; State state:dependencyNode:decision:grounding_bonding_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:inverter_selection: STALE; State state:dependencyNode:decision:inverter_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:ocpd_selection: STALE; State state:dependencyNode:decision:ocpd_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:sld_metadata: STALE; State state:dependencyNode:decision:sld_metadata is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:string_topology_selection: STALE; State state:dependencyNode:decision:string_topology_selection is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:decision:utility_interconnection_assumption: STALE; State state:dependencyNode:decision:utility_interconnection_assumption is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:BOM.equipment-schedule: STALE; State state:dependencyNode:documentSection:BOM.equipment-schedule is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:E-1.disconnect: STALE; State state:dependencyNode:documentSection:E-1.disconnect is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:E-1.interconnection: STALE; State state:dependencyNode:documentSection:E-1.interconnection is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:E-1.optional-subpanel: STALE; State state:dependencyNode:documentSection:E-1.optional-subpanel is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:E-1.utility-meter: STALE; State state:dependencyNode:documentSection:E-1.utility-meter is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:E-2.placards: STALE; State state:dependencyNode:documentSection:E-2.placards is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:ESS.location-context: STALE; State state:dependencyNode:documentSection:ESS.location-context is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-1.ess-location: STALE; State state:dependencyNode:documentSection:PV-1.ess-location is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-1.site-verification: STALE; State state:dependencyNode:documentSection:PV-1.site-verification is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-2.layout-context: STALE; State state:dependencyNode:documentSection:PV-2.layout-context is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-2.layout-verification: STALE; State state:dependencyNode:documentSection:PV-2.layout-verification is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-3.structural-access: STALE; State state:dependencyNode:documentSection:PV-3.structural-access is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-3.structural-review: STALE; State state:dependencyNode:documentSection:PV-3.structural-review is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-5.labels: STALE; State state:dependencyNode:documentSection:PV-5.labels is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes: STALE; State state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:SLD.disconnect: STALE; State state:dependencyNode:documentSection:SLD.disconnect is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:SLD.rapid-shutdown: STALE; State state:dependencyNode:documentSection:SLD.rapid-shutdown is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:SLD.service-equipment: STALE; State state:dependencyNode:documentSection:SLD.service-equipment is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:SLD.utility-meter: STALE; State state:dependencyNode:documentSection:SLD.utility-meter is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:VAL-1.inactive-future: STALE; State state:dependencyNode:documentSection:VAL-1.inactive-future is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:documentSection:VAL-1.registry: STALE; State state:dependencyNode:documentSection:VAL-1.registry is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:geometryInput:geometry:electrical-equipment-context: STALE; State state:dependencyNode:geometryInput:geometry:electrical-equipment-context is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:renderContext:primary: STALE; State state:dependencyNode:renderContext:primary is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:requirement:main_disconnect: STALE; State state:dependencyNode:requirement:main_disconnect is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:requirement:main_service_panel: STALE; State state:dependencyNode:requirement:main_service_panel is included because existing invalidation/state metadata marks it affected or non-current.
+- state:dependencyNode:requirement:subpanel: STALE; State state:dependencyNode:requirement:subpanel is included because existing invalidation/state metadata marks it affected or non-current.
+
+### Regeneration Forecast
+- Candidate ids: state:decision:decision:bom_derivation, state:decision:decision:breaker_sizing, state:decision:decision:conductor_sizing, state:decision:decision:conduit_routing_assumption, state:decision:decision:grounding_bonding_assumption, state:decision:decision:inverter_selection, state:decision:decision:ocpd_selection, state:decision:decision:sld_metadata, state:decision:decision:string_topology_selection, state:decision:decision:utility_interconnection_assumption, state:dependencyNode:canonicalEvidence:ev_jd1zvj, state:dependencyNode:decision:bom_derivation, state:dependencyNode:decision:breaker_sizing, state:dependencyNode:decision:conductor_sizing, state:dependencyNode:decision:conduit_routing_assumption, state:dependencyNode:decision:grounding_bonding_assumption, state:dependencyNode:decision:inverter_selection, state:dependencyNode:decision:ocpd_selection, state:dependencyNode:decision:sld_metadata, state:dependencyNode:decision:string_topology_selection, state:dependencyNode:decision:utility_interconnection_assumption, state:dependencyNode:documentSection:BOM.equipment-schedule, state:dependencyNode:documentSection:E-1.disconnect, state:dependencyNode:documentSection:E-1.interconnection, state:dependencyNode:documentSection:E-1.optional-subpanel, state:dependencyNode:documentSection:E-1.utility-meter, state:dependencyNode:documentSection:E-2.placards, state:dependencyNode:documentSection:ESS.location-context, state:dependencyNode:documentSection:PV-1.ess-location, state:dependencyNode:documentSection:PV-1.site-verification, state:dependencyNode:documentSection:PV-2.layout-context, state:dependencyNode:documentSection:PV-2.layout-verification, state:dependencyNode:documentSection:PV-3.structural-access, state:dependencyNode:documentSection:PV-3.structural-review, state:dependencyNode:documentSection:PV-5.labels, state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes, state:dependencyNode:documentSection:SLD.disconnect, state:dependencyNode:documentSection:SLD.rapid-shutdown, state:dependencyNode:documentSection:SLD.service-equipment, state:dependencyNode:documentSection:SLD.utility-meter, state:dependencyNode:documentSection:VAL-1.inactive-future, state:dependencyNode:documentSection:VAL-1.registry, state:dependencyNode:geometryInput:geometry:electrical-equipment-context, state:dependencyNode:renderContext:primary, state:dependencyNode:requirement:main_disconnect, state:dependencyNode:requirement:main_service_panel, state:dependencyNode:requirement:subpanel, state:documentSection:E-1.disconnect, state:documentSection:E-1.interconnection, state:documentSection:E-1.optional-subpanel, state:documentSection:E-1.utility-meter, state:documentSection:ESS.location-context, state:documentSection:PV-1.ess-location, state:documentSection:PV-1.site-verification, state:documentSection:PV-2.layout-context, state:documentSection:PV-2.layout-verification, state:documentSection:PV-3.structural-access, state:documentSection:PV-3.structural-review, state:documentSection:PV-5.labels, state:documentSection:PV-5.rapid-shutdown-notes, state:documentSection:SLD.disconnect, state:documentSection:SLD.rapid-shutdown, state:documentSection:SLD.service-equipment, state:documentSection:SLD.utility-meter, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:documentSection:VAL-1.registry, state:renderContext:renderContext:primary, state:sldSection:permit:project-scenario-report-1:survey-scenario-report-1.decision-provenance.sld
+- Review-required ids: state:dependencyNode:documentSection:PV-5.labels, state:dependencyNode:documentSection:PV-5.rapid-shutdown-notes, state:dependencyNode:documentSection:VAL-1.inactive-future, state:documentSection:PV-5.labels, state:documentSection:PV-5.rapid-shutdown-notes, state:documentSection:SLD.rapid-shutdown, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future, state:documentSection:VAL-1.inactive-future
+- Blocked dependency ids: canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj, canonicalEvidence:ev_jd1zvj
+- Missing evidence ids: missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:placards, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:rapid_shutdown, missingEvidenceForRequirement:service_equipment_label, missingEvidenceForRequirement:service_equipment_label, missingEvidenceForRequirement:service_equipment_label, missingEvidenceForRequirement:service_equipment_label, missingEvidenceForRequirement:utility_bill, missingEvidenceForRequirement:utility_bill, missingEvidenceForRequirement:utility_bill, missingEvidenceForRequirement:utility_bill
+
+### Dependency Traversal
+- Visited nodes: 69
+- Paths: 0
+- Cycle detected: false
+- Truncated: false
+

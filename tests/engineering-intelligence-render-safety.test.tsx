@@ -15,6 +15,16 @@ import {
   DependencyGraphViewer,
   FallbackChainInspectorWorkspace,
   PhotoGroupingWorkspace,
+  ScenarioSimulationWorkspace,
+  HypotheticalStateDeltaWorkspace,
+  AffectedOutputSimulationWorkspace,
+  StalePropagationSimulationWorkspace,
+  ContextImpactSimulationWorkspace,
+  RequirementImpactSimulationWorkspace,
+  FallbackConflictDeltaViewer,
+  RegenerationForecastWorkspace,
+  ConfidenceDeltaTimelineWorkspace,
+  SimulationDependencyTraversalWorkspace,
   ResolvedEngineeringContextsWorkspace,
   SnapshotTimelineWorkspace,
   StaleInvalidationWorkspace,
@@ -35,6 +45,7 @@ import type {
   ResolvedEngineeringContextsWorkspaceModel,
   SnapshotTimelineWorkspaceModel,
   StaleInvalidationWorkspaceModel,
+  EngineeringScenarioSimulationResult,
 } from '@/lib/engineeringIntelligence';
 
 describe('Engineering Intelligence workspace render safety', () => {
@@ -359,4 +370,121 @@ describe('Engineering Intelligence workspace render safety', () => {
     expect(screen.getAllByText(/Set\(/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Map\(/).length).toBeGreaterThan(0);
   });
+  it('renders scenario simulation workspaces safely while preserving hypothetical truth boundary copy', () => {
+    const simulation = {
+      scenarioId: { id: 'scenario-object', nested: true },
+      scenarioType: new Map([['scenarioType', 'evidence_change']]),
+      mode: 'read_only_sandbox',
+      operations: [{ operationId: { id: 'operation-object' }, deterministicReason: new Set(['what-if evidence changed']) }],
+      affectedEvidenceIds: [{ evidence: 'e1' }],
+      affectedContextIds: [{ context: 'ctx1' }],
+      affectedRequirementIds: [new Map([['requirement', 'roof_overview']])],
+      regenerationCandidateIds: [new Set(['output-layout'])],
+      deterministicExplanation: [{ note: 'hypothetical explanation' }, new Set(['read-only sandbox'])],
+      prohibitedRuntimeBehavior: ['no OCR', { guard: 'no production mutation' }],
+      deltas: [{
+        deltaId: 'delta:object-status',
+        entityType: { type: 'signal' },
+        entityId: { id: 'signal:main_service_panel_present' },
+        deltaType: new Map([['delta', 'changed']]),
+        previousStatus: { production: 'confirmed' },
+        simulatedStatus: new Set(['blocked']),
+        staleClass: { stale: 'engineering_required' },
+        deterministicReason: { reason: 'hypothetical invalidation only' },
+      }],
+      fallbackDeltas: [{
+        deltaId: 'delta:fallback',
+        entityType: { type: 'context' },
+        entityId: { id: 'context:preferred_routing_context' },
+        deltaType: 'changed',
+        previousStatus: 'fallback_available',
+        simulatedStatus: 'fallback_removed',
+        staleClass: 'engineering_review_required',
+        deterministicReason: new Map([['reason', 'fallback removed in sandbox']]),
+      }],
+      conflictDeltas: [{
+        deltaId: 'delta:conflict',
+        entityType: 'signal',
+        entityId: 'signal:routing_continuity_present',
+        deltaType: 'changed',
+        previousStatus: 'confirmed',
+        simulatedStatus: 'conflicting',
+        staleClass: 'engineering_review_required',
+        deterministicReason: { reason: 'conflict introduced in sandbox' },
+      }],
+      confidenceDeltas: [{
+        entityType: { type: 'context' },
+        entityId: { id: 'context:preferred_msp_context' },
+        previousScore: { score: 0.86 },
+        simulatedScore: new Set([0.41]),
+        delta: -0.45,
+        deterministicReason: { reason: 'confidence lowered deterministically' },
+      }],
+      staleImpacts: [{
+        entityId: { id: 'state:msp' },
+        staleClasses: [new Set(['engineering_review_required'])],
+        deterministicReason: { reason: 'stale propagated through explicit graph' },
+      }],
+      dependencyTraversalPaths: [{
+        pathId: { id: 'path-object' },
+        nodeIds: [{ node: 'source' }, new Map([['node', 'target']])],
+        deterministicReason: new Set(['cycle-safe traversal']),
+      }],
+      hypothetical: {
+        invalidationPropagation: {
+          staleClassCounts: { engineering_review_required: BigInt(2), cad_update_required: { count: 1 } },
+          affectedOutputs: [{
+            impactId: 'impact:layout',
+            outputId: { output: 'layout' },
+            staleClass: new Set(['cad_update_required']),
+            stateId: { state: 'state:layout' },
+            outputType: new Map([['type', 'cad_layout']]),
+            propagationPathIds: [{ path: 'path:layout' }],
+            deterministicReason: { reason: 'metadata-only affected output forecast' },
+          }],
+        },
+        contextResolution: {
+          contexts: [{
+            id: { id: 'context:preferred_msp_context' },
+            status: 'blocked',
+            confidence: { score: { value: 0.4 }, rank: BigInt(4) },
+            fallbackLineage: [new Set(['manual_review'])],
+            unresolvedDependencies: [new Map([['dependency', 'msp_photo']])],
+          }],
+        },
+        regenerationPlan: {
+          regenerationCandidateIds: [{ output: 'layout' }],
+          reviewRequiredIds: [new Set(['review:msp'])],
+          blockedDependencyIds: [new Map([['dependency', 'msp_context']])],
+          missingEvidenceIds: [{ evidence: 'msp_photo' }],
+          deterministicNotes: [{ note: 'metadata-only; never regenerates outputs' }],
+        },
+        dependencyTraversal: {
+          visitedNodeIds: [{ node: 'source' }, { node: 'target' }],
+          cycleDetected: false,
+          truncated: false,
+        },
+      },
+    } as unknown as EngineeringScenarioSimulationResult;
+
+    expect(() => render(<ScenarioSimulationWorkspace simulation={simulation} />)).not.toThrow();
+    expect(() => render(<HypotheticalStateDeltaWorkspace simulation={simulation} />)).not.toThrow();
+    expect(() => render(<AffectedOutputSimulationWorkspace simulation={simulation} />)).not.toThrow();
+    expect(() => render(<StalePropagationSimulationWorkspace simulation={simulation} />)).not.toThrow();
+    expect(() => render(<ContextImpactSimulationWorkspace simulation={simulation} />)).not.toThrow();
+    expect(() => render(<RequirementImpactSimulationWorkspace simulation={simulation} />)).not.toThrow();
+    expect(() => render(<FallbackConflictDeltaViewer simulation={simulation} />)).not.toThrow();
+    expect(() => render(<RegenerationForecastWorkspace simulation={simulation} />)).not.toThrow();
+    expect(() => render(<ConfidenceDeltaTimelineWorkspace simulation={simulation} />)).not.toThrow();
+    expect(() => render(<SimulationDependencyTraversalWorkspace simulation={simulation} />)).not.toThrow();
+
+    expect(screen.getByText('Scenario Simulation Workspace')).toBeInTheDocument();
+    expect(screen.getByText(/hypothetical Engineering Scenario Simulation V1 metadata only/)).toBeInTheDocument();
+    expect(screen.getByText(/not production truth/)).toBeInTheDocument();
+    expect(screen.getByText('Regeneration Forecast')).toBeInTheDocument();
+    expect(screen.getAllByText(/object\(keys=/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Set\(/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Map\(/).length).toBeGreaterThan(0);
+  });
+
 });

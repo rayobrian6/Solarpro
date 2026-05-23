@@ -35,6 +35,7 @@ import type {
   ContextInvalidationsWorkspaceModel,
   ContextStaleImpactsWorkspaceModel,
   ContextResolutionTimelineWorkspaceModel,
+  EngineeringScenarioSimulationResult,
 } from '@/lib/engineeringIntelligence';
 import type { HydratedProjectEngineeringState } from '@/lib/engineeringIntelligence/projectHydration';
 import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
@@ -1282,4 +1283,181 @@ function ListBox({ title, values }: { title: WorkspaceRenderable; values: Worksp
 function DeterministicNotes({ notes }: { notes: WorkspaceRenderable }) {
   const normalized = normalizeWorkspaceDisplay(notes);
   return <div className="mt-4 rounded-xl border border-sky-500/15 bg-sky-500/5 p-4 text-xs leading-5 text-sky-100/80">{(normalized.length ? normalized : ['not_loaded']).map((note, index) => <div key={workspaceKey('note', note, index)}>• {note}</div>)}</div>;
+}
+
+export function ScenarioSimulationWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+  return (
+    <Panel title="Scenario Simulation Workspace" eyebrow="Read-only hypothetical mode">
+      <div className="rounded-xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-100">
+        This workspace displays hypothetical Engineering Scenario Simulation V1 metadata only. It is not production truth, does not indicate regeneration occurred, and does not mutate canonical evidence, snapshots, decisions, outputs, or invalidation history.
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <Metric label="Scenario id" value={simulation.scenarioId} />
+        <Metric label="Scenario type" value={simulation.scenarioType} />
+        <Metric label="Mode" value={simulation.mode} />
+        <Metric label="Operations" value={collectionSize(simulation.operations)} />
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <Metric label="Affected evidence" value={collectionSize(simulation.affectedEvidenceIds)} />
+        <Metric label="Affected contexts" value={collectionSize(simulation.affectedContextIds)} />
+        <Metric label="Regeneration candidates" value={collectionSize(simulation.regenerationCandidateIds)} />
+      </div>
+      <DeterministicNotes notes={simulation.deterministicExplanation} />
+      <DeterministicNotes notes={simulation.prohibitedRuntimeBehavior} />
+    </Panel>
+  );
+}
+
+export function HypotheticalStateDeltaWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+  return (
+    <Panel title="Hypothetical State Delta" eyebrow="Production vs simulation">
+      {simulation.deltas.length === 0 ? <EmptyState state="no_delta">No hypothetical deltas were produced.</EmptyState> : (
+        <div className="space-y-2">
+          {simulation.deltas.slice(0, 24).map(delta => (
+            <div key={delta.deltaId} className="rounded-xl border border-white/10 bg-white/[0.02] p-3 text-xs text-slate-300">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="font-mono text-sky-300">{safeRenderValue(delta.entityId)}</div>
+                <div className="flex gap-2"><StatusPill value={delta.entityType} /><StatusPill value={delta.deltaType} /><StatusPill value={delta.staleClass} /></div>
+              </div>
+              <div className="mt-2 grid gap-2 md:grid-cols-2">
+                <div>Production: <span className="font-mono text-slate-400">{safeRenderValue(delta.previousStatus)}</span></div>
+                <div>Hypothetical: <span className="font-mono text-amber-300">{safeRenderValue(delta.simulatedStatus)}</span></div>
+              </div>
+              <div className="mt-2 text-slate-400">{safeRenderValue(delta.deterministicReason)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+export function AffectedOutputSimulationWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+  const outputs = simulation.hypothetical.invalidationPropagation.affectedOutputs;
+  return (
+    <Panel title="Affected Output Simulation" eyebrow="Hypothetical output impact">
+      {outputs.length === 0 ? <EmptyState state="no_affected_outputs">No affected outputs are forecast for this hypothetical scenario.</EmptyState> : (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {outputs.map(output => (
+            <div key={output.impactId} className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-xs text-slate-300">
+              <div className="flex items-center justify-between gap-2"><div className="font-mono text-orange-300">{safeRenderValue(output.outputId)}</div><StatusPill value={output.staleClass} /></div>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <Metric label="State" value={output.stateId} />
+                <Metric label="Output type" value={output.outputType} />
+              </div>
+              <div className="mt-3"><TokenList values={output.propagationPathIds} /></div>
+              <div className="mt-2 text-slate-400">{safeRenderValue(output.deterministicReason)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+export function StalePropagationSimulationWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+  return (
+    <Panel title="Stale Propagation Simulation" eyebrow="Sandbox propagation">
+      <div className="grid gap-3 md:grid-cols-4">
+        {Object.entries(simulation.hypothetical.invalidationPropagation.staleClassCounts).map(([staleClass, count]) => <Metric key={staleClass} label={staleClass} value={count} />)}
+      </div>
+      <div className="mt-4 space-y-2">
+        {simulation.staleImpacts.slice(0, 18).map(impact => (
+          <div key={impact.entityId} className="rounded-lg border border-white/10 bg-white/[0.02] p-3 text-xs text-slate-300">
+            <div className="font-mono text-sky-300">{safeRenderValue(impact.entityId)}</div>
+            <div className="mt-2"><TokenList values={impact.staleClasses} /></div>
+            <div className="mt-2 text-slate-400">{safeRenderValue(impact.deterministicReason)}</div>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+export function ContextImpactSimulationWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+  const contexts = simulation.hypothetical.contextResolution.contexts.filter(context => simulation.affectedContextIds.includes(context.id) || context.status === 'blocked' || context.status === 'conflicting' || context.status === 'unresolved');
+  return (
+    <Panel title="Context Impact Simulation" eyebrow="Hypothetical context arbitration">
+      {contexts.length === 0 ? <EmptyState state="no_context_impacts">No context impacts were forecast.</EmptyState> : contexts.map(context => (
+        <div key={context.id} className="mb-3 rounded-xl border border-white/10 bg-white/[0.02] p-4 text-xs text-slate-300">
+          <div className="flex flex-wrap items-center justify-between gap-2"><div className="font-mono text-sky-300">{safeRenderValue(context.id)}</div><StatusPill value={context.status} /></div>
+          <div className="mt-3 grid gap-2 md:grid-cols-3"><Metric label="Confidence" value={context.confidence.score} /><Metric label="Rank" value={context.confidence.rank} /><Metric label="Fallbacks" value={collectionSize(context.fallbackLineage)} /></div>
+          <div className="mt-3"><TokenList values={context.unresolvedDependencies} /></div>
+        </div>
+      ))}
+    </Panel>
+  );
+}
+
+export function RequirementImpactSimulationWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+  return (
+    <Panel title="Requirement Impact Simulation" eyebrow="Hypothetical requirement lineage">
+      <TokenList values={simulation.affectedRequirementIds} limit={32} />
+      <div className="mt-4 text-xs text-slate-400">Requirement impacts are derived from existing signal/context mappings and snapshot delta metadata only; this panel does not create new requirement truth.</div>
+    </Panel>
+  );
+}
+
+export function FallbackConflictDeltaViewer({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+  const rows = [...simulation.fallbackDeltas, ...simulation.conflictDeltas];
+  return (
+    <Panel title="Fallback/Conflict Delta Viewer" eyebrow="Review-visible unresolved state">
+      {rows.length === 0 ? <EmptyState state="no_fallback_or_conflict_delta">No fallback or conflict deltas are present.</EmptyState> : rows.map(row => (
+        <div key={row.deltaId} className="mb-2 rounded-lg border border-white/10 bg-white/[0.02] p-3 text-xs text-slate-300">
+          <div className="flex flex-wrap items-center justify-between gap-2"><div className="font-mono text-amber-300">{safeRenderValue(row.entityId)}</div><StatusPill value={row.entityType} /></div>
+          <div className="mt-2 text-slate-400">{safeRenderValue(row.deterministicReason)}</div>
+        </div>
+      ))}
+    </Panel>
+  );
+}
+
+export function RegenerationForecastWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+  return (
+    <Panel title="Regeneration Forecast" eyebrow="Metadata-only planning">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Candidates" value={collectionSize(simulation.hypothetical.regenerationPlan.regenerationCandidateIds)} />
+        <Metric label="Review required" value={collectionSize(simulation.hypothetical.regenerationPlan.reviewRequiredIds)} />
+        <Metric label="Blocked dependencies" value={collectionSize(simulation.hypothetical.regenerationPlan.blockedDependencyIds)} />
+        <Metric label="Missing evidence" value={collectionSize(simulation.hypothetical.regenerationPlan.missingEvidenceIds)} />
+      </div>
+      <div className="mt-4"><TokenList values={simulation.hypothetical.regenerationPlan.regenerationCandidateIds} limit={24} /></div>
+      <DeterministicNotes notes={simulation.hypothetical.regenerationPlan.deterministicNotes} />
+    </Panel>
+  );
+}
+
+export function ConfidenceDeltaTimelineWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+  return (
+    <Panel title="Confidence Delta Timeline" eyebrow="Deterministic confidence changes">
+      {simulation.confidenceDeltas.length === 0 ? <EmptyState state="stable_confidence">No confidence changes were produced.</EmptyState> : simulation.confidenceDeltas.map(row => (
+        <div key={`${row.entityType}:${row.entityId}`} className="mb-2 rounded-lg border border-white/10 bg-white/[0.02] p-3 text-xs text-slate-300">
+          <div className="flex flex-wrap items-center justify-between gap-2"><div className="font-mono text-sky-300">{safeRenderValue(row.entityId)}</div><StatusPill value={row.entityType} /></div>
+          <div className="mt-2 grid gap-2 md:grid-cols-3"><Metric label="Production" value={safeRenderValue(row.previousScore)} /><Metric label="Hypothetical" value={safeRenderValue(row.simulatedScore)} /><Metric label="Delta" value={row.delta} /></div>
+        </div>
+      ))}
+    </Panel>
+  );
+}
+
+export function SimulationDependencyTraversalWorkspace({ simulation }: { simulation: EngineeringScenarioSimulationResult }) {
+  return (
+    <Panel title="Simulation Dependency Traversal" eyebrow="Cycle-safe lineage">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Visited nodes" value={collectionSize(simulation.hypothetical.dependencyTraversal.visitedNodeIds)} />
+        <Metric label="Paths" value={collectionSize(simulation.dependencyTraversalPaths)} />
+        <Metric label="Cycle detected" value={simulation.hypothetical.dependencyTraversal.cycleDetected ? 'true' : 'false'} />
+        <Metric label="Truncated" value={simulation.hypothetical.dependencyTraversal.truncated ? 'true' : 'false'} />
+      </div>
+      <div className="mt-4 space-y-2">
+        {simulation.dependencyTraversalPaths.slice(0, 16).map(path => (
+          <div key={path.pathId} className="rounded-lg border border-white/10 bg-white/[0.02] p-3 text-xs text-slate-300">
+            <div className="font-mono text-violet-300">{safeRenderValue(path.pathId)}</div>
+            <div className="mt-2"><TokenList values={path.nodeIds} limit={12} /></div>
+            <div className="mt-2 text-slate-400">{safeRenderValue(path.deterministicReason)}</div>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
 }

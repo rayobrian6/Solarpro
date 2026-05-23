@@ -13,3 +13,5 @@ export * from './signalExtraction';
 export * from './contextTypes';
 export * from './contextRegistry';
 export * from './contextResolution';
+
+export * from './scenarioSimulation';
