@@ -24,5 +24,5 @@
 ## Delivery
 - [x] Stage intended artifacts only
 - [x] Commit directly to dev
-- [ ] Push dev only
-- [ ] Provide final safety summary confirming review-only non-authoritative geometry candidates
+- [x] Push dev only
+- [x] Provide final safety summary confirming review-only non-authoritative geometry candidates
