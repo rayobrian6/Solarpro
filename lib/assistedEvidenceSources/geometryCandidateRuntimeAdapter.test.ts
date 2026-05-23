@@ -242,3 +242,108 @@ describe('geometry candidate runtime behavior', () => {
     expect(first.derivedSignals).toHaveLength(1);
   });
 });
+
+describe('geometry candidate roadmap review lifecycle, stale visibility, and lineage compatibility', () => {
+  it('accepts geometry candidates only as review projections and preserves non-authoritative semantics', async () => {
+    const {
+      acceptGeometryCandidateForReviewProjection,
+      assertGeometryProjectionIsReviewOnly,
+      buildGeometryCandidateLineageNode,
+    } = await import('./geometryCandidateReviewLifecycle');
+    const result = await createGeometryCandidateCandidates({
+      imageBytes,
+      sourceContext: sourceContext(),
+      sourceContextText: 'possible vent obstruction source image review context',
+    });
+    const candidate = result.candidates[0];
+
+    const accepted = acceptGeometryCandidateForReviewProjection(candidate, {
+      reviewerId: 'reviewer-roadmap-001',
+      reviewedAt: '2025-05-02T00:00:00.000Z',
+      reviewNotes: ['Human reviewer acknowledged source image review context only.'],
+    });
+
+    expect(accepted.candidate.candidateStatus).toBe('accepted_by_reviewer');
+    expect(accepted.projection.projectionPayload).toEqual({ possible_obstruction_candidate: 'source_image_review_context_only' });
+    expect(accepted.projection.reviewProvenance.reviewNotes.join(' ')).toMatch(/review projection only/i);
+    expect(assertGeometryProjectionIsReviewOnly(accepted.projection)).toBe(true);
+    expect(projectionAutomaticallyMutatesCanonicalEvidence(accepted.projection)).toBe(false);
+
+    const lineage = buildGeometryCandidateLineageNode(candidate);
+    expect(lineage.downstreamAuthority).toBe(false);
+    expect(lineage.dependencyRole).toBe('lineage_visibility_only');
+    expect(lineage.allowedEdges).toEqual(['source_image_to_candidate', 'candidate_to_review_projection']);
+    expect(lineage.forbiddenEdges).toEqual(expect.arrayContaining([
+      'candidate_to_cad',
+      'candidate_to_roof_plane',
+      'candidate_to_setback',
+      'candidate_to_layout',
+      'candidate_to_nec',
+      'candidate_to_engineering',
+      'candidate_to_workflow',
+      'candidate_to_recommendation',
+    ]));
+  });
+
+  it('rejects geometry candidates in review space without creating projections or downstream authority', async () => {
+    const { rejectGeometryCandidate } = await import('./geometryCandidateReviewLifecycle');
+    const result = await createGeometryCandidateCandidates({
+      imageBytes,
+      sourceContext: sourceContext(),
+      sourceContextText: 'possible chimney obstruction source image review context',
+    });
+    const rejected = rejectGeometryCandidate(result.candidates[0], {
+      reviewerId: 'reviewer-roadmap-002',
+      reviewedAt: '2025-05-02T01:00:00.000Z',
+      reviewNotes: ['Candidate not useful for review.'],
+    });
+
+    expect(rejected.candidate.candidateStatus).toBe('rejected_by_reviewer');
+    expect(rejected.projection).toBeNull();
+    expect(candidateCanSatisfyRequirement(rejected.candidate)).toBe(false);
+    expect(candidateCanInfluenceCADReadiness(rejected.candidate)).toBe(false);
+    expect(candidateCanInfluenceRecommendations(rejected.candidate)).toBe(false);
+    expect(candidateCanCreateWorkflowItems(rejected.candidate)).toBe(false);
+  });
+
+  it('builds candidate-only stale visibility without CAD, engineering, workflow, or recommendation invalidation', async () => {
+    const { buildGeometryCandidateStaleVisibility } = await import('./geometryCandidateReviewLifecycle');
+    const result = await createGeometryCandidateCandidates({
+      imageBytes,
+      sourceContext: sourceContext(),
+      sourceContextText: 'roof jack obstruction source image review context',
+    });
+    const candidate = result.candidates[0];
+    const visibility = buildGeometryCandidateStaleVisibility(candidate, {
+      sourceMetadataHash: 'changed-source-metadata-hash',
+      runtimePayloadHash: 'changed-runtime-payload-hash',
+      boundaryPolicyVersion: 'geometry_candidate_boundary_v2',
+      reviewStateHash: 'changed-review-state-hash',
+    });
+
+    expect(visibility.candidateOnly).toBe(true);
+    expect(visibility.reviewVisibilityRequired).toBe(true);
+    expect(visibility.staleClasses).toEqual(['candidate_policy_stale', 'candidate_review_stale', 'candidate_runtime_stale', 'candidate_source_stale']);
+    expect(visibility.forbiddenStaleClasses).toEqual(['canonical_geometry_stale', 'cad_output_stale', 'engineering_output_stale', 'route_output_stale', 'bom_output_stale', 'plan_set_output_stale']);
+    expect(visibility.regenerationAllowed).toBe(false);
+    expect(visibility.cadInvalidationAllowed).toBe(false);
+    expect(visibility.engineeringInvalidationAllowed).toBe(false);
+    expect(visibility.workflowAllowed).toBe(false);
+    expect(visibility.recommendationAllowed).toBe(false);
+  });
+
+  it('does not permit non-geometry candidates to use the geometry candidate review lifecycle', async () => {
+    const { acceptGeometryCandidateForReviewProjection } = await import('./geometryCandidateReviewLifecycle');
+    const result = await createGeometryCandidateCandidates({
+      imageBytes,
+      sourceContext: sourceContext(),
+      sourceContextText: 'possible vent obstruction source image review context',
+    });
+    const nonGeometryCandidate = { ...result.candidates[0], candidateType: 'visual_category_candidate' as const };
+
+    expect(() => acceptGeometryCandidateForReviewProjection(nonGeometryCandidate, {
+      reviewerId: 'reviewer-roadmap-003',
+      reviewedAt: '2025-05-02T02:00:00.000Z',
+    })).toThrow(/possible_obstruction_candidate/i);
+  });
+});

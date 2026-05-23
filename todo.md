@@ -1,28 +1,23 @@
-# Controlled Geometry-Adjacent Evidence Pilot V1 Todo
+# Geometry Candidate Roadmap Implementation Todo
 
 ## Repository State
-- [x] Confirm branch is dev and inspect current state
+- [x] Confirm repository access and dev branch state
+- [x] Inspect current geometry candidate pilot, review lifecycle, stale/invalidation, and dependency graph surfaces
 
-## Target Selection Audit
-- [x] Re-audit geometry governance reports
-- [x] Select exactly one safest geometry candidate category
-- [x] Document safest signal source, insertion point, lineage, invalidation, and stale behavior
-
-## Implementation
-- [x] Implement governed geometry candidate runtime types/adapter/bridge for one candidate category only
-- [x] Expand assisted evidence boundary checks for geometry candidate protections
-- [x] Add review-only UI surfacing with explicit non-authoritative labels if appropriate
-
-## Tests and Reports
-- [x] Add deterministic runtime, boundary, and review lifecycle tests
-- [x] Generate final geometry candidate pilot reports
+## Safe Roadmap Implementation
+- [x] Add review lifecycle hardening for geometry candidates without canonical mutation
+- [x] Add candidate-only stale visibility helpers for geometry candidates
+- [x] Add dependency/lineage node compatibility for geometry candidates without downstream authority
+- [x] Add or strengthen misuse-prevention tests across CAD/layout/roof/setback/engineering/NEC/workflow/recommendation boundaries
+- [x] Add formal roadmap progress reports
 
 ## Validation
-- [x] Run required validation commands and capture logs/exits
-- [x] Review validation results and summarize pass/fail state
+- [x] Run targeted tests and boundary checks
+- [x] Run broader required validation as time allows
+- [x] Review validation results and capture logs/exits
 
 ## Delivery
 - [x] Stage intended artifacts only
-- [x] Commit directly to dev
+- [x] Commit changes directly to dev
 - [x] Push dev only
-- [x] Provide final safety summary confirming review-only non-authoritative geometry candidates
+- [x] Provide final safety summary

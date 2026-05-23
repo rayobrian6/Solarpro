@@ -15,3 +15,4 @@ export * from './ocrRuntimeBridge';
 export * from './geometryCandidateTypes';
 export * from './geometryCandidateRuntimeAdapter';
 export * from './geometryCandidateRuntimeBridge';
+export * from './geometryCandidateReviewLifecycle';

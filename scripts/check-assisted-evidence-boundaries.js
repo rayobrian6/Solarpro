@@ -42,6 +42,10 @@ const APPROVED_GEOMETRY_RUNTIME_FILES = new Set([
   'lib/assistedEvidenceSources/geometryCandidateRuntimeBridge.ts',
 ]);
 
+const APPROVED_GEOMETRY_REVIEW_LIFECYCLE_FILES = new Set([
+  'lib/assistedEvidenceSources/geometryCandidateReviewLifecycle.ts',
+]);
+
 const APPROVED_CORE_HASH_FILES = new Set([
   'lib/assistedEvidence/candidateRegistry.ts',
 ]);
@@ -246,7 +250,10 @@ for (const file of sourceFiles()) {
           && (/forbiddenUses|FORBIDDEN_USES|GEOMETRY_CANDIDATE_LIMITATIONS|no_|not |forbiddenStaleClasses|candidateSummary|registryNotes|must not|no /i.test(line)
             || isInsideNamedConstArray(lines, index, 'FORBIDDEN_USES')
             || isInsideNamedConstArray(lines, index, 'GEOMETRY_CANDIDATE_LIMITATIONS'));
-        if (!isAllowedGuardText && !isAllowedNegativeTest && !isTestFixtureReference && !isApprovedSurveyAlignmentReference && !isApprovedCoreHashing && !isApprovedMetadataAdapterHashing && !isApprovedOcrRuntime && !isApprovedOcrRuntimeHashing && !isApprovedVisualRuntimeHashing && !isApprovedVisualRuntimeImageBytes && !isApprovedOcrMetadataReference && !isApprovedGeometryRuntimeHashing && !isApprovedGeometryRuntimeImageBytes && !isApprovedGeometryRuntimeText) violations.push(`${relative}:${index + 1}: ${pattern.label}: ${line.trim()}`);
+        const isApprovedGeometryReviewLifecycleText = APPROVED_GEOMETRY_REVIEW_LIFECYCLE_FILES.has(relative)
+          && ['spatial detection output', 'cad engineering recommendation workflow influence'].includes(pattern.label)
+          && (/forbiddenEdges|forbiddenStaleClasses|candidateCanSatisfyRequirement|candidateCanInfluenceCADReadiness|candidateCanInfluenceRecommendations|candidateCanCreateWorkflowItems|projectionAutomaticallyMutatesCanonicalEvidence|must not|not canonical|not CAD|not engineering|No CAD|no canonical|without creating projections|downstream authority/i.test(line));
+        if (!isAllowedGuardText && !isAllowedNegativeTest && !isTestFixtureReference && !isApprovedSurveyAlignmentReference && !isApprovedCoreHashing && !isApprovedMetadataAdapterHashing && !isApprovedOcrRuntime && !isApprovedOcrRuntimeHashing && !isApprovedVisualRuntimeHashing && !isApprovedVisualRuntimeImageBytes && !isApprovedOcrMetadataReference && !isApprovedGeometryRuntimeHashing && !isApprovedGeometryRuntimeImageBytes && !isApprovedGeometryRuntimeText && !isApprovedGeometryReviewLifecycleText) violations.push(`${relative}:${index + 1}: ${pattern.label}: ${line.trim()}`);
       }
     }
   });
