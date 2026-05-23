@@ -29,5 +29,5 @@
 ## Commit and push
 - [x] Review diff/status
 - [x] Commit changes
-- [ ] Push dev safely without printing token
-- [ ] Final summary with exact validation results
+- [x] Push dev safely without printing token
+- [x] Final summary with exact validation results
