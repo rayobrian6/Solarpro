@@ -28,6 +28,6 @@
 
 ## Commit and push
 - [x] Review diff/status
-- [ ] Commit changes
-- [ ] Push branch safely without printing token
+- [x] Commit changes
+- [x] Push branch safely without printing token
 - [ ] Final summary with exact validation results
