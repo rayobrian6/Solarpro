@@ -11,6 +11,7 @@ import {
   getSurveyEvidenceDomain,
 } from './manifest';
 import { buildSurveyEvidenceEngineeringBridge } from './engineeringBridge';
+import { buildSurveyEvidenceTraceability, type SurveyEvidenceTraceabilityBundle } from './provenance';
 
 export type SurveySessionDuplicateStatus = 'canonical' | 'overlapping_duplicate' | 'unique' | 'unknown';
 export type EvidenceDuplicateStatus = 'canonical' | 'duplicate' | 'unique';
@@ -76,6 +77,7 @@ export interface ProjectSurveyEvidenceHygieneManifest {
   rawManifests: SurveyEvidenceManifest[];
   canonicalManifest: SurveyEvidenceManifest | null;
   engineeringBridge: ReturnType<typeof buildSurveyEvidenceEngineeringBridge> | null;
+  traceability: SurveyEvidenceTraceabilityBundle;
   warnings: string[];
 }
 
@@ -142,6 +144,13 @@ export function buildProjectSurveyEvidenceHygiene(
     })
     : null;
 
+  const traceability = buildSurveyEvidenceTraceability({
+    canonicalManifest,
+    evidenceTruthSource: 'canonical_manifest_v1',
+    evidenceDuplicateGroups,
+    sessions,
+  });
+
   const repeatedSubmissionGroups = sessionGroups.filter(group => group.surveyIds.length > 1);
   const warnings: string[] = [];
   if (repeatedSubmissionGroups.length > 0) {
@@ -169,6 +178,7 @@ export function buildProjectSurveyEvidenceHygiene(
     rawManifests,
     canonicalManifest,
     engineeringBridge: canonicalManifest ? buildSurveyEvidenceEngineeringBridge(canonicalManifest) : null,
+    traceability,
     warnings,
   };
 }

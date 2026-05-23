@@ -43,6 +43,7 @@ import type {
 } from '@/lib/survey/evidence/manifest';
 import type { ProjectSurveyEvidenceHygieneManifest } from '@/lib/survey/evidence/sessionGrouping';
 import { buildSurveyEvidenceEngineeringBridge } from '@/lib/survey/evidence/engineeringBridge';
+import { buildSurveyEvidenceTraceability, type SurveyEvidenceTraceabilityBundle } from '@/lib/survey/evidence/provenance';
 import type {
   SurveyV2Payload,
   SurveyElectricalService,
@@ -550,6 +551,72 @@ function SurveySessionHygieneViewer({ hygiene, currentSurveyId }: { hygiene: Pro
             </div>
           </details>
         )}
+      </div>
+    </SectionCard>
+  );
+}
+
+function SurveyTraceabilityViewer({ traceability }: { traceability: SurveyEvidenceTraceabilityBundle | null | undefined }) {
+  if (!traceability) return null;
+
+  return (
+    <SectionCard icon={<Shield size={14} />} title="Evidence Provenance + Requirement Traceability v1" iconColor="text-emerald-400">
+      <div className="space-y-3">
+        <details className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3" open>
+          <summary className="cursor-pointer text-xs font-semibold text-cyan-200">Requirement Evidence Traceability</summary>
+          <div className="mt-3 grid grid-cols-1 gap-2">
+            {traceability.requirements.map(requirement => (
+              <div key={requirement.requirementCategory} className="rounded-lg border border-slate-700/50 bg-slate-950/30 p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] font-semibold text-slate-200">{requirement.requirementLabel}</p>
+                  <span className={`text-[9px] uppercase rounded-full border px-2 py-0.5 ${requirement.requirementSatisfied ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/20 bg-amber-500/10 text-amber-300'}`}>
+                    {requirement.requirementSatisfied ? 'satisfied' : 'missing'}
+                  </span>
+                </div>
+                <p className="mt-1 text-[10px] text-slate-500 break-all">
+                  Evidence: {requirement.canonicalEvidenceId ?? 'none'} | Survey: {requirement.originatingSurveyId ?? 'none'} | Bucket: {requirement.engineeringBucket}
+                </p>
+                <p className="text-[10px] text-slate-600">Reason: {requirement.selectionReason}</p>
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <details className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-emerald-200">Canonical Evidence Provenance</summary>
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+            {traceability.canonicalEvidence.map(record => (
+              <div key={record.canonicalEvidenceId} className="rounded-lg border border-slate-700/50 bg-slate-950/30 p-2">
+                <p className="text-[11px] font-medium text-slate-200">{record.evidenceCategoryLabel}</p>
+                <p className="text-[10px] text-slate-500 break-all">Canonical evidence: {record.canonicalEvidenceId}</p>
+                <p className="text-[10px] text-slate-500">Origin survey: {record.originatingSurveyId} ({record.originatingSurveyCreatedAt ? new Date(record.originatingSurveyCreatedAt).toLocaleString() : 'unknown time'})</p>
+                <p className="text-[10px] text-slate-500">Duplicate group size: {record.duplicateGroupSize} | Confidence source: {record.requirementConfidenceSource}</p>
+                <p className="text-[10px] text-slate-600">Selection: {record.selectionReason}</p>
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <details className="rounded-xl border border-indigo-500/20 bg-indigo-500/10 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-indigo-200">Survey Lineage</summary>
+          <div className="mt-3 space-y-2">
+            {traceability.surveyLineage.length === 0 ? (
+              <p className="text-[11px] text-slate-500">No repeated-survey lineage context was attached; canonical manifest provenance still identifies originating survey ids.</p>
+            ) : traceability.surveyLineage.map(record => (
+              <div key={record.surveyId} className="rounded-lg border border-slate-700/50 bg-slate-950/30 p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-slate-300 break-all">{record.surveyId}</p>
+                  <span className="text-[9px] uppercase rounded-full border border-indigo-500/20 bg-indigo-500/10 text-indigo-300 px-2 py-0.5">
+                    {record.duplicateStatus}
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-500">
+                  {record.rawPhotoCount} raw upload(s) audit-only, {record.canonicalEvidenceCount} canonical representative(s), submitted {record.submittedAt ? new Date(record.submittedAt).toLocaleString() : 'unknown time'}.
+                </p>
+              </div>
+            ))}
+          </div>
+        </details>
       </div>
     </SectionCard>
   );
@@ -1067,6 +1134,11 @@ export default function SurveyDetailPage() {
   }
 
   const { survey, files, evidenceManifest, evidenceHygiene } = detail;
+  const displayedManifest = evidenceHygiene?.canonicalManifest ?? evidenceManifest;
+  const displayedTraceability = evidenceHygiene?.traceability ?? buildSurveyEvidenceTraceability({
+    canonicalManifest: displayedManifest,
+    evidenceTruthSource: evidenceHygiene?.canonicalManifest ? 'canonical_manifest_v1' : 'legacy_raw_photos_fallback',
+  });
 
   // ---------------------------------------------------------------------------
   // Determine payload version:
@@ -1145,8 +1217,11 @@ export default function SurveyDetailPage() {
         {/* 1b. Survey Session Hygiene — deterministic project-level duplicate grouping */}
         <SurveySessionHygieneViewer hygiene={evidenceHygiene} currentSurveyId={survey.id} />
 
-        {/* 1c. Survey Evidence Manifest — structured engineering evidence view */}
-        <SurveyEvidenceViewer manifest={evidenceHygiene?.canonicalManifest ?? evidenceManifest} />
+        {/* 1c. Evidence provenance and requirement traceability */}
+        <SurveyTraceabilityViewer traceability={displayedTraceability} />
+
+        {/* 1d. Survey Evidence Manifest — structured engineering evidence view */}
+        <SurveyEvidenceViewer manifest={displayedManifest} />
 
         {/* ------------------------------------------------------------------ */}
         {/* Typed V2 sections                                                   */}

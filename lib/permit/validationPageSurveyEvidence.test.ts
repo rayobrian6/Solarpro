@@ -41,10 +41,83 @@ function mockPermitInput(surveyEvidence?: EngineeringSurveyEvidence): PermitInpu
   };
 }
 
+
+function mockTraceability(): EngineeringSurveyEvidence['traceability'] {
+  const metadataCompleteness = {
+    hasFileUrl: true,
+    hasFilename: true,
+    hasMimeType: true,
+    hasCaptureTimestamp: true,
+    hasSubmittedCategory: true,
+    hasSiteSurveyFileId: true,
+    hasSurveyTechnician: false,
+  };
+  const canonicalEvidence = [
+    ['evidence-panel', 'survey-7', 'main_service_panel', 'Main Service Panel'],
+    ['evidence-meter', 'survey-7', 'meter', 'Utility Meter'],
+    ['evidence-roof', 'survey-7', 'roof_plane', 'Roof Plane'],
+    ['evidence-overview', 'survey-7', 'overview', 'Site Overview'],
+  ].map(([canonicalEvidenceId, originatingSurveyId, evidenceCategory, evidenceCategoryLabel]) => ({
+    canonicalEvidenceId,
+    originatingSurveyId,
+    originatingSurveyCreatedAt: '2025-01-01T00:07:00.000Z',
+    evidenceCategory: evidenceCategory as any,
+    evidenceCategoryLabel,
+    duplicateGroupSize: 7,
+    selectionReason: 'duplicate collapse representative; newest timestamp wins after metadata score ties; deterministic tie-break order uses stable evidence id',
+    evidenceTruthSource: 'canonical_manifest_v1' as const,
+    requirementSatisfied: true,
+    requirementConfidenceSource: 'canonical_evidence_confidence' as const,
+    metadataCompleteness,
+    evidenceSource: 'site_survey_files' as const,
+    evidenceConfidence: 'high' as const,
+    fileUrl: `https://cdn.example.com/${canonicalEvidenceId}.jpg`,
+    filename: `${canonicalEvidenceId}.jpg`,
+    sceneGroup: 'evidence_duplicate_group_1',
+  }));
+  const requirements = canonicalEvidence.map(record => ({
+    requirementCategory: record.evidenceCategory,
+    requirementLabel: record.evidenceCategoryLabel,
+    requirementDomain: record.evidenceCategory === 'roof_plane' ? 'roof' as const : record.evidenceCategory === 'overview' ? 'general' as const : 'electrical' as const,
+    engineeringBucket: record.evidenceCategory === 'roof_plane' ? 'roofLayoutEvidence' as const : record.evidenceCategory === 'overview' ? 'sitePlanEvidence' as const : 'electricalEvidence' as const,
+    requirementSatisfied: true,
+    canonicalEvidenceId: record.canonicalEvidenceId,
+    originatingSurveyId: record.originatingSurveyId,
+    originatingSurveyCreatedAt: record.originatingSurveyCreatedAt,
+    evidenceCategory: record.evidenceCategory,
+    duplicateGroupSize: record.duplicateGroupSize,
+    selectionReason: record.selectionReason,
+    evidenceTruthSource: 'canonical_manifest_v1' as const,
+    requirementConfidenceSource: record.requirementConfidenceSource,
+    metadataCompleteness,
+    deterministicReasoningPath: ['canonicalManifest category match', 'duplicate hygiene representative selected'],
+  }));
+  return {
+    evidenceTruthSource: 'canonical_manifest_v1',
+    requirements,
+    canonicalEvidence,
+    surveyLineage: Array.from({ length: 7 }, (_, index) => ({
+      surveyId: `survey-${index + 1}`,
+      submittedAt: `2025-01-01T00:0${index + 1}:00.000Z`,
+      technician: 'James',
+      duplicateStatus: index === 6 ? 'canonical' : 'overlapping_duplicate',
+      rawPhotoCount: 4,
+      canonicalEvidenceCount: index === 6 ? 4 : 0,
+      categoryCoverage: ['main_service_panel', 'meter', 'roof_plane', 'overview'],
+      isCanonical: index === 6,
+    })),
+    missingRequirements: [],
+  };
+}
+
 function mockSurveyEvidence(): EngineeringSurveyEvidence {
   return {
     projectId: 'project-evidence-001',
     surveyId: 'survey-evidence-001',
+    rawPhotoCount: 28,
+    canonicalEvidenceCount: 4,
+    evidenceTruthSource: 'canonical_manifest_v1',
+    traceability: mockTraceability(),
     photos: [
       {
         id: 'main_panel_open',
@@ -106,6 +179,22 @@ function mockSurveyEvidence(): EngineeringSurveyEvidence {
       rafterSpacingInches: 24,
       roofMaterial: 'composition_shingle',
       roofPitchDegrees: 22,
+    },
+
+    manifestV1: {
+      itemCount: 4,
+      lifecycleState: 'classified',
+      aiExtractionStatus: 'not_started',
+      qualityStatus: 'not_processed',
+      duplicateStatus: 'duplicate_checked',
+      engineeringBridge: {
+        readiness: 'ready_for_engineering',
+        electricalEvidenceCount: 2,
+        structuralEvidenceCount: 0,
+        roofLayoutEvidenceCount: 1,
+        sitePlanEvidenceCount: 1,
+        cadAutomationStatus: 'not_started',
+      },
     },
     source: {
       pipelineVersion: 2,
@@ -176,10 +265,22 @@ describe('pageValidationSummary survey evidence rendering', () => {
 
     expect(html).toContain('Survey Evidence Audit');
     expect(html).toContain('Photo & Field Traceability');
+    expect(html).toContain('items: 4 | source: canonical bridge summary');
+    expect(html).toContain('raw uploads 4 audit-only');
+    expect(html).toContain('canonical evidence 4');
     expect(html).toContain('completeness: SUFFICIENT');
     expect(html).toContain('main_service_panel: 1');
     expect(html).toContain('meter: 1');
     expect(html).toContain('survey evidence fallbacks, when used, are explicitly labeled and visible');
+    expect(html).toContain('ready_for_engineering');
+    expect(html).toContain('Electrical</td>');
+    expect(html).toContain('evidence items: 2');
+    expect(html).toContain('Requirement Evidence Traceability');
+    expect(html).toContain('Canonical Evidence Provenance');
+    expect(html).toContain('Survey Lineage');
+    expect(html).toContain('SATISFIED by evidence-panel');
+    expect(html).toContain('origin survey survey-7');
+    expect(html).toContain('raw uploads 4 audit-only');
   });
 
   it('renders a no-evidence warning without failing canonical validation rendering', () => {
@@ -195,4 +296,43 @@ describe('pageValidationSummary survey evidence rendering', () => {
     expect(html).toContain('plan-set assumptions are based on design/canonical inputs only');
     expect(html).toContain('ALL CHECKS PASSED');
   });
+
+  it('does not manufacture bridge counts from raw duplicated photo arrays when manifest counts are canonical', () => {
+    const duplicated = mockSurveyEvidence();
+    duplicated.photos = Array.from({ length: 7 }).flatMap(() => mockSurveyEvidence().photos);
+    duplicated.rawPhotoCount = 28;
+    duplicated.canonicalEvidenceCount = 4;
+    duplicated.manifestV1 = {
+      itemCount: 4,
+      lifecycleState: 'classified',
+      aiExtractionStatus: 'not_started',
+      qualityStatus: 'not_processed',
+      duplicateStatus: 'duplicate_checked',
+      engineeringBridge: {
+        readiness: 'ready_for_engineering',
+        electricalEvidenceCount: 2,
+        structuralEvidenceCount: 0,
+        roofLayoutEvidenceCount: 1,
+        sitePlanEvidenceCount: 1,
+        cadAutomationStatus: 'not_started',
+      },
+    };
+
+    const html = pageValidationSummary(
+      mockPermitInput(duplicated),
+      mockCanonical(),
+      {} as CADModel,
+      15,
+      15,
+    );
+
+    expect(html).toContain('items: 4 | source: canonical bridge summary');
+    expect(html).toContain('raw uploads 4 audit-only');
+    expect(html).toContain('canonical evidence 4');
+    expect(html).toContain('evidence items: 2');
+    expect(html).toContain('main_service_panel: 7 | meter: 7 | roof_plane: 7 | overview: 7');
+    expect(html).not.toContain('28 canonical evidence item(s)');
+    expect(html).not.toContain('<td style="font-family:monospace;font-size:7px;color:#000;">28</td>');
+  });
+
 });

@@ -91,6 +91,12 @@ describe('Project survey evidence duplicate hygiene v1', () => {
       'overview',
       'roof_plane',
     ]);
+    expect(hygiene.traceability.requirements.every(requirement => requirement.requirementSatisfied)).toBe(true);
+    expect(hygiene.traceability.requirements.every(requirement => requirement.canonicalEvidenceId !== null)).toBe(true);
+    expect(hygiene.traceability.canonicalEvidence.every(record => record.duplicateGroupSize === 7)).toBe(true);
+    expect(hygiene.traceability.canonicalEvidence.every(record => record.selectionReason.includes('duplicate collapse representative'))).toBe(true);
+    expect(hygiene.traceability.surveyLineage).toHaveLength(7);
+    expect(hygiene.traceability.surveyLineage.filter(record => record.isCanonical)).toHaveLength(1);
 
     expect(hygiene.canonicalManifest?.summary.totalItems).toBe(4);
     expect(hygiene.canonicalManifest?.coverage.find(group => group.category === 'meter')?.count).toBe(1);

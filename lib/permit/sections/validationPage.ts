@@ -218,6 +218,27 @@ export function pageValidationSummary(
     : surveyEvidence
       ? 'None'
       : 'main_service_panel, meter, roof_plane, overview';
+  const traceability = surveyEvidence?.traceability;
+  const requirementTraceRows = traceability?.requirements.length
+    ? traceability.requirements.map(requirement => [
+        requirement.requirementLabel,
+        requirement.requirementSatisfied
+          ? `SATISFIED by ${requirement.canonicalEvidenceId} | survey ${requirement.originatingSurveyId ?? 'unknown'} | duplicates: ${requirement.duplicateGroupSize} | confidence source: ${requirement.requirementConfidenceSource}`
+          : `MISSING | ${requirement.selectionReason} | confidence source: ${requirement.requirementConfidenceSource}`,
+      ] as const)
+    : [['Requirement Evidence Traceability', 'No canonical requirement traceability bundle was provided.'] as const];
+  const canonicalProvenanceRows = traceability?.canonicalEvidence.length
+    ? traceability.canonicalEvidence.slice(0, 8).map(record => [
+        record.evidenceCategoryLabel,
+        `${record.canonicalEvidenceId} | origin survey ${record.originatingSurveyId} @ ${record.originatingSurveyCreatedAt ?? 'unknown'} | group size ${record.duplicateGroupSize} | ${record.selectionReason}`,
+      ] as const)
+    : [['Canonical Evidence Provenance', 'No canonical evidence provenance records were provided.'] as const];
+  const surveyLineageRows = traceability?.surveyLineage.length
+    ? traceability.surveyLineage.map(record => [
+        record.isCanonical ? 'Canonical Survey Lineage' : 'Survey Lineage',
+        `${record.surveyId} | ${record.duplicateStatus} | submitted ${record.submittedAt ?? 'unknown'} | raw uploads ${record.rawPhotoCount} audit-only | canonical evidence ${record.canonicalEvidenceCount}`,
+      ] as const)
+    : [['Survey Lineage', 'No survey lineage records were provided for this permit run.'] as const];
   const surveyWarningRows = surveyEvidence
     ? [...surveyEvidence.blockers, ...surveyEvidence.warnings].slice(0, 6)
     : ['No normalized survey evidence object was provided; plan-set assumptions are based on design/canonical inputs only.'];
@@ -305,6 +326,24 @@ export function pageValidationSummary(
           <tr style="background:${i%2===0?'#f9f9f9':'#fff'};">
             <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
             <td colspan="3" style="font-family:monospace;font-size:7px;color:#000;">${esc(value)}</td>
+          </tr>`).join('')}
+          <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#0e7490;background:#ecfeff;">Requirement Evidence Traceability</td></tr>
+          ${requirementTraceRows.map(([label, value], i) => `
+          <tr style="background:${i%2===0?'#f0fdfa':'#fff'};">
+            <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
+            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
+          </tr>`).join('')}
+          <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#047857;background:#ecfdf5;">Canonical Evidence Provenance</td></tr>
+          ${canonicalProvenanceRows.map(([label, value], i) => `
+          <tr style="background:${i%2===0?'#f9f9f9':'#fff'};">
+            <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
+            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
+          </tr>`).join('')}
+          <tr><td colspan="4" style="font-weight:900;font-size:7px;color:#4338ca;background:#eef2ff;">Survey Lineage</td></tr>
+          ${surveyLineageRows.map(([label, value], i) => `
+          <tr style="background:${i%2===0?'#f9f9ff':'#fff'};">
+            <td style="font-weight:600;font-size:7.5px;">${esc(label)}</td>
+            <td colspan="3" style="font-family:monospace;font-size:6.5px;color:#000;">${esc(value)}</td>
           </tr>`).join('')}
           ${surveyWarningRows.map((warning, i) => `
           <tr style="background:${i%2===0?'#fff7ed':'#fff'};">

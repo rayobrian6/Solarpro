@@ -24,6 +24,7 @@ import { normalizeSurvey } from '@/lib/siteSurvey/normalizeSurvey';
 import { enrichSurvey } from '@/lib/siteSurvey/enrichSurvey';
 import { permitIntegration } from '@/lib/siteSurvey/permitIntegration';
 import { collectEngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
+import { getProjectSurveyContext } from '@/lib/survey/getProjectSurveyContext';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
@@ -535,12 +536,21 @@ export async function POST(req: NextRequest) {
             // 3. Normalize → Enrich → Integrate
             const normalized = normalizeSurvey(rawSurvey);
             const enriched   = enrichSurvey(normalized);
-            const surveyEvidence = collectEngineeringSurveyEvidence(enriched);
+            const surveyContext = await getProjectSurveyContext(projectId, user.id);
+            const evidenceHygiene = surveyContext.evidenceHygiene;
+            const canonicalManifest = evidenceHygiene?.canonicalManifest ?? null;
+            const surveyEvidence = collectEngineeringSurveyEvidence(enriched, {
+              canonicalManifest,
+              evidenceDuplicateGroups: evidenceHygiene?.evidenceDuplicateGroups,
+              sessions: evidenceHygiene?.sessions,
+            });
             enrichedBody.surveyEvidence = surveyEvidence;
             const { patch, sheetData, permitLog, warnings } = permitIntegration(enriched);
 
             console.log('[permit/survey] evidence completeness:', surveyEvidence.completeness, {
-              photos: surveyEvidence.photos.length,
+              canonicalEvidenceCount: surveyEvidence.canonicalEvidenceCount,
+              rawPhotoCount: surveyEvidence.rawPhotoCount,
+              truthSource: surveyEvidence.evidenceTruthSource,
               missingCategories: surveyEvidence.missingCategories,
               warnings: surveyEvidence.warnings.length,
               blockers: surveyEvidence.blockers.length,

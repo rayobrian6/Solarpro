@@ -3,6 +3,7 @@ import {
   getSurveyEvidenceLabel,
 } from './categoryRegistry';
 import type { SurveyEvidenceManifest, SurveyEvidenceItem } from './manifest';
+import { buildSurveyEvidenceTraceability, type RequirementEvidenceTraceabilityRecord } from './provenance';
 
 export interface SurveyEvidenceEngineeringBridge {
   readiness: 'blocked' | 'needs_review' | 'ready_for_engineering';
@@ -10,6 +11,8 @@ export interface SurveyEvidenceEngineeringBridge {
   structuralEvidence: string[];
   roofLayoutEvidence: string[];
   sitePlanEvidence: string[];
+  requirementTraceability: RequirementEvidenceTraceabilityRecord[];
+  missingRequirementTraceability: RequirementEvidenceTraceabilityRecord[];
   permitWarnings: string[];
   cadAutomationStatus: 'not_started';
 }
@@ -24,6 +27,11 @@ export interface SurveyEvidenceEngineeringBridgeCounts {
 export function buildSurveyEvidenceEngineeringBridge(
   manifest: SurveyEvidenceManifest | null | undefined,
 ): SurveyEvidenceEngineeringBridge {
+  const traceability = buildSurveyEvidenceTraceability({
+    canonicalManifest: manifest,
+    evidenceTruthSource: 'canonical_manifest_v1',
+  });
+
   if (!manifest || manifest.summary.totalItems === 0) {
     return {
       readiness: 'blocked',
@@ -31,6 +39,8 @@ export function buildSurveyEvidenceEngineeringBridge(
       structuralEvidence: [],
       roofLayoutEvidence: [],
       sitePlanEvidence: [],
+      requirementTraceability: traceability.requirements,
+      missingRequirementTraceability: traceability.missingRequirements,
       permitWarnings: ['No structured survey photo evidence manifest is available.'],
       cadAutomationStatus: 'not_started',
     };
@@ -56,6 +66,8 @@ export function buildSurveyEvidenceEngineeringBridge(
     structuralEvidence,
     roofLayoutEvidence,
     sitePlanEvidence,
+    requirementTraceability: traceability.requirements,
+    missingRequirementTraceability: traceability.missingRequirements,
     permitWarnings: manifest.warnings,
     cadAutomationStatus: 'not_started',
   };
