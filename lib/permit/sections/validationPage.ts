@@ -311,12 +311,26 @@ export function pageValidationSummary(
       ] as const)
     : [['Engineering State Records', 'No engineering state records were provided.'] as const];
 
+  const fieldEvidence = surveyEvidence?.fieldEvidence ?? {
+    hasPhysicalData: false,
+    hasRoofGeometry: false,
+    hasElectricalData: false,
+    hasStructuralData: false,
+    roofPlaneCount: 0,
+    usableAreaSqFt: null,
+    mainPanelRatingAmps: null,
+    busbarRatingAmps: null,
+    rafterSize: null,
+    rafterSpacingInches: null,
+    roofMaterial: null,
+  };
+
   const surveyFieldEvidenceRows = surveyEvidence ? [
     ['Evidence Manifest v1', `items: ${manifestV1.itemCount} | source: ${manifestSummarySource} | lifecycle: ${manifestV1.lifecycleState} | quality: ${manifestV1.qualityStatus} | duplicates: ${manifestV1.duplicateStatus} | AI: ${manifestV1.aiExtractionStatus} | engineering readiness: ${manifestV1.engineeringBridge.readiness} | CAD automation: ${manifestV1.engineeringBridge.cadAutomationStatus}`],
-    ['Physical Data', surveyEvidence.fieldEvidence.hasPhysicalData ? 'present' : 'missing'],
-    ['Roof Geometry', `${surveyEvidence.fieldEvidence.hasRoofGeometry ? 'present' : 'missing'} | planes: ${surveyEvidence.fieldEvidence.roofPlaneCount} | usable area: ${surveyEvidence.fieldEvidence.usableAreaSqFt ?? '—'} sq ft`],
-    ['Electrical', `${surveyEvidence.fieldEvidence.hasElectricalData ? 'present' : 'missing'} | MSP: ${surveyEvidence.fieldEvidence.mainPanelRatingAmps ?? '—'}A | Busbar: ${surveyEvidence.fieldEvidence.busbarRatingAmps ?? '—'}A | evidence items: ${manifestV1.engineeringBridge.electricalEvidenceCount}`],
-    ['Structural', `${surveyEvidence.fieldEvidence.hasStructuralData ? 'present' : 'missing'} | ${surveyEvidence.fieldEvidence.rafterSize ?? '—'} @ ${surveyEvidence.fieldEvidence.rafterSpacingInches ?? '—'} in O.C. | ${surveyEvidence.fieldEvidence.roofMaterial ?? '—'} | evidence items: ${manifestV1.engineeringBridge.structuralEvidenceCount}`],
+    ['Physical Data', fieldEvidence.hasPhysicalData ? 'present' : 'missing'],
+    ['Roof Geometry', `${fieldEvidence.hasRoofGeometry ? 'present' : 'missing'} | planes: ${fieldEvidence.roofPlaneCount} | usable area: ${fieldEvidence.usableAreaSqFt ?? '—'} sq ft`],
+    ['Electrical', `${fieldEvidence.hasElectricalData ? 'present' : 'missing'} | MSP: ${fieldEvidence.mainPanelRatingAmps ?? '—'}A | Busbar: ${fieldEvidence.busbarRatingAmps ?? '—'}A | evidence items: ${manifestV1.engineeringBridge.electricalEvidenceCount}`],
+    ['Structural', `${fieldEvidence.hasStructuralData ? 'present' : 'missing'} | ${fieldEvidence.rafterSize ?? '—'} @ ${fieldEvidence.rafterSpacingInches ?? '—'} in O.C. | ${fieldEvidence.roofMaterial ?? '—'} | evidence items: ${manifestV1.engineeringBridge.structuralEvidenceCount}`],
     ['Layout / Site Evidence', `roof/layout items: ${manifestV1.engineeringBridge.roofLayoutEvidenceCount} | site-plan items: ${manifestV1.engineeringBridge.sitePlanEvidenceCount}`],
   ] : [
     ['Physical Data', 'No survey evidence attached'],

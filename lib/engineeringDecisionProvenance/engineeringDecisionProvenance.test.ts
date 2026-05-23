@@ -354,6 +354,25 @@ describe('Engineering Decision Provenance v1', () => {
     expect(bundle.auditGuards.find(guard => guard.guardCode === 'fallback_assumptions_documented')?.passed).toBe(true);
   });
 
+  it('does not crash geometry decision provenance when survey field evidence is missing', () => {
+    const surveyEvidence = {
+      ...evidenceFromDuplicateHygiene(),
+      fieldEvidence: undefined,
+    } satisfies EngineeringSurveyEvidence;
+    const bundle = buildEngineeringDecisionProvenanceBundle({
+      bundleId: 'permit:missing-field-evidence.decision-provenance',
+      generatedAt,
+      surveyEvidence,
+      cad: mockCad(),
+      permitInput: permitInput(),
+    });
+    const setback = bundle.decisionRecords.find(record => record.decisionType === 'setback_assumption');
+
+    expect(setback?.decisionId).toBe('decision:setback_assumption');
+    expect(setback?.geometryAssumptions).toContain('survey.fieldEvidence.hasRoofGeometry:false');
+    expect(bundle.auditGuards.every(guard => guard.severity !== 'error' || guard.passed)).toBe(true);
+  });
+
   it('keeps decision provenance stable when duplicate uploads collapse to the same canonical evidence', () => {
     const withDuplicates = evidenceFromDuplicateHygiene(7);
     const sameCanonicalWithDifferentRawAuditCount = {

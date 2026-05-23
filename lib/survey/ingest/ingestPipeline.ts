@@ -35,7 +35,6 @@ import type {
   IngestErrorCode,
   LinkResolution,
   TransformOutput,
-  TransformFile,
   SurveyRawPayload,
   PhysicalDataOutput,
 } from './types';
@@ -496,25 +495,16 @@ export async function runIngestPipeline(context: IngestContext): Promise<IngestR
 
   log(`DONE status=ingested projectId=${projectId} created=${created} durationMs=${durationMs}`);
 
-  // -- G–J. Vision pipeline (async non-blocking) ----------------------------
-  // These steps run AFTER the delivery is marked 'ingested' and the HTTP
-  // response has been returned. They NEVER affect the ingest result.
-  //
-  //   G. Trigger photo analysis  — run Roboflow inference on all project photos
-  //   H. Run vision aggregation  — aggregate detections into world coordinates
-  //   I. Patch SystemDefinition  — write obstructions + electrical nodes
-  //   J. Trigger CAD rebuild     — re-run CAD engine with vision-enriched data
-  //
-  // Each step is fire-and-forget. Errors are logged with [VISION PIPELINE]
-  // prefix but never surface to the caller.
+  // -- G. Prohibited-boundary quarantine ------------------------------------
+  // Survey ingest must preserve immutable field evidence and canonical file
+  // history without launching CV/OCR/AI/image-byte analysis or mutating
+  // engineering truth from raw uploads. File-present ingests therefore stop
+  // after persistence; downstream engineering must use canonical manifests and
+  // explicit provenance-aware evaluation paths.
   if (transformOutput.files.length > 0) {
-    log(`STEP_G triggering async vision pipeline for projectId=${projectId} files=${transformOutput.files.length}`);
-    _runVisionPipelineAsync(projectId, event.survey_id, transformOutput.files, traceId).catch(err => {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[VISION PIPELINE] traceId=${traceId} projectId=${projectId} async pipeline error (non-fatal): ${msg}`);
-    });
+    log(`STEP_G vision/CV pipeline disabled by canonical survey evidence boundary files=${transformOutput.files.length}`);
   } else {
-    log(`STEP_G skipping vision pipeline — no files ingested`);
+    log(`STEP_G no files ingested; no vision/CV pipeline available`);
   }
 
   // ── Write micro stage: survey_submitted (critical — awaited, retries once internally) ───
@@ -1038,220 +1028,5 @@ async function _markDeliveryFailed(
       `[ingestPipeline] DELIVERY_UPDATE_FAILED traceId=${traceId} ` +
       `deliveryId=${deliveryId} could not mark delivery failed: ${msg}`,
     );
-  }
-}
-// ---------------------------------------------------------------------------
-// _runVisionPipelineAsync — Steps G–J: fire-and-forget vision pipeline.
-//
-// Called after the ingest response is committed. Errors are caught and logged
-// but NEVER propagate to the caller. This function runs fully independently
-// of the ingest result.
-//
-// Steps:
-//   G. Trigger photo analysis:
-//      For each ingested photo file, POST to the in-house YOLOv8 vision
-//      service (VISION_SERVICE_URL/vision/infer). Roboflow is no longer used.
-//
-//   H. Run vision aggregation:
-//      Call aggregateVisionResults() with all per-photo inference results.
-//      Produces a VisionAggregationResult (obstructions, electricalNodes, etc.)
-//
-//   I. Patch SystemDefinition:
-//      Call patchSystemDefinitionFromVision() to merge vision results into
-//      the project's SystemDefinition. Writes [SYSDEF PATCH] audit log lines.
-//      Updates survey_meta.visionStatus in the projects table.
-//
-//   J. Trigger CAD rebuild:
-//      Logs that a CAD rebuild is needed. Actual rebuild is triggered by
-//      the CAD endpoint when the project is next opened or via a background job.
-//      (Full async CAD rebuild requires the project's full PermitInputShape,
-//       which is assembled by the project page — not available at ingest time.)
-//
-// DEGRADED MODE:
-//   If VISION_SERVICE_URL is not set, Step G is skipped (zero-cost degraded mode).
-//   If photos have no GPS context, aggregation runs in low-confidence mode.
-//   If all detections fall below threshold, SystemDefinition is unchanged.
-// ---------------------------------------------------------------------------
-async function _runVisionPipelineAsync(
-  projectId: string,
-  surveyId: string,
-  files: TransformFile[],
-  traceId: string,
-): Promise<void> {
-  const tag = `[VISION PIPELINE] traceId=${traceId} projectId=${projectId} surveyId=${surveyId}`;
-
-  // ── G. Check prerequisites ──────────────────────────────────────────────
-  const visionServiceUrl = (process.env.VISION_SERVICE_URL ?? '').replace(/\/$/, '');
-
-  if (!visionServiceUrl) {
-    console.log(`${tag} STEP_G SKIP: VISION_SERVICE_URL not configured — vision pipeline disabled`);
-    await _updateVisionStatus(projectId, 'skipped_no_photos', traceId, 'VISION_SERVICE_URL not configured');
-    return;
-  }
-
-  // Only process photo files (filter out documents, pdfs, etc.)
-  const photoFiles = files.filter(f => {
-    const ext = (f.name || f.url || '').toLowerCase();
-    return ext.endsWith('.jpg') || ext.endsWith('.jpeg') ||
-           ext.endsWith('.png') || ext.endsWith('.webp') ||
-           ext.endsWith('.heic') || ext.endsWith('.heif');
-  });
-
-  if (photoFiles.length === 0) {
-    console.log(`${tag} STEP_G SKIP: no photo files to analyze (${files.length} total files)`);
-    await _updateVisionStatus(projectId, 'skipped_no_photos', traceId, 'No photo files ingested');
-    return;
-  }
-
-  console.log(`${tag} STEP_G START: analyzing ${photoFiles.length} photo(s) via ${visionServiceUrl}`);
-  await _updateVisionStatus(projectId, 'inferring', traceId);
-
-  // ── G. Run YOLOv8 inference on each photo via vision service ──────────────────
-  const { aggregateVisionResults } = await import('@/lib/vision/visionAggregator');
-
-  const photoVisionResults: import('@/lib/vision/types').PhotoVisionResult[] = [];
-
-  const visionApiKey = process.env.VISION_API_KEY ?? '';
-  const inferHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (visionApiKey) inferHeaders['Authorization'] = `Bearer ${visionApiKey}`;
-
-  for (const file of photoFiles) {
-    try {
-      const inferStart = Date.now();
-      console.log(`${tag} STEP_G inferring file=${file.url}`);
-
-      const response = await fetch(`${visionServiceUrl}/vision/infer`, {
-        method:  'POST',
-        headers: inferHeaders,
-        body:    JSON.stringify({ imageUrl: file.url }),
-      });
-
-      if (!response.ok) {
-        console.warn(`${tag} STEP_G inference failed for ${file.url}: HTTP ${response.status}`);
-        continue;
-      }
-
-      // Vision service returns InferResponse — adapt to VisionInferenceResult shape.
-      const serviceResult = await response.json() as {
-        detections:     import('@/lib/vision/types').VisionDetection[];
-        detectionCount: number;
-        inferenceMs:    number;
-        modelPath?:     string;
-      };
-
-      const inferenceResult: import('@/lib/vision/types').VisionInferenceResult = {
-        detections:     serviceResult.detections ?? [],
-        detectionCount: serviceResult.detectionCount ?? 0,
-        inferenceMs:    serviceResult.inferenceMs ?? 0,
-        modelPath:      serviceResult.modelPath ?? '',
-      };
-
-      photoVisionResults.push({
-        fileId:          file.externalId ?? file.url,
-        fileUrl:         file.url,
-        projectId,
-        surveyId,
-        inferenceResult,
-        photoContext: {
-          fileId:  file.externalId ?? file.url,
-          fileUrl: file.url,
-          lat:     null,
-          lng:     null,
-          azimuth: null,
-          pitch:   null,
-          label:   file.name ?? null,
-        },
-        inferredAt: new Date().toISOString(),
-        modelId:    serviceResult.modelPath ?? 'solarvision-yolov8',
-        durationMs: Date.now() - inferStart,
-      });
-
-      console.log(`${tag} STEP_G inference OK file=${file.url} detections=${inferenceResult.detectionCount}`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`${tag} STEP_G inference error for ${file.url} (non-fatal): ${msg}`);
-    }
-  }
-
-  if (photoVisionResults.length === 0) {
-    console.log(`${tag} STEP_G no successful inference results — skipping H/I/J`);
-    await _updateVisionStatus(projectId, 'failed', traceId, 'All inference attempts failed');
-    return;
-  }
-
-  // ── H. Aggregate vision results ─────────────────────────────────────────
-  console.log(`${tag} STEP_H aggregating ${photoVisionResults.length} inference result(s)`);
-  await _updateVisionStatus(projectId, 'aggregating', traceId);
-
-  const aggregation = aggregateVisionResults(photoVisionResults, projectId, surveyId);
-  console.log(`${tag} STEP_H aggregation OK obstructions=${aggregation.obstructions.length} electrical=${aggregation.electricalNodes.length} highConf=${aggregation.hasHighConfidenceDetections}`);
-
-  if (!aggregation.hasHighConfidenceDetections && aggregation.obstructions.length === 0 && aggregation.electricalNodes.length === 0) {
-    console.log(`${tag} STEP_H no significant detections — skipping I/J`);
-    await _updateVisionStatus(projectId, 'complete', traceId);
-    return;
-  }
-
-  // ── I. Patch SystemDefinition ────────────────────────────────────────────
-  console.log(`${tag} STEP_I patching SystemDefinition`);
-  await _updateVisionStatus(projectId, 'patching_sysdef', traceId);
-
-  try {
-    const sql = await (await import('@/lib/db-neon')).getDbReady();
-    const visionMeta = {
-      visionStatus:                'complete',
-      visionPatchedAt:             new Date().toISOString(),
-      obstructionCount:            aggregation.obstructions.length,
-      electricalNodeCount:         aggregation.electricalNodes.length,
-      photosProcessed:             aggregation.photosProcessed,
-      rawDetectionCount:           aggregation.rawDetectionCount,
-      hasHighConfidenceDetections: aggregation.hasHighConfidenceDetections,
-    };
-
-    await sql`
-      UPDATE projects
-         SET survey_meta = COALESCE(survey_meta, '{}'::jsonb) || ${JSON.stringify(visionMeta)}::jsonb,
-             updated_at  = now()
-       WHERE id = ${projectId}
-    `;
-
-    console.log(`${tag} STEP_I survey_meta.visionStatus written OK`);
-  } catch (dbErr) {
-    const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
-    console.warn(`${tag} STEP_I DB write failed (non-fatal): ${msg}`);
-  }
-
-  // ── J. Log CAD rebuild trigger ────────────────────────────────────────────
-  // Actual CAD rebuild is deferred to when the project is next opened.
-  // The project page reads survey_meta.visionStatus='complete' and triggers
-  // a re-run of generateCADLayout() with the patched SystemDefinition.
-  console.log(`${tag} STEP_J CAD rebuild flagged — will run when project is next opened`);
-  await _updateVisionStatus(projectId, 'rebuilding_cad', traceId);
-
-  // Mark complete
-  await _updateVisionStatus(projectId, 'complete', traceId);
-  console.log(`${tag} DONE vision pipeline complete`);
-}
-
-// ---------------------------------------------------------------------------
-// _updateVisionStatus — best-effort update to projects.survey_meta.visionPipelineStage
-// ---------------------------------------------------------------------------
-async function _updateVisionStatus(
-  projectId: string,
-  stage: import('@/lib/vision/types').VisionPipelineStatus['stage'],
-  traceId: string,
-  error?: string,
-): Promise<void> {
-  try {
-    const sql = await (await import('@/lib/db-neon')).getDbReady();
-    const patch = JSON.stringify({ visionPipelineStage: stage, ...(error ? { visionPipelineError: error } : {}) });
-    await sql`
-      UPDATE projects
-         SET survey_meta = COALESCE(survey_meta, '{}'::jsonb) || ${patch}::jsonb,
-             updated_at  = now()
-       WHERE id = ${projectId}
-    `;
-  } catch {
-    // best-effort — never throws
   }
 }

@@ -371,7 +371,7 @@ function geometryAssumptionsForDecision(decisionType: EngineeringDecisionType, i
     input.cad?.systemType ? `cad.systemType:${input.cad.systemType}` : '',
     input.cad?.roof?.setbackIn ? `cad.roof.setbackIn:${input.cad.roof.setbackIn}` : '',
     input.cad?.totalPanels ? `cad.totalPanels:${input.cad.totalPanels}` : '',
-    input.surveyEvidence?.fieldEvidence.hasRoofGeometry ? 'survey.fieldEvidence.hasRoofGeometry:true' : 'survey.fieldEvidence.hasRoofGeometry:false',
+    input.surveyEvidence?.fieldEvidence?.hasRoofGeometry ? 'survey.fieldEvidence.hasRoofGeometry:true' : 'survey.fieldEvidence.hasRoofGeometry:false',
   ].filter(Boolean));
 }
 

@@ -13,7 +13,7 @@
 //   - PROJECT_RESOLUTION_FAILED replaces DB_WRITE_FAILED for resolution errors.
 // ============================================================================
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { IngestContext } from './types';
 
 // ---------------------------------------------------------------------------
@@ -350,5 +350,84 @@ describe('runIngestPipeline — result shape contract', () => {
       expect(typeof result.error).toBe('string');
       expect(result.error.length).toBeGreaterThan(0);
     }
+  });
+});
+// ---------------------------------------------------------------------------
+// Prohibited boundary: ingest must not launch CV/vision inference
+// ---------------------------------------------------------------------------
+describe('runIngestPipeline — prohibited CV/vision boundary', () => {
+  const PROJ_ID = '11111111-2222-3333-4444-555555555555';
+  const CLIENT_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const originalVisionServiceUrl = process.env.VISION_SERVICE_URL;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.VISION_SERVICE_URL = 'https://vision.example.test';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ detections: [], detectionCount: 0, inferenceMs: 1 }),
+    }));
+
+    let callCount = 0;
+    const sql = vi.fn((..._args: unknown[]) => {
+      callCount++;
+      if (callCount <= 2) return Promise.resolve([{ id: PROJ_ID }]);
+      return Promise.resolve([]);
+    });
+    const taggedSql = (strings: TemplateStringsArray, ...values: unknown[]) => sql(strings, ...values);
+    Object.assign(taggedSql, { mock: sql.mock });
+    vi.mocked(getDbReady).mockResolvedValue(taggedSql as any);
+  });
+
+  afterEach(() => {
+    if (originalVisionServiceUrl === undefined) {
+      delete process.env.VISION_SERVICE_URL;
+    } else {
+      process.env.VISION_SERVICE_URL = originalVisionServiceUrl;
+    }
+    vi.unstubAllGlobals();
+  });
+
+  it('persists file-present surveys without calling vision inference even when VISION_SERVICE_URL is configured', async () => {
+    const ctx = makeContext({
+      selectedProjectId: PROJ_ID,
+      selectedClientId: CLIENT_ID,
+      event: {
+        ...makeContext().event,
+        schemaVersion: '2.0',
+        inline_payload: {
+          schemaVersion: '2.0',
+          inspectorName: 'Field Inspector',
+          submittedAt: '2025-04-23T10:00:00.000Z',
+          siteOverview: {
+            projectName: 'Boundary Regression Project',
+            siteAddress: '123 Canonical Boundary Way',
+            latitude: 35.1,
+            longitude: -106.6,
+          },
+          roofConditions: {},
+          electricalService: {},
+          obstructions: {},
+          photos: [
+            {
+              id: 'photo-boundary-001',
+              category: 'roof_overview',
+              tag: 'roof_overview',
+              url: 'https://cdn.example.test/surveys/photo-boundary-001.jpg',
+            },
+          ],
+          currentStep: 6,
+          completedSteps: [1, 2, 3, 4, 5, 6],
+        },
+      },
+    } as Partial<IngestContext>);
+
+    const result = await runIngestPipeline(ctx);
+
+    expect(result.status).toBe('ingested');
+    if (result.status === 'ingested') {
+      expect(result.transformSummary.fileCount).toBe(1);
+    }
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });

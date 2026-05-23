@@ -373,4 +373,25 @@ describe('pageValidationSummary survey evidence rendering', () => {
     expect(html).not.toContain('<td style="font-family:monospace;font-size:7px;color:#000;">28</td>');
   });
 
+  it('renders missing field evidence as missing instead of crashing', () => {
+    const partialEvidence = {
+      ...mockSurveyEvidence(),
+      fieldEvidence: undefined,
+    } satisfies EngineeringSurveyEvidence;
+
+    const html = pageValidationSummary(
+      mockPermitInput(partialEvidence),
+      mockCanonical(),
+      {} as CADModel,
+      15,
+      15,
+    );
+
+    expect(html).toContain('Evidence Manifest v1');
+    expect(html).toContain('Physical Data</td>');
+    expect(html).toContain('missing');
+    expect(html).toContain('planes: 0');
+    expect(html).toContain('MSP: —A');
+  });
+
 });
