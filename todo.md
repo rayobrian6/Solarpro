@@ -32,5 +32,5 @@
 ## Commit and dev-only push
 - [x] Review diff/status
 - [x] Commit changes on dev
-- [ ] Push dev only
-- [ ] Final recap with exact validation results
+- [x] Push dev only
+- [x] Final recap with exact validation results
