@@ -100,6 +100,7 @@ import {
 } from './composers';
 import { resolveSystemType } from './resolver';
 import type { DraftingInput } from './types';
+import type { PermitInputShape } from './permitInputShape';
 
 export const drawingEngine = {
   /** PV-2: Returns system-appropriate array plan SVG (legacy DraftingInput path) */
@@ -127,53 +128,7 @@ export const drawingEngine = {
 // Allows gradual migration — planset pages call this adapter
 // then pass DraftingInput to the engine.
 
-export interface PermitInputShape {
-  project: {
-    systemType?: string;
-    roofType?: string;
-    roofPitch?: number;
-    mountingSystem?: string;
-    rafterSize?: string;
-    rafterSpacing?: number;
-    attachmentSpacing?: number;
-    panelLengthIn?: number;
-    panelWidthIn?: number;
-    panelWeightLbs?: number;
-    conduitType?: string;
-    ahjWindSpeedMph?: number;
-    ahjGroundSnowPsf?: number;
-    ahjRoofSetbackIn?: number;
-    ahjRidgeSetbackIn?: number;
-    panelPositions?: any[];
-    roofPlanes?: any[];
-    [key: string]: any;
-  };
-  system: {
-    totalDcKw: number;
-    totalAcKw: number;
-    totalPanels: number;
-    inverters?: Array<{
-      strings?: Array<{
-        panelWatts?: number;
-        panelVoc?: number;
-        panelIsc?: number;
-      }>;
-    }>;
-    [key: string]: any;
-  };
-  layout?: {
-    fenceSegments?: any[];
-    fenceTotalLengthFt?: number;
-    fenceGateOpenings?: any[];
-    fencePostSpacingFt?: number;
-    fencePostEmbedmentFt?: number;
-    fenceRailCount?: number;
-    fencePanelHeightFt?: number;
-    groundArrays?: any[];
-    groundSetbackFt?: number;
-  };
-  [key: string]: any;
-}
+export type { PermitInputShape } from './permitInputShape';
 
 /**
  * Adapts PermitInput to DraftingInput.

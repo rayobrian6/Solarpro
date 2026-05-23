@@ -17,7 +17,7 @@
 //   - All geometry in local XY meters
 // ============================================================
 
-import type { PermitInputShape } from '../../../lib/drafting/index';
+import type { PermitInputShape } from '../../drafting/permitInputShape';
 import type {
   CADModel, CADFenceModel, CADFenceSegment, CADFencePost, CADPanel,
   CADFenceSection, FenceSectionType,

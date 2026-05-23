@@ -19,7 +19,7 @@
 //   - Drafting engine = rendering only
 // ============================================================
 
-import type { PermitInputShape } from '../drafting/index';
+import type { PermitInputShape } from '../drafting/permitInputShape';
 import type { CADModel, CADSystemType } from './types';
 import { roofCAD }   from './roof/roofCAD';
 import { groundCAD } from './ground/groundCAD';

@@ -18,7 +18,8 @@ import type {
   EvidenceBackedGeometryInput,
 } from './types';
 import { runDocumentAuditGuards } from './guards';
-import { buildEngineeringDecisionProvenanceBundle, type EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance';
+import { buildEngineeringDecisionProvenanceBundle } from '@/lib/engineeringDecisionProvenance/evaluator';
+import type { EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance/types';
 
 const EMPTY_RENDER_INPUTS: DocumentRenderInputs = {
   inputKeys: [],

@@ -17,14 +17,14 @@
 // DOES NOT modify V4 electrical stages — supplements only.
 // ============================================================
 
-import type { BOMLineItemV4, BOMStageId } from './bom-engine-v4';
+import type { BOMLineItemV4, BOMStageId, BOMSystemType as BOMSystemTypeShared } from './bom-types-v4';
 import { resolveEquipment, resolveDefaultFencePanelSpec } from './systemEquipmentResolver';
 
 // ——— Meters / feet conversion (from cad/geometry.ts) ————————
 const METERS_TO_FT = 3.28084;
 
 // ——— System Type ————————————————————————————————————————————
-export type BOMSystemType = 'roof' | 'ground' | 'fence';
+export type BOMSystemType = BOMSystemTypeShared;
 
 // ——— Input: what the caller passes from engineering page ————
 export interface StructuralBOMInput {

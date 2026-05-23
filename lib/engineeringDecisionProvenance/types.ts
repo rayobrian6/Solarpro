@@ -1,7 +1,7 @@
 import type { CADSystemType } from '@/lib/cad/types';
 import type { EngineeringRequirementId } from '@/lib/survey/evidence/engineeringRequirements';
-import type { DocumentTruthSource } from '@/lib/documentProvenance';
-import type { EngineeringStaleStateMetadata } from '@/lib/engineeringStateInvalidation';
+import type { DocumentTruthSource } from '@/lib/documentProvenance/types';
+import type { EngineeringStaleStateMetadata } from '@/lib/engineeringStateInvalidation/types';
 
 export type EngineeringDecisionType =
   | 'conductor_sizing'

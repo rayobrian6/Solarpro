@@ -25,10 +25,12 @@ import {
   buildSurveyEvidenceTraceability,
   type SurveyEvidenceTraceabilityBundle,
 } from '@/lib/survey/evidence/provenance';
-import type { EvidenceDuplicateGroup, SurveySessionSummary } from '@/lib/survey/evidence/sessionGrouping';
+import type { EvidenceDuplicateGroup, SurveySessionSummary } from '@/lib/survey/evidence/sessionTypes';
 import type { EngineeringRequirementEvaluationSummary } from '@/lib/survey/evidence/engineeringRequirements';
-import { buildDocumentProvenanceBundle, type DocumentProvenanceBundle } from '@/lib/documentProvenance';
-import { buildEngineeringDecisionProvenanceBundle, type EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance';
+import { buildDocumentProvenanceBundle } from '@/lib/documentProvenance/builders';
+import type { DocumentProvenanceBundle } from '@/lib/documentProvenance/types';
+import { buildEngineeringDecisionProvenanceBundle } from '@/lib/engineeringDecisionProvenance/evaluator';
+import type { EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance/types';
 
 export type SurveyPhotoEvidenceCategory = SurveyEvidenceCategory;
 

@@ -1,7 +1,7 @@
 import type { CADModel } from '@/lib/cad/types';
 import type { EngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
 import type { PermitInput } from '@/lib/permit/types';
-import type { DocumentProvenanceBundle, DocumentTruthSource } from '@/lib/documentProvenance';
+import type { DocumentProvenanceBundle, DocumentTruthSource } from '@/lib/documentProvenance/types';
 import type { EngineeringRequirementEvaluation, EngineeringRequirementId } from '@/lib/survey/evidence/engineeringRequirements';
 import { getEngineeringDecisionDefinition, listEngineeringDecisionDefinitions } from './decisionRegistry';
 import { runEngineeringDecisionAuditGuards } from './guards';

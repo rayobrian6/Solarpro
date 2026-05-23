@@ -24,40 +24,11 @@ import {
 import type { RunSegment } from './computed-system';
 import { getGeneratorById, getATSById, getBackupInterfaceById } from './equipment-db';
 // MASTER TASK: deriveStructuralBOM removed from V4 — now called in API route merge layer
-import { type BOMSystemType } from './bom-system-profiles';
+import type { BOMLineItemV4, BOMStageId, BOMSystemType } from './bom-types-v4';
 
-// ─── BOM Stage IDs ────────────────────────────────────────────────────────────
+// ─── BOM shared line/stage types are defined in ./bom-types-v4 ─────────────
 
-export type BOMStageId =
-  | 'array'
-  | 'dc'
-  | 'inverter'
-  | 'ac'
-  | 'structural'
-  | 'monitoring'
-  | 'labels';
-
-// ─── BOM Line Item ────────────────────────────────────────────────────────────
-
-export interface BOMLineItemV4 {
-  id: string;
-  stageId: BOMStageId;
-  stageLabel: string;
-  category: string;
-  manufacturer: string;
-  model: string;
-  partNumber: string;
-  description: string;
-  quantity: number;
-  unit: 'ea' | 'ft' | 'lf' | 'roll' | 'set' | 'lot';
-  unitCost?: number;
-  totalCost?: number;
-  necReference?: string;
-  derivedFrom: string;
-  formula?: string;
-  notes?: string;
-  required: boolean;
-}
+export type { BOMLineItemV4, BOMStageId, BOMSystemType } from './bom-types-v4';
 
 // ─── BOM Generation Input ─────────────────────────────────────────────────────
 

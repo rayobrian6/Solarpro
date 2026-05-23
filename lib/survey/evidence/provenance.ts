@@ -4,7 +4,7 @@ import {
   getSurveyEvidenceCategoryDefinition,
   getSurveyEvidenceLabel,
 } from './manifest';
-import type { EvidenceDuplicateGroup, SurveySessionSummary } from './sessionGrouping';
+import type { EvidenceDuplicateGroup, SurveySessionSummary } from './sessionTypes';
 
 export type EvidenceTruthSource = 'canonical_manifest_v1' | 'legacy_raw_photos_fallback';
 export type RequirementConfidenceSource = 'canonical_manifest_summary' | 'canonical_evidence_confidence' | 'missing_requirement';

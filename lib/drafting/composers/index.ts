@@ -32,7 +32,7 @@
 // ============================================================
 
 import type { DraftingInput, SysType } from '../types';
-import type { PermitInputShape } from '../index';
+import type { PermitInputShape } from '../permitInputShape';
 import { resolveSystemType } from '../resolver';
 import { drawRoofPlan, drawRoofStructural } from '../templates/roof';
 import { drawGroundArray, drawGroundStructural } from '../templates/ground';

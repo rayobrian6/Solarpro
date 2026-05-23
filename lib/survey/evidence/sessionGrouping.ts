@@ -2,62 +2,33 @@ import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
 import {
   buildSurveyEvidenceManifest,
   type SurveyEvidenceCategory,
-  type SurveyEvidenceCoverageGroup,
   type SurveyEvidenceItem,
   type SurveyEvidenceManifest,
+  type SurveyEvidenceCoverageGroup,
   type SurveyEvidenceConfidence,
   REQUIRED_SURVEY_EVIDENCE_CATEGORIES,
   SURVEY_EVIDENCE_CATEGORIES,
   getSurveyEvidenceDomain,
 } from './manifest';
 import { buildSurveyEvidenceEngineeringBridge } from './engineeringBridge';
-import { buildSurveyEvidenceTraceability, type SurveyEvidenceTraceabilityBundle } from './provenance';
+import { buildSurveyEvidenceTraceability } from './provenance';
 
-export type SurveySessionDuplicateStatus = 'canonical' | 'overlapping_duplicate' | 'unique' | 'unknown';
-export type EvidenceDuplicateStatus = 'canonical' | 'duplicate' | 'unique';
+import type {
+  EvidenceDuplicateGroup,
+  SurveyFilesBySurveyId,
+  SurveySessionDuplicateGroup,
+  SurveySessionDuplicateStatus,
+  SurveySessionSummary,
+} from './sessionTypes';
+export type {
+  EvidenceDuplicateGroup,
+  EvidenceDuplicateStatus,
+  SurveyFilesBySurveyId,
+  SurveySessionDuplicateGroup,
+  SurveySessionDuplicateStatus,
+  SurveySessionSummary,
+} from './sessionTypes';
 
-export interface SurveyFilesBySurveyId {
-  survey: SiteSurvey;
-  files: SiteSurveyFile[];
-}
-
-export interface SurveySessionDuplicateGroup {
-  surveySessionGroupId: string;
-  canonicalSurveyId: string;
-  surveyIds: string[];
-  duplicateCount: number;
-  duplicateReason: string;
-  statusBySurveyId: Record<string, SurveySessionDuplicateStatus>;
-  rawPhotoCount: number;
-  canonicalEvidenceCount: number;
-  similarCategoryCoverage: SurveyEvidenceCategory[];
-}
-
-export interface SurveySessionSummary {
-  surveyId: string;
-  surveySessionGroupId: string;
-  surveySessionDuplicateStatus: SurveySessionDuplicateStatus;
-  isCanonical: boolean;
-  submittedAt: string | null;
-  technician: string | null;
-  source: SiteSurvey['source'];
-  rawPhotoCount: number;
-  canonicalEvidenceCount: number;
-  categoryCoverage: SurveyEvidenceCategory[];
-  duplicateReason: string | null;
-}
-
-export interface EvidenceDuplicateGroup {
-  evidenceDuplicateGroupId: string;
-  canonicalEvidenceId: string;
-  canonicalSurveyId: string;
-  evidenceIds: string[];
-  surveyIds: string[];
-  duplicateCount: number;
-  duplicateReason: string;
-  category: SurveyEvidenceCategory;
-  rawUploadCount: number;
-}
 
 export interface ProjectSurveyEvidenceHygieneManifest {
   manifestVersion: 1;
@@ -77,7 +48,7 @@ export interface ProjectSurveyEvidenceHygieneManifest {
   rawManifests: SurveyEvidenceManifest[];
   canonicalManifest: SurveyEvidenceManifest | null;
   engineeringBridge: ReturnType<typeof buildSurveyEvidenceEngineeringBridge> | null;
-  traceability: SurveyEvidenceTraceabilityBundle;
+  traceability: ReturnType<typeof buildSurveyEvidenceTraceability>;
   warnings: string[];
 }
 

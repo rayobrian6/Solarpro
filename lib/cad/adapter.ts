@@ -35,7 +35,7 @@
 // ============================================================
 
 import type { DraftingInput, DraftingLayout, DraftingProject } from '../drafting/types';
-import type { PermitInputShape } from '../drafting/index';
+import type { PermitInputShape } from '../drafting/permitInputShape';
 import type { CADModel, CADRoofPlane, CADGroundArray, CADFenceSegment } from './types';
 import { metersToFt } from './geometry';
 

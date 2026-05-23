@@ -16,7 +16,7 @@
 //   - NO geometry logic in rendering templates
 // ============================================================
 
-import type { PermitInputShape } from '../../../lib/drafting/index';
+import type { PermitInputShape } from '../../drafting/permitInputShape';
 import type {
   CADModel, CADRoofModel, CADRoofPlane, CADPanel, CADDimension,
   CADObstruction, CADElectricalNode,
