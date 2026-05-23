@@ -1736,7 +1736,8 @@ export function AssistedEvidenceSandboxWorkspace({ sandbox }: { sandbox: { candi
         <div className="space-y-3">
           <div className="text-sm font-bold uppercase tracking-wide text-slate-300">Candidates</div>
           {candidates.map((candidate, index) => {
-            const runtimePilot = candidate.candidatePayload.runtimePilot === true;
+            const runtimePilot = candidate.candidatePayload.runtimePilot === true || candidate.candidatePayload.runtimeCategory === 'geometry_adjacency_candidate';
+            const isGeometryCandidate = candidate.candidateType === 'possible_obstruction_candidate';
             const sourceLabel = runtimePilot ? 'RUNTIME DATA' : 'FIXTURE DATA';
             return (
               <div key={workspaceKey('assisted-candidate', candidate.candidateId, index)} className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-xs text-slate-300">
@@ -1745,10 +1746,16 @@ export function AssistedEvidenceSandboxWorkspace({ sandbox }: { sandbox: { candi
                   <div className="flex flex-wrap gap-2"><StatusPill value={safeRenderValue(candidate.candidateStatus)} /><StatusPill value={safeRenderValue(candidate.candidateCategory)} /><StatusPill value={sourceLabel} /></div>
                 </div>
                 <div className="mt-3 grid gap-2 md:grid-cols-3"><Metric label="Confidence" value={candidate.candidateConfidence} /><Metric label="Non-authoritative" value={candidate.nonAuthoritative} /><Metric label="Review required" value={candidate.reviewRequired} /></div>
-                <div className="mt-3 rounded-lg border border-amber-400/20 bg-amber-400/10 p-2 font-bold text-amber-100">{sourceLabel} · NON-AUTHORITATIVE · REVIEW REQUIRED</div>
+                <div className="mt-3 rounded-lg border border-amber-400/20 bg-amber-400/10 p-2 font-bold text-amber-100">{sourceLabel} · NON-AUTHORITATIVE · REVIEW REQUIRED{isGeometryCandidate ? ' · GEOMETRY CANDIDATE · SOURCE IMAGE' : ''}</div>
+                {isGeometryCandidate ? (
+                  <div className="mt-3 rounded-lg border border-sky-400/20 bg-sky-400/10 p-3 text-sky-100">
+                    GEOMETRY CANDIDATE · REVIEW REQUIRED · NON-AUTHORITATIVE · CONFIDENCE {safeRenderValue(candidate.candidateConfidence)} · SOURCE IMAGE {safeRenderValue(candidate.sourceUploadKey)}. This candidate is not canonical geometry, not CAD input, not engineering authority, and not used for readiness, workflow, or recommendations.
+                  </div>
+                ) : null}
                 <div className="mt-3 leading-5 text-slate-300">{safeRenderValue(candidate.candidateSummary)}</div>
                 <div className="mt-3"><div className="mb-2 font-bold text-slate-200">Limitations</div><TokenList values={normalizeWorkspaceDisplay(candidate.candidateLimitations)} limit={12} /></div>
                 <div className="mt-3"><div className="mb-2 font-bold text-slate-200">Provenance</div><TokenList values={[safeRenderValue(candidate.toolName), safeRenderValue(candidate.toolVersion), safeRenderValue(candidate.toolRunId), safeRenderValue(candidate.sourceFileId), safeRenderValue(candidate.sourceUploadKey), safeRenderValue(candidate.candidatePayload.runtimeVersion ?? candidate.candidatePayload.runtimeCategory)]} limit={12} /></div>
+                {isGeometryCandidate ? <div className="mt-3"><div className="mb-2 font-bold text-slate-200">Geometry candidate lineage</div><TokenList values={[safeRenderValue(candidate.candidatePayload.label), safeRenderValue(candidate.candidatePayload.boundaryPolicyVersion), safeRenderValue(candidate.candidatePayload.runtimePayloadHash), safeRenderValue(candidate.candidatePayload.sourceImageLineageRef), safeRenderValue(candidate.candidatePayload.reviewRegionDescriptor), 'candidate invalidation only', 'no CAD invalidation', 'no engineering invalidation']} limit={14} /></div> : null}
               </div>
             );
           })}

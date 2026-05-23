@@ -32,6 +32,16 @@ const APPROVED_VISUAL_RUNTIME_IMPORT_FILES = new Set([
   'lib/assistedEvidenceSources/visualCategorizationRuntimeAdapter.ts',
 ]);
 
+const APPROVED_GEOMETRY_RUNTIME_IMPORT_FILES = new Set([
+  'lib/assistedEvidenceSources/geometryCandidateRuntimeAdapter.ts',
+]);
+
+const APPROVED_GEOMETRY_RUNTIME_FILES = new Set([
+  'lib/assistedEvidenceSources/geometryCandidateTypes.ts',
+  'lib/assistedEvidenceSources/geometryCandidateRuntimeAdapter.ts',
+  'lib/assistedEvidenceSources/geometryCandidateRuntimeBridge.ts',
+]);
+
 const APPROVED_CORE_HASH_FILES = new Set([
   'lib/assistedEvidence/candidateRegistry.ts',
 ]);
@@ -55,6 +65,24 @@ const FORBIDDEN_OCR_SOURCE_IMPORTS = [
   'lib/billPipeline',
   'lib/billClaudeExtractor',
   'lib/intake/utilityBillIntelligence',
+];
+
+const FORBIDDEN_GEOMETRY_IMPORTS = [
+  'lib/cad',
+  'lib/drafting',
+  'lib/plan-set',
+  'lib/engineering',
+  'lib/engineeringIntelligence',
+  'lib/system/conduitRouting',
+  'lib/bom',
+  'lib/topology-engine',
+  'lib/roofGeometry',
+  'lib/roofPlane3D',
+  'lib/planeEngine',
+  'lib/panelLayout',
+  'lib/panelLayoutOptimized',
+  'lib/placementEngine',
+  'components/3d',
 ];
 
 const FORBIDDEN_SOURCE_IMPORTS = [
@@ -84,6 +112,8 @@ const PROHIBITED_RUNTIME_PATTERNS = [
   { label: 'detectron segmentation runtime', regex: /detectron|segmentation|segmenter/i },
   { label: 'legacy vision service', regex: /VISION_SERVICE_URL|\/vision\/infer|VisionDetection|VisionInferenceResult|VisionBoundingBox/i },
   { label: 'spatial detection output', regex: /bounding\s*box|bbox|polygon|coordinate|roof\s*edge|setback|conduit\s*path|obstruction\s*map|geometry\s*truth/i },
+  { label: 'geometry authority mutation', regex: /generateCADLayout|roofCAD|buildCADFromSurvey|mergeCADModels|adaptCADToDrafting|renderPlanSet|calcFireSetbacks|routeConduit|deriveRunLengths|evaluateEngineeringRequirements|buildCADReadinessMetadata|buildEngineeringRecommendations|buildEngineeringWorkflowOrchestration/i },
+  { label: 'geometry measurable payload', regex: /boundingBox\s*[:=]|bbox\s*[:=]|polygon\s*[:=]|coordinates\s*[:=]|polyline\s*[:=]|roofEdge\s*[:=]|ridgeLine\s*[:=]|plane\s*[:=]|azimuth\s*[:=]|tilt\s*[:=]|pitch\s*[:=]|setback\s*[:=]|obstructionMap\s*[:=]|conduitPath\s*[:=]|routeLength\s*[:=]|cadModel\s*[:=]/i },
   { label: 'image-byte analysis', regex: /getImageData|pixelData|decodeImage|parseImage|file\.arrayBuffer|arrayBuffer\(\)|Buffer\.from\(|readFile\(/i },
   { label: 'perceptual hashing', regex: /perceptual\s*hash|\bpHash\b|\bdHash\b|\baHash\b|\bimageHash\b/i },
   { label: 'semantic scene classification', regex: /scene classification|semantic visual|object detection|roof segmentation|geometry extraction/i },
@@ -115,6 +145,23 @@ function importSpecifiers(text) {
   return matches.map(match => match[1]);
 }
 
+function isInsideNamedConstArray(lines, index, arrayName) {
+  let sawArrayStart = false;
+  for (let cursor = index; cursor >= 0 && cursor >= index - 80; cursor -= 1) {
+    const current = lines[cursor];
+    if (new RegExp(`const\\s+${arrayName}\\s*=\\s*\\[`).test(current)) {
+      sawArrayStart = true;
+      break;
+    }
+    if (cursor !== index && /^\s*\]\s*(?:as\s+const)?;?/.test(current)) break;
+  }
+  if (!sawArrayStart) return false;
+  for (let cursor = index; cursor < lines.length && cursor <= index + 80; cursor += 1) {
+    if (/^\s*\]\s*(?:as\s+const)?;?/.test(lines[cursor])) return true;
+  }
+  return false;
+}
+
 function sourceFiles() {
   return [...walk(ASSISTED_DIR), ...walk(ASSISTED_SOURCES_DIR)];
 }
@@ -136,6 +183,13 @@ for (const file of sourceFiles()) {
   const lines = text.split(/\r?\n/);
 
   for (const specifier of importSpecifiers(text)) {
+    if (relative.includes('geometryCandidate')) {
+      for (const forbiddenGeometry of FORBIDDEN_GEOMETRY_IMPORTS) {
+        if (specifier.includes(forbiddenGeometry) || specifier.includes(`@/${forbiddenGeometry}`)) {
+          violations.push(`${relative}: geometry candidate runtime must not import forbidden authority module '${specifier}'.`);
+        }
+      }
+    }
     for (const forbidden of FORBIDDEN_SOURCE_IMPORTS) {
       if (specifier.includes(forbidden) || specifier.includes(`@/${forbidden}`)) {
         violations.push(`${relative}: forbidden canonical/engineering import '${specifier}'.`);
@@ -158,7 +212,7 @@ for (const file of sourceFiles()) {
     for (const pattern of PROHIBITED_RUNTIME_PATTERNS) {
       if (pattern.regex.test(line)) {
         const isAllowedGuardText = /prohibit|forbid|forbidden|must not|not implement|no |no_|No |blocked|without|cannot|non-authoritative|review-required|: false|return false/i.test(line)
-          && (relative.endsWith('sandboxGuards.ts') || relative.endsWith('candidateAdapterContracts.ts') || relative.endsWith('openSourceToolRegistry.ts') || relative.endsWith('visualCategorizationRuntimeTypes.ts') || relative.endsWith('visualCategorizationRuntimeAdapter.ts') || relative.endsWith('candidateNormalization.ts') || relative.endsWith('ocrRuntimeBridge.ts'));
+          && (relative.endsWith('sandboxGuards.ts') || relative.endsWith('candidateAdapterContracts.ts') || relative.endsWith('openSourceToolRegistry.ts') || relative.endsWith('visualCategorizationRuntimeTypes.ts') || relative.endsWith('visualCategorizationRuntimeAdapter.ts') || relative.endsWith('geometryCandidateTypes.ts') || relative.endsWith('geometryCandidateRuntimeAdapter.ts') || relative.endsWith('candidateNormalization.ts') || relative.endsWith('ocrRuntimeBridge.ts'));
         const isAllowedNegativeTest = relative.endsWith('.test.ts');
         const isTestFixtureReference = relative.endsWith('.test.ts')
           && ['survey table mutation', 'duplicate blur system', 'duplicate metadata system', 'duplicate hashing system'].includes(pattern.label);
@@ -181,7 +235,18 @@ for (const file of sourceFiles()) {
         const isApprovedVisualRuntimeImageBytes = APPROVED_VISUAL_RUNTIME_IMPORT_FILES.has(relative)
           && pattern.label === 'image-byte analysis'
           && /Uint8Array|imageBytes|byteLength/.test(line);
-        if (!isAllowedGuardText && !isAllowedNegativeTest && !isTestFixtureReference && !isApprovedSurveyAlignmentReference && !isApprovedCoreHashing && !isApprovedMetadataAdapterHashing && !isApprovedOcrRuntime && !isApprovedOcrRuntimeHashing && !isApprovedVisualRuntimeHashing && !isApprovedVisualRuntimeImageBytes && !isApprovedOcrMetadataReference) violations.push(`${relative}:${index + 1}: ${pattern.label}: ${line.trim()}`);
+        const isApprovedGeometryRuntimeHashing = APPROVED_GEOMETRY_RUNTIME_IMPORT_FILES.has(relative)
+          && pattern.label === 'duplicate hashing system'
+          && /createHash|sha256|runtimePayloadHash|sourceImageByteHash|stableHash/.test(line);
+        const isApprovedGeometryRuntimeImageBytes = APPROVED_GEOMETRY_RUNTIME_IMPORT_FILES.has(relative)
+          && pattern.label === 'image-byte analysis'
+          && /Uint8Array|imageBytes|byteLength/.test(line);
+        const isApprovedGeometryRuntimeText = APPROVED_GEOMETRY_RUNTIME_FILES.has(relative)
+          && ['spatial detection output', 'geometry authority mutation', 'geometry measurable payload', 'detectron segmentation runtime', 'semantic scene classification'].includes(pattern.label)
+          && (/forbiddenUses|FORBIDDEN_USES|GEOMETRY_CANDIDATE_LIMITATIONS|no_|not |forbiddenStaleClasses|candidateSummary|registryNotes|must not|no /i.test(line)
+            || isInsideNamedConstArray(lines, index, 'FORBIDDEN_USES')
+            || isInsideNamedConstArray(lines, index, 'GEOMETRY_CANDIDATE_LIMITATIONS'));
+        if (!isAllowedGuardText && !isAllowedNegativeTest && !isTestFixtureReference && !isApprovedSurveyAlignmentReference && !isApprovedCoreHashing && !isApprovedMetadataAdapterHashing && !isApprovedOcrRuntime && !isApprovedOcrRuntimeHashing && !isApprovedVisualRuntimeHashing && !isApprovedVisualRuntimeImageBytes && !isApprovedOcrMetadataReference && !isApprovedGeometryRuntimeHashing && !isApprovedGeometryRuntimeImageBytes && !isApprovedGeometryRuntimeText) violations.push(`${relative}:${index + 1}: ${pattern.label}: ${line.trim()}`);
       }
     }
   });
@@ -224,6 +289,27 @@ for (const file of sourceFiles()) {
     const activeSpatialOutputPattern = /\b(?:boundingBox|bbox|polygon|coordinates|roofEdge|setback|conduitPath|obstructionMap)\s*[:=]/;
     if (activeSpatialOutputPattern.test(text)) {
       violations.push(`${relative}: visual categorization runtime must not emit spatial, geometric, or object-detection outputs.`);
+    }
+  }
+
+  if (relative.includes('geometryCandidate') && !relative.endsWith('.test.ts')) {
+    const mustUseLifecycle = relative.endsWith('RuntimeAdapter.ts');
+    if (mustUseLifecycle && !/createReviewRequiredCandidates/.test(text)) {
+      violations.push(`${relative}: geometry candidate runtime must route candidate creation through createReviewRequiredCandidates().`);
+    }
+    if (/\bcreateCandidate\s*\(/.test(text) && !/createReviewRequiredCandidates/.test(text)) {
+      violations.push(`${relative}: geometry candidate runtime must not bypass createReviewRequiredCandidates()/createCandidate lifecycle.`);
+    }
+    if (/\bmarkReviewRequired\s*\(/.test(text) && !/createReviewRequiredCandidates/.test(text)) {
+      violations.push(`${relative}: geometry candidate runtime must not bypass createReviewRequiredCandidates()/markReviewRequired lifecycle.`);
+    }
+    const forbiddenActiveGeometryPayload = /\b(?:boundingBox|bbox|polygon|coordinates|polyline|roofEdge|ridgeLine|valleyLine|plane|azimuth|tilt|pitch|setback|obstructionMap|conduitPath|routeLength|attachmentSpacing|rafter|truss|cadModel)\s*[:=]/i;
+    if (forbiddenActiveGeometryPayload.test(text)) {
+      violations.push(`${relative}: geometry candidate runtime must not emit measurable geometry, CAD, layout, setback, route, or structural payload fields.`);
+    }
+    const activeAuthorityMutationPattern = /\b(?:generateCADLayout|roofCAD|buildCADFromSurvey|mergeCADModels|adaptCADToDrafting|renderPlanSet|calcFireSetbacks|routeConduit|deriveRunLengths|evaluateEngineeringRequirements|buildCADReadinessMetadata|buildEngineeringRecommendations|buildEngineeringWorkflowOrchestration)\s*\(/i;
+    if (activeAuthorityMutationPattern.test(text)) {
+      violations.push(`${relative}: geometry candidate runtime must not call CAD, layout, roof-plane, setback, routing, NEC, engineering, workflow, recommendation, BOM, or plan-set authority.`);
     }
   }
 }

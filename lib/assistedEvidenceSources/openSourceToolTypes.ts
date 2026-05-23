@@ -7,6 +7,7 @@ export type OpenSourceRuntimeCategory =
   | 'image_metadata'
   | 'ocr_text_candidate'
   | 'visual_categorization_candidate'
+  | 'geometry_adjacency_candidate'
   | 'future_geometry_placeholder';
 
 export type OpenSourceRuntimeBoundary = 'fixture_static' | 'server_adapter_contract' | 'browser_adapter_contract' | 'blocked_future_geometry';

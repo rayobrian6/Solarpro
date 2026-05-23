@@ -27,6 +27,17 @@ export function validateOpenSourceToolDefinition(tool: OpenSourceToolDefinition)
     if (tool.requiresModelWeights) throw new Error(`${tool.toolName} visual categorization runtime cannot require model weights.`);
     if (!tool.allowedCandidateTypes.every(type => type === 'visual_category_candidate')) throw new Error(`${tool.toolName} visual categorization runtime may emit visual_category_candidate only.`);
   }
+  if (tool.runtimeCategory === 'geometry_adjacency_candidate') {
+    if (tool.allowedRuntimeBoundary !== 'server_adapter_contract') throw new Error(`${tool.toolName} geometry adjacency runtime must use the server adapter contract boundary.`);
+    if (tool.enabledStatus !== 'enabled_for_runtime_pilot') throw new Error(`${tool.toolName} geometry adjacency runtime must be explicitly enabled for runtime pilot execution.`);
+    if (!tool.serverOnly) throw new Error(`${tool.toolName} geometry adjacency runtime must be server-only.`);
+    if (tool.browserCompatible) throw new Error(`${tool.toolName} geometry adjacency runtime pilot must not be browser-executed.`);
+    if (tool.requiresNativeBinaries) throw new Error(`${tool.toolName} geometry adjacency runtime cannot require native binaries.`);
+    if (tool.requiresModelWeights) throw new Error(`${tool.toolName} geometry adjacency runtime cannot require model weights.`);
+    if (tool.deterministicReplaySupport !== 'runtime_payload_hash_required') throw new Error(`${tool.toolName} geometry adjacency runtime must require runtime payload hash replay support.`);
+    if (!tool.allowedCandidateTypes.every(type => type === 'possible_obstruction_candidate')) throw new Error(`${tool.toolName} geometry adjacency runtime may emit possible_obstruction_candidate only.`);
+    if (!tool.allowedCandidateCategories.every(category => category === 'roof_context')) throw new Error(`${tool.toolName} geometry adjacency runtime may emit roof_context candidates only.`);
+  }
   if (tool.requiresNativeBinaries && tool.runtimeCategory !== 'fixture_only' && tool.runtimeCategory !== 'image_metadata') throw new Error(`${tool.toolName} requires unapproved native binaries.`);
   if (tool.requiresModelWeights && tool.runtimeCategory !== 'fixture_only') throw new Error(`${tool.toolName} requires unapproved model weights.`);
   if ((tool.runtimeCategory === 'image_metadata' || tool.runtimeCategory === 'ocr_text_candidate') && tool.allowedRuntimeBoundary !== 'server_adapter_contract') throw new Error(`${tool.toolName} runtime must use the server adapter contract boundary.`);

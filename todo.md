@@ -1,26 +1,28 @@
-# Geometry-Adjacent Assistance Governance Audit V1 Todo
+# Controlled Geometry-Adjacent Evidence Pilot V1 Todo
 
 ## Repository State
-- [x] Confirm working branch is dev and inspect current repository state
+- [x] Confirm branch is dev and inspect current state
 
-## Audit
-- [x] Audit roof plane, layout, CAD/rendering, route, setback, obstruction, and panel-placement systems
-- [x] Audit spatial dependencies and geospatial/irradiance/terrain integrations
-- [x] Audit deterministic engineering coupling points where geometry affects authority or outputs
-- [x] Audit Engineering Intelligence UI/provenance/dependency graph surfaces
+## Target Selection Audit
+- [x] Re-audit geometry governance reports
+- [x] Select exactly one safest geometry candidate category
+- [x] Document safest signal source, insertion point, lineage, invalidation, and stale behavior
 
-## Deliverables
-- [x] Generate geometry governance readiness audit report
-- [x] Generate future geometry containment architecture report
-- [x] Generate geometry provenance boundary design report
-- [x] Generate geometry UI lineage planning report
+## Implementation
+- [x] Implement governed geometry candidate runtime types/adapter/bridge for one candidate category only
+- [x] Expand assisted evidence boundary checks for geometry candidate protections
+- [x] Add review-only UI surfacing with explicit non-authoritative labels if appropriate
+
+## Tests and Reports
+- [x] Add deterministic runtime, boundary, and review lifecycle tests
+- [x] Generate final geometry candidate pilot reports
 
 ## Validation
 - [x] Run required validation commands and capture logs/exits
 - [x] Review validation results and summarize pass/fail state
 
 ## Delivery
-- [x] Stage intended audit/planning artifacts only
-- [x] Commit directly to dev
-- [x] Push dev only
-- [x] Provide final safety summary confirming no geometry intelligence implementation
+- [x] Stage intended artifacts only
+- [ ] Commit directly to dev
+- [ ] Push dev only
+- [ ] Provide final safety summary confirming review-only non-authoritative geometry candidates

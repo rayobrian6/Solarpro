@@ -12,3 +12,6 @@ export * from './metadataRuntimeAdapter';
 export * from './surveyIngestionRuntimeBridge';
 export * from './ocrRuntimeAdapter';
 export * from './ocrRuntimeBridge';
+export * from './geometryCandidateTypes';
+export * from './geometryCandidateRuntimeAdapter';
+export * from './geometryCandidateRuntimeBridge';

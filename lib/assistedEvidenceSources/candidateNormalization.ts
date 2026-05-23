@@ -13,6 +13,7 @@ function runtimeProvenanceNote(tool: ValidatedOpenSourceToolDefinition): string 
   if (tool.runtimeCategory === 'fixture_only') return 'Fixture-only adapter output; no runtime OCR/CV/image processing executed.';
   if (tool.runtimeCategory === 'ocr_text_candidate') return 'Controlled OCR runtime pilot output; text extraction only, no semantic image understanding or engineering inference executed.';
   if (tool.runtimeCategory === 'visual_categorization_candidate') return 'Controlled visual categorization runtime pilot output; possible photo-category candidates only, no object detection, geometry extraction, engineering inference, CAD influence, workflow influence, or canonical mutation executed.';
+  if (tool.runtimeCategory === 'geometry_adjacency_candidate') return 'Controlled geometry-adjacent runtime pilot output; possible obstruction candidates only, no object detection, segmentation, roof extraction, plane generation, CAD mutation, layout mutation, NEC influence, engineering mutation, workflow influence, recommendation influence, or canonical mutation executed.';
   return 'Controlled metadata runtime pilot output; no OCR/CV/semantic image understanding executed.';
 }
 

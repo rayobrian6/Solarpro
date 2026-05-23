@@ -3,7 +3,7 @@ import { verifyToken } from '@/lib/auth';
 import { getProjectsByUser } from '@/lib/db-neon';
 import { buildEngineeringIntelligenceWorkspace } from '@/lib/engineeringIntelligence';
 import { acceptCandidate, createCandidate, markReviewRequired } from '@/lib/assistedEvidence';
-import { generateMetadataFixtureCandidates, generateMetadataRuntimeCandidates, generateOcrFixtureCandidates } from '@/lib/assistedEvidenceSources';
+import { createGeometryCandidateDemoCandidates, generateMetadataFixtureCandidates, generateMetadataRuntimeCandidates, generateOcrFixtureCandidates } from '@/lib/assistedEvidenceSources';
 import type { Project } from '@/types';
 import {
   AssistedEvidenceSandboxWorkspace,
@@ -184,9 +184,24 @@ async function buildAssistedEvidenceSandboxPanel() {
     3, 1, 1, 0, 24, 221, 141, 176, 0, 0, 0, 0, 73, 69, 78, 68,
     174, 66, 96, 130,
   ]));
+  const geometryContext = {
+    sourceFileId: 'geometry-runtime-source-image-1',
+    sourceUploadKey: 'runtime/assisted-evidence-sources/roof-obstruction-review-source-1.png',
+    projectId: 'fixture-project-assisted',
+    surveyId: 'fixture-survey-assisted',
+    toolRunId: 'geometry-runtime-run-1',
+    toolConfigHash: 'geometry-runtime-config-v1',
+    sourceMetadataHash: 'geometry-runtime-source-hash-v1',
+    createdAt: '2025-01-05T00:00:00.000Z',
+    createdBy: 'engineering-intelligence-demo',
+  };
+  const geometryRuntime = await createGeometryCandidateDemoCandidates({
+    sourceContext: geometryContext,
+    sourceContextText: 'roof overview source image with possible vent obstruction review context',
+  });
   return {
-    candidates: [candidate, accepted.candidate, ...metadataFixtures.candidates, ...ocrFixtures.candidates, ...runtimeMetadata.candidates],
+    candidates: [candidate, accepted.candidate, ...metadataFixtures.candidates, ...ocrFixtures.candidates, ...runtimeMetadata.candidates, ...geometryRuntime.candidates],
     projections: [accepted.projection],
-    warning: 'FIXTURE AND RUNTIME PILOT DATA ONLY: candidate metadata is non-authoritative, review-required, and cannot affect engineering truth until separately reviewed and explicitly mapped in a future approved layer.',
+    warning: 'FIXTURE AND RUNTIME PILOT DATA ONLY: candidate metadata is non-authoritative, review-required, and cannot affect engineering truth. Geometry candidates are review-only source-image context and are not CAD input, roof-plane truth, setbacks, NEC authority, layout input, workflow input, or recommendation input.',
   };
 }

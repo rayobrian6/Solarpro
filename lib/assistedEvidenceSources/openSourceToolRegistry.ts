@@ -1,4 +1,5 @@
 import type { OpenSourceToolDefinition, ValidatedOpenSourceToolDefinition } from './openSourceToolTypes';
+import { GEOMETRY_CANDIDATE_RUNTIME_TOOL_NAME, GEOMETRY_CANDIDATE_RUNTIME_TOOL_VERSION } from './geometryCandidateTypes';
 import { VISUAL_CATEGORIZATION_RUNTIME_TOOL_NAME, VISUAL_CATEGORIZATION_RUNTIME_TOOL_VERSION } from './visualCategorizationRuntimeTypes';
 import { validateOpenSourceToolRegistry } from './openSourceToolValidation';
 
@@ -126,6 +127,32 @@ export const OPEN_SOURCE_RUNTIME_TOOLS: readonly OpenSourceToolDefinition[] = [
       'Controlled visual categorization runtime pilot for possible photo-category candidates only.',
       'No object detection, segmentation, geometry extraction, CAD influence, recommendation influence, workflow influence, or canonical mutation is permitted.',
       'Runtime output must remain non-authoritative review-required visual_category_candidate evidence.',
+    ],
+  },
+  {
+    toolName: GEOMETRY_CANDIDATE_RUNTIME_TOOL_NAME,
+    toolVersion: GEOMETRY_CANDIDATE_RUNTIME_TOOL_VERSION,
+    sourceUrl: 'internal://solarpro/runtime/deterministic-geometry-adjacency',
+    license: 'MIT',
+    runtimeCategory: 'geometry_adjacency_candidate',
+    allowedCandidateTypes: ['possible_obstruction_candidate'],
+    allowedCandidateCategories: ['roof_context'],
+    requiresImageBytes: true,
+    requiresNativeBinaries: false,
+    requiresModelWeights: false,
+    browserCompatible: false,
+    serverOnly: true,
+    reviewRequired: true,
+    canonicalMutationAllowed: false,
+    allowedRuntimeBoundary: 'server_adapter_contract',
+    deterministicReplaySupport: 'runtime_payload_hash_required',
+    riskLevel: 'moderate',
+    enabledStatus: 'enabled_for_runtime_pilot',
+    maintainedStatus: 'maintained',
+    registryNotes: [
+      'Controlled geometry-adjacent runtime pilot for possible obstruction candidates only.',
+      'Uses deterministic source-context normalization and byte hashing only; no pixel decoding, object detection, segmentation, roof extraction, plane generation, or geometry inference is permitted.',
+      'Runtime output must remain non-authoritative review-required possible_obstruction_candidate evidence with no CAD, layout, NEC, engineering, workflow, recommendation, or canonical mutation influence.',
     ],
   },
 ] as const;
