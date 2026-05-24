@@ -24,6 +24,6 @@
 - [x] Verify no-authority, no CAD mutation, no persistence authority promotion, and no live UI wiring
 
 ## Delivery
-- [ ] Commit changes on dev
+- [x] Commit changes on dev
 - [ ] Push dev with token-authenticated remote syntax
 - [ ] Provide final summary with validation results and artifact attachments
