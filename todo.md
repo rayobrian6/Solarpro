@@ -18,5 +18,5 @@
 
 ## Delivery
 - [x] Commit changes
-- [ ] Push according to active repository workflow
-- [ ] Summarize roadmap progress and next phase
+- [x] Push according to active repository workflow
+- [x] Summarize roadmap progress and next phase
