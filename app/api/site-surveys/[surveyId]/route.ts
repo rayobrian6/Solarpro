@@ -17,6 +17,7 @@ import { buildSurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
 import { buildSurveyEvidenceTraceability } from '@/lib/survey/evidence/provenance';
 import { buildSurveyEvidenceEngineeringBridge } from '@/lib/survey/evidence/engineeringBridge';
 import { getProjectSurveyContext } from '@/lib/survey/getProjectSurveyContext';
+import { analyzeSurveyPhotosOpenSource } from '@/lib/siteSurvey/photoIntelligence';
 
 // ---------------------------------------------------------------------------
 // GET — survey detail + all files
@@ -44,7 +45,8 @@ export async function GET(
     // is user-scoped; only after it succeeds do we load survey files and derive
     // the manifest for the authorized survey.
     const files = await getSiteSurveyFiles(surveyId);
-    const evidenceManifest = buildSurveyEvidenceManifest({ survey, files });
+    const photoAnalysis = await analyzeSurveyPhotosOpenSource(files.filter(file => file.fileType === 'photo'));
+    const evidenceManifest = buildSurveyEvidenceManifest({ survey, files, photoAnalysis });
     const projectContext = survey.projectId
       ? await getProjectSurveyContext(survey.projectId, user.id)
       : null;
@@ -63,6 +65,7 @@ export async function GET(
         survey,
         files,
         evidenceManifest,
+        photoAnalysisSummary: summarizePhotoAnalysis(photoAnalysis),
         evidenceHygiene,
         evidenceTraceability,
         evidenceBridge,
@@ -120,4 +123,17 @@ export async function PATCH(
     console.error('[PATCH /api/site-surveys/[surveyId]]', err);
     return NextResponse.json({ success: false, error: 'Failed to update survey' }, { status: 500 });
   }
+}
+
+function summarizePhotoAnalysis(photoAnalysis: Awaited<ReturnType<typeof analyzeSurveyPhotosOpenSource>>) {
+  return {
+    schemaVersion: 'survey_photo_open_source_analysis_summary_v1' as const,
+    engine: 'sharp_sha256_perceptual_hash_laplacian_v1' as const,
+    attemptedPhotoCount: photoAnalysis.length,
+    analyzedPhotoCount: photoAnalysis.filter(item => item.analyzed).length,
+    unavailablePhotoCount: photoAnalysis.filter(item => !item.analyzed).length,
+    duplicateGroupCount: new Set(photoAnalysis.map(item => item.duplicateGroupId).filter(Boolean)).size,
+    duplicatePhotoCount: photoAnalysis.filter(item => item.duplicateGroupSize > 1 && !item.isDuplicateRepresentative).length,
+    qualityReviewRequiredCount: photoAnalysis.filter(item => item.qualityStatus !== 'good').length,
+  };
 }

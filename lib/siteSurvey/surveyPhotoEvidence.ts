@@ -1,3 +1,4 @@
+import type { SurveyPhotoOpenSourceAnalysis } from '@/lib/siteSurvey/photoIntelligence';
 import type { CanonicalSurveyGeometryV1, ProfessionalSurveyAuthorityFlagsV1 } from './professionalSurveyParser';
 import type { EnrichedSiteSurvey, SurveyPhotoRef } from './types';
 
@@ -38,6 +39,21 @@ export interface SurveyPhotoEvidenceV1 {
   evidenceLimitations: string[];
   geometryAssociationCandidates: string[];
   deterministicSignals: string[];
+  openSourceAnalysis: {
+    analyzed: boolean;
+    qualityScore: number;
+    qualityStatus: SurveyPhotoOpenSourceAnalysis['qualityStatus'];
+    qualityFlags: string[];
+    duplicateGroupId: string | null;
+    duplicateRank: number | null;
+    duplicateGroupSize: number;
+    isDuplicateRepresentative: boolean;
+    sharpnessScore: number | null;
+    brightnessScore: number | null;
+    widthPx: number | null;
+    heightPx: number | null;
+    analysisError: string | null;
+  } | null;
   noAuthorityEnforcement: SurveyPhotoEvidenceNoAuthorityV1;
 }
 
@@ -68,6 +84,9 @@ export interface SurveyPhotoEvidenceCoverageV1 {
   renderRelevantPhotoCount: number;
   highConfidencePhotoCount: number;
   reviewNeededPhotoCount: number;
+  openSourceAnalyzedPhotoCount: number;
+  duplicatePhotoCount: number;
+  qualityReviewRequiredPhotoCount: number;
 }
 
 export interface SurveyPhotoEvidenceNoAuthorityV1 {
@@ -111,9 +130,11 @@ const NO_AUTHORITY_FLAGS: ProfessionalSurveyAuthorityFlagsV1 = {
 export function buildSurveyPhotoEvidenceBundle(
   survey: EnrichedSiteSurvey,
   canonicalGeometry?: CanonicalSurveyGeometryV1,
+  photoAnalysis: SurveyPhotoOpenSourceAnalysis[] = [],
 ): SurveyPhotoEvidenceBundleV1 {
+  const analysisByUrl = new Map(photoAnalysis.map(analysis => [analysis.fileUrl, analysis]));
   const evidence = survey.photos
-    .map(photo => classifySurveyPhotoEvidence(survey, photo, canonicalGeometry))
+    .map(photo => classifySurveyPhotoEvidence(survey, photo, canonicalGeometry, analysisByUrl.get(photo.url) ?? null))
     .sort((a, b) => a.source.slotKey.localeCompare(b.source.slotKey));
   const coverage = buildCoverage(evidence);
   const missingPhotoCategoryWarnings = buildMissingPhotoCategoryWarnings(survey, evidence);
@@ -130,7 +151,8 @@ export function buildSurveyPhotoEvidenceBundle(
     authorityFlags: NO_AUTHORITY_FLAGS,
     noAuthorityEnforcement: noAuthorityEnforcement(),
     deterministicNotes: [
-      'SurveyPhotoEvidenceV1 classifies photo references with deterministic filename, metadata, category, notes, and survey-context heuristics only.',
+      'SurveyPhotoEvidenceV1 classifies photo references with deterministic filename, metadata, category, notes, and survey-context heuristics.',
+      'When supplied by the authorized route, open-source image quality and duplicate scans are attached as review evidence.',
       'Photo evidence supports render planning and operator review; it does not extract authoritative geometry or mutate CAD/canonical geometry.',
       'Unknown or low-confidence photos are surfaced for review rather than auto-corrected or promoted.',
     ],
@@ -142,6 +164,7 @@ export function classifySurveyPhotoEvidence(
   survey: EnrichedSiteSurvey,
   photo: SurveyPhotoRef,
   canonicalGeometry?: CanonicalSurveyGeometryV1,
+  analysis: SurveyPhotoOpenSourceAnalysis | null = null,
 ): SurveyPhotoEvidenceV1 {
   const normalizedFilename = normalizeFilename(photo.url || photo.slotKey);
   const haystack = [photo.slotKey, normalizedFilename, photo.category, photo.notes ?? ''].join(' ').toLowerCase();
@@ -149,9 +172,10 @@ export function classifySurveyPhotoEvidence(
   const category = classifyCategory(photo, haystack, survey.systemType, signals);
   const confidence = classifyConfidence(photo, category, signals);
   const renderRelevance = classifyRenderRelevance(category, confidence);
-  const evidenceLimitations = buildLimitations(photo, category, confidence);
+  const evidenceLimitations = buildLimitations(photo, category, confidence, analysis);
   const geometryAssociationCandidates = buildGeometryAssociations(category, survey, canonicalGeometry);
-  const renderUsefulnessScore = scoreRenderUsefulness(category, confidence, renderRelevance, evidenceLimitations.length);
+  const analysisPenalty = analysis && (!analysis.analyzed || analysis.qualityStatus !== 'good' || analysis.isDuplicateRepresentative === false) ? 12 : 0;
+  const renderUsefulnessScore = clamp(scoreRenderUsefulness(category, confidence, renderRelevance, evidenceLimitations.length) - analysisPenalty, 0, 100);
   const reviewStatus = classifyReviewStatus(category, confidence, renderUsefulnessScore);
 
   return {
@@ -174,7 +198,12 @@ export function classifySurveyPhotoEvidence(
     renderUsefulnessScore,
     evidenceLimitations,
     geometryAssociationCandidates,
-    deterministicSignals: signals.sort(),
+    deterministicSignals: [
+      ...signals,
+      ...(analysis?.analyzed ? [`open-source image quality ${analysis.qualityStatus}:${analysis.qualityScore}`] : []),
+      ...(analysis?.duplicateGroupId ? [`open-source duplicate group ${analysis.duplicateGroupId}`] : []),
+    ].sort(),
+    openSourceAnalysis: analysis ? summarizeAnalysisForPhotoEvidence(analysis) : null,
     noAuthorityEnforcement: noAuthorityEnforcement(),
   };
 }
@@ -193,6 +222,9 @@ export function buildOperatorPhotoEvidenceSummary(bundle: SurveyPhotoEvidenceBun
     missingPhotoCategoryWarnings: bundle.missingPhotoCategoryWarnings.slice(0, 8),
     reviewNeededPhotoSlotKeys: bundle.reviewNeededPhotoSlotKeys.slice(0, 8),
     renderSupportingPhotoSlotKeys: bundle.renderSupportingPhotoSlotKeys.slice(0, 8),
+    openSourceAnalyzedPhotoCount: bundle.coverage.openSourceAnalyzedPhotoCount,
+    duplicatePhotoCount: bundle.coverage.duplicatePhotoCount,
+    qualityReviewRequiredPhotoCount: bundle.coverage.qualityReviewRequiredPhotoCount,
     nonAuthoritative: true as const,
   };
 }
@@ -284,6 +316,9 @@ function buildCoverage(evidence: SurveyPhotoEvidenceV1[]): SurveyPhotoEvidenceCo
     renderRelevantPhotoCount: evidence.filter(item => item.classification.renderRelevance === 'high' || item.classification.renderRelevance === 'medium').length,
     highConfidencePhotoCount: evidence.filter(item => item.classification.confidence === 'high').length,
     reviewNeededPhotoCount: evidence.filter(item => item.classification.reviewStatus !== 'accepted_for_render_reference').length,
+    openSourceAnalyzedPhotoCount: evidence.filter(item => item.openSourceAnalysis?.analyzed).length,
+    duplicatePhotoCount: evidence.filter(item => item.openSourceAnalysis && item.openSourceAnalysis.duplicateGroupSize > 1 && !item.openSourceAnalysis.isDuplicateRepresentative).length,
+    qualityReviewRequiredPhotoCount: evidence.filter(item => item.openSourceAnalysis && item.openSourceAnalysis.qualityStatus !== 'good').length,
   };
 }
 
@@ -297,13 +332,36 @@ function buildMissingPhotoCategoryWarnings(survey: EnrichedSiteSurvey, evidence:
   return warnings.sort();
 }
 
-function buildLimitations(photo: SurveyPhotoRef, category: SurveyPhotoEvidenceCategoryV1, confidence: SurveyPhotoEvidenceConfidenceV1): string[] {
-  const limitations: string[] = ['No pixel-level computer vision, measurement extraction, or authoritative geometry inference was performed.'];
+function buildLimitations(photo: SurveyPhotoRef, category: SurveyPhotoEvidenceCategoryV1, confidence: SurveyPhotoEvidenceConfidenceV1, analysis: SurveyPhotoOpenSourceAnalysis | null): string[] {
+  const limitations: string[] = [analysis?.analyzed
+    ? 'Open-source pixel quality and duplicate scan was performed; authoritative geometry extraction was not performed.'
+    : 'No pixel-level scan was available for this photo; measurement extraction or authoritative geometry inference was not performed.'];
   if (category === 'unknown_review_needed') limitations.push('Photo category could not be determined from deterministic metadata heuristics.');
   if (confidence === 'low') limitations.push('Photo classification confidence is low; operator review is required before render use.');
   if (!photo.notes) limitations.push('No field notes were attached to this photo.');
   if (!photo.capturedAt) limitations.push('No capture timestamp was provided.');
+  if (analysis && !analysis.analyzed) limitations.push(`Open-source image scan unavailable: ${analysis.analysisError ?? 'unknown fetch/parse failure'}.`);
+  if (analysis?.analyzed && analysis.qualityStatus !== 'good') limitations.push(`Image quality requires review: ${analysis.qualityStatus} (${analysis.qualityScore}/100).`);
+  if (analysis?.analyzed && analysis.isDuplicateRepresentative === false) limitations.push(`Near-duplicate photo; representative is rank 1 in ${analysis.duplicateGroupId}.`);
   return limitations.sort();
+}
+
+function summarizeAnalysisForPhotoEvidence(analysis: SurveyPhotoOpenSourceAnalysis): SurveyPhotoEvidenceV1['openSourceAnalysis'] {
+  return {
+    analyzed: analysis.analyzed,
+    qualityScore: analysis.qualityScore,
+    qualityStatus: analysis.qualityStatus,
+    qualityFlags: analysis.qualityFlags,
+    duplicateGroupId: analysis.duplicateGroupId,
+    duplicateRank: analysis.duplicateRank,
+    duplicateGroupSize: analysis.duplicateGroupSize,
+    isDuplicateRepresentative: analysis.isDuplicateRepresentative,
+    sharpnessScore: analysis.sharpnessScore,
+    brightnessScore: analysis.brightnessScore,
+    widthPx: analysis.widthPx,
+    heightPx: analysis.heightPx,
+    analysisError: analysis.analysisError,
+  };
 }
 
 function buildGeometryAssociations(

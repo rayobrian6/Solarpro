@@ -13,6 +13,7 @@ import {
   isValidUUID,
 } from '@/lib/db-neon';
 import { buildProfessionalSurveyReadinessReport } from '@/lib/siteSurvey/professionalSurveyReadinessReport';
+import { analyzeSurveyPhotosOpenSource } from '@/lib/siteSurvey/photoIntelligence';
 import { buildProfessionalPlanSetRenderPackage } from '@/lib/siteSurvey/planSetRenderOutput';
 
 export async function GET(
@@ -34,7 +35,8 @@ export async function GET(
     }
 
     const files = await getSiteSurveyFiles(surveyId);
-    const readinessReport = buildProfessionalSurveyReadinessReport(survey, files);
+    const photoAnalysis = await analyzeSurveyPhotosOpenSource(files.filter(file => file.fileType === 'photo'));
+    const readinessReport = buildProfessionalSurveyReadinessReport(survey, files, photoAnalysis);
     const renderPackage = buildProfessionalPlanSetRenderPackage(readinessReport);
     const defaultSheet = renderPackage.sheets.find(sheet => sheet.sheetNumber === 'A-101') ?? renderPackage.sheets[0] ?? null;
 
@@ -85,6 +87,7 @@ export async function GET(
         canonicalGeometryMutationPerformed: false,
         dbWritesPerformed: false,
         downstreamTriggered: false,
+        photoAnalysisEngine: 'sharp_sha256_perceptual_hash_laplacian_v1',
       },
     });
   } catch (err) {

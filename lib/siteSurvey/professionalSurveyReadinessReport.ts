@@ -1,4 +1,5 @@
 import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
+import type { SurveyPhotoOpenSourceAnalysis } from '@/lib/siteSurvey/photoIntelligence';
 import { enrichSurvey } from './enrichSurvey';
 import { normalizeSurvey } from './normalizeSurvey';
 import {
@@ -91,13 +92,14 @@ export interface ProfessionalSurveyReadinessReportV1 {
 export function buildProfessionalSurveyReadinessReport(
   survey: SiteSurvey,
   files: SiteSurveyFile[] = [],
+  photoAnalysis: SurveyPhotoOpenSourceAnalysis[] = [],
 ): ProfessionalSurveyReadinessReportV1 {
   const enriched = siteSurveyToEnrichedSurvey(survey, files);
   const evidence = parseProfessionalSiteSurvey(enriched);
   const canonicalGeometry = buildCanonicalSurveyGeometry(enriched, evidence);
   const cadReadiness = buildSurveyCADReadiness(enriched, evidence, canonicalGeometry);
   const geometryIntelligence = buildGeometryIntelligenceReport({ evidence, canonicalGeometry, cadReadiness });
-  const photoEvidence = buildSurveyPhotoEvidenceBundle(enriched, canonicalGeometry);
+  const photoEvidence = buildSurveyPhotoEvidenceBundle(enriched, canonicalGeometry, photoAnalysis);
   const renderReadiness = buildRenderReadiness({ canonicalGeometry, cadReadiness, geometryIntelligence, photoEvidence });
   const renderRecommendationReport = buildProfessionalRenderRecommendationReport({ canonicalGeometry, cadReadiness, geometryIntelligence, photoEvidence, renderReadiness });
   const operatorGeometryIntelligence = buildOperatorGeometryIntelligenceSummary(geometryIntelligence);

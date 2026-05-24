@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getSiteSurveyById, getSiteSurveyFiles, isValidUUID } from '@/lib/db-neon';
 import { buildProfessionalSurveyReadinessReport } from '@/lib/siteSurvey/professionalSurveyReadinessReport';
+import { analyzeSurveyPhotosOpenSource } from '@/lib/siteSurvey/photoIntelligence';
 
 export async function GET(
   req: NextRequest,
@@ -36,7 +37,8 @@ export async function GET(
     }
 
     const files = await getSiteSurveyFiles(surveyId);
-    const report = buildProfessionalSurveyReadinessReport(survey, files);
+    const photoAnalysis = await analyzeSurveyPhotosOpenSource(files.filter(file => file.fileType === 'photo'));
+    const report = buildProfessionalSurveyReadinessReport(survey, files, photoAnalysis);
 
     return NextResponse.json({
       success: true,
@@ -48,6 +50,7 @@ export async function GET(
         cadSolverExecuted: false,
         cadMutationPerformed: false,
         downstreamTriggered: false,
+        photoAnalysisEngine: 'sharp_sha256_perceptual_hash_laplacian_v1',
       },
     });
   } catch (err) {

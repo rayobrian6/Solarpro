@@ -1119,10 +1119,13 @@ function SurveyEvidenceViewer({ manifest, bridge }: { manifest: SurveyEvidenceMa
                         </span>
                       </div>
                       <div className="grid grid-cols-2 gap-2 mt-3 text-[10px] text-slate-500">
-                        <span>AI: <b className="text-slate-300">{item.aiExtractionStatus}</b></span>
+                        <span>AI vision: <b className="text-slate-300">{item.aiExtractionStatus}</b></span>
                         <span>Confidence: <b className="text-slate-300">{item.evidenceConfidence}</b></span>
-                        <span>Blur: <b className="text-slate-300">{item.quality.blurScore ?? 'not checked'}</b></span>
-                        <span>Duplicate: <b className="text-slate-300">{item.quality.duplicateScore ?? 'not checked'}</b></span>
+                        <span>Blur risk: <b className="text-slate-300">{item.quality.blurScore ?? 'not checked'}</b></span>
+                        <span>Duplicate risk: <b className="text-slate-300">{item.quality.duplicateScore ?? 'not checked'}</b></span>
+                        {item.image.widthPx && item.image.heightPx && (
+                          <span className="col-span-2">Image scan: <b className="text-slate-300">{item.image.widthPx}×{item.image.heightPx}</b>{item.quality.warnings.length > 0 ? ` · ${item.quality.warnings.slice(0, 2).join(' · ')}` : ''}</span>
+                        )}
                       </div>
                     </a>
                   ))}
@@ -1135,8 +1138,9 @@ function SurveyEvidenceViewer({ manifest, bridge }: { manifest: SurveyEvidenceMa
         <div className="rounded-xl border border-slate-700/50 bg-slate-950/40 p-3">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Runtime boundary</p>
           <p className="text-[11px] text-slate-400 leading-relaxed">
-            v1 is deterministic web-runtime evidence organization only. OpenCV quality scoring, duplicate detection,
-            YOLO/Supervision, OCR, Claude reasoning, Open3D, and FreeCAD remain external worker or future-only stages.
+            v1 now performs Node/sharp open-source photo quality checks and duplicate detection on authorized survey photos.
+            AI vision classification, YOLO/Supervision object detection, OCR, Claude reasoning, Open3D geometry reconstruction,
+            and FreeCAD automation remain review-gated worker or future-only stages.
           </p>
         </div>
       </div>

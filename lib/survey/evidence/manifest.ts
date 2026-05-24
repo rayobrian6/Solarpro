@@ -1,4 +1,5 @@
 import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
+import type { SurveyPhotoOpenSourceAnalysis } from '@/lib/siteSurvey/photoIntelligence';
 
 import {
   REQUIRED_SURVEY_EVIDENCE_CATEGORIES,
@@ -150,11 +151,13 @@ export interface BuildSurveyEvidenceManifestInput {
   survey: Pick<SiteSurvey, 'id' | 'projectId' | 'surveyData' | 'inspectorName'>;
   files: SiteSurveyFile[];
   generatedAt?: string;
+  photoAnalysis?: SurveyPhotoOpenSourceAnalysis[];
 }
 
 export function buildSurveyEvidenceManifest(input: BuildSurveyEvidenceManifestInput): SurveyEvidenceManifest {
   const generatedAt = input.generatedAt ?? new Date().toISOString();
   const payloadPhotos = extractPayloadPhotos(input.survey.surveyData);
+  const photoAnalysisByFileId = new Map((input.photoAnalysis ?? []).map(analysis => [analysis.fileId, analysis]));
   const seenUrls = new Set<string>();
 
   const items = input.files
@@ -167,6 +170,7 @@ export function buildSurveyEvidenceManifest(input: BuildSurveyEvidenceManifestIn
         index,
         generatedAt,
         payloadPhoto: findPayloadPhoto(file, payloadPhotos),
+        photoAnalysis: photoAnalysisByFileId.get(file.id) ?? null,
       });
     });
 
@@ -195,8 +199,8 @@ export function buildSurveyEvidenceManifest(input: BuildSurveyEvidenceManifestIn
   }
 
   const classifiedItems = items.filter((item) => item.processingStatus !== 'uploaded').length;
-  const qualityCheckedItems = items.filter((item) => item.processingStatus === 'quality_checked').length;
-  const duplicateCheckedItems = items.filter((item) => item.processingStatus === 'duplicate_checked').length;
+  const qualityCheckedItems = items.filter((item) => item.quality.blurScore !== null || item.quality.warnings.some(warning => warning.startsWith('image_analysis:'))).length;
+  const duplicateCheckedItems = items.filter((item) => item.quality.duplicateScore !== null || item.quality.warnings.some(warning => warning.startsWith('duplicate_analysis:'))).length;
   const aiProcessedItems = items.filter((item) => item.aiExtractionStatus === 'processed').length;
   const engineeringReviewedItems = items.filter((item) => item.processingStatus === 'engineering_reviewed').length;
   const permitConsumedItems = items.filter((item) => item.processingStatus === 'permit_consumed').length;
@@ -231,12 +235,13 @@ export function buildSurveyEvidenceManifest(input: BuildSurveyEvidenceManifestIn
     openSourceBoundaries: {
       webRuntime: [
         'deterministic manifest construction',
+        'open-source image quality scoring',
+        'open-source duplicate detection',
         'category coverage warnings',
         'admin/project evidence viewer',
         'engineering/permit evidence summary',
       ],
       pythonWorker: [
-        'OpenCV blur/orientation/duplicate scoring',
         'YOLO/Supervision detection candidates',
         'targeted OCR extraction candidates',
       ],
@@ -254,12 +259,19 @@ function buildEvidenceItem(input: {
   survey: Pick<SiteSurvey, 'id' | 'projectId' | 'surveyData' | 'inspectorName'>;
   file: SiteSurveyFile;
   payloadPhoto: PayloadPhotoLike | null;
+  photoAnalysis: SurveyPhotoOpenSourceAnalysis | null;
   index: number;
   generatedAt: string;
 }): SurveyEvidenceItem {
   const submittedCategory = input.file.label ?? asString(input.payloadPhoto?.category);
   const category = classifySubmittedEvidenceCategory(submittedCategory);
   const classified = category !== 'uncategorized';
+  const photoAnalysis = input.photoAnalysis;
+  const quality = evidenceQualityFromAnalysis(photoAnalysis);
+  const image = photoAnalysis?.analyzed
+    ? { widthPx: photoAnalysis.widthPx, heightPx: photoAnalysis.heightPx, orientation: inferOrientation(photoAnalysis.widthPx, photoAnalysis.heightPx) }
+    : { widthPx: null, heightPx: null, orientation: null };
+  const processingStatus = photoAnalysis?.analyzed ? (classified ? 'classified' : 'quality_checked') : (classified ? 'classified' : 'uploaded');
   const captureTimestamp = asString(input.payloadPhoto?.capturedAt)
     ?? asString(input.payloadPhoto?.timestamp)
     ?? asString(input.payloadPhoto?.createdAt)
@@ -279,21 +291,36 @@ function buildEvidenceItem(input: {
     submittedCategory: submittedCategory ?? null,
     category,
     domain: getSurveyEvidenceDomain(category),
-    processingStatus: classified ? 'classified' : 'uploaded',
+    processingStatus,
     evidenceConfidence: classified ? 'high' : 'unknown',
     evidenceSource: 'site_survey_files',
     captureTimestamp,
     surveyTechnician: input.survey.inspectorName ?? extractTechnician(input.survey.surveyData),
-    image: { widthPx: null, heightPx: null, orientation: null },
-    quality: { blurScore: null, duplicateScore: null, warnings: [] },
+    image,
+    quality,
     sceneGroup: null,
     processingHistory: [
       {
         status: 'uploaded',
         source: 'survey_ingest',
         at: input.file.createdAt ?? input.generatedAt,
-        note: 'Photo linked from site_survey_files; image quality and duplicate analysis not processed in v1.',
+        note: photoAnalysis?.analyzed
+          ? `Photo linked from site_survey_files; open-source image scan completed (${photoAnalysis.format ?? 'unknown'} ${photoAnalysis.widthPx ?? '?'}x${photoAnalysis.heightPx ?? '?'}, quality ${photoAnalysis.qualityScore}/100).`
+          : 'Photo linked from site_survey_files; image quality and duplicate analysis unavailable until the route can fetch the image.',
       },
+      ...(photoAnalysis?.analyzed ? [{
+        status: 'quality_checked' as const,
+        source: 'sharp_sha256_perceptual_hash_laplacian_v1',
+        at: input.generatedAt,
+        note: `Quality scan completed: ${photoAnalysis.qualityStatus}, sharpness ${photoAnalysis.sharpnessScore ?? 'n/a'}, brightness ${photoAnalysis.brightnessScore ?? 'n/a'}.`,
+      }, {
+        status: 'duplicate_checked' as const,
+        source: 'sharp_sha256_perceptual_hash_laplacian_v1',
+        at: input.generatedAt,
+        note: photoAnalysis.duplicateGroupId
+          ? `Duplicate scan completed: group ${photoAnalysis.duplicateGroupId}, rank ${photoAnalysis.duplicateRank}/${photoAnalysis.duplicateGroupSize}.`
+          : 'Duplicate scan completed: no near-duplicate group detected in analyzed survey batch.',
+      }] : []),
       ...(classified ? [{
         status: 'classified' as const,
         source: 'category_mapper_v1',
@@ -301,7 +328,7 @@ function buildEvidenceItem(input: {
         note: `Submitted category "${submittedCategory}" mapped to evidence category "${category}".`,
       }] : []),
     ],
-    aiExtractionStatus: 'not_started',
+    aiExtractionStatus: photoAnalysis?.analyzed ? 'not_applicable' : 'not_started',
     engineeringUsageReferences: [],
   };
 }
@@ -351,6 +378,49 @@ function buildPayloadOnlyEvidenceItem(input: {
     aiExtractionStatus: 'not_started',
     engineeringUsageReferences: [],
   };
+}
+
+
+function evidenceQualityFromAnalysis(analysis: SurveyPhotoOpenSourceAnalysis | null): SurveyEvidenceQuality {
+  if (!analysis) return { blurScore: null, duplicateScore: null, warnings: [] };
+  if (!analysis.analyzed) {
+    return {
+      blurScore: null,
+      duplicateScore: null,
+      warnings: [
+        'image_analysis:unavailable',
+        'duplicate_analysis:unavailable',
+        ...(analysis.analysisError ? [`image_analysis_error:${analysis.analysisError}`] : []),
+      ],
+    };
+  }
+
+  const blurRisk = analysis.sharpnessScore === null ? null : clamp(100 - analysis.sharpnessScore, 0, 100);
+  const duplicateScore = analysis.duplicateGroupSize > 1
+    ? (analysis.isDuplicateRepresentative ? 35 : 95)
+    : 0;
+  const warnings = [
+    `image_analysis:${analysis.qualityStatus}`,
+    `image_analysis_engine:sharp_sha256_perceptual_hash_laplacian_v1`,
+    `quality_score:${analysis.qualityScore}`,
+    ...(analysis.qualityFlags.map(flag => `quality_flag:${flag}`)),
+    analysis.duplicateGroupId
+      ? `duplicate_analysis:${analysis.duplicateGroupId}:rank_${analysis.duplicateRank}_of_${analysis.duplicateGroupSize}`
+      : 'duplicate_analysis:no_near_duplicate_detected',
+    ...(analysis.isDuplicateRepresentative ? [] : ['duplicate_analysis:not_representative']),
+  ];
+
+  return { blurScore: blurRisk, duplicateScore, warnings };
+}
+
+function inferOrientation(width: number | null, height: number | null): string | null {
+  if (!width || !height) return null;
+  if (width === height) return 'square';
+  return width > height ? 'landscape' : 'portrait';
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function classifySubmittedEvidenceCategory(category: string | null | undefined): SurveyEvidenceCategory {
