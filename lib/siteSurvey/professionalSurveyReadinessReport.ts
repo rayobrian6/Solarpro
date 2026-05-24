@@ -2,6 +2,11 @@ import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
 import { enrichSurvey } from './enrichSurvey';
 import { normalizeSurvey } from './normalizeSurvey';
 import {
+  buildOperatorGeometryIntelligenceSummary,
+  buildGeometryIntelligenceReport,
+  type GeometryIntelligenceReportV1,
+} from './geometryIntelligence';
+import {
   buildCanonicalSurveyGeometry,
   buildSurveyCADReadiness,
   parseProfessionalSiteSurvey,
@@ -39,6 +44,7 @@ export interface ProfessionalSurveyReadinessReportV1 {
   evidence: ProfessionalSiteSurveyEvidenceBundleV1;
   canonicalGeometry: CanonicalSurveyGeometryV1;
   cadReadiness: SurveyCADReadinessV1;
+  geometryIntelligence: GeometryIntelligenceReportV1;
   summaries: {
     systemType: EnrichedSiteSurvey['systemType'];
     roofPlaneCount: number;
@@ -52,6 +58,7 @@ export interface ProfessionalSurveyReadinessReportV1 {
     missingRequiredFields: string[];
     blockingIssues: string[];
     warnings: string[];
+    geometryIntelligence: ReturnType<typeof buildOperatorGeometryIntelligenceSummary>;
   };
   noAuthorityEnforcement: {
     dbWritesAllowed: false;
@@ -72,6 +79,8 @@ export function buildProfessionalSurveyReadinessReport(
   const evidence = parseProfessionalSiteSurvey(enriched);
   const canonicalGeometry = buildCanonicalSurveyGeometry(enriched, evidence);
   const cadReadiness = buildSurveyCADReadiness(enriched, evidence, canonicalGeometry);
+  const geometryIntelligence = buildGeometryIntelligenceReport({ evidence, canonicalGeometry, cadReadiness });
+  const operatorGeometryIntelligence = buildOperatorGeometryIntelligenceSummary(geometryIntelligence);
   const readinessState = resolveOperatorReadinessState(canonicalGeometry, cadReadiness);
   const blockingIssues = dedupe([...evidence.blockingIssues, ...canonicalGeometry.blockingIssues, ...cadReadiness.blockingIssues]);
   const warnings = dedupe([...canonicalGeometry.warnings, ...cadReadiness.warnings]);
@@ -104,6 +113,7 @@ export function buildProfessionalSurveyReadinessReport(
     evidence,
     canonicalGeometry,
     cadReadiness,
+    geometryIntelligence,
     summaries: {
       systemType: enriched.systemType,
       roofPlaneCount: enriched.geometry.roofPlanes.length,
@@ -117,6 +127,7 @@ export function buildProfessionalSurveyReadinessReport(
       missingRequiredFields,
       blockingIssues,
       warnings,
+      geometryIntelligence: operatorGeometryIntelligence,
     },
     noAuthorityEnforcement: {
       dbWritesAllowed: false,

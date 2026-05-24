@@ -1,27 +1,30 @@
-# Isolated Geometry OSS Adapter Spike Todo
+# Geometry Intelligence V1 Todo
 
-## Scope and Safety
-- [x] Confirm adapter spike remains read-only, comparison-only, non-authoritative, and isolated
-- [x] Inspect repository state, package surface, parser geometry logic, and existing fixtures/tests
+## Scope and Repository Baseline
+- [x] Confirm repository state, current branch, and relevant geometry/readiness/operator files
+- [x] Identify the smallest reusable integration points for intelligence scoring and lightweight operator visibility
 
-## Adapter Implementation
-- [x] Add isolated polygon-clipping dependency and geometry adapter boundary
-- [x] Implement comparison-only geometry cross-check report service with discrepancy categories and no-authority flags
-- [x] Ensure adapter output never mutates canonical geometry, CAD preview outputs, parser readiness, or persistence
+## Intelligence Layer
+- [x] Implement deterministic Geometry Intelligence V1 read-only scoring layer
+- [x] Add explainable risk categories, discrepancy severity scoring, clustering, and review urgency classification
+- [x] Ensure no mutation, no persistence, no CAD execution, and no authority promotion
 
-## Geometry Stress Fixtures and Tests
-- [x] Add expanded geometry torture fixtures for overlap, malformed obstruction, invalid orientation, duplicated edges, and corrupted payloads
-- [x] Add adapter/report tests for overlap, intersection, self-intersection comparison, duplicate edges, clipping comparison, determinism, no mutation, and no authority promotion
-- [x] Verify parser/readiness/expanded fixture tests remain stable
+## Operator Visibility
+- [x] Add minimal high-value operator visibility for trust score, risk level, discrepancy severity, review urgency, and integrity summary
 
-## Evaluation Reports
-- [x] Produce adapter evaluation report with performance, bundle/package impact, TypeScript compatibility, determinism, maintainability, and isolation review
-- [x] Produce native-vs-OSS comparison report with improvements, false positives, false negatives, and recommendation
-- [x] Produce future adapter recommendation report
+## Fixture-Driven Validation
+- [x] Add geometry intelligence tests covering clean, malformed, overlap, duplicate edge, conflicting evidence, mixed-unit/corrupted, and near-zero geometry behavior
+- [x] Verify deterministic outputs and no-authority/no-mutation guarantees
+
+## Reports
+- [x] Produce intelligence validation report
+- [x] Produce geometry trust evaluation report
+- [x] Produce discrepancy intelligence report
+- [x] Produce fixture intelligence analysis report with credit-efficiency review
 
 ## Validation and Delivery
-- [x] Run parser/readiness/fixture/adapter tests
+- [x] Run parser/readiness/fixture/adapter/intelligence tests
 - [x] Run type-check clean
-- [x] Commit changes
-- [x] Push according to active repository workflow
-- [x] Summarize improvements, false positives, keep/expand recommendation, and native authority status
+- [ ] Commit changes
+- [ ] Push using repository access rules without exposing token
+- [ ] Summarize leverage gained, reusable infrastructure, trust/readiness/discrepancy findings, and CAD-authority maturity outlook
