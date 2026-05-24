@@ -1428,12 +1428,35 @@ function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
   const sheets = safeArray(preview.sheets);
   const selectedSheet = sheets.find(sheet => sheet.sheetNumber === selectedSheetNumber) ?? sheets[0] ?? null;
   const readiness = PROFESSIONAL_READINESS_META[preview.readiness.readinessState] ?? PROFESSIONAL_READINESS_META.review_required;
+  const source = preview.readiness.source;
+  const summary = preview.readiness.summaries;
+  const renderSummary = preview.renderPackage.summary;
+  const renderReadiness = preview.readiness.renderReadiness;
+  const blockingIssues = safeArray(summary.blockingIssues);
+  const warnings = safeArray(summary.warnings);
+  const renderBlockers = safeArray(renderReadiness.blockers);
+  const renderReviewItems = safeArray(renderReadiness.reviewItems);
   const reviewItems = Array.from(new Set([
-    ...safeArray(preview.readiness.summaries.blockingIssues),
-    ...safeArray(preview.readiness.summaries.warnings),
-    ...safeArray(preview.readiness.renderReadiness.blockers),
-    ...safeArray(preview.readiness.renderReadiness.reviewItems),
-  ])).slice(0, 6);
+    ...blockingIssues,
+    ...warnings,
+    ...renderBlockers,
+    ...renderReviewItems,
+  ])).slice(0, 8);
+  const missingSourceFacts = [
+    !source.hasSurveyData ? 'No structured survey JSON was available to the parser.' : null,
+    source.photoCount === 0 ? 'No survey photos are attached to this survey record.' : null,
+    source.fileCount === 0 ? 'No survey files are attached to this survey record.' : null,
+    summary.canonicalRoofPlaneCount === 0 ? 'No canonical roof planes were parsed from the survey.' : null,
+    summary.obstructionCount === 0 ? 'No obstructions were parsed from the survey.' : null,
+    summary.setbackCount === 0 ? 'No setbacks/fire pathways were parsed from the survey.' : null,
+  ].filter(Boolean) as string[];
+  const isFallbackPreview = renderSummary.renderQualityScore <= 0
+    || renderSummary.renderConfidenceScore <= 0
+    || summary.canonicalRoofPlaneCount === 0
+    || !summary.cadPreviewEligible
+    || renderBlockers.length > 0
+    || blockingIssues.length > 0;
+  const sourceHealthTone = isFallbackPreview ? 'border-red-500/25 bg-red-500/10' : 'border-emerald-500/20 bg-emerald-500/10';
 
   return (
     <SectionCard icon={<FileText size={14} />} title="Site Survey CAD Workbench — Read-Only Preview" iconColor="text-emerald-400">
@@ -1455,19 +1478,19 @@ function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
         <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
           <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
             <p className="text-[10px] uppercase tracking-wider text-slate-500">Sheets</p>
-            <p className="text-lg font-bold text-white">{preview.renderPackage.summary.sheetCount}</p>
+            <p className="text-lg font-bold text-white">{renderSummary.sheetCount}</p>
           </div>
-          <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+          <div className={`rounded-xl border p-3 ${renderSummary.renderQualityScore <= 0 ? 'border-red-500/25 bg-red-500/10' : 'border-slate-700/60 bg-slate-900/50'}`}>
             <p className="text-[10px] uppercase tracking-wider text-slate-500">Quality</p>
-            <p className="text-lg font-bold text-white">{preview.renderPackage.summary.renderQualityScore}/100</p>
+            <p className="text-lg font-bold text-white">{renderSummary.renderQualityScore}/100</p>
           </div>
           <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
             <p className="text-[10px] uppercase tracking-wider text-slate-500">Layers</p>
-            <p className="text-lg font-bold text-white">{preview.renderPackage.summary.enabledRenderLayerCount}</p>
+            <p className="text-lg font-bold text-white">{renderSummary.enabledRenderLayerCount}</p>
           </div>
-          <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+          <div className={`rounded-xl border p-3 ${renderSummary.renderConfidenceScore <= 0 ? 'border-red-500/25 bg-red-500/10' : 'border-slate-700/60 bg-slate-900/50'}`}>
             <p className="text-[10px] uppercase tracking-wider text-slate-500">Confidence</p>
-            <p className="text-lg font-bold text-white">{preview.renderPackage.summary.renderConfidenceScore}/100</p>
+            <p className="text-lg font-bold text-white">{renderSummary.renderConfidenceScore}/100</p>
           </div>
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
             <p className="text-[10px] uppercase tracking-wider text-amber-200/80">Authority</p>
@@ -1481,6 +1504,36 @@ function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
           <ReadinessPill tone="amber">No Solver Execution</ReadinessPill>
           <ReadinessPill tone="slate">No Permit Trigger</ReadinessPill>
           <ReadinessPill tone="cyan">Survey Source Traceable</ReadinessPill>
+          {isFallbackPreview && <ReadinessPill tone="amber">Fallback Geometry Only</ReadinessPill>}
+        </div>
+
+        <div className={`rounded-2xl border p-4 ${sourceHealthTone}`}>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                {isFallbackPreview ? <AlertTriangle size={15} className="text-red-300" /> : <CheckCircle size={15} className="text-emerald-300" />}
+                <p className={`text-xs font-bold uppercase tracking-wider ${isFallbackPreview ? 'text-red-100' : 'text-emerald-100'}`}>
+                  {isFallbackPreview ? 'Source data health: fallback / not CAD-ready' : 'Source data health: parsed geometry available'}
+                </p>
+              </div>
+              <p className="mt-2 max-w-3xl text-[11px] leading-relaxed text-slate-300">
+                {isFallbackPreview
+                  ? 'The drawing below is intentionally limited because the parser did not receive enough trustworthy survey geometry to reconstruct the roof/site plan. Treat the sheet as a diagnostic placeholder, not as a usable CAD interpretation.'
+                  : 'The parser found enough source geometry to build a reviewable preview. It is still read-only and non-authoritative until operator approval.'}
+              </p>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center text-[10px]">
+              <div className="rounded-lg border border-slate-700/60 bg-slate-950/40 px-3 py-2"><p className="text-slate-500">Files</p><p className="text-sm font-bold text-white">{source.fileCount}</p></div>
+              <div className="rounded-lg border border-slate-700/60 bg-slate-950/40 px-3 py-2"><p className="text-slate-500">Photos</p><p className="text-sm font-bold text-white">{source.photoCount}</p></div>
+              <div className="rounded-lg border border-slate-700/60 bg-slate-950/40 px-3 py-2"><p className="text-slate-500">Roof Planes</p><p className="text-sm font-bold text-white">{summary.canonicalRoofPlaneCount}</p></div>
+            </div>
+          </div>
+          {(missingSourceFacts.length > 0 || reviewItems.length > 0) && (
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+              <IssueList title="Missing or weak parsed source facts" items={missingSourceFacts} tone={isFallbackPreview ? 'red' : 'slate'} />
+              <IssueList title="Parser / render blockers and review notes" items={reviewItems} tone={isFallbackPreview ? 'red' : 'amber'} />
+            </div>
+          )}
         </div>
 
         {sheets.length > 1 && (
@@ -1505,7 +1558,7 @@ function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
                 <p className="text-[10px] text-slate-500 break-all">Render hash: {selectedSheet.renderHash}</p>
               </div>
               <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold uppercase text-emerald-200">
-                {String(preview.renderPackage.summary.renderQualityGrade ?? 'preview').replace(/_/g, ' ')}
+                {isFallbackPreview ? 'diagnostic fallback' : String(renderSummary.renderQualityGrade ?? 'preview').replace(/_/g, ' ')}
               </span>
             </div>
             <div className="max-h-[620px] overflow-auto rounded-xl bg-white p-2">
@@ -1519,7 +1572,7 @@ function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
           <div className="mt-3 space-y-3 text-[10px] text-slate-500">
             <p className="break-all">Package hash: <b className="text-slate-300">{preview.renderPackage.packageHash}</b></p>
             <p className="break-all">Render readiness hash: <b className="text-slate-300">{preview.renderPackage.sourceRenderReadinessHash}</b></p>
-            <p>System type: <b className="text-slate-300 capitalize">{preview.readiness.summaries.systemType}</b>; roof planes: <b className="text-slate-300">{preview.readiness.summaries.canonicalRoofPlaneCount}</b>; obstructions: <b className="text-slate-300">{preview.readiness.summaries.obstructionCount}</b>; setbacks: <b className="text-slate-300">{preview.readiness.summaries.setbackCount}</b>.</p>
+            <p>System type: <b className="text-slate-300 capitalize">{summary.systemType}</b>; roof planes: <b className="text-slate-300">{summary.canonicalRoofPlaneCount}</b>; obstructions: <b className="text-slate-300">{summary.obstructionCount}</b>; setbacks: <b className="text-slate-300">{summary.setbackCount}</b>.</p>
             {selectedSheet && <p>Visible layer order: <span className="text-slate-400">{safeArray(selectedSheet.layerOrder).join(' → ')}</span></p>}
             {reviewItems.length > 0 && (
               <ul className="space-y-1 text-amber-100/80">
