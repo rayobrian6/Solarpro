@@ -1,0 +1,15 @@
+# Geometry Candidate Review Audit Export Bundle V1
+
+This increment adds a deterministic DTO-only audit export bundle for the existing `possible_obstruction_candidate` geometry pilot. The export bundle is intentionally limited to review/provenance visibility. It does not add persistence, database writes, canonical geometry mutation, CAD mutation, engineering influence, NEC influence, workflow influence, recommendation influence, route influence, BOM influence, or plan-set influence.
+
+The bundle is built by `buildGeometryCandidateReviewAuditExportBundle()` inside the existing approved lifecycle boundary `lib/assistedEvidenceSources/geometryCandidateReviewLifecycle.ts`. Keeping the helper in that file preserves the previously audited boundary and avoids introducing a new allowlisted geometry surface. The helper first validates the candidate through `assertReviewableGeometryCandidate()`, so only existing review-required, non-authoritative `possible_obstruction_candidate` candidates from `deterministic-geometry-adjacency-runtime` are eligible.
+
+The bundle schema is `geometry_candidate_review_audit_export_bundle_v1`, and its persistence mode is `deterministic_dto_only_v1`. The exported DTO includes candidate ID/type/hash, source image reference, source lineage reference, runtime name/version, runtime payload hash, boundary policy version, a narrow candidate snapshot, candidate-only stale visibility, lineage-only dependency metadata, optional accept/reject review-action preview audits, explicit all-false authority flags, deterministic notes, and a stable export hash. The export hash is computed from the deterministic DTO contents before the hash field is added.
+
+The stale visibility portion reuses `buildGeometryCandidateStaleVisibility()`. It can only surface `candidate_source_stale`, `candidate_runtime_stale`, `candidate_policy_stale`, and `candidate_review_stale`. It explicitly keeps regeneration, CAD invalidation, engineering invalidation, workflow actions, and recommendation actions unavailable.
+
+The lineage portion reuses `buildGeometryCandidateLineageNode()`. Its dependency role remains `lineage_visibility_only`, `downstreamAuthority` remains false, and the only allowed edges remain `source_image_to_candidate` and `candidate_to_review_projection`. Forbidden edges to CAD, roof plane, setback, layout, NEC, engineering, workflow, and recommendation remain explicit metadata.
+
+Optional review-action previews reuse the existing audited helpers `acceptGeometryCandidateReviewAction()` and `rejectGeometryCandidateReviewAction()`. These previews return action audit DTOs only. Accept previews create reviewed projection DTOs only; reject previews create no projection. Neither preview writes to storage or mutates source/canonical/CAD/engineering state.
+
+Durable audit persistence remains out of scope. Canonicalization remains out of scope. New geometry categories remain out of scope. Coordinates, bounding boxes, polygons, obstruction maps, roof extraction, plane generation, object detection, segmentation, and measurement remain out of scope.

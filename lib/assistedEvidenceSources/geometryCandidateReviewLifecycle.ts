@@ -71,6 +71,42 @@ export interface GeometryCandidateReviewActionResult {
   audit: GeometryCandidateReviewActionAudit;
 }
 
+export interface GeometryCandidateReviewAuditExportInput {
+  exportedAt: string;
+  exportedBy: string;
+  exportReason?: string;
+  staleVisibilityInput?: GeometryCandidateStaleVisibilityInput;
+  acceptPreview?: Omit<GeometryCandidateReviewActionInput, 'actionType'>;
+  rejectPreview?: Omit<GeometryCandidateReviewActionInput, 'actionType'>;
+}
+
+export interface GeometryCandidateReviewAuditExportBundle {
+  exportSchemaVersion: 'geometry_candidate_review_audit_export_bundle_v1';
+  persistenceMode: GeometryCandidateReviewActionPersistenceMode;
+  candidateId: string;
+  candidateType: AssistedEvidenceCandidate['candidateType'];
+  candidateHash: string;
+  exportedAt: string;
+  exportedBy: string;
+  exportReason: string | null;
+  sourceImageReference: string;
+  sourceLineageRef: string;
+  runtimeName: string;
+  runtimeVersion: string;
+  runtimePayloadHash: string;
+  boundaryPolicyVersion: string;
+  candidateSnapshot: Pick<AssistedEvidenceCandidate, 'candidateId' | 'candidateType' | 'candidateCategory' | 'candidateStatus' | 'reviewRequired' | 'nonAuthoritative' | 'sourceFileId' | 'sourceUploadKey' | 'projectId' | 'surveyId' | 'toolName' | 'toolVersion' | 'deterministicHash'>;
+  staleVisibility: GeometryCandidateStaleVisibility;
+  lineage: GeometryCandidateLineageNode;
+  reviewActionPreviews: {
+    accept: GeometryCandidateReviewActionAudit | null;
+    reject: GeometryCandidateReviewActionAudit | null;
+  };
+  authorityFlags: GeometryCandidateReviewActionAuthorityFlags;
+  exportHash: string;
+  deterministicNotes: string[];
+}
+
 export interface GeometryCandidateStaleVisibilityInput {
   sourceMetadataHash?: string;
   runtimePayloadHash?: string;
@@ -349,5 +385,66 @@ export function buildGeometryCandidateLineageNode(candidate: AssistedEvidenceCan
     allowedEdges: ['source_image_to_candidate', 'candidate_to_review_projection'],
     forbiddenEdges: ['candidate_to_cad', 'candidate_to_roof_plane', 'candidate_to_setback', 'candidate_to_layout', 'candidate_to_nec', 'candidate_to_engineering', 'candidate_to_workflow', 'candidate_to_recommendation'],
     deterministicHash: deterministicHash(seed),
+  };
+}
+
+export function buildGeometryCandidateReviewAuditExportBundle(candidate: AssistedEvidenceCandidate, input: GeometryCandidateReviewAuditExportInput): GeometryCandidateReviewAuditExportBundle {
+  assertReviewableGeometryCandidate(candidate);
+  if (!input.exportedAt.trim()) throw new Error('Geometry candidate review audit export requires exportedAt.');
+  if (!input.exportedBy.trim()) throw new Error('Geometry candidate review audit export requires exportedBy.');
+
+  const runtimePayloadHash = payloadString(candidate, 'runtimePayloadHash');
+  const sourceLineageRef = payloadString(candidate, 'sourceImageLineageRef');
+  const boundaryPolicyVersion = payloadString(candidate, 'boundaryPolicyVersion') || GEOMETRY_CANDIDATE_BOUNDARY_POLICY_VERSION;
+  const staleVisibility = buildGeometryCandidateStaleVisibility(candidate, input.staleVisibilityInput ?? {});
+  const lineage = buildGeometryCandidateLineageNode(candidate);
+  const acceptPreview = input.acceptPreview ? acceptGeometryCandidateReviewAction(candidate, input.acceptPreview).audit : null;
+  const rejectPreview = input.rejectPreview ? rejectGeometryCandidateReviewAction(candidate, input.rejectPreview).audit : null;
+  const bundleWithoutHash = {
+    exportSchemaVersion: 'geometry_candidate_review_audit_export_bundle_v1' as const,
+    persistenceMode: 'deterministic_dto_only_v1' as const,
+    candidateId: candidate.candidateId,
+    candidateType: candidate.candidateType,
+    candidateHash: candidate.deterministicHash,
+    exportedAt: input.exportedAt,
+    exportedBy: input.exportedBy,
+    exportReason: normalizedOptionalText(input.exportReason),
+    sourceImageReference: candidate.sourceUploadKey,
+    sourceLineageRef,
+    runtimeName: candidate.toolName,
+    runtimeVersion: candidate.toolVersion,
+    runtimePayloadHash,
+    boundaryPolicyVersion,
+    candidateSnapshot: {
+      candidateId: candidate.candidateId,
+      candidateType: candidate.candidateType,
+      candidateCategory: candidate.candidateCategory,
+      candidateStatus: candidate.candidateStatus,
+      reviewRequired: candidate.reviewRequired,
+      nonAuthoritative: candidate.nonAuthoritative,
+      sourceFileId: candidate.sourceFileId,
+      sourceUploadKey: candidate.sourceUploadKey,
+      projectId: candidate.projectId,
+      surveyId: candidate.surveyId,
+      toolName: candidate.toolName,
+      toolVersion: candidate.toolVersion,
+      deterministicHash: candidate.deterministicHash,
+    },
+    staleVisibility,
+    lineage,
+    reviewActionPreviews: {
+      accept: acceptPreview,
+      reject: rejectPreview,
+    },
+    authorityFlags: GEOMETRY_CANDIDATE_REVIEW_ACTION_AUTHORITY_FLAGS,
+    deterministicNotes: [
+      'Geometry candidate review audit export bundle is deterministic DTO-only and does not persist records.',
+      'The bundle contains candidate provenance, candidate-only stale visibility, lineage-only dependency metadata, and optional preview audit DTOs.',
+      'The bundle is no-authority export metadata only and cannot change downstream operational systems or generated outputs.',
+    ],
+  };
+  return {
+    ...bundleWithoutHash,
+    exportHash: deterministicHash(bundleWithoutHash),
   };
 }

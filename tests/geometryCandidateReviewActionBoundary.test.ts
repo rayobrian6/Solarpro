@@ -6,6 +6,8 @@ const lifecycleSource = readFileSync('lib/assistedEvidenceSources/geometryCandid
 describe('geometry candidate review action boundary', () => {
   it('keeps the action helper in assisted evidence DTO-only scope without database or downstream authority calls', () => {
     expect(lifecycleSource).toContain('submitGeometryCandidateReviewAction');
+    expect(lifecycleSource).toContain('buildGeometryCandidateReviewAuditExportBundle');
+    expect(lifecycleSource).toContain('geometry_candidate_review_audit_export_bundle_v1');
     expect(lifecycleSource).toContain('accept_for_review_projection');
     expect(lifecycleSource).toContain('deterministic_dto_only_v1');
     expect(lifecycleSource).not.toMatch(/from ['"][^'"]*(?:lib\/cad|lib\/drafting|lib\/plan-set|lib\/engineering|lib\/engineeringIntelligence|lib\/system\/conduitRouting|lib\/bom|lib\/roofGeometry|lib\/panelLayout|lib\/placementEngine|lib\/survey\/evidence|lib\/db\/surveys)/);
