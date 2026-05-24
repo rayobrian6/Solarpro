@@ -131,6 +131,18 @@ describe('GeometryCandidateReviewWorkspace', () => {
       expect(controls.some(control => control.includes(forbiddenAction))).toBe(false);
     }
 
+    expect(screen.getByText('Reviewer annotation preview V1 · DTO-only · no state change')).toBeInTheDocument();
+    expect(screen.getByText('geometry_candidate_review_annotation_v1')).toBeInTheDocument();
+    expect(screen.getByText('Geometry Review Workspace Annotation Preview')).toBeInTheDocument();
+    expect(screen.getByText('Preview annotation only: reviewer triage metadata, not approval, rejection, projection creation, canonical geometry, CAD input, engineering truth, workflow trigger, or recommendation input.')).toBeInTheDocument();
+    for (const tag of ['needs-human-review', 'possible-obstruction', 'roof-context']) {
+      expect(screen.getByText(tag)).toBeInTheDocument();
+    }
+    expect(screen.getByText('0.72')).toBeInTheDocument();
+    expect(screen.getAllByText('Projection created').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('false').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('none').length).toBeGreaterThan(0);
+
     expect(screen.getByText('Audited review action path V1 · projection-only · deterministic DTO preview')).toBeInTheDocument();
     expect(screen.getAllByText('deterministic_dto_only_v1').length).toBeGreaterThan(0);
     expect(screen.getByText('not_actionable_for_review_projection')).toBeInTheDocument();

@@ -43,7 +43,7 @@ import type {
 } from '@/lib/engineeringIntelligence';
 import type { HydratedProjectEngineeringState } from '@/lib/engineeringIntelligence/projectHydration';
 import type { AssistedEvidenceCandidate, ReviewedEvidenceProjection } from '@/lib/assistedEvidence';
-import { acceptGeometryCandidateReviewAction, buildGeometryCandidateLineageNode, buildGeometryCandidateStaleVisibility, isGeometryCandidate, rejectGeometryCandidateReviewAction } from '@/lib/assistedEvidenceSources';
+import { acceptGeometryCandidateReviewAction, buildGeometryCandidateLineageNode, buildGeometryCandidateReviewAnnotation, buildGeometryCandidateStaleVisibility, isGeometryCandidate, rejectGeometryCandidateReviewAction } from '@/lib/assistedEvidenceSources';
 import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
 import type { DeterministicPhotoGroupingModel } from '@/lib/engineeringIntelligence/photoGrouping';
 import type { FieldEvidenceOrchestrationModel } from '@/lib/survey/evidence/fieldOrchestration';
@@ -172,6 +172,18 @@ function geometryCandidateReviewActionPreviews(candidate: AssistedEvidenceCandid
       rejectionReason: 'not_actionable_for_review_projection',
     }),
   };
+}
+
+function geometryCandidateReviewAnnotationPreview(candidate: AssistedEvidenceCandidate) {
+  if (candidate.candidateStatus !== 'review_required') return null;
+  return buildGeometryCandidateReviewAnnotation(candidate, {
+    reviewerId: 'geometry-review-workspace-annotation-preview',
+    reviewerDisplayLabel: 'Geometry Review Workspace Annotation Preview',
+    reviewedAt: '2026-01-01T00:00:00.000Z',
+    annotationNote: 'Preview annotation only: reviewer triage metadata, not approval, rejection, projection creation, canonical geometry, CAD input, engineering truth, workflow trigger, or recommendation input.',
+    reviewerConfidence: 0.72,
+    tags: ['needs-human-review', 'possible-obstruction', 'roof-context'],
+  });
 }
 
 function collectionSize(value: unknown): number {
@@ -1792,6 +1804,7 @@ export function GeometryCandidateReviewWorkspace({ sandbox }: { sandbox: { candi
             const lineageNode = buildGeometryCandidateLineageNode(candidate);
             const projection = relatedProjectionForCandidate(candidate, projections);
             const actionPreviews = geometryCandidateReviewActionPreviews(candidate);
+            const annotationPreview = geometryCandidateReviewAnnotationPreview(candidate);
             return (
               <div key={workspaceKey('geometry-review-candidate', candidate.candidateId, index)} className="rounded-2xl border border-sky-400/20 bg-slate-950/90 p-5 text-xs text-slate-300 shadow-xl shadow-sky-950/10">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1865,6 +1878,42 @@ export function GeometryCandidateReviewWorkspace({ sandbox }: { sandbox: { candi
                     <TokenList values={candidate.candidateLimitations} limit={24} />
                     <div className="mt-3 rounded-lg border border-red-400/20 bg-red-400/10 p-3 text-red-100">Forbidden UI actions are absent: draw geometry, edit roof planes, create CAD geometry, create setbacks, place obstructions on CAD, mark CAD ready, satisfy requirements, trigger engineering regeneration, trigger workflow creation, trigger recommendations, mutate canonical survey evidence, or mutate canonical geometry.</div>
                   </div>
+                </div>
+                <div className="mt-4 rounded-xl border border-violet-400/20 bg-violet-400/10 p-4 text-slate-200">
+                  <div className="text-sm font-black text-violet-100">Reviewer annotation preview V1 · DTO-only · no state change</div>
+                  <div className="mt-2 text-violet-50">This read-only preview displays the deterministic annotation DTO that a reviewer note would produce. It does not expose fields, buttons, submit handlers, persistence, candidate approval, candidate rejection, projection creation, CAD mutation, canonical geometry mutation, engineering influence, workflows, or recommendations.</div>
+                  {annotationPreview ? (
+                    <div className="mt-4 rounded-xl border border-violet-300/20 bg-slate-950/70 p-4">
+                      <div className="mb-3 text-sm font-bold text-white">Annotation audit DTO · read-only</div>
+                      <div className="grid gap-2 md:grid-cols-3">
+                        <Metric label="Annotation schema" value={annotationPreview.audit.annotationSchemaVersion} />
+                        <Metric label="Persistence mode" value={annotationPreview.audit.persistenceMode} />
+                        <Metric label="Reviewer" value={annotationPreview.audit.reviewerDisplayLabel ?? annotationPreview.audit.reviewerId} />
+                        <Metric label="Annotation timestamp" value={annotationPreview.audit.annotationTimestamp} />
+                        <Metric label="Reviewer confidence" value={annotationPreview.audit.reviewerConfidence ?? 'none'} />
+                        <Metric label="Prior state" value={annotationPreview.audit.priorReviewState} />
+                        <Metric label="Resulting state" value={annotationPreview.audit.resultingReviewState} />
+                        <Metric label="Projection created" value={annotationPreview.audit.projectionCreated} />
+                        <Metric label="Reviewed projection ID" value={annotationPreview.audit.reviewedProjectionId ?? 'none'} />
+                        <Metric label="Reviewed projection hash" value={annotationPreview.audit.reviewedProjectionHash ?? 'none'} />
+                        <Metric label="Candidate hash" value={annotationPreview.audit.candidateHash} />
+                        <Metric label="Annotation hash" value={annotationPreview.audit.annotationHash} />
+                        <Metric label="Runtime payload hash" value={annotationPreview.audit.runtimePayloadHash} />
+                        <Metric label="Source lineage" value={annotationPreview.audit.sourceLineageRef} />
+                        <Metric label="Boundary policy" value={annotationPreview.audit.boundaryPolicyVersion} />
+                        <Metric label="Canonical mutation" value={annotationPreview.audit.authorityFlags.canonicalGeometryMutationAllowed} />
+                        <Metric label="CAD mutation" value={annotationPreview.audit.authorityFlags.cadMutationAllowed} />
+                        <Metric label="Engineering influence" value={annotationPreview.audit.authorityFlags.engineeringInfluenceAllowed} />
+                        <Metric label="Downstream authority" value={annotationPreview.audit.authorityFlags.downstreamAuthority} />
+                        <Metric label="Workflow/recommendation" value={`${annotationPreview.audit.authorityFlags.workflowInfluenceAllowed}/${annotationPreview.audit.authorityFlags.recommendationInfluenceAllowed}`} />
+                      </div>
+                      <div className="mt-3 rounded-lg border border-violet-300/20 bg-violet-300/10 p-3 text-violet-50">{safeRenderValue(annotationPreview.audit.annotationNote)}</div>
+                      <div className="mt-3"><div className="mb-2 font-bold text-slate-200">Annotation tags</div><TokenList values={annotationPreview.audit.tags} limit={8} /></div>
+                      <div className="mt-3"><TokenList values={annotationPreview.audit.deterministicNotes} limit={8} /></div>
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-lg border border-slate-400/20 bg-slate-400/10 p-3 text-slate-200">Annotation previews are unavailable because this candidate is not in review_required state. Annotation V1 is only valid for existing review-required possible obstruction candidates.</div>
+                  )}
                 </div>
                 <div className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-slate-200">
                   <div className="text-sm font-black text-emerald-100">Audited review action path V1 · projection-only · deterministic DTO preview</div>
