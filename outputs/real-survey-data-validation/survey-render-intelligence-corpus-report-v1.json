@@ -1,0 +1,1077 @@
+{
+  "schemaVersion": "survey_render_intelligence_corpus_report_v1",
+  "corpusId": "expanded-professional-survey-fixtures-v1",
+  "fixtureCount": 16,
+  "summary": {
+    "renderReadinessDistribution": {
+      "render_blocked": 5,
+      "render_review_required": 1,
+      "render_preview_ready": 2,
+      "render_demo_ready": 8
+    },
+    "averageRenderConfidence": 65.13,
+    "previewOrDemoReadyCount": 10,
+    "blockedCount": 5,
+    "reviewRequiredCount": 1,
+    "strongestEvidenceCategories": [
+      {
+        "category": "meter",
+        "count": 15
+      },
+      {
+        "category": "msp_electrical_panel",
+        "count": 14
+      },
+      {
+        "category": "roof_overview",
+        "count": 13
+      },
+      {
+        "category": "fence_vertical_solar_area",
+        "count": 1
+      },
+      {
+        "category": "ground_mount_area",
+        "count": 1
+      },
+      {
+        "category": "unknown_review_needed",
+        "count": 1
+      },
+      {
+        "category": "attic_rafter",
+        "count": 0
+      },
+      {
+        "category": "inverter_equipment",
+        "count": 0
+      }
+    ],
+    "topCommercialRenderLayers": [
+      {
+        "value": "render_confidence_notes",
+        "count": 16
+      },
+      {
+        "value": "evidence_review_callouts",
+        "count": 10
+      },
+      {
+        "value": "module_layout_previews",
+        "count": 10
+      },
+      {
+        "value": "msp_meter_markers",
+        "count": 10
+      },
+      {
+        "value": "fire_setback_overlays",
+        "count": 8
+      },
+      {
+        "value": "pitch_azimuth_overlays",
+        "count": 8
+      },
+      {
+        "value": "roof_outlines",
+        "count": 8
+      },
+      {
+        "value": "conduit_path_candidates",
+        "count": 2
+      }
+    ],
+    "topRenderBlockers": [
+      {
+        "value": "CAD readiness is blocked by native survey validation.",
+        "count": 4
+      },
+      {
+        "value": "Canonical geometry is not ready for CAD input preview.",
+        "count": 4
+      },
+      {
+        "value": "Geometry intelligence requires blocker review before commercial render use.",
+        "count": 4
+      },
+      {
+        "value": "Missing roof/ground/fence visual coverage needed for credible render context.",
+        "count": 1
+      }
+    ],
+    "topReviewItems": [
+      {
+        "value": "Review readiness blockers and required review items before any downstream CAD or engineering phase.",
+        "count": 7
+      },
+      {
+        "value": "Resolve missing required survey fields before treating readiness as operationally reliable.",
+        "count": 4
+      },
+      {
+        "value": "Resolve readiness review item: electrical.mainPanelRatingAmps.",
+        "count": 3
+      },
+      {
+        "value": "Readiness trust score is 40; keep render in review-assisted mode.",
+        "count": 2
+      },
+      {
+        "value": "Readiness trust score is 68; keep render in review-assisted mode.",
+        "count": 2
+      },
+      {
+        "value": "Resolve readiness review item: electrical.interconnectionPoint.",
+        "count": 2
+      },
+      {
+        "value": "Review roof plane source capture, pitch, azimuth, vertices, and area evidence before relying on geometry for CAD planning.",
+        "count": 2
+      },
+      {
+        "value": "1 photo(s) need human category review before render use.",
+        "count": 1
+      }
+    ],
+    "missingPhotoWarnings": [
+      {
+        "value": "1 photo(s) need human category review before render use.",
+        "count": 1
+      },
+      {
+        "value": "Missing meter/MSP photo evidence for plan-set equipment marker confidence.",
+        "count": 1
+      },
+      {
+        "value": "Missing roof overview photo evidence for professional render context.",
+        "count": 1
+      },
+      {
+        "value": "Survey includes obstructions but lacks obstruction photo evidence for render callouts.",
+        "count": 1
+      }
+    ]
+  },
+  "fixtureResults": [
+    {
+      "fixtureId": "clean_roof",
+      "systemType": "roof",
+      "readinessState": "render_demo_ready",
+      "renderConfidenceScore": 100,
+      "renderBlockers": [],
+      "reviewItems": [],
+      "photoCoverage": {
+        "categoryCounts": {
+          "roof_overview": 1,
+          "roof_detail": 0,
+          "obstruction": 0,
+          "meter": 1,
+          "msp_electrical_panel": 1,
+          "inverter_equipment": 0,
+          "attic_rafter": 0,
+          "ground_mount_area": 0,
+          "fence_vertical_solar_area": 0,
+          "unknown_review_needed": 0
+        },
+        "roofOrMountCoverage": true,
+        "obstructionCoverage": false,
+        "electricalCoverage": true,
+        "equipmentCoverage": false,
+        "structuralCoverage": false,
+        "unknownPhotoCount": 0,
+        "renderRelevantPhotoCount": 3,
+        "highConfidencePhotoCount": 3,
+        "reviewNeededPhotoCount": 0
+      },
+      "missingPhotoCategoryWarnings": [],
+      "topCommercialRenderLayers": [
+        "msp_meter_markers",
+        "render_confidence_notes",
+        "roof_outlines",
+        "fire_setback_overlays",
+        "module_layout_previews",
+        "pitch_azimuth_overlays"
+      ],
+      "enabledLayerCount": 9,
+      "noAuthorityEnforcement": {
+        "readOnly": true,
+        "renderAssistOnly": true,
+        "automaticCadGenerationAllowed": false,
+        "canonicalGeometryMutationAllowed": false,
+        "cadMutationAllowed": false,
+        "cadSolverExecutionAllowed": false,
+        "persistenceAllowed": false,
+        "downstreamEngineeringAllowed": false,
+        "downstreamPermitAllowed": false,
+        "downstreamBomAllowed": false,
+        "engineeringAuthorityAllowed": false
+      }
+    },
+    {
+      "fixtureId": "missing_roof_pitch",
+      "systemType": "roof",
+      "readinessState": "render_demo_ready",
+      "renderConfidenceScore": 100,
+      "renderBlockers": [],
+      "reviewItems": [],
+      "photoCoverage": {
+        "categoryCounts": {
+          "roof_overview": 1,
+          "roof_detail": 0,
+          "obstruction": 0,
+          "meter": 1,
+          "msp_electrical_panel": 1,
+          "inverter_equipment": 0,
+          "attic_rafter": 0,
+          "ground_mount_area": 0,
+          "fence_vertical_solar_area": 0,
+          "unknown_review_needed": 0
+        },
+        "roofOrMountCoverage": true,
+        "obstructionCoverage": false,
+        "electricalCoverage": true,
+        "equipmentCoverage": false,
+        "structuralCoverage": false,
+        "unknownPhotoCount": 0,
+        "renderRelevantPhotoCount": 3,
+        "highConfidencePhotoCount": 3,
+        "reviewNeededPhotoCount": 0
+      },
+      "missingPhotoCategoryWarnings": [],
+      "topCommercialRenderLayers": [
+        "msp_meter_markers",
+        "render_confidence_notes",
+        "roof_outlines",
+        "fire_setback_overlays",
+        "module_layout_previews",
+        "pitch_azimuth_overlays"
+      ],
+      "enabledLayerCount": 9,
+      "noAuthorityEnforcement": {
+        "readOnly": true,
+        "renderAssistOnly": true,
+        "automaticCadGenerationAllowed": false,
+        "canonicalGeometryMutationAllowed": false,
+        "cadMutationAllowed": false,
+        "cadSolverExecutionAllowed": false,
+        "persistenceAllowed": false,
+        "downstreamEngineeringAllowed": false,
+        "downstreamPermitAllowed": false,
+        "downstreamBomAllowed": false,
+        "engineeringAuthorityAllowed": false
+      }
+    },
+    {
+      "fixtureId": "missing_azimuth",
+      "systemType": "roof",
+      "readinessState": "render_demo_ready",
+      "renderConfidenceScore": 100,
+      "renderBlockers": [],
+      "reviewItems": [],
+      "photoCoverage": {
+        "categoryCounts": {
+          "roof_overview": 1,
+          "roof_detail": 0,
+          "obstruction": 0,
+          "meter": 1,
+          "msp_electrical_panel": 1,
+          "inverter_equipment": 0,
+          "attic_rafter": 0,
+          "ground_mount_area": 0,
+          "fence_vertical_solar_area": 0,
+          "unknown_review_needed": 0
+        },
+        "roofOrMountCoverage": true,
+        "obstructionCoverage": false,
+        "electricalCoverage": true,
+        "equipmentCoverage": false,
+        "structuralCoverage": false,
+        "unknownPhotoCount": 0,
+        "renderRelevantPhotoCount": 3,
+        "highConfidencePhotoCount": 3,
+        "reviewNeededPhotoCount": 0
+      },
+      "missingPhotoCategoryWarnings": [],
+      "topCommercialRenderLayers": [
+        "msp_meter_markers",
+        "render_confidence_notes",
+        "roof_outlines",
+        "fire_setback_overlays",
+        "module_layout_previews",
+        "pitch_azimuth_overlays"
+      ],
+      "enabledLayerCount": 9,
+      "noAuthorityEnforcement": {
+        "readOnly": true,
+        "renderAssistOnly": true,
+        "automaticCadGenerationAllowed": false,
+        "canonicalGeometryMutationAllowed": false,
+        "cadMutationAllowed": false,
+        "cadSolverExecutionAllowed": false,
+        "persistenceAllowed": false,
+        "downstreamEngineeringAllowed": false,
+        "downstreamPermitAllowed": false,
+        "downstreamBomAllowed": false,
+        "engineeringAuthorityAllowed": false
+      }
+    },
+    {
+      "fixtureId": "duplicate_roof_planes",
+      "systemType": "roof",
+      "readinessState": "render_preview_ready",
+      "renderConfidenceScore": 83,
+      "renderBlockers": [],
+      "reviewItems": [
+        "Geometry discrepancy severity warrants render callouts rather than polished-only overlays.",
+        "Inspect roof-plane duplication/overlap before trusting preview layout assumptions.",
+        "Readiness trust score is 89; keep render in review-assisted mode."
+      ],
+      "photoCoverage": {
+        "categoryCounts": {
+          "roof_overview": 1,
+          "roof_detail": 0,
+          "obstruction": 0,
+          "meter": 1,
+          "msp_electrical_panel": 1,
+          "inverter_equipment": 0,
+          "attic_rafter": 0,
+          "ground_mount_area": 0,
+          "fence_vertical_solar_area": 0,
+          "unknown_review_needed": 0
+        },
+        "roofOrMountCoverage": true,
+        "obstructionCoverage": false,
+        "electricalCoverage": true,
+        "equipmentCoverage": false,
+        "structuralCoverage": false,
+        "unknownPhotoCount": 0,
+        "renderRelevantPhotoCount": 3,
+        "highConfidencePhotoCount": 3,
+        "reviewNeededPhotoCount": 0
+      },
+      "missingPhotoCategoryWarnings": [],
+      "topCommercialRenderLayers": [
+        "evidence_review_callouts",
+        "msp_meter_markers",
+        "render_confidence_notes",
+        "roof_outlines",
+        "fire_setback_overlays",
+        "module_layout_previews"
+      ],
+      "enabledLayerCount": 9,
+      "noAuthorityEnforcement": {
+        "readOnly": true,
+        "renderAssistOnly": true,
+        "automaticCadGenerationAllowed": false,
+        "canonicalGeometryMutationAllowed": false,
+        "cadMutationAllowed": false,
+        "cadSolverExecutionAllowed": false,
+        "persistenceAllowed": false,
+        "downstreamEngineeringAllowed": false,
+        "downstreamPermitAllowed": false,
+        "downstreamBomAllowed": false,
+        "engineeringAuthorityAllowed": false
+      }
+    },
+    {
+      "fixtureId": "bad_self_intersecting_polygon",
+      "systemType": "roof",
+      "readinessState": "render_blocked",
+      "renderConfidenceScore": 0,
+      "renderBlockers": [
+        "CAD readiness is blocked by native survey validation.",
+        "Canonical geometry is not ready for CAD input preview.",
+        "Geometry intelligence requires blocker review before commercial render use."
+      ],
+      "reviewItems": [
+        "Correct or recapture invalid roof plane geometry through review workflow; do not auto-correct.",
+        "Readiness trust score is 13; keep render in review-assisted mode.",
+        "Recapture or manually inspect polygon vertices before CAD preview or downstream engineering review.",
+        "Review coordinate projection and source units; near-zero projected roof planes should not be trusted for layout decisions.",
+        "Review readiness blockers and required review items before any downstream CAD or engineering phase."
+      ],
+      "photoCoverage": {
+        "categoryCounts": {
+          "roof_overview": 1,
+          "roof_detail": 0,
+          "obstruction": 0,
+          "meter": 1,
+          "msp_electrical_panel": 1,
+          "inverter_equipment": 0,
+          "attic_rafter": 0,
+          "ground_mount_area": 0,
+          "fence_vertical_solar_area": 0,
+          "unknown_review_needed": 0
+        },
+        "roofOrMountCoverage": true,
+        "obstructionCoverage": false,
+        "electricalCoverage": true,
+        "equipmentCoverage": false,
+        "structuralCoverage": false,
+        "unknownPhotoCount": 0,
+        "renderRelevantPhotoCount": 3,
+        "highConfidencePhotoCount": 3,
+        "reviewNeededPhotoCount": 0
+      },
+      "missingPhotoCategoryWarnings": [],
+      "topCommercialRenderLayers": [
+        "evidence_review_callouts",
+        "render_confidence_notes"
+      ],
+      "enabledLayerCount": 2,
+      "noAuthorityEnforcement": {
+        "readOnly": true,
+        "renderAssistOnly": true,
+        "automaticCadGenerationAllowed": false,
+        "canonicalGeometryMutationAllowed": false,
+        "cadMutationAllowed": false,
+        "cadSolverExecutionAllowed": false,
+        "persistenceAllowed": false,
+        "downstreamEngineeringAllowed": false,
+        "downstreamPermitAllowed": false,
+        "downstreamBomAllowed": false,
+        "engineeringAuthorityAllowed": false
+      }
+    },
+    {
+      "fixtureId": "obstruction_only_survey",
+      "systemType": "roof",
+      "readinessState": "render_blocked",
+      "renderConfidenceScore": 0,
+      "renderBlockers": [
+        "CAD readiness is blocked by native survey validation.",
+        "Canonical geometry is not ready for CAD input preview.",
+        "Geometry intelligence requires blocker review before commercial render use."
+      ],
+      "reviewItems": [
+        "Readiness trust score is 41; keep render in review-assisted mode.",
+        "Resolve missing required survey fields before treating readiness as operationally reliable.",
+        "Resolve readiness review item: geometry.roofPlanes.",
+        "Review readiness blockers and required review items before any downstream CAD or engineering phase.",
+        "Survey includes obstructions but lacks obstruction photo evidence for render callouts."
+      ],
+      "photoCoverage": {
+        "categoryCounts": {
+          "roof_overview": 1,
+          "roof_detail": 0,
+          "obstruction": 0,
+          "meter": 1,
+          "msp_electrical_panel": 1,
+          "inverter_equipment": 0,
+          "attic_rafter": 0,
+          "ground_mount_area": 0,
+          "fence_vertical_solar_area": 0,
+          "unknown_review_needed": 0
+        },
+        "roofOrMountCoverage": true,
+        "obstructionCoverage": false,
+        "electricalCoverage": true,
+        "equipmentCoverage": false,
+        "structuralCoverage": false,
+        "unknownPhotoCount": 0,
+        "renderRelevantPhotoCount": 3,
+        "highConfidencePhotoCount": 3,
+        "reviewNeededPhotoCount": 0
+      },
+      "missingPhotoCategoryWarnings": [
+        "Survey includes obstructions but lacks obstruction photo evidence for render callouts."
+      ],
+      "topCommercialRenderLayers": [
+        "evidence_review_callouts",
+        "render_confidence_notes"
+      ],
+      "enabledLayerCount": 2,
+      "noAuthorityEnforcement": {
+        "readOnly": true,
+        "renderAssistOnly": true,
+        "automaticCadGenerationAllowed": false,
+        "canonicalGeometryMutationAllowed": false,
+        "cadMutationAllowed": false,
+        "cadSolverExecutionAllowed": false,
+        "persistenceAllowed": false,
+        "downstreamEngineeringAllowed": false,
+        "downstreamPermitAllowed": false,
+        "downstreamBomAllowed": false,
+        "engineeringAuthorityAllowed": false
+      }
+    },
+    {
+      "fixtureId": "ground_mount_survey",
+      "systemType": "ground",
+      "readinessState": "render_demo_ready",
+      "renderConfidenceScore": 97,
+      "renderBlockers": [],
+      "reviewItems": [
+        "Review photo roof_overview: ground_mount_area, medium confidence."
+      ],
+      "photoCoverage": {
+        "categoryCounts": {
+          "roof_overview": 0,
+          "roof_detail": 0,
+          "obstruction": 0,
+          "meter": 1,
+          "msp_electrical_panel": 1,
+          "inverter_equipment": 0,
+          "attic_rafter": 0,
+          "ground_mount_area": 1,
+          "fence_vertical_solar_area": 0,
+          "unknown_review_needed": 0
+        },
+        "roofOrMountCoverage": true,
+        "obstructionCoverage": false,
+        "electricalCoverage": true,
+        "equipmentCoverage": false,
+        "structuralCoverage": false,
+        "unknownPhotoCount": 0,
+        "renderRelevantPhotoCount": 3,
+        "highConfidencePhotoCount": 2,
+        "reviewNeededPhotoCount": 1
+      },
+      "missingPhotoCategoryWarnings": [],
+      "topCommercialRenderLayers": [
+        "evidence_review_callouts",
+        "msp_meter_markers",
+        "render_confidence_notes",
+        "module_layout_previews",
+        "pitch_azimuth_overlays",
+        "conduit_path_candidates"
+      ],
+      "enabledLayerCount": 6,
+      "noAuthorityEnforcement": {
+        "readOnly": true,
+        "renderAssistOnly": true,
+        "automaticCadGenerationAllowed": false,
+        "canonicalGeometryMutationAllowed": false,
+        "cadMutationAllowed": false,
+        "cadSolverExecutionAllowed": false,
+        "persistenceAllowed": false,
+        "downstreamEngineeringAllowed": false,
+        "downstreamPermitAllowed": false,
+        "downstreamBomAllowed": false,
+        "engineeringAuthorityAllowed": false
+      }
+    },
+    {
+      "fixtureId": "solar_fence_survey",
+      "systemType": "fence",
+      "readinessState": "render_demo_ready",
+      "renderConfidenceScore": 97,
+      "renderBlockers": [],
+      "reviewItems": [
+        "Review photo roof_overview: fence_vertical_solar_area, medium confidence."
+      ],
+      "photoCoverage": {
+        "categoryCounts": {
+          "roof_overview": 0,
+          "roof_detail": 0,
+          "obstruction": 0,
+          "meter": 1,
+          "msp_electrical_panel": 1,
+          "inverter_equipment": 0,
+          "attic_rafter": 0,
+          "ground_mount_area": 0,
+          "fence_vertical_solar_area": 1,
+          "unknown_review_needed": 0
+        },
+        "roofOrMountCoverage": true,
+        "obstructionCoverage": false,
+        "electricalCoverage": true,
+        "equipmentCoverage": false,
+        "structuralCoverage": false,
+        "unknownPhotoCount": 0,
+        "renderRelevantPhotoCount": 3,
+        "highConfidencePhotoCount": 2,
+        "reviewNeededPhotoCount": 1
+      },
+      "missingPhotoCategoryWarnings": [],
+      "topCommercialRenderLayers": [
+        "evidence_review_callouts",
+        "msp_meter_markers",
+        "render_confidence_notes",
+        "module_layout_previews",
+        "pitch_azimuth_overlays",
+        "conduit_path_candidates"
+      ],
+      "enabledLayerCount": 6,
+      "noAuthorityEnforcement": {
+        "readOnly": true,
+        "renderAssistOnly": true,
+        "automaticCadGenerationAllowed": false,
+        "canonicalGeometryMutationAllowed": false,
+        "cadMutationAllowed": false,
+        "cadSolverExecutionAllowed": false,
+        "persistenceAllowed": false,
+        "downstreamEngineeringAllowed": false,
+        "downstreamPermitAllowed": false,
+        "downstreamBomAllowed": false,
+        "engineeringAuthorityAllowed": false
+      }
+    },
+    {
+      "fixtureId": "conflicting_panel_count",
+      "systemType": "roof",
+      "readinessState": "render_demo_ready",
+      "renderConfidenceScore": 100,
+      "renderBlockers": [],
+      "reviewItems": [],
+      "photoCoverage": {
+        "categoryCounts": {
+          "roof_overview": 1,
+          "roof_detail": 0,
+          "obstruction": 0,
+          "meter": 1,
+          "msp_electrical_panel": 1,
+          "inverter_equipment": 0,
+          "attic_rafter": 0,
+          "ground_mount_area": 0,
+          "fence_vertical_solar_area": 0,
+          "unknown_review_needed": 0
+        },
+        "roofOrMountCoverage": true,
+        "obstructionCoverage": false,
+        "electricalCoverage": true,
+        "equipmentCoverage": false,
+        "structuralCoverage": false,
+        "unknownPhotoCount": 0,
+        "renderRelevantPhotoCount": 3,
+        "highConfidencePhotoCount": 3,
+        "reviewNeededPhotoCount": 0
+      },
+      "missingPhotoCategoryWarnings": [],
+      "topCommercialRenderLayers": [
+        "msp_meter_markers",
+        "render_confidence_notes",
+        "roof_outlines",
+        "fire_setback_overlays",
+        "module_layout_previews",
+        "pitch_azimuth_overlays"
+      ],
+      "enabledLayerCount": 9,
+      "noAuthorityEnforcement": {
+        "readOnly": true,
+        "renderAssistOnly": true,
+        "automaticCadGenerationAllowed": false,
+        "canonicalGeometryMutationAllowed": false,
+        "cadMutationAllowed": false,
+        "cadSolverExecutionAllowed": false,
+        "persistenceAllowed": false,
+        "downstreamEngineeringAllowed": false,
+        "downstreamPermitAllowed": false,
+        "downstreamBomAllowed": false,
+        "engineeringAuthorityAllowed": false
+      }
+    },
+    {
+      "fixtureId": "wrong_mixed_units",
+      "systemType": "roof",
+      "readinessState": "render_blocked",
+      "renderConfidenceScore": 2,
+      "renderBlockers": [
+        "CAD readiness is blocked by native survey validation.",
+        "Canonical geometry is not ready for CAD input preview.",
+        "Geometry intelligence requires blocker review before commercial render use."
+      ],
+      "reviewItems": [
+        "Readiness trust score is 40; keep render in review-assisted mode.",
+        "Review readiness blockers and required review items before any downstream CAD or engineering phase.",
+        "Review roof plane source capture, pitch, azimuth, vertices, and area evidence before relying on geometry for CAD planning."
+      ],
+      "photoCoverage": {
+        "categoryCounts": {
+          "roof_overview": 1,
+          "roof_detail": 0,
+          "obstruction": 0,
+          "meter": 1,
+          "msp_electrical_panel": 1,
+          "inverter_equipment": 0,
+          "attic_rafter": 0,
+          "ground_mount_area": 0,
+          "fence_vertical_solar_area": 0,
+          "unknown_review_needed": 0
+        },
+        "roofOrMountCoverage": true,
+        "obstructionCoverage": false,
+        "electricalCoverage": true,
+        "equipmentCoverage": false,
+        "structuralCoverage": false,
+        "unknownPhotoCount": 0,
+        "renderRelevantPhotoCount": 3,
+        "highConfidencePhotoCount": 3,
+        "reviewNeededPhotoCount": 0
+      },
+      "missingPhotoCategoryWarnings": [],
+      "topCommercialRenderLayers": [
+        "evidence_review_callouts",
+        "render_confidence_notes"
+      ],
+      "enabledLayerCount": 2,
+      "noAuthorityEnforcement": {
+        "readOnly": true,
+        "renderAssistOnly": true,
+        "automaticCadGenerationAllowed": false,
+        "canonicalGeometryMutationAllowed": false,
+        "cadMutationAllowed": false,
+        "cadSolverExecutionAllowed": false,
+        "persistenceAllowed": false,
+        "downstreamEngineeringAllowed": false,
+        "downstreamPermitAllowed": false,
+        "downstreamBomAllowed": false,
+        "engineeringAuthorityAllowed": false
+      }
+    },
+    {
+      "fixtureId": "incomplete_electrical_service",
+      "systemType": "roof",
+      "readinessState": "render_preview_ready",
+      "renderConfidenceScore": 76,
+      "renderBlockers": [],
+      "reviewItems": [
+        "Readiness trust score is 68; keep render in review-assisted mode.",
+        "Resolve missing required survey fields before treating readiness as operationally reliable.",
+        "Resolve readiness review item: electrical.interconnectionPoint.",
+        "Resolve readiness review item: electrical.mainPanelRatingAmps.",
+        "Review readiness blockers and required review items before any downstream CAD or engineering phase."
+      ],
+      "photoCoverage": {
+        "categoryCounts": {
+          "roof_overview": 1,
+          "roof_detail": 0,
+          "obstruction": 0,
+          "meter": 1,
+          "msp_electrical_panel": 1,
+          "inverter_equipment": 0,
+          "attic_rafter": 0,
+          "ground_mount_area": 0,
+          "fence_vertical_solar_area": 0,
+          "unknown_review_needed": 0
+        },
+        "roofOrMountCoverage": true,
+        "obstructionCoverage": false,
+        "electricalCoverage": true,
+        "equipmentCoverage": false,
+        "structuralCoverage": false,
+        "unknownPhotoCount": 0,
+        "renderRelevantPhotoCount": 3,
+        "highConfidencePhotoCount": 3,
+        "reviewNeededPhotoCount": 0
+      },
+      "missingPhotoCategoryWarnings": [],
+      "topCommercialRenderLayers": [
+        "evidence_review_callouts",
+        "msp_meter_markers",
+        "render_confidence_notes",
+        "roof_outlines",
+        "fire_setback_overlays",
+        "module_layout_previews"
+      ],
+      "enabledLayerCount": 9,
+      "noAuthorityEnforcement": {
+        "readOnly": true,
+        "renderAssistOnly": true,
+        "automaticCadGenerationAllowed": false,
+        "canonicalGeometryMutationAllowed": false,
+        "cadMutationAllowed": false,
+        "cadSolverExecutionAllowed": false,
+        "persistenceAllowed": false,
+        "downstreamEngineeringAllowed": false,
+        "downstreamPermitAllowed": false,
+        "downstreamBomAllowed": false,
+        "engineeringAuthorityAllowed": false
+      }
+    },
+    {
+      "fixtureId": "meter_location_present_msp_missing",
+      "systemType": "roof",
+      "readinessState": "render_blocked",
+      "renderConfidenceScore": 34,
+      "renderBlockers": [
+        "Missing roof/ground/fence visual coverage needed for credible render context."
+      ],
+      "reviewItems": [
+        "Missing roof overview photo evidence for professional render context.",
+        "Readiness trust score is 70; keep render in review-assisted mode.",
+        "Resolve missing required survey fields before treating readiness as operationally reliable.",
+        "Resolve readiness review item: electrical.mainPanelRatingAmps.",
+        "Review readiness blockers and required review items before any downstream CAD or engineering phase."
+      ],
+      "photoCoverage": {
+        "categoryCounts": {
+          "roof_overview": 0,
+          "roof_detail": 0,
+          "obstruction": 0,
+          "meter": 1,
+          "msp_electrical_panel": 0,
+          "inverter_equipment": 0,
+          "attic_rafter": 0,
+          "ground_mount_area": 0,
+          "fence_vertical_solar_area": 0,
+          "unknown_review_needed": 0
+        },
+        "roofOrMountCoverage": false,
+        "obstructionCoverage": false,
+        "electricalCoverage": true,
+        "equipmentCoverage": false,
+        "structuralCoverage": false,
+        "unknownPhotoCount": 0,
+        "renderRelevantPhotoCount": 1,
+        "highConfidencePhotoCount": 1,
+        "reviewNeededPhotoCount": 0
+      },
+      "missingPhotoCategoryWarnings": [
+        "Missing roof overview photo evidence for professional render context."
+      ],
+      "topCommercialRenderLayers": [
+        "evidence_review_callouts",
+        "render_confidence_notes"
+      ],
+      "enabledLayerCount": 2,
+      "noAuthorityEnforcement": {
+        "readOnly": true,
+        "renderAssistOnly": true,
+        "automaticCadGenerationAllowed": false,
+        "canonicalGeometryMutationAllowed": false,
+        "cadMutationAllowed": false,
+        "cadSolverExecutionAllowed": false,
+        "persistenceAllowed": false,
+        "downstreamEngineeringAllowed": false,
+        "downstreamPermitAllowed": false,
+        "downstreamBomAllowed": false,
+        "engineeringAuthorityAllowed": false
+      }
+    },
+    {
+      "fixtureId": "msp_present_utility_missing",
+      "systemType": "roof",
+      "readinessState": "render_demo_ready",
+      "renderConfidenceScore": 100,
+      "renderBlockers": [],
+      "reviewItems": [],
+      "photoCoverage": {
+        "categoryCounts": {
+          "roof_overview": 1,
+          "roof_detail": 0,
+          "obstruction": 0,
+          "meter": 1,
+          "msp_electrical_panel": 1,
+          "inverter_equipment": 0,
+          "attic_rafter": 0,
+          "ground_mount_area": 0,
+          "fence_vertical_solar_area": 0,
+          "unknown_review_needed": 0
+        },
+        "roofOrMountCoverage": true,
+        "obstructionCoverage": false,
+        "electricalCoverage": true,
+        "equipmentCoverage": false,
+        "structuralCoverage": false,
+        "unknownPhotoCount": 0,
+        "renderRelevantPhotoCount": 3,
+        "highConfidencePhotoCount": 3,
+        "reviewNeededPhotoCount": 0
+      },
+      "missingPhotoCategoryWarnings": [],
+      "topCommercialRenderLayers": [
+        "msp_meter_markers",
+        "render_confidence_notes",
+        "roof_outlines",
+        "fire_setback_overlays",
+        "module_layout_previews",
+        "pitch_azimuth_overlays"
+      ],
+      "enabledLayerCount": 9,
+      "noAuthorityEnforcement": {
+        "readOnly": true,
+        "renderAssistOnly": true,
+        "automaticCadGenerationAllowed": false,
+        "canonicalGeometryMutationAllowed": false,
+        "cadMutationAllowed": false,
+        "cadSolverExecutionAllowed": false,
+        "persistenceAllowed": false,
+        "downstreamEngineeringAllowed": false,
+        "downstreamPermitAllowed": false,
+        "downstreamBomAllowed": false,
+        "engineeringAuthorityAllowed": false
+      }
+    },
+    {
+      "fixtureId": "roof_geometry_no_usable_cad_preview",
+      "systemType": "roof",
+      "readinessState": "render_blocked",
+      "renderConfidenceScore": 2,
+      "renderBlockers": [
+        "CAD readiness is blocked by native survey validation.",
+        "Canonical geometry is not ready for CAD input preview.",
+        "Geometry intelligence requires blocker review before commercial render use."
+      ],
+      "reviewItems": [
+        "Readiness trust score is 40; keep render in review-assisted mode.",
+        "Review readiness blockers and required review items before any downstream CAD or engineering phase.",
+        "Review roof plane source capture, pitch, azimuth, vertices, and area evidence before relying on geometry for CAD planning."
+      ],
+      "photoCoverage": {
+        "categoryCounts": {
+          "roof_overview": 1,
+          "roof_detail": 0,
+          "obstruction": 0,
+          "meter": 1,
+          "msp_electrical_panel": 1,
+          "inverter_equipment": 0,
+          "attic_rafter": 0,
+          "ground_mount_area": 0,
+          "fence_vertical_solar_area": 0,
+          "unknown_review_needed": 0
+        },
+        "roofOrMountCoverage": true,
+        "obstructionCoverage": false,
+        "electricalCoverage": true,
+        "equipmentCoverage": false,
+        "structuralCoverage": false,
+        "unknownPhotoCount": 0,
+        "renderRelevantPhotoCount": 3,
+        "highConfidencePhotoCount": 3,
+        "reviewNeededPhotoCount": 0
+      },
+      "missingPhotoCategoryWarnings": [],
+      "topCommercialRenderLayers": [
+        "evidence_review_callouts",
+        "render_confidence_notes"
+      ],
+      "enabledLayerCount": 2,
+      "noAuthorityEnforcement": {
+        "readOnly": true,
+        "renderAssistOnly": true,
+        "automaticCadGenerationAllowed": false,
+        "canonicalGeometryMutationAllowed": false,
+        "cadMutationAllowed": false,
+        "cadSolverExecutionAllowed": false,
+        "persistenceAllowed": false,
+        "downstreamEngineeringAllowed": false,
+        "downstreamPermitAllowed": false,
+        "downstreamBomAllowed": false,
+        "engineeringAuthorityAllowed": false
+      }
+    },
+    {
+      "fixtureId": "document_derived_partial_evidence",
+      "systemType": "roof",
+      "readinessState": "render_review_required",
+      "renderConfidenceScore": 51,
+      "renderBlockers": [],
+      "reviewItems": [
+        "1 photo(s) need human category review before render use.",
+        "Electrical photos are missing; MSP/meter/equipment markers should be callout-only.",
+        "Missing meter/MSP photo evidence for plan-set equipment marker confidence.",
+        "Readiness trust score is 68; keep render in review-assisted mode.",
+        "Resolve missing required survey fields before treating readiness as operationally reliable.",
+        "Resolve readiness review item: electrical.interconnectionPoint.",
+        "Resolve readiness review item: electrical.mainPanelRatingAmps.",
+        "Review photo uploaded_site_doc: unknown_review_needed, low confidence.",
+        "Review readiness blockers and required review items before any downstream CAD or engineering phase."
+      ],
+      "photoCoverage": {
+        "categoryCounts": {
+          "roof_overview": 1,
+          "roof_detail": 0,
+          "obstruction": 0,
+          "meter": 0,
+          "msp_electrical_panel": 0,
+          "inverter_equipment": 0,
+          "attic_rafter": 0,
+          "ground_mount_area": 0,
+          "fence_vertical_solar_area": 0,
+          "unknown_review_needed": 1
+        },
+        "roofOrMountCoverage": true,
+        "obstructionCoverage": false,
+        "electricalCoverage": false,
+        "equipmentCoverage": false,
+        "structuralCoverage": false,
+        "unknownPhotoCount": 1,
+        "renderRelevantPhotoCount": 1,
+        "highConfidencePhotoCount": 1,
+        "reviewNeededPhotoCount": 1
+      },
+      "missingPhotoCategoryWarnings": [
+        "1 photo(s) need human category review before render use.",
+        "Missing meter/MSP photo evidence for plan-set equipment marker confidence."
+      ],
+      "topCommercialRenderLayers": [
+        "evidence_review_callouts",
+        "render_confidence_notes"
+      ],
+      "enabledLayerCount": 2,
+      "noAuthorityEnforcement": {
+        "readOnly": true,
+        "renderAssistOnly": true,
+        "automaticCadGenerationAllowed": false,
+        "canonicalGeometryMutationAllowed": false,
+        "cadMutationAllowed": false,
+        "cadSolverExecutionAllowed": false,
+        "persistenceAllowed": false,
+        "downstreamEngineeringAllowed": false,
+        "downstreamPermitAllowed": false,
+        "downstreamBomAllowed": false,
+        "engineeringAuthorityAllowed": false
+      }
+    },
+    {
+      "fixtureId": "geometry_ready_without_cad_preview",
+      "systemType": "roof",
+      "readinessState": "render_demo_ready",
+      "renderConfidenceScore": 100,
+      "renderBlockers": [],
+      "reviewItems": [],
+      "photoCoverage": {
+        "categoryCounts": {
+          "roof_overview": 1,
+          "roof_detail": 0,
+          "obstruction": 0,
+          "meter": 1,
+          "msp_electrical_panel": 1,
+          "inverter_equipment": 0,
+          "attic_rafter": 0,
+          "ground_mount_area": 0,
+          "fence_vertical_solar_area": 0,
+          "unknown_review_needed": 0
+        },
+        "roofOrMountCoverage": true,
+        "obstructionCoverage": false,
+        "electricalCoverage": true,
+        "equipmentCoverage": false,
+        "structuralCoverage": false,
+        "unknownPhotoCount": 0,
+        "renderRelevantPhotoCount": 3,
+        "highConfidencePhotoCount": 3,
+        "reviewNeededPhotoCount": 0
+      },
+      "missingPhotoCategoryWarnings": [],
+      "topCommercialRenderLayers": [
+        "msp_meter_markers",
+        "render_confidence_notes",
+        "roof_outlines",
+        "fire_setback_overlays",
+        "module_layout_previews",
+        "pitch_azimuth_overlays"
+      ],
+      "enabledLayerCount": 9,
+      "noAuthorityEnforcement": {
+        "readOnly": true,
+        "renderAssistOnly": true,
+        "automaticCadGenerationAllowed": false,
+        "canonicalGeometryMutationAllowed": false,
+        "cadMutationAllowed": false,
+        "cadSolverExecutionAllowed": false,
+        "persistenceAllowed": false,
+        "downstreamEngineeringAllowed": false,
+        "downstreamPermitAllowed": false,
+        "downstreamBomAllowed": false,
+        "engineeringAuthorityAllowed": false
+      }
+    }
+  ],
+  "deterministicNotes": [
+    "Report was generated from deterministic metadata/photo-reference heuristics over the existing expanded professional survey fixture corpus.",
+    "No image pixels were inspected, no computer vision model was executed, and no CAD solver or persistence workflow was invoked.",
+    "Render readiness states are commercial/operator review states only and do not promote survey photos to canonical geometry authority."
+  ]
+}

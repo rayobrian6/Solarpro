@@ -1,30 +1,24 @@
-# Geometry Trust Operations Infrastructure Todo
+# Survey Photo Render Intelligence V1 Todo
 
-## Completed Baseline Merge
-- [x] Merge geometry-intelligence-v1 into dev before beginning replay/review work
-- [x] Preserve Geometry Intelligence V1 deterministic read-only scoring and operator summary behavior
+## Repository Baseline
+- [x] Inspect current dev branch status and existing survey/readiness/render architecture
+- [x] Identify minimal integration points for photo evidence, render readiness, and operator summaries
 
-## Geometry Corpus Replay Framework
-- [x] Add deterministic replay framework for parser, canonical geometry, readiness, OSS comparison, geometry intelligence, and review recommendation execution
-- [x] Add replay-safe item and corpus report DTOs
-- [x] Normalize replay timing noise so replay hashes remain stable
-- [x] Add confidence distributions, discrepancy distributions, topology degradation summaries, recurring risk summaries, readiness downgrade frequency, and integrity trend analysis
+## Implementation
+- [x] Add SurveyPhotoEvidenceV1 DTOs and deterministic photo classification pipeline
+- [x] Add RenderReadinessV1 framework connected to geometry trust and photo coverage
+- [x] Add professional render layer recommendation engine
+- [x] Integrate photo/render intelligence into readiness reporting with lightweight operator visibility
+- [x] Add visual OSS evaluation and commercial render readiness/roadmap reports
+- [x] Preserve strict no-authority/no-CAD-mutation/no-persistence/no-solver boundaries
 
-## Human Review Workflow Foundation
-- [x] Add review lifecycle primitives: review_not_recommended, review_recommended, review_required, blocker_review
-- [x] Add deterministic review priority and queue classification utilities
-- [x] Add explainable review reasons, recommended actions, topology investigation recommendations, and queue summaries
-- [x] Preserve no automatic approval, no auto-correction, no persistence, no CAD mutation, and no readiness promotion boundaries
-
-## Trust Calibration and Operational Insight Reporting
-- [x] Add trust calibration report focused on explainability and consistency rather than automation
-- [x] Add compact operational insight report for confidence distributions, recurring risk categories, review queues, topology instability, discrepancy hot spots, and urgency patterns
-- [x] Generate replay intelligence, review workflow, trust calibration, operational insight, and replay summary artifacts from fixture replay
-
-## Validation and Delivery
+## Validation
+- [x] Add photo evidence and render readiness tests
+- [x] Run parser/readiness/fixture/adapter/intelligence/replay/photo/render tests
 - [x] Run type-check clean
-- [x] Run parser/readiness/fixture/adapter/intelligence/replay tests
-- [x] Verify deterministic outputs and no-authority boundaries in tests
-- [x] Commit changes directly on dev
-- [x] Push dev using token-authenticated remote syntax
-- [x] Provide final summary with replay findings, instability findings, trust calibration observations, review workflow maturity, CAD-authority outlook, leverage gained, and complexity avoided
+- [x] Verify deterministic output and safety boundaries
+
+## Delivery
+- [ ] Commit changes on dev
+- [ ] Push dev using token-authenticated remote syntax
+- [ ] Provide final commercial/render summary and attach deliverables

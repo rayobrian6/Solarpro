@@ -126,6 +126,11 @@ describe('professional survey readiness report', () => {
     expect(report.evidence.bundleHash).toBe(repeated.evidence.bundleHash);
     expect(report.canonicalGeometry.geometryHash).toBe(repeated.canonicalGeometry.geometryHash);
     expect(report.cadReadiness.readinessHash).toBe(repeated.cadReadiness.readinessHash);
+    expect(report.photoEvidence.bundleHash).toBe(repeated.photoEvidence.bundleHash);
+    expect(report.renderReadiness.renderReadinessHash).toBe(repeated.renderReadiness.renderReadinessHash);
+    expect(report.renderRecommendationReport.recommendationHash).toBe(repeated.renderRecommendationReport.recommendationHash);
+    expect(report.summaries.photoEvidence.roofOrMountCoverage).toBe(true);
+    expect(report.summaries.renderIntelligence.renderConfidenceScore).toBeGreaterThan(0);
   });
 
   it('enforces no-authority and no downstream execution flags', () => {

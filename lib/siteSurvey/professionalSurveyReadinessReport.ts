@@ -7,6 +7,18 @@ import {
   type GeometryIntelligenceReportV1,
 } from './geometryIntelligence';
 import {
+  buildOperatorPhotoEvidenceSummary,
+  buildSurveyPhotoEvidenceBundle,
+  type SurveyPhotoEvidenceBundleV1,
+} from './surveyPhotoEvidence';
+import {
+  buildOperatorRenderIntelligenceSummary,
+  buildProfessionalRenderRecommendationReport,
+  buildRenderReadiness,
+  type ProfessionalRenderRecommendationReportV1,
+  type RenderReadinessV1,
+} from './surveyRenderIntelligence';
+import {
   buildCanonicalSurveyGeometry,
   buildSurveyCADReadiness,
   parseProfessionalSiteSurvey,
@@ -45,6 +57,9 @@ export interface ProfessionalSurveyReadinessReportV1 {
   canonicalGeometry: CanonicalSurveyGeometryV1;
   cadReadiness: SurveyCADReadinessV1;
   geometryIntelligence: GeometryIntelligenceReportV1;
+  photoEvidence: SurveyPhotoEvidenceBundleV1;
+  renderReadiness: RenderReadinessV1;
+  renderRecommendationReport: ProfessionalRenderRecommendationReportV1;
   summaries: {
     systemType: EnrichedSiteSurvey['systemType'];
     roofPlaneCount: number;
@@ -59,6 +74,8 @@ export interface ProfessionalSurveyReadinessReportV1 {
     blockingIssues: string[];
     warnings: string[];
     geometryIntelligence: ReturnType<typeof buildOperatorGeometryIntelligenceSummary>;
+    photoEvidence: ReturnType<typeof buildOperatorPhotoEvidenceSummary>;
+    renderIntelligence: ReturnType<typeof buildOperatorRenderIntelligenceSummary>;
   };
   noAuthorityEnforcement: {
     dbWritesAllowed: false;
@@ -80,7 +97,12 @@ export function buildProfessionalSurveyReadinessReport(
   const canonicalGeometry = buildCanonicalSurveyGeometry(enriched, evidence);
   const cadReadiness = buildSurveyCADReadiness(enriched, evidence, canonicalGeometry);
   const geometryIntelligence = buildGeometryIntelligenceReport({ evidence, canonicalGeometry, cadReadiness });
+  const photoEvidence = buildSurveyPhotoEvidenceBundle(enriched, canonicalGeometry);
+  const renderReadiness = buildRenderReadiness({ canonicalGeometry, cadReadiness, geometryIntelligence, photoEvidence });
+  const renderRecommendationReport = buildProfessionalRenderRecommendationReport({ canonicalGeometry, cadReadiness, geometryIntelligence, photoEvidence, renderReadiness });
   const operatorGeometryIntelligence = buildOperatorGeometryIntelligenceSummary(geometryIntelligence);
+  const operatorPhotoEvidence = buildOperatorPhotoEvidenceSummary(photoEvidence);
+  const operatorRenderIntelligence = buildOperatorRenderIntelligenceSummary(renderRecommendationReport);
   const readinessState = resolveOperatorReadinessState(canonicalGeometry, cadReadiness);
   const blockingIssues = dedupe([...evidence.blockingIssues, ...canonicalGeometry.blockingIssues, ...cadReadiness.blockingIssues]);
   const warnings = dedupe([...canonicalGeometry.warnings, ...cadReadiness.warnings]);
@@ -114,6 +136,9 @@ export function buildProfessionalSurveyReadinessReport(
     canonicalGeometry,
     cadReadiness,
     geometryIntelligence,
+    photoEvidence,
+    renderReadiness,
+    renderRecommendationReport,
     summaries: {
       systemType: enriched.systemType,
       roofPlaneCount: enriched.geometry.roofPlanes.length,
@@ -128,6 +153,8 @@ export function buildProfessionalSurveyReadinessReport(
       blockingIssues,
       warnings,
       geometryIntelligence: operatorGeometryIntelligence,
+      photoEvidence: operatorPhotoEvidence,
+      renderIntelligence: operatorRenderIntelligence,
     },
     noAuthorityEnforcement: {
       dbWritesAllowed: false,
@@ -142,6 +169,8 @@ export function buildProfessionalSurveyReadinessReport(
       'Report generation does not execute CAD solvers, mutate CAD state, or trigger engineering, permit, BOM, proposal, or downstream workflows.',
       'CAD readiness preview is generated only through the pure buildCADFromSurvey input-adapter boundary; it is not a solved CAD layout.',
       'Operator readiness states are review UI states only: blocked, review_required, geometry_ready, cad_preview_ready.',
+      'Survey photo evidence is deterministic render-reference metadata only and never extracts or mutates canonical geometry.',
+      'Render readiness and layer recommendations support commercial previews and operator review; they do not create authoritative CAD, permit, engineering, BOM, or solved layout outputs.',
     ],
   };
 }
