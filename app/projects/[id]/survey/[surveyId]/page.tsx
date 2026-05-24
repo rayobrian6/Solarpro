@@ -33,7 +33,7 @@ import {
   ArrowLeft, Camera, Home, Zap, ChevronDown, ChevronUp,
   AlertTriangle, RefreshCw, CheckCircle, Clock, Network,
   MapPin, User, Calendar, ImageIcon, Shield,
-  Sun, Layers, FileText, Wrench,
+  Sun, Layers, FileText, Wrench, Maximize2,
 } from 'lucide-react';
 import type { SiteSurvey, SiteSurveyFile } from '@/lib/db-neon';
 import type {
@@ -654,6 +654,156 @@ function SurveyTraceabilityViewer({ traceability }: { traceability: SurveyEviden
             ))}
           </div>
         </details>
+      </div>
+    </SectionCard>
+  );
+}
+
+interface PhotoClassificationCandidatePreview {
+  fileId: string;
+  filename: string | null;
+  fileUrl: string;
+  currentLabel: string | null;
+  currentCategory: SurveyEvidenceCategory;
+  suggestedCategory: SurveyEvidenceCategory;
+  suggestedLabel: string;
+  confidence: 'high' | 'medium' | 'low';
+  evidenceSignals: string[];
+  rationale: string;
+  reviewRequired: boolean;
+}
+
+interface PhotoClassificationPreviewResponse {
+  schemaVersion: 'survey_photo_classification_preview_v1';
+  mode: string;
+  totalPhotoCount: number;
+  processedPhotoCount: number;
+  skippedPhotoCount: number;
+  requestedLimit: number;
+  visionExecuted: boolean;
+  categoryCounts: Partial<Record<SurveyEvidenceCategory, number>>;
+  candidates: PhotoClassificationCandidatePreview[];
+  note: string;
+  noAuthorityEnforcement: Record<string, boolean>;
+}
+
+function SurveyPhotoClassificationPreviewPanel({ surveyId, manifest }: { surveyId: string; manifest: SurveyEvidenceManifest | null | undefined }) {
+  const [preview, setPreview] = useState<PhotoClassificationPreviewResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const uncategorizedCount = manifest?.items.filter(item => item.category === 'uncategorized').length ?? 0;
+  const classifiedCount = manifest?.summary.classifiedItems ?? 0;
+  const totalItems = manifest?.summary.totalItems ?? 0;
+
+  const runPreview = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/site-surveys/${surveyId}/photo-classification-preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 36 }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setError(json.error || 'Photo classification preview failed');
+        return;
+      }
+      const nextPreview = json.data as PhotoClassificationPreviewResponse | null;
+      if (!nextPreview || !Array.isArray(nextPreview.candidates)) {
+        setError('Photo classification preview returned an unexpected shape');
+        return;
+      }
+      setPreview(nextPreview);
+    } catch {
+      setError('Network error while running photo classification preview');
+    } finally {
+      setLoading(false);
+    }
+  }, [surveyId]);
+
+  const visibleCandidates = safeArray(preview?.candidates).slice(0, 18);
+  const nonEmptyCounts = Object.entries(preview?.categoryCounts ?? {})
+    .filter(([, count]) => Number(count) > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]));
+
+  return (
+    <SectionCard icon={<ImageIcon size={14} />} title="AI Photo Evidence Classification Preview" iconColor="text-fuchsia-400">
+      <div className="space-y-4">
+        <div className="rounded-xl border border-fuchsia-500/20 bg-fuchsia-500/10 p-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-fuchsia-200">Operator-triggered vision pass</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                The survey has {totalItems} photo evidence item(s), {classifiedCount} classified, and {uncategorizedCount} uncategorized. This preview can ask the vision model to identify meter, MSP, roof overview, wall/equipment location, obstructions, and site overview candidates. It is read-only: no labels are written, no canonical evidence is mutated, and no CAD/permit workflow is triggered.
+              </p>
+            </div>
+            <button
+              onClick={runPreview}
+              disabled={loading || uncategorizedCount === 0}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-fuchsia-400/30 bg-fuchsia-500/15 px-3 py-2 text-xs font-semibold text-fuchsia-100 transition hover:bg-fuchsia-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loading ? <div className="spinner w-3 h-3" /> : <RefreshCw size={12} />}
+              {loading ? 'Classifying photos...' : 'Run AI classification preview'}
+            </button>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <ReadinessPill tone="amber">Preview Only</ReadinessPill>
+            <ReadinessPill tone="amber">No DB Writes</ReadinessPill>
+            <ReadinessPill tone="slate">No CAD Mutation</ReadinessPill>
+            <ReadinessPill tone="slate">No Permit Trigger</ReadinessPill>
+          </div>
+        </div>
+
+        {error && (
+          <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">
+            <div className="flex items-center gap-2 font-semibold"><AlertTriangle size={13} /> Classification preview unavailable</div>
+            <p className="mt-1 text-[11px] text-red-100/80">{error}</p>
+          </div>
+        )}
+
+        {preview && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-500">Processed</p><p className="text-lg font-bold text-white">{preview.processedPhotoCount}</p></div>
+              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-500">Total Photos</p><p className="text-lg font-bold text-white">{preview.totalPhotoCount}</p></div>
+              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-500">Skipped</p><p className="text-lg font-bold text-white">{preview.skippedPhotoCount}</p></div>
+              <div className={`rounded-xl border p-3 ${preview.visionExecuted ? 'border-emerald-500/20 bg-emerald-500/10' : 'border-amber-500/20 bg-amber-500/10'}`}><p className="text-[10px] uppercase tracking-wider opacity-80">Vision</p><p className="text-lg font-bold text-white">{preview.visionExecuted ? 'ran' : 'off'}</p></div>
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3"><p className="text-[10px] uppercase tracking-wider text-amber-200/80">Authority</p><p className="text-lg font-bold text-amber-100">review</p></div>
+            </div>
+
+            <p className="rounded-xl border border-slate-700/60 bg-slate-950/40 p-3 text-[11px] text-slate-400">{preview.note}</p>
+
+            {nonEmptyCounts.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {nonEmptyCounts.map(([category, count]) => (
+                  <span key={category} className="rounded-full border border-slate-600/50 bg-slate-900/70 px-2 py-1 text-[10px] font-semibold text-slate-300">
+                    {evidenceCategoryLabel(category as SurveyEvidenceCategory)}: {count}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+              {visibleCandidates.map(candidate => (
+                <a key={candidate.fileId} href={candidate.fileUrl} target="_blank" rel="noopener noreferrer" className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-3 hover:border-fuchsia-400/40 transition-colors">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-semibold text-slate-100">{candidate.suggestedLabel}</p>
+                      <p className="truncate text-[10px] text-slate-500">{candidate.filename ?? candidate.fileId}</p>
+                    </div>
+                    <span className={`rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase ${candidate.confidence === 'high' ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200' : candidate.confidence === 'medium' ? 'border-amber-500/25 bg-amber-500/10 text-amber-200' : 'border-red-500/25 bg-red-500/10 text-red-200'}`}>
+                      {candidate.confidence}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-[10px] leading-relaxed text-slate-400">{candidate.rationale}</p>
+                  {candidate.evidenceSignals.length > 0 && <p className="mt-2 text-[10px] text-slate-500">Signals: {candidate.evidenceSignals.join(' · ')}</p>}
+                  <p className="mt-2 text-[10px] text-slate-600">Current: {evidenceCategoryLabel(candidate.currentCategory)} → Suggested: {candidate.suggestedLabel}{candidate.reviewRequired ? ' · review required' : ''}</p>
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </SectionCard>
   );
@@ -1367,6 +1517,7 @@ interface SurveyCadWorkbenchPreview {
 function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
   const [preview, setPreview] = useState<SurveyCadWorkbenchPreview | null>(null);
   const [selectedSheetNumber, setSelectedSheetNumber] = useState<string | null>(null);
+  const [viewerMode, setViewerMode] = useState<'fit' | 'wide' | 'native'>('fit');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -1557,12 +1708,33 @@ function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
                 <p className="text-xs font-bold text-white">{selectedSheet.sheetNumber} · {selectedSheet.title}</p>
                 <p className="text-[10px] text-slate-500 break-all">Render hash: {selectedSheet.renderHash}</p>
               </div>
-              <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold uppercase text-emerald-200">
-                {isFallbackPreview ? 'diagnostic fallback' : String(renderSummary.renderQualityGrade ?? 'preview').replace(/_/g, ' ')}
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold uppercase text-emerald-200">
+                  {isFallbackPreview ? 'diagnostic fallback' : String(renderSummary.renderQualityGrade ?? 'preview').replace(/_/g, ' ')}
+                </span>
+                <div className="flex rounded-lg border border-slate-700 bg-slate-900 p-0.5">
+                  {(['fit', 'wide', 'native'] as const).map(mode => (
+                    <button
+                      key={mode}
+                      onClick={() => setViewerMode(mode)}
+                      className={`rounded-md px-2 py-1 text-[10px] font-semibold uppercase ${viewerMode === mode ? 'bg-cyan-500/20 text-cyan-100' : 'text-slate-500 hover:text-slate-300'}`}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
-            <div className="max-h-[620px] overflow-auto rounded-xl bg-white p-2">
-              <div className="mx-auto min-w-[900px]" dangerouslySetInnerHTML={{ __html: selectedSheet.svg }} />
+            <div className="rounded-xl border border-slate-700/70 bg-slate-900/60 p-2">
+              <div className="mb-2 flex items-center gap-2 text-[10px] text-slate-500">
+                <Maximize2 size={11} /> Use trackpad/shift-wheel or the bottom scrollbar to pan horizontally. Choose Wide/Native if Fit is too small.
+              </div>
+              <div className="max-h-[72vh] overflow-auto rounded-xl bg-white p-2 overscroll-contain">
+                <div
+                  className={viewerMode === 'fit' ? 'mx-auto w-full [&_svg]:h-auto [&_svg]:w-full' : viewerMode === 'wide' ? 'min-w-[1400px] [&_svg]:h-auto [&_svg]:w-[1400px]' : 'min-w-max [&_svg]:h-auto'}
+                  dangerouslySetInnerHTML={{ __html: selectedSheet.svg }}
+                />
+              </div>
             </div>
           </div>
         )}
@@ -1910,15 +2082,20 @@ export default function SurveyDetailPage() {
         {/* 1c. Evidence provenance and requirement traceability */}
         <SurveyTraceabilityViewer traceability={displayedTraceability} />
 
-        {/* 1d. Survey Evidence Manifest — structured engineering evidence view */}
+        {/* 1d. Operator-triggered photo classification preview */}
+        <SurveyPanelErrorBoundary title="AI Photo Evidence Classification Preview">
+          <SurveyPhotoClassificationPreviewPanel surveyId={survey.id} manifest={displayedManifest} />
+        </SurveyPanelErrorBoundary>
+
+        {/* 1e. Survey Evidence Manifest — structured engineering evidence view */}
         <SurveyEvidenceViewer manifest={displayedManifest} bridge={displayedBridge} />
 
-        {/* 1e. CAD workbench — read-only source-truth SVG preview */}
+        {/* 1f. CAD workbench — read-only source-truth SVG preview */}
         <SurveyPanelErrorBoundary title="Site Survey CAD Workbench — Read-Only Preview">
           <SurveyCadWorkbenchPanel surveyId={survey.id} />
         </SurveyPanelErrorBoundary>
 
-        {/* 1f. Professional parser readiness — read-only preview/reporting */}
+        {/* 1g. Professional parser readiness — read-only preview/reporting */}
         <SurveyPanelErrorBoundary title="Professional Survey Parser Readiness v1">
           <ProfessionalReadinessPanel surveyId={survey.id} />
         </SurveyPanelErrorBoundary>
