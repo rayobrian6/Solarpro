@@ -17,6 +17,6 @@
 - [x] Run focused render/export tests, site-survey validation suite, type-check, and safety boundary checks
 
 ## Delivery
-- [ ] Commit refinements on a new branch
-- [ ] Push branch with token-authenticated remote syntax
-- [ ] Provide final summary with requested commercial-quality assessment
+- [x] Commit refinements on a new branch
+- [x] Push branch with token-authenticated remote syntax
+- [x] Provide final summary with requested commercial-quality assessment
