@@ -4,16 +4,16 @@ Professional Plan-Set Render Output V1 generated **12 SVG sheets** across **4 de
 
 ## Visible Quality Improvements
 
-- Professional title blocks, legends, review stamps, and sheet numbering create contractor-facing plan-set identity.
-- Canonical roof geometry is rendered as export-safe vector linework with consistent line-weight hierarchy.
-- Render readiness, confidence, and review-required callouts are visible directly on sheets.
-- Photo evidence and geometry trust summaries are packaged into readable evidence/review sheets.
+- CAD-style double borders, right-side title-block rail, sheet index regions, and drawing-number hierarchy create a permit-set visual language.
+- Canonical roof geometry is rendered as export-safe vector linework with professional line-weight conventions and monochrome drafting priority.
+- Setbacks, module previews, conduit candidates, equipment markers, north arrow, scale note, and leader callouts are visible directly on the drawing sheet.
+- Photo evidence and review risk summaries are packaged into cleaner report-sheet groupings with quality checklist scoring.
 
 ## Contractor / Demo Usability Improvements
 
-- Roof labels, pitch/azimuth labels, setbacks, equipment markers, and module preview zones are visually grouped.
-- Blocked/review states are explicit, reducing risk that preview renders are mistaken for stamped engineering.
-- Legends and notes explain symbol meaning and non-authoritative boundaries on every output package.
+- Roof labels, pitch/azimuth labels, setbacks, equipment markers, leader lines, and module preview zones are visually grouped for print readability.
+- Blocked/review states and non-authoritative preview stamps are explicit, reducing risk that preview renders are mistaken for stamped engineering.
+- Symbolized legends and title-block metadata explain drawing conventions and review limits on every output package.
 
 ## Professional Output Elements Added
 

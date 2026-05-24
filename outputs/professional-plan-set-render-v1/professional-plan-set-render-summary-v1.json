@@ -10,39 +10,60 @@
   "packageHashes": [
     {
       "fixtureId": "clean_roof",
-      "packageHash": "f2ad3800",
+      "packageHash": "c90830fd",
       "state": "render_demo_ready",
-      "confidence": 100
+      "confidence": 100,
+      "renderQualityScore": 100,
+      "renderQualityGrade": "ui_candidate"
     },
     {
       "fixtureId": "ground_mount_survey",
-      "packageHash": "4603c536",
+      "packageHash": "4e02a30b",
       "state": "render_demo_ready",
-      "confidence": 97
+      "confidence": 97,
+      "renderQualityScore": 100,
+      "renderQualityGrade": "ui_candidate"
     },
     {
       "fixtureId": "solar_fence_survey",
-      "packageHash": "287d8c45",
+      "packageHash": "c7f3eb98",
       "state": "render_demo_ready",
-      "confidence": 97
+      "confidence": 97,
+      "renderQualityScore": 100,
+      "renderQualityGrade": "ui_candidate"
     },
     {
       "fixtureId": "document_derived_partial_evidence",
-      "packageHash": "f56c9e47",
+      "packageHash": "bea076ba",
       "state": "render_review_required",
-      "confidence": 64
+      "confidence": 64,
+      "renderQualityScore": 100,
+      "renderQualityGrade": "ui_candidate"
     }
   ],
+  "averageRenderQualityScore": 100,
+  "renderQualityChecklistKeys": [
+    "title_block_rail",
+    "sheet_border",
+    "legend_symbols",
+    "viewport_readability",
+    "annotation_readability",
+    "line_weight_consistency",
+    "render_confidence_display",
+    "review_warning_visibility",
+    "print_export_readiness",
+    "evidence_grouping"
+  ],
   "visibleQualityImprovements": [
-    "Professional title blocks, legends, review stamps, and sheet numbering create contractor-facing plan-set identity.",
-    "Canonical roof geometry is rendered as export-safe vector linework with consistent line-weight hierarchy.",
-    "Render readiness, confidence, and review-required callouts are visible directly on sheets.",
-    "Photo evidence and geometry trust summaries are packaged into readable evidence/review sheets."
+    "CAD-style double borders, right-side title-block rail, sheet index regions, and drawing-number hierarchy create a permit-set visual language.",
+    "Canonical roof geometry is rendered as export-safe vector linework with professional line-weight conventions and monochrome drafting priority.",
+    "Setbacks, module previews, conduit candidates, equipment markers, north arrow, scale note, and leader callouts are visible directly on the drawing sheet.",
+    "Photo evidence and review risk summaries are packaged into cleaner report-sheet groupings with quality checklist scoring."
   ],
   "contractorUsabilityImprovements": [
-    "Roof labels, pitch/azimuth labels, setbacks, equipment markers, and module preview zones are visually grouped.",
-    "Blocked/review states are explicit, reducing risk that preview renders are mistaken for stamped engineering.",
-    "Legends and notes explain symbol meaning and non-authoritative boundaries on every output package."
+    "Roof labels, pitch/azimuth labels, setbacks, equipment markers, leader lines, and module preview zones are visually grouped for print readability.",
+    "Blocked/review states and non-authoritative preview stamps are explicit, reducing risk that preview renders are mistaken for stamped engineering.",
+    "Symbolized legends and title-block metadata explain drawing conventions and review limits on every output package."
   ],
   "noAuthorityEnforcement": {
     "readOnly": true,

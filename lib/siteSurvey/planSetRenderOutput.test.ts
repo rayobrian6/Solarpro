@@ -120,6 +120,33 @@ describe('Professional Plan-Set Render Output V1', () => {
     expect(evidence?.annotations).toContain('photo evidence tiles');
   });
 
+  it('scores deterministic CAD render quality without promoting engineering authority', () => {
+    const pkg = buildProfessionalPlanSetRenderPackage(buildProfessionalSurveyReadinessReport(survey(), files()));
+    const checklist = pkg.summary.renderQualityChecklist;
+    const sitePlan = pkg.sheets.find(sheet => sheet.sheetType === 'site_plan_render');
+
+    expect(checklist.schemaVersion).toBe('professional_plan_set_render_quality_checklist_v1');
+    expect(pkg.summary.renderQualityScore).toBe(checklist.score);
+    expect(checklist.score).toBeGreaterThanOrEqual(90);
+    expect(['commercial_preview', 'ui_candidate']).toContain(checklist.grade);
+    expect(checklist.checks.map(check => check.key)).toEqual([
+      'title_block_rail',
+      'sheet_border',
+      'legend_symbols',
+      'viewport_readability',
+      'annotation_readability',
+      'line_weight_consistency',
+      'render_confidence_display',
+      'review_warning_visibility',
+      'print_export_readiness',
+      'evidence_grouping',
+    ]);
+    expect(checklist.noAuthorityEnforcement.stampedEngineeringPackage).toBe(false);
+    expect(sitePlan?.svg).toContain('SCALE: DIAGRAMMATIC / VERIFY IN FIELD');
+    expect(sitePlan?.svg).toContain('MODULE PREVIEW ZONE');
+    expect(sitePlan?.svg).toContain('PV module');
+  });
+
   it('enforces render-only safety boundaries without mutating source report objects', () => {
     const report = buildProfessionalSurveyReadinessReport(survey(), files());
     const beforeReport = JSON.stringify(report);

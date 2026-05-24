@@ -1,24 +1,28 @@
-# Survey Photo Render Intelligence V1 Todo
+# Professional CAD Render Quality Benchmark + Upgrade Pass Todo
 
-## Repository Baseline
-- [x] Inspect current dev branch status and existing survey/readiness/render architecture
-- [x] Identify minimal integration points for photo evidence, render readiness, and operator summaries
+## Benchmark Audit
+- [x] Verify repository state and current render output files
+- [x] Extract visual/text reference from uploaded sealed permit PDF
+- [x] Produce benchmark gap report with highest-impact polish wins
 
 ## Implementation
-- [x] Add SurveyPhotoEvidenceV1 DTOs and deterministic photo classification pipeline
-- [x] Add RenderReadinessV1 framework connected to geometry trust and photo coverage
-- [x] Add professional render layer recommendation engine
-- [x] Integrate photo/render intelligence into readiness reporting with lightweight operator visibility
-- [x] Add visual OSS evaluation and commercial render readiness/roadmap reports
-- [x] Preserve strict no-authority/no-CAD-mutation/no-persistence/no-solver boundaries
+- [x] Upgrade CAD/permit SVG style system and sheet primitives
+- [x] Improve A-000, A-101, and A-201 professional layouts
+- [x] Improve annotation placement, hierarchy, leader lines, and readability
+- [x] Add deterministic render quality scoring/checklist layer
+- [x] Preserve no-live-UI, no-authority, no-CAD-mutation, no-persistence boundaries
+
+## Artifacts
+- [x] Regenerate upgraded clean_roof, ground_mount_survey, solar_fence_survey, and document_derived_partial_evidence packages
+- [x] Generate visual quality comparison notes and render quality checklist outputs
 
 ## Validation
-- [x] Add photo evidence and render readiness tests
-- [x] Run parser/readiness/fixture/adapter/intelligence/replay/photo/render tests
-- [x] Run type-check clean
-- [x] Verify deterministic output and safety boundaries
+- [x] Run parser/readiness/fixture/adapter/intelligence/replay/photo/render/plan-set tests
+- [x] Run new quality checklist and deterministic output tests
+- [x] Run type-check clean and build if feasible
+- [x] Verify no-authority, no CAD mutation, and no persistence authority promotion
 
 ## Delivery
-- [x] Commit changes on dev
-- [x] Push dev using token-authenticated remote syntax
-- [ ] Provide final commercial/render summary and attach deliverables
+- [ ] Commit changes on dev
+- [ ] Push dev with token-authenticated remote syntax
+- [ ] Provide final summary with validation results and artifact attachments
