@@ -22,6 +22,6 @@
 ## Validation and Delivery
 - [x] Run parser/readiness/fixture/adapter tests
 - [x] Run type-check clean
-- [ ] Commit changes
-- [ ] Push according to active repository workflow
-- [ ] Summarize improvements, false positives, keep/expand recommendation, and native authority status
+- [x] Commit changes
+- [x] Push according to active repository workflow
+- [x] Summarize improvements, false positives, keep/expand recommendation, and native authority status
