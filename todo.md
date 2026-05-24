@@ -1,28 +1,29 @@
-# Professional CAD Render Quality Benchmark + Upgrade Pass Todo
+# Realistic Site Context + PDF Export + Live Preview Preparation Todo
 
-## Benchmark Audit
-- [x] Verify repository state and current render output files
-- [x] Extract visual/text reference from uploaded sealed permit PDF
-- [x] Produce benchmark gap report with highest-impact polish wins
+## Discovery
+- [x] Inspect current render package, generator, fixtures, and existing export capabilities
+- [x] Identify deterministic realism and preview assets that can be added without authority promotion
 
 ## Implementation
-- [x] Upgrade CAD/permit SVG style system and sheet primitives
-- [x] Improve A-000, A-101, and A-201 professional layouts
-- [x] Improve annotation placement, hierarchy, leader lines, and readability
-- [x] Add deterministic render quality scoring/checklist layer
-- [x] Preserve no-live-UI, no-authority, no-CAD-mutation, no-persistence boundaries
+- [x] Add realistic site/property/aerial-like context composition to site render sheets
+- [x] Improve module layout realism with spacing, grouping, rails, attachments, and callouts
+- [x] Add deterministic PDF export pipeline for multi-sheet render packages
+- [x] Add live-preview-ready manifest metadata and access patterns without UI wiring
+- [x] Add thumbnail, snapshot, and contact-sheet preview generation
+- [x] Preserve no-authority, no-CAD-mutation, no-persistence, and no-live-UI boundaries
 
 ## Artifacts
-- [x] Regenerate upgraded clean_roof, ground_mount_survey, solar_fence_survey, and document_derived_partial_evidence packages
-- [x] Generate visual quality comparison notes and render quality checklist outputs
+- [x] Regenerate upgraded packages for clean_roof, ground_mount_survey, solar_fence_survey, and document_derived_partial_evidence
+- [x] Generate PDF exports, thumbnails, preview snapshots, contact sheets, and preview manifests
+- [x] Generate updated realism/export readiness notes
 
 ## Validation
-- [x] Run parser/readiness/fixture/adapter/intelligence/replay/photo/render/plan-set tests
-- [x] Run new quality checklist and deterministic output tests
+- [x] Run parser/readiness/fixture/adapter/intelligence/replay/photo/render tests
+- [x] Run PDF export, preview-generation, render quality, and deterministic output tests
 - [x] Run type-check clean and build if feasible
-- [x] Verify no-authority, no CAD mutation, and no persistence authority promotion
+- [x] Verify no-authority, no CAD mutation, no persistence authority promotion, and no live UI wiring
 
 ## Delivery
-- [x] Commit changes on dev
-- [x] Push dev with token-authenticated remote syntax
-- [x] Provide final summary with validation results and artifact attachments
+- [ ] Commit changes on dev
+- [ ] Push dev with token-authenticated remote syntax
+- [ ] Provide final summary with validation results and artifact attachments

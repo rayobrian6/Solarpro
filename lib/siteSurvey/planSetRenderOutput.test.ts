@@ -103,9 +103,18 @@ describe('Professional Plan-Set Render Output V1', () => {
     expect(sitePlan?.svg).toContain('module preview');
     expect(sitePlan?.svg).toContain('MSP/Meter');
     expect(sitePlan?.svg).toContain('conduit candidate');
+    expect(sitePlan?.svg).toContain('realistic site context');
+    expect(sitePlan?.svg).toContain('PROPERTY / LOT CONTEXT PREVIEW');
+    expect(sitePlan?.svg).toContain('DRIVEWAY / ACCESS');
+    expect(sitePlan?.svg).toContain('PV-1 MODULE GROUP');
+    expect(sitePlan?.svg).toContain('PV STRING / GROUP CALLOUT');
+    expect(sitePlan?.layerOrder).toContain('site-context');
+    expect(sitePlan?.layerOrder).toContain('property-boundary');
+    expect(sitePlan?.layerOrder).toContain('module-string-groups');
     expect(sitePlan?.layerOrder).toContain('roof-outlines');
     expect(sitePlan?.layerOrder).toContain('review-callouts');
     expect(sitePlan?.annotations.join('\n')).toContain('pitch/azimuth annotations');
+    expect(sitePlan?.annotations.join('\n')).toContain('realistic site context');
   });
 
   it('includes evidence/review sheet photo tiles and confidence notes for contractor usability', () => {
@@ -134,6 +143,8 @@ describe('Professional Plan-Set Render Output V1', () => {
       'sheet_border',
       'legend_symbols',
       'viewport_readability',
+      'site_context_realism',
+      'module_layout_realism',
       'annotation_readability',
       'line_weight_consistency',
       'render_confidence_display',
@@ -141,10 +152,33 @@ describe('Professional Plan-Set Render Output V1', () => {
       'print_export_readiness',
       'evidence_grouping',
     ]);
+    expect(checklist.score).toBeLessThanOrEqual(checklist.maxScore);
     expect(checklist.noAuthorityEnforcement.stampedEngineeringPackage).toBe(false);
     expect(sitePlan?.svg).toContain('SCALE: DIAGRAMMATIC / VERIFY IN FIELD');
     expect(sitePlan?.svg).toContain('MODULE PREVIEW ZONE');
     expect(sitePlan?.svg).toContain('PV module');
+  });
+
+
+
+  it('prepares live-preview manifest metadata without wiring the live Engineering UI', () => {
+    const pkg = buildProfessionalPlanSetRenderPackage(buildProfessionalSurveyReadinessReport(survey(), files()));
+    const manifest = pkg.previewManifest;
+
+    expect(manifest.schemaVersion).toBe('professional_plan_set_preview_manifest_v1');
+    expect(manifest.packageMode).toBe('live_preview_preparation_only');
+    expect(manifest.packageHash).toBe(pkg.packageHash);
+    expect(manifest.defaultPreviewPath).toBe('index.html');
+    expect(manifest.pdfPath).toBe('package.pdf');
+    expect(manifest.contactSheetPath).toBe('contact-sheet.png');
+    expect(manifest.sheets).toHaveLength(3);
+    expect(manifest.sheets[0]).toMatchObject({ sheetNumber: 'A-000', thumbnailPath: 'thumbnails/A-000-cover_summary.png', snapshotPath: 'snapshots/A-000-cover_summary.png' });
+    expect(manifest.assets.map(asset => asset.kind)).toContain('pdf');
+    expect(manifest.assets.map(asset => asset.kind)).toContain('thumbnail');
+    expect(manifest.assets.map(asset => asset.kind)).toContain('contact_sheet');
+    expect(manifest.livePreviewReadiness.readyForInternalPreviewRoute).toBe(true);
+    expect(manifest.livePreviewReadiness.readyForLiveEngineeringUi).toBe(false);
+    expect(manifest.noAuthorityEnforcement.persistenceAllowed).toBe(false);
   });
 
   it('enforces render-only safety boundaries without mutating source report objects', () => {

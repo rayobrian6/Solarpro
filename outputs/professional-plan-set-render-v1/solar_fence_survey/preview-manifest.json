@@ -1,0 +1,171 @@
+{
+  "schemaVersion": "professional_plan_set_preview_manifest_v1",
+  "packageMode": "live_preview_preparation_only",
+  "sourceSurveyId": "expanded-fence-001",
+  "packageHash": "6d19fbef",
+  "defaultPreviewPath": "index.html",
+  "pdfPath": "package.pdf",
+  "contactSheetPath": "contact-sheet.png",
+  "sheets": [
+    {
+      "sheetNumber": "A-000",
+      "sheetType": "cover_summary",
+      "title": "Cover / Render Readiness Summary",
+      "svgPath": "A-000-cover_summary.svg",
+      "thumbnailPath": "thumbnails/A-000-cover_summary.png",
+      "snapshotPath": "snapshots/A-000-cover_summary.png",
+      "renderHash": "46604f47"
+    },
+    {
+      "sheetNumber": "A-101",
+      "sheetType": "site_plan_render",
+      "title": "Roof / Site Plan Render Preview",
+      "svgPath": "A-101-site_plan_render.svg",
+      "thumbnailPath": "thumbnails/A-101-site_plan_render.png",
+      "snapshotPath": "snapshots/A-101-site_plan_render.png",
+      "renderHash": "2ee8fc53"
+    },
+    {
+      "sheetNumber": "A-201",
+      "sheetType": "evidence_review",
+      "title": "Photo Evidence / Review Callout Sheet",
+      "svgPath": "A-201-evidence_review.svg",
+      "thumbnailPath": "thumbnails/A-201-evidence_review.png",
+      "snapshotPath": "snapshots/A-201-evidence_review.png",
+      "renderHash": "9d25d752"
+    }
+  ],
+  "assets": [
+    {
+      "kind": "html",
+      "label": "Multi-sheet HTML preview",
+      "path": "index.html",
+      "mimeType": "text/html"
+    },
+    {
+      "kind": "pdf",
+      "label": "Multi-sheet PDF package",
+      "path": "package.pdf",
+      "mimeType": "application/pdf"
+    },
+    {
+      "kind": "contact_sheet",
+      "label": "Package contact sheet",
+      "path": "contact-sheet.png",
+      "mimeType": "image/png"
+    },
+    {
+      "kind": "manifest",
+      "label": "Live preview manifest",
+      "path": "preview-manifest.json",
+      "mimeType": "application/json"
+    },
+    {
+      "kind": "svg_sheet",
+      "label": "A-000 Cover / Render Readiness Summary",
+      "path": "A-000-cover_summary.svg",
+      "sheetNumber": "A-000",
+      "mimeType": "image/svg+xml"
+    },
+    {
+      "kind": "thumbnail",
+      "label": "A-000 thumbnail",
+      "path": "thumbnails/A-000-cover_summary.png",
+      "sheetNumber": "A-000",
+      "mimeType": "image/png"
+    },
+    {
+      "kind": "snapshot",
+      "label": "A-000 preview snapshot",
+      "path": "snapshots/A-000-cover_summary.png",
+      "sheetNumber": "A-000",
+      "mimeType": "image/png"
+    },
+    {
+      "kind": "svg_sheet",
+      "label": "A-101 Roof / Site Plan Render Preview",
+      "path": "A-101-site_plan_render.svg",
+      "sheetNumber": "A-101",
+      "mimeType": "image/svg+xml"
+    },
+    {
+      "kind": "thumbnail",
+      "label": "A-101 thumbnail",
+      "path": "thumbnails/A-101-site_plan_render.png",
+      "sheetNumber": "A-101",
+      "mimeType": "image/png"
+    },
+    {
+      "kind": "snapshot",
+      "label": "A-101 preview snapshot",
+      "path": "snapshots/A-101-site_plan_render.png",
+      "sheetNumber": "A-101",
+      "mimeType": "image/png"
+    },
+    {
+      "kind": "svg_sheet",
+      "label": "A-201 Photo Evidence / Review Callout Sheet",
+      "path": "A-201-evidence_review.svg",
+      "sheetNumber": "A-201",
+      "mimeType": "image/svg+xml"
+    },
+    {
+      "kind": "thumbnail",
+      "label": "A-201 thumbnail",
+      "path": "thumbnails/A-201-evidence_review.png",
+      "sheetNumber": "A-201",
+      "mimeType": "image/png"
+    },
+    {
+      "kind": "snapshot",
+      "label": "A-201 preview snapshot",
+      "path": "snapshots/A-201-evidence_review.png",
+      "sheetNumber": "A-201",
+      "mimeType": "image/png"
+    }
+  ],
+  "livePreviewReadiness": {
+    "readyForInternalPreviewRoute": true,
+    "readyForLiveEngineeringUi": false,
+    "blockersBeforePublicPreview": [
+      "Product approval of preview-only warning UX",
+      "PDF download QA across target browsers",
+      "Stakeholder acceptance of visual quality threshold before public release"
+    ]
+  },
+  "noAuthorityEnforcement": {
+    "readOnly": true,
+    "renderOutputOnly": true,
+    "stampedEngineeringPackage": false,
+    "automaticCadGenerationAllowed": false,
+    "canonicalGeometryMutationAllowed": false,
+    "cadMutationAllowed": false,
+    "cadSolverExecutionAllowed": false,
+    "persistenceAllowed": false,
+    "downstreamEngineeringAllowed": false,
+    "downstreamPermitAllowed": false,
+    "downstreamBomAllowed": false
+  },
+  "generatedAssets": {
+    "schemaVersion": "professional_plan_set_preview_assets_v1",
+    "pdfExported": true,
+    "pdfPath": "package.pdf",
+    "thumbnailCount": 3,
+    "snapshotCount": 3,
+    "contactSheetGenerated": true,
+    "exportStack": "wkhtmltopdf + deterministic HTML/SVG; sharp thumbnails/snapshots/contact sheet",
+    "noAuthorityEnforcement": {
+      "readOnly": true,
+      "renderOutputOnly": true,
+      "stampedEngineeringPackage": false,
+      "automaticCadGenerationAllowed": false,
+      "canonicalGeometryMutationAllowed": false,
+      "cadMutationAllowed": false,
+      "cadSolverExecutionAllowed": false,
+      "persistenceAllowed": false,
+      "downstreamEngineeringAllowed": false,
+      "downstreamPermitAllowed": false,
+      "downstreamBomAllowed": false
+    }
+  }
+}

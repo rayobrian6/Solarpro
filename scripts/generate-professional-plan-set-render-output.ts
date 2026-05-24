@@ -1,52 +1,113 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+
+import sharp from 'sharp';
 
 import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
 import { buildProfessionalPlanSetRenderPackage } from '../lib/siteSurvey/planSetRenderOutput';
 import { professionalExpandedSurveyFixtures } from '../lib/siteSurvey/professionalSurveyExpandedFixtures';
 import { buildProfessionalSurveyReadinessReport } from '../lib/siteSurvey/professionalSurveyReadinessReport';
 
-const OUT = join(process.cwd(), 'outputs', 'professional-plan-set-render-v1');
-mkdirSync(OUT, { recursive: true });
+async function main() {
+  const OUT = join(process.cwd(), 'outputs', 'professional-plan-set-render-v1');
+  mkdirSync(OUT, { recursive: true });
 
-const selectedIds = ['clean_roof', 'ground_mount_survey', 'solar_fence_survey', 'document_derived_partial_evidence'] as const;
-const packages = selectedIds.map(id => {
-  const fixture = professionalExpandedSurveyFixtures.find(item => item.id === id);
-  if (!fixture) throw new Error(`Missing fixture ${id}`);
-  const report = buildProfessionalSurveyReadinessReport(siteSurveyFromFixture(fixture), filesFromFixture(fixture));
-  const pkg = buildProfessionalPlanSetRenderPackage(report);
-  const dir = join(OUT, id);
-  mkdirSync(dir, { recursive: true });
-  for (const sheet of pkg.sheets) writeFileSync(join(dir, `${sheet.sheetNumber}-${sheet.sheetType}.svg`), sheet.svg);
-  writeFileSync(join(dir, 'index.html'), pkg.htmlPreview);
-  writeFileSync(join(dir, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`);
-  return { id, fixture, report, pkg };
+  const selectedIds = ['clean_roof', 'ground_mount_survey', 'solar_fence_survey', 'document_derived_partial_evidence'] as const;
+  const packages = await Promise.all(selectedIds.map(async id => {
+    const fixture = professionalExpandedSurveyFixtures.find(item => item.id === id);
+    if (!fixture) throw new Error(`Missing fixture ${id}`);
+    const report = buildProfessionalSurveyReadinessReport(siteSurveyFromFixture(fixture), filesFromFixture(fixture));
+    const pkg = buildProfessionalPlanSetRenderPackage(report);
+    const dir = join(OUT, id);
+    mkdirSync(dir, { recursive: true });
+    for (const sheet of pkg.sheets) writeFileSync(join(dir, `${sheet.sheetNumber}-${sheet.sheetType}.svg`), sheet.svg);
+    writeFileSync(join(dir, 'index.html'), pkg.htmlPreview);
+    writeFileSync(join(dir, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`);
+    const previewAssets = await generatePreviewAssets(dir, pkg);
+    writeFileSync(join(dir, 'preview-manifest.json'), `${JSON.stringify({ ...pkg.previewManifest, generatedAssets: previewAssets }, null, 2)}\n`);
+    return { id, fixture, report, pkg, previewAssets };
+  }));
+
+  const indexHtml = `<!doctype html><html><head><meta charset="utf-8"><title>SolarPro Demo Plan-Set Render Package</title><style>body{font-family:Arial,sans-serif;background:#f1f5f9;margin:0;padding:32px}a{display:block;margin:10px 0;color:#1d4ed8}.card{background:#fff;border:1px solid #cbd5e1;border-radius:12px;padding:18px;margin:16px 0;max-width:980px}.asset{display:inline-block;margin-right:14px}</style></head><body><h1>SolarPro Professional Plan-Set Render Output V1</h1><p>Deterministic, non-authoritative, realistic SVG/PDF-ready preview package for contractor-facing demos.</p>${packages.map(item => `<div class="card"><h2>${item.id}</h2><p>State: <b>${item.pkg.summary.renderReadinessState}</b> · Confidence: <b>${item.pkg.summary.renderConfidenceScore}/100</b> · Quality: <b>${item.pkg.summary.renderQualityScore}/100</b> · Sheets: ${item.pkg.summary.sheetCount}</p><p><a class="asset" href="./${item.id}/index.html">Open multi-sheet preview</a><a class="asset" href="./${item.id}/package.pdf">Download PDF package</a><a class="asset" href="./${item.id}/contact-sheet.png">Open contact sheet</a><a class="asset" href="./${item.id}/preview-manifest.json">Preview manifest</a></p>${item.pkg.sheets.map(s => `<a href="./${item.id}/${s.sheetNumber}-${s.sheetType}.svg">${s.sheetNumber} ${s.title}</a>`).join('')}</div>`).join('')}</body></html>`;
+  writeFileSync(join(OUT, 'index.html'), indexHtml);
+
+  const summary = {
+    schemaVersion: 'professional_plan_set_render_output_summary_v1',
+    packageCount: packages.length,
+    totalSheetCount: packages.reduce((sum, item) => sum + item.pkg.sheets.length, 0),
+    renderedSheetTypes: Array.from(new Set(packages.flatMap(item => item.pkg.sheets.map(sheet => sheet.sheetType)))).sort(),
+    packageHashes: packages.map(item => ({ fixtureId: item.id, packageHash: item.pkg.packageHash, state: item.pkg.summary.renderReadinessState, confidence: item.pkg.summary.renderConfidenceScore, renderQualityScore: item.pkg.summary.renderQualityScore, renderQualityGrade: item.pkg.summary.renderQualityGrade, pdfExported: item.previewAssets.pdfExported, thumbnailCount: item.previewAssets.thumbnailCount, snapshotCount: item.previewAssets.snapshotCount, contactSheetGenerated: item.previewAssets.contactSheetGenerated })),
+    averageRenderQualityScore: Math.round(packages.reduce((sum, item) => sum + item.pkg.summary.renderQualityScore, 0) / packages.length),
+    pdfExport: { stack: 'wkhtmltopdf from deterministic HTML/SVG composition; sharp for PNG thumbnails/snapshots/contact sheets', packagePdfCount: packages.filter(item => item.previewAssets.pdfExported).length, expectedPackagePdfCount: packages.length },
+    previewAssets: { thumbnailCount: packages.reduce((sum, item) => sum + item.previewAssets.thumbnailCount, 0), snapshotCount: packages.reduce((sum, item) => sum + item.previewAssets.snapshotCount, 0), contactSheetCount: packages.filter(item => item.previewAssets.contactSheetGenerated).length, manifestCount: packages.length },
+    renderQualityChecklistKeys: packages[0].pkg.summary.renderQualityChecklist.checks.map(check => check.key),
+    visibleQualityImprovements: packages[0].pkg.summary.visibleQualityImprovements,
+    contractorUsabilityImprovements: packages[0].pkg.summary.contractorUsabilityImprovements,
+    noAuthorityEnforcement: packages[0].pkg.noAuthorityEnforcement,
+  };
+  writeFileSync(join(OUT, 'professional-plan-set-render-summary-v1.json'), `${JSON.stringify(summary, null, 2)}\n`);
+  writeFileSync(join(OUT, 'commercial-render-quality-report-v1.md'), commercialReport(summary));
+  writeFileSync(join(OUT, 'professional-cad-benchmark-gap-report-v1.md'), benchmarkGapReport(summary));
+  writeFileSync(join(OUT, 'render-quality-checklist-report-v1.md'), qualityChecklistReport(summary));
+  writeFileSync(join(OUT, 'export-render-validation-report-v1.md'), validationReport(summary));
+  writeFileSync(join(OUT, 'visual-oss-leverage-report-v1.md'), ossReport());
+  writeFileSync(join(OUT, 'professional-cad-roadmap-update-v1.md'), roadmapReport(summary));
+  writeFileSync(join(OUT, 'realistic-site-context-export-readiness-v1.md'), realismExportReport(summary));
+
+  console.log(JSON.stringify(summary, null, 2));
+
+}
+
+main().catch(error => {
+  console.error(error);
+  process.exit(1);
 });
 
-const indexHtml = `<!doctype html><html><head><meta charset="utf-8"><title>SolarPro Demo Plan-Set Render Package</title><style>body{font-family:Arial,sans-serif;background:#f1f5f9;margin:0;padding:32px}a{display:block;margin:10px 0;color:#1d4ed8}.card{background:#fff;border:1px solid #cbd5e1;border-radius:12px;padding:18px;margin:16px 0;max-width:980px}</style></head><body><h1>SolarPro Professional Plan-Set Render Output V1</h1><p>Deterministic, non-authoritative, SVG/PDF-ready preview package for contractor-facing demos.</p>${packages.map(item => `<div class="card"><h2>${item.id}</h2><p>State: <b>${item.pkg.summary.renderReadinessState}</b> · Confidence: <b>${item.pkg.summary.renderConfidenceScore}/100</b> · Sheets: ${item.pkg.summary.sheetCount}</p><a href="./${item.id}/index.html">Open multi-sheet preview</a>${item.pkg.sheets.map(s => `<a href="./${item.id}/${s.sheetNumber}-${s.sheetType}.svg">${s.sheetNumber} ${s.title}</a>`).join('')}</div>`).join('')}</body></html>`;
-writeFileSync(join(OUT, 'index.html'), indexHtml);
+async function generatePreviewAssets(dir: string, pkg: ReturnType<typeof buildProfessionalPlanSetRenderPackage>) {
+  const thumbnailDir = join(dir, 'thumbnails');
+  const snapshotDir = join(dir, 'snapshots');
+  mkdirSync(thumbnailDir, { recursive: true });
+  mkdirSync(snapshotDir, { recursive: true });
+  const sheetCards: Buffer[] = [];
+  for (const sheet of pkg.sheets) {
+    const svgPath = join(dir, `${sheet.sheetNumber}-${sheet.sheetType}.svg`);
+    const thumbPath = join(thumbnailDir, `${sheet.sheetNumber}-${sheet.sheetType}.png`);
+    const snapPath = join(snapshotDir, `${sheet.sheetNumber}-${sheet.sheetType}.png`);
+    await sharp(svgPath, { density: 96 }).resize({ width: 330 }).png().toFile(thumbPath);
+    await sharp(svgPath, { density: 144 }).resize({ width: 990 }).png().toFile(snapPath);
+    const thumbBase64 = (await sharp(thumbPath).png().toBuffer()).toString('base64');
+    const cardSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="380" height="330"><rect width="100%" height="100%" fill="#fff"/><image href="data:image/png;base64,${thumbBase64}" x="25" y="24" width="330"/><text x="25" y="305" font-family="Arial" font-size="18" font-weight="700" fill="#111827">${sheet.sheetNumber} · ${sheet.title}</text></svg>`;
+    sheetCards.push(await sharp(Buffer.from(cardSvg)).png().toBuffer());
+  }
+  await sharp({ create: { width: 1200, height: 410, channels: 4, background: '#f8fafc' } })
+    .composite(sheetCards.map((input, index) => ({ input, left: 20 + index * 390, top: 40 })))
+    .png()
+    .toFile(join(dir, 'contact-sheet.png'));
+  const pdfPath = join(dir, 'package.pdf');
+  const pdfExported = exportPdf(join(dir, 'index.html'), pdfPath);
+  return {
+    schemaVersion: 'professional_plan_set_preview_assets_v1',
+    pdfExported,
+    pdfPath: 'package.pdf',
+    thumbnailCount: pkg.sheets.length,
+    snapshotCount: pkg.sheets.length,
+    contactSheetGenerated: existsSync(join(dir, 'contact-sheet.png')),
+    exportStack: 'wkhtmltopdf + deterministic HTML/SVG; sharp thumbnails/snapshots/contact sheet',
+    noAuthorityEnforcement: pkg.noAuthorityEnforcement,
+  };
+}
 
-const summary = {
-  schemaVersion: 'professional_plan_set_render_output_summary_v1',
-  packageCount: packages.length,
-  totalSheetCount: packages.reduce((sum, item) => sum + item.pkg.sheets.length, 0),
-  renderedSheetTypes: Array.from(new Set(packages.flatMap(item => item.pkg.sheets.map(sheet => sheet.sheetType)))).sort(),
-  packageHashes: packages.map(item => ({ fixtureId: item.id, packageHash: item.pkg.packageHash, state: item.pkg.summary.renderReadinessState, confidence: item.pkg.summary.renderConfidenceScore, renderQualityScore: item.pkg.summary.renderQualityScore, renderQualityGrade: item.pkg.summary.renderQualityGrade })),
-  averageRenderQualityScore: Math.round(packages.reduce((sum, item) => sum + item.pkg.summary.renderQualityScore, 0) / packages.length),
-  renderQualityChecklistKeys: packages[0].pkg.summary.renderQualityChecklist.checks.map(check => check.key),
-  visibleQualityImprovements: packages[0].pkg.summary.visibleQualityImprovements,
-  contractorUsabilityImprovements: packages[0].pkg.summary.contractorUsabilityImprovements,
-  noAuthorityEnforcement: packages[0].pkg.noAuthorityEnforcement,
-};
-writeFileSync(join(OUT, 'professional-plan-set-render-summary-v1.json'), `${JSON.stringify(summary, null, 2)}\n`);
-writeFileSync(join(OUT, 'commercial-render-quality-report-v1.md'), commercialReport(summary));
-writeFileSync(join(OUT, 'professional-cad-benchmark-gap-report-v1.md'), benchmarkGapReport(summary));
-writeFileSync(join(OUT, 'render-quality-checklist-report-v1.md'), qualityChecklistReport(summary));
-writeFileSync(join(OUT, 'export-render-validation-report-v1.md'), validationReport(summary));
-writeFileSync(join(OUT, 'visual-oss-leverage-report-v1.md'), ossReport());
-writeFileSync(join(OUT, 'professional-cad-roadmap-update-v1.md'), roadmapReport(summary));
-
-console.log(JSON.stringify(summary, null, 2));
+function exportPdf(htmlPath: string, pdfPath: string) {
+  try {
+    execFileSync('wkhtmltopdf', ['--quiet', '--enable-local-file-access', '--page-size', 'Letter', '--orientation', 'Landscape', '--margin-top', '0', '--margin-right', '0', '--margin-bottom', '0', '--margin-left', '0', htmlPath, pdfPath], { stdio: 'pipe' });
+    return existsSync(pdfPath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    writeFileSync(`${pdfPath}.error.txt`, message);
+    return false;
+  }
+}
 
 function siteSurveyFromFixture(fixture: (typeof professionalExpandedSurveyFixtures)[number]): SiteSurvey {
   return {
@@ -97,9 +158,10 @@ ${summaryValue.contractorUsabilityImprovements.map(v => `- ${v}`).join('\n')}
 
 - SVG title blocks with sheet numbers and project metadata.
 - Review-first preview stamps visible on every sheet.
-- Roof plan viewport with line-weight hierarchy, roof outlines, setback previews, module preview blocks, conduit candidates, equipment markers, legends, and annotation lists.
+- Realistic but diagrammatic site-context layer with lot boundary, street/access cue, driveway cue, neighboring structure silhouettes, and aerial-like grayscale texture.
+- Roof plan viewport with line-weight hierarchy, roof outlines, setback previews, realistic module grouping, conduit candidates, equipment markers, legends, and annotation lists.
 - Evidence/review sheets with photo evidence tiles, confidence notes, missing coverage visibility, and render-readiness callouts.
-- Print-friendly HTML package suitable for PDF export or live demo presentation.
+- Print-friendly HTML plus direct PDF packages, thumbnails, snapshots, contact sheets, and live-preview manifests.
 
 ## Commercial Impact
 
@@ -113,17 +175,52 @@ function validationReport(summaryValue: typeof summary) {
 
 - Demo package index: \`outputs/professional-plan-set-render-v1/index.html\`
 - Per-fixture SVG sheets and HTML previews for ${summaryValue.packageCount} fixtures.
+- Per-fixture PDF packages: ${summaryValue.pdfExport.packagePdfCount}/${summaryValue.pdfExport.expectedPackagePdfCount} generated.
+- Per-fixture preview manifests, thumbnails, snapshots, and contact sheets.
 - Summary JSON with deterministic package hashes.
 
 ## Validation Assertions
 
-- SVG/render export tests verify deterministic package hashes, professional sheet numbers, visual hierarchy, title blocks, legends, annotations, evidence tiles, review stamps, and no-authority flags.
+- SVG/render export tests verify deterministic package hashes, professional sheet numbers, visual hierarchy, title blocks, legends, annotations, evidence tiles, review stamps, realism cues, preview manifests, and no-authority flags.
 - Renderer consumes existing readiness/report DTOs only.
 - Renderer does not mutate canonical geometry or CAD readiness objects.
 - Renderer writes artifacts only through the explicit generation script; library functions perform no persistence.
+- Direct PDF exports are generated from deterministic HTML/SVG packages using wkhtmltopdf with local-file access only.
+- Thumbnail, snapshot, contact-sheet, and preview-manifest assets are generated for live-preview preparation.
 - Outputs are PDF-ready vector/HTML compositions, not stamped engineering packages.
 
 ## Safety Boundary Verified
+
+${Object.entries(summaryValue.noAuthorityEnforcement).map(([key, value]) => `- ${key}: ${value}`).join('\n')}`;
+}
+
+function realismExportReport(summaryValue: typeof summary) {
+  return `# Realistic Site Context / Export Readiness Report V1
+
+## Realism Upgrades
+
+- A deterministic grayscale site-context layer adds lot/property boundary, street/access cue, driveway/access shape, neighboring structure silhouettes, and aerial-like texture.
+- Site plan composition remains diagrammatic and preview-only; it does not extract authoritative parcel geometry or mutate canonical roof geometry.
+- Module layout visuals now include aligned rows, orientation labels, group outlines, consistent spacing, and string/group callouts.
+
+## PDF / Preview Export
+
+- PDF stack: ${summaryValue.pdfExport.stack}.
+- PDF packages generated: ${summaryValue.pdfExport.packagePdfCount}/${summaryValue.pdfExport.expectedPackagePdfCount}.
+- Preview assets generated: ${summaryValue.previewAssets.thumbnailCount} thumbnails, ${summaryValue.previewAssets.snapshotCount} snapshots, ${summaryValue.previewAssets.contactSheetCount} contact sheets, ${summaryValue.previewAssets.manifestCount} manifests.
+
+## Live Preview Readiness
+
+The generated manifests define HTML, PDF, SVG sheet, thumbnail, snapshot, and contact-sheet access patterns. This prepares a lightweight future UI integration while intentionally leaving live Engineering UI wiring disabled.
+
+## Remaining Public Preview Blockers
+
+- Product approval of preview-only warning UX.
+- Browser/download QA for PDFs and thumbnails.
+- Final stakeholder acceptance of visual quality thresholds.
+- Optional contractor/dealer branding and richer project metadata.
+
+## Safety Boundary
 
 ${Object.entries(summaryValue.noAuthorityEnforcement).map(([key, value]) => `- ${key}: ${value}`).join('\n')}`;
 }
@@ -137,9 +234,10 @@ The first professional output engine intentionally uses native deterministic SVG
 
 ## Existing OSS Utilities Considered
 
-- \`jspdf\`: useful next step for direct PDF export, but deferred because SVG/HTML print output is faster and more inspectable for this phase.
-- \`puppeteer-core\`: useful for automated PDF snapshots later, but unnecessary for deterministic SVG unit tests.
-- \`sharp\`: valuable for future image/contact-sheet thumbnails, deferred to avoid pixel/image processing expansion.
+- \`wkhtmltopdf\`: selected for direct multi-sheet PDF export from deterministic HTML/SVG composition because no additional browser runtime was required in this environment.
+- \`jspdf\`: available for future client-side or pure-JS PDF flows, but not selected here because HTML/SVG-to-PDF preserved the existing composition with less churn.
+- \`puppeteer-core\`: available for a future controlled Chromium export adapter when a browser binary is guaranteed.
+- \`sharp\`: used for deterministic PNG thumbnails, larger preview snapshots, and contact-sheet package previews.
 - \`exif-reader\`: valuable for future metadata confidence scoring, not needed for SVG composition.
 
 ## Leverage Gained
@@ -148,7 +246,7 @@ Native SVG provided the strongest quality-per-credit leverage: export-safe vecto
 
 ## Performance / Complexity
 
-Performance impact is negligible for fixture-sized plan sets because rendering is string composition over existing DTOs. Integration complexity is low: one library module plus one generation script and focused tests.`;
+Performance impact is low for fixture-sized plan sets because rendering is string composition over existing DTOs, with explicit artifact generation confined to the generation script. Integration complexity remains low: one library module plus one generation script and focused tests.`;
 }
 
 function roadmapReport(summaryValue: typeof summary) {
@@ -159,20 +257,20 @@ function roadmapReport(summaryValue: typeof summary) {
 - Professional SVG sheet output engine.
 - Reusable sheet composition primitives: title block, legend, viewport, review stamp, metric cards, evidence tiles, notes panels.
 - Deterministic annotation engine for roof labels, pitch/azimuth labels, setback preview labels, conduit labels, equipment labels, render confidence notes, and review callouts.
-- Exportable SVG and print/PDF-ready HTML demo packaging.
+- Realistic site-context composition and richer module layout preview treatment.
+- Exportable SVG, print/PDF-ready HTML, direct PDF package generation, thumbnails, snapshots, contact sheets, and preview manifests.
 - Visual OSS leverage assessment.
 
-## Remaining Blockers Before Commercially Competitive Plan-Set Quality
+## Remaining Blockers Before Commercially Competitive Public Preview Quality
 
-- Need richer module layout fidelity and string/group labels from production design data when available.
-- Need polished PDF export automation using the existing HTML/SVG package and a controlled browser/PDF adapter.
+- Need production module/string layout data when available under explicit authority controls.
 - Need real contractor branding/title-block customization and sheet index controls.
-- Need optional thumbnail/contact-sheet generation from actual uploaded photo assets.
+- Need final browser/download QA for generated PDFs and preview images.
 - Need AHJ-specific plan notes only after engineering authority boundaries are intentionally designed.
 
 ## Next Highest-Leverage Step
 
-Build a static preview UI route or downloadable artifact endpoint around the generated \`PlanSetRenderPackageV1\`, then add direct PDF export using existing browser/PDF tooling. Current generated sheet types: ${summaryValue.renderedSheetTypes.join(', ')}.`;
+Build a static preview UI route or downloadable artifact endpoint around the generated \`PlanSetRenderPackageV1\` and \`professional_plan_set_preview_manifest_v1\`; direct PDF export and preview asset generation now exist and should be QA-reviewed before public UI wiring. Current generated sheet types: ${summaryValue.renderedSheetTypes.join(', ')}.`;
 }
 
 function benchmarkGapReport(summaryValue: typeof summary) {
@@ -195,23 +293,24 @@ The uploaded sealed residential solar permit package was reviewed as a visual be
 
 - CAD-style double border and right-side title block rail added to every sheet.
 - Monochrome drafting hierarchy with controlled module, setback, conduit, and equipment accents.
+- Deterministic grayscale site-context composition added for lot/property, access, driveway, neighboring structure, and aerial-like realism cues.
 - Symbolized legend with matching roof/module/fire path/conduit/equipment/attachment symbols.
-- Leader-line callouts for module preview zones and fire setback overlays.
+- Leader-line callouts for module preview zones, PV group/string callouts, and fire setback overlays.
 - A-000 rebalanced into system summary, sheet index, render layer summary, trust indicators, and review notes.
 - A-101 reworked around a cleaner roof plan viewport, scale/north placement, rail/attachment symbols, and active render layer table.
 - A-201 converted into evidence records plus evidence coverage and review/risk regions.
-- Deterministic render quality checklist added for visual QA only.
+- Deterministic render quality checklist, direct PDF export, preview thumbnails/snapshots, contact sheets, and live-preview manifests added for visual QA only.
 
 ## Lowest-Cost Polish Wins Remaining
 
-- Direct PDF export from the existing SVG/HTML composition.
 - Real brand/title-block customization per contractor or dealer.
 - Better project/address/client metadata where survey fixtures provide it.
 - Production module/string layout data when available, replacing deterministic preview modules.
+- Public preview QA for PDF/download/browser behavior.
 
-## Blockers To Professional Commercial Standard
+## Blockers To Public-Facing Professional Standard
 
-The upgraded output is closer to commercial preview quality, but it is still not a stamped permit package. Remaining blockers before full professional standard are direct PDF export, production-grade module/string placement, AHJ-specific note libraries under explicit authority controls, and richer imagery/context overlays. Live UI wiring should wait until product stakeholders accept the quality checklist threshold and preview-only warnings in the UI experience.
+The upgraded output is closer to commercial preview quality, but it is still not a stamped permit package. Remaining blockers before public-facing release are production-grade module/string placement when authoritative design data exists, AHJ-specific note libraries under explicit authority controls, branding/custom metadata, and product-approved preview-only warning UX. Live UI wiring should wait until product stakeholders accept the quality checklist threshold and preview warnings in the UI experience.
 
 ## Quality Result
 
@@ -231,11 +330,11 @@ ${summaryValue.renderQualityChecklistKeys.map(key => `- ${key}`).join('\n')}
 
 ## Demo Package Scores
 
-${summaryValue.packageHashes.map(item => `- ${item.fixtureId}: ${item.renderQualityScore}/100 (${item.renderQualityGrade}) · state ${item.state} · confidence ${item.confidence}/100 · hash ${item.packageHash}`).join('\n')}
+${summaryValue.packageHashes.map(item => `- ${item.fixtureId}: ${item.renderQualityScore}/100 (${item.renderQualityGrade}) · state ${item.state} · confidence ${item.confidence}/100 · PDF ${item.pdfExported ? 'generated' : 'not generated'} · thumbnails ${item.thumbnailCount} · snapshots ${item.snapshotCount} · contact sheet ${item.contactSheetGenerated ? 'yes' : 'no'} · hash ${item.packageHash}`).join('\n')}
 
 ## UI Wiring Recommendation
 
-The outputs are upgraded enough for internal review and stakeholder demo evaluation. They should not be wired into the live Engineering UI until direct PDF export behavior, preview-only warnings, and quality-score thresholds are product-approved. Current recommendation: **hold live UI wiring**, but continue toward an internal preview route or artifact viewer.
+The outputs are upgraded enough for internal live-preview preparation and stakeholder demo evaluation. They should not be wired into the live Engineering UI until direct PDF download behavior, preview-only warnings, and quality-score thresholds are product-approved. Current recommendation: **ready for lightweight internal preview route preparation; hold public/live Engineering UI wiring**.
 
 ## No-Authority Boundary
 

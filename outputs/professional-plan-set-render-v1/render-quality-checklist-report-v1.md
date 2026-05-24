@@ -10,6 +10,8 @@ This checklist is visual quality assurance only. It does not promote engineering
 - sheet_border
 - legend_symbols
 - viewport_readability
+- site_context_realism
+- module_layout_realism
 - annotation_readability
 - line_weight_consistency
 - render_confidence_display
@@ -19,14 +21,14 @@ This checklist is visual quality assurance only. It does not promote engineering
 
 ## Demo Package Scores
 
-- clean_roof: 100/100 (ui_candidate) · state render_demo_ready · confidence 100/100 · hash c90830fd
-- ground_mount_survey: 100/100 (ui_candidate) · state render_demo_ready · confidence 97/100 · hash 4e02a30b
-- solar_fence_survey: 100/100 (ui_candidate) · state render_demo_ready · confidence 97/100 · hash c7f3eb98
-- document_derived_partial_evidence: 100/100 (ui_candidate) · state render_review_required · confidence 64/100 · hash bea076ba
+- clean_roof: 100/100 (ui_candidate) · state render_demo_ready · confidence 100/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash fedb1c87
+- ground_mount_survey: 90/100 (commercial_preview) · state render_demo_ready · confidence 97/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash 0fbf8a72
+- solar_fence_survey: 90/100 (commercial_preview) · state render_demo_ready · confidence 97/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash 6d19fbef
+- document_derived_partial_evidence: 90/100 (commercial_preview) · state render_review_required · confidence 64/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash 4549b177
 
 ## UI Wiring Recommendation
 
-The outputs are upgraded enough for internal review and stakeholder demo evaluation. They should not be wired into the live Engineering UI until direct PDF export behavior, preview-only warnings, and quality-score thresholds are product-approved. Current recommendation: **hold live UI wiring**, but continue toward an internal preview route or artifact viewer.
+The outputs are upgraded enough for internal live-preview preparation and stakeholder demo evaluation. They should not be wired into the live Engineering UI until direct PDF download behavior, preview-only warnings, and quality-score thresholds are product-approved. Current recommendation: **ready for lightweight internal preview route preparation; hold public/live Engineering UI wiring**.
 
 ## No-Authority Boundary
 

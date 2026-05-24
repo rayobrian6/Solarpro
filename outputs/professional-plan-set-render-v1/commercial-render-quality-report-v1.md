@@ -5,23 +5,26 @@ Professional Plan-Set Render Output V1 generated **12 SVG sheets** across **4 de
 ## Visible Quality Improvements
 
 - CAD-style double borders, right-side title-block rail, sheet index regions, and drawing-number hierarchy create a permit-set visual language.
+- A deterministic grayscale site-context layer adds lot boundary, street/driveway cues, neighboring structure silhouettes, and aerial-like texture without extracting or mutating geometry.
 - Canonical roof geometry is rendered as export-safe vector linework with professional line-weight conventions and monochrome drafting priority.
-- Setbacks, module previews, conduit candidates, equipment markers, north arrow, scale note, and leader callouts are visible directly on the drawing sheet.
-- Photo evidence and review risk summaries are packaged into cleaner report-sheet groupings with quality checklist scoring.
+- Setbacks, realistic module grouping, rail runs, attachment indicators, conduit candidates, equipment markers, north arrow, scale note, and leader callouts are visible directly on the drawing sheet.
+- Photo evidence, review risk summaries, PDF/export metadata, and live-preview manifest metadata are packaged for contractor/demo review.
 
 ## Contractor / Demo Usability Improvements
 
-- Roof labels, pitch/azimuth labels, setbacks, equipment markers, leader lines, and module preview zones are visually grouped for print readability.
+- Roof labels, pitch/azimuth labels, setbacks, equipment markers, leader lines, string/group labels, and module preview zones are visually grouped for print readability.
+- Site context makes the sheet feel closer to a real contractor-facing roof/site plan while remaining diagrammatic and non-authoritative.
 - Blocked/review states and non-authoritative preview stamps are explicit, reducing risk that preview renders are mistaken for stamped engineering.
-- Symbolized legends and title-block metadata explain drawing conventions and review limits on every output package.
+- Symbolized legends, PDF/export metadata, title-block metadata, and preview manifest paths explain drawing conventions and review limits on every output package.
 
 ## Professional Output Elements Added
 
 - SVG title blocks with sheet numbers and project metadata.
 - Review-first preview stamps visible on every sheet.
-- Roof plan viewport with line-weight hierarchy, roof outlines, setback previews, module preview blocks, conduit candidates, equipment markers, legends, and annotation lists.
+- Realistic but diagrammatic site-context layer with lot boundary, street/access cue, driveway cue, neighboring structure silhouettes, and aerial-like grayscale texture.
+- Roof plan viewport with line-weight hierarchy, roof outlines, setback previews, realistic module grouping, conduit candidates, equipment markers, legends, and annotation lists.
 - Evidence/review sheets with photo evidence tiles, confidence notes, missing coverage visibility, and render-readiness callouts.
-- Print-friendly HTML package suitable for PDF export or live demo presentation.
+- Print-friendly HTML plus direct PDF packages, thumbnails, snapshots, contact sheets, and live-preview manifests.
 
 ## Commercial Impact
 

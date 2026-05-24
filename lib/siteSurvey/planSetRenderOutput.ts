@@ -31,6 +31,32 @@ export interface PlanSetRenderSheetV1 {
   noAuthorityEnforcement: PlanSetRenderNoAuthorityV1;
 }
 
+export interface PlanSetPreviewAssetV1 {
+  kind: 'html' | 'pdf' | 'svg_sheet' | 'thumbnail' | 'snapshot' | 'contact_sheet' | 'manifest';
+  label: string;
+  path: string;
+  sheetNumber?: string;
+  mimeType: string;
+}
+
+export interface PlanSetPreviewManifestV1 {
+  schemaVersion: 'professional_plan_set_preview_manifest_v1';
+  packageMode: 'live_preview_preparation_only';
+  sourceSurveyId: string;
+  packageHash: string;
+  defaultPreviewPath: string;
+  pdfPath: string;
+  contactSheetPath: string;
+  sheets: Array<{ sheetNumber: string; sheetType: PlanSetSheetTypeV1; title: string; svgPath: string; thumbnailPath: string; snapshotPath: string; renderHash: string }>;
+  assets: PlanSetPreviewAssetV1[];
+  livePreviewReadiness: {
+    readyForInternalPreviewRoute: boolean;
+    readyForLiveEngineeringUi: false;
+    blockersBeforePublicPreview: string[];
+  };
+  noAuthorityEnforcement: PlanSetRenderNoAuthorityV1;
+}
+
 export interface PlanSetRenderQualityChecklistV1 {
   schemaVersion: 'professional_plan_set_render_quality_checklist_v1';
   score: number;
@@ -49,6 +75,7 @@ export interface PlanSetRenderPackageV1 {
   packageHash: string;
   sheets: PlanSetRenderSheetV1[];
   htmlPreview: string;
+  previewManifest: PlanSetPreviewManifestV1;
   summary: {
     sheetCount: number;
     renderReadinessState: string;
@@ -74,7 +101,7 @@ const STYLE = {
   ink: '#111827', muted: '#4b5563', faint: '#e5e7eb', grid: '#d1d5db', roof: '#030712', roofFill: '#ffffff', setback: '#ea580c', module: '#1d4ed8', moduleFill: '#dbeafe', rail: '#334155', conduit: '#6d28d9', equipment: '#991b1b', obstruction: '#525252', review: '#92400e', ok: '#166534', banner: '#fff7ed', note: '#f8fafc', paper: '#ffffff', photo: '#eff6ff', trust: '#ecfdf5', blocked: '#fef2f2', shadow: '#9ca3af', titleFill: '#f3f4f6',
 } as const;
 
-const LAYERS = ['sheet-background', 'outer-border', 'title-block-rail', 'viewport-frame', 'grid', 'roof-outlines', 'fire-setbacks', 'module-layout', 'rail-attachment-symbols', 'conduit-candidates', 'equipment-markers', 'leader-callouts', 'annotations', 'review-callouts', 'legend', 'preview-stamp'] as const;
+const LAYERS = ['sheet-background', 'outer-border', 'title-block-rail', 'viewport-frame', 'grid', 'site-context', 'property-boundary', 'driveway-context', 'roof-outlines', 'fire-setbacks', 'module-layout', 'module-string-groups', 'rail-attachment-symbols', 'conduit-candidates', 'equipment-markers', 'leader-callouts', 'annotations', 'review-callouts', 'legend', 'preview-stamp'] as const;
 
 export function buildProfessionalPlanSetRenderPackage(report: ProfessionalSurveyReadinessReportV1): PlanSetRenderPackageV1 {
   const context = buildContext(report);
@@ -87,6 +114,7 @@ export function buildProfessionalPlanSetRenderPackage(report: ProfessionalSurvey
     sourceRenderReadinessHash: report.renderReadiness.renderReadinessHash,
     sheets,
     htmlPreview: buildHtmlPreview(sheets),
+    previewManifest: buildPreviewManifest(report, sheets, 'package.pdf', 'contact-sheet.png'),
     summary: {
       sheetCount: sheets.length,
       renderReadinessState: report.renderReadiness.state,
@@ -98,14 +126,16 @@ export function buildProfessionalPlanSetRenderPackage(report: ProfessionalSurvey
       renderQualityChecklist: quality,
       visibleQualityImprovements: [
         'CAD-style double borders, right-side title-block rail, sheet index regions, and drawing-number hierarchy create a permit-set visual language.',
+        'A deterministic grayscale site-context layer adds lot boundary, street/driveway cues, neighboring structure silhouettes, and aerial-like texture without extracting or mutating geometry.',
         'Canonical roof geometry is rendered as export-safe vector linework with professional line-weight conventions and monochrome drafting priority.',
-        'Setbacks, module previews, conduit candidates, equipment markers, north arrow, scale note, and leader callouts are visible directly on the drawing sheet.',
-        'Photo evidence and review risk summaries are packaged into cleaner report-sheet groupings with quality checklist scoring.',
+        'Setbacks, realistic module grouping, rail runs, attachment indicators, conduit candidates, equipment markers, north arrow, scale note, and leader callouts are visible directly on the drawing sheet.',
+        'Photo evidence, review risk summaries, PDF/export metadata, and live-preview manifest metadata are packaged for contractor/demo review.',
       ],
       contractorUsabilityImprovements: [
-        'Roof labels, pitch/azimuth labels, setbacks, equipment markers, leader lines, and module preview zones are visually grouped for print readability.',
+        'Roof labels, pitch/azimuth labels, setbacks, equipment markers, leader lines, string/group labels, and module preview zones are visually grouped for print readability.',
+        'Site context makes the sheet feel closer to a real contractor-facing roof/site plan while remaining diagrammatic and non-authoritative.',
         'Blocked/review states and non-authoritative preview stamps are explicit, reducing risk that preview renders are mistaken for stamped engineering.',
-        'Symbolized legends and title-block metadata explain drawing conventions and review limits on every output package.',
+        'Symbolized legends, PDF/export metadata, title-block metadata, and preview manifest paths explain drawing conventions and review limits on every output package.',
       ],
     },
     noAuthorityEnforcement: noAuthority(),
@@ -113,9 +143,12 @@ export function buildProfessionalPlanSetRenderPackage(report: ProfessionalSurvey
       'SVG sheets are deterministic render previews built from existing survey readiness DTOs only.',
       'Plan-set render output does not execute CAD solvers, mutate CAD, mutate canonical geometry, write persistence, or trigger engineering/permit/BOM workflows.',
       'PDF-ready output means vector composition suitable for export; it is not a stamped engineering package.',
+      'Site-context and aerial-like layers are deterministic visual context only; they are not property surveys, imagery analysis, or geometry authority.',
+      'Preview manifests and thumbnails prepare future UI integration but do not wire these outputs into the live Engineering UI.',
     ],
   };
-  return { ...withoutHash, packageHash: hash(stripSvgHashes(withoutHash)) };
+  const packageHash = hash(stripSvgHashes(withoutHash));
+  return { ...withoutHash, packageHash, previewManifest: { ...withoutHash.previewManifest, packageHash } };
 }
 
 function buildContext(report: ProfessionalSurveyReadinessReportV1) {
@@ -168,8 +201,8 @@ function renderSitePlanSheet(ctx: ReturnType<typeof buildContext>): PlanSetRende
   const annotations = renderPlanAnnotations(ctx);
   const callouts = renderReviewCallouts(ctx, 894, 118, 122, 300);
   const legend = renderLegend(894, 456);
-  const body = [viewportFrame(ctx), roof, setbacks, modules, renderRailSymbols(ctx), equipment, leaders, annotations, callouts, legend, scaleBar(652, 804), northArrow(814, 798)].join('');
-  return sheet(ctx, 'A-101', 'site_plan_render', 'Roof / Site Plan Render Preview', body, ['roof outlines', 'pitch/azimuth annotations', 'setback overlays', 'module preview zones', 'rail/attachment symbols', 'equipment markers', 'leader callouts', 'review callouts']);
+  const body = [viewportFrame(ctx), renderSiteContext(ctx), roof, setbacks, modules, renderRailSymbols(ctx), equipment, leaders, annotations, callouts, legend, scaleBar(652, 804), northArrow(814, 798)].join('');
+  return sheet(ctx, 'A-101', 'site_plan_render', 'Roof / Site Plan Render Preview', body, ['realistic site context', 'diagrammatic property boundary', 'driveway/building context', 'roof outlines', 'pitch/azimuth annotations', 'setback overlays', 'module preview zones', 'module string/group callouts', 'rail/attachment symbols', 'equipment markers', 'leader callouts', 'review callouts']);
 }
 
 function renderEvidenceSheet(ctx: ReturnType<typeof buildContext>): PlanSetRenderSheetV1 {
@@ -193,6 +226,26 @@ function sheet(ctx: ReturnType<typeof buildContext>, sheetNumber: string, type: 
   return { ...withoutHash, renderHash: hash({ ...withoutHash, svg: normalizeSvg(svgNoHash) }) };
 }
 
+function renderSiteContext(ctx: ReturnType<typeof buildContext>) {
+  const v = ctx.viewport;
+  const roof = ctx.bounds;
+  const cx = (tx(ctx, roof.minX) + tx(ctx, roof.maxX)) / 2;
+  const cy = (ty(ctx, roof.minY) + ty(ctx, roof.maxY)) / 2;
+  const lotX = Math.max(v.x + 58, Math.round(cx - 280));
+  const lotY = Math.max(v.y + 54, Math.round(cy - 238));
+  const lotW = Math.min(610, v.x + v.w - lotX - 58);
+  const lotH = Math.min(520, v.y + v.h - lotY - 54);
+  const streetY = Math.min(v.y + v.h - 78, lotY + lotH + 22);
+  const drivewayX = Math.min(lotX + lotW - 118, Math.max(lotX + 54, cx + 138));
+  const texture = Array.from({ length: 18 }, (_, i) => {
+    const x = v.x + 42 + (i * 67) % Math.max(1, v.w - 92);
+    const y = v.y + 48 + (i * 113) % Math.max(1, v.h - 118);
+    const r = 10 + (i % 4) * 3;
+    return `<circle cx="${x}" cy="${y}" r="${r}" fill="#e5e7eb" opacity="0.28"/>`;
+  }).join('');
+  return `<g opacity="0.96"><desc>realistic site context aerial-like grayscale property boundary driveway neighboring structure diagrammatic only</desc><rect x="${v.x + 10}" y="${v.y + 10}" width="${v.w - 20}" height="${v.h - 20}" fill="#f8fafc"/><g opacity="0.55">${texture}</g><rect x="${v.x + 18}" y="${streetY}" width="${v.w - 36}" height="44" fill="#e5e7eb" stroke="#9ca3af" stroke-width="${CAD.hairline}"/><line x1="${v.x + 38}" y1="${streetY + 22}" x2="${v.x + v.w - 38}" y2="${streetY + 22}" stroke="#f8fafc" stroke-width="3" stroke-dasharray="28 20"/><text x="${v.x + 30}" y="${streetY + 36}" class="tiny">STREET / ACCESS CONTEXT (DIAGRAMMATIC)</text><rect x="${lotX}" y="${lotY}" width="${lotW}" height="${lotH}" fill="none" stroke="#374151" stroke-width="${CAD.medium}" stroke-dasharray="10 6"/><text x="${lotX + 12}" y="${lotY + 20}" class="callout">PROPERTY / LOT CONTEXT PREVIEW</text><path d="M ${drivewayX} ${streetY} L ${drivewayX - 22} ${cy + 122} L ${drivewayX + 34} ${cy + 94} L ${drivewayX + 72} ${streetY}" fill="#e5e7eb" stroke="#6b7280" stroke-width="${CAD.thin}"/><text x="${drivewayX - 4}" y="${Math.min(streetY - 12, cy + 134)}" class="tiny">DRIVEWAY / ACCESS</text><rect x="${lotX + 32}" y="${lotY + 52}" width="84" height="58" fill="#f3f4f6" stroke="#9ca3af" stroke-width="${CAD.hairline}"/><rect x="${lotX + lotW - 112}" y="${lotY + 74}" width="72" height="94" fill="#f3f4f6" stroke="#9ca3af" stroke-width="${CAD.hairline}"/><text x="${lotX + lotW - 130}" y="${lotY + 188}" class="tiny">NEIGHBORING STRUCTURE CUES</text></g>`;
+}
+
 function renderRoofGeometry(ctx: ReturnType<typeof buildContext>) {
   return ctx.report.canonicalGeometry.roofPlanes.map((plane) => {
     const d = plane.polygon.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${tx(ctx, p.x)} ${ty(ctx, p.y)}`).join(' ') + ' Z';
@@ -210,15 +263,33 @@ function renderSetbacks(ctx: ReturnType<typeof buildContext>) {
 }
 
 function renderModulePreview(ctx: ReturnType<typeof buildContext>) {
-  const cells: string[] = [];
-  for (const plane of ctx.report.canonicalGeometry.roofPlanes) {
-    const b = geometryBounds(plane.polygon); const x0 = tx(ctx, b.minX) + 48; const y0 = ty(ctx, b.maxY) + 66;
-    for (let row = 0; row < 3; row++) for (let col = 0; col < 5; col++) {
-      const x = x0 + col * 44, y = y0 + row * 70;
-      cells.push(`<g><rect x="${x}" y="${y}" width="34" height="58" fill="${STYLE.moduleFill}" stroke="${STYLE.module}" stroke-width="${CAD.thin}"/><line x1="${x + 17}" y1="${y + 3}" x2="${x + 17}" y2="${y + 55}" stroke="#93c5fd" stroke-width="0.6"/><line x1="${x + 3}" y1="${y + 29}" x2="${x + 31}" y2="${y + 29}" stroke="#93c5fd" stroke-width="0.6"/></g>`);
+  const groups: string[] = [];
+  for (const [planeIndex, plane] of ctx.report.canonicalGeometry.roofPlanes.entries()) {
+    const b = geometryBounds(plane.polygon);
+    const left = tx(ctx, b.minX) + 52;
+    const top = ty(ctx, b.maxY) + 62;
+    const right = tx(ctx, b.maxX) - 46;
+    const bottom = ty(ctx, b.minY) - 54;
+    const wide = Math.max(1, right - left) > Math.max(1, bottom - top) * 1.22;
+    const moduleW = wide ? 56 : 34;
+    const moduleH = wide ? 34 : 58;
+    const gapX = 8;
+    const gapY = 10;
+    const cols = Math.max(3, Math.min(wide ? 6 : 5, Math.floor(Math.max(90, right - left) / (moduleW + gapX))));
+    const rows = Math.max(2, Math.min(wide ? 4 : 3, Math.floor(Math.max(90, bottom - top) / (moduleH + gapY))));
+    const groupW = cols * moduleW + (cols - 1) * gapX;
+    const groupH = rows * moduleH + (rows - 1) * gapY;
+    const x0 = Math.round(left + Math.max(0, (right - left - groupW) / 2));
+    const y0 = Math.round(top + Math.max(0, (bottom - top - groupH) / 2));
+    const modules: string[] = [];
+    for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) {
+      const x = x0 + col * (moduleW + gapX), y = y0 + row * (moduleH + gapY);
+      modules.push(`<g><rect x="${x}" y="${y}" width="${moduleW}" height="${moduleH}" fill="${STYLE.moduleFill}" stroke="${STYLE.module}" stroke-width="${CAD.thin}"/><line x1="${x + Math.round(moduleW / 2)}" y1="${y + 3}" x2="${x + Math.round(moduleW / 2)}" y2="${y + moduleH - 3}" stroke="#93c5fd" stroke-width="0.6"/><line x1="${x + 3}" y1="${y + Math.round(moduleH / 2)}" x2="${x + moduleW - 3}" y2="${y + Math.round(moduleH / 2)}" stroke="#93c5fd" stroke-width="0.6"/></g>`);
     }
+    const labelY = Math.max(98, y0 - 12);
+    groups.push(`<g><desc>module preview realistic spacing row alignment portrait landscape string group callout</desc><rect x="${x0 - 10}" y="${y0 - 10}" width="${groupW + 20}" height="${groupH + 20}" fill="none" stroke="${STYLE.module}" stroke-width="${CAD.hairline}" stroke-dasharray="5 4"/>${modules.join('')}<text x="${x0}" y="${labelY}" class="callout" fill="${STYLE.module}">PV-${planeIndex + 1} MODULE GROUP · ${rows}x${cols} ${wide ? 'LANDSCAPE' : 'PORTRAIT'} PREVIEW</text></g>`);
   }
-  return cells.join('');
+  return groups.join('');
 }
 
 function renderEquipment(ctx: ReturnType<typeof buildContext>) {
@@ -235,7 +306,7 @@ function renderRailSymbols(ctx: ReturnType<typeof buildContext>) {
 
 function renderLeaderCallouts(ctx: ReturnType<typeof buildContext>) {
   const c = centroid(ctx.report.canonicalGeometry.roofPlanes[0]?.polygon ?? [], ctx);
-  return `<g><path d="M ${c.x + 48} ${c.y - 52} L 880 206" fill="none" stroke="${STYLE.ink}" stroke-width="${CAD.thin}"/><text x="884" y="204" class="callout">MODULE PREVIEW ZONE</text><path d="M ${c.x + 132} ${c.y + 82} L 880 250" fill="none" stroke="${STYLE.setback}" stroke-width="${CAD.thin}" stroke-dasharray="${CAD.dashReview}"/><text x="884" y="252" class="callout" fill="${STYLE.setback}">FIRE SETBACK OVERLAY</text></g>`;
+  return `<g><path d="M ${c.x + 48} ${c.y - 52} L 880 206" fill="none" stroke="${STYLE.ink}" stroke-width="${CAD.thin}"/><text x="884" y="204" class="callout">MODULE PREVIEW ZONE</text><path d="M ${c.x + 18} ${c.y - 118} L 880 228" fill="none" stroke="${STYLE.module}" stroke-width="${CAD.thin}"/><text x="884" y="230" class="callout" fill="${STYLE.module}">PV STRING / GROUP CALLOUT</text><path d="M ${c.x + 132} ${c.y + 82} L 880 254" fill="none" stroke="${STYLE.setback}" stroke-width="${CAD.thin}" stroke-dasharray="${CAD.dashReview}"/><text x="884" y="256" class="callout" fill="${STYLE.setback}">FIRE SETBACK OVERLAY</text></g>`;
 }
 
 function renderPlanAnnotations(ctx: ReturnType<typeof buildContext>) {
@@ -277,20 +348,53 @@ function centroid(points: Array<{ x: number; y: number }>, ctx: ReturnType<typeo
 function geometryBounds(points: Array<{ x: number; y: number }>) { if (points.length === 0) return { minX: 0, maxX: 100, minY: 0, maxY: 100 }; return points.reduce((b, p) => ({ minX: Math.min(b.minX, p.x), maxX: Math.max(b.maxX, p.x), minY: Math.min(b.minY, p.y), maxY: Math.max(b.maxY, p.y) }), { minX: points[0].x, maxX: points[0].x, minY: points[0].y, maxY: points[0].y }); }
 function enabled(r: ProfessionalSurveyReadinessReportV1, type: string) { return r.renderRecommendationReport.recommendations.some(item => item.type === type && item.enabledForPreview); }
 function stateColor(state: string) { return state === 'render_blocked' ? STYLE.blocked : state === 'render_review_required' ? STYLE.banner : STYLE.trust; }
+function buildPreviewManifest(report: ProfessionalSurveyReadinessReportV1, sheets: PlanSetRenderSheetV1[], pdfPath: string, contactSheetPath: string): PlanSetPreviewManifestV1 {
+  const sheetAssets = sheets.flatMap(sheet => ([
+    { kind: 'svg_sheet' as const, label: `${sheet.sheetNumber} ${sheet.title}`, path: `${sheet.sheetNumber}-${sheet.sheetType}.svg`, sheetNumber: sheet.sheetNumber, mimeType: 'image/svg+xml' },
+    { kind: 'thumbnail' as const, label: `${sheet.sheetNumber} thumbnail`, path: `thumbnails/${sheet.sheetNumber}-${sheet.sheetType}.png`, sheetNumber: sheet.sheetNumber, mimeType: 'image/png' },
+    { kind: 'snapshot' as const, label: `${sheet.sheetNumber} preview snapshot`, path: `snapshots/${sheet.sheetNumber}-${sheet.sheetType}.png`, sheetNumber: sheet.sheetNumber, mimeType: 'image/png' },
+  ]));
+  return {
+    schemaVersion: 'professional_plan_set_preview_manifest_v1',
+    packageMode: 'live_preview_preparation_only',
+    sourceSurveyId: report.source.surveyId,
+    packageHash: 'computed-after-package-hash',
+    defaultPreviewPath: 'index.html',
+    pdfPath,
+    contactSheetPath,
+    sheets: sheets.map(sheet => ({ sheetNumber: sheet.sheetNumber, sheetType: sheet.sheetType, title: sheet.title, svgPath: `${sheet.sheetNumber}-${sheet.sheetType}.svg`, thumbnailPath: `thumbnails/${sheet.sheetNumber}-${sheet.sheetType}.png`, snapshotPath: `snapshots/${sheet.sheetNumber}-${sheet.sheetType}.png`, renderHash: sheet.renderHash })),
+    assets: [
+      { kind: 'html', label: 'Multi-sheet HTML preview', path: 'index.html', mimeType: 'text/html' },
+      { kind: 'pdf', label: 'Multi-sheet PDF package', path: pdfPath, mimeType: 'application/pdf' },
+      { kind: 'contact_sheet', label: 'Package contact sheet', path: contactSheetPath, mimeType: 'image/png' },
+      { kind: 'manifest', label: 'Live preview manifest', path: 'preview-manifest.json', mimeType: 'application/json' },
+      ...sheetAssets,
+    ],
+    livePreviewReadiness: {
+      readyForInternalPreviewRoute: true,
+      readyForLiveEngineeringUi: false,
+      blockersBeforePublicPreview: ['Product approval of preview-only warning UX', 'PDF download QA across target browsers', 'Stakeholder acceptance of visual quality threshold before public release'],
+    },
+    noAuthorityEnforcement: noAuthority(),
+  };
+}
+
 function buildRenderQualityChecklist(report: ProfessionalSurveyReadinessReportV1, sheets: PlanSetRenderSheetV1[]): PlanSetRenderQualityChecklistV1 {
   const all = sheets.map(s => s.svg).join('\n');
   const mk = (key: string, label: string, passed: boolean, maxPoints: number) => ({ key, label, passed, points: passed ? maxPoints : 0, maxPoints });
   const checks = [
-    mk('title_block_rail', 'Right-side CAD title block rail with sheet number/name metadata', all.includes('SHEET NUMBER') && all.includes('SHEET NAME'), 12),
-    mk('sheet_border', 'Double sheet border and drawing rail are present', all.includes('outer-border') || all.includes('width="1272" height="972"'), 10),
-    mk('legend_symbols', 'Legend contains graphic symbols, not text-only descriptions', all.includes('LEGEND') && all.includes('PV module') && all.includes('fire path'), 10),
-    mk('viewport_readability', 'Site plan viewport includes drawing frame, grid, roof plan title, north arrow, and scale bar', all.includes('ROOF PLAN WITH MODULES') && all.includes('SCALE: DIAGRAMMATIC') && all.includes('N</text>'), 12),
-    mk('annotation_readability', 'Leader callouts and active render layer table are present', all.includes('MODULE PREVIEW ZONE') && all.includes('ACTIVE RENDER LAYERS'), 10),
-    mk('line_weight_consistency', 'CAD line-weight and dashed convention tokens are used consistently', all.includes('stroke-width="3"') && all.includes(CAD.dashSetback) && all.includes(CAD.dashConduit), 10),
-    mk('render_confidence_display', 'Render confidence/state is visible in title block and stamp', all.includes(`${report.renderReadiness.renderConfidenceScore}/100`) && all.includes(report.renderReadiness.state), 10),
-    mk('review_warning_visibility', 'Review/non-authority warnings are visible on package sheets', all.includes('NON-AUTHORITATIVE PREVIEW') && all.includes('REVIEW'), 10),
-    mk('print_export_readiness', 'HTML/SVG package is deterministic, vector based, and print styled', sheets.every(s => s.svg.startsWith('<svg')) && sheets.length === 3, 8),
-    mk('evidence_grouping', 'Evidence sheet groups photo metadata and coverage/risk summaries', all.includes('PHOTO EVIDENCE / REVIEW CALLOUTS') && all.includes('EVIDENCE COVERAGE SUMMARY'), 8),
+    mk('title_block_rail', 'Right-side CAD title block rail with sheet number/name metadata', all.includes('SHEET NUMBER') && all.includes('SHEET NAME'), 10),
+    mk('sheet_border', 'Double sheet border and drawing rail are present', all.includes('outer-border') || all.includes('width="1272" height="972"'), 8),
+    mk('legend_symbols', 'Legend contains graphic symbols, not text-only descriptions', all.includes('LEGEND') && all.includes('PV module') && all.includes('fire path'), 8),
+    mk('viewport_readability', 'Site plan viewport includes drawing frame, grid, roof plan title, north arrow, and scale bar', all.includes('ROOF PLAN WITH MODULES') && all.includes('SCALE: DIAGRAMMATIC') && all.includes('N</text>'), 9),
+    mk('site_context_realism', 'Site plan includes deterministic aerial-like context, lot boundary, driveway/access, and neighboring structure cues', all.includes('realistic site context') && all.includes('PROPERTY / LOT CONTEXT PREVIEW') && all.includes('DRIVEWAY / ACCESS'), 10),
+    mk('module_layout_realism', 'Module layout includes aligned rows, spacing, orientation, group outline, and string/group callout', all.includes('PV-1 MODULE GROUP') && all.includes('PV STRING / GROUP CALLOUT'), 10),
+    mk('annotation_readability', 'Leader callouts and active render layer table are present', all.includes('MODULE PREVIEW ZONE') && all.includes('ACTIVE RENDER LAYERS'), 7),
+    mk('line_weight_consistency', 'CAD line-weight and dashed convention tokens are used consistently', all.includes('stroke-width="3"') && all.includes(CAD.dashSetback) && all.includes(CAD.dashConduit), 8),
+    mk('render_confidence_display', 'Render confidence/state is visible in title block and stamp', all.includes(`${report.renderReadiness.renderConfidenceScore}/100`) && all.includes(report.renderReadiness.state), 8),
+    mk('review_warning_visibility', 'Review/non-authority warnings are visible on package sheets', all.includes('NON-AUTHORITATIVE PREVIEW') && all.includes('REVIEW'), 8),
+    mk('print_export_readiness', 'HTML/SVG package is deterministic, vector based, and print styled', sheets.every(s => s.svg.startsWith('<svg')) && sheets.length === 3, 7),
+    mk('evidence_grouping', 'Evidence sheet groups photo metadata and coverage/risk summaries', all.includes('PHOTO EVIDENCE / REVIEW CALLOUTS') && all.includes('EVIDENCE COVERAGE SUMMARY'), 7),
   ];
   const score = checks.reduce((sum, c) => sum + c.points, 0);
   return { schemaVersion: 'professional_plan_set_render_quality_checklist_v1', score, maxScore: 100, grade: score >= 92 ? 'ui_candidate' : score >= 78 ? 'commercial_preview' : 'benchmark_gap', checks, benchmarkGaps: score >= 92 ? ['Direct PDF export automation and richer production module/string data remain before permit-grade UI release.'] : ['Visual output still needs CAD polish before live UI wiring.'], noAuthorityEnforcement: noAuthority() };

@@ -6,9 +6,10 @@ The first professional output engine intentionally uses native deterministic SVG
 
 ## Existing OSS Utilities Considered
 
-- `jspdf`: useful next step for direct PDF export, but deferred because SVG/HTML print output is faster and more inspectable for this phase.
-- `puppeteer-core`: useful for automated PDF snapshots later, but unnecessary for deterministic SVG unit tests.
-- `sharp`: valuable for future image/contact-sheet thumbnails, deferred to avoid pixel/image processing expansion.
+- `wkhtmltopdf`: selected for direct multi-sheet PDF export from deterministic HTML/SVG composition because no additional browser runtime was required in this environment.
+- `jspdf`: available for future client-side or pure-JS PDF flows, but not selected here because HTML/SVG-to-PDF preserved the existing composition with less churn.
+- `puppeteer-core`: available for a future controlled Chromium export adapter when a browser binary is guaranteed.
+- `sharp`: used for deterministic PNG thumbnails, larger preview snapshots, and contact-sheet package previews.
 - `exif-reader`: valuable for future metadata confidence scoring, not needed for SVG composition.
 
 ## Leverage Gained
@@ -17,4 +18,4 @@ Native SVG provided the strongest quality-per-credit leverage: export-safe vecto
 
 ## Performance / Complexity
 
-Performance impact is negligible for fixture-sized plan sets because rendering is string composition over existing DTOs. Integration complexity is low: one library module plus one generation script and focused tests.
+Performance impact is low for fixture-sized plan sets because rendering is string composition over existing DTOs, with explicit artifact generation confined to the generation script. Integration complexity remains low: one library module plus one generation script and focused tests.

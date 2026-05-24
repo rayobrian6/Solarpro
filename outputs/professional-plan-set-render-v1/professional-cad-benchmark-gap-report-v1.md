@@ -17,24 +17,25 @@ The uploaded sealed residential solar permit package was reviewed as a visual be
 
 - CAD-style double border and right-side title block rail added to every sheet.
 - Monochrome drafting hierarchy with controlled module, setback, conduit, and equipment accents.
+- Deterministic grayscale site-context composition added for lot/property, access, driveway, neighboring structure, and aerial-like realism cues.
 - Symbolized legend with matching roof/module/fire path/conduit/equipment/attachment symbols.
-- Leader-line callouts for module preview zones and fire setback overlays.
+- Leader-line callouts for module preview zones, PV group/string callouts, and fire setback overlays.
 - A-000 rebalanced into system summary, sheet index, render layer summary, trust indicators, and review notes.
 - A-101 reworked around a cleaner roof plan viewport, scale/north placement, rail/attachment symbols, and active render layer table.
 - A-201 converted into evidence records plus evidence coverage and review/risk regions.
-- Deterministic render quality checklist added for visual QA only.
+- Deterministic render quality checklist, direct PDF export, preview thumbnails/snapshots, contact sheets, and live-preview manifests added for visual QA only.
 
 ## Lowest-Cost Polish Wins Remaining
 
-- Direct PDF export from the existing SVG/HTML composition.
 - Real brand/title-block customization per contractor or dealer.
 - Better project/address/client metadata where survey fixtures provide it.
 - Production module/string layout data when available, replacing deterministic preview modules.
+- Public preview QA for PDF/download/browser behavior.
 
-## Blockers To Professional Commercial Standard
+## Blockers To Public-Facing Professional Standard
 
-The upgraded output is closer to commercial preview quality, but it is still not a stamped permit package. Remaining blockers before full professional standard are direct PDF export, production-grade module/string placement, AHJ-specific note libraries under explicit authority controls, and richer imagery/context overlays. Live UI wiring should wait until product stakeholders accept the quality checklist threshold and preview-only warnings in the UI experience.
+The upgraded output is closer to commercial preview quality, but it is still not a stamped permit package. Remaining blockers before public-facing release are production-grade module/string placement when authoritative design data exists, AHJ-specific note libraries under explicit authority controls, branding/custom metadata, and product-approved preview-only warning UX. Live UI wiring should wait until product stakeholders accept the quality checklist threshold and preview warnings in the UI experience.
 
 ## Quality Result
 
-Average deterministic render quality score: **100/100**. Checklist keys: title_block_rail, sheet_border, legend_symbols, viewport_readability, annotation_readability, line_weight_consistency, render_confidence_display, review_warning_visibility, print_export_readiness, evidence_grouping.
+Average deterministic render quality score: **93/100**. Checklist keys: title_block_rail, sheet_border, legend_symbols, viewport_readability, site_context_realism, module_layout_realism, annotation_readability, line_weight_consistency, render_confidence_display, review_warning_visibility, print_export_readiness, evidence_grouping.

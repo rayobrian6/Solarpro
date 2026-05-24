@@ -10,43 +10,72 @@
   "packageHashes": [
     {
       "fixtureId": "clean_roof",
-      "packageHash": "c90830fd",
+      "packageHash": "fedb1c87",
       "state": "render_demo_ready",
       "confidence": 100,
       "renderQualityScore": 100,
-      "renderQualityGrade": "ui_candidate"
+      "renderQualityGrade": "ui_candidate",
+      "pdfExported": true,
+      "thumbnailCount": 3,
+      "snapshotCount": 3,
+      "contactSheetGenerated": true
     },
     {
       "fixtureId": "ground_mount_survey",
-      "packageHash": "4e02a30b",
+      "packageHash": "0fbf8a72",
       "state": "render_demo_ready",
       "confidence": 97,
-      "renderQualityScore": 100,
-      "renderQualityGrade": "ui_candidate"
+      "renderQualityScore": 90,
+      "renderQualityGrade": "commercial_preview",
+      "pdfExported": true,
+      "thumbnailCount": 3,
+      "snapshotCount": 3,
+      "contactSheetGenerated": true
     },
     {
       "fixtureId": "solar_fence_survey",
-      "packageHash": "c7f3eb98",
+      "packageHash": "6d19fbef",
       "state": "render_demo_ready",
       "confidence": 97,
-      "renderQualityScore": 100,
-      "renderQualityGrade": "ui_candidate"
+      "renderQualityScore": 90,
+      "renderQualityGrade": "commercial_preview",
+      "pdfExported": true,
+      "thumbnailCount": 3,
+      "snapshotCount": 3,
+      "contactSheetGenerated": true
     },
     {
       "fixtureId": "document_derived_partial_evidence",
-      "packageHash": "bea076ba",
+      "packageHash": "4549b177",
       "state": "render_review_required",
       "confidence": 64,
-      "renderQualityScore": 100,
-      "renderQualityGrade": "ui_candidate"
+      "renderQualityScore": 90,
+      "renderQualityGrade": "commercial_preview",
+      "pdfExported": true,
+      "thumbnailCount": 3,
+      "snapshotCount": 3,
+      "contactSheetGenerated": true
     }
   ],
-  "averageRenderQualityScore": 100,
+  "averageRenderQualityScore": 93,
+  "pdfExport": {
+    "stack": "wkhtmltopdf from deterministic HTML/SVG composition; sharp for PNG thumbnails/snapshots/contact sheets",
+    "packagePdfCount": 4,
+    "expectedPackagePdfCount": 4
+  },
+  "previewAssets": {
+    "thumbnailCount": 12,
+    "snapshotCount": 12,
+    "contactSheetCount": 4,
+    "manifestCount": 4
+  },
   "renderQualityChecklistKeys": [
     "title_block_rail",
     "sheet_border",
     "legend_symbols",
     "viewport_readability",
+    "site_context_realism",
+    "module_layout_realism",
     "annotation_readability",
     "line_weight_consistency",
     "render_confidence_display",
@@ -56,14 +85,16 @@
   ],
   "visibleQualityImprovements": [
     "CAD-style double borders, right-side title-block rail, sheet index regions, and drawing-number hierarchy create a permit-set visual language.",
+    "A deterministic grayscale site-context layer adds lot boundary, street/driveway cues, neighboring structure silhouettes, and aerial-like texture without extracting or mutating geometry.",
     "Canonical roof geometry is rendered as export-safe vector linework with professional line-weight conventions and monochrome drafting priority.",
-    "Setbacks, module previews, conduit candidates, equipment markers, north arrow, scale note, and leader callouts are visible directly on the drawing sheet.",
-    "Photo evidence and review risk summaries are packaged into cleaner report-sheet groupings with quality checklist scoring."
+    "Setbacks, realistic module grouping, rail runs, attachment indicators, conduit candidates, equipment markers, north arrow, scale note, and leader callouts are visible directly on the drawing sheet.",
+    "Photo evidence, review risk summaries, PDF/export metadata, and live-preview manifest metadata are packaged for contractor/demo review."
   ],
   "contractorUsabilityImprovements": [
-    "Roof labels, pitch/azimuth labels, setbacks, equipment markers, leader lines, and module preview zones are visually grouped for print readability.",
+    "Roof labels, pitch/azimuth labels, setbacks, equipment markers, leader lines, string/group labels, and module preview zones are visually grouped for print readability.",
+    "Site context makes the sheet feel closer to a real contractor-facing roof/site plan while remaining diagrammatic and non-authoritative.",
     "Blocked/review states and non-authoritative preview stamps are explicit, reducing risk that preview renders are mistaken for stamped engineering.",
-    "Symbolized legends and title-block metadata explain drawing conventions and review limits on every output package."
+    "Symbolized legends, PDF/export metadata, title-block metadata, and preview manifest paths explain drawing conventions and review limits on every output package."
   ],
   "noAuthorityEnforcement": {
     "readOnly": true,
