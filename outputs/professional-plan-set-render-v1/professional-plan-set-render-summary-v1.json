@@ -10,7 +10,7 @@
   "packageHashes": [
     {
       "fixtureId": "clean_roof",
-      "packageHash": "d0c90d6c",
+      "packageHash": "b2a4bb73",
       "state": "render_demo_ready",
       "confidence": 100,
       "renderQualityScore": 100,
@@ -22,11 +22,11 @@
     },
     {
       "fixtureId": "ground_mount_survey",
-      "packageHash": "53241b9a",
+      "packageHash": "8182a35c",
       "state": "render_demo_ready",
       "confidence": 97,
-      "renderQualityScore": 82,
-      "renderQualityGrade": "benchmark_gap",
+      "renderQualityScore": 100,
+      "renderQualityGrade": "ui_candidate",
       "pdfExported": true,
       "thumbnailCount": 3,
       "snapshotCount": 3,
@@ -34,11 +34,11 @@
     },
     {
       "fixtureId": "solar_fence_survey",
-      "packageHash": "c4133487",
+      "packageHash": "8189e061",
       "state": "render_demo_ready",
       "confidence": 97,
-      "renderQualityScore": 82,
-      "renderQualityGrade": "benchmark_gap",
+      "renderQualityScore": 100,
+      "renderQualityGrade": "ui_candidate",
       "pdfExported": true,
       "thumbnailCount": 3,
       "snapshotCount": 3,
@@ -46,7 +46,7 @@
     },
     {
       "fixtureId": "document_derived_partial_evidence",
-      "packageHash": "bf8752dc",
+      "packageHash": "d7aa4463",
       "state": "render_review_required",
       "confidence": 64,
       "renderQualityScore": 90,
@@ -57,7 +57,7 @@
       "contactSheetGenerated": true
     }
   ],
-  "averageRenderQualityScore": 89,
+  "averageRenderQualityScore": 98,
   "pdfExport": {
     "stack": "wkhtmltopdf from deterministic HTML/SVG composition; sharp for PNG thumbnails/snapshots/contact sheets",
     "packagePdfCount": 4,

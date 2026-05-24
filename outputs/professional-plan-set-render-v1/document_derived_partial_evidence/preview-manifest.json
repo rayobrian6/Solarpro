@@ -2,7 +2,7 @@
   "schemaVersion": "professional_plan_set_preview_manifest_v1",
   "packageMode": "live_preview_preparation_only",
   "sourceSurveyId": "expanded-document-partial-001",
-  "packageHash": "bf8752dc",
+  "packageHash": "d7aa4463",
   "defaultPreviewPath": "index.html",
   "pdfPath": "package.pdf",
   "contactSheetPath": "contact-sheet.png",
@@ -14,7 +14,7 @@
       "svgPath": "A-000-cover_summary.svg",
       "thumbnailPath": "thumbnails/A-000-cover_summary.png",
       "snapshotPath": "snapshots/A-000-cover_summary.png",
-      "renderHash": "3344a169"
+      "renderHash": "a0a936de"
     },
     {
       "sheetNumber": "A-101",
@@ -23,7 +23,7 @@
       "svgPath": "A-101-site_plan_render.svg",
       "thumbnailPath": "thumbnails/A-101-site_plan_render.png",
       "snapshotPath": "snapshots/A-101-site_plan_render.png",
-      "renderHash": "976ab0a8"
+      "renderHash": "0b2cb210"
     },
     {
       "sheetNumber": "A-201",
@@ -32,7 +32,7 @@
       "svgPath": "A-201-evidence_review.svg",
       "thumbnailPath": "thumbnails/A-201-evidence_review.png",
       "snapshotPath": "snapshots/A-201-evidence_review.png",
-      "renderHash": "e91fde06"
+      "renderHash": "ac5e6431"
     }
   ],
   "assets": [

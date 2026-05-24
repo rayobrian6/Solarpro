@@ -22,8 +22,8 @@ Professional Plan-Set Render Output V1 generated **12 SVG sheets** across **4 de
 - SVG title blocks with sheet numbers and project metadata.
 - Review-first preview stamps visible on every sheet.
 - Realistic but diagrammatic site-context layer with lot boundary, street/access cue, driveway cue, neighboring structure silhouettes, and aerial-like grayscale texture.
-- Flagship A-101 roof/site plan now carries stronger roof edge articulation, roof hatch, obstruction reference symbols, parcel hatch cues, rail/attachment indicators, professional true-north/scale graphics, and balanced bottom-table density.
-- Roof plan viewport with line-weight hierarchy, roof outlines, setback previews, realistic module grouping, conduit candidates, equipment markers, richer legends, construction notes, revision/QA table, and annotation lists.
+- Flagship A-101 now carries stronger roof edge articulation for roof systems plus fixture-aware ground-mount rack rows, support-post grids, trench/conduit corridors, solar-fence post/rail bay layouts, clearance review zones, rail/attachment indicators, professional true-north/scale graphics, and balanced bottom-table density.
+- Site plan viewport with line-weight hierarchy, roof/fixture outlines, setback/access/clearance previews, realistic module grouping, conduit candidates, equipment markers, richer fixture-aware legends, construction notes, revision/QA table, and annotation lists.
 - Evidence/review sheets with photo evidence tiles, confidence notes, missing coverage visibility, and render-readiness callouts.
 - Print-friendly HTML plus direct PDF packages, thumbnails, snapshots, contact sheets, and live-preview manifests.
 

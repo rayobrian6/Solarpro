@@ -80,7 +80,7 @@ async function generatePreviewAssets(dir: string, pkg: ReturnType<typeof buildPr
     const cardSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="380" height="354"><rect x="0" y="0" width="380" height="354" rx="16" fill="#ffffff" stroke="#111827" stroke-width="1.4"/><rect x="14" y="14" width="352" height="270" fill="#f8fafc" stroke="#cbd5e1"/><image href="data:image/png;base64,${thumbBase64}" x="25" y="24" width="330"/><rect x="14" y="292" width="352" height="48" fill="#f3f4f6" stroke="#cbd5e1"/><text x="26" y="313" font-family="Arial" font-size="18" font-weight="800" fill="#111827">${sheet.sheetNumber}</text><text x="86" y="313" font-family="Arial" font-size="12" font-weight="700" fill="#334155">${sheet.title}</text><text x="26" y="333" font-family="Arial" font-size="10" font-weight="700" fill="#92400e">NON-AUTHORITATIVE COMMERCIAL PREVIEW</text></svg>`;
     sheetCards.push(await sharp(Buffer.from(cardSvg)).png().toBuffer());
   }
-  const contactHeader = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="118"><rect width="1200" height="118" fill="#111827"/><text x="32" y="46" font-family="Arial" font-size="28" font-weight="900" fill="#ffffff">SolarPro Commercial Plan-Set Preview</text><text x="32" y="76" font-family="Arial" font-size="14" font-weight="700" fill="#d1d5db">A-101 flagship roof/site plan refinement · PDF-ready SVG sheets · deterministic preview-only package</text><text x="930" y="46" font-family="Arial" font-size="16" font-weight="900" fill="#fbbf24">QUALITY ${pkg.summary.renderQualityScore}/100</text><text x="930" y="74" font-family="Arial" font-size="12" font-weight="700" fill="#e5e7eb">${pkg.summary.renderQualityGrade}</text></svg>`);
+  const contactHeader = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="118"><rect width="1200" height="118" fill="#111827"/><text x="32" y="46" font-family="Arial" font-size="28" font-weight="900" fill="#ffffff">SolarPro Commercial Plan-Set Preview</text><text x="32" y="76" font-family="Arial" font-size="14" font-weight="700" fill="#d1d5db">A-101 fixture-aware roof, ground-mount, and solar-fence refinement · PDF-ready SVG sheets · deterministic preview-only package</text><text x="930" y="46" font-family="Arial" font-size="16" font-weight="900" fill="#fbbf24">QUALITY ${pkg.summary.renderQualityScore}/100</text><text x="930" y="74" font-family="Arial" font-size="12" font-weight="700" fill="#e5e7eb">${pkg.summary.renderQualityGrade}</text></svg>`);
   const contactFooter = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="56"><rect width="1200" height="56" fill="#f8fafc"/><line x1="32" y1="1" x2="1168" y2="1" stroke="#cbd5e1"/><text x="32" y="34" font-family="Arial" font-size="12" font-weight="700" fill="#475569">Preview-only render package. Not stamped engineering, not construction documents, no CAD solver execution, no geometry mutation.</text></svg>`);
   await sharp({ create: { width: 1200, height: 530, channels: 4, background: '#e5e7eb' } })
     .composite([
@@ -165,8 +165,8 @@ ${summaryValue.contractorUsabilityImprovements.map(v => `- ${v}`).join('\n')}
 - SVG title blocks with sheet numbers and project metadata.
 - Review-first preview stamps visible on every sheet.
 - Realistic but diagrammatic site-context layer with lot boundary, street/access cue, driveway cue, neighboring structure silhouettes, and aerial-like grayscale texture.
-- Flagship A-101 roof/site plan now carries stronger roof edge articulation, roof hatch, obstruction reference symbols, parcel hatch cues, rail/attachment indicators, professional true-north/scale graphics, and balanced bottom-table density.
-- Roof plan viewport with line-weight hierarchy, roof outlines, setback previews, realistic module grouping, conduit candidates, equipment markers, richer legends, construction notes, revision/QA table, and annotation lists.
+- Flagship A-101 now carries stronger roof edge articulation for roof systems plus fixture-aware ground-mount rack rows, support-post grids, trench/conduit corridors, solar-fence post/rail bay layouts, clearance review zones, rail/attachment indicators, professional true-north/scale graphics, and balanced bottom-table density.
+- Site plan viewport with line-weight hierarchy, roof/fixture outlines, setback/access/clearance previews, realistic module grouping, conduit candidates, equipment markers, richer fixture-aware legends, construction notes, revision/QA table, and annotation lists.
 - Evidence/review sheets with photo evidence tiles, confidence notes, missing coverage visibility, and render-readiness callouts.
 - Print-friendly HTML plus direct PDF packages, thumbnails, snapshots, contact sheets, and live-preview manifests.
 
@@ -208,8 +208,8 @@ function realismExportReport(summaryValue: typeof summary) {
 
 - A deterministic grayscale site-context layer adds lot/property boundary, street/access cue, driveway/access shape, neighboring structure silhouettes, and aerial-like texture.
 - Site plan composition remains diagrammatic and preview-only; it does not extract authoritative parcel geometry or mutate canonical roof geometry.
-- Module layout visuals now include aligned rows, orientation labels, group outlines, consistent spacing, string/group callouts, rail/attachment symbols, and A-101 note/table density.
-- Roof plan realism now includes roof hatch, edge vertices, obstruction reference symbols, parcel hatch cues, and stronger true-north/scale presentation while remaining explicitly diagrammatic.
+- Module layout visuals now include aligned rows, orientation labels, ground-mount rack grouping, solar-fence linear bay grouping, consistent spacing, string/group callouts, conductor homerun cues, rail/attachment symbols, and A-101 note/table density.
+- Roof plan realism still includes roof hatch, edge vertices, obstruction reference symbols, and parcel hatch cues; ground/fence realism now includes support posts, rack/fence rails, access/clearance review zones, trench/conduit candidates, and stronger true-north/scale presentation while remaining explicitly diagrammatic.
 
 ## PDF / Preview Export
 

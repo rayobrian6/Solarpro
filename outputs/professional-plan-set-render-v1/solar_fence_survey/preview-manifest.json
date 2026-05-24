@@ -2,7 +2,7 @@
   "schemaVersion": "professional_plan_set_preview_manifest_v1",
   "packageMode": "live_preview_preparation_only",
   "sourceSurveyId": "expanded-fence-001",
-  "packageHash": "c4133487",
+  "packageHash": "8189e061",
   "defaultPreviewPath": "index.html",
   "pdfPath": "package.pdf",
   "contactSheetPath": "contact-sheet.png",
@@ -14,7 +14,7 @@
       "svgPath": "A-000-cover_summary.svg",
       "thumbnailPath": "thumbnails/A-000-cover_summary.png",
       "snapshotPath": "snapshots/A-000-cover_summary.png",
-      "renderHash": "00962fb2"
+      "renderHash": "bb494ae2"
     },
     {
       "sheetNumber": "A-101",
@@ -23,7 +23,7 @@
       "svgPath": "A-101-site_plan_render.svg",
       "thumbnailPath": "thumbnails/A-101-site_plan_render.png",
       "snapshotPath": "snapshots/A-101-site_plan_render.png",
-      "renderHash": "7edbc097"
+      "renderHash": "b9276131"
     },
     {
       "sheetNumber": "A-201",
@@ -32,7 +32,7 @@
       "svgPath": "A-201-evidence_review.svg",
       "thumbnailPath": "thumbnails/A-201-evidence_review.png",
       "snapshotPath": "snapshots/A-201-evidence_review.png",
-      "renderHash": "4b15b367"
+      "renderHash": "925eae77"
     }
   ],
   "assets": [

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
 import { buildProfessionalSurveyReadinessReport } from './professionalSurveyReadinessReport';
 import { buildProfessionalPlanSetRenderPackage } from './planSetRenderOutput';
+import { professionalExpandedSurveyFixtures, type ProfessionalExpandedSurveyFixture } from './professionalSurveyExpandedFixtures';
 
 function survey(overrides: Partial<SiteSurvey> = {}): SiteSurvey {
   return {
@@ -66,6 +67,34 @@ function survey(overrides: Partial<SiteSurvey> = {}): SiteSurvey {
     deliveryId: 'delivery-plan-001',
     ...overrides,
   };
+}
+
+
+function expandedSurvey(fixture: ProfessionalExpandedSurveyFixture): SiteSurvey {
+  return {
+    id: `plan-${fixture.id}`,
+    clientId: 'fixture-client-001',
+    projectId: fixture.raw.projectId ?? `project-${fixture.id}`,
+    createdBy: 'fixture-user-001',
+    createdAt: '2026-05-20T10:00:00Z',
+    updatedAt: '2026-05-20T10:00:00Z',
+    status: 'completed',
+    source: 'standalone',
+    addressSnapshot: fixture.raw.location?.address ?? null,
+    surveyData: fixture.raw as unknown as Record<string, unknown>,
+    inspectorName: fixture.raw.inspectorName ?? null,
+    notes: fixture.raw.installerNotes ?? null,
+    externalSurveyId: fixture.raw.id ?? fixture.id,
+    deliveryId: null,
+  };
+}
+
+function expandedFiles(id: string): SiteSurveyFile[] {
+  return [
+    { id: `${id}-mount`, surveyId: `plan-${id}`, fileUrl: 'https://cdn.example.test/mount.jpg', fileType: 'photo', label: 'mount overview', filename: 'mount.jpg', mimeType: 'image/jpeg', createdAt: '2026-05-20T10:05:00Z' },
+    { id: `${id}-panel`, surveyId: `plan-${id}`, fileUrl: 'https://cdn.example.test/main_panel.jpg', fileType: 'photo', label: 'main panel', filename: 'main_panel.jpg', mimeType: 'image/jpeg', createdAt: '2026-05-20T10:06:00Z' },
+    { id: `${id}-meter`, surveyId: `plan-${id}`, fileUrl: 'https://cdn.example.test/meter.jpg', fileType: 'photo', label: 'meter', filename: 'meter.jpg', mimeType: 'image/jpeg', createdAt: '2026-05-20T10:07:00Z' },
+  ];
 }
 
 function files(): SiteSurveyFile[] {
@@ -169,6 +198,27 @@ describe('Professional Plan-Set Render Output V1', () => {
     expect(sitePlan?.svg).toContain('PV module');
   });
 
+  it('renders ground-mount and solar-fence fixtures as intentionally drafted commercial previews', () => {
+    for (const id of ['ground_mount_survey', 'solar_fence_survey'] as const) {
+      const fixture = professionalExpandedSurveyFixtures.find(item => item.id === id);
+      expect(fixture).toBeDefined();
+      const report = buildProfessionalSurveyReadinessReport(expandedSurvey(fixture!), expandedFiles(id));
+      const pkg = buildProfessionalPlanSetRenderPackage(report);
+      const sitePlan = pkg.sheets.find(sheet => sheet.sheetType === 'site_plan_render');
+      const svg = sitePlan?.svg ?? '';
+
+      expect(svg).toContain(id === 'ground_mount_survey' ? 'GROUND-MOUNT FIXTURE PLAN' : 'SOLAR-FENCE FIXTURE PLAN');
+      expect(svg).toContain('intentionally drafted fixture-specific preview');
+      expect(svg).toContain('STRING A/B HOMERUN');
+      expect(svg).toContain('CONTRACTOR / DEALER META');
+      expect(svg).toContain('CLIENT / INSTALLER');
+      expect(svg).toContain('rail-attachment-symbols');
+      expect(svg).toContain('PV STRING / GROUP CALLOUT');
+      expect(pkg.summary.renderQualityScore).toBeGreaterThan(82);
+      expect(['commercial_preview', 'ui_candidate']).toContain(pkg.summary.renderQualityGrade);
+      expect(pkg.noAuthorityEnforcement.canonicalGeometryMutationAllowed).toBe(false);
+    }
+  });
 
 
   it('prepares live-preview manifest metadata without wiring the live Engineering UI', () => {

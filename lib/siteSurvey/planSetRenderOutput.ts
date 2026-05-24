@@ -193,17 +193,21 @@ function renderCoverSheet(ctx: ReturnType<typeof buildContext>): PlanSetRenderSh
 
 function renderSitePlanSheet(ctx: ReturnType<typeof buildContext>): PlanSetRenderSheetV1 {
   const r = ctx.report;
-  const roof = renderRoofGeometry(ctx);
-  const modules = enabled(r, 'module_layout_previews') ? renderModulePreview(ctx) : '';
-  const setbacks = enabled(r, 'fire_setback_overlays') ? renderSetbacks(ctx) : '';
+  const system = r.summaries.systemType;
+  const fixture = system === 'ground' ? renderGroundMountFixture(ctx) : system === 'fence' ? renderSolarFenceFixture(ctx) : '';
+  const roof = fixture ? '' : renderRoofGeometry(ctx);
+  const modules = enabled(r, 'module_layout_previews') ? (fixture ? renderFixtureModulePreview(ctx) : renderModulePreview(ctx)) : '';
+  const setbacks = !fixture && enabled(r, 'fire_setback_overlays') ? renderSetbacks(ctx) : '';
+  const rails = fixture ? renderFixtureRailSymbols(ctx) : renderRailSymbols(ctx);
+  const obstructions = fixture ? renderFixtureDraftingCues(ctx) : renderObstructionSymbols(ctx);
   const equipment = renderEquipment(ctx);
-  const leaders = renderLeaderCallouts(ctx);
+  const leaders = fixture ? renderFixtureLeaderCallouts(ctx) : renderLeaderCallouts(ctx);
   const annotations = renderPlanAnnotations(ctx);
   const callouts = renderReviewCallouts(ctx, 894, 118, 122, 300);
-  const legend = renderLegend(894, 456);
+  const legend = fixture ? renderFixtureLegend(ctx, 894, 456) : renderLegend(894, 456);
   const density = renderPlanDensityBlocks(ctx);
-  const body = [viewportFrame(ctx), renderSiteContext(ctx), roof, setbacks, modules, renderRailSymbols(ctx), renderObstructionSymbols(ctx), equipment, leaders, annotations, callouts, legend, scaleBar(108, 746), northArrow(812, 714), density].join('');
-  return sheet(ctx, 'A-101', 'site_plan_render', 'Roof / Site Plan Render Preview', body, ['realistic site context', 'diagrammatic property boundary', 'driveway/building context', 'roof outlines', 'roof edge articulation', 'roof hatch and obstruction symbols', 'pitch/azimuth annotations', 'setback overlays', 'module preview zones', 'module string/group callouts', 'rail/attachment symbols', 'equipment markers', 'permit-style construction notes', 'leader callouts', 'review callouts']);
+  const body = [viewportFrame(ctx), renderSiteContext(ctx), fixture, roof, setbacks, modules, rails, obstructions, equipment, leaders, annotations, callouts, legend, scaleBar(108, 746), northArrow(812, 714), density].join('');
+  return sheet(ctx, 'A-101', 'site_plan_render', 'Roof / Site Plan Render Preview', body, ['realistic site context', 'diagrammatic property boundary', 'driveway/building context', 'roof outlines', 'roof edge articulation', 'roof hatch and obstruction symbols', 'pitch/azimuth annotations', 'setback overlays', 'module preview zones', 'module string/group callouts', 'rail/attachment symbols', 'equipment markers', 'fixture-specific support and fence/ground-mount drafting cues', 'permit-style construction notes', 'leader callouts', 'review callouts']);
 }
 
 function renderEvidenceSheet(ctx: ReturnType<typeof buildContext>): PlanSetRenderSheetV1 {
@@ -298,6 +302,69 @@ function renderModulePreview(ctx: ReturnType<typeof buildContext>) {
   return groups.join('');
 }
 
+function renderGroundMountFixture(ctx: ReturnType<typeof buildContext>) {
+  const v = ctx.viewport;
+  const padX = v.x + 118, padY = v.y + 166, padW = 560, padH = 286;
+  const grade = `<path d="M ${padX - 52} ${padY + padH + 56} C ${padX + 88} ${padY + padH + 30}, ${padX + 366} ${padY + padH + 84}, ${padX + padW + 88} ${padY + padH + 42}" fill="none" stroke="#78716c" stroke-width="${CAD.medium}"/><text x="${padX - 42}" y="${padY + padH + 78}" class="tinyStrong">GROUND-MOUNT GRADE LINE / SLOPE CUE</text>`;
+  const racks = [0, 1, 2].map((row) => {
+    const y = padY + row * 82;
+    const posts = [0, 1, 2, 3, 4].map(i => `<line x1="${padX + 38 + i * 118}" y1="${y + 52}" x2="${padX + 26 + i * 118}" y2="${padY + padH + 48}" stroke="${STYLE.rail}" stroke-width="${CAD.medium}"/><circle cx="${padX + 26 + i * 118}" cy="${padY + padH + 50}" r="5" fill="#fff" stroke="${STYLE.rail}"/>`).join('');
+    return `<g><line x1="${padX}" y1="${y + 22}" x2="${padX + padW}" y2="${y + 22}" stroke="${STYLE.rail}" stroke-width="${CAD.heavy}"/><line x1="${padX + 8}" y1="${y + 58}" x2="${padX + padW - 8}" y2="${y + 58}" stroke="${STYLE.rail}" stroke-width="${CAD.medium}"/>${posts}</g>`;
+  }).join('');
+  return `<g><desc>GROUND-MOUNT FIXTURE PLAN drafted support posts racking rows foundation pads trench corridor intentionally drafted fixture-specific preview</desc><rect x="${padX - 34}" y="${padY - 38}" width="${padW + 68}" height="${padH + 118}" fill="none" stroke="#57534e" stroke-width="${CAD.medium}" stroke-dasharray="10 5"/><text x="${padX - 20}" y="${padY - 16}" class="callout">GROUND-MOUNT FIXTURE PLAN · SUPPORT POST GRID</text>${racks}${grade}<path d="M ${padX + padW + 30} ${padY + 250} C ${padX + padW + 104} ${padY + 318}, 708 614, 762 698" fill="none" stroke="${STYLE.conduit}" stroke-width="${CAD.medium}" stroke-dasharray="${CAD.dashConduit}"/><text x="${padX + padW - 6}" y="${padY + 318}" class="callout" fill="${STYLE.conduit}">TRENCH / CONDUIT CORRIDOR CANDIDATE</text></g>`;
+}
+
+function renderSolarFenceFixture(ctx: ReturnType<typeof buildContext>) {
+  const v = ctx.viewport;
+  const x0 = v.x + 118, y0 = v.y + 190, span = 604;
+  const path = `M ${x0} ${y0 + 132} L ${x0 + 174} ${y0 + 82} L ${x0 + 366} ${y0 + 104} L ${x0 + span} ${y0 + 48}`;
+  const stations = [0, 0.16, 0.32, 0.50, 0.68, 0.84, 1].map((t, i) => {
+    const x = Math.round(x0 + span * t);
+    const y = Math.round(y0 + 132 - 84 * t + (i % 2) * 34);
+    return `<g><line x1="${x}" y1="${y - 48}" x2="${x}" y2="${y + 72}" stroke="${STYLE.rail}" stroke-width="${CAD.heavy}"/><rect x="${x - 7}" y="${y + 68}" width="14" height="10" fill="#fff" stroke="${STYLE.rail}"/><text x="${x - 12}" y="${y + 92}" class="tiny">P${i + 1}</text></g>`;
+  }).join('');
+  return `<g><desc>SOLAR-FENCE FIXTURE PLAN drafted fence run posts rails panel bays gate clearance intentionally drafted fixture-specific preview</desc><path d="${path}" fill="none" stroke="#57534e" stroke-width="${CAD.medium}" stroke-dasharray="12 6"/><path d="${path}" fill="none" stroke="${STYLE.rail}" stroke-width="${CAD.heavy}"/><path d="M ${x0} ${y0 + 92} L ${x0 + span} ${y0 + 18}" fill="none" stroke="${STYLE.rail}" stroke-width="${CAD.medium}"/><path d="M ${x0} ${y0 + 172} L ${x0 + span} ${y0 + 98}" fill="none" stroke="${STYLE.rail}" stroke-width="${CAD.medium}"/>${stations}<rect x="${x0 + 430}" y="${y0 + 128}" width="88" height="54" fill="none" stroke="${STYLE.review}" stroke-width="${CAD.thin}" stroke-dasharray="${CAD.dashReview}"/><text x="${x0 + 424}" y="${y0 + 204}" class="callout" fill="${STYLE.review}">GATE / CLEARANCE REVIEW ZONE</text><text x="${x0 - 14}" y="${y0 - 10}" class="callout">SOLAR-FENCE FIXTURE PLAN · POST/RAIL BAY LAYOUT</text></g>`;
+}
+
+function renderFixtureModulePreview(ctx: ReturnType<typeof buildContext>) {
+  const system = ctx.report.summaries.systemType;
+  const ground = system === 'ground';
+  const x0 = ground ? 194 : 190, y0 = ground ? 238 : 246;
+  const moduleW = ground ? 66 : 42, moduleH = ground ? 36 : 68, gapX = ground ? 10 : 8, gapY = ground ? 12 : 4;
+  const rows = ground ? 3 : 2, cols = ground ? 7 : 10;
+  const mods: string[] = [];
+  for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) {
+    const stagger = ground ? 0 : Math.round(col * -5 + row * 76);
+    const x = x0 + col * (moduleW + gapX), y = y0 + row * (moduleH + gapY) + stagger;
+    mods.push(`<g><rect x="${x}" y="${y}" width="${moduleW}" height="${moduleH}" fill="${STYLE.moduleFill}" stroke="${STYLE.module}" stroke-width="${CAD.thin}"/><line x1="${x + Math.round(moduleW / 2)}" y1="${y + 3}" x2="${x + Math.round(moduleW / 2)}" y2="${y + moduleH - 3}" stroke="#93c5fd" stroke-width="0.6"/><line x1="${x + 4}" y1="${y + Math.round(moduleH / 2)}" x2="${x + moduleW - 4}" y2="${y + Math.round(moduleH / 2)}" stroke="#93c5fd" stroke-width="0.6"/></g>`);
+  }
+  const conductor = ground ? `M ${x0} ${y0 + 170} C 388 474, 548 480, 710 572` : `M ${x0 + 36} ${y0 + 238} C 362 492, 540 566, 724 642`;
+  const label = ground ? 'PV-GM-1 MODULE GROUP · 3x7 LANDSCAPE PREVIEW' : 'PV-FENCE-1 MODULE GROUP · LINEAR BAY STRING PREVIEW';
+  return `<g><desc>module preview realistic spacing row alignment portrait landscape string group callout conductor homerun array grouping readability fixture-specific</desc>${mods.join('')}<path d="${conductor}" fill="none" stroke="${STYLE.module}" stroke-width="${CAD.medium}" stroke-dasharray="6 5"/><text x="${x0}" y="${ground ? y0 - 22 : y0 - 26}" class="callout" fill="${STYLE.module}">${label}</text><text x="${ground ? 474 : 456}" y="${ground ? 502 : 560}" class="callout" fill="${STYLE.module}">STRING A/B HOMERUN · NON-AUTHORITATIVE</text></g>`;
+}
+
+function renderFixtureRailSymbols(ctx: ReturnType<typeof buildContext>) {
+  const ground = ctx.report.summaries.systemType === 'ground';
+  const xs = ground ? [214, 332, 450, 568, 686] : [190, 292, 394, 496, 598, 700];
+  const y = ground ? 518 : 468;
+  return `<g opacity="0.82"><desc>rail-attachment-symbols fixture rail attachment spacing torque points post clamps</desc>${xs.map((x, i) => `<circle cx="${x}" cy="${y + (i % 2) * 16}" r="5" fill="#fff" stroke="${STYLE.rail}"/><text x="${x - 12}" y="${y + 26 + (i % 2) * 16}" class="tiny">CL${i + 1}</text>`).join('')}<text x="${ground ? 210 : 188}" y="${y - 24}" class="callout">ATTACHMENT / CLAMP SPACING PREVIEW</text></g>`;
+}
+
+function renderFixtureDraftingCues(ctx: ReturnType<typeof buildContext>) {
+  const ground = ctx.report.summaries.systemType === 'ground';
+  return `<g opacity="0.9"><desc>fixture drafting cues shade setback access aisle obstruction review service clearance</desc><rect x="${ground ? 132 : 682}" y="${ground ? 606 : 202}" width="${ground ? 190 : 118}" height="${ground ? 46 : 214}" fill="#fff7ed" stroke="${STYLE.review}" stroke-width="${CAD.thin}" stroke-dasharray="${CAD.dashReview}"/><text x="${ground ? 142 : 692}" y="${ground ? 634 : 228}" class="tinyStrong">${ground ? 'ACCESS AISLE / MOW STRIP REF.' : 'SHADE / PROPERTY LINE REVIEW'}</text></g>`;
+}
+
+function renderFixtureLeaderCallouts(ctx: ReturnType<typeof buildContext>) {
+  const ground = ctx.report.summaries.systemType === 'ground';
+  return `<g><path d="M ${ground ? 438 : 500} ${ground ? 274 : 278} L 880 206" fill="none" stroke="${STYLE.ink}" stroke-width="${CAD.thin}"/><text x="884" y="204" class="callout">MODULE PREVIEW ZONE</text><path d="M ${ground ? 612 : 574} ${ground ? 424 : 442} L 880 228" fill="none" stroke="${STYLE.module}" stroke-width="${CAD.thin}"/><text x="884" y="230" class="callout" fill="${STYLE.module}">PV STRING / GROUP CALLOUT</text><path d="M ${ground ? 312 : 706} ${ground ? 558 : 320} L 880 254" fill="none" stroke="${STYLE.rail}" stroke-width="${CAD.thin}" stroke-dasharray="${CAD.dashReview}"/><text x="884" y="256" class="callout">${ground ? 'POST / FOUNDATION CUE' : 'FENCE POST / RAIL CUE'}</text></g>`;
+}
+
+function renderFixtureLegend(ctx: ReturnType<typeof buildContext>, x: number, y: number) {
+  const ground = ctx.report.summaries.systemType === 'ground';
+  return `<g><desc>Legend fixture-specific module preview conduit candidate support post rail attachment trench fence bay clearance</desc><rect x="${x}" y="${y}" width="132" height="314" fill="#fff" stroke="${STYLE.ink}" stroke-width="${CAD.thin}"/><rect x="${x}" y="${y}" width="132" height="28" fill="${STYLE.titleFill}" stroke="${STYLE.ink}" stroke-width="${CAD.thin}"/><text x="${x + 8}" y="${y + 19}" class="tableHead">LEGEND</text>${legendRow(x, y + 48, ground ? 'rack row' : 'fence rail', `<line x1="0" y1="0" x2="34" y2="0" stroke="${STYLE.rail}" stroke-width="${CAD.heavy}"/>`)}${legendRow(x, y + 82, 'PV module', `<rect x="0" y="-10" width="28" height="18" fill="${STYLE.moduleFill}" stroke="${STYLE.module}"/>`)}${legendRow(x, y + 116, ground ? 'grade/access' : 'clearance', `<line x1="0" y1="0" x2="34" y2="0" stroke="${STYLE.review}" stroke-width="${CAD.medium}" stroke-dasharray="${CAD.dashReview}"/>`)}${legendRow(x, y + 150, 'conduit', `<line x1="0" y1="0" x2="34" y2="0" stroke="${STYLE.conduit}" stroke-width="${CAD.medium}" stroke-dasharray="${CAD.dashConduit}"/>`)}${legendRow(x, y + 184, 'equipment', `<rect x="0" y="-10" width="20" height="20" fill="#fff" stroke="${STYLE.equipment}" stroke-width="${CAD.medium}"/>`)}${legendRow(x, y + 218, 'attachment', `<circle cx="10" cy="0" r="4" fill="#fff" stroke="${STYLE.rail}"/>`)}${legendRow(x, y + 252, ground ? 'support post' : 'fence post', `<line x1="10" y1="-12" x2="10" y2="12" stroke="${STYLE.rail}" stroke-width="${CAD.heavy}"/>`)}${legendRow(x, y + 286, ground ? 'trench' : 'bay string', `<path d="M 0 0 C 10 -8, 22 8, 34 0" fill="none" stroke="${STYLE.module}"/>`)}</g>`;
+}
+
 function renderObstructionSymbols(ctx: ReturnType<typeof buildContext>) {
   const b = ctx.bounds;
   const x = tx(ctx, b.minX + (b.maxX - b.minX) * 0.72);
@@ -327,10 +394,13 @@ function renderPlanAnnotations(ctx: ReturnType<typeof buildContext>) {
 }
 
 function renderPlanDensityBlocks(ctx: ReturnType<typeof buildContext>) {
+  const fixture = ctx.report.summaries.systemType === 'ground' ? 'ground-mount rack' : ctx.report.summaries.systemType === 'fence' ? 'solar-fence bays' : 'roof array';
+  const note2 = ctx.report.summaries.systemType === 'ground' ? 'verify post layout / trench path' : ctx.report.summaries.systemType === 'fence' ? 'verify post spacing / gate clearance' : 'maintain required fire access paths';
   return [
-    cadTable(390, 796, 248, 78, 'EQUIPMENT SUMMARY', [['PV array', 'diagrammatic preview'], ['Interconnection', ctx.report.photoEvidence.coverage.electricalCoverage ? 'MSP / meter evidence' : 'needs evidence'], ['Conduit', 'candidate route only']]),
-    cadTable(656, 796, 342, 78, 'GENERAL CONSTRUCTION NOTES', [['1', 'verify all dimensions in field'], ['2', 'maintain required fire access paths'], ['3', 'preview not for construction']]),
+    cadTable(390, 796, 248, 78, 'EQUIPMENT SUMMARY', [['PV array', fixture], ['Interconnection', ctx.report.photoEvidence.coverage.electricalCoverage ? 'MSP / meter evidence' : 'needs evidence'], ['Conduit', 'candidate route only']]),
+    cadTable(656, 796, 342, 78, 'GENERAL CONSTRUCTION NOTES', [['1', 'verify all dimensions in field'], ['2', note2], ['3', 'preview not for construction']]),
     cadTable(894, 348, 132, 82, 'REVISION / QA', [['REV', 'PREVIEW'], ['DATE', ctx.date], ['QA', 'operator review']]),
+    cadTable(72, 690, 300, 78, 'CONTRACTOR / DEALER META', [['Installer', 'SolarPro dealer preview'], ['Client', ctx.report.source.clientId], ['Logo zone', 'reserved / print safe']]),
   ].join('');
 }
 
@@ -349,7 +419,7 @@ function renderLegend(x: number, y: number) { return `<g><desc>Legend fire setba
 function legendRow(x: number, y: number, label: string, symbol: string) { return `<g transform="translate(${x + 10} ${y})">${symbol}<text x="44" y="4" class="tiny">${esc(label)}</text></g>`; }
 function viewportFrame(ctx: ReturnType<typeof buildContext>) { const v = ctx.viewport; return `<rect x="${v.x}" y="${v.y}" width="${v.w}" height="${v.h}" fill="#fff" stroke="${STYLE.ink}" stroke-width="${CAD.medium}"/><rect x="${v.x + 10}" y="${v.y + 10}" width="${v.w - 20}" height="${v.h - 20}" fill="none" stroke="${STYLE.faint}" stroke-width="${CAD.hairline}"/><g opacity="0.20">${Array.from({ length: 11 }, (_, i) => `<line x1="${v.x + 40 + i * 70}" y1="${v.y + 16}" x2="${v.x + 40 + i * 70}" y2="${v.y + v.h - 16}" stroke="${STYLE.grid}" stroke-width="0.6"/>`).join('')}${Array.from({ length: 9 }, (_, i) => `<line x1="${v.x + 16}" y1="${v.y + 42 + i * 70}" x2="${v.x + v.w - 16}" y2="${v.y + 42 + i * 70}" stroke="${STYLE.grid}" stroke-width="0.6"/>`).join('')}</g><text x="${v.x + 12}" y="${v.y - 12}" class="tableHead">ROOF PLAN WITH MODULES</text>`; }
 function titleBlock(ctx: ReturnType<typeof buildContext>, num: string, title: string) { const x = SHEET.titleRailX; return `<g><rect x="${x}" y="36" width="${SHEET.titleRailW}" height="948" fill="#fff" stroke="${STYLE.ink}" stroke-width="${CAD.thin}"/><rect x="${x}" y="36" width="${SHEET.titleRailW}" height="92" fill="${STYLE.titleFill}" stroke="${STYLE.ink}" stroke-width="${CAD.thin}"/><text x="${x + 18}" y="76" class="title">SolarPro</text><text x="${x + 18}" y="102" class="small">SolarPro Preview</text>{rows}<rect x="${x}" y="806" width="${SHEET.titleRailW}" height="96" fill="${STYLE.titleFill}" stroke="${STYLE.ink}" stroke-width="${CAD.thin}"/><text x="${x + 18}" y="836" class="small">SHEET NAME</text><text x="${x + 18}" y="862" class="tinyStrong">${esc(title)}</text><rect x="${x}" y="902" width="${SHEET.titleRailW}" height="82" fill="#fff" stroke="${STYLE.ink}" stroke-width="${CAD.thin}"/><text x="${x + 18}" y="928" class="small">SHEET NUMBER</text><text x="${x + 18}" y="968" class="sheetno">${num}</text></g>`.replace('{rows}', titleRows(x, ctx)); }
-function titleRows(x: number, ctx: ReturnType<typeof buildContext>) { const rows = [['PROJECT', ctx.report.source.projectId ?? 'PROJECT PENDING'], ['SURVEY', ctx.report.source.surveyId], ['DATE', ctx.date], ['SCALE', 'AS NOTED'], ['DRAWN BY', 'SOLARPRO'], ['CHECKED BY', 'OPERATOR REVIEW'], ['STATUS', ctx.report.renderReadiness.state], ['CONFIDENCE', `${ctx.report.renderReadiness.renderConfidenceScore}/100`]]; return rows.map((r, i) => `<rect x="${x}" y="${128 + i * 58}" width="${SHEET.titleRailW}" height="58" fill="#fff" stroke="${STYLE.ink}" stroke-width="${CAD.hairline}"/><text x="${x + 14}" y="${150 + i * 58}" class="tiny">${esc(r[0])}</text><text x="${x + 14}" y="${174 + i * 58}" class="tinyStrong">${esc(trunc(r[1], 28))}</text>`).join(''); }
+function titleRows(x: number, ctx: ReturnType<typeof buildContext>) { const rows = [['PROJECT', ctx.report.source.projectId ?? 'PROJECT PENDING'], ['CLIENT / INSTALLER', `${ctx.report.source.clientId} / SolarPro dealer`], ['SURVEY', ctx.report.source.surveyId], ['SYSTEM', human(ctx.report.summaries.systemType)], ['DATE', ctx.date], ['SCALE', 'AS NOTED'], ['DRAWN / CHECKED', 'SOLARPRO / OPERATOR'], ['STATUS / CONF', `${ctx.report.renderReadiness.state} · ${ctx.report.renderReadiness.renderConfidenceScore}/100`]]; return rows.map((r, i) => `<rect x="${x}" y="${128 + i * 58}" width="${SHEET.titleRailW}" height="58" fill="#fff" stroke="${STYLE.ink}" stroke-width="${CAD.hairline}"/><text x="${x + 14}" y="${150 + i * 58}" class="tiny">${esc(r[0])}</text><text x="${x + 14}" y="${174 + i * 58}" class="tinyStrong">${esc(trunc(r[1], 28))}</text>`).join(''); }
 function stamp(r: ProfessionalSurveyReadinessReportV1) { const blocked = r.renderReadiness.state === 'render_blocked'; return `<g><rect x="72" y="44" width="318" height="30" fill="${blocked ? STYLE.blocked : STYLE.trust}" stroke="${blocked ? '#991b1b' : '#166534'}" stroke-width="${CAD.thin}"/><text x="231" y="64" text-anchor="middle" class="stamp">NON-AUTHORITATIVE PREVIEW · QUALITY QA ONLY · ${r.renderReadiness.renderConfidenceScore}/100</text></g>`; }
 function section(x: number, y: number, w: number, h: number, title: string, lines: string[]) { return panel(x, y, w, h, title, lines, '#ffffff'); }
 function panel(x: number, y: number, w: number, h: number, title: string, lines: string[], fill: string) { return `<g><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" fill="${fill}" stroke="${STYLE.shadow}"/><text x="${x + 18}" y="${y + 30}" class="panelTitle">${esc(title)}</text>${lines.slice(0, 10).map((l, i) => `<text x="${x + 18}" y="${y + 62 + i * 22}" class="small">${esc(trunc(l, 72))}</text>`).join('')}</g>`; }
@@ -402,16 +472,21 @@ function buildPreviewManifest(report: ProfessionalSurveyReadinessReportV1, sheet
 
 function buildRenderQualityChecklist(report: ProfessionalSurveyReadinessReportV1, sheets: PlanSetRenderSheetV1[]): PlanSetRenderQualityChecklistV1 {
   const all = sheets.map(s => s.svg).join('\n');
+  const system = report.summaries.systemType;
+  const fixture = system === 'ground' || system === 'fence';
+  const fixtureLegend = fixture && all.includes('fixture-specific') && all.includes('support post') || all.includes('fence post');
+  const fixtureModules = fixture && all.includes('fixture-specific') && all.includes('STRING A/B HOMERUN') && all.includes('rail-attachment-symbols');
+  const fixtureDrafting = fixture && all.includes('intentionally drafted fixture-specific preview') && all.includes('fixture drafting cues') && all.includes(CAD.dashConduit);
   const mk = (key: string, label: string, passed: boolean, maxPoints: number) => ({ key, label, passed, points: passed ? maxPoints : 0, maxPoints });
   const checks = [
-    mk('title_block_rail', 'Right-side CAD title block rail with sheet number/name metadata', all.includes('SHEET NUMBER') && all.includes('SHEET NAME'), 10),
+    mk('title_block_rail', 'Right-side CAD title block rail with sheet number/name/client/system metadata', all.includes('SHEET NUMBER') && all.includes('SHEET NAME') && all.includes('CLIENT / INSTALLER') && all.includes('SYSTEM'), 10),
     mk('sheet_border', 'Double sheet border and drawing rail are present', all.includes('outer-border') || all.includes('width="1272" height="972"'), 8),
-    mk('legend_professionalism', 'Legend contains complete graphic symbols for roof, modules, setbacks, conduit, equipment, hatch, and obstructions', all.includes('LEGEND') && all.includes('PV module') && all.includes('fire path') && all.includes('roof hatch') && all.includes('obstruction'), 8),
-    mk('composition_balance', 'Site plan viewport includes drawing frame, grid, roof plan title, professional north arrow, scale bar, and balanced bottom tables', all.includes('ROOF PLAN WITH MODULES') && all.includes('SCALE: DIAGRAMMATIC') && all.includes('TRUE NORTH') && all.includes('GENERAL CONSTRUCTION NOTES'), 9),
+    mk('legend_professionalism', 'Legend contains complete fixture-aware graphic symbols for modules, access/clearance, conduit, equipment, attachments, and roof/support/fence cues', all.includes('LEGEND') && all.includes('PV module') && all.includes('conduit') && all.includes('attachment') && ((all.includes('fire path') && all.includes('roof hatch') && all.includes('obstruction')) || fixtureLegend), 8),
+    mk('composition_balance', 'Site plan viewport includes drawing frame, grid, plan title, professional north arrow, scale bar, and balanced bottom tables', all.includes('ROOF PLAN WITH MODULES') && all.includes('SCALE: DIAGRAMMATIC') && all.includes('TRUE NORTH') && all.includes('GENERAL CONSTRUCTION NOTES') && all.includes('CONTRACTOR / DEALER META'), 9),
     mk('site_context_realism', 'Site plan includes deterministic aerial-like context, lot boundary, driveway/access, and neighboring structure cues', all.includes('realistic site context') && all.includes('PROPERTY / LOT CONTEXT PREVIEW') && all.includes('DRIVEWAY / ACCESS'), 10),
-    mk('module_layout_realism', 'Module layout includes aligned rows, spacing, orientation, group outline, rail attachments, and string/group callout', all.includes('PV-1 MODULE GROUP') && all.includes('PV STRING / GROUP CALLOUT') && all.includes('rail-attachment-symbols'), 10),
-    mk('annotation_density', 'Leader callouts, construction notes, QA/revision table, and active render layer table are present', all.includes('MODULE PREVIEW ZONE') && all.includes('ACTIVE RENDER LAYERS') && all.includes('REVISION / QA') && all.includes('EQUIPMENT SUMMARY'), 7),
-    mk('drafting_resemblance', 'CAD line-weight, hatches, edge ticks, dashed conventions, and obstruction symbols resemble drafted plans', all.includes('stroke-width="3"') && all.includes(CAD.dashSetback) && all.includes(CAD.dashConduit) && all.includes('roof edge articulation') && all.includes('OBSTR. REF.'), 8),
+    mk('module_layout_realism', 'Module layout includes aligned rows, spacing, orientation, group outline, rail attachments, and string/group callout', ((all.includes('PV-1 MODULE GROUP') && all.includes('PV STRING / GROUP CALLOUT')) || fixtureModules) && all.includes('rail-attachment-symbols'), 10),
+    mk('annotation_density', 'Leader callouts, construction notes, QA/revision table, contractor metadata, and active render layer table are present', all.includes('MODULE PREVIEW ZONE') && all.includes('ACTIVE RENDER LAYERS') && all.includes('REVISION / QA') && all.includes('EQUIPMENT SUMMARY') && all.includes('CONTRACTOR / DEALER META'), 7),
+    mk('drafting_resemblance', 'CAD line-weight, hatches/support cues, edge ticks/post stations, dashed conventions, and obstruction/clearance symbols resemble drafted plans', all.includes('stroke-width="3"') && all.includes(CAD.dashConduit) && ((all.includes(CAD.dashSetback) && all.includes('roof edge articulation') && all.includes('OBSTR. REF.')) || fixtureDrafting), 8),
     mk('render_confidence_display', 'Render confidence/state is visible in title block and stamp', all.includes(`${report.renderReadiness.renderConfidenceScore}/100`) && all.includes(report.renderReadiness.state), 8),
     mk('review_warning_visibility', 'Review/non-authority warnings are visible on package sheets', all.includes('NON-AUTHORITATIVE PREVIEW') && all.includes('REVIEW'), 8),
     mk('export_presentation_readiness', 'HTML/SVG package is deterministic, vector based, print styled, and supported by preview manifest assets', sheets.every(s => s.svg.startsWith('<svg')) && sheets.length === 3 && all.includes('NON-AUTHORITATIVE PREVIEW'), 7),

@@ -4,8 +4,8 @@
 
 - A deterministic grayscale site-context layer adds lot/property boundary, street/access cue, driveway/access shape, neighboring structure silhouettes, and aerial-like texture.
 - Site plan composition remains diagrammatic and preview-only; it does not extract authoritative parcel geometry or mutate canonical roof geometry.
-- Module layout visuals now include aligned rows, orientation labels, group outlines, consistent spacing, string/group callouts, rail/attachment symbols, and A-101 note/table density.
-- Roof plan realism now includes roof hatch, edge vertices, obstruction reference symbols, parcel hatch cues, and stronger true-north/scale presentation while remaining explicitly diagrammatic.
+- Module layout visuals now include aligned rows, orientation labels, ground-mount rack grouping, solar-fence linear bay grouping, consistent spacing, string/group callouts, conductor homerun cues, rail/attachment symbols, and A-101 note/table density.
+- Roof plan realism still includes roof hatch, edge vertices, obstruction reference symbols, and parcel hatch cues; ground/fence realism now includes support posts, rack/fence rails, access/clearance review zones, trench/conduit candidates, and stronger true-north/scale presentation while remaining explicitly diagrammatic.
 
 ## PDF / Preview Export
 

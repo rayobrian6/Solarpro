@@ -23,10 +23,10 @@ The scoring threshold is intentionally stricter than earlier package-existence c
 
 ## Demo Package Scores
 
-- clean_roof: 100/100 (ui_candidate) · state render_demo_ready · confidence 100/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash d0c90d6c
-- ground_mount_survey: 82/100 (benchmark_gap) · state render_demo_ready · confidence 97/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash 53241b9a
-- solar_fence_survey: 82/100 (benchmark_gap) · state render_demo_ready · confidence 97/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash c4133487
-- document_derived_partial_evidence: 90/100 (commercial_preview) · state render_review_required · confidence 64/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash bf8752dc
+- clean_roof: 100/100 (ui_candidate) · state render_demo_ready · confidence 100/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash b2a4bb73
+- ground_mount_survey: 100/100 (ui_candidate) · state render_demo_ready · confidence 97/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash 8182a35c
+- solar_fence_survey: 100/100 (ui_candidate) · state render_demo_ready · confidence 97/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash 8189e061
+- document_derived_partial_evidence: 90/100 (commercial_preview) · state render_review_required · confidence 64/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash d7aa4463
 
 ## UI Wiring Recommendation
 
