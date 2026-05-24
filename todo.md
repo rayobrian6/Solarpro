@@ -1,31 +1,30 @@
-# Geometry Intelligence V1 Todo
+# Geometry Trust Operations Infrastructure Todo
 
-## Scope and Repository Baseline
-- [x] Confirm repository state, current branch, and relevant geometry/readiness/operator files
-- [x] Identify the smallest reusable integration points for intelligence scoring and lightweight operator visibility
+## Completed Baseline Merge
+- [x] Merge geometry-intelligence-v1 into dev before beginning replay/review work
+- [x] Preserve Geometry Intelligence V1 deterministic read-only scoring and operator summary behavior
 
-## Intelligence Layer
-- [x] Implement deterministic Geometry Intelligence V1 read-only scoring layer
-- [x] Add explainable risk categories, discrepancy severity scoring, clustering, and review urgency classification
-- [x] Ensure no mutation, no persistence, no CAD execution, and no authority promotion
+## Geometry Corpus Replay Framework
+- [x] Add deterministic replay framework for parser, canonical geometry, readiness, OSS comparison, geometry intelligence, and review recommendation execution
+- [x] Add replay-safe item and corpus report DTOs
+- [x] Normalize replay timing noise so replay hashes remain stable
+- [x] Add confidence distributions, discrepancy distributions, topology degradation summaries, recurring risk summaries, readiness downgrade frequency, and integrity trend analysis
 
-## Operator Visibility
-- [x] Add minimal high-value operator visibility for trust score, risk level, discrepancy severity, review urgency, and integrity summary
+## Human Review Workflow Foundation
+- [x] Add review lifecycle primitives: review_not_recommended, review_recommended, review_required, blocker_review
+- [x] Add deterministic review priority and queue classification utilities
+- [x] Add explainable review reasons, recommended actions, topology investigation recommendations, and queue summaries
+- [x] Preserve no automatic approval, no auto-correction, no persistence, no CAD mutation, and no readiness promotion boundaries
 
-## Fixture-Driven Validation
-- [x] Add geometry intelligence tests covering clean, malformed, overlap, duplicate edge, conflicting evidence, mixed-unit/corrupted, and near-zero geometry behavior
-- [x] Verify deterministic outputs and no-authority/no-mutation guarantees
-
-## Reports
-- [x] Produce intelligence validation report
-- [x] Produce geometry trust evaluation report
-- [x] Produce discrepancy intelligence report
-- [x] Produce fixture intelligence analysis report with credit-efficiency review
+## Trust Calibration and Operational Insight Reporting
+- [x] Add trust calibration report focused on explainability and consistency rather than automation
+- [x] Add compact operational insight report for confidence distributions, recurring risk categories, review queues, topology instability, discrepancy hot spots, and urgency patterns
+- [x] Generate replay intelligence, review workflow, trust calibration, operational insight, and replay summary artifacts from fixture replay
 
 ## Validation and Delivery
-- [x] Run parser/readiness/fixture/adapter/intelligence tests
 - [x] Run type-check clean
-- [x] Commit changes
-- [x] Push using repository access rules without exposing token
-- [x] Summarize leverage gained, reusable infrastructure, trust/readiness/discrepancy findings, and CAD-authority maturity outlook
-
+- [x] Run parser/readiness/fixture/adapter/intelligence/replay tests
+- [x] Verify deterministic outputs and no-authority boundaries in tests
+- [x] Commit changes directly on dev
+- [ ] Push dev using token-authenticated remote syntax
+- [ ] Provide final summary with replay findings, instability findings, trust calibration observations, review workflow maturity, CAD-authority outlook, leverage gained, and complexity avoided
