@@ -1,27 +1,22 @@
-# Plan-Set CAD Appendix Preview V1 Todo
+# Professional Site Survey Parser V1 Todo
 
-## Phase 1 — Audit First
-- [x] Confirm existing feature branch and clean baseline
-- [x] Audit renderPlanSet, validation, permit generation, sheet registration/render helpers, CAD export bundle, and SVG artifact DTO
-- [x] Generate required audit artifact before implementation
+## Audit Current Survey Pipeline
+- [x] Confirm repository state and branch strategy
+- [x] Inspect existing survey ingestion, evidence, and canonical geometry modules
+- [x] Identify safe insertion points and authority boundaries
 
-## Phase 2 — Appendix DTO
-- [x] Add deterministic CAD appendix preview sheet DTO module
-- [x] Preserve JSON-safe, replay-safe, non-persistent, non-authoritative semantics
+## Implement Parser Boundary
+- [x] Add ProfessionalSiteSurveyEvidenceBundleV1 DTO and parser module
+- [x] Add canonical survey geometry DTO/builder boundary
+- [x] Add CAD-input readiness/adapter result boundary without mutating CAD
+- [x] Add deterministic validation/readiness reporting
 
-## Phase 3 — Plan-Set Wiring
-- [x] Add explicit disabled-by-default feature flag path
-- [x] Wire appendix sheet additively without replacing PV-2/PV-3 or rerunning solver
-- [x] Fail closed for invalid CAD export/artifact inputs
+## Tests and Reports
+- [x] Add focused fixture tests for roof/ground/fence and ambiguous data
+- [x] Add audit/implementation report under outputs/real-survey-data-validation
+- [x] Run focused tests and type-check
 
-## Phase 4 — Validation + Reports
-- [x] Add targeted appendix DTO and renderPlanSet tests
-- [x] Generate implementation, boundary, and validation reports
-- [x] Run targeted tests and required validation commands
-- [x] Confirm validation results are clean or only existing warnings
-
-## Phase 5 — Delivery
-- [x] Stage intended artifacts only
-- [ ] Commit once on existing feature branch
-- [ ] Push existing feature branch once
-- [ ] Provide final safety summary and next handoff
+## Delivery
+- [x] Commit changes
+- [ ] Push according to active repository workflow
+- [ ] Summarize roadmap progress and next phase
