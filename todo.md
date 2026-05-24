@@ -23,6 +23,6 @@
 - [x] Verify no-authority, no CAD mutation, and no persistence authority promotion
 
 ## Delivery
-- [ ] Commit changes on dev
-- [ ] Push dev with token-authenticated remote syntax
-- [ ] Provide final summary with validation results and artifact attachments
+- [x] Commit changes on dev
+- [x] Push dev with token-authenticated remote syntax
+- [x] Provide final summary with validation results and artifact attachments
