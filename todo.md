@@ -25,5 +25,5 @@
 
 ## Delivery
 - [x] Commit changes on dev
-- [ ] Push dev with token-authenticated remote syntax
-- [ ] Provide final summary with validation results and artifact attachments
+- [x] Push dev with token-authenticated remote syntax
+- [x] Provide final summary with validation results and artifact attachments
