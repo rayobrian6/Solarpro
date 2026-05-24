@@ -725,11 +725,11 @@ function SurveyPhotoClassificationPreviewPanel({ surveyId, manifest }: { surveyI
       const res = await fetch(`/api/site-surveys/${surveyId}/photo-classification-preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ limit: 36 }),
+        body: JSON.stringify({ limit: 12 }),
       });
       const json = await res.json();
       if (!json.success) {
-        setError(json.error || 'Photo classification preview failed');
+        setError([json.error, json.detail].filter(Boolean).join(': ') || 'Photo classification preview failed');
         return;
       }
       const nextPreview = json.data as PhotoClassificationPreviewResponse | null;
@@ -2082,8 +2082,11 @@ export default function SurveyDetailPage() {
   }
 
   const { survey, files, evidenceManifest, evidenceHygiene, evidenceTraceability, evidenceBridge } = detail;
-  const displayedManifest = evidenceHygiene?.canonicalManifest ?? evidenceManifest;
-  const displayedTraceability = evidenceHygiene?.traceability ?? evidenceTraceability;
+  // Always show the freshly computed survey detail manifest in the active
+  // workbench. Project-level hygiene can lag behind the current survey scan and
+  // should not hide photo quality/duplicate analysis from operators.
+  const displayedManifest = evidenceManifest;
+  const displayedTraceability = evidenceTraceability;
   const displayedBridge = evidenceBridge ?? null;
 
   // ---------------------------------------------------------------------------

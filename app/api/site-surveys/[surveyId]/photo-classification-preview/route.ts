@@ -58,8 +58,8 @@ const ALLOWED_CATEGORIES: PreviewCategory[] = [
   'uncategorized',
 ];
 
-const DEFAULT_LIMIT = 24;
-const MAX_LIMIT = 60;
+const DEFAULT_LIMIT = 12;
+const MAX_LIMIT = 24;
 
 export async function POST(
   req: NextRequest,
@@ -106,14 +106,33 @@ export async function POST(
       });
     }
 
-    const visionCandidates = await classifyWithVision(candidates, apiKey, analysisByFileId);
-    return NextResponse.json({
-      success: true,
-      data: buildResponse(visionCandidates, files, limit, true, 'Vision classification preview completed. Review suggestions before any future persistence step.'),
-    });
+    try {
+      const visionCandidates = await classifyWithVision(candidates, apiKey, analysisByFileId);
+      return NextResponse.json({
+        success: true,
+        data: buildResponse(visionCandidates, files, limit, true, 'Vision classification preview completed. Review suggestions before any future persistence step.'),
+      });
+    } catch (visionError) {
+      console.error('[POST /api/site-surveys/[surveyId]/photo-classification-preview] vision fallback', visionError);
+      const deterministic = candidates.map(file => deterministicCandidate(file, analysisByFileId.get(file.id) ?? null));
+      return NextResponse.json({
+        success: true,
+        data: buildResponse(
+          deterministic,
+          files,
+          limit,
+          false,
+          `Vision classification could not complete, so this response returned deterministic metadata plus open-source image quality/duplicate analysis for troubleshooting. Reason: ${safeErrorMessage(visionError)}`,
+        ),
+      });
+    }
   } catch (err) {
     console.error('[POST /api/site-surveys/[surveyId]/photo-classification-preview]', err);
-    return NextResponse.json({ success: false, error: 'Failed to classify survey photos' }, { status: 500 });
+    return NextResponse.json({
+      success: false,
+      error: 'Failed to classify survey photos',
+      detail: safeErrorMessage(err),
+    }, { status: 500 });
   }
 }
 
@@ -256,6 +275,14 @@ function buildResponse(candidates: VisionCandidate[], files: SiteSurveyFile[], l
 function normalizePreviewCategory(value: unknown): PreviewCategory {
   const category = inferSurveyEvidenceCategoryFromText(typeof value === 'string' ? value : null);
   return ALLOWED_CATEGORIES.includes(category as PreviewCategory) ? category as PreviewCategory : 'uncategorized';
+}
+
+function safeErrorMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : 'unknown error';
+  return raw
+    .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+/gi, 'Bearer [redacted]')
+    .replace(/api[_-]?key[=:]\s*[^\s,;]+/gi, 'api_key=[redacted]')
+    .slice(0, 500);
 }
 
 async function safeJson(req: NextRequest): Promise<Record<string, unknown> | null> {

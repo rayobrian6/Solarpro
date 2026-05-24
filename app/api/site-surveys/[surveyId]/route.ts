@@ -52,12 +52,15 @@ export async function GET(
       : null;
 
     const evidenceHygiene = projectContext?.evidenceHygiene ?? null;
-    const canonicalManifest = evidenceHygiene?.canonicalManifest ?? evidenceManifest;
-    const evidenceTraceability = evidenceHygiene?.traceability ?? buildSurveyEvidenceTraceability({
-      canonicalManifest,
-      evidenceTruthSource: evidenceHygiene?.canonicalManifest ? 'canonical_manifest_v1' : 'legacy_raw_photos_fallback',
+    // The survey detail endpoint must surface the freshly computed manifest.
+    // Project hygiene manifests may be useful for historical duplicate/session
+    // context, but they can be stale and must not mask current photo quality or
+    // duplicate analysis in the survey workbench.
+    const evidenceTraceability = buildSurveyEvidenceTraceability({
+      canonicalManifest: evidenceManifest,
+      evidenceTruthSource: 'canonical_manifest_v1',
     });
-    const evidenceBridge = buildSurveyEvidenceEngineeringBridge(canonicalManifest, evidenceTraceability);
+    const evidenceBridge = buildSurveyEvidenceEngineeringBridge(evidenceManifest, evidenceTraceability);
 
     return NextResponse.json({
       success: true,
