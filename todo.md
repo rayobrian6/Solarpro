@@ -25,6 +25,7 @@
 ## Validation and Delivery
 - [x] Run parser/readiness/fixture/adapter/intelligence tests
 - [x] Run type-check clean
-- [ ] Commit changes
-- [ ] Push using repository access rules without exposing token
-- [ ] Summarize leverage gained, reusable infrastructure, trust/readiness/discrepancy findings, and CAD-authority maturity outlook
+- [x] Commit changes
+- [x] Push using repository access rules without exposing token
+- [x] Summarize leverage gained, reusable infrastructure, trust/readiness/discrepancy findings, and CAD-authority maturity outlook
+
