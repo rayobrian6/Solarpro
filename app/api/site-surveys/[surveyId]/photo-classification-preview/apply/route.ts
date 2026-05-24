@@ -72,6 +72,14 @@ export async function POST(
       : [];
     const files = await getSiteSurveyFiles(surveyId);
     const fileIds = new Set(files.map((file) => file.id));
+    const beforeLabelSnapshot = files.map((file) => ({
+      fileId: file.id,
+      filename: file.filename,
+      label: file.label,
+      category: inferSurveyEvidenceCategoryFromText(
+        file.label ?? file.filename ?? file.fileUrl,
+      ),
+    }));
 
     const items: ApplyItem[] = rawItems
       .map((item) => normalizeApplyItem(item))
@@ -106,7 +114,83 @@ export async function POST(
       user.id,
       updates,
     );
+
+    if (updatedFiles.length !== updates.length) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "No survey file labels were updated for one or more reviewed classifications; canonical evidence was not recomputed from stale rows.",
+          diagnostics: {
+            requestedCount: rawItems.length,
+            acceptedCount: deduped.length,
+            updateCount: updates.length,
+            updatedCount: updatedFiles.length,
+            normalizedUpdates: updates,
+            updatedFileIds: updatedFiles.map((file) => file.id),
+            unmatchedFileIds: updates
+              .map((update) => update.fileId)
+              .filter(
+                (fileId) => !updatedFiles.some((file) => file.id === fileId),
+              ),
+            beforeLabelSnapshot: beforeLabelSnapshot.filter((file) =>
+              updates.some((update) => update.fileId === file.fileId),
+            ),
+            authority: {
+              cadMutationAllowed: false,
+              cadSolverExecutionAllowed: false,
+              downstreamPermitAllowed: false,
+            },
+          },
+        },
+        { status: 409 },
+      );
+    }
+
     const refreshedFiles = await getSiteSurveyFiles(surveyId);
+    const persistedLabelSnapshot = refreshedFiles
+      .filter((file) => updates.some((update) => update.fileId === file.id))
+      .map((file) => ({
+        fileId: file.id,
+        filename: file.filename,
+        label: file.label,
+        category: inferSurveyEvidenceCategoryFromText(
+          file.label ?? file.filename ?? file.fileUrl,
+        ),
+      }));
+    const failedPersistence = updates.filter((update) => {
+      const refreshed = refreshedFiles.find((file) => file.id === update.fileId);
+      return !refreshed || refreshed.label !== update.label;
+    });
+
+    if (failedPersistence.length > 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Reviewed labels were acknowledged by the update helper but did not persist in site_survey_files.label after re-query.",
+          diagnostics: {
+            requestedCount: rawItems.length,
+            acceptedCount: deduped.length,
+            updateCount: updates.length,
+            updatedCount: updatedFiles.length,
+            normalizedUpdates: updates,
+            failedPersistence,
+            beforeLabelSnapshot: beforeLabelSnapshot.filter((file) =>
+              updates.some((update) => update.fileId === file.fileId),
+            ),
+            persistedLabelSnapshot,
+            authority: {
+              cadMutationAllowed: false,
+              cadSolverExecutionAllowed: false,
+              downstreamPermitAllowed: false,
+            },
+          },
+        },
+        { status: 409 },
+      );
+    }
+
     const photoAnalysis = await analyzeSurveyPhotosOpenSource(
       refreshedFiles.filter((file) => file.fileType === "photo"),
     );
@@ -150,6 +234,17 @@ export async function POST(
           ),
         })),
         diagnostics: {
+          persistence: {
+            requestedCount: rawItems.length,
+            acceptedCount: deduped.length,
+            updateCount: updates.length,
+            updatedCount: updatedFiles.length,
+            normalizedUpdates: updates,
+            beforeLabelSnapshot: beforeLabelSnapshot.filter((file) =>
+              updates.some((update) => update.fileId === file.fileId),
+            ),
+            persistedLabelSnapshot,
+          },
           canonicalCounts: {
             rawPhotoItemCount: evidenceManifest.diagnostics.rawPhotoItemCount,
             canonicalItemCount: evidenceManifest.diagnostics.canonicalItemCount,

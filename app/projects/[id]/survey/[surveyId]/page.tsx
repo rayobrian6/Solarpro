@@ -1062,7 +1062,13 @@ function SurveyPhotoClassificationPreviewPanel({
       );
       const json = await res.json();
       if (!json.success) {
-        setError(json.error || "Failed to apply reviewed classifications");
+        const diagnostics = json.diagnostics;
+        const updateSummary = diagnostics
+          ? ` Requested ${diagnostics.requestedCount ?? "n/a"}, accepted ${diagnostics.acceptedCount ?? "n/a"}, attempted ${diagnostics.updateCount ?? "n/a"}, updated ${diagnostics.updatedCount ?? "n/a"}.`
+          : "";
+        setError(
+          `${json.error || "Failed to apply reviewed classifications"}${updateSummary}`,
+        );
         return;
       }
       const refreshedDetail = json.data?.refreshedDetail as
