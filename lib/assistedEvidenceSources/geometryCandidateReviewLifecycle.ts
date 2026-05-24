@@ -71,6 +71,47 @@ export interface GeometryCandidateReviewActionResult {
   audit: GeometryCandidateReviewActionAudit;
 }
 
+export interface GeometryCandidateReviewAnnotationInput extends Required<Pick<CandidateReviewInput, 'reviewerId' | 'reviewedAt'>> {
+  reviewerDisplayLabel?: string;
+  annotationNote?: string;
+  reviewerConfidence?: number;
+  tags?: string[];
+}
+
+export interface GeometryCandidateReviewAnnotationAudit {
+  annotationSchemaVersion: 'geometry_candidate_review_annotation_v1';
+  persistenceMode: GeometryCandidateReviewActionPersistenceMode;
+  candidateId: string;
+  candidateType: AssistedEvidenceCandidate['candidateType'];
+  candidateHash: string;
+  runtimeName: string;
+  runtimeVersion: string;
+  runtimePayloadHash: string;
+  sourceImageReference: string;
+  sourceLineageRef: string;
+  boundaryPolicyVersion: string;
+  reviewerId: string;
+  reviewerDisplayLabel: string | null;
+  annotationTimestamp: string;
+  annotationNote: string | null;
+  reviewerConfidence: number | null;
+  tags: string[];
+  priorReviewState: AssistedEvidenceCandidate['candidateStatus'];
+  resultingReviewState: AssistedEvidenceCandidate['candidateStatus'];
+  projectionCreated: false;
+  reviewedProjectionId: string | null;
+  reviewedProjectionHash: string | null;
+  authorityFlags: GeometryCandidateReviewActionAuthorityFlags;
+  annotationHash: string;
+  deterministicNotes: string[];
+}
+
+export interface GeometryCandidateReviewAnnotationResult {
+  candidate: AssistedEvidenceCandidate;
+  projection: null;
+  audit: GeometryCandidateReviewAnnotationAudit;
+}
+
 export interface GeometryCandidateReviewAuditExportInput {
   exportedAt: string;
   exportedBy: string;
@@ -227,6 +268,25 @@ function reviewNotesFromAction(input: GeometryCandidateReviewActionInput): strin
   return [reviewNote, rejectionReason ? `Rejection reason: ${rejectionReason}` : null].filter((value): value is string => value !== null);
 }
 
+function normalizedAnnotationTags(tags: string[] | undefined): string[] {
+  return [...new Set((tags ?? [])
+    .map(tag => tag.trim())
+    .filter(tag => tag.length > 0))]
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function assertGeometryReviewAnnotationInput(input: GeometryCandidateReviewAnnotationInput): true {
+  if (!input.reviewerId.trim()) throw new Error('Geometry candidate review annotation requires reviewerId.');
+  if (!input.reviewedAt.trim()) throw new Error('Geometry candidate review annotation requires annotation timestamp.');
+  if (input.reviewerConfidence !== undefined && (!Number.isFinite(input.reviewerConfidence) || input.reviewerConfidence < 0 || input.reviewerConfidence > 1)) {
+    throw new Error('Geometry candidate review annotation confidence must be between 0 and 1.');
+  }
+  if (!normalizedOptionalText(input.annotationNote) && input.reviewerConfidence === undefined && normalizedAnnotationTags(input.tags).length === 0) {
+    throw new Error('Geometry candidate review annotation requires a note, reviewer confidence, or at least one tag.');
+  }
+  return true;
+}
+
 function assertGeometryReviewActionInput(input: GeometryCandidateReviewActionInput): true {
   if (input.actionType !== 'accept_for_review_projection' && input.actionType !== 'reject_candidate') throw new Error('Unsupported geometry candidate review action.');
   if (!input.reviewerId.trim()) throw new Error('Geometry candidate review action requires reviewerId.');
@@ -281,6 +341,52 @@ function buildGeometryCandidateReviewActionAudit(
       'Accepted geometry candidates create reviewed evidence projections only and do not create canonical geometry.',
       'Rejected geometry candidates do not create projections and do not mutate CAD, engineering, workflows, or recommendations.',
     ],
+  };
+}
+
+export function buildGeometryCandidateReviewAnnotation(candidate: AssistedEvidenceCandidate, input: GeometryCandidateReviewAnnotationInput): GeometryCandidateReviewAnnotationResult {
+  assertGeometryReviewAnnotationInput(input);
+  assertReviewableGeometryCandidate(candidate);
+
+  const tags = normalizedAnnotationTags(input.tags);
+  const annotationWithoutHash = {
+    annotationSchemaVersion: 'geometry_candidate_review_annotation_v1' as const,
+    persistenceMode: 'deterministic_dto_only_v1' as const,
+    candidateId: candidate.candidateId,
+    candidateType: candidate.candidateType,
+    candidateHash: candidate.deterministicHash,
+    runtimeName: candidate.toolName,
+    runtimeVersion: candidate.toolVersion,
+    runtimePayloadHash: payloadString(candidate, 'runtimePayloadHash'),
+    sourceImageReference: candidate.sourceUploadKey,
+    sourceLineageRef: payloadString(candidate, 'sourceImageLineageRef'),
+    boundaryPolicyVersion: payloadString(candidate, 'boundaryPolicyVersion') || GEOMETRY_CANDIDATE_BOUNDARY_POLICY_VERSION,
+    reviewerId: input.reviewerId,
+    reviewerDisplayLabel: normalizedOptionalText(input.reviewerDisplayLabel),
+    annotationTimestamp: input.reviewedAt,
+    annotationNote: normalizedOptionalText(input.annotationNote),
+    reviewerConfidence: input.reviewerConfidence ?? null,
+    tags,
+    priorReviewState: candidate.candidateStatus,
+    resultingReviewState: candidate.candidateStatus,
+    projectionCreated: false as const,
+    reviewedProjectionId: null,
+    reviewedProjectionHash: null,
+    authorityFlags: GEOMETRY_CANDIDATE_REVIEW_ACTION_AUTHORITY_FLAGS,
+    deterministicNotes: [
+      'Geometry candidate review annotation is deterministic DTO-only in V1 and does not persist records.',
+      'Annotation output keeps the review state unchanged and does not create reviewed evidence projections.',
+      'Reviewer confidence and tags are triage metadata only with no downstream authority.',
+    ],
+  };
+
+  return {
+    candidate,
+    projection: null,
+    audit: {
+      ...annotationWithoutHash,
+      annotationHash: deterministicHash(annotationWithoutHash),
+    },
   };
 }
 
