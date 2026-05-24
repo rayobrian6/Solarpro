@@ -1,22 +1,19 @@
-# Commercial Render Refinement Sprint Todo
+# CAD Visual Wiring Todo
 
-## Audit
-- [x] Visually audit current generated sheets/previews for generated/dashboard/sparse/unfinished qualities
-- [x] Prioritize high-impact low-cost visual fixes for A-101, density, typography, and export polish
+## Scope Reset
+- [x] Revert broad validation/source-truth/provenance UI changes from the previous interpretation
+- [x] Preserve existing planset information structure and validation behavior
 
-## Visible Refinement
-- [x] Upgrade A-101 roof/site plan drafting realism, density, annotation hierarchy, and visual balance
-- [x] Improve permit-sheet density, note blocks, legends, tables, equipment summaries, and revision areas
-- [x] Tighten typography, callouts, leader lines, symbols, scale/north arrow, and PDF/contact-sheet presentation
-- [x] Keep preview-only manifest cleanliness without live UI wiring or backend expansion
-- [x] Reset render quality scoring to stricter commercial realism/professionalism thresholds
+## Visual Audit
+- [x] Inspect current generated permit visuals from the latest uploaded HTML package
+- [x] Identify weak schematic visuals that should be replaced by professional CAD output
+- [x] Inspect existing CAD/drafting engine entry points for reusable next-level renderers
 
-## Artifacts and Validation
-- [x] Regenerate clean_roof, ground_mount_survey, solar_fence_survey, and document_derived_partial_evidence packages
-- [x] Verify PDFs, thumbnails, contact sheets, manifests, quality scores, and deterministic outputs
-- [x] Run focused render/export tests, site-survey validation suite, type-check, and safety boundary checks
+## CAD Engine Wiring
+- [x] Wire professional CAD visuals into existing permit sheet slots without redesigning sheet content
+- [x] Keep changes focused on actual imagery/drawing output
 
-## Delivery
-- [x] Commit refinements on a new branch
-- [x] Push branch with token-authenticated remote syntax
-- [x] Provide final summary with requested commercial-quality assessment
+## Validation and Delivery
+- [x] Run targeted tests/type checks for touched permit/CAD files
+- [ ] Commit changes on dev and push only dev
+- [ ] Summarize visual-only fixes and any remaining CAD rendering priorities

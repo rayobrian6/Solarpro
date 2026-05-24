@@ -13,6 +13,7 @@ import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, pv2Title, compassDir } from '../utils/helpers';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import { isFence, isGround, isRoof, displaySystemType } from '@/lib/system';
+import { drawingEngine } from '@/lib/drafting';
 
 export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
   // ── CAD validation ────────────────────────────────────────────────────────
@@ -110,6 +111,25 @@ export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number
 
 // ─── PV-1B: Array Geometry & String Layout ────────────────────────────────
 // Detailed schematic showing array groupings, string assignments, row/col grid
+
+
+function buildProfessionalCadArrayVisual(
+  input: PermitInput,
+  cad: CADModel,
+  fallbackSvg: string,
+): string {
+  try {
+    const cadSvg = drawingEngine.getArrayPlanFromCAD(cad, input, undefined);
+    if (!cadSvg || cadSvg.length < 500) return fallbackSvg;
+    return cadSvg.replace(
+      /<svg([^>]*)>/,
+      '<svg$1 class="professional-cad-array-visual" style="display:block;width:100%;height:100%;max-width:100%;max-height:100%;" preserveAspectRatio="xMidYMid meet">',
+    );
+  } catch (error) {
+    console.warn('[pageArrayGeometry] Professional CAD visual fallback:', error instanceof Error ? error.message : String(error));
+    return fallbackSvg;
+  }
+}
 
 export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { project, system } = input;
@@ -275,7 +295,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     agCells += `<text x="${AG_VB_W/2}" y="${AG_VB_H/2 + 10}" text-anchor="middle" font-size="12" fill="#555">${totalStrings} strings — see string schedule</text>`;
   }
 
-  const agDrawSvg = `<svg viewBox="0 0 ${AG_VB_W} ${AG_VB_H}" width="100%" height="100%"
+  const schematicGridSvg = `<svg viewBox="0 0 ${AG_VB_W} ${AG_VB_H}" width="100%" height="100%"
     preserveAspectRatio="xMidYMid meet"
     style="display:block;max-width:100%;max-height:100%;"
     xmlns="http://www.w3.org/2000/svg">
@@ -289,6 +309,8 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     <rect x="80" y="${AG_VB_H - 18}" width="120" height="5" fill="#aaa" rx="1"/>
     <text x="80" y="${AG_VB_H - 5}" font-size="8" fill="#777" font-family="Arial,sans-serif">SCHEMATIC (NOT TO SCALE — NTS)</text>
   </svg>`;
+
+  const agDrawSvg = buildProfessionalCadArrayVisual(input, cad, schematicGridSvg);
 
   // Callout notes for data zone
   const agCalloutRows = [
@@ -346,7 +368,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     <div style="display:flex;flex-direction:row;gap:0;flex:1 1 0%;min-height:0;overflow:hidden;margin-top:var(--md);">
       <!-- Draw zone 78%: full-height array grid SVG -->
       <div class="draw-zone" style="flex:0 0 78%;max-width:78%;min-height:0;">
-        <div class="draw-zone-hdr">ARRAY CONFIGURATION DIAGRAM \u2014 ${totalPanels} MODULES / ${totalStrings} STRING${totalStrings !== 1 ? 'S' : ''}</div>
+        <div class="draw-zone-hdr">PROFESSIONAL CAD ARRAY DIAGRAM \u2014 ${totalPanels} MODULES / ${totalStrings} STRING${totalStrings !== 1 ? 'S' : ''}</div>
         <div class="draw-zone-body" style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:10px;background:#fff;min-height:0;">
           ${agDrawSvg}
         </div>
