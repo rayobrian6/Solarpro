@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "professional_plan_set_render_output_summary_v1",
+  "packageCount": 4,
+  "totalSheetCount": 12,
+  "renderedSheetTypes": [
+    "cover_summary",
+    "evidence_review",
+    "site_plan_render"
+  ],
+  "packageHashes": [
+    {
+      "fixtureId": "clean_roof",
+      "packageHash": "f2ad3800",
+      "state": "render_demo_ready",
+      "confidence": 100
+    },
+    {
+      "fixtureId": "ground_mount_survey",
+      "packageHash": "4603c536",
+      "state": "render_demo_ready",
+      "confidence": 97
+    },
+    {
+      "fixtureId": "solar_fence_survey",
+      "packageHash": "287d8c45",
+      "state": "render_demo_ready",
+      "confidence": 97
+    },
+    {
+      "fixtureId": "document_derived_partial_evidence",
+      "packageHash": "f56c9e47",
+      "state": "render_review_required",
+      "confidence": 64
+    }
+  ],
+  "visibleQualityImprovements": [
+    "Professional title blocks, legends, review stamps, and sheet numbering create contractor-facing plan-set identity.",
+    "Canonical roof geometry is rendered as export-safe vector linework with consistent line-weight hierarchy.",
+    "Render readiness, confidence, and review-required callouts are visible directly on sheets.",
+    "Photo evidence and geometry trust summaries are packaged into readable evidence/review sheets."
+  ],
+  "contractorUsabilityImprovements": [
+    "Roof labels, pitch/azimuth labels, setbacks, equipment markers, and module preview zones are visually grouped.",
+    "Blocked/review states are explicit, reducing risk that preview renders are mistaken for stamped engineering.",
+    "Legends and notes explain symbol meaning and non-authoritative boundaries on every output package."
+  ],
+  "noAuthorityEnforcement": {
+    "readOnly": true,
+    "renderOutputOnly": true,
+    "stampedEngineeringPackage": false,
+    "automaticCadGenerationAllowed": false,
+    "canonicalGeometryMutationAllowed": false,
+    "cadMutationAllowed": false,
+    "cadSolverExecutionAllowed": false,
+    "persistenceAllowed": false,
+    "downstreamEngineeringAllowed": false,
+    "downstreamPermitAllowed": false,
+    "downstreamBomAllowed": false
+  }
+}
