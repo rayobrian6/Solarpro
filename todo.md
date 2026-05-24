@@ -1,29 +1,22 @@
-# Realistic Site Context + PDF Export + Live Preview Preparation Todo
+# Commercial Render Refinement Sprint Todo
 
-## Discovery
-- [x] Inspect current render package, generator, fixtures, and existing export capabilities
-- [x] Identify deterministic realism and preview assets that can be added without authority promotion
+## Audit
+- [x] Visually audit current generated sheets/previews for generated/dashboard/sparse/unfinished qualities
+- [x] Prioritize high-impact low-cost visual fixes for A-101, density, typography, and export polish
 
-## Implementation
-- [x] Add realistic site/property/aerial-like context composition to site render sheets
-- [x] Improve module layout realism with spacing, grouping, rails, attachments, and callouts
-- [x] Add deterministic PDF export pipeline for multi-sheet render packages
-- [x] Add live-preview-ready manifest metadata and access patterns without UI wiring
-- [x] Add thumbnail, snapshot, and contact-sheet preview generation
-- [x] Preserve no-authority, no-CAD-mutation, no-persistence, and no-live-UI boundaries
+## Visible Refinement
+- [x] Upgrade A-101 roof/site plan drafting realism, density, annotation hierarchy, and visual balance
+- [x] Improve permit-sheet density, note blocks, legends, tables, equipment summaries, and revision areas
+- [x] Tighten typography, callouts, leader lines, symbols, scale/north arrow, and PDF/contact-sheet presentation
+- [x] Keep preview-only manifest cleanliness without live UI wiring or backend expansion
+- [x] Reset render quality scoring to stricter commercial realism/professionalism thresholds
 
-## Artifacts
-- [x] Regenerate upgraded packages for clean_roof, ground_mount_survey, solar_fence_survey, and document_derived_partial_evidence
-- [x] Generate PDF exports, thumbnails, preview snapshots, contact sheets, and preview manifests
-- [x] Generate updated realism/export readiness notes
-
-## Validation
-- [x] Run parser/readiness/fixture/adapter/intelligence/replay/photo/render tests
-- [x] Run PDF export, preview-generation, render quality, and deterministic output tests
-- [x] Run type-check clean and build if feasible
-- [x] Verify no-authority, no CAD mutation, no persistence authority promotion, and no live UI wiring
+## Artifacts and Validation
+- [x] Regenerate clean_roof, ground_mount_survey, solar_fence_survey, and document_derived_partial_evidence packages
+- [x] Verify PDFs, thumbnails, contact sheets, manifests, quality scores, and deterministic outputs
+- [x] Run focused render/export tests, site-survey validation suite, type-check, and safety boundary checks
 
 ## Delivery
-- [x] Commit changes on dev
-- [x] Push dev with token-authenticated remote syntax
-- [x] Provide final summary with validation results and artifact attachments
+- [x] Commit refinements on a new branch
+- [x] Push branch with token-authenticated remote syntax
+- [x] Provide final summary with requested commercial-quality assessment

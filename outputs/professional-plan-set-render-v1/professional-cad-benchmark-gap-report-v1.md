@@ -21,7 +21,7 @@ The uploaded sealed residential solar permit package was reviewed as a visual be
 - Symbolized legend with matching roof/module/fire path/conduit/equipment/attachment symbols.
 - Leader-line callouts for module preview zones, PV group/string callouts, and fire setback overlays.
 - A-000 rebalanced into system summary, sheet index, render layer summary, trust indicators, and review notes.
-- A-101 reworked around a cleaner roof plan viewport, scale/north placement, rail/attachment symbols, and active render layer table.
+- A-101 reworked as the flagship commercial sheet with roof edge articulation, hatch linework, obstruction symbols, parcel/access realism cues, professional true-north/scale graphics, rail/attachment symbols, equipment summary, construction notes, revision/QA table, and active render layer table.
 - A-201 converted into evidence records plus evidence coverage and review/risk regions.
 - Deterministic render quality checklist, direct PDF export, preview thumbnails/snapshots, contact sheets, and live-preview manifests added for visual QA only.
 
@@ -38,4 +38,4 @@ The upgraded output is closer to commercial preview quality, but it is still not
 
 ## Quality Result
 
-Average deterministic render quality score: **93/100**. Checklist keys: title_block_rail, sheet_border, legend_symbols, viewport_readability, site_context_realism, module_layout_realism, annotation_readability, line_weight_consistency, render_confidence_display, review_warning_visibility, print_export_readiness, evidence_grouping.
+Average deterministic render quality score: **89/100**. Checklist keys: title_block_rail, sheet_border, legend_professionalism, composition_balance, site_context_realism, module_layout_realism, annotation_density, drafting_resemblance, render_confidence_display, review_warning_visibility, export_presentation_readiness, evidence_grouping.

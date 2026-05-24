@@ -77,11 +77,17 @@ async function generatePreviewAssets(dir: string, pkg: ReturnType<typeof buildPr
     await sharp(svgPath, { density: 96 }).resize({ width: 330 }).png().toFile(thumbPath);
     await sharp(svgPath, { density: 144 }).resize({ width: 990 }).png().toFile(snapPath);
     const thumbBase64 = (await sharp(thumbPath).png().toBuffer()).toString('base64');
-    const cardSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="380" height="330"><rect width="100%" height="100%" fill="#fff"/><image href="data:image/png;base64,${thumbBase64}" x="25" y="24" width="330"/><text x="25" y="305" font-family="Arial" font-size="18" font-weight="700" fill="#111827">${sheet.sheetNumber} · ${sheet.title}</text></svg>`;
+    const cardSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="380" height="354"><rect x="0" y="0" width="380" height="354" rx="16" fill="#ffffff" stroke="#111827" stroke-width="1.4"/><rect x="14" y="14" width="352" height="270" fill="#f8fafc" stroke="#cbd5e1"/><image href="data:image/png;base64,${thumbBase64}" x="25" y="24" width="330"/><rect x="14" y="292" width="352" height="48" fill="#f3f4f6" stroke="#cbd5e1"/><text x="26" y="313" font-family="Arial" font-size="18" font-weight="800" fill="#111827">${sheet.sheetNumber}</text><text x="86" y="313" font-family="Arial" font-size="12" font-weight="700" fill="#334155">${sheet.title}</text><text x="26" y="333" font-family="Arial" font-size="10" font-weight="700" fill="#92400e">NON-AUTHORITATIVE COMMERCIAL PREVIEW</text></svg>`;
     sheetCards.push(await sharp(Buffer.from(cardSvg)).png().toBuffer());
   }
-  await sharp({ create: { width: 1200, height: 410, channels: 4, background: '#f8fafc' } })
-    .composite(sheetCards.map((input, index) => ({ input, left: 20 + index * 390, top: 40 })))
+  const contactHeader = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="118"><rect width="1200" height="118" fill="#111827"/><text x="32" y="46" font-family="Arial" font-size="28" font-weight="900" fill="#ffffff">SolarPro Commercial Plan-Set Preview</text><text x="32" y="76" font-family="Arial" font-size="14" font-weight="700" fill="#d1d5db">A-101 flagship roof/site plan refinement · PDF-ready SVG sheets · deterministic preview-only package</text><text x="930" y="46" font-family="Arial" font-size="16" font-weight="900" fill="#fbbf24">QUALITY ${pkg.summary.renderQualityScore}/100</text><text x="930" y="74" font-family="Arial" font-size="12" font-weight="700" fill="#e5e7eb">${pkg.summary.renderQualityGrade}</text></svg>`);
+  const contactFooter = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="56"><rect width="1200" height="56" fill="#f8fafc"/><line x1="32" y1="1" x2="1168" y2="1" stroke="#cbd5e1"/><text x="32" y="34" font-family="Arial" font-size="12" font-weight="700" fill="#475569">Preview-only render package. Not stamped engineering, not construction documents, no CAD solver execution, no geometry mutation.</text></svg>`);
+  await sharp({ create: { width: 1200, height: 530, channels: 4, background: '#e5e7eb' } })
+    .composite([
+      { input: contactHeader, left: 0, top: 0 },
+      ...sheetCards.map((input, index) => ({ input, left: 20 + index * 390, top: 130 })),
+      { input: contactFooter, left: 0, top: 474 },
+    ])
     .png()
     .toFile(join(dir, 'contact-sheet.png'));
   const pdfPath = join(dir, 'package.pdf');
@@ -159,7 +165,8 @@ ${summaryValue.contractorUsabilityImprovements.map(v => `- ${v}`).join('\n')}
 - SVG title blocks with sheet numbers and project metadata.
 - Review-first preview stamps visible on every sheet.
 - Realistic but diagrammatic site-context layer with lot boundary, street/access cue, driveway cue, neighboring structure silhouettes, and aerial-like grayscale texture.
-- Roof plan viewport with line-weight hierarchy, roof outlines, setback previews, realistic module grouping, conduit candidates, equipment markers, legends, and annotation lists.
+- Flagship A-101 roof/site plan now carries stronger roof edge articulation, roof hatch, obstruction reference symbols, parcel hatch cues, rail/attachment indicators, professional true-north/scale graphics, and balanced bottom-table density.
+- Roof plan viewport with line-weight hierarchy, roof outlines, setback previews, realistic module grouping, conduit candidates, equipment markers, richer legends, construction notes, revision/QA table, and annotation lists.
 - Evidence/review sheets with photo evidence tiles, confidence notes, missing coverage visibility, and render-readiness callouts.
 - Print-friendly HTML plus direct PDF packages, thumbnails, snapshots, contact sheets, and live-preview manifests.
 
@@ -201,7 +208,8 @@ function realismExportReport(summaryValue: typeof summary) {
 
 - A deterministic grayscale site-context layer adds lot/property boundary, street/access cue, driveway/access shape, neighboring structure silhouettes, and aerial-like texture.
 - Site plan composition remains diagrammatic and preview-only; it does not extract authoritative parcel geometry or mutate canonical roof geometry.
-- Module layout visuals now include aligned rows, orientation labels, group outlines, consistent spacing, and string/group callouts.
+- Module layout visuals now include aligned rows, orientation labels, group outlines, consistent spacing, string/group callouts, rail/attachment symbols, and A-101 note/table density.
+- Roof plan realism now includes roof hatch, edge vertices, obstruction reference symbols, parcel hatch cues, and stronger true-north/scale presentation while remaining explicitly diagrammatic.
 
 ## PDF / Preview Export
 
@@ -297,7 +305,7 @@ The uploaded sealed residential solar permit package was reviewed as a visual be
 - Symbolized legend with matching roof/module/fire path/conduit/equipment/attachment symbols.
 - Leader-line callouts for module preview zones, PV group/string callouts, and fire setback overlays.
 - A-000 rebalanced into system summary, sheet index, render layer summary, trust indicators, and review notes.
-- A-101 reworked around a cleaner roof plan viewport, scale/north placement, rail/attachment symbols, and active render layer table.
+- A-101 reworked as the flagship commercial sheet with roof edge articulation, hatch linework, obstruction symbols, parcel/access realism cues, professional true-north/scale graphics, rail/attachment symbols, equipment summary, construction notes, revision/QA table, and active render layer table.
 - A-201 converted into evidence records plus evidence coverage and review/risk regions.
 - Deterministic render quality checklist, direct PDF export, preview thumbnails/snapshots, contact sheets, and live-preview manifests added for visual QA only.
 
@@ -325,6 +333,8 @@ function qualityChecklistReport(summaryValue: typeof summary) {
 This checklist is visual quality assurance only. It does not promote engineering authority, does not stamp drawings, does not mutate canonical geometry, and does not trigger CAD solver, permit, BOM, or engineering workflows.
 
 ## Deterministic Checklist Areas
+
+The scoring threshold is intentionally stricter than earlier package-existence checks. It now rewards drafting resemblance, composition balance, annotation density, legend professionalism, contractor trust, and export presentation readiness instead of merely counting sheets and metadata.
 
 ${summaryValue.renderQualityChecklistKeys.map(key => `- ${key}`).join('\n')}
 
