@@ -19,6 +19,6 @@
 - [x] Verify deterministic output and safety boundaries
 
 ## Delivery
-- [ ] Commit changes on dev
-- [ ] Push dev using token-authenticated remote syntax
+- [x] Commit changes on dev
+- [x] Push dev using token-authenticated remote syntax
 - [ ] Provide final commercial/render summary and attach deliverables
