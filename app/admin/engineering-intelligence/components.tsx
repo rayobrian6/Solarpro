@@ -186,6 +186,29 @@ function geometryCandidateReviewAnnotationPreview(candidate: AssistedEvidenceCan
   });
 }
 
+function geometryCandidateReviewerTriageSummary(annotationPreview: ReturnType<typeof geometryCandidateReviewAnnotationPreview>) {
+  if (!annotationPreview) {
+    return {
+      triageMode: 'preview_unavailable',
+      confidenceLabel: 'not_reviewable',
+      tagSummary: 'none',
+      projectionCreated: 'false',
+      stateTransition: 'unchanged_unavailable',
+      downstreamAuthority: 'false',
+    };
+  }
+  const confidence = annotationPreview.audit.reviewerConfidence;
+  const confidenceLabel = confidence === null ? 'no_confidence' : confidence >= 0.7 ? 'reviewer_attention_high' : confidence >= 0.4 ? 'reviewer_attention_medium' : 'reviewer_attention_low';
+  return {
+    triageMode: 'annotation_preview_only',
+    confidenceLabel,
+    tagSummary: annotationPreview.audit.tags.join('|') || 'none',
+    projectionCreated: String(annotationPreview.audit.projectionCreated),
+    stateTransition: `${annotationPreview.audit.priorReviewState}->${annotationPreview.audit.resultingReviewState}`,
+    downstreamAuthority: String(annotationPreview.audit.authorityFlags.downstreamAuthority),
+  };
+}
+
 function collectionSize(value: unknown): number {
   if (Array.isArray(value) || typeof value === 'string') return value.length;
   if (value instanceof Map || value instanceof Set) return value.size;
@@ -1805,6 +1828,7 @@ export function GeometryCandidateReviewWorkspace({ sandbox }: { sandbox: { candi
             const projection = relatedProjectionForCandidate(candidate, projections);
             const actionPreviews = geometryCandidateReviewActionPreviews(candidate);
             const annotationPreview = geometryCandidateReviewAnnotationPreview(candidate);
+            const triageSummary = geometryCandidateReviewerTriageSummary(annotationPreview);
             return (
               <div key={workspaceKey('geometry-review-candidate', candidate.candidateId, index)} className="rounded-2xl border border-sky-400/20 bg-slate-950/90 p-5 text-xs text-slate-300 shadow-xl shadow-sky-950/10">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1882,6 +1906,18 @@ export function GeometryCandidateReviewWorkspace({ sandbox }: { sandbox: { candi
                 <div className="mt-4 rounded-xl border border-violet-400/20 bg-violet-400/10 p-4 text-slate-200">
                   <div className="text-sm font-black text-violet-100">Reviewer annotation preview V1 · DTO-only · no state change</div>
                   <div className="mt-2 text-violet-50">This read-only preview displays the deterministic annotation DTO that a reviewer note would produce. It does not expose fields, buttons, submit handlers, persistence, candidate approval, candidate rejection, projection creation, CAD mutation, canonical geometry mutation, engineering influence, workflows, or recommendations.</div>
+                  <div className="mt-4 rounded-xl border border-violet-300/20 bg-slate-950/60 p-4">
+                    <div className="mb-3 text-sm font-bold text-white">Reviewer triage summary · display-only</div>
+                    <div className="grid gap-2 md:grid-cols-3">
+                      <Metric label="Triage mode" value={triageSummary.triageMode} />
+                      <Metric label="Confidence label" value={triageSummary.confidenceLabel} />
+                      <Metric label="State transition" value={triageSummary.stateTransition} />
+                      <Metric label="Projection created" value={triageSummary.projectionCreated} />
+                      <Metric label="Downstream authority" value={triageSummary.downstreamAuthority} />
+                      <Metric label="Triage tags" value={triageSummary.tagSummary} />
+                    </div>
+                    <div className="mt-3 rounded-lg border border-violet-300/20 bg-violet-300/10 p-3 text-violet-50">Reviewer triage summary is derived from annotation preview metadata only. It is not sorting authority, not a filter state, not persistence, not approval, and not downstream engineering input.</div>
+                  </div>
                   {annotationPreview ? (
                     <div className="mt-4 rounded-xl border border-violet-300/20 bg-slate-950/70 p-4">
                       <div className="mb-3 text-sm font-bold text-white">Annotation audit DTO · read-only</div>
@@ -1912,7 +1948,7 @@ export function GeometryCandidateReviewWorkspace({ sandbox }: { sandbox: { candi
                       <div className="mt-3"><TokenList values={annotationPreview.audit.deterministicNotes} limit={8} /></div>
                     </div>
                   ) : (
-                    <div className="mt-3 rounded-lg border border-slate-400/20 bg-slate-400/10 p-3 text-slate-200">Annotation previews are unavailable because this candidate is not in review_required state. Annotation V1 is only valid for existing review-required possible obstruction candidates.</div>
+                    <div className="mt-3 rounded-lg border border-slate-400/20 bg-slate-400/10 p-3 text-slate-200">Annotation previews are unavailable because this candidate is not in review_required state. Annotation V1 is only valid for existing review-required possible obstruction candidates, and unavailable previews remain display-only with no retry control, no submit handler, no status repair action, and no persistence.</div>
                   )}
                 </div>
                 <div className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-slate-200">
@@ -1973,7 +2009,7 @@ export function GeometryCandidateReviewWorkspace({ sandbox }: { sandbox: { candi
                       </div>
                     </div>
                   ) : (
-                    <div className="mt-3 rounded-lg border border-slate-400/20 bg-slate-400/10 p-3 text-slate-200">Review action previews are unavailable because this candidate is not in review_required state. Lifecycle helpers reject already-reviewed, invalidated, superseded, or unsupported candidates.</div>
+                    <div className="mt-3 rounded-lg border border-slate-400/20 bg-slate-400/10 p-3 text-slate-200">Review action previews are unavailable because this candidate is not in review_required state. Lifecycle helpers reject already-reviewed, invalidated, superseded, or unsupported candidates, and this workspace intentionally exposes no repair, resubmit, promotion, persistence, CAD, engineering, workflow, recommendation, or canonical mutation control.</div>
                   )}
                 </div>
               </div>

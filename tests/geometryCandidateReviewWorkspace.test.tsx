@@ -132,6 +132,12 @@ describe('GeometryCandidateReviewWorkspace', () => {
     }
 
     expect(screen.getByText('Reviewer annotation preview V1 · DTO-only · no state change')).toBeInTheDocument();
+    expect(screen.getByText('Reviewer triage summary · display-only')).toBeInTheDocument();
+    expect(screen.getByText('annotation_preview_only')).toBeInTheDocument();
+    expect(screen.getByText('reviewer_attention_high')).toBeInTheDocument();
+    expect(screen.getByText('review_required->review_required')).toBeInTheDocument();
+    expect(screen.getByText('needs-human-review|possible-obstruction|roof-context')).toBeInTheDocument();
+    expect(screen.getByText('Reviewer triage summary is derived from annotation preview metadata only. It is not sorting authority, not a filter state, not persistence, not approval, and not downstream engineering input.')).toBeInTheDocument();
     expect(screen.getByText('geometry_candidate_review_annotation_v1')).toBeInTheDocument();
     expect(screen.getByText('Geometry Review Workspace Annotation Preview')).toBeInTheDocument();
     expect(screen.getByText('Preview annotation only: reviewer triage metadata, not approval, rejection, projection creation, canonical geometry, CAD input, engineering truth, workflow trigger, or recommendation input.')).toBeInTheDocument();

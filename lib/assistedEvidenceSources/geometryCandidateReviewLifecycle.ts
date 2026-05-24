@@ -119,6 +119,7 @@ export interface GeometryCandidateReviewAuditExportInput {
   staleVisibilityInput?: GeometryCandidateStaleVisibilityInput;
   acceptPreview?: Omit<GeometryCandidateReviewActionInput, 'actionType'>;
   rejectPreview?: Omit<GeometryCandidateReviewActionInput, 'actionType'>;
+  annotationPreview?: GeometryCandidateReviewAnnotationInput;
 }
 
 export interface GeometryCandidateReviewAuditExportBundle {
@@ -143,6 +144,7 @@ export interface GeometryCandidateReviewAuditExportBundle {
     accept: GeometryCandidateReviewActionAudit | null;
     reject: GeometryCandidateReviewActionAudit | null;
   };
+  reviewerAnnotationPreview: GeometryCandidateReviewAnnotationAudit | null;
   authorityFlags: GeometryCandidateReviewActionAuthorityFlags;
   exportHash: string;
   deterministicNotes: string[];
@@ -506,6 +508,7 @@ export function buildGeometryCandidateReviewAuditExportBundle(candidate: Assiste
   const lineage = buildGeometryCandidateLineageNode(candidate);
   const acceptPreview = input.acceptPreview ? acceptGeometryCandidateReviewAction(candidate, input.acceptPreview).audit : null;
   const rejectPreview = input.rejectPreview ? rejectGeometryCandidateReviewAction(candidate, input.rejectPreview).audit : null;
+  const annotationPreview = input.annotationPreview ? buildGeometryCandidateReviewAnnotation(candidate, input.annotationPreview).audit : null;
   const bundleWithoutHash = {
     exportSchemaVersion: 'geometry_candidate_review_audit_export_bundle_v1' as const,
     persistenceMode: 'deterministic_dto_only_v1' as const,
@@ -542,10 +545,11 @@ export function buildGeometryCandidateReviewAuditExportBundle(candidate: Assiste
       accept: acceptPreview,
       reject: rejectPreview,
     },
+    reviewerAnnotationPreview: annotationPreview,
     authorityFlags: GEOMETRY_CANDIDATE_REVIEW_ACTION_AUTHORITY_FLAGS,
     deterministicNotes: [
       'Geometry candidate review audit export bundle is deterministic DTO-only and does not persist records.',
-      'The bundle contains candidate provenance, candidate-only stale visibility, lineage-only dependency metadata, and optional preview audit DTOs.',
+      'The bundle contains candidate provenance, candidate-only stale visibility, lineage-only dependency metadata, optional review-action preview audit DTOs, and an optional reviewer annotation preview audit DTO.',
       'The bundle is no-authority export metadata only and cannot change downstream operational systems or generated outputs.',
     ],
   };

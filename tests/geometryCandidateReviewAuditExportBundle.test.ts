@@ -53,6 +53,14 @@ describe('geometry candidate review audit export bundle v1', () => {
         reviewNote: 'Preview reject for audit export only.',
         rejectionReason: 'not_actionable_for_review_projection',
       },
+      annotationPreview: {
+        reviewerId: 'reviewer-export-annotation',
+        reviewerDisplayLabel: 'Export Annotation Reviewer',
+        reviewedAt: '2026-01-07T03:00:00.000Z',
+        annotationNote: 'Preview annotation for audit export only.',
+        reviewerConfidence: 0.81,
+        tags: ['export-handoff', 'roof-context', 'possible-obstruction'],
+      },
     });
     const replay = buildGeometryCandidateReviewAuditExportBundle(candidate, {
       exportedAt: '2026-01-07T00:00:00.000Z',
@@ -76,6 +84,14 @@ describe('geometry candidate review audit export bundle v1', () => {
         reviewedAt: '2026-01-07T02:00:00.000Z',
         reviewNote: 'Preview reject for audit export only.',
         rejectionReason: 'not_actionable_for_review_projection',
+      },
+      annotationPreview: {
+        reviewerId: 'reviewer-export-annotation',
+        reviewerDisplayLabel: 'Export Annotation Reviewer',
+        reviewedAt: '2026-01-07T03:00:00.000Z',
+        annotationNote: 'Preview annotation for audit export only.',
+        reviewerConfidence: 0.81,
+        tags: ['export-handoff', 'roof-context', 'possible-obstruction'],
       },
     });
 
@@ -114,6 +130,16 @@ describe('geometry candidate review audit export bundle v1', () => {
     expect(bundle.reviewActionPreviews.reject?.actionType).toBe('reject_candidate');
     expect(bundle.reviewActionPreviews.reject?.reviewedProjectionId).toBeNull();
     expect(bundle.reviewActionPreviews.reject?.rejectionReason).toBe('not_actionable_for_review_projection');
+    expect(bundle.reviewerAnnotationPreview?.annotationSchemaVersion).toBe('geometry_candidate_review_annotation_v1');
+    expect(bundle.reviewerAnnotationPreview?.reviewerDisplayLabel).toBe('Export Annotation Reviewer');
+    expect(bundle.reviewerAnnotationPreview?.annotationNote).toBe('Preview annotation for audit export only.');
+    expect(bundle.reviewerAnnotationPreview?.reviewerConfidence).toBe(0.81);
+    expect(bundle.reviewerAnnotationPreview?.tags).toEqual(['export-handoff', 'possible-obstruction', 'roof-context']);
+    expect(bundle.reviewerAnnotationPreview?.priorReviewState).toBe('review_required');
+    expect(bundle.reviewerAnnotationPreview?.resultingReviewState).toBe('review_required');
+    expect(bundle.reviewerAnnotationPreview?.projectionCreated).toBe(false);
+    expect(bundle.reviewerAnnotationPreview?.reviewedProjectionId).toBeNull();
+    expect(bundle.reviewerAnnotationPreview?.authorityFlags.downstreamAuthority).toBe(false);
     expect(bundle.authorityFlags).toEqual({
       canonicalGeometryMutationAllowed: false,
       cadMutationAllowed: false,
@@ -138,6 +164,7 @@ describe('geometry candidate review audit export bundle v1', () => {
     expect(bundle.exportReason).toBeNull();
     expect(bundle.reviewActionPreviews.accept).toBeNull();
     expect(bundle.reviewActionPreviews.reject).toBeNull();
+    expect(bundle.reviewerAnnotationPreview).toBeNull();
     expect(bundle.staleVisibility.staleClasses).toEqual([]);
     expect(bundle.staleVisibility.regenerationAllowed).toBe(false);
     expect(bundle.authorityFlags.downstreamAuthority).toBe(false);
@@ -164,6 +191,16 @@ describe('geometry candidate review audit export bundle v1', () => {
         reviewedAt: '2026-01-09T01:00:00.000Z',
       },
     })).toThrow(/rejection reason/i);
+
+    expect(() => buildGeometryCandidateReviewAuditExportBundle(candidate, {
+      exportedAt: '2026-01-09T00:00:00.000Z',
+      exportedBy: 'audit-exporter-3',
+      annotationPreview: {
+        reviewerId: 'reviewer-export-annotation-invalid',
+        reviewedAt: '2026-01-09T01:30:00.000Z',
+        reviewerConfidence: 1.2,
+      },
+    })).toThrow(/confidence/i);
 
     const nonGeometryCandidate: AssistedEvidenceCandidate = {
       ...candidate,
