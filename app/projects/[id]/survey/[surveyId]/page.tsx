@@ -42,8 +42,8 @@ import type {
   SurveyEvidenceManifest,
 } from '@/lib/survey/evidence/manifest';
 import type { ProjectSurveyEvidenceHygieneManifest } from '@/lib/survey/evidence/sessionGrouping';
-import { buildSurveyEvidenceEngineeringBridge } from '@/lib/survey/evidence/engineeringBridge';
-import { buildSurveyEvidenceTraceability, type SurveyEvidenceTraceabilityBundle } from '@/lib/survey/evidence/provenance';
+import type { SurveyEvidenceEngineeringBridge } from '@/lib/survey/evidence/engineeringBridge';
+import type { SurveyEvidenceTraceabilityBundle } from '@/lib/survey/evidence/provenance';
 import type {
   SurveyV2Payload,
   SurveyElectricalService,
@@ -622,7 +622,7 @@ function SurveyTraceabilityViewer({ traceability }: { traceability: SurveyEviden
   );
 }
 
-function SurveyEvidenceViewer({ manifest }: { manifest: SurveyEvidenceManifest | null | undefined }) {
+function SurveyEvidenceViewer({ manifest, bridge }: { manifest: SurveyEvidenceManifest | null | undefined; bridge: SurveyEvidenceEngineeringBridge | null | undefined }) {
   if (!manifest) {
     return (
       <SectionCard icon={<Shield size={14} />} title="Survey Evidence Manifest" iconColor="text-cyan-400">
@@ -638,14 +638,13 @@ function SurveyEvidenceViewer({ manifest }: { manifest: SurveyEvidenceManifest |
   }, { electrical: [], roof: [], site: [], general: [] });
 
   const requiredCoverage = manifest.coverage.filter(group => group.required);
-  const bridge = buildSurveyEvidenceEngineeringBridge(manifest);
-  const requirementEvaluation = bridge.requirementEvaluation;
-  const activeRequirements = requirementEvaluation.allRequirements.filter(requirement => requirement.active);
+  const requirementEvaluation = bridge?.requirementEvaluation ?? null;
+  const activeRequirements = requirementEvaluation?.allRequirements.filter(requirement => requirement.active) ?? [];
   const bridgeCounts = {
-    electrical: bridge.electricalEvidence.length,
-    structural: bridge.structuralEvidence.length,
-    roofLayout: bridge.roofLayoutEvidence.length,
-    sitePlan: bridge.sitePlanEvidence.length,
+    electrical: bridge?.electricalEvidence.length ?? 0,
+    structural: bridge?.structuralEvidence.length ?? 0,
+    roofLayout: bridge?.roofLayoutEvidence.length ?? 0,
+    sitePlan: bridge?.sitePlanEvidence.length ?? 0,
   };
   const statusColor = manifest.summary.completeness === 'sufficient'
     ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20'
@@ -694,6 +693,7 @@ function SurveyEvidenceViewer({ manifest }: { manifest: SurveyEvidenceManifest |
           </div>
         </div>
 
+        {bridge && (
         <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div>
@@ -712,7 +712,9 @@ function SurveyEvidenceViewer({ manifest }: { manifest: SurveyEvidenceManifest |
           </div>
           <p className="mt-2 text-[10px] text-slate-500">CAD automation: <b className="text-slate-300">{bridge.cadAutomationStatus}</b></p>
         </div>
+        )}
 
+        {requirementEvaluation && (
         <div className="rounded-xl border border-violet-500/20 bg-violet-500/10 p-3">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div>
@@ -800,6 +802,7 @@ function SurveyEvidenceViewer({ manifest }: { manifest: SurveyEvidenceManifest |
             </details>
           </div>
         </div>
+        )}
 
         {manifest.warnings.length > 0 && (
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
@@ -1265,6 +1268,228 @@ function IssueList({ title, items, tone = 'amber' }: { title: string; items: str
   );
 }
 
+
+interface SurveyCadPreviewSheet {
+  sheetId: string;
+  sheetNumber: string;
+  sheetType: string;
+  title: string;
+  width: number;
+  height: number;
+  svg: string;
+  layerOrder: string[];
+  annotations: string[];
+  renderHash: string;
+}
+
+interface SurveyCadWorkbenchPreview {
+  readiness: {
+    readinessState: ProfessionalOperatorReadinessState;
+    source: { surveyId: string; projectId: string | null; fileCount: number; photoCount: number; hasSurveyData: boolean };
+    summaries: {
+      systemType: string;
+      roofPlaneCount: number;
+      obstructionCount: number;
+      setbackCount: number;
+      canonicalRoofPlaneCount: number;
+      cadPreviewEligible: boolean;
+      cadPreviewBuilt: boolean;
+      blockingIssues: string[];
+      warnings: string[];
+    };
+    renderReadiness: {
+      state: string;
+      renderConfidenceScore: number;
+      enabledLayerCount: number;
+      blockers: string[];
+      reviewItems: string[];
+    };
+  };
+  renderPackage: {
+    mode: string;
+    sourceSurveyId: string;
+    sourceRenderReadinessHash: string;
+    packageHash: string;
+    summary: {
+      sheetCount: number;
+      renderReadinessState: string;
+      renderConfidenceScore: number;
+      enabledRenderLayerCount: number;
+      reviewCalloutCount: number;
+      renderQualityScore: number;
+      renderQualityGrade: string;
+      visibleQualityImprovements: string[];
+      contractorUsabilityImprovements: string[];
+    };
+    deterministicNotes: string[];
+  };
+  sheets: SurveyCadPreviewSheet[];
+  defaultSheetNumber: string | null;
+}
+
+function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
+  const [preview, setPreview] = useState<SurveyCadWorkbenchPreview | null>(null);
+  const [selectedSheetNumber, setSelectedSheetNumber] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadPreview = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/site-surveys/${surveyId}/cad-render-preview`);
+      const json = await res.json();
+      if (!json.success) {
+        setError(json.error || 'Failed to load CAD render preview');
+        return;
+      }
+      setPreview(json.data);
+      setSelectedSheetNumber(json.data.defaultSheetNumber ?? json.data.sheets?.[0]?.sheetNumber ?? null);
+    } catch {
+      setError('Network error while loading CAD render preview');
+    } finally {
+      setLoading(false);
+    }
+  }, [surveyId]);
+
+  useEffect(() => {
+    if (surveyId) loadPreview();
+  }, [surveyId, loadPreview]);
+
+  if (loading) {
+    return (
+      <SectionCard icon={<FileText size={14} />} title="Site Survey CAD Workbench — Read-Only Preview" iconColor="text-emerald-400">
+        <div className="flex items-center gap-2 py-4 text-xs text-slate-500">
+          <div className="spinner w-4 h-4" /> Rendering source-truth CAD preview package...
+        </div>
+      </SectionCard>
+    );
+  }
+
+  if (error || !preview) {
+    return (
+      <SectionCard icon={<FileText size={14} />} title="Site Survey CAD Workbench — Read-Only Preview" iconColor="text-emerald-400">
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
+          <div className="flex items-center gap-2 text-amber-200">
+            <AlertTriangle size={13} />
+            <p className="text-xs font-semibold">CAD preview unavailable</p>
+          </div>
+          <p className="mt-1 text-[11px] text-amber-100/80">{error ?? 'No preview package returned.'}</p>
+          <button onClick={loadPreview} className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-[11px] text-slate-300">
+            <RefreshCw size={11} /> Retry
+          </button>
+        </div>
+      </SectionCard>
+    );
+  }
+
+  const selectedSheet = preview.sheets.find(sheet => sheet.sheetNumber === selectedSheetNumber) ?? preview.sheets[0] ?? null;
+  const readiness = PROFESSIONAL_READINESS_META[preview.readiness.readinessState] ?? PROFESSIONAL_READINESS_META.review_required;
+  const reviewItems = Array.from(new Set([
+    ...(preview.readiness.summaries.blockingIssues ?? []),
+    ...(preview.readiness.summaries.warnings ?? []),
+    ...(preview.readiness.renderReadiness.blockers ?? []),
+    ...(preview.readiness.renderReadiness.reviewItems ?? []),
+  ])).slice(0, 6);
+
+  return (
+    <SectionCard icon={<FileText size={14} />} title="Site Survey CAD Workbench — Read-Only Preview" iconColor="text-emerald-400">
+      <div className="space-y-4">
+        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-200">Source-truth render workbench</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                This is a non-authoritative SVG preview generated from the survey readiness DTO for operator review. It gives us a visible CAD-quality checkpoint before any permit package regeneration, production CAD mutation, solver execution, or downstream engineering/BOM/permit trigger.
+              </p>
+            </div>
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-bold uppercase ${readiness.cls}`}>
+              {readiness.icon}{readiness.label}
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">Sheets</p>
+            <p className="text-lg font-bold text-white">{preview.renderPackage.summary.sheetCount}</p>
+          </div>
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">Quality</p>
+            <p className="text-lg font-bold text-white">{preview.renderPackage.summary.renderQualityScore}/100</p>
+          </div>
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">Layers</p>
+            <p className="text-lg font-bold text-white">{preview.renderPackage.summary.enabledRenderLayerCount}</p>
+          </div>
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">Confidence</p>
+            <p className="text-lg font-bold text-white">{preview.renderPackage.summary.renderConfidenceScore}/100</p>
+          </div>
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-amber-200/80">Authority</p>
+            <p className="text-lg font-bold text-amber-100">Preview</p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <ReadinessPill tone="emerald">Read Only</ReadinessPill>
+          <ReadinessPill tone="amber">No CAD Mutation</ReadinessPill>
+          <ReadinessPill tone="amber">No Solver Execution</ReadinessPill>
+          <ReadinessPill tone="slate">No Permit Trigger</ReadinessPill>
+          <ReadinessPill tone="cyan">Survey Source Traceable</ReadinessPill>
+        </div>
+
+        {preview.sheets.length > 1 && (
+          <div className="flex flex-wrap gap-2">
+            {preview.sheets.map(sheet => (
+              <button
+                key={sheet.sheetNumber}
+                onClick={() => setSelectedSheetNumber(sheet.sheetNumber)}
+                className={`rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition ${sheet.sheetNumber === selectedSheet?.sheetNumber ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-200' : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'}`}
+              >
+                {sheet.sheetNumber} · {sheet.title}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {selectedSheet && (
+          <div className="rounded-2xl border border-slate-700/70 bg-slate-950/50 p-3 overflow-hidden">
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-bold text-white">{selectedSheet.sheetNumber} · {selectedSheet.title}</p>
+                <p className="text-[10px] text-slate-500 break-all">Render hash: {selectedSheet.renderHash}</p>
+              </div>
+              <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold uppercase text-emerald-200">
+                {preview.renderPackage.summary.renderQualityGrade.replace(/_/g, ' ')}
+              </span>
+            </div>
+            <div className="max-h-[620px] overflow-auto rounded-xl bg-white p-2">
+              <div className="mx-auto min-w-[900px]" dangerouslySetInnerHTML={{ __html: selectedSheet.svg }} />
+            </div>
+          </div>
+        )}
+
+        <details className="rounded-xl border border-slate-700/60 bg-slate-950/30 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-slate-300">Layer provenance, review items, and package hashes</summary>
+          <div className="mt-3 space-y-3 text-[10px] text-slate-500">
+            <p className="break-all">Package hash: <b className="text-slate-300">{preview.renderPackage.packageHash}</b></p>
+            <p className="break-all">Render readiness hash: <b className="text-slate-300">{preview.renderPackage.sourceRenderReadinessHash}</b></p>
+            <p>System type: <b className="text-slate-300 capitalize">{preview.readiness.summaries.systemType}</b>; roof planes: <b className="text-slate-300">{preview.readiness.summaries.canonicalRoofPlaneCount}</b>; obstructions: <b className="text-slate-300">{preview.readiness.summaries.obstructionCount}</b>; setbacks: <b className="text-slate-300">{preview.readiness.summaries.setbackCount}</b>.</p>
+            {selectedSheet && <p>Visible layer order: <span className="text-slate-400">{selectedSheet.layerOrder.join(' → ')}</span></p>}
+            {reviewItems.length > 0 && (
+              <ul className="space-y-1 text-amber-100/80">
+                {reviewItems.map((item, i) => <li key={`${item}-${i}`}>- {item}</li>)}
+              </ul>
+            )}
+          </div>
+        </details>
+      </div>
+    </SectionCard>
+  );
+}
+
 function ProfessionalReadinessPanel({ surveyId }: { surveyId: string }) {
   const [report, setReport] = useState<ProfessionalReadinessReportPreview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1430,6 +1655,8 @@ interface SurveyDetailData {
   files: SiteSurveyFile[];
   evidenceManifest?: SurveyEvidenceManifest;
   evidenceHygiene?: ProjectSurveyEvidenceHygieneManifest | null;
+  evidenceTraceability?: SurveyEvidenceTraceabilityBundle | null;
+  evidenceBridge?: SurveyEvidenceEngineeringBridge | null;
 }
 
 export default function SurveyDetailPage() {
@@ -1494,12 +1721,10 @@ export default function SurveyDetailPage() {
     );
   }
 
-  const { survey, files, evidenceManifest, evidenceHygiene } = detail;
+  const { survey, files, evidenceManifest, evidenceHygiene, evidenceTraceability, evidenceBridge } = detail;
   const displayedManifest = evidenceHygiene?.canonicalManifest ?? evidenceManifest;
-  const displayedTraceability = evidenceHygiene?.traceability ?? buildSurveyEvidenceTraceability({
-    canonicalManifest: displayedManifest,
-    evidenceTruthSource: evidenceHygiene?.canonicalManifest ? 'canonical_manifest_v1' : 'legacy_raw_photos_fallback',
-  });
+  const displayedTraceability = evidenceHygiene?.traceability ?? evidenceTraceability;
+  const displayedBridge = evidenceBridge ?? null;
 
   // ---------------------------------------------------------------------------
   // Determine payload version:
@@ -1585,9 +1810,12 @@ export default function SurveyDetailPage() {
         <SurveyTraceabilityViewer traceability={displayedTraceability} />
 
         {/* 1d. Survey Evidence Manifest — structured engineering evidence view */}
-        <SurveyEvidenceViewer manifest={displayedManifest} />
+        <SurveyEvidenceViewer manifest={displayedManifest} bridge={displayedBridge} />
 
-        {/* 1e. Professional parser readiness — read-only preview/reporting */}
+        {/* 1e. CAD workbench — read-only source-truth SVG preview */}
+        <SurveyCadWorkbenchPanel surveyId={survey.id} />
+
+        {/* 1f. Professional parser readiness — read-only preview/reporting */}
         <ProfessionalReadinessPanel surveyId={survey.id} />
 
         {/* ------------------------------------------------------------------ */}

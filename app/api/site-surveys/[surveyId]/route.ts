@@ -14,6 +14,8 @@ import {
   isValidUUID,
 } from '@/lib/db-neon';
 import { buildSurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
+import { buildSurveyEvidenceTraceability } from '@/lib/survey/evidence/provenance';
+import { buildSurveyEvidenceEngineeringBridge } from '@/lib/survey/evidence/engineeringBridge';
 import { getProjectSurveyContext } from '@/lib/survey/getProjectSurveyContext';
 
 // ---------------------------------------------------------------------------
@@ -47,13 +49,23 @@ export async function GET(
       ? await getProjectSurveyContext(survey.projectId, user.id)
       : null;
 
+    const evidenceHygiene = projectContext?.evidenceHygiene ?? null;
+    const canonicalManifest = evidenceHygiene?.canonicalManifest ?? evidenceManifest;
+    const evidenceTraceability = evidenceHygiene?.traceability ?? buildSurveyEvidenceTraceability({
+      canonicalManifest,
+      evidenceTruthSource: evidenceHygiene?.canonicalManifest ? 'canonical_manifest_v1' : 'legacy_raw_photos_fallback',
+    });
+    const evidenceBridge = buildSurveyEvidenceEngineeringBridge(canonicalManifest, evidenceTraceability);
+
     return NextResponse.json({
       success: true,
       data: {
         survey,
         files,
         evidenceManifest,
-        evidenceHygiene: projectContext?.evidenceHygiene ?? null,
+        evidenceHygiene,
+        evidenceTraceability,
+        evidenceBridge,
       },
     });
   } catch (err) {
