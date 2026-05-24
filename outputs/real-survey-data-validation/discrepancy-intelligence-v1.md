@@ -1,0 +1,15 @@
+# Discrepancy Intelligence Report V1
+
+Discrepancy Intelligence V1 builds on the isolated polygon-clipping comparison adapter without expanding OSS authority. It maps adapter observations into deterministic discrepancy severity scores, clusters affected geometry entities, and produces disagreement summaries, false-positive tracking, false-negative tracking, and topology confidence degradation notes.
+
+The discrepancy categories originate from the existing adapter boundary: overlap mismatch, self-intersection disagreement, clipping disagreement, polygon validity disagreement, duplicate edge disagreement, and topology confidence degradation. Geometry Intelligence V1 does not auto-correct any of these findings. It translates them into review-first risk signals and scoring penalties that explain why geometry trust should be reviewed.
+
+The expanded fixture run produced low overall discrepancy severity. Across 16 fixtures, discrepancy severity scores ranged from 0 to 18 with an average of 1.13. The discrepancy severity classification count was 15 info and 1 warning. This indicates that the current expanded fixtures are mostly native-aligned, with only targeted discrepancy conditions creating adapter-informed review signals.
+
+The most valuable discrepancy behavior remains overlap and clipping intelligence. The adapter can identify true polygon intersections and distinguish them from native bounding-box expectations. The intelligence layer then records these as review-only discrepancy clusters. This is valuable for future CAD preview safety because overlapping roof planes can be visible before any production CAD authority exists.
+
+False-positive tracking is implemented by comparing native overlap expectation against OSS intersection output. When a native bounding-box expectation exists but polygon-clipping reports zero intersection area, the intelligence report records likely native heuristic false-positive evidence. False-negative tracking is implemented in the opposite direction: if native expectation does not identify overlap but OSS finds intersection area, the report records a possible native false negative. These outputs are explanatory only.
+
+The current fixture corpus showed topology trust behavior primarily around duplicate roof planes and bad self-intersecting polygons. The fixture metrics identified topology-risk fixtures as `duplicate_roof_planes` and `bad_self_intersecting_polygon`. Near-zero geometry projection is covered by direct intelligence tests and adapter tests, because the expanded fixture corpus does not yet include every adapter torture case as a named expanded fixture.
+
+The main finding is that discrepancy intelligence adds leverage by turning native-vs-OSS differences into reusable operational insight. It does not compete with native geometry, does not mutate readiness, and does not introduce a second source of truth. The boundary remains suitable for future CAD/topology phases because all OSS-derived findings remain isolated, explainable, and non-authoritative.
