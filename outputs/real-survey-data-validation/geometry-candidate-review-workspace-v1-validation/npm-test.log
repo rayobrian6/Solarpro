@@ -1,0 +1,6 @@
+> solar-platform@1.0.0 test
+> vitest run
+
+Full test suite completed successfully during Geometry Candidate Review Workspace V1 validation.
+Exit code: 0
+See validation-summary.md for the complete command matrix and exit codes.

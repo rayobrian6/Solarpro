@@ -43,6 +43,7 @@ import type {
 } from '@/lib/engineeringIntelligence';
 import type { HydratedProjectEngineeringState } from '@/lib/engineeringIntelligence/projectHydration';
 import type { AssistedEvidenceCandidate, ReviewedEvidenceProjection } from '@/lib/assistedEvidence';
+import { buildGeometryCandidateLineageNode, buildGeometryCandidateStaleVisibility, isGeometryCandidate } from '@/lib/assistedEvidenceSources';
 import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
 import type { DeterministicPhotoGroupingModel } from '@/lib/engineeringIntelligence/photoGrouping';
 import type { FieldEvidenceOrchestrationModel } from '@/lib/survey/evidence/fieldOrchestration';
@@ -121,6 +122,35 @@ function safeArray<T>(value: T[] | readonly T[] | null | undefined): T[];
 function safeArray<T = unknown>(value: unknown): T[];
 function safeArray<T = unknown>(value: unknown): T[] {
   return Array.isArray(value) ? value as T[] : [];
+}
+
+
+function stringPayloadValue(candidate: AssistedEvidenceCandidate, key: string, fallback = 'not_loaded'): string {
+  const value = candidate.candidatePayload[key];
+  return typeof value === 'string' && value.length ? value : fallback;
+}
+
+function relatedProjectionForCandidate(candidate: AssistedEvidenceCandidate, projections: ReviewedEvidenceProjection[]): ReviewedEvidenceProjection | null {
+  return projections.find(projection => projection.sourceCandidateId === candidate.candidateId) ?? null;
+}
+
+function projectionStatusForCandidate(candidate: AssistedEvidenceCandidate, projections: ReviewedEvidenceProjection[]): string {
+  const projection = relatedProjectionForCandidate(candidate, projections);
+  if (projection) return `${projection.projectionStatus}:${projection.canonicalParticipationStatus}`;
+  if (candidate.candidateStatus === 'accepted_by_reviewer') return 'accepted_no_projection_loaded';
+  if (candidate.candidateStatus === 'rejected_by_reviewer') return 'rejected_no_projection';
+  return 'no_review_projection';
+}
+
+function reviewerNotesForProjection(projection: ReviewedEvidenceProjection | null): string[] {
+  if (!projection) return ['No reviewed projection notes are loaded for this candidate.'];
+  return safeArray<string>(projection.reviewProvenance.reviewNotes);
+}
+
+function payloadStringFromRecord(value: unknown, key: string, fallback: string): string {
+  if (!isRecord(value)) return fallback;
+  const nested = value[key];
+  return typeof nested === 'string' && nested.length ? nested : fallback;
 }
 
 function collectionSize(value: unknown): number {
@@ -1706,6 +1736,129 @@ export function DependencyRiskEscalationsWorkspace({ orchestration }: { orchestr
 
 export function WorkflowSimulationImpactsWorkspace({ orchestration }: { orchestration: EngineeringWorkflowOrchestrationSummary }) {
   return <Panel title="Workflow Simulation Impacts" eyebrow="Read-only hypothetical outcomes"><WorkflowCollection workflows={orchestration.workflowSimulationImpacts} empty="no_simulation_workflows" /></Panel>;
+}
+
+
+export function GeometryCandidateReviewWorkspace({ sandbox }: { sandbox: { candidates: AssistedEvidenceCandidate[]; projections: ReviewedEvidenceProjection[]; warning: string } }) {
+  const candidates = safeArray<AssistedEvidenceCandidate>(sandbox.candidates).filter(candidate => isGeometryCandidate(candidate));
+  const projections = safeArray<ReviewedEvidenceProjection>(sandbox.projections);
+  return (
+    <Panel title="Geometry Candidate Review Workspace V1" eyebrow="GEOMETRY CANDIDATE · REVIEW REQUIRED · NON-AUTHORITATIVE · READ ONLY">
+      <div className="rounded-xl border border-sky-400/30 bg-sky-400/10 p-4 text-sm font-semibold leading-6 text-sky-100">
+        GEOMETRY CANDIDATE · REVIEW REQUIRED · NON-AUTHORITATIVE · NOT CAD INPUT · NOT ENGINEERING TRUTH · NOT CANONICAL GEOMETRY. This workspace is inspect-only for possible_obstruction_candidate review context and does not expose drawing, roof-plane editing, setback creation, CAD placement, requirement satisfaction, engineering regeneration, workflow creation, recommendations, or canonical survey evidence mutation.
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-5">
+        <Metric label="Geometry candidates" value={collectionSize(candidates)} />
+        <Metric label="Approved category" value="possible_obstruction_candidate" />
+        <Metric label="Workspace mode" value="read_only" />
+        <Metric label="Stale propagation" value="metadata_only" />
+        <Metric label="Downstream authority" value="false" />
+      </div>
+      {candidates.length === 0 ? (
+        <div className="mt-4"><EmptyState state="no_geometry_candidates">No possible obstruction geometry candidates are available for review.</EmptyState></div>
+      ) : (
+        <div className="mt-4 space-y-4">
+          {candidates.map((candidate, index) => {
+            const runtimePayloadHash = stringPayloadValue(candidate, 'runtimePayloadHash');
+            const boundaryPolicyVersion = stringPayloadValue(candidate, 'boundaryPolicyVersion');
+            const reviewWorkspaceCurrentState = candidate.candidatePayload.reviewWorkspaceCurrentState;
+            const staleVisibility = buildGeometryCandidateStaleVisibility(candidate, {
+              sourceMetadataHash: payloadStringFromRecord(reviewWorkspaceCurrentState, 'sourceMetadataHash', candidate.sourceMetadataHash),
+              runtimePayloadHash: payloadStringFromRecord(reviewWorkspaceCurrentState, 'runtimePayloadHash', runtimePayloadHash),
+              boundaryPolicyVersion: payloadStringFromRecord(reviewWorkspaceCurrentState, 'boundaryPolicyVersion', boundaryPolicyVersion),
+              reviewStateHash: payloadStringFromRecord(reviewWorkspaceCurrentState, 'reviewStateHash', candidate.deterministicHash),
+            });
+            const lineageNode = buildGeometryCandidateLineageNode(candidate);
+            const projection = relatedProjectionForCandidate(candidate, projections);
+            return (
+              <div key={workspaceKey('geometry-review-candidate', candidate.candidateId, index)} className="rounded-2xl border border-sky-400/20 bg-slate-950/90 p-5 text-xs text-slate-300 shadow-xl shadow-sky-950/10">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="font-mono text-sky-300">{safeRenderValue(candidate.candidateId)}</div>
+                    <div className="mt-1 text-lg font-black text-white">{safeRenderValue(candidate.candidateType)}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <StatusPill value="GEOMETRY CANDIDATE" />
+                    <StatusPill value="REVIEW REQUIRED" />
+                    <StatusPill value="NON-AUTHORITATIVE" />
+                    <StatusPill value="NOT CAD INPUT" />
+                    <StatusPill value="NOT ENGINEERING TRUTH" />
+                    <StatusPill value="NOT CANONICAL GEOMETRY" />
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-4">
+                  <Metric label="Candidate ID" value={candidate.candidateId} />
+                  <Metric label="Candidate type" value={candidate.candidateType} />
+                  <Metric label="Confidence" value={candidate.candidateConfidence} />
+                  <Metric label="Review status" value={candidate.candidateStatus} />
+                  <Metric label="Source image reference" value={candidate.sourceUploadKey} />
+                  <Metric label="Source image lineage" value={stringPayloadValue(candidate, 'sourceImageLineageRef')} />
+                  <Metric label="Runtime" value={`${safeRenderValue(candidate.toolName)}@${safeRenderValue(candidate.toolVersion)}`} />
+                  <Metric label="Boundary policy" value={boundaryPolicyVersion} />
+                  <Metric label="Runtime payload hash" value={runtimePayloadHash} />
+                  <Metric label="Deterministic candidate hash" value={candidate.deterministicHash} />
+                  <Metric label="Reviewed projection status" value={projectionStatusForCandidate(candidate, projections)} />
+                  <Metric label="Canonical mutation" value="none" />
+                </div>
+                <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                  <div className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+                    <div className="mb-3 text-sm font-bold text-white">Stale visibility state · metadata-only</div>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <Metric label="Candidate source stale" value={staleVisibility.staleClasses.includes('candidate_source_stale')} />
+                      <Metric label="Runtime payload stale" value={staleVisibility.staleClasses.includes('candidate_runtime_stale')} />
+                      <Metric label="Boundary policy stale" value={staleVisibility.staleClasses.includes('candidate_policy_stale')} />
+                      <Metric label="Review state stale" value={staleVisibility.staleClasses.includes('candidate_review_stale')} />
+                      <Metric label="Review visibility required" value={staleVisibility.reviewVisibilityRequired} />
+                      <Metric label="CAD invalidation" value={staleVisibility.cadInvalidationAllowed} />
+                      <Metric label="Engineering invalidation" value={staleVisibility.engineeringInvalidationAllowed} />
+                      <Metric label="Workflow/recommendation" value={`${staleVisibility.workflowAllowed}/${staleVisibility.recommendationAllowed}`} />
+                    </div>
+                    <div className="mt-3"><TokenList values={staleVisibility.staleClasses.length ? staleVisibility.staleClasses : ['current_candidate_metadata']} limit={8} /></div>
+                    <div className="mt-3 rounded-lg border border-amber-400/20 bg-amber-400/10 p-3 text-amber-100">Stale state is review visibility metadata only. It does not invalidate CAD, does not invalidate engineering, does not trigger recommendations, and does not create workflows.</div>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+                    <div className="mb-3 text-sm font-bold text-white">Lineage node · visibility-only</div>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <Metric label="Node" value={lineageNode.nodeId} />
+                      <Metric label="Role" value={lineageNode.dependencyRole} />
+                      <Metric label="Downstream authority" value={lineageNode.downstreamAuthority} />
+                      <Metric label="Lineage hash" value={lineageNode.deterministicHash} />
+                    </div>
+                    <div className="mt-3"><div className="mb-2 font-bold text-slate-200">Allowed edges</div><TokenList values={lineageNode.allowedEdges} limit={8} /></div>
+                    <div className="mt-3"><div className="mb-2 font-bold text-slate-200">Forbidden edges</div><TokenList values={lineageNode.forbiddenEdges} limit={12} /></div>
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                  <div className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+                    <div className="mb-3 text-sm font-bold text-white">Reviewer notes / projection</div>
+                    <TokenList values={reviewerNotesForProjection(projection)} limit={12} />
+                    <div className="mt-3 grid gap-2 md:grid-cols-3">
+                      <Metric label="Projection loaded" value={projection !== null} />
+                      <Metric label="Projection ID" value={projection?.projectionId ?? 'none'} />
+                      <Metric label="Projection-only" value="true" />
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+                    <div className="mb-3 text-sm font-bold text-white">Explicit limitations</div>
+                    <TokenList values={candidate.candidateLimitations} limit={24} />
+                    <div className="mt-3 rounded-lg border border-red-400/20 bg-red-400/10 p-3 text-red-100">Forbidden UI actions are absent: draw geometry, edit roof planes, create CAD geometry, create setbacks, place obstructions on CAD, mark CAD ready, satisfy requirements, trigger engineering regeneration, trigger workflow creation, trigger recommendations, mutate canonical survey evidence, or mutate canonical geometry.</div>
+                  </div>
+                </div>
+                <div className="mt-4 rounded-xl border border-slate-500/20 bg-slate-500/10 p-4 text-slate-200">
+                  Review actions are read-only in Workspace V1. Safe accept/reject helpers exist server-side, but this admin UI does not expose controls until a dedicated audited server action path is wired and tested.
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <DeterministicNotes notes={[
+        'Geometry Candidate Review Workspace V1 renders possible_obstruction_candidate only.',
+        'All stale indicators are metadata-only and candidate-only.',
+        'No CAD, roof-plane, setback, layout, NEC, engineering, workflow, recommendation, or canonical evidence mutation action is exposed.',
+      ]} />
+    </Panel>
+  );
 }
 
 export function AssistedEvidenceSandboxWorkspace({ sandbox }: { sandbox: { candidates: AssistedEvidenceCandidate[]; projections: ReviewedEvidenceProjection[]; warning: string } }) {

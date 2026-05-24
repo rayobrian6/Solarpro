@@ -14,6 +14,7 @@ import {
   DependencyGraphViewer,
   DependencyRiskEscalationsWorkspace,
   EngineeringHealthDashboard,
+  GeometryCandidateReviewWorkspace,
   EngineeringReviewQueueWorkspace,
   EngineeringWorkflowOrchestrationWorkspace,
   ProjectIntelligencePicker,
@@ -51,6 +52,7 @@ export default async function EngineeringIntelligencePage() {
       <ProjectIntelligencePicker projects={projectList.projects} loadState={projectList.loadState} />
       <EngineeringHealthDashboard health={model.health} />
       <AssistedEvidenceSandboxWorkspace sandbox={assistedEvidenceSandbox} />
+      <GeometryCandidateReviewWorkspace sandbox={assistedEvidenceSandbox} />
       <EngineeringWorkflowOrchestrationWorkspace orchestration={model.workflowOrchestration} />
       <div className="grid gap-6 2xl:grid-cols-2">
         <SurveyFollowUpQueueWorkspace orchestration={model.workflowOrchestration} />
