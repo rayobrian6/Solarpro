@@ -37,6 +37,11 @@ describe('permit CAD appendix preview integration', () => {
     expect(source).toContain('buildCADSvgArtifactPreview');
     expect(source).toContain('buildPlanSetCADAppendixPreviewSheetV1');
     expect(source).toContain('renderPlanSetCADAppendixPreviewSheetV1');
+    expect(source).toContain('sourceSurveyId: normalizeSourceId(surveyEvidence?.surveyId)');
+    expect(source).toContain('site-survey-derived-cad-visual');
+    expect(source).toContain('SITE-SURVEY CAD BRIDGE');
+    expect(source).toContain('SURVEY-DERIVED SIGNALS VISIBLE IN THIS PLANSET');
+    expect(source).toContain('EngineeringSurveyEvidence reaches generatePermitHTML()');
     expect(source).toContain('CAD PREVIEW ONLY · NON-AUTHORITATIVE · NOT PERMIT AUTHORITY');
     expect(source).toContain('DOES NOT REPLACE PV-2 OR PV-3');
     expect(source).not.toContain('generateCADLayout(');
