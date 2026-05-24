@@ -1,0 +1,40 @@
+[projectLinkResolver] action=resolve_existing survey_id=survey-abc-123 selectedClientId=null traceId=delivery-001
+
+[90mstdout[2m | lib/survey/ingest/projectLinkResolver.test.ts[2m > [22m[2mresolveProjectLink — determinism[2m > [22m[2mattach with projectId is deterministic
+[22m[39m[projectLinkResolver] action=attach method=direct_id projectId=11111111-1111-4111-a111-111111111111 survey_id=survey-abc-123 traceId=delivery-001
+[projectLinkResolver] action=attach method=direct_id projectId=11111111-1111-4111-a111-111111111111 survey_id=survey-abc-123 traceId=delivery-001
+
+ [32m✓[39m lib/survey/ingest/projectLinkResolver.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m lib/system/hardConstraint.test.ts [2m([22m[2m27 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m lib/survey/verifyWebhookSignature.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m tests/intake-funnels-admin.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m lib/tigo-battery-datasheet.test.ts [2m([22m[2m39 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m tests/priority-portal-monitoring.test.ts [2m([22m[2m30 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m lib/survey/ingest/types.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m lib/byd-pylontech-datasheet.test.ts [2m([22m[2m35 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m lib/survey/webhookResponseContract.test.ts [2m([22m[2m23 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m lib/system/__tests__/configOverwriteKillSwitch.test.ts [2m([22m[2m28 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m lib/eg4-homegrid-datasheet.test.ts [2m([22m[2m35 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/priority-rate-limit-sign.test.ts [2m([22m[2m23 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m lib/system/__tests__/hydrationGate.test.ts [2m([22m[2m26 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/engineering-intelligence-navigation.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m lib/system/panelAutoHealReducer.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m lib/system/optimizerMergeHint.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m lib/survey/envelopeValidator.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m lib/system/solaredgeDataConsistency.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m lib/intake/funnelUrls.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m lib/survey/contractDriftGuard.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m lib/survey/producerVersionContract.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m lib/poaCalc.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m lib/system/panelCountSource.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/free-solar-estimate-page.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m lib/racking-database.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/geometryCandidateReviewActionBoundary.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m tests/network-screening-route-enrichment.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m lib/system/rackingDatabaseDriftGuard.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 2[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m162 passed[39m[22m[90m (162)[39m
+[2m      Tests [22m [1m[32m4945 passed[39m[22m[90m (4945)[39m
+[2m   Start at [22m 00:41:58
+[2m   Duration [22m 46.18s[2m (transform 5.19s, setup 0ms, import 10.82s, tests 11.51s, environment 3.61s)[22m
+

@@ -2,7 +2,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { createReviewedEvidenceProjection, type AssistedEvidenceCandidate } from '@/lib/assistedEvidence';
 import { createGeometryCandidateDemoCandidates } from '@/lib/assistedEvidenceSources';
@@ -101,19 +101,20 @@ describe('GeometryCandidateReviewWorkspace', () => {
     expect(screen.getAllByText('Engineering invalidation').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Workflow/recommendation').length).toBeGreaterThan(0);
     expect(screen.getAllByText('false').length).toBeGreaterThanOrEqual(4);
-    expect(screen.getByText('false/false')).toBeInTheDocument();
+    expect(screen.getAllByText('false/false').length).toBeGreaterThan(0);
   });
 
-  it('does not expose unsafe CAD, engineering, workflow, recommendation, or canonical mutation UI actions', async () => {
+  it('exposes only disabled audited accept/reject controls and no unsafe CAD, engineering, workflow, recommendation, or canonical mutation controls', async () => {
     const candidate = await buildGeometryCandidate();
 
     render(<GeometryCandidateReviewWorkspace sandbox={{ candidates: [candidate], projections: [], warning: 'fixture only' }} />);
 
-    const controls = screen.queryAllByRole('button')
-      .concat(screen.queryAllByRole('link'))
-      .map(element => element.textContent?.toLowerCase() ?? '');
+    const buttons = screen.getAllByRole('button');
+    expect(buttons.map(button => button.textContent)).toEqual(['accept_for_review_projection', 'reject_candidate']);
+    for (const button of buttons) expect(button).toBeDisabled();
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
 
-    expect(controls).toHaveLength(0);
+    const controls = buttons.map(element => element.textContent?.toLowerCase() ?? '');
     for (const forbiddenAction of [
       'draw geometry',
       'edit roof plane',
@@ -130,7 +131,11 @@ describe('GeometryCandidateReviewWorkspace', () => {
       expect(controls.some(control => control.includes(forbiddenAction))).toBe(false);
     }
 
-    expect(screen.getByText('Review actions are read-only in Workspace V1. Safe accept/reject helpers exist server-side, but this admin UI does not expose controls until a dedicated audited server action path is wired and tested.')).toBeInTheDocument();
+    expect(screen.getByText('Audited review action path V1 · projection-only · deterministic DTO preview')).toBeInTheDocument();
+    expect(screen.getAllByText('deterministic_dto_only_v1').length).toBeGreaterThan(0);
+    expect(screen.getByText('not_actionable_for_review_projection')).toBeInTheDocument();
+    expect(screen.getByText('NO LIVE DB WRITE')).toBeInTheDocument();
+    expect(screen.getByText('NO DOWNSTREAM AUTHORITY')).toBeInTheDocument();
   });
 
   it('filters out non-geometry candidates from the dedicated review workspace', async () => {

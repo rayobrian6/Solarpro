@@ -11,12 +11,64 @@ import type { AcceptedCandidateReviewResult, RejectedCandidateReviewResult } fro
 import type { AssistedEvidenceCandidate, CandidateReviewInput, ReviewedEvidenceProjection } from '@/lib/assistedEvidence';
 import { GEOMETRY_CANDIDATE_BOUNDARY_POLICY_VERSION, GEOMETRY_CANDIDATE_RUNTIME_TOOL_NAME } from './geometryCandidateTypes';
 
-export type GeometryCandidateReviewAction = 'acknowledge_review_projection' | 'reject_candidate';
+export type GeometryCandidateReviewAction = 'accept_for_review_projection' | 'reject_candidate';
+export type GeometryCandidateReviewActionPersistenceMode = 'deterministic_dto_only_v1';
 export type GeometryCandidateStaleClass = 'candidate_source_stale' | 'candidate_runtime_stale' | 'candidate_policy_stale' | 'candidate_review_stale';
 export type GeometryCandidateForbiddenStaleClass = 'canonical_geometry_stale' | 'cad_output_stale' | 'engineering_output_stale' | 'route_output_stale' | 'bom_output_stale' | 'plan_set_output_stale';
 
 export interface GeometryCandidateReviewInput extends Required<Pick<CandidateReviewInput, 'reviewerId' | 'reviewedAt'>> {
   reviewNotes?: string[];
+}
+
+export interface GeometryCandidateReviewActionInput extends Required<Pick<CandidateReviewInput, 'reviewerId' | 'reviewedAt'>> {
+  actionType: GeometryCandidateReviewAction;
+  reviewerDisplayLabel?: string;
+  reviewNote?: string;
+  rejectionReason?: string;
+}
+
+export interface GeometryCandidateReviewActionAuthorityFlags {
+  canonicalGeometryMutationAllowed: false;
+  cadMutationAllowed: false;
+  roofPlaneMutationAllowed: false;
+  setbackMutationAllowed: false;
+  layoutMutationAllowed: false;
+  engineeringInfluenceAllowed: false;
+  necInfluenceAllowed: false;
+  workflowInfluenceAllowed: false;
+  recommendationInfluenceAllowed: false;
+  downstreamAuthority: false;
+}
+
+export interface GeometryCandidateReviewActionAudit {
+  actionType: GeometryCandidateReviewAction;
+  persistenceMode: GeometryCandidateReviewActionPersistenceMode;
+  candidateId: string;
+  candidateType: AssistedEvidenceCandidate['candidateType'];
+  candidateHash: string;
+  runtimeName: string;
+  runtimeVersion: string;
+  runtimePayloadHash: string;
+  sourceImageReference: string;
+  sourceLineageRef: string;
+  boundaryPolicyVersion: string;
+  reviewerId: string;
+  reviewerDisplayLabel: string | null;
+  reviewTimestamp: string;
+  reviewNote: string | null;
+  priorReviewState: AssistedEvidenceCandidate['candidateStatus'];
+  resultingReviewState: AssistedEvidenceCandidate['candidateStatus'];
+  reviewedProjectionId: string | null;
+  reviewedProjectionHash: string | null;
+  rejectionReason: string | null;
+  authorityFlags: GeometryCandidateReviewActionAuthorityFlags;
+  deterministicNotes: string[];
+}
+
+export interface GeometryCandidateReviewActionResult {
+  candidate: AssistedEvidenceCandidate;
+  projection: ReviewedEvidenceProjection | null;
+  audit: GeometryCandidateReviewActionAudit;
 }
 
 export interface GeometryCandidateStaleVisibilityInput {
@@ -121,6 +173,114 @@ export function rejectGeometryCandidate(candidate: AssistedEvidenceCandidate, re
       ...(review.reviewNotes ?? []),
     ],
   });
+}
+
+function payloadString(candidate: AssistedEvidenceCandidate, key: string): string {
+  const value = candidate.candidatePayload[key];
+  return typeof value === 'string' ? value : '';
+}
+
+function normalizedOptionalText(value: string | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : null;
+}
+
+function reviewNotesFromAction(input: GeometryCandidateReviewActionInput): string[] {
+  const reviewNote = normalizedOptionalText(input.reviewNote);
+  const rejectionReason = normalizedOptionalText(input.rejectionReason);
+  return [reviewNote, rejectionReason ? `Rejection reason: ${rejectionReason}` : null].filter((value): value is string => value !== null);
+}
+
+function assertGeometryReviewActionInput(input: GeometryCandidateReviewActionInput): true {
+  if (input.actionType !== 'accept_for_review_projection' && input.actionType !== 'reject_candidate') throw new Error('Unsupported geometry candidate review action.');
+  if (!input.reviewerId.trim()) throw new Error('Geometry candidate review action requires reviewerId.');
+  if (!input.reviewedAt.trim()) throw new Error('Geometry candidate review action requires review timestamp.');
+  if (input.actionType === 'reject_candidate' && !normalizedOptionalText(input.rejectionReason)) throw new Error('Rejecting a geometry candidate requires a rejection reason.');
+  return true;
+}
+
+const GEOMETRY_CANDIDATE_REVIEW_ACTION_AUTHORITY_FLAGS: GeometryCandidateReviewActionAuthorityFlags = {
+  canonicalGeometryMutationAllowed: false,
+  cadMutationAllowed: false,
+  roofPlaneMutationAllowed: false,
+  setbackMutationAllowed: false,
+  layoutMutationAllowed: false,
+  engineeringInfluenceAllowed: false,
+  necInfluenceAllowed: false,
+  workflowInfluenceAllowed: false,
+  recommendationInfluenceAllowed: false,
+  downstreamAuthority: false,
+};
+
+function buildGeometryCandidateReviewActionAudit(
+  sourceCandidate: AssistedEvidenceCandidate,
+  resultingCandidate: AssistedEvidenceCandidate,
+  projection: ReviewedEvidenceProjection | null,
+  input: GeometryCandidateReviewActionInput,
+): GeometryCandidateReviewActionAudit {
+  return {
+    actionType: input.actionType,
+    persistenceMode: 'deterministic_dto_only_v1',
+    candidateId: sourceCandidate.candidateId,
+    candidateType: sourceCandidate.candidateType,
+    candidateHash: sourceCandidate.deterministicHash,
+    runtimeName: sourceCandidate.toolName,
+    runtimeVersion: sourceCandidate.toolVersion,
+    runtimePayloadHash: payloadString(sourceCandidate, 'runtimePayloadHash'),
+    sourceImageReference: sourceCandidate.sourceUploadKey,
+    sourceLineageRef: payloadString(sourceCandidate, 'sourceImageLineageRef'),
+    boundaryPolicyVersion: payloadString(sourceCandidate, 'boundaryPolicyVersion') || GEOMETRY_CANDIDATE_BOUNDARY_POLICY_VERSION,
+    reviewerId: input.reviewerId,
+    reviewerDisplayLabel: normalizedOptionalText(input.reviewerDisplayLabel),
+    reviewTimestamp: input.reviewedAt,
+    reviewNote: normalizedOptionalText(input.reviewNote),
+    priorReviewState: sourceCandidate.candidateStatus,
+    resultingReviewState: resultingCandidate.candidateStatus,
+    reviewedProjectionId: projection?.projectionId ?? null,
+    reviewedProjectionHash: projection?.deterministicHash ?? null,
+    rejectionReason: input.actionType === 'reject_candidate' ? normalizedOptionalText(input.rejectionReason) : null,
+    authorityFlags: GEOMETRY_CANDIDATE_REVIEW_ACTION_AUTHORITY_FLAGS,
+    deterministicNotes: [
+      'Geometry candidate review action is deterministic DTO-only in V1; durable persistence is a future phase.',
+      'Accepted geometry candidates create reviewed evidence projections only and do not create canonical geometry.',
+      'Rejected geometry candidates do not create projections and do not mutate CAD, engineering, workflows, or recommendations.',
+    ],
+  };
+}
+
+export function acceptGeometryCandidateReviewAction(candidate: AssistedEvidenceCandidate, input: Omit<GeometryCandidateReviewActionInput, 'actionType'>): GeometryCandidateReviewActionResult {
+  return submitGeometryCandidateReviewAction(candidate, { ...input, actionType: 'accept_for_review_projection' });
+}
+
+export function rejectGeometryCandidateReviewAction(candidate: AssistedEvidenceCandidate, input: Omit<GeometryCandidateReviewActionInput, 'actionType'>): GeometryCandidateReviewActionResult {
+  return submitGeometryCandidateReviewAction(candidate, { ...input, actionType: 'reject_candidate' });
+}
+
+export function submitGeometryCandidateReviewAction(candidate: AssistedEvidenceCandidate, input: GeometryCandidateReviewActionInput): GeometryCandidateReviewActionResult {
+  assertGeometryReviewActionInput(input);
+  assertReviewableGeometryCandidate(candidate);
+  if (input.actionType === 'accept_for_review_projection') {
+    const accepted = acceptGeometryCandidateForReviewProjection(candidate, {
+      reviewerId: input.reviewerId,
+      reviewedAt: input.reviewedAt,
+      reviewNotes: reviewNotesFromAction(input),
+    });
+    return {
+      candidate: accepted.candidate,
+      projection: accepted.projection,
+      audit: buildGeometryCandidateReviewActionAudit(candidate, accepted.candidate, accepted.projection, input),
+    };
+  }
+  const rejected = rejectGeometryCandidate(candidate, {
+    reviewerId: input.reviewerId,
+    reviewedAt: input.reviewedAt,
+    reviewNotes: reviewNotesFromAction(input),
+  });
+  return {
+    candidate: rejected.candidate,
+    projection: rejected.projection,
+    audit: buildGeometryCandidateReviewActionAudit(candidate, rejected.candidate, rejected.projection, input),
+  };
 }
 
 export function assertGeometryProjectionIsReviewOnly(projection: ReviewedEvidenceProjection): true {

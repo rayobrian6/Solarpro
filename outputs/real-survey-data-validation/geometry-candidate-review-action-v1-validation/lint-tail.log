@@ -1,0 +1,40 @@
+
+./lib/system/conduitRouting.ts
+107:5  Warning: Unexpected console statement.  no-console
+117:5  Warning: Unexpected console statement.  no-console
+133:5  Warning: Unexpected console statement.  no-console
+
+./lib/system/debugSizing.test.ts
+16:5  Warning: Unexpected console statement.  no-console
+17:5  Warning: Unexpected console statement.  no-console
+18:5  Warning: Unexpected console statement.  no-console
+19:28  Warning: Unexpected console statement.  no-console
+20:5  Warning: Unexpected console statement.  no-console
+
+./lib/system/electricalNormalize.ts
+278:5  Warning: Unexpected console statement.  no-console
+
+./lib/system/fixEngine.ts
+252:3  Warning: Unexpected console statement.  no-console
+291:5  Warning: Unexpected console statement.  no-console
+334:3  Warning: Unexpected console statement.  no-console
+380:3  Warning: Unexpected console statement.  no-console
+
+./lib/system/systemAccessors.ts
+52:5  Warning: Unexpected console statement.  no-console
+58:3  Warning: Unexpected console statement.  no-console
+76:5  Warning: Unexpected console statement.  no-console
+83:3  Warning: Unexpected console statement.  no-console
+122:5  Warning: Unexpected console statement.  no-console
+128:3  Warning: Unexpected console statement.  no-console
+
+./lib/topography/getTopographyState.ts
+385:5  Warning: Unexpected console statement.  no-console
+
+./lib/utilityNormalizer.ts
+1099:7  Warning: Unexpected console statement.  no-console
+1117:7  Warning: Unexpected console statement.  no-console
+1131:9  Warning: Unexpected console statement.  no-console
+1137:3  Warning: Unexpected console statement.  no-console
+
+info  - Need to disable some ESLint rules? Learn more here: https://nextjs.org/docs/basic-features/eslint#disabling-rules

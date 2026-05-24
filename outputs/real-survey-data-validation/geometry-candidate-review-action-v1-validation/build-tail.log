@@ -1,0 +1,40 @@
+├ ○ /debug/project                                2.91 kB        91.1 kB
+├ ○ /design                                       103 kB          306 kB
+├ ○ /engineering                                  196 kB          680 kB
+├ ƒ /engineering/[projectId]                      554 B          88.6 kB
+├ ○ /engineering/assist                           504 B          88.6 kB
+├ ○ /engineering/permit                           5.13 kB         208 kB
+├ ○ /enterprise                                   4.25 kB         101 kB
+├ ○ /free-solar-estimate                          8.43 kB        96.5 kB
+├ ○ /get-a-quote                                  4.78 kB        92.8 kB
+├ ○ /hardware                                     227 B          94.3 kB
+├ ○ /mobile-login                                 462 B          88.5 kB
+├ ○ /network                                      18.3 kB         222 kB
+├ ○ /onboarding                                   5.91 kB         103 kB
+├ ○ /operations                                   1.42 kB        89.5 kB
+├ ○ /portal                                       153 B          88.2 kB
+├ ○ /portal/dashboard                             14.3 kB         139 kB
+├ ○ /portal/login                                 5.41 kB        93.5 kB
+├ ○ /pricing                                      226 B          94.7 kB
+├ ○ /projects                                     9.86 kB         213 kB
+├ ƒ /projects/[id]                                40.6 kB         351 kB
+├ ƒ /projects/[id]/survey/[surveyId]              10.4 kB         221 kB
+├ ○ /projects/new                                 6.67 kB         218 kB
+├ ○ /proposals                                    26.6 kB         572 kB
+├ ƒ /proposals/view/[id]                          29 kB           559 kB
+├ ○ /settings                                     14.6 kB         218 kB
+├ ○ /sitemap.xml                                  0 B                0 B
+├ ○ /subscribe                                    6.02 kB         103 kB
+├ ƒ /survey/[token]                               15.1 kB         103 kB
+└ ○ /terms                                        15.3 kB         112 kB
++ First Load JS shared by all                     88.1 kB
+  ├ chunks/2117-e979ffbe5bce0a65.js               31.9 kB
+  ├ chunks/fd9d1056-2b205af35c505cf3.js           53.6 kB
+  └ other shared chunks (total)                   2.51 kB
+
+
+ƒ Middleware                                      28 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

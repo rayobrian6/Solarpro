@@ -43,7 +43,7 @@ import type {
 } from '@/lib/engineeringIntelligence';
 import type { HydratedProjectEngineeringState } from '@/lib/engineeringIntelligence/projectHydration';
 import type { AssistedEvidenceCandidate, ReviewedEvidenceProjection } from '@/lib/assistedEvidence';
-import { buildGeometryCandidateLineageNode, buildGeometryCandidateStaleVisibility, isGeometryCandidate } from '@/lib/assistedEvidenceSources';
+import { acceptGeometryCandidateReviewAction, buildGeometryCandidateLineageNode, buildGeometryCandidateStaleVisibility, isGeometryCandidate, rejectGeometryCandidateReviewAction } from '@/lib/assistedEvidenceSources';
 import type { CADReadinessMetadataModel } from '@/lib/engineeringIntelligence/cadReadiness';
 import type { DeterministicPhotoGroupingModel } from '@/lib/engineeringIntelligence/photoGrouping';
 import type { FieldEvidenceOrchestrationModel } from '@/lib/survey/evidence/fieldOrchestration';
@@ -151,6 +151,27 @@ function payloadStringFromRecord(value: unknown, key: string, fallback: string):
   if (!isRecord(value)) return fallback;
   const nested = value[key];
   return typeof nested === 'string' && nested.length ? nested : fallback;
+}
+
+function geometryCandidateReviewActionPreviews(candidate: AssistedEvidenceCandidate) {
+  if (candidate.candidateStatus !== 'review_required') return null;
+  const reviewerId = 'geometry-review-workspace-v1-preview';
+  const reviewedAt = '2026-01-01T00:00:00.000Z';
+  return {
+    accept: acceptGeometryCandidateReviewAction(candidate, {
+      reviewerId,
+      reviewerDisplayLabel: 'Geometry Review Workspace V1 Preview',
+      reviewedAt,
+      reviewNote: 'Preview accept action: projection-only review result, not canonical geometry.',
+    }),
+    reject: rejectGeometryCandidateReviewAction(candidate, {
+      reviewerId,
+      reviewerDisplayLabel: 'Geometry Review Workspace V1 Preview',
+      reviewedAt,
+      reviewNote: 'Preview reject action: candidate rejected in assisted evidence review only.',
+      rejectionReason: 'not_actionable_for_review_projection',
+    }),
+  };
 }
 
 function collectionSize(value: unknown): number {
@@ -1770,6 +1791,7 @@ export function GeometryCandidateReviewWorkspace({ sandbox }: { sandbox: { candi
             });
             const lineageNode = buildGeometryCandidateLineageNode(candidate);
             const projection = relatedProjectionForCandidate(candidate, projections);
+            const actionPreviews = geometryCandidateReviewActionPreviews(candidate);
             return (
               <div key={workspaceKey('geometry-review-candidate', candidate.candidateId, index)} className="rounded-2xl border border-sky-400/20 bg-slate-950/90 p-5 text-xs text-slate-300 shadow-xl shadow-sky-950/10">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1844,8 +1866,66 @@ export function GeometryCandidateReviewWorkspace({ sandbox }: { sandbox: { candi
                     <div className="mt-3 rounded-lg border border-red-400/20 bg-red-400/10 p-3 text-red-100">Forbidden UI actions are absent: draw geometry, edit roof planes, create CAD geometry, create setbacks, place obstructions on CAD, mark CAD ready, satisfy requirements, trigger engineering regeneration, trigger workflow creation, trigger recommendations, mutate canonical survey evidence, or mutate canonical geometry.</div>
                   </div>
                 </div>
-                <div className="mt-4 rounded-xl border border-slate-500/20 bg-slate-500/10 p-4 text-slate-200">
-                  Review actions are read-only in Workspace V1. Safe accept/reject helpers exist server-side, but this admin UI does not expose controls until a dedicated audited server action path is wired and tested.
+                <div className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-400/10 p-4 text-slate-200">
+                  <div className="text-sm font-black text-emerald-100">Audited review action path V1 · projection-only · deterministic DTO preview</div>
+                  <div className="mt-2 text-emerald-50">Safe actions are available only through the audited lifecycle boundary. These controls are disabled in this workspace because V1 does not add durable persistence or live mutation; the displayed audit DTO proves the accept/reject path without writing canonical geometry, CAD, engineering, workflows, or recommendations.</div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button type="button" disabled className="rounded-lg border border-emerald-300/30 bg-emerald-300/10 px-3 py-2 font-mono text-[11px] font-bold text-emerald-100 opacity-80">accept_for_review_projection</button>
+                    <button type="button" disabled className="rounded-lg border border-rose-300/30 bg-rose-300/10 px-3 py-2 font-mono text-[11px] font-bold text-rose-100 opacity-80">reject_candidate</button>
+                    <StatusPill value="NO LIVE DB WRITE" />
+                    <StatusPill value="PROJECTION ONLY" />
+                    <StatusPill value="NO DOWNSTREAM AUTHORITY" />
+                  </div>
+                  {actionPreviews ? (
+                    <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                      <div className="rounded-xl border border-emerald-300/20 bg-slate-950/70 p-4">
+                        <div className="mb-3 text-sm font-bold text-white">Accept audit DTO · read-only</div>
+                        <div className="grid gap-2 md:grid-cols-2">
+                          <Metric label="Action type" value={actionPreviews.accept.audit.actionType} />
+                          <Metric label="Persistence mode" value={actionPreviews.accept.audit.persistenceMode} />
+                          <Metric label="Prior state" value={actionPreviews.accept.audit.priorReviewState} />
+                          <Metric label="Resulting state" value={actionPreviews.accept.audit.resultingReviewState} />
+                          <Metric label="Reviewer" value={actionPreviews.accept.audit.reviewerDisplayLabel ?? actionPreviews.accept.audit.reviewerId} />
+                          <Metric label="Review timestamp" value={actionPreviews.accept.audit.reviewTimestamp} />
+                          <Metric label="Projection ID" value={actionPreviews.accept.audit.reviewedProjectionId ?? 'none'} />
+                          <Metric label="Projection hash" value={actionPreviews.accept.audit.reviewedProjectionHash ?? 'none'} />
+                          <Metric label="Candidate hash" value={actionPreviews.accept.audit.candidateHash} />
+                          <Metric label="Runtime payload hash" value={actionPreviews.accept.audit.runtimePayloadHash} />
+                          <Metric label="Source lineage" value={actionPreviews.accept.audit.sourceLineageRef} />
+                          <Metric label="Boundary policy" value={actionPreviews.accept.audit.boundaryPolicyVersion} />
+                          <Metric label="Canonical mutation" value={actionPreviews.accept.audit.authorityFlags.canonicalGeometryMutationAllowed} />
+                          <Metric label="CAD mutation" value={actionPreviews.accept.audit.authorityFlags.cadMutationAllowed} />
+                          <Metric label="Engineering influence" value={actionPreviews.accept.audit.authorityFlags.engineeringInfluenceAllowed} />
+                          <Metric label="Workflow/recommendation" value={`${actionPreviews.accept.audit.authorityFlags.workflowInfluenceAllowed}/${actionPreviews.accept.audit.authorityFlags.recommendationInfluenceAllowed}`} />
+                        </div>
+                        <div className="mt-3"><TokenList values={actionPreviews.accept.audit.deterministicNotes} limit={8} /></div>
+                      </div>
+                      <div className="rounded-xl border border-rose-300/20 bg-slate-950/70 p-4">
+                        <div className="mb-3 text-sm font-bold text-white">Reject audit DTO · read-only</div>
+                        <div className="grid gap-2 md:grid-cols-2">
+                          <Metric label="Action type" value={actionPreviews.reject.audit.actionType} />
+                          <Metric label="Persistence mode" value={actionPreviews.reject.audit.persistenceMode} />
+                          <Metric label="Prior state" value={actionPreviews.reject.audit.priorReviewState} />
+                          <Metric label="Resulting state" value={actionPreviews.reject.audit.resultingReviewState} />
+                          <Metric label="Reviewer" value={actionPreviews.reject.audit.reviewerDisplayLabel ?? actionPreviews.reject.audit.reviewerId} />
+                          <Metric label="Review timestamp" value={actionPreviews.reject.audit.reviewTimestamp} />
+                          <Metric label="Projection ID" value={actionPreviews.reject.audit.reviewedProjectionId ?? 'none'} />
+                          <Metric label="Projection hash" value={actionPreviews.reject.audit.reviewedProjectionHash ?? 'none'} />
+                          <Metric label="Rejection reason" value={actionPreviews.reject.audit.rejectionReason ?? 'none'} />
+                          <Metric label="Candidate hash" value={actionPreviews.reject.audit.candidateHash} />
+                          <Metric label="Runtime payload hash" value={actionPreviews.reject.audit.runtimePayloadHash} />
+                          <Metric label="Source lineage" value={actionPreviews.reject.audit.sourceLineageRef} />
+                          <Metric label="Canonical mutation" value={actionPreviews.reject.audit.authorityFlags.canonicalGeometryMutationAllowed} />
+                          <Metric label="CAD mutation" value={actionPreviews.reject.audit.authorityFlags.cadMutationAllowed} />
+                          <Metric label="Engineering influence" value={actionPreviews.reject.audit.authorityFlags.engineeringInfluenceAllowed} />
+                          <Metric label="Downstream authority" value={actionPreviews.reject.audit.authorityFlags.downstreamAuthority} />
+                        </div>
+                        <div className="mt-3"><TokenList values={actionPreviews.reject.audit.deterministicNotes} limit={8} /></div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-lg border border-slate-400/20 bg-slate-400/10 p-3 text-slate-200">Review action previews are unavailable because this candidate is not in review_required state. Lifecycle helpers reject already-reviewed, invalidated, superseded, or unsupported candidates.</div>
+                  )}
                 </div>
               </div>
             );

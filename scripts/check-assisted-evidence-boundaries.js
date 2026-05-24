@@ -252,7 +252,7 @@ for (const file of sourceFiles()) {
             || isInsideNamedConstArray(lines, index, 'GEOMETRY_CANDIDATE_LIMITATIONS'));
         const isApprovedGeometryReviewLifecycleText = APPROVED_GEOMETRY_REVIEW_LIFECYCLE_FILES.has(relative)
           && ['spatial detection output', 'cad engineering recommendation workflow influence'].includes(pattern.label)
-          && (/forbiddenEdges|forbiddenStaleClasses|candidateCanSatisfyRequirement|candidateCanInfluenceCADReadiness|candidateCanInfluenceRecommendations|candidateCanCreateWorkflowItems|projectionAutomaticallyMutatesCanonicalEvidence|must not|not canonical|not CAD|not engineering|No CAD|no canonical|without creating projections|downstream authority/i.test(line));
+          && (/forbiddenEdges|forbiddenStaleClasses|candidateCanSatisfyRequirement|candidateCanInfluenceCADReadiness|candidateCanInfluenceRecommendations|candidateCanCreateWorkflowItems|projectionAutomaticallyMutatesCanonicalEvidence|must not|not canonical|not CAD|not engineering|No CAD|no canonical|without creating projections|downstream authority|MutationAllowed:\s*false|InfluenceAllowed:\s*false/i.test(line));
         if (!isAllowedGuardText && !isAllowedNegativeTest && !isTestFixtureReference && !isApprovedSurveyAlignmentReference && !isApprovedCoreHashing && !isApprovedMetadataAdapterHashing && !isApprovedOcrRuntime && !isApprovedOcrRuntimeHashing && !isApprovedVisualRuntimeHashing && !isApprovedVisualRuntimeImageBytes && !isApprovedOcrMetadataReference && !isApprovedGeometryRuntimeHashing && !isApprovedGeometryRuntimeImageBytes && !isApprovedGeometryRuntimeText && !isApprovedGeometryReviewLifecycleText) violations.push(`${relative}:${index + 1}: ${pattern.label}: ${line.trim()}`);
       }
     }
