@@ -1,23 +1,21 @@
-# Geometry Candidate Roadmap Implementation Todo
+# CAD Model Export Bundle V1 Todo
 
-## Repository State
-- [x] Confirm repository access and dev branch state
-- [x] Inspect current geometry candidate pilot, review lifecycle, stale/invalidation, and dependency graph surfaces
+## Prepare
+- [x] Confirm branch, sync state, and intended baseline
+- [x] Inspect CAD validation/test patterns and sample model builders
 
-## Safe Roadmap Implementation
-- [x] Add review lifecycle hardening for geometry candidates without canonical mutation
-- [x] Add candidate-only stale visibility helpers for geometry candidates
-- [x] Add dependency/lineage node compatibility for geometry candidates without downstream authority
-- [x] Add or strengthen misuse-prevention tests across CAD/layout/roof/setback/engineering/NEC/workflow/recommendation boundaries
-- [x] Add formal roadmap progress reports
+## Implement
+- [x] Add deterministic CAD model export bundle module
+- [x] Add targeted export bundle tests for roof/ground/fence validation and determinism
+- [x] Add validation/report artifact
 
-## Validation
-- [x] Run targeted tests and boundary checks
-- [x] Run broader required validation as time allows
-- [x] Review validation results and capture logs/exits
+## Validate
+- [x] Run targeted tests
+- [x] Run required boundary/type/topology/build/lint checks appropriate for this chunk
+- [x] Confirm validation results are clean or only existing warnings
 
-## Delivery
+## Deliver
 - [x] Stage intended artifacts only
-- [x] Commit changes directly to dev
-- [x] Push dev only
+- [x] Commit once
+- [x] Push once
 - [x] Provide final safety summary
