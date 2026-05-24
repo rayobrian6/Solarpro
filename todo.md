@@ -26,5 +26,5 @@
 - [x] Run parser/readiness/fixture/adapter/intelligence/replay tests
 - [x] Verify deterministic outputs and no-authority boundaries in tests
 - [x] Commit changes directly on dev
-- [ ] Push dev using token-authenticated remote syntax
-- [ ] Provide final summary with replay findings, instability findings, trust calibration observations, review workflow maturity, CAD-authority outlook, leverage gained, and complexity avoided
+- [x] Push dev using token-authenticated remote syntax
+- [x] Provide final summary with replay findings, instability findings, trust calibration observations, review workflow maturity, CAD-authority outlook, leverage gained, and complexity avoided
