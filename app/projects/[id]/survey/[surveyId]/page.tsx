@@ -25,7 +25,7 @@
 
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { Component, useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import AppShell from '@/components/ui/AppShell';
@@ -355,6 +355,43 @@ function SectionCard({
       <div className="px-5 py-3">{children}</div>
     </div>
   );
+}
+
+
+class SurveyPanelErrorBoundary extends Component<
+  { title: string; children: React.ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error(`[SurveyPanelErrorBoundary] ${this.props.title}`, error);
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <SectionCard icon={<AlertTriangle size={14} />} title={this.props.title} iconColor="text-amber-400">
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
+          <div className="flex items-center gap-2 text-amber-200">
+            <AlertTriangle size={13} />
+            <p className="text-xs font-semibold">Panel failed safely</p>
+          </div>
+          <p className="mt-1 text-[11px] text-amber-100/80">
+            {this.state.error.message || 'This panel could not render, but the survey page remains available.'}
+          </p>
+        </div>
+      </SectionCard>
+    );
+  }
+}
+
+function safeArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
 }
 
 // ---------------------------------------------------------------------------
@@ -1343,8 +1380,13 @@ function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
         setError(json.error || 'Failed to load CAD render preview');
         return;
       }
-      setPreview(json.data);
-      setSelectedSheetNumber(json.data.defaultSheetNumber ?? json.data.sheets?.[0]?.sheetNumber ?? null);
+      const nextPreview = json.data as SurveyCadWorkbenchPreview | null;
+      if (!nextPreview || !Array.isArray(nextPreview.sheets) || !nextPreview.renderPackage?.summary || !nextPreview.readiness?.summaries) {
+        setError('CAD preview returned an unexpected shape');
+        return;
+      }
+      setPreview(nextPreview);
+      setSelectedSheetNumber(nextPreview.defaultSheetNumber ?? nextPreview.sheets[0]?.sheetNumber ?? null);
     } catch {
       setError('Network error while loading CAD render preview');
     } finally {
@@ -1383,13 +1425,14 @@ function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
     );
   }
 
-  const selectedSheet = preview.sheets.find(sheet => sheet.sheetNumber === selectedSheetNumber) ?? preview.sheets[0] ?? null;
+  const sheets = safeArray(preview.sheets);
+  const selectedSheet = sheets.find(sheet => sheet.sheetNumber === selectedSheetNumber) ?? sheets[0] ?? null;
   const readiness = PROFESSIONAL_READINESS_META[preview.readiness.readinessState] ?? PROFESSIONAL_READINESS_META.review_required;
   const reviewItems = Array.from(new Set([
-    ...(preview.readiness.summaries.blockingIssues ?? []),
-    ...(preview.readiness.summaries.warnings ?? []),
-    ...(preview.readiness.renderReadiness.blockers ?? []),
-    ...(preview.readiness.renderReadiness.reviewItems ?? []),
+    ...safeArray(preview.readiness.summaries.blockingIssues),
+    ...safeArray(preview.readiness.summaries.warnings),
+    ...safeArray(preview.readiness.renderReadiness.blockers),
+    ...safeArray(preview.readiness.renderReadiness.reviewItems),
   ])).slice(0, 6);
 
   return (
@@ -1440,9 +1483,9 @@ function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
           <ReadinessPill tone="cyan">Survey Source Traceable</ReadinessPill>
         </div>
 
-        {preview.sheets.length > 1 && (
+        {sheets.length > 1 && (
           <div className="flex flex-wrap gap-2">
-            {preview.sheets.map(sheet => (
+            {sheets.map(sheet => (
               <button
                 key={sheet.sheetNumber}
                 onClick={() => setSelectedSheetNumber(sheet.sheetNumber)}
@@ -1462,7 +1505,7 @@ function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
                 <p className="text-[10px] text-slate-500 break-all">Render hash: {selectedSheet.renderHash}</p>
               </div>
               <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold uppercase text-emerald-200">
-                {preview.renderPackage.summary.renderQualityGrade.replace(/_/g, ' ')}
+                {String(preview.renderPackage.summary.renderQualityGrade ?? 'preview').replace(/_/g, ' ')}
               </span>
             </div>
             <div className="max-h-[620px] overflow-auto rounded-xl bg-white p-2">
@@ -1477,7 +1520,7 @@ function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
             <p className="break-all">Package hash: <b className="text-slate-300">{preview.renderPackage.packageHash}</b></p>
             <p className="break-all">Render readiness hash: <b className="text-slate-300">{preview.renderPackage.sourceRenderReadinessHash}</b></p>
             <p>System type: <b className="text-slate-300 capitalize">{preview.readiness.summaries.systemType}</b>; roof planes: <b className="text-slate-300">{preview.readiness.summaries.canonicalRoofPlaneCount}</b>; obstructions: <b className="text-slate-300">{preview.readiness.summaries.obstructionCount}</b>; setbacks: <b className="text-slate-300">{preview.readiness.summaries.setbackCount}</b>.</p>
-            {selectedSheet && <p>Visible layer order: <span className="text-slate-400">{selectedSheet.layerOrder.join(' → ')}</span></p>}
+            {selectedSheet && <p>Visible layer order: <span className="text-slate-400">{safeArray(selectedSheet.layerOrder).join(' → ')}</span></p>}
             {reviewItems.length > 0 && (
               <ul className="space-y-1 text-amber-100/80">
                 {reviewItems.map((item, i) => <li key={`${item}-${i}`}>- {item}</li>)}
@@ -1505,7 +1548,12 @@ function ProfessionalReadinessPanel({ surveyId }: { surveyId: string }) {
         setError(json.error || 'Failed to load professional readiness report');
         return;
       }
-      setReport(json.data);
+      const nextReport = json.data as ProfessionalReadinessReportPreview | null;
+      if (!nextReport || !nextReport.summaries || !nextReport.evidence || !nextReport.canonicalGeometry || !nextReport.cadReadiness) {
+        setError('Professional readiness returned an unexpected shape');
+        return;
+      }
+      setReport(nextReport);
     } catch {
       setError('Network error while loading professional readiness report');
     } finally {
@@ -1545,9 +1593,9 @@ function ProfessionalReadinessPanel({ surveyId }: { surveyId: string }) {
   }
 
   const readiness = PROFESSIONAL_READINESS_META[report.readinessState] ?? PROFESSIONAL_READINESS_META.review_required;
-  const blockingIssues = Array.from(new Set([...report.summaries.blockingIssues, ...report.canonicalGeometry.blockingIssues, ...report.cadReadiness.blockingIssues]));
-  const warnings = Array.from(new Set([...report.summaries.warnings, ...report.evidence.warnings, ...report.canonicalGeometry.warnings, ...report.cadReadiness.warnings]));
-  const reviewRequired = Array.from(new Set([...report.summaries.confidenceGaps, ...report.cadReadiness.reviewRequired]));
+  const blockingIssues = Array.from(new Set([...safeArray(report.summaries.blockingIssues), ...safeArray(report.canonicalGeometry.blockingIssues), ...safeArray(report.cadReadiness.blockingIssues)]));
+  const warnings = Array.from(new Set([...safeArray(report.summaries.warnings), ...safeArray(report.evidence.warnings), ...safeArray(report.canonicalGeometry.warnings), ...safeArray(report.cadReadiness.warnings)]));
+  const reviewRequired = Array.from(new Set([...safeArray(report.summaries.confidenceGaps), ...safeArray(report.cadReadiness.reviewRequired)]));
 
   return (
     <SectionCard icon={<Layers size={14} />} title="Professional Survey Parser Readiness v1" iconColor="text-violet-400">
@@ -1813,10 +1861,14 @@ export default function SurveyDetailPage() {
         <SurveyEvidenceViewer manifest={displayedManifest} bridge={displayedBridge} />
 
         {/* 1e. CAD workbench — read-only source-truth SVG preview */}
-        <SurveyCadWorkbenchPanel surveyId={survey.id} />
+        <SurveyPanelErrorBoundary title="Site Survey CAD Workbench — Read-Only Preview">
+          <SurveyCadWorkbenchPanel surveyId={survey.id} />
+        </SurveyPanelErrorBoundary>
 
         {/* 1f. Professional parser readiness — read-only preview/reporting */}
-        <ProfessionalReadinessPanel surveyId={survey.id} />
+        <SurveyPanelErrorBoundary title="Professional Survey Parser Readiness v1">
+          <ProfessionalReadinessPanel surveyId={survey.id} />
+        </SurveyPanelErrorBoundary>
 
         {/* ------------------------------------------------------------------ */}
         {/* Typed V2 sections                                                   */}
