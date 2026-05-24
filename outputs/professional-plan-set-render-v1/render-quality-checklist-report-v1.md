@@ -6,25 +6,27 @@ This checklist is visual quality assurance only. It does not promote engineering
 
 ## Deterministic Checklist Areas
 
+The scoring threshold is intentionally stricter than earlier package-existence checks. It now rewards drafting resemblance, composition balance, annotation density, legend professionalism, contractor trust, and export presentation readiness instead of merely counting sheets and metadata.
+
 - title_block_rail
 - sheet_border
-- legend_symbols
-- viewport_readability
+- legend_professionalism
+- composition_balance
 - site_context_realism
 - module_layout_realism
-- annotation_readability
-- line_weight_consistency
+- annotation_density
+- drafting_resemblance
 - render_confidence_display
 - review_warning_visibility
-- print_export_readiness
+- export_presentation_readiness
 - evidence_grouping
 
 ## Demo Package Scores
 
-- clean_roof: 100/100 (ui_candidate) · state render_demo_ready · confidence 100/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash fedb1c87
-- ground_mount_survey: 90/100 (commercial_preview) · state render_demo_ready · confidence 97/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash 0fbf8a72
-- solar_fence_survey: 90/100 (commercial_preview) · state render_demo_ready · confidence 97/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash 6d19fbef
-- document_derived_partial_evidence: 90/100 (commercial_preview) · state render_review_required · confidence 64/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash 4549b177
+- clean_roof: 100/100 (ui_candidate) · state render_demo_ready · confidence 100/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash d0c90d6c
+- ground_mount_survey: 82/100 (benchmark_gap) · state render_demo_ready · confidence 97/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash 53241b9a
+- solar_fence_survey: 82/100 (benchmark_gap) · state render_demo_ready · confidence 97/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash c4133487
+- document_derived_partial_evidence: 90/100 (commercial_preview) · state render_review_required · confidence 64/100 · PDF generated · thumbnails 3 · snapshots 3 · contact sheet yes · hash bf8752dc
 
 ## UI Wiring Recommendation
 

@@ -108,10 +108,20 @@ describe('Professional Plan-Set Render Output V1', () => {
     expect(sitePlan?.svg).toContain('DRIVEWAY / ACCESS');
     expect(sitePlan?.svg).toContain('PV-1 MODULE GROUP');
     expect(sitePlan?.svg).toContain('PV STRING / GROUP CALLOUT');
+    expect(sitePlan?.svg).toContain('roof edge articulation');
+    expect(sitePlan?.svg).toContain('roof hatch');
+    expect(sitePlan?.svg).toContain('VENT / OBSTR. REF.');
+    expect(sitePlan?.svg).toContain('GENERAL CONSTRUCTION NOTES');
+    expect(sitePlan?.svg).toContain('EQUIPMENT SUMMARY');
+    expect(sitePlan?.svg).toContain('REVISION / QA');
+    expect(sitePlan?.svg).toContain('TRUE NORTH');
+    expect(sitePlan?.svg).toContain('rail-attachment-symbols');
     expect(sitePlan?.layerOrder).toContain('site-context');
     expect(sitePlan?.layerOrder).toContain('property-boundary');
     expect(sitePlan?.layerOrder).toContain('module-string-groups');
     expect(sitePlan?.layerOrder).toContain('roof-outlines');
+    expect(sitePlan?.layerOrder).toContain('roof-articulation');
+    expect(sitePlan?.layerOrder).toContain('obstruction-symbols');
     expect(sitePlan?.layerOrder).toContain('review-callouts');
     expect(sitePlan?.annotations.join('\n')).toContain('pitch/azimuth annotations');
     expect(sitePlan?.annotations.join('\n')).toContain('realistic site context');
@@ -136,20 +146,20 @@ describe('Professional Plan-Set Render Output V1', () => {
 
     expect(checklist.schemaVersion).toBe('professional_plan_set_render_quality_checklist_v1');
     expect(pkg.summary.renderQualityScore).toBe(checklist.score);
-    expect(checklist.score).toBeGreaterThanOrEqual(90);
+    expect(checklist.score).toBeGreaterThanOrEqual(96);
     expect(['commercial_preview', 'ui_candidate']).toContain(checklist.grade);
     expect(checklist.checks.map(check => check.key)).toEqual([
       'title_block_rail',
       'sheet_border',
-      'legend_symbols',
-      'viewport_readability',
+      'legend_professionalism',
+      'composition_balance',
       'site_context_realism',
       'module_layout_realism',
-      'annotation_readability',
-      'line_weight_consistency',
+      'annotation_density',
+      'drafting_resemblance',
       'render_confidence_display',
       'review_warning_visibility',
-      'print_export_readiness',
+      'export_presentation_readiness',
       'evidence_grouping',
     ]);
     expect(checklist.score).toBeLessThanOrEqual(checklist.maxScore);

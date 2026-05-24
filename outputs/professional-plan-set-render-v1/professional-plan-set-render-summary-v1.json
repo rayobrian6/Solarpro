@@ -10,7 +10,7 @@
   "packageHashes": [
     {
       "fixtureId": "clean_roof",
-      "packageHash": "fedb1c87",
+      "packageHash": "d0c90d6c",
       "state": "render_demo_ready",
       "confidence": 100,
       "renderQualityScore": 100,
@@ -22,11 +22,11 @@
     },
     {
       "fixtureId": "ground_mount_survey",
-      "packageHash": "0fbf8a72",
+      "packageHash": "53241b9a",
       "state": "render_demo_ready",
       "confidence": 97,
-      "renderQualityScore": 90,
-      "renderQualityGrade": "commercial_preview",
+      "renderQualityScore": 82,
+      "renderQualityGrade": "benchmark_gap",
       "pdfExported": true,
       "thumbnailCount": 3,
       "snapshotCount": 3,
@@ -34,11 +34,11 @@
     },
     {
       "fixtureId": "solar_fence_survey",
-      "packageHash": "6d19fbef",
+      "packageHash": "c4133487",
       "state": "render_demo_ready",
       "confidence": 97,
-      "renderQualityScore": 90,
-      "renderQualityGrade": "commercial_preview",
+      "renderQualityScore": 82,
+      "renderQualityGrade": "benchmark_gap",
       "pdfExported": true,
       "thumbnailCount": 3,
       "snapshotCount": 3,
@@ -46,7 +46,7 @@
     },
     {
       "fixtureId": "document_derived_partial_evidence",
-      "packageHash": "4549b177",
+      "packageHash": "bf8752dc",
       "state": "render_review_required",
       "confidence": 64,
       "renderQualityScore": 90,
@@ -57,7 +57,7 @@
       "contactSheetGenerated": true
     }
   ],
-  "averageRenderQualityScore": 93,
+  "averageRenderQualityScore": 89,
   "pdfExport": {
     "stack": "wkhtmltopdf from deterministic HTML/SVG composition; sharp for PNG thumbnails/snapshots/contact sheets",
     "packagePdfCount": 4,
@@ -72,26 +72,26 @@
   "renderQualityChecklistKeys": [
     "title_block_rail",
     "sheet_border",
-    "legend_symbols",
-    "viewport_readability",
+    "legend_professionalism",
+    "composition_balance",
     "site_context_realism",
     "module_layout_realism",
-    "annotation_readability",
-    "line_weight_consistency",
+    "annotation_density",
+    "drafting_resemblance",
     "render_confidence_display",
     "review_warning_visibility",
-    "print_export_readiness",
+    "export_presentation_readiness",
     "evidence_grouping"
   ],
   "visibleQualityImprovements": [
     "CAD-style double borders, right-side title-block rail, sheet index regions, and drawing-number hierarchy create a permit-set visual language.",
     "A deterministic grayscale site-context layer adds lot boundary, street/driveway cues, neighboring structure silhouettes, and aerial-like texture without extracting or mutating geometry.",
     "Canonical roof geometry is rendered as export-safe vector linework with professional line-weight conventions and monochrome drafting priority.",
-    "Setbacks, realistic module grouping, rail runs, attachment indicators, conduit candidates, equipment markers, north arrow, scale note, and leader callouts are visible directly on the drawing sheet.",
+    "Setbacks, realistic module grouping, rail runs, attachment indicators, conduit candidates, obstruction symbols, equipment markers, professional north/scale graphics, and leader callouts are visible directly on the drawing sheet.",
     "Photo evidence, review risk summaries, PDF/export metadata, and live-preview manifest metadata are packaged for contractor/demo review."
   ],
   "contractorUsabilityImprovements": [
-    "Roof labels, pitch/azimuth labels, setbacks, equipment markers, leader lines, string/group labels, and module preview zones are visually grouped for print readability.",
+    "Roof labels, pitch/azimuth labels, setbacks, equipment markers, construction notes, design criteria, leader lines, string/group labels, and module preview zones are visually grouped for print readability.",
     "Site context makes the sheet feel closer to a real contractor-facing roof/site plan while remaining diagrammatic and non-authoritative.",
     "Blocked/review states and non-authoritative preview stamps are explicit, reducing risk that preview renders are mistaken for stamped engineering.",
     "Symbolized legends, PDF/export metadata, title-block metadata, and preview manifest paths explain drawing conventions and review limits on every output package."
