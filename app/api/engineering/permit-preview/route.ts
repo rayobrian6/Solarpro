@@ -25,6 +25,8 @@
 //   CERT  → page index 11 (Engineering Certification)
 //   PE-1  → page index 12 (PE Structural Letter)
 //   E-1   → page index 13 (Single-Line Diagram)
+//   VAL-1 → page index 14 (Validation Summary)
+//   APP-CAD → page index 15 (CAD Preview Appendix, when generated)
 //
 // If no saved HTML exists the route returns a styled "not yet generated"
 // guidance page instead of an error.
@@ -43,7 +45,7 @@ export const maxDuration = 30;
 // v47.312: Sheet ID → page index map — must match generatePermitHTML() assembly order exactly.
 // Page indices (0-based):
 //   0=PV-0  1=PV-1  2=PV-2  3=PV-2B  4=PV-3  5=PV-4A  6=PV-4B  7=PV-4C
-//   8=PV-5  9=SCHED  10=APP-A  11=CERT  12=PE-1  13=E-1
+//   8=PV-5  9=SCHED  10=APP-A  11=CERT  12=PE-1  13=E-1  14=VAL-1  15=APP-CAD
 const SHEET_PAGE_INDEX: Record<string, number> = {
   'PV-0':  0,   // Cover Sheet
   'PV-1':  1,   // Site Information
@@ -59,6 +61,8 @@ const SHEET_PAGE_INDEX: Record<string, number> = {
   'CERT':  11,  // Engineering Certification
   'PE-1':  12,  // PE Structural Letter
   'E-1':   13,  // Single-Line Diagram
+  'VAL-1': 14,  // Validation Summary
+  'APP-CAD': 15, // CAD Preview Appendix (non-authoritative)
 };
 
 const VALID_SHEETS = Object.keys(SHEET_PAGE_INDEX);

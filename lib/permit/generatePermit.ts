@@ -28,6 +28,7 @@ import { pageNECCompliance, pageConductorSchedule, pageSingleLineDiagram } from 
 import { pageWarningLabels, pageSpecSheetReference } from './sections/compliancePages';
 import { pageEngineerCert, pagePELetter } from './sections/certPages';
 import { pageValidationSummary } from './sections/validationPage';
+import { pageCADAppendixPreview } from './sections/cadAppendixPreviewPage';
 // pageInterconnection removed from planset (v48.35) — ICA/PTO Roadmap moved to Permit tab UI in engineering page
 import { generateBOMForPermit } from './utils/bomForPermit';
 
@@ -287,7 +288,10 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     staleStateMetadata: staleMetadataForState(engineeringStateRegistry.stateRecords.find((record: any) => record.stateId === 'state:renderContext:renderContext:primary') ?? engineeringStateRegistry.stateRecords[0]),
   });
 
-  const TOTAL = 15;
+  const includeCADAppendixPreview = (input as any).cadAppendixPreviewV1 === true
+    || (input as any).planSetOptions?.cadAppendixPreviewV1 === true
+    || (input as any).permitOptions?.cadAppendixPreviewV1 === true;
+  const TOTAL = includeCADAppendixPreview ? 16 : 15;
 
   // Dynamic page assembly — CADModel + RenderContext passed to ALL page functions
   const pages = [
@@ -307,6 +311,14 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     pageSingleLineDiagram(input, cad, 14, TOTAL, storedSldSvg),   // E-1: SLD (all, system-labeled)
     pageValidationSummary(input, canonical, cad, 15, TOTAL),      // VAL-1: Validation summary (engineering authority)
   ];
+
+  if (includeCADAppendixPreview) {
+    try {
+      pages.push(pageCADAppendixPreview(input, cad, 16, TOTAL));       // APP-CAD: non-authoritative CAD preview appendix
+    } catch (appendixErr: unknown) {
+      console.warn('[generatePermitHTML] CAD appendix preview omitted (non-critical):', appendixErr instanceof Error ? appendixErr.message : appendixErr);
+    }
+  }
 
   return `<!DOCTYPE html>
 <html>

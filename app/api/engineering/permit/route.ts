@@ -648,6 +648,9 @@ export async function POST(req: NextRequest) {
     // buildCanonical() throws on missing / invalid layout — no silent fallbacks.
     // ─────────────────────────────────────────────────────────────────────────
     console.log('[PLANSET VERSION]', PLANSET_ENGINE_VERSION);
+    // Explicit opt-in for the non-authoritative CAD preview appendix in generated permit packages.
+    // The appendix is additive only: it does not replace PV-2/PV-3 and does not mutate CAD, engineering, NEC, BOM, routing, workflow, recommendations, or permit authority.
+    (enrichedBody as any).cadAppendixPreviewV1 = true;
     const html = generatePermitHTML(enrichedBody, storedSldSvg);
     console.log('[PLANSET GENERATED]', { systemType: enrichedBody.project?.systemType, panels: (enrichedBody as any).system?.totalPanels, version: PLANSET_ENGINE_VERSION });
 

@@ -12697,6 +12697,7 @@ function EngineeringPageInner() {
                 { label: 'CERT  Engineer Certification',              done: !!config.designer },
                 { label: 'PE-1  PE Structural Letter of Compliance',  done: true },
                 { label: 'E-1  Single-Line Electrical Diagram',       done: true },
+                { label: 'APP-CAD  CAD Preview Appendix — Non-Authoritative', done: !!(projectLayout?.panels?.length > 0) },
               ];
               const _doneCount  = _sheets.filter(s => s.done).length;
               const _readyPct   = Math.round((_doneCount / _sheets.length) * 100);

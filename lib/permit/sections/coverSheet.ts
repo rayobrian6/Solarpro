@@ -127,6 +127,9 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   }
 
   // ── Sheet index ───────────────────────────────────────────────────────────
+  const includeCADAppendixPreview = (input as any).cadAppendixPreviewV1 === true
+    || (input as any).planSetOptions?.cadAppendixPreviewV1 === true
+    || (input as any).permitOptions?.cadAppendixPreviewV1 === true;
   const sheets = [
     { id: 'PV-0',  title: 'COVER SHEET — PROJECT OVERVIEW & GENERAL NOTES' },
     { id: 'PV-1',  title: 'SITE PLAN — EQUIPMENT LAYOUT & VICINITY' },
@@ -142,6 +145,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     { id: 'CERT',  title: 'ENGINEER CERTIFICATION — PROFESSIONAL REVIEW' },
     { id: 'PE-1',  title: 'PE STRUCTURAL LETTER — LETTER OF COMPLIANCE' },
     { id: 'E-1',   title: 'SINGLE-LINE DIAGRAM — ELECTRICAL SCHEMATIC' },
+    ...(includeCADAppendixPreview ? [{ id: 'APP-CAD', title: 'CAD PREVIEW APPENDIX — NON-AUTHORITATIVE' }] : []),
   ];
 
   // ── Topology label ────────────────────────────────────────────────────────

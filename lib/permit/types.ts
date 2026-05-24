@@ -487,7 +487,7 @@ export interface PermitSheetIndexEntry {
 // v47.312: Canonical 14-sheet permit plan-set — matches generatePermitHTML() page assembly order.
 // Page indices (0-based) must match exactly:
 //   0=PV-0  1=PV-1  2=PV-2  3=PV-2B  4=PV-3  5=PV-4A  6=PV-4B  7=PV-4C
-//   8=PV-5  9=SCHED  10=APP-A  11=CERT  12=PE-1  13=E-1
+//   8=PV-5  9=SCHED  10=APP-A  11=CERT  12=PE-1  13=E-1  14=VAL-1  15=APP-CAD
 export type PermitSheetId =
   | 'PV-0'   // Cover Sheet
   | 'PV-1'   // Site Information
@@ -502,7 +502,9 @@ export type PermitSheetId =
   | 'APP-A'  // Specification Sheets
   | 'CERT'   // Engineering Certification
   | 'PE-1'   // PE Structural Letter
-  | 'E-1';   // Single-Line Diagram
+  | 'E-1'    // Single-Line Diagram
+  | 'VAL-1'  // Validation Summary
+  | 'APP-CAD'; // CAD Preview Appendix
 
 export const PERMIT_SHEET_INDEX: PermitSheetIndexEntry[] = [
   { id: 'PV-0',  title: 'Cover Sheet',                 description: 'Project overview, sheet index, aerial view, design criteria, governing codes' },
@@ -519,6 +521,8 @@ export const PERMIT_SHEET_INDEX: PermitSheetIndexEntry[] = [
   { id: 'CERT',  title: 'Engineering Certification',    description: 'Engineering stamp, certification statement, revision history, document control' },
   { id: 'PE-1',  title: 'PE Structural Letter',         description: 'Licensed PE review letter with ASCE 7-22 analysis and structural attestation' },
   { id: 'E-1',   title: 'Single-Line Diagram',          description: 'Complete electrical SLD — IEEE/ANSI symbols, wire gauges, OCP ratings, grounding' },
+  { id: 'VAL-1', title: 'Validation Summary',           description: 'Canonical validation summary and engineering readiness checks' },
+  { id: 'APP-CAD', title: 'CAD Preview Appendix',       description: 'Preview-only CAD SVG appendix; non-authoritative and not a PV-2/PV-3 replacement' },
 ];
 
 // ─── Satellite image result (from satelliteService) ───────────────────────────
