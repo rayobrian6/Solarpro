@@ -38,4 +38,4 @@ The upgraded output is closer to commercial preview quality, but it is still not
 
 ## Quality Result
 
-Average evidence-alignment render quality score: **93/100**. Checklist keys: evidence_reconstruction_overlay, photo_consistency, geometry_evidence_correlation, fallback_transparency, authenticity_score, oss_adapter_boundaries, no_authority_boundaries, title_block_rail, review_warning_visibility, export_presentation_readiness, evidence_grouping.
+Average evidence-alignment render quality score: **31/100**. Checklist keys: survey_photo_truth_usage, survey_metadata_truth_usage, design_layout_truth_usage, layer_provenance_completeness, fallback_disclosure, design_survey_reconciliation, authenticity_score, oss_adapter_boundaries, no_authority_boundaries, review_warning_visibility, export_presentation_readiness.

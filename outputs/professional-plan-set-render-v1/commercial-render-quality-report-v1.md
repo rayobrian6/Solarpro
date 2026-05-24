@@ -4,7 +4,9 @@ Professional Plan-Set Render Output V1 generated **12 SVG sheets** across **4 de
 
 ## Visible Quality Improvements
 
-- A bounded evidence-derived reconstruction layer now draws photo-aligned review candidates before synthetic drafting fallback layers.
+- A source-of-truth provenance layer now classifies A-101 render layers as survey photo truth, survey metadata truth, design/layout truth, equipment truth, review inference, or explicit fallback.
+- Design handoff data, when supplied, drives visible panel count, module orientation, array grouping, and equipment intent before any fallback layout is shown.
+- Survey photo evidence remains the primary review truth for roof/equipment/obstruction/conduit candidates without mutating CAD or canonical geometry.
 - CAD-style double borders, right-side title-block rail, sheet index regions, and drawing-number hierarchy create a permit-set visual language.
 - A deterministic grayscale site-context layer is explicitly diagrammatic and cannot inflate evidence-alignment quality.
 - Canonical roof geometry is rendered as export-safe vector linework only after real survey evidence and derived evidence cues are considered.

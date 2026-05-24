@@ -1,5 +1,6 @@
 import type { ProfessionalSurveyReadinessReportV1 } from './professionalSurveyReadinessReport';
 import { buildEvidenceDerivedCadReconstruction, type EvidenceDerivedCandidateV1 } from './evidenceDerivedCadReconstruction';
+import { buildSourceOfTruthCadRenderContext, type SourceOfTruthDesignHandoffV1, type SourceTruthLayerProvenanceV1, type DesignTruthModuleGroupV1 } from './sourceOfTruthCadRender';
 
 export type PlanSetSheetTypeV1 = 'cover_summary' | 'site_plan_render' | 'evidence_review';
 
@@ -104,10 +105,10 @@ const STYLE = {
 
 const LAYERS = ['sheet-background', 'outer-border', 'title-block-rail', 'viewport-frame', 'grid', 'site-context', 'property-boundary', 'driveway-context', 'roof-outlines', 'roof-articulation', 'obstruction-symbols', 'fire-setbacks', 'module-layout', 'module-string-groups', 'rail-attachment-symbols', 'conduit-candidates', 'equipment-markers', 'leader-callouts', 'annotations', 'review-callouts', 'legend', 'preview-stamp'] as const;
 
-export function buildProfessionalPlanSetRenderPackage(report: ProfessionalSurveyReadinessReportV1): PlanSetRenderPackageV1 {
-  const context = buildContext(report);
+export function buildProfessionalPlanSetRenderPackage(report: ProfessionalSurveyReadinessReportV1, designHandoff: SourceOfTruthDesignHandoffV1 | null = null): PlanSetRenderPackageV1 {
+  const context = buildContext(report, designHandoff);
   const sheets = [renderCoverSheet(context), renderSitePlanSheet(context), renderEvidenceSheet(context)];
-  const quality = buildRenderQualityChecklist(report, sheets);
+  const quality = buildRenderQualityChecklist(context, sheets);
   const withoutHash = {
     schemaVersion: 'professional_plan_set_render_package_v1' as const,
     mode: 'deterministic_svg_plan_set_preview_review_only' as const,
@@ -126,7 +127,9 @@ export function buildProfessionalPlanSetRenderPackage(report: ProfessionalSurvey
       renderQualityGrade: quality.grade,
       renderQualityChecklist: quality,
       visibleQualityImprovements: [
-        'A bounded evidence-derived reconstruction layer now draws photo-aligned review candidates before synthetic drafting fallback layers.',
+        'A source-of-truth provenance layer now classifies A-101 render layers as survey photo truth, survey metadata truth, design/layout truth, equipment truth, review inference, or explicit fallback.',
+        'Design handoff data, when supplied, drives visible panel count, module orientation, array grouping, and equipment intent before any fallback layout is shown.',
+        'Survey photo evidence remains the primary review truth for roof/equipment/obstruction/conduit candidates without mutating CAD or canonical geometry.',
         'CAD-style double borders, right-side title-block rail, sheet index regions, and drawing-number hierarchy create a permit-set visual language.',
         'A deterministic grayscale site-context layer is explicitly diagrammatic and cannot inflate evidence-alignment quality.',
         'Canonical roof geometry is rendered as export-safe vector linework only after real survey evidence and derived evidence cues are considered.',
@@ -154,11 +157,12 @@ export function buildProfessionalPlanSetRenderPackage(report: ProfessionalSurvey
   return { ...withoutHash, packageHash, previewManifest: { ...withoutHash.previewManifest, packageHash } };
 }
 
-function buildContext(report: ProfessionalSurveyReadinessReportV1) {
+function buildContext(report: ProfessionalSurveyReadinessReportV1, designHandoff: SourceOfTruthDesignHandoffV1 | null = null) {
   const bounds = geometryBounds(report.canonicalGeometry.roofPlanes.flatMap(p => p.polygon));
   const viewport = { x: 62, y: 94, w: 812, h: 690 };
-  const reconstruction = buildEvidenceDerivedCadReconstruction(report);
-  return { report, bounds, viewport, reconstruction, projectTitle: `Survey ${report.source.surveyId}`, date: new Date(0).toISOString().slice(0, 10) };
+  const sourceTruth = buildSourceOfTruthCadRenderContext(report, designHandoff);
+  const reconstruction = sourceTruth.photoReconstruction;
+  return { report, bounds, viewport, reconstruction, sourceTruth, projectTitle: `Survey ${report.source.surveyId}`, date: new Date(0).toISOString().slice(0, 10) };
 }
 
 function renderCoverSheet(ctx: ReturnType<typeof buildContext>): PlanSetRenderSheetV1 {
@@ -201,7 +205,7 @@ function renderSitePlanSheet(ctx: ReturnType<typeof buildContext>): PlanSetRende
   const fixture = system === 'ground' ? renderGroundMountFixture(ctx) : system === 'fence' ? renderSolarFenceFixture(ctx) : '';
   const evidenceOverlays = renderEvidenceDerivedOverlays(ctx);
   const roof = fixture ? '' : renderRoofGeometry(ctx);
-  const modules = enabled(r, 'module_layout_previews') ? (fixture ? renderFixtureModulePreview(ctx) : renderModulePreview(ctx)) : '';
+  const modules = enabled(r, 'module_layout_previews') ? renderSourceTruthModulePreview(ctx, Boolean(fixture)) : '';
   const setbacks = !fixture && enabled(r, 'fire_setback_overlays') ? renderSetbacks(ctx) : '';
   const rails = fixture ? renderFixtureRailSymbols(ctx) : renderRailSymbols(ctx);
   const obstructions = fixture ? renderFixtureDraftingCues(ctx) : renderObstructionSymbols(ctx);
@@ -209,10 +213,11 @@ function renderSitePlanSheet(ctx: ReturnType<typeof buildContext>): PlanSetRende
   const leaders = fixture ? renderFixtureLeaderCallouts(ctx) : renderLeaderCallouts(ctx);
   const annotations = renderPlanAnnotations(ctx);
   const callouts = renderReviewCallouts(ctx, 894, 118, 122, 300);
-  const legend = fixture ? renderFixtureLegend(ctx, 894, 456) : renderLegend(894, 456);
+  const legend = renderSourceTruthLegend(ctx, 894, 456);
   const density = renderPlanDensityBlocks(ctx);
-  const body = [viewportFrame(ctx), renderSiteContext(ctx), fixture, roof, evidenceOverlays, setbacks, modules, rails, obstructions, equipment, leaders, annotations, callouts, legend, scaleBar(108, 746), northArrow(812, 714), density].join('');
-  return sheet(ctx, 'A-101', 'site_plan_render', 'Roof / Site Plan Render Preview', body, ['real survey evidence first', 'photo-derived evidence cues', 'explicit fallback disclosure', 'realistic site context', 'diagrammatic property boundary', 'driveway/building context', 'roof outlines', 'roof edge articulation', 'roof hatch and obstruction symbols', 'pitch/azimuth annotations', 'setback overlays', 'module preview zones', 'module string/group callouts', 'rail/attachment symbols', 'equipment markers', 'fixture-specific support and fence/ground-mount drafting cues', 'permit-style construction notes', 'leader callouts', 'review callouts']);
+  const provenance = renderSourceTruthProvenance(ctx);
+  const body = [viewportFrame(ctx), renderSiteContext(ctx), fixture, roof, evidenceOverlays, setbacks, modules, rails, obstructions, equipment, leaders, annotations, callouts, legend, provenance, scaleBar(108, 746), northArrow(812, 714), density].join('');
+  return sheet(ctx, 'A-101', 'site_plan_render', 'Roof / Site Plan Render Preview', body, ['source-of-truth driven A-101', 'survey photos are primary evidence truth', 'design/layout handoff is secondary placement truth', 'photo-derived evidence cues', 'explicit fallback disclosure', 'source provenance legend', 'design-vs-survey reconciliation warnings', 'authenticity score', 'diagrammatic property boundary fallback', 'roof outlines from survey metadata', 'pitch/azimuth annotations', 'setback overlays review required', 'module preview zones from design layout when supplied', 'module string/group callouts', 'rail/attachment symbols fallback unless design-supported', 'equipment markers with evidence/design provenance', 'leader callouts', 'review callouts']);
 }
 
 function renderEvidenceSheet(ctx: ReturnType<typeof buildContext>): PlanSetRenderSheetV1 {
@@ -254,7 +259,7 @@ function renderSiteContext(ctx: ReturnType<typeof buildContext>) {
     return `<circle cx="${x}" cy="${y}" r="${r}" fill="#e5e7eb" opacity="0.28"/>`;
   }).join('');
   const parcelTick = Array.from({ length: 9 }, (_, i) => `<line x1="${lotX + 30 + i * Math.max(34, Math.floor(lotW / 10))}" y1="${lotY}" x2="${lotX + 18 + i * Math.max(34, Math.floor(lotW / 10))}" y2="${lotY + lotH}" stroke="#cbd5e1" stroke-width="0.45" opacity="0.55"/>`).join('');
-  return `<g opacity="0.96"><desc>realistic site context aerial-like grayscale property boundary driveway neighboring structure diagrammatic only parcel hatch</desc><rect x="${v.x + 10}" y="${v.y + 10}" width="${v.w - 20}" height="${v.h - 20}" fill="#f8fafc"/><g opacity="0.55">${texture}</g><rect x="${v.x + 18}" y="${streetY}" width="${v.w - 36}" height="44" fill="#e5e7eb" stroke="#9ca3af" stroke-width="${CAD.hairline}"/><line x1="${v.x + 38}" y1="${streetY + 22}" x2="${v.x + v.w - 38}" y2="${streetY + 22}" stroke="#f8fafc" stroke-width="3" stroke-dasharray="28 20"/><text x="${v.x + 30}" y="${streetY + 36}" class="tiny">STREET / ACCESS CONTEXT (DIAGRAMMATIC)</text>${parcelTick}<rect x="${lotX}" y="${lotY}" width="${lotW}" height="${lotH}" fill="none" stroke="#374151" stroke-width="${CAD.medium}" stroke-dasharray="10 6"/><text x="${lotX + 12}" y="${lotY + 20}" class="callout">PROPERTY / LOT CONTEXT PREVIEW</text><path d="M ${drivewayX} ${streetY} L ${drivewayX - 22} ${cy + 122} L ${drivewayX + 34} ${cy + 94} L ${drivewayX + 72} ${streetY}" fill="#e5e7eb" stroke="#6b7280" stroke-width="${CAD.thin}"/><text x="${drivewayX - 4}" y="${Math.min(streetY - 12, cy + 134)}" class="tiny">DRIVEWAY / ACCESS</text><rect x="${lotX + 32}" y="${lotY + 52}" width="84" height="58" fill="#f3f4f6" stroke="#9ca3af" stroke-width="${CAD.hairline}"/><rect x="${lotX + lotW - 112}" y="${lotY + 74}" width="72" height="94" fill="#f3f4f6" stroke="#9ca3af" stroke-width="${CAD.hairline}"/><text x="${lotX + lotW - 130}" y="${lotY + 188}" class="tiny">NEIGHBORING STRUCTURE CUES</text></g>`;
+  return `<g opacity="0.96"><desc>${provenanceDesc(ctx, 'site-context')} realistic site context aerial-like grayscale property boundary driveway neighboring structure diagrammatic only parcel hatch FALLBACK PLACEHOLDER</desc><rect x="${v.x + 10}" y="${v.y + 10}" width="${v.w - 20}" height="${v.h - 20}" fill="#f8fafc"/><g opacity="0.55">${texture}</g><rect x="${v.x + 18}" y="${streetY}" width="${v.w - 36}" height="44" fill="#e5e7eb" stroke="#9ca3af" stroke-width="${CAD.hairline}"/><line x1="${v.x + 38}" y1="${streetY + 22}" x2="${v.x + v.w - 38}" y2="${streetY + 22}" stroke="#f8fafc" stroke-width="3" stroke-dasharray="28 20"/><text x="${v.x + 30}" y="${streetY + 36}" class="tiny">STREET / ACCESS CONTEXT (DIAGRAMMATIC)</text>${parcelTick}<rect x="${lotX}" y="${lotY}" width="${lotW}" height="${lotH}" fill="none" stroke="#374151" stroke-width="${CAD.medium}" stroke-dasharray="10 6"/><text x="${lotX + 12}" y="${lotY + 20}" class="callout">PROPERTY / LOT CONTEXT PREVIEW</text><path d="M ${drivewayX} ${streetY} L ${drivewayX - 22} ${cy + 122} L ${drivewayX + 34} ${cy + 94} L ${drivewayX + 72} ${streetY}" fill="#e5e7eb" stroke="#6b7280" stroke-width="${CAD.thin}"/><text x="${drivewayX - 4}" y="${Math.min(streetY - 12, cy + 134)}" class="tiny">DRIVEWAY / ACCESS</text><rect x="${lotX + 32}" y="${lotY + 52}" width="84" height="58" fill="#f3f4f6" stroke="#9ca3af" stroke-width="${CAD.hairline}"/><rect x="${lotX + lotW - 112}" y="${lotY + 74}" width="72" height="94" fill="#f3f4f6" stroke="#9ca3af" stroke-width="${CAD.hairline}"/><text x="${lotX + lotW - 130}" y="${lotY + 188}" class="tiny">NEIGHBORING STRUCTURE CUES</text></g>`;
 }
 
 function renderEvidenceDerivedOverlays(ctx: ReturnType<typeof buildContext>) {
@@ -302,7 +307,7 @@ function renderRoofGeometry(ctx: ReturnType<typeof buildContext>) {
     const x = tx(ctx, b.minX), y = ty(ctx, b.maxY), w = Math.max(18, tx(ctx, b.maxX) - tx(ctx, b.minX)), h = Math.max(18, ty(ctx, b.minY) - ty(ctx, b.maxY));
     const hatch = Array.from({ length: 9 }, (_, i) => `<line x1="${x + 18 + i * Math.max(18, Math.floor(w / 9))}" y1="${y + 10}" x2="${x - 10 + i * Math.max(18, Math.floor(w / 9))}" y2="${y + h - 10}" stroke="#e5e7eb" stroke-width="0.7"/>`).join('');
     const edgeTicks = plane.polygon.map((pt, idx) => `<circle cx="${tx(ctx, pt.x)}" cy="${ty(ctx, pt.y)}" r="3" fill="#fff" stroke="${STYLE.roof}" stroke-width="${CAD.hairline}"><title>roof edge vertex ${idx + 1}</title></circle>`).join('');
-    return `<g><desc>roof edge articulation roof hatch drafted silhouette</desc><clipPath id="clip-${plane.planeId}"><path d="${d}"/></clipPath><g clip-path="url(#clip-${plane.planeId})">${hatch}</g><path d="${d}" fill="${STYLE.roofFill}" fill-opacity="0.78" stroke="${STYLE.roof}" stroke-width="${CAD.heavy}"/><path d="${d}" fill="none" stroke="${STYLE.faint}" stroke-width="${CAD.thin}" transform="translate(5 5)"/>${edgeTicks}<text x="${c.x}" y="${c.y - 4}" text-anchor="middle" class="label">${esc(plane.planeId)}</text><text x="${c.x}" y="${c.y + 16}" text-anchor="middle" class="tiny">PITCH ${plane.pitchDeg}° / AZ ${plane.azimuthDeg}°</text></g>`;
+    return `<g><desc>${provenanceDesc(ctx, 'roof-outlines')} roof edge articulation roof hatch drafted silhouette</desc><clipPath id="clip-${plane.planeId}"><path d="${d}"/></clipPath><g clip-path="url(#clip-${plane.planeId})">${hatch}</g><path d="${d}" fill="${STYLE.roofFill}" fill-opacity="0.78" stroke="${STYLE.roof}" stroke-width="${CAD.heavy}"/><path d="${d}" fill="none" stroke="${STYLE.faint}" stroke-width="${CAD.thin}" transform="translate(5 5)"/>${edgeTicks}<text x="${c.x}" y="${c.y - 4}" text-anchor="middle" class="label">${esc(plane.planeId)}</text><text x="${c.x}" y="${c.y + 16}" text-anchor="middle" class="tiny">PITCH ${plane.pitchDeg}° / AZ ${plane.azimuthDeg}°</text></g>`;
   }).join('');
 }
 
@@ -342,6 +347,97 @@ function renderModulePreview(ctx: ReturnType<typeof buildContext>) {
     groups.push(`<g><desc>module preview realistic spacing row alignment portrait landscape string group callout</desc><rect x="${x0 - 10}" y="${y0 - 10}" width="${groupW + 20}" height="${groupH + 20}" fill="none" stroke="${STYLE.module}" stroke-width="${CAD.hairline}" stroke-dasharray="5 4"/>${modules.join('')}<text x="${x0}" y="${labelY}" class="callout" fill="${STYLE.module}">PV-${planeIndex + 1} MODULE GROUP · ${rows}x${cols} ${wide ? 'LANDSCAPE' : 'PORTRAIT'} PREVIEW</text></g>`);
   }
   return groups.join('');
+}
+
+
+function renderSourceTruthModulePreview(ctx: ReturnType<typeof buildContext>, fixture: boolean) {
+  const groups = ctx.sourceTruth.moduleGroups;
+  if (groups.length === 0) return `<g><desc>module-layout source fallback_placeholder no module groups available</desc><text x="108" y="238" class="callout" fill="${STYLE.review}">FALLBACK PLACEHOLDER · NO DESIGN MODULE LAYOUT AVAILABLE</text></g>`;
+  return groups.map((group, index) => fixture ? renderFixtureSourceTruthModuleGroup(ctx, group, index) : renderRoofSourceTruthModuleGroup(ctx, group, index)).join('');
+}
+
+function renderRoofSourceTruthModuleGroup(ctx: ReturnType<typeof buildContext>, group: DesignTruthModuleGroupV1, index: number) {
+  const plane = ctx.report.canonicalGeometry.roofPlanes.find(item => item.planeId === group.planeId) ?? ctx.report.canonicalGeometry.roofPlanes[index % Math.max(1, ctx.report.canonicalGeometry.roofPlanes.length)];
+  const b = geometryBounds(plane?.polygon ?? []);
+  const left = tx(ctx, b.minX) + 52;
+  const top = ty(ctx, b.maxY) + 62;
+  const right = tx(ctx, b.maxX) - 46;
+  const bottom = ty(ctx, b.minY) - 54;
+  const portrait = group.orientation === 'portrait';
+  const moduleW = portrait ? 34 : 56;
+  const moduleH = portrait ? 58 : 34;
+  const gapX = 8;
+  const gapY = 10;
+  const cols = Math.max(1, group.columnCount);
+  const rows = Math.max(1, Math.ceil(group.panelCount / cols));
+  const groupW = cols * moduleW + (cols - 1) * gapX;
+  const groupH = rows * moduleH + (rows - 1) * gapY;
+  const x0 = Math.round(left + Math.max(0, (right - left - groupW) / 2));
+  const y0 = Math.round(top + Math.max(0, (bottom - top - groupH) / 2));
+  const modules: string[] = [];
+  for (let i = 0; i < group.panelCount; i++) {
+    const row = Math.floor(i / cols), col = i % cols;
+    const x = x0 + col * (moduleW + gapX), y = y0 + row * (moduleH + gapY);
+    modules.push(`<g><title>PV module ${i + 1} from ${esc(group.sourceReferences.join(', '))}</title><rect x="${x}" y="${y}" width="${moduleW}" height="${moduleH}" fill="${STYLE.moduleFill}" stroke="${STYLE.module}" stroke-width="${CAD.thin}"/><line x1="${x + Math.round(moduleW / 2)}" y1="${y + 3}" x2="${x + Math.round(moduleW / 2)}" y2="${y + moduleH - 3}" stroke="#93c5fd" stroke-width="0.6"/><line x1="${x + 3}" y1="${y + Math.round(moduleH / 2)}" x2="${x + moduleW - 3}" y2="${y + Math.round(moduleH / 2)}" stroke="#93c5fd" stroke-width="0.6"/></g>`);
+  }
+  const cls = group.fallback ? 'fallback_placeholder' : 'design_layout_truth';
+  const sourceLabel = group.fallback ? 'FALLBACK PLACEHOLDER' : 'DESIGN LAYOUT TRUTH';
+  const specs = group.panelWidthIn && group.panelHeightIn ? ` · ${group.panelWidthIn}x${group.panelHeightIn}IN` : '';
+  const labelY = Math.max(98, y0 - 12);
+  const fallbackText = group.fallback ? `<text x="${x0}" y="${y0 + groupH + 30}" class="tinyStrong" fill="${STYLE.review}">FALLBACK: MODULE COUNT/PLACEMENT NOT FROM DESIGN LAYOUT · REVIEW REQUIRED</text>` : '';
+  return `<g><desc>module-layout SOURCE ${cls} PANEL_COUNT ${group.panelCount} ORIENTATION ${group.orientation} REVIEW ${group.reviewRequired}</desc><rect x="${x0 - 10}" y="${y0 - 10}" width="${groupW + 20}" height="${groupH + 20}" fill="none" stroke="${group.fallback ? STYLE.review : STYLE.module}" stroke-width="${CAD.hairline}" stroke-dasharray="5 4"/>${modules.join('')}<text x="${x0}" y="${labelY}" class="callout" fill="${group.fallback ? STYLE.review : STYLE.module}">PV-${index + 1} · ${sourceLabel} · ${group.panelCount} MOD · ${group.orientation.toUpperCase()}${specs}</text><text x="${x0}" y="${labelY + 14}" class="tiny">PLANE ${esc(group.planeId ?? 'unmapped')} · SOURCE ${esc(trunc(group.sourceReferences.join(', '), 80))}</text>${fallbackText}</g>`;
+}
+
+function renderFixtureSourceTruthModuleGroup(ctx: ReturnType<typeof buildContext>, group: DesignTruthModuleGroupV1, index: number) {
+  const ground = ctx.report.summaries.systemType === 'ground';
+  const x0 = ground ? 194 : 190, y0 = ground ? 238 : 246;
+  const moduleW = group.orientation === 'landscape' ? 66 : 42;
+  const moduleH = group.orientation === 'landscape' ? 36 : 68;
+  const gapX = ground ? 10 : 8, gapY = ground ? 12 : 6;
+  const cols = Math.max(1, group.columnCount);
+  const mods: string[] = [];
+  for (let i = 0; i < group.panelCount; i++) {
+    const row = Math.floor(i / cols), col = i % cols;
+    const stagger = ground ? 0 : Math.round(col * -5 + row * 34);
+    const x = x0 + col * (moduleW + gapX), y = y0 + row * (moduleH + gapY) + stagger;
+    mods.push(`<rect x="${x}" y="${y}" width="${moduleW}" height="${moduleH}" fill="${STYLE.moduleFill}" stroke="${STYLE.module}" stroke-width="${CAD.thin}"/>`);
+  }
+  const sourceLabel = group.fallback ? 'FALLBACK PLACEHOLDER' : 'DESIGN LAYOUT TRUTH';
+  const conductor = ground ? `M ${x0} ${y0 + 170} C 388 474, 548 480, 710 572` : `M ${x0 + 36} ${y0 + 238} C 362 492, 540 566, 724 642`;
+  return `<g><desc>module-layout SOURCE ${group.fallback ? 'fallback_placeholder' : 'design_layout_truth'} fixture-specific panel count ${group.panelCount}</desc>${mods.join('')}<path d="${conductor}" fill="none" stroke="${group.fallback ? STYLE.review : STYLE.module}" stroke-width="${CAD.medium}" stroke-dasharray="6 5"/><text x="${x0}" y="${ground ? y0 - 22 : y0 - 26}" class="callout" fill="${group.fallback ? STYLE.review : STYLE.module}">PV-${index + 1} · ${sourceLabel} · ${group.panelCount} MOD · ${group.orientation.toUpperCase()}</text><text x="${x0}" y="${ground ? y0 - 8 : y0 - 12}" class="tiny">SOURCE ${esc(trunc(group.sourceReferences.join(', '), 82))}</text>${group.fallback ? `<text x="${x0}" y="${y0 + 260}" class="tinyStrong" fill="${STYLE.review}">FALLBACK: FIXTURE MODULE LAYOUT NOT DESIGN-DERIVED</text>` : ''}</g>`;
+}
+
+function renderSourceTruthLegend(ctx: ReturnType<typeof buildContext>, x: number, y: number) {
+  const st = ctx.sourceTruth;
+  const rows = [
+    ['survey_photo_truth', String(st.layerProvenance.filter(p => p.classification === 'survey_photo_truth').length)],
+    ['survey_metadata_truth', String(st.layerProvenance.filter(p => p.classification === 'survey_metadata_truth').length)],
+    ['design_layout_truth', String(st.layerProvenance.filter(p => p.classification === 'design_layout_truth').length)],
+    ['equipment_truth', String(st.layerProvenance.filter(p => p.classification === 'equipment_truth').length)],
+    ['inferred_review_required', String(st.layerProvenance.filter(p => p.classification === 'inferred_review_required').length)],
+    ['fallback_placeholder', String(st.layerProvenance.filter(p => p.classification === 'fallback_placeholder').length)],
+    ['AUTHENTICITY', `${st.authenticity.score}/100`],
+    ['RECONCILIATION', st.reconciliation.status],
+  ];
+  return cadTable(x, y, 132, 314, 'SOURCE OF TRUTH', rows);
+}
+
+function renderSourceTruthProvenance(ctx: ReturnType<typeof buildContext>) {
+  const st = ctx.sourceTruth;
+  const layerRows = st.layerProvenance.slice(0, 7).map(layer => [layer.layerId, `${layer.classification}${layer.fallback ? ' FALLBACK PLACEHOLDER' : ''}`]);
+  const warnings = st.reconciliation.warnings.slice(0, 4);
+  const warningRows = warnings.length ? warnings.map((warning, i) => [`W${i + 1}`, warning]) : [['STATUS', st.reconciliation.status]];
+  return `<g><desc>source-of-truth provenance layer classifications fallback disclosure reconciliation authenticity score review-only</desc>${cadTable(656, 690, 342, 96, 'LAYER PROVENANCE', layerRows)}${cadTable(894, 118, 122, 214, 'RECONCILIATION', warningRows)}<text x="86" y="154" class="callout" fill="${STYLE.review}">SOURCE-OF-TRUTH A-101 · PRIMARY SURVEY PHOTO TRUTH + SECONDARY DESIGN LAYOUT TRUTH · PREVIEW ONLY</text><text x="86" y="170" class="tinyStrong" fill="${STYLE.review}">AUTHENTICITY ${st.authenticity.score}/100 · FALLBACK PENALTY ${st.authenticity.fallbackPenalty} · ${esc(st.reconciliation.status)}</text></g>`;
+}
+
+function provenanceFor(ctx: ReturnType<typeof buildContext>, layerId: string): SourceTruthLayerProvenanceV1 | undefined {
+  return ctx.sourceTruth.layerProvenance.find(layer => layer.layerId === layerId);
+}
+
+function provenanceDesc(ctx: ReturnType<typeof buildContext>, layerId: string) {
+  const p = provenanceFor(ctx, layerId);
+  if (!p) return `SOURCE fallback_placeholder layer ${layerId}`;
+  return `SOURCE ${p.classification} layer ${p.layerId} confidence ${p.confidence} fallback ${p.fallback} review ${p.reviewRequired} refs ${p.sourceReferences.join('|')}`;
 }
 
 function renderGroundMountFixture(ctx: ReturnType<typeof buildContext>) {
@@ -411,19 +507,19 @@ function renderObstructionSymbols(ctx: ReturnType<typeof buildContext>) {
   const b = ctx.bounds;
   const x = tx(ctx, b.minX + (b.maxX - b.minX) * 0.72);
   const y = ty(ctx, b.minY + (b.maxY - b.minY) * 0.70);
-  return `<g opacity="0.88"><desc>roof obstruction detail vent skylight placeholder diagrammatic only</desc><rect x="${x - 18}" y="${y - 14}" width="36" height="28" fill="#f5f5f4" stroke="${STYLE.obstruction}" stroke-width="${CAD.thin}"/><line x1="${x - 18}" y1="${y - 14}" x2="${x + 18}" y2="${y + 14}" stroke="${STYLE.obstruction}" stroke-width="0.8"/><text x="${x + 24}" y="${y + 4}" class="tinyStrong">VENT / OBSTR. REF.</text></g>`;
+  return `<g opacity="0.88"><desc>${provenanceDesc(ctx, 'obstruction-symbols')} roof obstruction detail vent skylight placeholder diagrammatic only FALLBACK PLACEHOLDER</desc><rect x="${x - 18}" y="${y - 14}" width="36" height="28" fill="#f5f5f4" stroke="${STYLE.obstruction}" stroke-width="${CAD.thin}"/><line x1="${x - 18}" y1="${y - 14}" x2="${x + 18}" y2="${y + 14}" stroke="${STYLE.obstruction}" stroke-width="0.8"/><text x="${x + 24}" y="${y + 4}" class="tinyStrong">VENT / OBSTR. REF.</text></g>`;
 }
 
 function renderEquipment(ctx: ReturnType<typeof buildContext>) {
   const on = ctx.report.photoEvidence.coverage.electricalCoverage;
   const opacity = on ? 1 : 0.38;
-  return `<g opacity="${opacity}"><rect x="748" y="684" width="28" height="28" fill="#fff" stroke="${STYLE.equipment}" stroke-width="${CAD.medium}"/><circle cx="762" cy="698" r="7" fill="none" stroke="${STYLE.equipment}" stroke-width="${CAD.thin}"/><path d="M 762 698 C 714 636, 646 594, 562 548" fill="none" stroke="${STYLE.conduit}" stroke-width="${CAD.medium}" stroke-dasharray="${CAD.dashConduit}"/><text x="642" y="628" class="callout" fill="${STYLE.conduit}">(N) CONDUIT CANDIDATE</text><text x="784" y="704" class="small">MSP/Meter</text></g>`;
+  return `<g opacity="${opacity}"><desc>${provenanceDesc(ctx, 'equipment-markers')} equipment marker MSP meter conduit candidate</desc><rect x="748" y="684" width="28" height="28" fill="#fff" stroke="${STYLE.equipment}" stroke-width="${CAD.medium}"/><circle cx="762" cy="698" r="7" fill="none" stroke="${STYLE.equipment}" stroke-width="${CAD.thin}"/><path d="M 762 698 C 714 636, 646 594, 562 548" fill="none" stroke="${STYLE.conduit}" stroke-width="${CAD.medium}" stroke-dasharray="${CAD.dashConduit}"/><text x="642" y="628" class="callout" fill="${STYLE.conduit}">(N) CONDUIT CANDIDATE</text><text x="784" y="704" class="small">MSP/Meter</text></g>`;
 }
 
 function renderRailSymbols(ctx: ReturnType<typeof buildContext>) {
   const b = ctx.bounds; const y1 = ty(ctx, b.minY + (b.maxY - b.minY) * 0.36); const y2 = ty(ctx, b.minY + (b.maxY - b.minY) * 0.58);
   const x1 = tx(ctx, b.minX) + 74; const x2 = tx(ctx, b.maxX) - 74;
-  return `<g opacity="0.72"><desc>rail-attachment-symbols module rail attachment indicators</desc><line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y1}" stroke="${STYLE.rail}" stroke-width="${CAD.medium}"/><line x1="${x1}" y1="${y2}" x2="${x2}" y2="${y2}" stroke="${STYLE.rail}" stroke-width="${CAD.medium}"/>${[0.2, 0.38, 0.56, 0.74].map(t => `<circle cx="${Math.round(x1 + (x2 - x1) * t)}" cy="${y1}" r="4" fill="#fff" stroke="${STYLE.rail}"/><circle cx="${Math.round(x1 + (x2 - x1) * t)}" cy="${y2}" r="4" fill="#fff" stroke="${STYLE.rail}"/>`).join('')}</g>`;
+  return `<g opacity="0.72"><desc>${provenanceDesc(ctx, 'rail-attachment-symbols')} rail-attachment-symbols module rail attachment indicators FALLBACK PLACEHOLDER</desc><line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y1}" stroke="${STYLE.rail}" stroke-width="${CAD.medium}"/><line x1="${x1}" y1="${y2}" x2="${x2}" y2="${y2}" stroke="${STYLE.rail}" stroke-width="${CAD.medium}"/>${[0.2, 0.38, 0.56, 0.74].map(t => `<circle cx="${Math.round(x1 + (x2 - x1) * t)}" cy="${y1}" r="4" fill="#fff" stroke="${STYLE.rail}"/><circle cx="${Math.round(x1 + (x2 - x1) * t)}" cy="${y2}" r="4" fill="#fff" stroke="${STYLE.rail}"/>`).join('')}</g>`;
 }
 
 function renderLeaderCallouts(ctx: ReturnType<typeof buildContext>) {
@@ -512,10 +608,12 @@ function buildPreviewManifest(report: ProfessionalSurveyReadinessReportV1, sheet
   };
 }
 
-function buildRenderQualityChecklist(report: ProfessionalSurveyReadinessReportV1, sheets: PlanSetRenderSheetV1[]): PlanSetRenderQualityChecklistV1 {
+function buildRenderQualityChecklist(ctx: ReturnType<typeof buildContext>, sheets: PlanSetRenderSheetV1[]): PlanSetRenderQualityChecklistV1 {
+  const report = ctx.report;
   const all = sheets.map(s => s.svg).join('\n');
-  const reconstruction = buildEvidenceDerivedCadReconstruction(report);
+  const reconstruction = ctx.reconstruction;
   const summary = reconstruction.alignmentSummary;
+  const sourceTruth = ctx.sourceTruth;
   const hasEvidenceOverlay = all.includes('EVIDENCE-DERIVED CAD RECONSTRUCTION') && all.includes('PHOTO-ALIGNED CANDIDATE');
   const hasFallbackDisclosure = summary.fallbackCandidateCount === 0 || all.includes('FALLBACK:');
   const hasPhotoFrameSupport = summary.acceptedPhotoFrameCount > 0 && reconstruction.photoFrames.length > 0;
@@ -525,29 +623,39 @@ function buildRenderQualityChecklist(report: ProfessionalSurveyReadinessReportV1
     && reconstruction.noAuthorityEnforcement.cadMutationAllowed === false
     && reconstruction.noAuthorityEnforcement.persistenceAllowed === false
     && reconstruction.noAuthorityEnforcement.downstreamPermitAllowed === false;
+  const hasSourceTruthLegend = all.includes('SOURCE OF TRUTH') && all.includes('AUTHENTICITY');
+  const hasDesignTruth = sourceTruth.authenticity.designTruthScore > 0 && sourceTruth.moduleGroups.some(group => !group.fallback);
+  const hasProvenanceCompleteness = sourceTruth.authenticity.provenanceCompletenessScore >= 95;
+  const hasFallbackVisibility = sourceTruth.layerProvenance.filter(layer => layer.fallback).every(layer => all.includes(layer.layerId) || all.includes('FALLBACK'));
+  const hasReconciliation = all.includes('RECONCILIATION') && sourceTruth.reconciliation.reviewRequiredFlags.length >= 0;
   const syntheticDensityOnly = !hasEvidenceOverlay || summary.evidenceAlignedCandidateCount === 0;
   const mk = (key: string, label: string, passed: boolean, maxPoints: number) => ({ key, label, passed, points: passed ? maxPoints : 0, maxPoints });
   const checks = [
-    mk('evidence_reconstruction_overlay', 'A-101 contains photo-aligned evidence-derived reconstruction candidates rather than only synthetic drafting density', hasEvidenceOverlay, 16),
-    mk('photo_consistency', 'Accepted survey photo frames are explicitly linked to visible render candidates and evidence slots', hasPhotoFrameSupport && summary.photoConsistencyScore >= 58, 12),
-    mk('geometry_evidence_correlation', 'Derived candidates correlate with canonical geometry or mounting/equipment target entities without mutating them', hasGeometryCorrelation, 12),
-    mk('fallback_transparency', 'Placeholder/fallback geometry is explicitly disclosed and cannot silently masquerade as realism', hasFallbackDisclosure, 10),
-    mk('authenticity_score', 'Evidence authenticity score is high enough for contractor-trust preview quality', hasAuthenticity, 10),
-    mk('oss_adapter_boundaries', 'OSS utilities are named as bounded non-authoritative adapters, not trusted CAD authorities', all.includes('sharp exif-reader tesseract adapter boundaries') && reconstruction.ossAdapters.every(adapter => adapter.authoritative === false), 8),
-    mk('no_authority_boundaries', 'Reconstruction and render package enforce no CAD mutation, no persistence, and no downstream authority', noMutation, 10),
-    mk('title_block_rail', 'Right-side CAD title block rail with sheet number/name/client/system metadata remains present', all.includes('SHEET NUMBER') && all.includes('SHEET NAME') && all.includes('CLIENT / INSTALLER') && all.includes('SYSTEM'), 6),
-    mk('review_warning_visibility', 'Review/non-authority warnings are visible on package sheets', all.includes('NON-AUTHORITATIVE PREVIEW') && all.includes('REVIEW'), 6),
-    mk('export_presentation_readiness', 'HTML/SVG package is deterministic, vector based, print styled, and supported by preview manifest assets', sheets.every(s => s.svg.startsWith('<svg')) && sheets.length === 3 && all.includes('NON-AUTHORITATIVE PREVIEW'), 5),
-    mk('evidence_grouping', 'Evidence sheet groups photo metadata and coverage/risk summaries', all.includes('PHOTO EVIDENCE / REVIEW CALLOUTS') && all.includes('EVIDENCE COVERAGE SUMMARY'), 5),
+    mk('survey_photo_truth_usage', 'A-101 uses accepted survey photo evidence as primary visible truth through photo-aligned candidates', hasEvidenceOverlay && hasPhotoFrameSupport && summary.photoConsistencyScore >= 58, 14),
+    mk('survey_metadata_truth_usage', 'Canonical survey metadata drives roof outline/pitch/azimuth preview without mutation', all.includes('survey_metadata_truth') && all.includes('roof-outlines') && report.canonicalGeometry.roofPlanes.length > 0, 9),
+    mk('design_layout_truth_usage', 'Design/layout handoff drives panel count, orientation, and grouping when supplied', hasDesignTruth || !ctx.sourceTruth.designHandoff, ctx.sourceTruth.designHandoff ? 14 : 0),
+    mk('layer_provenance_completeness', 'Every A-101 visible render layer has source classification, references, limitations, fallback, and review status', hasSourceTruthLegend && hasProvenanceCompleteness, 13),
+    mk('fallback_disclosure', 'Fallback placeholders are visible and cannot masquerade as source-derived CAD', hasFallbackDisclosure && hasFallbackVisibility && all.includes('FALLBACK PLACEHOLDER'), 12),
+    mk('design_survey_reconciliation', 'Design/layout, survey metadata, photo evidence, and fallback status are reconciled with warnings', hasReconciliation && all.includes(sourceTruth.reconciliation.status), 10),
+    mk('authenticity_score', 'Authenticity score rewards survey evidence, design truth, provenance completeness, and low fallback usage', hasAuthenticity && sourceTruth.authenticity.score >= 40 && all.includes('AUTHENTICITY'), 8),
+    mk('oss_adapter_boundaries', 'OSS utilities are named as bounded non-authoritative adapters, not trusted CAD authorities', all.includes('sharp exif-reader tesseract adapter boundaries') && reconstruction.ossAdapters.every(adapter => adapter.authoritative === false), 6),
+    mk('no_authority_boundaries', 'Render package enforces no CAD mutation, no design mutation, no persistence, and no downstream authority', noMutation && sourceTruth.noAuthorityEnforcement.designMutationAllowed === false, 8),
+    mk('review_warning_visibility', 'Review/non-authority warnings are visible on package sheets', all.includes('NON-AUTHORITATIVE PREVIEW') && all.includes('REVIEW'), 4),
+    mk('export_presentation_readiness', 'HTML/SVG package is deterministic, vector based, print styled, and supported by preview manifest assets', sheets.every(s => s.svg.startsWith('<svg')) && sheets.length === 3 && all.includes('NON-AUTHORITATIVE PREVIEW'), 2),
   ];
   const rawScore = checks.reduce((sum, c) => sum + c.points, 0);
   const syntheticPenalty = syntheticDensityOnly ? 24 : 0;
-  const fallbackPenalty = Math.min(12, Math.max(0, summary.fallbackCandidateCount - 1) * 4);
-  const uncappedScore = Math.max(0, rawScore - syntheticPenalty - fallbackPenalty);
-  const score = summary.fallbackCandidateCount > 0 ? Math.min(uncappedScore, 94 - Math.min(12, summary.fallbackCandidateCount * 4)) : uncappedScore;
+  const fallbackPenalty = Math.min(30, Math.max(0, summary.fallbackCandidateCount - 1) * 4 + sourceTruth.layerProvenance.filter(layer => layer.fallback).length * 3);
+  const designPenalty = ctx.sourceTruth.designHandoff ? (hasDesignTruth ? 0 : 16) : 10;
+  const reconciliationPenalty = Math.min(18, sourceTruth.reconciliation.mismatchCount * 3);
+  const uncappedScore = Math.max(0, rawScore - syntheticPenalty - fallbackPenalty - designPenalty - reconciliationPenalty);
+  const sourceCap = sourceTruth.layerProvenance.some(layer => layer.fallback) ? 88 : 100;
+  const score = Math.min(uncappedScore, sourceCap);
   const benchmarkGaps = [
     ...(syntheticDensityOnly ? ['Render still relies on synthetic drafting density without enough evidence-derived candidates.'] : []),
     ...(summary.fallbackCandidateCount > 0 ? [`${summary.fallbackCandidateCount} explicit fallback area(s) remain; collect/align more site-survey photos before demo-grade trust.`] : []),
+    ...(sourceTruth.reconciliation.warnings.length ? sourceTruth.reconciliation.warnings.slice(0, 4) : []),
+    ...(!ctx.sourceTruth.designHandoff ? ['No design/layout handoff supplied; A-101 cannot prove design-derived panel count or placement planes.'] : []),
     ...(score >= 92 ? ['Pixel-level CV extraction remains adapter-bounded and review-only before any future production UI promotion.'] : []),
   ];
   return { schemaVersion: 'professional_plan_set_render_quality_checklist_v1', score, maxScore: 100, grade: score >= 92 ? 'ui_candidate' : score >= 76 ? 'commercial_preview' : 'benchmark_gap', checks, benchmarkGaps: benchmarkGaps.length ? benchmarkGaps : ['Evidence alignment is visible; continue operator review before release.'], noAuthorityEnforcement: noAuthority() };

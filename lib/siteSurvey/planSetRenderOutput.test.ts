@@ -4,6 +4,8 @@ import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
 import { buildProfessionalSurveyReadinessReport } from './professionalSurveyReadinessReport';
 import { buildProfessionalPlanSetRenderPackage } from './planSetRenderOutput';
 import { buildEvidenceDerivedCadReconstruction } from './evidenceDerivedCadReconstruction';
+import { buildSystemDefinition } from '../system/systemDefinition';
+import type { SourceOfTruthDesignHandoffV1 } from './sourceOfTruthCadRender';
 import { professionalExpandedSurveyFixtures, type ProfessionalExpandedSurveyFixture } from './professionalSurveyExpandedFixtures';
 
 function survey(overrides: Partial<SiteSurvey> = {}): SiteSurvey {
@@ -98,6 +100,37 @@ function expandedFiles(id: string): SiteSurveyFile[] {
   ];
 }
 
+
+function designHandoff(totalPanels = 12): SourceOfTruthDesignHandoffV1 {
+  const systemDefinition = buildSystemDefinition({
+    project: { systemType: 'roof', roofPitch: 22, panelWidthIn: 41, panelLengthIn: 67, mainPanelAmps: 200 },
+    system: {
+      totalPanels,
+      topology: 'micro',
+      totalDcKw: totalPanels * 0.4,
+      inverters: [{ manufacturer: 'Enphase', model: 'IQ8M', type: 'micro', acOutputKw: 0.325, strings: [{ panelManufacturer: 'REC', panelModel: 'Alpha Pure', panelWatts: 400, panelCount: totalPanels }] }],
+    },
+    layout: { type: 'roof' },
+  });
+  return {
+    schemaVersion: 'source_of_truth_design_handoff_v1',
+    sourceReference: 'design-layout-fixture-v1',
+    systemDefinition,
+    layout: {
+      sourceReference: 'layout-arrays-fixture-v1',
+      totalPanels,
+      arrays: [{ arrayId: 'ARRAY-A', planeId: 'roof-a', panelCount: totalPanels, orientation: 'portrait', azimuthDeg: 180, tiltDeg: 22, rowCount: 3, columnCount: 4 }],
+      installAreaRefs: ['roof-a'],
+    },
+    design3d: {
+      sourceReference: 'design-3d-fixture-v1',
+      installPlanes: [{ planeId: 'roof-a', azimuthDeg: 180, tiltDeg: 22 }],
+      equipmentPlacements: [{ id: 'msp-design-node', type: 'main_service_panel', x: 0, y: 0, confidence: 0.8 }],
+    },
+    notes: ['test fixture design handoff is read-only'],
+  };
+}
+
 function files(): SiteSurveyFile[] {
   return [
     { id: 'file-roof', surveyId: 'plan-render-001', fileUrl: 'https://cdn.example.test/roof_overview.jpg', fileType: 'photo', label: 'roof overview', filename: 'roof_overview.jpg', mimeType: 'image/jpeg', createdAt: '2026-05-01T10:05:00Z' },
@@ -128,15 +161,15 @@ describe('Professional Plan-Set Render Output V1', () => {
 
     expect(sitePlan?.svg).toContain('SolarPro Preview');
     expect(sitePlan?.svg).toContain('NON-AUTHORITATIVE PREVIEW');
-    expect(sitePlan?.svg).toContain('Legend');
-    expect(sitePlan?.svg).toContain('fire setback preview');
-    expect(sitePlan?.svg).toContain('module preview');
+    expect(sitePlan?.svg).toContain('SOURCE OF TRUTH');
+    expect(sitePlan?.svg).toContain('FIRE SETBACK / ACCESS PATH PREVIEW');
+    expect(sitePlan?.svg).toContain('module-layout');
     expect(sitePlan?.svg).toContain('MSP/Meter');
     expect(sitePlan?.svg).toContain('conduit candidate');
     expect(sitePlan?.svg).toContain('realistic site context');
     expect(sitePlan?.svg).toContain('PROPERTY / LOT CONTEXT PREVIEW');
     expect(sitePlan?.svg).toContain('DRIVEWAY / ACCESS');
-    expect(sitePlan?.svg).toContain('PV-1 MODULE GROUP');
+    expect(sitePlan?.svg).toContain('PV-1 · FALLBACK PLACEHOLDER');
     expect(sitePlan?.svg).toContain('PV STRING / GROUP CALLOUT');
     expect(sitePlan?.svg).toContain('roof edge articulation');
     expect(sitePlan?.svg).toContain('roof hatch');
@@ -154,7 +187,7 @@ describe('Professional Plan-Set Render Output V1', () => {
     expect(sitePlan?.layerOrder).toContain('obstruction-symbols');
     expect(sitePlan?.layerOrder).toContain('review-callouts');
     expect(sitePlan?.annotations.join('\n')).toContain('pitch/azimuth annotations');
-    expect(sitePlan?.annotations.join('\n')).toContain('realistic site context');
+    expect(sitePlan?.annotations.join('\n')).toContain('source-of-truth driven A-101');
   });
 
   it('includes evidence/review sheet photo tiles and confidence notes for contractor usability', () => {
@@ -169,36 +202,36 @@ describe('Professional Plan-Set Render Output V1', () => {
     expect(evidence?.annotations).toContain('photo evidence tiles');
   });
 
-  it('scores deterministic CAD render quality without promoting engineering authority', () => {
-    const pkg = buildProfessionalPlanSetRenderPackage(buildProfessionalSurveyReadinessReport(survey(), files()));
+  it('scores source-of-truth CAD render quality with design handoff without promoting engineering authority', () => {
+    const pkg = buildProfessionalPlanSetRenderPackage(buildProfessionalSurveyReadinessReport(survey(), files()), designHandoff(12));
     const checklist = pkg.summary.renderQualityChecklist;
     const sitePlan = pkg.sheets.find(sheet => sheet.sheetType === 'site_plan_render');
 
     expect(checklist.schemaVersion).toBe('professional_plan_set_render_quality_checklist_v1');
     expect(pkg.summary.renderQualityScore).toBe(checklist.score);
-    expect(checklist.score).toBeGreaterThanOrEqual(76);
+    expect(checklist.score).toBeGreaterThanOrEqual(70);
     expect(['commercial_preview', 'ui_candidate']).toContain(checklist.grade);
     expect(checklist.checks.map(check => check.key)).toEqual([
-      'evidence_reconstruction_overlay',
-      'photo_consistency',
-      'geometry_evidence_correlation',
-      'fallback_transparency',
+      'survey_photo_truth_usage',
+      'survey_metadata_truth_usage',
+      'design_layout_truth_usage',
+      'layer_provenance_completeness',
+      'fallback_disclosure',
+      'design_survey_reconciliation',
       'authenticity_score',
       'oss_adapter_boundaries',
       'no_authority_boundaries',
-      'title_block_rail',
       'review_warning_visibility',
       'export_presentation_readiness',
-      'evidence_grouping',
     ]);
     expect(checklist.score).toBeLessThanOrEqual(checklist.maxScore);
     expect(checklist.noAuthorityEnforcement.stampedEngineeringPackage).toBe(false);
     expect(sitePlan?.svg).toContain('SCALE: DIAGRAMMATIC / VERIFY IN FIELD');
-    expect(sitePlan?.svg).toContain('MODULE PREVIEW ZONE');
-    expect(sitePlan?.svg).toContain('PV module');
+    expect(sitePlan?.svg).toContain('DESIGN LAYOUT TRUTH');
+    expect(sitePlan?.svg).toContain('12 MOD');
   });
 
-  it('renders ground-mount and solar-fence fixtures as intentionally drafted commercial previews', () => {
+  it('renders ground-mount and solar-fence fixtures with explicit fallback disclosure when design handoff is absent', () => {
     for (const id of ['ground_mount_survey', 'solar_fence_survey'] as const) {
       const fixture = professionalExpandedSurveyFixtures.find(item => item.id === id);
       expect(fixture).toBeDefined();
@@ -211,15 +244,38 @@ describe('Professional Plan-Set Render Output V1', () => {
       expect(svg).toContain('intentionally drafted fixture-specific preview');
       expect(svg).toContain('EVIDENCE-DERIVED CAD RECONSTRUCTION');
       expect(svg).toContain('PHOTO-ALIGNED CANDIDATE');
-      expect(svg).toContain('STRING A/B HOMERUN');
+      expect(svg).toContain('FALLBACK PLACEHOLDER');
       expect(svg).toContain('CONTRACTOR / DEALER META');
       expect(svg).toContain('CLIENT / INSTALLER');
       expect(svg).toContain('rail-attachment-symbols');
       expect(svg).toContain('PV STRING / GROUP CALLOUT');
-      expect(pkg.summary.renderQualityScore).toBeGreaterThanOrEqual(76);
-      expect(['commercial_preview', 'ui_candidate']).toContain(pkg.summary.renderQualityGrade);
+      expect(pkg.summary.renderQualityScore).toBeLessThan(76);
+      expect(pkg.summary.renderQualityGrade).toBe('benchmark_gap');
       expect(pkg.noAuthorityEnforcement.canonicalGeometryMutationAllowed).toBe(false);
     }
+  });
+
+
+  it('uses design layout handoff for A-101 panel count, orientation, provenance, and reconciliation', () => {
+    const report = buildProfessionalSurveyReadinessReport(survey(), files());
+    const beforeReport = JSON.stringify(report);
+    const handoff = designHandoff(12);
+    const beforeDesign = JSON.stringify(handoff);
+    const pkg = buildProfessionalPlanSetRenderPackage(report, handoff);
+    const sitePlan = pkg.sheets.find(sheet => sheet.sheetType === 'site_plan_render');
+    const svg = sitePlan?.svg ?? '';
+
+    expect(svg).toContain('DESIGN LAYOUT TRUTH');
+    expect(svg).toContain('12 MOD');
+    expect(svg).toContain('SOURCE OF TRUTH');
+    expect(svg).toContain('design_layout_truth');
+    expect(svg).toContain('survey_photo_truth');
+    expect(svg).toContain('RECONCILIATION');
+    expect(svg).toContain('AUTHENTICITY');
+    expect(pkg.summary.renderQualityChecklist.checks.find(check => check.key === 'design_layout_truth_usage')?.passed).toBe(true);
+    expect(pkg.summary.renderQualityScore).toBeGreaterThanOrEqual(70);
+    expect(JSON.stringify(report)).toBe(beforeReport);
+    expect(JSON.stringify(handoff)).toBe(beforeDesign);
   });
 
 
@@ -262,7 +318,7 @@ describe('Professional Plan-Set Render Output V1', () => {
     expect(sitePlan?.svg).toContain('EVIDENCE-DERIVED CAD RECONSTRUCTION');
     expect(sitePlan?.svg).toContain('FALLBACK:');
     expect(sitePlan?.svg).toContain('No accepted survey photos available');
-    expect(keys).toContain('evidence_reconstruction_overlay');
+    expect(keys).toContain('survey_photo_truth_usage');
     expect(pkg.summary.renderQualityScore).toBeLessThan(76);
     expect(pkg.summary.renderQualityGrade).toBe('benchmark_gap');
     expect(pkg.summary.renderQualityChecklist.benchmarkGaps.join(' ')).toContain('synthetic drafting density');

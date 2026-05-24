@@ -2,7 +2,7 @@
   "schemaVersion": "professional_plan_set_preview_manifest_v1",
   "packageMode": "live_preview_preparation_only",
   "sourceSurveyId": "expanded-clean-roof-001",
-  "packageHash": "4d08b4ed",
+  "packageHash": "ee220278",
   "defaultPreviewPath": "index.html",
   "pdfPath": "package.pdf",
   "contactSheetPath": "contact-sheet.png",
@@ -23,7 +23,7 @@
       "svgPath": "A-101-site_plan_render.svg",
       "thumbnailPath": "thumbnails/A-101-site_plan_render.png",
       "snapshotPath": "snapshots/A-101-site_plan_render.png",
-      "renderHash": "f9388ca2"
+      "renderHash": "50f5bce4"
     },
     {
       "sheetNumber": "A-201",
