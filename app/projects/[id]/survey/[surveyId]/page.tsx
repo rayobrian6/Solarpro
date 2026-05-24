@@ -972,17 +972,21 @@ interface PhotoClassificationPreviewResponse {
 interface PhotoClassificationApplyDiagnosticsState {
   status: "success" | "conflict" | "error";
   message: string;
+  applyRequestFired: boolean;
+  httpStatus: number | null;
   requestedCount: number | null;
   acceptedCount: number | null;
   updateCount: number | null;
   updatedCount: number | null;
   persistedCount: number | null;
+  rejectedCount: number | null;
   classifiedItems: number | null;
   promotedAiReviewedCount: number | null;
   suppressedDuplicateCount: number | null;
   requiredMissing: string[];
   unmatchedFileIds: string[];
   failedFileIds: string[];
+  rowMatchFailures: string[];
 }
 
 function asStringArray(value: unknown): string[] {
@@ -995,10 +999,38 @@ function asNullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function asNullableBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function summarizeRowMatchFailures(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const record = item as Record<string, unknown>;
+      const fileId = typeof record.fileId === "string" ? record.fileId : "unknown";
+      const failedPredicates = [
+        ["file row", record.fileRowExists],
+        ["survey match", record.fileBelongsToRequestedSurvey],
+        ["linked survey", record.linkedSurveyRowExists],
+        ["linked client", record.linkedClientRowExists],
+        ["client user", record.clientBelongsToAuthenticatedUser],
+      ]
+        .filter(([, passed]) => passed === false)
+        .map(([label]) => label);
+      return failedPredicates.length > 0
+        ? `${fileId}: ${failedPredicates.join(", ")}`
+        : `${fileId}: update predicate reported no explicit failed condition`;
+    })
+    .filter((item): item is string => typeof item === "string");
+}
+
 function buildApplyDiagnosticsState(
   status: PhotoClassificationApplyDiagnosticsState["status"],
   message: string,
   diagnostics: Record<string, unknown> | null | undefined,
+  lifecycle?: { applyRequestFired?: boolean; httpStatus?: number | null },
 ): PhotoClassificationApplyDiagnosticsState {
   const persistence =
     diagnostics && typeof diagnostics.persistence === "object"
@@ -1018,6 +1050,11 @@ function buildApplyDiagnosticsState(
   return {
     status,
     message,
+    applyRequestFired:
+      lifecycle?.applyRequestFired ??
+      asNullableBoolean(persistence?.requestReceived) ??
+      false,
+    httpStatus: lifecycle?.httpStatus ?? asNullableNumber(persistence?.httpStatus),
     requestedCount: asNullableNumber(persistence?.requestedCount),
     acceptedCount: asNullableNumber(persistence?.acceptedCount),
     updateCount: asNullableNumber(persistence?.updateCount),
@@ -1025,6 +1062,7 @@ function buildApplyDiagnosticsState(
     persistedCount: Array.isArray(persistence?.persistedLabelSnapshot)
       ? persistedSnapshot.length
       : asNullableNumber(persistence?.persistedCount),
+    rejectedCount: asNullableNumber(persistence?.rejectedCount),
     classifiedItems: asNullableNumber(canonicalCounts?.classifiedItems),
     promotedAiReviewedCount: asNullableNumber(
       canonicalCounts?.promotedAiReviewedCount,
@@ -1041,6 +1079,7 @@ function buildApplyDiagnosticsState(
           : null,
       )
       .filter((item): item is string => typeof item === "string"),
+    rowMatchFailures: summarizeRowMatchFailures(persistence?.rowMatchDiagnostics),
   };
 }
 
@@ -1141,11 +1180,17 @@ function SurveyPhotoClassificationPreviewPanel({
       `Applying ${items.length} high-confidence reviewed label(s)...`,
     );
     setApplyDiagnostics(
-      buildApplyDiagnosticsState("success", "Apply request sent", {
-        requestedCount: preview.candidates.length,
-        acceptedCount: items.length,
-        updateCount: items.length,
-      }),
+      buildApplyDiagnosticsState(
+        "success",
+        "Apply request sent",
+        {
+          requestReceived: true,
+          requestedCount: preview.candidates.length,
+          acceptedCount: items.length,
+          updateCount: items.length,
+        },
+        { applyRequestFired: true, httpStatus: null },
+      ),
     );
     try {
       const res = await fetch(
@@ -1173,6 +1218,7 @@ function SurveyPhotoClassificationPreviewPanel({
             res.status === 409 ? "conflict" : "error",
             message,
             diagnostics,
+            { applyRequestFired: true, httpStatus: res.status },
           ),
         );
         return;
@@ -1194,13 +1240,21 @@ function SurveyPhotoClassificationPreviewPanel({
       const message = `Applied ${json.data?.appliedCount ?? items.length} reviewed label(s). Canonical manifest recomputed: ${diagnostics?.promotedAiReviewedCount ?? "n/a"} promoted, ${diagnostics?.suppressedDuplicateCount ?? 0} duplicate(s) suppressed${requiredMissing !== null ? `, ${requiredMissing} required categor${requiredMissing === 1 ? "y" : "ies"} still missing` : ""}.`;
       setApplyResult(message);
       setApplyDiagnostics(
-        buildApplyDiagnosticsState("success", message, allDiagnostics),
+        buildApplyDiagnosticsState("success", message, allDiagnostics, {
+          applyRequestFired: true,
+          httpStatus: res.status,
+        }),
       );
     } catch {
       const message = "Network error while applying reviewed classifications";
       setError(message);
       setApplyResult(message);
-      setApplyDiagnostics(buildApplyDiagnosticsState("error", message, null));
+      setApplyDiagnostics(
+        buildApplyDiagnosticsState("error", message, null, {
+          applyRequestFired: true,
+          httpStatus: null,
+        }),
+      );
     } finally {
       setApplyLoading(false);
     }
@@ -1386,11 +1440,17 @@ function SurveyPhotoClassificationPreviewPanel({
                   </p>
                   <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
                     {[
+                      [
+                        "Request fired",
+                        applyDiagnostics.applyRequestFired ? "yes" : "no",
+                      ],
+                      ["HTTP status", applyDiagnostics.httpStatus],
                       ["Requested", applyDiagnostics.requestedCount],
                       ["Accepted", applyDiagnostics.acceptedCount],
                       ["Attempted", applyDiagnostics.updateCount],
                       ["Updated", applyDiagnostics.updatedCount],
                       ["Persisted", applyDiagnostics.persistedCount],
+                      ["Rejected", applyDiagnostics.rejectedCount],
                       ["Classified", applyDiagnostics.classifiedItems],
                       ["Promoted", applyDiagnostics.promotedAiReviewedCount],
                       [
@@ -1408,6 +1468,7 @@ function SurveyPhotoClassificationPreviewPanel({
                   </div>
                   {(applyDiagnostics.unmatchedFileIds.length > 0 ||
                     applyDiagnostics.failedFileIds.length > 0 ||
+                    applyDiagnostics.rowMatchFailures.length > 0 ||
                     applyDiagnostics.requiredMissing.length > 0) && (
                     <div className="mt-3 space-y-1 text-[10px] text-slate-400">
                       {applyDiagnostics.unmatchedFileIds.length > 0 && (
@@ -1420,6 +1481,12 @@ function SurveyPhotoClassificationPreviewPanel({
                         <p>
                           Failed persistence IDs:{" "}
                           {applyDiagnostics.failedFileIds.join(", ")}
+                        </p>
+                      )}
+                      {applyDiagnostics.rowMatchFailures.length > 0 && (
+                        <p>
+                          Row match failures:{" "}
+                          {applyDiagnostics.rowMatchFailures.join("; ")}
                         </p>
                       )}
                       {applyDiagnostics.requiredMissing.length > 0 && (

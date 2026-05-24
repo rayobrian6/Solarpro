@@ -300,6 +300,8 @@ describe("site survey photo classification apply UI", () => {
     expect(
       screen.getAllByText(/Applied 3 reviewed label/).length,
     ).toBeGreaterThan(0);
+    expect(screen.getByText(/Request fired:/)).toHaveTextContent("Request fired: yes");
+    expect(screen.getByText(/HTTP status:/)).toHaveTextContent("HTTP status: 200");
     expect(screen.getByText(/Requested:/)).toHaveTextContent("Requested: 3");
     expect(screen.getByText(/Accepted:/)).toHaveTextContent("Accepted: 3");
     expect(screen.getByText(/Attempted:/)).toHaveTextContent("Attempted: 3");
@@ -370,6 +372,17 @@ describe("site survey photo classification apply UI", () => {
                 "file-main-service-panel",
                 "file-overview",
               ],
+              rowMatchDiagnostics: [
+                {
+                  fileId: "file-meter",
+                  fileRowExists: true,
+                  fileBelongsToRequestedSurvey: true,
+                  linkedSurveyRowExists: true,
+                  linkedClientRowExists: true,
+                  clientBelongsToAuthenticatedUser: false,
+                  updatePredicateWouldMatch: false,
+                },
+              ],
             },
           },
           { status: 409 },
@@ -408,12 +421,17 @@ describe("site survey photo classification apply UI", () => {
     expect(
       screen.getAllByText(/No survey file labels were updated/).length,
     ).toBeGreaterThan(0);
+    expect(screen.getByText(/Request fired:/)).toHaveTextContent("Request fired: yes");
+    expect(screen.getByText(/HTTP status:/)).toHaveTextContent("HTTP status: 409");
     expect(screen.getByText(/Requested:/)).toHaveTextContent("Requested: 3");
     expect(screen.getByText(/Accepted:/)).toHaveTextContent("Accepted: 3");
     expect(screen.getByText(/Attempted:/)).toHaveTextContent("Attempted: 3");
     expect(screen.getByText(/Updated:/)).toHaveTextContent("Updated: 0");
     expect(screen.getByText(/Unmatched file IDs:/)).toHaveTextContent(
       "file-meter",
+    );
+    expect(screen.getByText(/Row match failures:/)).toHaveTextContent(
+      "file-meter: client user",
     );
 
     const manifestAfterConflict =

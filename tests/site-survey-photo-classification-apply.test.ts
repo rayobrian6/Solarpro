@@ -6,6 +6,7 @@ const mockGetUserFromRequest = vi.fn();
 const mockGetSiteSurveyById = vi.fn();
 const mockGetSiteSurveyFiles = vi.fn();
 const mockUpdateSiteSurveyFileLabels = vi.fn();
+const mockDiagnoseSiteSurveyFileLabelUpdateMatches = vi.fn();
 const mockAnalyzeSurveyPhotosOpenSource = vi.fn();
 
 vi.mock('@/lib/auth', () => ({
@@ -17,6 +18,7 @@ vi.mock('@/lib/db-neon', () => ({
   getSiteSurveyFiles: mockGetSiteSurveyFiles,
   isValidUUID: (value: string) => /^[0-9a-f-]{36}$/i.test(value),
   updateSiteSurveyFileLabels: mockUpdateSiteSurveyFileLabels,
+  diagnoseSiteSurveyFileLabelUpdateMatches: mockDiagnoseSiteSurveyFileLabelUpdateMatches,
 }));
 
 vi.mock('@/lib/siteSurvey/photoIntelligence', () => ({
@@ -71,10 +73,12 @@ describe('site survey photo classification apply route', () => {
     mockGetSiteSurveyById.mockReset();
     mockGetSiteSurveyFiles.mockReset();
     mockUpdateSiteSurveyFileLabels.mockReset();
+    mockDiagnoseSiteSurveyFileLabelUpdateMatches.mockReset();
     mockAnalyzeSurveyPhotosOpenSource.mockReset();
 
     mockGetUserFromRequest.mockReturnValue({ id: userId });
     mockGetSiteSurveyById.mockResolvedValue(survey);
+    mockDiagnoseSiteSurveyFileLabelUpdateMatches.mockResolvedValue([]);
     mockAnalyzeSurveyPhotosOpenSource.mockResolvedValue([]);
   });
 
@@ -123,6 +127,38 @@ describe('site survey photo classification apply route', () => {
 
     mockGetSiteSurveyFiles.mockResolvedValue(unchanged);
     mockUpdateSiteSurveyFileLabels.mockResolvedValue([]);
+    mockDiagnoseSiteSurveyFileLabelUpdateMatches.mockResolvedValue([
+      {
+        fileId: 'file-meter',
+        requestedSurveyId: surveyId,
+        requestedUserId: userId,
+        fileRowExists: true,
+        fileBelongsToRequestedSurvey: true,
+        linkedSurveyRowExists: true,
+        linkedClientRowExists: true,
+        clientBelongsToAuthenticatedUser: false,
+        updatePredicateWouldMatch: false,
+        actualSurveyId: surveyId,
+        linkedClientId: survey.clientId,
+        linkedClientUserId: 'other-user',
+        currentLabel: null,
+      },
+      {
+        fileId: 'file-overview',
+        requestedSurveyId: surveyId,
+        requestedUserId: userId,
+        fileRowExists: false,
+        fileBelongsToRequestedSurvey: false,
+        linkedSurveyRowExists: false,
+        linkedClientRowExists: false,
+        clientBelongsToAuthenticatedUser: false,
+        updatePredicateWouldMatch: false,
+        actualSurveyId: null,
+        linkedClientId: null,
+        linkedClientUserId: null,
+        currentLabel: null,
+      },
+    ]);
 
     const { POST } = await import('@/app/api/site-surveys/[surveyId]/photo-classification-preview/apply/route');
     const response = await POST(
@@ -141,6 +177,25 @@ describe('site survey photo classification apply route', () => {
     expect(json.diagnostics.acceptedCount).toBe(2);
     expect(json.diagnostics.updateCount).toBe(2);
     expect(json.diagnostics.updatedCount).toBe(0);
+    expect(json.diagnostics.requestReceived).toBe(true);
+    expect(json.diagnostics.unmatchedFileIds).toEqual(['file-meter', 'file-overview']);
+    expect(mockDiagnoseSiteSurveyFileLabelUpdateMatches).toHaveBeenCalledWith(
+      surveyId,
+      userId,
+      ['file-meter', 'file-overview'],
+    );
+    expect(json.diagnostics.rowMatchDiagnostics).toEqual([
+      expect.objectContaining({
+        fileId: 'file-meter',
+        clientBelongsToAuthenticatedUser: false,
+        updatePredicateWouldMatch: false,
+      }),
+      expect.objectContaining({
+        fileId: 'file-overview',
+        fileRowExists: false,
+        updatePredicateWouldMatch: false,
+      }),
+    ]);
     expect(json.diagnostics.normalizedUpdates).toEqual([
       { fileId: 'file-meter', label: 'meter' },
       { fileId: 'file-overview', label: 'overview' },

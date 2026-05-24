@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import {
+  diagnoseSiteSurveyFileLabelUpdateMatches,
   getSiteSurveyById,
   getSiteSurveyFiles,
   isValidUUID,
@@ -81,21 +82,62 @@ export async function POST(
       ),
     }));
 
-    const items: ApplyItem[] = rawItems
-      .map((item) => normalizeApplyItem(item))
-      .filter((item): item is ApplyItem =>
-        Boolean(
-          item &&
-          fileIds.has(item.fileId) &&
-          !NON_APPLY_CATEGORIES.has(item.acceptedCategory),
-        ),
-      );
+    const normalizedItems = rawItems.map((item) => normalizeApplyItem(item));
+    const rejectedItems = normalizedItems.map((item, index) => {
+      if (!item) {
+        return {
+          index,
+          reason: "invalid_shape_or_missing_file_id",
+          rawItem: summarizeRawApplyItem(rawItems[index]),
+        };
+      }
+      if (!fileIds.has(item.fileId)) {
+        return {
+          index,
+          fileId: item.fileId,
+          acceptedCategory: item.acceptedCategory,
+          reason: "file_id_not_in_requested_survey_files",
+        };
+      }
+      if (NON_APPLY_CATEGORIES.has(item.acceptedCategory)) {
+        return {
+          index,
+          fileId: item.fileId,
+          acceptedCategory: item.acceptedCategory,
+          reason: "non_apply_category",
+        };
+      }
+      return null;
+    }).filter((item): item is NonNullable<typeof item> => item !== null);
+
+    const items: ApplyItem[] = normalizedItems.filter((item): item is ApplyItem =>
+      Boolean(
+        item &&
+        fileIds.has(item.fileId) &&
+        !NON_APPLY_CATEGORIES.has(item.acceptedCategory),
+      ),
+    );
 
     if (items.length === 0) {
       return NextResponse.json(
         {
           success: false,
           error: "No valid reviewed classifications were supplied",
+          diagnostics: {
+            requestReceived: true,
+            requestedCount: rawItems.length,
+            acceptedCount: 0,
+            updateCount: 0,
+            updatedCount: 0,
+            rejectedCount: rejectedItems.length,
+            rejectedItems,
+            availableFileIds: files.map((file) => file.id),
+            authority: {
+              cadMutationAllowed: false,
+              cadSolverExecutionAllowed: false,
+              downstreamPermitAllowed: false,
+            },
+          },
         },
         { status: 400 },
       );
@@ -116,23 +158,33 @@ export async function POST(
     );
 
     if (updatedFiles.length !== updates.length) {
+      const unmatchedFileIds = updates
+        .map((update) => update.fileId)
+        .filter((fileId) => !updatedFiles.some((file) => file.id === fileId));
+      const rowMatchDiagnostics =
+        await diagnoseSiteSurveyFileLabelUpdateMatches(
+          surveyId,
+          user.id,
+          unmatchedFileIds,
+        );
+
       return NextResponse.json(
         {
           success: false,
           error:
             "No survey file labels were updated for one or more reviewed classifications; canonical evidence was not recomputed from stale rows.",
           diagnostics: {
+            requestReceived: true,
             requestedCount: rawItems.length,
             acceptedCount: deduped.length,
             updateCount: updates.length,
             updatedCount: updatedFiles.length,
+            rejectedCount: rejectedItems.length,
+            rejectedItems,
             normalizedUpdates: updates,
             updatedFileIds: updatedFiles.map((file) => file.id),
-            unmatchedFileIds: updates
-              .map((update) => update.fileId)
-              .filter(
-                (fileId) => !updatedFiles.some((file) => file.id === fileId),
-              ),
+            unmatchedFileIds,
+            rowMatchDiagnostics,
             beforeLabelSnapshot: beforeLabelSnapshot.filter((file) =>
               updates.some((update) => update.fileId === file.fileId),
             ),
@@ -170,10 +222,13 @@ export async function POST(
           error:
             "Reviewed labels were acknowledged by the update helper but did not persist in site_survey_files.label after re-query.",
           diagnostics: {
+            requestReceived: true,
             requestedCount: rawItems.length,
             acceptedCount: deduped.length,
             updateCount: updates.length,
             updatedCount: updatedFiles.length,
+            rejectedCount: rejectedItems.length,
+            rejectedItems,
             normalizedUpdates: updates,
             failedPersistence,
             beforeLabelSnapshot: beforeLabelSnapshot.filter((file) =>
@@ -235,10 +290,13 @@ export async function POST(
         })),
         diagnostics: {
           persistence: {
+            requestReceived: true,
             requestedCount: rawItems.length,
             acceptedCount: deduped.length,
             updateCount: updates.length,
             updatedCount: updatedFiles.length,
+            rejectedCount: rejectedItems.length,
+            rejectedItems,
             normalizedUpdates: updates,
             beforeLabelSnapshot: beforeLabelSnapshot.filter((file) =>
               updates.some((update) => update.fileId === file.fileId),
@@ -291,10 +349,30 @@ export async function POST(
       {
         success: false,
         error: "Failed to apply reviewed photo classifications",
+        diagnostics: {
+          requestReceived: true,
+          authority: {
+            cadMutationAllowed: false,
+            cadSolverExecutionAllowed: false,
+            downstreamPermitAllowed: false,
+          },
+        },
       },
       { status: 500 },
     );
   }
+}
+
+function summarizeRawApplyItem(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  return {
+    fileId: typeof record.fileId === "string" ? record.fileId : null,
+    acceptedCategory:
+      typeof record.acceptedCategory === "string"
+        ? record.acceptedCategory
+        : null,
+  };
 }
 
 function normalizeApplyItem(value: unknown): ApplyItem | null {

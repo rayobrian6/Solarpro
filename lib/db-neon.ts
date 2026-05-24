@@ -132,6 +132,7 @@ export {
   addSiteSurveyFile,
   bulkAddSiteSurveyFiles,
   updateSiteSurveyFileLabels,
+  diagnoseSiteSurveyFileLabelUpdateMatches,
 } from './db/surveys';
 
-export type { SiteSurvey, SiteSurveyFile } from './db/surveys';
+export type { SiteSurvey, SiteSurveyFile, SiteSurveyFileLabelRowMatchDiagnostic } from './db/surveys';

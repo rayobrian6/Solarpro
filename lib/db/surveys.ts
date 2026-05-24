@@ -37,6 +37,22 @@ export interface SiteSurveyFile {
   createdAt: string;
 }
 
+export interface SiteSurveyFileLabelRowMatchDiagnostic {
+  fileId: string;
+  requestedSurveyId: string;
+  requestedUserId: string;
+  fileRowExists: boolean;
+  fileBelongsToRequestedSurvey: boolean;
+  linkedSurveyRowExists: boolean;
+  linkedClientRowExists: boolean;
+  clientBelongsToAuthenticatedUser: boolean;
+  updatePredicateWouldMatch: boolean;
+  actualSurveyId: string | null;
+  linkedClientId: string | null;
+  linkedClientUserId: string | null;
+  currentLabel: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Row mapper
 // ---------------------------------------------------------------------------
@@ -354,5 +370,70 @@ export async function updateSiteSurveyFileLabels(
   }
 
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// diagnoseSiteSurveyFileLabelUpdateMatches — read-only predicate diagnostics
+// ---------------------------------------------------------------------------
+export async function diagnoseSiteSurveyFileLabelUpdateMatches(
+  surveyId: string,
+  userId: string,
+  fileIds: string[],
+): Promise<SiteSurveyFileLabelRowMatchDiagnostic[]> {
+  if (!fileIds.length) return [];
+  const sql = await getDbReady();
+  const diagnostics: SiteSurveyFileLabelRowMatchDiagnostic[] = [];
+
+  for (const fileId of fileIds) {
+    const rows = await sql`
+      SELECT
+        ssf.id AS file_id,
+        ssf.survey_id AS actual_survey_id,
+        ssf.label AS current_label,
+        ss.id AS linked_survey_id,
+        ss.client_id AS linked_client_id,
+        c.id AS linked_client_row_id,
+        c.user_id AS linked_client_user_id
+      FROM (SELECT ${fileId}::text AS requested_file_id) requested
+      LEFT JOIN site_survey_files ssf ON ssf.id = requested.requested_file_id
+      LEFT JOIN site_surveys ss ON ss.id = ssf.survey_id
+      LEFT JOIN clients c ON c.id = ss.client_id
+      LIMIT 1
+    `;
+    const row = (rows[0] ?? {}) as Record<string, unknown>;
+    const actualSurveyId = (row.actual_survey_id as string | null) ?? null;
+    const linkedSurveyId = (row.linked_survey_id as string | null) ?? null;
+    const linkedClientId = (row.linked_client_id as string | null) ?? null;
+    const linkedClientRowId = (row.linked_client_row_id as string | null) ?? null;
+    const linkedClientUserId = (row.linked_client_user_id as string | null) ?? null;
+    const fileRowExists = typeof row.file_id === 'string';
+    const fileBelongsToRequestedSurvey = actualSurveyId === surveyId;
+    const linkedSurveyRowExists = linkedSurveyId === actualSurveyId && linkedSurveyId !== null;
+    const linkedClientRowExists = linkedClientRowId === linkedClientId && linkedClientRowId !== null;
+    const clientBelongsToAuthenticatedUser = linkedClientUserId === userId;
+
+    diagnostics.push({
+      fileId,
+      requestedSurveyId: surveyId,
+      requestedUserId: userId,
+      fileRowExists,
+      fileBelongsToRequestedSurvey,
+      linkedSurveyRowExists,
+      linkedClientRowExists,
+      clientBelongsToAuthenticatedUser,
+      updatePredicateWouldMatch:
+        fileRowExists &&
+        fileBelongsToRequestedSurvey &&
+        linkedSurveyRowExists &&
+        linkedClientRowExists &&
+        clientBelongsToAuthenticatedUser,
+      actualSurveyId,
+      linkedClientId,
+      linkedClientUserId,
+      currentLabel: (row.current_label as string | null) ?? null,
+    });
+  }
+
+  return diagnostics;
 }
 
