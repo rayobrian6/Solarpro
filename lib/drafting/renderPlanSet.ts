@@ -36,6 +36,13 @@ import { buildRenderContext, type RenderContext } from './renderContext';
 import type { BillInsights } from '../billInsights';
 import type { DocumentProvenanceBundle } from '@/lib/documentProvenance';
 import type { EngineeringDecisionEvaluationBundle } from '@/lib/engineeringDecisionProvenance';
+import { buildCADModelExportBundle } from '@/lib/cad/cadModelExportBundle';
+import { buildCADSvgArtifactPreview } from '@/lib/cad/cadSvgArtifactPreview';
+import {
+  CAD_APPENDIX_PREVIEW_SHEET_ID,
+  buildPlanSetCADAppendixPreviewSheetV1,
+  renderPlanSetCADAppendixPreviewSheetV1,
+} from './cadAppendixPreviewSheet';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -84,6 +91,8 @@ export function renderPlanSet(
     annualKwh?: number | null;
     documentProvenance?: DocumentProvenanceBundle | null;
     decisionProvenance?: EngineeringDecisionEvaluationBundle | null;
+    /** Explicit opt-in only. Disabled by default. Adds non-authoritative APP-CAD preview appendix. */
+    cadAppendixPreviewV1?: boolean;
   } | null,
 ): PlanSetSheets {
   // ── STEP 10: Validate before any rendering ──
@@ -104,16 +113,22 @@ export function renderPlanSet(
   console.log(`[renderPlanSet] ✓ validated ${systemType} — ${cad.totalPanels} panels / ${cad.totalDcKw.toFixed(2)} kW DC hasBillInsights=${ctx.billInsights !== null}`);
 
   // ── STEP 2: Hard system mode routing ──
-  switch (systemType) {
-    case 'solar_fence':
-      return renderFenceSheets(cad, input, intent, ctx);
-    case 'ground_mount':
-      return renderGroundSheets(cad, input, intent, ctx);
-    case 'roof':
-      return renderRoofSheets(cad, input, intent, ctx);
-    default:
-      throw new Error(`[renderPlanSet] Unhandled systemType: "${systemType}"`);
-  }
+  const basePlanSet = (() => {
+    switch (systemType) {
+      case 'solar_fence':
+        return renderFenceSheets(cad, input, intent, ctx);
+      case 'ground_mount':
+        return renderGroundSheets(cad, input, intent, ctx);
+      case 'roof':
+        return renderRoofSheets(cad, input, intent, ctx);
+      default:
+        throw new Error(`[renderPlanSet] Unhandled systemType: "${systemType}"`);
+    }
+  })();
+
+  return engOpts?.cadAppendixPreviewV1 === true
+    ? withCADAppendixPreviewV1(basePlanSet, cad, systemType)
+    : basePlanSet;
 }
 
 // ── FENCE: Elevation is mandatory PRIMARY ────────────────────────────────────
@@ -186,6 +201,47 @@ function renderRoofSheets(
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+function withCADAppendixPreviewV1(
+  planSet: PlanSetSheets,
+  cad: CADModel,
+  systemType: SystemType,
+): PlanSetSheets {
+  const appendixSheetId: string = CAD_APPENDIX_PREVIEW_SHEET_ID;
+  if (appendixSheetId === 'PV-2' || appendixSheetId === 'PV-3') {
+    throw new Error('[renderPlanSet] CAD appendix preview cannot use production PV-2/PV-3 sheet ids.');
+  }
+  if (Object.prototype.hasOwnProperty.call(planSet.sheets, CAD_APPENDIX_PREVIEW_SHEET_ID)) {
+    throw new Error(`[renderPlanSet] CAD appendix preview sheet id collision: ${CAD_APPENDIX_PREVIEW_SHEET_ID}`);
+  }
+
+  try {
+    const exportBundle = buildCADModelExportBundle(cad, {
+      exportedAt: '1970-01-01T00:00:00.000Z',
+      exportedBy: 'renderPlanSet.cadAppendixPreviewV1',
+      exportReason: 'plan-set-cad-appendix-preview-v1',
+    });
+    const svgArtifact = buildCADSvgArtifactPreview(exportBundle);
+    const appendixSheet = buildPlanSetCADAppendixPreviewSheetV1({
+      exportBundle,
+      svgArtifact,
+      renderingWarnings: planSet.warnings,
+    });
+
+    return {
+      ...planSet,
+      sheets: {
+        ...planSet.sheets,
+        [CAD_APPENDIX_PREVIEW_SHEET_ID]: renderPlanSetCADAppendixPreviewSheetV1(appendixSheet),
+      },
+    };
+  } catch (error) {
+    console.warn(
+      `[renderPlanSet] CAD appendix preview omitted for ${systemType}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return planSet;
+  }
+}
 
 function buildResult(
   sheets: Record<string, string>,

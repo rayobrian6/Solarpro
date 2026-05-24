@@ -1,21 +1,27 @@
-# CAD SVG Artifact Preview V1 Todo
+# Plan-Set CAD Appendix Preview V1 Todo
 
-## Prepare
-- [x] Confirm repository state and create a feature branch from dev
-- [x] Inspect CAD export bundle and existing SVG/rendering conventions
+## Phase 1 — Audit First
+- [x] Confirm existing feature branch and clean baseline
+- [x] Audit renderPlanSet, validation, permit generation, sheet registration/render helpers, CAD export bundle, and SVG artifact DTO
+- [x] Generate required audit artifact before implementation
 
-## Implement
-- [x] Add deterministic CAD SVG artifact preview module
-- [x] Add targeted tests for roof/ground/fence rendering, determinism, immutability, rejection, and no-authority flags
-- [x] Add validation/report artifact
+## Phase 2 — Appendix DTO
+- [x] Add deterministic CAD appendix preview sheet DTO module
+- [x] Preserve JSON-safe, replay-safe, non-persistent, non-authoritative semantics
 
-## Validate
-- [x] Run targeted tests
-- [x] Run boundary/type/topology/build/lint checks appropriate for this chunk
+## Phase 3 — Plan-Set Wiring
+- [x] Add explicit disabled-by-default feature flag path
+- [x] Wire appendix sheet additively without replacing PV-2/PV-3 or rerunning solver
+- [x] Fail closed for invalid CAD export/artifact inputs
+
+## Phase 4 — Validation + Reports
+- [x] Add targeted appendix DTO and renderPlanSet tests
+- [x] Generate implementation, boundary, and validation reports
+- [x] Run targeted tests and required validation commands
 - [x] Confirm validation results are clean or only existing warnings
 
-## Deliver
+## Phase 5 — Delivery
 - [x] Stage intended artifacts only
-- [x] Commit once on feature branch
-- [x] Push feature branch once
-- [x] Provide final safety summary and next handoff
+- [ ] Commit once on existing feature branch
+- [ ] Push existing feature branch once
+- [ ] Provide final safety summary and next handoff
