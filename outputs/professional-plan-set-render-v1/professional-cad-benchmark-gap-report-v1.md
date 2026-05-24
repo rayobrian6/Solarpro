@@ -38,4 +38,4 @@ The upgraded output is closer to commercial preview quality, but it is still not
 
 ## Quality Result
 
-Average deterministic render quality score: **98/100**. Checklist keys: title_block_rail, sheet_border, legend_professionalism, composition_balance, site_context_realism, module_layout_realism, annotation_density, drafting_resemblance, render_confidence_display, review_warning_visibility, export_presentation_readiness, evidence_grouping.
+Average evidence-alignment render quality score: **93/100**. Checklist keys: evidence_reconstruction_overlay, photo_consistency, geometry_evidence_correlation, fallback_transparency, authenticity_score, oss_adapter_boundaries, no_authority_boundaries, title_block_rail, review_warning_visibility, export_presentation_readiness, evidence_grouping.

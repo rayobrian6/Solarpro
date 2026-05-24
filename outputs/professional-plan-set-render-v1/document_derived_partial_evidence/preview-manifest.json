@@ -2,7 +2,7 @@
   "schemaVersion": "professional_plan_set_preview_manifest_v1",
   "packageMode": "live_preview_preparation_only",
   "sourceSurveyId": "expanded-document-partial-001",
-  "packageHash": "d7aa4463",
+  "packageHash": "5ff17047",
   "defaultPreviewPath": "index.html",
   "pdfPath": "package.pdf",
   "contactSheetPath": "contact-sheet.png",
@@ -23,7 +23,7 @@
       "svgPath": "A-101-site_plan_render.svg",
       "thumbnailPath": "thumbnails/A-101-site_plan_render.png",
       "snapshotPath": "snapshots/A-101-site_plan_render.png",
-      "renderHash": "0b2cb210"
+      "renderHash": "deaed45c"
     },
     {
       "sheetNumber": "A-201",

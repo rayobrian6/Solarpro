@@ -10,7 +10,7 @@
   "packageHashes": [
     {
       "fixtureId": "clean_roof",
-      "packageHash": "b2a4bb73",
+      "packageHash": "4d08b4ed",
       "state": "render_demo_ready",
       "confidence": 100,
       "renderQualityScore": 100,
@@ -22,11 +22,11 @@
     },
     {
       "fixtureId": "ground_mount_survey",
-      "packageHash": "8182a35c",
+      "packageHash": "7a07cd38",
       "state": "render_demo_ready",
       "confidence": 97,
-      "renderQualityScore": 100,
-      "renderQualityGrade": "ui_candidate",
+      "renderQualityScore": 90,
+      "renderQualityGrade": "commercial_preview",
       "pdfExported": true,
       "thumbnailCount": 3,
       "snapshotCount": 3,
@@ -34,11 +34,11 @@
     },
     {
       "fixtureId": "solar_fence_survey",
-      "packageHash": "8189e061",
+      "packageHash": "78cc0c25",
       "state": "render_demo_ready",
       "confidence": 97,
-      "renderQualityScore": 100,
-      "renderQualityGrade": "ui_candidate",
+      "renderQualityScore": 90,
+      "renderQualityGrade": "commercial_preview",
       "pdfExported": true,
       "thumbnailCount": 3,
       "snapshotCount": 3,
@@ -46,7 +46,7 @@
     },
     {
       "fixtureId": "document_derived_partial_evidence",
-      "packageHash": "d7aa4463",
+      "packageHash": "5ff17047",
       "state": "render_review_required",
       "confidence": 64,
       "renderQualityScore": 90,
@@ -57,7 +57,7 @@
       "contactSheetGenerated": true
     }
   ],
-  "averageRenderQualityScore": 98,
+  "averageRenderQualityScore": 93,
   "pdfExport": {
     "stack": "wkhtmltopdf from deterministic HTML/SVG composition; sharp for PNG thumbnails/snapshots/contact sheets",
     "packagePdfCount": 4,
@@ -70,23 +70,23 @@
     "manifestCount": 4
   },
   "renderQualityChecklistKeys": [
+    "evidence_reconstruction_overlay",
+    "photo_consistency",
+    "geometry_evidence_correlation",
+    "fallback_transparency",
+    "authenticity_score",
+    "oss_adapter_boundaries",
+    "no_authority_boundaries",
     "title_block_rail",
-    "sheet_border",
-    "legend_professionalism",
-    "composition_balance",
-    "site_context_realism",
-    "module_layout_realism",
-    "annotation_density",
-    "drafting_resemblance",
-    "render_confidence_display",
     "review_warning_visibility",
     "export_presentation_readiness",
     "evidence_grouping"
   ],
   "visibleQualityImprovements": [
+    "A bounded evidence-derived reconstruction layer now draws photo-aligned review candidates before synthetic drafting fallback layers.",
     "CAD-style double borders, right-side title-block rail, sheet index regions, and drawing-number hierarchy create a permit-set visual language.",
-    "A deterministic grayscale site-context layer adds lot boundary, street/driveway cues, neighboring structure silhouettes, and aerial-like texture without extracting or mutating geometry.",
-    "Canonical roof geometry is rendered as export-safe vector linework with professional line-weight conventions and monochrome drafting priority.",
+    "A deterministic grayscale site-context layer is explicitly diagrammatic and cannot inflate evidence-alignment quality.",
+    "Canonical roof geometry is rendered as export-safe vector linework only after real survey evidence and derived evidence cues are considered.",
     "Setbacks, realistic module grouping, rail runs, attachment indicators, conduit candidates, obstruction symbols, equipment markers, professional north/scale graphics, and leader callouts are visible directly on the drawing sheet.",
     "Photo evidence, review risk summaries, PDF/export metadata, and live-preview manifest metadata are packaged for contractor/demo review."
   ],

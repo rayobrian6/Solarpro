@@ -1,4 +1,5 @@
 import type { ProfessionalSurveyReadinessReportV1 } from './professionalSurveyReadinessReport';
+import { buildEvidenceDerivedCadReconstruction, type EvidenceDerivedCandidateV1 } from './evidenceDerivedCadReconstruction';
 
 export type PlanSetSheetTypeV1 = 'cover_summary' | 'site_plan_render' | 'evidence_review';
 
@@ -125,9 +126,10 @@ export function buildProfessionalPlanSetRenderPackage(report: ProfessionalSurvey
       renderQualityGrade: quality.grade,
       renderQualityChecklist: quality,
       visibleQualityImprovements: [
+        'A bounded evidence-derived reconstruction layer now draws photo-aligned review candidates before synthetic drafting fallback layers.',
         'CAD-style double borders, right-side title-block rail, sheet index regions, and drawing-number hierarchy create a permit-set visual language.',
-        'A deterministic grayscale site-context layer adds lot boundary, street/driveway cues, neighboring structure silhouettes, and aerial-like texture without extracting or mutating geometry.',
-        'Canonical roof geometry is rendered as export-safe vector linework with professional line-weight conventions and monochrome drafting priority.',
+        'A deterministic grayscale site-context layer is explicitly diagrammatic and cannot inflate evidence-alignment quality.',
+        'Canonical roof geometry is rendered as export-safe vector linework only after real survey evidence and derived evidence cues are considered.',
         'Setbacks, realistic module grouping, rail runs, attachment indicators, conduit candidates, obstruction symbols, equipment markers, professional north/scale graphics, and leader callouts are visible directly on the drawing sheet.',
         'Photo evidence, review risk summaries, PDF/export metadata, and live-preview manifest metadata are packaged for contractor/demo review.',
       ],
@@ -144,6 +146,7 @@ export function buildProfessionalPlanSetRenderPackage(report: ProfessionalSurvey
       'Plan-set render output does not execute CAD solvers, mutate CAD, mutate canonical geometry, write persistence, or trigger engineering/permit/BOM workflows.',
       'PDF-ready output means vector composition suitable for export; it is not a stamped engineering package.',
       'Site-context and aerial-like layers are deterministic visual context only; they are not property surveys, imagery analysis, or geometry authority.',
+      'Evidence-derived reconstruction candidates are review-only overlays and cannot mutate canonical geometry, CAD, permit, BOM, or engineering workflows.',
       'Preview manifests and thumbnails prepare future UI integration but do not wire these outputs into the live Engineering UI.',
     ],
   };
@@ -154,7 +157,8 @@ export function buildProfessionalPlanSetRenderPackage(report: ProfessionalSurvey
 function buildContext(report: ProfessionalSurveyReadinessReportV1) {
   const bounds = geometryBounds(report.canonicalGeometry.roofPlanes.flatMap(p => p.polygon));
   const viewport = { x: 62, y: 94, w: 812, h: 690 };
-  return { report, bounds, viewport, projectTitle: `Survey ${report.source.surveyId}`, date: new Date(0).toISOString().slice(0, 10) };
+  const reconstruction = buildEvidenceDerivedCadReconstruction(report);
+  return { report, bounds, viewport, reconstruction, projectTitle: `Survey ${report.source.surveyId}`, date: new Date(0).toISOString().slice(0, 10) };
 }
 
 function renderCoverSheet(ctx: ReturnType<typeof buildContext>): PlanSetRenderSheetV1 {
@@ -195,6 +199,7 @@ function renderSitePlanSheet(ctx: ReturnType<typeof buildContext>): PlanSetRende
   const r = ctx.report;
   const system = r.summaries.systemType;
   const fixture = system === 'ground' ? renderGroundMountFixture(ctx) : system === 'fence' ? renderSolarFenceFixture(ctx) : '';
+  const evidenceOverlays = renderEvidenceDerivedOverlays(ctx);
   const roof = fixture ? '' : renderRoofGeometry(ctx);
   const modules = enabled(r, 'module_layout_previews') ? (fixture ? renderFixtureModulePreview(ctx) : renderModulePreview(ctx)) : '';
   const setbacks = !fixture && enabled(r, 'fire_setback_overlays') ? renderSetbacks(ctx) : '';
@@ -206,8 +211,8 @@ function renderSitePlanSheet(ctx: ReturnType<typeof buildContext>): PlanSetRende
   const callouts = renderReviewCallouts(ctx, 894, 118, 122, 300);
   const legend = fixture ? renderFixtureLegend(ctx, 894, 456) : renderLegend(894, 456);
   const density = renderPlanDensityBlocks(ctx);
-  const body = [viewportFrame(ctx), renderSiteContext(ctx), fixture, roof, setbacks, modules, rails, obstructions, equipment, leaders, annotations, callouts, legend, scaleBar(108, 746), northArrow(812, 714), density].join('');
-  return sheet(ctx, 'A-101', 'site_plan_render', 'Roof / Site Plan Render Preview', body, ['realistic site context', 'diagrammatic property boundary', 'driveway/building context', 'roof outlines', 'roof edge articulation', 'roof hatch and obstruction symbols', 'pitch/azimuth annotations', 'setback overlays', 'module preview zones', 'module string/group callouts', 'rail/attachment symbols', 'equipment markers', 'fixture-specific support and fence/ground-mount drafting cues', 'permit-style construction notes', 'leader callouts', 'review callouts']);
+  const body = [viewportFrame(ctx), renderSiteContext(ctx), fixture, roof, evidenceOverlays, setbacks, modules, rails, obstructions, equipment, leaders, annotations, callouts, legend, scaleBar(108, 746), northArrow(812, 714), density].join('');
+  return sheet(ctx, 'A-101', 'site_plan_render', 'Roof / Site Plan Render Preview', body, ['real survey evidence first', 'photo-derived evidence cues', 'explicit fallback disclosure', 'realistic site context', 'diagrammatic property boundary', 'driveway/building context', 'roof outlines', 'roof edge articulation', 'roof hatch and obstruction symbols', 'pitch/azimuth annotations', 'setback overlays', 'module preview zones', 'module string/group callouts', 'rail/attachment symbols', 'equipment markers', 'fixture-specific support and fence/ground-mount drafting cues', 'permit-style construction notes', 'leader callouts', 'review callouts']);
 }
 
 function renderEvidenceSheet(ctx: ReturnType<typeof buildContext>): PlanSetRenderSheetV1 {
@@ -250,6 +255,43 @@ function renderSiteContext(ctx: ReturnType<typeof buildContext>) {
   }).join('');
   const parcelTick = Array.from({ length: 9 }, (_, i) => `<line x1="${lotX + 30 + i * Math.max(34, Math.floor(lotW / 10))}" y1="${lotY}" x2="${lotX + 18 + i * Math.max(34, Math.floor(lotW / 10))}" y2="${lotY + lotH}" stroke="#cbd5e1" stroke-width="0.45" opacity="0.55"/>`).join('');
   return `<g opacity="0.96"><desc>realistic site context aerial-like grayscale property boundary driveway neighboring structure diagrammatic only parcel hatch</desc><rect x="${v.x + 10}" y="${v.y + 10}" width="${v.w - 20}" height="${v.h - 20}" fill="#f8fafc"/><g opacity="0.55">${texture}</g><rect x="${v.x + 18}" y="${streetY}" width="${v.w - 36}" height="44" fill="#e5e7eb" stroke="#9ca3af" stroke-width="${CAD.hairline}"/><line x1="${v.x + 38}" y1="${streetY + 22}" x2="${v.x + v.w - 38}" y2="${streetY + 22}" stroke="#f8fafc" stroke-width="3" stroke-dasharray="28 20"/><text x="${v.x + 30}" y="${streetY + 36}" class="tiny">STREET / ACCESS CONTEXT (DIAGRAMMATIC)</text>${parcelTick}<rect x="${lotX}" y="${lotY}" width="${lotW}" height="${lotH}" fill="none" stroke="#374151" stroke-width="${CAD.medium}" stroke-dasharray="10 6"/><text x="${lotX + 12}" y="${lotY + 20}" class="callout">PROPERTY / LOT CONTEXT PREVIEW</text><path d="M ${drivewayX} ${streetY} L ${drivewayX - 22} ${cy + 122} L ${drivewayX + 34} ${cy + 94} L ${drivewayX + 72} ${streetY}" fill="#e5e7eb" stroke="#6b7280" stroke-width="${CAD.thin}"/><text x="${drivewayX - 4}" y="${Math.min(streetY - 12, cy + 134)}" class="tiny">DRIVEWAY / ACCESS</text><rect x="${lotX + 32}" y="${lotY + 52}" width="84" height="58" fill="#f3f4f6" stroke="#9ca3af" stroke-width="${CAD.hairline}"/><rect x="${lotX + lotW - 112}" y="${lotY + 74}" width="72" height="94" fill="#f3f4f6" stroke="#9ca3af" stroke-width="${CAD.hairline}"/><text x="${lotX + lotW - 130}" y="${lotY + 188}" class="tiny">NEIGHBORING STRUCTURE CUES</text></g>`;
+}
+
+function renderEvidenceDerivedOverlays(ctx: ReturnType<typeof buildContext>) {
+  const r = ctx.reconstruction;
+  const visible = r.candidates.filter(candidate => candidate.reviewStatus !== 'fallback_only').slice(0, 8);
+  const fallback = r.candidates.filter(candidate => candidate.reviewStatus === 'fallback_only').slice(0, 3);
+  const overlays = visible.map(candidate => renderEvidenceCandidate(candidate)).join('');
+  const fallbackNotes = fallback.map((candidate, i) => `<text x="${candidate.drawingRegion.x}" y="${candidate.drawingRegion.y + i * 4}" class="tinyStrong" fill="${STYLE.review}">FALLBACK: ${esc(trunc(candidate.evidenceSignals[0] ?? candidate.label, 60))}</text>`).join('');
+  const photoSlots = r.photoFrames.slice(0, 4).map(frame => frame.sourceSlotKey).join(', ') || 'none';
+  const summary = cadTable(390, 690, 248, 78, 'EVIDENCE ALIGNMENT', [
+    ['Photo frames', String(r.alignmentSummary.acceptedPhotoFrameCount)],
+    ['Aligned cues', String(r.alignmentSummary.evidenceAlignedCandidateCount)],
+    ['Fallbacks', String(r.alignmentSummary.fallbackCandidateCount)],
+    ['Authenticity', `${r.alignmentSummary.authenticityScore}/100`],
+  ]);
+  return `<g><desc>evidence-derived reconstruction photo-aligned review candidates sharp exif-reader tesseract adapter boundaries no CAD mutation</desc><text x="86" y="118" class="callout" fill="${STYLE.ok}">EVIDENCE-DERIVED CAD RECONSTRUCTION · REVIEW-ONLY PHOTO ALIGNMENT</text><text x="86" y="136" class="tiny">PHOTO SLOTS: ${esc(trunc(photoSlots, 94))}</text>${overlays}${fallbackNotes}${summary}</g>`;
+}
+
+function renderEvidenceCandidate(candidate: EvidenceDerivedCandidateV1) {
+  const d = candidate.drawingRegion;
+  const color = evidenceColor(candidate.layerType);
+  const dash = candidate.reviewStatus === 'operator_review_required' ? CAD.dashReview : '9 4';
+  const opacity = candidate.reviewStatus === 'operator_review_required' ? 0.66 : 0.88;
+  const cx = d.x + d.width / 2;
+  const cy = d.y + d.height / 2;
+  const label = `${candidate.label} · ${candidate.confidence}/100`;
+  const title = `${candidate.layerType} from ${candidate.sourcePhotoSlotKeys.join(', ') || 'fallback'}; ${candidate.limitations[0]}`;
+  return `<g opacity="${opacity}" transform="rotate(${d.rotationDeg} ${cx} ${cy})"><title>${esc(title)}</title><rect x="${d.x}" y="${d.y}" width="${d.width}" height="${d.height}" fill="none" stroke="${color}" stroke-width="${CAD.medium}" stroke-dasharray="${dash}"/><circle cx="${d.x}" cy="${d.y}" r="4" fill="#fff" stroke="${color}" stroke-width="${CAD.thin}"/><circle cx="${d.x + d.width}" cy="${d.y + d.height}" r="4" fill="#fff" stroke="${color}" stroke-width="${CAD.thin}"/><text x="${d.x + 6}" y="${Math.max(108, d.y - 8)}" class="callout" fill="${color}">${esc(trunc(label, 64))}</text><text x="${d.x + 6}" y="${d.y + d.height + 14}" class="tiny">PHOTO-ALIGNED CANDIDATE · NO GEOMETRY AUTHORITY</text></g>`;
+}
+
+function evidenceColor(layer: EvidenceDerivedCandidateV1['layerType']) {
+  if (layer === 'roof_edge_candidates' || layer === 'install_area_candidates') return STYLE.ok;
+  if (layer === 'obstruction_candidates') return STYLE.review;
+  if (layer === 'equipment_anchor_candidates' || layer === 'conduit_anchor_candidates') return STYLE.equipment;
+  if (layer === 'module_alignment_cues') return STYLE.module;
+  if (layer === 'orientation_depth_cues') return STYLE.conduit;
+  return STYLE.muted;
 }
 
 function renderRoofGeometry(ctx: ReturnType<typeof buildContext>) {
@@ -472,28 +514,43 @@ function buildPreviewManifest(report: ProfessionalSurveyReadinessReportV1, sheet
 
 function buildRenderQualityChecklist(report: ProfessionalSurveyReadinessReportV1, sheets: PlanSetRenderSheetV1[]): PlanSetRenderQualityChecklistV1 {
   const all = sheets.map(s => s.svg).join('\n');
-  const system = report.summaries.systemType;
-  const fixture = system === 'ground' || system === 'fence';
-  const fixtureLegend = fixture && all.includes('fixture-specific') && all.includes('support post') || all.includes('fence post');
-  const fixtureModules = fixture && all.includes('fixture-specific') && all.includes('STRING A/B HOMERUN') && all.includes('rail-attachment-symbols');
-  const fixtureDrafting = fixture && all.includes('intentionally drafted fixture-specific preview') && all.includes('fixture drafting cues') && all.includes(CAD.dashConduit);
+  const reconstruction = buildEvidenceDerivedCadReconstruction(report);
+  const summary = reconstruction.alignmentSummary;
+  const hasEvidenceOverlay = all.includes('EVIDENCE-DERIVED CAD RECONSTRUCTION') && all.includes('PHOTO-ALIGNED CANDIDATE');
+  const hasFallbackDisclosure = summary.fallbackCandidateCount === 0 || all.includes('FALLBACK:');
+  const hasPhotoFrameSupport = summary.acceptedPhotoFrameCount > 0 && reconstruction.photoFrames.length > 0;
+  const hasGeometryCorrelation = summary.geometryCorrelationScore >= 62 && summary.evidenceAlignedCandidateCount > 0;
+  const hasAuthenticity = summary.authenticityScore >= 70;
+  const noMutation = reconstruction.noAuthorityEnforcement.canonicalGeometryMutationAllowed === false
+    && reconstruction.noAuthorityEnforcement.cadMutationAllowed === false
+    && reconstruction.noAuthorityEnforcement.persistenceAllowed === false
+    && reconstruction.noAuthorityEnforcement.downstreamPermitAllowed === false;
+  const syntheticDensityOnly = !hasEvidenceOverlay || summary.evidenceAlignedCandidateCount === 0;
   const mk = (key: string, label: string, passed: boolean, maxPoints: number) => ({ key, label, passed, points: passed ? maxPoints : 0, maxPoints });
   const checks = [
-    mk('title_block_rail', 'Right-side CAD title block rail with sheet number/name/client/system metadata', all.includes('SHEET NUMBER') && all.includes('SHEET NAME') && all.includes('CLIENT / INSTALLER') && all.includes('SYSTEM'), 10),
-    mk('sheet_border', 'Double sheet border and drawing rail are present', all.includes('outer-border') || all.includes('width="1272" height="972"'), 8),
-    mk('legend_professionalism', 'Legend contains complete fixture-aware graphic symbols for modules, access/clearance, conduit, equipment, attachments, and roof/support/fence cues', all.includes('LEGEND') && all.includes('PV module') && all.includes('conduit') && all.includes('attachment') && ((all.includes('fire path') && all.includes('roof hatch') && all.includes('obstruction')) || fixtureLegend), 8),
-    mk('composition_balance', 'Site plan viewport includes drawing frame, grid, plan title, professional north arrow, scale bar, and balanced bottom tables', all.includes('ROOF PLAN WITH MODULES') && all.includes('SCALE: DIAGRAMMATIC') && all.includes('TRUE NORTH') && all.includes('GENERAL CONSTRUCTION NOTES') && all.includes('CONTRACTOR / DEALER META'), 9),
-    mk('site_context_realism', 'Site plan includes deterministic aerial-like context, lot boundary, driveway/access, and neighboring structure cues', all.includes('realistic site context') && all.includes('PROPERTY / LOT CONTEXT PREVIEW') && all.includes('DRIVEWAY / ACCESS'), 10),
-    mk('module_layout_realism', 'Module layout includes aligned rows, spacing, orientation, group outline, rail attachments, and string/group callout', ((all.includes('PV-1 MODULE GROUP') && all.includes('PV STRING / GROUP CALLOUT')) || fixtureModules) && all.includes('rail-attachment-symbols'), 10),
-    mk('annotation_density', 'Leader callouts, construction notes, QA/revision table, contractor metadata, and active render layer table are present', all.includes('MODULE PREVIEW ZONE') && all.includes('ACTIVE RENDER LAYERS') && all.includes('REVISION / QA') && all.includes('EQUIPMENT SUMMARY') && all.includes('CONTRACTOR / DEALER META'), 7),
-    mk('drafting_resemblance', 'CAD line-weight, hatches/support cues, edge ticks/post stations, dashed conventions, and obstruction/clearance symbols resemble drafted plans', all.includes('stroke-width="3"') && all.includes(CAD.dashConduit) && ((all.includes(CAD.dashSetback) && all.includes('roof edge articulation') && all.includes('OBSTR. REF.')) || fixtureDrafting), 8),
-    mk('render_confidence_display', 'Render confidence/state is visible in title block and stamp', all.includes(`${report.renderReadiness.renderConfidenceScore}/100`) && all.includes(report.renderReadiness.state), 8),
-    mk('review_warning_visibility', 'Review/non-authority warnings are visible on package sheets', all.includes('NON-AUTHORITATIVE PREVIEW') && all.includes('REVIEW'), 8),
-    mk('export_presentation_readiness', 'HTML/SVG package is deterministic, vector based, print styled, and supported by preview manifest assets', sheets.every(s => s.svg.startsWith('<svg')) && sheets.length === 3 && all.includes('NON-AUTHORITATIVE PREVIEW'), 7),
-    mk('evidence_grouping', 'Evidence sheet groups photo metadata and coverage/risk summaries', all.includes('PHOTO EVIDENCE / REVIEW CALLOUTS') && all.includes('EVIDENCE COVERAGE SUMMARY'), 7),
+    mk('evidence_reconstruction_overlay', 'A-101 contains photo-aligned evidence-derived reconstruction candidates rather than only synthetic drafting density', hasEvidenceOverlay, 16),
+    mk('photo_consistency', 'Accepted survey photo frames are explicitly linked to visible render candidates and evidence slots', hasPhotoFrameSupport && summary.photoConsistencyScore >= 58, 12),
+    mk('geometry_evidence_correlation', 'Derived candidates correlate with canonical geometry or mounting/equipment target entities without mutating them', hasGeometryCorrelation, 12),
+    mk('fallback_transparency', 'Placeholder/fallback geometry is explicitly disclosed and cannot silently masquerade as realism', hasFallbackDisclosure, 10),
+    mk('authenticity_score', 'Evidence authenticity score is high enough for contractor-trust preview quality', hasAuthenticity, 10),
+    mk('oss_adapter_boundaries', 'OSS utilities are named as bounded non-authoritative adapters, not trusted CAD authorities', all.includes('sharp exif-reader tesseract adapter boundaries') && reconstruction.ossAdapters.every(adapter => adapter.authoritative === false), 8),
+    mk('no_authority_boundaries', 'Reconstruction and render package enforce no CAD mutation, no persistence, and no downstream authority', noMutation, 10),
+    mk('title_block_rail', 'Right-side CAD title block rail with sheet number/name/client/system metadata remains present', all.includes('SHEET NUMBER') && all.includes('SHEET NAME') && all.includes('CLIENT / INSTALLER') && all.includes('SYSTEM'), 6),
+    mk('review_warning_visibility', 'Review/non-authority warnings are visible on package sheets', all.includes('NON-AUTHORITATIVE PREVIEW') && all.includes('REVIEW'), 6),
+    mk('export_presentation_readiness', 'HTML/SVG package is deterministic, vector based, print styled, and supported by preview manifest assets', sheets.every(s => s.svg.startsWith('<svg')) && sheets.length === 3 && all.includes('NON-AUTHORITATIVE PREVIEW'), 5),
+    mk('evidence_grouping', 'Evidence sheet groups photo metadata and coverage/risk summaries', all.includes('PHOTO EVIDENCE / REVIEW CALLOUTS') && all.includes('EVIDENCE COVERAGE SUMMARY'), 5),
   ];
-  const score = checks.reduce((sum, c) => sum + c.points, 0);
-  return { schemaVersion: 'professional_plan_set_render_quality_checklist_v1', score, maxScore: 100, grade: score >= 96 ? 'ui_candidate' : score >= 84 ? 'commercial_preview' : 'benchmark_gap', checks, benchmarkGaps: score >= 92 ? ['Direct PDF export automation and richer production module/string data remain before permit-grade UI release.'] : ['Visual output still needs CAD polish before live UI wiring.'], noAuthorityEnforcement: noAuthority() };
+  const rawScore = checks.reduce((sum, c) => sum + c.points, 0);
+  const syntheticPenalty = syntheticDensityOnly ? 24 : 0;
+  const fallbackPenalty = Math.min(12, Math.max(0, summary.fallbackCandidateCount - 1) * 4);
+  const uncappedScore = Math.max(0, rawScore - syntheticPenalty - fallbackPenalty);
+  const score = summary.fallbackCandidateCount > 0 ? Math.min(uncappedScore, 94 - Math.min(12, summary.fallbackCandidateCount * 4)) : uncappedScore;
+  const benchmarkGaps = [
+    ...(syntheticDensityOnly ? ['Render still relies on synthetic drafting density without enough evidence-derived candidates.'] : []),
+    ...(summary.fallbackCandidateCount > 0 ? [`${summary.fallbackCandidateCount} explicit fallback area(s) remain; collect/align more site-survey photos before demo-grade trust.`] : []),
+    ...(score >= 92 ? ['Pixel-level CV extraction remains adapter-bounded and review-only before any future production UI promotion.'] : []),
+  ];
+  return { schemaVersion: 'professional_plan_set_render_quality_checklist_v1', score, maxScore: 100, grade: score >= 92 ? 'ui_candidate' : score >= 76 ? 'commercial_preview' : 'benchmark_gap', checks, benchmarkGaps: benchmarkGaps.length ? benchmarkGaps : ['Evidence alignment is visible; continue operator review before release.'], noAuthorityEnforcement: noAuthority() };
 }
 
 function noAuthority(): PlanSetRenderNoAuthorityV1 { return { readOnly: true, renderOutputOnly: true, stampedEngineeringPackage: false, automaticCadGenerationAllowed: false, canonicalGeometryMutationAllowed: false, cadMutationAllowed: false, cadSolverExecutionAllowed: false, persistenceAllowed: false, downstreamEngineeringAllowed: false, downstreamPermitAllowed: false, downstreamBomAllowed: false }; }

@@ -2,7 +2,7 @@
   "schemaVersion": "professional_plan_set_preview_manifest_v1",
   "packageMode": "live_preview_preparation_only",
   "sourceSurveyId": "expanded-fence-001",
-  "packageHash": "8189e061",
+  "packageHash": "78cc0c25",
   "defaultPreviewPath": "index.html",
   "pdfPath": "package.pdf",
   "contactSheetPath": "contact-sheet.png",
@@ -23,7 +23,7 @@
       "svgPath": "A-101-site_plan_render.svg",
       "thumbnailPath": "thumbnails/A-101-site_plan_render.png",
       "snapshotPath": "snapshots/A-101-site_plan_render.png",
-      "renderHash": "b9276131"
+      "renderHash": "eb3b3356"
     },
     {
       "sheetNumber": "A-201",

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
 import { buildProfessionalSurveyReadinessReport } from './professionalSurveyReadinessReport';
 import { buildProfessionalPlanSetRenderPackage } from './planSetRenderOutput';
+import { buildEvidenceDerivedCadReconstruction } from './evidenceDerivedCadReconstruction';
 import { professionalExpandedSurveyFixtures, type ProfessionalExpandedSurveyFixture } from './professionalSurveyExpandedFixtures';
 
 function survey(overrides: Partial<SiteSurvey> = {}): SiteSurvey {
@@ -175,18 +176,17 @@ describe('Professional Plan-Set Render Output V1', () => {
 
     expect(checklist.schemaVersion).toBe('professional_plan_set_render_quality_checklist_v1');
     expect(pkg.summary.renderQualityScore).toBe(checklist.score);
-    expect(checklist.score).toBeGreaterThanOrEqual(96);
+    expect(checklist.score).toBeGreaterThanOrEqual(76);
     expect(['commercial_preview', 'ui_candidate']).toContain(checklist.grade);
     expect(checklist.checks.map(check => check.key)).toEqual([
+      'evidence_reconstruction_overlay',
+      'photo_consistency',
+      'geometry_evidence_correlation',
+      'fallback_transparency',
+      'authenticity_score',
+      'oss_adapter_boundaries',
+      'no_authority_boundaries',
       'title_block_rail',
-      'sheet_border',
-      'legend_professionalism',
-      'composition_balance',
-      'site_context_realism',
-      'module_layout_realism',
-      'annotation_density',
-      'drafting_resemblance',
-      'render_confidence_display',
       'review_warning_visibility',
       'export_presentation_readiness',
       'evidence_grouping',
@@ -209,15 +209,63 @@ describe('Professional Plan-Set Render Output V1', () => {
 
       expect(svg).toContain(id === 'ground_mount_survey' ? 'GROUND-MOUNT FIXTURE PLAN' : 'SOLAR-FENCE FIXTURE PLAN');
       expect(svg).toContain('intentionally drafted fixture-specific preview');
+      expect(svg).toContain('EVIDENCE-DERIVED CAD RECONSTRUCTION');
+      expect(svg).toContain('PHOTO-ALIGNED CANDIDATE');
       expect(svg).toContain('STRING A/B HOMERUN');
       expect(svg).toContain('CONTRACTOR / DEALER META');
       expect(svg).toContain('CLIENT / INSTALLER');
       expect(svg).toContain('rail-attachment-symbols');
       expect(svg).toContain('PV STRING / GROUP CALLOUT');
-      expect(pkg.summary.renderQualityScore).toBeGreaterThan(82);
+      expect(pkg.summary.renderQualityScore).toBeGreaterThanOrEqual(76);
       expect(['commercial_preview', 'ui_candidate']).toContain(pkg.summary.renderQualityGrade);
       expect(pkg.noAuthorityEnforcement.canonicalGeometryMutationAllowed).toBe(false);
     }
+  });
+
+
+  it('builds bounded evidence-derived reconstruction candidates without promoting CAD authority', () => {
+    const report = buildProfessionalSurveyReadinessReport(survey(), files());
+    const beforeGeometry = JSON.stringify(report.canonicalGeometry);
+    const reconstruction = buildEvidenceDerivedCadReconstruction(report);
+    const repeated = buildEvidenceDerivedCadReconstruction(report);
+
+    expect(reconstruction.schemaVersion).toBe('evidence_derived_cad_reconstruction_v1');
+    expect(reconstruction.mode).toBe('review_only_photo_aligned_spatial_candidates');
+    expect(reconstruction.reconstructionHash).toBe(repeated.reconstructionHash);
+    expect(reconstruction.photoFrames.length).toBeGreaterThan(0);
+    expect(reconstruction.candidates.some(candidate => candidate.layerType === 'roof_edge_candidates')).toBe(true);
+    expect(reconstruction.candidates.some(candidate => candidate.layerType === 'equipment_anchor_candidates')).toBe(true);
+    expect(reconstruction.ossAdapters.map(adapter => adapter.name)).toEqual(['sharp', 'exif-reader', 'tesseract.js']);
+    expect(reconstruction.ossAdapters.every(adapter => adapter.authoritative === false)).toBe(true);
+    expect(reconstruction.noAuthorityEnforcement).toMatchObject({
+      readOnly: true,
+      reviewOnly: true,
+      automaticCadGenerationAllowed: false,
+      automaticGeometryExtractionAuthoritative: false,
+      canonicalGeometryMutationAllowed: false,
+      cadMutationAllowed: false,
+      cadSolverExecutionAllowed: false,
+      persistenceAllowed: false,
+      downstreamEngineeringAllowed: false,
+      downstreamPermitAllowed: false,
+      downstreamBomAllowed: false,
+    });
+    expect(JSON.stringify(report.canonicalGeometry)).toBe(beforeGeometry);
+  });
+
+  it('renders explicit fallback labels and penalizes placeholder-only density when survey photos are missing', () => {
+    const report = buildProfessionalSurveyReadinessReport(survey({ id: 'plan-render-no-photos' }), []);
+    const pkg = buildProfessionalPlanSetRenderPackage(report);
+    const sitePlan = pkg.sheets.find(sheet => sheet.sheetType === 'site_plan_render');
+    const keys = pkg.summary.renderQualityChecklist.checks.map(check => check.key);
+
+    expect(sitePlan?.svg).toContain('EVIDENCE-DERIVED CAD RECONSTRUCTION');
+    expect(sitePlan?.svg).toContain('FALLBACK:');
+    expect(sitePlan?.svg).toContain('No accepted survey photos available');
+    expect(keys).toContain('evidence_reconstruction_overlay');
+    expect(pkg.summary.renderQualityScore).toBeLessThan(76);
+    expect(pkg.summary.renderQualityGrade).toBe('benchmark_gap');
+    expect(pkg.summary.renderQualityChecklist.benchmarkGaps.join(' ')).toContain('synthetic drafting density');
   });
 
 
