@@ -671,6 +671,20 @@ interface PhotoClassificationCandidatePreview {
   evidenceSignals: string[];
   rationale: string;
   reviewRequired: boolean;
+  openSourceAnalysis: {
+    analyzed: boolean;
+    qualityScore: number;
+    qualityStatus: 'good' | 'review_required' | 'poor' | 'unavailable';
+    qualityFlags: string[];
+    duplicateGroupId: string | null;
+    duplicateRank: number | null;
+    duplicateGroupSize: number;
+    isDuplicateRepresentative: boolean;
+    sharpnessScore: number | null;
+    brightnessScore: number | null;
+    widthPx: number | null;
+    heightPx: number | null;
+  } | null;
 }
 
 interface PhotoClassificationPreviewResponse {
@@ -680,6 +694,13 @@ interface PhotoClassificationPreviewResponse {
   processedPhotoCount: number;
   skippedPhotoCount: number;
   requestedLimit: number;
+  openSourceAnalysisSummary?: {
+    analyzedPhotoCount: number;
+    duplicateGroupCount: number;
+    duplicatePhotoCount: number;
+    qualityReviewRequiredCount: number;
+    engine: string;
+  };
   visionExecuted: boolean;
   categoryCounts: Partial<Record<SurveyEvidenceCategory, number>>;
   candidates: PhotoClassificationCandidatePreview[];
@@ -691,6 +712,8 @@ function SurveyPhotoClassificationPreviewPanel({ surveyId, manifest }: { surveyI
   const [preview, setPreview] = useState<PhotoClassificationPreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [applyLoading, setApplyLoading] = useState(false);
+  const [applyResult, setApplyResult] = useState<string | null>(null);
   const uncategorizedCount = manifest?.items.filter(item => item.category === 'uncategorized').length ?? 0;
   const classifiedCount = manifest?.summary.classifiedItems ?? 0;
   const totalItems = manifest?.summary.totalItems ?? 0;
@@ -715,12 +738,48 @@ function SurveyPhotoClassificationPreviewPanel({ surveyId, manifest }: { surveyI
         return;
       }
       setPreview(nextPreview);
+      setApplyResult(null);
     } catch {
       setError('Network error while running photo classification preview');
     } finally {
       setLoading(false);
     }
   }, [surveyId]);
+
+  const applyReviewed = useCallback(async () => {
+    if (!preview) return;
+    const items = preview.candidates
+      .filter(candidate => candidate.confidence === 'high')
+      .filter(candidate => candidate.suggestedCategory !== 'uncategorized')
+      .filter(candidate => candidate.openSourceAnalysis?.qualityStatus === 'good')
+      .filter(candidate => candidate.openSourceAnalysis?.isDuplicateRepresentative !== false)
+      .map(candidate => ({ fileId: candidate.fileId, acceptedCategory: candidate.suggestedCategory }));
+
+    if (items.length === 0) {
+      setApplyResult('No high-confidence, non-duplicate, good-quality labels are ready to apply. Review/override support should handle the remaining photos.');
+      return;
+    }
+
+    setApplyLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/site-surveys/${surveyId}/photo-classification-preview/apply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setError(json.error || 'Failed to apply reviewed classifications');
+        return;
+      }
+      setApplyResult(`Applied ${json.data?.appliedCount ?? items.length} reviewed label(s). Refresh the survey to recompute the evidence manifest and CAD readiness from accepted labels.`);
+    } catch {
+      setError('Network error while applying reviewed classifications');
+    } finally {
+      setApplyLoading(false);
+    }
+  }, [preview, surveyId]);
 
   const visibleCandidates = safeArray(preview?.candidates).slice(0, 18);
   const nonEmptyCounts = Object.entries(preview?.categoryCounts ?? {})
@@ -764,15 +823,32 @@ function SurveyPhotoClassificationPreviewPanel({ surveyId, manifest }: { surveyI
 
         {preview && (
           <div className="space-y-3">
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
               <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-500">Processed</p><p className="text-lg font-bold text-white">{preview.processedPhotoCount}</p></div>
               <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-500">Total Photos</p><p className="text-lg font-bold text-white">{preview.totalPhotoCount}</p></div>
               <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-500">Skipped</p><p className="text-lg font-bold text-white">{preview.skippedPhotoCount}</p></div>
               <div className={`rounded-xl border p-3 ${preview.visionExecuted ? 'border-emerald-500/20 bg-emerald-500/10' : 'border-amber-500/20 bg-amber-500/10'}`}><p className="text-[10px] uppercase tracking-wider opacity-80">Vision</p><p className="text-lg font-bold text-white">{preview.visionExecuted ? 'ran' : 'off'}</p></div>
               <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3"><p className="text-[10px] uppercase tracking-wider text-amber-200/80">Authority</p><p className="text-lg font-bold text-amber-100">review</p></div>
+              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-500">OS analyzed</p><p className="text-lg font-bold text-white">{preview.openSourceAnalysisSummary?.analyzedPhotoCount ?? 0}</p></div>
+              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-500">Dupes</p><p className="text-lg font-bold text-white">{preview.openSourceAnalysisSummary?.duplicatePhotoCount ?? 0}</p></div>
+              <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-500">Quality review</p><p className="text-lg font-bold text-white">{preview.openSourceAnalysisSummary?.qualityReviewRequiredCount ?? 0}</p></div>
             </div>
 
-            <p className="rounded-xl border border-slate-700/60 bg-slate-950/40 p-3 text-[11px] text-slate-400">{preview.note}</p>
+            <div className="rounded-xl border border-slate-700/60 bg-slate-950/40 p-3">
+              <p className="text-[11px] text-slate-400">{preview.note}</p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  onClick={applyReviewed}
+                  disabled={applyLoading || !preview.visionExecuted}
+                  className="inline-flex items-center gap-2 rounded-lg border border-emerald-400/30 bg-emerald-500/15 px-3 py-2 text-[11px] font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {applyLoading ? <div className="spinner w-3 h-3" /> : <CheckCircle size={12} />}
+                  Apply high-confidence reviewed labels
+                </button>
+                <span className="text-[10px] text-slate-500">Applies only high-confidence, good-quality, non-duplicate, non-uncategorized suggestions to existing file labels.</span>
+              </div>
+              {applyResult && <p className="mt-2 text-[11px] text-emerald-200">{applyResult}</p>}
+            </div>
 
             {nonEmptyCounts.length > 0 && (
               <div className="flex flex-wrap gap-2">
@@ -798,6 +874,13 @@ function SurveyPhotoClassificationPreviewPanel({ surveyId, manifest }: { surveyI
                   </div>
                   <p className="mt-2 text-[10px] leading-relaxed text-slate-400">{candidate.rationale}</p>
                   {candidate.evidenceSignals.length > 0 && <p className="mt-2 text-[10px] text-slate-500">Signals: {candidate.evidenceSignals.join(' · ')}</p>}
+                  {candidate.openSourceAnalysis && (
+                    <p className="mt-2 text-[10px] text-slate-500">
+                      Quality: {candidate.openSourceAnalysis.qualityStatus} ({candidate.openSourceAnalysis.qualityScore}/100) · Sharpness {candidate.openSourceAnalysis.sharpnessScore ?? 'n/a'} · Brightness {candidate.openSourceAnalysis.brightnessScore ?? 'n/a'} · {candidate.openSourceAnalysis.widthPx ?? '?'}×{candidate.openSourceAnalysis.heightPx ?? '?'}
+                      {candidate.openSourceAnalysis.duplicateGroupId ? ` · Duplicate ${candidate.openSourceAnalysis.duplicateRank}/${candidate.openSourceAnalysis.duplicateGroupSize}` : ''}
+                      {candidate.openSourceAnalysis.qualityFlags.length > 0 ? ` · ${candidate.openSourceAnalysis.qualityFlags.join(', ')}` : ''}
+                    </p>
+                  )}
                   <p className="mt-2 text-[10px] text-slate-600">Current: {evidenceCategoryLabel(candidate.currentCategory)} → Suggested: {candidate.suggestedLabel}{candidate.reviewRequired ? ' · review required' : ''}</p>
                 </a>
               ))}

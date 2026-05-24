@@ -325,3 +325,34 @@ export async function bulkAddSiteSurveyFiles(
   }
   return inserted;
 }
+
+// ---------------------------------------------------------------------------
+// updateSiteSurveyFileLabels — apply operator-reviewed photo evidence labels
+// ---------------------------------------------------------------------------
+export async function updateSiteSurveyFileLabels(
+  surveyId: string,
+  userId: string,
+  updates: Array<{ fileId: string; label: string | null }>,
+): Promise<SiteSurveyFile[]> {
+  if (!updates.length) return [];
+  const sql = await getDbReady();
+  const results: SiteSurveyFile[] = [];
+
+  for (const update of updates) {
+    const rows = await sql`
+      UPDATE site_survey_files ssf
+      SET label = ${update.label ?? null}
+      FROM site_surveys ss
+      JOIN clients c ON c.id = ss.client_id
+      WHERE ssf.id = ${update.fileId}
+        AND ssf.survey_id = ${surveyId}
+        AND ss.id = ssf.survey_id
+        AND c.user_id = ${userId}
+      RETURNING ssf.*
+    `;
+    if (rows.length) results.push(rowToSiteSurveyFile(rows[0] as Record<string, unknown>));
+  }
+
+  return results;
+}
+

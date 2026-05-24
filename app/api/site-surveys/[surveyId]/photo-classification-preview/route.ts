@@ -13,6 +13,7 @@ import { getUserFromRequest } from '@/lib/auth';
 import { getSiteSurveyById, getSiteSurveyFiles, isValidUUID } from '@/lib/db-neon';
 import { inferSurveyEvidenceCategoryFromText, getSurveyEvidenceLabel, type SurveyEvidenceCategory } from '@/lib/survey/evidence/manifest';
 import type { SiteSurveyFile } from '@/lib/db/surveys';
+import { analyzeSurveyPhotosOpenSource, type SurveyPhotoOpenSourceAnalysis } from '@/lib/siteSurvey/photoIntelligence';
 
 type PreviewCategory = Exclude<SurveyEvidenceCategory, 'duplicate' | 'blurry' | 'unusable'>;
 
@@ -28,6 +29,7 @@ type VisionCandidate = {
   evidenceSignals: string[];
   rationale: string;
   reviewRequired: boolean;
+  openSourceAnalysis: SurveyPhotoOpenSourceAnalysis | null;
 };
 
 const ALLOWED_CATEGORIES: PreviewCategory[] = [
@@ -85,6 +87,9 @@ export async function POST(
       .filter(file => includeAlreadyLabeled || inferSurveyEvidenceCategoryFromText(file.label ?? file.filename ?? file.fileUrl) === 'uncategorized')
       .slice(0, limit);
 
+    const openSourceAnalysis = await analyzeSurveyPhotosOpenSource(candidates);
+    const analysisByFileId = new Map(openSourceAnalysis.map(analysis => [analysis.fileId, analysis]));
+
     if (candidates.length === 0) {
       return NextResponse.json({
         success: true,
@@ -94,14 +99,14 @@ export async function POST(
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      const deterministic = candidates.map(file => deterministicCandidate(file));
+      const deterministic = candidates.map(file => deterministicCandidate(file, analysisByFileId.get(file.id) ?? null));
       return NextResponse.json({
         success: true,
         data: buildResponse(deterministic, files, limit, false, 'OPENAI_API_KEY is not set; returned deterministic metadata-only suggestions.'),
       });
     }
 
-    const visionCandidates = await classifyWithVision(candidates, apiKey);
+    const visionCandidates = await classifyWithVision(candidates, apiKey, analysisByFileId);
     return NextResponse.json({
       success: true,
       data: buildResponse(visionCandidates, files, limit, true, 'Vision classification preview completed. Review suggestions before any future persistence step.'),
@@ -112,7 +117,7 @@ export async function POST(
   }
 }
 
-async function classifyWithVision(files: SiteSurveyFile[], apiKey: string): Promise<VisionCandidate[]> {
+async function classifyWithVision(files: SiteSurveyFile[], apiKey: string, analysisByFileId: Map<string, SurveyPhotoOpenSourceAnalysis>): Promise<VisionCandidate[]> {
   const prompt = [
     'You are classifying solar site-survey photos for evidence organization only.',
     'Return strict JSON with key "items" as an array. One item per image in order.',
@@ -125,12 +130,14 @@ async function classifyWithVision(files: SiteSurveyFile[], apiKey: string): Prom
     'Choose obstructions for vents, chimneys, skylights, HVAC, or roof obstructions.',
     'If unclear, use uncategorized and reviewRequired true.',
     'Do not infer measurements, code compliance, or CAD geometry.',
+    'Prefer non-duplicate representative photos when duplicate/quality metadata is supplied.',
     'Each item must include: suggestedCategory, confidence high|medium|low, evidenceSignals string[], rationale string, reviewRequired boolean.',
   ].join('\n');
 
   const content: Array<Record<string, unknown>> = [{ type: 'text', text: prompt }];
   files.forEach((file, index) => {
-    content.push({ type: 'text', text: `Image ${index + 1}: fileId=${file.id}; filename=${file.filename ?? 'unknown'}; currentLabel=${file.label ?? 'none'}` });
+    const analysis = analysisByFileId.get(file.id);
+    content.push({ type: 'text', text: `Image ${index + 1}: fileId=${file.id}; filename=${file.filename ?? 'unknown'}; currentLabel=${file.label ?? 'none'}; quality=${analysis?.qualityStatus ?? 'unknown'}:${analysis?.qualityScore ?? 'n/a'}; duplicateGroup=${analysis?.duplicateGroupId ?? 'none'}; duplicateRank=${analysis?.duplicateRank ?? 'n/a'}` });
     content.push({ type: 'image_url', image_url: { url: file.fileUrl, detail: 'low' } });
   });
 
@@ -177,12 +184,13 @@ async function classifyWithVision(files: SiteSurveyFile[], apiKey: string): Prom
       confidence,
       evidenceSignals,
       rationale: typeof item.rationale === 'string' ? item.rationale.slice(0, 500) : 'No rationale returned.',
-      reviewRequired: item.reviewRequired !== false || confidence !== 'high',
+      reviewRequired: item.reviewRequired !== false || confidence !== 'high' || (analysisByFileId.get(file.id)?.qualityStatus !== 'good') || (analysisByFileId.get(file.id)?.isDuplicateRepresentative === false),
+      openSourceAnalysis: analysisByFileId.get(file.id) ?? null,
     };
   });
 }
 
-function deterministicCandidate(file: SiteSurveyFile): VisionCandidate {
+function deterministicCandidate(file: SiteSurveyFile, analysis: SurveyPhotoOpenSourceAnalysis | null): VisionCandidate {
   const currentCategory = inferSurveyEvidenceCategoryFromText(file.label ?? file.filename ?? file.fileUrl);
   const suggestedCategory = normalizePreviewCategory(currentCategory);
   return {
@@ -201,12 +209,17 @@ function deterministicCandidate(file: SiteSurveyFile): VisionCandidate {
       ? 'The current metadata does not identify this photo. Use the vision preview with OPENAI_API_KEY enabled or classify manually.'
       : 'Suggested from existing label/filename metadata only.',
     reviewRequired: true,
+    openSourceAnalysis: analysis,
   };
 }
 
 function buildResponse(candidates: VisionCandidate[], files: SiteSurveyFile[], limit: number, visionExecuted: boolean, note: string) {
   const categoryCounts = Object.fromEntries(ALLOWED_CATEGORIES.map(category => [category, 0])) as Record<PreviewCategory, number>;
   for (const candidate of candidates) categoryCounts[candidate.suggestedCategory] += 1;
+  const analyzed = candidates.filter(candidate => candidate.openSourceAnalysis?.analyzed).length;
+  const duplicateGroups = new Set(candidates.map(candidate => candidate.openSourceAnalysis?.duplicateGroupId).filter(Boolean)).size;
+  const duplicatePhotos = candidates.filter(candidate => candidate.openSourceAnalysis && candidate.openSourceAnalysis.duplicateGroupSize > 1 && !candidate.openSourceAnalysis.isDuplicateRepresentative).length;
+  const qualityReviewRequired = candidates.filter(candidate => candidate.openSourceAnalysis && candidate.openSourceAnalysis.qualityStatus !== 'good').length;
   return {
     schemaVersion: 'survey_photo_classification_preview_v1' as const,
     mode: 'operator_triggered_read_only_photo_classification_preview' as const,
@@ -214,6 +227,13 @@ function buildResponse(candidates: VisionCandidate[], files: SiteSurveyFile[], l
     processedPhotoCount: candidates.length,
     skippedPhotoCount: Math.max(files.length - candidates.length, 0),
     requestedLimit: limit,
+    openSourceAnalysisSummary: {
+      analyzedPhotoCount: analyzed,
+      duplicateGroupCount: duplicateGroups,
+      duplicatePhotoCount: duplicatePhotos,
+      qualityReviewRequiredCount: qualityReviewRequired,
+      engine: 'sharp_sha256_perceptual_hash_laplacian_v1',
+    },
     visionExecuted,
     categoryCounts,
     candidates,

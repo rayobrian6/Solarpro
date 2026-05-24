@@ -131,6 +131,7 @@ export {
   getSiteSurveyFiles,
   addSiteSurveyFile,
   bulkAddSiteSurveyFiles,
+  updateSiteSurveyFileLabels,
 } from './db/surveys';
 
 export type { SiteSurvey, SiteSurveyFile } from './db/surveys';
