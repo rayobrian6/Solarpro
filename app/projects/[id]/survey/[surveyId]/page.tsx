@@ -1134,6 +1134,277 @@ function V1ChecklistSection({ items }: { items: V1DisplayData['checklist'] }) {
   );
 }
 
+
+// ---------------------------------------------------------------------------
+// Professional Survey Parser Readiness Panel -- read-only preview/reporting
+// ---------------------------------------------------------------------------
+type ProfessionalOperatorReadinessState = 'blocked' | 'review_required' | 'geometry_ready' | 'cad_preview_ready';
+
+interface ProfessionalReadinessReportPreview {
+  schemaVersion: 'professional_survey_readiness_report_v1';
+  persistenceMode: 'read_only_review_report_v1';
+  readinessState: ProfessionalOperatorReadinessState;
+  labels: {
+    surveyDerived: boolean;
+    parserDerived: boolean;
+    canonicalized: boolean;
+    previewOnly: boolean;
+    reviewRequired: boolean;
+    nonAuthoritative: boolean;
+  };
+  source: {
+    fileCount: number;
+    photoCount: number;
+    hasSurveyData: boolean;
+  };
+  evidence: {
+    sourceHash: string;
+    bundleHash: string;
+    systemType: string;
+    evidenceItems: unknown[];
+    missingRequiredFields: string[];
+    warnings: string[];
+  };
+  canonicalGeometry: {
+    geometryHash: string;
+    readyForCADInput: boolean;
+    roofPlanes: Array<{ id: string; sourceType: string; areaM2: number | null; isValid: boolean; warnings: string[] }>;
+    groundArrays: unknown[];
+    fenceRuns: unknown[];
+    obstructions: unknown[];
+    setbacks: unknown[];
+    blockingIssues: string[];
+    warnings: string[];
+  };
+  cadReadiness: {
+    readinessHash: string;
+    readinessStatus: string;
+    canBuildCADInput: boolean;
+    cadInputPreview: unknown | null;
+    blockingIssues: string[];
+    reviewRequired: string[];
+    warnings: string[];
+  };
+  summaries: {
+    systemType: string;
+    roofPlaneCount: number;
+    obstructionCount: number;
+    setbackCount: number;
+    canonicalRoofPlaneCount: number;
+    invalidCanonicalRoofPlaneCount: number;
+    cadPreviewEligible: boolean;
+    cadPreviewBuilt: boolean;
+    confidenceGaps: string[];
+    missingRequiredFields: string[];
+    blockingIssues: string[];
+    warnings: string[];
+  };
+  noAuthorityEnforcement: {
+    dbWritesAllowed: false;
+    cadSolverExecutionAllowed: false;
+    productionCADMutationAllowed: false;
+    downstreamEngineeringAllowed: false;
+    downstreamPermitAllowed: false;
+    downstreamBOMAllowed: false;
+  };
+  deterministicNotes: string[];
+}
+
+const PROFESSIONAL_READINESS_META: Record<ProfessionalOperatorReadinessState, { label: string; cls: string; icon: React.ReactNode; description: string }> = {
+  blocked: {
+    label: 'Blocked',
+    cls: 'border-red-500/25 bg-red-500/10 text-red-200',
+    icon: <AlertTriangle size={13} />,
+    description: 'Blocking geometry or evidence issues must be resolved before preview use.',
+  },
+  review_required: {
+    label: 'Review Required',
+    cls: 'border-amber-500/25 bg-amber-500/10 text-amber-200',
+    icon: <AlertTriangle size={13} />,
+    description: 'Parser output exists, but operator review is required before relying on preview data.',
+  },
+  geometry_ready: {
+    label: 'Geometry Ready',
+    cls: 'border-cyan-500/25 bg-cyan-500/10 text-cyan-200',
+    icon: <Layers size={13} />,
+    description: 'Canonicalized geometry is structurally usable for review, without production CAD authority.',
+  },
+  cad_preview_ready: {
+    label: 'CAD Preview Ready',
+    cls: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200',
+    icon: <CheckCircle size={13} />,
+    description: 'A deterministic CAD input preview can be built, but no solver or downstream flow is triggered.',
+  },
+};
+
+function ReadinessPill({ children, tone = 'slate' }: { children: React.ReactNode; tone?: 'slate' | 'cyan' | 'amber' | 'emerald' | 'violet' }) {
+  const cls = {
+    slate: 'border-slate-600/40 bg-slate-800/50 text-slate-300',
+    cyan: 'border-cyan-500/25 bg-cyan-500/10 text-cyan-200',
+    amber: 'border-amber-500/25 bg-amber-500/10 text-amber-200',
+    emerald: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200',
+    violet: 'border-violet-500/25 bg-violet-500/10 text-violet-200',
+  }[tone];
+  return <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${cls}`}>{children}</span>;
+}
+
+function IssueList({ title, items, tone = 'amber' }: { title: string; items: string[]; tone?: 'amber' | 'red' | 'slate' }) {
+  if (items.length === 0) return null;
+  const cls = tone === 'red'
+    ? 'border-red-500/20 bg-red-500/10 text-red-100'
+    : tone === 'slate'
+      ? 'border-slate-700/60 bg-slate-950/30 text-slate-300'
+      : 'border-amber-500/20 bg-amber-500/10 text-amber-100';
+  return (
+    <div className={`rounded-xl border p-3 ${cls}`}>
+      <p className="text-[10px] font-semibold uppercase tracking-wider mb-2">{title}</p>
+      <ul className="space-y-1">
+        {items.map((item, i) => <li key={`${title}-${item}-${i}`} className="text-[11px] leading-relaxed">- {item}</li>)}
+      </ul>
+    </div>
+  );
+}
+
+function ProfessionalReadinessPanel({ surveyId }: { surveyId: string }) {
+  const [report, setReport] = useState<ProfessionalReadinessReportPreview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadReport = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/site-surveys/${surveyId}/professional-readiness`);
+      const json = await res.json();
+      if (!json.success) {
+        setError(json.error || 'Failed to load professional readiness report');
+        return;
+      }
+      setReport(json.data);
+    } catch {
+      setError('Network error while loading professional readiness report');
+    } finally {
+      setLoading(false);
+    }
+  }, [surveyId]);
+
+  useEffect(() => {
+    if (surveyId) loadReport();
+  }, [surveyId, loadReport]);
+
+  if (loading) {
+    return (
+      <SectionCard icon={<Layers size={14} />} title="Professional Survey Parser Readiness v1" iconColor="text-violet-400">
+        <div className="flex items-center gap-2 py-4 text-xs text-slate-500">
+          <div className="spinner w-4 h-4" /> Loading read-only parser readiness report...
+        </div>
+      </SectionCard>
+    );
+  }
+
+  if (error || !report) {
+    return (
+      <SectionCard icon={<Layers size={14} />} title="Professional Survey Parser Readiness v1" iconColor="text-violet-400">
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
+          <div className="flex items-center gap-2 text-amber-200">
+            <AlertTriangle size={13} />
+            <p className="text-xs font-semibold">Read-only readiness report unavailable</p>
+          </div>
+          <p className="mt-1 text-[11px] text-amber-100/80">{error ?? 'No report returned.'}</p>
+          <button onClick={loadReport} className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-[11px] text-slate-300">
+            <RefreshCw size={11} /> Retry
+          </button>
+        </div>
+      </SectionCard>
+    );
+  }
+
+  const readiness = PROFESSIONAL_READINESS_META[report.readinessState] ?? PROFESSIONAL_READINESS_META.review_required;
+  const blockingIssues = Array.from(new Set([...report.summaries.blockingIssues, ...report.canonicalGeometry.blockingIssues, ...report.cadReadiness.blockingIssues]));
+  const warnings = Array.from(new Set([...report.summaries.warnings, ...report.evidence.warnings, ...report.canonicalGeometry.warnings, ...report.cadReadiness.warnings]));
+  const reviewRequired = Array.from(new Set([...report.summaries.confidenceGaps, ...report.cadReadiness.reviewRequired]));
+
+  return (
+    <SectionCard icon={<Layers size={14} />} title="Professional Survey Parser Readiness v1" iconColor="text-violet-400">
+      <div className="space-y-4">
+        <div className="rounded-xl border border-violet-500/20 bg-violet-500/10 p-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-violet-200">Read-only parser integration</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                Deterministic operator preview generated from survey data and uploaded files. This panel is non-authoritative and does not persist canonical geometry, execute CAD solving, mutate production CAD, or trigger engineering, permit, or BOM flows.
+              </p>
+            </div>
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-bold uppercase ${readiness.cls}`}>
+              {readiness.icon}{readiness.label}
+            </span>
+          </div>
+          <p className="mt-2 text-[11px] text-violet-100/75">{readiness.description}</p>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <ReadinessPill tone="cyan">Survey Derived</ReadinessPill>
+          <ReadinessPill tone="violet">Parser Derived</ReadinessPill>
+          <ReadinessPill tone="cyan">Canonicalized</ReadinessPill>
+          <ReadinessPill tone="amber">Preview Only</ReadinessPill>
+          <ReadinessPill tone={report.labels.reviewRequired ? 'amber' : 'emerald'}>{report.labels.reviewRequired ? 'Review Required' : 'Review Clear'}</ReadinessPill>
+          <ReadinessPill tone="slate">Non-Authoritative</ReadinessPill>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">System Type</p>
+            <p className="text-lg font-bold text-white capitalize">{report.summaries.systemType}</p>
+          </div>
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">Evidence Items</p>
+            <p className="text-lg font-bold text-white">{report.evidence.evidenceItems.length}</p>
+          </div>
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500">Roof Planes</p>
+            <p className="text-lg font-bold text-white">{report.summaries.canonicalRoofPlaneCount}</p>
+          </div>
+          <div className={`rounded-xl border p-3 ${report.summaries.cadPreviewEligible ? 'border-emerald-500/20 bg-emerald-500/10' : 'border-amber-500/20 bg-amber-500/10'}`}>
+            <p className="text-[10px] uppercase tracking-wider text-slate-300/80">CAD Preview</p>
+            <p className={`text-lg font-bold ${report.summaries.cadPreviewEligible ? 'text-emerald-100' : 'text-amber-100'}`}>{report.summaries.cadPreviewBuilt ? 'Built' : report.summaries.cadPreviewEligible ? 'Eligible' : 'Not Ready'}</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
+          <span className="rounded-lg border border-slate-700/60 bg-slate-950/30 px-2 py-1 text-slate-300">Photos: <b>{report.source.photoCount}</b></span>
+          <span className="rounded-lg border border-slate-700/60 bg-slate-950/30 px-2 py-1 text-slate-300">Obstructions: <b>{report.summaries.obstructionCount}</b></span>
+          <span className="rounded-lg border border-slate-700/60 bg-slate-950/30 px-2 py-1 text-slate-300">Setbacks: <b>{report.summaries.setbackCount}</b></span>
+          <span className="rounded-lg border border-slate-700/60 bg-slate-950/30 px-2 py-1 text-slate-300">Invalid Geometry: <b>{report.summaries.invalidCanonicalRoofPlaneCount}</b></span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <IssueList title="Blocking Issues" items={blockingIssues} tone="red" />
+          <IssueList title="Missing Required Fields" items={report.summaries.missingRequiredFields} tone="amber" />
+          <IssueList title="Review / Confidence Gaps" items={reviewRequired} tone="amber" />
+          <IssueList title="Parser + Geometry Warnings" items={warnings} tone="slate" />
+        </div>
+
+        {blockingIssues.length === 0 && report.summaries.missingRequiredFields.length === 0 && reviewRequired.length === 0 && warnings.length === 0 && (
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-[11px] text-emerald-100/80">
+            No blocking issues, missing required fields, parser warnings, or confidence gaps were reported for this preview.
+          </div>
+        )}
+
+        <details className="rounded-xl border border-slate-700/60 bg-slate-950/30 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-slate-300">Deterministic hashes and no-authority enforcement</summary>
+          <div className="mt-3 grid grid-cols-1 gap-2 text-[10px] text-slate-500">
+            <p className="break-all">Source hash: <b className="text-slate-300">{report.evidence.sourceHash}</b></p>
+            <p className="break-all">Evidence bundle hash: <b className="text-slate-300">{report.evidence.bundleHash}</b></p>
+            <p className="break-all">Canonical geometry hash: <b className="text-slate-300">{report.canonicalGeometry.geometryHash}</b></p>
+            <p className="break-all">CAD readiness hash: <b className="text-slate-300">{report.cadReadiness.readinessHash}</b></p>
+            <p className="text-slate-400">No authority: DB writes {String(report.noAuthorityEnforcement.dbWritesAllowed)}, CAD solver {String(report.noAuthorityEnforcement.cadSolverExecutionAllowed)}, production CAD mutation {String(report.noAuthorityEnforcement.productionCADMutationAllowed)}, downstream engineering {String(report.noAuthorityEnforcement.downstreamEngineeringAllowed)}, permit {String(report.noAuthorityEnforcement.downstreamPermitAllowed)}, BOM {String(report.noAuthorityEnforcement.downstreamBOMAllowed)}.</p>
+          </div>
+        </details>
+      </div>
+    </SectionCard>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Status badge
 // ---------------------------------------------------------------------------
@@ -1315,6 +1586,9 @@ export default function SurveyDetailPage() {
 
         {/* 1d. Survey Evidence Manifest — structured engineering evidence view */}
         <SurveyEvidenceViewer manifest={displayedManifest} />
+
+        {/* 1e. Professional parser readiness — read-only preview/reporting */}
+        <ProfessionalReadinessPanel surveyId={survey.id} />
 
         {/* ------------------------------------------------------------------ */}
         {/* Typed V2 sections                                                   */}
