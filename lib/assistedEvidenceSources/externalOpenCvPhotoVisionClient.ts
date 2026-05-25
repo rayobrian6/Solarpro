@@ -10,7 +10,8 @@ export const EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME = 'external-opencv-photo-vis
 export const EXTERNAL_OPENCV_PHOTO_VISION_TOOL_VERSION = '0.1.0';
 export const REQUESTED_EXTERNAL_CV_TOOLS = ['opencv_primitives', 'yolo_detection', 'tesseract_ocr', 'ocr_equipment_labels'] as const;
 
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_HEALTH_TIMEOUT_MS = 15_000;
 
 export interface ExternalOpenCvPhotoVisionHealth {
   status: 'ok' | string;
@@ -56,7 +57,8 @@ export async function runExternalOpenCvPhotoVisionPass(input: {
   }
 
   const timeoutMs = input.timeoutMs ?? Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
-  const health = await fetchHealth(workerUrl, timeoutMs);
+  const healthTimeoutMs = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_HEALTH_TIMEOUT_MS || DEFAULT_HEALTH_TIMEOUT_MS);
+  const health = await fetchHealth(workerUrl, healthTimeoutMs);
   if (!health || health.status !== 'ok') {
     return { available: false, reason: 'external_worker_health_unavailable', health };
   }
