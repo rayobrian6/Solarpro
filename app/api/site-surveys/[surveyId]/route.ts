@@ -46,11 +46,23 @@ export async function GET(
     // is user-scoped; only after it succeeds do we load survey files and derive
     // the manifest for the authorized survey.
     const files = await getSiteSurveyFiles(surveyId);
-    const photoAnalysis = await analyzeSurveyPhotosOpenSource(files.filter(file => file.fileType === 'photo'));
+    let photoAnalysis: Awaited<ReturnType<typeof analyzeSurveyPhotosOpenSource>> = [];
+    try {
+      photoAnalysis = await analyzeSurveyPhotosOpenSource(files.filter(file => file.fileType === 'photo'));
+    } catch (paErr) {
+      // Photo analysis depends on sharp and image fetching — degrade gracefully
+      // rather than failing the entire survey page.
+      console.warn('[GET /api/site-surveys/[surveyId]] photo analysis unavailable:', paErr instanceof Error ? paErr.message : String(paErr));
+    }
     const evidenceManifest = buildSurveyEvidenceManifest({ survey, files, photoAnalysis });
-    const projectContext = survey.projectId
-      ? await getProjectSurveyContext(survey.projectId, user.id)
-      : null;
+    let projectContext: Awaited<ReturnType<typeof getProjectSurveyContext>> | null = null;
+    if (survey.projectId) {
+      try {
+        projectContext = await getProjectSurveyContext(survey.projectId, user.id);
+      } catch (pcErr) {
+        console.warn('[GET /api/site-surveys/[surveyId]] project survey context unavailable:', pcErr instanceof Error ? pcErr.message : String(pcErr));
+      }
+    }
 
     const evidenceHygiene = projectContext?.evidenceHygiene ?? null;
     // The survey detail endpoint must surface the freshly computed manifest.
@@ -62,7 +74,16 @@ export async function GET(
       evidenceTruthSource: 'canonical_manifest_v1',
     });
     const evidenceBridge = buildSurveyEvidenceEngineeringBridge(evidenceManifest, evidenceTraceability);
-    const openSourcePhotoVision = await getOpenSourcePhotoVisionCandidatesBySurvey(surveyId, user.id);
+    let openSourcePhotoVision = null;
+    try {
+      openSourcePhotoVision = await getOpenSourcePhotoVisionCandidatesBySurvey(surveyId, user.id);
+    } catch (ossErr) {
+      // Review-only feature — must not block the survey page from loading.
+      // The open_source_photo_vision_candidates table may not exist yet if
+      // migration 023 has not been run, or the query may fail for other reasons.
+      // Log and degrade gracefully instead of failing the entire GET.
+      console.warn('[GET /api/site-surveys/[surveyId]] open-source photo vision candidates unavailable:', ossErr instanceof Error ? ossErr.message : String(ossErr));
+    }
 
     return NextResponse.json({
       success: true,
