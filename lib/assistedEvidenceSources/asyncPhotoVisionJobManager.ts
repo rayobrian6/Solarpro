@@ -58,7 +58,7 @@ export async function createJob(
 ): Promise<PhotoVisionJob> {
   const sql = await getDbReady();
   const jobId = `job_${surveyId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const batchSize = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_SIZE || 5);
+  const batchSize = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_SIZE || 10);
   const totalBatches = Math.ceil(photoFiles.length / batchSize);
 
   // Store survey + photoFiles as the job input (needed for batch processing)
@@ -142,9 +142,11 @@ export async function getJob(jobId: string): Promise<PhotoVisionJob | null> {
 
 // ---------------------------------------------------------------------------
 // Process the next batch for a job — called by the GET/poll handler.
-// Processes ONE batch of photos by sending them to the external Render worker.
+// Processes up to `maxBatchesPerPoll` batches of photos by sending them to
+// the external Render worker. Processing multiple batches per poll reduces
+// total round-trips and avoids client-side timeout for large surveys.
 // ---------------------------------------------------------------------------
-export async function processNextBatch(jobId: string): Promise<PhotoVisionJob> {
+export async function processNextBatch(jobId: string, maxBatchesPerPoll = 3): Promise<PhotoVisionJob> {
   const sql = await getDbReady();
 
   // Load full job state from DB
@@ -202,73 +204,77 @@ export async function processNextBatch(jobId: string): Promise<PhotoVisionJob> {
     WHERE job_id = ${jobId}
   `;
 
-  // Get the next batch of files to process
-  const startIdx = currentBatch * batchSize;
-  const endIdx = Math.min(startIdx + batchSize, allPhotoFiles.length);
-  const batchFiles = allPhotoFiles.slice(startIdx, endIdx);
-
-  if (batchFiles.length === 0) {
-    // No more batches — finalize
-    await finalizeJobInDb(jobId, allFileResults, batchErrors, lastAvailability, survey, createdAtISO);
-    return (await getJob(jobId))!;
-  }
-
-  console.log(`[asyncJobManager] Job ${jobId}: processing batch ${currentBatch + 1}/${totalBatches} (${batchFiles.length} files)`);
-
+  // Process up to maxBatchesPerPoll batches in this single poll request.
+  // This dramatically reduces total round-trips for large surveys (e.g. 490 photos).
   const workerUrl = getExternalOpenCvWorkerUrl()!;
   const batchTimeoutMs = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_TIMEOUT_MS || 80_000);
+  let batchIdx = currentBatch;
+  let batchesProcessedThisPoll = 0;
 
-  try {
-    const jobPayload = {
-      schemaVersion: 'solarpro_external_photo_vision_job_v1',
-      surveyId: survey.id,
-      projectId: survey.projectId ?? null,
-      createdAt: createdAtISO,
-      requestedTools: ['opencv_primitives', 'yolo_detection', 'tesseract_ocr', 'ocr_equipment_labels'],
-      files: batchFiles.map(file => ({
-        fileId: file.id,
-        fileUrl: file.fileUrl,
-        filename: file.filename,
-        contentType: file.mimeType ?? null,
-      })),
-    };
+  while (batchIdx < totalBatches && batchesProcessedThisPoll < maxBatchesPerPoll) {
+    const startIdx = batchIdx * batchSize;
+    const endIdx = Math.min(startIdx + batchSize, allPhotoFiles.length);
+    const batchFiles = allPhotoFiles.slice(startIdx, endIdx);
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), batchTimeoutMs);
-    let raw: unknown;
+    if (batchFiles.length === 0) break; // no more files
+
+    console.log(`[asyncJobManager] Job ${jobId}: processing batch ${batchIdx + 1}/${totalBatches} (${batchFiles.length} files) [poll batch ${batchesProcessedThisPoll + 1}/${maxBatchesPerPoll}]`);
+
     try {
-      const res = await fetch(`${workerUrl}/v1/photo-vision/jobs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(jobPayload),
-        signal: controller.signal,
-      });
-      if (!res.ok) throw new Error(`external worker ${res.status}`);
-      raw = await res.json();
-    } finally {
-      clearTimeout(timer);
+      const jobPayload = {
+        schemaVersion: 'solarpro_external_photo_vision_job_v1',
+        surveyId: survey.id,
+        projectId: survey.projectId ?? null,
+        createdAt: createdAtISO,
+        requestedTools: ['opencv_primitives', 'yolo_detection', 'tesseract_ocr', 'ocr_equipment_labels'],
+        files: batchFiles.map(file => ({
+          fileId: file.id,
+          fileUrl: file.fileUrl,
+          filename: file.filename,
+          contentType: file.mimeType ?? null,
+        })),
+      };
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), batchTimeoutMs);
+      let raw: unknown;
+      try {
+        const res = await fetch(`${workerUrl}/v1/photo-vision/jobs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(jobPayload),
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`external worker ${res.status}`);
+        raw = await res.json();
+      } finally {
+        clearTimeout(timer);
+      }
+
+      // Normalize the batch result
+      const batchRun = normalizeExternalRun(raw, survey, batchFiles, createdAtISO);
+      allFileResults.push(...batchRun.files);
+      if (batchRun.availability) {
+        Object.assign(lastAvailability || {}, batchRun.availability);
+      }
+
+      console.log(`[asyncJobManager] Job ${jobId}: batch ${batchIdx + 1}/${totalBatches} completed. processed=${batchRun.processedCount} candidates=${batchRun.candidateCount}`);
+    } catch (batchErr) {
+      const errMsg = batchErr instanceof Error ? batchErr.message : String(batchErr);
+      console.error(`[asyncJobManager] Job ${jobId}: batch ${batchIdx + 1}/${totalBatches} failed:`, errMsg);
+      batchErrors.push(`Batch ${batchIdx + 1} (${batchFiles.length} files): ${errMsg}`);
+      for (const file of batchFiles) {
+        allFileResults.push(makeFailedFileResult(survey, file, createdAtISO, errMsg));
+      }
     }
 
-    // Normalize the batch result
-    const batchRun = normalizeExternalRun(raw, survey, batchFiles, createdAtISO);
-    allFileResults.push(...batchRun.files);
-    if (batchRun.availability) {
-      Object.assign(lastAvailability || {}, batchRun.availability);
-    }
-
-    console.log(`[asyncJobManager] Job ${jobId}: batch ${currentBatch + 1}/${totalBatches} completed. processed=${batchRun.processedCount} candidates=${batchRun.candidateCount}`);
-  } catch (batchErr) {
-    const errMsg = batchErr instanceof Error ? batchErr.message : String(batchErr);
-    console.error(`[asyncJobManager] Job ${jobId}: batch ${currentBatch + 1}/${totalBatches} failed:`, errMsg);
-    batchErrors.push(`Batch ${currentBatch + 1} (${batchFiles.length} files): ${errMsg}`);
-    for (const file of batchFiles) {
-      allFileResults.push(makeFailedFileResult(survey, file, createdAtISO, errMsg));
-    }
+    batchIdx++;
+    batchesProcessedThisPoll++;
   }
 
   // Update job progress in DB
-  const newCurrentBatch = currentBatch + 1;
-  const newCompletedBatches = newCurrentBatch;
+  const newCurrentBatch = batchIdx;
+  const newCompletedBatches = batchIdx;
   const newProcessedFiles = allFileResults.filter(f => f.analyzed).length;
   const isComplete = newCurrentBatch >= totalBatches;
 
