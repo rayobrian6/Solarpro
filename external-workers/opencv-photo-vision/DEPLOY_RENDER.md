@@ -13,7 +13,7 @@ This guide covers deploying the external OpenCV/YOLO/OCR photo vision worker as 
 | Setting | Value |
 |---|---|
 | **Service Type** | Web Service |
-| **Name** | `opencv-photo-vision-worker` |
+| **Name** | `solarpro` |
 | **Runtime** | Docker |
 | **Root Directory** | `external-workers/opencv-photo-vision` |
 | **Branch** | `dev` |
@@ -122,7 +122,7 @@ Once deployed, verify the worker is running:
 
 ```bash
 # Health check
-curl https://<your-render-service>.onrender.com/health
+curl https://solarpro.onrender.com/health
 
 # Expected response:
 # {
@@ -140,7 +140,7 @@ After the worker is deployed and healthy on Render, update the SolarPro dev envi
 
 1. In Vercel (or `.env.local`), set:
    ```
-   OPEN_SOURCE_PHOTO_VISION_WORKER_URL=https://<your-render-service>.onrender.com
+   OPEN_SOURCE_PHOTO_VISION_WORKER_URL=https://solarpro.onrender.com
    ```
 2. Optionally set:
    ```

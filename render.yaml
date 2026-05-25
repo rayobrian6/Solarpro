@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: opencv-photo-vision-worker
+    name: solarpro
     runtime: docker
     rootDir: external-workers/opencv-photo-vision
     plan: starter
