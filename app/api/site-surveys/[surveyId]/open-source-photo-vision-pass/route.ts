@@ -53,7 +53,16 @@ export async function POST(
     }
 
     const run = outcome.run;
-    const stored = await replaceOpenSourcePhotoVisionCandidatesForSurveyRun(surveyId, user.id, run);
+    let stored = null;
+    try {
+      stored = await replaceOpenSourcePhotoVisionCandidatesForSurveyRun(surveyId, user.id, run);
+    } catch (dbErr) {
+      // The open_source_photo_vision_candidates table may not exist yet
+      // (migration 023 not run). Log the error but still return the run
+      // results so the UI can display candidates from the transient run.
+      console.error('[POST /api/site-surveys/[surveyId]/open-source-photo-vision-pass] DB persist failed (table may not exist):', dbErr instanceof Error ? dbErr.message : String(dbErr));
+    }
+
     const summary = uiSummary(run);
 
     return NextResponse.json({
@@ -82,10 +91,12 @@ export async function POST(
     });
   } catch (err) {
     console.error('[POST /api/site-surveys/[surveyId]/open-source-photo-vision-pass]', err);
+    const message = err instanceof Error ? err.message : 'Failed to run external OpenCV photo vision pass';
     return NextResponse.json(
       {
         success: false,
         error: 'Failed to run external OpenCV photo vision pass',
+        detail: message,
         meta: noMutationMeta({ workerUnavailable: false, sourceImageBytesProcessed: false }),
       },
       { status: 500 },
