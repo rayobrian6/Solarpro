@@ -123,7 +123,7 @@ const nextConfig = {
       { hostname: 'maps.googleapis.com' },
     ],
   },
-  webpack: (config) => {
+  webpack: (config, { isServer }) => {
     config.externals = [
       ...(config.externals || []),
       { canvas: 'canvas' },
@@ -134,11 +134,20 @@ const nextConfig = {
       'pdfjs-dist',
       'tesseract.js',
       'tesseract.js-core',
-      'sharp',
       'exif-reader',
       'puppeteer-core',
       '@sparticuz/chromium-min',
     ];
+    // sharp: on the server, resolve as a normal commonjs external;
+    // on the client, resolve to an empty stub module so any accidental
+    // client-side import of a file that transitively references sharp
+    // does not produce `e.exports=sharp` (undefined global → runtime crash).
+    if (isServer) {
+      config.externals.push('sharp');
+    } else {
+      // On the client, replace all sharp imports with an empty stub
+      config.resolve.alias.sharp = require('path').resolve(__dirname, 'lib/sharp-browser-stub.js');
+    }
     return config;
   },
   // Force unique build ID on every deploy to bust CDN/browser cache

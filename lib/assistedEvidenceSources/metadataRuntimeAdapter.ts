@@ -1,4 +1,3 @@
-import sharp from 'sharp';
 import { createHash } from 'crypto';
 import { deterministicHash } from '@/lib/assistedEvidence';
 import { createReviewRequiredCandidates } from './candidateNormalization';
@@ -117,6 +116,8 @@ export const metadataRuntimeAdapter: MetadataCandidateRuntimeAdapter = {
   toolName: TOOL_NAME,
   toolVersion: TOOL_VERSION,
   async extractRuntimePayload(imageBytes) {
+    // Dynamic import — sharp has native bindings, keep out of client-side webpack bundle
+    const sharp = (await import('sharp')).default;
     const metadata = await sharp(imageBytes, { failOn: 'none' }).metadata();
     const basePayload = {
       inputByteLength: imageBytes.byteLength,

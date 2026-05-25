@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import sharp from 'sharp';
 import type { SiteSurveyFile } from '@/lib/db/surveys';
 
 export type PhotoQualityStatus = 'good' | 'review_required' | 'poor' | 'unavailable';
@@ -43,6 +42,8 @@ export async function analyzeSurveyPhotosOpenSource(files: SiteSurveyFile[]): Pr
 async function analyzeOnePhoto(file: SiteSurveyFile, originalIndex: number): Promise<InternalAnalysis> {
   try {
     const buffer = await fetchImageBuffer(file.fileUrl);
+    // Dynamic import — sharp has native bindings, keep out of client-side webpack bundle
+    const sharp = (await import('sharp')).default;
     const metadata = await sharp(buffer, { failOn: 'none' }).metadata();
     const width = metadata.width ?? null;
     const height = metadata.height ?? null;
@@ -119,6 +120,8 @@ async function fetchImageBuffer(url: string): Promise<Buffer> {
 }
 
 async function analyzePixels(buffer: Buffer): Promise<{ perceptualHash: string; sharpnessScore: number; brightnessScore: number }> {
+  // Dynamic import — sharp has native bindings, keep out of client-side webpack bundle
+  const sharp = (await import('sharp')).default;
   const size = 32;
   const raw = await sharp(buffer, { failOn: 'none' })
     .rotate()

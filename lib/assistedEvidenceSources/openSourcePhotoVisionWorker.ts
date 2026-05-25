@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import sharp from 'sharp';
 import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
 
 export const OPEN_SOURCE_PHOTO_VISION_TOOL_NAME = 'open-source-photo-vision-worker';
@@ -183,6 +182,8 @@ async function analyzeFile(survey: Pick<SiteSurvey, 'id' | 'projectId'>, file: S
   try {
     const bytes = await fetchImageBuffer(file.fileUrl);
     const byteHash = sha256(bytes);
+    // Dynamic import — sharp has native bindings, keep out of client-side webpack bundle
+    const sharp = (await import('sharp')).default;
     const image = sharp(bytes, { failOn: 'none' }).rotate();
     const metadata = await image.metadata();
     const width = metadata.width ?? null;
@@ -243,6 +244,8 @@ async function fetchImageBuffer(url: string): Promise<Buffer> {
 }
 
 async function analyzePixels(bytes: Buffer): Promise<PixelAnalysis> {
+  // Dynamic import — sharp has native bindings, keep out of client-side webpack bundle
+  const sharp = (await import('sharp')).default;
   const { data, info } = await sharp(bytes, { failOn: 'none' }).rotate().resize(EDGE_SIZE, EDGE_SIZE, { fit: 'inside' }).greyscale().raw().toBuffer({ resolveWithObject: true });
   const w = info.width;
   const h = info.height;
