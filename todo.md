@@ -1,29 +1,27 @@
-# Stage 3 Tesseract OCR worker extension
+# Fix Photo Vision Pass Batch Failures
 
-## Audit current Stage 2 worker and integration
-- [x] Confirm branch/status and inspect external worker OpenCV/YOLO architecture, health, requestedTools, candidate hashing, and safety limits
-- [x] Inspect Next client, route, review-only persistence, UI candidate display, and A-201 evidence sheet rendering paths
+## Problem
+- Photo vision pass completed with 142 failed batches and 0 candidates
+- All CV components showing "unavailable_batch_fallback" status
+- Batches are failing during processing on Render worker with "This operation was aborted" errors
+- Root cause: Batch timeout (80s) is too short for 10 photos per batch
 
-## Design Stage 3 OCR boundary
-- [x] Define Tesseract/pytesseract availability reporting, OCR candidate schema, crop behavior, hint extraction, deterministic hash behavior, and unavailable fallback behavior
-- [x] Define minimal integration path that reuses the existing review-only candidate store and avoids canonical/permit/BOM/engineering mutation
+## Analysis
+- Current batch size: 10 photos (recently increased from 5)
+- Current batch timeout: 80 seconds (OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_TIMEOUT_MS)
+- Render worker processes images SEQUENTIALLY
+- Each image: fetch (12s timeout) + OpenCV + YOLO + Tesseract OCR ≈ 8-12s per image
+- With 10 photos × 8-12s = 80-120s total → exceeds 80s timeout → AbortController fires
+- Also: Render starter plan has ~90s request timeout, adding another constraint
 
-## Implement Stage 3 only
-- [x] Add Tesseract system packages and pytesseract dependency to the existing worker
-- [x] Add OCR worker module with preprocessing, full-image OCR, YOLO-box crop OCR, text cleanup, confidence scoring, equipment regex hints, and review-only limitations
-- [x] Extend worker health/job flow for requestedTools tesseract_ocr and ocr_equipment_labels without fabricated OCR text
-- [x] Extend Next client/UI/render support for OCR candidates, snippets, hints, source crop metadata, and review-only labels
-- [x] Update worker README with OCR setup, Docker usage, limitations, and future-stage boundaries
+## Fix Plan
+1. Reduce batch size from 10 back to 5 photos per batch (keeps each batch well within timeout)
+2. Increase batch timeout from 80s to 120s (2 min) as safety margin
+3. Process more batches per poll (increase from 3 to 5) to compensate for smaller batch size
 
-## Verify
-- [x] Add/update tests for OCR unavailable path, candidate normalization, review-only persistence, A-201 snippets, and no CAD/permit/BOM/engineering/canonical mutation
-- [x] Run targeted tests and typecheck
-- [x] Commit and push dev with final report
-
-## Stage 3 audit/design notes
-- Current external worker already fetches real photo bytes, enforces byte/file/time limits, produces thumbnails, OpenCV candidates, optional YOLO/Supervision candidates, deterministic candidate hashes, and a run hash. It has no database write path.
-- Current Next route authorizes the operator, calls the external worker, persists returned candidates through the existing open-source photo vision candidate store, and returns explicit no-mutation metadata for canonical evidence, CAD, permits, BOM, and engineering workflows.
-- OCR will be reported as Tesseract/pytesseract availability only. If unavailable or not requested, the worker emits diagnostics and zero OCR text candidates; it must not fabricate text or add fake fallbacks.
-- OCR candidates will use candidateType `ocr_text`, candidateCategory `electrical_context`, reviewStatus `review_required`, nonAuthoritative true, confidence from actual Tesseract word confidences, normalized bbox/region, sourceCrop metadata, cleaned text, equipment hints, model/version provenance, limitations, and deterministic hashes.
-- Crop behavior: when YOLO boxes exist, OCR may run on bounded equipment/object crops; full-image OCR remains a real-photo fallback. Duplicate/empty low-confidence text is suppressed, not fabricated.
-- Integration path: extend requestedTools with `tesseract_ocr` and `ocr_equipment_labels`, normalize/store/display candidates through the existing bundle, and add A-201 snippets only as review-only evidence annotations.
+## Tasks
+- [ ] Reduce batch size default from 10 to 5 in asyncPhotoVisionJobManager.ts
+- [ ] Increase batch timeout from 80_000ms to 120_000ms
+- [ ] Increase maxBatchesPerPoll from 3 to 5 to compensate for smaller batches
+- [ ] Commit and push to dev branch
+- [ ] Verify deployment and test

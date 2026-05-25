@@ -1728,7 +1728,7 @@ function OpenSourcePhotoVisionPassPanel({
 
       // Step 2: Poll GET endpoint for job completion
       const POLL_INTERVAL_MS = 2_000; // 2 seconds between polls
-      const MAX_POLL_DURATION_MS = 1_800_000; // 30 minutes total (large surveys need ~490 photos / 10 per batch = 49 batches × ~15s each)
+      const MAX_POLL_DURATION_MS = 1_800_000; // 30 minutes total (large surveys need ~490 photos / 5 per batch = 98 batches, 5 batches per poll × ~40s each ≈ 20 min)
       const pollStart = Date.now();
 
       while (Date.now() - pollStart < MAX_POLL_DURATION_MS) {

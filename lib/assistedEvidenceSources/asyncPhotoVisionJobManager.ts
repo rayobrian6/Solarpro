@@ -58,7 +58,7 @@ export async function createJob(
 ): Promise<PhotoVisionJob> {
   const sql = await getDbReady();
   const jobId = `job_${surveyId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const batchSize = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_SIZE || 10);
+  const batchSize = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_SIZE || 5);
   const totalBatches = Math.ceil(photoFiles.length / batchSize);
 
   // Store survey + photoFiles as the job input (needed for batch processing)
@@ -146,7 +146,7 @@ export async function getJob(jobId: string): Promise<PhotoVisionJob | null> {
 // the external Render worker. Processing multiple batches per poll reduces
 // total round-trips and avoids client-side timeout for large surveys.
 // ---------------------------------------------------------------------------
-export async function processNextBatch(jobId: string, maxBatchesPerPoll = 3): Promise<PhotoVisionJob> {
+export async function processNextBatch(jobId: string, maxBatchesPerPoll = 5): Promise<PhotoVisionJob> {
   const sql = await getDbReady();
 
   // Load full job state from DB
@@ -207,7 +207,7 @@ export async function processNextBatch(jobId: string, maxBatchesPerPoll = 3): Pr
   // Process up to maxBatchesPerPoll batches in this single poll request.
   // This dramatically reduces total round-trips for large surveys (e.g. 490 photos).
   const workerUrl = getExternalOpenCvWorkerUrl()!;
-  const batchTimeoutMs = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_TIMEOUT_MS || 80_000);
+  const batchTimeoutMs = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_TIMEOUT_MS || 120_000);
   let batchIdx = currentBatch;
   let batchesProcessedThisPoll = 0;
 
@@ -260,11 +260,13 @@ export async function processNextBatch(jobId: string, maxBatchesPerPoll = 3): Pr
 
       console.log(`[asyncJobManager] Job ${jobId}: batch ${batchIdx + 1}/${totalBatches} completed. processed=${batchRun.processedCount} candidates=${batchRun.candidateCount}`);
     } catch (batchErr) {
+      const isTimeout = batchErr instanceof Error && batchErr.name === 'AbortError';
       const errMsg = batchErr instanceof Error ? batchErr.message : String(batchErr);
-      console.error(`[asyncJobManager] Job ${jobId}: batch ${batchIdx + 1}/${totalBatches} failed:`, errMsg);
-      batchErrors.push(`Batch ${batchIdx + 1} (${batchFiles.length} files): ${errMsg}`);
+      const errLabel = isTimeout ? `TIMEOUT after ${batchTimeoutMs}ms: ${errMsg}` : errMsg;
+      console.error(`[asyncJobManager] Job ${jobId}: batch ${batchIdx + 1}/${totalBatches} failed${isTimeout ? ' (TIMEOUT)' : ''}:`, errLabel);
+      batchErrors.push(`Batch ${batchIdx + 1} (${batchFiles.length} files): ${errLabel}`);
       for (const file of batchFiles) {
-        allFileResults.push(makeFailedFileResult(survey, file, createdAtISO, errMsg));
+        allFileResults.push(makeFailedFileResult(survey, file, createdAtISO, errLabel));
       }
     }
 
