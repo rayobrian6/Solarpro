@@ -1,6 +1,6 @@
 // ============================================================================
 // POST /api/site-surveys/[surveyId]/open-source-photo-vision-pass
-// Operator-triggered external OSS OpenCV photo vision pass.
+// Operator-triggered external OSS OpenCV + YOLO/Supervision CV worker pass.
 // Review-only candidates only: no CAD/canonical/permit/BOM/workflow mutation.
 // ============================================================================
 
@@ -42,7 +42,7 @@ export async function POST(
     if (outcome.available === false) {
       return NextResponse.json({
         success: false,
-        error: 'External OpenCV photo vision worker unavailable',
+        error: 'External CV photo vision worker unavailable',
         detail: outcome.reason,
         data: {
           workerHealth: outcome.health,
@@ -116,7 +116,7 @@ function unavailableSummary(surveyId: string, reason: string) {
     failedFileCount: 0,
     candidateCount: 0,
     candidateTypeCounts: {},
-    unavailableDiagnostics: [`externalOpenCvWorker: ${reason}`],
+    unavailableDiagnostics: [`externalCvWorker: ${reason}`],
     runHash: `unavailable:${surveyId}`,
   };
 }

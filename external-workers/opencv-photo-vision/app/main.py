@@ -9,6 +9,7 @@ from typing import Any, Literal
 import cv2
 import numpy as np
 import requests
+from app.yolo_detection import YoloDetectionService
 from fastapi import FastAPI
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -17,6 +18,10 @@ TOOL_NAME = "external-opencv-photo-vision-worker"
 TOOL_VERSION = "0.1.0"
 MAX_IMAGE_BYTES = int(os.environ.get("MAX_IMAGE_BYTES", str(16 * 1024 * 1024)))
 FETCH_TIMEOUT_SECONDS = float(os.environ.get("FETCH_TIMEOUT_SECONDS", "12"))
+MAX_FILES_PER_JOB = int(os.environ.get("MAX_FILES_PER_JOB", "12"))
+PROCESSING_TIMEOUT_SECONDS = float(os.environ.get("PROCESSING_TIMEOUT_SECONDS", "45"))
+
+yolo_service = YoloDetectionService()
 
 app = FastAPI(title="SolarPro External OpenCV Photo Vision Worker", version=TOOL_VERSION)
 
@@ -41,7 +46,7 @@ def no_authority() -> dict[str, bool]:
 def base_limitations() -> list[str]:
     return [
         "REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY",
-        "OpenCV candidates are pixel-derived review cues only; they do not create roof planes, measurements, CAD geometry, permit inputs, BOM inputs, or engineering truth.",
+        "OpenCV and YOLO/Supervision candidates are pixel/model-derived review cues only; they do not create roof planes, measurements, CAD geometry, permit inputs, BOM inputs, or engineering truth.",
         "SolarPro must persist and review results; this external worker does not write to the SolarPro database.",
     ]
 
@@ -58,11 +63,13 @@ class VisionJob(BaseModel):
     surveyId: str
     projectId: str | None = None
     createdAt: str | None = None
+    requestedTools: list[str] = Field(default_factory=lambda: ["opencv_primitives", "yolo_detection"])
     files: list[FileJob] = Field(default_factory=list)
 
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    yolo_availability = yolo_service.availability()
     return {
         "status": "ok",
         "schemaVersion": "solarpro_external_photo_vision_health_v1",
@@ -71,7 +78,9 @@ def health() -> dict[str, Any]:
         "tools": {
             "opencv": {"available": True, "version": cv2.__version__},
             "python": {"available": True},
-            "yoloSupervision": {"available": False, "reason": "stage_2_not_implemented"},
+            "yolo": yolo_availability.yolo,
+            "supervision": yolo_availability.supervision,
+            "yoloSupervision": {"available": yolo_availability.yolo.get("available") and yolo_availability.supervision.get("available"), "reason": yolo_availability.yolo.get("reason") or yolo_availability.supervision.get("reason"), "modelLoaded": yolo_availability.yolo.get("modelLoaded")},
             "open3d": {"available": False, "reason": "future_stage_not_implemented"},
             "freecad": {"available": False, "reason": "future_stage_not_implemented"},
             "tesseract": {"available": False, "reason": "stage_3_not_implemented_in_this_worker"},
@@ -85,7 +94,7 @@ def run_job(job: VisionJob) -> dict[str, Any]:
     created_at = job.createdAt or datetime.now(timezone.utc).isoformat()
     files: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
-    for file_job in job.files:
+    for file_job in job.files[:MAX_FILES_PER_JOB]:
         file_result = analyze_file(job, file_job, created_at)
         files.append(file_result)
         candidates.extend(file_result["candidates"])
@@ -117,7 +126,9 @@ def run_job(job: VisionJob) -> dict[str, Any]:
         "candidates": candidates,
         "availability": {
             "opencv": f"available:{cv2.__version__}",
-            "yoloSupervision": "unavailable_stage_2_not_implemented",
+            "yoloSupervision": yolo_availability_string(),
+            "yolo": yolo_availability_string(),
+            "supervision": supervision_availability_string(),
             "tesseract": "unavailable_stage_3_not_implemented_in_this_worker",
             "open3d": "unavailable_future_stage_not_implemented",
             "freecad": "unavailable_future_stage_not_implemented",
@@ -149,8 +160,14 @@ def analyze_file(job: VisionJob, file_job: FileJob, created_at: str) -> dict[str
         lines = extract_lines(edges, width, height)
         regions = extract_regions(edges, width, height)
         thumbnail = make_thumbnail(content)
-        run_hash = stable_hash({"fileId": file_job.fileId, "sha256": byte_hash, "lines": lines, "regions": regions})
-        candidates = build_candidates(job, file_job, byte_hash, created_at, run_hash, edge_ratio, lines, regions)
+        opencv_candidates = build_candidates(job, file_job, byte_hash, created_at, "pending", edge_ratio, lines, regions) if tool_requested(job, "opencv_primitives") else []
+        elapsed_before_yolo = time.time() - started
+        if elapsed_before_yolo > PROCESSING_TIMEOUT_SECONDS:
+            yolo_result = {"available": False, "diagnostic": "processing_timeout_before_yolo", "candidates": [], "elapsedMs": 0, "limitations": []}
+        else:
+            yolo_result = yolo_service.detect(image, survey_id=job.surveyId, file_id=file_job.fileId, file_url=file_job.fileUrl, filename=file_job.filename, byte_hash=byte_hash, created_at=created_at) if tool_requested(job, "yolo_detection") else {"available": False, "diagnostic": "yolo_detection_not_requested", "candidates": [], "elapsedMs": 0, "limitations": []}
+        candidates = [*opencv_candidates, *yolo_result.get("candidates", [])]
+        run_hash = stable_hash({"fileId": file_job.fileId, "sha256": byte_hash, "lines": lines, "regions": regions, "yoloCandidates": [c.get("payload", {}) for c in yolo_result.get("candidates", [])]})
         return {
             "surveyId": job.surveyId,
             "fileId": file_job.fileId,
@@ -168,6 +185,7 @@ def analyze_file(job: VisionJob, file_job: FileJob, created_at: str) -> dict[str
                 "sharpnessScore": round(float(cv2.Laplacian(gray, cv2.CV_64F).var()), 3),
                 "qualityScore": int(max(5, min(95, 45 + edge_ratio * 250))),
                 "elapsedMs": int((time.time() - started) * 1000),
+                "yoloElapsedMs": yolo_result.get("elapsedMs", 0),
             },
             "thumbnailDataUrl": thumbnail,
             "edgeSummary": {
@@ -178,7 +196,8 @@ def analyze_file(job: VisionJob, file_job: FileJob, created_at: str) -> dict[str
                 "denseRegionCount": len(regions),
             },
             "candidates": candidates,
-            "limitations": base_limitations(),
+            "limitations": [*base_limitations(), *([f"YOLO diagnostic: {yolo_result.get('diagnostic')}"] if yolo_result.get("diagnostic") else [])],
+            "toolDiagnostics": {"yolo": {"available": yolo_result.get("available"), "diagnostic": yolo_result.get("diagnostic"), "model": yolo_result.get("model"), "modelVersion": yolo_result.get("modelVersion"), "elapsedMs": yolo_result.get("elapsedMs", 0)}},
             "runHash": run_hash,
         }
     except Exception as exc:
@@ -283,3 +302,19 @@ def build_candidates(job: VisionJob, file_job: FileJob, byte_hash: str, created_
         deterministic_hash = stable_hash({**candidate, "candidateId": "stable", "deterministicHash": "stable", "createdAt": "stable-created-at"})
         finalized.append({**candidate, "candidateId": f"ospv_{deterministic_hash[:24]}_{index + 1}", "deterministicHash": deterministic_hash})
     return finalized
+
+
+def tool_requested(job: VisionJob, tool: str) -> bool:
+    return tool in set(job.requestedTools or [])
+
+def yolo_availability_string() -> str:
+    availability = yolo_service.availability()
+    if availability.yolo.get("available") and availability.supervision.get("available"):
+        return f"available:{availability.yolo.get('model')}:{availability.yolo.get('modelVersion')}"
+    return f"unavailable:{availability.yolo.get('reason') or availability.supervision.get('reason') or 'model_not_loaded'}"
+
+def supervision_availability_string() -> str:
+    availability = yolo_service.availability()
+    if availability.supervision.get("available"):
+        return f"available:{availability.supervision.get('version')}"
+    return f"unavailable:{availability.supervision.get('reason') or 'supervision_not_loaded'}"

@@ -1663,8 +1663,17 @@ function OpenSourcePhotoVisionPassPanel({
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [candidateFilter, setCandidateFilter] = useState<"both" | "opencv" | "yolo">("both");
   const activeBundle = result?.stored ?? bundle ?? null;
-  const candidates = safeArray(activeBundle?.candidates);
+  const allCandidates = safeArray(activeBundle?.candidates);
+  const candidates = allCandidates.filter((candidate) => {
+    const stage = String(candidate.payload?.stage ?? "");
+    const source = String(candidate.payload?.source ?? "");
+    const isYolo = candidate.candidateType === "object_detection" || stage.includes("yolo") || source.includes("yolo");
+    if (candidateFilter === "yolo") return isYolo;
+    if (candidateFilter === "opencv") return !isYolo;
+    return true;
+  });
   const candidateTypeCounts = candidates.reduce<Record<string, number>>(
     (acc, candidate) => {
       acc[candidate.candidateType] = (acc[candidate.candidateType] ?? 0) + 1;
@@ -1723,14 +1732,15 @@ function OpenSourcePhotoVisionPassPanel({
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-200">
-                External OpenCV worker · actual image bytes · separate from OpenAI preview
+External OpenCV + YOLO/Supervision worker · actual image bytes · separate from OpenAI preview
               </p>
               <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
                 Sends authorized survey photo URLs to the external Dockerized
-                OpenCV worker, which fetches actual image bytes and returns
-                review-only edge, line, contour, rectangle, thumbnail,
-                provenance, and availability diagnostics. YOLO, OCR, Open3D,
-                and FreeCAD remain future stages and are not marked complete.
+                OpenCV + YOLO/Supervision worker, which fetches actual image
+                bytes and returns review-only edges, lines, contours, rectangles,
+                semantic object detections, thumbnails, confidence, model
+                provenance, and availability diagnostics. OCR, Open3D, and
+                FreeCAD remain future stages and are not marked complete.
               </p>
             </div>
             <button
@@ -1748,7 +1758,7 @@ function OpenSourcePhotoVisionPassPanel({
             <ReadinessPill tone="slate">No CAD Mutation</ReadinessPill>
             <ReadinessPill tone="slate">No Permit/BOM Trigger</ReadinessPill>
             <ReadinessPill tone="emerald">
-              {activeBundle ? "Stored Candidates Available" : "Available On Demand"}
+              {activeBundle ? "Stored CV Candidates Available" : "Available On Demand"}
             </ReadinessPill>
           </div>
         </div>
@@ -1766,7 +1776,7 @@ function OpenSourcePhotoVisionPassPanel({
           {[
             ["Processed", result?.summary.processedFileCount ?? "—"],
             ["Failed", result?.summary.failedFileCount ?? "—"],
-            ["Candidates", activeBundle?.candidateCount ?? 0],
+            ["Candidates", candidates.length],
             ["Edges/lines", edgeCount],
             ["Equipment", equipmentCount],
             ["Obstructions", obstructionCount],
@@ -1784,6 +1794,27 @@ function OpenSourcePhotoVisionPassPanel({
             </div>
           ))}
         </div>
+
+        {allCandidates.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-700/60 bg-slate-950/40 p-3">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Overlay filter</span>
+            {(["both", "opencv", "yolo"] as const).map((filter) => (
+              <button
+                key={filter}
+                type="button"
+                onClick={() => setCandidateFilter(filter)}
+                className={`rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider transition ${
+                  candidateFilter === filter
+                    ? "border-emerald-400/50 bg-emerald-500/20 text-emerald-100"
+                    : "border-slate-700 bg-slate-900/60 text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                {filter === "both" ? "OpenCV + YOLO" : filter === "opencv" ? "OpenCV candidates" : "YOLO detections"}
+              </button>
+            ))}
+            <span className="text-[10px] text-slate-500">Showing {candidates.length} of {allCandidates.length} persisted review-only candidates.</span>
+          </div>
+        )}
 
         {result?.summary.unavailableDiagnostics?.length ? (
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
@@ -1829,7 +1860,7 @@ function OpenSourcePhotoVisionPassPanel({
                       </span>
                     </div>
                     <p className="mt-1 text-[10px] text-slate-500">
-                      {candidate.toolName} v{candidate.toolVersion} · run {candidate.runHash.slice(0, 10)} · REVIEW-ONLY / NOT CAD GEOMETRY
+                      {candidate.toolName} v{candidate.toolVersion} · {String(candidate.payload?.sourceModel ?? candidate.payload?.source ?? "cv-worker")} · run {candidate.runHash.slice(0, 10)} · REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
                     </p>
                   </div>
                 ))}

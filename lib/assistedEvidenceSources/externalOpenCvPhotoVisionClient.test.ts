@@ -36,16 +36,18 @@ describe('external OpenCV photo vision client', () => {
   });
 
   it('normalizes external OpenCV results into deterministic review-only candidates', async () => {
-    const fetchMock = vi.fn(async (url: string) => {
+    let postedJob: Record<string, unknown> | null = null;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/health')) {
         return new Response(JSON.stringify({
           status: 'ok',
           toolName: 'external-opencv-photo-vision-worker',
           toolVersion: '0.1.0',
-          tools: { opencv: { available: true, version: '4.10.0' } },
+          tools: { opencv: { available: true, version: '4.10.0' }, yolo: { available: true, modelLoaded: true, model: 'yolov8n.pt' }, supervision: { available: true, version: '0.25.1' } },
           authority: { reviewOnly: true, nonAuthoritative: true },
         }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
+      postedJob = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       return new Response(JSON.stringify({
         schemaVersion: 'solarpro_external_photo_vision_result_v1',
         surveyId: survey.id,
@@ -84,11 +86,32 @@ describe('external OpenCV photo vision client', () => {
             nonAuthoritative: true,
             runHash: 'runhash123',
             createdAt: '2026-01-01T00:00:00.000Z',
+          }, {
+            candidateId: 'worker-yolo-1',
+            deterministicHash: 'deterministic-yolo-hash',
+            surveyId: survey.id,
+            fileId: file.id,
+            fileUrl: file.fileUrl,
+            filename: file.filename,
+            toolName: 'external-yolo-supervision-worker',
+            toolVersion: '8.3.55',
+            candidateType: 'object_detection',
+            candidateCategory: 'electrical_context',
+            category: 'main_service_panel_candidate',
+            confidence: 82,
+            summary: 'YOLO/Supervision semantic main service panel candidate.',
+            payload: { source: 'yolo_detection', sourceModel: 'yolov8n.pt', modelVersion: '8.3.55', rawClassName: 'tv', bbox: { x: 100, y: 200, width: 220, height: 300, coordinateSystem: 'normalized_image_0_1000' } },
+            bbox: { x: 100, y: 200, width: 220, height: 300, coordinateSystem: 'normalized_image_0_1000' },
+            limitations: ['Generic pretrained YOLO weights are not solar-specific', 'REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY'],
+            reviewStatus: 'review_required',
+            nonAuthoritative: true,
+            runHash: 'runhash123',
+            createdAt: '2026-01-01T00:00:00.000Z',
           }],
           limitations: ['REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY'],
           runHash: 'runhash123',
         }],
-        availability: { opencv: 'available:4.10.0', yoloSupervision: 'unavailable_stage_2_not_implemented', tesseract: 'unavailable_stage_3_not_implemented_in_this_worker', pythonWorker: 'available_external_docker_worker' },
+        availability: { opencv: 'available:4.10.0', yoloSupervision: 'available:yolov8n.pt:8.3.55', yolo: 'available:yolov8n.pt:8.3.55', supervision: 'available:0.25.1', tesseract: 'unavailable_stage_3_not_implemented_in_this_worker', pythonWorker: 'available_external_docker_worker' },
         authority: { reviewOnly: true, nonAuthoritative: true, canonicalMutationAllowed: false, cadMutationAllowed: false, permitGenerationAllowed: false, bomMutationAllowed: false, engineeringWorkflowMutationAllowed: false },
         limitations: ['REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY'],
       }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -101,8 +124,9 @@ describe('external OpenCV photo vision client', () => {
     if (outcome.available) {
       expect(outcome.run.toolName).toBe('external-opencv-photo-vision-worker');
       expect(outcome.run.toolVersion).toBe('0.1.0');
-      expect(outcome.run.availability.opencv).toBe('available_external_worker');
-      expect(outcome.run.availability.yoloSupervision).toContain('unavailable_stage_2');
+      expect(outcome.run.availability.opencv).toBe('available:4.10.0');
+      expect(outcome.run.availability.yoloSupervision).toContain('available:yolov8n.pt');
+      expect(outcome.run.availability.supervision).toBe('available:0.25.1');
       expect(outcome.run.authority).toMatchObject({
         reviewOnly: true,
         nonAuthoritative: true,
@@ -125,6 +149,23 @@ describe('external OpenCV photo vision client', () => {
         stage: 'stage_1_opencv_edges_lines_contours',
         sourceToolName: 'external-opencv-photo-vision-worker',
       });
+      expect(outcome.run.candidates[1]).toMatchObject({
+        toolName: 'external-yolo-supervision-worker',
+        candidateType: 'object_detection',
+        candidateCategory: 'electrical_context',
+        reviewStatus: 'review_required',
+        nonAuthoritative: true,
+        deterministicHash: 'deterministic-yolo-hash',
+      });
+      expect(outcome.run.candidates[1].payload).toMatchObject({
+        externalWorker: true,
+        stage: 'stage_2_yolo_supervision_semantic_detection',
+        sourceModel: 'yolov8n.pt',
+        semanticCategory: 'main_service_panel_candidate',
+        reviewRequired: true,
+        region: { x: 100, y: 200, width: 220, height: 300, coordinateSystem: 'normalized_image_0_1000' },
+      });
+      expect(postedJob?.requestedTools).toEqual(['opencv_primitives', 'yolo_detection']);
     }
   });
 });

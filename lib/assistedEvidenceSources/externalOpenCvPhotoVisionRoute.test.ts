@@ -71,8 +71,8 @@ describe('open-source photo vision pass API route', () => {
       candidateCount: 1,
       runHash: 'runhash',
       files: [],
-      candidates: [{ candidateType: 'dominant_line_candidate' }],
-      availability: { opencv: 'available_external_worker', yoloSupervision: 'unavailable_stage_2_not_implemented', tesseract: 'unavailable_stage_3_not_implemented_in_this_pass', pythonWorker: 'available_external_docker_worker' },
+      candidates: [{ candidateType: 'object_detection', payload: { stage: 'stage_2_yolo_supervision_semantic_detection', sourceModel: 'yolov8n.pt' }, nonAuthoritative: true, reviewStatus: 'review_required' }],
+      availability: { opencv: 'available:4.10.0', yoloSupervision: 'available:yolov8n.pt:8.3.55', yolo: 'available:yolov8n.pt:8.3.55', supervision: 'available:0.25.1', tesseract: 'unavailable_stage_3_not_implemented_in_this_pass', pythonWorker: 'available_external_docker_worker' },
       authority: { reviewOnly: true, nonAuthoritative: true, canonicalMutationAllowed: false, cadMutationAllowed: false, permitGenerationAllowed: false, bomMutationAllowed: false, engineeringWorkflowMutationAllowed: false },
       limitations: ['REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY'],
     };
@@ -86,7 +86,8 @@ describe('open-source photo vision pass API route', () => {
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(json.data.summary).toMatchObject({ processedFileCount: 1, failedFileCount: 0, candidateCount: 1, runHash: 'runhash' });
-    expect(json.data.summary.unavailableDiagnostics).toContain('yoloSupervision: unavailable_stage_2_not_implemented');
+    expect(json.data.summary.candidateTypeCounts).toMatchObject({ object_detection: 1 });
+    expect(json.data.summary.unavailableDiagnostics).not.toContain('yoloSupervision: unavailable_stage_2_not_implemented');
     expect(json.meta).toMatchObject({ externalWorker: true, workerUnavailable: false, sourceImageBytesProcessed: true, cadMutationPerformed: false, bomMutationPerformed: false });
     expect(replaceOpenSourcePhotoVisionCandidatesForSurveyRun).toHaveBeenCalledTimes(1);
     expect(replaceOpenSourcePhotoVisionCandidatesForSurveyRun.mock.calls[0][2]).toBe(run);

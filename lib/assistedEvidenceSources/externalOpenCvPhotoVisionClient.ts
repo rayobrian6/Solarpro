@@ -8,6 +8,7 @@ import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
 
 export const EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME = 'external-opencv-photo-vision-worker';
 export const EXTERNAL_OPENCV_PHOTO_VISION_TOOL_VERSION = '0.1.0';
+export const REQUESTED_EXTERNAL_CV_TOOLS = ['opencv_primitives', 'yolo_detection'] as const;
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -67,6 +68,7 @@ export async function runExternalOpenCvPhotoVisionPass(input: {
     surveyId: input.survey.id,
     projectId: input.survey.projectId ?? null,
     createdAt,
+    requestedTools: [...REQUESTED_EXTERNAL_CV_TOOLS],
     files: photoFiles.map(file => ({
       fileId: file.id,
       fileUrl: file.fileUrl,
@@ -132,17 +134,26 @@ function normalizeExternalRun(
     runHash,
     files: fileResults.map(file => ({ ...file, runHash })),
     candidates: candidates.map(candidate => ({ ...candidate, runHash })),
-    availability: {
-      sharp: 'available_next_app_thumbnail_fallback',
-      opencv: 'available_external_worker',
-      yoloSupervision: 'unavailable_stage_2_not_implemented',
-      tesseract: 'unavailable_stage_3_not_implemented_in_this_pass',
-      pythonWorker: 'available_external_docker_worker',
-      open3d: 'unavailable_future_stage_not_implemented',
-      freecad: 'unavailable_future_stage_not_implemented',
-    },
+    availability: normalizeAvailability(value.availability),
     authority: noAuthority(),
     limitations: baseLimitations(),
+  };
+}
+
+function normalizeAvailability(value: unknown): OpenSourcePhotoVisionRunResult['availability'] {
+  const raw = asRecord(value);
+  const yolo = typeof raw.yolo === 'string' ? raw.yolo : typeof raw.yoloSupervision === 'string' ? raw.yoloSupervision : 'unavailable_yolo_diagnostics_missing';
+  const supervision = typeof raw.supervision === 'string' ? raw.supervision : yolo.includes('available') && !yolo.includes('unavailable') ? 'available_with_yolo_worker' : 'unavailable_supervision_diagnostics_missing';
+  return {
+    sharp: 'available_next_app_thumbnail_fallback',
+    opencv: typeof raw.opencv === 'string' ? raw.opencv : 'available_external_worker',
+    yoloSupervision: typeof raw.yoloSupervision === 'string' ? raw.yoloSupervision : yolo,
+    yolo,
+    supervision,
+    tesseract: typeof raw.tesseract === 'string' ? raw.tesseract : 'unavailable_stage_3_not_implemented_in_this_pass',
+    pythonWorker: typeof raw.pythonWorker === 'string' ? raw.pythonWorker : 'available_external_docker_worker',
+    open3d: typeof raw.open3d === 'string' ? raw.open3d : 'unavailable_future_stage_not_implemented',
+    freecad: typeof raw.freecad === 'string' ? raw.freecad : 'unavailable_future_stage_not_implemented',
   };
 }
 
@@ -175,7 +186,7 @@ function normalizeFileResult(raw: unknown, survey: Pick<SiteSurvey, 'id' | 'proj
     },
     thumbnailDataUrl: typeof value.thumbnailDataUrl === 'string' && value.thumbnailDataUrl.startsWith('data:image/') ? value.thumbnailDataUrl : null,
     edgeSummary: normalizeEdgeSummary(value.edgeSummary),
-    candidates,
+    candidates: candidates.map(candidate => ({ ...candidate, thumbnailDataUrl: typeof value.thumbnailDataUrl === 'string' && value.thumbnailDataUrl.startsWith('data:image/') ? value.thumbnailDataUrl : undefined })),
     limitations: normalizeStringArray(value.limitations, baseLimitations()),
     runHash: typeof value.runHash === 'string' ? value.runHash : sha256(stable({ surveyId: survey.id, fileId, error: value.error ?? null })),
   };
@@ -187,7 +198,7 @@ function normalizeCandidate(raw: unknown, survey: Pick<SiteSurvey, 'id' | 'proje
   const candidateCategory = normalizeCandidateCategory(value.candidateCategory);
   const payload = asRecord(value.payload);
   const line = normalizeLine(value.line ?? payload.line);
-  const region = normalizeRegion(value.region ?? payload.region);
+  const region = normalizeRegion(value.region ?? value.bbox ?? payload.region ?? payload.bbox);
   const toolName = typeof value.toolName === 'string' && value.toolName ? value.toolName : EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME;
   const toolVersion = typeof value.toolVersion === 'string' && value.toolVersion ? value.toolVersion : EXTERNAL_OPENCV_PHOTO_VISION_TOOL_VERSION;
   const base = {
@@ -198,13 +209,17 @@ function normalizeCandidate(raw: unknown, survey: Pick<SiteSurvey, 'id' | 'proje
     candidateType,
     candidateCategory,
     confidence: clamp(Math.round(numberOrZero(value.confidence)), 0, 100),
-    summary: typeof value.summary === 'string' ? value.summary : 'External OpenCV review candidate.',
+    summary: typeof value.summary === 'string' ? value.summary : candidateType === 'object_detection' ? 'External YOLO/Supervision object detection review candidate.' : 'External OpenCV review candidate.',
     payload: {
       ...payload,
       externalWorker: true,
-      stage: 'stage_1_opencv_edges_lines_contours',
+      stage: candidateType === 'object_detection' ? 'stage_2_yolo_supervision_semantic_detection' : 'stage_1_opencv_edges_lines_contours',
       sourceToolName: toolName,
       sourceToolVersion: toolVersion,
+      sourceModel: typeof value.sourceModel === 'string' ? value.sourceModel : typeof payload.sourceModel === 'string' ? payload.sourceModel : null,
+      modelVersion: typeof value.modelVersion === 'string' ? value.modelVersion : typeof payload.modelVersion === 'string' ? payload.modelVersion : null,
+      semanticCategory: typeof value.category === 'string' ? value.category : typeof payload.semanticCategory === 'string' ? payload.semanticCategory : null,
+      reviewRequired: true,
       region: region ?? null,
       line: line ?? null,
     },

@@ -796,4 +796,61 @@ describe("Professional Plan-Set Render Output V1", () => {
     expect(svg).not.toContain("LEGACY SYNTHETIC FALLBACK - ROOF EDGE REVIEW CUE");
   });
 
+
+  it("renders YOLO/Supervision object detection boxes with model provenance and review-only labels", () => {
+    const report = buildProfessionalSurveyReadinessReport(survey(), files());
+    const pkg = buildProfessionalPlanSetRenderPackage(report, null, {
+      openSourcePhotoVision: {
+        schemaVersion: "open_source_photo_vision_stored_bundle_v1",
+        surveyId: report.source.surveyId,
+        toolName: "external-opencv-photo-vision-worker",
+        toolVersion: "0.1.0",
+        candidateCount: 1,
+        latestRunHash: "yolorunhash123456",
+        candidates: [
+          {
+            id: "candidate-yolo-overlay",
+            surveyId: report.source.surveyId,
+            fileId: "file-roof",
+            toolName: "external-yolo-supervision-worker",
+            toolVersion: "8.3.55",
+            runHash: "yolorunhash123456",
+            candidateType: "object_detection",
+            candidateCategory: "electrical_context",
+            payload: {
+              source: "yolo_detection",
+              semanticCategory: "main_service_panel_candidate",
+              sourceModel: "yolov8n.pt",
+              region: { x: 120, y: 180, width: 220, height: 260, coordinateSystem: "normalized_image_0_1000" },
+            },
+            confidence: 82,
+            limitations: ["REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY"],
+            reviewStatus: "review_required",
+            deterministicHash: "hash-yolo-overlay",
+            thumbnailDataUrl: null,
+            createdAt: "2026-05-25T00:00:00Z",
+          },
+        ],
+        authority: {
+          reviewOnly: true,
+          nonAuthoritative: true,
+          canonicalMutationAllowed: false,
+          cadMutationAllowed: false,
+          permitGenerationAllowed: false,
+          bomMutationAllowed: false,
+          engineeringWorkflowMutationAllowed: false,
+        },
+        limitations: ["REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY"],
+      },
+    });
+    const sitePlan = pkg.sheets.find((sheet) => sheet.sheetType === "site_plan_render");
+    const svg = sitePlan?.svg ?? "";
+
+    expect(svg).toContain("main service panel candidate");
+    expect(svg).toContain("yolov8n.pt");
+    expect(svg).toContain("external-yolo-supervision-worker/8.3.55");
+    expect(svg).toContain("REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY");
+    expect(svg).not.toContain("LEGACY SYNTHETIC FALLBACK - ROOF EDGE REVIEW CUE");
+  });
+
 });
