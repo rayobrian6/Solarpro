@@ -1701,37 +1701,83 @@ function OpenSourcePhotoVisionPassPanel({
     setLoading(true);
     setError(null);
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 300_000); // 5 min client-side timeout
-      let res: Response;
+      // Step 1: POST to create async job (returns immediately with jobId)
+      const postRes = await fetch(
+        `/api/site-surveys/${surveyId}/open-source-photo-vision-pass`,
+        { method: "POST", headers: { "Content-Type": "application/json" } },
+      );
+      let postJson: Record<string, unknown>;
       try {
-        res = await fetch(
-          `/api/site-surveys/${surveyId}/open-source-photo-vision-pass`,
-          { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal },
-        );
-      } finally {
-        clearTimeout(timeoutId);
-      }
-      let json: Record<string, unknown>;
-      try {
-        json = await res.json();
-      } catch (jsonErr) {
-        setError(`Photo vision pass returned non-JSON (HTTP ${res.status}). The server function may have timed out or crashed.`);
+        postJson = await postRes.json();
+      } catch {
+        setError(`Photo vision pass returned non-JSON (HTTP ${postRes.status}). The server function may have timed out or crashed.`);
         return;
       }
-      if (!json.success) {
+      if (!postJson.success) {
         setError(
-          [json.error, json.detail].filter(Boolean).join(": ") ||
-            "Open-source photo vision pass failed",
+          [postJson.error, postJson.detail].filter(Boolean).join(": ") ||
+            "Open-source photo vision pass failed to start",
         );
         return;
       }
-      const data = json.data as OpenSourcePhotoVisionRunResponse;
-      setResult(data);
-      onDetailRefresh?.({ openSourcePhotoVision: data.stored });
+      const jobId = postJson.jobId as string;
+      if (!jobId) {
+        setError("Server did not return a jobId. Cannot poll for results.");
+        return;
+      }
+
+      // Step 2: Poll GET endpoint for job completion
+      const POLL_INTERVAL_MS = 3_000; // 3 seconds
+      const MAX_POLL_DURATION_MS = 300_000; // 5 minutes total
+      const pollStart = Date.now();
+
+      while (Date.now() - pollStart < MAX_POLL_DURATION_MS) {
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+
+        const getRes = await fetch(
+          `/api/site-surveys/${surveyId}/open-source-photo-vision-pass?jobId=${encodeURIComponent(jobId)}`,
+        );
+        let getJson: Record<string, unknown>;
+        try {
+          getJson = await getRes.json();
+        } catch {
+          setError(`Poll request returned non-JSON (HTTP ${getRes.status}). The server may have recycled.`);
+          return;
+        }
+
+        if (!getJson.success && getJson.status !== 'failed') {
+          // Job not found or other error during polling
+          setError(
+            [getJson.error, getJson.detail].filter(Boolean).join(": ") ||
+              "Error while polling for photo vision results",
+          );
+          return;
+        }
+
+        const jobStatus = getJson.status as string;
+
+        if (jobStatus === "completed" && getJson.data) {
+          const data = getJson.data as OpenSourcePhotoVisionRunResponse;
+          setResult(data);
+          onDetailRefresh?.({ openSourcePhotoVision: data.stored });
+          return;
+        }
+
+        if (jobStatus === "failed") {
+          setError(
+            [getJson.error].filter(Boolean).join(": ") ||
+              "Photo vision pass failed during processing",
+          );
+          return;
+        }
+
+        // Still pending/running — continue polling
+      }
+
+      // Timed out
+      setError("Photo vision pass timed out (5 min). The survey may have too many photos for the current worker.");
     } catch (err) {
-      const isAbort = err instanceof DOMException && err.name === "AbortError";
-      setError(isAbort ? "Photo vision pass timed out (5 min). The survey may have too many photos for the current worker." : "Network error while running open-source photo vision pass");
+      setError("Network error while running open-source photo vision pass");
     } finally {
       setLoading(false);
     }
@@ -1766,7 +1812,7 @@ External OpenCV + YOLO/Supervision + Tesseract OCR worker · actual image bytes 
               className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-400/30 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading ? <div className="spinner w-3 h-3" /> : <RefreshCw size={12} />}
-              {loading ? "Processing photo bytes..." : "Run Open-Source Photo Vision Pass"}
+              {loading ? "Running photo vision pass..." : "Run Open-Source Photo Vision Pass"}
             </button>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">

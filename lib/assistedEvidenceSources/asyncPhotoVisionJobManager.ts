@@ -1,3 +1,19 @@
+// ============================================================================
+// Async Photo Vision Job Manager
+//
+// Manages in-memory job state for the async photo vision pass.
+//
+// Architecture:
+//   POST creates a job record and returns jobId immediately.
+//   Each GET/poll request processes ONE batch of photos, then returns status.
+//   This "lazy processing" pattern ensures work happens within the
+//   serverless function's lifecycle — no fire-and-forget Promises
+//   that could be killed when the function responds.
+//
+//   The client polls every 3 seconds. Each poll processes 5 photos (~10s),
+//   so the GET handler always returns within ~15s — well within any timeout.
+// ============================================================================
+
 import crypto from 'crypto';
 import type {
   OpenSourcePhotoVisionCandidate,
@@ -5,120 +21,175 @@ import type {
   OpenSourcePhotoVisionRunResult,
 } from './openSourcePhotoVisionWorker';
 import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
+import {
+  EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME,
+  EXTERNAL_OPENCV_PHOTO_VISION_TOOL_VERSION,
+  getExternalOpenCvWorkerUrl,
+  fetchHealth,
+} from './externalOpenCvPhotoVisionClient';
 
-export const EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME = 'external-opencv-photo-vision-worker';
-export const EXTERNAL_OPENCV_PHOTO_VISION_TOOL_VERSION = '0.1.0';
-export const REQUESTED_EXTERNAL_CV_TOOLS = ['opencv_primitives', 'yolo_detection', 'tesseract_ocr', 'ocr_equipment_labels'] as const;
+export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
 
-const DEFAULT_TIMEOUT_MS = 120_000;
-const DEFAULT_HEALTH_TIMEOUT_MS = 15_000;
-const DEFAULT_BATCH_SIZE = 5;
-const DEFAULT_BATCH_TIMEOUT_MS = 80_000;
-
-export interface ExternalOpenCvPhotoVisionHealth {
-  status: 'ok' | string;
-  schemaVersion?: string;
-  toolName?: string;
-  toolVersion?: string;
-  tools?: Record<string, unknown>;
-  authority?: Record<string, unknown>;
-}
-
-export interface ExternalOpenCvPhotoVisionUnavailableResult {
-  available: false;
-  reason: string;
-  health: ExternalOpenCvPhotoVisionHealth | null;
-}
-
-export interface ExternalOpenCvPhotoVisionAvailableResult {
-  available: true;
-  health: ExternalOpenCvPhotoVisionHealth;
-  run: OpenSourcePhotoVisionRunResult;
-}
-
-export type ExternalOpenCvPhotoVisionRunOutcome =
-  | ExternalOpenCvPhotoVisionUnavailableResult
-  | ExternalOpenCvPhotoVisionAvailableResult;
-
-export function getExternalOpenCvWorkerUrl(): string | null {
-  const raw = process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_URL?.trim();
-  if (!raw) return null;
-  return raw.replace(/\/+$/, '');
-}
-
-export async function runExternalOpenCvPhotoVisionPass(input: {
+export interface PhotoVisionJob {
+  jobId: string;
+  surveyId: string;
+  userId: string;
+  status: JobStatus;
+  createdAt: number; // epoch ms
+  updatedAt: number; // epoch ms
+  completedAt: number | null;
+  // Survey/files data (needed for batch processing)
   survey: Pick<SiteSurvey, 'id' | 'projectId'>;
-  files: SiteSurveyFile[];
-  createdAt?: string;
-  workerUrl?: string | null;
-  timeoutMs?: number;
-}): Promise<ExternalOpenCvPhotoVisionRunOutcome> {
-  const workerUrl = input.workerUrl ?? getExternalOpenCvWorkerUrl();
-  if (!workerUrl) {
-    return { available: false, reason: 'external_worker_url_not_configured', health: null };
+  photoFiles: SiteSurveyFile[];
+  batchSize: number;
+  // Progress tracking
+  totalBatches: number;
+  currentBatch: number; // 0-indexed, next batch to process
+  completedBatches: number;
+  totalPhotoFiles: number;
+  processedFiles: number;
+  // Accumulated results
+  allFileResults: OpenSourcePhotoVisionFileResult[];
+  batchErrors: string[];
+  lastAvailability: OpenSourcePhotoVisionRunResult['availability'] | null;
+  createdAtISO: string;
+  // Final result (populated on completion)
+  result: OpenSourcePhotoVisionRunResult | null;
+  error: string | null;
+  // Health check result (cached from first poll)
+  healthChecked: boolean;
+  healthOk: boolean;
+}
+
+// In-memory job store.
+// Vercel Fluid keeps instances warm, so this survives across poll requests
+// for the typical processing window (a few minutes).
+const jobs = new Map<string, PhotoVisionJob>();
+
+// Auto-cleanup: remove jobs older than 30 minutes
+const JOB_TTL_MS = 30 * 60 * 1000;
+
+function cleanupOldJobs(): void {
+  const now = Date.now();
+  for (const [jobId, job] of jobs) {
+    if (now - job.createdAt > JOB_TTL_MS) {
+      jobs.delete(jobId);
+    }
+  }
+}
+
+export function createJob(
+  surveyId: string,
+  userId: string,
+  survey: Pick<SiteSurvey, 'id' | 'projectId'>,
+  photoFiles: SiteSurveyFile[],
+): PhotoVisionJob {
+  cleanupOldJobs();
+  const jobId = `job_${surveyId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const batchSize = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_SIZE || 5);
+  const totalBatches = Math.ceil(photoFiles.length / batchSize);
+  const job: PhotoVisionJob = {
+    jobId,
+    surveyId,
+    userId,
+    status: 'pending',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    completedAt: null,
+    survey,
+    photoFiles,
+    batchSize,
+    totalBatches,
+    currentBatch: 0,
+    completedBatches: 0,
+    totalPhotoFiles: photoFiles.length,
+    processedFiles: 0,
+    allFileResults: [],
+    batchErrors: [],
+    lastAvailability: null,
+    createdAtISO: new Date().toISOString(),
+    result: null,
+    error: null,
+    healthChecked: false,
+    healthOk: false,
+  };
+  jobs.set(jobId, job);
+  return job;
+}
+
+export function getJob(jobId: string): PhotoVisionJob | undefined {
+  return jobs.get(jobId);
+}
+
+/**
+ * Process the next batch for a job. Called by the GET/poll handler.
+ * Processes ONE batch of photos (typically 5) by sending them to the
+ * external Render worker, then returns the updated job.
+ *
+ * This ensures each poll request does a bounded amount of work
+ * (~10-15s per batch) and always returns within serverless function timeout.
+ *
+ * Returns the updated job state.
+ */
+export async function processNextBatch(jobId: string): Promise<PhotoVisionJob> {
+  const job = jobs.get(jobId);
+  if (!job) throw new Error(`Job ${jobId} not found`);
+
+  // If job is already complete, just return it
+  if (job.status === 'completed' || job.status === 'failed') {
+    return job;
   }
 
-  const healthTimeoutMs = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_HEALTH_TIMEOUT_MS || DEFAULT_HEALTH_TIMEOUT_MS);
-  const health = await fetchHealth(workerUrl, healthTimeoutMs);
-  if (!health || health.status !== 'ok') {
-    return { available: false, reason: 'external_worker_health_unavailable', health };
+  // First poll: check worker health
+  if (!job.healthChecked) {
+    const workerUrl = getExternalOpenCvWorkerUrl();
+    if (!workerUrl) {
+      job.status = 'failed';
+      job.error = 'External worker URL not configured';
+      job.completedAt = Date.now();
+      job.updatedAt = Date.now();
+      return job;
+    }
+    const health = await fetchHealth(workerUrl, 15_000);
+    if (!health || health.status !== 'ok') {
+      job.status = 'failed';
+      job.error = `External CV worker health check failed: ${health?.status ?? 'no response'}`;
+      job.completedAt = Date.now();
+      job.updatedAt = Date.now();
+      return job;
+    }
+    job.healthChecked = true;
+    job.healthOk = true;
   }
 
-  const createdAt = input.createdAt ?? new Date().toISOString();
-  const photoFiles = input.files.filter(file => file.fileType === 'photo');
+  // Mark as running
+  job.status = 'running';
+  job.updatedAt = Date.now();
 
-  // Batching: split photos into batches to stay within Render's ~90s request timeout.
-  // Each batch is sent as a separate POST; results are aggregated into a single run.
-  const batchSize = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_SIZE || DEFAULT_BATCH_SIZE);
-  const batchTimeoutMs = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_TIMEOUT_MS || DEFAULT_BATCH_TIMEOUT_MS);
-  const batches: SiteSurveyFile[][] = [];
-  for (let i = 0; i < photoFiles.length; i += batchSize) {
-    batches.push(photoFiles.slice(i, i + batchSize));
+  // Get the next batch of files to process
+  const batchIndex = job.currentBatch;
+  const startIdx = batchIndex * job.batchSize;
+  const endIdx = Math.min(startIdx + job.batchSize, job.photoFiles.length);
+  const batchFiles = job.photoFiles.slice(startIdx, endIdx);
+
+  if (batchFiles.length === 0) {
+    // No more batches — finalize the job
+    finalizeJob(job);
+    return job;
   }
 
-  console.log(`[externalOpenCvPhotoVisionClient] surveyId=${input.survey.id} photoFiles=${photoFiles.length} batchSize=${batchSize} batches=${batches.length} batchTimeoutMs=${batchTimeoutMs}`);
+  console.log(`[asyncJobManager] Job ${jobId}: processing batch ${batchIndex + 1}/${job.totalBatches} (${batchFiles.length} files)`);
 
-  // If there is only one batch (or zero photos), send a single request as before.
-  if (batches.length <= 1) {
-    const job = {
+  const workerUrl = getExternalOpenCvWorkerUrl()!;
+  const batchTimeoutMs = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_TIMEOUT_MS || 80_000);
+
+  try {
+    const jobPayload = {
       schemaVersion: 'solarpro_external_photo_vision_job_v1',
-      surveyId: input.survey.id,
-      projectId: input.survey.projectId ?? null,
-      createdAt,
-      requestedTools: [...REQUESTED_EXTERNAL_CV_TOOLS],
-      files: photoFiles.map(file => ({
-        fileId: file.id,
-        fileUrl: file.fileUrl,
-        filename: file.filename,
-        contentType: file.mimeType ?? null,
-      })),
-    };
-    const overallTimeoutMs = input.timeoutMs ?? Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
-    const raw = await fetchJson(`${workerUrl}/v1/photo-vision/jobs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(job),
-      timeoutMs: overallTimeoutMs,
-    });
-    const run = normalizeExternalRun(raw, input.survey, photoFiles, createdAt);
-    return { available: true, health, run };
-  }
-
-  // Multi-batch: send each batch sequentially and aggregate results.
-  const allFileResults: OpenSourcePhotoVisionFileResult[] = [];
-  const batchErrors: string[] = [];
-  let lastAvailability: OpenSourcePhotoVisionRunResult['availability'] | null = null;
-  const batchStart = Date.now();
-
-  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-    const batchFiles = batches[batchIndex];
-    console.log(`[externalOpenCvPhotoVisionClient] Batch ${batchIndex + 1}/${batches.length}: sending ${batchFiles.length} files to worker...`);
-    const job = {
-      schemaVersion: 'solarpro_external_photo_vision_job_v1',
-      surveyId: input.survey.id,
-      projectId: input.survey.projectId ?? null,
-      createdAt,
-      requestedTools: [...REQUESTED_EXTERNAL_CV_TOOLS],
+      surveyId: job.survey.id,
+      projectId: job.survey.projectId ?? null,
+      createdAt: job.createdAtISO,
+      requestedTools: ['opencv_primitives', 'yolo_detection', 'tesseract_ocr', 'ocr_equipment_labels'],
       files: batchFiles.map(file => ({
         fileId: file.id,
         fileUrl: file.fileUrl,
@@ -126,54 +197,136 @@ export async function runExternalOpenCvPhotoVisionPass(input: {
         contentType: file.mimeType ?? null,
       })),
     };
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), batchTimeoutMs);
+    let raw: unknown;
     try {
-      const raw = await fetchJson(`${workerUrl}/v1/photo-vision/jobs`, {
+      const res = await fetch(`${workerUrl}/v1/photo-vision/jobs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(job),
-        timeoutMs: batchTimeoutMs,
+        body: JSON.stringify(jobPayload),
+        signal: controller.signal,
       });
-      const batchRun = normalizeExternalRun(raw, input.survey, batchFiles, createdAt);
-      allFileResults.push(...batchRun.files);
-      if (batchRun.availability) {
-        lastAvailability = batchRun.availability;
-      }
-      console.log(`[externalOpenCvPhotoVisionClient] Batch ${batchIndex + 1}/${batches.length}: completed processed=${batchRun.processedCount} candidates=${batchRun.candidateCount} elapsed=${Date.now() - batchStart}ms`);
-    } catch (batchErr) {
-      const errMsg = batchErr instanceof Error ? batchErr.message : String(batchErr);
-      console.error(`[externalOpenCvPhotoVisionClient] Batch ${batchIndex + 1}/${batches.length} failed:`, errMsg);
-      batchErrors.push(`Batch ${batchIndex + 1} (${batchFiles.length} files): ${errMsg}`);
-      // Mark failed files so they appear in the aggregate result with error status.
-      for (const file of batchFiles) {
-        allFileResults.push(makeFailedFileResult(input.survey, file, createdAt, errMsg));
-      }
+      if (!res.ok) throw new Error(`external worker ${res.status}`);
+      raw = await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
+
+    // Normalize the batch result
+    const batchRun = normalizeExternalRun(raw, job.survey, batchFiles, job.createdAtISO);
+    job.allFileResults.push(...batchRun.files);
+    if (batchRun.availability) {
+      job.lastAvailability = batchRun.availability;
+    }
+    job.processedFiles = job.allFileResults.filter(f => f.analyzed).length;
+
+    console.log(`[asyncJobManager] Job ${jobId}: batch ${batchIndex + 1}/${job.totalBatches} completed. processed=${batchRun.processedCount} candidates=${batchRun.candidateCount}`);
+  } catch (batchErr) {
+    const errMsg = batchErr instanceof Error ? batchErr.message : String(batchErr);
+    console.error(`[asyncJobManager] Job ${jobId}: batch ${batchIndex + 1}/${job.totalBatches} failed:`, errMsg);
+    job.batchErrors.push(`Batch ${batchIndex + 1} (${batchFiles.length} files): ${errMsg}`);
+    // Mark failed files
+    for (const file of batchFiles) {
+      job.allFileResults.push(makeFailedFileResult(job.survey, file, job.createdAtISO, errMsg));
     }
   }
 
-  // Aggregate all batch results into a single run.
-  const run = aggregateBatchResults(allFileResults, input.survey, createdAt, lastAvailability, batchErrors);
-  return { available: true, health, run };
+  // Advance to next batch
+  job.currentBatch = batchIndex + 1;
+  job.completedBatches = job.currentBatch;
+  job.updatedAt = Date.now();
+
+  // Check if all batches are done
+  if (job.currentBatch >= job.totalBatches) {
+    finalizeJob(job);
+  }
+
+  return job;
 }
 
-export async function fetchHealth(workerUrl: string, timeoutMs: number): Promise<ExternalOpenCvPhotoVisionHealth | null> {
-  try {
-    return await fetchJson(`${workerUrl}/health`, { method: 'GET', timeoutMs }) as ExternalOpenCvPhotoVisionHealth;
-  } catch {
-    return null;
+function finalizeJob(job: PhotoVisionJob): void {
+  const candidates = job.allFileResults.flatMap(file => file.candidates);
+  const runHash = sha256(stable({
+    surveyId: job.survey.id,
+    toolName: EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME,
+    toolVersion: EXTERNAL_OPENCV_PHOTO_VISION_TOOL_VERSION,
+    batched: true,
+    fileHashes: job.allFileResults.map(file => ({
+      fileId: file.fileId,
+      hash: file.metadata.sha256,
+      candidates: file.candidates.map(c => c.deterministicHash),
+    })),
+  }));
+
+  // Assign the aggregate runHash to all files and candidates
+  for (const file of job.allFileResults) {
+    file.runHash = runHash;
+    for (const candidate of file.candidates) {
+      candidate.runHash = runHash;
+    }
   }
+
+  const baseLimitations = [
+    'REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY',
+    'External OpenCV, YOLO/Supervision, and Tesseract OCR worker outputs are review cues only and cannot mutate canonical evidence, CAD, permits, BOM, or engineering workflows.',
+    'Open3D and FreeCAD remain future stages and are not marked complete by this result.',
+  ];
+
+  job.result = {
+    schemaVersion: 'open_source_photo_vision_run_v1',
+    surveyId: job.survey.id,
+    projectId: job.survey.projectId ?? null,
+    toolName: EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME,
+    toolVersion: EXTERNAL_OPENCV_PHOTO_VISION_TOOL_VERSION,
+    createdAt: job.createdAtISO,
+    processedCount: job.allFileResults.filter(file => file.analyzed).length,
+    failedCount: job.allFileResults.filter(file => !file.analyzed).length,
+    candidateCount: candidates.length,
+    runHash,
+    files: job.allFileResults,
+    candidates,
+    availability: job.lastAvailability ?? {
+      sharp: 'available_next_app_thumbnail_fallback',
+      opencv: 'available_external_worker',
+      yoloSupervision: 'unavailable_batch_fallback',
+      yolo: 'unavailable_batch_fallback',
+      supervision: 'unavailable_batch_fallback',
+      tesseract: 'unavailable_batch_fallback',
+      pythonWorker: 'available_external_docker_worker',
+      open3d: 'unavailable_future_stage_not_implemented',
+      freecad: 'unavailable_future_stage_not_implemented',
+    },
+    authority: {
+      reviewOnly: true,
+      nonAuthoritative: true,
+      canonicalMutationAllowed: false,
+      cadMutationAllowed: false,
+      permitGenerationAllowed: false,
+      bomMutationAllowed: false,
+      engineeringWorkflowMutationAllowed: false,
+    },
+    limitations: [
+      ...baseLimitations,
+      ...(job.batchErrors.length > 0
+        ? [`BATCH_PARTIAL_FAILURE: ${job.batchErrors.length} batch(es) failed. Errors: ${job.batchErrors.join('; ')}`]
+        : []),
+    ],
+  };
+
+  job.status = 'completed';
+  job.completedAt = Date.now();
+  job.updatedAt = Date.now();
+  job.processedFiles = job.result.processedCount;
+
+  console.log(`[asyncJobManager] Job ${job.jobId} finalized: processed=${job.result.processedCount} failed=${job.result.failedCount} candidates=${job.result.candidateCount}`);
 }
 
-async function fetchJson(url: string, init: RequestInit & { timeoutMs: number }): Promise<unknown> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), init.timeoutMs);
-  try {
-    const res = await fetch(url, { ...init, signal: controller.signal });
-    if (!res.ok) throw new Error(`external worker ${res.status}`);
-    return await res.json();
-  } finally {
-    clearTimeout(timer);
-  }
-}
+// ---------------------------------------------------------------------------
+// Helper functions (duplicated from externalOpenCvPhotoVisionClient to avoid
+// circular dependency issues and keep this module self-contained)
+// ---------------------------------------------------------------------------
 
 function makeFailedFileResult(
   survey: Pick<SiteSurvey, 'id' | 'projectId'>,
@@ -198,62 +351,12 @@ function makeFailedFileResult(
   };
 }
 
-function aggregateBatchResults(
-  fileResults: OpenSourcePhotoVisionFileResult[],
-  survey: Pick<SiteSurvey, 'id' | 'projectId'>,
-  createdAt: string,
-  availability: OpenSourcePhotoVisionRunResult['availability'] | null,
-  batchErrors: string[],
-): OpenSourcePhotoVisionRunResult {
-  const candidates = fileResults.flatMap(file => file.candidates);
-  const runHash = sha256(stable({
-    surveyId: survey.id,
-    toolName: EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME,
-    toolVersion: EXTERNAL_OPENCV_PHOTO_VISION_TOOL_VERSION,
-    batched: true,
-    fileHashes: fileResults.map(file => ({ fileId: file.fileId, hash: file.metadata.sha256, candidates: file.candidates.map(c => c.deterministicHash) })),
-  }));
-
-  // Assign the aggregate runHash to all files and candidates.
-  for (const file of fileResults) {
-    file.runHash = runHash;
-    for (const candidate of file.candidates) {
-      candidate.runHash = runHash;
-    }
-  }
-
-  return {
-    schemaVersion: 'open_source_photo_vision_run_v1',
-    surveyId: survey.id,
-    projectId: survey.projectId ?? null,
-    toolName: EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME,
-    toolVersion: EXTERNAL_OPENCV_PHOTO_VISION_TOOL_VERSION,
-    createdAt,
-    processedCount: fileResults.filter(file => file.analyzed).length,
-    failedCount: fileResults.filter(file => !file.analyzed).length,
-    candidateCount: candidates.length,
-    runHash,
-    files: fileResults,
-    candidates,
-    availability: availability ?? {
-      sharp: 'available_next_app_thumbnail_fallback',
-      opencv: 'available_external_worker',
-      yoloSupervision: 'unavailable_batch_fallback',
-      yolo: 'unavailable_batch_fallback',
-      supervision: 'unavailable_batch_fallback',
-      tesseract: 'unavailable_batch_fallback',
-      pythonWorker: 'available_external_docker_worker',
-      open3d: 'unavailable_future_stage_not_implemented',
-      freecad: 'unavailable_future_stage_not_implemented',
-    },
-    authority: noAuthority(),
-    limitations: [
-      ...baseLimitations(),
-      ...(batchErrors.length > 0
-        ? [`BATCH_PARTIAL_FAILURE: ${batchErrors.length} batch(es) failed. Errors: ${batchErrors.join('; ')}`]
-        : []),
-    ],
-  };
+function baseLimitations(): string[] {
+  return [
+    'REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY',
+    'External OpenCV, YOLO/Supervision, and Tesseract OCR worker outputs are review cues only and cannot mutate canonical evidence, CAD, permits, BOM, or engineering workflows.',
+    'Open3D and FreeCAD remain future stages and are not marked complete by this result.',
+  ];
 }
 
 function normalizeExternalRun(
@@ -263,7 +366,7 @@ function normalizeExternalRun(
   createdAt: string,
 ): OpenSourcePhotoVisionRunResult {
   const value = asRecord(raw);
-  const fileResults = Array.isArray(value.files) ? value.files.map(file => normalizeFileResult(file, survey, files, createdAt)) : [];
+  const fileResults = Array.isArray(value.files) ? value.files.map((file: unknown) => normalizeFileResult(file, survey, files, createdAt)) : [];
   const candidates = fileResults.flatMap(file => file.candidates);
   const toolName = typeof value.toolName === 'string' && value.toolName ? value.toolName : EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME;
   const toolVersion = typeof value.toolVersion === 'string' && value.toolVersion ? value.toolVersion : EXTERNAL_OPENCV_PHOTO_VISION_TOOL_VERSION;
@@ -283,7 +386,15 @@ function normalizeExternalRun(
     files: fileResults.map(file => ({ ...file, runHash })),
     candidates: candidates.map(candidate => ({ ...candidate, runHash })),
     availability: normalizeAvailability(value.availability),
-    authority: noAuthority(),
+    authority: {
+      reviewOnly: true,
+      nonAuthoritative: true,
+      canonicalMutationAllowed: false,
+      cadMutationAllowed: false,
+      permitGenerationAllowed: false,
+      bomMutationAllowed: false,
+      engineeringWorkflowMutationAllowed: false,
+    },
     limitations: baseLimitations(),
   };
 }
@@ -313,7 +424,7 @@ function normalizeFileResult(raw: unknown, survey: Pick<SiteSurvey, 'id' | 'proj
   const filename = typeof value.filename === 'string' ? value.filename : sourceFile?.filename ?? null;
   const metadata = asRecord(value.metadata);
   const candidates = Array.isArray(value.candidates)
-    ? value.candidates.map((candidate, index) => normalizeCandidate(candidate, survey, fileId, fileUrl, filename, createdAt, index)).filter((candidate): candidate is OpenSourcePhotoVisionCandidate => Boolean(candidate))
+    ? value.candidates.map((candidate: unknown, index: number) => normalizeCandidate(candidate, survey, fileId, fileUrl, filename, createdAt, index)).filter((candidate: unknown): candidate is OpenSourcePhotoVisionCandidate => Boolean(candidate))
     : [];
   return {
     surveyId: survey.id,
@@ -334,7 +445,7 @@ function normalizeFileResult(raw: unknown, survey: Pick<SiteSurvey, 'id' | 'proj
     },
     thumbnailDataUrl: typeof value.thumbnailDataUrl === 'string' && value.thumbnailDataUrl.startsWith('data:image/') ? value.thumbnailDataUrl : null,
     edgeSummary: normalizeEdgeSummary(value.edgeSummary),
-    candidates: candidates.map(candidate => ({ ...candidate, thumbnailDataUrl: typeof value.thumbnailDataUrl === 'string' && value.thumbnailDataUrl.startsWith('data:image/') ? value.thumbnailDataUrl : undefined })),
+    candidates: candidates.map((candidate: OpenSourcePhotoVisionCandidate) => ({ ...candidate, thumbnailDataUrl: typeof value.thumbnailDataUrl === 'string' && value.thumbnailDataUrl.startsWith('data:image/') ? value.thumbnailDataUrl : undefined })),
     limitations: normalizeStringArray(value.limitations, baseLimitations()),
     runHash: typeof value.runHash === 'string' ? value.runHash : sha256(stable({ surveyId: survey.id, fileId, error: value.error ?? null })),
   };
@@ -468,24 +579,4 @@ function flattenKeys(value: unknown, out: Record<string, true> = {}): Record<str
     }
   }
   return out;
-}
-
-function noAuthority() {
-  return {
-    reviewOnly: true as const,
-    nonAuthoritative: true as const,
-    canonicalMutationAllowed: false as const,
-    cadMutationAllowed: false as const,
-    permitGenerationAllowed: false as const,
-    bomMutationAllowed: false as const,
-    engineeringWorkflowMutationAllowed: false as const,
-  };
-}
-
-function baseLimitations(): string[] {
-  return [
-    'REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY',
-    'External OpenCV, YOLO/Supervision, and Tesseract OCR worker outputs are review cues only and cannot mutate canonical evidence, CAD, permits, BOM, or engineering workflows.',
-    'Open3D and FreeCAD remain future stages and are not marked complete by this result.',
-  ];
 }
