@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: opencv-photo-vision-worker
+    runtime: docker
+    rootDir: external-workers/opencv-photo-vision
+    plan: starter
+    region: oregon
+    branch: dev
+    dockerContext: .
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: YOLO_ENABLED
+        value: "true"
+      - key: YOLO_MODEL_PATH
+        value: "yolov8n.pt"
+      - key: YOLO_CONFIDENCE_THRESHOLD
+        value: "0.25"
+      - key: YOLO_IMAGE_SIZE
+        value: "640"
+      - key: YOLO_MAX_DETECTIONS
+        value: "50"
+      - key: TESSERACT_OCR_ENABLED
+        value: "true"
+      - key: TESSERACT_OCR_LANGUAGE
+        value: "eng"
+      - key: TESSERACT_OCR_MIN_CONFIDENCE
+        value: "30"
+      - key: MAX_IMAGE_BYTES
+        value: "20971520"
+      - key: FETCH_TIMEOUT_SECONDS
+        value: "30"
+      - key: MAX_FILES_PER_JOB
+        value: "10"
+      - key: PROCESSING_TIMEOUT_SECONDS
+        value: "120"
