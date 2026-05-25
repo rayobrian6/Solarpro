@@ -1663,15 +1663,17 @@ function OpenSourcePhotoVisionPassPanel({
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [candidateFilter, setCandidateFilter] = useState<"both" | "opencv" | "yolo">("both");
+  const [candidateFilter, setCandidateFilter] = useState<"both" | "opencv" | "yolo" | "ocr">("both");
   const activeBundle = result?.stored ?? bundle ?? null;
   const allCandidates = safeArray(activeBundle?.candidates);
   const candidates = allCandidates.filter((candidate) => {
     const stage = String(candidate.payload?.stage ?? "");
     const source = String(candidate.payload?.source ?? "");
     const isYolo = candidate.candidateType === "object_detection" || stage.includes("yolo") || source.includes("yolo");
+    const isOcr = candidate.candidateType === "ocr_text" || stage.includes("ocr") || stage.includes("tesseract") || source.includes("ocr") || source.includes("tesseract");
     if (candidateFilter === "yolo") return isYolo;
-    if (candidateFilter === "opencv") return !isYolo;
+    if (candidateFilter === "ocr") return isOcr;
+    if (candidateFilter === "opencv") return !isYolo && !isOcr;
     return true;
   });
   const candidateTypeCounts = candidates.reduce<Record<string, number>>(
@@ -1732,15 +1734,16 @@ function OpenSourcePhotoVisionPassPanel({
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-200">
-External OpenCV + YOLO/Supervision worker · actual image bytes · separate from OpenAI preview
+External OpenCV + YOLO/Supervision + Tesseract OCR worker · actual image bytes · separate from OpenAI preview
               </p>
               <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
                 Sends authorized survey photo URLs to the external Dockerized
-                OpenCV + YOLO/Supervision worker, which fetches actual image
-                bytes and returns review-only edges, lines, contours, rectangles,
-                semantic object detections, thumbnails, confidence, model
-                provenance, and availability diagnostics. OCR, Open3D, and
-                FreeCAD remain future stages and are not marked complete.
+                OpenCV + YOLO/Supervision + Tesseract OCR worker, which fetches
+                actual image bytes and returns review-only edges, lines, contours,
+                rectangles, semantic object detections, OCR text snippets,
+                thumbnails, confidence, model/runtime provenance, source-crop
+                metadata, and availability diagnostics. Open3D and FreeCAD remain
+                future stages and are not marked complete.
               </p>
             </div>
             <button
@@ -1798,7 +1801,7 @@ External OpenCV + YOLO/Supervision worker · actual image bytes · separate from
         {allCandidates.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-700/60 bg-slate-950/40 p-3">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Overlay filter</span>
-            {(["both", "opencv", "yolo"] as const).map((filter) => (
+            {(["both", "opencv", "yolo", "ocr"] as const).map((filter) => (
               <button
                 key={filter}
                 type="button"
@@ -1809,7 +1812,7 @@ External OpenCV + YOLO/Supervision worker · actual image bytes · separate from
                     : "border-slate-700 bg-slate-900/60 text-slate-400 hover:text-slate-200"
                 }`}
               >
-                {filter === "both" ? "OpenCV + YOLO" : filter === "opencv" ? "OpenCV candidates" : "YOLO detections"}
+                {filter === "both" ? "All CV/OCR" : filter === "opencv" ? "OpenCV candidates" : filter === "yolo" ? "YOLO detections" : "OCR text"}
               </button>
             ))}
             <span className="text-[10px] text-slate-500">Showing {candidates.length} of {allCandidates.length} persisted review-only candidates.</span>
@@ -1859,6 +1862,25 @@ External OpenCV + YOLO/Supervision worker · actual image bytes · separate from
                         {Math.round(candidate.confidence)}%
                       </span>
                     </div>
+                    {candidate.candidateType === "ocr_text" && (
+                      <div className="mt-2 rounded-md border border-amber-500/20 bg-amber-500/10 p-2">
+                        <p className="text-[11px] font-semibold text-amber-100">
+                          “{String(candidate.payload?.ocrText ?? candidate.payload?.cleanedText ?? candidate.payload?.text ?? "OCR text candidate").slice(0, 180)}”
+                        </p>
+                        {Array.isArray(candidate.payload?.hints) && candidate.payload.hints.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {candidate.payload.hints.slice(0, 4).map((hint: any, idx: number) => (
+                              <span key={`${String(hint?.kind ?? "hint")}-${idx}`} className="rounded-full border border-amber-400/20 bg-amber-400/10 px-1.5 py-0.5 text-[9px] text-amber-100">
+                                {String(hint?.kind ?? "hint").replace(/_/g, " ")}: {String(hint?.value ?? "")}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <p className="mt-1 text-[9px] text-amber-100/70">
+                          Source crop: {String((candidate.payload?.sourceCrop as any)?.kind ?? "unknown")} · photo {candidate.fileId.slice(0, 8)} · review required
+                        </p>
+                      </div>
+                    )}
                     <p className="mt-1 text-[10px] text-slate-500">
                       {candidate.toolName} v{candidate.toolVersion} · {String(candidate.payload?.sourceModel ?? candidate.payload?.source ?? "cv-worker")} · run {candidate.runHash.slice(0, 10)} · REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
                     </p>

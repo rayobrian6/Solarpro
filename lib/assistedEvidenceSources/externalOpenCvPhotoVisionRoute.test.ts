@@ -68,15 +68,18 @@ describe('open-source photo vision pass API route', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       processedCount: 1,
       failedCount: 0,
-      candidateCount: 1,
+      candidateCount: 2,
       runHash: 'runhash',
       files: [],
-      candidates: [{ candidateType: 'object_detection', payload: { stage: 'stage_2_yolo_supervision_semantic_detection', sourceModel: 'yolov8n.pt' }, nonAuthoritative: true, reviewStatus: 'review_required' }],
-      availability: { opencv: 'available:4.10.0', yoloSupervision: 'available:yolov8n.pt:8.3.55', yolo: 'available:yolov8n.pt:8.3.55', supervision: 'available:0.25.1', tesseract: 'unavailable_stage_3_not_implemented_in_this_pass', pythonWorker: 'available_external_docker_worker' },
+      candidates: [
+        { candidateType: 'object_detection', payload: { stage: 'stage_2_yolo_supervision_semantic_detection', sourceModel: 'yolov8n.pt' }, nonAuthoritative: true, reviewStatus: 'review_required' },
+        { candidateType: 'ocr_text', payload: { stage: 'stage_3_tesseract_ocr_text_detection', text: 'MAIN PANEL 200 AMP', sourceCrop: { kind: 'full_image' } }, nonAuthoritative: true, reviewStatus: 'review_required' },
+      ],
+      availability: { opencv: 'available:4.10.0', yoloSupervision: 'available:yolov8n.pt:8.3.55', yolo: 'available:yolov8n.pt:8.3.55', supervision: 'available:0.25.1', tesseract: 'available:tesseract:5.3.0:pytesseract:0.3.13', pythonWorker: 'available_external_docker_worker' },
       authority: { reviewOnly: true, nonAuthoritative: true, canonicalMutationAllowed: false, cadMutationAllowed: false, permitGenerationAllowed: false, bomMutationAllowed: false, engineeringWorkflowMutationAllowed: false },
       limitations: ['REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY'],
     };
-    const stored = { schemaVersion: 'open_source_photo_vision_stored_bundle_v1', candidateCount: 1, candidates: [], authority: run.authority };
+    const stored = { schemaVersion: 'open_source_photo_vision_stored_bundle_v1', candidateCount: 2, candidates: [], authority: run.authority };
     runExternalOpenCvPhotoVisionPass.mockResolvedValueOnce({ available: true, health: { status: 'ok' }, run });
     replaceOpenSourcePhotoVisionCandidatesForSurveyRun.mockResolvedValueOnce(stored);
 
@@ -85,11 +88,12 @@ describe('open-source photo vision pass API route', () => {
 
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
-    expect(json.data.summary).toMatchObject({ processedFileCount: 1, failedFileCount: 0, candidateCount: 1, runHash: 'runhash' });
-    expect(json.data.summary.candidateTypeCounts).toMatchObject({ object_detection: 1 });
+    expect(json.data.summary).toMatchObject({ processedFileCount: 1, failedFileCount: 0, candidateCount: 2, runHash: 'runhash' });
+    expect(json.data.summary.candidateTypeCounts).toMatchObject({ object_detection: 1, ocr_text: 1 });
     expect(json.data.summary.unavailableDiagnostics).not.toContain('yoloSupervision: unavailable_stage_2_not_implemented');
-    expect(json.meta).toMatchObject({ externalWorker: true, workerUnavailable: false, sourceImageBytesProcessed: true, cadMutationPerformed: false, bomMutationPerformed: false });
+    expect(json.meta).toMatchObject({ externalWorker: true, workerUnavailable: false, sourceImageBytesProcessed: true, canonicalManifestMutationPerformed: false, canonicalGeometryMutationPerformed: false, cadMutationPerformed: false, permitGenerationTriggered: false, bomMutationPerformed: false, engineeringWorkflowMutationPerformed: false });
     expect(replaceOpenSourcePhotoVisionCandidatesForSurveyRun).toHaveBeenCalledTimes(1);
     expect(replaceOpenSourcePhotoVisionCandidatesForSurveyRun.mock.calls[0][2]).toBe(run);
+    expect(replaceOpenSourcePhotoVisionCandidatesForSurveyRun.mock.calls[0][2].candidates[1]).toMatchObject({ candidateType: 'ocr_text', nonAuthoritative: true, reviewStatus: 'review_required' });
   });
 });

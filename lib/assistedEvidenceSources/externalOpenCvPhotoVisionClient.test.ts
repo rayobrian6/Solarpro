@@ -43,7 +43,7 @@ describe('external OpenCV photo vision client', () => {
           status: 'ok',
           toolName: 'external-opencv-photo-vision-worker',
           toolVersion: '0.1.0',
-          tools: { opencv: { available: true, version: '4.10.0' }, yolo: { available: true, modelLoaded: true, model: 'yolov8n.pt' }, supervision: { available: true, version: '0.25.1' } },
+          tools: { opencv: { available: true, version: '4.10.0' }, yolo: { available: true, modelLoaded: true, model: 'yolov8n.pt' }, supervision: { available: true, version: '0.25.1' }, tesseract: { available: true, version: '5.3.0' }, pytesseract: { available: true, version: '0.3.13' } },
           authority: { reviewOnly: true, nonAuthoritative: true },
         }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
@@ -107,11 +107,32 @@ describe('external OpenCV photo vision client', () => {
             nonAuthoritative: true,
             runHash: 'runhash123',
             createdAt: '2026-01-01T00:00:00.000Z',
+          }, {
+            candidateId: 'worker-ocr-1',
+            deterministicHash: 'deterministic-ocr-hash',
+            surveyId: survey.id,
+            fileId: file.id,
+            fileUrl: file.fileUrl,
+            filename: file.filename,
+            toolName: 'external-tesseract-ocr-worker',
+            toolVersion: '0.1.0',
+            candidateType: 'ocr_text',
+            candidateCategory: 'electrical_context',
+            category: 'equipment_label_text_candidate',
+            confidence: 77,
+            summary: 'Tesseract OCR review candidate: MAIN PANEL 200 AMP',
+            payload: { source: 'tesseract_ocr', text: 'MAIN PANEL 200 AMP', cleanedText: 'MAIN PANEL 200 AMP', sourceModel: 'tesseract', modelVersion: '5.3.0', hints: [{ kind: 'breaker_rating_candidate', value: '200 AMP' }], sourceCrop: { kind: 'yolo_object_bbox', sourceCandidateId: 'worker-yolo-1' }, bbox: { x: 120, y: 220, width: 180, height: 40, coordinateSystem: 'normalized_image_0_1000' } },
+            bbox: { x: 120, y: 220, width: 180, height: 40, coordinateSystem: 'normalized_image_0_1000' },
+            limitations: ['REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY'],
+            reviewStatus: 'review_required',
+            nonAuthoritative: true,
+            runHash: 'runhash123',
+            createdAt: '2026-01-01T00:00:00.000Z',
           }],
           limitations: ['REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY'],
           runHash: 'runhash123',
         }],
-        availability: { opencv: 'available:4.10.0', yoloSupervision: 'available:yolov8n.pt:8.3.55', yolo: 'available:yolov8n.pt:8.3.55', supervision: 'available:0.25.1', tesseract: 'unavailable_stage_3_not_implemented_in_this_worker', pythonWorker: 'available_external_docker_worker' },
+        availability: { opencv: 'available:4.10.0', yoloSupervision: 'available:yolov8n.pt:8.3.55', yolo: 'available:yolov8n.pt:8.3.55', supervision: 'available:0.25.1', tesseract: 'available:tesseract:5.3.0:pytesseract:0.3.13', pytesseract: 'available:0.3.13', pythonWorker: 'available_external_docker_worker' },
         authority: { reviewOnly: true, nonAuthoritative: true, canonicalMutationAllowed: false, cadMutationAllowed: false, permitGenerationAllowed: false, bomMutationAllowed: false, engineeringWorkflowMutationAllowed: false },
         limitations: ['REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY'],
       }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -127,6 +148,7 @@ describe('external OpenCV photo vision client', () => {
       expect(outcome.run.availability.opencv).toBe('available:4.10.0');
       expect(outcome.run.availability.yoloSupervision).toContain('available:yolov8n.pt');
       expect(outcome.run.availability.supervision).toBe('available:0.25.1');
+      expect(outcome.run.availability.tesseract).toContain('available:tesseract:5.3.0');
       expect(outcome.run.authority).toMatchObject({
         reviewOnly: true,
         nonAuthoritative: true,
@@ -165,7 +187,28 @@ describe('external OpenCV photo vision client', () => {
         reviewRequired: true,
         region: { x: 100, y: 200, width: 220, height: 300, coordinateSystem: 'normalized_image_0_1000' },
       });
-      expect(postedJob?.requestedTools).toEqual(['opencv_primitives', 'yolo_detection']);
+      expect(outcome.run.candidates[2]).toMatchObject({
+        toolName: 'external-tesseract-ocr-worker',
+        candidateType: 'ocr_text',
+        candidateCategory: 'electrical_context',
+        reviewStatus: 'review_required',
+        nonAuthoritative: true,
+        deterministicHash: 'deterministic-ocr-hash',
+      });
+      expect(outcome.run.candidates[2].payload).toMatchObject({
+        externalWorker: true,
+        stage: 'stage_3_tesseract_ocr_text_detection',
+        ocrText: 'MAIN PANEL 200 AMP',
+        text: 'MAIN PANEL 200 AMP',
+        cleanedText: 'MAIN PANEL 200 AMP',
+        sourceModel: 'tesseract',
+        modelVersion: '5.3.0',
+        reviewRequired: true,
+        region: { x: 120, y: 220, width: 180, height: 40, coordinateSystem: 'normalized_image_0_1000' },
+      });
+      expect(outcome.run.candidates[2].payload.hints).toEqual([{ kind: 'breaker_rating_candidate', value: '200 AMP' }]);
+      expect(outcome.run.candidates[2].payload.sourceCrop).toMatchObject({ kind: 'yolo_object_bbox', sourceCandidateId: 'worker-yolo-1' });
+      expect(postedJob?.requestedTools).toEqual(['opencv_primitives', 'yolo_detection', 'tesseract_ocr', 'ocr_equipment_labels']);
     }
   });
 });

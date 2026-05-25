@@ -734,6 +734,63 @@ describe("Professional Plan-Set Render Output V1", () => {
     expect(svg).toContain("SAFE PLACEHOLDER");
   });
 
+  it("renders Tesseract OCR snippets on A-201 beside matching photo thumbnails as review-only", () => {
+    const report = buildProfessionalSurveyReadinessReport(survey(), files());
+    const pkg = buildProfessionalPlanSetRenderPackage(report, null, {
+      openSourcePhotoVision: {
+        schemaVersion: "open_source_photo_vision_stored_bundle_v1",
+        surveyId: report.source.surveyId,
+        toolName: "external-opencv-photo-vision-worker",
+        toolVersion: "0.1.0",
+        candidateCount: 1,
+        latestRunHash: "ocr-runhash-123456",
+        candidates: [
+          {
+            id: "candidate-ocr-a201",
+            surveyId: report.source.surveyId,
+            fileId: "file-roof",
+            toolName: "external-tesseract-ocr-worker",
+            toolVersion: "0.1.0",
+            runHash: "ocr-runhash-123456",
+            candidateType: "ocr_text",
+            candidateCategory: "electrical_context",
+            payload: {
+              source: "tesseract_ocr",
+              sourceFileUrl: "https://cdn.example.test/roof_overview.jpg",
+              text: "MAIN PANEL 200 AMP",
+              cleanedText: "MAIN PANEL 200 AMP",
+              ocrText: "MAIN PANEL 200 AMP",
+              sourceCrop: { kind: "full_image" },
+            },
+            confidence: 77,
+            limitations: ["REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY"],
+            reviewStatus: "review_required",
+            deterministicHash: "hash-ocr-a201",
+            thumbnailDataUrl: null,
+            createdAt: "2026-05-25T00:00:00Z",
+          },
+        ],
+        authority: {
+          reviewOnly: true,
+          nonAuthoritative: true,
+          canonicalMutationAllowed: false,
+          cadMutationAllowed: false,
+          permitGenerationAllowed: false,
+          bomMutationAllowed: false,
+          engineeringWorkflowMutationAllowed: false,
+        },
+        limitations: ["REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY"],
+      },
+    });
+    const evidence = pkg.sheets.find((sheet) => sheet.sheetType === "evidence_review");
+    const svg = evidence?.svg ?? "";
+
+    expect(svg).toContain("OCR REVIEW-ONLY");
+    expect(svg).toContain("MAIN PANEL 200 AMP");
+    expect(pkg.noAuthorityEnforcement.downstreamPermitAllowed).toBe(false);
+    expect(pkg.noAuthorityEnforcement.downstreamBomAllowed).toBe(false);
+  });
+
   it("prefers real open-source worker overlays on A-101 with source provenance and review-only labels", () => {
     const report = buildProfessionalSurveyReadinessReport(survey(), files());
     const pkg = buildProfessionalPlanSetRenderPackage(report, null, {

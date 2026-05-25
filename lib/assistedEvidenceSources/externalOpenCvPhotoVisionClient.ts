@@ -8,7 +8,7 @@ import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
 
 export const EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME = 'external-opencv-photo-vision-worker';
 export const EXTERNAL_OPENCV_PHOTO_VISION_TOOL_VERSION = '0.1.0';
-export const REQUESTED_EXTERNAL_CV_TOOLS = ['opencv_primitives', 'yolo_detection'] as const;
+export const REQUESTED_EXTERNAL_CV_TOOLS = ['opencv_primitives', 'yolo_detection', 'tesseract_ocr', 'ocr_equipment_labels'] as const;
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -150,7 +150,7 @@ function normalizeAvailability(value: unknown): OpenSourcePhotoVisionRunResult['
     yoloSupervision: typeof raw.yoloSupervision === 'string' ? raw.yoloSupervision : yolo,
     yolo,
     supervision,
-    tesseract: typeof raw.tesseract === 'string' ? raw.tesseract : 'unavailable_stage_3_not_implemented_in_this_pass',
+    tesseract: typeof raw.tesseract === 'string' ? raw.tesseract : 'unavailable_tesseract_diagnostics_missing',
     pythonWorker: typeof raw.pythonWorker === 'string' ? raw.pythonWorker : 'available_external_docker_worker',
     open3d: typeof raw.open3d === 'string' ? raw.open3d : 'unavailable_future_stage_not_implemented',
     freecad: typeof raw.freecad === 'string' ? raw.freecad : 'unavailable_future_stage_not_implemented',
@@ -209,16 +209,21 @@ function normalizeCandidate(raw: unknown, survey: Pick<SiteSurvey, 'id' | 'proje
     candidateType,
     candidateCategory,
     confidence: clamp(Math.round(numberOrZero(value.confidence)), 0, 100),
-    summary: typeof value.summary === 'string' ? value.summary : candidateType === 'object_detection' ? 'External YOLO/Supervision object detection review candidate.' : 'External OpenCV review candidate.',
+    summary: typeof value.summary === 'string' ? value.summary : candidateType === 'ocr_text' ? 'External Tesseract OCR text review candidate.' : candidateType === 'object_detection' ? 'External YOLO/Supervision object detection review candidate.' : 'External OpenCV review candidate.',
     payload: {
       ...payload,
       externalWorker: true,
-      stage: candidateType === 'object_detection' ? 'stage_2_yolo_supervision_semantic_detection' : 'stage_1_opencv_edges_lines_contours',
+      stage: candidateType === 'ocr_text' ? 'stage_3_tesseract_ocr_text_detection' : candidateType === 'object_detection' ? 'stage_2_yolo_supervision_semantic_detection' : 'stage_1_opencv_edges_lines_contours',
       sourceToolName: toolName,
       sourceToolVersion: toolVersion,
       sourceModel: typeof value.sourceModel === 'string' ? value.sourceModel : typeof payload.sourceModel === 'string' ? payload.sourceModel : null,
       modelVersion: typeof value.modelVersion === 'string' ? value.modelVersion : typeof payload.modelVersion === 'string' ? payload.modelVersion : null,
       semanticCategory: typeof value.category === 'string' ? value.category : typeof payload.semanticCategory === 'string' ? payload.semanticCategory : null,
+      ocrText: candidateType === 'ocr_text' ? stringOrNull(value.text) ?? stringOrNull(payload.text) ?? stringOrNull(payload.cleanedText) : null,
+      text: candidateType === 'ocr_text' ? stringOrNull(value.text) ?? stringOrNull(payload.text) ?? stringOrNull(payload.cleanedText) : stringOrNull(payload.text),
+      cleanedText: candidateType === 'ocr_text' ? stringOrNull(payload.cleanedText) ?? stringOrNull(value.text) ?? stringOrNull(payload.text) : stringOrNull(payload.cleanedText),
+      hints: Array.isArray(payload.hints) ? payload.hints : [],
+      sourceCrop: asRecord(payload.sourceCrop),
       reviewRequired: true,
       region: region ?? null,
       line: line ?? null,
@@ -279,6 +284,10 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function stringOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
 function nullableNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
@@ -328,7 +337,7 @@ function noAuthority() {
 function baseLimitations(): string[] {
   return [
     'REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY',
-    'Stage 1 external OpenCV worker output is a review cue only and cannot mutate canonical evidence, CAD, permits, BOM, or engineering workflows.',
-    'YOLO/Supervision, OCR/Tesseract, Open3D, and FreeCAD remain future stages and are not marked complete by this result.',
+    'External OpenCV, YOLO/Supervision, and Tesseract OCR worker outputs are review cues only and cannot mutate canonical evidence, CAD, permits, BOM, or engineering workflows.',
+    'Open3D and FreeCAD remain future stages and are not marked complete by this result.',
   ];
 }
