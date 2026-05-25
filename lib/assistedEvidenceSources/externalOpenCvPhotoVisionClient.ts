@@ -76,6 +76,8 @@ export async function runExternalOpenCvPhotoVisionPass(input: {
     batches.push(photoFiles.slice(i, i + batchSize));
   }
 
+  console.log(`[externalOpenCvPhotoVisionClient] surveyId=${input.survey.id} photoFiles=${photoFiles.length} batchSize=${batchSize} batches=${batches.length} batchTimeoutMs=${batchTimeoutMs}`);
+
   // If there is only one batch (or zero photos), send a single request as before.
   if (batches.length <= 1) {
     const job = {
@@ -106,9 +108,11 @@ export async function runExternalOpenCvPhotoVisionPass(input: {
   const allFileResults: OpenSourcePhotoVisionFileResult[] = [];
   const batchErrors: string[] = [];
   let lastAvailability: OpenSourcePhotoVisionRunResult['availability'] | null = null;
+  const batchStart = Date.now();
 
   for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
     const batchFiles = batches[batchIndex];
+    console.log(`[externalOpenCvPhotoVisionClient] Batch ${batchIndex + 1}/${batches.length}: sending ${batchFiles.length} files to worker...`);
     const job = {
       schemaVersion: 'solarpro_external_photo_vision_job_v1',
       surveyId: input.survey.id,
@@ -134,6 +138,7 @@ export async function runExternalOpenCvPhotoVisionPass(input: {
       if (batchRun.availability) {
         lastAvailability = batchRun.availability;
       }
+      console.log(`[externalOpenCvPhotoVisionClient] Batch ${batchIndex + 1}/${batches.length}: completed processed=${batchRun.processedCount} candidates=${batchRun.candidateCount} elapsed=${Date.now() - batchStart}ms`);
     } catch (batchErr) {
       const errMsg = batchErr instanceof Error ? batchErr.message : String(batchErr);
       console.error(`[externalOpenCvPhotoVisionClient] Batch ${batchIndex + 1}/${batches.length} failed:`, errMsg);

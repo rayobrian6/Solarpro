@@ -24,6 +24,9 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { surveyId: string } },
 ) {
+  const startedAt = Date.now();
+  const surveyId = params?.surveyId ?? 'unknown';
+  console.log(`[POST open-source-photo-vision-pass] surveyId=${surveyId} started`);
   try {
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
@@ -37,7 +40,11 @@ export async function POST(
     if (!survey) return NextResponse.json({ success: false, error: 'Survey not found' }, { status: 404 });
 
     const files = await getSiteSurveyFiles(surveyId);
+    const photoFiles = files.filter(file => file.fileType === 'photo');
+    console.log(`[POST open-source-photo-vision-pass] surveyId=${surveyId} totalFiles=${files.length} photoFiles=${photoFiles.length} after ${(Date.now() - startedAt)}ms`);
+
     const outcome = await runExternalOpenCvPhotoVisionPass({ survey, files });
+    console.log(`[POST open-source-photo-vision-pass] surveyId=${surveyId} worker completed available=${outcome.available} after ${(Date.now() - startedAt)}ms`);
 
     if (outcome.available === false) {
       return NextResponse.json({
@@ -60,10 +67,11 @@ export async function POST(
       // The open_source_photo_vision_candidates table may not exist yet
       // (migration 023 not run). Log the error but still return the run
       // results so the UI can display candidates from the transient run.
-      console.error('[POST /api/site-surveys/[surveyId]/open-source-photo-vision-pass] DB persist failed (table may not exist):', dbErr instanceof Error ? dbErr.message : String(dbErr));
+      console.error('[POST open-source-photo-vision-pass] DB persist failed (table may not exist):', dbErr instanceof Error ? dbErr.message : String(dbErr));
     }
 
     const summary = uiSummary(run);
+    console.log(`[POST open-source-photo-vision-pass] surveyId=${surveyId} completed processed=${run.processedCount} failed=${run.failedCount} candidates=${run.candidateCount} after ${(Date.now() - startedAt)}ms`);
 
     return NextResponse.json({
       success: true,
@@ -90,7 +98,7 @@ export async function POST(
       meta: noMutationMeta({ workerUnavailable: false, sourceImageBytesProcessed: true }),
     });
   } catch (err) {
-    console.error('[POST /api/site-surveys/[surveyId]/open-source-photo-vision-pass]', err);
+    console.error(`[POST open-source-photo-vision-pass] surveyId=${surveyId} FAILED after ${(Date.now() - startedAt)}ms:`, err);
     const message = err instanceof Error ? err.message : 'Failed to run external OpenCV photo vision pass';
     return NextResponse.json(
       {

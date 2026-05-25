@@ -1701,11 +1701,24 @@ function OpenSourcePhotoVisionPassPanel({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
-        `/api/site-surveys/${surveyId}/open-source-photo-vision-pass`,
-        { method: "POST", headers: { "Content-Type": "application/json" } },
-      );
-      const json = await res.json();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 300_000); // 5 min client-side timeout
+      let res: Response;
+      try {
+        res = await fetch(
+          `/api/site-surveys/${surveyId}/open-source-photo-vision-pass`,
+          { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal },
+        );
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      let json: Record<string, unknown>;
+      try {
+        json = await res.json();
+      } catch (jsonErr) {
+        setError(`Photo vision pass returned non-JSON (HTTP ${res.status}). The server function may have timed out or crashed.`);
+        return;
+      }
       if (!json.success) {
         setError(
           [json.error, json.detail].filter(Boolean).join(": ") ||
@@ -1716,8 +1729,9 @@ function OpenSourcePhotoVisionPassPanel({
       const data = json.data as OpenSourcePhotoVisionRunResponse;
       setResult(data);
       onDetailRefresh?.({ openSourcePhotoVision: data.stored });
-    } catch {
-      setError("Network error while running open-source photo vision pass");
+    } catch (err) {
+      const isAbort = err instanceof DOMException && err.name === "AbortError";
+      setError(isAbort ? "Photo vision pass timed out (5 min). The survey may have too many photos for the current worker." : "Network error while running open-source photo vision pass");
     } finally {
       setLoading(false);
     }
