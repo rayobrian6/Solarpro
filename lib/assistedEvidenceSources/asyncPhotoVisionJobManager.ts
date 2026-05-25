@@ -24,7 +24,6 @@ import {
   EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME,
   EXTERNAL_OPENCV_PHOTO_VISION_TOOL_VERSION,
   getExternalOpenCvWorkerUrl,
-  fetchHealth,
 } from './externalOpenCvPhotoVisionClient';
 import { getDbReady } from '@/lib/db/core';
 
@@ -58,7 +57,7 @@ export async function createJob(
 ): Promise<PhotoVisionJob> {
   const sql = await getDbReady();
   const jobId = `job_${surveyId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const batchSize = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_SIZE || 2);
+  const batchSize = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_SIZE || 1);
   const totalBatches = Math.ceil(photoFiles.length / batchSize);
 
   // Store survey + photoFiles as the job input (needed for batch processing)
@@ -143,15 +142,20 @@ export async function getJob(jobId: string): Promise<PhotoVisionJob | null> {
 // ---------------------------------------------------------------------------
 // Process the next batch for a job — called by the GET/poll handler.
 // Processes up to `maxBatchesPerPoll` batches of photos by sending them to
-// the external Render worker. Each batch of 2 photos takes ~16-24s on the worker,
+// the external Render worker. Each batch of 1 photo takes ~8-12s on the worker,
 // so we process only 1 batch per poll to stay within Vercel's 60s maxDuration.
 // ---------------------------------------------------------------------------
 export async function processNextBatch(jobId: string, maxBatchesPerPoll = 1): Promise<PhotoVisionJob> {
   const sql = await getDbReady();
 
-  // Load full job state from DB
+  // Load job state from DB — select only needed columns to avoid reading
+  // the potentially large file_results JSONB when we only need metadata
   const rows = await sql`
-    SELECT * FROM photo_vision_jobs WHERE job_id = ${jobId}
+    SELECT job_id, survey_id, user_id, status,
+           job_input, current_batch, total_batches, completed_batches,
+           total_photo_files, processed_files,
+           file_results, batch_errors, last_availability
+    FROM photo_vision_jobs WHERE job_id = ${jobId}
   `;
   if (!rows.length) throw new Error(`Job ${jobId} not found`);
   const row = rows[0] as Record<string, unknown>;
@@ -166,7 +170,7 @@ export async function processNextBatch(jobId: string, maxBatchesPerPoll = 1): Pr
   const jobInput = typeof row.job_input === 'string' ? JSON.parse(row.job_input) : row.job_input as Record<string, unknown>;
   const survey = jobInput.survey as Pick<SiteSurvey, 'id' | 'projectId'>;
   const allPhotoFiles = (jobInput.photoFiles as SiteSurveyFile[]) || [];
-  const batchSize = Number(jobInput.batchSize) || 2;
+  const batchSize = Number(jobInput.batchSize) || 1;
   const createdAtISO = (jobInput.createdAtISO as string) || new Date().toISOString();
 
   const currentBatch = Number(row.current_batch) || 0;
@@ -183,18 +187,11 @@ export async function processNextBatch(jobId: string, maxBatchesPerPoll = 1): Pr
     ? (typeof row.last_availability === 'string' ? JSON.parse(row.last_availability) : row.last_availability)
     : null;
 
-  // First poll: check worker health
-  if (currentBatch === 0 && allFileResults.length === 0) {
-    const workerUrl = getExternalOpenCvWorkerUrl();
-    if (!workerUrl) {
-      await failJobInDb(jobId, 'External worker URL not configured');
-      return (await getJob(jobId))!;
-    }
-    const health = await fetchHealth(workerUrl, 15_000);
-    if (!health || health.status !== 'ok') {
-      await failJobInDb(jobId, `External CV worker health check failed: ${health?.status ?? 'no response'}`);
-      return (await getJob(jobId))!;
-    }
+  // Verify worker URL is configured (health check was done at job creation in POST)
+  const workerUrl = getExternalOpenCvWorkerUrl();
+  if (!workerUrl) {
+    await failJobInDb(jobId, 'External worker URL not configured');
+    return (await getJob(jobId))!;
   }
 
   // Mark as running
@@ -205,9 +202,7 @@ export async function processNextBatch(jobId: string, maxBatchesPerPoll = 1): Pr
   `;
 
   // Process up to maxBatchesPerPoll batches in this single poll request.
-  // This dramatically reduces total round-trips for large surveys (e.g. 490 photos).
-  const workerUrl = getExternalOpenCvWorkerUrl()!;
-  const batchTimeoutMs = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_TIMEOUT_MS || 120_000);
+  const batchTimeoutMs = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_TIMEOUT_MS || 45_000);
   let batchIdx = currentBatch;
   let batchesProcessedThisPoll = 0;
 
@@ -296,7 +291,37 @@ export async function processNextBatch(jobId: string, maxBatchesPerPoll = 1): Pr
     `;
   }
 
-  return (await getJob(jobId))!;
+  // Return lightweight job status — avoid re-reading the full file_results JSONB
+  // which can be large. The route handler only needs status/progress fields.
+  const statusRow = await sql`
+    SELECT status, error,
+           EXTRACT(EPOCH FROM created_at)::bigint * 1000 AS created_at_ms,
+           EXTRACT(EPOCH FROM completed_at)::bigint * 1000 AS completed_at_ms
+    FROM photo_vision_jobs
+    WHERE job_id = ${jobId}
+  `;
+  const sRow = statusRow[0] as Record<string, unknown>;
+  const finalStatus = (sRow?.status ?? 'running') as JobStatus;
+  const finalError = (sRow?.error ?? null) as string | null;
+  const finalCreatedAt = Number(sRow?.created_at_ms) || Date.now();
+  const finalCompletedAt = sRow?.completed_at_ms ? Number(sRow.completed_at_ms) : null;
+
+  return {
+    jobId,
+    surveyId: row.survey_id as string,
+    userId: row.user_id as string,
+    status: finalStatus,
+    createdAt: finalCreatedAt,
+    updatedAt: Date.now(),
+    completedAt: finalCompletedAt,
+    totalBatches,
+    currentBatch: newCurrentBatch,
+    completedBatches: newCompletedBatches,
+    totalPhotoFiles,
+    processedFiles: newProcessedFiles,
+    result: null, // full result only needed for completed jobs, loaded on demand
+    error: finalError,
+  };
 }
 
 // ---------------------------------------------------------------------------

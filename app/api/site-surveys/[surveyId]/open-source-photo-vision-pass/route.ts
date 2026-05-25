@@ -7,7 +7,7 @@
 //   → Client polls repeatedly until status is "completed" or "failed".
 //
 // This "lazy processing" pattern ensures each request handler does a bounded
-// amount of work (~16-24s per batch of 2 photos) and returns well within
+// amount of work (~8-12s per batch of 1 photo) and returns well within
 // serverless function timeout limits. No fire-and-forget Promises that could be killed.
 //
 // Review-only candidates only: no CAD/canonical/permit/BOM/workflow mutation.
@@ -32,6 +32,10 @@ import {
   processNextBatch,
   type PhotoVisionJob,
 } from '@/lib/assistedEvidenceSources/asyncPhotoVisionJobManager';
+import {
+  getExternalOpenCvWorkerUrl,
+  fetchHealth,
+} from '@/lib/assistedEvidenceSources/externalOpenCvPhotoVisionClient';
 import type { OpenSourcePhotoVisionRunResult } from '@/lib/assistedEvidenceSources/openSourcePhotoVisionWorker';
 
 // ---------------------------------------------------------------------------
@@ -69,6 +73,24 @@ export async function POST(
       }, { status: 400 });
     }
 
+    // Check worker health before creating the job (saves a health check during poll)
+    const workerUrl = getExternalOpenCvWorkerUrl();
+    if (!workerUrl) {
+      return NextResponse.json({
+        success: false,
+        error: 'External CV worker URL not configured',
+        meta: noMutationMeta({ workerUnavailable: true, sourceImageBytesProcessed: false }),
+      }, { status: 503 });
+    }
+    const health = await fetchHealth(workerUrl, 15_000);
+    if (!health || health.status !== 'ok') {
+      return NextResponse.json({
+        success: false,
+        error: `External CV worker unavailable: ${health?.status ?? 'no response'}`,
+        meta: noMutationMeta({ workerUnavailable: true, sourceImageBytesProcessed: false }),
+      }, { status: 503 });
+    }
+
     // Create an async job — processing will happen during GET/poll requests
     const job = await createJob(surveyId, user.id, survey, photoFiles);
     console.log(`[POST open-source-photo-vision-pass] surveyId=${surveyId} jobId=${job.jobId} created. Client should poll GET with jobId.`);
@@ -98,7 +120,7 @@ export async function POST(
 
 // ---------------------------------------------------------------------------
 // GET — Poll job status AND process next batch (lazy processing)
-// Each poll request processes one batch (~16-24s for 2 photos), then returns status.
+// Each poll request processes one batch (~8-12s for 1 photo), then returns status.
 // ---------------------------------------------------------------------------
 export async function GET(
   req: NextRequest,
@@ -142,7 +164,9 @@ export async function GET(
 
     // Check if the job just completed
     if (updatedJob.status === 'completed') {
-      return handleCompletedJob(updatedJob, surveyId);
+      // Load full job (with result) for the completed handler
+      const fullJob = await getJob(updatedJob.jobId);
+      return handleCompletedJob(fullJob ?? updatedJob, surveyId);
     }
 
     if (updatedJob.status === 'failed') {
