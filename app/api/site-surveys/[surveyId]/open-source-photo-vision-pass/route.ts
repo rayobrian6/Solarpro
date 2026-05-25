@@ -7,7 +7,7 @@
 //   → Client polls repeatedly until status is "completed" or "failed".
 //
 // This "lazy processing" pattern ensures each request handler does a bounded
-// amount of work (~40-60s per batch of 5 photos) and returns well within
+// amount of work (~16-24s per batch of 2 photos) and returns well within
 // serverless function timeout limits. No fire-and-forget Promises that could be killed.
 //
 // Review-only candidates only: no CAD/canonical/permit/BOM/workflow mutation.
@@ -98,7 +98,7 @@ export async function POST(
 
 // ---------------------------------------------------------------------------
 // GET — Poll job status AND process next batch (lazy processing)
-// Each poll request processes one batch (~40-60s for 5 photos), then returns status.
+// Each poll request processes one batch (~16-24s for 2 photos), then returns status.
 // ---------------------------------------------------------------------------
 export async function GET(
   req: NextRequest,

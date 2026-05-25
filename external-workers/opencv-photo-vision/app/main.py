@@ -1,4 +1,5 @@
 import base64
+import gc
 import hashlib
 import io
 import os
@@ -102,6 +103,8 @@ def run_job(job: VisionJob) -> dict[str, Any]:
         file_result = analyze_file(job, file_job, created_at)
         files.append(file_result)
         candidates.extend(file_result["candidates"])
+        # Explicit GC between files to keep peak memory low on constrained Render instances
+        gc.collect()
     run_hash = stable_hash({
         "surveyId": job.surveyId,
         "projectId": job.projectId,
@@ -189,6 +192,9 @@ def analyze_file(job: VisionJob, file_job: FileJob, created_at: str) -> dict[str
             ) if ocr_requested else {"available": False, "diagnostic": "tesseract_ocr_not_requested", "candidates": [], "elapsedMs": 0, "limitations": []}
         candidates = [*opencv_candidates, *yolo_result.get("candidates", []), *ocr_result.get("candidates", [])]
         run_hash = stable_hash({"fileId": file_job.fileId, "sha256": byte_hash, "lines": lines, "regions": regions, "yoloCandidates": [c.get("payload", {}) for c in yolo_result.get("candidates", [])], "ocrCandidates": [c.get("payload", {}) for c in ocr_result.get("candidates", [])]})
+        # Free large image arrays to reduce peak memory before building the result dict
+        del image, gray, blur, edges, np_bytes, content
+        gc.collect()
         return {
             "surveyId": job.surveyId,
             "fileId": file_job.fileId,
@@ -226,6 +232,8 @@ def analyze_file(job: VisionJob, file_job: FileJob, created_at: str) -> dict[str
             "runHash": run_hash,
         }
     except Exception as exc:
+        # Free any partially-loaded image data on error
+        gc.collect()
         run_hash = stable_hash({"surveyId": job.surveyId, "fileId": file_job.fileId, "error": str(exc)})
         return {
             "surveyId": job.surveyId,

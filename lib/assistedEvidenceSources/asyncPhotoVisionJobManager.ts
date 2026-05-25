@@ -58,7 +58,7 @@ export async function createJob(
 ): Promise<PhotoVisionJob> {
   const sql = await getDbReady();
   const jobId = `job_${surveyId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const batchSize = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_SIZE || 5);
+  const batchSize = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_SIZE || 2);
   const totalBatches = Math.ceil(photoFiles.length / batchSize);
 
   // Store survey + photoFiles as the job input (needed for batch processing)
@@ -143,7 +143,7 @@ export async function getJob(jobId: string): Promise<PhotoVisionJob | null> {
 // ---------------------------------------------------------------------------
 // Process the next batch for a job — called by the GET/poll handler.
 // Processes up to `maxBatchesPerPoll` batches of photos by sending them to
-// the external Render worker. Each batch of 5 photos takes ~40-60s on the worker,
+// the external Render worker. Each batch of 2 photos takes ~16-24s on the worker,
 // so we process only 1 batch per poll to stay within Vercel's 60s maxDuration.
 // ---------------------------------------------------------------------------
 export async function processNextBatch(jobId: string, maxBatchesPerPoll = 1): Promise<PhotoVisionJob> {
@@ -166,7 +166,7 @@ export async function processNextBatch(jobId: string, maxBatchesPerPoll = 1): Pr
   const jobInput = typeof row.job_input === 'string' ? JSON.parse(row.job_input) : row.job_input as Record<string, unknown>;
   const survey = jobInput.survey as Pick<SiteSurvey, 'id' | 'projectId'>;
   const allPhotoFiles = (jobInput.photoFiles as SiteSurveyFile[]) || [];
-  const batchSize = Number(jobInput.batchSize) || 5;
+  const batchSize = Number(jobInput.batchSize) || 2;
   const createdAtISO = (jobInput.createdAtISO as string) || new Date().toISOString();
 
   const currentBatch = Number(row.current_batch) || 0;
