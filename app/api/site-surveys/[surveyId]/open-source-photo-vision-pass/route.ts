@@ -1,6 +1,6 @@
 // ============================================================================
 // POST /api/site-surveys/[surveyId]/open-source-photo-vision-pass
-// Operator-triggered OSS photo vision pass.
+// Operator-triggered external OSS OpenCV photo vision pass.
 // Review-only candidates only: no CAD/canonical/permit/BOM/workflow mutation.
 // ============================================================================
 
@@ -17,7 +17,8 @@ import {
   replaceOpenSourcePhotoVisionCandidatesForSurveyRun,
   summarizeOpenSourcePhotoVisionRun,
 } from '@/lib/db-neon';
-import { runOpenSourcePhotoVisionWorker } from '@/lib/assistedEvidenceSources/openSourcePhotoVisionWorker';
+import { runExternalOpenCvPhotoVisionPass } from '@/lib/assistedEvidenceSources/externalOpenCvPhotoVisionClient';
+import type { OpenSourcePhotoVisionRunResult } from '@/lib/assistedEvidenceSources/openSourcePhotoVisionWorker';
 
 export async function POST(
   req: NextRequest,
@@ -36,14 +37,32 @@ export async function POST(
     if (!survey) return NextResponse.json({ success: false, error: 'Survey not found' }, { status: 404 });
 
     const files = await getSiteSurveyFiles(surveyId);
-    const run = await runOpenSourcePhotoVisionWorker({ survey, files });
+    const outcome = await runExternalOpenCvPhotoVisionPass({ survey, files });
+
+    if (outcome.available === false) {
+      return NextResponse.json({
+        success: false,
+        error: 'External OpenCV photo vision worker unavailable',
+        detail: outcome.reason,
+        data: {
+          workerHealth: outcome.health,
+          summary: unavailableSummary(surveyId, outcome.reason),
+        },
+        meta: noMutationMeta({ workerUnavailable: true, sourceImageBytesProcessed: false }),
+      }, { status: 503 });
+    }
+
+    const run = outcome.run;
     const stored = await replaceOpenSourcePhotoVisionCandidatesForSurveyRun(surveyId, user.id, run);
+    const summary = uiSummary(run);
 
     return NextResponse.json({
       success: true,
       data: {
+        summary,
         run: summarizeOpenSourcePhotoVisionRun(run),
         stored,
+        workerHealth: outcome.health,
         files: run.files.map(file => ({
           surveyId: file.surveyId,
           fileId: file.fileId,
@@ -59,26 +78,63 @@ export async function POST(
           runHash: file.runHash,
         })),
       },
-      meta: {
-        operatorTriggered: true,
-        reviewOnly: true,
-        nonAuthoritative: true,
-        sourceImageBytesProcessed: true,
-        openAiVisionUsed: false,
-        canonicalManifestMutationPerformed: false,
-        canonicalGeometryMutationPerformed: false,
-        cadMutationPerformed: false,
-        projectPhysicalDataMutationPerformed: false,
-        permitGenerationTriggered: false,
-        bomMutationPerformed: false,
-        engineeringWorkflowMutationPerformed: false,
-      },
+      meta: noMutationMeta({ workerUnavailable: false, sourceImageBytesProcessed: true }),
     });
   } catch (err) {
     console.error('[POST /api/site-surveys/[surveyId]/open-source-photo-vision-pass]', err);
     return NextResponse.json(
-      { success: false, error: 'Failed to run open-source photo vision pass' },
+      {
+        success: false,
+        error: 'Failed to run external OpenCV photo vision pass',
+        meta: noMutationMeta({ workerUnavailable: false, sourceImageBytesProcessed: false }),
+      },
       { status: 500 },
     );
   }
+}
+
+function uiSummary(run: OpenSourcePhotoVisionRunResult) {
+  const candidateTypeCounts: Record<string, number> = {};
+  for (const candidate of run.candidates) {
+    candidateTypeCounts[candidate.candidateType] = (candidateTypeCounts[candidate.candidateType] ?? 0) + 1;
+  }
+  return {
+    processedFileCount: run.processedCount,
+    failedFileCount: run.failedCount,
+    candidateCount: run.candidateCount,
+    candidateTypeCounts,
+    unavailableDiagnostics: Object.entries(run.availability)
+      .filter(([, value]) => typeof value === 'string' && value.includes('unavailable'))
+      .map(([tool, value]) => `${tool}: ${value}`),
+    runHash: run.runHash,
+  };
+}
+
+function unavailableSummary(surveyId: string, reason: string) {
+  return {
+    processedFileCount: 0,
+    failedFileCount: 0,
+    candidateCount: 0,
+    candidateTypeCounts: {},
+    unavailableDiagnostics: [`externalOpenCvWorker: ${reason}`],
+    runHash: `unavailable:${surveyId}`,
+  };
+}
+
+function noMutationMeta(extra: { workerUnavailable: boolean; sourceImageBytesProcessed: boolean }) {
+  return {
+    operatorTriggered: true,
+    reviewOnly: true,
+    nonAuthoritative: true,
+    externalWorker: true,
+    openAiVisionUsed: false,
+    canonicalManifestMutationPerformed: false,
+    canonicalGeometryMutationPerformed: false,
+    cadMutationPerformed: false,
+    projectPhysicalDataMutationPerformed: false,
+    permitGenerationTriggered: false,
+    bomMutationPerformed: false,
+    engineeringWorkflowMutationPerformed: false,
+    ...extra,
+  };
 }

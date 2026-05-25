@@ -40,8 +40,8 @@ export interface StoredOpenSourcePhotoVisionCandidate {
 export interface OpenSourcePhotoVisionStoredBundle {
   schemaVersion: 'open_source_photo_vision_stored_bundle_v1';
   surveyId: string;
-  toolName: typeof OPEN_SOURCE_PHOTO_VISION_TOOL_NAME;
-  toolVersion: typeof OPEN_SOURCE_PHOTO_VISION_TOOL_VERSION;
+  toolName: string;
+  toolVersion: string;
   candidateCount: number;
   latestRunHash: string | null;
   candidates: StoredOpenSourcePhotoVisionCandidate[];
@@ -196,8 +196,8 @@ function buildStoredBundle(surveyId: string, candidates: StoredOpenSourcePhotoVi
   return {
     schemaVersion: 'open_source_photo_vision_stored_bundle_v1',
     surveyId,
-    toolName: OPEN_SOURCE_PHOTO_VISION_TOOL_NAME,
-    toolVersion: OPEN_SOURCE_PHOTO_VISION_TOOL_VERSION,
+    toolName: candidates[0]?.toolName ?? OPEN_SOURCE_PHOTO_VISION_TOOL_NAME,
+    toolVersion: candidates[0]?.toolVersion ?? OPEN_SOURCE_PHOTO_VISION_TOOL_VERSION,
     candidateCount: candidates.length,
     latestRunHash: candidates[0]?.runHash ?? null,
     candidates,

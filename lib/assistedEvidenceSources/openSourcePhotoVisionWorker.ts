@@ -5,6 +5,9 @@ import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
 export const OPEN_SOURCE_PHOTO_VISION_TOOL_NAME = 'open-source-photo-vision-worker';
 export const OPEN_SOURCE_PHOTO_VISION_TOOL_VERSION = '1.0.0';
 
+export type OpenSourcePhotoVisionToolName = typeof OPEN_SOURCE_PHOTO_VISION_TOOL_NAME | 'external-opencv-photo-vision-worker' | (string & {});
+export type OpenSourcePhotoVisionToolVersion = typeof OPEN_SOURCE_PHOTO_VISION_TOOL_VERSION | '0.1.0' | (string & {});
+
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 9_000;
 const EDGE_SIZE = 96;
@@ -18,7 +21,8 @@ export type OpenSourcePhotoVisionCandidateType =
   | 'roof_edge_candidate'
   | 'wall_anchor_candidate'
   | 'obstruction_candidate'
-  | 'ocr_availability_note';
+  | 'ocr_availability_note'
+  | (string & {});
 
 export interface OpenSourcePhotoVisionRegion {
   x: number;
@@ -54,8 +58,8 @@ export interface OpenSourcePhotoVisionCandidate {
   limitations: string[];
   reviewStatus: 'review_required';
   nonAuthoritative: true;
-  toolName: typeof OPEN_SOURCE_PHOTO_VISION_TOOL_NAME;
-  toolVersion: typeof OPEN_SOURCE_PHOTO_VISION_TOOL_VERSION;
+  toolName: OpenSourcePhotoVisionToolName;
+  toolVersion: OpenSourcePhotoVisionToolVersion;
   runHash: string;
   deterministicHash: string;
   createdAt: string;
@@ -95,8 +99,8 @@ export interface OpenSourcePhotoVisionRunResult {
   schemaVersion: 'open_source_photo_vision_run_v1';
   surveyId: string;
   projectId: string | null;
-  toolName: typeof OPEN_SOURCE_PHOTO_VISION_TOOL_NAME;
-  toolVersion: typeof OPEN_SOURCE_PHOTO_VISION_TOOL_VERSION;
+  toolName: OpenSourcePhotoVisionToolName;
+  toolVersion: OpenSourcePhotoVisionToolVersion;
   createdAt: string;
   processedCount: number;
   failedCount: number;
@@ -105,11 +109,14 @@ export interface OpenSourcePhotoVisionRunResult {
   files: OpenSourcePhotoVisionFileResult[];
   candidates: OpenSourcePhotoVisionCandidate[];
   availability: {
-    sharp: 'available';
-    opencv: 'unavailable_next_runtime_adapter_not_configured';
-    yoloSupervision: 'unavailable_model_worker_not_configured';
-    tesseract: 'available_optional_not_executed_in_this_pass';
-    pythonWorker: 'unavailable_not_configured';
+    sharp?: string;
+    opencv: string;
+    yoloSupervision: string;
+    tesseract: string;
+    pythonWorker: string;
+    open3d?: string;
+    freecad?: string;
+    [key: string]: string | undefined;
   };
   authority: {
     reviewOnly: true;

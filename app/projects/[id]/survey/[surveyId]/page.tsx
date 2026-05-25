@@ -1002,6 +1002,7 @@ interface OpenSourcePhotoVisionBundle {
     canonicalMutationAllowed: false;
     cadMutationAllowed: false;
     permitGenerationAllowed: false;
+    bomMutationAllowed: false;
     engineeringWorkflowMutationAllowed: false;
   };
   limitations: string[];
@@ -1722,14 +1723,14 @@ function OpenSourcePhotoVisionPassPanel({
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-200">
-                Actual image-byte OSS worker · separate from OpenAI preview
+                External OpenCV worker · actual image bytes · separate from OpenAI preview
               </p>
               <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                Runs the bounded sharp-based worker against authorized survey
-                photo bytes and stores review-only candidates for edge maps,
-                dominant lines, dense rectangular/equipment/obstruction regions,
-                duplicate/hash identity, quality, thumbnails, and explicit
-                unavailable diagnostics for native OpenCV/YOLO/Python workers.
+                Sends authorized survey photo URLs to the external Dockerized
+                OpenCV worker, which fetches actual image bytes and returns
+                review-only edge, line, contour, rectangle, thumbnail,
+                provenance, and availability diagnostics. YOLO, OCR, Open3D,
+                and FreeCAD remain future stages and are not marked complete.
               </p>
             </div>
             <button
