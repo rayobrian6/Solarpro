@@ -69,7 +69,7 @@ export async function POST(
     }
 
     // Create an async job — processing will happen during GET/poll requests
-    const job = createJob(surveyId, user.id, survey, photoFiles);
+    const job = await createJob(surveyId, user.id, survey, photoFiles);
     console.log(`[POST open-source-photo-vision-pass] surveyId=${surveyId} jobId=${job.jobId} created. Client should poll GET with jobId.`);
 
     return NextResponse.json({
@@ -110,7 +110,7 @@ export async function GET(
     return NextResponse.json({ success: false, error: 'Missing jobId query parameter' }, { status: 400 });
   }
 
-  const job = getJob(jobId);
+  const job = await getJob(jobId);
   if (!job) {
     return NextResponse.json({ success: false, error: 'Job not found. It may have expired or the server recycled. Please start a new pass.' }, { status: 404 });
   }

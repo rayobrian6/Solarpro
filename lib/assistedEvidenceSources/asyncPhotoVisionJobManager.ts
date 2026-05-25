@@ -1,17 +1,16 @@
 // ============================================================================
-// Async Photo Vision Job Manager
+// Async Photo Vision Job Manager — PostgreSQL-backed
 //
-// Manages in-memory job state for the async photo vision pass.
+// Manages job state for the async photo vision pass using Neon PostgreSQL.
+// This ensures job state persists across Vercel serverless function instances,
+// unlike in-memory state which is lost when the instance recycles or a
+// different instance handles the next request.
 //
 // Architecture:
-//   POST creates a job record and returns jobId immediately.
-//   Each GET/poll request processes ONE batch of photos, then returns status.
+//   POST creates a job record in DB, returns jobId immediately.
+//   Each GET/poll request processes ONE batch of photos, updates DB, returns status.
 //   This "lazy processing" pattern ensures work happens within the
-//   serverless function's lifecycle — no fire-and-forget Promises
-//   that could be killed when the function responds.
-//
-//   The client polls every 3 seconds. Each poll processes 5 photos (~10s),
-//   so the GET handler always returns within ~15s — well within any timeout.
+//   serverless function's lifecycle — no fire-and-forget Promises.
 // ============================================================================
 
 import crypto from 'crypto';
@@ -27,6 +26,7 @@ import {
   getExternalOpenCvWorkerUrl,
   fetchHealth,
 } from './externalOpenCvPhotoVisionClient';
+import { getDbReady } from '@/lib/db/core';
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
 
@@ -35,60 +35,58 @@ export interface PhotoVisionJob {
   surveyId: string;
   userId: string;
   status: JobStatus;
-  createdAt: number; // epoch ms
-  updatedAt: number; // epoch ms
+  createdAt: number;
+  updatedAt: number;
   completedAt: number | null;
-  // Survey/files data (needed for batch processing)
-  survey: Pick<SiteSurvey, 'id' | 'projectId'>;
-  photoFiles: SiteSurveyFile[];
-  batchSize: number;
-  // Progress tracking
   totalBatches: number;
-  currentBatch: number; // 0-indexed, next batch to process
+  currentBatch: number;
   completedBatches: number;
   totalPhotoFiles: number;
   processedFiles: number;
-  // Accumulated results
-  allFileResults: OpenSourcePhotoVisionFileResult[];
-  batchErrors: string[];
-  lastAvailability: OpenSourcePhotoVisionRunResult['availability'] | null;
-  createdAtISO: string;
-  // Final result (populated on completion)
   result: OpenSourcePhotoVisionRunResult | null;
   error: string | null;
-  // Health check result (cached from first poll)
-  healthChecked: boolean;
-  healthOk: boolean;
 }
 
-// In-memory job store.
-// Vercel Fluid keeps instances warm, so this survives across poll requests
-// for the typical processing window (a few minutes).
-const jobs = new Map<string, PhotoVisionJob>();
-
-// Auto-cleanup: remove jobs older than 30 minutes
-const JOB_TTL_MS = 30 * 60 * 1000;
-
-function cleanupOldJobs(): void {
-  const now = Date.now();
-  for (const [jobId, job] of jobs) {
-    if (now - job.createdAt > JOB_TTL_MS) {
-      jobs.delete(jobId);
-    }
-  }
-}
-
-export function createJob(
+// ---------------------------------------------------------------------------
+// Create a new job in the database
+// ---------------------------------------------------------------------------
+export async function createJob(
   surveyId: string,
   userId: string,
   survey: Pick<SiteSurvey, 'id' | 'projectId'>,
   photoFiles: SiteSurveyFile[],
-): PhotoVisionJob {
-  cleanupOldJobs();
+): Promise<PhotoVisionJob> {
+  const sql = await getDbReady();
   const jobId = `job_${surveyId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const batchSize = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_SIZE || 5);
   const totalBatches = Math.ceil(photoFiles.length / batchSize);
-  const job: PhotoVisionJob = {
+
+  // Store survey + photoFiles as the job input (needed for batch processing)
+  const jobInput = {
+    survey: { id: survey.id, projectId: survey.projectId ?? null },
+    photoFiles: photoFiles.map(f => ({
+      id: f.id,
+      fileUrl: f.fileUrl,
+      filename: f.filename,
+      mimeType: f.mimeType ?? null,
+      fileType: f.fileType,
+    })),
+    batchSize,
+    createdAtISO: new Date().toISOString(),
+  };
+
+  await sql`
+    INSERT INTO photo_vision_jobs (
+      job_id, survey_id, user_id, status, job_input,
+      total_batches, current_batch, completed_batches,
+      total_photo_files, processed_files
+    ) VALUES (
+      ${jobId}, ${surveyId}, ${userId}, 'pending', ${JSON.stringify(jobInput)},
+      ${totalBatches}, 0, 0, ${photoFiles.length}, 0
+    )
+  `;
+
+  return {
     jobId,
     surveyId,
     userId,
@@ -96,89 +94,126 @@ export function createJob(
     createdAt: Date.now(),
     updatedAt: Date.now(),
     completedAt: null,
-    survey,
-    photoFiles,
-    batchSize,
     totalBatches,
     currentBatch: 0,
     completedBatches: 0,
     totalPhotoFiles: photoFiles.length,
     processedFiles: 0,
-    allFileResults: [],
-    batchErrors: [],
-    lastAvailability: null,
-    createdAtISO: new Date().toISOString(),
     result: null,
     error: null,
-    healthChecked: false,
-    healthOk: false,
   };
-  jobs.set(jobId, job);
-  return job;
 }
 
-export function getJob(jobId: string): PhotoVisionJob | undefined {
-  return jobs.get(jobId);
+// ---------------------------------------------------------------------------
+// Get job from database
+// ---------------------------------------------------------------------------
+export async function getJob(jobId: string): Promise<PhotoVisionJob | null> {
+  const sql = await getDbReady();
+  const rows = await sql`
+    SELECT job_id, survey_id, user_id, status,
+           EXTRACT(EPOCH FROM created_at)::bigint * 1000 AS created_at_ms,
+           EXTRACT(EPOCH FROM updated_at)::bigint * 1000 AS updated_at_ms,
+           EXTRACT(EPOCH FROM completed_at)::bigint * 1000 AS completed_at_ms,
+           total_batches, current_batch, completed_batches,
+           total_photo_files, processed_files,
+           final_result, error
+    FROM photo_vision_jobs
+    WHERE job_id = ${jobId}
+  `;
+  if (!rows.length) return null;
+  const row = rows[0] as Record<string, unknown>;
+  return {
+    jobId: row.job_id as string,
+    surveyId: row.survey_id as string,
+    userId: row.user_id as string,
+    status: row.status as JobStatus,
+    createdAt: Number(row.created_at_ms) || Date.now(),
+    updatedAt: Number(row.updated_at_ms) || Date.now(),
+    completedAt: row.completed_at_ms ? Number(row.completed_at_ms) : null,
+    totalBatches: Number(row.total_batches) || 0,
+    currentBatch: Number(row.current_batch) || 0,
+    completedBatches: Number(row.completed_batches) || 0,
+    totalPhotoFiles: Number(row.total_photo_files) || 0,
+    processedFiles: Number(row.processed_files) || 0,
+    result: row.final_result as OpenSourcePhotoVisionRunResult | null,
+    error: row.error as string | null,
+  };
 }
 
-/**
- * Process the next batch for a job. Called by the GET/poll handler.
- * Processes ONE batch of photos (typically 5) by sending them to the
- * external Render worker, then returns the updated job.
- *
- * This ensures each poll request does a bounded amount of work
- * (~10-15s per batch) and always returns within serverless function timeout.
- *
- * Returns the updated job state.
- */
+// ---------------------------------------------------------------------------
+// Process the next batch for a job — called by the GET/poll handler.
+// Processes ONE batch of photos by sending them to the external Render worker.
+// ---------------------------------------------------------------------------
 export async function processNextBatch(jobId: string): Promise<PhotoVisionJob> {
-  const job = jobs.get(jobId);
-  if (!job) throw new Error(`Job ${jobId} not found`);
+  const sql = await getDbReady();
 
-  // If job is already complete, just return it
-  if (job.status === 'completed' || job.status === 'failed') {
-    return job;
+  // Load full job state from DB
+  const rows = await sql`
+    SELECT * FROM photo_vision_jobs WHERE job_id = ${jobId}
+  `;
+  if (!rows.length) throw new Error(`Job ${jobId} not found`);
+  const row = rows[0] as Record<string, unknown>;
+
+  const status = row.status as string;
+  if (status === 'completed' || status === 'failed') {
+    // Already terminal — return as-is
+    return (await getJob(jobId))!;
   }
 
+  // Parse job input
+  const jobInput = typeof row.job_input === 'string' ? JSON.parse(row.job_input) : row.job_input as Record<string, unknown>;
+  const survey = jobInput.survey as Pick<SiteSurvey, 'id' | 'projectId'>;
+  const allPhotoFiles = (jobInput.photoFiles as SiteSurveyFile[]) || [];
+  const batchSize = Number(jobInput.batchSize) || 5;
+  const createdAtISO = (jobInput.createdAtISO as string) || new Date().toISOString();
+
+  const currentBatch = Number(row.current_batch) || 0;
+  const totalBatches = Number(row.total_batches) || 0;
+  const completedBatches = Number(row.completed_batches) || 0;
+  const totalPhotoFiles = Number(row.total_photo_files) || 0;
+
+  // Parse accumulated state
+  const fileResultsRaw = typeof row.file_results === 'string' ? JSON.parse(row.file_results) : row.file_results;
+  const allFileResults: OpenSourcePhotoVisionFileResult[] = Array.isArray(fileResultsRaw) ? fileResultsRaw : [];
+  const batchErrorsRaw = typeof row.batch_errors === 'string' ? JSON.parse(row.batch_errors) : row.batch_errors;
+  const batchErrors: string[] = Array.isArray(batchErrorsRaw) ? batchErrorsRaw : [];
+  const lastAvailability = row.last_availability
+    ? (typeof row.last_availability === 'string' ? JSON.parse(row.last_availability) : row.last_availability)
+    : null;
+
   // First poll: check worker health
-  if (!job.healthChecked) {
+  if (currentBatch === 0 && allFileResults.length === 0) {
     const workerUrl = getExternalOpenCvWorkerUrl();
     if (!workerUrl) {
-      job.status = 'failed';
-      job.error = 'External worker URL not configured';
-      job.completedAt = Date.now();
-      job.updatedAt = Date.now();
-      return job;
+      await failJobInDb(jobId, 'External worker URL not configured');
+      return (await getJob(jobId))!;
     }
     const health = await fetchHealth(workerUrl, 15_000);
     if (!health || health.status !== 'ok') {
-      job.status = 'failed';
-      job.error = `External CV worker health check failed: ${health?.status ?? 'no response'}`;
-      job.completedAt = Date.now();
-      job.updatedAt = Date.now();
-      return job;
+      await failJobInDb(jobId, `External CV worker health check failed: ${health?.status ?? 'no response'}`);
+      return (await getJob(jobId))!;
     }
-    job.healthChecked = true;
-    job.healthOk = true;
   }
 
   // Mark as running
-  job.status = 'running';
-  job.updatedAt = Date.now();
+  await sql`
+    UPDATE photo_vision_jobs
+    SET status = 'running', updated_at = NOW()
+    WHERE job_id = ${jobId}
+  `;
 
   // Get the next batch of files to process
-  const batchIndex = job.currentBatch;
-  const startIdx = batchIndex * job.batchSize;
-  const endIdx = Math.min(startIdx + job.batchSize, job.photoFiles.length);
-  const batchFiles = job.photoFiles.slice(startIdx, endIdx);
+  const startIdx = currentBatch * batchSize;
+  const endIdx = Math.min(startIdx + batchSize, allPhotoFiles.length);
+  const batchFiles = allPhotoFiles.slice(startIdx, endIdx);
 
   if (batchFiles.length === 0) {
-    // No more batches — finalize the job
-    finalizeJob(job);
-    return job;
+    // No more batches — finalize
+    await finalizeJobInDb(jobId, allFileResults, batchErrors, lastAvailability, survey, createdAtISO);
+    return (await getJob(jobId))!;
   }
 
-  console.log(`[asyncJobManager] Job ${jobId}: processing batch ${batchIndex + 1}/${job.totalBatches} (${batchFiles.length} files)`);
+  console.log(`[asyncJobManager] Job ${jobId}: processing batch ${currentBatch + 1}/${totalBatches} (${batchFiles.length} files)`);
 
   const workerUrl = getExternalOpenCvWorkerUrl()!;
   const batchTimeoutMs = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_TIMEOUT_MS || 80_000);
@@ -186,9 +221,9 @@ export async function processNextBatch(jobId: string): Promise<PhotoVisionJob> {
   try {
     const jobPayload = {
       schemaVersion: 'solarpro_external_photo_vision_job_v1',
-      surveyId: job.survey.id,
-      projectId: job.survey.projectId ?? null,
-      createdAt: job.createdAtISO,
+      surveyId: survey.id,
+      projectId: survey.projectId ?? null,
+      createdAt: createdAtISO,
       requestedTools: ['opencv_primitives', 'yolo_detection', 'tesseract_ocr', 'ocr_equipment_labels'],
       files: batchFiles.map(file => ({
         fileId: file.id,
@@ -215,45 +250,78 @@ export async function processNextBatch(jobId: string): Promise<PhotoVisionJob> {
     }
 
     // Normalize the batch result
-    const batchRun = normalizeExternalRun(raw, job.survey, batchFiles, job.createdAtISO);
-    job.allFileResults.push(...batchRun.files);
+    const batchRun = normalizeExternalRun(raw, survey, batchFiles, createdAtISO);
+    allFileResults.push(...batchRun.files);
     if (batchRun.availability) {
-      job.lastAvailability = batchRun.availability;
+      Object.assign(lastAvailability || {}, batchRun.availability);
     }
-    job.processedFiles = job.allFileResults.filter(f => f.analyzed).length;
 
-    console.log(`[asyncJobManager] Job ${jobId}: batch ${batchIndex + 1}/${job.totalBatches} completed. processed=${batchRun.processedCount} candidates=${batchRun.candidateCount}`);
+    console.log(`[asyncJobManager] Job ${jobId}: batch ${currentBatch + 1}/${totalBatches} completed. processed=${batchRun.processedCount} candidates=${batchRun.candidateCount}`);
   } catch (batchErr) {
     const errMsg = batchErr instanceof Error ? batchErr.message : String(batchErr);
-    console.error(`[asyncJobManager] Job ${jobId}: batch ${batchIndex + 1}/${job.totalBatches} failed:`, errMsg);
-    job.batchErrors.push(`Batch ${batchIndex + 1} (${batchFiles.length} files): ${errMsg}`);
-    // Mark failed files
+    console.error(`[asyncJobManager] Job ${jobId}: batch ${currentBatch + 1}/${totalBatches} failed:`, errMsg);
+    batchErrors.push(`Batch ${currentBatch + 1} (${batchFiles.length} files): ${errMsg}`);
     for (const file of batchFiles) {
-      job.allFileResults.push(makeFailedFileResult(job.survey, file, job.createdAtISO, errMsg));
+      allFileResults.push(makeFailedFileResult(survey, file, createdAtISO, errMsg));
     }
   }
 
-  // Advance to next batch
-  job.currentBatch = batchIndex + 1;
-  job.completedBatches = job.currentBatch;
-  job.updatedAt = Date.now();
+  // Update job progress in DB
+  const newCurrentBatch = currentBatch + 1;
+  const newCompletedBatches = newCurrentBatch;
+  const newProcessedFiles = allFileResults.filter(f => f.analyzed).length;
+  const isComplete = newCurrentBatch >= totalBatches;
 
-  // Check if all batches are done
-  if (job.currentBatch >= job.totalBatches) {
-    finalizeJob(job);
+  if (isComplete) {
+    await finalizeJobInDb(jobId, allFileResults, batchErrors, lastAvailability, survey, createdAtISO);
+  } else {
+    await sql`
+      UPDATE photo_vision_jobs
+      SET current_batch = ${newCurrentBatch},
+          completed_batches = ${newCompletedBatches},
+          processed_files = ${newProcessedFiles},
+          file_results = ${JSON.stringify(allFileResults)}::jsonb,
+          batch_errors = ${JSON.stringify(batchErrors)}::jsonb,
+          last_availability = ${lastAvailability ? JSON.stringify(lastAvailability) : null}::jsonb,
+          updated_at = NOW()
+      WHERE job_id = ${jobId}
+    `;
   }
 
-  return job;
+  return (await getJob(jobId))!;
 }
 
-function finalizeJob(job: PhotoVisionJob): void {
-  const candidates = job.allFileResults.flatMap(file => file.candidates);
+// ---------------------------------------------------------------------------
+// Fail a job in the database
+// ---------------------------------------------------------------------------
+async function failJobInDb(jobId: string, error: string): Promise<void> {
+  const sql = await getDbReady();
+  await sql`
+    UPDATE photo_vision_jobs
+    SET status = 'failed', error = ${error}, completed_at = NOW(), updated_at = NOW()
+    WHERE job_id = ${jobId}
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Finalize a completed job — build the aggregate run result
+// ---------------------------------------------------------------------------
+async function finalizeJobInDb(
+  jobId: string,
+  allFileResults: OpenSourcePhotoVisionFileResult[],
+  batchErrors: string[],
+  lastAvailability: Record<string, unknown> | null,
+  survey: Pick<SiteSurvey, 'id' | 'projectId'>,
+  createdAtISO: string,
+): Promise<void> {
+  const sql = await getDbReady();
+  const candidates = allFileResults.flatMap(file => file.candidates);
   const runHash = sha256(stable({
-    surveyId: job.survey.id,
+    surveyId: survey.id,
     toolName: EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME,
     toolVersion: EXTERNAL_OPENCV_PHOTO_VISION_TOOL_VERSION,
     batched: true,
-    fileHashes: job.allFileResults.map(file => ({
+    fileHashes: allFileResults.map(file => ({
       fileId: file.fileId,
       hash: file.metadata.sha256,
       candidates: file.candidates.map(c => c.deterministicHash),
@@ -261,33 +329,33 @@ function finalizeJob(job: PhotoVisionJob): void {
   }));
 
   // Assign the aggregate runHash to all files and candidates
-  for (const file of job.allFileResults) {
+  for (const file of allFileResults) {
     file.runHash = runHash;
     for (const candidate of file.candidates) {
       candidate.runHash = runHash;
     }
   }
 
-  const baseLimitations = [
+  const baseLimits = [
     'REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY',
     'External OpenCV, YOLO/Supervision, and Tesseract OCR worker outputs are review cues only and cannot mutate canonical evidence, CAD, permits, BOM, or engineering workflows.',
     'Open3D and FreeCAD remain future stages and are not marked complete by this result.',
   ];
 
-  job.result = {
+  const result: OpenSourcePhotoVisionRunResult = {
     schemaVersion: 'open_source_photo_vision_run_v1',
-    surveyId: job.survey.id,
-    projectId: job.survey.projectId ?? null,
+    surveyId: survey.id,
+    projectId: survey.projectId ?? null,
     toolName: EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME,
     toolVersion: EXTERNAL_OPENCV_PHOTO_VISION_TOOL_VERSION,
-    createdAt: job.createdAtISO,
-    processedCount: job.allFileResults.filter(file => file.analyzed).length,
-    failedCount: job.allFileResults.filter(file => !file.analyzed).length,
+    createdAt: createdAtISO,
+    processedCount: allFileResults.filter(file => file.analyzed).length,
+    failedCount: allFileResults.filter(file => !file.analyzed).length,
     candidateCount: candidates.length,
     runHash,
-    files: job.allFileResults,
+    files: allFileResults,
     candidates,
-    availability: job.lastAvailability ?? {
+    availability: (lastAvailability as OpenSourcePhotoVisionRunResult['availability']) ?? {
       sharp: 'available_next_app_thumbnail_fallback',
       opencv: 'available_external_worker',
       yoloSupervision: 'unavailable_batch_fallback',
@@ -308,24 +376,35 @@ function finalizeJob(job: PhotoVisionJob): void {
       engineeringWorkflowMutationAllowed: false,
     },
     limitations: [
-      ...baseLimitations,
-      ...(job.batchErrors.length > 0
-        ? [`BATCH_PARTIAL_FAILURE: ${job.batchErrors.length} batch(es) failed. Errors: ${job.batchErrors.join('; ')}`]
+      ...baseLimits,
+      ...(batchErrors.length > 0
+        ? [`BATCH_PARTIAL_FAILURE: ${batchErrors.length} batch(es) failed. Errors: ${batchErrors.join('; ')}`]
         : []),
     ],
   };
 
-  job.status = 'completed';
-  job.completedAt = Date.now();
-  job.updatedAt = Date.now();
-  job.processedFiles = job.result.processedCount;
+  const processedFiles = result.processedCount;
 
-  console.log(`[asyncJobManager] Job ${job.jobId} finalized: processed=${job.result.processedCount} failed=${job.result.failedCount} candidates=${job.result.candidateCount}`);
+  await sql`
+    UPDATE photo_vision_jobs
+    SET status = 'completed',
+        current_batch = total_batches,
+        completed_batches = total_batches,
+        processed_files = ${processedFiles},
+        file_results = ${JSON.stringify(allFileResults)}::jsonb,
+        batch_errors = ${JSON.stringify(batchErrors)}::jsonb,
+        last_availability = ${lastAvailability ? JSON.stringify(lastAvailability) : null}::jsonb,
+        final_result = ${JSON.stringify(result)}::jsonb,
+        completed_at = NOW(),
+        updated_at = NOW()
+    WHERE job_id = ${jobId}
+  `;
+
+  console.log(`[asyncJobManager] Job ${jobId} finalized: processed=${result.processedCount} failed=${result.failedCount} candidates=${result.candidateCount}`);
 }
 
 // ---------------------------------------------------------------------------
-// Helper functions (duplicated from externalOpenCvPhotoVisionClient to avoid
-// circular dependency issues and keep this module self-contained)
+// Normalize helpers (same as externalOpenCvPhotoVisionClient)
 // ---------------------------------------------------------------------------
 
 function makeFailedFileResult(
