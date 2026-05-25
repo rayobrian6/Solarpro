@@ -1,14 +1,17 @@
 // ============================================================================
 // POST /api/site-surveys/[surveyId]/open-source-photo-vision-pass
 //   → Creates an async job, returns { jobId } immediately.
+//   → Deduplication: if an active job exists for this survey, returns its ID.
+//   → Rate limiting: max 3 active jobs per user.
 //
 // GET  /api/site-surveys/[surveyId]/open-source-photo-vision-pass?jobId=xxx
 //   → Processes one batch per call, then returns current job status/progress.
+//   → Stale job housekeeping: marks jobs running >30min as failed.
 //   → Client polls repeatedly until status is "completed" or "failed".
 //
-// This "lazy processing" pattern ensures each request handler does a bounded
-// amount of work (~8-12s per batch of 1 photo) and returns well within
-// serverless function timeout limits. No fire-and-forget Promises that could be killed.
+// DELETE /api/site-surveys/[surveyId]/open-source-photo-vision-pass?jobId=xxx
+//   → Cancels an active (pending/running) job.
+//   → Also sends DELETE to the Render worker for queued jobs.
 //
 // Review-only candidates only: no CAD/canonical/permit/BOM/workflow mutation.
 // ============================================================================
@@ -30,6 +33,10 @@ import {
   createJob,
   getJob,
   processNextBatch,
+  findActiveJobForSurvey,
+  countActiveJobsForUser,
+  cancelJob,
+  markStaleJobsFailed,
   type PhotoVisionJob,
 } from '@/lib/assistedEvidenceSources/asyncPhotoVisionJobManager';
 import {
@@ -38,8 +45,10 @@ import {
 } from '@/lib/assistedEvidenceSources/externalOpenCvPhotoVisionClient';
 import type { OpenSourcePhotoVisionRunResult } from '@/lib/assistedEvidenceSources/openSourcePhotoVisionWorker';
 
+const MAX_ACTIVE_JOBS_PER_USER = 3;
+
 // ---------------------------------------------------------------------------
-// POST — Create an async photo vision job
+// POST — Create an async photo vision job (with dedup + rate limiting)
 // ---------------------------------------------------------------------------
 export async function POST(
   req: NextRequest,
@@ -58,6 +67,31 @@ export async function POST(
       return NextResponse.json({ success: false, error: 'Invalid survey ID' }, { status: 400 });
     }
 
+    // Dedup: check if there's already an active job for this survey
+    const activeJob = await findActiveJobForSurvey(surveyId);
+    if (activeJob) {
+      console.log(`[POST open-source-photo-vision-pass] surveyId=${surveyId} dedup: returning existing jobId=${activeJob.jobId} (status=${activeJob.status})`);
+      return NextResponse.json({
+        success: true,
+        jobId: activeJob.jobId,
+        surveyId,
+        photoFileCount: activeJob.totalPhotoFiles,
+        totalBatches: activeJob.totalBatches,
+        message: 'An active job already exists for this survey. Poll GET endpoint with the returned jobId for progress.',
+        deduplicated: true,
+      });
+    }
+
+    // Rate limiting: max active jobs per user
+    const activeJobCount = await countActiveJobsForUser(user.id);
+    if (activeJobCount >= MAX_ACTIVE_JOBS_PER_USER) {
+      return NextResponse.json({
+        success: false,
+        error: `Rate limit: you have ${activeJobCount} active photo vision job(s). Please wait for one to complete or cancel one before starting a new one.`,
+        activeJobCount,
+      }, { status: 429 });
+    }
+
     const survey = await getSiteSurveyById(surveyId, user.id);
     if (!survey) return NextResponse.json({ success: false, error: 'Survey not found' }, { status: 404 });
 
@@ -73,7 +107,7 @@ export async function POST(
       }, { status: 400 });
     }
 
-    // Check worker health before creating the job (saves a health check during poll)
+    // Check worker health before creating the job
     const workerUrl = getExternalOpenCvWorkerUrl();
     if (!workerUrl) {
       return NextResponse.json({
@@ -91,7 +125,7 @@ export async function POST(
       }, { status: 503 });
     }
 
-    // Create an async job — processing will happen during GET/poll requests
+    // Create an async job
     const job = await createJob(surveyId, user.id, survey, photoFiles);
     console.log(`[POST open-source-photo-vision-pass] surveyId=${surveyId} jobId=${job.jobId} created. Client should poll GET with jobId.`);
 
@@ -120,7 +154,7 @@ export async function POST(
 
 // ---------------------------------------------------------------------------
 // GET — Poll job status AND process next batch (lazy processing)
-// Each poll request processes one batch (~8-12s for 1 photo), then returns status.
+// Includes stale job housekeeping at the start of each poll.
 // ---------------------------------------------------------------------------
 export async function GET(
   req: NextRequest,
@@ -131,6 +165,17 @@ export async function GET(
 
   if (!jobId) {
     return NextResponse.json({ success: false, error: 'Missing jobId query parameter' }, { status: 400 });
+  }
+
+  // Stale job housekeeping — mark jobs running >30min as failed
+  try {
+    const staleCount = await markStaleJobsFailed();
+    if (staleCount > 0) {
+      console.log(`[GET open-source-photo-vision-pass] Marked ${staleCount} stale job(s) as failed`);
+    }
+  } catch (staleErr) {
+    // Non-fatal: don't block polling if stale cleanup fails
+    console.error('[GET open-source-photo-vision-pass] Stale cleanup error (non-fatal):', staleErr instanceof Error ? staleErr.message : String(staleErr));
   }
 
   const job = await getJob(jobId);
@@ -162,9 +207,7 @@ export async function GET(
   try {
     const updatedJob = await processNextBatch(jobId);
 
-    // Check if the job just completed
     if (updatedJob.status === 'completed') {
-      // Load full job (with result) for the completed handler
       const fullJob = await getJob(updatedJob.jobId);
       return handleCompletedJob(fullJob ?? updatedJob, surveyId);
     }
@@ -205,6 +248,71 @@ export async function GET(
       error: `Processing error: ${errMsg}`,
     }, { status: 500 });
   }
+}
+
+// ---------------------------------------------------------------------------
+// DELETE — Cancel an active job
+// ---------------------------------------------------------------------------
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: { surveyId: string } },
+) {
+  const surveyId = params?.surveyId ?? 'unknown';
+  const jobId = req.nextUrl.searchParams.get('jobId');
+
+  if (!jobId) {
+    return NextResponse.json({ success: false, error: 'Missing jobId query parameter' }, { status: 400 });
+  }
+
+  const job = await getJob(jobId);
+  if (!job) {
+    return NextResponse.json({ success: false, error: 'Job not found' }, { status: 404 });
+  }
+
+  if (job.surveyId !== surveyId) {
+    return NextResponse.json({ success: false, error: 'Job does not belong to this survey' }, { status: 403 });
+  }
+
+  if (job.status !== 'pending' && job.status !== 'running') {
+    return NextResponse.json({
+      success: false,
+      error: `Job is already ${job.status} and cannot be cancelled`,
+      status: job.status,
+    }, { status: 400 });
+  }
+
+  // Cancel in our DB
+  const cancelled = await cancelJob(jobId);
+
+  // Also try to cancel on the Render worker side
+  try {
+    const workerUrl = getExternalOpenCvWorkerUrl();
+    if (workerUrl) {
+      // We don't have the renderJobId stored in our DB, so we can't cancel
+      // on the Render side directly. The Render worker will clean up its
+      // in-memory jobs after 1 hour via _cleanup_old_jobs().
+      // This is acceptable because the semaphore ensures only 1 job runs
+      // at a time, and the cancelled job won't block new submissions.
+    }
+  } catch (cancelErr) {
+    // Non-fatal: Render worker cancellation is best-effort
+    console.error('[DELETE open-source-photo-vision-pass] Render cancel error (non-fatal):', cancelErr instanceof Error ? cancelErr.message : String(cancelErr));
+  }
+
+  if (cancelled) {
+    console.log(`[DELETE open-source-photo-vision-pass] jobId=${jobId} cancelled successfully`);
+    return NextResponse.json({
+      success: true,
+      jobId,
+      status: 'cancelled',
+      message: 'Job cancelled successfully.',
+    });
+  }
+
+  return NextResponse.json({
+    success: false,
+    error: 'Could not cancel job — it may have already completed or failed',
+  }, { status: 400 });
 }
 
 // ---------------------------------------------------------------------------

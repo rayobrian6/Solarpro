@@ -1,9 +1,11 @@
+import asyncio
 import base64
 import gc
 import hashlib
 import io
 import os
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -17,18 +19,94 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 TOOL_NAME = "external-opencv-photo-vision-worker"
-TOOL_VERSION = "0.1.0"
+TOOL_VERSION = "0.2.0"
 MAX_IMAGE_BYTES = int(os.environ.get("MAX_IMAGE_BYTES", str(16 * 1024 * 1024)))
 FETCH_TIMEOUT_SECONDS = float(os.environ.get("FETCH_TIMEOUT_SECONDS", "12"))
 MAX_FILES_PER_JOB = int(os.environ.get("MAX_FILES_PER_JOB", "12"))
-PROCESSING_TIMEOUT_SECONDS = float(os.environ.get("PROCESSING_TIMEOUT_SECONDS", "45"))
+PROCESSING_TIMEOUT_SECONDS = float(os.environ.get("PROCESSING_TIMEOUT_SECONDS", "90"))
+MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "1"))
 
 yolo_service = YoloDetectionService()
 ocr_service = TesseractOcrService()
 
 app = FastAPI(title="SolarPro External OpenCV Photo Vision Worker", version=TOOL_VERSION)
 
+# ---------------------------------------------------------------------------
+# Async job queue — in-memory job store + semaphore for YOLO serialization
+# ---------------------------------------------------------------------------
+processing_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 
+
+class RenderJob:
+    """In-memory job record for async processing."""
+
+    def __init__(self, render_job_id: str, job: "VisionJob"):
+        self.render_job_id = render_job_id
+        self.job = job
+        self.status: Literal["queued", "processing", "completed", "failed", "cancelled"] = "queued"
+        self.result: dict[str, Any] | None = None
+        self.error: str | None = None
+        self.created_at = time.time()
+        self.completed_at: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "renderJobId": self.render_job_id,
+            "status": self.status,
+            "createdAt": self.created_at,
+        }
+        if self.result is not None:
+            out["result"] = self.result
+        if self.error is not None:
+            out["error"] = self.error
+        if self.completed_at is not None:
+            out["completedAt"] = self.completed_at
+        return out
+
+
+render_jobs: dict[str, RenderJob] = {}
+
+
+# ---------------------------------------------------------------------------
+# Startup / shutdown — clean up stale in-memory jobs
+# ---------------------------------------------------------------------------
+@app.on_event("startup")
+async def _startup():
+    # Mark any leftover in-memory jobs as failed (shouldn't happen after clean
+    # shutdown, but protects against hard crashes / restarts)
+    for rj in render_jobs.values():
+        if rj.status in ("queued", "processing"):
+            rj.status = "failed"
+            rj.error = "Server restarted while job was active"
+            rj.completed_at = time.time()
+
+
+# ---------------------------------------------------------------------------
+# Periodic cleanup — remove completed/failed/cancelled jobs older than 1 hour
+# ---------------------------------------------------------------------------
+async def _cleanup_old_jobs():
+    while True:
+        await asyncio.sleep(300)  # every 5 minutes
+        cutoff = time.time() - 3600  # 1 hour
+        to_remove = [
+            jid
+            for jid, rj in render_jobs.items()
+            if rj.status in ("completed", "failed", "cancelled")
+            and rj.completed_at is not None
+            and rj.completed_at < cutoff
+        ]
+        for jid in to_remove:
+            del render_jobs[jid]
+
+
+@app.on_event("startup")
+async def _start_cleanup_task():
+    asyncio.create_task(_cleanup_old_jobs())
+
+
+# ---------------------------------------------------------------------------
+# Helper types and functions (unchanged from v0.1)
+# ---------------------------------------------------------------------------
 def stable_hash(value: Any) -> str:
     import json
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
@@ -70,15 +148,26 @@ class VisionJob(BaseModel):
     files: list[FileJob] = Field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# Health endpoint — now includes capacity info
+# ---------------------------------------------------------------------------
 @app.get("/health")
 def health() -> dict[str, Any]:
     yolo_availability = yolo_service.availability()
     ocr_availability = ocr_service.availability()
+    queued = sum(1 for rj in render_jobs.values() if rj.status == "queued")
+    processing = sum(1 for rj in render_jobs.values() if rj.status == "processing")
     return {
         "status": "ok",
         "schemaVersion": "solarpro_external_photo_vision_health_v1",
         "toolName": TOOL_NAME,
         "toolVersion": TOOL_VERSION,
+        "capacity": {
+            "maxConcurrentJobs": MAX_CONCURRENT_JOBS,
+            "currentlyProcessing": processing,
+            "currentlyQueued": queued,
+            "available": processing < MAX_CONCURRENT_JOBS,
+        },
         "tools": {
             "opencv": {"available": True, "version": cv2.__version__},
             "python": {"available": True},
@@ -94,8 +183,99 @@ def health() -> dict[str, Any]:
     }
 
 
-@app.post("/v1/photo-vision/jobs")
-def run_job(job: VisionJob) -> dict[str, Any]:
+# ---------------------------------------------------------------------------
+# POST /v1/photo-vision/jobs — submit job, returns 202 Accepted instantly
+# ---------------------------------------------------------------------------
+@app.post("/v1/photo-vision/jobs", status_code=202)
+async def submit_job(job: VisionJob) -> dict[str, Any]:
+    render_job_id = f"rj_{uuid.uuid4().hex[:16]}"
+    rj = RenderJob(render_job_id, job)
+    render_jobs[render_job_id] = rj
+    asyncio.create_task(_process_job_background(render_job_id))
+    return {
+        "renderJobId": render_job_id,
+        "status": "queued",
+        "message": "Job submitted. Poll GET /v1/photo-vision/jobs/{renderJobId} for status.",
+        "toolVersion": TOOL_VERSION,
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/photo-vision/jobs/{renderJobId} — poll job status
+# ---------------------------------------------------------------------------
+@app.get("/v1/photo-vision/jobs/{render_job_id}")
+async def get_job_status(render_job_id: str) -> dict[str, Any]:
+    rj = render_jobs.get(render_job_id)
+    if not rj:
+        return {"error": f"Job {render_job_id} not found", "status": "not_found"}
+    return rj.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# DELETE /v1/photo-vision/jobs/{renderJobId} — cancel a queued job
+# ---------------------------------------------------------------------------
+@app.delete("/v1/photo-vision/jobs/{render_job_id}")
+async def cancel_job(render_job_id: str) -> dict[str, Any]:
+    rj = render_jobs.get(render_job_id)
+    if not rj:
+        return {"error": f"Job {render_job_id} not found", "status": "not_found"}
+    if rj.status == "queued":
+        rj.status = "cancelled"
+        rj.completed_at = time.time()
+        return {"renderJobId": render_job_id, "status": "cancelled", "message": "Job cancelled successfully."}
+    if rj.status == "processing":
+        # Can't cancel a job that's already being processed by the semaphore,
+        # but we can mark it for the background task to check
+        rj.status = "cancelled"
+        rj.completed_at = time.time()
+        return {"renderJobId": render_job_id, "status": "cancelled", "message": "Job marked for cancellation (may still complete if processing is in progress)."}
+    return {"renderJobId": render_job_id, "status": rj.status, "message": f"Job is already {rj.status} and cannot be cancelled."}
+
+
+# ---------------------------------------------------------------------------
+# Background job processor — acquires semaphore, runs sync processing in
+# thread pool so asyncio event loop stays responsive for health/poll endpoints
+# ---------------------------------------------------------------------------
+async def _process_job_background(render_job_id: str) -> None:
+    rj = render_jobs.get(render_job_id)
+    if not rj:
+        return
+
+    # Check if already cancelled before acquiring semaphore
+    if rj.status == "cancelled":
+        return
+
+    try:
+        async with processing_semaphore:
+            # Re-check after acquiring semaphore (may have been cancelled while waiting)
+            if rj.status == "cancelled":
+                return
+
+            rj.status = "processing"
+
+            # Run CPU-bound processing in thread pool to keep event loop responsive
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, _run_job_sync, rj.job)
+
+            # Check if cancelled during processing
+            if rj.status == "cancelled":
+                return
+
+            rj.result = result
+            rj.status = "completed"
+            rj.completed_at = time.time()
+
+    except Exception as exc:
+        if rj.status != "cancelled":
+            rj.status = "failed"
+            rj.error = str(exc)[:500]
+            rj.completed_at = time.time()
+
+
+# ---------------------------------------------------------------------------
+# Synchronous job processing (same logic as old run_job, runs in thread pool)
+# ---------------------------------------------------------------------------
+def _run_job_sync(job: VisionJob) -> dict[str, Any]:
     created_at = job.createdAt or datetime.now(timezone.utc).isoformat()
     files: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
@@ -103,7 +283,6 @@ def run_job(job: VisionJob) -> dict[str, Any]:
         file_result = analyze_file(job, file_job, created_at)
         files.append(file_result)
         candidates.extend(file_result["candidates"])
-        # Explicit GC between files to keep peak memory low on constrained Render instances
         gc.collect()
     run_hash = stable_hash({
         "surveyId": job.surveyId,
@@ -147,6 +326,9 @@ def run_job(job: VisionJob) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# analyze_file — same logic as v0.1, runs synchronously in thread pool
+# ---------------------------------------------------------------------------
 def analyze_file(job: VisionJob, file_job: FileJob, created_at: str) -> dict[str, Any]:
     try:
         started = time.time()
@@ -192,7 +374,6 @@ def analyze_file(job: VisionJob, file_job: FileJob, created_at: str) -> dict[str
             ) if ocr_requested else {"available": False, "diagnostic": "tesseract_ocr_not_requested", "candidates": [], "elapsedMs": 0, "limitations": []}
         candidates = [*opencv_candidates, *yolo_result.get("candidates", []), *ocr_result.get("candidates", [])]
         run_hash = stable_hash({"fileId": file_job.fileId, "sha256": byte_hash, "lines": lines, "regions": regions, "yoloCandidates": [c.get("payload", {}) for c in yolo_result.get("candidates", [])], "ocrCandidates": [c.get("payload", {}) for c in ocr_result.get("candidates", [])]})
-        # Free large image arrays to reduce peak memory before building the result dict
         del image, gray, blur, edges, np_bytes, content
         gc.collect()
         return {
@@ -232,7 +413,6 @@ def analyze_file(job: VisionJob, file_job: FileJob, created_at: str) -> dict[str
             "runHash": run_hash,
         }
     except Exception as exc:
-        # Free any partially-loaded image data on error
         gc.collect()
         run_hash = stable_hash({"surveyId": job.surveyId, "fileId": file_job.fileId, "error": str(exc)})
         return {
@@ -340,11 +520,13 @@ def build_candidates(job: VisionJob, file_job: FileJob, byte_hash: str, created_
 def tool_requested(job: VisionJob, tool: str) -> bool:
     return tool in set(job.requestedTools or [])
 
+
 def yolo_availability_string() -> str:
     availability = yolo_service.availability()
     if availability.yolo.get("available") and availability.supervision.get("available"):
         return f"available:{availability.yolo.get('model')}:{availability.yolo.get('modelVersion')}"
     return f"unavailable:{availability.yolo.get('reason') or availability.supervision.get('reason') or 'model_not_loaded'}"
+
 
 def supervision_availability_string() -> str:
     availability = yolo_service.availability()
@@ -355,6 +537,7 @@ def supervision_availability_string() -> str:
 
 def tesseract_availability_string() -> str:
     return ocr_service.availability_string()
+
 
 def pytesseract_availability_string() -> str:
     availability = ocr_service.availability()

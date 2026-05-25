@@ -1,16 +1,19 @@
 // ============================================================================
-// Async Photo Vision Job Manager — PostgreSQL-backed
+// Async Photo Vision Job Manager — PostgreSQL-backed + Render polling
 //
 // Manages job state for the async photo vision pass using Neon PostgreSQL.
-// This ensures job state persists across Vercel serverless function instances,
-// unlike in-memory state which is lost when the instance recycles or a
-// different instance handles the next request.
+// Each batch is sent to the Render worker which now returns 202 Accepted
+// instantly with a renderJobId. This manager then polls the Render worker's
+// GET /v1/photo-vision/jobs/{renderJobId} endpoint until the batch completes.
 //
-// Architecture:
-//   POST creates a job record in DB, returns jobId immediately.
-//   Each GET/poll request processes ONE batch of photos, updates DB, returns status.
-//   This "lazy processing" pattern ensures work happens within the
-//   serverless function's lifecycle — no fire-and-forget Promises.
+// Key changes from v0.1:
+//   - POST to Render returns 202 + renderJobId (no more blocking 8-12s)
+//   - pollRenderJob() polls Render GET with exponential backoff
+//   - JSONB append-only writes (|| operator) — never re-reads file_results
+//   - findActiveJobForSurvey() — dedup before creating new jobs
+//   - countActiveJobsForUser() — per-user rate limiting
+//   - cancelJob() — mark a job as failed with "Cancelled by user"
+//   - markStaleJobsFailed() — auto-fail jobs running >30 minutes
 // ============================================================================
 
 import crypto from 'crypto';
@@ -60,7 +63,6 @@ export async function createJob(
   const batchSize = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_SIZE || 1);
   const totalBatches = Math.ceil(photoFiles.length / batchSize);
 
-  // Store survey + photoFiles as the job input (needed for batch processing)
   const jobInput = {
     survey: { id: survey.id, projectId: survey.projectId ?? null },
     photoFiles: photoFiles.map(f => ({
@@ -140,21 +142,177 @@ export async function getJob(jobId: string): Promise<PhotoVisionJob | null> {
 }
 
 // ---------------------------------------------------------------------------
+// Find active job for a survey (for dedup)
+// ---------------------------------------------------------------------------
+export async function findActiveJobForSurvey(surveyId: string): Promise<PhotoVisionJob | null> {
+  const sql = await getDbReady();
+  const rows = await sql`
+    SELECT job_id, survey_id, user_id, status,
+           EXTRACT(EPOCH FROM created_at)::bigint * 1000 AS created_at_ms,
+           EXTRACT(EPOCH FROM updated_at)::bigint * 1000 AS updated_at_ms,
+           total_batches, current_batch, completed_batches,
+           total_photo_files, processed_files
+    FROM photo_vision_jobs
+    WHERE survey_id = ${surveyId}
+      AND status IN ('pending', 'running')
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  if (!rows.length) return null;
+  const row = rows[0] as Record<string, unknown>;
+  return {
+    jobId: row.job_id as string,
+    surveyId: row.survey_id as string,
+    userId: row.user_id as string,
+    status: row.status as JobStatus,
+    createdAt: Number(row.created_at_ms) || Date.now(),
+    updatedAt: Number(row.updated_at_ms) || Date.now(),
+    completedAt: null,
+    totalBatches: Number(row.total_batches) || 0,
+    currentBatch: Number(row.current_batch) || 0,
+    completedBatches: Number(row.completed_batches) || 0,
+    totalPhotoFiles: Number(row.total_photo_files) || 0,
+    processedFiles: Number(row.processed_files) || 0,
+    result: null,
+    error: null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Count active jobs for a user (for rate limiting)
+// ---------------------------------------------------------------------------
+export async function countActiveJobsForUser(userId: string): Promise<number> {
+  const sql = await getDbReady();
+  const rows = await sql`
+    SELECT COUNT(*)::int AS cnt
+    FROM photo_vision_jobs
+    WHERE user_id = ${userId}
+      AND status IN ('pending', 'running')
+  `;
+  const row = rows[0] as Record<string, unknown>;
+  return Number(row.cnt) || 0;
+}
+
+// ---------------------------------------------------------------------------
+// Cancel a job — marks it as failed with "Cancelled by user"
+// ---------------------------------------------------------------------------
+export async function cancelJob(jobId: string): Promise<boolean> {
+  const sql = await getDbReady();
+  const result = await sql`
+    UPDATE photo_vision_jobs
+    SET status = 'failed',
+        error = 'Cancelled by user',
+        completed_at = NOW(),
+        updated_at = NOW()
+    WHERE job_id = ${jobId}
+      AND status IN ('pending', 'running')
+  `;
+  return (result.count ?? 0) > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Mark stale jobs as failed — jobs running >30 minutes
+// ---------------------------------------------------------------------------
+export async function markStaleJobsFailed(): Promise<number> {
+  const sql = await getDbReady();
+  const result = await sql`
+    UPDATE photo_vision_jobs
+    SET status = 'failed',
+        error = 'Job exceeded 30 minute timeout (stale)',
+        completed_at = NOW(),
+        updated_at = NOW()
+    WHERE status IN ('pending', 'running')
+      AND updated_at < NOW() - INTERVAL '30 minutes'
+  `;
+  return Number(result.count ?? 0);
+}
+
+// ---------------------------------------------------------------------------
+// Poll the Render worker for a submitted batch job
+// POST → get renderJobId (202 Accepted), then poll GET until completed/failed
+// ---------------------------------------------------------------------------
+async function pollRenderJob(
+  workerUrl: string,
+  jobPayload: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<Record<string, unknown>> {
+  // Step 1: POST batch to Render, get 202 + renderJobId
+  const postRes = await fetch(`${workerUrl}/v1/photo-vision/jobs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(jobPayload),
+  });
+
+  if (!postRes.ok) {
+    throw new Error(`Render worker POST returned ${postRes.status}`);
+  }
+
+  const postData = await postRes.json() as Record<string, unknown>;
+  const renderJobId = postData.renderJobId as string;
+
+  if (!renderJobId) {
+    // Fallback: if the worker somehow returns the result synchronously (old behavior)
+    if (postData.schemaVersion && postData.files) {
+      return postData;
+    }
+    throw new Error('Render worker did not return a renderJobId');
+  }
+
+  // Step 2: Poll GET /v1/photo-vision/jobs/{renderJobId} with exponential backoff
+  const startTime = Date.now();
+  let delay = 1000; // start at 1s
+
+  while (Date.now() - startTime < timeoutMs) {
+    await new Promise(r => setTimeout(r, delay));
+
+    const getRes = await fetch(`${workerUrl}/v1/photo-vision/jobs/${renderJobId}`);
+    if (!getRes.ok) {
+      // Non-fatal: worker may be temporarily unreachable, retry
+      delay = Math.min(delay * 1.5, 4_000);
+      continue;
+    }
+
+    const getData = await getRes.json() as Record<string, unknown>;
+    const renderStatus = getData.status as string;
+
+    if (renderStatus === 'completed') {
+      return getData.result as Record<string, unknown>;
+    }
+
+    if (renderStatus === 'failed') {
+      const err = getData.error ?? 'Render worker processing failed';
+      throw new Error(typeof err === 'string' ? err : String(err));
+    }
+
+    if (renderStatus === 'cancelled') {
+      throw new Error('Render worker job was cancelled');
+    }
+
+    if (renderStatus === 'not_found') {
+      throw new Error('Render worker job not found (may have expired)');
+    }
+
+    // Still queued or processing — increase delay (1s → 1.5s → 2.25s → cap 4s)
+    delay = Math.min(delay * 1.5, 4_000);
+  }
+
+  throw new Error(`Render worker polling timed out after ${timeoutMs}ms`);
+}
+
+// ---------------------------------------------------------------------------
 // Process the next batch for a job — called by the GET/poll handler.
-// Processes up to `maxBatchesPerPoll` batches of photos by sending them to
-// the external Render worker. Each batch of 1 photo takes ~8-12s on the worker,
-// so we process only 1 batch per poll to stay within Vercel's 60s maxDuration.
+// Now uses JSONB append-only writes (|| operator) instead of re-reading
+// file_results, and polls the Render worker asynchronously.
 // ---------------------------------------------------------------------------
 export async function processNextBatch(jobId: string, maxBatchesPerPoll = 1): Promise<PhotoVisionJob> {
   const sql = await getDbReady();
 
-  // Load job state from DB — select only needed columns to avoid reading
-  // the potentially large file_results JSONB when we only need metadata
+  // Load job metadata only — do NOT read the growing file_results JSONB
   const rows = await sql`
     SELECT job_id, survey_id, user_id, status,
            job_input, current_batch, total_batches, completed_batches,
            total_photo_files, processed_files,
-           file_results, batch_errors, last_availability
+           batch_errors, last_availability
     FROM photo_vision_jobs WHERE job_id = ${jobId}
   `;
   if (!rows.length) throw new Error(`Job ${jobId} not found`);
@@ -162,7 +320,6 @@ export async function processNextBatch(jobId: string, maxBatchesPerPoll = 1): Pr
 
   const status = row.status as string;
   if (status === 'completed' || status === 'failed') {
-    // Already terminal — return as-is
     return (await getJob(jobId))!;
   }
 
@@ -175,19 +332,15 @@ export async function processNextBatch(jobId: string, maxBatchesPerPoll = 1): Pr
 
   const currentBatch = Number(row.current_batch) || 0;
   const totalBatches = Number(row.total_batches) || 0;
-  const completedBatches = Number(row.completed_batches) || 0;
   const totalPhotoFiles = Number(row.total_photo_files) || 0;
 
-  // Parse accumulated state
-  const fileResultsRaw = typeof row.file_results === 'string' ? JSON.parse(row.file_results) : row.file_results;
-  const allFileResults: OpenSourcePhotoVisionFileResult[] = Array.isArray(fileResultsRaw) ? fileResultsRaw : [];
+  // Parse batch_errors and last_availability (small, OK to read)
   const batchErrorsRaw = typeof row.batch_errors === 'string' ? JSON.parse(row.batch_errors) : row.batch_errors;
   const batchErrors: string[] = Array.isArray(batchErrorsRaw) ? batchErrorsRaw : [];
   const lastAvailability = row.last_availability
     ? (typeof row.last_availability === 'string' ? JSON.parse(row.last_availability) : row.last_availability)
     : null;
 
-  // Verify worker URL is configured (health check was done at job creation in POST)
   const workerUrl = getExternalOpenCvWorkerUrl();
   if (!workerUrl) {
     await failJobInDb(jobId, 'External worker URL not configured');
@@ -201,17 +354,18 @@ export async function processNextBatch(jobId: string, maxBatchesPerPoll = 1): Pr
     WHERE job_id = ${jobId}
   `;
 
-  // Process up to maxBatchesPerPoll batches in this single poll request.
-  const batchTimeoutMs = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_TIMEOUT_MS || 45_000);
+  // Process up to maxBatchesPerPoll batches
+  const renderTimeoutMs = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_TIMEOUT_MS || 60_000);
   let batchIdx = currentBatch;
   let batchesProcessedThisPoll = 0;
+  let newProcessedFiles = Number(row.processed_files) || 0;
 
   while (batchIdx < totalBatches && batchesProcessedThisPoll < maxBatchesPerPoll) {
     const startIdx = batchIdx * batchSize;
     const endIdx = Math.min(startIdx + batchSize, allPhotoFiles.length);
     const batchFiles = allPhotoFiles.slice(startIdx, endIdx);
 
-    if (batchFiles.length === 0) break; // no more files
+    if (batchFiles.length === 0) break;
 
     console.log(`[asyncJobManager] Job ${jobId}: processing batch ${batchIdx + 1}/${totalBatches} (${batchFiles.length} files) [poll batch ${batchesProcessedThisPoll + 1}/${maxBatchesPerPoll}]`);
 
@@ -230,69 +384,67 @@ export async function processNextBatch(jobId: string, maxBatchesPerPoll = 1): Pr
         })),
       };
 
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), batchTimeoutMs);
-      let raw: unknown;
-      try {
-        const res = await fetch(`${workerUrl}/v1/photo-vision/jobs`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(jobPayload),
-          signal: controller.signal,
-        });
-        if (!res.ok) throw new Error(`external worker ${res.status}`);
-        raw = await res.json();
-      } finally {
-        clearTimeout(timer);
-      }
+      // Use async Render polling instead of synchronous fetch
+      const raw = await pollRenderJob(workerUrl, jobPayload, renderTimeoutMs);
 
       // Normalize the batch result
       const batchRun = normalizeExternalRun(raw, survey, batchFiles, createdAtISO);
-      allFileResults.push(...batchRun.files);
-      if (batchRun.availability) {
-        Object.assign(lastAvailability || {}, batchRun.availability);
-      }
+      const batchFileResults = batchRun.files;
+
+      // JSONB append-only write — don't re-read file_results, just append
+      await sql`
+        UPDATE photo_vision_jobs
+        SET file_results = COALESCE(file_results, '[]'::jsonb) || ${JSON.stringify(batchFileResults)}::jsonb,
+            last_availability = ${batchRun.availability ? JSON.stringify({ ...(lastAvailability || {}), ...batchRun.availability }) : null}::jsonb,
+            updated_at = NOW()
+        WHERE job_id = ${jobId}
+      `;
+
+      newProcessedFiles += batchFileResults.filter(f => f.analyzed).length;
 
       console.log(`[asyncJobManager] Job ${jobId}: batch ${batchIdx + 1}/${totalBatches} completed. processed=${batchRun.processedCount} candidates=${batchRun.candidateCount}`);
     } catch (batchErr) {
-      const isTimeout = batchErr instanceof Error && batchErr.name === 'AbortError';
+      const isTimeout = batchErr instanceof Error && batchErr.message.includes('timed out');
       const errMsg = batchErr instanceof Error ? batchErr.message : String(batchErr);
-      const errLabel = isTimeout ? `TIMEOUT after ${batchTimeoutMs}ms: ${errMsg}` : errMsg;
-      console.error(`[asyncJobManager] Job ${jobId}: batch ${batchIdx + 1}/${totalBatches} failed${isTimeout ? ' (TIMEOUT)' : ''}:`, errLabel);
-      batchErrors.push(`Batch ${batchIdx + 1} (${batchFiles.length} files): ${errLabel}`);
-      for (const file of batchFiles) {
-        allFileResults.push(makeFailedFileResult(survey, file, createdAtISO, errLabel));
-      }
+      console.error(`[asyncJobManager] Job ${jobId}: batch ${batchIdx + 1}/${totalBatches} failed${isTimeout ? ' (TIMEOUT)' : ''}:`, errMsg);
+
+      batchErrors.push(`Batch ${batchIdx + 1} (${batchFiles.length} files): ${errMsg}`);
+
+      // Append failed file results using JSONB || operator
+      const failedResults = batchFiles.map(file => makeFailedFileResult(survey, file, createdAtISO, errMsg));
+      await sql`
+        UPDATE photo_vision_jobs
+        SET file_results = COALESCE(file_results, '[]'::jsonb) || ${JSON.stringify(failedResults)}::jsonb,
+            batch_errors = COALESCE(batch_errors, '[]'::jsonb) || ${JSON.stringify([errMsg])}::jsonb,
+            updated_at = NOW()
+        WHERE job_id = ${jobId}
+      `;
     }
 
     batchIdx++;
     batchesProcessedThisPoll++;
   }
 
-  // Update job progress in DB
+  // Update job progress
   const newCurrentBatch = batchIdx;
   const newCompletedBatches = batchIdx;
-  const newProcessedFiles = allFileResults.filter(f => f.analyzed).length;
   const isComplete = newCurrentBatch >= totalBatches;
 
   if (isComplete) {
-    await finalizeJobInDb(jobId, allFileResults, batchErrors, lastAvailability, survey, createdAtISO);
+    await finalizeJobInDb(jobId, batchErrors, lastAvailability, survey, createdAtISO);
   } else {
     await sql`
       UPDATE photo_vision_jobs
       SET current_batch = ${newCurrentBatch},
           completed_batches = ${newCompletedBatches},
           processed_files = ${newProcessedFiles},
-          file_results = ${JSON.stringify(allFileResults)}::jsonb,
           batch_errors = ${JSON.stringify(batchErrors)}::jsonb,
-          last_availability = ${lastAvailability ? JSON.stringify(lastAvailability) : null}::jsonb,
           updated_at = NOW()
       WHERE job_id = ${jobId}
     `;
   }
 
-  // Return lightweight job status — avoid re-reading the full file_results JSONB
-  // which can be large. The route handler only needs status/progress fields.
+  // Return lightweight job status — avoid re-reading file_results JSONB
   const statusRow = await sql`
     SELECT status, error,
            EXTRACT(EPOCH FROM created_at)::bigint * 1000 AS created_at_ms,
@@ -303,23 +455,21 @@ export async function processNextBatch(jobId: string, maxBatchesPerPoll = 1): Pr
   const sRow = statusRow[0] as Record<string, unknown>;
   const finalStatus = (sRow?.status ?? 'running') as JobStatus;
   const finalError = (sRow?.error ?? null) as string | null;
-  const finalCreatedAt = Number(sRow?.created_at_ms) || Date.now();
-  const finalCompletedAt = sRow?.completed_at_ms ? Number(sRow.completed_at_ms) : null;
 
   return {
     jobId,
     surveyId: row.survey_id as string,
     userId: row.user_id as string,
     status: finalStatus,
-    createdAt: finalCreatedAt,
+    createdAt: Number(sRow?.created_at_ms) || Date.now(),
     updatedAt: Date.now(),
-    completedAt: finalCompletedAt,
+    completedAt: sRow?.completed_at_ms ? Number(sRow.completed_at_ms) : null,
     totalBatches,
     currentBatch: newCurrentBatch,
     completedBatches: newCompletedBatches,
     totalPhotoFiles,
     processedFiles: newProcessedFiles,
-    result: null, // full result only needed for completed jobs, loaded on demand
+    result: null,
     error: finalError,
   };
 }
@@ -337,18 +487,29 @@ async function failJobInDb(jobId: string, error: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Finalize a completed job — build the aggregate run result
+// Finalize a completed job — read file_results only at completion time,
+// build the aggregate run result, and write final_result
 // ---------------------------------------------------------------------------
 async function finalizeJobInDb(
   jobId: string,
-  allFileResults: OpenSourcePhotoVisionFileResult[],
   batchErrors: string[],
   lastAvailability: Record<string, unknown> | null,
   survey: Pick<SiteSurvey, 'id' | 'projectId'>,
   createdAtISO: string,
 ): Promise<void> {
   const sql = await getDbReady();
+
+  // Read file_results only now, at completion time
+  const rows = await sql`
+    SELECT file_results, processed_files FROM photo_vision_jobs WHERE job_id = ${jobId}
+  `;
+  if (!rows.length) return;
+
+  const row = rows[0] as Record<string, unknown>;
+  const fileResultsRaw = typeof row.file_results === 'string' ? JSON.parse(row.file_results) : row.file_results;
+  const allFileResults: OpenSourcePhotoVisionFileResult[] = Array.isArray(fileResultsRaw) ? fileResultsRaw : [];
   const candidates = allFileResults.flatMap(file => file.candidates);
+
   const runHash = sha256(stable({
     surveyId: survey.id,
     toolName: EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME,
@@ -361,7 +522,6 @@ async function finalizeJobInDb(
     })),
   }));
 
-  // Assign the aggregate runHash to all files and candidates
   for (const file of allFileResults) {
     file.runHash = runHash;
     for (const candidate of file.candidates) {
@@ -424,10 +584,8 @@ async function finalizeJobInDb(
         current_batch = total_batches,
         completed_batches = total_batches,
         processed_files = ${processedFiles},
-        file_results = ${JSON.stringify(allFileResults)}::jsonb,
-        batch_errors = ${JSON.stringify(batchErrors)}::jsonb,
-        last_availability = ${lastAvailability ? JSON.stringify(lastAvailability) : null}::jsonb,
         final_result = ${JSON.stringify(result)}::jsonb,
+        batch_errors = ${JSON.stringify(batchErrors)}::jsonb,
         completed_at = NOW(),
         updated_at = NOW()
     WHERE job_id = ${jobId}
@@ -437,7 +595,7 @@ async function finalizeJobInDb(
 }
 
 // ---------------------------------------------------------------------------
-// Normalize helpers (same as externalOpenCvPhotoVisionClient)
+// Normalize helpers
 // ---------------------------------------------------------------------------
 
 function makeFailedFileResult(

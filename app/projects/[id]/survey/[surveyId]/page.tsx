@@ -25,7 +25,7 @@
 
 "use client";
 
-import React, { Component, useEffect, useState, useCallback } from "react";
+import React, { Component, useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import AppShell from "@/components/ui/AppShell";
@@ -51,6 +51,7 @@ import {
   FileText,
   Wrench,
   Maximize2,
+  StopCircle,
 } from "lucide-react";
 import type { SiteSurvey, SiteSurveyFile } from "@/lib/db-neon";
 import type {
@@ -1663,6 +1664,8 @@ function OpenSourcePhotoVisionPassPanel({
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const [candidateFilter, setCandidateFilter] = useState<"both" | "opencv" | "yolo" | "ocr">("both");
   const activeBundle = result?.stored ?? bundle ?? null;
   const allCandidates = safeArray(activeBundle?.candidates);
@@ -1700,6 +1703,8 @@ function OpenSourcePhotoVisionPassPanel({
   const runPass = useCallback(async () => {
     setLoading(true);
     setError(null);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       // Step 1: POST to create async job (returns immediately with jobId)
       const postRes = await fetch(
@@ -1725,14 +1730,16 @@ function OpenSourcePhotoVisionPassPanel({
         setError("Server did not return a jobId. Cannot poll for results.");
         return;
       }
+      setCurrentJobId(jobId);
 
       // Step 2: Poll GET endpoint for job completion
-      const POLL_INTERVAL_MS = 2_000; // 2 seconds between polls
+      const POLL_INTERVAL_MS = 4_000; // 4 seconds between polls (reduced load on Vercel + Render)
       const MAX_POLL_DURATION_MS = 1_800_000; // 30 min total (~490 photos / 1 per batch = 490 batches, 1 batch per poll, ~10s each)
       const pollStart = Date.now();
 
       while (Date.now() - pollStart < MAX_POLL_DURATION_MS) {
         await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+        if (controller.signal.aborted) return; // Cancelled by user
 
         const getRes = await fetch(
           `/api/site-surveys/${surveyId}/open-source-photo-vision-pass?jobId=${encodeURIComponent(jobId)}`,
@@ -1780,8 +1787,27 @@ function OpenSourcePhotoVisionPassPanel({
       setError("Network error while running open-source photo vision pass");
     } finally {
       setLoading(false);
+      setCurrentJobId(null);
+      if (abortRef.current === controller) abortRef.current = null;
     }
   }, [onDetailRefresh, surveyId]);
+
+  const cancelPass = useCallback(async () => {
+    if (!currentJobId) return;
+    // Abort the polling loop
+    abortRef.current?.abort();
+    try {
+      await fetch(
+        `/api/site-surveys/${surveyId}/open-source-photo-vision-pass?jobId=${encodeURIComponent(currentJobId)}`,
+        { method: "DELETE" },
+      );
+    } catch {
+      // Swallow — the polling loop will stop regardless because we aborted
+    }
+    setCurrentJobId(null);
+    setLoading(false);
+    setError("Photo vision pass cancelled by user.");
+  }, [currentJobId, surveyId]);
 
   return (
     <SectionCard
@@ -1806,14 +1832,25 @@ External OpenCV + YOLO/Supervision + Tesseract OCR worker · actual image bytes 
                 future stages and are not marked complete.
               </p>
             </div>
-            <button
-              onClick={runPass}
-              disabled={loading}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-400/30 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {loading ? <div className="spinner w-3 h-3" /> : <RefreshCw size={12} />}
-              {loading ? "Running photo vision pass..." : "Run Open-Source Photo Vision Pass"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={runPass}
+                disabled={loading}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-400/30 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {loading ? <div className="spinner w-3 h-3" /> : <RefreshCw size={12} />}
+                {loading ? "Running photo vision pass..." : "Run Open-Source Photo Vision Pass"}
+              </button>
+              {loading && currentJobId && (
+                <button
+                  onClick={cancelPass}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-400/30 bg-red-500/15 px-3 py-2 text-xs font-semibold text-red-100 transition hover:bg-red-500/25"
+                >
+                  <StopCircle size={12} />
+                  Cancel
+                </button>
+              )}
+            </div>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             <ReadinessPill tone="amber">Review Only</ReadinessPill>
