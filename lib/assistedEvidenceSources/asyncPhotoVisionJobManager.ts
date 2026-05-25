@@ -143,10 +143,10 @@ export async function getJob(jobId: string): Promise<PhotoVisionJob | null> {
 // ---------------------------------------------------------------------------
 // Process the next batch for a job — called by the GET/poll handler.
 // Processes up to `maxBatchesPerPoll` batches of photos by sending them to
-// the external Render worker. Processing multiple batches per poll reduces
-// total round-trips and avoids client-side timeout for large surveys.
+// the external Render worker. Each batch of 5 photos takes ~40-60s on the worker,
+// so we process only 1 batch per poll to stay within Vercel's 60s maxDuration.
 // ---------------------------------------------------------------------------
-export async function processNextBatch(jobId: string, maxBatchesPerPoll = 5): Promise<PhotoVisionJob> {
+export async function processNextBatch(jobId: string, maxBatchesPerPoll = 1): Promise<PhotoVisionJob> {
   const sql = await getDbReady();
 
   // Load full job state from DB
