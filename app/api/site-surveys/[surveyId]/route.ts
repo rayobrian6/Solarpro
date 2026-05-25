@@ -12,6 +12,7 @@ import {
   getSiteSurveyFiles,
   updateSiteSurvey,
   isValidUUID,
+  getOpenSourcePhotoVisionCandidatesBySurvey,
 } from '@/lib/db-neon';
 import { buildSurveyEvidenceManifest } from '@/lib/survey/evidence/manifest';
 import { buildSurveyEvidenceTraceability } from '@/lib/survey/evidence/provenance';
@@ -61,6 +62,7 @@ export async function GET(
       evidenceTruthSource: 'canonical_manifest_v1',
     });
     const evidenceBridge = buildSurveyEvidenceEngineeringBridge(evidenceManifest, evidenceTraceability);
+    const openSourcePhotoVision = await getOpenSourcePhotoVisionCandidatesBySurvey(surveyId, user.id);
 
     return NextResponse.json({
       success: true,
@@ -72,6 +74,7 @@ export async function GET(
         evidenceHygiene,
         evidenceTraceability,
         evidenceBridge,
+        openSourcePhotoVision,
       },
     });
   } catch (err) {

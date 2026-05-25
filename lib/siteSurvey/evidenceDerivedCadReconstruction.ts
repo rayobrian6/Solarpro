@@ -123,10 +123,10 @@ export function buildEvidenceDerivedCadReconstruction(report: ProfessionalSurvey
     ],
     noAuthorityEnforcement: noAuthority(),
     deterministicNotes: [
-      'Evidence-derived reconstruction V1 creates review-only spatial candidates from accepted survey photo evidence, photo metadata, and canonical geometry correlation.',
-      'Candidates are photo-aligned drawing aids, not CAD geometry, not measurements, and not permit/engineering authority.',
-      'Synthetic drafting layers remain visible only as labeled fallback when evidence-derived candidates are missing.',
-      'OSS utilities are isolated behind adapter roles; this deterministic pass does not silently trust or promote OSS output.',
+      'Legacy reconstruction V1 emits only review-only synthetic fallback spatial cues from photo categories and canonical geometry labels; it does not execute pixel CV or infer authoritative geometry.',
+      'Real image-byte CV candidates, when available, come from the separate open-source photo vision worker bundle and are rendered with source tool/version/run hash labels.',
+      'Candidates in this legacy module are fallback-only drawing aids, not CAD geometry, not measurements, and not permit/engineering authority.',
+      'OSS utilities listed here are adapter boundaries only and are not loaded in this deterministic reconstruction pass.',
     ],
   };
   return { ...withoutHash, reconstructionHash: deterministicHash(withoutHash) };
@@ -155,7 +155,8 @@ function buildCandidatesForFrame(report: ProfessionalSurveyReadinessReportV1, fr
   const base = baseRegion(frame.category, index);
   const targets = targetEntities(report, frame.category);
   const confidence = candidateConfidence(report, frame, targets.length);
-  const reviewStatus = confidence >= 70 && targets.length > 0 ? 'accepted_for_preview_reference' : 'operator_review_required';
+  const reviewStatus: EvidenceDerivedCandidateV1['reviewStatus'] = 'fallback_only';
+  const fallbackLimitations = legacySyntheticFallbackLimitations();
   const primary: EvidenceDerivedCandidateV1 = {
     candidateId: `${layerType}-${index + 1}`,
     layerType,
@@ -165,17 +166,16 @@ function buildCandidatesForFrame(report: ProfessionalSurveyReadinessReportV1, fr
     reviewStatus,
     imageRegion: base.imageRegion,
     drawingRegion: base.drawingRegion,
-    label: labelFor(frame.category),
+    label: `LEGACY SYNTHETIC FALLBACK - ${labelFor(frame.category)}`,
     evidenceSignals: [
-      `${frame.category} photo evidence: ${frame.sourceSlotKey}`,
-      `render usefulness ${frame.renderUsefulnessScore}/100`,
-      `correlated targets: ${targets.join(', ') || 'none'}`,
-      ...frame.ossAdapterSignals.slice(0, 2),
+      `legacy synthetic normalized region for ${frame.category} photo slot ${frame.sourceSlotKey}`,
+      `render usefulness ${frame.renderUsefulnessScore}/100 used only to order fallback review cues`,
+      `correlated targets retained as labels only: ${targets.join(', ') || 'none'}`,
+      'no real pixel CV detection was executed by this legacy reconstruction module',
+      'real open-source photo vision candidates, when present, are rendered through the separate persisted worker bundle',
+      ...frame.ossAdapterSignals.slice(0, 2).map(signal => `adapter boundary only: ${signal}`),
     ].sort(),
-    limitations: [
-      'Candidate is photo-aligned for review, not an authoritative measurement.',
-      'No canonical geometry mutation is allowed from this candidate.',
-    ],
+    limitations: fallbackLimitations,
   };
   const extras: EvidenceDerivedCandidateV1[] = [];
   if (frame.category === 'roof_overview' || frame.category === 'roof_detail' || frame.category === 'ground_mount_area' || frame.category === 'fence_vertical_solar_area') {
@@ -184,10 +184,11 @@ function buildCandidatesForFrame(report: ProfessionalSurveyReadinessReportV1, fr
       candidateId: `module-alignment-cues-${index + 1}`,
       layerType: 'module_alignment_cues',
       confidence: clamp(confidence - 8, 0, 100),
-      label: 'PHOTO-DERIVED MODULE ALIGNMENT CUE',
+      label: 'LEGACY SYNTHETIC FALLBACK - MODULE ALIGNMENT CUE',
       imageRegion: { x: base.imageRegion.x + 60, y: base.imageRegion.y + 80, width: Math.max(160, base.imageRegion.width - 120), height: Math.max(120, base.imageRegion.height - 160), perspectiveSkewDeg: base.imageRegion.perspectiveSkewDeg },
       drawingRegion: { x: base.drawingRegion.x + 42, y: base.drawingRegion.y + 44, width: Math.max(120, base.drawingRegion.width - 84), height: Math.max(90, base.drawingRegion.height - 88), rotationDeg: base.drawingRegion.rotationDeg },
-      evidenceSignals: [...primary.evidenceSignals, 'module alignment follows accepted mounting-area photo frame'].sort(),
+      evidenceSignals: [...primary.evidenceSignals, 'synthetic module cue is category-based fallback only, not a detected module alignment'].sort(),
+      limitations: fallbackLimitations,
     });
   }
   if (frame.category === 'meter' || frame.category === 'msp_electrical_panel' || frame.category === 'inverter_equipment') {
@@ -196,10 +197,11 @@ function buildCandidatesForFrame(report: ProfessionalSurveyReadinessReportV1, fr
       candidateId: `conduit-anchor-candidates-${index + 1}`,
       layerType: 'conduit_anchor_candidates',
       confidence: clamp(confidence - 12, 0, 100),
-      label: 'PHOTO-DERIVED CONDUIT ANCHOR CUE',
+      label: 'LEGACY SYNTHETIC FALLBACK - CONDUIT ANCHOR CUE',
       imageRegion: { x: 520, y: 460, width: 260, height: 320, perspectiveSkewDeg: 8 },
       drawingRegion: { x: 708, y: 628, width: 126, height: 88, rotationDeg: -18 },
-      evidenceSignals: [...primary.evidenceSignals, 'electrical photo supports endpoint anchor only, not route authority'].sort(),
+      evidenceSignals: [...primary.evidenceSignals, 'synthetic conduit cue is category-based fallback only, not a detected electrical route or endpoint'].sort(),
+      limitations: fallbackLimitations,
     });
   }
   return [primary, ...extras];
@@ -220,6 +222,15 @@ function baseRegion(category: SurveyPhotoEvidenceCategoryV1, index: number) {
     return { imageRegion: { x: 120, y: 260 + jitter, width: 760, height: 440, perspectiveSkewDeg: 13 }, drawingRegion: { x: 132, y: 188 + jitter, width: 630, height: 408, rotationDeg: 0 } };
   }
   return { imageRegion: { x: 150, y: 170 + jitter, width: 700, height: 620, perspectiveSkewDeg: 9 }, drawingRegion: { x: 132, y: 150 + jitter, width: 626, height: 458, rotationDeg: 0 } };
+}
+
+function legacySyntheticFallbackLimitations(): string[] {
+  return [
+    'LEGACY SYNTHETIC FALLBACK ONLY / REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY',
+    'Region coordinates are deterministic category-based placeholders, not detected from image pixels.',
+    'This candidate cannot be accepted as evidence-derived CAD, cannot create measurements, and cannot mutate canonical geometry.',
+    'Use the separate Open-Source Photo Vision Pass for actual image-byte review candidates with source tool/version/run hash.',
+  ];
 }
 
 function targetEntities(report: ProfessionalSurveyReadinessReportV1, category: SurveyPhotoEvidenceCategoryV1): string[] {
@@ -243,20 +254,20 @@ function candidateConfidence(report: ProfessionalSurveyReadinessReportV1, frame:
 }
 
 function labelFor(category: SurveyPhotoEvidenceCategoryV1): string {
-  if (category === 'roof_overview' || category === 'roof_detail') return 'PHOTO-DERIVED ROOF EDGE CANDIDATE';
-  if (category === 'ground_mount_area') return 'PHOTO-DERIVED GROUND INSTALL AREA';
-  if (category === 'fence_vertical_solar_area') return 'PHOTO-DERIVED FENCE INSTALL RUN';
-  if (category === 'obstruction') return 'PHOTO-DERIVED OBSTRUCTION CANDIDATE';
-  if (category === 'meter' || category === 'msp_electrical_panel' || category === 'inverter_equipment') return 'PHOTO-DERIVED EQUIPMENT ANCHOR';
-  return 'PHOTO-DERIVED ORIENTATION / DEPTH CUE';
+  if (category === 'roof_overview' || category === 'roof_detail') return 'ROOF EDGE REVIEW CUE';
+  if (category === 'ground_mount_area') return 'GROUND INSTALL AREA REVIEW CUE';
+  if (category === 'fence_vertical_solar_area') return 'FENCE INSTALL RUN REVIEW CUE';
+  if (category === 'obstruction') return 'OBSTRUCTION REVIEW CUE';
+  if (category === 'meter' || category === 'msp_electrical_panel' || category === 'inverter_equipment') return 'EQUIPMENT ANCHOR REVIEW CUE';
+  return 'ORIENTATION / DEPTH REVIEW CUE';
 }
 
 function buildFallbackDisclosures(report: ProfessionalSurveyReadinessReportV1, frames: EvidencePhotoFrameV1[], candidates: EvidenceDerivedCandidateV1[]): string[] {
   const disclosures: string[] = [];
   if (frames.length === 0) disclosures.push('No accepted survey photos available; A-101 geometry is existing survey/canonical fallback only.');
-  if (!candidates.some(candidate => candidate.layerType === 'roof_edge_candidates' || candidate.layerType === 'install_area_candidates')) disclosures.push('No photo-derived roof/install-area candidate exists; mounting outline is fallback geometry.');
-  if (!candidates.some(candidate => candidate.layerType === 'equipment_anchor_candidates')) disclosures.push('No photo-derived equipment anchor exists; MSP/meter marker is evidence-coverage or placeholder fallback only.');
-  if (report.summaries.obstructionCount > 0 && !candidates.some(candidate => candidate.layerType === 'obstruction_candidates')) disclosures.push('Survey has obstruction metadata without photo-derived obstruction candidates; obstruction drafting must remain review-only fallback.');
+  if (!candidates.some(candidate => candidate.layerType === 'roof_edge_candidates' || candidate.layerType === 'install_area_candidates')) disclosures.push('No real worker roof/install-area candidate is available in this legacy reconstruction pass; mounting outline is fallback geometry only.');
+  if (!candidates.some(candidate => candidate.layerType === 'equipment_anchor_candidates')) disclosures.push('No real worker equipment anchor is available in this legacy reconstruction pass; MSP/meter marker is evidence-coverage or placeholder fallback only.');
+  if (report.summaries.obstructionCount > 0 && !candidates.some(candidate => candidate.layerType === 'obstruction_candidates')) disclosures.push('Survey has obstruction metadata without real worker obstruction candidates; obstruction drafting must remain review-only fallback.');
   return disclosures.sort();
 }
 
@@ -277,7 +288,7 @@ function fallbackCandidate(report: ProfessionalSurveyReadinessReportV1, disclosu
 }
 
 function scoreGeometryCorrelation(report: ProfessionalSurveyReadinessReportV1, candidates: EvidenceDerivedCandidateV1[]): number {
-  const targetHits = candidates.filter(candidate => candidate.targetEntities.length > 0 && candidate.reviewStatus !== 'fallback_only').length;
+  const targetHits = candidates.filter(candidate => candidate.targetEntities.length > 0 && candidate.reviewStatus === 'accepted_for_preview_reference').length;
   const geometryBase = report.canonicalGeometry.readyForCADInput ? 48 : 22;
   return clamp(geometryBase + targetHits * 9 + Math.min(16, report.canonicalGeometry.roofPlanes.length * 4), 0, 100);
 }

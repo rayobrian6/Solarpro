@@ -11,6 +11,7 @@ import {
   getSiteSurveyById,
   getSiteSurveyFiles,
   isValidUUID,
+  getOpenSourcePhotoVisionCandidatesBySurvey,
 } from '@/lib/db-neon';
 import { buildProfessionalSurveyReadinessReport } from '@/lib/siteSurvey/professionalSurveyReadinessReport';
 import { analyzeSurveyPhotosOpenSource } from '@/lib/siteSurvey/photoIntelligence';
@@ -37,7 +38,8 @@ export async function GET(
     const files = await getSiteSurveyFiles(surveyId);
     const photoAnalysis = await analyzeSurveyPhotosOpenSource(files.filter(file => file.fileType === 'photo'));
     const readinessReport = buildProfessionalSurveyReadinessReport(survey, files, photoAnalysis);
-    const renderPackage = buildProfessionalPlanSetRenderPackage(readinessReport);
+    const openSourcePhotoVision = await getOpenSourcePhotoVisionCandidatesBySurvey(surveyId, user.id);
+    const renderPackage = buildProfessionalPlanSetRenderPackage(readinessReport, null, { openSourcePhotoVision });
     const defaultSheet = renderPackage.sheets.find(sheet => sheet.sheetNumber === 'A-101') ?? renderPackage.sheets[0] ?? null;
 
     return NextResponse.json({

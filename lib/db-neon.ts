@@ -136,3 +136,18 @@ export {
 } from './db/surveys';
 
 export type { SiteSurvey, SiteSurveyFile, SiteSurveyFileLabelRowMatchDiagnostic } from './db/surveys';
+
+// ── Open-source photo vision candidates (review-only, non-authoritative) ─────
+export {
+  replaceOpenSourcePhotoVisionCandidatesForSurveyRun,
+  getOpenSourcePhotoVisionCandidatesBySurvey,
+  buildTransientOpenSourcePhotoVisionBundle,
+  summarizeOpenSourcePhotoVisionRun,
+} from './db/openSourcePhotoVision';
+
+export type {
+  OpenSourcePhotoVisionReviewStatus,
+  StoredOpenSourcePhotoVisionCandidate,
+  OpenSourcePhotoVisionStoredBundle,
+  OpenSourcePhotoVisionFileResult,
+} from './db/openSourcePhotoVision';

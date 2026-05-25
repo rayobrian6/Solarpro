@@ -969,6 +969,59 @@ interface PhotoClassificationPreviewResponse {
   noAuthorityEnforcement: Record<string, boolean>;
 }
 
+
+interface OpenSourcePhotoVisionStoredCandidate {
+  id: string;
+  surveyId: string;
+  fileId: string;
+  toolName: string;
+  toolVersion: string;
+  runHash: string;
+  candidateType: string;
+  candidateCategory: string;
+  payload: Record<string, unknown>;
+  confidence: number;
+  limitations: string[];
+  reviewStatus: "review_required" | "accepted_review_reference" | "rejected";
+  deterministicHash: string;
+  thumbnailDataUrl: string | null;
+  createdAt: string;
+}
+
+interface OpenSourcePhotoVisionBundle {
+  schemaVersion: "open_source_photo_vision_stored_bundle_v1";
+  surveyId: string;
+  toolName: string;
+  toolVersion: string;
+  candidateCount: number;
+  latestRunHash: string | null;
+  candidates: OpenSourcePhotoVisionStoredCandidate[];
+  authority: {
+    reviewOnly: true;
+    nonAuthoritative: true;
+    canonicalMutationAllowed: false;
+    cadMutationAllowed: false;
+    permitGenerationAllowed: false;
+    engineeringWorkflowMutationAllowed: false;
+  };
+  limitations: string[];
+}
+
+interface OpenSourcePhotoVisionRunSummary {
+  processedFileCount: number;
+  failedFileCount: number;
+  candidateCount: number;
+  candidateTypeCounts: Record<string, number>;
+  unavailableDiagnostics: string[];
+  runHash: string;
+}
+
+interface OpenSourcePhotoVisionRunResponse {
+  summary: OpenSourcePhotoVisionRunSummary;
+  stored: OpenSourcePhotoVisionBundle;
+  meta: Record<string, boolean>;
+}
+
 interface PhotoClassificationApplyDiagnosticsState {
   status: "success" | "conflict" | "error";
   message: string;
@@ -1573,6 +1626,253 @@ function SurveyPhotoClassificationPreviewPanel({
                   </p>
                 </a>
               ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
+
+function candidateCountFor(
+  bundle: OpenSourcePhotoVisionBundle | null | undefined,
+  fragments: string[],
+): number {
+  return safeArray(bundle?.candidates).filter((candidate) =>
+    fragments.some((fragment) =>
+      `${candidate.candidateType} ${candidate.candidateCategory}`
+        .toLowerCase()
+        .includes(fragment),
+    ),
+  ).length;
+}
+
+function OpenSourcePhotoVisionPassPanel({
+  surveyId,
+  bundle,
+  onDetailRefresh,
+}: {
+  surveyId: string;
+  bundle: OpenSourcePhotoVisionBundle | null | undefined;
+  onDetailRefresh?: (detail: Partial<SurveyDetailData>) => void;
+}) {
+  const [result, setResult] = useState<OpenSourcePhotoVisionRunResponse | null>(
+    null,
+  );
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const activeBundle = result?.stored ?? bundle ?? null;
+  const candidates = safeArray(activeBundle?.candidates);
+  const candidateTypeCounts = candidates.reduce<Record<string, number>>(
+    (acc, candidate) => {
+      acc[candidate.candidateType] = (acc[candidate.candidateType] ?? 0) + 1;
+      return acc;
+    },
+    {},
+  );
+  const edgeCount = candidateCountFor(activeBundle, ["edge", "line", "roof"]);
+  const equipmentCount = candidateCountFor(activeBundle, ["equipment"]);
+  const obstructionCount = candidateCountFor(activeBundle, ["obstruction"]);
+  const ocrCount = candidateCountFor(activeBundle, ["ocr"]);
+  const thumbnailCandidates = candidates
+    .filter((candidate) => Boolean(candidate.thumbnailDataUrl))
+    .slice(0, 6);
+  const limitationPreview = Array.from(
+    new Set([
+      ...safeArray(activeBundle?.limitations),
+      ...candidates.flatMap((candidate) => safeArray(candidate.limitations)),
+    ]),
+  ).slice(0, 6);
+
+  const runPass = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/site-surveys/${surveyId}/open-source-photo-vision-pass`,
+        { method: "POST", headers: { "Content-Type": "application/json" } },
+      );
+      const json = await res.json();
+      if (!json.success) {
+        setError(
+          [json.error, json.detail].filter(Boolean).join(": ") ||
+            "Open-source photo vision pass failed",
+        );
+        return;
+      }
+      const data = json.data as OpenSourcePhotoVisionRunResponse;
+      setResult(data);
+      onDetailRefresh?.({ openSourcePhotoVision: data.stored });
+    } catch {
+      setError("Network error while running open-source photo vision pass");
+    } finally {
+      setLoading(false);
+    }
+  }, [onDetailRefresh, surveyId]);
+
+  return (
+    <SectionCard
+      icon={<Layers size={14} />}
+      title="Run Open-Source Photo Vision Pass"
+      iconColor="text-emerald-400"
+    >
+      <div className="space-y-4">
+        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-200">
+                Actual image-byte OSS worker · separate from OpenAI preview
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                Runs the bounded sharp-based worker against authorized survey
+                photo bytes and stores review-only candidates for edge maps,
+                dominant lines, dense rectangular/equipment/obstruction regions,
+                duplicate/hash identity, quality, thumbnails, and explicit
+                unavailable diagnostics for native OpenCV/YOLO/Python workers.
+              </p>
+            </div>
+            <button
+              onClick={runPass}
+              disabled={loading}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-400/30 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loading ? <div className="spinner w-3 h-3" /> : <RefreshCw size={12} />}
+              {loading ? "Processing photo bytes..." : "Run Open-Source Photo Vision Pass"}
+            </button>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <ReadinessPill tone="amber">Review Only</ReadinessPill>
+            <ReadinessPill tone="slate">Non-Authoritative</ReadinessPill>
+            <ReadinessPill tone="slate">No CAD Mutation</ReadinessPill>
+            <ReadinessPill tone="slate">No Permit/BOM Trigger</ReadinessPill>
+            <ReadinessPill tone="emerald">
+              {activeBundle ? "Stored Candidates Available" : "Available On Demand"}
+            </ReadinessPill>
+          </div>
+        </div>
+
+        {error && (
+          <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">
+            <div className="flex items-center gap-2 font-semibold">
+              <AlertTriangle size={13} /> Open-source photo vision unavailable
+            </div>
+            <p className="mt-1 text-[11px] text-red-100/80">{error}</p>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
+          {[
+            ["Processed", result?.summary.processedFileCount ?? "—"],
+            ["Failed", result?.summary.failedFileCount ?? "—"],
+            ["Candidates", activeBundle?.candidateCount ?? 0],
+            ["Edges/lines", edgeCount],
+            ["Equipment", equipmentCount],
+            ["Obstructions", obstructionCount],
+            ["OCR notes", ocrCount],
+            ["Run hash", activeBundle?.latestRunHash ? activeBundle.latestRunHash.slice(0, 8) : "—"],
+          ].map(([label, value]) => (
+            <div
+              key={String(label)}
+              className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3"
+            >
+              <p className="text-[10px] uppercase tracking-wider text-slate-500">
+                {label}
+              </p>
+              <p className="text-lg font-bold text-white">{value}</p>
+            </div>
+          ))}
+        </div>
+
+        {result?.summary.unavailableDiagnostics?.length ? (
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-200">
+              Unavailable native worker diagnostics
+            </p>
+            <ul className="mt-2 space-y-1 text-[11px] text-amber-100/85">
+              {result.summary.unavailableDiagnostics.slice(0, 5).map((item) => (
+                <li key={item}>• {item}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {candidates.length > 0 && (
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="rounded-xl border border-slate-700/60 bg-slate-950/40 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-300">
+                Candidate categories
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {Object.entries(candidateTypeCounts).map(([type, count]) => (
+                  <span
+                    key={type}
+                    className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-100"
+                  >
+                    {type}: {count}
+                  </span>
+                ))}
+              </div>
+              <div className="mt-3 space-y-2">
+                {candidates.slice(0, 6).map((candidate) => (
+                  <div
+                    key={candidate.id}
+                    className="rounded-lg border border-slate-800 bg-slate-900/70 p-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] font-semibold text-slate-200">
+                        {candidate.candidateType}
+                      </p>
+                      <span className="text-[10px] text-emerald-200">
+                        {Math.round(candidate.confidence)}%
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      {candidate.toolName} v{candidate.toolVersion} · run {candidate.runHash.slice(0, 10)} · REVIEW-ONLY / NOT CAD GEOMETRY
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-700/60 bg-slate-950/40 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-300">
+                Source thumbnails / overlay-ready candidates
+              </p>
+              {thumbnailCandidates.length > 0 ? (
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  {thumbnailCandidates.map((candidate) => (
+                    <div key={candidate.id} className="space-y-1">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={candidate.thumbnailDataUrl ?? ""}
+                        alt={`${candidate.candidateType} thumbnail`}
+                        className="h-16 w-full rounded-lg border border-slate-700 object-cover"
+                      />
+                      <p className="truncate text-[9px] text-slate-500">
+                        {candidate.fileId.slice(0, 8)} · {candidate.candidateType}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-[11px] text-slate-500">
+                  No stored thumbnails yet. Run the pass to generate safe
+                  data-URL thumbnails for A-201 and review overlays for A-101.
+                </p>
+              )}
+              {limitationPreview.length > 0 && (
+                <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/10 p-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-200">
+                    Limitations
+                  </p>
+                  <ul className="mt-1 space-y-1 text-[10px] text-amber-100/80">
+                    {limitationPreview.map((item) => (
+                      <li key={item}>• {item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -3482,6 +3782,7 @@ interface SurveyDetailData {
   evidenceHygiene?: ProjectSurveyEvidenceHygieneManifest | null;
   evidenceTraceability?: SurveyEvidenceTraceabilityBundle | null;
   evidenceBridge?: SurveyEvidenceEngineeringBridge | null;
+  openSourcePhotoVision?: OpenSourcePhotoVisionBundle | null;
 }
 
 export default function SurveyDetailPage() {
@@ -3561,6 +3862,7 @@ export default function SurveyDetailPage() {
     evidenceHygiene,
     evidenceTraceability,
     evidenceBridge,
+    openSourcePhotoVision,
   } = detail;
   // Always show the freshly computed survey detail manifest in the active
   // workbench. Project-level hygiene can lag behind the current survey scan and
@@ -3684,18 +3986,31 @@ export default function SurveyDetailPage() {
           />
         </SurveyPanelErrorBoundary>
 
-        {/* 1e. Survey Evidence Manifest — structured engineering evidence view */}
+        {/* 1e. Open-source photo vision worker — actual image bytes, review-only */}
+        <SurveyPanelErrorBoundary title="Run Open-Source Photo Vision Pass">
+          <OpenSourcePhotoVisionPassPanel
+            surveyId={survey.id}
+            bundle={openSourcePhotoVision}
+            onDetailRefresh={(refreshedDetail) => {
+              setDetail((current) =>
+                current ? { ...current, ...refreshedDetail } : current,
+              );
+            }}
+          />
+        </SurveyPanelErrorBoundary>
+
+        {/* 1f. Survey Evidence Manifest — structured engineering evidence view */}
         <SurveyEvidenceViewer
           manifest={displayedManifest}
           bridge={displayedBridge}
         />
 
-        {/* 1f. CAD workbench — read-only source-truth SVG preview */}
+        {/* 1g. CAD workbench — read-only source-truth SVG preview */}
         <SurveyPanelErrorBoundary title="Site Survey CAD Workbench — Read-Only Preview">
           <SurveyCadWorkbenchPanel surveyId={survey.id} />
         </SurveyPanelErrorBoundary>
 
-        {/* 1g. Professional parser readiness — read-only preview/reporting */}
+        {/* 1h. Professional parser readiness — read-only preview/reporting */}
         <SurveyPanelErrorBoundary title="Professional Survey Parser Readiness v1">
           <ProfessionalReadinessPanel surveyId={survey.id} />
         </SurveyPanelErrorBoundary>

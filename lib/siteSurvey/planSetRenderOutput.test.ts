@@ -444,7 +444,7 @@ describe("Professional Plan-Set Render Output V1", () => {
       );
       expect(svg).toContain("intentionally drafted fixture-specific preview");
       expect(svg).toContain("EVIDENCE-DERIVED CAD RECONSTRUCTION");
-      expect(svg).toContain("PHOTO-ALIGNED CANDIDATE");
+      expect(svg).toContain("LEGACY SYNTHETIC FALLBACK");
       expect(svg).toContain("FALLBACK PLACEHOLDER");
       expect(svg).toContain("CONTRACTOR / DEALER META");
       expect(svg).toContain("CLIENT / INSTALLER");
@@ -664,4 +664,136 @@ describe("Professional Plan-Set Render Output V1", () => {
     );
     expect(pkg.noAuthorityEnforcement.stampedEngineeringPackage).toBe(false);
   });
+
+  it("marks legacy reconstruction regions as synthetic fallback-only", () => {
+    const report = buildProfessionalSurveyReadinessReport(survey(), files());
+    const reconstruction = buildEvidenceDerivedCadReconstruction(report);
+
+    expect(reconstruction.alignmentSummary.evidenceAlignedCandidateCount).toBe(0);
+    expect(reconstruction.candidates.length).toBeGreaterThan(0);
+    expect(
+      reconstruction.candidates.every(
+        (candidate) => candidate.reviewStatus === "fallback_only",
+      ),
+    ).toBe(true);
+    expect(reconstruction.candidates.map((candidate) => candidate.label).join(" ")).toContain(
+      "LEGACY SYNTHETIC FALLBACK",
+    );
+    expect(reconstruction.deterministicNotes.join(" ")).toContain(
+      "does not execute pixel CV",
+    );
+  });
+
+  it("renders A-201 source thumbnails when worker thumbnails exist and safe placeholders otherwise", () => {
+    const report = buildProfessionalSurveyReadinessReport(survey(), files());
+    const thumb = "data:image/jpeg;base64,VGh1bWJuYWls";
+    const pkg = buildProfessionalPlanSetRenderPackage(report, null, {
+      openSourcePhotoVision: {
+        schemaVersion: "open_source_photo_vision_stored_bundle_v1",
+        surveyId: report.source.surveyId,
+        toolName: "open-source-photo-vision-worker",
+        toolVersion: "1.0.0",
+        candidateCount: 1,
+        latestRunHash: "runhash-thumbnail-test",
+        candidates: [
+          {
+            id: "candidate-thumb",
+            surveyId: report.source.surveyId,
+            fileId: "file-roof",
+            toolName: "open-source-photo-vision-worker",
+            toolVersion: "1.0.0",
+            runHash: "runhash-thumbnail-test",
+            candidateType: "edge_map_summary",
+            candidateCategory: "quality",
+            payload: { sourceFileUrl: "https://cdn.example.test/roof_overview.jpg" },
+            confidence: 45,
+            limitations: ["REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY"],
+            reviewStatus: "review_required",
+            deterministicHash: "hash-thumb",
+            thumbnailDataUrl: thumb,
+            createdAt: "2026-05-25T00:00:00Z",
+          },
+        ],
+        authority: {
+          reviewOnly: true,
+          nonAuthoritative: true,
+          canonicalMutationAllowed: false,
+          cadMutationAllowed: false,
+          permitGenerationAllowed: false,
+          bomMutationAllowed: false,
+          engineeringWorkflowMutationAllowed: false,
+        },
+        limitations: ["REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY"],
+      },
+    });
+    const evidence = pkg.sheets.find((sheet) => sheet.sheetType === "evidence_review");
+    const svg = evidence?.svg ?? "";
+
+    expect(svg).toContain(thumb);
+    expect(svg).toContain("SOURCE THUMBNAIL");
+    expect(svg).toContain("SAFE PLACEHOLDER");
+  });
+
+  it("prefers real open-source worker overlays on A-101 with source provenance and review-only labels", () => {
+    const report = buildProfessionalSurveyReadinessReport(survey(), files());
+    const pkg = buildProfessionalPlanSetRenderPackage(report, null, {
+      openSourcePhotoVision: {
+        schemaVersion: "open_source_photo_vision_stored_bundle_v1",
+        surveyId: report.source.surveyId,
+        toolName: "open-source-photo-vision-worker",
+        toolVersion: "1.0.0",
+        candidateCount: 1,
+        latestRunHash: "abcdef1234567890",
+        candidates: [
+          {
+            id: "candidate-overlay",
+            surveyId: report.source.surveyId,
+            fileId: "file-roof",
+            toolName: "open-source-photo-vision-worker",
+            toolVersion: "1.0.0",
+            runHash: "abcdef1234567890",
+            candidateType: "roof_edge_candidate",
+            candidateCategory: "roof_context",
+            payload: {
+              line: {
+                x1: 100,
+                y1: 220,
+                x2: 900,
+                y2: 220,
+                orientation: "horizontal",
+                strength: 0.72,
+                coordinateSystem: "normalized_image_0_1000",
+              },
+              sourceFileUrl: "https://cdn.example.test/roof_overview.jpg",
+            },
+            confidence: 62,
+            limitations: ["REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY"],
+            reviewStatus: "review_required",
+            deterministicHash: "hash-overlay",
+            thumbnailDataUrl: null,
+            createdAt: "2026-05-25T00:00:00Z",
+          },
+        ],
+        authority: {
+          reviewOnly: true,
+          nonAuthoritative: true,
+          canonicalMutationAllowed: false,
+          cadMutationAllowed: false,
+          permitGenerationAllowed: false,
+          bomMutationAllowed: false,
+          engineeringWorkflowMutationAllowed: false,
+        },
+        limitations: ["REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY"],
+      },
+    });
+    const sitePlan = pkg.sheets.find((sheet) => sheet.sheetType === "site_plan_render");
+    const svg = sitePlan?.svg ?? "";
+
+    expect(svg).toContain("OPEN-SOURCE PHOTO VISION PASS");
+    expect(svg).toContain("REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY");
+    expect(svg).toContain("open-source-photo-vision-worker/1.0.0");
+    expect(svg).toContain("abcdef1234");
+    expect(svg).not.toContain("LEGACY SYNTHETIC FALLBACK - ROOF EDGE REVIEW CUE");
+  });
+
 });
