@@ -377,12 +377,19 @@ export async function updatePhotoLabelsFromCandidates(
     // Only consider object_detection candidates (not ocr_text, edge_map_summary, etc.)
     if (candidate.candidateType !== 'object_detection') continue;
 
+    // Normalize confidence from 0-100 scale (Render worker) to 0-1 scale (mapper expectation)
+    // The Render worker (main.py) stores confidence as integer 0-100, but the mapper expects 0-1
+    const normalizedCandidate = {
+      ...candidate,
+      confidence: candidate.confidence / 100,
+    };
+
     const fileId = candidate.fileId;
     const existing = candidatesByFile.get(fileId);
 
     // Keep the highest-confidence candidate for each file
-    if (!existing || candidate.confidence > existing.confidence) {
-      candidatesByFile.set(fileId, candidate);
+    if (!existing || normalizedCandidate.confidence > existing.confidence) {
+      candidatesByFile.set(fileId, normalizedCandidate);
     }
   }
 
@@ -458,7 +465,7 @@ export async function updatePhotoLabelsFromCandidates(
         newLabel: category,
         candidateType: candidate.candidateType,
         candidateClass: yoloClassName,
-        confidence: candidate.confidence,
+        confidence: candidate.confidence, // Already normalized to 0-1 scale in Step 1
       });
 
       updatesForDb.push({
