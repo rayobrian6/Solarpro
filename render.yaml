@@ -19,7 +19,7 @@ services:
       - key: YOLO_CONFIDENCE_THRESHOLD
         value: "0.25"
       - key: YOLO_IMAGE_SIZE
-        value: "640"
+        value: "416"
       - key: YOLO_MAX_DETECTIONS
         value: "50"
       - key: TESSERACT_OCR_ENABLED
@@ -38,5 +38,11 @@ services:
         value: "120"
       - key: BATCH_SIZE
         value: "10"
+      - key: FETCH_CONCURRENCY
+        value: "5"
+      - key: OCR_ONLY_ON_YOLO_HITS
+        value: "true"
+      - key: SKIP_THUMBNAILS
+        value: "true"
       - key: DATABASE_URL
         sync: false
