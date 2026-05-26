@@ -83,3 +83,5 @@ scripts/preview_*.py
 build-output.log
 .commit-msg-*.txt
 .env*.local
+.browser_data/
+.psiphon_data/
