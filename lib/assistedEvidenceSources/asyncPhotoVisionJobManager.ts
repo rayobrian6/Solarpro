@@ -60,7 +60,7 @@ export async function createJob(
 ): Promise<PhotoVisionJob> {
   const sql = await getDbReady();
   const jobId = `job_${surveyId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const batchSize = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_SIZE || 3);
+  const batchSize = Number(process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_BATCH_SIZE || 2);
   const totalBatches = Math.ceil(photoFiles.length / batchSize);
 
   const jobInput = {
@@ -304,7 +304,7 @@ async function pollRenderJob(
 // Now uses JSONB append-only writes (|| operator) instead of re-reading
 // file_results, and polls the Render worker asynchronously.
 // ---------------------------------------------------------------------------
-export async function processNextBatch(jobId: string, maxBatchesPerPoll = 5): Promise<PhotoVisionJob> {
+export async function processNextBatch(jobId: string, maxBatchesPerPoll = 2): Promise<PhotoVisionJob> {
   const sql = await getDbReady();
 
   // Load job metadata only — do NOT read the growing file_results JSONB
