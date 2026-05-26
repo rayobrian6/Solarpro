@@ -5,8 +5,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Install OpenCL, OpenCV dependencies, and Tesseract
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends libglib2.0-0 libgl1 tesseract-ocr tesseract-ocr-eng \
+  && apt-get install -y --no-install-recommends \
+    libglib2.0-0 \
+    libgl1 \
+    libgomp1 \
+    ocl-icd-opencl-dev \
+    tesseract-ocr \
+    tesseract-ocr-eng \
   && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./requirements.txt

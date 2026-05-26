@@ -25,10 +25,10 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 import cv2
+import httpx
 import numpy as np
 import psycopg2
 import psycopg2.extras
-import requests
 from app.ocr_detection import TesseractOcrService
 from app.yolo_detection import YoloDetectionService
 from fastapi import FastAPI, HTTPException
@@ -508,10 +508,48 @@ def _run_all_batches_sync(render_job_id: str, job: VisionJob) -> dict[str, Any]:
         print(f"[WORKER] Job {job_id}: processing batch {batch_idx + 1}/{total_batches} ({len(batch_files)} files)")
 
         try:
+            # Fetch all image bytes in parallel first (faster than sequential)
+            async def fetch_all_images():
+                async with httpx.AsyncClient(timeout=FETCH_TIMEOUT_SECONDS, follow_redirects=True, limits=httpx.Limits(max_keepalive_connections=20, max_connections=50)) as client:
+                    tasks = [client.get(fj.fileUrl) for fj in batch_files]
+                    responses = await asyncio.gather(*tasks, return_exceptions=True)
+                    return responses
+
+            # Run async fetch in executor
+            responses = await asyncio.get_event_loop().run_in_executor(None, asyncio.run, fetch_all_images())
+
+            # Process fetched images
             batch_file_results = []
-            for file_job in batch_files:
-                file_result = analyze_file(job, file_job, created_at)
-                batch_file_results.append(file_result)
+            for i, file_job in enumerate(batch_files):
+                try:
+                    response = responses[i]
+                    if isinstance(response, Exception):
+                        raise Exception(f"Fetch failed: {response}")
+                    if response.status_code != 200:
+                        raise Exception(f"HTTP {response.status_code}")
+                    if len(response.content) > MAX_IMAGE_BYTES:
+                        raise ValueError(f"image exceeds max byte size {MAX_IMAGE_BYTES}")
+
+                    # Process image (same as before, but with pre-fetched bytes)
+                    file_result = analyze_file_with_bytes(job, file_job, response.content, created_at)
+                    batch_file_results.append(file_result)
+                except Exception as exc:
+                    # Create failed result for this file
+                    batch_file_results.append({
+                        "surveyId": job.surveyId,
+                        "fileId": file_job.fileId,
+                        "fileUrl": file_job.fileUrl,
+                        "filename": file_job.filename,
+                        "analyzed": False,
+                        "error": str(exc)[:300],
+                        "metadata": {"widthPx": None, "heightPx": None, "format": None, "byteSize": 0, "sha256": None, "dominantBrightness": None, "sharpnessScore": None, "qualityScore": None},
+                        "thumbnailDataUrl": None,
+                        "edgeSummary": None,
+                        "candidates": [],
+                        "limitations": ["Image bytes could not be fetched or decoded; no candidates emitted.", *base_limitations()],
+                        "runHash": stable_hash({"surveyId": job.surveyId, "fileId": file_job.fileId, "error": str(exc)}),
+                    })
+
                 gc.collect()
 
             # Build per-batch run hash for the batch's files
@@ -685,14 +723,10 @@ async def on_startup():
 # Image analysis (unchanged from v0.2)
 # ---------------------------------------------------------------------------
 
-def analyze_file(job: VisionJob, file_job: FileJob, created_at: str) -> dict[str, Any]:
+def analyze_file_with_bytes(job: VisionJob, file_job: FileJob, content: bytes, created_at: str) -> dict[str, Any]:
+    """Analyze a file with pre-fetched bytes (no network I/O)."""
     try:
         started = time.time()
-        response = requests.get(file_job.fileUrl, timeout=FETCH_TIMEOUT_SECONDS)
-        response.raise_for_status()
-        content = response.content
-        if len(content) > MAX_IMAGE_BYTES:
-            raise ValueError(f"image exceeds max byte size {MAX_IMAGE_BYTES}")
         byte_hash = hashlib.sha256(content).hexdigest()
         np_bytes = np.frombuffer(content, dtype=np.uint8)
         image = cv2.imdecode(np_bytes, cv2.IMREAD_COLOR)
@@ -742,8 +776,8 @@ def analyze_file(job: VisionJob, file_job: FileJob, created_at: str) -> dict[str
             "metadata": {
                 "widthPx": width,
                 "heightPx": height,
-                "format": response.headers.get("content-type"),
-                "byteSize": len(response.content),
+                "format": "image/jpeg",
+                "byteSize": len(content),
                 "sha256": byte_hash,
                 "dominantBrightness": round(float(np.mean(gray)), 3) if gray is not None else None,
                 "sharpnessScore": round(float(cv2.Laplacian(gray, cv2.CV_64F).var()), 3) if gray is not None else None,
