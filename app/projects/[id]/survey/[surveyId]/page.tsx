@@ -1734,8 +1734,8 @@ function OpenSourcePhotoVisionPassPanel({
       setCurrentJobId(jobId);
 
       // Step 2: Poll GET endpoint for job completion
-      const POLL_INTERVAL_MS = 4_000; // 4 seconds between polls (reduced load on Vercel + Render)
-      const MAX_POLL_DURATION_MS = 1_800_000; // 30 min total (~490 photos / 1 per batch = 490 batches, 1 batch per poll, ~10s each)
+      const POLL_INTERVAL_MS = 5_000; // 5 seconds between polls (each poll processes ~5 batches on server)
+      const MAX_POLL_DURATION_MS = 2_700_000; // 45 min total (headroom for large surveys)
       const pollStart = Date.now();
 
       while (Date.now() - pollStart < MAX_POLL_DURATION_MS) {
