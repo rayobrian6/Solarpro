@@ -36,7 +36,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 TOOL_NAME = "external-opencv-photo-vision-worker"
-TOOL_VERSION = "0.3.0"
+TOOL_VERSION = "0.4.0"
 MAX_IMAGE_BYTES = int(os.environ.get("MAX_IMAGE_BYTES", str(16 * 1024 * 1024)))
 FETCH_TIMEOUT_SECONDS = float(os.environ.get("FETCH_TIMEOUT_SECONDS", "15"))
 MAX_FILES_PER_JOB = int(os.environ.get("MAX_FILES_PER_JOB", "50"))
