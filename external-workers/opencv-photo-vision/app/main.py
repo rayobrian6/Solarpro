@@ -508,48 +508,10 @@ def _run_all_batches_sync(render_job_id: str, job: VisionJob) -> dict[str, Any]:
         print(f"[WORKER] Job {job_id}: processing batch {batch_idx + 1}/{total_batches} ({len(batch_files)} files)")
 
         try:
-            # Fetch all image bytes in parallel first (faster than sequential)
-            async def fetch_all_images():
-                async with httpx.AsyncClient(timeout=FETCH_TIMEOUT_SECONDS, follow_redirects=True, limits=httpx.Limits(max_keepalive_connections=20, max_connections=50)) as client:
-                    tasks = [client.get(fj.fileUrl) for fj in batch_files]
-                    responses = await asyncio.gather(*tasks, return_exceptions=True)
-                    return responses
-
-            # Run async fetch in executor
-            responses = await asyncio.get_event_loop().run_in_executor(None, asyncio.run, fetch_all_images())
-
-            # Process fetched images
             batch_file_results = []
-            for i, file_job in enumerate(batch_files):
-                try:
-                    response = responses[i]
-                    if isinstance(response, Exception):
-                        raise Exception(f"Fetch failed: {response}")
-                    if response.status_code != 200:
-                        raise Exception(f"HTTP {response.status_code}")
-                    if len(response.content) > MAX_IMAGE_BYTES:
-                        raise ValueError(f"image exceeds max byte size {MAX_IMAGE_BYTES}")
-
-                    # Process image (same as before, but with pre-fetched bytes)
-                    file_result = analyze_file_with_bytes(job, file_job, response.content, created_at)
-                    batch_file_results.append(file_result)
-                except Exception as exc:
-                    # Create failed result for this file
-                    batch_file_results.append({
-                        "surveyId": job.surveyId,
-                        "fileId": file_job.fileId,
-                        "fileUrl": file_job.fileUrl,
-                        "filename": file_job.filename,
-                        "analyzed": False,
-                        "error": str(exc)[:300],
-                        "metadata": {"widthPx": None, "heightPx": None, "format": None, "byteSize": 0, "sha256": None, "dominantBrightness": None, "sharpnessScore": None, "qualityScore": None},
-                        "thumbnailDataUrl": None,
-                        "edgeSummary": None,
-                        "candidates": [],
-                        "limitations": ["Image bytes could not be fetched or decoded; no candidates emitted.", *base_limitations()],
-                        "runHash": stable_hash({"surveyId": job.surveyId, "fileId": file_job.fileId, "error": str(exc)}),
-                    })
-
+            for file_job in batch_files:
+                file_result = analyze_file(job, file_job, created_at)
+                batch_file_results.append(file_result)
                 gc.collect()
 
             # Build per-batch run hash for the batch's files
@@ -905,6 +867,37 @@ def build_candidates(job: VisionJob, file_job: FileJob, byte_hash: str, created_
         deterministic_hash = stable_hash({**candidate, "candidateId": "stable", "deterministicHash": "stable", "createdAt": "stable-created-at"})
         finalized.append({**candidate, "candidateId": f"ospv_{deterministic_hash[:24]}_{index + 1}", "deterministicHash": deterministic_hash})
     return finalized
+
+
+def analyze_file(job: VisionJob, file_job: FileJob, created_at: str) -> dict[str, Any]:
+    """Fetch and analyze a file (legacy wrapper)."""
+    try:
+        started = time.time()
+        # Use httpx for faster sync fetching
+        with httpx.Client(timeout=FETCH_TIMEOUT_SECONDS, follow_redirects=True) as client:
+            response = client.get(file_job.fileUrl)
+            response.raise_for_status()
+            content = response.content
+        if len(content) > MAX_IMAGE_BYTES:
+            raise ValueError(f"image exceeds max byte size {MAX_IMAGE_BYTES}")
+        return analyze_file_with_bytes(job, file_job, content, created_at)
+    except Exception as exc:
+        gc.collect()
+        run_hash = stable_hash({"surveyId": job.surveyId, "fileId": file_job.fileId, "error": str(exc)})
+        return {
+            "surveyId": job.surveyId,
+            "fileId": file_job.fileId,
+            "fileUrl": file_job.fileUrl,
+            "filename": file_job.filename,
+            "analyzed": False,
+            "error": str(exc)[:300],
+            "metadata": {"widthPx": None, "heightPx": None, "format": None, "byteSize": 0, "sha256": None, "dominantBrightness": None, "sharpnessScore": None, "qualityScore": None},
+            "thumbnailDataUrl": None,
+            "edgeSummary": None,
+            "candidates": [],
+            "limitations": ["Image bytes could not be fetched or decoded by the external OpenCV worker; no candidates emitted for this file.", *base_limitations()],
+            "runHash": run_hash,
+        }
 
 
 def tool_requested(job: VisionJob, tool: str) -> bool:
