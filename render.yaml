@@ -36,3 +36,9 @@ services:
         value: "5"
       - key: PROCESSING_TIMEOUT_SECONDS
         value: "90"
+      - key: BATCH_SIZE
+        value: "2"
+      - key: MAX_FILES_PER_JOB
+        value: "50"
+      - key: DATABASE_URL
+        sync: false

@@ -1,38 +1,252 @@
+"""
+SolarPro External OpenCV Photo Vision Worker — v0.3.0
+
+Production architecture:
+  - Vercel POST creates a job in Neon DB, returns jobId instantly.
+  - Vercel POST also submits ALL photo files to this Render worker (one POST).
+  - This worker processes all photos in batches internally, writing progress
+    and results directly to Neon PostgreSQL after each batch.
+  - Vercel GET is a pure DB read (instant, no Render communication).
+  - Client polls Vercel GET every few seconds for progress.
+
+This eliminates Vercel's 60s timeout from the critical processing path entirely.
+"""
+
+import asyncio
 import base64
 import gc
 import hashlib
 import io
+import json
 import os
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal
 
 import cv2
 import numpy as np
+import psycopg2
+import psycopg2.extras
 import requests
 from app.ocr_detection import TesseractOcrService
 from app.yolo_detection import YoloDetectionService
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from PIL import Image
 from pydantic import BaseModel, Field
 
 TOOL_NAME = "external-opencv-photo-vision-worker"
-TOOL_VERSION = "0.1.0"
+TOOL_VERSION = "0.3.0"
 MAX_IMAGE_BYTES = int(os.environ.get("MAX_IMAGE_BYTES", str(16 * 1024 * 1024)))
-FETCH_TIMEOUT_SECONDS = float(os.environ.get("FETCH_TIMEOUT_SECONDS", "12"))
-MAX_FILES_PER_JOB = int(os.environ.get("MAX_FILES_PER_JOB", "12"))
-PROCESSING_TIMEOUT_SECONDS = float(os.environ.get("PROCESSING_TIMEOUT_SECONDS", "45"))
+FETCH_TIMEOUT_SECONDS = float(os.environ.get("FETCH_TIMEOUT_SECONDS", "15"))
+MAX_FILES_PER_JOB = int(os.environ.get("MAX_FILES_PER_JOB", "50"))
+PROCESSING_TIMEOUT_SECONDS = float(os.environ.get("PROCESSING_TIMEOUT_SECONDS", "90"))
+MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "1"))
+BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "2"))
+
+# Neon PostgreSQL
+RAW_DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DB_CONNECTION_TIMEOUT = int(os.environ.get("DB_CONNECTION_TIMEOUT", "10"))
 
 yolo_service = YoloDetectionService()
 ocr_service = TesseractOcrService()
 
 app = FastAPI(title="SolarPro External OpenCV Photo Vision Worker", version=TOOL_VERSION)
 
+# ---------------------------------------------------------------------------
+# Neon PostgreSQL connection
+# ---------------------------------------------------------------------------
+def _sanitize_db_url(url: str) -> str:
+    """Sanitize Neon connection string: channel_binding=require → disable."""
+    return url.replace("channel_binding=require", "channel_binding=disable")
+
+def get_db_connection():
+    """Get a new psycopg2 connection to Neon PostgreSQL."""
+    url = _sanitize_db_url(RAW_DATABASE_URL)
+    if not url:
+        raise RuntimeError("DATABASE_URL environment variable not set")
+    conn = psycopg2.connect(url, connect_timeout=DB_CONNECTION_TIMEOUT)
+    conn.autocommit = True
+    return conn
+
+# ---------------------------------------------------------------------------
+# DB helper functions
+# ---------------------------------------------------------------------------
+def db_update_job_status(job_id: str, status: str, error: str | None = None):
+    """Update job status in Neon DB."""
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            if error:
+                cur.execute(
+                    """UPDATE photo_vision_jobs
+                       SET status = %s, error = %s, updated_at = NOW()
+                       WHERE job_id = %s""",
+                    (status, error[:500], job_id),
+                )
+            else:
+                cur.execute(
+                    """UPDATE photo_vision_jobs
+                       SET status = %s, updated_at = NOW()
+                       WHERE job_id = %s""",
+                    (status, job_id),
+                )
+    except Exception as exc:
+        print(f"[DB ERROR] db_update_job_status({job_id}, {status}): {exc}")
+    finally:
+        if conn:
+            conn.close()
+
+def db_append_file_results(job_id: str, file_results: list[dict], processed_count: int, current_batch: int, completed_batches: int):
+    """Append batch file results to job using JSONB || operator (no re-read)."""
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            # Append file results using JSONB || (avoids reading growing blob)
+            cur.execute(
+                """UPDATE photo_vision_jobs
+                   SET file_results = COALESCE(file_results, '[]'::jsonb) || %s::jsonb,
+                       current_batch = %s,
+                       completed_batches = %s,
+                       processed_files = %s,
+                       updated_at = NOW()
+                   WHERE job_id = %s""",
+                (json.dumps(file_results), current_batch, completed_batches, processed_count, job_id),
+            )
+    except Exception as exc:
+        print(f"[DB ERROR] db_append_file_results({job_id}): {exc}")
+    finally:
+        if conn:
+            conn.close()
+
+def db_append_batch_error(job_id: str, error_msg: str):
+    """Append a batch error to the job's batch_errors JSONB."""
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE photo_vision_jobs
+                   SET batch_errors = COALESCE(batch_errors, '[]'::jsonb) || %s::jsonb,
+                       updated_at = NOW()
+                   WHERE job_id = %s""",
+                (json.dumps([error_msg]), job_id),
+            )
+    except Exception as exc:
+        print(f"[DB ERROR] db_append_batch_error({job_id}): {exc}")
+    finally:
+        if conn:
+            conn.close()
+
+def db_update_last_availability(job_id: str, availability: dict):
+    """Update the last_availability JSONB column."""
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE photo_vision_jobs
+                   SET last_availability = %s::jsonb, updated_at = NOW()
+                   WHERE job_id = %s""",
+                (json.dumps(availability), job_id),
+            )
+    except Exception as exc:
+        print(f"[DB ERROR] db_update_last_availability({job_id}): {exc}")
+    finally:
+        if conn:
+            conn.close()
+
+def db_finalize_job(job_id: str, final_result: dict, processed_files: int, batch_errors: list[str]):
+    """Mark job as completed with final aggregated result."""
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE photo_vision_jobs
+                   SET status = 'completed',
+                       current_batch = total_batches,
+                       completed_batches = total_batches,
+                       processed_files = %s,
+                       batch_errors = %s::jsonb,
+                       final_result = %s::jsonb,
+                       completed_at = NOW(),
+                       updated_at = NOW()
+                   WHERE job_id = %s""",
+                (processed_files, json.dumps(batch_errors), json.dumps(final_result), job_id),
+            )
+    except Exception as exc:
+        print(f"[DB ERROR] db_finalize_job({job_id}): {exc}")
+    finally:
+        if conn:
+            conn.close()
+
+def db_fail_job(job_id: str, error: str):
+    """Mark job as failed."""
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE photo_vision_jobs
+                   SET status = 'failed', error = %s, completed_at = NOW(), updated_at = NOW()
+                   WHERE job_id = %s""",
+                (error[:500], job_id),
+            )
+    except Exception as exc:
+        print(f"[DB ERROR] db_fail_job({job_id}): {exc}")
+    finally:
+        if conn:
+            conn.close()
+
+def db_get_job_status(job_id: str) -> dict | None:
+    """Get job status from DB for polling."""
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """SELECT job_id, status, current_batch, total_batches,
+                          completed_batches, processed_files, total_photo_files,
+                          error,
+                          EXTRACT(EPOCH FROM created_at)::float AS created_at_epoch,
+                          EXTRACT(EPOCH FROM completed_at)::float AS completed_at_epoch
+                   FROM photo_vision_jobs
+                   WHERE job_id = %s""",
+                (job_id,),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+    except Exception as exc:
+        print(f"[DB ERROR] db_get_job_status({job_id}): {exc}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Processing semaphore — serialize YOLO inference to prevent OOM
+# ---------------------------------------------------------------------------
+processing_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+
+# In-memory tracking for active render-side processing (lightweight)
+active_render_jobs: dict[str, dict] = {}
+
+def _count_active_jobs() -> int:
+    return sum(1 for j in active_render_jobs.values() if j["status"] in ("queued", "processing"))
+
+def _cleanup_old_jobs() -> None:
+    cutoff = time.time() - 3600
+    to_remove = [jid for jid, j in active_render_jobs.items()
+                 if j["status"] in ("completed", "failed") and j.get("completed_at", 0) < cutoff]
+    for jid in to_remove:
+        del active_render_jobs[jid]
 
 def stable_hash(value: Any) -> str:
-    import json
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-
 
 def no_authority() -> dict[str, bool]:
     return {
@@ -45,35 +259,48 @@ def no_authority() -> dict[str, bool]:
         "engineeringWorkflowMutationAllowed": False,
     }
 
-
 def base_limitations() -> list[str]:
     return [
         "REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY",
         "OpenCV, YOLO/Supervision, and Tesseract OCR candidates are pixel/model-derived review cues only; they do not create roof planes, measurements, CAD geometry, permit inputs, BOM inputs, or engineering truth.",
-        "SolarPro must persist and review results; this external worker does not write to the SolarPro database.",
+        "SolarPro must persist and review results; this external worker writes progress to the SolarPro database as review-only candidates.",
     ]
 
 
+# ---------------------------------------------------------------------------
+# Request/Response models
+# ---------------------------------------------------------------------------
 class FileJob(BaseModel):
     fileId: str
     fileUrl: str
     filename: str | None = None
     contentType: str | None = None
 
-
 class VisionJob(BaseModel):
     schemaVersion: Literal["solarpro_external_photo_vision_job_v1"]
     surveyId: str
     projectId: str | None = None
     createdAt: str | None = None
+    jobId: str | None = None  # Vercel-side job ID for DB writes
     requestedTools: list[str] = Field(default_factory=lambda: ["opencv_primitives", "yolo_detection", "tesseract_ocr", "ocr_equipment_labels"])
     files: list[FileJob] = Field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# GET /health
+# ---------------------------------------------------------------------------
 @app.get("/health")
 def health() -> dict[str, Any]:
     yolo_availability = yolo_service.availability()
     ocr_availability = ocr_service.availability()
+    active = _count_active_jobs()
+    db_ok = False
+    try:
+        conn = get_db_connection()
+        conn.close()
+        db_ok = True
+    except Exception:
+        pass
     return {
         "status": "ok",
         "schemaVersion": "solarpro_external_photo_vision_health_v1",
@@ -90,62 +317,373 @@ def health() -> dict[str, Any]:
             "tesseract": ocr_availability.tesseract,
             "pytesseract": ocr_availability.pytesseract,
         },
+        "capacity": {
+            "maxConcurrentJobs": MAX_CONCURRENT_JOBS,
+            "activeJobs": active,
+            "available": active < MAX_CONCURRENT_JOBS * 3,
+        },
+        "database": {"connected": db_ok},
         "authority": no_authority(),
     }
 
 
-@app.post("/v1/photo-vision/jobs")
-def run_job(job: VisionJob) -> dict[str, Any]:
+# ---------------------------------------------------------------------------
+# POST /v1/photo-vision/jobs — Submit ALL photos, worker processes them all
+# Returns 202 Accepted immediately with renderJobId.
+# Worker processes all batches internally, writing progress to Neon DB.
+# ---------------------------------------------------------------------------
+@app.post("/v1/photo-vision/jobs", status_code=202)
+async def submit_job(job: VisionJob) -> dict[str, Any]:
+    _cleanup_old_jobs()
+
+    if not RAW_DATABASE_URL:
+        raise HTTPException(status_code=500, detail="DATABASE_URL not configured on worker")
+
+    render_job_id = f"rj_{uuid.uuid4().hex[:16]}"
+    job_id = job.jobId  # Vercel-side job ID
+
+    queued = _count_active_jobs()
+    active_render_jobs[render_job_id] = {
+        "status": "queued",
+        "job_id": job_id,
+        "survey_id": job.surveyId,
+        "total_files": len(job.files),
+        "created_at": time.time(),
+        "started_at": None,
+        "completed_at": None,
+    }
+
+    # Start background processing — the entire loop runs here on Render
+    asyncio.create_task(_process_all_batches_background(render_job_id, job))
+
+    return {
+        "schemaVersion": "solarpro_external_photo_vision_job_accepted_v1",
+        "renderJobId": render_job_id,
+        "jobId": job_id,
+        "status": "queued",
+        "totalFiles": len(job.files),
+        "batchSize": BATCH_SIZE,
+        "message": f"Job queued. Worker will process all {len(job.files)} files in batches of {BATCH_SIZE}. Progress is written to Neon DB.",
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/photo-vision/jobs/{renderJobId} — Poll render-side status
+# Also reads from Neon DB if a jobId was provided.
+# ---------------------------------------------------------------------------
+@app.get("/v1/photo-vision/jobs/{render_job_id}")
+async def get_job_status(render_job_id: str) -> dict[str, Any]:
+    rj = active_render_jobs.get(render_job_id)
+    if not rj:
+        raise HTTPException(status_code=404, detail=f"Render job {render_job_id} not found")
+
+    response: dict[str, Any] = {
+        "renderJobId": render_job_id,
+        "jobId": rj.get("job_id"),
+        "status": rj["status"],
+        "surveyId": rj.get("survey_id"),
+    }
+
+    # If we have a Vercel job_id, also read DB for progress details
+    job_id = rj.get("job_id")
+    if job_id and rj["status"] in ("processing", "completed", "failed"):
+        db_status = db_get_job_status(job_id)
+        if db_status:
+            response["progress"] = {
+                "currentBatch": db_status.get("current_batch", 0),
+                "totalBatches": db_status.get("total_batches", 0),
+                "completedBatches": db_status.get("completed_batches", 0),
+                "processedFiles": db_status.get("processed_files", 0),
+                "totalPhotoFiles": db_status.get("total_photo_files", 0),
+            }
+
+    if rj["status"] == "queued":
+        response["message"] = "Job is queued waiting for processing slot."
+    elif rj["status"] == "processing":
+        elapsed = time.time() - (rj.get("started_at") or rj.get("created_at"))
+        response["elapsedSeconds"] = round(elapsed, 1)
+        response["message"] = "Job is currently being processed."
+    elif rj["status"] == "completed":
+        response["message"] = "Job completed. Results are in Neon DB."
+    elif rj["status"] == "failed":
+        response["error"] = rj.get("error")
+        response["message"] = "Job failed."
+
+    return response
+
+
+# ---------------------------------------------------------------------------
+# DELETE /v1/photo-vision/jobs/{renderJobId} — Cancel a queued job
+# ---------------------------------------------------------------------------
+@app.delete("/v1/photo-vision/jobs/{render_job_id}")
+async def cancel_job(render_job_id: str) -> dict[str, Any]:
+    rj = active_render_jobs.get(render_job_id)
+    if not rj:
+        raise HTTPException(status_code=404, detail=f"Render job {render_job_id} not found")
+
+    if rj["status"] == "queued":
+        rj["status"] = "failed"
+        rj["error"] = "Cancelled by user"
+        rj["completed_at"] = time.time()
+        # Also fail in DB
+        job_id = rj.get("job_id")
+        if job_id:
+            db_fail_job(job_id, "Cancelled by user")
+        return {"renderJobId": render_job_id, "status": "cancelled", "message": "Job cancelled."}
+
+    if rj["status"] == "processing":
+        return {"renderJobId": render_job_id, "status": rj["status"], "message": "Job is already processing and cannot be cancelled."}
+
+    return {"renderJobId": render_job_id, "status": rj["status"], "message": f"Job is already {rj['status']}."}
+
+
+# ---------------------------------------------------------------------------
+# Background processor — processes ALL batches, writes to Neon DB
+# ---------------------------------------------------------------------------
+async def _process_all_batches_background(render_job_id: str, job: VisionJob) -> None:
+    """Process all photo files in batches, writing progress to Neon DB."""
+    rj = active_render_jobs.get(render_job_id)
+    if not rj:
+        return
+
+    job_id = job.jobId  # Vercel-side job ID for DB writes
+
+    async with processing_semaphore:
+        # Check if cancelled while waiting
+        if rj["status"] == "failed":
+            return
+
+        rj["status"] = "processing"
+        rj["started_at"] = time.time()
+
+        # Mark job as running in DB
+        if job_id:
+            db_update_job_status(job_id, "running")
+
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(
+                None, _run_all_batches_sync, render_job_id, job
+            )
+            rj["status"] = "completed"
+            rj["completed_at"] = time.time()
+        except Exception as exc:
+            rj["status"] = "failed"
+            rj["error"] = str(exc)[:500]
+            rj["completed_at"] = time.time()
+            if job_id:
+                db_fail_job(job_id, str(exc)[:500])
+            gc.collect()
+
+
+def _run_all_batches_sync(render_job_id: str, job: VisionJob) -> dict[str, Any]:
+    """Synchronous processing of ALL files in batches. Writes progress to Neon DB after each batch."""
+    rj = active_render_jobs.get(render_job_id)
+    job_id = job.jobId
+    survey_id = job.surveyId
+    project_id = job.projectId
     created_at = job.createdAt or datetime.now(timezone.utc).isoformat()
-    files: list[dict[str, Any]] = []
-    candidates: list[dict[str, Any]] = []
-    for file_job in job.files[:MAX_FILES_PER_JOB]:
-        file_result = analyze_file(job, file_job, created_at)
-        files.append(file_result)
-        candidates.extend(file_result["candidates"])
-        # Explicit GC between files to keep peak memory low on constrained Render instances
+
+    all_files = job.files[:MAX_FILES_PER_JOB]
+    total_files = len(all_files)
+    total_batches = (total_files + BATCH_SIZE - 1) // BATCH_SIZE
+
+    all_file_results: list[dict[str, Any]] = []
+    all_candidates: list[dict[str, Any]] = []
+    batch_errors: list[str] = []
+    last_availability: dict | None = None
+    total_processed = 0
+
+    print(f"[WORKER] Job {job_id}: starting processing of {total_files} files in {total_batches} batches (batch_size={BATCH_SIZE})")
+
+    for batch_idx in range(total_batches):
+        # Check if job was cancelled
+        if rj and rj.get("status") == "failed":
+            print(f"[WORKER] Job {job_id}: cancelled, stopping at batch {batch_idx}")
+            break
+
+        start_idx = batch_idx * BATCH_SIZE
+        end_idx = min(start_idx + BATCH_SIZE, total_files)
+        batch_files = all_files[start_idx:end_idx]
+
+        print(f"[WORKER] Job {job_id}: processing batch {batch_idx + 1}/{total_batches} ({len(batch_files)} files)")
+
+        try:
+            batch_file_results = []
+            for file_job in batch_files:
+                file_result = analyze_file(job, file_job, created_at)
+                batch_file_results.append(file_result)
+                gc.collect()
+
+            # Build per-batch run hash for the batch's files
+            batch_run_hash = stable_hash({
+                "surveyId": survey_id,
+                "projectId": project_id,
+                "toolName": TOOL_NAME,
+                "toolVersion": TOOL_VERSION,
+                "batchIndex": batch_idx,
+                "files": [{"fileId": f["fileId"], "sha256": f["metadata"].get("sha256")} for f in batch_file_results],
+            })
+
+            for file_result in batch_file_results:
+                file_result["runHash"] = batch_run_hash
+                for candidate in file_result.get("candidates", []):
+                    candidate["runHash"] = batch_run_hash
+                    candidate["deterministicHash"] = stable_hash({**candidate, "createdAt": "stable-created-at", "runHash": batch_run_hash})
+                    candidate["candidateId"] = f"ospv_{candidate['deterministicHash'][:24]}"
+
+            batch_processed = sum(1 for f in batch_file_results if f.get("analyzed"))
+            total_processed += batch_processed
+            all_file_results.extend(batch_file_results)
+            all_candidates.extend(c for f in batch_file_results for c in f.get("candidates", []))
+
+            # Extract availability from the last file result
+            for fr in reversed(batch_file_results):
+                if fr.get("toolDiagnostics"):
+                    last_availability = _build_availability_from_diagnostics(fr["toolDiagnostics"])
+                    break
+
+            # Write progress to Neon DB after each batch
+            if job_id:
+                db_append_file_results(
+                    job_id,
+                    batch_file_results,
+                    processed_count=total_processed,
+                    current_batch=batch_idx + 1,
+                    completed_batches=batch_idx + 1,
+                )
+                if last_availability:
+                    db_update_last_availability(job_id, last_availability)
+
+            print(f"[WORKER] Job {job_id}: batch {batch_idx + 1}/{total_batches} done. batch_processed={batch_processed} total_processed={total_processed}")
+
+        except Exception as exc:
+            err_msg = f"Batch {batch_idx + 1} ({len(batch_files)} files): {str(exc)[:200]}"
+            batch_errors.append(err_msg)
+            print(f"[WORKER] Job {job_id}: batch {batch_idx + 1} FAILED: {err_msg}")
+
+            # Create failed file results for this batch
+            failed_results = []
+            for file_job in batch_files:
+                failed_results.append({
+                    "surveyId": survey_id,
+                    "fileId": file_job.fileId,
+                    "fileUrl": file_job.fileUrl,
+                    "filename": file_job.filename,
+                    "analyzed": False,
+                    "error": str(exc)[:300],
+                    "metadata": {"widthPx": None, "heightPx": None, "format": None, "byteSize": 0, "sha256": None, "dominantBrightness": None, "sharpnessScore": None, "qualityScore": None},
+                    "thumbnailDataUrl": None,
+                    "edgeSummary": None,
+                    "candidates": [],
+                    "limitations": ["Batch processing failed; no candidates emitted.", *base_limitations()],
+                    "runHash": stable_hash({"surveyId": survey_id, "fileId": file_job.fileId, "error": str(exc)}),
+                })
+            all_file_results.extend(failed_results)
+
+            # Write failed results to DB
+            if job_id:
+                db_append_file_results(
+                    job_id,
+                    failed_results,
+                    processed_count=total_processed,
+                    current_batch=batch_idx + 1,
+                    completed_batches=batch_idx + 1,
+                )
+                db_append_batch_error(job_id, err_msg)
+
+        # Force GC between batches to keep memory stable
         gc.collect()
-    run_hash = stable_hash({
-        "surveyId": job.surveyId,
-        "projectId": job.projectId,
+
+    # Build final aggregated result
+    aggregate_run_hash = stable_hash({
+        "surveyId": survey_id,
+        "projectId": project_id,
         "toolName": TOOL_NAME,
         "toolVersion": TOOL_VERSION,
-        "files": [{"fileId": f["fileId"], "sha256": f["metadata"].get("sha256"), "candidateHashes": [c["deterministicHash"] for c in f["candidates"]]} for f in files],
+        "batched": True,
+        "fileHashes": [{"fileId": f["fileId"], "hash": f["metadata"].get("sha256"), "candidateHashes": [c.get("deterministicHash") for c in f.get("candidates", [])]} for f in all_file_results],
     })
-    for file_result in files:
-        file_result["runHash"] = run_hash
-    for candidate in candidates:
-        candidate["runHash"] = run_hash
-        candidate["deterministicHash"] = stable_hash({**candidate, "createdAt": "stable-created-at", "runHash": run_hash})
-        candidate["candidateId"] = f"ospv_{candidate['deterministicHash'][:24]}"
-    return {
+
+    # Assign aggregate run hash to all files and candidates
+    for file_result in all_file_results:
+        file_result["runHash"] = aggregate_run_hash
+        for candidate in file_result.get("candidates", []):
+            candidate["runHash"] = aggregate_run_hash
+
+    final_result = {
         "schemaVersion": "solarpro_external_photo_vision_result_v1",
-        "surveyId": job.surveyId,
-        "projectId": job.projectId,
+        "surveyId": survey_id,
+        "projectId": project_id,
         "toolName": TOOL_NAME,
         "toolVersion": TOOL_VERSION,
         "createdAt": created_at,
-        "processedCount": len([f for f in files if f["analyzed"]]),
-        "failedCount": len([f for f in files if not f["analyzed"]]),
-        "candidateCount": len(candidates),
-        "runHash": run_hash,
-        "files": files,
-        "candidates": candidates,
-        "availability": {
-            "opencv": f"available:{cv2.__version__}",
-            "yoloSupervision": yolo_availability_string(),
-            "yolo": yolo_availability_string(),
-            "supervision": supervision_availability_string(),
-            "tesseract": tesseract_availability_string(),
-            "pytesseract": pytesseract_availability_string(),
-            "open3d": "unavailable_future_stage_not_implemented",
-            "freecad": "unavailable_future_stage_not_implemented",
-            "pythonWorker": "available_external_docker_worker",
-        },
+        "processedCount": sum(1 for f in all_file_results if f.get("analyzed")),
+        "failedCount": sum(1 for f in all_file_results if not f.get("analyzed")),
+        "candidateCount": len(all_candidates),
+        "runHash": aggregate_run_hash,
+        "files": all_file_results,
+        "candidates": all_candidates,
+        "availability": last_availability or _default_availability(),
         "authority": no_authority(),
-        "limitations": base_limitations(),
+        "limitations": [
+            *base_limitations(),
+            *([f"BATCH_PARTIAL_FAILURE: {len(batch_errors)} batch(es) failed. Errors: {'; '.join(batch_errors)}"] if batch_errors else []),
+        ],
     }
 
+    # Finalize job in DB
+    if job_id:
+        db_finalize_job(job_id, final_result, total_processed, batch_errors)
+
+    print(f"[WORKER] Job {job_id}: ALL DONE. processed={final_result['processedCount']} failed={final_result['failedCount']} candidates={final_result['candidateCount']}")
+
+    return final_result
+
+
+def _build_availability_from_diagnostics(diagnostics: dict) -> dict:
+    """Build availability dict from tool diagnostics."""
+    yolo_diag = diagnostics.get("yolo", {})
+    ocr_diag = diagnostics.get("tesseract", {})
+    return {
+        "opencv": f"available:{cv2.__version__}",
+        "yoloSupervision": f"available:{yolo_diag.get('model', 'yolov8n')}:{yolo_diag.get('modelVersion', 'unknown')}" if yolo_diag.get("available") else f"unavailable:{yolo_diag.get('diagnostic', 'unknown')}",
+        "yolo": f"available:{yolo_diag.get('model', 'yolov8n')}:{yolo_diag.get('modelVersion', 'unknown')}" if yolo_diag.get("available") else f"unavailable:{yolo_diag.get('diagnostic', 'unknown')}",
+        "supervision": "available:0.25.1",
+        "tesseract": f"available:{ocr_diag.get('model', 'tesseract')}" if ocr_diag.get("available") else f"unavailable:{ocr_diag.get('diagnostic', 'unknown')}",
+        "pythonWorker": "available_external_docker_worker",
+        "open3d": "unavailable_future_stage_not_implemented",
+        "freecad": "unavailable_future_stage_not_implemented",
+    }
+
+def _default_availability() -> dict:
+    return {
+        "opencv": f"available:{cv2.__version__}",
+        "yoloSupervision": yolo_availability_string(),
+        "yolo": yolo_availability_string(),
+        "supervision": supervision_availability_string(),
+        "tesseract": tesseract_availability_string(),
+        "pythonWorker": "available_external_docker_worker",
+        "open3d": "unavailable_future_stage_not_implemented",
+        "freecad": "unavailable_future_stage_not_implemented",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Startup event
+# ---------------------------------------------------------------------------
+@app.on_event("startup")
+async def on_startup():
+    for jid, j in list(active_render_jobs.items()):
+        if j["status"] in ("queued", "processing"):
+            j["status"] = "failed"
+            j["error"] = "Worker restarted while job was active"
+            j["completed_at"] = time.time()
+    print(f"[startup] Worker v{TOOL_VERSION} ready. MAX_CONCURRENT_JOBS={MAX_CONCURRENT_JOBS} BATCH_SIZE={BATCH_SIZE} MAX_FILES_PER_JOB={MAX_FILES_PER_JOB} DB={'configured' if RAW_DATABASE_URL else 'NOT CONFIGURED'}")
+
+
+# ---------------------------------------------------------------------------
+# Image analysis (unchanged from v0.2)
+# ---------------------------------------------------------------------------
 
 def analyze_file(job: VisionJob, file_job: FileJob, created_at: str) -> dict[str, Any]:
     try:
@@ -192,7 +730,6 @@ def analyze_file(job: VisionJob, file_job: FileJob, created_at: str) -> dict[str
             ) if ocr_requested else {"available": False, "diagnostic": "tesseract_ocr_not_requested", "candidates": [], "elapsedMs": 0, "limitations": []}
         candidates = [*opencv_candidates, *yolo_result.get("candidates", []), *ocr_result.get("candidates", [])]
         run_hash = stable_hash({"fileId": file_job.fileId, "sha256": byte_hash, "lines": lines, "regions": regions, "yoloCandidates": [c.get("payload", {}) for c in yolo_result.get("candidates", [])], "ocrCandidates": [c.get("payload", {}) for c in ocr_result.get("candidates", [])]})
-        # Free large image arrays to reduce peak memory before building the result dict
         del image, gray, blur, edges, np_bytes, content
         gc.collect()
         return {
@@ -206,10 +743,10 @@ def analyze_file(job: VisionJob, file_job: FileJob, created_at: str) -> dict[str
                 "widthPx": width,
                 "heightPx": height,
                 "format": response.headers.get("content-type"),
-                "byteSize": len(content),
+                "byteSize": len(response.content),
                 "sha256": byte_hash,
-                "dominantBrightness": round(float(np.mean(gray)), 3),
-                "sharpnessScore": round(float(cv2.Laplacian(gray, cv2.CV_64F).var()), 3),
+                "dominantBrightness": round(float(np.mean(gray)), 3) if gray is not None else None,
+                "sharpnessScore": round(float(cv2.Laplacian(gray, cv2.CV_64F).var()), 3) if gray is not None else None,
                 "qualityScore": int(max(5, min(95, 45 + edge_ratio * 250))),
                 "elapsedMs": int((time.time() - started) * 1000),
                 "yoloElapsedMs": yolo_result.get("elapsedMs", 0),
@@ -232,7 +769,6 @@ def analyze_file(job: VisionJob, file_job: FileJob, created_at: str) -> dict[str
             "runHash": run_hash,
         }
     except Exception as exc:
-        # Free any partially-loaded image data on error
         gc.collect()
         run_hash = stable_hash({"surveyId": job.surveyId, "fileId": file_job.fileId, "error": str(exc)})
         return {
@@ -351,7 +887,6 @@ def supervision_availability_string() -> str:
     if availability.supervision.get("available"):
         return f"available:{availability.supervision.get('version')}"
     return f"unavailable:{availability.supervision.get('reason') or 'supervision_not_loaded'}"
-
 
 def tesseract_availability_string() -> str:
     return ocr_service.availability_string()

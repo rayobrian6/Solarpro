@@ -1,14 +1,15 @@
 // ============================================================================
 // POST /api/site-surveys/[surveyId]/open-source-photo-vision-pass
-//   → Creates an async job, returns { jobId } immediately.
+//   → Creates a job in DB + submits ALL photos to Render → returns jobId instantly.
+//   → Render processes all photos in batches internally, writes progress to Neon DB.
+//   → Deduplicates: if an active job exists for this survey, returns its ID.
+//   → Rate limits: max 3 active jobs per user.
 //
 // GET  /api/site-surveys/[surveyId]/open-source-photo-vision-pass?jobId=xxx
-//   → Processes one batch per call, then returns current job status/progress.
-//   → Client polls repeatedly until status is "completed" or "failed".
+//   → PURE DB READ — instant status/progress. No Render communication.
 //
-// This "lazy processing" pattern ensures each request handler does a bounded
-// amount of work (~8-12s per batch of 1 photo) and returns well within
-// serverless function timeout limits. No fire-and-forget Promises that could be killed.
+// DELETE /api/site-surveys/[surveyId]/open-source-photo-vision-pass?jobId=xxx
+//   → Cancels an active job (DB + best-effort Render cancel).
 //
 // Review-only candidates only: no CAD/canonical/permit/BOM/workflow mutation.
 // ============================================================================
@@ -27,9 +28,12 @@ import {
   summarizeOpenSourcePhotoVisionRun,
 } from '@/lib/db-neon';
 import {
-  createJob,
+  createAndSubmitJob,
   getJob,
-  processNextBatch,
+  findActiveJobForSurvey,
+  countActiveJobsForUser,
+  cancelJob,
+  markStaleJobsFailed,
   type PhotoVisionJob,
 } from '@/lib/assistedEvidenceSources/asyncPhotoVisionJobManager';
 import {
@@ -38,8 +42,10 @@ import {
 } from '@/lib/assistedEvidenceSources/externalOpenCvPhotoVisionClient';
 import type { OpenSourcePhotoVisionRunResult } from '@/lib/assistedEvidenceSources/openSourcePhotoVisionWorker';
 
+const MAX_ACTIVE_JOBS_PER_USER = 3;
+
 // ---------------------------------------------------------------------------
-// POST — Create an async photo vision job
+// POST — Create async job + submit ALL photos to Render (returns instantly)
 // ---------------------------------------------------------------------------
 export async function POST(
   req: NextRequest,
@@ -61,6 +67,31 @@ export async function POST(
     const survey = await getSiteSurveyById(surveyId, user.id);
     if (!survey) return NextResponse.json({ success: false, error: 'Survey not found' }, { status: 404 });
 
+    // Deduplication: if there's already an active job for this survey, return it
+    const existingJob = await findActiveJobForSurvey(surveyId);
+    if (existingJob) {
+      console.log(`[POST open-source-photo-vision-pass] surveyId=${surveyId} existing active job found: ${existingJob.jobId} (status=${existingJob.status})`);
+      return NextResponse.json({
+        success: true,
+        jobId: existingJob.jobId,
+        surveyId,
+        photoFileCount: existingJob.totalPhotoFiles,
+        totalBatches: existingJob.totalBatches,
+        message: 'An active job already exists for this survey. Poll GET endpoint with jobId for progress.',
+        existingJob: true,
+      });
+    }
+
+    // Rate limiting
+    const activeJobCount = await countActiveJobsForUser(user.id);
+    if (activeJobCount >= MAX_ACTIVE_JOBS_PER_USER) {
+      return NextResponse.json({
+        success: false,
+        error: `You have ${activeJobCount} active photo vision job(s). Please wait for them to complete before starting more.`,
+        meta: noMutationMeta({ workerUnavailable: false, sourceImageBytesProcessed: false }),
+      }, { status: 429 });
+    }
+
     const files = await getSiteSurveyFiles(surveyId);
     const photoFiles = files.filter(file => file.fileType === 'photo');
     console.log(`[POST open-source-photo-vision-pass] surveyId=${surveyId} totalFiles=${files.length} photoFiles=${photoFiles.length} after ${(Date.now() - startedAt)}ms`);
@@ -73,7 +104,7 @@ export async function POST(
       }, { status: 400 });
     }
 
-    // Check worker health before creating the job (saves a health check during poll)
+    // Check worker health before creating the job
     const workerUrl = getExternalOpenCvWorkerUrl();
     if (!workerUrl) {
       return NextResponse.json({
@@ -91,9 +122,19 @@ export async function POST(
       }, { status: 503 });
     }
 
-    // Create an async job — processing will happen during GET/poll requests
-    const job = await createJob(surveyId, user.id, survey, photoFiles);
-    console.log(`[POST open-source-photo-vision-pass] surveyId=${surveyId} jobId=${job.jobId} created. Client should poll GET with jobId.`);
+    // Create job in DB + submit ALL files to Render in one POST
+    const { job, renderSubmitOk, renderError } = await createAndSubmitJob(surveyId, user.id, survey, photoFiles);
+
+    if (!renderSubmitOk) {
+      return NextResponse.json({
+        success: false,
+        error: `Failed to submit to Render worker: ${renderError}`,
+        jobId: job.jobId,
+        meta: noMutationMeta({ workerUnavailable: true, sourceImageBytesProcessed: false }),
+      }, { status: 502 });
+    }
+
+    console.log(`[POST open-source-photo-vision-pass] surveyId=${surveyId} jobId=${job.jobId} created and submitted to Render. Client should poll GET with jobId.`);
 
     return NextResponse.json({
       success: true,
@@ -101,7 +142,7 @@ export async function POST(
       surveyId,
       photoFileCount: photoFiles.length,
       totalBatches: job.totalBatches,
-      message: 'Photo vision pass job created. Poll GET endpoint with jobId for progress and results.',
+      message: 'Photo vision pass job created and submitted to worker. Poll GET endpoint with jobId for progress and results.',
     });
   } catch (err) {
     console.error(`[POST open-source-photo-vision-pass] surveyId=${surveyId} FAILED after ${(Date.now() - startedAt)}ms:`, err);
@@ -119,8 +160,7 @@ export async function POST(
 }
 
 // ---------------------------------------------------------------------------
-// GET — Poll job status AND process next batch (lazy processing)
-// Each poll request processes one batch (~8-12s for 1 photo), then returns status.
+// GET — PURE DB READ for job status/progress (instant, no Render communication)
 // ---------------------------------------------------------------------------
 export async function GET(
   req: NextRequest,
@@ -133,6 +173,16 @@ export async function GET(
     return NextResponse.json({ success: false, error: 'Missing jobId query parameter' }, { status: 400 });
   }
 
+  // Housekeeping: mark stale jobs as failed
+  try {
+    const staleCount = await markStaleJobsFailed();
+    if (staleCount > 0) {
+      console.log(`[GET open-source-photo-vision-pass] Marked ${staleCount} stale job(s) as failed`);
+    }
+  } catch {
+    // Don't fail the poll if housekeeping fails
+  }
+
   const job = await getJob(jobId);
   if (!job) {
     return NextResponse.json({ success: false, error: 'Job not found. It may have expired or the server recycled. Please start a new pass.' }, { status: 404 });
@@ -142,11 +192,12 @@ export async function GET(
     return NextResponse.json({ success: false, error: 'Job does not belong to this survey' }, { status: 403 });
   }
 
-  // If job is already terminal, return final state
+  // Completed job — return full results
   if (job.status === 'completed') {
     return handleCompletedJob(job, surveyId);
   }
 
+  // Failed job
   if (job.status === 'failed') {
     return NextResponse.json({
       success: false,
@@ -158,53 +209,62 @@ export async function GET(
     });
   }
 
-  // Job is pending/running — process the next batch
-  try {
-    const updatedJob = await processNextBatch(jobId);
+  // Pending/running — return progress (instant DB read)
+  return NextResponse.json({
+    success: true,
+    jobId: job.jobId,
+    status: job.status,
+    progress: {
+      totalBatches: job.totalBatches,
+      completedBatches: job.completedBatches,
+      currentBatch: job.currentBatch,
+      totalPhotoFiles: job.totalPhotoFiles,
+      processedFiles: job.processedFiles,
+    },
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  });
+}
 
-    // Check if the job just completed
-    if (updatedJob.status === 'completed') {
-      // Load full job (with result) for the completed handler
-      const fullJob = await getJob(updatedJob.jobId);
-      return handleCompletedJob(fullJob ?? updatedJob, surveyId);
-    }
+// ---------------------------------------------------------------------------
+// DELETE — Cancel an active job
+// ---------------------------------------------------------------------------
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: { surveyId: string } },
+) {
+  const surveyId = params?.surveyId ?? 'unknown';
+  const jobId = req.nextUrl.searchParams.get('jobId');
 
-    if (updatedJob.status === 'failed') {
-      return NextResponse.json({
-        success: false,
-        jobId: updatedJob.jobId,
-        status: 'failed',
-        error: updatedJob.error,
-        createdAt: updatedJob.createdAt,
-        completedAt: updatedJob.completedAt,
-      });
-    }
+  if (!jobId) {
+    return NextResponse.json({ success: false, error: 'Missing jobId query parameter' }, { status: 400 });
+  }
 
-    // Still running — return progress
+  const job = await getJob(jobId);
+  if (!job) {
+    return NextResponse.json({ success: false, error: 'Job not found' }, { status: 404 });
+  }
+
+  if (job.surveyId !== surveyId) {
+    return NextResponse.json({ success: false, error: 'Job does not belong to this survey' }, { status: 403 });
+  }
+
+  const cancelled = await cancelJob(jobId);
+  if (cancelled) {
+    console.log(`[DELETE open-source-photo-vision-pass] jobId=${jobId} cancelled by user`);
     return NextResponse.json({
       success: true,
-      jobId: updatedJob.jobId,
-      status: updatedJob.status,
-      progress: {
-        totalBatches: updatedJob.totalBatches,
-        completedBatches: updatedJob.completedBatches,
-        currentBatch: updatedJob.currentBatch,
-        totalPhotoFiles: updatedJob.totalPhotoFiles,
-        processedFiles: updatedJob.processedFiles,
-      },
-      createdAt: updatedJob.createdAt,
-      updatedAt: updatedJob.updatedAt,
-    });
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    console.error(`[GET open-source-photo-vision-pass] jobId=${jobId} processing error:`, errMsg);
-    return NextResponse.json({
-      success: false,
       jobId,
-      status: 'failed',
-      error: `Processing error: ${errMsg}`,
-    }, { status: 500 });
+      status: 'cancelled',
+      message: 'Job cancelled successfully.',
+    });
   }
+
+  return NextResponse.json({
+    success: false,
+    jobId,
+    error: 'Job could not be cancelled (it may have already completed or failed)',
+  }, { status: 400 });
 }
 
 // ---------------------------------------------------------------------------
