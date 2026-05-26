@@ -19,14 +19,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import {
   getJob,
-  processNextBatch,
+  updatePhotoLabelsFromCandidates,
   type PhotoVisionJob,
 } from '@/lib/assistedEvidenceSources/asyncPhotoVisionJobManager';
 import {
   replaceOpenSourcePhotoVisionCandidatesForSurveyRun,
   summarizeOpenSourcePhotoVisionRun,
 } from '@/lib/db-neon';
-import type { OpenSourcePhotoVisionRunResult } from '@/lib/assistedEvidenceSources/asyncPhotoVisionJobManager';
+import type { OpenSourcePhotoVisionRunResult } from '@/lib/assistedEvidenceSources/openSourcePhotoVisionWorker';
 
 const MAX_BATCHES_PER_TICK = 2; // Process 2 batches per invocation (~25-35s total, safely under 60s)
 
@@ -83,36 +83,24 @@ export async function POST(
     });
   }
 
-  // Process N batches
+  // Process N batches — NOTE: With the async Render architecture, processing
+  // happens entirely on Render. This route is kept for backward compatibility
+  // but simply reads the current job status from DB (same as GET on parent route).
+  // The client should use GET /open-source-photo-vision-pass?jobId=... instead.
   try {
-    const updatedJob = await processNextBatch(jobId, MAX_BATCHES_PER_TICK);
-
-    if (updatedJob.status === 'completed') {
-      const fullJob = await getJob(updatedJob.jobId);
-      return handleCompletedJob(fullJob ?? updatedJob, surveyId);
-    }
-
-    if (updatedJob.status === 'failed') {
-      return NextResponse.json({
-        success: false,
-        jobId: updatedJob.jobId,
-        status: 'failed',
-        error: updatedJob.error,
-      });
-    }
-
-    // Still running — return progress
+    // Just return the current job status — Render handles processing
     return NextResponse.json({
       success: true,
-      jobId: updatedJob.jobId,
-      status: updatedJob.status,
+      jobId: job.jobId,
+      status: job.status,
       progress: {
-        totalBatches: updatedJob.totalBatches,
-        completedBatches: updatedJob.completedBatches,
-        currentBatch: updatedJob.currentBatch,
-        totalPhotoFiles: updatedJob.totalPhotoFiles,
-        processedFiles: updatedJob.processedFiles,
+        totalBatches: job.totalBatches,
+        completedBatches: job.completedBatches,
+        currentBatch: job.currentBatch,
+        totalPhotoFiles: job.totalPhotoFiles,
+        processedFiles: job.processedFiles,
       },
+      message: 'Processing is handled by the async Render worker. Use GET ?jobId=... to poll progress.',
     });
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);

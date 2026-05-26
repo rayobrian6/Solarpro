@@ -17,12 +17,17 @@ import type {
   OpenSourcePhotoVisionRunResult,
 } from './openSourcePhotoVisionWorker';
 import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
+import { updateSiteSurveyFileLabels } from '@/lib/db/surveys';
 import {
   EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME,
   EXTERNAL_OPENCV_PHOTO_VISION_TOOL_VERSION,
   getExternalOpenCvWorkerUrl,
 } from './externalOpenCvPhotoVisionClient';
 import { getDbReady } from '@/lib/db/core';
+import {
+  getEvidenceCategoryForCandidate,
+  extractYoloClassNameFromPayload,
+} from './yoloToEvidenceMapper';
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
 
@@ -320,4 +325,177 @@ export async function markStaleJobsFailed(): Promise<number> {
   `;
   const affected = Array.isArray(result) ? result.length : (result as Record<string, unknown>).count as number;
   return affected ?? 0;
+}
+
+// ---------------------------------------------------------------------------
+// Update photo labels from YOLO/OCR candidates (Option 1 implementation)
+//
+// This function is called after a photo vision run completes to auto-assign
+// photo labels from high-confidence YOLO object detection and OCR candidates.
+//
+// Algorithm:
+// 1. Group object_detection candidates by file_id
+// 2. For each file, pick the highest-confidence object_detection candidate
+// 3. Map the YOLO class name to an evidence category using yoloToEvidenceMapper
+// 4. Update site_survey_files.label for files where label is currently NULL
+// 5. Only update files with confidence >= threshold (default: 0.70)
+//
+// Returns: Summary of updates performed
+// ---------------------------------------------------------------------------
+export interface UpdatePhotoLabelsFromCandidatesResult {
+  totalFiles: number;
+  filesWithCandidates: number;
+  filesEligibleForUpdate: number;
+  filesUpdated: number;
+  updates: Array<{
+    fileId: string;
+    filename: string | null;
+    oldLabel: string | null;
+    newLabel: string;
+    candidateType: string;
+    candidateClass: string | null;
+    confidence: number;
+  }>;
+}
+
+export async function updatePhotoLabelsFromCandidates(
+  surveyId: string,
+  userId: string,
+  run: OpenSourcePhotoVisionRunResult,
+): Promise<UpdatePhotoLabelsFromCandidatesResult> {
+  const startedAt = Date.now();
+  const sql = await getDbReady();
+
+  // Confidence threshold from env var (default: 0.70)
+  const minConfidenceThreshold = Number(process.env.PHOTO_VISION_AUTO_LABEL_MIN_CONFIDENCE || 0.70);
+
+  console.log(`[updatePhotoLabelsFromCandidates] surveyId=${surveyId} runHash=${run.runHash} minConfidence=${minConfidenceThreshold}`);
+
+  // Step 1: Group object_detection candidates by file_id, pick highest-confidence per file
+  const candidatesByFile = new Map<string, OpenSourcePhotoVisionCandidate>();
+  for (const candidate of run.candidates) {
+    // Only consider object_detection candidates (not ocr_text, edge_map_summary, etc.)
+    if (candidate.candidateType !== 'object_detection') continue;
+
+    const fileId = candidate.fileId;
+    const existing = candidatesByFile.get(fileId);
+
+    // Keep the highest-confidence candidate for each file
+    if (!existing || candidate.confidence > existing.confidence) {
+      candidatesByFile.set(fileId, candidate);
+    }
+  }
+
+  const filesWithCandidates = candidatesByFile.size;
+  console.log(`[updatePhotoLabelsFromCandidates] Found ${filesWithCandidates} files with object_detection candidates (out of ${run.processedCount} processed)`);
+
+  if (filesWithCandidates === 0) {
+    return {
+      totalFiles: run.processedCount,
+      filesWithCandidates: 0,
+      filesEligibleForUpdate: 0,
+      filesUpdated: 0,
+      updates: [],
+    };
+  }
+
+  // Step 2: Check which files currently have NULL labels (only update those)
+  // Build a safe IN clause for Neon's tagged template literals
+  const fileIdsWithCandidates = Array.from(candidatesByFile.keys());
+
+  // Neon tagged templates don't support `IN ${sql(array)}` directly.
+  // Use a loop approach to check each file, or batch query with OR conditions.
+  // For safety and simplicity, query files individually (typically < 50 files).
+  const filesWithoutLabelsMap = new Map<string, { filename: string | null; label: string | null }>();
+  for (const fileId of fileIdsWithCandidates) {
+    const rows = await sql`
+      SELECT id, filename, label
+      FROM site_survey_files
+      WHERE id = ${fileId}
+        AND survey_id = ${surveyId}
+        AND (label IS NULL OR label = '')
+    `;
+    for (const row of rows as Record<string, unknown>[]) {
+      filesWithoutLabelsMap.set(row.id as string, {
+        filename: row.filename as string | null,
+        label: row.label as string | null,
+      });
+    }
+  }
+
+  const filesEligibleForUpdate = filesWithoutLabelsMap.size;
+  console.log(`[updatePhotoLabelsFromCandidates] ${filesEligibleForUpdate} files are eligible for label update (have no existing label)`);
+
+  if (filesEligibleForUpdate === 0) {
+    return {
+      totalFiles: run.processedCount,
+      filesWithCandidates,
+      filesEligibleForUpdate: 0,
+      filesUpdated: 0,
+      updates: [],
+    };
+  }
+
+  // Step 3: Map candidates to evidence categories and prepare updates
+  const updates: UpdatePhotoLabelsFromCandidatesResult['updates'] = [];
+  const updatesForDb: Array<{ fileId: string; label: string }> = [];
+
+  for (const [fileId, candidate] of candidatesByFile.entries()) {
+    // Skip if file already has a label
+    if (!filesWithoutLabelsMap.has(fileId)) continue;
+
+    // Map candidate to evidence category
+    const category = getEvidenceCategoryForCandidate(candidate, minConfidenceThreshold);
+
+    if (category) {
+      const yoloClassName = extractYoloClassNameFromPayload(candidate.payload);
+      const filename = filesWithoutLabelsMap.get(fileId)!.filename;
+
+      updates.push({
+        fileId,
+        filename,
+        oldLabel: null,
+        newLabel: category,
+        candidateType: candidate.candidateType,
+        candidateClass: yoloClassName,
+        confidence: candidate.confidence,
+      });
+
+      updatesForDb.push({
+        fileId,
+        label: category,
+      });
+    }
+  }
+
+  console.log(`[updatePhotoLabelsFromCandidates] Prepared ${updatesForDb.length} label updates`);
+
+  if (updatesForDb.length === 0) {
+    return {
+      totalFiles: run.processedCount,
+      filesWithCandidates,
+      filesEligibleForUpdate,
+      filesUpdated: 0,
+      updates: [],
+    };
+  }
+
+  // Step 4: Apply updates to site_survey_files table
+  let filesUpdated = 0;
+  try {
+    const updatedFiles = await updateSiteSurveyFileLabels(surveyId, userId, updatesForDb);
+    filesUpdated = updatedFiles.length;
+    console.log(`[updatePhotoLabelsFromCandidates] Successfully updated ${filesUpdated} files in ${(Date.now() - startedAt)}ms`);
+  } catch (err) {
+    console.error(`[updatePhotoLabelsFromCandidates] Failed to update labels:`, err);
+    throw err;
+  }
+
+  return {
+    totalFiles: run.processedCount,
+    filesWithCandidates,
+    filesEligibleForUpdate,
+    filesUpdated,
+    updates,
+  };
 }

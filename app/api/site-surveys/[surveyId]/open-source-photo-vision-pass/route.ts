@@ -34,6 +34,7 @@ import {
   countActiveJobsForUser,
   cancelJob,
   markStaleJobsFailed,
+  updatePhotoLabelsFromCandidates,
   type PhotoVisionJob,
 } from '@/lib/assistedEvidenceSources/asyncPhotoVisionJobManager';
 import {
@@ -279,6 +280,16 @@ async function handleCompletedJob(job: PhotoVisionJob, surveyId: string) {
     console.error('[GET open-source-photo-vision-pass] DB persist failed:', dbErr instanceof Error ? dbErr.message : String(dbErr));
   }
 
+  // Auto-assign photo labels from YOLO/OCR candidates (Option 1)
+  let labelUpdateResult = null;
+  try {
+    labelUpdateResult = await updatePhotoLabelsFromCandidates(surveyId, job.userId, run);
+    console.log(`[GET open-source-photo-vision-pass] Photo label auto-update: filesWithCandidates=${labelUpdateResult.filesWithCandidates}, filesUpdated=${labelUpdateResult.filesUpdated}`);
+  } catch (labelErr) {
+    console.error('[GET open-source-photo-vision-pass] Photo label auto-update failed:', labelErr instanceof Error ? labelErr.message : String(labelErr));
+    // Don't fail the response if label update fails — it's a secondary optimization
+  }
+
   const summary = uiSummary(run);
   console.log(`[GET open-source-photo-vision-pass] jobId=${job.jobId} completed: processed=${run.processedCount} failed=${run.failedCount} candidates=${run.candidateCount}`);
 
@@ -290,6 +301,7 @@ async function handleCompletedJob(job: PhotoVisionJob, surveyId: string) {
       summary,
       run: summarizeOpenSourcePhotoVisionRun(run),
       stored,
+      labelUpdate: labelUpdateResult,
       files: run.files.map(file => ({
         surveyId: file.surveyId,
         fileId: file.fileId,
