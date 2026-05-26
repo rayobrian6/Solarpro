@@ -16,3 +16,5 @@ export * from './geometryCandidateTypes';
 export * from './geometryCandidateRuntimeAdapter';
 export * from './geometryCandidateRuntimeBridge';
 export * from './geometryCandidateReviewLifecycle';
+export * from './roofObstructionRegistration';
+export * from './openaiVisionClassifier';

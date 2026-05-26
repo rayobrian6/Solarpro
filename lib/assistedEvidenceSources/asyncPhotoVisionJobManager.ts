@@ -32,6 +32,14 @@ import {
   classifyFileFromCandidates,
   type FilenameCandidateSummary,
 } from './yoloToEvidenceMapper';
+import {
+  registerObstructionsForSurvey,
+  type ObstructionRegistrationResult,
+} from './roofObstructionRegistration';
+import {
+  classifyUnclassifiedPhotosWithVision,
+  type VisionClassificationBatchResult,
+} from './openaiVisionClassifier';
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
 
@@ -363,6 +371,8 @@ export interface UpdatePhotoLabelsFromCandidatesResult {
     candidateClass: string | null;
     confidence: number;
   }>;
+  obstructionRegistration?: ObstructionRegistrationResult | null;
+  visionClassification?: VisionClassificationBatchResult | null;
 }
 
 export async function updatePhotoLabelsFromCandidates(
@@ -559,25 +569,60 @@ export async function updatePhotoLabelsFromCandidates(
     console.log(`[updatePhotoLabelsFromCandidates] ${cat}: ${fnames.size} unique filenames (${fnames.size * 7} expected file_id rows)`);
   }
 
+  let filesUpdated = 0;
   if (updatesForDb.length === 0) {
-    return {
-      totalFiles: run.processedCount,
-      filesWithCandidates: allCandidateFileIds.size,
-      filesEligibleForUpdate,
-      filesUpdated: 0,
-      updates: [],
-    };
+    // No label updates, but still register obstructions and run Vision fallback
+    console.log(`[updatePhotoLabelsFromCandidates] No heuristic label updates needed, proceeding to obstruction registration and Vision fallback`);
+    // Fall through to Steps 7 and 8 below
+  } else {
+
+    // ── Step 6: Apply updates to site_survey_files table ──
+    try {
+      const updatedFiles = await updateSiteSurveyFileLabels(surveyId, userId, updatesForDb);
+      filesUpdated = updatedFiles.length;
+      console.log(`[updatePhotoLabelsFromCandidates] Successfully updated ${filesUpdated} files in ${(Date.now() - startedAt)}ms`);
+    } catch (err) {
+      console.error(`[updatePhotoLabelsFromCandidates] Failed to update labels:`, err);
+      throw err;
+    }
+
+  } // end of else (updatesForDb.length > 0)
+
+  // ─── Step 7: Register obstructions on roof_plane photos ───
+  // After label updates are applied, extract obstruction candidate data
+  // from roof_plane photos and store deduplicated obstruction records.
+  let obstructionRegistration: ObstructionRegistrationResult | null = null;
+  try {
+    obstructionRegistration = await registerObstructionsForSurvey(
+      surveyId,
+      run,
+      fileIdToFilename,
+    );
+    console.log(`[updatePhotoLabelsFromCandidates] Obstruction registration: ${obstructionRegistration.totalObstructions} obstructions across ${obstructionRegistration.roofPhotosProcessed} roof photos`);
+  } catch (err) {
+    console.error(`[updatePhotoLabelsFromCandidates] Obstruction registration failed (non-fatal):`, err);
+    // Obstruction registration failure should not block the pipeline
   }
 
-  // ── Step 6: Apply updates to site_survey_files table ──
-  let filesUpdated = 0;
-  try {
-    const updatedFiles = await updateSiteSurveyFileLabels(surveyId, userId, updatesForDb);
-    filesUpdated = updatedFiles.length;
-    console.log(`[updatePhotoLabelsFromCandidates] Successfully updated ${filesUpdated} files in ${(Date.now() - startedAt)}ms`);
-  } catch (err) {
-    console.error(`[updatePhotoLabelsFromCandidates] Failed to update labels:`, err);
-    throw err;
+  // ─── Step 8: OpenAI Vision fallback for remaining unclassified photos ───
+  // If any photos still lack labels after heuristic classification,
+  // use GPT-4o Vision as a fallback classifier. This is especially
+  // important for main_service_panel detection, which YOLO cannot handle.
+  let visionClassification: VisionClassificationBatchResult | null = null;
+  const openaiApiKey = process.env.OPENAI_API_KEY;
+  if (openaiApiKey) {
+    try {
+      visionClassification = await classifyUnclassifiedPhotosWithVision(
+        surveyId,
+        openaiApiKey,
+      );
+      console.log(`[updatePhotoLabelsFromCandidates] Vision classification: ${visionClassification.totalClassified} photos classified, ${visionClassification.estimatedCost.toFixed(4)} estimated cost`);
+    } catch (err) {
+      console.error(`[updatePhotoLabelsFromCandidates] Vision classification failed (non-fatal):`, err);
+      // Vision classification failure should not block the pipeline
+    }
+  } else {
+    console.log(`[updatePhotoLabelsFromCandidates] OPENAI_API_KEY not set, skipping Vision fallback classification`);
   }
 
   return {
@@ -586,5 +631,7 @@ export async function updatePhotoLabelsFromCandidates(
     filesEligibleForUpdate,
     filesUpdated,
     updates,
+    obstructionRegistration,
+    visionClassification,
   };
 }

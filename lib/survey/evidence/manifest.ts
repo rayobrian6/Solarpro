@@ -106,6 +106,44 @@ export interface SurveyEvidenceItem {
   processingHistory: SurveyEvidenceHistoryEvent[];
   aiExtractionStatus: SurveyEvidenceAiExtractionStatus;
   engineeringUsageReferences: SurveyEvidenceEngineeringUsageReference[];
+  /** Obstruction data from vision pipeline (only present for roof_plane items) */
+  obstructionData?: SurveyEvidenceObstructionData | null;
+}
+
+/**
+ * Obstruction data linked to a roof_plane evidence item.
+ * Populated by the roof obstruction registration pipeline (Phase 3).
+ */
+export interface SurveyEvidenceObstructionData {
+  /** Number of deduplicated obstructions found on this roof plane photo */
+  obstructionCount: number;
+  /** Size distribution of obstructions */
+  sizeDistribution: {
+    tiny: number;
+    small: number;
+    medium: number;
+    large: number;
+    huge: number;
+  };
+  /** Average confidence of obstruction detections */
+  avgConfidence: number;
+  /** Whether these obstructions have been human-reviewed */
+  reviewed: boolean;
+  /** Individual obstruction bounding boxes (normalized 0-1000 coordinates) */
+  obstructions: Array<{
+    id: string;
+    region: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      coordinateSystem: "normalized_image_0_1000";
+    };
+    areaNormalized: number;
+    confidence: number;
+    obstructionType: string | null;
+    reviewed: boolean;
+  }>;
 }
 
 export interface SurveyEvidenceCoverageGroup {
@@ -165,6 +203,13 @@ export interface SurveyEvidenceManifest {
     confidence: SurveyEvidenceConfidence;
     completeness: "missing" | "partial" | "sufficient";
   };
+  /** Obstruction data summary across all roof_plane evidence items (Phase 3) */
+  obstructionSummary?: {
+    roofPhotosWithObstructions: number;
+    totalObstructions: number;
+    reviewedObstructions: number;
+    obstructionTypeDistribution: Record<string, number>;
+  } | null;
   openSourceBoundaries: {
     webRuntime: string[];
     pythonWorker: string[];
@@ -187,6 +232,8 @@ export interface BuildSurveyEvidenceManifestInput {
   files: SiteSurveyFile[];
   generatedAt?: string;
   photoAnalysis?: SurveyPhotoOpenSourceAnalysis[];
+  /** Obstruction data per filename (from roof obstruction registration pipeline) */
+  obstructionDataByFilename?: Map<string, SurveyEvidenceObstructionData> | null;
 }
 
 export function buildSurveyEvidenceManifest(
@@ -211,6 +258,9 @@ export function buildSurveyEvidenceManifest(
         generatedAt,
         payloadPhoto: findPayloadPhoto(file, payloadPhotos),
         photoAnalysis: photoAnalysisByFileId.get(file.id) ?? null,
+        obstructionData: (input.obstructionDataByFilename && file.filename)
+          ? input.obstructionDataByFilename.get(file.filename) ?? null
+          : null,
         mappingConflicts,
       });
     });
@@ -354,6 +404,43 @@ export function buildSurveyEvidenceManifest(
         "Label Studio dataset workflows",
       ],
     },
+    obstructionSummary: buildObstructionSummary(items),
+  };
+}
+
+/**
+ * Build an obstruction summary across all roof_plane evidence items.
+ * Returns null if no roof_plane items have obstruction data.
+ */
+function buildObstructionSummary(
+  items: SurveyEvidenceItem[],
+): SurveyEvidenceManifest["obstructionSummary"] {
+  const roofItemsWithObstructions = items.filter(
+    (item) => item.category === "roof_plane" && item.obstructionData && item.obstructionData.obstructionCount > 0,
+  );
+
+  if (roofItemsWithObstructions.length === 0) return null;
+
+  let totalObstructions = 0;
+  let reviewedObstructions = 0;
+  const typeDistribution: Record<string, number> = {};
+
+  for (const item of roofItemsWithObstructions) {
+    const data = item.obstructionData!;
+    totalObstructions += data.obstructionCount;
+    reviewedObstructions += data.obstructions.filter((o) => o.reviewed).length;
+
+    for (const obs of data.obstructions) {
+      const type = obs.obstructionType ?? "unknown";
+      typeDistribution[type] = (typeDistribution[type] ?? 0) + 1;
+    }
+  }
+
+  return {
+    roofPhotosWithObstructions: roofItemsWithObstructions.length,
+    totalObstructions,
+    reviewedObstructions,
+    obstructionTypeDistribution: typeDistribution,
   };
 }
 
@@ -362,6 +449,7 @@ function buildEvidenceItem(input: {
   file: SiteSurveyFile;
   payloadPhoto: PayloadPhotoLike | null;
   photoAnalysis: SurveyPhotoOpenSourceAnalysis | null;
+  obstructionData: SurveyEvidenceObstructionData | null;
   index: number;
   generatedAt: string;
   mappingConflicts?: SurveyEvidenceDiagnostics["mappingConflicts"];
@@ -469,6 +557,9 @@ function buildEvidenceItem(input: {
       ? "not_applicable"
       : "not_started",
     engineeringUsageReferences: [],
+    obstructionData: (input.obstructionData && classified && category === "roof_plane")
+      ? input.obstructionData
+      : null,
   };
 }
 
