@@ -1665,6 +1665,7 @@ function OpenSourcePhotoVisionPassPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+  const [pollProgress, setPollProgress] = useState<{ processedFiles: number; totalPhotoFiles: number; completedBatches: number; totalBatches: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const [candidateFilter, setCandidateFilter] = useState<"both" | "opencv" | "yolo" | "ocr">("both");
   const activeBundle = result?.stored ?? bundle ?? null;
@@ -1778,7 +1779,15 @@ function OpenSourcePhotoVisionPassPanel({
           return;
         }
 
-        // Still pending/running — continue polling
+        // Still pending/running — update progress and continue polling
+        if (getJson.progress) {
+          setPollProgress({
+            processedFiles: (getJson.progress as Record<string, number>).processedFiles ?? 0,
+            totalPhotoFiles: (getJson.progress as Record<string, number>).totalPhotoFiles ?? 0,
+            completedBatches: (getJson.progress as Record<string, number>).completedBatches ?? 0,
+            totalBatches: (getJson.progress as Record<string, number>).totalBatches ?? 0,
+          });
+        }
       }
 
       // Timed out
@@ -1788,6 +1797,7 @@ function OpenSourcePhotoVisionPassPanel({
     } finally {
       setLoading(false);
       setCurrentJobId(null);
+      setPollProgress(null);
       if (abortRef.current === controller) abortRef.current = null;
     }
   }, [onDetailRefresh, surveyId]);
@@ -1806,6 +1816,7 @@ function OpenSourcePhotoVisionPassPanel({
     }
     setCurrentJobId(null);
     setLoading(false);
+    setPollProgress(null);
     setError("Photo vision pass cancelled by user.");
   }, [currentJobId, surveyId]);
 
@@ -1839,7 +1850,11 @@ External OpenCV + YOLO/Supervision + Tesseract OCR worker · actual image bytes 
                 className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-400/30 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {loading ? <div className="spinner w-3 h-3" /> : <RefreshCw size={12} />}
-                {loading ? "Running photo vision pass..." : "Run Open-Source Photo Vision Pass"}
+                {loading
+                  ? pollProgress
+                    ? `Processing ${pollProgress.processedFiles}/${pollProgress.totalPhotoFiles} photos…`
+                    : "Running photo vision pass…"
+                  : "Run Open-Source Photo Vision Pass"}
               </button>
               {loading && currentJobId && (
                 <button
@@ -1861,6 +1876,19 @@ External OpenCV + YOLO/Supervision + Tesseract OCR worker · actual image bytes 
               {activeBundle ? "Stored CV Candidates Available" : "Available On Demand"}
             </ReadinessPill>
           </div>
+          {loading && pollProgress && pollProgress.totalPhotoFiles > 0 && (
+            <div className="mt-3">
+              <div className="h-1.5 w-full rounded-full bg-emerald-900/40">
+                <div
+                  className="h-1.5 rounded-full bg-emerald-400 transition-all duration-500"
+                  style={{ width: `${Math.round((pollProgress.processedFiles / pollProgress.totalPhotoFiles) * 100)}%` }}
+                />
+              </div>
+              <p className="mt-1 text-[10px] text-emerald-300/60">
+                Batch {pollProgress.completedBatches}/{pollProgress.totalBatches} · {pollProgress.processedFiles}/{pollProgress.totalPhotoFiles} photos
+              </p>
+            </div>
+          )}
         </div>
 
         {error && (
