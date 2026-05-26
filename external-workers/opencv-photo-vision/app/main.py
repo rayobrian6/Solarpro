@@ -487,6 +487,22 @@ def _run_all_batches_sync(render_job_id: str, job: VisionJob) -> dict[str, Any]:
     total_files = len(all_files)
     total_batches = (total_files + BATCH_SIZE - 1) // BATCH_SIZE
 
+    # Update DB with correct total_batches based on Render's BATCH_SIZE
+    # (Vercel may have calculated total_batches with a different batch size)
+    if job_id:
+        try:
+            conn = get_db_connection()
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE photo_vision_jobs
+                       SET total_batches = %s, updated_at = NOW()
+                       WHERE job_id = %s""",
+                    (total_batches, job_id),
+                )
+            conn.close()
+        except Exception as exc:
+            print(f"[WORKER] Job {job_id}: failed to update total_batches: {exc}")
+
     all_file_results: list[dict[str, Any]] = []
     all_candidates: list[dict[str, Any]] = []
     batch_errors: list[str] = []
@@ -726,6 +742,11 @@ def analyze_file_with_bytes(job: VisionJob, file_job: FileJob, content: bytes, c
             ) if ocr_requested else {"available": False, "diagnostic": "tesseract_ocr_not_requested", "candidates": [], "elapsedMs": 0, "limitations": []}
         candidates = [*opencv_candidates, *yolo_result.get("candidates", []), *ocr_result.get("candidates", [])]
         run_hash = stable_hash({"fileId": file_job.fileId, "sha256": byte_hash, "lines": lines, "regions": regions, "yoloCandidates": [c.get("payload", {}) for c in yolo_result.get("candidates", [])], "ocrCandidates": [c.get("payload", {}) for c in ocr_result.get("candidates", [])]})
+        # Save content length before cleanup
+        content_byte_size = len(content)
+        # Compute brightness and sharpness before deleting gray
+        dominant_brightness = round(float(np.mean(gray)), 3) if gray is not None else None
+        sharpness_score = round(float(cv2.Laplacian(gray, cv2.CV_64F).var()), 3) if gray is not None else None
         del image, gray, blur, edges, np_bytes, content
         gc.collect()
         return {
@@ -739,10 +760,10 @@ def analyze_file_with_bytes(job: VisionJob, file_job: FileJob, content: bytes, c
                 "widthPx": width,
                 "heightPx": height,
                 "format": "image/jpeg",
-                "byteSize": len(content),
+                "byteSize": content_byte_size,
                 "sha256": byte_hash,
-                "dominantBrightness": round(float(np.mean(gray)), 3) if gray is not None else None,
-                "sharpnessScore": round(float(cv2.Laplacian(gray, cv2.CV_64F).var()), 3) if gray is not None else None,
+                "dominantBrightness": dominant_brightness,
+                "sharpnessScore": sharpness_score,
                 "qualityScore": int(max(5, min(95, 45 + edge_ratio * 250))),
                 "elapsedMs": int((time.time() - started) * 1000),
                 "yoloElapsedMs": yolo_result.get("elapsedMs", 0),
