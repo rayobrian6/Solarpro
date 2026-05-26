@@ -5,9 +5,9 @@
 //   → Rate limiting: max 3 active jobs per user.
 //
 // GET  /api/site-surveys/[surveyId]/open-source-photo-vision-pass?jobId=xxx
-//   → Processes one batch per call, then returns current job status/progress.
+//   → Returns current job status/progress (instant, reads from DB only).
+//   → Processing is done by the /process endpoint, not here.
 //   → Stale job housekeeping: marks jobs running >30min as failed.
-//   → Client polls repeatedly until status is "completed" or "failed".
 //
 // DELETE /api/site-surveys/[surveyId]/open-source-photo-vision-pass?jobId=xxx
 //   → Cancels an active (pending/running) job.
@@ -203,51 +203,22 @@ export async function GET(
     });
   }
 
-  // Job is pending/running — process the next batch
-  try {
-    const updatedJob = await processNextBatch(jobId);
-
-    if (updatedJob.status === 'completed') {
-      const fullJob = await getJob(updatedJob.jobId);
-      return handleCompletedJob(fullJob ?? updatedJob, surveyId);
-    }
-
-    if (updatedJob.status === 'failed') {
-      return NextResponse.json({
-        success: false,
-        jobId: updatedJob.jobId,
-        status: 'failed',
-        error: updatedJob.error,
-        createdAt: updatedJob.createdAt,
-        completedAt: updatedJob.completedAt,
-      });
-    }
-
-    // Still running — return progress
-    return NextResponse.json({
-      success: true,
-      jobId: updatedJob.jobId,
-      status: updatedJob.status,
-      progress: {
-        totalBatches: updatedJob.totalBatches,
-        completedBatches: updatedJob.completedBatches,
-        currentBatch: updatedJob.currentBatch,
-        totalPhotoFiles: updatedJob.totalPhotoFiles,
-        processedFiles: updatedJob.processedFiles,
-      },
-      createdAt: updatedJob.createdAt,
-      updatedAt: updatedJob.updatedAt,
-    });
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    console.error(`[GET open-source-photo-vision-pass] jobId=${jobId} processing error:`, errMsg);
-    return NextResponse.json({
-      success: false,
-      jobId,
-      status: 'failed',
-      error: `Processing error: ${errMsg}`,
-    }, { status: 500 });
-  }
+  // Job is pending/running — return progress only (no processing here)
+  // Processing is done by the /process endpoint called by the client
+  return NextResponse.json({
+    success: true,
+    jobId: job.jobId,
+    status: job.status,
+    progress: {
+      totalBatches: job.totalBatches,
+      completedBatches: job.completedBatches,
+      currentBatch: job.currentBatch,
+      totalPhotoFiles: job.totalPhotoFiles,
+      processedFiles: job.processedFiles,
+    },
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  });
 }
 
 // ---------------------------------------------------------------------------

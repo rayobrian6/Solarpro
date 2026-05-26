@@ -1733,39 +1733,44 @@ function OpenSourcePhotoVisionPassPanel({
       }
       setCurrentJobId(jobId);
 
-      // Step 2: Poll GET endpoint for job completion
-      const POLL_INTERVAL_MS = 5_000; // 5 seconds between polls (each poll processes ~5 batches on server)
+      // Step 2: Call /process endpoint in a loop to process batches
+      const PROCESS_INTERVAL_MS = 2_000; // 2s between process calls (short since each call does the work)
       const MAX_POLL_DURATION_MS = 2_700_000; // 45 min total (headroom for large surveys)
       const pollStart = Date.now();
 
       while (Date.now() - pollStart < MAX_POLL_DURATION_MS) {
-        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+        await new Promise((resolve) => setTimeout(resolve, PROCESS_INTERVAL_MS));
         if (controller.signal.aborted) return; // Cancelled by user
 
-        const getRes = await fetch(
-          `/api/site-surveys/${surveyId}/open-source-photo-vision-pass?jobId=${encodeURIComponent(jobId)}`,
+        // Call the process endpoint — it processes N batches and returns progress
+        const procRes = await fetch(
+          `/api/site-surveys/${surveyId}/open-source-photo-vision-pass/process`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jobId }),
+          },
         );
-        let getJson: Record<string, unknown>;
+        let procJson: Record<string, unknown>;
         try {
-          getJson = await getRes.json();
+          procJson = await procRes.json();
         } catch {
-          setError(`Poll request returned non-JSON (HTTP ${getRes.status}). The server may have recycled.`);
+          setError(`Process request returned non-JSON (HTTP ${procRes.status}). The server function may have timed out or crashed.`);
           return;
         }
 
-        if (!getJson.success && getJson.status !== 'failed') {
-          // Job not found or other error during polling
+        if (!procJson.success && procJson.status !== 'failed') {
           setError(
-            [getJson.error, getJson.detail].filter(Boolean).join(": ") ||
-              "Error while polling for photo vision results",
+            [procJson.error, procJson.detail].filter(Boolean).join(": ") ||
+              "Error while processing photo vision batch",
           );
           return;
         }
 
-        const jobStatus = getJson.status as string;
+        const jobStatus = procJson.status as string;
 
-        if (jobStatus === "completed" && getJson.data) {
-          const data = getJson.data as OpenSourcePhotoVisionRunResponse;
+        if (jobStatus === "completed" && procJson.data) {
+          const data = procJson.data as OpenSourcePhotoVisionRunResponse;
           setResult(data);
           onDetailRefresh?.({ openSourcePhotoVision: data.stored });
           return;
@@ -1773,19 +1778,19 @@ function OpenSourcePhotoVisionPassPanel({
 
         if (jobStatus === "failed") {
           setError(
-            [getJson.error].filter(Boolean).join(": ") ||
+            [procJson.error].filter(Boolean).join(": ") ||
               "Photo vision pass failed during processing",
           );
           return;
         }
 
-        // Still pending/running — update progress and continue polling
-        if (getJson.progress) {
+        // Still running — update progress
+        if (procJson.progress) {
           setPollProgress({
-            processedFiles: (getJson.progress as Record<string, number>).processedFiles ?? 0,
-            totalPhotoFiles: (getJson.progress as Record<string, number>).totalPhotoFiles ?? 0,
-            completedBatches: (getJson.progress as Record<string, number>).completedBatches ?? 0,
-            totalBatches: (getJson.progress as Record<string, number>).totalBatches ?? 0,
+            processedFiles: (procJson.progress as Record<string, number>).processedFiles ?? 0,
+            totalPhotoFiles: (procJson.progress as Record<string, number>).totalPhotoFiles ?? 0,
+            completedBatches: (procJson.progress as Record<string, number>).completedBatches ?? 0,
+            totalBatches: (procJson.progress as Record<string, number>).totalBatches ?? 0,
           });
         }
       }
