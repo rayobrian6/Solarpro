@@ -309,14 +309,14 @@ export async function cancelJob(jobId: string): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
-// Mark stale jobs as failed (running > 30 min)
+// Mark stale jobs as failed (running > 60 min)
 // ---------------------------------------------------------------------------
 export async function markStaleJobsFailed(): Promise<number> {
   const sql = await getDbReady();
   const result = await sql`
     UPDATE photo_vision_jobs
     SET status = 'failed', error = 'Job timed out (running > 30 minutes)', completed_at = NOW(), updated_at = NOW()
-    WHERE status = 'running' AND updated_at < NOW() - INTERVAL '30 minutes'
+    WHERE status = 'running' AND updated_at < NOW() - INTERVAL '60 minutes'
   `;
   const affected = Array.isArray(result) ? result.length : (result as Record<string, unknown>).count as number;
   return affected ?? 0;

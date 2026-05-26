@@ -1732,7 +1732,7 @@ function OpenSourcePhotoVisionPassPanel({
       // Step 2: Poll GET endpoint for job completion (pure DB read — instant)
       // Render processes all photos internally and writes progress to DB.
       const POLL_INTERVAL_MS = 3_000; // 3 seconds between polls
-      const MAX_POLL_DURATION_MS = 1_800_000; // 30 min total
+      const MAX_POLL_DURATION_MS = 3_600_000; // 60 min total
       const pollStart = Date.now();
       let consecutiveErrors = 0;
 
@@ -1802,7 +1802,7 @@ function OpenSourcePhotoVisionPassPanel({
       }
 
       // Timed out
-      setError("Photo vision pass timed out (30 min). The survey may have too many photos for the current worker.");
+      setError("Photo vision pass timed out (60 min). The survey may have too many photos for the current worker.");
     } catch (err) {
       setError("Network error while running open-source photo vision pass");
     } finally {
