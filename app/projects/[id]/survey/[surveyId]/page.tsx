@@ -1743,20 +1743,38 @@ function OpenSourcePhotoVisionPassPanel({
         if (controller.signal.aborted) return; // Cancelled by user
 
         // Call the process endpoint — it processes N batches and returns progress
-        const procRes = await fetch(
-          `/api/site-surveys/${surveyId}/open-source-photo-vision-pass/process`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ jobId }),
-          },
-        );
+        let procRes: Response;
+        try {
+          procRes = await fetch(
+            `/api/site-surveys/${surveyId}/open-source-photo-vision-pass/process`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ jobId }),
+            },
+          );
+        } catch (fetchErr) {
+          // Network error — likely a timeout, retry after delay
+          console.warn("[photo-vision] fetch error, retrying in 5s:", fetchErr);
+          await new Promise((resolve) => setTimeout(resolve, 5_000));
+          continue;
+        }
+
+        // Handle 502/504 gateway timeouts — retry instead of failing
+        if (procRes.status === 502 || procRes.status === 504) {
+          console.warn(`[photo-vision] HTTP ${procRes.status}, retrying in 5s`);
+          await new Promise((resolve) => setTimeout(resolve, 5_000));
+          continue;
+        }
+
         let procJson: Record<string, unknown>;
         try {
           procJson = await procRes.json();
         } catch {
-          setError(`Process request returned non-JSON (HTTP ${procRes.status}). The server function may have timed out or crashed.`);
-          return;
+          // Non-JSON response — likely a timeout, retry
+          console.warn(`[photo-vision] non-JSON response (HTTP ${procRes.status}), retrying in 5s`);
+          await new Promise((resolve) => setTimeout(resolve, 5_000));
+          continue;
         }
 
         if (!procJson.success && procJson.status !== 'failed') {
