@@ -27,6 +27,9 @@ import { getDbReady } from '@/lib/db/core';
 import {
   getEvidenceCategoryForCandidate,
   extractYoloClassNameFromPayload,
+  buildCandidateCountSummaries,
+  classifyFileFromCandidates,
+  type CandidateCountSummary,
 } from './yoloToEvidenceMapper';
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
@@ -371,34 +374,38 @@ export async function updatePhotoLabelsFromCandidates(
   // Each class-specific threshold in YOLO_CLASS_TO_EVIDENCE_CATEGORY acts as a floor
   const minConfidenceThreshold = Number(process.env.PHOTO_VISION_AUTO_LABEL_MIN_CONFIDENCE || 0.55);
 
-  console.log(`[updatePhotoLabelsFromCandidates] surveyId=${surveyId} runHash=${run.runHash} minConfidence=${minConfidenceThreshold}`);
+  console.log(`[updatePhotoLabelsFromCandidates] surveyId=${surveyId} runHash=${run.runHash} minConfidence=${minConfidenceThreshold} totalCandidates=${run.candidates.length}`);
 
-  // Step 1: Group object_detection candidates by file_id, pick highest-confidence per file
-  const candidatesByFile = new Map<string, OpenSourcePhotoVisionCandidate>();
+  // ── Step 1: Build candidate count summaries for ALL candidate types ──
+  // This powers the roof_edge_count and candidate_diversity heuristics
+  const candidateSummaries = buildCandidateCountSummaries(run.candidates);
+  console.log(`[updatePhotoLabelsFromCandidates] Built summaries for ${candidateSummaries.size} files`);
+
+  // ── Step 2: Group object_detection candidates by file_id, pick highest per file ──
+  const objectDetectionByFile = new Map<string, OpenSourcePhotoVisionCandidate>();
   for (const candidate of run.candidates) {
-    // Only consider object_detection candidates (not ocr_text, edge_map_summary, etc.)
     if (candidate.candidateType !== 'object_detection') continue;
 
     // Normalize confidence from 0-100 scale (Render worker) to 0-1 scale (mapper expectation)
-    // The Render worker (main.py) stores confidence as integer 0-100, but the mapper expects 0-1
     const normalizedCandidate = {
       ...candidate,
       confidence: candidate.confidence / 100,
     };
 
     const fileId = candidate.fileId;
-    const existing = candidatesByFile.get(fileId);
+    const existing = objectDetectionByFile.get(fileId);
 
-    // Keep the highest-confidence candidate for each file
     if (!existing || normalizedCandidate.confidence > existing.confidence) {
-      candidatesByFile.set(fileId, normalizedCandidate);
+      objectDetectionByFile.set(fileId, normalizedCandidate);
     }
   }
 
-  const filesWithCandidates = candidatesByFile.size;
-  console.log(`[updatePhotoLabelsFromCandidates] Found ${filesWithCandidates} files with object_detection candidates (out of ${run.processedCount} processed)`);
+  console.log(`[updatePhotoLabelsFromCandidates] Found ${objectDetectionByFile.size} files with object_detection candidates (out of ${run.processedCount} processed)`);
 
-  if (filesWithCandidates === 0) {
+  // ── Step 3: Collect ALL file IDs that have any candidates ──
+  const allFileIdsWithCandidates = new Set<string>(candidateSummaries.keys());
+
+  if (allFileIdsWithCandidates.size === 0) {
     return {
       totalFiles: run.processedCount,
       filesWithCandidates: 0,
@@ -408,15 +415,9 @@ export async function updatePhotoLabelsFromCandidates(
     };
   }
 
-  // Step 2: Check which files currently have NULL labels (only update those)
-  // Build a safe IN clause for Neon's tagged template literals
-  const fileIdsWithCandidates = Array.from(candidatesByFile.keys());
-
-  // Neon tagged templates don't support `IN ${sql(array)}` directly.
-  // Use a loop approach to check each file, or batch query with OR conditions.
-  // For safety and simplicity, query files individually (typically < 50 files).
+  // ── Step 4: Check which files currently have NULL/empty labels ──
   const filesWithoutLabelsMap = new Map<string, { filename: string | null; label: string | null }>();
-  for (const fileId of fileIdsWithCandidates) {
+  for (const fileId of allFileIdsWithCandidates) {
     const rows = await sql`
       SELECT id, filename, label
       FROM site_survey_files
@@ -438,58 +439,82 @@ export async function updatePhotoLabelsFromCandidates(
   if (filesEligibleForUpdate === 0) {
     return {
       totalFiles: run.processedCount,
-      filesWithCandidates,
+      filesWithCandidates: allFileIdsWithCandidates.size,
       filesEligibleForUpdate: 0,
       filesUpdated: 0,
       updates: [],
     };
   }
 
-  // Step 3: Map candidates to evidence categories and prepare updates
+  // ── Step 5: Apply multi-heuristic classification to each eligible file ──
   const updates: UpdatePhotoLabelsFromCandidatesResult['updates'] = [];
   const updatesForDb: Array<{ fileId: string; label: string }> = [];
 
-  for (const [fileId, candidate] of candidatesByFile.entries()) {
+  for (const [fileId, summary] of candidateSummaries.entries()) {
     // Skip if file already has a label
     if (!filesWithoutLabelsMap.has(fileId)) continue;
 
-    // Map candidate to evidence category
-    const category = getEvidenceCategoryForCandidate(candidate, minConfidenceThreshold);
+    // Get object_detection classification (if any)
+    const objDetCandidate = objectDetectionByFile.get(fileId);
+    const objDetCategory = objDetCandidate
+      ? getEvidenceCategoryForCandidate(objDetCandidate, minConfidenceThreshold)
+      : null;
+    const objDetConfidence = objDetCandidate ? objDetCandidate.confidence : 0;
+    const objDetClass = objDetCandidate
+      ? extractYoloClassNameFromPayload(objDetCandidate.payload)
+      : null;
 
-    if (category) {
-      const yoloClassName = extractYoloClassNameFromPayload(candidate.payload);
+    // Apply unified classification (combines YOLO + roof_edge + diversity)
+    const classification = classifyFileFromCandidates(
+      fileId,
+      objDetCategory,
+      objDetConfidence,
+      objDetClass,
+      summary,
+    );
+
+    if (classification.category) {
       const filename = filesWithoutLabelsMap.get(fileId)!.filename;
 
       updates.push({
         fileId,
         filename,
         oldLabel: null,
-        newLabel: category,
-        candidateType: candidate.candidateType,
-        candidateClass: yoloClassName,
-        confidence: candidate.confidence, // Already normalized to 0-1 scale in Step 1
+        newLabel: classification.category,
+        candidateType: classification.method || 'unknown',
+        candidateClass: objDetClass,
+        confidence: classification.confidence,
       });
 
       updatesForDb.push({
         fileId,
-        label: category,
+        label: classification.category,
       });
+
+      console.log(`[updatePhotoLabelsFromCandidates] ${fileId} → ${classification.category} via ${classification.method}: ${classification.details}`);
     }
   }
 
-  console.log(`[updatePhotoLabelsFromCandidates] Prepared ${updatesForDb.length} label updates`);
+  console.log(`[updatePhotoLabelsFromCandidates] Prepared ${updatesForDb.length} label updates (from ${candidateSummaries.size} files with candidates)`);
+
+  // Log method breakdown
+  const methodBreakdown: Record<string, number> = {};
+  for (const u of updates) {
+    methodBreakdown[u.candidateType] = (methodBreakdown[u.candidateType] ?? 0) + 1;
+  }
+  console.log(`[updatePhotoLabelsFromCandidates] Method breakdown: ${JSON.stringify(methodBreakdown)}`);
 
   if (updatesForDb.length === 0) {
     return {
       totalFiles: run.processedCount,
-      filesWithCandidates,
+      filesWithCandidates: allFileIdsWithCandidates.size,
       filesEligibleForUpdate,
       filesUpdated: 0,
       updates: [],
     };
   }
 
-  // Step 4: Apply updates to site_survey_files table
+  // ── Step 6: Apply updates to site_survey_files table ──
   let filesUpdated = 0;
   try {
     const updatedFiles = await updateSiteSurveyFileLabels(surveyId, userId, updatesForDb);
@@ -502,7 +527,7 @@ export async function updatePhotoLabelsFromCandidates(
 
   return {
     totalFiles: run.processedCount,
-    filesWithCandidates,
+    filesWithCandidates: allFileIdsWithCandidates.size,
     filesEligibleForUpdate,
     filesUpdated,
     updates,
