@@ -260,7 +260,7 @@ async function pollRenderJob(
 
   // Step 2: Poll GET /v1/photo-vision/jobs/{renderJobId} with exponential backoff
   const startTime = Date.now();
-  let delay = 1000; // start at 1s
+  let delay = 2000; // start at 2s (YOLO+OCR takes ~8-12s minimum, no point checking sooner)
 
   while (Date.now() - startTime < timeoutMs) {
     await new Promise(r => setTimeout(r, delay));

@@ -28,7 +28,7 @@ import {
 } from '@/lib/db-neon';
 import type { OpenSourcePhotoVisionRunResult } from '@/lib/assistedEvidenceSources/asyncPhotoVisionJobManager';
 
-const MAX_BATCHES_PER_TICK = 3; // Process 3 batches per invocation (~30-45s total)
+const MAX_BATCHES_PER_TICK = 2; // Process 2 batches per invocation (~25-35s total, safely under 60s)
 
 export async function POST(
   req: NextRequest,
