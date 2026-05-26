@@ -366,8 +366,10 @@ export async function updatePhotoLabelsFromCandidates(
   const startedAt = Date.now();
   const sql = await getDbReady();
 
-  // Confidence threshold from env var (default: 0.70)
-  const minConfidenceThreshold = Number(process.env.PHOTO_VISION_AUTO_LABEL_MIN_CONFIDENCE || 0.70);
+  // Confidence threshold from env var (default: 0.55)
+  // Set to 0.55 to accommodate YOLOv8-nano which produces lower confidence scores (0.55-0.70 range)
+  // Each class-specific threshold in YOLO_CLASS_TO_EVIDENCE_CATEGORY acts as a floor
+  const minConfidenceThreshold = Number(process.env.PHOTO_VISION_AUTO_LABEL_MIN_CONFIDENCE || 0.55);
 
   console.log(`[updatePhotoLabelsFromCandidates] surveyId=${surveyId} runHash=${run.runHash} minConfidence=${minConfidenceThreshold}`);
 
