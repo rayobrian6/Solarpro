@@ -8,6 +8,15 @@
  * 2. **roof_edge_candidate** — Roof edge count heuristic → roof_plane
  * 3. **candidate_diversity** — Candidate type diversity heuristic → overview
  *
+ * CRITICAL ARCHITECTURE NOTE:
+ * Each unique photo has ~7 duplicate file_id rows in site_survey_files (one per
+ * file_url variant). The vision worker processes each file_id separately, producing
+ * candidates per file_id. But for heuristic classification, we must AGGREGATE
+ * candidates by filename (unique photo) rather than by file_id, because:
+ * - Roof edge counts are 50-80 per filename but only 5-16 per file_id
+ * - A threshold of 30 per file_id catches ZERO roof photos
+ * - A threshold of 20 per filename catches ALL 15 roof photos cleanly
+ *
  * YOLO payload field formats:
  * - rawClassName: Used by external Render worker (yolov8n.pt)
  * - className / class_name / label / category: Generic formats
@@ -15,9 +24,9 @@
 
 import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/manifest';
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 // Section 1: YOLO Class → Evidence Category Mapping
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 
 /**
  * Mapping from YOLO class names to evidence categories.
@@ -101,7 +110,7 @@ export const YOLO_CLASS_TO_EVIDENCE_CATEGORY: Record<string, {
     description: 'Site overview or exterior photo',
   },
 
-  // ─── YOLOv8 (yolov8n.pt) COCO class aliases ────────────────────────────────
+  // ── YOLOv8 (yolov8n.pt) COCO class aliases ──────────────────────────────
   // YOLOv8 trained on COCO doesn't know "utility_meter" — it detects "clock"
   // (class 74) when it sees round utility meters. Map these semantically.
   'clock': {
@@ -146,9 +155,9 @@ export const YOLO_CLASS_TO_EVIDENCE_CATEGORY: Record<string, {
   },
 };
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 // Section 2: Roof Edge Candidate Heuristic → roof_plane
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 
 /**
  * Configuration for roof edge count heuristic.
@@ -157,22 +166,34 @@ export const YOLO_CLASS_TO_EVIDENCE_CATEGORY: Record<string, {
  * roof photo. The count threshold filters out photos with only a few
  * incidental horizontal lines (which could be sidewalks, tables, etc.).
  *
- * Based on analysis of survey 302cf42c data:
- * - Roof photos have 50-80 roof_edge candidates
- * - Non-roof photos have 0-36 roof_edge candidates
- * - Threshold of 30 cleanly separates the two groups
+ * IMPORTANT: This threshold applies to AGGREGATED counts per unique filename,
+ * NOT per individual file_id row. Each unique photo has ~7 duplicate file_id
+ * rows in site_survey_files, and the roof_edge counts must be summed across
+ * all rows for the same filename before comparing against this threshold.
+ *
+ * Based on analysis of survey 302cf42c data (aggregated by filename):
+ * - Roof photos: 27-80 roof_edge candidates per filename
+ * - Non-roof photos: 0-10 roof_edge candidates per filename
+ * - Threshold of 20 cleanly separates the two groups
+ *
+ * Per-file_id counts are much lower (5-16 for roof photos) because each
+ * duplicate row gets ~1/7th of the total candidates.
  */
 export const ROOF_EDGE_MIN_COUNT_THRESHOLD = Number(
-  process.env.ROOF_EDGE_MIN_COUNT_THRESHOLD || 30,
+  process.env.ROOF_EDGE_MIN_COUNT_THRESHOLD || 20,
 );
 
 /**
- * Aggregate candidate counts per file.
- * Used by the roof edge and diversity heuristics.
+ * Aggregate candidate counts — keyed by FILENAME (not file_id).
+ *
+ * Each unique photo (filename) has ~7 duplicate file_id rows. We aggregate
+ * across all rows for the same filename to get meaningful candidate counts.
+ * The fileIds set tracks which individual file_id rows belong to each filename.
  */
-export interface CandidateCountSummary {
-  fileId: string;
-  candidateTypeCounts: Record<string, number>;
+export interface FilenameCandidateSummary {
+  filename: string;
+  fileIds: Set<string>;           // All file_id rows for this filename
+  candidateTypeCounts: Record<string, number>;  // Aggregated counts
   totalCandidates: number;
   distinctTypes: number;
   dominantType: string | null;
@@ -180,29 +201,48 @@ export interface CandidateCountSummary {
 }
 
 /**
- * Build candidate count summaries for all files in a run.
- * Groups candidates by file_id and computes aggregate statistics.
+ * Build candidate count summaries AGGREGATED BY FILENAME.
+ *
+ * This is the critical fix: instead of grouping by file_id (where each photo
+ * has ~7 duplicate rows with ~1/7th of the candidates each), we group by
+ * filename to get the full picture of each unique photo.
+ *
+ * The caller must provide a mapping from fileId → filename so we can
+ * aggregate correctly. This mapping comes from the site_survey_files table.
  */
 export function buildCandidateCountSummaries(
   candidates: Array<{ fileId: string; candidateType: string }>,
-): Map<string, CandidateCountSummary> {
-  const summaries = new Map<string, CandidateCountSummary>();
+  fileIdToFilename: Map<string, string>,
+): Map<string, FilenameCandidateSummary> {
+  const summaries = new Map<string, FilenameCandidateSummary>();
 
   for (const candidate of candidates) {
     const { fileId, candidateType } = candidate;
 
-    let summary = summaries.get(fileId);
+    // Look up filename for this file_id
+    const filename = fileIdToFilename.get(fileId);
+    if (!filename) {
+      // Skip candidates whose file_id we can't map to a filename
+      // (orphaned candidates from a different survey)
+      continue;
+    }
+
+    let summary = summaries.get(filename);
     if (!summary) {
       summary = {
-        fileId,
+        filename,
+        fileIds: new Set<string>(),
         candidateTypeCounts: {},
         totalCandidates: 0,
         distinctTypes: 0,
         dominantType: null,
         dominantRatio: 0,
       };
-      summaries.set(fileId, summary);
+      summaries.set(filename, summary);
     }
+
+    // Track which file_ids belong to this filename
+    summary.fileIds.add(fileId);
 
     summary.candidateTypeCounts[candidateType] = (summary.candidateTypeCounts[candidateType] ?? 0) + 1;
     summary.totalCandidates++;
@@ -230,17 +270,18 @@ export function buildCandidateCountSummaries(
 }
 
 /**
- * Classify a file as roof_plane based on roof_edge_candidate count.
+ * Classify a filename as roof_plane based on aggregated roof_edge_candidate count.
  *
- * Rule: If a file has >= ROOF_EDGE_MIN_COUNT_THRESHOLD roof_edge_candidate
- * entries, it is very likely a roof photo → label as "roof_plane".
+ * Rule: If a filename has >= ROOF_EDGE_MIN_COUNT_THRESHOLD roof_edge_candidate
+ * entries (aggregated across all file_id rows), it is very likely a roof photo
+ * → label as "roof_plane".
  *
  * This works because roof photos contain many detectable horizontal lines
  * (eaves, ridges, rake edges) that the OpenCV Hough line detector picks up.
  * Non-roof photos (meters, panels, site overview) have far fewer.
  */
 export function classifyByRoofEdgeCount(
-  summary: CandidateCountSummary,
+  summary: FilenameCandidateSummary,
 ): SurveyEvidenceCategory | null {
   const roofEdgeCount = summary.candidateTypeCounts['roof_edge_candidate'] ?? 0;
 
@@ -251,9 +292,9 @@ export function classifyByRoofEdgeCount(
   return null;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 // Section 3: Candidate Diversity Heuristic → overview
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 
 /**
  * Configuration for candidate diversity heuristic.
@@ -266,28 +307,38 @@ export function classifyByRoofEdgeCount(
  *
  * This heuristic identifies photos where no single candidate type dominates,
  * which is characteristic of wide-angle overview shots.
+ *
+ * IMPORTANT: These thresholds apply to AGGREGATED stats per filename,
+ * not per individual file_id row.
+ *
+ * Based on analysis of survey 302cf42c data (aggregated by filename):
+ * - Overview photos: 5 distinct types, dominant ratio 0.29-0.41, roof_edge < 20
+ * - Roof photos: 4-5 types but dominant = roof_edge at 0.29-0.47 (excluded by roof check)
+ * - Meter/panel photos: 3 types, dominant ratio 0.44+ (excluded by min_types=5)
+ *
+ * Optimal settings: min_types=5, max_ratio=0.45 → classifies 3 unique filenames as overview
  */
 export const OVERVIEW_MIN_CANDIDATE_TYPES = Number(
-  process.env.OVERVIEW_MIN_CANDIDATE_TYPES || 4,
+  process.env.OVERVIEW_MIN_CANDIDATE_TYPES || 5,
 );
 export const OVERVIEW_MAX_DOMINANT_RATIO = Number(
-  process.env.OVERVIEW_MAX_DOMINANT_RATIO || 0.55,
+  process.env.OVERVIEW_MAX_DOMINANT_RATIO || 0.45,
 );
 
 /**
- * Classify a file as overview based on candidate type diversity.
+ * Classify a filename as overview based on candidate type diversity.
  *
- * Rule: If a file has >= OVERVIEW_MIN_CANDIDATE_TYPES distinct candidate types
+ * Rule: If a filename has >= OVERVIEW_MIN_CANDIDATE_TYPES distinct candidate types
  * AND no single type accounts for more than OVERVIEW_MAX_DOMINANT_RATIO of
  * all candidates, it is likely a site overview photo → label as "overview".
  *
- * Exclusion: Files already classified as roof_plane (high roof edge count)
+ * Exclusion: Filenames already classified as roof_plane (high roof edge count)
  * are excluded from overview classification.
  */
 export function classifyByCandidateDiversity(
-  summary: CandidateCountSummary,
+  summary: FilenameCandidateSummary,
 ): SurveyEvidenceCategory | null {
-  // Don't classify as overview if this file has many roof edges
+  // Don't classify as overview if this filename has many roof edges
   // (those are roof photos, not overview photos)
   const roofEdgeCount = summary.candidateTypeCounts['roof_edge_candidate'] ?? 0;
   if (roofEdgeCount >= ROOF_EDGE_MIN_COUNT_THRESHOLD) {
@@ -307,15 +358,16 @@ export function classifyByCandidateDiversity(
   return 'overview';
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 // Section 4: Unified Classification — combine all heuristics
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 
 /**
  * Result of applying all candidate classification heuristics to a file.
  */
 export interface CandidateClassificationResult {
   fileId: string;
+  filename: string;
   category: SurveyEvidenceCategory | null;
   method: string | null;
   confidence: number;
@@ -323,70 +375,97 @@ export interface CandidateClassificationResult {
 }
 
 /**
- * Classify a file using all available heuristics.
+ * Classify all file_ids for a filename using all available heuristics.
  *
  * Priority order (highest to lowest):
  * 1. Object detection (YOLO) — highest confidence, direct semantic mapping
  * 2. Roof edge count heuristic — strong signal for roof_plane
  * 3. Candidate diversity heuristic — moderate signal for overview
  *
- * Returns the first classification that produces a result.
+ * The classification is determined at the FILENAME level (aggregated across
+ * all file_id rows), then applied to each individual file_id row that doesn't
+ * already have a label.
+ *
+ * Returns one CandidateClassificationResult per file_id in the filename's group.
  */
 export function classifyFileFromCandidates(
-  fileId: string,
-  objectDetectionCategory: SurveyEvidenceCategory | null,
-  objectDetectionConfidence: number,
-  objectDetectionClass: string | null,
-  candidateCountSummary: CandidateCountSummary,
-): CandidateClassificationResult {
-  // Priority 1: Object detection (YOLO)
-  if (objectDetectionCategory) {
-    return {
-      fileId,
-      category: objectDetectionCategory,
-      method: 'object_detection',
-      confidence: objectDetectionConfidence,
-      details: `YOLO class "${objectDetectionClass}" → ${objectDetectionCategory}`,
-    };
-  }
+  filenameSummary: FilenameCandidateSummary,
+  objectDetectionByFileId: Map<string, {
+    category: SurveyEvidenceCategory | null;
+    confidence: number;
+    yoloClass: string | null;
+  }>,
+): CandidateClassificationResult[] {
+  const results: CandidateClassificationResult[] = [];
 
-  // Priority 2: Roof edge count heuristic
-  const roofCategory = classifyByRoofEdgeCount(candidateCountSummary);
+  // First, determine the FILENAME-level classification from heuristics
+  let filenameCategory: SurveyEvidenceCategory | null = null;
+  let filenameMethod: string | null = null;
+  let filenameConfidence = 0;
+  let filenameDetails = '';
+
+  // Priority 2: Roof edge count heuristic (at filename level)
+  const roofCategory = classifyByRoofEdgeCount(filenameSummary);
   if (roofCategory) {
-    const roofEdgeCount = candidateCountSummary.candidateTypeCounts['roof_edge_candidate'] ?? 0;
-    return {
-      fileId,
-      category: roofCategory,
-      method: 'roof_edge_count',
-      confidence: Math.min(0.95, 0.50 + (roofEdgeCount / 200)), // Scale: 30 edges ≈ 0.65, 80 edges ≈ 0.90
-      details: `${roofEdgeCount} roof_edge_candidate entries (threshold: ${ROOF_EDGE_MIN_COUNT_THRESHOLD}) → ${roofCategory}`,
-    };
+    const roofEdgeCount = filenameSummary.candidateTypeCounts['roof_edge_candidate'] ?? 0;
+    filenameCategory = roofCategory;
+    filenameMethod = 'roof_edge_count';
+    filenameConfidence = Math.min(0.95, 0.50 + (roofEdgeCount / 200)); // Scale: 20 edges ≈ 0.60, 80 edges ≈ 0.90
+    filenameDetails = `${roofEdgeCount} roof_edge_candidate entries (threshold: ${ROOF_EDGE_MIN_COUNT_THRESHOLD}) → ${roofCategory}`;
   }
 
-  // Priority 3: Candidate diversity heuristic
-  const overviewCategory = classifyByCandidateDiversity(candidateCountSummary);
-  if (overviewCategory) {
-    return {
-      fileId,
-      category: overviewCategory,
-      method: 'candidate_diversity',
-      confidence: 0.60, // Moderate confidence for diversity heuristic
-      details: `${candidateCountSummary.distinctTypes} candidate types, dominant ratio ${candidateCountSummary.dominantRatio.toFixed(2)} → ${overviewCategory}`,
-    };
+  // Priority 3: Candidate diversity heuristic (at filename level, only if no roof classification)
+  if (!filenameCategory) {
+    const overviewCategory = classifyByCandidateDiversity(filenameSummary);
+    if (overviewCategory) {
+      filenameCategory = overviewCategory;
+      filenameMethod = 'candidate_diversity';
+      filenameConfidence = 0.60; // Moderate confidence for diversity heuristic
+      filenameDetails = `${filenameSummary.distinctTypes} candidate types, dominant ratio ${filenameSummary.dominantRatio.toFixed(2)} → ${overviewCategory}`;
+    }
   }
 
-  return {
-    fileId,
-    category: null,
-    method: null,
-    confidence: 0,
-    details: 'No classification heuristic matched',
-  };
+  // Now produce results for each file_id in this filename group
+  for (const fileId of filenameSummary.fileIds) {
+    // Priority 1: Object detection (YOLO) — per file_id, highest priority
+    const objDet = objectDetectionByFileId.get(fileId);
+    if (objDet && objDet.category) {
+      results.push({
+        fileId,
+        filename: filenameSummary.filename,
+        category: objDet.category,
+        method: 'object_detection',
+        confidence: objDet.confidence,
+        details: `YOLO class "${objDet.yoloClass}" → ${objDet.category}`,
+      });
+    } else if (filenameCategory) {
+      // Apply filename-level heuristic classification
+      results.push({
+        fileId,
+        filename: filenameSummary.filename,
+        category: filenameCategory,
+        method: filenameMethod,
+        confidence: filenameConfidence,
+        details: filenameDetails,
+      });
+    } else {
+      results.push({
+        fileId,
+        filename: filenameSummary.filename,
+        category: null,
+        method: null,
+        confidence: 0,
+        details: 'No classification heuristic matched',
+      });
+    }
+  }
+
+  return results;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 // Section 5: Legacy YOLO-only functions (kept for backward compatibility)
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 
 /**
  * Get the evidence category for a YOLO class name, considering confidence.

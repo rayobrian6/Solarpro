@@ -1,5 +1,5 @@
 // ============================================================================
-// Async Photo Vision Job Manager — PostgreSQL-backed (v0.3)
+// Async Photo Vision Job Manager — PostgreSQL-backed (v0.4)
 //
 // Production architecture:
 //   POST creates a job record in DB + submits ALL files to Render → returns jobId instantly.
@@ -24,12 +24,13 @@ import {
   getExternalOpenCvWorkerUrl,
 } from './externalOpenCvPhotoVisionClient';
 import { getDbReady } from '@/lib/db/core';
+import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/categoryRegistry';
 import {
   getEvidenceCategoryForCandidate,
   extractYoloClassNameFromPayload,
   buildCandidateCountSummaries,
   classifyFileFromCandidates,
-  type CandidateCountSummary,
+  type FilenameCandidateSummary,
 } from './yoloToEvidenceMapper';
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
@@ -331,17 +332,20 @@ export async function markStaleJobsFailed(): Promise<number> {
 }
 
 // ---------------------------------------------------------------------------
-// Update photo labels from YOLO/OCR candidates (Option 1 implementation)
+// Update photo labels from YOLO/OCR candidates (v0.4 — filename-aggregated)
 //
 // This function is called after a photo vision run completes to auto-assign
-// photo labels from high-confidence YOLO object detection and OCR candidates.
+// photo labels from high-confidence YOLO object detection and heuristic candidates.
 //
 // Algorithm:
-// 1. Group object_detection candidates by file_id
-// 2. For each file, pick the highest-confidence object_detection candidate
-// 3. Map the YOLO class name to an evidence category using yoloToEvidenceMapper
-// 4. Update site_survey_files.label for files where label is currently NULL
-// 5. Only update files with confidence >= threshold (default: 0.70)
+// 1. Load fileId → filename mapping from site_survey_files
+// 2. Build candidate count summaries AGGREGATED BY FILENAME (not file_id)
+//    — This fixes the duplicate row problem where each photo has ~7 file_id rows
+// 3. Group object_detection candidates by file_id, pick highest per file
+// 4. Check which files currently have NULL/empty labels
+// 5. Apply multi-heuristic classification using classifyFileFromCandidates()
+//    — Combines YOLO (per file_id) + roof_edge_count (per filename) + diversity (per filename)
+// 6. Apply updates to site_survey_files table
 //
 // Returns: Summary of updates performed
 // ---------------------------------------------------------------------------
@@ -376,12 +380,50 @@ export async function updatePhotoLabelsFromCandidates(
 
   console.log(`[updatePhotoLabelsFromCandidates] surveyId=${surveyId} runHash=${run.runHash} minConfidence=${minConfidenceThreshold} totalCandidates=${run.candidates.length}`);
 
-  // ── Step 1: Build candidate count summaries for ALL candidate types ──
-  // This powers the roof_edge_count and candidate_diversity heuristics
-  const candidateSummaries = buildCandidateCountSummaries(run.candidates);
-  console.log(`[updatePhotoLabelsFromCandidates] Built summaries for ${candidateSummaries.size} files`);
+  // ── Step 1: Load fileId → filename mapping from site_survey_files ──
+  // This is needed to aggregate candidates by filename (unique photo)
+  // instead of by file_id (which has ~7 duplicate rows per photo)
+  const fileIdToFilename = new Map<string, string>();
+  const allCandidateFileIds = new Set(run.candidates.map(c => c.fileId));
 
-  // ── Step 2: Group object_detection candidates by file_id, pick highest per file ──
+  if (allCandidateFileIds.size > 0) {
+    // Query in batches to avoid SQL parameter limits
+    const fileIdArray = Array.from(allCandidateFileIds);
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < fileIdArray.length; i += BATCH_SIZE) {
+      const batch = fileIdArray.slice(i, i + BATCH_SIZE);
+      const rows = await sql`
+        SELECT id, filename
+        FROM site_survey_files
+        WHERE survey_id = ${surveyId}
+          AND id = ANY(${batch}::uuid[])
+      `;
+      for (const row of rows as Record<string, unknown>[]) {
+        const id = row.id as string;
+        const filename = row.filename as string | null;
+        if (filename) {
+          fileIdToFilename.set(id, filename);
+        }
+      }
+    }
+  }
+  console.log(`[updatePhotoLabelsFromCandidates] Loaded ${fileIdToFilename.size} fileId→filename mappings (from ${allCandidateFileIds.size} candidate fileIds)`);
+
+  // ── Step 2: Build candidate count summaries AGGREGATED BY FILENAME ──
+  // This is the critical fix: instead of per-file_id (5-16 roof edges),
+  // we aggregate by filename (50-80 roof edges) for meaningful heuristics
+  const filenameSummaries = buildCandidateCountSummaries(run.candidates, fileIdToFilename);
+  console.log(`[updatePhotoLabelsFromCandidates] Built ${filenameSummaries.size} filename summaries (aggregated from ${allCandidateFileIds.size} file_ids)`);
+
+  // Log filename-level roof edge counts for debugging
+  for (const [filename, summary] of filenameSummaries.entries()) {
+    const roofEdgeCount = summary.candidateTypeCounts['roof_edge_candidate'] ?? 0;
+    if (roofEdgeCount > 0) {
+      console.log(`[updatePhotoLabelsFromCandidates] ${filename}: roof_edge=${roofEdgeCount}, total=${summary.totalCandidates}, types=${summary.distinctTypes}, dominant=${summary.dominantType}(${summary.dominantRatio.toFixed(2)})`);
+    }
+  }
+
+  // ── Step 3: Group object_detection candidates by file_id, pick highest per file ──
   const objectDetectionByFile = new Map<string, OpenSourcePhotoVisionCandidate>();
   for (const candidate of run.candidates) {
     if (candidate.candidateType !== 'object_detection') continue;
@@ -402,34 +444,50 @@ export async function updatePhotoLabelsFromCandidates(
 
   console.log(`[updatePhotoLabelsFromCandidates] Found ${objectDetectionByFile.size} files with object_detection candidates (out of ${run.processedCount} processed)`);
 
-  // ── Step 3: Collect ALL file IDs that have any candidates ──
-  const allFileIdsWithCandidates = new Set<string>(candidateSummaries.keys());
-
-  if (allFileIdsWithCandidates.size === 0) {
-    return {
-      totalFiles: run.processedCount,
-      filesWithCandidates: 0,
-      filesEligibleForUpdate: 0,
-      filesUpdated: 0,
-      updates: [],
-    };
+  // Pre-compute object_detection classification per file_id
+  const objDetClassificationByFileId = new Map<string, {
+    category: SurveyEvidenceCategory | null;
+    confidence: number;
+    yoloClass: string | null;
+  }>();
+  for (const [fileId, candidate] of objectDetectionByFile.entries()) {
+    const category = getEvidenceCategoryForCandidate(candidate, minConfidenceThreshold);
+    const yoloClass = extractYoloClassNameFromPayload(candidate.payload);
+    objDetClassificationByFileId.set(fileId, {
+      category,
+      confidence: candidate.confidence,
+      yoloClass,
+    });
   }
 
   // ── Step 4: Check which files currently have NULL/empty labels ──
   const filesWithoutLabelsMap = new Map<string, { filename: string | null; label: string | null }>();
-  for (const fileId of allFileIdsWithCandidates) {
-    const rows = await sql`
-      SELECT id, filename, label
-      FROM site_survey_files
-      WHERE id = ${fileId}
-        AND survey_id = ${surveyId}
-        AND (label IS NULL OR label = '')
-    `;
-    for (const row of rows as Record<string, unknown>[]) {
-      filesWithoutLabelsMap.set(row.id as string, {
-        filename: row.filename as string | null,
-        label: row.label as string | null,
-      });
+  // Collect ALL file_ids from filename summaries
+  const allFileIdsFromSummaries: string[] = [];
+  for (const summary of filenameSummaries.values()) {
+    for (const fileId of summary.fileIds) {
+      allFileIdsFromSummaries.push(fileId);
+    }
+  }
+
+  if (allFileIdsFromSummaries.length > 0) {
+    // Query in batches
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < allFileIdsFromSummaries.length; i += BATCH_SIZE) {
+      const batch = allFileIdsFromSummaries.slice(i, i + BATCH_SIZE);
+      const rows = await sql`
+        SELECT id, filename, label
+        FROM site_survey_files
+        WHERE survey_id = ${surveyId}
+          AND id = ANY(${batch}::uuid[])
+          AND (label IS NULL OR label = '')
+      `;
+      for (const row of rows as Record<string, unknown>[]) {
+        filesWithoutLabelsMap.set(row.id as string, {
+          filename: row.filename as string | null,
+          label: row.label as string | null,
+        });
+      }
     }
   }
 
@@ -439,63 +497,50 @@ export async function updatePhotoLabelsFromCandidates(
   if (filesEligibleForUpdate === 0) {
     return {
       totalFiles: run.processedCount,
-      filesWithCandidates: allFileIdsWithCandidates.size,
+      filesWithCandidates: allCandidateFileIds.size,
       filesEligibleForUpdate: 0,
       filesUpdated: 0,
       updates: [],
     };
   }
 
-  // ── Step 5: Apply multi-heuristic classification to each eligible file ──
+  // ── Step 5: Apply multi-heuristic classification per filename ──
   const updates: UpdatePhotoLabelsFromCandidatesResult['updates'] = [];
   const updatesForDb: Array<{ fileId: string; label: string }> = [];
 
-  for (const [fileId, summary] of candidateSummaries.entries()) {
-    // Skip if file already has a label
-    if (!filesWithoutLabelsMap.has(fileId)) continue;
+  for (const [filename, summary] of filenameSummaries.entries()) {
+    // Classify all file_ids in this filename group
+    const classifications = classifyFileFromCandidates(summary, objDetClassificationByFileId);
 
-    // Get object_detection classification (if any)
-    const objDetCandidate = objectDetectionByFile.get(fileId);
-    const objDetCategory = objDetCandidate
-      ? getEvidenceCategoryForCandidate(objDetCandidate, minConfidenceThreshold)
-      : null;
-    const objDetConfidence = objDetCandidate ? objDetCandidate.confidence : 0;
-    const objDetClass = objDetCandidate
-      ? extractYoloClassNameFromPayload(objDetCandidate.payload)
-      : null;
+    for (const classification of classifications) {
+      // Skip if file already has a label
+      if (!filesWithoutLabelsMap.has(classification.fileId)) continue;
 
-    // Apply unified classification (combines YOLO + roof_edge + diversity)
-    const classification = classifyFileFromCandidates(
-      fileId,
-      objDetCategory,
-      objDetConfidence,
-      objDetClass,
-      summary,
-    );
+      if (classification.category) {
+        const fileInfo = filesWithoutLabelsMap.get(classification.fileId);
+        const filenameStr = fileInfo?.filename ?? classification.filename;
 
-    if (classification.category) {
-      const filename = filesWithoutLabelsMap.get(fileId)!.filename;
+        updates.push({
+          fileId: classification.fileId,
+          filename: filenameStr,
+          oldLabel: null,
+          newLabel: classification.category,
+          candidateType: classification.method || 'unknown',
+          candidateClass: objDetClassificationByFileId.get(classification.fileId)?.yoloClass ?? null,
+          confidence: classification.confidence,
+        });
 
-      updates.push({
-        fileId,
-        filename,
-        oldLabel: null,
-        newLabel: classification.category,
-        candidateType: classification.method || 'unknown',
-        candidateClass: objDetClass,
-        confidence: classification.confidence,
-      });
+        updatesForDb.push({
+          fileId: classification.fileId,
+          label: classification.category,
+        });
 
-      updatesForDb.push({
-        fileId,
-        label: classification.category,
-      });
-
-      console.log(`[updatePhotoLabelsFromCandidates] ${fileId} → ${classification.category} via ${classification.method}: ${classification.details}`);
+        console.log(`[updatePhotoLabelsFromCandidates] ${classification.fileId} (${filenameStr}) → ${classification.category} via ${classification.method}: ${classification.details}`);
+      }
     }
   }
 
-  console.log(`[updatePhotoLabelsFromCandidates] Prepared ${updatesForDb.length} label updates (from ${candidateSummaries.size} files with candidates)`);
+  console.log(`[updatePhotoLabelsFromCandidates] Prepared ${updatesForDb.length} label updates (from ${filenameSummaries.size} unique filenames)`);
 
   // Log method breakdown
   const methodBreakdown: Record<string, number> = {};
@@ -504,10 +549,20 @@ export async function updatePhotoLabelsFromCandidates(
   }
   console.log(`[updatePhotoLabelsFromCandidates] Method breakdown: ${JSON.stringify(methodBreakdown)}`);
 
+  // Log unique filenames per category
+  const categoryFilenames: Record<string, Set<string>> = {};
+  for (const u of updates) {
+    if (!categoryFilenames[u.newLabel]) categoryFilenames[u.newLabel] = new Set();
+    categoryFilenames[u.newLabel].add(u.filename || 'unknown');
+  }
+  for (const [cat, fnames] of Object.entries(categoryFilenames)) {
+    console.log(`[updatePhotoLabelsFromCandidates] ${cat}: ${fnames.size} unique filenames (${fnames.size * 7} expected file_id rows)`);
+  }
+
   if (updatesForDb.length === 0) {
     return {
       totalFiles: run.processedCount,
-      filesWithCandidates: allFileIdsWithCandidates.size,
+      filesWithCandidates: allCandidateFileIds.size,
       filesEligibleForUpdate,
       filesUpdated: 0,
       updates: [],
@@ -527,7 +582,7 @@ export async function updatePhotoLabelsFromCandidates(
 
   return {
     totalFiles: run.processedCount,
-    filesWithCandidates: allFileIdsWithCandidates.size,
+    filesWithCandidates: allCandidateFileIds.size,
     filesEligibleForUpdate,
     filesUpdated,
     updates,
