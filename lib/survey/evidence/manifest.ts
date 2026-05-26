@@ -112,7 +112,7 @@ export interface SurveyEvidenceItem {
 
 /**
  * Obstruction data linked to a roof_plane evidence item.
- * Populated by the roof obstruction registration pipeline (Phase 3).
+ * Populated by the roof obstruction registration pipeline (Phase 3B: CAD-Ready Roof Intelligence).
  */
 export interface SurveyEvidenceObstructionData {
   /** Number of deduplicated obstructions found on this roof plane photo */
@@ -127,11 +127,13 @@ export interface SurveyEvidenceObstructionData {
   };
   /** Average confidence of obstruction detections */
   avgConfidence: number;
-  /** Whether these obstructions have been human-reviewed */
+  /** Whether these obstructions have been human-reviewed (deprecated, use reviewState on individual obstructions) */
   reviewed: boolean;
-  /** Individual obstruction bounding boxes (normalized 0-1000 coordinates) */
+  /** Individual obstruction records with full CAD-readiness metadata (Phase 3B) */
   obstructions: Array<{
     id: string;
+    sourceFilename: string;
+    sourceFileId: string;
     region: {
       x: number;
       y: number;
@@ -139,10 +141,38 @@ export interface SurveyEvidenceObstructionData {
       height: number;
       coordinateSystem: "normalized_image_0_1000";
     };
+    center: {
+      x: number;
+      y: number;
+      coordinateSystem: "normalized_image_0_1000";
+    };
     areaNormalized: number;
+    aspectRatio: number;
+    sizeBucket: "tiny" | "small" | "medium" | "large" | "huge";
+    orientationHint: "horizontal" | "vertical" | "square" | "diagonal" | "irregular";
+    edgeDistance: number;
+    edgeProximity: "center" | "near_center" | "edge" | "corner";
+    quadrant: "nw" | "ne" | "sw" | "se" | "unknown";
+    setbackBuffer: "standard" | "reduced" | "none";
     confidence: number;
+    detectionMethod: "opencv_contour" | "yolo_detection" | "hybrid" | "manual" | "unknown";
+    limitations: string[];
+    sourcePhotoUrl: string | null;
+    sourceImageSha256: string | null;
+    regionIndex: number;
+    reviewState: "review_required" | "accepted" | "rejected";
     obstructionType: string | null;
-    reviewed: boolean;
+    priority: "high" | "medium" | "low";
+    cadBlockHint: string;
+    obstructionFootprintHint: string;
+    clearanceRadiusHint: string;
+    setbackCategoryHint: string;
+    layoutAvoidancePriority: number;
+    requiresHumanReview: boolean;
+    canAffectPanelPlacement: boolean;
+    canAffectFirePathway: boolean;
+    canAffectConduitPath: boolean;
+    canAffectStructuralAttachment: boolean;
   }>;
 }
 
@@ -203,12 +233,32 @@ export interface SurveyEvidenceManifest {
     confidence: SurveyEvidenceConfidence;
     completeness: "missing" | "partial" | "sufficient";
   };
-  /** Obstruction data summary across all roof_plane evidence items (Phase 3) */
+  /** Obstruction data summary across all roof_plane evidence items (Phase 3B: CAD-Ready Roof Intelligence) */
   obstructionSummary?: {
     roofPhotosWithObstructions: number;
     totalObstructions: number;
     reviewedObstructions: number;
     obstructionTypeDistribution: Record<string, number>;
+    /** Phase 3B: Obstructions by priority level */
+    obstructionPriorityDistribution: {
+      high: number;
+      medium: number;
+      low: number;
+    };
+    /** Phase 3B: Obstructions by review state */
+    obstructionReviewStateDistribution: {
+      review_required: number;
+      accepted: number;
+      rejected: number;
+    };
+    /** Phase 3B: Count of obstructions per roof photo filename */
+    obstructionsByPhoto: Record<string, number>;
+    /** Phase 3B: Count of high-impact obstructions (priority=high) */
+    highImpactObstructionCount: number;
+    /** Phase 3B: CAD readiness quality score (0-100) */
+    cadReadinessQualityScore: number;
+    /** Phase 3B: Count of obstructions with missing/unknown type classification */
+    missingClassificationCount: number;
   } | null;
   openSourceBoundaries: {
     webRuntime: string[];
@@ -411,6 +461,9 @@ export function buildSurveyEvidenceManifest(
 /**
  * Build an obstruction summary across all roof_plane evidence items.
  * Returns null if no roof_plane items have obstruction data.
+ *
+ * Phase 3B: Extended with by-priority, by-review-status, by-photo,
+ * high-impact count, CAD readiness quality score, missing classification count.
  */
 function buildObstructionSummary(
   items: SurveyEvidenceItem[],
@@ -424,23 +477,85 @@ function buildObstructionSummary(
   let totalObstructions = 0;
   let reviewedObstructions = 0;
   const typeDistribution: Record<string, number> = {};
+  const priorityDistribution = { high: 0, medium: 0, low: 0 };
+  const reviewStateDistribution = { review_required: 0, accepted: 0, rejected: 0 };
+  const byPhoto: Record<string, number> = {};
+  let highImpactCount = 0;
+  let missingClassificationCount = 0;
+  let totalConfidence = 0;
+  let totalWithGeometry = 0;
 
   for (const item of roofItemsWithObstructions) {
     const data = item.obstructionData!;
     totalObstructions += data.obstructionCount;
-    reviewedObstructions += data.obstructions.filter((o) => o.reviewed).length;
+
+    // Count per photo
+    byPhoto[item.filename ?? item.evidenceId] = data.obstructionCount;
 
     for (const obs of data.obstructions) {
-      const type = obs.obstructionType ?? "unknown";
+      // Type distribution
+      const type = obs.obstructionType ?? "unknown_obstruction";
       typeDistribution[type] = (typeDistribution[type] ?? 0) + 1;
+
+      // Review state (Phase 3B)
+      const reviewState = (obs as Record<string, unknown>).reviewState as string | undefined;
+      if (reviewState === "accepted") {
+        reviewStateDistribution.accepted++;
+        reviewedObstructions++;
+      } else if (reviewState === "rejected") {
+        reviewStateDistribution.rejected++;
+      } else {
+        reviewStateDistribution.review_required++;
+      }
+
+      // Priority distribution (Phase 3B)
+      const priority = (obs as Record<string, unknown>).priority as string | undefined;
+      if (priority === "high") {
+        priorityDistribution.high++;
+        highImpactCount++;
+      } else if (priority === "medium") {
+        priorityDistribution.medium++;
+      } else {
+        priorityDistribution.low++;
+      }
+
+      // Missing classification (Phase 3B)
+      if (!obs.obstructionType || obs.obstructionType === "unknown_obstruction" || obs.obstructionType === "unknown") {
+        missingClassificationCount++;
+      }
+
+      // Geometry readiness tracking (Phase 3B)
+      totalConfidence += obs.confidence;
+      if ((obs as Record<string, unknown>).center) {
+        totalWithGeometry++;
+      }
     }
   }
+
+  // CAD readiness quality score (0-100)
+  // Based on: classification completeness, geometry completeness, confidence
+  const classificationCompleteness = totalObstructions > 0
+    ? ((totalObstructions - missingClassificationCount) / totalObstructions) * 40 // 40 points max
+    : 0;
+  const geometryCompleteness = totalObstructions > 0
+    ? (totalWithGeometry / totalObstructions) * 30 // 30 points max
+    : 0;
+  const confidenceScore = totalObstructions > 0
+    ? (totalConfidence / totalObstructions / 100) * 30 // 30 points max
+    : 0;
+  const cadReadinessQualityScore = Math.round(classificationCompleteness + geometryCompleteness + confidenceScore);
 
   return {
     roofPhotosWithObstructions: roofItemsWithObstructions.length,
     totalObstructions,
     reviewedObstructions,
     obstructionTypeDistribution: typeDistribution,
+    obstructionPriorityDistribution: priorityDistribution,
+    obstructionReviewStateDistribution: reviewStateDistribution,
+    obstructionsByPhoto: byPhoto,
+    highImpactObstructionCount: highImpactCount,
+    cadReadinessQualityScore,
+    missingClassificationCount,
   };
 }
 

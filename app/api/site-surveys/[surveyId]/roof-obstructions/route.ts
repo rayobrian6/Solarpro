@@ -1,7 +1,10 @@
 // ============================================================================
 // GET /api/site-surveys/[surveyId]/roof-obstructions
 // Read-only query for roof obstruction data registered on roof_plane photos.
+// Phase 3B: Returns CAD-readiness fields, review status, priority, source photo traceability.
+//
 // No DB writes, no CAD mutation, no solver execution, no permit trigger.
+// Review-only evidence refinement.
 // ============================================================================
 
 export const runtime = 'nodejs';
@@ -51,11 +54,12 @@ export async function GET(
       return NextResponse.json({
         success: true,
         data: {
-          schemaVersion: 'roof_obstruction_query_v1',
+          schemaVersion: 'roof_obstruction_query_v2_phase3b',
           surveyId,
           roofPhotoCount: 0,
           roofPhotosWithObstructions: 0,
           totalObstructions: 0,
+          aggregateStats: emptyAggregateStats(),
           photos: [],
           note: 'No roof_plane photos found for this survey. Obstruction data requires roof_plane classified photos with vision pipeline candidates.',
         },
@@ -66,7 +70,19 @@ export async function GET(
     const roofFilenames = [...new Set(roofPlaneFiles.map((f) => f.filename).filter(Boolean))] as string[];
     const obstructionDataByFilename = await queryObstructionData(surveyId, roofFilenames);
 
-    // Build per-photo obstruction summaries
+    // Build URL lookup for source photo traceability
+    const fileUrlByFilename = new Map<string, string>();
+    const fileIdByFilename = new Map<string, string>();
+    for (const file of roofPlaneFiles) {
+      if (file.filename) {
+        fileUrlByFilename.set(file.filename, file.fileUrl);
+        if (!fileIdByFilename.has(file.filename)) {
+          fileIdByFilename.set(file.filename, file.id);
+        }
+      }
+    }
+
+    // Build per-photo obstruction summaries (Phase 3B enriched)
     const photos = roofFilenames.map((filename) => {
       const obstructionData = obstructionDataByFilename.get(filename) ?? null;
       const filesForFilename = roofPlaneFiles.filter((f) => f.filename === filename);
@@ -81,46 +97,94 @@ export async function GET(
         avgConfidence: obstructionData?.avgConfidence ?? 0,
         reviewed: obstructionData?.reviewed ?? false,
         sizeDistribution: obstructionData?.sizeDistribution ?? {
-          tiny: 0,
-          small: 0,
-          medium: 0,
-          large: 0,
-          huge: 0,
+          tiny: 0, small: 0, medium: 0, large: 0, huge: 0,
         },
-        obstructions: obstructionData?.obstructions ?? [],
+        obstructions: (obstructionData?.obstructions ?? []).map(enrichObstructionForApi),
       };
     });
 
-    // Compute aggregate summary
+    // Compute aggregate summary (Phase 3B extended)
     const photosWithObstructions = photos.filter(
       (p) => p.obstructionCount > 0,
     );
-    const totalObstructions = photosWithObstructions.reduce(
-      (sum, p) => sum + p.obstructionCount,
-      0,
-    );
-    const reviewedObstructions = photosWithObstructions.reduce(
-      (sum, p) => sum + p.obstructions.filter((o) => o.reviewed).length,
-      0,
-    );
+    const allObstructions = photosWithObstructions.flatMap((p) => p.obstructions);
+    const totalObstructions = allObstructions.length;
+
     const typeDistribution: Record<string, number> = {};
-    for (const photo of photosWithObstructions) {
-      for (const obs of photo.obstructions) {
-        const type = obs.obstructionType ?? 'unknown';
-        typeDistribution[type] = (typeDistribution[type] ?? 0) + 1;
+    const priorityDistribution = { high: 0, medium: 0, low: 0 };
+    const reviewStateDistribution = { review_required: 0, accepted: 0, rejected: 0 };
+    let highImpactCount = 0;
+    let missingClassificationCount = 0;
+    let totalConfidence = 0;
+    let totalWithGeometry = 0;
+    const byPhoto: Record<string, number> = {};
+
+    for (const obs of allObstructions) {
+      // Type distribution
+      const type = (obs.obstructionType ?? 'unknown_obstruction') as string;
+      typeDistribution[type] = (typeDistribution[type] ?? 0) + 1;
+
+      // Priority distribution
+      if (obs.priority === 'high') {
+        priorityDistribution.high++;
+        highImpactCount++;
+      } else if (obs.priority === 'medium') {
+        priorityDistribution.medium++;
+      } else {
+        priorityDistribution.low++;
       }
+
+      // Review state distribution
+      if (obs.reviewState === 'accepted') {
+        reviewStateDistribution.accepted++;
+      } else if (obs.reviewState === 'rejected') {
+        reviewStateDistribution.rejected++;
+      } else {
+        reviewStateDistribution.review_required++;
+      }
+
+      // Missing classification
+      if (!obs.obstructionType || obs.obstructionType === 'unknown_obstruction' || obs.obstructionType === 'unknown') {
+        missingClassificationCount++;
+      }
+
+      totalConfidence += (obs.confidence as number) ?? 0;
+      if (obs.center) totalWithGeometry++;
     }
+
+    for (const photo of photosWithObstructions) {
+      byPhoto[photo.filename] = photo.obstructionCount;
+    }
+
+    // CAD readiness quality score
+    const classificationCompleteness = totalObstructions > 0
+      ? ((totalObstructions - missingClassificationCount) / totalObstructions) * 40 : 0;
+    const geometryCompleteness = totalObstructions > 0
+      ? (totalWithGeometry / totalObstructions) * 30 : 0;
+    const confidenceScore = totalObstructions > 0
+      ? (totalConfidence / totalObstructions / 100) * 30 : 0;
+    const cadReadinessQualityScore = Math.round(classificationCompleteness + geometryCompleteness + confidenceScore);
+
+    const reviewedObstructions = reviewStateDistribution.accepted;
 
     return NextResponse.json({
       success: true,
       data: {
-        schemaVersion: 'roof_obstruction_query_v1',
+        schemaVersion: 'roof_obstruction_query_v2_phase3b',
         surveyId,
         roofPhotoCount: roofFilenames.length,
         roofPhotosWithObstructions: photosWithObstructions.length,
         totalObstructions,
-        reviewedObstructions,
-        obstructionTypeDistribution: typeDistribution,
+        aggregateStats: {
+          reviewedObstructions,
+          obstructionTypeDistribution: typeDistribution,
+          obstructionPriorityDistribution: priorityDistribution,
+          obstructionReviewStateDistribution: reviewStateDistribution,
+          obstructionsByPhoto: byPhoto,
+          highImpactObstructionCount: highImpactCount,
+          cadReadinessQualityScore,
+          missingClassificationCount,
+        },
         photos,
         note: photosWithObstructions.length === 0
           ? 'Roof_plane photos were found but no obstruction data has been registered yet. Run the photo vision pipeline (open-source-photo-vision-pass) to generate obstruction candidates, then the obstruction registration step will populate this data.'
@@ -141,12 +205,60 @@ export async function GET(
 }
 
 /**
+ * Enrich an obstruction record for API response with CAD impact badges.
+ * Adds computed badges for front-end display.
+ */
+function enrichObstructionForApi(obs: Record<string, unknown>): Record<string, unknown> {
+  const badges: string[] = [];
+
+  // Priority badge
+  if (obs.priority === 'high') badges.push('high_priority');
+  if (obs.priority === 'medium') badges.push('medium_priority');
+
+  // CAD impact badges
+  if (obs.canAffectPanelPlacement) badges.push('affects_panels');
+  if (obs.canAffectFirePathway) badges.push('affects_fire_path');
+  if (obs.canAffectConduitPath) badges.push('affects_conduit');
+  if (obs.canAffectStructuralAttachment) badges.push('affects_structural');
+
+  // Review badge
+  if (obs.reviewState === 'review_required') badges.push('needs_review');
+  if (obs.reviewState === 'accepted') badges.push('reviewed_accepted');
+
+  // Type badge
+  if (obs.obstructionType && obs.obstructionType !== 'unknown_obstruction') {
+    badges.push('classified');
+  } else {
+    badges.push('unclassified');
+  }
+
+  return {
+    ...obs,
+    cadImpactBadges: badges,
+    // Ensure source photo traceability
+    sourcePhotoLink: obs.sourcePhotoUrl ?? null,
+  };
+}
+
+/**
+ * Empty aggregate stats for when no roof photos exist.
+ */
+function emptyAggregateStats() {
+  return {
+    reviewedObstructions: 0,
+    obstructionTypeDistribution: {},
+    obstructionPriorityDistribution: { high: 0, medium: 0, low: 0 },
+    obstructionReviewStateDistribution: { review_required: 0, accepted: 0, rejected: 0 },
+    obstructionsByPhoto: {},
+    highImpactObstructionCount: 0,
+    cadReadinessQualityScore: 0,
+    missingClassificationCount: 0,
+  };
+}
+
+/**
  * Query obstruction_data JSONB column from site_survey_files for the given
  * roof_plane filenames. Returns a Map keyed by filename.
- *
- * The obstruction_data column is populated by the roof obstruction registration
- * pipeline (Step 7 in asyncPhotoVisionJobManager). If the column doesn't exist
- * yet (i.e., the pipeline hasn't run), returns an empty Map.
  */
 async function queryObstructionData(
   surveyId: string,
@@ -168,7 +280,6 @@ async function queryObstructionData(
     `;
 
     if (columnCheck.length === 0) {
-      // Column doesn't exist yet — pipeline hasn't run
       return result;
     }
 
@@ -187,7 +298,6 @@ async function queryObstructionData(
     for (const row of rows as Array<{ filename: string; obstruction_data: unknown }>) {
       if (row.filename && row.obstruction_data) {
         try {
-          // obstruction_data is stored as JSONB, parsed automatically by neon
           const data = typeof row.obstruction_data === 'string'
             ? JSON.parse(row.obstruction_data)
             : row.obstruction_data;
@@ -201,7 +311,6 @@ async function queryObstructionData(
     }
   } catch (err) {
     console.error('[queryObstructionData] Failed to query obstruction data:', err);
-    // Return whatever we have (may be partial)
   }
 
   return result;
