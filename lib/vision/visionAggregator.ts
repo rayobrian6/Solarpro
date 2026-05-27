@@ -101,6 +101,15 @@ const DEG = Math.PI / 180;
  */
 const ENABLE_HOMOGRAPHY_PROJECTION = process.env.ENABLE_HOMOGRAPHY_PROJECTION !== 'false';
 
+/**
+ * Maximum time budget for aggregation in milliseconds.
+ * If aggregation exceeds this budget, remaining detections fall back to
+ * non-homography projection (gps_azimuth_pitch / gps_centroid / none).
+ * Set to 40s to leave headroom within Vercel's 60s function timeout.
+ * Override with AGGREGATION_BUDGET_MS env var.
+ */
+const AGGREGATION_BUDGET_MS = parseInt(process.env.AGGREGATION_BUDGET_MS ?? '40000', 10);
+
 // ── Classification helpers ──────────────────────────────────────────────────
 
 const OBSTRUCTION_CLASSES = new Set<string>([
@@ -167,6 +176,12 @@ async function attemptHomographyProjection(
   ctx: PhotoContext,
   origin: { lat: number; lng: number },
   log: string[],
+  featureMatchCache?: Map<string, { matchedPoints: { source: Array<{ x: number; y: number }>; target: Array<{ x: number; y: number }> } | null; logMsg: string }>,
+  statsCallbacks?: {
+    onFeatureMatchComplete?: (durationMs: number) => void;
+    onFeatureMatchCacheHit?: () => void;
+    onHomographyComplete?: (durationMs: number) => void;
+  },
 ): Promise<HomographyProjectionAttempt> {
 
   const FAILED: HomographyProjectionAttempt = {
@@ -218,19 +233,42 @@ async function attemptHomographyProjection(
 
     const referenceImageUrl = ctx.referenceImageUrl;
     if (referenceImageUrl) {
-      try {
-        const matchResult = await matchFeaturesWithFallback(photoUrl, referenceImageUrl, {
-          minGoodMatches: HOMOGRAPHY_MIN_INLIERS,
-          minConfidence: HOMOGRAPHY_MIN_CONFIDENCE,
-        });
-        if (matchResult.ok && matchResult.matchedPoints) {
-          matchedPoints = matchResult.matchedPoints;
-          log.push(`[aggregator:4A] Feature matching succeeded: goodMatches=${matchResult.goodMatchCount} confidence=${matchResult.confidence.toFixed(3)} detector=${matchResult.detector}`);
-        } else {
-          log.push(`[aggregator:4A] Feature matching failed: ${matchResult.error ?? `quality=${matchResult.quality} confidence=${matchResult.confidence.toFixed(3)}`} — homography will fall back gracefully`);
+      // Use feature-match cache to avoid redundant HTTP calls for the same (photoUrl, referenceImageUrl) pair
+      const cacheKey = `${photoUrl}::${referenceImageUrl}`;
+      const cached = featureMatchCache?.get(cacheKey);
+      if (cached) {
+        matchedPoints = cached.matchedPoints;
+        log.push(cached.logMsg);
+        statsCallbacks?.onFeatureMatchCacheHit?.();
+      } else {
+        // Cache miss — perform feature matching
+        const fmStartMs = Date.now();
+        try {
+          const matchResult = await matchFeaturesWithFallback(photoUrl, referenceImageUrl, {
+            minGoodMatches: HOMOGRAPHY_MIN_INLIERS,
+            minConfidence: HOMOGRAPHY_MIN_CONFIDENCE,
+          });
+          const fmDurationMs = Date.now() - fmStartMs;
+          statsCallbacks?.onFeatureMatchComplete?.(fmDurationMs);
+
+          if (matchResult.ok && matchResult.matchedPoints) {
+            matchedPoints = matchResult.matchedPoints;
+            const logMsg = `[aggregator:4A:feature-match] SUCCEEDED in ${fmDurationMs}ms goodMatches=${matchResult.goodMatchCount} confidence=${matchResult.confidence.toFixed(3)} detector=${matchResult.detector}`;
+            log.push(logMsg);
+            featureMatchCache?.set(cacheKey, { matchedPoints: matchResult.matchedPoints, logMsg });
+          } else {
+            const logMsg = `[aggregator:4A:feature-match] FAILED in ${fmDurationMs}ms: ${matchResult.error ?? `quality=${matchResult.quality} confidence=${matchResult.confidence.toFixed(3)}`} — homography will fall back gracefully`;
+            log.push(logMsg);
+            // Cache the failure too — no point retrying the same failed pair
+            featureMatchCache?.set(cacheKey, { matchedPoints: null, logMsg });
+          }
+        } catch (matchErr) {
+          const fmDurationMs = Date.now() - fmStartMs;
+          statsCallbacks?.onFeatureMatchComplete?.(fmDurationMs);
+          const logMsg = `[aggregator:4A:feature-match] ERROR in ${fmDurationMs}ms: ${matchErr} — homography will fall back gracefully`;
+          log.push(logMsg);
+          featureMatchCache?.set(cacheKey, { matchedPoints: null, logMsg });
         }
-      } catch (matchErr) {
-        log.push(`[aggregator:4A] Feature matching error: ${matchErr} — homography will fall back gracefully`);
       }
     } else {
       log.push(`[aggregator:4A] No reference image URL available (referenceImageUrl is null) — skipping feature matching, homography will fall back gracefully`);
@@ -238,6 +276,8 @@ async function attemptHomographyProjection(
 
     // ── Step 3: Run homography projection pipeline ──────────────────────────
     // projectWithHomography handles: EXIF → FOV → homography → world projection
+    const homStartMs = Date.now();
+    log.push(`[aggregator:4A:homography] START detection=${detection.class}`);
     const attempt = await projectWithHomography(
       {
         class: detection.class,
@@ -248,7 +288,11 @@ async function attemptHomographyProjection(
       exifData,
     );
 
-    // ── Step 4: Validate result ─────────────────────────────────────────────
+    const homDurationMs = Date.now() - homStartMs;
+    statsCallbacks?.onHomographyComplete?.(homDurationMs);
+    log.push(`[aggregator:4A:homography] END durationMs=${homDurationMs} success=${attempt.success}`);
+
+        // ── Step 4: Validate result ─────────────────────────────────────────────
     if (!attempt.success || !attempt.projection) {
       log.push(`[aggregator:4A] Homography projection unsuccessful — falling back to ${attempt.fallbackMethod}`);
       return attempt;
@@ -282,7 +326,7 @@ async function attemptHomographyProjection(
     }
 
     const proj = attempt.projection;
-    log.push(`[aggregator:4A] Homography projection SUCCESS world=(${proj.worldX.toFixed(2)},${proj.worldY.toFixed(2)}) radiusM=${proj.radiusM.toFixed(2)} confidence=${proj.confidence.toFixed(3)} method=${proj.method} reprojErr=${proj.reprojectionError?.toFixed(2) ?? 'n/a'}px`);
+    log.push(`[aggregator:4A:projection] SUCCESS world=(${proj.worldX.toFixed(2)},${proj.worldY.toFixed(2)}) radiusM=${proj.radiusM.toFixed(2)} confidence=${proj.confidence.toFixed(3)} method=${proj.method} reprojErr=${proj.reprojectionError?.toFixed(2) ?? 'n/a'}px`);
 
     return attempt;
 
@@ -327,12 +371,29 @@ async function projectDetectionToWorld(
   ctx: PhotoContext,
   origin: { lat: number; lng: number },
   log: string[],
+  options?: {
+    skipHomography?: boolean;
+    featureMatchCache?: Map<string, { matchedPoints: { source: Array<{ x: number; y: number }>; target: Array<{ x: number; y: number }> } | null; logMsg: string }>;
+    onFeatureMatchComplete?: (durationMs: number) => void;
+    onFeatureMatchCacheHit?: () => void;
+    onHomographyComplete?: (durationMs: number) => void;
+    onHomographyAttempt?: (success: boolean) => void;
+  },
 ): Promise<{ worldX: number; worldY: number; radiusM: number; method: WorldDetection['projectionMethod']; _projectionConfidence?: number; _reprojectionError?: number | null }> {
   const bbox = detection.bbox;
 
   // ── Tier 0: Homography-assisted projection (Phase 4A) ─────────────────────
-  if (ENABLE_HOMOGRAPHY_PROJECTION && ctx.fileUrl) {
-    const homAttempt = await attemptHomographyProjection(detection, ctx, origin, log);
+  if (ENABLE_HOMOGRAPHY_PROJECTION && ctx.fileUrl && !options?.skipHomography) {
+    const homAttempt = await attemptHomographyProjection(
+      detection, ctx, origin, log,
+      options?.featureMatchCache,
+      {
+        onFeatureMatchComplete: options?.onFeatureMatchComplete,
+        onFeatureMatchCacheHit: options?.onFeatureMatchCacheHit,
+        onHomographyComplete: options?.onHomographyComplete,
+      },
+    );
+    options?.onHomographyAttempt?.(homAttempt.success);
     if (homAttempt.success && homAttempt.projection) {
       const proj = homAttempt.projection;
       return {
@@ -554,27 +615,36 @@ export async function aggregateVisionResults(
   const log: string[] = [];
   const startMs = Date.now();
 
-  log.push(`[aggregator] START projectId=${projectId} surveyId=${surveyId} photos=${photos.length} homography=${ENABLE_HOMOGRAPHY_PROJECTION}`);
+  log.push(`[aggregator:4A:start] projectId=${projectId} surveyId=${surveyId} photos=${photos.length} homography=${ENABLE_HOMOGRAPHY_PROJECTION} budget=${AGGREGATION_BUDGET_MS}ms`);
 
   // ── Phase 4A: Initialize EXIF cache ───────────────────────────────────────
   // Pre-warm the EXIF cache by extracting EXIF for all photo URLs in parallel.
   // This is a best-effort optimization; failures are non-fatal.
+  // ── Phase 4A: Pre-warm EXIF cache and feature-match cache ─────────────
+  // Block on EXIF pre-warming so that per-detection calls hit cache.
+  // Feature-match cache is populated lazily per (photoUrl, referenceImageUrl) pair.
+  const featureMatchCache = new Map<string, { matchedPoints: { source: Array<{ x: number; y: number }>; target: Array<{ x: number; y: number }> } | null; logMsg: string }>();
+  let featureMatchCacheHits = 0;
+  let featureMatchCacheMisses = 0;
+
   if (ENABLE_HOMOGRAPHY_PROJECTION) {
     const photoUrls = photos
       .map(pv => pv.photoContext.fileUrl)
       .filter((url): url is string => typeof url === 'string' && url.length > 0);
+    const uniquePhotoUrls = [...new Set(photoUrls)];
 
-    if (photoUrls.length > 0) {
-      log.push(`[aggregator:4A] Pre-warming EXIF cache for ${photoUrls.length} photos`);
-      const exifPromises = photoUrls.map(async (url) => {
-        try {
-          await extractExifFromUrl(url);
-        } catch {
-          // Non-fatal: EXIF extraction will be retried per-detection if needed
-        }
-      });
-      // Don't block on pre-warming — let it run in parallel
-      void Promise.allSettled(exifPromises);
+    if (uniquePhotoUrls.length > 0) {
+      log.push(`[aggregator:4A] Pre-warming EXIF cache for ${uniquePhotoUrls.length} unique photo URLs`);
+      const exifStartMs = Date.now();
+      // Pre-warm in parallel with concurrency limit (5 at a time)
+      const EXIF_CONCURRENCY = 5;
+      for (let i = 0; i < uniquePhotoUrls.length; i += EXIF_CONCURRENCY) {
+        const batch = uniquePhotoUrls.slice(i, i + EXIF_CONCURRENCY);
+        await Promise.allSettled(batch.map(async (url) => {
+          try { await extractExifFromUrl(url); } catch { /* non-fatal */ }
+        }));
+      }
+      log.push(`[aggregator:4A] EXIF cache pre-warmed in ${Date.now() - exifStartMs}ms`);
     }
   }
 
@@ -623,6 +693,13 @@ export async function aggregateVisionResults(
     }
   }
 
+  // ── Phase 4A: Stats tracking ──────────────────────────────────────────────
+  let totalFeatureMatchMs = 0;
+  let homographyAttempts = 0;
+  let homographySuccesses = 0;
+  let totalHomographyMs = 0;
+  let budgetExhausted = false;
+
   // ── Process each photo (async for homography) ─────────────────────────────
   let totalRaw = 0;
   let totalFiltered = 0;
@@ -647,7 +724,21 @@ export async function aggregateVisionResults(
       }
 
       // Project to world (now async for Phase 4A homography)
-      const proj = await projectDetectionToWorld(det, pv.photoContext, origin, log);
+      // Budget guard: skip homography for remaining detections if budget exhausted
+      const elapsedMs = Date.now() - startMs;
+      const skipHomography = ENABLE_HOMOGRAPHY_PROJECTION && budgetExhausted;
+      if (ENABLE_HOMOGRAPHY_PROJECTION && elapsedMs > AGGREGATION_BUDGET_MS && !budgetExhausted) {
+        budgetExhausted = true;
+        log.push(`[aggregator:4A] BUDGET_EXHAUSTED at ${elapsedMs}ms (budget=${AGGREGATION_BUDGET_MS}ms) — remaining detections will use fast projection`);
+      }
+      const proj = await projectDetectionToWorld(det, pv.photoContext, origin, log, {
+        skipHomography: budgetExhausted,
+        featureMatchCache,
+        onFeatureMatchComplete: (durationMs) => { totalFeatureMatchMs += durationMs; featureMatchCacheMisses++; },
+        onFeatureMatchCacheHit: () => { featureMatchCacheHits++; },
+        onHomographyComplete: (durationMs) => { totalHomographyMs += durationMs; },
+        onHomographyAttempt: (success) => { homographyAttempts++; if (success) homographySuccesses++; },
+      });
 
       // Skip zero-GPS projections for obstructions (they're meaningless without location)
       if (proj.method === 'none' && isObstructionClass(det.class)) {
@@ -690,7 +781,14 @@ export async function aggregateVisionResults(
     const homAvgConf = homCount > 0
       ? (allWorldDetections.filter(d => d.projectionMethod === 'homography_assisted').reduce((s, d) => s + (d._projectionConfidence ?? 0), 0) / homCount)
       : 0;
-    log.push(`[aggregator:4A] Homography stats: projected=${homCount}/${allWorldDetections.length} avgConf=${homAvgConf.toFixed(3)}`);
+    const avgFeatureMatchMs = featureMatchCacheMisses > 0 ? Math.round(totalFeatureMatchMs / featureMatchCacheMisses) : 0;
+    const avgHomographyMs = homographyAttempts > 0 ? Math.round(totalHomographyMs / homographyAttempts) : 0;
+    log.push(`[aggregator:4A:end] totalMs=${Date.now() - startMs} homographyAttempts=${homographyAttempts} successes=${homographySuccesses} projected=${homCount}/${allWorldDetections.length} avgConf=${homAvgConf.toFixed(3)}`);
+    log.push(`[aggregator:4A:end] featureMatch: cacheHits=${featureMatchCacheHits} cacheMisses=${featureMatchCacheMisses} totalMs=${totalFeatureMatchMs} avgMs=${avgFeatureMatchMs}`);
+    log.push(`[aggregator:4A:end] homography: attempts=${homographyAttempts} totalMs=${totalHomographyMs} avgMs=${avgHomographyMs}`);
+    if (budgetExhausted) {
+      log.push(`[aggregator:4A:end] BUDGET_EXHAUSTED — ${allWorldDetections.filter(d => d.projectionMethod !== 'homography_assisted').length} detections used fallback`);
+    }
   }
 
   // ── Split by type ──────────────────────────────────────────────────────────
