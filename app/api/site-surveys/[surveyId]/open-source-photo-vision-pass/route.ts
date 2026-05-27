@@ -278,6 +278,7 @@ async function handleCompletedJob(job: PhotoVisionJob, surveyId: string) {
   let stored = null;
   try {
     stored = await replaceOpenSourcePhotoVisionCandidatesForSurveyRun(surveyId, job.userId, run);
+    console.log(`[GET open-source-photo-vision-pass] DB persist: stored=${!!stored}`);
   } catch (dbErr) {
     console.error('[GET open-source-photo-vision-pass] DB persist failed:', dbErr instanceof Error ? dbErr.message : String(dbErr));
   }
@@ -285,8 +286,10 @@ async function handleCompletedJob(job: PhotoVisionJob, surveyId: string) {
   // Auto-assign photo labels from YOLO/OCR candidates (Option 1)
   let labelUpdateResult = null;
   try {
+    const labelStart = Date.now();
     labelUpdateResult = await updatePhotoLabelsFromCandidates(surveyId, job.userId, run);
-    console.log(`[GET open-source-photo-vision-pass] Photo label auto-update: filesWithCandidates=${labelUpdateResult.filesWithCandidates}, filesUpdated=${labelUpdateResult.filesUpdated}`);
+    const labelDuration = Date.now() - labelStart;
+    console.log(`[GET open-source-photo-vision-pass] Photo label auto-update: filesWithCandidates=${labelUpdateResult.filesWithCandidates}, filesUpdated=${labelUpdateResult.filesUpdated}, duration=${labelDuration}ms, visionClassified=${labelUpdateResult.visionClassification?.totalClassified ?? 0}`);
   } catch (labelErr) {
     console.error('[GET open-source-photo-vision-pass] Photo label auto-update failed:', labelErr instanceof Error ? labelErr.message : String(labelErr));
     // Don't fail the response if label update fails — it's a secondary optimization
@@ -295,6 +298,7 @@ async function handleCompletedJob(job: PhotoVisionJob, surveyId: string) {
   // ── Phase 4A: Convert worker results → PhotoVisionResult[] → aggregateVisionResults ──
   let aggregationResult = null;
   try {
+    const aggStart = Date.now();
     const projectId = run.projectId ?? job.surveyId; // Fallback to surveyId if projectId is null
     const photoVisionResults = convertWorkerResultToPhotoVisionResults(run, projectId);
 
@@ -347,7 +351,8 @@ async function handleCompletedJob(job: PhotoVisionJob, surveyId: string) {
       projectId,
       surveyId,
     );
-    console.log(`[GET open-source-photo-vision-pass] Phase 4A aggregation: obstructions=${aggregationResult.obstructions.length} electrical=${aggregationResult.electricalNodes.length} corrections=${aggregationResult.planeCorrections.length}`);
+    const aggDuration = Date.now() - aggStart;
+    console.log(`[GET open-source-photo-vision-pass] [aggregator:4A] Phase 4A aggregation: obstructions=${aggregationResult.obstructions.length} electrical=${aggregationResult.electricalNodes.length} corrections=${aggregationResult.planeCorrections.length} duration=${aggDuration}ms`);
   } catch (aggErr) {
     console.error('[GET open-source-photo-vision-pass] Phase 4A aggregation failed (non-fatal):', aggErr instanceof Error ? aggErr.message : String(aggErr));
     // Non-fatal: aggregation failure should not prevent returning the raw worker results
