@@ -1019,8 +1019,11 @@ interface OpenSourcePhotoVisionRunSummary {
 
 interface OpenSourcePhotoVisionRunResponse {
   summary: OpenSourcePhotoVisionRunSummary;
-  stored: OpenSourcePhotoVisionBundle;
+  stored: OpenSourcePhotoVisionBundle | null;
+  labelUpdate: Record<string, unknown> | null;
+  phase4a: Record<string, unknown> | null;
   meta: Record<string, boolean>;
+  run?: Record<string, unknown>;
 }
 
 interface PhotoClassificationApplyDiagnosticsState {
@@ -1779,7 +1782,47 @@ function OpenSourcePhotoVisionPassPanel({
             const data = getJson.data as OpenSourcePhotoVisionRunResponse;
             setResult(data);
             setPollProgress(null);
-            onDetailRefresh?.({ openSourcePhotoVision: data.stored });
+            // If finalization is complete, stored candidates are available — refresh the detail view.
+            // If still running/pending, stored will be null — use the raw runHash from summary instead
+            // so the UI doesn't show stale runHash from previously persisted candidates.
+            const finalizationStatus = getJson.finalizationStatus as string | undefined;
+            if (data.stored) {
+              onDetailRefresh?.({ openSourcePhotoVision: data.stored });
+            }
+            // If finalization is still in progress, keep polling at a slower rate
+            // until stored results are available. The next poll will pick up the completed finalization.
+            if (finalizationStatus && finalizationStatus !== 'complete' && finalizationStatus !== 'failed') {
+              // Continue polling for finalization completion (with same jobId)
+              const FINALIZATION_POLL_INTERVAL_MS = 5_000; // 5s between finalization polls
+              const MAX_FINALIZATION_WAIT_MS = 120_000; // 2 min max wait for finalization
+              const finalizationStart = Date.now();
+              
+              while (Date.now() - finalizationStart < MAX_FINALIZATION_WAIT_MS) {
+                await new Promise((resolve) => setTimeout(resolve, FINALIZATION_POLL_INTERVAL_MS));
+                try {
+                  const fRes = await fetch(
+                    `/api/site-surveys/${surveyId}/open-source-photo-vision-pass?jobId=${encodeURIComponent(jobId)}`,
+                  );
+                  let fJson: Record<string, unknown>;
+                  try { fJson = await fRes.json(); } catch { break; }
+                  
+                  const fStatus = fJson.finalizationStatus as string | undefined;
+                  const fData = fJson.data as OpenSourcePhotoVisionRunResponse | undefined;
+                  
+                  if (fStatus === 'complete' && fData?.stored) {
+                    setResult(fData);
+                    onDetailRefresh?.({ openSourcePhotoVision: fData.stored });
+                    break;
+                  }
+                  if (fStatus === 'failed') {
+                    // Finalization failed but we already have the raw results — just stop polling
+                    break;
+                  }
+                } catch {
+                  break; // Stop polling on network errors
+                }
+              }
+            }
             return;
           }
 
@@ -1886,7 +1929,7 @@ External OpenCV + YOLO/Supervision + Tesseract OCR worker · actual image bytes 
             ["Equipment", equipmentCount],
             ["Obstructions", obstructionCount],
             ["OCR notes", ocrCount],
-            ["Run hash", activeBundle?.latestRunHash ? activeBundle.latestRunHash.slice(0, 8) : "—"],
+            ["Run hash", (result?.summary?.runHash ?? activeBundle?.latestRunHash) ? (result?.summary?.runHash ?? activeBundle?.latestRunHash!).slice(0, 8) : "—"],
           ].map(([label, value]) => (
             <div
               key={String(label)}

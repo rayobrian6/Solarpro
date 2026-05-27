@@ -42,6 +42,7 @@ import {
 } from './openaiVisionClassifier';
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type FinalizationStatus = 'pending' | 'running' | 'complete' | 'failed' | 'skipped';
 
 export interface PhotoVisionJob {
   jobId: string;
@@ -59,6 +60,12 @@ export interface PhotoVisionJob {
   result: OpenSourcePhotoVisionRunResult | null;
   error: string | null;
   renderJobId: string | null;
+  // Finalization tracking (migration 075)
+  finalizationStatus: FinalizationStatus;
+  finalizationResult: Record<string, unknown> | null;
+  finalizationError: string | null;
+  finalizationStartedAt: number | null;
+  finalizationCompletedAt: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,6 +128,11 @@ export async function createAndSubmitJob(
     result: null,
     error: null,
     renderJobId: null,
+    finalizationStatus: 'pending',
+    finalizationResult: null,
+    finalizationError: null,
+    finalizationStartedAt: null,
+    finalizationCompletedAt: null,
   };
 
   // Submit ALL files to Render in one POST
@@ -209,7 +221,12 @@ export async function getJob(jobId: string): Promise<PhotoVisionJob | null> {
            EXTRACT(EPOCH FROM completed_at)::bigint * 1000 AS completed_at_ms,
            total_batches, current_batch, completed_batches,
            total_photo_files, processed_files,
-           final_result, error, render_job_id
+           final_result, error, render_job_id,
+           finalization_status,
+           finalization_result,
+           finalization_error,
+           EXTRACT(EPOCH FROM finalization_started_at)::bigint * 1000 AS finalization_started_at_ms,
+           EXTRACT(EPOCH FROM finalization_completed_at)::bigint * 1000 AS finalization_completed_at_ms
     FROM photo_vision_jobs
     WHERE job_id = ${jobId}
   `;
@@ -231,6 +248,11 @@ export async function getJob(jobId: string): Promise<PhotoVisionJob | null> {
     result: row.final_result as OpenSourcePhotoVisionRunResult | null,
     error: row.error as string | null,
     renderJobId: (row.render_job_id as string) || null,
+    finalizationStatus: (row.finalization_status as FinalizationStatus) || 'pending',
+    finalizationResult: (row.finalization_result as Record<string, unknown> | null) || null,
+    finalizationError: (row.finalization_error as string | null) || null,
+    finalizationStartedAt: row.finalization_started_at_ms ? Number(row.finalization_started_at_ms) : null,
+    finalizationCompletedAt: row.finalization_completed_at_ms ? Number(row.finalization_completed_at_ms) : null,
   };
 }
 
@@ -246,7 +268,12 @@ export async function findActiveJobForSurvey(surveyId: string): Promise<PhotoVis
            EXTRACT(EPOCH FROM completed_at)::bigint * 1000 AS completed_at_ms,
            total_batches, current_batch, completed_batches,
            total_photo_files, processed_files,
-           final_result, error, render_job_id
+           final_result, error, render_job_id,
+           finalization_status,
+           finalization_result,
+           finalization_error,
+           EXTRACT(EPOCH FROM finalization_started_at)::bigint * 1000 AS finalization_started_at_ms,
+           EXTRACT(EPOCH FROM finalization_completed_at)::bigint * 1000 AS finalization_completed_at_ms
     FROM photo_vision_jobs
     WHERE survey_id = ${surveyId} AND status IN ('pending', 'running')
     ORDER BY created_at DESC
@@ -270,6 +297,11 @@ export async function findActiveJobForSurvey(surveyId: string): Promise<PhotoVis
     result: row.final_result as OpenSourcePhotoVisionRunResult | null,
     error: row.error as string | null,
     renderJobId: (row.render_job_id as string) || null,
+    finalizationStatus: (row.finalization_status as FinalizationStatus) || 'pending',
+    finalizationResult: (row.finalization_result as Record<string, unknown> | null) || null,
+    finalizationError: (row.finalization_error as string | null) || null,
+    finalizationStartedAt: row.finalization_started_at_ms ? Number(row.finalization_started_at_ms) : null,
+    finalizationCompletedAt: row.finalization_completed_at_ms ? Number(row.finalization_completed_at_ms) : null,
   };
 }
 
@@ -634,4 +666,66 @@ export async function updatePhotoLabelsFromCandidates(
     obstructionRegistration,
     visionClassification,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Finalization status management (migration 075)
+// These functions track the post-processing state so the GET route can
+// return immediately while heavy work runs in the background.
+// ---------------------------------------------------------------------------
+
+/**
+ * Mark finalization as started. Uses a CAS (compare-and-swap) on
+ * finalization_status = 'pending' to prevent duplicate finalization runs.
+ * Returns true if the update was applied (i.e. this caller won the race).
+ */
+export async function markFinalizationStarted(jobId: string): Promise<boolean> {
+  const sql = await getDbReady();
+  const result = await sql`
+    UPDATE photo_vision_jobs
+    SET finalization_status = 'running',
+        finalization_started_at = NOW(),
+        updated_at = NOW()
+    WHERE job_id = ${jobId}
+      AND finalization_status = 'pending'
+  `;
+  // Neon sql UPDATE returns the row count via .count on the result
+  const affected = Array.isArray(result) ? result.length : (result as Record<string, unknown>).count as number;
+  return affected > 0;
+}
+
+/**
+ * Mark finalization as complete and store the finalization result.
+ */
+export async function markFinalizationComplete(
+  jobId: string,
+  finalizationResult: Record<string, unknown>,
+): Promise<void> {
+  const sql = await getDbReady();
+  await sql`
+    UPDATE photo_vision_jobs
+    SET finalization_status = 'complete',
+        finalization_result = ${JSON.stringify(finalizationResult)},
+        finalization_completed_at = NOW(),
+        updated_at = NOW()
+    WHERE job_id = ${jobId}
+  `;
+}
+
+/**
+ * Mark finalization as failed with an error message.
+ */
+export async function markFinalizationFailed(
+  jobId: string,
+  error: string,
+): Promise<void> {
+  const sql = await getDbReady();
+  await sql`
+    UPDATE photo_vision_jobs
+    SET finalization_status = 'failed',
+        finalization_error = ${error},
+        finalization_completed_at = NOW(),
+        updated_at = NOW()
+    WHERE job_id = ${jobId}
+  `;
 }
