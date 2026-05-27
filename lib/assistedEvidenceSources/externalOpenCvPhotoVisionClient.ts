@@ -40,9 +40,11 @@ export type ExternalOpenCvPhotoVisionRunOutcome =
   | ExternalOpenCvPhotoVisionUnavailableResult
   | ExternalOpenCvPhotoVisionAvailableResult;
 
+const DEFAULT_OPEN_SOURCE_PHOTO_VISION_WORKER_URL = 'https://solarpro.onrender.com';
+
 export function getExternalOpenCvWorkerUrl(): string | null {
   const raw = process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_URL?.trim();
-  if (!raw) return null;
+  if (!raw) return DEFAULT_OPEN_SOURCE_PHOTO_VISION_WORKER_URL;
   return raw.replace(/\/+$/, '');
 }
 
