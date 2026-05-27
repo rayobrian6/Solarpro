@@ -307,11 +307,19 @@ export async function classifyUnclassifiedPhotosWithVision(
     }
 
     if (updatesForDb.length > 0) {
-      // Apply updates using the existing function
+      // Apply updates using the existing function.
+      // skipOwnerCheck=true: the OpenAI Vision auto-classifier doesn't have a
+      // UUID in the clients table, so we bypass the c.user_id ownership check.
+      // The pipeline that invoked us already gate-keeps access.
       const { updateSiteSurveyFileLabels } = await import('@/lib/db/surveys');
-      const userId = 'openai_vision_auto'; // System user for auto-labeling
-      const updatedFiles = await updateSiteSurveyFileLabels(surveyId, userId, updatesForDb);
-      console.log(`[classifyUnclassifiedPhotosWithVision] Auto-applied ${updatedFiles.length} label updates`);
+      const source = 'openai_vision_auto'; // Audit identifier (not a UUID)
+      const updatedFiles = await updateSiteSurveyFileLabels(
+        surveyId,
+        source,
+        updatesForDb,
+        { skipOwnerCheck: true },
+      );
+      console.log(`[classifyUnclassifiedPhotosWithVision] Auto-applied ${updatedFiles.length} label updates (source=${source})`);
     }
   }
 

@@ -344,31 +344,59 @@ export async function bulkAddSiteSurveyFiles(
 
 // ---------------------------------------------------------------------------
 // updateSiteSurveyFileLabels — apply operator-reviewed photo evidence labels
+//
+// Options:
+//   skipOwnerCheck — when true, omits the c.user_id ownership JOIN condition.
+//     Used by system auto-classifiers (e.g. OpenAI Vision) that are already
+//     gated by the pipeline and don't have a UUID in the clients table.
+//     The caller should pass a descriptive source identifier as `userId`
+//     for audit logging purposes only.
 // ---------------------------------------------------------------------------
 export async function updateSiteSurveyFileLabels(
   surveyId: string,
   userId: string,
   updates: Array<{ fileId: string; label: string | null }>,
+  options?: { skipOwnerCheck?: boolean },
 ): Promise<SiteSurveyFile[]> {
   if (!updates.length) return [];
   const sql = await getDbReady();
   const results: SiteSurveyFile[] = [];
 
-  for (const update of updates) {
-    const rows = await sql`
-      UPDATE site_survey_files ssf
-      SET label = ${update.label ?? null}
-      FROM site_surveys ss
-      JOIN clients c ON c.id = ss.client_id
-      WHERE ssf.id = ${update.fileId}
-        AND ssf.survey_id = ${surveyId}
-        AND ss.id = ssf.survey_id
-        AND c.user_id = ${userId}
-      RETURNING ssf.*
-    `;
-    if (rows.length) results.push(rowToSiteSurveyFile(rows[0] as Record<string, unknown>));
+  const skipOwnerCheck = options?.skipOwnerCheck ?? false;
+
+  if (skipOwnerCheck) {
+    // System auto-classifier path: no ownership check (the pipeline already
+    // gate-keeps access), but we still verify the file belongs to the survey.
+    console.log(`[updateSiteSurveyFileLabels] skipOwnerCheck=true, source=${userId}, surveyId=${surveyId}, updates=${updates.length}`);
+    for (const update of updates) {
+      const rows = await sql`
+        UPDATE site_survey_files ssf
+        SET label = ${update.label ?? null}
+        WHERE ssf.id = ${update.fileId}
+          AND ssf.survey_id = ${surveyId}
+        RETURNING ssf.*
+      `;
+      if (rows.length) results.push(rowToSiteSurveyFile(rows[0] as Record<string, unknown>));
+    }
+  } else {
+    // Human operator path: enforce ownership via client join (existing behavior)
+    for (const update of updates) {
+      const rows = await sql`
+        UPDATE site_survey_files ssf
+        SET label = ${update.label ?? null}
+        FROM site_surveys ss
+        JOIN clients c ON c.id = ss.client_id
+        WHERE ssf.id = ${update.fileId}
+          AND ssf.survey_id = ${surveyId}
+          AND ss.id = ssf.survey_id
+          AND c.user_id = ${userId}
+        RETURNING ssf.*
+      `;
+      if (rows.length) results.push(rowToSiteSurveyFile(rows[0] as Record<string, unknown>));
+    }
   }
 
+  console.log(`[updateSiteSurveyFileLabels] ${skipOwnerCheck ? 'system' : 'operator'} path: ${results.length}/${updates.length} updates applied (source=${userId})`);
   return results;
 }
 
