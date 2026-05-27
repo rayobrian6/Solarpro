@@ -15,8 +15,13 @@
 // Idempotency:
 //   - If finalization_status='complete', returns stored results immediately.
 //   - If finalization_status='running' (stale >2min), resets to 'pending' first.
-//   - CAS on finalization_status='pending' prevents duplicate runs.
+//   - CAS on finalization_status IN ('pending','failed','skipped') prevents duplicate runs
+//     while allowing retry of failed/skipped jobs.
 //   - Candidate persistence uses (surveyId, runHash) dedup.
+//
+// Dry-Run Mode:
+//   - POST /finalize?dryRun=1 returns the stage plan without executing or writing anything.
+//   - Useful for debugging why finalization isn't progressing.
 //
 // INSTRUMENTATION:
 //   Every stage emits [finalize:STAGE:start] and [finalize:STAGE:end] logs
@@ -72,6 +77,12 @@ const VISION_CLASSIFICATION_BUDGET_MS = 5 * 60_000; // 5 min — but capped by o
 
 /** Statement timeout for DB operations during finalization (ms). */
 const DB_STATEMENT_TIMEOUT_MS = 30_000; // 30s per DB statement
+
+/** Timeout for lightweight DB reads (getJob, CAS claim, etc.) */
+const DB_READ_TIMEOUT_MS = 10_000; // 10s for simple reads
+
+/** Timeout for Phase 4A aggregation (outer timeout). */
+const PHASE4A_AGGREGATION_TIMEOUT_MS = 40_000; // 40s — matches internal AGGREGATION_BUDGET_MS
 
 // ---------------------------------------------------------------------------
 // Helper: run a function with an overall timeout guard
@@ -266,6 +277,12 @@ export async function POST(
   const finalizeStart = Date.now();
   const surveyId = params?.surveyId ?? 'unknown';
 
+  // ── Check dry-run mode ──
+  const dryRun = req.nextUrl.searchParams.get('dryRun') === '1';
+  if (dryRun) {
+    console.log(`[finalize:dry-run:start] surveyId=${surveyId}`);
+  }
+
   // Auth check
   const user = getUserFromRequest(req);
   if (!user) {
@@ -284,10 +301,13 @@ export async function POST(
     return NextResponse.json({ success: false, error: 'jobId is required' }, { status: 400 });
   }
 
-  console.log(`[finalize:start] surveyId=${surveyId} jobId=${jobId}`);
+  console.log(`[finalize:start] surveyId=${surveyId} jobId=${jobId} dryRun=${dryRun}`);
 
-  // Verify job exists and belongs to this survey
-  const job = await getJob(jobId);
+  // ── Verify job exists and belongs to this survey ──
+  console.log(`[finalize:get-job:start] jobId=${jobId}`);
+  const job = await withTimeout(getJob(jobId), DB_READ_TIMEOUT_MS, 'finalize:get-job');
+  console.log(`[finalize:get-job:end] jobId=${jobId} found=${!!job} status=${job?.status} finalizationStatus=${job?.finalizationStatus}`);
+
   if (!job) {
     return NextResponse.json({ success: false, error: 'Job not found' }, { status: 404 });
   }
@@ -320,10 +340,12 @@ export async function POST(
 
   // ── Handle stuck 'running' status (from killed fire-and-forget) ──
   if (job.finalizationStatus === 'running') {
-    const reset = await resetStuckFinalization(jobId);
+    console.log(`[finalize:reset-stuck:start] jobId=${jobId}`);
+    const reset = await withTimeout(resetStuckFinalization(jobId), DB_READ_TIMEOUT_MS, 'finalize:reset-stuck');
+    console.log(`[finalize:reset-stuck:end] jobId=${jobId} reset=${reset}`);
     if (reset) {
       console.log(`[finalize:start] jobId=${jobId} reset stuck 'running' finalization back to 'pending'`);
-      const refreshed = await getJob(jobId);
+      const refreshed = await withTimeout(getJob(jobId), DB_READ_TIMEOUT_MS, 'finalize:get-job-after-reset');
       if (refreshed) {
         job.finalizationStatus = refreshed.finalizationStatus;
         job.finalizationResult = refreshed.finalizationResult;
@@ -341,18 +363,53 @@ export async function POST(
   }
 
   // ── Claim the finalization slot (CAS) ──
-  if (job.finalizationStatus === 'pending' || job.finalizationStatus === 'failed') {
-    const claimed = await markFinalizationStarted(jobId);
+  // CAS now matches 'pending', 'failed', and 'skipped' — allows retry of failed/skipped jobs
+  if (job.finalizationStatus === 'pending' || job.finalizationStatus === 'failed' || job.finalizationStatus === 'skipped') {
+    console.log(`[finalize:cas-claim:start] jobId=${jobId} currentStatus=${job.finalizationStatus}`);
+    const claimed = await withTimeout(markFinalizationStarted(jobId), DB_READ_TIMEOUT_MS, 'finalize:cas-claim');
+    console.log(`[finalize:cas-claim:end] jobId=${jobId} claimed=${claimed}`);
     if (!claimed) {
-      console.log(`[finalize:start] jobId=${jobId} finalization slot already claimed, returning status`);
-      const refreshed = await getJob(jobId);
+      console.log(`[finalize:start] jobId=${jobId} CAS claim failed for finalizationStatus=${job.finalizationStatus}, returning status`);
+      const refreshed = await withTimeout(getJob(jobId), DB_READ_TIMEOUT_MS, 'finalize:get-job-after-cas');
       return NextResponse.json({
         success: true,
         jobId: job.jobId,
-        finalizationStatus: refreshed?.finalizationStatus ?? 'running',
-        message: 'Finalization is currently in progress. Poll GET for completion.',
+        finalizationStatus: refreshed?.finalizationStatus ?? job.finalizationStatus,
+        message: 'Finalization is currently in progress or in a non-retryable state. Poll GET for completion.',
       });
     }
+  }
+
+  // ── Dry-run: return the stage plan without executing ──
+  if (dryRun) {
+    const run = job.result!;
+    const stagePlan = [
+      { stage: 1, name: 'persist', description: 'Persist candidates to DB', timeoutMs: DB_STATEMENT_TIMEOUT_MS, fatal: true },
+      { stage: 2, name: 'labels', description: 'Update photo labels from YOLO/OCR candidates', timeoutMs: DB_STATEMENT_TIMEOUT_MS, fatal: true },
+      { stage: 3, name: 'obstructions', description: 'Register obstructions on roof_plane photos', timeoutMs: DB_STATEMENT_TIMEOUT_MS, fatal: false },
+      { stage: 4, name: 'classification', description: 'OpenAI Vision fallback classification', timeoutMs: VISION_CLASSIFICATION_BUDGET_MS, fatal: false, skipped: !process.env.OPENAI_API_KEY },
+      { stage: 5, name: 'phase4a', description: 'Phase 4A aggregation (homography projection)', timeoutMs: PHASE4A_AGGREGATION_TIMEOUT_MS, fatal: false },
+      { stage: 6, name: 'store-result', description: 'Store finalization result in DB', timeoutMs: DB_READ_TIMEOUT_MS, fatal: true },
+    ];
+    const totalDurationEstimate = stagePlan.reduce((sum, s) => sum + s.timeoutMs, 0);
+    console.log(`[finalize:dry-run:end] jobId=${jobId} stages=${stagePlan.length}`);
+    return NextResponse.json({
+      success: true,
+      dryRun: true,
+      jobId: job.jobId,
+      surveyId,
+      finalizationStatus: job.finalizationStatus,
+      jobStatus: job.status,
+      candidateCount: run.candidates.length,
+      processedCount: run.processedCount,
+      failedCount: run.failedCount,
+      stagePlan,
+      overallTimeoutMs: FINALIZATION_OVERALL_TIMEOUT_MS,
+      totalDurationEstimateMs: totalDurationEstimate,
+      warning: totalDurationEstimate > FINALIZATION_OVERALL_TIMEOUT_MS
+        ? `Sum of stage timeouts (${totalDurationEstimate}ms) exceeds overall timeout (${FINALIZATION_OVERALL_TIMEOUT_MS}ms). Stages may be cut short.`
+        : undefined,
+    });
   }
 
   // ── Run the full finalization pipeline ──
@@ -360,15 +417,25 @@ export async function POST(
   const runHash = run.runHash;
   const finalizationResult: Record<string, unknown> = {};
 
-  // Overall timeout guard — if the pipeline exceeds this, we abort
+  // Overall timeout guard — uses AbortController to actually abort the pipeline
+  const abortController = new AbortController();
   const overallTimeout = setTimeout(() => {
-    console.error(`[finalize:failed] jobId=${jobId} OVERALL TIMEOUT — pipeline exceeded ${FINALIZATION_OVERALL_TIMEOUT_MS}ms`);
+    console.error(`[finalize:failed] jobId=${jobId} OVERALL TIMEOUT — pipeline exceeded ${FINALIZATION_OVERALL_TIMEOUT_MS}ms, aborting`);
+    abortController.abort();
   }, FINALIZATION_OVERALL_TIMEOUT_MS);
 
+  // Helper to check if we should abort
+  function checkAbort(stageName: string) {
+    if (abortController.signal.aborted) {
+      throw new Error(`Finalization aborted during ${stageName}: overall timeout exceeded ${FINALIZATION_OVERALL_TIMEOUT_MS}ms`);
+    }
+  }
+
   try {
-    // ════════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════
     // STAGE 1: Persist candidates to DB
-    // ════════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════
+    checkAbort('pre-persist');
     const persistStart = Date.now();
     console.log(`[finalize:persist:start] jobId=${jobId} runHash=${runHash}`);
     let stored: unknown = null;
@@ -388,14 +455,19 @@ export async function POST(
     }
     finalizationResult.stored = stored;
 
-    // ════════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════
     // STAGE 2: Update photo labels from YOLO/OCR candidates
-    // ════════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════
+    checkAbort('pre-labels');
     const labelsStart = Date.now();
     console.log(`[finalize:labels:start] jobId=${jobId} runHash=${runHash}`);
     let labelUpdateResult: LabelUpdateResult | null = null;
     try {
-      labelUpdateResult = await runLabelUpdateStage(surveyId, job.userId, run, jobId);
+      labelUpdateResult = await withTimeout(
+        runLabelUpdateStage(surveyId, job.userId, run, jobId),
+        DB_STATEMENT_TIMEOUT_MS,
+        'finalize:labels',
+      );
       console.log(`[finalize:labels:end] jobId=${jobId} runHash=${runHash} filesWithCandidates=${labelUpdateResult.filesWithCandidates} filesUpdated=${labelUpdateResult.filesUpdated} durationMs=${Date.now() - labelsStart}`);
     } catch (labelErr) {
       const durationMs = Date.now() - labelsStart;
@@ -411,9 +483,10 @@ export async function POST(
         }
       : null;
 
-    // ════════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════
     // STAGE 3: Register obstructions on roof_plane photos
-    // ════════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════
+    checkAbort('pre-obstructions');
     const obstructionsStart = Date.now();
     console.log(`[finalize:obstructions:start] jobId=${jobId} runHash=${runHash}`);
     let obstructionRegistration: ObstructionRegistrationResult | null = null;
@@ -457,9 +530,10 @@ export async function POST(
       ? { totalObstructions: obstructionRegistration.totalObstructions, roofPhotosProcessed: obstructionRegistration.roofPhotosProcessed }
       : null;
 
-    // ════════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════
     // STAGE 4: OpenAI Vision fallback classification
-    // ════════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════
+    checkAbort('pre-classification');
     const classificationStart = Date.now();
     console.log(`[finalize:classification:start] jobId=${jobId} runHash=${runHash}`);
     let visionClassification: VisionClassificationBatchResult | null = null;
@@ -485,9 +559,10 @@ export async function POST(
       ? { totalClassified: visionClassification.totalClassified, estimatedCost: visionClassification.estimatedCost }
       : null;
 
-    // ════════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════
     // STAGE 5: Phase 4A aggregation (homography projection)
-    // ════════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════
+    checkAbort('pre-phase4a');
     const phase4aStart = Date.now();
     console.log(`[finalize:phase4a:start] jobId=${jobId} runHash=${runHash}`);
     let aggregationResult = null;
@@ -496,7 +571,11 @@ export async function POST(
       const photoVisionResults = convertWorkerResultToPhotoVisionResults(run, projectId);
 
       // Enrich photo contexts with survey data
-      const surveyFiles = await getSiteSurveyFiles(surveyId);
+      const surveyFiles = await withTimeout(
+        getSiteSurveyFiles(surveyId),
+        DB_READ_TIMEOUT_MS,
+        'finalize:phase4a:get-survey-files',
+      );
       const photoFiles = surveyFiles.filter(f => f.fileType === 'photo');
 
       // Build per-roof-plane reference image lookup
@@ -536,10 +615,10 @@ export async function POST(
         }
       }
 
-      aggregationResult = await aggregateVisionResults(
-        photoVisionResults,
-        projectId,
-        surveyId,
+      aggregationResult = await withTimeout(
+        aggregateVisionResults(photoVisionResults, projectId, surveyId),
+        PHASE4A_AGGREGATION_TIMEOUT_MS,
+        'finalize:phase4a:aggregate',
       );
       const phase4aDuration = Date.now() - phase4aStart;
       console.log(`[finalize:phase4a:end] jobId=${jobId} runHash=${runHash} obstructions=${aggregationResult.obstructions.length} electrical=${aggregationResult.electricalNodes.length} corrections=${aggregationResult.planeCorrections.length} durationMs=${phase4aDuration}`);
@@ -628,13 +707,18 @@ export async function POST(
       };
     }
 
-    // ════════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════
     // STAGE 6: Store finalization result
-    // ════════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════
+    checkAbort('pre-store-result');
     const storeResultStart = Date.now();
     console.log(`[finalize:store-result:start] jobId=${jobId} runHash=${runHash}`);
     try {
-      await markFinalizationComplete(job.jobId, finalizationResult);
+      await withTimeout(
+        markFinalizationComplete(job.jobId, finalizationResult),
+        DB_READ_TIMEOUT_MS,
+        'finalize:store-result',
+      );
       console.log(`[finalize:store-result:end] jobId=${jobId} runHash=${runHash} durationMs=${Date.now() - storeResultStart}`);
     } catch (storeErr) {
       const durationMs = Date.now() - storeResultStart;
@@ -661,7 +745,8 @@ export async function POST(
     clearTimeout(overallTimeout);
     const totalDuration = Date.now() - finalizeStart;
     const errMsg = fatalErr instanceof Error ? fatalErr.message : String(fatalErr);
-    console.error(`[finalize:failed] jobId=${jobId} runHash=${runHash} FATAL: ${errMsg} durationMs=${totalDuration}`);
+    const isAborted = abortController.signal.aborted;
+    console.error(`[finalize:failed] jobId=${jobId} runHash=${runHash} FATAL: ${errMsg} durationMs=${totalDuration} aborted=${isAborted}`);
     try {
       await markFinalizationFailed(job.jobId, errMsg);
     } catch (markErr) {
@@ -673,6 +758,7 @@ export async function POST(
       finalizationStatus: 'failed',
       error: errMsg,
       durationMs: totalDuration,
+      aborted: isAborted || undefined,
     }, { status: 500 });
   }
 }

@@ -676,8 +676,13 @@ export async function updatePhotoLabelsFromCandidates(
 
 /**
  * Mark finalization as started. Uses a CAS (compare-and-swap) on
- * finalization_status = 'pending' to prevent duplicate finalization runs.
+ * finalization_status IN ('pending', 'failed', 'skipped') to prevent duplicate
+ * finalization runs while allowing retry of failed/skipped jobs.
  * Returns true if the update was applied (i.e. this caller won the race).
+ *
+ * NOTE: Previously only matched 'pending', which prevented retry of 'failed' jobs.
+ * Now also matches 'failed' and 'skipped' so they can be re-finalized.
+ * Clears finalization_error on retry to avoid stale error messages.
  */
 export async function markFinalizationStarted(jobId: string): Promise<boolean> {
   const sql = await getDbReady();
@@ -685,9 +690,10 @@ export async function markFinalizationStarted(jobId: string): Promise<boolean> {
     UPDATE photo_vision_jobs
     SET finalization_status = 'running',
         finalization_started_at = NOW(),
+        finalization_error = NULL,
         updated_at = NOW()
     WHERE job_id = ${jobId}
-      AND finalization_status = 'pending'
+      AND finalization_status IN ('pending', 'failed', 'skipped')
   `;
   // Neon sql UPDATE returns the row count via .count on the result
   const affected = Array.isArray(result) ? result.length : (result as Record<string, unknown>).count as number;
