@@ -215,6 +215,6 @@ describe('Survey Photo Render Intelligence V1', () => {
 
     expect(evidence.classification.category).toBe('attic_rafter');
     expect(evidence.deterministicSignals.join('\n')).toContain('matched attic/rafter keyword');
-    expect(evidence.evidenceLimitations.join('\n')).toContain('No pixel-level computer vision, measurement extraction, or authoritative geometry inference was performed.');
+    expect(evidence.evidenceLimitations.join('\n')).toContain('No pixel-level scan was available for this photo; measurement extraction or authoritative geometry inference was not performed.');
   });
 });

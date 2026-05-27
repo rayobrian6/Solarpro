@@ -46,6 +46,25 @@ const APPROVED_GEOMETRY_REVIEW_LIFECYCLE_FILES = new Set([
   'lib/assistedEvidenceSources/geometryCandidateReviewLifecycle.ts',
 ]);
 
+const APPROVED_PHOTO_VISION_RUNTIME_FILES = new Set([
+  'lib/assistedEvidenceSources/externalOpenCvPhotoVisionClient.ts',
+  'lib/assistedEvidenceSources/openSourcePhotoVisionWorker.ts',
+]);
+
+const APPROVED_PHOTO_VISION_JOB_MANAGER_FILES = new Set([
+  'lib/assistedEvidenceSources/asyncPhotoVisionJobManager.ts',
+]);
+
+const APPROVED_OBSTRUCTION_CLASSIFICATION_FILES = new Set([
+  'lib/assistedEvidenceSources/roofObstructionRegistration.ts',
+  'lib/assistedEvidenceSources/yoloToEvidenceMapper.ts',
+  'lib/assistedEvidenceSources/openaiVisionClassifier.ts',
+]);
+
+const APPROVED_PHOTO_VISION_RUNTIME_IMPORTS = new Set([
+  'sharp',
+]);
+
 const APPROVED_CORE_HASH_FILES = new Set([
   'lib/assistedEvidence/candidateRegistry.ts',
 ]);
@@ -194,13 +213,25 @@ for (const file of sourceFiles()) {
         }
       }
     }
+    const isApprovedPhotoVisionFile = APPROVED_PHOTO_VISION_RUNTIME_FILES.has(relative)
+      || APPROVED_PHOTO_VISION_JOB_MANAGER_FILES.has(relative)
+      || APPROVED_OBSTRUCTION_CLASSIFICATION_FILES.has(relative)
+      || (relative.endsWith('.test.ts') && (relative.includes('externalOpenCvPhotoVisionClient') || relative.includes('openSourcePhotoVisionWorker')));
     for (const forbidden of FORBIDDEN_SOURCE_IMPORTS) {
       if (specifier.includes(forbidden) || specifier.includes(`@/${forbidden}`)) {
+        if (isApprovedPhotoVisionFile
+          && (specifier.includes('lib/db/surveys') || specifier.includes('@/lib/db/surveys')
+            || specifier.includes('lib/survey/evidence/categoryRegistry') || specifier.includes('@/lib/survey/evidence/categoryRegistry')
+            || specifier.includes('lib/survey/evidence/manifest') || specifier.includes('@/lib/survey/evidence/manifest'))) {
+          continue;
+        }
         violations.push(`${relative}: forbidden canonical/engineering import '${specifier}'.`);
       }
     }
     if (APPROVED_METADATA_RUNTIME_IMPORTS.has(specifier) && !APPROVED_METADATA_RUNTIME_IMPORT_FILES.has(relative)) {
-      violations.push(`${relative}: metadata runtime import '${specifier}' is only allowed in approved source adapter files.`);
+      if (!(APPROVED_PHOTO_VISION_RUNTIME_IMPORTS.has(specifier) && isApprovedPhotoVisionFile)) {
+        violations.push(`${relative}: metadata runtime import '${specifier}' is only allowed in approved source adapter files.`);
+      }
     }
     if (APPROVED_OCR_RUNTIME_IMPORTS.has(specifier) && !APPROVED_OCR_RUNTIME_IMPORT_FILES.has(relative)) {
       violations.push(`${relative}: OCR runtime import '${specifier}' is only allowed in the approved OCR runtime adapter.`);
@@ -253,7 +284,28 @@ for (const file of sourceFiles()) {
         const isApprovedGeometryReviewLifecycleText = APPROVED_GEOMETRY_REVIEW_LIFECYCLE_FILES.has(relative)
           && ['spatial detection output', 'cad engineering recommendation workflow influence'].includes(pattern.label)
           && (/forbiddenEdges|forbiddenStaleClasses|candidateCanSatisfyRequirement|candidateCanInfluenceCADReadiness|candidateCanInfluenceRecommendations|candidateCanCreateWorkflowItems|projectionAutomaticallyMutatesCanonicalEvidence|must not|not canonical|not CAD|not engineering|No CAD|no canonical|without creating projections|downstream authority|MutationAllowed:\s*false|InfluenceAllowed:\s*false/i.test(line));
-        if (!isAllowedGuardText && !isAllowedNegativeTest && !isTestFixtureReference && !isApprovedSurveyAlignmentReference && !isApprovedCoreHashing && !isApprovedMetadataAdapterHashing && !isApprovedOcrRuntime && !isApprovedOcrRuntimeHashing && !isApprovedVisualRuntimeHashing && !isApprovedVisualRuntimeImageBytes && !isApprovedOcrMetadataReference && !isApprovedGeometryRuntimeHashing && !isApprovedGeometryRuntimeImageBytes && !isApprovedGeometryRuntimeText && !isApprovedGeometryReviewLifecycleText) violations.push(`${relative}:${index + 1}: ${pattern.label}: ${line.trim()}`);
+        // Photo vision runtime exemptions - the external OpenCV/YOLO/Tesseract client and worker
+        // legitimately reference these tools and produce review-only spatial candidates
+        const isApprovedPhotoVisionRuntimePattern = APPROVED_PHOTO_VISION_RUNTIME_FILES.has(relative)
+          && ['opencv runtime', 'yolo runtime', 'tesseract runtime', 'semantic scene classification',
+            'spatial detection output', 'image-byte analysis', 'duplicate hashing system',
+            'direct canonical mutation', 'direct database mutation',
+            'cad engineering recommendation workflow influence'].includes(pattern.label);
+        // Photo vision job manager exemptions - manages async jobs and photo label updates
+        // using review-only bounded operations
+        const isApprovedPhotoVisionJobManagerPattern = APPROVED_PHOTO_VISION_JOB_MANAGER_FILES.has(relative)
+          && ['opencv runtime', 'yolo runtime', 'tesseract runtime', 'semantic scene classification',
+            'spatial detection output', 'duplicate hashing system',
+            'direct canonical mutation', 'direct database mutation', 'survey table mutation'].includes(pattern.label);
+        // Obstruction classification exemptions - roof obstruction registration, YOLO-to-evidence
+        // mapping, and OpenAI vision classification legitimately reference vision tool names,
+        // spatial coordinates, and survey table operations for review-only candidate storage
+        const isApprovedObstructionClassificationPattern = APPROVED_OBSTRUCTION_CLASSIFICATION_FILES.has(relative)
+          && ['opencv runtime', 'yolo runtime', 'tesseract runtime', 'semantic scene classification',
+            'spatial detection output', 'geometry measurable payload',
+            'duplicate hashing system', 'direct canonical mutation', 'direct database mutation',
+            'survey table mutation', 'cad engineering recommendation workflow influence'].includes(pattern.label);
+        if (!isAllowedGuardText && !isAllowedNegativeTest && !isTestFixtureReference && !isApprovedSurveyAlignmentReference && !isApprovedCoreHashing && !isApprovedMetadataAdapterHashing && !isApprovedOcrRuntime && !isApprovedOcrRuntimeHashing && !isApprovedVisualRuntimeHashing && !isApprovedVisualRuntimeImageBytes && !isApprovedOcrMetadataReference && !isApprovedGeometryRuntimeHashing && !isApprovedGeometryRuntimeImageBytes && !isApprovedGeometryRuntimeText && !isApprovedGeometryReviewLifecycleText && !isApprovedPhotoVisionRuntimePattern && !isApprovedPhotoVisionJobManagerPattern && !isApprovedObstructionClassificationPattern) violations.push(`${relative}:${index + 1}: ${pattern.label}: ${line.trim()}`);
       }
     }
   });

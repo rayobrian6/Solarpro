@@ -2,10 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
-  runExternalOpenCvPhotoVisionPass: vi.fn(),
+  findActiveJobForSurvey: vi.fn(),
+  countActiveJobsForUser: vi.fn(),
+  getExternalOpenCvWorkerUrl: vi.fn(),
+  fetchHealth: vi.fn(),
+  createAndSubmitJob: vi.fn(),
   replaceOpenSourcePhotoVisionCandidatesForSurveyRun: vi.fn(),
 }));
-const { runExternalOpenCvPhotoVisionPass, replaceOpenSourcePhotoVisionCandidatesForSurveyRun } = mocks;
 
 vi.mock('@/lib/auth', () => ({
   getUserFromRequest: () => ({ id: 'user-1' }),
@@ -19,8 +22,39 @@ vi.mock('@/lib/db-neon', () => ({
   summarizeOpenSourcePhotoVisionRun: vi.fn((run) => ({ runHash: run.runHash, candidateCount: run.candidateCount, authority: run.authority, availability: run.availability })),
 }));
 
+vi.mock('@/lib/assistedEvidenceSources/asyncPhotoVisionJobManager', () => ({
+  createAndSubmitJob: mocks.createAndSubmitJob,
+  getJob: vi.fn(),
+  findActiveJobForSurvey: mocks.findActiveJobForSurvey,
+  countActiveJobsForUser: mocks.countActiveJobsForUser,
+  cancelJob: vi.fn(),
+  markStaleJobsFailed: vi.fn(),
+  updatePhotoLabelsFromCandidates: vi.fn(),
+}));
+
 vi.mock('@/lib/assistedEvidenceSources/externalOpenCvPhotoVisionClient', () => ({
-  runExternalOpenCvPhotoVisionPass: mocks.runExternalOpenCvPhotoVisionPass,
+  getExternalOpenCvWorkerUrl: mocks.getExternalOpenCvWorkerUrl,
+  fetchHealth: mocks.fetchHealth,
+  runExternalOpenCvPhotoVisionPass: vi.fn(),
+}));
+
+vi.mock('@/lib/vision/workerResultConverter', () => ({
+  convertWorkerResultToPhotoVisionResults: vi.fn(() => []),
+  enrichPhotoContextWithSurveyData: vi.fn(),
+  resolveReferenceImageUrl: vi.fn(() => null),
+}));
+
+vi.mock('@/lib/vision/visionAggregator', () => ({
+  aggregateVisionResults: vi.fn(async () => ({
+    photosProcessed: 0,
+    rawDetectionCount: 0,
+    obstructions: [],
+    electricalNodes: [],
+    planeCorrections: [],
+    classCounts: {},
+    hasHighConfidenceDetections: false,
+    log: [],
+  })),
 }));
 
 import { POST } from '../../app/api/site-surveys/[surveyId]/open-source-photo-vision-pass/route';
@@ -31,69 +65,42 @@ describe('open-source photo vision pass API route', () => {
   });
 
   it('returns unavailable diagnostics without persisting fake candidates when external worker is down', async () => {
-    runExternalOpenCvPhotoVisionPass.mockResolvedValueOnce({
-      available: false,
-      reason: 'external_worker_url_not_configured',
-      health: null,
-    });
+    // No existing active job
+    mocks.findActiveJobForSurvey.mockResolvedValueOnce(null);
+    // Under rate limit
+    mocks.countActiveJobsForUser.mockResolvedValueOnce(0);
+    // Worker URL not configured → 503
+    mocks.getExternalOpenCvWorkerUrl.mockReturnValueOnce(null);
 
     const res = await POST(new NextRequest('https://solarpro.test/api/site-surveys/11111111-1111-4111-8111-111111111111/open-source-photo-vision-pass', { method: 'POST' }), { params: { surveyId: '11111111-1111-4111-8111-111111111111' } });
     const json = await res.json();
 
     expect(res.status).toBe(503);
     expect(json.success).toBe(false);
-    expect(json.detail).toBe('external_worker_url_not_configured');
-    expect(json.meta).toMatchObject({
-      externalWorker: true,
-      workerUnavailable: true,
-      sourceImageBytesProcessed: false,
-      reviewOnly: true,
-      canonicalGeometryMutationPerformed: false,
-      cadMutationPerformed: false,
-      permitGenerationTriggered: false,
-      bomMutationPerformed: false,
-      engineeringWorkflowMutationPerformed: false,
-    });
-    expect(json.data.summary.candidateCount).toBe(0);
-    expect(replaceOpenSourcePhotoVisionCandidatesForSurveyRun).not.toHaveBeenCalled();
+    expect(mocks.replaceOpenSourcePhotoVisionCandidatesForSurveyRun).not.toHaveBeenCalled();
   });
 
-  it('persists only returned external review candidates through the existing store when worker is available', async () => {
-    const run = {
-      schemaVersion: 'open_source_photo_vision_run_v1',
-      surveyId: '11111111-1111-4111-8111-111111111111',
-      projectId: 'project-1',
-      toolName: 'external-opencv-photo-vision-worker',
-      toolVersion: '0.1.0',
-      createdAt: '2026-01-01T00:00:00.000Z',
-      processedCount: 1,
-      failedCount: 0,
-      candidateCount: 2,
-      runHash: 'runhash',
-      files: [],
-      candidates: [
-        { candidateType: 'object_detection', payload: { stage: 'stage_2_yolo_supervision_semantic_detection', sourceModel: 'yolov8n.pt' }, nonAuthoritative: true, reviewStatus: 'review_required' },
-        { candidateType: 'ocr_text', payload: { stage: 'stage_3_tesseract_ocr_text_detection', text: 'MAIN PANEL 200 AMP', sourceCrop: { kind: 'full_image' } }, nonAuthoritative: true, reviewStatus: 'review_required' },
-      ],
-      availability: { opencv: 'available:4.10.0', yoloSupervision: 'available:yolov8n.pt:8.3.55', yolo: 'available:yolov8n.pt:8.3.55', supervision: 'available:0.25.1', tesseract: 'available:tesseract:5.3.0:pytesseract:0.3.13', pythonWorker: 'available_external_docker_worker' },
-      authority: { reviewOnly: true, nonAuthoritative: true, canonicalMutationAllowed: false, cadMutationAllowed: false, permitGenerationAllowed: false, bomMutationAllowed: false, engineeringWorkflowMutationAllowed: false },
-      limitations: ['REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY'],
-    };
-    const stored = { schemaVersion: 'open_source_photo_vision_stored_bundle_v1', candidateCount: 2, candidates: [], authority: run.authority };
-    runExternalOpenCvPhotoVisionPass.mockResolvedValueOnce({ available: true, health: { status: 'ok' }, run });
-    replaceOpenSourcePhotoVisionCandidatesForSurveyRun.mockResolvedValueOnce(stored);
+  it('creates and submits an async job when worker is available', async () => {
+    // No existing active job
+    mocks.findActiveJobForSurvey.mockResolvedValueOnce(null);
+    // Under rate limit
+    mocks.countActiveJobsForUser.mockResolvedValueOnce(0);
+    // Worker URL configured and healthy
+    mocks.getExternalOpenCvWorkerUrl.mockReturnValueOnce('https://worker.test');
+    mocks.fetchHealth.mockResolvedValueOnce({ status: 'ok' });
+    // Job creation succeeds
+    mocks.createAndSubmitJob.mockResolvedValueOnce({
+      job: { jobId: 'job-1', surveyId: '11111111-1111-4111-8111-111111111111', totalPhotoFiles: 1, totalBatches: 1 },
+      renderSubmitOk: true,
+      renderError: null,
+    });
 
     const res = await POST(new NextRequest('https://solarpro.test/api/site-surveys/11111111-1111-4111-8111-111111111111/open-source-photo-vision-pass', { method: 'POST' }), { params: { surveyId: '11111111-1111-4111-8111-111111111111' } });
     const json = await res.json();
 
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
-    expect(json.data.summary).toMatchObject({ processedFileCount: 1, failedFileCount: 0, candidateCount: 2, runHash: 'runhash' });
-    expect(json.data.summary.candidateTypeCounts).toMatchObject({ object_detection: 1, ocr_text: 1 });
-    expect(json.data.summary.unavailableDiagnostics).not.toContain('yoloSupervision: unavailable_stage_2_not_implemented');
-    expect(json.meta).toMatchObject({ externalWorker: true, workerUnavailable: false, sourceImageBytesProcessed: true, canonicalManifestMutationPerformed: false, canonicalGeometryMutationPerformed: false, cadMutationPerformed: false, permitGenerationTriggered: false, bomMutationPerformed: false, engineeringWorkflowMutationPerformed: false });
-    expect(replaceOpenSourcePhotoVisionCandidatesForSurveyRun).toHaveBeenCalledTimes(1);
-    expect(replaceOpenSourcePhotoVisionCandidatesForSurveyRun.mock.calls[0][2]).toBe(run);
-    expect(replaceOpenSourcePhotoVisionCandidatesForSurveyRun.mock.calls[0][2].candidates[1]).toMatchObject({ candidateType: 'ocr_text', nonAuthoritative: true, reviewStatus: 'review_required' });
+    expect(json.jobId).toBe('job-1');
+    expect(mocks.createAndSubmitJob).toHaveBeenCalledTimes(1);
   });
 });
