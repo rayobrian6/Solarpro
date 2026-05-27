@@ -262,6 +262,15 @@ export async function classifyUnclassifiedPhotosWithVision(
     };
   }
 
+  // Cap the number of photos to classify to avoid unbounded runtime.
+  // Each call takes ~1s rate-limit + ~2s API = ~3s per photo.
+  // At 20 photos max, that's ~60s which fits within Vercel's 60s function limit.
+  const MAX_VISION_CLASSIFICATION_PHOTOS = Number(process.env.MAX_VISION_CLASSIFICATION_PHOTOS || 20);
+  if (unclassifiedPhotos.length > MAX_VISION_CLASSIFICATION_PHOTOS) {
+    console.log(`[classifyUnclassifiedPhotosWithVision] Capping from ${unclassifiedPhotos.length} to ${MAX_VISION_CLASSIFICATION_PHOTOS} photos (set MAX_VISION_CLASSIFICATION_PHOTOS to override)`);
+    unclassifiedPhotos.splice(MAX_VISION_CLASSIFICATION_PHOTOS);
+  }
+
   // Step 2: Classify each photo
   for (const photo of unclassifiedPhotos) {
     const result = await classifyPhotoWithVision(photo.file_url, openaiApiKey);

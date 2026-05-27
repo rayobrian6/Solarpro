@@ -636,13 +636,31 @@ export async function aggregateVisionResults(
     if (uniquePhotoUrls.length > 0) {
       log.push(`[aggregator:4A] Pre-warming EXIF cache for ${uniquePhotoUrls.length} unique photo URLs`);
       const exifStartMs = Date.now();
+      /** Budget for EXIF pre-warming (ms). Don't spend more than 20% of the total budget on pre-warming. */
+      const EXIF_PREWARM_BUDGET_MS = Math.min(10_000, AGGREGATION_BUDGET_MS * 0.2);
       // Pre-warm in parallel with concurrency limit (5 at a time)
       const EXIF_CONCURRENCY = 5;
+      let exifBudgetExhausted = false;
       for (let i = 0; i < uniquePhotoUrls.length; i += EXIF_CONCURRENCY) {
+        if (exifBudgetExhausted) {
+          log.push(`[aggregator:4A] EXIF pre-warming budget exhausted at ${Date.now() - exifStartMs}ms — ${uniquePhotoUrls.length - i} URLs skipped`);
+          break;
+        }
         const batch = uniquePhotoUrls.slice(i, i + EXIF_CONCURRENCY);
-        await Promise.allSettled(batch.map(async (url) => {
-          try { await extractExifFromUrl(url); } catch { /* non-fatal */ }
-        }));
+        // Each batch gets a timeout: remaining budget or 15s per URL, whichever is less
+        const remainingBudget = EXIF_PREWARM_BUDGET_MS - (Date.now() - exifStartMs);
+        if (remainingBudget <= 0) {
+          exifBudgetExhausted = true;
+          log.push(`[aggregator:4A] EXIF pre-warming budget exhausted at ${Date.now() - exifStartMs}ms — ${uniquePhotoUrls.length - i} URLs skipped`);
+          break;
+        }
+        const batchTimeoutMs = Math.min(remainingBudget, batch.length * 15_000);
+        await Promise.race([
+          Promise.allSettled(batch.map(async (url) => {
+            try { await extractExifFromUrl(url); } catch { /* non-fatal */ }
+          })),
+          new Promise<void>(resolve => setTimeout(resolve, batchTimeoutMs)),
+        ]);
       }
       log.push(`[aggregator:4A] EXIF cache pre-warmed in ${Date.now() - exifStartMs}ms`);
     }
@@ -710,6 +728,13 @@ export async function aggregateVisionResults(
     totalRaw += detections.length;
 
     for (const det of detections) {
+      // Hard timeout: if we've been running for 2x the budget, break out entirely
+      const hardTimeoutMs = Date.now() - startMs;
+      if (hardTimeoutMs > AGGREGATION_BUDGET_MS * 2) {
+        log.push(`[aggregator:4A] HARD_TIMEOUT at ${hardTimeoutMs}ms (2x budget=${AGGREGATION_BUDGET_MS * 2}ms) — stopping detection loop, ${allWorldDetections.length} detections processed so far`);
+        break;
+      }
+
       // Skip unknown classes
       if (!isKnownClass(det.class)) {
         totalFiltered++;
