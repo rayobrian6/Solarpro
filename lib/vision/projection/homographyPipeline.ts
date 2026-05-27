@@ -66,7 +66,7 @@ export const HOMOGRAPHY_MAX_REPROJ_ERROR_PX = 8.0;
 export const HOMOGRAPHY_CONFIDENCE_BOOST = 1.15;
 
 /** Default OpenCV worker URL */
-const DEFAULT_WORKER_URL = 'https://solarpro.onrender.com';
+const DEFAULT_OPEN_SOURCE_PHOTO_VISION_WORKER_URL = 'https://solarpro.onrender.com';
 
 /** Request timeout for worker calls (15 seconds) */
 const WORKER_TIMEOUT_MS = 15_000;
@@ -615,8 +615,17 @@ export interface HomographyProjectionAttempt {
   exifUsed: boolean;
   /** Confidence after EXIF boost (if applicable) */
   boostedConfidence: number | null;
-  /** Fallback method recommended if homography fails */
+  /**
+   * Fallback method recommended if homography fails (legacy field for projection chain).
+   * For Phase 4A failures, see fallbackReason for specific error details.
+   */
   fallbackMethod: ProjectionMethod;
+  /**
+   * Specific reason why homography failed (Phase 4A diagnostic).
+   * Only populated when success=false.
+   * Values: "missing_reference_image", "feature_matching_failed", "homography_worker_failed", "insufficient_inliers", "reprojection_error_too_high"
+   */
+  fallbackReason?: string;
 }
 
 /**
@@ -667,6 +676,7 @@ export async function projectWithHomography(
       exifUsed: false,
       boostedConfidence: null,
       fallbackMethod,
+      fallbackReason: matchedPoints ? 'insufficient_inliers' : 'feature_matching_failed',
     };
   }
 
@@ -688,6 +698,7 @@ export async function projectWithHomography(
       exifUsed: false,
       boostedConfidence: null,
       fallbackMethod,
+      fallbackReason: 'homography_worker_failed',
     };
   }
 
@@ -702,6 +713,7 @@ export async function projectWithHomography(
       exifUsed: false,
       boostedConfidence: null,
       fallbackMethod,
+      fallbackReason: 'reprojection_error_too_high',
     };
   }
 
@@ -794,5 +806,5 @@ export function estimateRadiusFromProjection(
 // ─── Worker URL Resolution ────────────────────────────────────────────────────
 
 function getWorkerUrl(): string {
-  return process.env.OPENCV_WORKER_URL ?? process.env.VISION_SERVICE_URL ?? DEFAULT_WORKER_URL;
+  return process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_URL ?? DEFAULT_OPEN_SOURCE_PHOTO_VISION_WORKER_URL;
 }

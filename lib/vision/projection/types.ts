@@ -68,6 +68,15 @@ export interface FeatureMatchResult {
   ok: boolean;
   /** Error message if matching failed */
   error?: string;
+  /**
+   * Matched keypoint pairs (normalized 0.0–1.0 coordinates) for homography estimation.
+   * Source points are in the detection image, target points are in the reference image.
+   * Only populated when matching succeeds with good matches.
+   */
+  matchedPoints?: {
+    source: Array<{ x: number; y: number }>;
+    target: Array<{ x: number; y: number }>;
+  } | null;
 }
 
 // ─── Homography Types ─────────────────────────────────────────────────────────

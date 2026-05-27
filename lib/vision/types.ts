@@ -168,6 +168,16 @@ export interface PhotoContext {
   roofPlaneId?: string | null;
   /** Image pixel dimensions (if known) */
   imageDims?: { width: number; height: number } | null;
+  /**
+   * Reference image URL for homography-based projection.
+   * Priority chain for population:
+   *   1. Roof plane reference image (if roof plane has an associated reference photo)
+   *   2. CAD/SVG raster (if project has a rendered CAD/SVG orthographic view)
+   *   3. Orthographic artifact (if project has a top-down orthographic image)
+   *   4. Survey-selected reference photo (if user selected a reference photo for this survey)
+   *   5. null (no reference available — homography projection falls back gracefully)
+   */
+  referenceImageUrl?: string | null;
 }
 
 // ─── World-Projected Detection ───────────────────────────────────────────────

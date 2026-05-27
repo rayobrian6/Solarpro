@@ -1444,3 +1444,323 @@ def pytesseract_availability_string() -> str:
     if availability.pytesseract.get("available"):
         return f"available:{availability.pytesseract.get('version')}"
     return f"unavailable:{availability.pytesseract.get('reason') or 'pytesseract_not_loaded'}"
+
+
+# ---------------------------------------------------------------------------
+# Phase 4A: Feature Matching & Homography Estimation Endpoints
+# ---------------------------------------------------------------------------
+
+class FeatureMatchRequest(BaseModel):
+    """Request payload for the /vision/match-features endpoint."""
+    image1Url: str
+    image2Url: str
+    detector: Literal["AKAZE", "SIFT", "ORB"] = "AKAZE"
+    ratioTestThreshold: float = 0.75
+    maxMatchDistance: float = 0.7
+
+class HomographyEstimateRequest(BaseModel):
+    """Request payload for the /vision/estimate-homography endpoint."""
+    sourcePoints: list[dict[str, float]]  # [{x, y}, ...]
+    targetPoints: list[dict[str, float]]  # [{x, y}, ...]
+    method: Literal["RANSAC", "LMEDS", "RHO"] = "RANSAC"
+    ransacReprojThreshold: float = 5.0
+    minInliers: int = 8
+
+
+def _fetch_image_as_cv2(url: str) -> np.ndarray:
+    """Fetch an image URL and decode it as a BGR numpy array using httpx."""
+    with httpx.Client(timeout=FETCH_TIMEOUT_SECONDS, follow_redirects=True) as client:
+        response = client.get(url)
+        response.raise_for_status()
+        content = response.content
+    if len(content) > MAX_IMAGE_BYTES:
+        raise ValueError(f"Image exceeds max byte size {MAX_IMAGE_BYTES}")
+    np_bytes = np.frombuffer(content, dtype=np.uint8)
+    image = cv2.imdecode(np_bytes, cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError("OpenCV could not decode image bytes")
+    return image
+
+
+def _get_detector(detector_name: str):
+    """Create an OpenCV feature detector instance by name."""
+    if detector_name == "AKAZE":
+        return cv2.AKAZE_create()
+    elif detector_name == "SIFT":
+        return cv2.SIFT_create()
+    elif detector_name == "ORB":
+        return cv2.ORB_create()
+    else:
+        raise ValueError(f"Unknown detector: {detector_name}. Supported: AKAZE, SIFT, ORB")
+
+
+@app.post("/vision/match-features")
+async def match_features(request: FeatureMatchRequest) -> dict[str, Any]:
+    """
+    Match features between two images using the specified detector.
+
+    Returns matched keypoint pairs (normalized 0-1 coordinates) for homography estimation.
+    Tries AKAZE → SIFT → ORB if the specified detector fails.
+
+    SAFETY:
+      - Never raises — returns error in response body
+      - Confidence is computed from actual match data (never faked)
+      - All authority flags remain false (no_authority)
+    """
+    start_ms = time.time()
+    detector_name = request.detector
+
+    try:
+        # Fetch both images
+        img1 = await asyncio.get_event_loop().run_in_executor(None, _fetch_image_as_cv2, request.image1Url)
+        img2 = await asyncio.get_event_loop().run_in_executor(None, _fetch_image_as_cv2, request.image2Url)
+
+        h1, w1 = img1.shape[:2]
+        h2, w2 = img2.shape[:2]
+
+        # Convert to grayscale
+        gray1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
+        gray2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
+
+        # Try the requested detector first, then fall back
+        detectors_to_try = [detector_name]
+        for fallback in ["AKAZE", "SIFT", "ORB"]:
+            if fallback not in detectors_to_try:
+                detectors_to_try.append(fallback)
+
+        last_error = None
+
+        for det_name in detectors_to_try:
+            try:
+                det = _get_detector(det_name)
+
+                # Detect and compute
+                kp1, des1 = det.detectAndCompute(gray1, None)
+                kp2, des2 = det.detectAndCompute(gray2, None)
+
+                if des1 is None or des2 is None or len(kp1) < 2 or len(kp2) < 2:
+                    last_error = f"{det_name}: insufficient keypoints ({len(kp1) if kp1 else 0}/{len(kp2) if kp2 else 0})"
+                    continue
+
+                # Match features using BFMatcher
+                # For ORB, use Hamming distance; for AKAZE/SIFT, use L2
+                if det_name == "ORB":
+                    matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+                else:
+                    matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck=False)
+
+                matches = matcher.knnMatch(des1, des2, k=2)
+
+                # Apply Lowe's ratio test
+                good_matches = []
+                for match_pair in matches:
+                    if len(match_pair) == 2:
+                        m, n = match_pair
+                        if m.distance < request.ratioTestThreshold * n.distance:
+                            if m.distance < request.maxMatchDistance * max(des1.shape[1], 1) if des1.shape[1] > 0 else True:
+                                good_matches.append(m)
+
+                if len(good_matches) < 4:
+                    last_error = f"{det_name}: insufficient good matches ({len(good_matches)})"
+                    continue
+
+                # Extract matched keypoint coordinates (normalized 0-1)
+                source_points = []
+                target_points = []
+                for m in good_matches:
+                    pt1 = kp1[m.queryIdx].pt
+                    pt2 = kp2[m.trainIdx].pt
+                    source_points.append({"x": pt1[0] / w1, "y": pt1[1] / h1})
+                    target_points.append({"x": pt2[0] / w2, "y": pt2[1] / h2})
+
+                # Compute inlier count via RANSAC homography check
+                inlier_count = 0
+                if len(good_matches) >= 4:
+                    src_pts = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+                    dst_pts = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+                    _, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+                    if mask is not None:
+                        inlier_count = int(np.count_nonzero(mask))
+
+                # Compute confidence from inlier ratio + match count
+                inlier_ratio = inlier_count / max(1, len(good_matches))
+                count_conf = min(1.0, len(good_matches) / 50.0)
+                detector_factor = {"AKAZE": 1.0, "SIFT": 0.95, "ORB": 0.85}.get(det_name, 0.85)
+                confidence = min(1.0, count_conf * 0.4 + inlier_ratio * 0.4 + detector_factor * 0.2)
+
+                elapsed_ms = int((time.time() - start_ms) * 1000)
+
+                return {
+                    "success": True,
+                    "rawMatchCount": len(matches),
+                    "goodMatchCount": len(good_matches),
+                    "inlierCount": inlier_count,
+                    "detector": det_name,
+                    "workerDurationMs": elapsed_ms,
+                    "confidence": round(confidence, 4),
+                    "matchedPoints": {
+                        "source": source_points,
+                        "target": target_points,
+                    },
+                    "authority": no_authority(),
+                }
+
+            except Exception as det_err:
+                last_error = f"{det_name}: {str(det_err)[:200]}"
+                continue
+
+        # All detectors failed
+        elapsed_ms = int((time.time() - start_ms) * 1000)
+        return {
+            "success": False,
+            "rawMatchCount": 0,
+            "goodMatchCount": 0,
+            "inlierCount": 0,
+            "detector": detector_name,
+            "workerDurationMs": elapsed_ms,
+            "error": f"All feature detectors failed. Last error: {last_error}",
+            "matchedPoints": None,
+            "authority": no_authority(),
+        }
+
+    except Exception as exc:
+        elapsed_ms = int((time.time() - start_ms) * 1000)
+        return {
+            "success": False,
+            "rawMatchCount": 0,
+            "goodMatchCount": 0,
+            "inlierCount": 0,
+            "detector": detector_name,
+            "workerDurationMs": elapsed_ms,
+            "error": f"Feature matching failed: {str(exc)[:300]}",
+            "matchedPoints": None,
+            "authority": no_authority(),
+        }
+
+
+@app.post("/vision/estimate-homography")
+async def estimate_homography(request: HomographyEstimateRequest) -> dict[str, Any]:
+    """
+    Estimate a homography matrix from matched point pairs.
+
+    Takes source and target point pairs (normalized 0-1 coordinates)
+    and computes the homography using RANSAC with quality gates.
+
+    SAFETY:
+      - Never raises — returns error in response body
+      - Authority flags remain false (no_authority)
+      - Minimum inlier count enforced
+    """
+    start_ms = time.time()
+
+    try:
+        if len(request.sourcePoints) < 4 or len(request.targetPoints) < 4:
+            return {
+                "success": False,
+                "error": "At least 4 point pairs required for homography estimation",
+                "homography": None,
+                "inlierCount": 0,
+                "meanReprojectionError": None,
+                "confidence": 0.0,
+                "authority": no_authority(),
+            }
+
+        if len(request.sourcePoints) != len(request.targetPoints):
+            return {
+                "success": False,
+                "error": "sourcePoints and targetPoints must have the same length",
+                "homography": None,
+                "inlierCount": 0,
+                "meanReprojectionError": None,
+                "confidence": 0.0,
+                "authority": no_authority(),
+            }
+
+        # Convert normalized 0-1 coordinates to pixel coordinates
+        # We use a canonical 1000x1000 image space for the homography
+        CANONICAL_SIZE = 1000.0
+        src_pts = np.float32([
+            [p["x"] * CANONICAL_SIZE, p["y"] * CANONICAL_SIZE]
+            for p in request.sourcePoints
+        ]).reshape(-1, 1, 2)
+        dst_pts = np.float32([
+            [p["x"] * CANONICAL_SIZE, p["y"] * CANONICAL_SIZE]
+            for p in request.targetPoints
+        ]).reshape(-1, 1, 2)
+
+        # Choose OpenCV method
+        method_map = {"RANSAC": cv2.RANSAC, "LMEDS": cv2.LMEDS, "RHO": cv2.RHO}
+        cv_method = method_map.get(request.method, cv2.RANSAC)
+
+        # Estimate homography
+        H, mask = cv2.findHomography(src_pts, dst_pts, cv_method, request.ransacReprojThreshold)
+
+        if H is None:
+            return {
+                "success": False,
+                "error": "Homography estimation failed — no valid homography found",
+                "homography": None,
+                "inlierCount": 0,
+                "meanReprojectionError": None,
+                "confidence": 0.0,
+                "authority": no_authority(),
+            }
+
+        # Count inliers
+        inlier_count = int(np.count_nonzero(mask)) if mask is not None else 0
+
+        # Check minimum inliers
+        if inlier_count < request.minInliers:
+            return {
+                "success": False,
+                "error": f"Insufficient inliers: {inlier_count} < {request.minInliers}",
+                "homography": H.tolist(),
+                "inlierCount": inlier_count,
+                "meanReprojectionError": None,
+                "confidence": 0.0,
+                "authority": no_authority(),
+            }
+
+        # Compute reprojection error for inliers
+        reproj_errors = []
+        if mask is not None:
+            for i in range(len(src_pts)):
+                if mask[i][0]:
+                    src_pt = np.array([src_pts[i][0][0], src_pts[i][0][1], 1.0])
+                    projected = H @ src_pt
+                    projected = projected / projected[2]
+                    dx = projected[0] - dst_pts[i][0][0]
+                    dy = projected[1] - dst_pts[i][0][1]
+                    reproj_errors.append((dx * dx + dy * dy) ** 0.5)
+
+        mean_reproj_error = float(np.mean(reproj_errors)) if reproj_errors else None
+
+        # Compute confidence from inlier ratio and count
+        inlier_ratio = inlier_count / max(1, len(request.sourcePoints))
+        count_conf = min(1.0, inlier_count / 50.0)
+        confidence = min(1.0, count_conf * 0.5 + inlier_ratio * 0.5)
+
+        elapsed_ms = int((time.time() - start_ms) * 1000)
+
+        return {
+            "success": True,
+            "homography": H.tolist(),
+            "inlierCount": inlier_count,
+            "meanReprojectionError": round(mean_reproj_error, 4) if mean_reproj_error is not None else None,
+            "confidence": round(confidence, 4),
+            "method": request.method,
+            "durationMs": elapsed_ms,
+            "authority": no_authority(),
+        }
+
+    except Exception as exc:
+        elapsed_ms = int((time.time() - start_ms) * 1000)
+        return {
+            "success": False,
+            "error": f"Homography estimation failed: {str(exc)[:300]}",
+            "homography": None,
+            "inlierCount": 0,
+            "meanReprojectionError": None,
+            "confidence": 0.0,
+            "authority": no_authority(),
+        }

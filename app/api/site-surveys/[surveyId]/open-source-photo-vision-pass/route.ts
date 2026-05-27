@@ -42,6 +42,8 @@ import {
   fetchHealth,
 } from '@/lib/assistedEvidenceSources/externalOpenCvPhotoVisionClient';
 import type { OpenSourcePhotoVisionRunResult } from '@/lib/assistedEvidenceSources/openSourcePhotoVisionWorker';
+import { convertWorkerResultToPhotoVisionResults, enrichPhotoContextWithSurveyData, resolveReferenceImageUrl } from '@/lib/vision/workerResultConverter';
+import { aggregateVisionResults } from '@/lib/vision/visionAggregator';
 
 const MAX_ACTIVE_JOBS_PER_USER = 3;
 
@@ -290,6 +292,67 @@ async function handleCompletedJob(job: PhotoVisionJob, surveyId: string) {
     // Don't fail the response if label update fails — it's a secondary optimization
   }
 
+  // ── Phase 4A: Convert worker results → PhotoVisionResult[] → aggregateVisionResults ──
+  let aggregationResult = null;
+  try {
+    const projectId = run.projectId ?? job.surveyId; // Fallback to surveyId if projectId is null
+    const photoVisionResults = convertWorkerResultToPhotoVisionResults(run, projectId);
+
+    // Enrich photo contexts with survey data (GPS, azimuth, pitch, label, roofPlaneId)
+    // Then resolve referenceImageUrl via the 5-tier priority chain
+    const surveyFiles = await getSiteSurveyFiles(surveyId);
+    const photoFiles = surveyFiles.filter(f => f.fileType === 'photo');
+
+    // Build per-roof-plane reference image lookup from survey/project data
+    const roofPlaneReferenceImages: Record<string, string> = {};
+    for (const sf of photoFiles) {
+      const planeId = (sf as unknown as Record<string, unknown>).roofPlaneId as string | null | undefined;
+      const refUrl = (sf as unknown as Record<string, unknown>).referenceImageUrl as string | null | undefined;
+      if (planeId && refUrl) {
+        roofPlaneReferenceImages[planeId] = refUrl;
+      }
+    }
+
+    for (const pvr of photoVisionResults) {
+      const surveyFile = photoFiles.find(sf => sf.id === pvr.fileId);
+      if (surveyFile) {
+        const surveyFileAny = surveyFile as unknown as Record<string, unknown>;
+        const surveyRoofPlaneId = surveyFileAny.roofPlaneId as string | null ?? null;
+        enrichPhotoContextWithSurveyData(pvr, {
+          fileId: surveyFile.id,
+          lat: surveyFileAny.lat as number | null ?? null,
+          lng: surveyFileAny.lng as number | null ?? null,
+          azimuth: surveyFileAny.azimuth as number | null ?? null,
+          pitch: surveyFileAny.pitch as number | null ?? null,
+          label: surveyFile.label ?? null,
+          roofPlaneId: surveyRoofPlaneId,
+          referenceImageUrl: null, // Will be resolved by priority chain below
+        });
+
+        // Resolve referenceImageUrl via priority chain:
+        // 1. Roof plane reference image → 2. CAD/SVG raster → 3. Orthographic artifact → 4. Survey-selected reference photo → 5. null
+        const resolvedRefUrl = resolveReferenceImageUrl({
+          roofPlaneReferenceImages,
+          roofPlaneId: surveyRoofPlaneId,
+          cadSvgRasterUrl: (run as unknown as Record<string, unknown>).cadSvgRasterUrl as string | null ?? null,
+          orthographicArtifactUrl: (run as unknown as Record<string, unknown>).orthographicArtifactUrl as string | null ?? null,
+          surveySelectedReferenceUrl: surveyFileAny.referenceImageUrl as string | null ?? null,
+        });
+        pvr.photoContext.referenceImageUrl = resolvedRefUrl;
+      }
+    }
+
+    aggregationResult = await aggregateVisionResults(
+      photoVisionResults,
+      projectId,
+      surveyId,
+    );
+    console.log(`[GET open-source-photo-vision-pass] Phase 4A aggregation: obstructions=${aggregationResult.obstructions.length} electrical=${aggregationResult.electricalNodes.length} corrections=${aggregationResult.planeCorrections.length}`);
+  } catch (aggErr) {
+    console.error('[GET open-source-photo-vision-pass] Phase 4A aggregation failed (non-fatal):', aggErr instanceof Error ? aggErr.message : String(aggErr));
+    // Non-fatal: aggregation failure should not prevent returning the raw worker results
+  }
+
   const summary = uiSummary(run);
   console.log(`[GET open-source-photo-vision-pass] jobId=${job.jobId} completed: processed=${run.processedCount} failed=${run.failedCount} candidates=${run.candidateCount}`);
 
@@ -302,6 +365,16 @@ async function handleCompletedJob(job: PhotoVisionJob, surveyId: string) {
       run: summarizeOpenSourcePhotoVisionRun(run),
       stored,
       labelUpdate: labelUpdateResult,
+      phase4a: aggregationResult ? {
+        photosProcessed: aggregationResult.photosProcessed,
+        rawDetectionCount: aggregationResult.rawDetectionCount,
+        obstructionNodes: aggregationResult.obstructions.length,
+        electricalNodes: aggregationResult.electricalNodes.length,
+        planeCorrections: aggregationResult.planeCorrections.length,
+        classCounts: aggregationResult.classCounts,
+        hasHighConfidenceDetections: aggregationResult.hasHighConfidenceDetections,
+        logSample: aggregationResult.log.slice(-5),
+      } : null,
       files: run.files.map(file => ({
         surveyId: file.surveyId,
         fileId: file.fileId,

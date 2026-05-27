@@ -3,7 +3,7 @@
 //
 // Orchestrates feature detection and matching between photo pairs
 // for homography estimation. Delegates actual computation to the Python
-// OpenCV worker (running on Render at OPENCV_WORKER_URL).
+// OpenCV worker (running on Render at OPEN_SOURCE_PHOTO_VISION_WORKER_URL).
 //
 // MATCHING STRATEGY:
 //   1. Try AKAZE (default) — robust to illumination/rotation changes
@@ -19,7 +19,7 @@
 //
 // ARCHITECTURE:
 //   featureMatching.ts (this file, TypeScript orchestration)
-//     → OPENCV_WORKER_URL (Python worker with cv2.AKAZE/SIFT/ORB)
+//     → OPEN_SOURCE_PHOTO_VISION_WORKER_URL (Python worker with cv2.AKAZE/SIFT/ORB)
 //     → homographyPipeline.ts (consumes FeatureMatchResult)
 //
 // SAFETY:
@@ -39,7 +39,7 @@ import {
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
 /** Default OpenCV worker URL */
-const DEFAULT_OPENCV_WORKER_URL = 'https://solarpro.onrender.com';
+const DEFAULT_OPEN_SOURCE_PHOTO_VISION_WORKER_URL = 'https://solarpro.onrender.com';
 
 /** Request timeout for worker calls (10 seconds) */
 const WORKER_TIMEOUT_MS = 10_000;
@@ -251,6 +251,7 @@ export async function matchFeatures(
         durationMs: Date.now() - startMs,
         ok: false,
         error: response.error ?? 'Worker returned unsuccessful response',
+        matchedPoints: null,
       };
     }
 
@@ -261,6 +262,9 @@ export async function matchFeatures(
     const confidence = calculateMatchConfidence(goodMatchCount, inlierCount, detector);
     const quality = assessMatchQuality(goodMatchCount, confidence);
 
+    // Pass through matchedPoints from worker response (normalized 0.0-1.0 coordinates)
+    const matchedPoints = response.matchedPoints ?? null;
+
     return {
       rawMatchCount,
       goodMatchCount,
@@ -269,6 +273,7 @@ export async function matchFeatures(
       detector,
       durationMs: Date.now() - startMs,
       ok: quality !== 'failed',
+      matchedPoints,
     };
   } catch (err) {
     return {
@@ -280,6 +285,7 @@ export async function matchFeatures(
       durationMs: Date.now() - startMs,
       ok: false,
       error: `Feature matching failed: ${err instanceof Error ? err.message : String(err)}`,
+      matchedPoints: null,
     };
   }
 }
@@ -341,6 +347,7 @@ export async function matchFeaturesWithFallback(
     durationMs: 0,
     ok: false,
     error: 'All feature detectors failed to produce matches',
+    matchedPoints: null,
   };
 }
 
@@ -350,7 +357,7 @@ export async function matchFeaturesWithFallback(
  * Get the OpenCV worker URL from environment or default.
  */
 function getWorkerUrl(): string {
-  return process.env.OPENCV_WORKER_URL ?? process.env.VISION_SERVICE_URL ?? DEFAULT_OPENCV_WORKER_URL;
+  return process.env.OPEN_SOURCE_PHOTO_VISION_WORKER_URL ?? DEFAULT_OPEN_SOURCE_PHOTO_VISION_WORKER_URL;
 }
 
 // ─── Batch Matching ────────────────────────────────────────────────────────────

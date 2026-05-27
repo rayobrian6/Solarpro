@@ -176,22 +176,23 @@ async function attemptHomographyProjection(
     exifUsed: false,
     boostedConfidence: null,
     fallbackMethod: 'none',
+    fallbackReason: undefined,
   };
 
   // ── Gate: master toggle ──────────────────────────────────────────────────
   if (!ENABLE_HOMOGRAPHY_PROJECTION) {
-    return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx) };
+    return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx), fallbackReason: 'homography_projection_disabled' };
   }
 
   // ── Gate: photo URL required ─────────────────────────────────────────────
   const photoUrl = ctx.fileUrl;
   if (!photoUrl) {
-    return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx) };
+    return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx), fallbackReason: 'missing_reference_image' };
   }
 
   // ── Gate: GPS coords required for origin anchoring ───────────────────────
   if (ctx.lat == null || ctx.lng == null) {
-    return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx) };
+    return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx), fallbackReason: 'missing_gps_coords' };
   }
 
   try {
@@ -205,12 +206,35 @@ async function attemptHomographyProjection(
       // Non-fatal: we can proceed with default smartphone FOV
     }
 
-    // ── Step 2: Try feature matching (optional — homography needs matched points) ──
-    // Feature matching against a reference image would require a reference image URL
-    // which is not yet available in the PhotoContext. For now, pass null matched points,
-    // which causes projectWithHomography to fall back gracefully.
-    // Future: integrate with roof plane reference images from project data.
-    const matchedPoints = null;
+    // ── Step 2: Try feature matching against reference image ──
+    // Feature matching requires a reference image URL.
+    // Priority chain for referenceImageUrl:
+    //   1. ctx.referenceImageUrl (explicitly set from roof plane reference / CAD raster / orthographic)
+    //   2. null → no reference image available → skip feature matching
+    let matchedPoints: {
+      source: Array<{ x: number; y: number }>;
+      target: Array<{ x: number; y: number }>;
+    } | null = null;
+
+    const referenceImageUrl = ctx.referenceImageUrl;
+    if (referenceImageUrl) {
+      try {
+        const matchResult = await matchFeaturesWithFallback(photoUrl, referenceImageUrl, {
+          minGoodMatches: HOMOGRAPHY_MIN_INLIERS,
+          minConfidence: HOMOGRAPHY_MIN_CONFIDENCE,
+        });
+        if (matchResult.ok && matchResult.matchedPoints) {
+          matchedPoints = matchResult.matchedPoints;
+          log.push(`[aggregator:4A] Feature matching succeeded: goodMatches=${matchResult.goodMatchCount} confidence=${matchResult.confidence.toFixed(3)} detector=${matchResult.detector}`);
+        } else {
+          log.push(`[aggregator:4A] Feature matching failed: ${matchResult.error ?? `quality=${matchResult.quality} confidence=${matchResult.confidence.toFixed(3)}`} — homography will fall back gracefully`);
+        }
+      } catch (matchErr) {
+        log.push(`[aggregator:4A] Feature matching error: ${matchErr} — homography will fall back gracefully`);
+      }
+    } else {
+      log.push(`[aggregator:4A] No reference image URL available (referenceImageUrl is null) — skipping feature matching, homography will fall back gracefully`);
+    }
 
     // ── Step 3: Run homography projection pipeline ──────────────────────────
     // projectWithHomography handles: EXIF → FOV → homography → world projection
@@ -234,17 +258,17 @@ async function attemptHomographyProjection(
     if (attempt.homography) {
       if (attempt.homography.inlierCount < HOMOGRAPHY_MIN_INLIERS) {
         log.push(`[aggregator:4A] Insufficient inliers: ${attempt.homography.inlierCount} < ${HOMOGRAPHY_MIN_INLIERS} — falling back`);
-        return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx) };
+        return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx), fallbackReason: 'insufficient_inliers' };
       }
 
       if (attempt.homography.confidence < HOMOGRAPHY_MIN_CONFIDENCE) {
         log.push(`[aggregator:4A] Low confidence: ${attempt.homography.confidence.toFixed(3)} < ${HOMOGRAPHY_MIN_CONFIDENCE} — falling back`);
-        return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx) };
+        return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx), fallbackReason: 'low_confidence' };
       }
 
       if (attempt.homography.meanReprojectionError > HOMOGRAPHY_MAX_REPROJ_ERROR_PX) {
         log.push(`[aggregator:4A] High reprojection error: ${attempt.homography.meanReprojectionError.toFixed(2)}px > ${HOMOGRAPHY_MAX_REPROJ_ERROR_PX}px — falling back`);
-        return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx) };
+        return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx), fallbackReason: 'reprojection_error_too_high' };
       }
     }
 
@@ -254,7 +278,7 @@ async function attemptHomographyProjection(
       assertAuthorityFlagsSafe(FROZEN_AUTHORITY_FLAGS);
     } catch (authorityErr) {
       log.push(`[aggregator:4A] CRITICAL: Authority flags violation — ${authorityErr}`);
-      return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx) };
+      return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx), fallbackReason: 'authority_flags_violation' };
     }
 
     const proj = attempt.projection;
@@ -264,7 +288,7 @@ async function attemptHomographyProjection(
 
   } catch (err) {
     log.push(`[aggregator:4A] Homography pipeline error: ${err} — falling back to ${_inferFallbackMethod(ctx)}`);
-    return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx) };
+    return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx), fallbackReason: 'homography_pipeline_error' };
   }
 }
 
