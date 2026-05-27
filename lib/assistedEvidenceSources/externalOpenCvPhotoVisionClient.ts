@@ -55,7 +55,9 @@ export async function runExternalOpenCvPhotoVisionPass(input: {
   workerUrl?: string | null;
   timeoutMs?: number;
 }): Promise<ExternalOpenCvPhotoVisionRunOutcome> {
-  const workerUrl = input.workerUrl ?? getExternalOpenCvWorkerUrl();
+  // Explicit null means "no worker configured" (different from undefined which means "use default").
+  // This allows tests to force the unavailable path without mocking getExternalOpenCvWorkerUrl.
+  const workerUrl = input.workerUrl === null ? null : (input.workerUrl ?? getExternalOpenCvWorkerUrl());
   if (!workerUrl) {
     return { available: false, reason: 'external_worker_url_not_configured', health: null };
   }
