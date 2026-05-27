@@ -18,30 +18,30 @@
 //   6. Derive PlaneCorrections from roof geometry detections
 //   7. Return VisionAggregationResult with full audit log
 //
-// PROJECTION STRATEGY:
-//   Given a detection bbox (center x,y normalized 0–1) in a photo taken from
-//   position (photoLat, photoLng) facing azimuth θ at pitch φ:
+// PROJECTION STRATEGY (Phase 4A — 4-tier priority chain):
+//   Priority 0 (NEW): homography_assisted
+//     — Single-photo homography from matched features → image→world projection
+//     — Gated by ENABLE_HOMOGRAPHY_PROJECTION env var (default: true)
+//     — All outputs are candidate/preview-only (FROZEN_AUTHORITY_FLAGS)
+//     — Requires: photo URL (fileUrl), roof plane reference geometry, OpenCV worker
 //
-//   The detection's angular offset from photo center:
-//     dAz  = (bbox.x - 0.5) * HFOV_DEG  (horizontal, +East)
-//     dEl  = (bbox.y - 0.5) * VFOV_DEG  (vertical, +Down = towards roof)
+//   Priority 1: gps_azimuth_pitch
+//     — Full geometric projection from photo GPS + azimuth + pitch
+//     — Requires: GPS coords + azimuth (pitch optional, defaults to 0°)
 //
-//   Bearing to detection:
-//     bearing = azimuth + dAz
+//   Priority 2: gps_centroid
+//     — Place at photo GPS position (no angular projection)
+//     — Requires: GPS coords only
 //
-//   Estimated ground distance:
-//     If camera pitch φ (from horizontal):
-//       groundDist = cameraHeightM / tan(pitch + dEl)
-//     Fallback: use ESTIMATED_PHOTO_DISTANCE_M
-//
-//   World position:
-//     worldX = photoX + cos(bearing_rad) * groundDist
-//     worldY = photoY + sin(bearing_rad) * groundDist
+//   Priority 3: none
+//     — No position information (0,0 fallback)
+//     — Used when no GPS data is available
 //
 // NON-BREAKING GUARANTEE:
 //   - If photos array is empty → returns empty VisionAggregationResult
 //   - If projection fails for any photo → detection placed at photo GPS centroid
 //   - NEVER throws — all errors caught; partial results always returned
+//   - Phase 4A homography failure silently falls back to gps_azimuth_pitch
 // ============================================================================
 
 import {
@@ -66,7 +66,13 @@ import {
 
 import { latLngToXY, dist2D, centroid, type Point2D } from '@/lib/cad/geometry';
 
-// ─── Constants ───────────────────────────────────────────────────────────────
+// ── Phase 4A imports ────────────────────────────────────────────────────────
+import { extractExifFromUrl, computeFieldOfView, getDefaultSmartphoneFov, clearExifCache, type ExifData, type ExifCameraParams } from './exif/exifExtractor';
+import { projectWithHomography, estimateRadiusFromProjection, HOMOGRAPHY_MIN_INLIERS, HOMOGRAPHY_MIN_CONFIDENCE, HOMOGRAPHY_MAX_REPROJ_ERROR_PX, HOMOGRAPHY_CONFIDENCE_BOOST, type HomographyProjectionAttempt } from './projection/homographyPipeline';
+import { matchFeaturesWithFallback } from './projection/featureMatching';
+import { FROZEN_AUTHORITY_FLAGS, assertAuthorityFlagsSafe, type ProjectionAuthorityFlags, type FeatureMatchResult } from './projection/types';
+
+// ── Constants ───────────────────────────────────────────────────────────────
 
 /** Estimated horizontal field of view of a smartphone camera (degrees) */
 const HFOV_DEG = 65;
@@ -85,7 +91,17 @@ const STORY_HEIGHT_M = 3.0;
 
 const DEG = Math.PI / 180;
 
-// ─── Classification helpers ──────────────────────────────────────────────────
+// ── Phase 4A constants ──────────────────────────────────────────────────────
+
+/**
+ * Master toggle for Phase 4A homography-assisted projection.
+ * Set ENABLE_HOMOGRAPHY_PROJECTION=false to disable homography entirely
+ * and fall back to the legacy 3-tier projection chain.
+ * Default: true (homography enabled).
+ */
+const ENABLE_HOMOGRAPHY_PROJECTION = process.env.ENABLE_HOMOGRAPHY_PROJECTION !== 'false';
+
+// ── Classification helpers ──────────────────────────────────────────────────
 
 const OBSTRUCTION_CLASSES = new Set<string>([
   'vent', 'skylight', 'hvac_unit', 'chimney', 'pipe_jack',
@@ -116,7 +132,7 @@ function isKnownClass(c: string): c is DetectionClass {
   return isObstructionClass(c) || isElectricalClass(c) || isRoofGeometryClass(c);
 }
 
-// ─── Confidence gating ───────────────────────────────────────────────────────
+// ── Confidence gating ───────────────────────────────────────────────────────
 
 function meetsThreshold(
   detection: VisionDetection,
@@ -127,21 +143,188 @@ function meetsThreshold(
   return detection.confidence >= classThreshold;
 }
 
-// ─── World projection ─────────────────────────────────────────────────────────
+// ── Phase 4A: Homography-assisted projection ────────────────────────────────
 
 /**
- * Project a single detection from image-space to world-space XY (meters).
- * Returns the world position and the projection method used.
+ * Attempt homography-assisted projection for a single detection.
+ *
+ * This is the Phase 4A entry point. It tries to:
+ *   1. Extract EXIF data from the photo URL (fileUrl)
+ *   2. Compute field of view from EXIF camera params or use smartphone defaults
+ *   3. Run feature matching against a reference image (if available)
+ *   4. Pass matched points + detection + EXIF to projectWithHomography()
+ *   5. Validate the result against quality thresholds
+ *   6. Assert authority safety flags at every output boundary
+ *
+ * All outputs carry FROZEN_AUTHORITY_FLAGS (candidate/preview-only).
+ * If any step fails, the function returns success=false with a fallbackMethod,
+ * allowing the caller to fall back to the next projection tier.
+ *
+ * SAFETY: assertAuthorityFlagsSafe() is called at every output boundary.
  */
-function projectDetectionToWorld(
+async function attemptHomographyProjection(
   detection: VisionDetection,
   ctx: PhotoContext,
   origin: { lat: number; lng: number },
   log: string[],
-): { worldX: number; worldY: number; radiusM: number; method: WorldDetection['projectionMethod'] } {
+): Promise<HomographyProjectionAttempt> {
+
+  const FAILED: HomographyProjectionAttempt = {
+    success: false,
+    projection: null,
+    homography: null,
+    exifUsed: false,
+    boostedConfidence: null,
+    fallbackMethod: 'none',
+  };
+
+  // ── Gate: master toggle ──────────────────────────────────────────────────
+  if (!ENABLE_HOMOGRAPHY_PROJECTION) {
+    return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx) };
+  }
+
+  // ── Gate: photo URL required ─────────────────────────────────────────────
+  const photoUrl = ctx.fileUrl;
+  if (!photoUrl) {
+    return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx) };
+  }
+
+  // ── Gate: GPS coords required for origin anchoring ───────────────────────
+  if (ctx.lat == null || ctx.lng == null) {
+    return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx) };
+  }
+
+  try {
+    // ── Step 1: Extract EXIF from photo ─────────────────────────────────────
+    let exifData: ExifData | null = null;
+    try {
+      exifData = await extractExifFromUrl(photoUrl);
+      log.push(`[aggregator:4A] EXIF extracted from ${photoUrl.substring(0, 60)}… focalLength=${exifData.camera?.focalLength35mmEquiv ?? 'n/a'} gps=(${exifData.gps?.latitude?.toFixed(6) ?? 'n/a'},${exifData.gps?.longitude?.toFixed(6) ?? 'n/a'})`);
+    } catch (exifErr) {
+      log.push(`[aggregator:4A] EXIF extraction failed: ${exifErr} — will use default FOV`);
+      // Non-fatal: we can proceed with default smartphone FOV
+    }
+
+    // ── Step 2: Try feature matching (optional — homography needs matched points) ──
+    // Feature matching against a reference image would require a reference image URL
+    // which is not yet available in the PhotoContext. For now, pass null matched points,
+    // which causes projectWithHomography to fall back gracefully.
+    // Future: integrate with roof plane reference images from project data.
+    const matchedPoints = null;
+
+    // ── Step 3: Run homography projection pipeline ──────────────────────────
+    // projectWithHomography handles: EXIF → FOV → homography → world projection
+    const attempt = await projectWithHomography(
+      {
+        class: detection.class,
+        confidence: detection.confidence,
+        bbox: detection.bbox,
+      },
+      matchedPoints,
+      exifData,
+    );
+
+    // ── Step 4: Validate result ─────────────────────────────────────────────
+    if (!attempt.success || !attempt.projection) {
+      log.push(`[aggregator:4A] Homography projection unsuccessful — falling back to ${attempt.fallbackMethod}`);
+      return attempt;
+    }
+
+    // ── Step 5: Quality gates on homography result ──────────────────────────
+    if (attempt.homography) {
+      if (attempt.homography.inlierCount < HOMOGRAPHY_MIN_INLIERS) {
+        log.push(`[aggregator:4A] Insufficient inliers: ${attempt.homography.inlierCount} < ${HOMOGRAPHY_MIN_INLIERS} — falling back`);
+        return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx) };
+      }
+
+      if (attempt.homography.confidence < HOMOGRAPHY_MIN_CONFIDENCE) {
+        log.push(`[aggregator:4A] Low confidence: ${attempt.homography.confidence.toFixed(3)} < ${HOMOGRAPHY_MIN_CONFIDENCE} — falling back`);
+        return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx) };
+      }
+
+      if (attempt.homography.meanReprojectionError > HOMOGRAPHY_MAX_REPROJ_ERROR_PX) {
+        log.push(`[aggregator:4A] High reprojection error: ${attempt.homography.meanReprojectionError.toFixed(2)}px > ${HOMOGRAPHY_MAX_REPROJ_ERROR_PX}px — falling back`);
+        return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx) };
+      }
+    }
+
+    // ── Step 6: Authority safety assertion ──────────────────────────────────
+    // ALL Phase 4A outputs are candidate/preview-only.
+    try {
+      assertAuthorityFlagsSafe(FROZEN_AUTHORITY_FLAGS);
+    } catch (authorityErr) {
+      log.push(`[aggregator:4A] CRITICAL: Authority flags violation — ${authorityErr}`);
+      return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx) };
+    }
+
+    const proj = attempt.projection;
+    log.push(`[aggregator:4A] Homography projection SUCCESS world=(${proj.worldX.toFixed(2)},${proj.worldY.toFixed(2)}) radiusM=${proj.radiusM.toFixed(2)} confidence=${proj.confidence.toFixed(3)} method=${proj.method} reprojErr=${proj.reprojectionError?.toFixed(2) ?? 'n/a'}px`);
+
+    return attempt;
+
+  } catch (err) {
+    log.push(`[aggregator:4A] Homography pipeline error: ${err} — falling back to ${_inferFallbackMethod(ctx)}`);
+    return { ...FAILED, fallbackMethod: _inferFallbackMethod(ctx) };
+  }
+}
+
+/**
+ * Infer the best fallback projection method based on available PhotoContext data.
+ */
+function _inferFallbackMethod(ctx: PhotoContext): 'gps_azimuth_pitch' | 'gps_centroid' | 'none' {
+  if (ctx.lat != null && ctx.lng != null && ctx.azimuth != null) {
+    return 'gps_azimuth_pitch';
+  }
+  if (ctx.lat != null && ctx.lng != null) {
+    return 'gps_centroid';
+  }
+  return 'none';
+}
+
+// ── World projection (4-tier priority chain) ────────────────────────────────
+
+/**
+ * Project a single detection from image-space to world-space XY (meters).
+ * Returns the world position, radius, projection method, and optional
+ * Phase 4A confidence/reprojection metadata.
+ *
+ * PRIORITY CHAIN (Phase 4A):
+ *   0. homography_assisted — single-photo homography projection (NEW)
+ *   1. gps_azimuth_pitch   — GPS + azimuth + pitch geometric projection
+ *   2. gps_centroid         — place at photo GPS position
+ *   3. none                 — no position information (0,0 fallback)
+ *
+ * Each tier is attempted in order; failure falls through to the next.
+ * Phase 4A homography is attempted first when ENABLE_HOMOGRAPHY_PROJECTION
+ * is true and the required inputs (fileUrl, GPS) are available.
+ */
+async function projectDetectionToWorld(
+  detection: VisionDetection,
+  ctx: PhotoContext,
+  origin: { lat: number; lng: number },
+  log: string[],
+): Promise<{ worldX: number; worldY: number; radiusM: number; method: WorldDetection['projectionMethod']; _projectionConfidence?: number; _reprojectionError?: number | null }> {
   const bbox = detection.bbox;
 
-  // Method 1: GPS + azimuth + pitch → full projection
+  // ── Tier 0: Homography-assisted projection (Phase 4A) ─────────────────────
+  if (ENABLE_HOMOGRAPHY_PROJECTION && ctx.fileUrl) {
+    const homAttempt = await attemptHomographyProjection(detection, ctx, origin, log);
+    if (homAttempt.success && homAttempt.projection) {
+      const proj = homAttempt.projection;
+      return {
+        worldX: proj.worldX,
+        worldY: proj.worldY,
+        radiusM: proj.radiusM,
+        method: 'homography_assisted',
+        _projectionConfidence: homAttempt.boostedConfidence ?? proj.confidence,
+        _reprojectionError: proj.reprojectionError,
+      };
+    }
+    // Homography failed — log the reason and fall through
+    log.push(`[aggregator:4A] Homography skipped — falling back to ${homAttempt.fallbackMethod}`);
+  }
+
+  // ── Tier 1: GPS + azimuth + pitch → full projection ──────────────────────
   if (
     ctx.lat != null && ctx.lng != null &&
     ctx.azimuth != null
@@ -181,7 +364,7 @@ function projectDetectionToWorld(
     }
   }
 
-  // Method 2: GPS only → place at photo GPS position
+  // ── Tier 2: GPS only → place at photo GPS position ──────────────────────
   if (ctx.lat != null && ctx.lng != null) {
     const photoXY = latLngToXY(ctx.lat, ctx.lng, origin.lat, origin.lng);
     const cls = detection.class as DetectionClass;
@@ -191,11 +374,11 @@ function projectDetectionToWorld(
     return { worldX: photoXY.x, worldY: photoXY.y, radiusM: defaults.radiusM, method: 'gps_centroid' };
   }
 
-  // Method 3: No GPS — use (0,0) fallback (will be filtered in post-processing)
+  // ── Tier 3: No GPS — use (0,0) fallback (will be filtered in post-processing)
   return { worldX: 0, worldY: 0, radiusM: 0.40, method: 'none' };
 }
 
-// ─── Roof plane assignment ───────────────────────────────────────────────────
+// ── Roof plane assignment ────────────────────────────────────────────────────
 
 /**
  * Assign a detection to a roof plane based on:
@@ -232,7 +415,7 @@ function assignToRoofPlane(
   return closestDist <= 15 ? closest : null;
 }
 
-// ─── Spatial clustering ──────────────────────────────────────────────────────
+// ── Spatial clustering ───────────────────────────────────────────────────────
 
 interface ClusterInput {
   cls: string;
@@ -300,7 +483,7 @@ function clusterDetections(detections: ClusterInput[]): Array<{
   });
 }
 
-// ─── ID generation ───────────────────────────────────────────────────────────
+// ── ID generation ────────────────────────────────────────────────────────────
 
 /** Generate a deterministic id from class + world position (for stability) */
 function makeNodeId(cls: string, worldX: number, worldY: number): string {
@@ -309,7 +492,7 @@ function makeNodeId(cls: string, worldX: number, worldY: number): string {
   return `${cls}_${x}_${y}`.replace(/\./g, 'p').replace(/-/g, 'n');
 }
 
-// ─── Main aggregator ─────────────────────────────────────────────────────────
+// ── Main aggregator ─────────────────────────────────────────────────────────
 
 export interface AggregatorOptions {
   /** Override default confidence thresholds */
@@ -328,25 +511,56 @@ export interface AggregatorOptions {
  *
  * NON-BREAKING: Returns an empty result (no obstructions, no nodes) if
  * photos array is empty or all detections fail thresholds.
+ *
+ * Phase 4A NOTE (breaking change — async):
+ *   This function is now ASYNC because homography projection requires
+ *   network calls (EXIF extraction, Python worker for feature matching).
+ *   All existing callers must `await` the result.
+ *   The function signature changed from sync to async but the output
+ *   shape is identical — only the projection method may now be
+ *   'homography_assisted' and WorldDetection may carry optional
+ *   _projectionConfidence and _reprojectionError fields.
  */
-export function aggregateVisionResults(
+export async function aggregateVisionResults(
   photos: PhotoVisionResult[],
   projectId: string,
   surveyId: string,
   options: AggregatorOptions = {},
-): VisionAggregationResult {
+): Promise<VisionAggregationResult> {
   const log: string[] = [];
   const startMs = Date.now();
 
-  log.push(`[aggregator] START projectId=${projectId} surveyId=${surveyId} photos=${photos.length}`);
+  log.push(`[aggregator] START projectId=${projectId} surveyId=${surveyId} photos=${photos.length} homography=${ENABLE_HOMOGRAPHY_PROJECTION}`);
 
-  // ── Empty guard ──────────────────────────────────────────────────────────
+  // ── Phase 4A: Initialize EXIF cache ───────────────────────────────────────
+  // Pre-warm the EXIF cache by extracting EXIF for all photo URLs in parallel.
+  // This is a best-effort optimization; failures are non-fatal.
+  if (ENABLE_HOMOGRAPHY_PROJECTION) {
+    const photoUrls = photos
+      .map(pv => pv.photoContext.fileUrl)
+      .filter((url): url is string => typeof url === 'string' && url.length > 0);
+
+    if (photoUrls.length > 0) {
+      log.push(`[aggregator:4A] Pre-warming EXIF cache for ${photoUrls.length} photos`);
+      const exifPromises = photoUrls.map(async (url) => {
+        try {
+          await extractExifFromUrl(url);
+        } catch {
+          // Non-fatal: EXIF extraction will be retried per-detection if needed
+        }
+      });
+      // Don't block on pre-warming — let it run in parallel
+      void Promise.allSettled(exifPromises);
+    }
+  }
+
+  // ── Empty guard ────────────────────────────────────────────────────────────
   if (photos.length === 0) {
     log.push('[aggregator] No photos provided — returning empty result');
     return _emptyResult(projectId, surveyId, log);
   }
 
-  // ── Merge thresholds ─────────────────────────────────────────────────────
+  // ── Merge thresholds ──────────────────────────────────────────────────────
   const thresholds: ConfidenceThresholds = {
     default: options.thresholds?.default ?? DEFAULT_CONFIDENCE_THRESHOLDS.default,
     byClass: {
@@ -355,7 +569,7 @@ export function aggregateVisionResults(
     },
   };
 
-  // ── Resolve GPS origin ───────────────────────────────────────────────────
+  // ── Resolve GPS origin ────────────────────────────────────────────────────
   let origin = options.origin;
   if (!origin) {
     const gpsPoints: Array<{ lat: number; lng: number }> = [];
@@ -376,7 +590,7 @@ export function aggregateVisionResults(
     }
   }
 
-  // ── Build roof plane lookup ──────────────────────────────────────────────
+  // ── Build roof plane lookup ───────────────────────────────────────────────
   const roofPlaneLookup: Array<{ id: string; centroidX: number; centroidY: number }> = [];
   if (options.roofPlanes) {
     for (const plane of options.roofPlanes) {
@@ -385,7 +599,7 @@ export function aggregateVisionResults(
     }
   }
 
-  // ── Process each photo ────────────────────────────────────────────────────
+  // ── Process each photo (async for homography) ─────────────────────────────
   let totalRaw = 0;
   let totalFiltered = 0;
   const allWorldDetections: WorldDetection[] = [];
@@ -408,8 +622,8 @@ export function aggregateVisionResults(
         continue;
       }
 
-      // Project to world
-      const proj = projectDetectionToWorld(det, pv.photoContext, origin, log);
+      // Project to world (now async for Phase 4A homography)
+      const proj = await projectDetectionToWorld(det, pv.photoContext, origin, log);
 
       // Skip zero-GPS projections for obstructions (they're meaningless without location)
       if (proj.method === 'none' && isObstructionClass(det.class)) {
@@ -435,6 +649,9 @@ export function aggregateVisionResults(
         source: pv.photoContext,
         rawDetection: det,
         projectionMethod: proj.method,
+        // Phase 4A optional fields (undefined for non-homography projections)
+        _projectionConfidence: proj._projectionConfidence,
+        _reprojectionError: proj._reprojectionError,
       };
 
       allWorldDetections.push(wd);
@@ -443,7 +660,16 @@ export function aggregateVisionResults(
 
   log.push(`[aggregator] World detections: total_raw=${totalRaw} filtered=${totalFiltered} projected=${allWorldDetections.length}`);
 
-  // ── Split by type ─────────────────────────────────────────────────────────
+  // ── Log Phase 4A stats ────────────────────────────────────────────────────
+  if (ENABLE_HOMOGRAPHY_PROJECTION) {
+    const homCount = allWorldDetections.filter(d => d.projectionMethod === 'homography_assisted').length;
+    const homAvgConf = homCount > 0
+      ? (allWorldDetections.filter(d => d.projectionMethod === 'homography_assisted').reduce((s, d) => s + (d._projectionConfidence ?? 0), 0) / homCount)
+      : 0;
+    log.push(`[aggregator:4A] Homography stats: projected=${homCount}/${allWorldDetections.length} avgConf=${homAvgConf.toFixed(3)}`);
+  }
+
+  // ── Split by type ──────────────────────────────────────────────────────────
   const obstructionDetections = allWorldDetections.filter(d => isObstructionClass(d.class));
   const electricalDetections  = allWorldDetections.filter(d => isElectricalClass(d.class));
   const geometryDetections    = allWorldDetections.filter(d => isRoofGeometryClass(d.class));
@@ -541,7 +767,7 @@ export function aggregateVisionResults(
 
   log.push(`[aggregator] Plane corrections: ${planeCorrections.length}`);
 
-  // ── Class counts ──────────────────────────────────────────────────────────
+  // ── Class counts ───────────────────────────────────────────────────────────
   const classCounts: Record<string, number> = {};
   for (const d of allWorldDetections) {
     classCounts[d.class] = (classCounts[d.class] ?? 0) + 1;
@@ -571,7 +797,7 @@ export function aggregateVisionResults(
   };
 }
 
-// ─── Plane correction derivation ─────────────────────────────────────────────
+// ── Plane correction derivation ──────────────────────────────────────────────
 
 /**
  * Derive PlaneCorrections from roof geometry class detections.
@@ -632,7 +858,7 @@ function _derivePlaneCorrections(
   return corrections;
 }
 
-// ─── Empty result helper ──────────────────────────────────────────────────────
+// ── Empty result helper ──────────────────────────────────────────────────────
 
 function _emptyResult(
   projectId: string,

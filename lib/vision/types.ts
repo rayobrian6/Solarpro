@@ -199,7 +199,11 @@ export interface WorldDetection {
   /** Raw detection that produced this world detection */
   rawDetection: VisionDetection;
   /** Projection method used (for audit/debug) */
-  projectionMethod: 'gps_azimuth_pitch' | 'gps_centroid' | 'plane_centroid' | 'none';
+  projectionMethod: 'gps_azimuth_pitch' | 'gps_centroid' | 'plane_centroid' | 'homography_assisted' | 'none';
+  /** Phase 4A: Projection confidence from homography pipeline (0.0-1.0) */
+  _projectionConfidence?: number;
+  /** Phase 4A: Reprojection error in pixels from homography (null if not applicable) */
+  _reprojectionError?: number | null;
 }
 
 // ─── Aggregated Obstruction ───────────────────────────────────────────────────
