@@ -1782,45 +1782,93 @@ function OpenSourcePhotoVisionPassPanel({
             const data = getJson.data as OpenSourcePhotoVisionRunResponse;
             setResult(data);
             setPollProgress(null);
-            // If finalization is complete, stored candidates are available — refresh the detail view.
-            // If still running/pending, stored will be null — use the raw runHash from summary instead
-            // so the UI doesn't show stale runHash from previously persisted candidates.
             const finalizationStatus = getJson.finalizationStatus as string | undefined;
-            if (data.stored) {
+
+            // If finalization is already complete, refresh the detail view with stored results.
+            if (finalizationStatus === 'complete' && data.stored) {
               onDetailRefresh?.({ openSourcePhotoVision: data.stored });
+              return;
             }
-            // If finalization is still in progress, keep polling at a slower rate
-            // until stored results are available. The next poll will pick up the completed finalization.
-            if (finalizationStatus && finalizationStatus !== 'complete' && finalizationStatus !== 'failed') {
-              // Continue polling for finalization completion (with same jobId)
-              const FINALIZATION_POLL_INTERVAL_MS = 5_000; // 5s between finalization polls
-              const MAX_FINALIZATION_WAIT_MS = 120_000; // 2 min max wait for finalization
-              const finalizationStart = Date.now();
-              
-              while (Date.now() - finalizationStart < MAX_FINALIZATION_WAIT_MS) {
-                await new Promise((resolve) => setTimeout(resolve, FINALIZATION_POLL_INTERVAL_MS));
+            // If finalization failed, we still have raw results — just stop.
+            if (finalizationStatus === 'failed') {
+              return;
+            }
+
+            // ── Trigger finalization explicitly via POST /finalize ──
+            // The GET polling route is now a pure DB read — it never runs heavy work.
+            // The UI must call /finalize to trigger candidate persistence, label updates,
+            // and Phase 4A aggregation (homography projection).
+            console.log(`[ui] Worker completed, calling POST /finalize for jobId=${jobId}`);
+            try {
+              const finalizeRes = await fetch(
+                `/api/site-surveys/${surveyId}/open-source-photo-vision-pass/finalize`,
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ jobId }),
+                },
+              );
+              let finalizeJson: Record<string, unknown>;
+              try { finalizeJson = await finalizeRes.json(); } catch { finalizeJson = {}; }
+
+              const fStatus = finalizeJson.finalizationStatus as string | undefined;
+              console.log(`[ui] /finalize responded: finalizationStatus=${fStatus}`);
+
+              // If /finalize completed synchronously, we have the results right away.
+              if (fStatus === 'complete') {
+                // Re-fetch the GET endpoint to get the full data shape (files, etc.)
+                const refreshRes = await fetch(
+                  `/api/site-surveys/${surveyId}/open-source-photo-vision-pass?jobId=${encodeURIComponent(jobId)}`,
+                );
                 try {
-                  const fRes = await fetch(
-                    `/api/site-surveys/${surveyId}/open-source-photo-vision-pass?jobId=${encodeURIComponent(jobId)}`,
-                  );
-                  let fJson: Record<string, unknown>;
-                  try { fJson = await fRes.json(); } catch { break; }
-                  
-                  const fStatus = fJson.finalizationStatus as string | undefined;
-                  const fData = fJson.data as OpenSourcePhotoVisionRunResponse | undefined;
-                  
-                  if (fStatus === 'complete' && fData?.stored) {
-                    setResult(fData);
+                  const refreshJson = await refreshRes.json() as Record<string, unknown>;
+                  const refreshData = refreshJson.data as OpenSourcePhotoVisionRunResponse | undefined;
+                  if (refreshData) {
+                    setResult(refreshData);
+                    if (refreshData.stored) {
+                      onDetailRefresh?.({ openSourcePhotoVision: refreshData.stored });
+                    }
+                  }
+                } catch { /* use existing data */ }
+                return;
+              }
+            } catch (finalizeErr) {
+              console.error(`[ui] POST /finalize failed, will poll GET for completion:`, finalizeErr);
+              // Fall through to polling — finalization might have started before the error.
+            }
+
+            // ── Poll GET for finalization completion ──
+            // If /finalize returned 'running' (another request is finalizing) or
+            // the /finalize call failed, poll GET until finalization completes.
+            const FINALIZATION_POLL_INTERVAL_MS = 5_000; // 5s between finalization polls
+            const MAX_FINALIZATION_WAIT_MS = 120_000; // 2 min max wait for finalization
+            const finalizationStart = Date.now();
+
+            while (Date.now() - finalizationStart < MAX_FINALIZATION_WAIT_MS) {
+              await new Promise((resolve) => setTimeout(resolve, FINALIZATION_POLL_INTERVAL_MS));
+              try {
+                const fRes = await fetch(
+                  `/api/site-surveys/${surveyId}/open-source-photo-vision-pass?jobId=${encodeURIComponent(jobId)}`,
+                );
+                let fJson: Record<string, unknown>;
+                try { fJson = await fRes.json(); } catch { break; }
+
+                const fStatus = fJson.finalizationStatus as string | undefined;
+                const fData = fJson.data as OpenSourcePhotoVisionRunResponse | undefined;
+
+                if (fStatus === 'complete' && fData) {
+                  setResult(fData);
+                  if (fData.stored) {
                     onDetailRefresh?.({ openSourcePhotoVision: fData.stored });
-                    break;
                   }
-                  if (fStatus === 'failed') {
-                    // Finalization failed but we already have the raw results — just stop polling
-                    break;
-                  }
-                } catch {
-                  break; // Stop polling on network errors
+                  break;
                 }
+                if (fStatus === 'failed') {
+                  // Finalization failed but we already have the raw results — just stop polling
+                  break;
+                }
+              } catch {
+                break; // Stop polling on network errors
               }
             }
             return;

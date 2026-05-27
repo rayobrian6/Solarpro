@@ -729,3 +729,48 @@ export async function markFinalizationFailed(
     WHERE job_id = ${jobId}
   `;
 }
+
+/**
+ * Reset finalization_status from 'running' back to 'pending' for a specific job.
+ * This handles the case where a previous Vercel function invocation set
+ * finalization_status='running' but was killed before completing the work
+ * (Vercel terminates serverless functions after the response is sent).
+ * Returns true if the reset was applied.
+ */
+export async function resetStuckFinalization(jobId: string): Promise<boolean> {
+  const sql = await getDbReady();
+  // Only reset if finalization has been running for more than 2 minutes
+  // (prevents resetting a genuinely in-flight finalization from the /finalize route)
+  const result = await sql`
+    UPDATE photo_vision_jobs
+    SET finalization_status = 'pending',
+        finalization_started_at = NULL,
+        finalization_error = NULL,
+        updated_at = NOW()
+    WHERE job_id = ${jobId}
+      AND finalization_status = 'running'
+      AND finalization_started_at < NOW() - INTERVAL '2 minutes'
+  `;
+  const affected = Array.isArray(result) ? result.length : (result as Record<string, unknown>).count as number;
+  return affected > 0;
+}
+
+/**
+ * Reset ALL jobs with stuck finalization (running > 5 minutes).
+ * Called as housekeeping by the GET route.
+ * Returns the number of jobs reset.
+ */
+export async function resetAllStuckFinalizations(): Promise<number> {
+  const sql = await getDbReady();
+  const result = await sql`
+    UPDATE photo_vision_jobs
+    SET finalization_status = 'pending',
+        finalization_started_at = NULL,
+        finalization_error = NULL,
+        updated_at = NOW()
+    WHERE finalization_status = 'running'
+      AND finalization_started_at < NOW() - INTERVAL '5 minutes'
+  `;
+  const affected = Array.isArray(result) ? result.length : (result as Record<string, unknown>).count as number;
+  return typeof affected === 'number' ? affected : 0;
+}
