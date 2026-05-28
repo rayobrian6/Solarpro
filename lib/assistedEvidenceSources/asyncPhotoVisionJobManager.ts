@@ -348,6 +348,7 @@ export async function cancelJob(jobId: string): Promise<boolean> {
     UPDATE photo_vision_jobs
     SET status = 'failed', error = 'Cancelled by user', completed_at = NOW(), updated_at = NOW()
     WHERE job_id = ${jobId} AND status IN ('pending', 'running')
+    RETURNING job_id
   `;
 
   // Best-effort cancel on Render
@@ -365,9 +366,8 @@ export async function cancelJob(jobId: string): Promise<boolean> {
     }
   }
 
-  // Neon's sql tagged template returns rows[]; for UPDATE we check affected rows via the result metadata
-  const affected = Array.isArray(result) ? result.length : (result as Record<string, unknown>).count as number;
-  return affected > 0;
+  // Neon serverless returns rows[] — RETURNING makes affected rows visible
+  return result.length > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -379,9 +379,9 @@ export async function markStaleJobsFailed(): Promise<number> {
     UPDATE photo_vision_jobs
     SET status = 'failed', error = 'Job timed out (running > 30 minutes)', completed_at = NOW(), updated_at = NOW()
     WHERE status = 'running' AND updated_at < NOW() - INTERVAL '60 minutes'
+    RETURNING job_id
   `;
-  const affected = Array.isArray(result) ? result.length : (result as Record<string, unknown>).count as number;
-  return affected ?? 0;
+  return result.length;
 }
 
 // ---------------------------------------------------------------------------
@@ -699,6 +699,10 @@ export async function updatePhotoLabelsFromCandidates(
  */
 export async function markFinalizationStarted(jobId: string): Promise<boolean> {
   const sql = await getDbReady();
+  // CRITICAL: Neon serverless driver (without fullResults:true) returns rows[]
+  // for UPDATE. Without RETURNING, rows[] is always empty regardless of whether
+  // rows were affected. Adding RETURNING job_id makes the UPDATE return the
+  // primary key of affected rows, so result.length > 0 means the CAS succeeded.
   const result = await sql`
     UPDATE photo_vision_jobs
     SET finalization_status = 'running',
@@ -707,10 +711,28 @@ export async function markFinalizationStarted(jobId: string): Promise<boolean> {
         updated_at = NOW()
     WHERE job_id = ${jobId}
       AND finalization_status IN ('pending', 'failed', 'skipped')
+    RETURNING job_id
   `;
-  // Neon sql UPDATE returns the row count via .count on the result
-  const affected = Array.isArray(result) ? result.length : (result as Record<string, unknown>).count as number;
-  return affected > 0;
+  const claimed = result.length > 0;
+  if (!claimed) {
+    // Debug: re-read the row to show why CAS failed
+    try {
+      const debugRows = await sql`
+        SELECT job_id, status, finalization_status, finalization_started_at, finalization_error
+        FROM photo_vision_jobs
+        WHERE job_id = ${jobId}
+      `;
+      const dbg = debugRows[0] as Record<string, unknown> | undefined;
+      console.error(
+        `[markFinalizationStarted] CAS FAILED for jobId=${jobId}. ` +
+        `DB state: status=${dbg?.status} finalization_status=${dbg?.finalization_status} ` +
+        `finalization_started_at=${dbg?.finalization_started_at} finalization_error=${dbg?.finalization_error}`
+      );
+    } catch (dbgErr) {
+      console.error(`[markFinalizationStarted] CAS FAILED for jobId=${jobId}, and debug re-read also failed:`, dbgErr);
+    }
+  }
+  return claimed;
 }
 
 /**
@@ -769,9 +791,9 @@ export async function resetStuckFinalization(jobId: string): Promise<boolean> {
     WHERE job_id = ${jobId}
       AND finalization_status = 'running'
       AND finalization_started_at < NOW() - INTERVAL '2 minutes'
+    RETURNING job_id
   `;
-  const affected = Array.isArray(result) ? result.length : (result as Record<string, unknown>).count as number;
-  return affected > 0;
+  return result.length > 0;
 }
 
 /**
@@ -789,9 +811,9 @@ export async function resetAllStuckFinalizations(): Promise<number> {
         updated_at = NOW()
     WHERE finalization_status = 'running'
       AND finalization_started_at < NOW() - INTERVAL '5 minutes'
+    RETURNING job_id
   `;
-  const affected = Array.isArray(result) ? result.length : (result as Record<string, unknown>).count as number;
-  return typeof affected === 'number' ? affected : 0;
+  return result.length;
 }
 
 /**
@@ -837,7 +859,7 @@ export async function resetStuckOrFailedFinalization(jobId: string): Promise<boo
         finalization_status = 'failed'
         OR (finalization_status = 'running' AND finalization_started_at < NOW() - INTERVAL '2 minutes')
       )
+    RETURNING job_id
   `;
-  const affected = Array.isArray(result) ? result.length : (result as Record<string, unknown>).count as number;
-  return affected > 0;
+  return result.length > 0;
 }
