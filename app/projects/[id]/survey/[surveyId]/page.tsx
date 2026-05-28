@@ -51,6 +51,7 @@ import {
   FileText,
   Wrench,
   Maximize2,
+  RotateCcw,
 } from "lucide-react";
 import type { SiteSurvey, SiteSurveyFile } from "@/lib/db-neon";
 import type {
@@ -1667,6 +1668,8 @@ function OpenSourcePhotoVisionPassPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [candidateFilter, setCandidateFilter] = useState<"both" | "opencv" | "yolo" | "ocr">("both");
+  const [retryingFinalization, setRetryingFinalization] = useState(false);
+  const [retryJobId, setRetryJobId] = useState<string>("");
   const activeBundle = result?.stored ?? bundle ?? null;
   const allCandidates = safeArray(activeBundle?.candidates);
   const candidates = allCandidates.filter((candidate) => {
@@ -1701,6 +1704,45 @@ function OpenSourcePhotoVisionPassPanel({
   ).slice(0, 6);
 
   const [pollProgress, setPollProgress] = useState<{ processedFiles: number; totalPhotoFiles: number } | null>(null);
+
+  // ── TEMP: Retry stuck/failed finalization ── remove during UI rework
+  const retryFinalize = useCallback(async () => {
+    if (!retryJobId.trim()) {
+      setError("Enter the Job ID to retry finalization.");
+      return;
+    }
+    setRetryingFinalization(true);
+    setError(null);
+    try {
+      console.log(`[ui:retry-finalize] jobId=${retryJobId}`);
+      const res = await fetch(
+        `/api/site-surveys/${surveyId}/open-source-photo-vision-pass/finalize?retry=1`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jobId: retryJobId.trim() }),
+        },
+      );
+      let data: Record<string, unknown>;
+      try { data = await res.json(); } catch { data = {}; }
+      if (data.success) {
+        console.log("[ui:retry-finalize] Success!", data.finalizationStatus);
+        if (data.finalizationStatus === "complete" && data.data) {
+          setResult(data.data as OpenSourcePhotoVisionRunResponse);
+          const d = data.data as Record<string, unknown>;
+          if (d.stored) {
+            onDetailRefresh?.({ openSourcePhotoVision: d.stored as OpenSourcePhotoVisionBundle });
+          }
+        }
+      } else {
+        setError(`Retry finalization failed: ${data.error ?? "Unknown error"}`);
+      }
+    } catch (err) {
+      setError(`Retry finalization error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setRetryingFinalization(false);
+    }
+  }, [surveyId, retryJobId, onDetailRefresh]);
 
   const runPass = useCallback(async () => {
     setLoading(true);
@@ -1925,14 +1967,34 @@ External OpenCV + YOLO/Supervision + Tesseract OCR worker · actual image bytes 
                 future stages and are not marked complete.
               </p>
             </div>
-            <button
-              onClick={runPass}
-              disabled={loading}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-400/30 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {loading ? <div className="spinner w-3 h-3" /> : <RefreshCw size={12} />}
-              {loading && pollProgress ? `Processing ${pollProgress.processedFiles}/${pollProgress.totalPhotoFiles} photos…` : loading ? "Running photo vision pass…" : "Run Open-Source Photo Vision Pass"}
-            </button>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={runPass}
+                disabled={loading}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-400/30 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {loading ? <div className="spinner w-3 h-3" /> : <RefreshCw size={12} />}
+                {loading && pollProgress ? `Processing ${pollProgress.processedFiles}/${pollProgress.totalPhotoFiles} photos…` : loading ? "Running photo vision pass…" : "Run Open-Source Photo Vision Pass"}
+              </button>
+              {/* TEMP: Retry stuck finalization — remove during UI rework */}
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={retryJobId}
+                  onChange={(e) => setRetryJobId(e.target.value)}
+                  placeholder="Paste Job ID to retry finalization…"
+                  className="flex-1 rounded border border-amber-500/30 bg-slate-900/60 px-2 py-1.5 text-[10px] text-amber-100 placeholder:text-amber-200/40 focus:outline-none focus:ring-1 focus:ring-amber-400/50"
+                />
+                <button
+                  onClick={retryFinalize}
+                  disabled={retryingFinalization || !retryJobId.trim()}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-400/30 bg-amber-500/15 px-2 py-1.5 text-[10px] font-semibold text-amber-100 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
+                >
+                  {retryingFinalization ? <div className="spinner w-2.5 h-2.5" /> : <RotateCcw size={10} />}
+                  {retryingFinalization ? "Retrying…" : "Retry Finalization"}
+                </button>
+              </div>
+            </div>
           </div>
           {loading && pollProgress && pollProgress.totalPhotoFiles > 0 && (
             <div className="mt-3">
