@@ -20,7 +20,7 @@
 // BYPASS PREVENTION:
 //   - CADObstruction.source='vision' is ILLEGAL through this bridge
 //   - roofObstructionRegistration data must go through promotion first
-//   - patchSystemDefinitionFromVision() is deprecated — this replaces it
+//   - patchSystemDefinitionFromVision() has been removed — this is the sole legal path
 // ============================================================================
 
 import type { CanonicalBuildingModel, CanonicalObstruction, CanonicalElectricalNode } from '@/lib/siteSurveys/unifiedGeometry/types';
@@ -306,12 +306,16 @@ function resolveWorldPosition(
   return null;
 }
 
-// ── Guard: Block raw vision data from entering CAD ──────────────────────────
+// ── Guard: Verify CAD model source integrity ──────────────────────────────────
 
 /**
  * assertNoRawVisionInCAD — runtime guard that checks a CADModel's obstructions
  * and electrical nodes for any source='vision' entries that bypassed the
  * canonical bridge.
+ *
+ * DEFENSE-IN-DEPTH: The type system now excludes 'vision' from CADObstruction.source
+ * and CADElectricalNode.source. This runtime guard remains as a safety net against
+ * runtime data (e.g., from DB or external APIs) that might still contain 'vision'.
  *
  * This should be called AFTER generateCADLayout() to verify no raw vision
  * data leaked into the model.
@@ -326,7 +330,8 @@ export function assertNoRawVisionInCAD(
 
   if (obstructions) {
     for (const obs of obstructions) {
-      if (obs.source === 'vision') {
+      // Defense-in-depth: type system prevents 'vision', but runtime data may bypass
+      if ((obs as { source: string }).source === 'vision') {
         violations.push(`obstruction id=${obs.id} type=${obs.type} has source='vision' — must go through canonical bridge`);
       }
     }
@@ -334,7 +339,7 @@ export function assertNoRawVisionInCAD(
 
   if (electricalNodes) {
     for (const node of electricalNodes) {
-      if (node.source === 'vision') {
+      if ((node as { source: string }).source === 'vision') {
         violations.push(`electricalNode id=${node.id} type=${node.type} has source='vision' — must go through canonical bridge`);
       }
     }
@@ -352,14 +357,17 @@ export function assertNoRawVisionInCAD(
   }
 }
 
-// ── Guard: Verify CAD model only uses canonical sources ─────────────────────
+// ── Guard: Verify CAD model only uses canonical sources ───────────────────────
 
 /**
  * validateCADModelSources — check that all obstructions and electrical nodes
  * in a CADModel have acceptable sources.
  *
  * Acceptable sources: 'promoted_canonical', 'manual', 'merged'
- * Unacceptable sources: 'vision' (raw, unreviewed)
+ * Unacceptable sources: 'vision' (raw, unreviewed) — blocked at type level
+ *
+ * DEFENSE-IN-DEPTH: The type system excludes 'vision' from the source unions.
+ * This function remains as a runtime safety net.
  *
  * Returns a list of violations (empty = all good).
  */
@@ -371,7 +379,7 @@ export function validateCADModelSources(
 
   if (obstructions) {
     for (const obs of obstructions) {
-      if (obs.source === 'vision') {
+      if ((obs as { source: string }).source === 'vision') {
         violations.push(`CADObstruction id=${obs.id} has source='vision' (raw, unreviewed)`);
       }
     }
@@ -379,7 +387,7 @@ export function validateCADModelSources(
 
   if (electricalNodes) {
     for (const node of electricalNodes) {
-      if (node.source === 'vision') {
+      if ((node as { source: string }).source === 'vision') {
         violations.push(`CADElectricalNode id=${node.id} has source='vision' (raw, unreviewed)`);
       }
     }

@@ -58,6 +58,7 @@ import {
   validateCADModelSources,
   CanonicalBridgeError,
 } from '@/lib/cad/canonicalBridge';
+import type { CADObstruction, CADElectricalNode } from '@/lib/cad/types';
 import type { CanonicalBuildingModel } from '../types';
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
@@ -765,6 +766,8 @@ describe('Test 13: CAD bridge mock gate', () => {
 
 describe('Test 14: No raw vision in CAD guard', () => {
   it('assertNoRawVisionInCAD throws when given obstructions with source=vision', () => {
+    // Defense-in-depth test: type system blocks 'vision' in CADObstruction.source,
+    // but runtime data (e.g. from DB) may contain it. Test with explicit cast.
     const visionObstructions = [
       {
         id: 'obs-001',
@@ -779,12 +782,14 @@ describe('Test 14: No raw vision in CAD guard', () => {
         source: 'vision' as const,
         confidence: 75,
       },
-    ];
+    ] as unknown as CADObstruction[];
 
     expect(() => assertNoRawVisionInCAD(visionObstructions, undefined)).toThrow(CanonicalBridgeError);
   });
 
   it('assertNoRawVisionInCAD throws when given electrical nodes with source=vision', () => {
+    // Defense-in-depth test: type system blocks 'vision' in CADElectricalNode.source,
+    // but runtime data may contain it. Test with explicit cast.
     const visionNodes = [
       {
         id: 'node-001',
@@ -796,7 +801,7 @@ describe('Test 14: No raw vision in CAD guard', () => {
         source: 'vision' as const,
         confidence: 70,
       },
-    ];
+    ] as unknown as CADElectricalNode[];
 
     expect(() => assertNoRawVisionInCAD(undefined, visionNodes)).toThrow(CanonicalBridgeError);
   });
@@ -869,11 +874,12 @@ describe('validateCADModelSources', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('returns valid=false for source=vision', () => {
-    const result = validateCADModelSources(
-      [{ id: '1', type: 'chimney', x: 0, y: 0, radiusM: 0.3, setbackM: 0.15, totalRadiusM: 0.45, heightFt: 3, roofPlaneId: null, source: 'vision', confidence: 50 }],
-      undefined,
-    );
+  it('returns valid=false for source=vision (defense-in-depth)', () => {
+    // Type system blocks 'vision' in CADObstruction.source; test with cast
+    const visionObs = [
+      { id: '1', type: 'chimney', x: 0, y: 0, radiusM: 0.3, setbackM: 0.15, totalRadiusM: 0.45, heightFt: 3, roofPlaneId: null, source: 'vision', confidence: 50 },
+    ] as unknown as CADObstruction[];
+    const result = validateCADModelSources(visionObs, undefined);
     expect(result.valid).toBe(false);
     expect(result.violations.length).toBeGreaterThan(0);
     expect(result.violations[0]).toContain('vision');

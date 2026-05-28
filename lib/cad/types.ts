@@ -168,15 +168,13 @@ export interface CADObstruction {
    *  - 'promoted_canonical': Passed through unified geometry pipeline + human review (PREFERRED)
    *  - 'manual': User-entered obstruction (ACCEPTABLE)
    *  - 'merged': Merged from multiple sources after review (ACCEPTABLE)
-   *  - 'vision': RAW vision pipeline data — DEPRECATED, must go through canonical bridge
-   *  Use canonicalBridge.canonicalToCADInputs() to produce 'promoted_canonical' entries.
-   *  Use assertNoRawVisionInCAD() to enforce no raw vision data in CAD models.
+   *  Raw 'vision' source is no longer allowed — must go through canonical bridge.
    */
-  source:      'promoted_canonical' | 'vision' | 'manual' | 'merged';
+  source:      'promoted_canonical' | 'manual' | 'merged';
   confidence:  number;         // 0.0–1.0
 }
 
-// ── CAD Electrical Node (vision-sourced) ────────────────────────────
+// ── CAD Electrical Node ────────────────────────────
 // Represents a detected electrical component in the CAD model.
 // Used by conduitRouting.ts as a routing target / waypoint.
 
@@ -191,10 +189,9 @@ export interface CADElectricalNode {
    *  - 'promoted_canonical': Passed through unified geometry pipeline + human review (PREFERRED)
    *  - 'manual': User-entered node (ACCEPTABLE)
    *  - 'merged': Merged from multiple sources after review (ACCEPTABLE)
-   *  - 'vision': RAW vision pipeline data — DEPRECATED, must go through canonical bridge
-   *  Use canonicalBridge.canonicalToCADInputs() to produce 'promoted_canonical' entries.
+   *  Raw 'vision' source is no longer allowed — must go through canonical bridge.
    */
-  source:               'promoted_canonical' | 'vision' | 'manual' | 'merged';
+  source:               'promoted_canonical' | 'manual' | 'merged';
   confidence:           number;
 }
 

@@ -3556,6 +3556,170 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 079b (unified artifacts): ${(e as Error).message}`);
     }
 
+    // ── Migration 080: Backfill unified_geometry_artifacts from source tables ──
+    try {
+      const ugaExists = await sql`
+        SELECT 1 FROM information_schema.tables
+        WHERE table_name = 'unified_geometry_artifacts'
+      `;
+      if (ugaExists.length === 0) {
+        results.push('⏭ Migration 080: skipped — unified_geometry_artifacts table does not exist yet (run 079 first)');
+      } else {
+        // Check if backfill has already been done
+        const backfillMarker = await sql`
+          SELECT 1 FROM information_schema.tables
+          WHERE table_name = 'unified_geometry_artifacts'
+        `;
+        const existingCount = await sql`
+          SELECT COUNT(*) as cnt FROM unified_geometry_artifacts
+        `;
+        const currentCount = Number(existingCount[0]?.cnt ?? 0);
+
+        if (currentCount > 0) {
+          results.push(`⏭ Migration 080: skipped — unified_geometry_artifacts already has ${currentCount} rows`);
+        } else {
+          let backfilledA = 0;
+          let backfilledB = 0;
+
+          // Backfill from Pipeline A: open_source_photo_vision_candidates
+          try {
+            const pipelineARows = await sql`
+              SELECT * FROM open_source_photo_vision_candidates
+              ORDER BY created_at ASC
+            `;
+            for (const row of pipelineARows) {
+              try {
+                await sql`
+                  INSERT INTO unified_geometry_artifacts (
+                    id, survey_id, geometry_class, authority_state, authority,
+                    provenance, confidence, label, limitations, geometry_data,
+                    review_state, priority, mock_artifact, created_at, updated_at
+                  ) VALUES (
+                    ${row.candidate_id ?? `pv-${row.id}`},
+                    ${row.survey_id},
+                    'obstruction',
+                    'raw_evidence',
+                    ${JSON.stringify({
+                      state: 'raw_evidence',
+                      level: 0,
+                      reviewOnly: true,
+                      cadConsumable: false,
+                      mockArtifact: false,
+                    })}::jsonb,
+                    ${JSON.stringify({
+                      sourcePipeline: 'photo_vision',
+                      toolName: row.candidate_type ?? 'unknown',
+                      toolVersion: '1.0.0',
+                      runHash: row.id ?? 'unknown',
+                      sourceFileIds: row.survey_id ? [row.survey_id] : [],
+                      derivedFromArtifactIds: [],
+                    })}::jsonb,
+                    ${Number(row.confidence ?? 0)},
+                    ${String(row.candidate_type ?? 'unknown')},
+                    ${[]}::text[],
+                    ${JSON.stringify({
+                      originalCandidateId: row.candidate_id ?? row.id,
+                      candidateType: row.candidate_type,
+                      candidateCategory: row.candidate_category,
+                    })}::jsonb,
+                    'review_required',
+                    'medium',
+                    false,
+                    ${row.created_at ?? new Date().toISOString()}::timestamptz,
+                    NOW()::timestamptz
+                  )
+                  ON CONFLICT (id) DO NOTHING
+                `;
+                backfilledA++;
+              } catch (insertErr) {
+                // Skip individual failures — log but continue
+                console.warn(`[Migration 080] Failed to backfill Pipeline A row id=${row.id}:`, insertErr);
+              }
+            }
+          } catch (aErr) {
+            console.warn('[Migration 080] Pipeline A backfill error:', aErr);
+          }
+
+          // Backfill from Pipeline B: site_survey_geometry_reconstruction_artifacts
+          try {
+            const pipelineBRows = await sql`
+              SELECT * FROM site_survey_geometry_reconstruction_artifacts
+              ORDER BY created_at ASC
+            `;
+            for (const row of pipelineBRows) {
+              try {
+                const artifactType = row.artifact_type ?? 'unknown';
+                // Map artifact type to geometry class
+                const geometryClassMap: Record<string, string> = {
+                  segmentation_mask: 'segmentation',
+                  depth_map: 'depth',
+                  sfm_point_cloud: 'point_cloud',
+                  plane_candidate: 'roof_plane',
+                  roof_plane_candidate: 'roof_plane',
+                  wall_plane_candidate: 'wall_plane',
+                  line_candidate: 'structural_line',
+                  semantic_segmentation_mask: 'segmentation',
+                  structural_line_candidate: 'structural_line',
+                  vanishing_point: 'vanishing_point',
+                  consensus_plane_candidate: 'consensus_plane',
+                };
+                await sql`
+                  INSERT INTO unified_geometry_artifacts (
+                    id, survey_id, geometry_class, authority_state, authority,
+                    provenance, confidence, label, limitations, geometry_data,
+                    review_state, priority, mock_artifact, created_at, updated_at
+                  ) VALUES (
+                    ${row.id},
+                    ${row.survey_id},
+                    ${geometryClassMap[artifactType] ?? 'unknown'},
+                    'raw_evidence',
+                    ${JSON.stringify({
+                      state: 'raw_evidence',
+                      level: 0,
+                      reviewOnly: true,
+                      cadConsumable: false,
+                      mockArtifact: artifactType === 'mock',
+                    })}::jsonb,
+                    ${JSON.stringify({
+                      sourcePipeline: 'geometry_reconstruction',
+                      toolName: artifactType,
+                      toolVersion: row.tool_version ?? '1.0.0',
+                      runHash: row.job_id ?? row.id ?? 'unknown',
+                      sourceFileIds: row.source_file_ids ?? [],
+                      derivedFromArtifactIds: [],
+                    })}::jsonb,
+                    ${Number(row.confidence ?? 0)},
+                    ${artifactType},
+                    ${row.limitations ?? []}::text[],
+                    ${JSON.stringify({
+                      originalArtifactId: row.id,
+                      artifactType,
+                      artifactData: row.artifact_data,
+                    })}::jsonb,
+                    'review_required',
+                    'medium',
+                    ${artifactType === 'mock'},
+                    ${row.created_at ?? new Date().toISOString()}::timestamptz,
+                    NOW()::timestamptz
+                  )
+                  ON CONFLICT (id) DO NOTHING
+                `;
+                backfilledB++;
+              } catch (insertErr) {
+                console.warn(`[Migration 080] Failed to backfill Pipeline B row id=${row.id}:`, insertErr);
+              }
+            }
+          } catch (bErr) {
+            console.warn('[Migration 080] Pipeline B backfill error:', bErr);
+          }
+
+          results.push(`✅ Migration 080: backfilled unified_geometry_artifacts — Pipeline A: ${backfilledA}, Pipeline B: ${backfilledB}`);
+        }
+      }
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 080 (backfill unified artifacts): ${(e as Error).message}`);
+    }
+
     return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);

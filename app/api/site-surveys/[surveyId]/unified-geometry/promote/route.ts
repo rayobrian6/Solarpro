@@ -19,6 +19,10 @@
 //   - Mock artifacts CANNOT be promoted
 //   - Rejected artifacts CANNOT be promoted
 //   - Only promoted_canonical+ artifacts can feed the CanonicalBuildingModel
+//
+// ARTIFACT SOURCE:
+//   PRIMARY:   unified_geometry_artifacts table (via unifiedArtifactStore)
+//   FALLBACK:  On-the-fly adaptation from Pipeline A + Pipeline B source tables
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -37,6 +41,7 @@ import {
 import type { UnifiedGeometryAuthorityState } from '@/lib/siteSurveys/unifiedGeometry';
 import { insertPromotionRecords } from '@/lib/siteSurveys/unifiedGeometry/promotionStore';
 import type { UnifiedGeometryArtifact } from '@/lib/siteSurveys/unifiedGeometry/types';
+import { getUnifiedArtifactsForSurvey } from '@/lib/siteSurveys/unifiedGeometry/unifiedArtifactStore';
 
 export async function POST(
   req: NextRequest,
@@ -53,7 +58,7 @@ export async function POST(
       return NextResponse.json({ success: false, error: 'Invalid survey ID' }, { status: 400 });
     }
 
-    // ── Parse request body ───────────────────────────────────────────────
+    // ── Parse request body ──────────────────────────────────────────────
     const body = await req.json();
     const { artifactIds, targetState, notes, intelligenceValidated, intelligenceWarnings } = body as {
       artifactIds: string[];
@@ -83,36 +88,45 @@ export async function POST(
       );
     }
 
-    // ── Fetch the current bundle to get artifact objects ──────────────────
-    // In a full implementation, we'd fetch the artifacts from the
-    // unified_geometry_artifacts table. For now, we accept the promotion
-    // request and validate against the bundle endpoint data.
-    //
-    // The caller should first GET the bundle, then POST to promote specific
-    // artifact IDs. The server re-fetches to ensure freshness.
-    const { getOpenSourcePhotoVisionCandidatesBySurvey } = await import('@/lib/db/openSourcePhotoVision');
-    const { getArtifactsBySurvey } = await import('@/lib/db/geometryReconstruction');
-    const { buildUnifiedEvidenceBundle } = await import('@/lib/siteSurveys/unifiedGeometry');
+    // ── Fetch artifacts: PRIMARY unified table, FALLBACK on-the-fly ─────
+    let artifacts: UnifiedGeometryArtifact[] = [];
 
-    const [photoVisionBundle, geometryReconResult] = await Promise.all([
-      getOpenSourcePhotoVisionCandidatesBySurvey(surveyId, user.id).catch(() => null),
-      getArtifactsBySurvey(surveyId, user.id).catch(() => null),
-    ]);
+    // PRIMARY: Query unified_geometry_artifacts directly
+    const unifiedArtifacts = await getUnifiedArtifactsForSurvey(surveyId);
+    if (unifiedArtifacts.length > 0) {
+      artifacts = unifiedArtifacts;
+    } else {
+      // FALLBACK: On-the-fly adaptation from source tables
+      console.info(
+        `[POST /unified-geometry/promote] No artifacts in unified table for survey ${surveyId}, falling back to on-the-fly adaptation`,
+      );
 
-    const bundle = buildUnifiedEvidenceBundle(
-      surveyId,
-      photoVisionBundle?.candidates ?? [],
-      geometryReconResult?.artifacts ?? [],
-      { includeMocks: true, minConfidence: 0 },
-    );
+      const { getOpenSourcePhotoVisionCandidatesBySurvey } = await import('@/lib/db/openSourcePhotoVision');
+      const { getArtifactsBySurvey } = await import('@/lib/db/geometryReconstruction');
+      const { buildUnifiedEvidenceBundle } = await import('@/lib/siteSurveys/unifiedGeometry');
+
+      const [photoVisionBundle, geometryReconResult] = await Promise.all([
+        getOpenSourcePhotoVisionCandidatesBySurvey(surveyId, user.id).catch(() => null),
+        getArtifactsBySurvey(surveyId, user.id).catch(() => null),
+      ]);
+
+      const bundle = buildUnifiedEvidenceBundle(
+        surveyId,
+        photoVisionBundle?.candidates ?? [],
+        geometryReconResult?.artifacts ?? [],
+        { includeMocks: true, minConfidence: 0 },
+      );
+
+      artifacts = bundle.artifacts;
+    }
 
     // Build a lookup of current artifacts by ID
     const artifactLookup = new Map<string, UnifiedGeometryArtifact>();
-    for (const artifact of bundle.artifacts) {
+    for (const artifact of artifacts) {
       artifactLookup.set(artifact.id, artifact);
     }
 
-    // ── Promote each artifact ────────────────────────────────────────────
+    // ── Promote each artifact ───────────────────────────────────────────
     const successful: PromotionResult[] = [];
     const failed: Array<{ artifactId: string; error: string }> = [];
 
@@ -139,7 +153,7 @@ export async function POST(
       }
     }
 
-    // ── Persist promotion records ────────────────────────────────────────
+    // ── Persist promotion records ───────────────────────────────────────
     if (successful.length > 0) {
       try {
         await insertPromotionRecords(successful.map(r => r.promotionRecord), surveyId);
@@ -150,6 +164,56 @@ export async function POST(
         );
         // Don't fail the request — the promotion still happened in memory.
         // The records can be reconstructed from the audit trail.
+      }
+
+      // ── Upsert promoted artifacts into unified_geometry_artifacts ──────
+      // After promotion, the promoted artifact should be reflected in the
+      // unified table so subsequent bundle fetches reflect the updated authority.
+      try {
+        const { getDbReady } = await import('@/lib/db/core');
+        const db = await getDbReady();
+        for (const result of successful) {
+          const art = result.promotedArtifact;
+          await db`
+            INSERT INTO unified_geometry_artifacts (
+              id, survey_id, geometry_class, authority_state, authority,
+              provenance, confidence, label, limitations, geometry_data,
+              review_state, priority, mock_artifact, created_at, updated_at
+            ) VALUES (
+              ${art.id},
+              ${art.surveyId},
+              ${art.geometryClass},
+              ${art.authority.state},
+              ${JSON.stringify(art.authority)}::jsonb,
+              ${JSON.stringify(art.provenance)}::jsonb,
+              ${art.confidence},
+              ${art.label},
+              ${art.limitations ?? []}::text[],
+              ${JSON.stringify(art)}::jsonb,
+              ${art.reviewState ?? 'review_required'},
+              ${art.priority ?? 'medium'},
+              ${art.authority.mockArtifact ?? false},
+              NOW()::timestamptz,
+              NOW()::timestamptz
+            )
+            ON CONFLICT (id) DO UPDATE SET
+              authority_state = EXCLUDED.authority_state,
+              authority = EXCLUDED.authority,
+              provenance = EXCLUDED.provenance,
+              confidence = EXCLUDED.confidence,
+              review_state = EXCLUDED.review_state,
+              mock_artifact = EXCLUDED.mock_artifact,
+              geometry_data = EXCLUDED.geometry_data,
+              updated_at = NOW()::timestamptz
+          `;
+        }
+      } catch (err) {
+        console.warn(
+          '[POST /unified-geometry/promote] Failed to upsert promoted artifacts into unified table:',
+          err instanceof Error ? err.message : String(err),
+        );
+        // Don't fail the request — the in-memory promotion is still valid.
+        // The unified table will be consistent on next backfill.
       }
     }
 

@@ -8,9 +8,9 @@
 //     → yoloClient.inferRoboflowFromPath()  (app backend, calls VISION_SERVICE_URL)
 //     → ar_detections (app DB)     ← raw detections stored here
 //     → visionAggregator.ts        ← YOU ARE HERE (aggregation + world projection)
-//     → VisionAggregationResult    ← fed into visionPatch.ts
-//     → patchSystemDefinitionFromVision() → SystemDefinition (obstructions, electrical)
-//     → CAD engine (collision avoidance, conduit routing)
+//     → VisionAggregationResult    ← fed into unified geometry pipeline
+//     → adaptPhotoVisionCandidate() → UnifiedGeometryArtifact → Promotion → CanonicalBuildingModel
+//     → canonicalBridge → CAD engine (collision avoidance, conduit routing)
 //
 // DETECTION CLASSES:
 //   Roof obstructions: vent, skylight, hvac_unit, chimney, pipe_jack, dormer
@@ -314,7 +314,7 @@ export interface PlaneCorrection {
  * VisionAggregationResult — the output of visionAggregator.ts.
  * This is the complete vision intelligence package for a project.
  *
- * Fed directly into patchSystemDefinitionFromVision() in visionPatch.ts.
+ * Fed into the unified geometry pipeline via adaptPhotoVisionCandidate().
  */
 export interface VisionAggregationResult {
   /** Project UUID */

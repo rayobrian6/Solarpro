@@ -7,7 +7,7 @@
 //   PhotoVisionResult[] (from ar_detections / inference run)
 //     → aggregateVisionResults()  ← YOU ARE HERE
 //     → VisionAggregationResult
-//     → patchSystemDefinitionFromVision() (visionPatch.ts)
+//     → adaptPhotoVisionCandidate() (unified geometry pipeline)
 //
 // RESPONSIBILITIES:
 //   1. Accept an array of per-photo inference results

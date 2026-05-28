@@ -5,7 +5,7 @@
 //
 // PURPOSE:
 //   Centralized confidence threshold evaluation for all detection classes.
-//   Used by visionAggregator.ts and visionPatch.ts to filter detections
+//   Used by visionAggregator.ts and the unified geometry pipeline to filter detections
 //   before writing to SystemDefinition.
 //
 // DESIGN:

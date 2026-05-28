@@ -1126,7 +1126,7 @@ export function extractObstructionsForFilename(
  *   ILLEGAL PATH (BLOCKED):
  *     obstruction_data → SysDefObstruction → CADObstruction
  *     obstruction_data → roofCAD.buildCADObstructions()
- *     obstruction_data → patchSystemDefinitionFromVision()
+ *     obstruction_data → unified geometry pipeline (review + promotion required)
  *
  *   The guard below emits a structured warning on every registration
  *   to make the review-only status explicit and auditable.

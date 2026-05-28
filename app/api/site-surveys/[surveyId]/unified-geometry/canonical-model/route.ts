@@ -19,6 +19,10 @@
 //
 // The CanonicalBuildingModel is then consumed by canonicalBridge.canonicalToCADInputs()
 // to produce CAD-safe inputs for the CAD engine.
+//
+// ARTIFACT SOURCE:
+//   PRIMARY:   unified_geometry_artifacts table (via unifiedArtifactStore)
+//   FALLBACK:  On-the-fly adaptation from Pipeline A + Pipeline B source tables
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -29,6 +33,7 @@ import {
   CanonicalBuilderError,
 } from '@/lib/siteSurveys/unifiedGeometry';
 import type { UnifiedGeometryArtifact } from '@/lib/siteSurveys/unifiedGeometry/types';
+import { getUnifiedArtifactsForSurvey } from '@/lib/siteSurveys/unifiedGeometry/unifiedArtifactStore';
 
 export async function POST(
   req: NextRequest,
@@ -45,7 +50,7 @@ export async function POST(
       return NextResponse.json({ success: false, error: 'Invalid survey ID' }, { status: 400 });
     }
 
-    // ── Parse request body ───────────────────────────────────────────────
+    // ── Parse request body ──────────────────────────────────────────────
     let body: {
       artifactIds?: string[];
       config?: {
@@ -60,25 +65,40 @@ export async function POST(
       // Empty body is fine — we'll use all promoted artifacts
     }
 
-    // ── Fetch the current bundle ─────────────────────────────────────────
-    const { getOpenSourcePhotoVisionCandidatesBySurvey } = await import('@/lib/db/openSourcePhotoVision');
-    const { getArtifactsBySurvey } = await import('@/lib/db/geometryReconstruction');
-    const { buildUnifiedEvidenceBundle } = await import('@/lib/siteSurveys/unifiedGeometry');
+    // ── Fetch artifacts: PRIMARY unified table, FALLBACK on-the-fly ─────
+    let allArtifacts: UnifiedGeometryArtifact[] = [];
 
-    const [photoVisionBundle, geometryReconResult] = await Promise.all([
-      getOpenSourcePhotoVisionCandidatesBySurvey(surveyId, user.id).catch(() => null),
-      getArtifactsBySurvey(surveyId, user.id).catch(() => null),
-    ]);
+    // PRIMARY: Query unified_geometry_artifacts directly
+    const unifiedArtifacts = await getUnifiedArtifactsForSurvey(surveyId);
+    if (unifiedArtifacts.length > 0) {
+      allArtifacts = unifiedArtifacts;
+    } else {
+      // FALLBACK: On-the-fly adaptation from source tables
+      console.info(
+        `[POST /unified-geometry/canonical-model] No artifacts in unified table for survey ${surveyId}, falling back to on-the-fly adaptation`,
+      );
 
-    const bundle = buildUnifiedEvidenceBundle(
-      surveyId,
-      photoVisionBundle?.candidates ?? [],
-      geometryReconResult?.artifacts ?? [],
-      { includeMocks: false, minConfidence: 0 }, // exclude mocks from canonical model
-    );
+      const { getOpenSourcePhotoVisionCandidatesBySurvey } = await import('@/lib/db/openSourcePhotoVision');
+      const { getArtifactsBySurvey } = await import('@/lib/db/geometryReconstruction');
+      const { buildUnifiedEvidenceBundle } = await import('@/lib/siteSurveys/unifiedGeometry');
 
-    // ── Filter to promoted_canonical or cad_safe artifacts ───────────────
-    let eligibleArtifacts = bundle.artifacts.filter(
+      const [photoVisionBundle, geometryReconResult] = await Promise.all([
+        getOpenSourcePhotoVisionCandidatesBySurvey(surveyId, user.id).catch(() => null),
+        getArtifactsBySurvey(surveyId, user.id).catch(() => null),
+      ]);
+
+      const bundle = buildUnifiedEvidenceBundle(
+        surveyId,
+        photoVisionBundle?.candidates ?? [],
+        geometryReconResult?.artifacts ?? [],
+        { includeMocks: false, minConfidence: 0 }, // exclude mocks from canonical model
+      );
+
+      allArtifacts = bundle.artifacts;
+    }
+
+    // ── Filter to promoted_canonical or cad_safe artifacts ──────────────
+    let eligibleArtifacts = allArtifacts.filter(
       a => a.authority.state === 'promoted_canonical' || a.authority.state === 'cad_safe',
     );
 

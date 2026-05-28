@@ -147,11 +147,10 @@ export interface SysDefObstruction {
   /**
    * Source of this obstruction data.
    * - 'promoted_canonical': From unified geometry pipeline + human review (PREFERRED)
-   * - 'vision': RAW vision data — BLOCKED by CAD engine guard (Phase 6)
    * - 'manual': User-entered (ACCEPTABLE)
    * - 'merged': Merged from multiple sources after review (ACCEPTABLE)
    */
-  source: 'promoted_canonical' | 'vision' | 'manual' | 'merged';
+  source: 'promoted_canonical' | 'manual' | 'merged';
 }
 
 /** Electrical node (panel, meter, disconnect) with world position */
@@ -166,11 +165,10 @@ export interface SysDefElectricalNode {
   /**
    * Source of this electrical node data.
    * - 'promoted_canonical': From unified geometry pipeline + human review (PREFERRED)
-   * - 'vision': RAW vision data — BLOCKED by CAD engine guard (Phase 6)
    * - 'manual': User-entered (ACCEPTABLE)
    * - 'merged': Merged from multiple sources after review (ACCEPTABLE)
    */
-  source: 'promoted_canonical' | 'vision' | 'manual' | 'merged';
+  source: 'promoted_canonical' | 'manual' | 'merged';
 }
 
 /** Correction to a GPS-derived roof plane polygon */
@@ -221,15 +219,9 @@ export interface SystemDefinition {
 
   /**
    * Corrections to GPS-derived roof plane polygons from vision detections.
-   * Applied by CAD engine when confidence >= PLANE_CORRECTION_MIN_CONFIDENCE.
+   * Applied by CAD engine after promotion through unified geometry pipeline.
    */
   planeCorrections?: SysDefPlaneCorrection[];
-
-  /**
-   * ISO timestamp of last vision patch.
-   * undefined = vision pipeline has not yet run for this project.
-   */
-  visionPatchedAt?: string;
 }
 
 // ── Default Constants ───────────────────────────────────────────────────

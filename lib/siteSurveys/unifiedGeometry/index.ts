@@ -111,6 +111,13 @@ export {
   getPromotionCountsByState,
 } from './promotionStore';
 
+// ── Unified Artifact Store ─────────────────────────────────────────────────────────
+export {
+  getUnifiedArtifactsForSurvey,
+  getUnifiedArtifactsByIds,
+  hasUnifiedArtifactsForSurvey,
+} from './unifiedArtifactStore';
+
 // ── Canonical Builder ────────────────────────────────────────────────────────
 export {
   CanonicalModelBuilder,
