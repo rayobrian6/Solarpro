@@ -290,34 +290,14 @@ interface PlaneCluster {
  * IoU proxy >= overlapThreshold.
  */
 function clusterPlanes(
-  planes: PlaneWrapper[],
-  config: MultiViewFusionConfig,
+  _planes: PlaneWrapper[],
+  _config: MultiViewFusionConfig,
 ): PlaneCluster[] {
-  const clusters: PlaneCluster[] = [];
-
-  for (const plane of planes) {
-    let matched = false;
-    for (const cluster of clusters) {
-      // Check if any existing cluster member matches
-      for (const member of cluster.planes) {
-        // Must be from different photos
-        if (member.fileId === plane.fileId) continue;
-        const sim = cosineSimilarity(member.normal, plane.normal);
-        const overlap = polygonIoUProxy(member.polygon, plane.polygon);
-        if (sim >= config.normalSimilarityThreshold && overlap >= config.overlapThreshold) {
-          cluster.planes.push(plane);
-          matched = true;
-          break;
-        }
-      }
-      if (matched) break;
-    }
-    if (!matched) {
-      clusters.push({ planes: [plane], planeType: plane.planeType });
-    }
-  }
-
-  return clusters;
+  throw new Error(
+    `NOT_IMPLEMENTED: clusterPlanes(). ` +
+    `Heuristic multi-view plane clustering has been removed. Awaiting real SfM/MVS pipeline integration. ` +
+    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -181,50 +181,14 @@ function extractEdges(mask: SemanticSegmentationMask): RawEdge[] {
  * - Other masks → skip (no structural lines from sky/tree/ground/etc.)
  */
 function classifyEdge(
-  edge: RawEdge,
-  angleTolerance: number,
+  _edge: RawEdge,
+  _angleTolerance: number,
 ): StructuralLineType | null {
-  const { sourceClass, angleDeg } = edge;
-
-  // Only extract lines from roof and wall masks
-  if (sourceClass !== 'roof' && sourceClass !== 'wall') {
-    return null;
-  }
-
-  if (sourceClass === 'wall') {
-    if (isNearVertical(angleDeg, angleTolerance)) {
-      return 'wall_vertical';
-    }
-    if (isNearHorizontal(angleDeg, angleTolerance)) {
-      return 'eave'; // top of wall line
-    }
-    return null; // diagonal wall edges are not structurally meaningful
-  }
-
-  // Roof edges
-  if (isNearHorizontal(angleDeg, angleTolerance)) {
-    // Distinguish ridge from eave by vertical position
-    // Ridge is in the upper portion of the roof mask
-    // Eave is in the lower portion
-    const midY = (edge.start.y + edge.end.y) / 2;
-    // Roof masks typically have y range 60-350 (from heuristic generator)
-    // Ridge is roughly y < 200, eave is roughly y >= 200
-    if (midY < 250) {
-      return 'ridge';
-    }
-    return 'eave';
-  }
-
-  if (isDiagonal(angleDeg, angleTolerance)) {
-    return 'rake';
-  }
-
-  // Near-vertical roof edge — treat as rake (gable end)
-  if (isNearVertical(angleDeg, angleTolerance)) {
-    return 'rake';
-  }
-
-  return null;
+  throw new Error(
+    `NOT_IMPLEMENTED: classifyEdge() for sourceClass='${_edge.sourceClass}'. ` +
+    `Heuristic edge classification has been removed. Awaiting real line detector (e.g., Hough transform) integration. ` +
+    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -242,23 +206,11 @@ function computeLineConfidence(
   edgeLength: number,
   maskConfidence: number,
 ): number {
-  // Base confidence by type
-  const baseByType: Record<StructuralLineType, number> = {
-    ridge: 70,
-    eave: 65,
-    rake: 55,
-    wall_vertical: 60,
-  };
-
-  // Length bonus: longer edges are more confident
-  // Normalize to 0-10 bonus range
-  const lengthBonus = Math.min(10, edgeLength / 30);
-
-  // Mask confidence factor (0.5-1.0 scaling)
-  const maskFactor = 0.5 + (maskConfidence / 200);
-
-  const confidence = Math.round((baseByType[lineType] + lengthBonus) * maskFactor);
-  return Math.max(0, Math.min(100, confidence));
+  throw new Error(
+    `NOT_IMPLEMENTED: computeLineConfidence() for lineType='${lineType}'. ` +
+    `Heuristic line confidence computation has been removed. Awaiting real line detector (e.g., Hough transform) integration. ` +
+    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
+  );
 }
 
 // ---------------------------------------------------------------------------

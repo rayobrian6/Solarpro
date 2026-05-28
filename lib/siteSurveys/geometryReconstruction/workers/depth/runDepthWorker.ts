@@ -25,7 +25,6 @@ import type {
   DepthMap,
   GeometryReconstructionArtifact,
   GeometryReconstructionInput,
-  NormalizedPoint,
 } from '../../types';
 import { REVIEW_ONLY_AUTHORITY, BASE_LIMITATIONS } from '../../types';
 
@@ -79,104 +78,17 @@ export interface DepthWorkerOutput {
 
 // ---------------------------------------------------------------------------
 // Depth heuristic
-// ---------------------------------------------------------------------------
-
-/**
- * Semantic class depth priors (normalized 0-1, 0=near, 1=far).
- * These are coarse approximations for typical rooftop photos.
- */
-const CLASS_DEPTH_PRIOR: Record<string, number> = {
-  sky: 0.95,
-  tree: 0.7,
-  roof: 0.5,
-  wall: 0.4,
-  equipment: 0.3,
-  obstruction: 0.35,
-  ground: 0.15,
-};
-
-/**
- * Check if a point is inside a polygon (ray casting).
- */
-function pointInPolygon(point: NormalizedPoint, polygon: NormalizedPoint[]): boolean {
-  let inside = false;
-  const n = polygon.length;
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const xi = polygon[i].x, yi = polygon[i].y;
-    const xj = polygon[j].x, yj = polygon[j].y;
-    if (((yi > point.y) !== (yj > point.y)) &&
-        (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi)) {
-      inside = !inside;
-    }
-  }
-  return inside;
-}
-
-/**
- * Determine the semantic class at a given point by checking which mask
- * contains the point. Returns the class with highest confidence if
- * multiple masks overlap.
- */
-function classAtPoint(
-  point: NormalizedPoint,
-  masks: SemanticSegmentationMask[],
-): string | null {
-  let bestClass: string | null = null;
-  let bestConf = -1;
-
-  for (const mask of masks) {
-    if (pointInPolygon(point, mask.polygon)) {
-      if (mask.confidence > bestConf) {
-        bestConf = mask.confidence;
-        bestClass = mask.segmentationClass;
-      }
-    }
-  }
-
-  return bestClass;
-}
-
-/**
- * Compute a heuristic depth value for a grid cell.
- * Uses semantic class priors and a vertical gradient (higher = farther
- * in typical rooftop photos).
- */
 function heuristicDepth(
   x: number, // 0-1000
   y: number, // 0-1000
-  masks: SemanticSegmentationMask[],
-  vanishingPoints: VanishingPointArtifact[],
+  _masks: SemanticSegmentationMask[],
+  _vanishingPoints: VanishingPointArtifact[],
 ): number {
-  // Check if point is inside any mask
-  const point: NormalizedPoint = { x, y, coordinateSystem: 'normalized_image_0_1000' };
-  const semanticClass = classAtPoint(point, masks);
-
-  // Base depth from semantic class
-  let depth = semanticClass ? (CLASS_DEPTH_PRIOR[semanticClass] ?? 0.5) : 0.5;
-
-  // Apply vertical gradient: things higher in the image (lower y) are generally farther
-  // This is a weak signal — only applies if no mask covers the point
-  if (semanticClass === null) {
-    const verticalGradient = 1 - (y / 1000); // 0 at bottom, 1 at top
-    depth = 0.3 + verticalGradient * 0.4; // range 0.3-0.7
-  }
-
-  // Vanishing point modulation: distance from VP affects depth
-  // Points farther from a VP are closer to the viewer
-  for (const vp of vanishingPoints) {
-    if (vp.direction === 'vertical') {
-      // Vertical VP: distance from VP affects depth
-      const dx = x - vp.point.x;
-      const dy = y - vp.point.y;
-      const distFromVP = Math.sqrt(dx * dx + dy * dy);
-      // Points closer to vertical VP are farther away
-      const vpInfluence = Math.max(0, 1 - distFromVP / 1500) * 0.1;
-      depth = Math.min(1, depth + vpInfluence);
-    }
-  }
-
-  // Clamp to [0, 1]
-  return Math.max(0, Math.min(1, depth));
+  throw new Error(
+    `NOT_IMPLEMENTED: heuristicDepth() at (x=${x}, y=${y}). ` +
+    `Heuristic depth estimation has been removed. Awaiting real depth model (e.g., MiDaS/DPT) integration. ` +
+    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
+  );
 }
 
 // ---------------------------------------------------------------------------

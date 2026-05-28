@@ -146,34 +146,12 @@ function pointToSegmentDist(p: NormalizedPoint, a: NormalizedPoint, b: Normalize
 }
 
 /** Check if a line overlaps with a mask polygon. */
-function lineOverlapsMask(line: StructuralLineCandidate, mask: SemanticSegmentationMask): boolean {
-  const bounds = polygonBounds(mask.polygon);
-  // Quick bounding box check
-  const lineMinX = Math.min(line.start.x, line.end.x);
-  const lineMaxX = Math.max(line.start.x, line.end.x);
-  const lineMinY = Math.min(line.start.y, line.end.y);
-  const lineMaxY = Math.max(line.start.y, line.end.y);
-
-  const boundsMaxX = bounds.x + bounds.width;
-  const boundsMaxY = bounds.y + bounds.height;
-
-  if (lineMaxX < bounds.x || lineMinX > boundsMaxX ||
-      lineMaxY < bounds.y || lineMinY > boundsMaxY) {
-    return false;
-  }
-
-  // More precise: check if line endpoints are near the polygon
-  const threshold = 50; // normalized units
-  const startDist = Math.min(...mask.polygon.map(p => pointToSegmentDist(line.start, p, line.end)));
-  const endDist = Math.min(...mask.polygon.map(p => pointToSegmentDist(line.end, p, line.start)));
-
-  // Or check if the line midpoint is inside the polygon
-  const midX = (line.start.x + line.end.x) / 2;
-  const midY = (line.start.y + line.end.y) / 2;
-  const midPoint: NormalizedPoint = { x: midX, y: midY, coordinateSystem: 'normalized_image_0_1000' };
-  if (pointInPolygon(midPoint, mask.polygon)) return true;
-
-  return startDist < threshold || endDist < threshold;
+function lineOverlapsMask(_line: StructuralLineCandidate, _mask: SemanticSegmentationMask): boolean {
+  throw new Error(
+    `NOT_IMPLEMENTED: lineOverlapsMask(). ` +
+    `Heuristic line-mask overlap detection has been removed. Awaiting real plane fitting algorithm integration. ` +
+    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -190,58 +168,15 @@ function lineOverlapsMask(line: StructuralLineCandidate, mask: SemanticSegmentat
  * - VP directions give aspect
  */
 function estimateRoofParameters(
-  mask: SemanticSegmentationMask,
-  associatedLines: StructuralLineCandidate[],
-  vanishingPoints: VanishingPointArtifact[],
+  _mask: SemanticSegmentationMask,
+  _associatedLines: StructuralLineCandidate[],
+  _vanishingPoints: VanishingPointArtifact[],
 ): { slope: number; aspect: number; normal: [number, number, number] } {
-  // Default values
-  let slope = 25; // degrees, typical residential roof
-  let aspect = 180; // degrees, south-facing default
-  const normal: [number, number, number] = [0, -0.42, 0.91]; // approx 25° slope
-
-  // Find ridge lines to determine axis
-  const ridges = associatedLines.filter(l => l.lineType === 'ridge');
-  const rakes = associatedLines.filter(l => l.lineType === 'rake');
-
-  if (ridges.length > 0) {
-    // Ridge direction determines aspect
-    const ridge = ridges[0];
-    const dx = ridge.end.x - ridge.start.x;
-    const dy = ridge.end.y - ridge.start.y;
-    const ridgeAngle = Math.atan2(-dy, dx) * (180 / Math.PI);
-    // Aspect is perpendicular to ridge, pointing "downhill"
-    aspect = (ridgeAngle + 90 + 360) % 360;
-  }
-
-  if (rakes.length > 0) {
-    // Rake angle gives slope estimate
-    const rake = rakes[0];
-    const dx = rake.end.x - rake.start.x;
-    const dy = rake.end.y - rake.start.y;
-    const rakeAngle = Math.atan2(Math.abs(dy), Math.abs(dx)) * (180 / Math.PI);
-    // In a perspective image, the rake angle relates to slope
-    // (simplified heuristic: steeper rake = steeper roof)
-    slope = Math.max(10, Math.min(60, rakeAngle * 0.8));
-  }
-
-  // Check vanishing points for consistency
-  const xVp = vanishingPoints.find(vp => vp.direction === 'x');
-  const yVp = vanishingPoints.find(vp => vp.direction === 'y');
-  if (xVp && yVp) {
-    // VPs can refine the aspect estimate
-    const vpAngle = Math.atan2(yVp.point.y - xVp.point.y, xVp.point.x - yVp.point.x) * (180 / Math.PI);
-    // Blend with line-based estimate
-    aspect = (aspect + (vpAngle + 360) % 360) / 2;
-  }
-
-  // Compute normal vector from slope and aspect
-  const slopeRad = slope * (Math.PI / 180);
-  const aspectRad = aspect * (Math.PI / 180);
-  normal[0] = Math.sin(slopeRad) * Math.cos(aspectRad);
-  normal[1] = Math.sin(slopeRad) * Math.sin(aspectRad);
-  normal[2] = Math.cos(slopeRad);
-
-  return { slope, aspect, normal };
+  throw new Error(
+    `NOT_IMPLEMENTED: estimateRoofParameters(). ` +
+    `Heuristic roof plane parameter estimation has been removed. Awaiting real plane fitting algorithm (e.g., RANSAC on depth data) integration. ` +
+    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
+  );
 }
 
 /**
@@ -249,46 +184,14 @@ function estimateRoofParameters(
  * associated lines and mask extent.
  */
 function estimateWallParameters(
-  mask: SemanticSegmentationMask,
-  associatedLines: StructuralLineCandidate[],
+  _mask: SemanticSegmentationMask,
+  _associatedLines: StructuralLineCandidate[],
 ): { height: number; facing: string; normal: [number, number, number] } {
-  // Default values
-  let height = 4; // meters, typical residential wall
-  let facing = 'south';
-  const normal: [number, number, number] = [0, -1, 0]; // south-facing
-
-  // Use mask height as a proportional estimate
-  const bounds = polygonBounds(mask.polygon);
-  // In normalized coords, 1000 = full image height
-  // Assume image covers ~10m of house, so 1 unit ≈ 0.01m
-  const estimatedHeight = bounds.height * 0.01;
-  height = Math.max(2, Math.min(10, estimatedHeight));
-
-  // Determine facing from wall vertical lines
-  const vertLines = associatedLines.filter(l => l.lineType === 'wall_vertical');
-  if (vertLines.length > 0) {
-    // Check which side of the image the wall is on
-    const avgX = vertLines.reduce((s, l) => s + (l.start.x + l.end.x) / 2, 0) / vertLines.length;
-    if (avgX < 300) facing = 'west';
-    else if (avgX > 700) facing = 'east';
-    else if (mask.polygon[0].y > 400) facing = 'south';
-    else facing = 'north';
-  }
-
-  // Compute normal from facing
-  const facingDirs: Record<string, [number, number, number]> = {
-    north: [0, 1, 0],
-    south: [0, -1, 0],
-    east: [1, 0, 0],
-    west: [-1, 0, 0],
-  };
-  if (facingDirs[facing]) {
-    normal[0] = facingDirs[facing][0];
-    normal[1] = facingDirs[facing][1];
-    normal[2] = facingDirs[facing][2];
-  }
-
-  return { height, facing, normal };
+  throw new Error(
+    `NOT_IMPLEMENTED: estimateWallParameters(). ` +
+    `Heuristic wall plane parameter estimation has been removed. Awaiting real plane fitting algorithm integration. ` +
+    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
+  );
 }
 
 // ---------------------------------------------------------------------------

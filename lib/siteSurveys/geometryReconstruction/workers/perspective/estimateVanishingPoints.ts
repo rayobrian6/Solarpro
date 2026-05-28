@@ -129,35 +129,12 @@ function pointToLineDistance(point: NormalizedPoint, line: LineHomo): number {
  * Guess the likely vanishing direction of a structural line
  * based on its type and orientation.
  */
-function guessDirection(line: StructuralLineCandidate): 'x' | 'y' | 'vertical' {
-  // wall_vertical lines converge to the vertical VP
-  if (line.lineType === 'wall_vertical') return 'vertical';
-
-  // For roof lines, use angle to guess direction
-  const dx = line.end.x - line.start.x;
-  const dy = line.end.y - line.start.y;
-  const angleDeg = Math.abs(Math.atan2(-dy, dx) * (180 / Math.PI));
-
-  // Near-horizontal lines: if they're roughly parallel to the X axis,
-  // they converge to the X VP; if roughly parallel to Y, to the Y VP.
-  // We use a simple heuristic: if the line extends more in X, it's X direction
-  if (Math.abs(dx) > Math.abs(dy) * 2) {
-    // Primarily horizontal — could be either X or Y depending on perspective
-    // For a typical rooftop photo, ridges are X-direction and eaves are Y-direction
-    if (line.lineType === 'ridge') return 'x';
-    if (line.lineType === 'eave') return 'y';
-    return 'x'; // default
-  }
-
-  // Diagonal lines (rakes) — depend on which side
-  if (line.lineType === 'rake') {
-    // Positive slope → Y direction, negative slope → X direction
-    // (in screen coordinates where Y increases downward)
-    return dy > 0 ? (dx > 0 ? 'y' : 'x') : (dx > 0 ? 'x' : 'y');
-  }
-
-  // Default fallback
-  return 'x';
+function guessDirection(_line: StructuralLineCandidate): 'x' | 'y' | 'vertical' {
+  throw new Error(
+    `NOT_IMPLEMENTED: guessDirection() for line='${_line.id}'. ` +
+    `Heuristic vanishing point direction estimation has been removed. Awaiting real perspective estimation model integration. ` +
+    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -172,54 +149,15 @@ function guessDirection(line: StructuralLineCandidate): 'x' | 'y' | 'vertical' {
  * and selects the intersection with the most inlier support.
  */
 function ransacVanishingPoint(
-  lines: LineHomo[],
-  iterations: number,
-  inlierThreshold: number,
+  _lines: LineHomo[],
+  _iterations: number,
+  _inlierThreshold: number,
 ): { point: NormalizedPoint; inlierIds: string[]; inlierRatio: number } | null {
-  if (lines.length < 2) return null;
-
-  let bestPoint: NormalizedPoint | null = null;
-  let bestInlierIds: string[] = [];
-  let bestInlierRatio = 0;
-
-  for (let iter = 0; iter < iterations; iter++) {
-    // Pick two random lines
-    const i = iter % lines.length;
-    const j = (iter + 1 + Math.floor(iter / lines.length)) % lines.length;
-    if (i === j) continue;
-
-    const intersection = intersectLines(lines[i], lines[j]);
-    if (intersection === null) continue;
-
-    // Skip intersections far outside the image (allow some margin for VPs
-    // that are outside the frame but not infinitely far)
-    if (Math.abs(intersection.x) > 5000 || Math.abs(intersection.y) > 5000) continue;
-
-    // Count inliers
-    const inlierIds: string[] = [];
-    for (const line of lines) {
-      const dist = pointToLineDistance(intersection, line);
-      if (dist <= inlierThreshold) {
-        inlierIds.push(line.lineId);
-      }
-    }
-
-    const inlierRatio = inlierIds.length / lines.length;
-    if (inlierIds.length > bestInlierIds.length ||
-        (inlierIds.length === bestInlierIds.length && inlierRatio > bestInlierRatio)) {
-      bestPoint = intersection;
-      bestInlierIds = inlierIds;
-      bestInlierRatio = inlierRatio;
-    }
-  }
-
-  if (bestPoint === null || bestInlierIds.length < 2) return null;
-
-  return {
-    point: bestPoint,
-    inlierIds: bestInlierIds,
-    inlierRatio: bestInlierRatio,
-  };
+  throw new Error(
+    `NOT_IMPLEMENTED: ransacVanishingPoint(). ` +
+    `Heuristic RANSAC vanishing point estimation has been removed. Awaiting real perspective estimation model integration. ` +
+    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
+  );
 }
 
 // ---------------------------------------------------------------------------

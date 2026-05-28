@@ -92,94 +92,11 @@ function generateHeuristicPolygon(
   segmentationClass: SegmentationClass,
   fileId: string,
 ): NormalizedPoint[] {
-  // DEPRECATED: Runtime warning on every invocation
-  console.warn(
-    `[DEPRECATED] generateHeuristicPolygon() produces synthetic geometry for class='${segmentationClass}'. ` +
-    `Awaiting real model integration. All output is marked provenance.synthetic=true.`
+  throw new Error(
+    `NOT_IMPLEMENTED: generateHeuristicPolygon() for class='${segmentationClass}', fileId='${fileId}'. ` +
+    `Heuristic polygon generation has been removed. Awaiting real segmentation model (e.g., SAM) integration. ` +
+    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
   );
-
-  // Deterministic seed from fileId to vary shapes per photo
-  const seed = simpleHash(fileId);
-
-  switch (segmentationClass) {
-    case 'roof': {
-      // Roof typically occupies upper-center of image
-      const xOff = (seed % 50) - 25;
-      const yOff = (seed % 30) - 15;
-      return [
-        { x: 150 + xOff, y: 100 + yOff, coordinateSystem: 'normalized_image_0_1000' },
-        { x: 500 + xOff, y: 60 + yOff, coordinateSystem: 'normalized_image_0_1000' },
-        { x: 850 - xOff, y: 100 + yOff, coordinateSystem: 'normalized_image_0_1000' },
-        { x: 820 - xOff, y: 350 - yOff, coordinateSystem: 'normalized_image_0_1000' },
-        { x: 500 + xOff, y: 280 - yOff, coordinateSystem: 'normalized_image_0_1000' },
-        { x: 180 + xOff, y: 350 - yOff, coordinateSystem: 'normalized_image_0_1000' },
-      ];
-    }
-    case 'wall': {
-      // Wall is typically below roof line, left/right sides
-      const xOff = (seed % 20) - 10;
-      return [
-        { x: 180 + xOff, y: 340, coordinateSystem: 'normalized_image_0_1000' },
-        { x: 500 + xOff, y: 280, coordinateSystem: 'normalized_image_0_1000' },
-        { x: 820 - xOff, y: 340, coordinateSystem: 'normalized_image_0_1000' },
-        { x: 840 - xOff, y: 700, coordinateSystem: 'normalized_image_0_1000' },
-        { x: 160 + xOff, y: 700, coordinateSystem: 'normalized_image_0_1000' },
-      ];
-    }
-    case 'sky': {
-      // Sky is the top portion above the roof
-      const yOff = (seed % 20);
-      return [
-        { x: 0, y: 0, coordinateSystem: 'normalized_image_0_1000' },
-        { x: 1000, y: 0, coordinateSystem: 'normalized_image_0_1000' },
-        { x: 1000, y: 80 + yOff, coordinateSystem: 'normalized_image_0_1000' },
-        { x: 500, y: 50 + yOff, coordinateSystem: 'normalized_image_0_1000' },
-        { x: 0, y: 80 + yOff, coordinateSystem: 'normalized_image_0_1000' },
-      ];
-    }
-    case 'tree': {
-      // Trees are on the sides, often overlapping roof edges
-      const side = seed % 2 === 0;
-      const xBase = side ? 50 : 800;
-      return [
-        { x: xBase, y: 200, coordinateSystem: 'normalized_image_0_1000' },
-        { x: xBase + (side ? 120 : -120), y: 150, coordinateSystem: 'normalized_image_0_1000' },
-        { x: xBase + (side ? 150 : -150), y: 400, coordinateSystem: 'normalized_image_0_1000' },
-        { x: xBase + (side ? 80 : -80), y: 500, coordinateSystem: 'normalized_image_0_1000' },
-        { x: xBase - (side ? 20 : -20), y: 350, coordinateSystem: 'normalized_image_0_1000' },
-      ];
-    }
-    case 'ground': {
-      // Ground is the bottom strip
-      const yOff = (seed % 20);
-      return [
-        { x: 0, y: 700 + yOff, coordinateSystem: 'normalized_image_0_1000' },
-        { x: 1000, y: 700 + yOff, coordinateSystem: 'normalized_image_0_1000' },
-        { x: 1000, y: 1000, coordinateSystem: 'normalized_image_0_1000' },
-        { x: 0, y: 1000, coordinateSystem: 'normalized_image_0_1000' },
-      ];
-    }
-    case 'obstruction': {
-      // Obstructions (vents, chimneys) are small regions on the roof
-      const xOff = 300 + (seed % 200);
-      return [
-        { x: xOff - 30, y: 180, coordinateSystem: 'normalized_image_0_1000' },
-        { x: xOff + 30, y: 180, coordinateSystem: 'normalized_image_0_1000' },
-        { x: xOff + 35, y: 230, coordinateSystem: 'normalized_image_0_1000' },
-        { x: xOff - 35, y: 230, coordinateSystem: 'normalized_image_0_1000' },
-      ];
-    }
-    case 'equipment': {
-      // Equipment (HVAC, etc.) typically on ground level near walls
-      const xOff = (seed % 100) + 600;
-      return [
-        { x: xOff, y: 650, coordinateSystem: 'normalized_image_0_1000' },
-        { x: xOff + 80, y: 650, coordinateSystem: 'normalized_image_0_1000' },
-        { x: xOff + 80, y: 700, coordinateSystem: 'normalized_image_0_1000' },
-        { x: xOff, y: 700, coordinateSystem: 'normalized_image_0_1000' },
-      ];
-    }
-  }
 }
 
 /**
@@ -209,20 +126,6 @@ function computeMaskBounds(polygon: NormalizedPoint[]): import('@/lib/assistedEv
 }
 
 /**
- * Simple deterministic hash from a string to a number.
- * Used to generate varied but deterministic shapes per photo.
- */
-function simpleHash(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32-bit integer
-  }
-  return Math.abs(hash);
-}
-
-/**
  * Generate a deterministic confidence score for a given class + photo combo.
  *
  * @deprecated SYNTHETIC — This function produces fabricated confidence scores
@@ -232,25 +135,11 @@ function simpleHash(str: string): number {
  * All artifacts using these scores carry provenance.synthetic=true.
  */
 function heuristicConfidence(segmentationClass: SegmentationClass, fileId: string): number {
-  // DEPRECATED: Runtime warning on every invocation
-  console.warn(
-    `[DEPRECATED] heuristicConfidence() produces synthetic confidence for class='${segmentationClass}'. ` +
-    `Awaiting real model integration. All output is marked provenance.synthetic=true.`
+  throw new Error(
+    `NOT_IMPLEMENTED: heuristicConfidence() for class='${segmentationClass}', fileId='${fileId}'. ` +
+    `Heuristic confidence generation has been removed. Awaiting real model confidence calibration. ` +
+    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
   );
-
-  const base: Record<SegmentationClass, number> = {
-    roof: 72,
-    wall: 68,
-    sky: 85,
-    tree: 60,
-    ground: 75,
-    obstruction: 45,
-    equipment: 50,
-  };
-
-  // Deterministic variation per fileId
-  const variation = (simpleHash(fileId + segmentationClass) % 10) - 5;
-  return Math.max(0, Math.min(100, base[segmentationClass] + variation));
 }
 
 // ---------------------------------------------------------------------------
