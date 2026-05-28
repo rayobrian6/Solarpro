@@ -3351,6 +3351,117 @@ export async function POST(req: NextRequest) {
       results.push(`\u26a0\ufe0f Migration 058c: \${(e as Error).message}`);
     }
 
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Migration 077: Geometry Reconstruction artifacts tables
+    // Stores segmentation masks, depth maps, SfM point clouds, plane/line
+    // candidates. REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY.
+    // ──────────────────────────────────────────────────────────────────────
+
+    // 077a: Jobs table
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS site_survey_geometry_reconstruction_jobs (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          survey_id UUID NOT NULL REFERENCES site_surveys(id) ON DELETE CASCADE,
+          status TEXT NOT NULL DEFAULT 'queued',
+          pipeline TEXT NOT NULL DEFAULT 'mock',
+          input JSONB NOT NULL DEFAULT '{}',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          completed_at TIMESTAMPTZ
+        )
+      `;
+      results.push('\u2705 Migration 077a: site_survey_geometry_reconstruction_jobs table \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 077a (geo_recon_jobs): \${(e as Error).message}`);
+    }
+
+    // 077b: Artifacts table
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS site_survey_geometry_reconstruction_artifacts (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          job_id UUID NOT NULL REFERENCES site_survey_geometry_reconstruction_jobs(id) ON DELETE CASCADE,
+          survey_id UUID NOT NULL REFERENCES site_surveys(id) ON DELETE CASCADE,
+          file_id TEXT,
+          artifact_type TEXT NOT NULL,
+          pipeline TEXT NOT NULL,
+          payload JSONB NOT NULL DEFAULT '{}',
+          confidence DOUBLE PRECISION NOT NULL DEFAULT 0,
+          limitations TEXT[] NOT NULL DEFAULT '{}',
+          authority JSONB NOT NULL DEFAULT '{"reviewOnly":true,"nonAuthoritative":true,"cadMutationAllowed":false,"permitGenerationAllowed":false,"bomMutationAllowed":false}',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `;
+      results.push('\u2705 Migration 077b: site_survey_geometry_reconstruction_artifacts table \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 077b (geo_recon_artifacts): \${(e as Error).message}`);
+    }
+
+    // 077c: Indexes
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_geo_recon_artifacts_survey ON site_survey_geometry_reconstruction_artifacts (survey_id)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_geo_recon_artifacts_job ON site_survey_geometry_reconstruction_artifacts (job_id)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_geo_recon_jobs_survey ON site_survey_geometry_reconstruction_jobs (survey_id)`;
+      results.push('\u2705 Migration 077c: geometry reconstruction indexes \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 077c (geo_recon_indexes): \${(e as Error).message}`);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Migration 078: Geometry Reconstruction heartbeat + stage tracking
+    // Adds heartbeat, current_stage, worker_version to jobs;
+    // stage_timings + worker_version to artifacts.
+    // Enables detection of stuck/in-flight jobs and pipeline provenance.
+    // ──────────────────────────────────────────────────────────────────────
+
+    // 078a: Jobs - heartbeat + stage + worker_version
+    try {
+      await sql`ALTER TABLE site_survey_geometry_reconstruction_jobs ADD COLUMN IF NOT EXISTS current_stage TEXT NULL`;
+      results.push('\u2705 Migration 078a: geo_recon_jobs.current_stage \u2014 ensured');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 078a (current_stage): \${(e as Error).message}`);
+    }
+    try {
+      await sql`ALTER TABLE site_survey_geometry_reconstruction_jobs ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMPTZ NULL`;
+      results.push('\u2705 Migration 078b: geo_recon_jobs.last_heartbeat_at \u2014 ensured');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 078b (last_heartbeat_at): \${(e as Error).message}`);
+    }
+    try {
+      await sql`ALTER TABLE site_survey_geometry_reconstruction_jobs ADD COLUMN IF NOT EXISTS worker_version TEXT NULL`;
+      results.push('\u2705 Migration 078c: geo_recon_jobs.worker_version \u2014 ensured');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 078c (worker_version): \${(e as Error).message}`);
+    }
+
+    // 078d: Artifacts - stage_timings + worker_version
+    try {
+      await sql`ALTER TABLE site_survey_geometry_reconstruction_artifacts ADD COLUMN IF NOT EXISTS stage_timings JSONB NULL`;
+      results.push('\u2705 Migration 078d: geo_recon_artifacts.stage_timings \u2014 ensured');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 078d (stage_timings): \${(e as Error).message}`);
+    }
+    try {
+      await sql`ALTER TABLE site_survey_geometry_reconstruction_artifacts ADD COLUMN IF NOT EXISTS worker_version TEXT NULL`;
+      results.push('\u2705 Migration 078e: geo_recon_artifacts.worker_version \u2014 ensured');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 078e (worker_version): \${(e as Error).message}`);
+    }
+
+    // 078f: Stuck-job index
+    try {
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_geo_recon_jobs_stuck
+          ON site_survey_geometry_reconstruction_jobs (status, last_heartbeat_at)
+          WHERE status = 'running'
+      `;
+      results.push('\u2705 Migration 078f: idx_geo_recon_jobs_stuck \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 078f (stuck index): \${(e as Error).message}`);
+    }
+
     return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);
