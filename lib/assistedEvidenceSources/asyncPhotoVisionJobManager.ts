@@ -66,6 +66,9 @@ export interface PhotoVisionJob {
   finalizationError: string | null;
   finalizationStartedAt: number | null;
   finalizationCompletedAt: number | null;
+  // Finalization stage + heartbeat (migration 076)
+  finalizationStage: string | null;
+  finalizationLastHeartbeatAt: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +136,8 @@ export async function createAndSubmitJob(
     finalizationError: null,
     finalizationStartedAt: null,
     finalizationCompletedAt: null,
+    finalizationStage: null,
+    finalizationLastHeartbeatAt: null,
   };
 
   // Submit ALL files to Render in one POST
@@ -226,7 +231,9 @@ export async function getJob(jobId: string): Promise<PhotoVisionJob | null> {
            finalization_result,
            finalization_error,
            EXTRACT(EPOCH FROM finalization_started_at)::bigint * 1000 AS finalization_started_at_ms,
-           EXTRACT(EPOCH FROM finalization_completed_at)::bigint * 1000 AS finalization_completed_at_ms
+           EXTRACT(EPOCH FROM finalization_completed_at)::bigint * 1000 AS finalization_completed_at_ms,
+           finalization_stage,
+           EXTRACT(EPOCH FROM finalization_last_heartbeat_at)::bigint * 1000 AS finalization_last_heartbeat_at_ms
     FROM photo_vision_jobs
     WHERE job_id = ${jobId}
   `;
@@ -253,6 +260,8 @@ export async function getJob(jobId: string): Promise<PhotoVisionJob | null> {
     finalizationError: (row.finalization_error as string | null) || null,
     finalizationStartedAt: row.finalization_started_at_ms ? Number(row.finalization_started_at_ms) : null,
     finalizationCompletedAt: row.finalization_completed_at_ms ? Number(row.finalization_completed_at_ms) : null,
+    finalizationStage: (row.finalization_stage as string | null) || null,
+    finalizationLastHeartbeatAt: row.finalization_last_heartbeat_at_ms ? Number(row.finalization_last_heartbeat_at_ms) : null,
   };
 }
 
@@ -273,7 +282,9 @@ export async function findActiveJobForSurvey(surveyId: string): Promise<PhotoVis
            finalization_result,
            finalization_error,
            EXTRACT(EPOCH FROM finalization_started_at)::bigint * 1000 AS finalization_started_at_ms,
-           EXTRACT(EPOCH FROM finalization_completed_at)::bigint * 1000 AS finalization_completed_at_ms
+           EXTRACT(EPOCH FROM finalization_completed_at)::bigint * 1000 AS finalization_completed_at_ms,
+           finalization_stage,
+           EXTRACT(EPOCH FROM finalization_last_heartbeat_at)::bigint * 1000 AS finalization_last_heartbeat_at_ms
     FROM photo_vision_jobs
     WHERE survey_id = ${surveyId} AND status IN ('pending', 'running')
     ORDER BY created_at DESC
@@ -302,6 +313,8 @@ export async function findActiveJobForSurvey(surveyId: string): Promise<PhotoVis
     finalizationError: (row.finalization_error as string | null) || null,
     finalizationStartedAt: row.finalization_started_at_ms ? Number(row.finalization_started_at_ms) : null,
     finalizationCompletedAt: row.finalization_completed_at_ms ? Number(row.finalization_completed_at_ms) : null,
+    finalizationStage: (row.finalization_stage as string | null) || null,
+    finalizationLastHeartbeatAt: row.finalization_last_heartbeat_at_ms ? Number(row.finalization_last_heartbeat_at_ms) : null,
   };
 }
 
@@ -779,4 +792,52 @@ export async function resetAllStuckFinalizations(): Promise<number> {
   `;
   const affected = Array.isArray(result) ? result.length : (result as Record<string, unknown>).count as number;
   return typeof affected === 'number' ? affected : 0;
+}
+
+/**
+ * Update finalization stage and heartbeat for a running job.
+ * Called at each stage boundary so that stuck finalizations are visible
+ * in the DB without relying on logs alone.
+ */
+export async function updateFinalizationStage(
+  jobId: string,
+  stage: string,
+): Promise<void> {
+  const sql = await getDbReady();
+  await sql`
+    UPDATE photo_vision_jobs
+    SET finalization_stage = ${stage},
+        finalization_last_heartbeat_at = NOW(),
+        updated_at = NOW()
+    WHERE job_id = ${jobId}
+  `;
+}
+
+/**
+ * Reset finalization_status from 'running' or 'failed' back to 'pending'.
+ * Used by the ?retry=1 path to explicitly retry a stuck or failed finalization.
+ * Only resets 'running' if it has been running for more than 2 minutes
+ * (to avoid resetting a genuinely in-flight finalization).
+ * Always resets 'failed' (explicit retry intent).
+ * Returns true if the reset was applied.
+ */
+export async function resetStuckOrFailedFinalization(jobId: string): Promise<boolean> {
+  const sql = await getDbReady();
+  // Reset 'failed' unconditionally (explicit retry), or 'running' only if stale (>2min)
+  const result = await sql`
+    UPDATE photo_vision_jobs
+    SET finalization_status = 'pending',
+        finalization_started_at = NULL,
+        finalization_error = NULL,
+        finalization_stage = NULL,
+        finalization_last_heartbeat_at = NULL,
+        updated_at = NOW()
+    WHERE job_id = ${jobId}
+      AND (
+        finalization_status = 'failed'
+        OR (finalization_status = 'running' AND finalization_started_at < NOW() - INTERVAL '2 minutes')
+      )
+  `;
+  const affected = Array.isArray(result) ? result.length : (result as Record<string, unknown>).count as number;
+  return affected > 0;
 }

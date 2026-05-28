@@ -19,6 +19,10 @@
 //     while allowing retry of failed/skipped jobs.
 //   - Candidate persistence uses (surveyId, runHash) dedup.
 //
+// Retry Mode:
+//   - POST /finalize?retry=1 resets 'failed' or stale 'running' (>2min) back to 'pending'
+//     and then re-runs the full pipeline.
+//
 // Dry-Run Mode:
 //   - POST /finalize?dryRun=1 returns the stage plan without executing or writing anything.
 //   - Useful for debugging why finalization isn't progressing.
@@ -28,6 +32,12 @@
 //   with durationMs. All stages are wrapped in try/catch that calls
 //   markFinalizationFailed() — no swallowed errors, no unbounded awaits,
 //   no Promise.all without timeout, no infinite polling, no worker re-run.
+//
+// CRITICAL INVARIANT:
+//   Once CAS claim succeeds (finalization_status='running'), EVERY line of code
+//   after that point MUST be inside a single try/catch/finally that guarantees
+//   markFinalizationFailed() is called on ANY error or abort. The function
+//   MUST NOT leave finalization_status='running' when it exits.
 //
 // Review-only candidates only: no CAD/canonical/permit/BOM/workflow mutation.
 // ============================================================================
@@ -48,6 +58,8 @@ import {
   markFinalizationComplete,
   markFinalizationFailed,
   resetStuckFinalization,
+  resetStuckOrFailedFinalization,
+  updateFinalizationStage,
   type PhotoVisionJob,
 } from '@/lib/assistedEvidenceSources/asyncPhotoVisionJobManager';
 import {
@@ -83,6 +95,9 @@ const DB_READ_TIMEOUT_MS = 10_000; // 10s for simple reads
 
 /** Timeout for Phase 4A aggregation (outer timeout). */
 const PHASE4A_AGGREGATION_TIMEOUT_MS = 40_000; // 40s — matches internal AGGREGATION_BUDGET_MS
+
+/** Vercel serverless hard kill is at 60s. We must call markFinalizationFailed() before that. */
+const VERCEL_GRACE_PERIOD_MS = 52_000; // 52s — gives 3s to write the 'failed' status to DB
 
 // ---------------------------------------------------------------------------
 // Helper: run a function with an overall timeout guard
@@ -277,10 +292,15 @@ export async function POST(
   const finalizeStart = Date.now();
   const surveyId = params?.surveyId ?? 'unknown';
 
-  // ── Check dry-run mode ──
+  // ── Parse query params ──
   const dryRun = req.nextUrl.searchParams.get('dryRun') === '1';
+  const isRetry = req.nextUrl.searchParams.get('retry') === '1';
+
   if (dryRun) {
     console.log(`[finalize:dry-run:start] surveyId=${surveyId}`);
+  }
+  if (isRetry) {
+    console.log(`[finalize:retry] surveyId=${surveyId} explicit retry requested`);
   }
 
   // Auth check
@@ -301,7 +321,7 @@ export async function POST(
     return NextResponse.json({ success: false, error: 'jobId is required' }, { status: 400 });
   }
 
-  console.log(`[finalize:start] surveyId=${surveyId} jobId=${jobId} dryRun=${dryRun}`);
+  console.log(`[finalize:start] surveyId=${surveyId} jobId=${jobId} dryRun=${dryRun} retry=${isRetry}`);
 
   // ── Verify job exists and belongs to this survey ──
   console.log(`[finalize:get-job:start] jobId=${jobId}`);
@@ -338,10 +358,13 @@ export async function POST(
     });
   }
 
-  // ── Handle stuck 'running' status (from killed fire-and-forget) ──
+  // ── Handle stuck 'running' status (from killed Vercel function) ──
+  // If ?retry=1, use resetStuckOrFailedFinalization which also resets 'failed' unconditionally
   if (job.finalizationStatus === 'running') {
-    console.log(`[finalize:reset-stuck:start] jobId=${jobId}`);
-    const reset = await withTimeout(resetStuckFinalization(jobId), DB_READ_TIMEOUT_MS, 'finalize:reset-stuck');
+    console.log(`[finalize:reset-stuck:start] jobId=${jobId} retry=${isRetry}`);
+    const reset = isRetry
+      ? await withTimeout(resetStuckOrFailedFinalization(jobId), DB_READ_TIMEOUT_MS, 'finalize:reset-stuck-or-failed')
+      : await withTimeout(resetStuckFinalization(jobId), DB_READ_TIMEOUT_MS, 'finalize:reset-stuck');
     console.log(`[finalize:reset-stuck:end] jobId=${jobId} reset=${reset}`);
     if (reset) {
       console.log(`[finalize:start] jobId=${jobId} reset stuck 'running' finalization back to 'pending'`);
@@ -352,13 +375,34 @@ export async function POST(
         job.finalizationError = refreshed.finalizationError;
       }
     } else {
+      // Still actively running (or not yet stale enough for non-retry path)
       console.log(`[finalize:start] jobId=${jobId} finalization is actively running, returning status`);
       return NextResponse.json({
         success: true,
         jobId: job.jobId,
         finalizationStatus: 'running',
+        finalizationStage: job.finalizationStage,
+        finalizationLastHeartbeatAt: job.finalizationLastHeartbeatAt,
+        finalizationStartedAt: job.finalizationStartedAt,
         message: 'Finalization is currently in progress. Poll GET for completion.',
       });
+    }
+  }
+
+  // ── Handle 'failed' status with ?retry=1 ──
+  if (job.finalizationStatus === 'failed' && isRetry) {
+    console.log(`[finalize:retry-reset:start] jobId=${jobId} resetting failed→pending for retry`);
+    const reset = await withTimeout(resetStuckOrFailedFinalization(jobId), DB_READ_TIMEOUT_MS, 'finalize:retry-reset');
+    if (reset) {
+      console.log(`[finalize:retry-reset:end] jobId=${jobId} reset succeeded`);
+      const refreshed = await withTimeout(getJob(jobId), DB_READ_TIMEOUT_MS, 'finalize:get-job-after-retry-reset');
+      if (refreshed) {
+        job.finalizationStatus = refreshed.finalizationStatus;
+        job.finalizationResult = refreshed.finalizationResult;
+        job.finalizationError = refreshed.finalizationError;
+      }
+    } else {
+      console.log(`[finalize:retry-reset:end] jobId=${jobId} reset failed — may have changed state`);
     }
   }
 
@@ -369,56 +413,49 @@ export async function POST(
     const claimed = await withTimeout(markFinalizationStarted(jobId), DB_READ_TIMEOUT_MS, 'finalize:cas-claim');
     console.log(`[finalize:cas-claim:end] jobId=${jobId} claimed=${claimed}`);
     if (!claimed) {
-      console.log(`[finalize:start] jobId=${jobId} CAS claim failed for finalizationStatus=${job.finalizationStatus}, returning status`);
+      // CAS failed — re-read the job to return actual status/result/error
+      console.log(`[finalize:cas-claim:failed] jobId=${jobId} CAS claim failed for finalizationStatus=${job.finalizationStatus}`);
       const refreshed = await withTimeout(getJob(jobId), DB_READ_TIMEOUT_MS, 'finalize:get-job-after-cas');
       return NextResponse.json({
-        success: true,
+        success: false,
         jobId: job.jobId,
         finalizationStatus: refreshed?.finalizationStatus ?? job.finalizationStatus,
-        message: 'Finalization is currently in progress or in a non-retryable state. Poll GET for completion.',
-      });
+        finalizationResult: refreshed?.finalizationResult ?? job.finalizationResult,
+        finalizationError: refreshed?.finalizationError ?? job.finalizationError,
+        finalizationStage: refreshed?.finalizationStage ?? job.finalizationStage,
+        finalizationLastHeartbeatAt: refreshed?.finalizationLastHeartbeatAt ?? job.finalizationLastHeartbeatAt,
+        message: `CAS claim failed. Current finalization status: ${refreshed?.finalizationStatus ?? job.finalizationStatus}. Use ?retry=1 to force retry.`,
+      }, { status: 409 });
     }
+    // CAS claim succeeded!
+    console.log(`[finalize:cas-claim:success] jobId=${jobId} finalization_status is now 'running'`);
   }
 
-  // ── Dry-run: return the stage plan without executing ──
-  if (dryRun) {
-    const run = job.result!;
-    const stagePlan = [
-      { stage: 1, name: 'persist', description: 'Persist candidates to DB', timeoutMs: DB_STATEMENT_TIMEOUT_MS, fatal: true },
-      { stage: 2, name: 'labels', description: 'Update photo labels from YOLO/OCR candidates', timeoutMs: DB_STATEMENT_TIMEOUT_MS, fatal: true },
-      { stage: 3, name: 'obstructions', description: 'Register obstructions on roof_plane photos', timeoutMs: DB_STATEMENT_TIMEOUT_MS, fatal: false },
-      { stage: 4, name: 'classification', description: 'OpenAI Vision fallback classification', timeoutMs: VISION_CLASSIFICATION_BUDGET_MS, fatal: false, skipped: !process.env.OPENAI_API_KEY },
-      { stage: 5, name: 'phase4a', description: 'Phase 4A aggregation (homography projection)', timeoutMs: PHASE4A_AGGREGATION_TIMEOUT_MS, fatal: false },
-      { stage: 6, name: 'store-result', description: 'Store finalization result in DB', timeoutMs: DB_READ_TIMEOUT_MS, fatal: true },
-    ];
-    const totalDurationEstimate = stagePlan.reduce((sum, s) => sum + s.timeoutMs, 0);
-    console.log(`[finalize:dry-run:end] jobId=${jobId} stages=${stagePlan.length}`);
-    return NextResponse.json({
-      success: true,
-      dryRun: true,
-      jobId: job.jobId,
-      surveyId,
-      finalizationStatus: job.finalizationStatus,
-      jobStatus: job.status,
-      candidateCount: run.candidates.length,
-      processedCount: run.processedCount,
-      failedCount: run.failedCount,
-      stagePlan,
-      overallTimeoutMs: FINALIZATION_OVERALL_TIMEOUT_MS,
-      totalDurationEstimateMs: totalDurationEstimate,
-      warning: totalDurationEstimate > FINALIZATION_OVERALL_TIMEOUT_MS
-        ? `Sum of stage timeouts (${totalDurationEstimate}ms) exceeds overall timeout (${FINALIZATION_OVERALL_TIMEOUT_MS}ms). Stages may be cut short.`
-        : undefined,
-    });
-  }
-
-  // ── Run the full finalization pipeline ──
-  const run = job.result!;
-  const runHash = run.runHash;
-  const finalizationResult: Record<string, unknown> = {};
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CRITICAL: From this point forward, EVERY line of code is inside a single
+  // try/catch/finally that guarantees markFinalizationFailed() on any error.
+  // The function MUST NOT leave finalization_status='running' when it exits.
+  // ═══════════════════════════════════════════════════════════════════════════
 
   // Overall timeout guard — uses AbortController to actually abort the pipeline
   const abortController = new AbortController();
+
+  // Vercel grace-period handler: detect approaching 60s limit and mark failed
+  // before the function is killed. This runs at VERCEL_GRACE_PERIOD_MS (52s)
+  // to give us 8s to write the 'failed' status to DB before Vercel kills us at 60s.
+  let vercelGracePeriodFired = false;
+  const vercelGracePeriodTimeout = setTimeout(async () => {
+    vercelGracePeriodFired = true;
+    console.error(`[finalize:vercel-grace-period] jobId=${jobId} Approaching Vercel 60s limit at ${Date.now() - finalizeStart}ms, marking failed`);
+    try {
+      await markFinalizationFailed(jobId, `Vercel grace period: finalization exceeded ${VERCEL_GRACE_PERIOD_MS}ms, aborting to prevent stuck 'running' state`);
+    } catch (markErr) {
+      console.error(`[finalize:vercel-grace-period] jobId=${jobId} Failed to mark finalization as failed during grace period:`, markErr);
+    }
+    abortController.abort();
+  }, VERCEL_GRACE_PERIOD_MS);
+
+  // Overall timeout fires at 55s as a secondary safety net
   const overallTimeout = setTimeout(() => {
     console.error(`[finalize:failed] jobId=${jobId} OVERALL TIMEOUT — pipeline exceeded ${FINALIZATION_OVERALL_TIMEOUT_MS}ms, aborting`);
     abortController.abort();
@@ -431,13 +468,73 @@ export async function POST(
     }
   }
 
+  // Helper to write stage + heartbeat, with best-effort error handling
+  async function heartbeat(stage: string) {
+    try {
+      await updateFinalizationStage(jobId, stage);
+    } catch (hbErr) {
+      // Heartbeat failure must NOT crash the pipeline
+      console.error(`[finalize:heartbeat:failed] jobId=${jobId} stage=${stage} error:`, hbErr instanceof Error ? hbErr.message : String(hbErr));
+    }
+  }
+
   try {
+    // ── Guard: job.result must exist ──
+    if (!job.result) {
+      const errMsg = `Cannot finalize: job.result is null. The worker may not have stored results for this job.`;
+      console.error(`[finalize:guard] jobId=${jobId} ${errMsg}`);
+      throw new Error(errMsg);
+    }
+
+    const run = job.result;
+    const runHash = run.runHash;
+    const finalizationResult: Record<string, unknown> = {};
+
+    // ── Dry-run: return the stage plan without executing ──
+    if (dryRun) {
+      const stagePlan = [
+        { stage: 1, name: 'persist', description: 'Persist candidates to DB', timeoutMs: DB_STATEMENT_TIMEOUT_MS, fatal: true },
+        { stage: 2, name: 'labels', description: 'Update photo labels from YOLO/OCR candidates', timeoutMs: DB_STATEMENT_TIMEOUT_MS, fatal: true },
+        { stage: 3, name: 'obstructions', description: 'Register obstructions on roof_plane photos', timeoutMs: DB_STATEMENT_TIMEOUT_MS, fatal: false },
+        { stage: 4, name: 'classification', description: 'OpenAI Vision fallback classification', timeoutMs: VISION_CLASSIFICATION_BUDGET_MS, fatal: false, skipped: !process.env.OPENAI_API_KEY },
+        { stage: 5, name: 'phase4a', description: 'Phase 4A aggregation (homography projection)', timeoutMs: PHASE4A_AGGREGATION_TIMEOUT_MS, fatal: false },
+        { stage: 6, name: 'store-result', description: 'Store finalization result in DB', timeoutMs: DB_READ_TIMEOUT_MS, fatal: true },
+      ];
+      const totalDurationEstimate = stagePlan.reduce((sum, s) => sum + s.timeoutMs, 0);
+      console.log(`[finalize:dry-run:end] jobId=${jobId} stages=${stagePlan.length}`);
+      // Dry-run does NOT modify finalization_status, so reset it back
+      await markFinalizationFailed(jobId, 'Dry-run mode — no actual finalization performed');
+      return NextResponse.json({
+        success: true,
+        dryRun: true,
+        jobId: job.jobId,
+        surveyId,
+        finalizationStatus: job.finalizationStatus,
+        jobStatus: job.status,
+        candidateCount: run.candidates.length,
+        processedCount: run.processedCount,
+        failedCount: run.failedCount,
+        stagePlan,
+        overallTimeoutMs: FINALIZATION_OVERALL_TIMEOUT_MS,
+        vercelGracePeriodMs: VERCEL_GRACE_PERIOD_MS,
+        totalDurationEstimateMs: totalDurationEstimate,
+        warning: totalDurationEstimate > FINALIZATION_OVERALL_TIMEOUT_MS
+          ? `Sum of stage timeouts (${totalDurationEstimate}ms) exceeds overall timeout (${FINALIZATION_OVERALL_TIMEOUT_MS}ms). Stages may be cut short.`
+          : undefined,
+      });
+    }
+
+    // ── Begin stages ──
+    console.log(`[finalize:stages:begin] jobId=${jobId} runHash=${runHash} candidates=${run.candidates.length} processedCount=${run.processedCount}`);
+    await heartbeat('stages-begin');
+
     // ═══════════════════════════════════════════════════════════════════════
     // STAGE 1: Persist candidates to DB
     // ═══════════════════════════════════════════════════════════════════════
     checkAbort('pre-persist');
     const persistStart = Date.now();
     console.log(`[finalize:persist:start] jobId=${jobId} runHash=${runHash}`);
+    await heartbeat('persist');
     let stored: unknown = null;
     try {
       stored = await withTimeout(
@@ -461,6 +558,7 @@ export async function POST(
     checkAbort('pre-labels');
     const labelsStart = Date.now();
     console.log(`[finalize:labels:start] jobId=${jobId} runHash=${runHash}`);
+    await heartbeat('labels');
     let labelUpdateResult: LabelUpdateResult | null = null;
     try {
       labelUpdateResult = await withTimeout(
@@ -489,6 +587,7 @@ export async function POST(
     checkAbort('pre-obstructions');
     const obstructionsStart = Date.now();
     console.log(`[finalize:obstructions:start] jobId=${jobId} runHash=${runHash}`);
+    await heartbeat('obstructions');
     let obstructionRegistration: ObstructionRegistrationResult | null = null;
     try {
       // Build fileId→filename map (needed by registerObstructionsForSurvey)
@@ -536,6 +635,7 @@ export async function POST(
     checkAbort('pre-classification');
     const classificationStart = Date.now();
     console.log(`[finalize:classification:start] jobId=${jobId} runHash=${runHash}`);
+    await heartbeat('classification');
     let visionClassification: VisionClassificationBatchResult | null = null;
     const openaiApiKey = process.env.OPENAI_API_KEY;
     if (openaiApiKey) {
@@ -565,6 +665,7 @@ export async function POST(
     checkAbort('pre-phase4a');
     const phase4aStart = Date.now();
     console.log(`[finalize:phase4a:start] jobId=${jobId} runHash=${runHash}`);
+    await heartbeat('phase4a');
     let aggregationResult = null;
     try {
       const projectId = run.projectId ?? job.surveyId;
@@ -713,6 +814,7 @@ export async function POST(
     checkAbort('pre-store-result');
     const storeResultStart = Date.now();
     console.log(`[finalize:store-result:start] jobId=${jobId} runHash=${runHash}`);
+    await heartbeat('store-result');
     try {
       await withTimeout(
         markFinalizationComplete(job.jobId, finalizationResult),
@@ -730,6 +832,7 @@ export async function POST(
 
     // ── Complete ──
     clearTimeout(overallTimeout);
+    clearTimeout(vercelGracePeriodTimeout);
     const totalDuration = Date.now() - finalizeStart;
     console.log(`[finalize:complete] jobId=${jobId} runHash=${runHash} totalDurationMs=${totalDuration}`);
 
@@ -743,22 +846,30 @@ export async function POST(
 
   } catch (fatalErr) {
     clearTimeout(overallTimeout);
+    clearTimeout(vercelGracePeriodTimeout);
     const totalDuration = Date.now() - finalizeStart;
     const errMsg = fatalErr instanceof Error ? fatalErr.message : String(fatalErr);
     const isAborted = abortController.signal.aborted;
-    console.error(`[finalize:failed] jobId=${jobId} runHash=${runHash} FATAL: ${errMsg} durationMs=${totalDuration} aborted=${isAborted}`);
+    const stage = job.finalizationStage ?? 'unknown';
+    console.error(`[finalize:failed] jobId=${jobId} stage=${stage} FATAL: ${errMsg} durationMs=${totalDuration} aborted=${isAborted} vercelGracePeriodFired=${vercelGracePeriodFired}`);
+
+    // Always mark finalization as failed — this is the CRITICAL guarantee
+    // If vercelGracePeriodFired already marked it, this is a no-op (idempotent)
     try {
-      await markFinalizationFailed(job.jobId, errMsg);
+      await markFinalizationFailed(job.jobId, `stage=${stage}: ${errMsg}`);
     } catch (markErr) {
       console.error(`[finalize:failed] jobId=${jobId} also failed to mark finalization as failed:`, markErr);
     }
+
     return NextResponse.json({
       success: false,
       jobId: job.jobId,
       finalizationStatus: 'failed',
       error: errMsg,
+      stage,
       durationMs: totalDuration,
       aborted: isAborted || undefined,
+      vercelGracePeriodFired: vercelGracePeriodFired || undefined,
     }, { status: 500 });
   }
 }

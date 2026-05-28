@@ -1,46 +1,27 @@
-# Fix Photo Vision Pass Batch Failures
+# Finalize Hang Investigation — Remaining Tasks
 
-## Problem
-- Photo vision pass completed with 142 failed batches and 0 candidates
-- All CV components showing "unavailable_batch_fallback" status
-- Batches were failing with "This operation was aborted" errors
+## Completed (Previous Session)
+- [x] Instrument finalize route with per-stage logging markers: `[finalize:start]`, `[finalize:persist:start/end]`, `[finalize:labels:start/end]`, `[finalize:obstructions:start/end]`, `[finalize:classification:start/end]`, `[finalize:phase4a:start/end]`, `[finalize:store-result:start/end]`, `[finalize:complete]`, `[finalize:failed]`
+- [x] Add stage timing with `Date.now()` and `durationMs` logging
+- [x] Wrap every major stage with try/catch; fatal errors call `markFinalizationFailed()`
+- [x] Add `withTimeout()` helper for Promise timeout wrapping
+- [x] Add `FINALIZATION_OVERALL_TIMEOUT_MS = 55_000` hard limit
+- [x] Add EXIF pre-warming budget cap (20% of aggregation budget, max 10s)
+- [x] Add hard timeout at 2x AGGREGATION_BUDGET_MS in detection loop
+- [x] Add MAX_VISION_CLASSIFICATION_PHOTOS=20 cap
+- [x] Fix TypeScript compilation errors (duplicate identifiers, unused imports)
+- [x] Commit locally: 253b724
 
-## Root Cause Analysis
-1. **Batch size too large**: 10 photos per batch, but Render worker processes images sequentially (~8-12s each)
-2. **Batch timeout too short**: 80s timeout, but 10 photos × ~8-12s = 80-120s total → exceeds timeout → AbortController fires
-3. **Too many batches per poll**: Processing 3-5 batches per poll = 200-300s, exceeding Vercel's serverless function timeout
+## Push & Deploy
+- [x] Fix GitHub authentication and push commit 253b724 to origin/dev
+- [ ] Deploy to preview environment
 
-## Fixes Applied (3 commits)
+## Validation
+- [ ] Run finalize on existing completed job and verify:
+  - All `[finalize:STAGE:start/end]` log markers appear in order
+  - No stage hangs (each has timeout protection)
+  - Finalization transitions `running → complete` or `running → failed`
+  - Identify the exact stage that was previously hanging
 
-### Commit 362a4b1: Reduce batch size and increase timeout
-- Batch size: 10 → 5 photos per batch
-- Batch timeout: 80s → 120s
-- Added timeout-specific error logging (distinguishes AbortError from HTTP errors)
-
-### Commit 7b88b1f: Process 1 batch per poll + maxDuration
-- maxBatchesPerPoll: 5 → 1 (each batch takes ~40-60s, must fit in Vercel's 60s limit)
-- Added `export const maxDuration = 60` to route for explicit timeout control
-- Updated comments to reflect actual timing
-
-## Tasks
-- [x] Reduce batch size from 10 to 5 photos per batch
-- [x] Increase batch timeout from 80s to 120s
-- [x] Process only 1 batch per poll (not 3-5) to stay within Vercel's 60s maxDuration
-- [x] Add maxDuration = 60 to the API route
-- [x] Improve error logging for timeout aborts
-- [x] Commit and push to dev branch
-- [ ] Wait for Vercel deployment and test end-to-end
-
-## Render Worker Health (Verified)
-- Status: OK
-- OpenCV: available v4.13.0
-- YOLO: available (yolov8n.pt, model loaded)
-- Supervision: available v0.25.1
-- Tesseract: available v5.5.0
-- pytesseract: available v0.3.13
-
-## Expected Behavior After Fix
-- Each batch: 5 photos × ~8-12s = ~40-60s per batch
-- Each poll: processes 1 batch, returns progress
-- Client polls every 2s, max 30 min
-- For ~490 photos: 98 batches × ~45s each ≈ ~73 min worst case (may need to increase timeout further)
+## Reporting
+- [ ] Report: last log reached, exact function hanging, stage duration, finalization transition result
