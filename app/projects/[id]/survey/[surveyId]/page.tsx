@@ -65,7 +65,8 @@ import {
   candidatesPassOverlayFilter,
   classifyCandidateForFilter,
 } from "@/lib/assistedEvidenceSources/overlayCoordinateConversion";
-import { PhotoVisionOverlayRenderer, buildFilesWithOverlays } from "@/components/PhotoVisionOverlayRenderer";
+import { PhotoVisionOverlayRenderer, buildFilesWithOverlays, buildFilesWithRefinedOverlays, type OverlayMode } from "@/components/PhotoVisionOverlayRenderer";
+import { refineGeometry, type RawRefinementInput, type RefinedGeometryBundle } from "@/lib/assistedEvidenceSources/geometryRefinement";
 import type { ProjectSurveyEvidenceHygieneManifest } from "@/lib/survey/evidence/sessionGrouping";
 import type { SurveyEvidenceEngineeringBridge } from "@/lib/survey/evidence/engineeringBridge";
 import type { SurveyEvidenceTraceabilityBundle } from "@/lib/survey/evidence/provenance";
@@ -1678,10 +1679,25 @@ function OpenSourcePhotoVisionPassPanel({
   const [error, setError] = useState<string | null>(null);
   const [candidateFilter, setCandidateFilter] = useState<"both" | "opencv" | "yolo" | "ocr">("both");
   const [selectedOverlayFileId, setSelectedOverlayFileId] = useState<string | null>(null);
+  const [overlayMode, setOverlayMode] = useState<OverlayMode>("raw");
   const [retryingFinalization, setRetryingFinalization] = useState(false);
   const [retryJobId, setRetryJobId] = useState<string>("");
   const activeBundle = result?.stored ?? bundle ?? null;
   const allCandidates = safeArray(activeBundle?.candidates);
+
+  // Compute refined geometry when in refined mode
+  const refinedBundle: RefinedGeometryBundle | null = (() => {
+    if (overlayMode !== "refined" || allCandidates.length === 0) return null;
+    const rawInputs: RawRefinementInput[] = allCandidates.map((c) => ({
+      id: c.id,
+      fileId: c.fileId,
+      candidateType: c.candidateType,
+      candidateCategory: c.candidateCategory,
+      payload: c.payload,
+      confidence: c.confidence,
+    }));
+    return refineGeometry(rawInputs);
+  })();
   const candidates = allCandidates.filter((candidate) => {
     const stage = String(candidate.payload?.stage ?? "");
     const source = String(candidate.payload?.source ?? "");
@@ -2086,12 +2102,48 @@ External OpenCV + YOLO/Supervision + Tesseract OCR worker · actual image bytes 
 
         {/* ── Geometric overlay renderer ── */}
         {allCandidates.length > 0 && (
-          <div className="rounded-xl border border-cyan-500/20 bg-slate-950/40 p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-cyan-300 mb-2">
-              Geometric overlays on survey photos
-            </p>
+          <div className={`rounded-xl border bg-slate-950/40 p-3 ${overlayMode === "refined" ? "border-emerald-500/20" : "border-cyan-500/20"}`}>
+            <div className="flex items-center justify-between mb-2">
+              <p className={`text-[10px] font-semibold uppercase tracking-wider ${overlayMode === "refined" ? "text-emerald-300" : "text-cyan-300"}`}>
+                {overlayMode === "refined" ? "Refined geometry preview" : "Geometric overlays on survey photos"}
+              </p>
+              <div className="flex items-center gap-1">
+                <span className="text-[9px] text-slate-500 mr-1">Mode:</span>
+                {(["raw", "refined"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setOverlayMode(mode)}
+                    className={`rounded-full border px-2.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider transition ${
+                      overlayMode === mode
+                        ? mode === "refined"
+                          ? "border-emerald-400/50 bg-emerald-500/20 text-emerald-100"
+                          : "border-cyan-400/50 bg-cyan-500/20 text-cyan-100"
+                        : "border-slate-700 bg-slate-900/60 text-slate-500 hover:text-slate-300"
+                    }`}
+                  >
+                    {mode === "raw" ? "Raw" : "Refined"}
+                  </button>
+                ))}
+              </div>
+            </div>
             <p className="text-[9px] text-slate-500 mb-3">
-              Candidates with <code className="text-slate-400">payload.region</code> or <code className="text-slate-400">payload.bbox</code> geometry rendered as SVG overlays. Dashed borders = review required. REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY.
+              {overlayMode === "refined" ? (
+                <>
+                  Refined geometry preview: noise-filtered, deduplicated, classified, and scored candidates.
+                  Raw candidates are preserved unchanged.{" "}
+                  {refinedBundle && (
+                    <span className="text-emerald-400/70">
+                      {refinedBundle.refinedCandidateCount} refined from {refinedBundle.rawCandidateCount} raw.
+                    </span>
+                  )}
+                  {" "}REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY.
+                </>
+              ) : (
+                <>
+                  Candidates with <code className="text-slate-400">payload.region</code> or <code className="text-slate-400">payload.bbox</code> geometry rendered as SVG overlays. Dashed borders = review required. REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY.
+                </>
+              )}
             </p>
             <PhotoVisionOverlayRenderer
               filesWithOverlays={buildFilesWithOverlays(
@@ -2107,7 +2159,12 @@ External OpenCV + YOLO/Supervision + Tesseract OCR worker · actual image bytes 
                 })),
                 files.map((f) => ({ id: f.id, fileUrl: f.fileUrl, filename: f.filename })),
               )}
+              refinedFilesWithOverlays={buildFilesWithRefinedOverlays(
+                refinedBundle?.candidates ?? [],
+                files.map((f) => ({ id: f.id, fileUrl: f.fileUrl, filename: f.filename })),
+              )}
               candidateFilter={candidateFilter}
+              overlayMode={overlayMode}
               selectedFileId={selectedOverlayFileId}
               onSelectFile={setSelectedOverlayFileId}
             />
