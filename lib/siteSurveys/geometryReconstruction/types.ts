@@ -443,6 +443,12 @@ export interface GeometryReconstructionJob {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  /** Current pipeline stage (e.g. 'segmentation', 'line_extraction', 'plane_extraction'). */
+  currentStage: string | null;
+  /** Last heartbeat timestamp — used to detect stuck/in-flight jobs. */
+  lastHeartbeatAt: string | null;
+  /** Worker version that is processing or processed this job. */
+  workerVersion: string | null;
   authority: GeometryReconstructionAuthority;
   limitations: string[];
 }

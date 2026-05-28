@@ -43,6 +43,9 @@ function makeJob(overrides: Partial<GeometryReconstructionJob> = {}): GeometryRe
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     completedAt: new Date().toISOString(),
+    currentStage: 'completed',
+    lastHeartbeatAt: new Date().toISOString(),
+    workerVersion: '1.0.0',
     ...overrides,
   };
 }

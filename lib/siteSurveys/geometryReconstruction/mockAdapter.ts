@@ -214,6 +214,9 @@ export const mockGeometryReconstructionService: GeometryReconstructionService = 
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       completedAt: new Date().toISOString(),
+      currentStage: 'completed',
+      lastHeartbeatAt: new Date().toISOString(),
+      workerVersion: 'mock-1.0.0',
       authority: { ...REVIEW_ONLY_AUTHORITY },
       limitations: [...MOCK_LIMITATIONS],
     };
@@ -244,6 +247,9 @@ export const mockGeometryReconstructionService: GeometryReconstructionService = 
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       completedAt: new Date().toISOString(),
+      currentStage: 'completed',
+      lastHeartbeatAt: new Date().toISOString(),
+      workerVersion: 'mock-1.0.0',
       authority: { ...REVIEW_ONLY_AUTHORITY },
       limitations: [...MOCK_LIMITATIONS],
     };

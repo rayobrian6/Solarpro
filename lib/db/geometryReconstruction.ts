@@ -38,6 +38,9 @@ interface JobRow {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  current_stage: string | null;
+  last_heartbeat_at: string | null;
+  worker_version: string | null;
 }
 
 /** DB row shape for site_survey_geometry_reconstruction_artifacts. */
@@ -219,7 +222,8 @@ export async function getArtifactsBySurvey(
 
   // Get the latest job for this survey to include in the result
   const jobRows = await sql`
-    SELECT id, survey_id, status, pipeline, input, created_at, updated_at, completed_at
+    SELECT id, survey_id, status, pipeline, input, created_at, updated_at, completed_at,
+           current_stage, last_heartbeat_at, worker_version
     FROM site_survey_geometry_reconstruction_jobs
     WHERE survey_id = ${surveyId}
     ORDER BY created_at DESC
@@ -241,6 +245,9 @@ export async function getArtifactsBySurvey(
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       completedAt: null,
+      currentStage: null,
+      lastHeartbeatAt: null,
+      workerVersion: null,
       authority: REVIEW_ONLY_AUTHORITY,
       limitations: [...BASE_LIMITATIONS],
     };
@@ -278,6 +285,9 @@ function rowToJob(row: JobRow, artifacts: GeometryReconstructionArtifact[]): Geo
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
+    currentStage: row.current_stage ?? null,
+    lastHeartbeatAt: row.last_heartbeat_at ?? null,
+    workerVersion: row.worker_version ?? null,
     authority: REVIEW_ONLY_AUTHORITY,
     limitations: [...BASE_LIMITATIONS],
   };

@@ -65,3 +65,31 @@ export {
   generateMockArtifacts,
   mockGeometryReconstructionService,
 } from './mockAdapter';
+
+// Async job manager (heartbeat)
+export {
+  HEARTBEAT_TIMEOUT_MS,
+  STUCK_JOB_THRESHOLD_MS,
+  PIPELINE_STAGES,
+  isHeartbeatStale,
+  isJobStuck,
+  computeProgress,
+  buildNewJob,
+  transitionToRunning,
+  advanceStage,
+  transitionToCompleted,
+  transitionToFailed,
+  transitionToCancelled,
+  updateJobHeartbeat,
+  markJobRunning,
+  markJobCompleted,
+  markJobFailed,
+  cancelJobInDb,
+  markStaleJobsFailed,
+  insertArtifactWithProvenance,
+} from './asyncJobManager';
+
+export type {
+  HeartbeatInfo,
+  PipelineStage,
+} from './asyncJobManager';
