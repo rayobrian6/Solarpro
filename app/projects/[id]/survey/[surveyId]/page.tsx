@@ -59,6 +59,13 @@ import type {
   SurveyEvidenceDomain,
   SurveyEvidenceManifest,
 } from "@/lib/survey/evidence/manifest";
+import {
+  extractDrawableRegion,
+  hasDrawableGeometry,
+  candidatesPassOverlayFilter,
+  classifyCandidateForFilter,
+} from "@/lib/assistedEvidenceSources/overlayCoordinateConversion";
+import { PhotoVisionOverlayRenderer, buildFilesWithOverlays } from "@/components/PhotoVisionOverlayRenderer";
 import type { ProjectSurveyEvidenceHygieneManifest } from "@/lib/survey/evidence/sessionGrouping";
 import type { SurveyEvidenceEngineeringBridge } from "@/lib/survey/evidence/engineeringBridge";
 import type { SurveyEvidenceTraceabilityBundle } from "@/lib/survey/evidence/provenance";
@@ -1656,10 +1663,12 @@ function candidateCountFor(
 function OpenSourcePhotoVisionPassPanel({
   surveyId,
   bundle,
+  files,
   onDetailRefresh,
 }: {
   surveyId: string;
   bundle: OpenSourcePhotoVisionBundle | null | undefined;
+  files: SiteSurveyFile[];
   onDetailRefresh?: (detail: Partial<SurveyDetailData>) => void;
 }) {
   const [result, setResult] = useState<OpenSourcePhotoVisionRunResponse | null>(
@@ -1668,6 +1677,7 @@ function OpenSourcePhotoVisionPassPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [candidateFilter, setCandidateFilter] = useState<"both" | "opencv" | "yolo" | "ocr">("both");
+  const [selectedOverlayFileId, setSelectedOverlayFileId] = useState<string | null>(null);
   const [retryingFinalization, setRetryingFinalization] = useState(false);
   const [retryJobId, setRetryJobId] = useState<string>("");
   const activeBundle = result?.stored ?? bundle ?? null;
@@ -2071,6 +2081,36 @@ External OpenCV + YOLO/Supervision + Tesseract OCR worker · actual image bytes 
               </button>
             ))}
             <span className="text-[10px] text-slate-500">Showing {candidates.length} of {allCandidates.length} persisted review-only candidates.</span>
+          </div>
+        )}
+
+        {/* ── Geometric overlay renderer ── */}
+        {allCandidates.length > 0 && (
+          <div className="rounded-xl border border-cyan-500/20 bg-slate-950/40 p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-cyan-300 mb-2">
+              Geometric overlays on survey photos
+            </p>
+            <p className="text-[9px] text-slate-500 mb-3">
+              Candidates with <code className="text-slate-400">payload.region</code> or <code className="text-slate-400">payload.bbox</code> geometry rendered as SVG overlays. Dashed borders = review required. REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY.
+            </p>
+            <PhotoVisionOverlayRenderer
+              filesWithOverlays={buildFilesWithOverlays(
+                candidates.map((c) => ({
+                  id: c.id,
+                  fileId: c.fileId,
+                  candidateType: c.candidateType,
+                  candidateCategory: c.candidateCategory,
+                  payload: c.payload,
+                  confidence: c.confidence,
+                  reviewStatus: c.reviewStatus,
+                  thumbnailDataUrl: c.thumbnailDataUrl,
+                })),
+                files.map((f) => ({ id: f.id, fileUrl: f.fileUrl, filename: f.filename })),
+              )}
+              candidateFilter={candidateFilter}
+              selectedFileId={selectedOverlayFileId}
+              onSelectFile={setSelectedOverlayFileId}
+            />
           </div>
         )}
 
@@ -4300,6 +4340,7 @@ export default function SurveyDetailPage() {
           <OpenSourcePhotoVisionPassPanel
             surveyId={survey.id}
             bundle={openSourcePhotoVision}
+            files={files}
             onDetailRefresh={(refreshedDetail) => {
               setDetail((current) =>
                 current ? { ...current, ...refreshedDetail } : current,
