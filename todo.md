@@ -1,20 +1,20 @@
 # Real Geometry Reconstruction Worker — Task Tracker
 
-## Phase 1: Semantic Segmentation Layer
+## Phase 1: Semantic Segmentation Layer ✅
 - [x] Extend types.ts with SemanticSegmentationMask (polygon-based, class labels)
 - [x] Extend types.ts with SegmentationClass, NormalizedPoint, StructuralLineType
 - [x] Extend types.ts with StructuralLineCandidate, VanishingPointArtifact, ConsensusPlaneCandidate
 - [x] Extend types.ts ARTIFACT_TYPE_DISCRIMINATORS with new discriminators
 - [x] Extend types.ts GeometryReconstructionArtifact union with new types
 - [x] Extend types.ts pipeline type with new pipeline names
-- [ ] Add validators in schemas.ts for 4 new artifact types
-- [ ] Update schemas.ts VALIDATOR_MAP with new discriminators
-- [ ] Update index.ts barrel exports for new types/validators
-- [ ] Create workers/segmentation/runSegmentationWorker.ts
-- [ ] Create workers/segmentation/index.ts
-- [ ] Create __tests__/segmentationWorker.test.ts
-- [ ] Run jest + tsc
-- [ ] Commit: `feat: segmentation worker — polygon mask extraction`
+- [x] Add validators in schemas.ts for 4 new artifact types
+- [x] Update schemas.ts VALIDATOR_MAP with new discriminators
+- [x] Update index.ts barrel exports for new types/validators
+- [x] Create workers/segmentation/runSegmentationWorker.ts
+- [x] Create workers/segmentation/index.ts
+- [x] Create __tests__/segmentationWorker.test.ts (57 tests)
+- [x] Run jest + tsc (217 pass, tsc clean)
+- [x] Commit: `feat: segmentation worker — polygon mask extraction` (b5452e9)
 
 ## Phase 2: Mask Cleanup
 - [ ] Create workers/segmentation/maskCleanup.ts

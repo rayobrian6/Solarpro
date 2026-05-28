@@ -14,3 +14,17 @@ export type {
   SegmentationWorkerInput,
   SegmentationWorkerOutput,
 } from './runSegmentationWorker';
+
+export {
+  cleanMask,
+  cleanSegmentationMask,
+  douglasPeucker,
+  convexHull,
+  polygonArea,
+  polygonPerimeter,
+} from './maskCleanup';
+
+export type {
+  MaskCleanupConfig,
+  MaskCleanupResult,
+} from './maskCleanup';
