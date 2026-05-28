@@ -17,11 +17,17 @@ import type {
   WallPlaneCandidate,
   LineCandidate,
   LineCandidateType,
+  SemanticSegmentationMask,
+  SegmentationClass,
+  StructuralLineCandidate,
+  StructuralLineType,
+  VanishingPointArtifact,
+  ConsensusPlaneCandidate,
   GeometryReconstructionArtifact,
   ArtifactTypeDiscriminator,
   ValidationResult,
 } from './types';
-import { ARTIFACT_TYPE_DISCRIMINATORS } from './types';
+import { ARTIFACT_TYPE_DISCRIMINATORS, SEGMENTATION_CLASSES } from './types';
 
 // ---------------------------------------------------------------------------
 // Authority validation
@@ -332,6 +338,289 @@ export function validateLineCandidate(payload: unknown): ValidationResult<LineCa
 }
 
 // ---------------------------------------------------------------------------
+// Normalized point validation helper
+// ---------------------------------------------------------------------------
+
+function assertNormalizedPoint(payload: Record<string, unknown>, field: string, errors: string[]): void {
+  if (!(field in payload)) {
+    errors.push(`Missing required field: ${field}`);
+    return;
+  }
+  const val = payload[field];
+  if (!isRecord(val)) {
+    errors.push(`Field "${field}" must be an object with x, y, coordinateSystem`);
+    return;
+  }
+  const pt = val as Record<string, unknown>;
+  if (!isNumber(pt.x)) {
+    errors.push(`Field "${field}.x" must be a number`);
+  }
+  if (!isNumber(pt.y)) {
+    errors.push(`Field "${field}.y" must be a number`);
+  }
+  if (pt.coordinateSystem !== 'normalized_image_0_1000') {
+    errors.push(`Field "${field}.coordinateSystem" must be "normalized_image_0_1000"`);
+  }
+}
+
+function assertNormalizedPointArray(payload: Record<string, unknown>, field: string, errors: string[]): void {
+  if (!(field in payload)) {
+    errors.push(`Missing required field: ${field}`);
+    return;
+  }
+  const val = payload[field];
+  if (!Array.isArray(val) || val.length === 0) {
+    errors.push(`Field "${field}" must be a non-empty array of NormalizedPoint objects`);
+    return;
+  }
+  for (let i = 0; i < val.length; i++) {
+    if (!isRecord(val[i])) {
+      errors.push(`Field "${field}[${i}] must be an object with x, y, coordinateSystem`);
+      continue;
+    }
+    const pt = val[i] as Record<string, unknown>;
+    if (!isNumber(pt.x)) {
+      errors.push(`Field "${field}[${i}].x must be a number`);
+    }
+    if (!isNumber(pt.y)) {
+      errors.push(`Field "${field}[${i}].y must be a number`);
+    }
+    if (pt.coordinateSystem !== 'normalized_image_0_1000') {
+      errors.push(`Field "${field}[${i}].coordinateSystem must be "normalized_image_0_1000"`);
+    }
+  }
+}
+
+function assertNormalizedRegion(payload: Record<string, unknown>, field: string, errors: string[]): void {
+  if (!(field in payload)) {
+    errors.push(`Missing required field: ${field}`);
+    return;
+  }
+  const val = payload[field];
+  if (!isRecord(val)) {
+    errors.push(`Field "${field}" must be a NormalizedRegion object`);
+    return;
+  }
+  const region = val as Record<string, unknown>;
+  assertNumber(region, 'x', errors);
+  assertNumber(region, 'y', errors);
+  assertNumber(region, 'width', errors);
+  assertNumber(region, 'height', errors);
+  if (region.coordinateSystem !== 'normalized_image_0_1000') {
+    errors.push(`Field "${field}.coordinateSystem" must be "normalized_image_0_1000"`);
+  }
+}
+
+function assertOptionalString(payload: Record<string, unknown>, field: string, errors: string[]): void {
+  if (field in payload && payload[field] !== undefined && !isString(payload[field])) {
+    errors.push(`Field "${field}" must be a string if present`);
+  }
+}
+
+function assertOptionalNumber(payload: Record<string, unknown>, field: string, errors: string[]): void {
+  if (field in payload && payload[field] !== undefined && !isNumber(payload[field])) {
+    errors.push(`Field "${field}" must be a number if present`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// New artifact type validators (Phase 1+)
+// ---------------------------------------------------------------------------
+
+/** Validate a SemanticSegmentationMask payload. */
+export function validateSemanticSegmentationMask(payload: unknown): ValidationResult<SemanticSegmentationMask> {
+  const errors: string[] = [];
+  if (!isRecord(payload)) return { valid: false, errors: ['Payload must be a non-null object'] };
+  const p = payload as Record<string, unknown>;
+
+  if (p.artifactType !== 'semantic_segmentation_mask') {
+    errors.push(`artifactType must be "semantic_segmentation_mask", got "${String(p.artifactType)}"`);
+  }
+  assertString(p, 'id', errors);
+  assertString(p, 'fileId', errors);
+
+  // Validate segmentationClass
+  if (!('segmentationClass' in p)) {
+    errors.push('Missing required field: segmentationClass');
+  } else if (!isString(p.segmentationClass) || !SEGMENTATION_CLASSES.includes(p.segmentationClass as SegmentationClass)) {
+    errors.push(`segmentationClass must be one of: ${SEGMENTATION_CLASSES.join(', ')}, got "${String(p.segmentationClass)}"`);
+  }
+
+  assertNormalizedPointArray(p, 'polygon', errors);
+  assertConfidence(p, errors);
+  assertNormalizedRegion(p, 'maskBounds', errors);
+  assertOptionalString(p, 'rawMask', errors);
+  assertOptionalString(p, 'cleanedMask', errors);
+  assertOptionalNumber(p, 'maskWidth', errors);
+  assertOptionalNumber(p, 'maskHeight', errors);
+  assertString(p, 'workerVersion', errors);
+
+  // stageTimings is optional
+  if ('stageTimings' in p && p.stageTimings !== undefined) {
+    if (!isRecord(p.stageTimings)) {
+      errors.push('stageTimings must be a Record<string, number> if present');
+    } else {
+      const timings = p.stageTimings as Record<string, unknown>;
+      for (const key of Object.keys(timings)) {
+        if (!isNumber(timings[key])) {
+          errors.push(`stageTimings["${key}"] must be a number`);
+        }
+      }
+    }
+  }
+
+  assertAuthority(p, errors);
+  assertLimitations(p, errors);
+
+  if (errors.length > 0) return { valid: false, errors };
+  return { valid: true, data: p as unknown as SemanticSegmentationMask };
+}
+
+/** Validate a StructuralLineCandidate payload. */
+export function validateStructuralLineCandidate(payload: unknown): ValidationResult<StructuralLineCandidate> {
+  const errors: string[] = [];
+  if (!isRecord(payload)) return { valid: false, errors: ['Payload must be a non-null object'] };
+  const p = payload as Record<string, unknown>;
+
+  if (p.artifactType !== 'structural_line_candidate') {
+    errors.push(`artifactType must be "structural_line_candidate", got "${String(p.artifactType)}"`);
+  }
+  assertString(p, 'id', errors);
+  assertString(p, 'fileId', errors);
+
+  // Validate lineType
+  const validLineTypes: StructuralLineType[] = ['ridge', 'eave', 'rake', 'wall_vertical'];
+  if (!('lineType' in p)) {
+    errors.push('Missing required field: lineType');
+  } else if (!isString(p.lineType) || !validLineTypes.includes(p.lineType as StructuralLineType)) {
+    errors.push(`lineType must be one of: ${validLineTypes.join(', ')}, got "${String(p.lineType)}"`);
+  }
+
+  assertNormalizedPoint(p, 'start', errors);
+  assertNormalizedPoint(p, 'end', errors);
+  assertConfidence(p, errors);
+  assertOptionalString(p, 'sourceMaskId', errors);
+  assertString(p, 'workerVersion', errors);
+
+  // stageTimings is optional
+  if ('stageTimings' in p && p.stageTimings !== undefined) {
+    if (!isRecord(p.stageTimings)) {
+      errors.push('stageTimings must be a Record<string, number> if present');
+    }
+  }
+
+  assertAuthority(p, errors);
+  assertLimitations(p, errors);
+
+  if (errors.length > 0) return { valid: false, errors };
+  return { valid: true, data: p as unknown as StructuralLineCandidate };
+}
+
+/** Validate a VanishingPointArtifact payload. */
+export function validateVanishingPointArtifact(payload: unknown): ValidationResult<VanishingPointArtifact> {
+  const errors: string[] = [];
+  if (!isRecord(payload)) return { valid: false, errors: ['Payload must be a non-null object'] };
+  const p = payload as Record<string, unknown>;
+
+  if (p.artifactType !== 'vanishing_point') {
+    errors.push(`artifactType must be "vanishing_point", got "${String(p.artifactType)}"`);
+  }
+  assertString(p, 'id', errors);
+  assertString(p, 'fileId', errors);
+
+  // Validate direction
+  const validDirections = ['x', 'y', 'vertical'];
+  if (!('direction' in p)) {
+    errors.push('Missing required field: direction');
+  } else if (!isString(p.direction) || !validDirections.includes(p.direction)) {
+    errors.push(`direction must be one of: ${validDirections.join(', ')}, got "${String(p.direction)}"`);
+  }
+
+  assertNormalizedPoint(p, 'point', errors);
+  assertNumber(p, 'supportingLineCount', errors);
+  assertStringArray(p, 'supportingLineIds', errors);
+
+  // Validate inlierRatio (0-1)
+  assertNumber(p, 'inlierRatio', errors);
+  if ('inlierRatio' in p && isNumber(p.inlierRatio)) {
+    if (p.inlierRatio < 0 || p.inlierRatio > 1) {
+      errors.push('inlierRatio must be between 0 and 1');
+    }
+  }
+
+  assertConfidence(p, errors);
+  assertString(p, 'workerVersion', errors);
+
+  // stageTimings is optional
+  if ('stageTimings' in p && p.stageTimings !== undefined) {
+    if (!isRecord(p.stageTimings)) {
+      errors.push('stageTimings must be a Record<string, number> if present');
+    }
+  }
+
+  assertAuthority(p, errors);
+  assertLimitations(p, errors);
+
+  if (errors.length > 0) return { valid: false, errors };
+  return { valid: true, data: p as unknown as VanishingPointArtifact };
+}
+
+/** Validate a ConsensusPlaneCandidate payload. */
+export function validateConsensusPlaneCandidate(payload: unknown): ValidationResult<ConsensusPlaneCandidate> {
+  const errors: string[] = [];
+  if (!isRecord(payload)) return { valid: false, errors: ['Payload must be a non-null object'] };
+  const p = payload as Record<string, unknown>;
+
+  if (p.artifactType !== 'consensus_plane_candidate') {
+    errors.push(`artifactType must be "consensus_plane_candidate", got "${String(p.artifactType)}"`);
+  }
+  assertString(p, 'id', errors);
+
+  // Validate planeType
+  const validPlaneTypes = ['roof', 'wall'];
+  if (!('planeType' in p)) {
+    errors.push('Missing required field: planeType');
+  } else if (!isString(p.planeType) || !validPlaneTypes.includes(p.planeType)) {
+    errors.push(`planeType must be one of: ${validPlaneTypes.join(', ')}, got "${String(p.planeType)}"`);
+  }
+
+  assertNormalizedPointArray(p, 'polygon', errors);
+
+  // Validate normalVector
+  if (!('normalVector' in p)) {
+    errors.push('Missing required field: normalVector');
+  } else if (!isRecord(p.normalVector)) {
+    errors.push('normalVector must be an object with x, y, z');
+  } else {
+    const nv = p.normalVector as Record<string, unknown>;
+    assertNumber(nv, 'x', errors);
+    assertNumber(nv, 'y', errors);
+    assertNumber(nv, 'z', errors);
+  }
+
+  assertOptionalNumber(p, 'estimatedPitch', errors);
+  assertOptionalNumber(p, 'estimatedAzimuth', errors);
+  assertConfidence(p, errors);
+  assertStringArray(p, 'sourceMaskIds', errors);
+  assertStringArray(p, 'sourceFileIds', errors);
+  assertNumber(p, 'consensusPhotoCount', errors);
+  assertString(p, 'workerVersion', errors);
+
+  // stageTimings is optional
+  if ('stageTimings' in p && p.stageTimings !== undefined) {
+    if (!isRecord(p.stageTimings)) {
+      errors.push('stageTimings must be a Record<string, number> if present');
+    }
+  }
+
+  assertAuthority(p, errors);
+  assertLimitations(p, errors);
+
+  if (errors.length > 0) return { valid: false, errors };
+  return { valid: true, data: p as unknown as ConsensusPlaneCandidate };
+}
+
+// ---------------------------------------------------------------------------
 // Union validator
 // ---------------------------------------------------------------------------
 
@@ -371,6 +660,22 @@ const VALIDATOR_MAP: Record<ArtifactTypeDiscriminator, (payload: unknown) => Val
   },
   rake_line_candidate: (p) => {
     const r = validateLineCandidate(p);
+    return r.valid ? { valid: true, data: r.data } : r as ValidationResult<GeometryReconstructionArtifact>;
+  },
+  semantic_segmentation_mask: (p) => {
+    const r = validateSemanticSegmentationMask(p);
+    return r.valid ? { valid: true, data: r.data } : r as ValidationResult<GeometryReconstructionArtifact>;
+  },
+  structural_line_candidate: (p) => {
+    const r = validateStructuralLineCandidate(p);
+    return r.valid ? { valid: true, data: r.data } : r as ValidationResult<GeometryReconstructionArtifact>;
+  },
+  vanishing_point: (p) => {
+    const r = validateVanishingPointArtifact(p);
+    return r.valid ? { valid: true, data: r.data } : r as ValidationResult<GeometryReconstructionArtifact>;
+  },
+  consensus_plane_candidate: (p) => {
+    const r = validateConsensusPlaneCandidate(p);
     return r.valid ? { valid: true, data: r.data } : r as ValidationResult<GeometryReconstructionArtifact>;
   },
 };

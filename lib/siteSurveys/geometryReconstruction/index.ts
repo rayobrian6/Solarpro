@@ -19,6 +19,13 @@ export type {
   RidgeLineCandidate,
   EaveLineCandidate,
   RakeLineCandidate,
+  SegmentationClass,
+  NormalizedPoint,
+  SemanticSegmentationMask,
+  StructuralLineType,
+  StructuralLineCandidate,
+  VanishingPointArtifact,
+  ConsensusPlaneCandidate,
   GeometryReconstructionArtifact,
   ArtifactTypeDiscriminator,
   GeometryReconstructionInput,
@@ -33,6 +40,7 @@ export {
   REVIEW_ONLY_AUTHORITY,
   BASE_LIMITATIONS,
   ARTIFACT_TYPE_DISCRIMINATORS,
+  SEGMENTATION_CLASSES,
 } from './types';
 
 // Schemas / validators
@@ -45,6 +53,10 @@ export {
   validateRoofPlaneCandidate,
   validateWallPlaneCandidate,
   validateLineCandidate,
+  validateSemanticSegmentationMask,
+  validateStructuralLineCandidate,
+  validateVanishingPointArtifact,
+  validateConsensusPlaneCandidate,
   validateGeometryReconstructionArtifact,
 } from './schemas';
 
