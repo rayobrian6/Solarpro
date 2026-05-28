@@ -67,6 +67,7 @@ import {
 } from "@/lib/assistedEvidenceSources/overlayCoordinateConversion";
 import { PhotoVisionOverlayRenderer, buildFilesWithOverlays, buildFilesWithRefinedOverlays, type OverlayMode } from "@/components/PhotoVisionOverlayRenderer";
 import GeometryReconstructionPreview from "@/components/GeometryReconstructionPreview";
+import { UnifiedGeometryPanel } from "@/components/UnifiedGeometryPanel";
 import { refineGeometry, type RawRefinementInput, type RefinedGeometryBundle } from "@/lib/assistedEvidenceSources/geometryRefinement";
 import type { ProjectSurveyEvidenceHygieneManifest } from "@/lib/survey/evidence/sessionGrouping";
 import type { SurveyEvidenceEngineeringBridge } from "@/lib/survey/evidence/engineeringBridge";
@@ -4410,6 +4411,11 @@ export default function SurveyDetailPage() {
         {/* 1e-2. Geometry Reconstruction Preview — research spike, review-only */}
         <SurveyPanelErrorBoundary title="Geometry Reconstruction Preview">
           <GeometryReconstructionPreview surveyId={survey.id} />
+        </SurveyPanelErrorBoundary>
+
+        {/* 1e-3. Unified Geometry Panel — unified pipeline view with authority badges */}
+        <SurveyPanelErrorBoundary title="Unified Geometry">
+          <UnifiedGeometryPanel surveyId={survey.id} />
         </SurveyPanelErrorBoundary>
 
         {/* 1f. Survey Evidence Manifest — structured engineering evidence view */}
