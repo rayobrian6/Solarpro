@@ -5,10 +5,16 @@ const config: Config = {
   testEnvironment: 'node',
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
+    '\\.(css|less|scss|sass)$': '<rootDir>/__mocks__/styleMock.js',
   },
-  testMatch: ['**/__tests__/**/*.test.ts'],
+  testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
   transform: {
-    '^.+\\.tsx?$': ['ts-jest', { tsconfig: { strict: false } }],
+    '^.+\\.tsx?$': ['ts-jest', {
+      tsconfig: {
+        strict: false,
+        jsx: 'react-jsx',
+      },
+    }],
   },
 };
 
