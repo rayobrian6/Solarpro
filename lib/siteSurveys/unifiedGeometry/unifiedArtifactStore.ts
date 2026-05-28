@@ -13,6 +13,14 @@
 //   PRIMARY:   unified_geometry_artifacts table (this module)
 //   FALLBACK:  On-the-fly adaptation from Pipeline A + Pipeline B source tables
 //
+// MIGRATION DRIFT GUARD:
+//   The `obstruction_metadata` column was added in Migration 081, after the
+//   base table was created in Migration 079b. If 079b was applied but 081
+//   was not, SELECT queries referencing `obstruction_metadata` will fail with
+//   "column does not exist". To prevent this, both query functions check for
+//   the column's existence before including it in the SELECT. If the column
+//   is absent, the query omits it and obstructionMetadata defaults to null.
+//
 // NEON DRIVER QUIRKS:
 //   - Must use RETURNING on all UPDATE queries
 //   - TEXT[] columns receive JS arrays directly, NOT JSON.stringify'd arrays
@@ -24,11 +32,15 @@ import type { UnifiedGeometryArtifact, UnifiedGeometryClass, GeometrySourcePipel
 import type { UnifiedGeometryAuthorityState } from './authority';
 import { getAuthorityForState } from './authority';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DB Row Type
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+// DB Row Types
+// ────────────────────────────────────────────────────────────────────────────
 
-interface UnifiedArtifactRow {
+/**
+ * Base row type — columns present since Migration 079b.
+ * Used when the `obstruction_metadata` column does not yet exist (pre-081).
+ */
+interface UnifiedArtifactBaseRow {
   id: string;
   survey_id: string;
   geometry_class: string;
@@ -39,7 +51,6 @@ interface UnifiedArtifactRow {
   label: string;
   limitations: unknown;     // TEXT[] → JS array
   geometry_data: unknown;   // JSONB → parsed UnifiedGeometryArtifact
-  obstruction_metadata: unknown;  // JSONB → parsed ObstructionMetadata | null
   review_state: string;
   review_notes: string | null;
   priority: string;
@@ -48,9 +59,65 @@ interface UnifiedArtifactRow {
   updated_at: string;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Full row type — includes obstruction_metadata column (Migration 081).
+ * Used when the column existence check passes.
+ */
+interface UnifiedArtifactRow extends UnifiedArtifactBaseRow {
+  obstruction_metadata: unknown;  // JSONB → parsed ObstructionMetadata | null
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Column Existence Check — Migration Drift Guard
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Check whether the `obstruction_metadata` column exists on the
+ * `unified_geometry_artifacts` table. This column is added by Migration 081.
+ *
+ * If the table was created (079b) but the column hasn't been added yet,
+ * SELECT queries that reference it will fail with "column does not exist".
+ * This check allows us to degrade gracefully by omitting the column from
+ * the SELECT when it's not yet present.
+ *
+ * Results are cached for the lifetime of the serverless function invocation
+ * to avoid repeated information_schema queries on every call.
+ */
+let _obstructionMetadataColumnExists: boolean | null = null;
+
+async function checkObstructionMetadataColumn(
+  sql: ReturnType<typeof import('@neondatabase/serverless')['neon']>,
+): Promise<boolean> {
+  // Return cached result if available
+  if (_obstructionMetadataColumnExists !== null) {
+    return _obstructionMetadataColumnExists;
+  }
+
+  try {
+    const result = await sql`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'unified_geometry_artifacts'
+        AND column_name = 'obstruction_metadata'
+    `;
+    _obstructionMetadataColumnExists = Array.isArray(result) && result.length > 0;
+  } catch {
+    // If the check fails (e.g., permission issue), assume column doesn't exist
+    _obstructionMetadataColumnExists = false;
+  }
+
+  return _obstructionMetadataColumnExists;
+}
+
+/**
+ * Reset the cached column existence check. Exposed for testing.
+ */
+export function _resetObstructionMetadataColumnCache(): void {
+  _obstructionMetadataColumnExists = null;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Query: Get all unified artifacts for a survey
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 
 /**
  * Get all UnifiedGeometryArtifact instances for a survey from the
@@ -63,6 +130,11 @@ interface UnifiedArtifactRow {
  * The `geometry_data` JSONB column stores the full artifact as JSON.
  * If `geometry_data` is null (e.g., from backfill that only stored metadata),
  * the artifact is reconstructed from the row columns.
+ *
+ * MIGRATION DRIFT GUARD: If the `obstruction_metadata` column does not exist
+ * (Migration 081 not yet applied), the SELECT omits it and
+ * obstructionMetadata defaults to null on each artifact. This prevents
+ * runtime errors when the table exists but the column hasn't been added yet.
  */
 export async function getUnifiedArtifactsForSurvey(
   surveyId: string,
@@ -79,19 +151,35 @@ export async function getUnifiedArtifactsForSurvey(
       return [];
     }
 
-    const rows = await sql`
-      SELECT
-        id, survey_id, geometry_class, authority_state, authority,
-        provenance, confidence, label, limitations, geometry_data,
-        obstruction_metadata,
-        review_state, review_notes, priority, mock_artifact,
-        created_at, updated_at
-      FROM unified_geometry_artifacts
-      WHERE survey_id = ${surveyId}
-      ORDER BY created_at ASC
-    `;
+    // Check if the obstruction_metadata column exists (Migration 081 guard)
+    const hasObstructionColumn = await checkObstructionMetadataColumn(sql);
 
-    return rows.map(rowToArtifact);
+    if (hasObstructionColumn) {
+      const rows = await sql`
+        SELECT
+          id, survey_id, geometry_class, authority_state, authority,
+          provenance, confidence, label, limitations, geometry_data,
+          obstruction_metadata,
+          review_state, review_notes, priority, mock_artifact,
+          created_at, updated_at
+        FROM unified_geometry_artifacts
+        WHERE survey_id = ${surveyId}
+        ORDER BY created_at ASC
+      `;
+      return (rows as UnifiedArtifactRow[]).map(rowToArtifact);
+    } else {
+      const rows = await sql`
+        SELECT
+          id, survey_id, geometry_class, authority_state, authority,
+          provenance, confidence, label, limitations, geometry_data,
+          review_state, review_notes, priority, mock_artifact,
+          created_at, updated_at
+        FROM unified_geometry_artifacts
+        WHERE survey_id = ${surveyId}
+        ORDER BY created_at ASC
+      `;
+      return (rows as UnifiedArtifactBaseRow[]).map(rowToArtifactBase);
+    }
   } catch (err) {
     console.warn(
       '[unifiedArtifactStore] Failed to query unified_geometry_artifacts:',
@@ -101,13 +189,17 @@ export async function getUnifiedArtifactsForSurvey(
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 // Query: Get specific artifacts by ID
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 
 /**
  * Get specific UnifiedGeometryArtifact instances by their IDs.
  * Useful when a promotion request specifies particular artifact IDs.
+ *
+ * MIGRATION DRIFT GUARD: Same column check as getUnifiedArtifactsForSurvey.
+ * Also includes a table existence check — if the table doesn't exist,
+ * returns [] instead of throwing.
  */
 export async function getUnifiedArtifactsByIds(
   artifactIds: string[],
@@ -117,19 +209,44 @@ export async function getUnifiedArtifactsByIds(
   try {
     const sql = await getDbReady();
 
-    const rows = await sql`
-      SELECT
-        id, survey_id, geometry_class, authority_state, authority,
-        provenance, confidence, label, limitations, geometry_data,
-        obstruction_metadata,
-        review_state, review_notes, priority, mock_artifact,
-        created_at, updated_at
-      FROM unified_geometry_artifacts
-      WHERE id = ANY(${artifactIds})
-      ORDER BY created_at ASC
+    // Check if the table exists first (graceful degradation)
+    const tableCheck = await sql`
+      SELECT 1 FROM information_schema.tables
+      WHERE table_name = 'unified_geometry_artifacts'
     `;
+    if (tableCheck.length === 0) {
+      return [];
+    }
 
-    return rows.map(rowToArtifact);
+    // Check if the obstruction_metadata column exists (Migration 081 guard)
+    const hasObstructionColumn = await checkObstructionMetadataColumn(sql);
+
+    if (hasObstructionColumn) {
+      const rows = await sql`
+        SELECT
+          id, survey_id, geometry_class, authority_state, authority,
+          provenance, confidence, label, limitations, geometry_data,
+          obstruction_metadata,
+          review_state, review_notes, priority, mock_artifact,
+          created_at, updated_at
+        FROM unified_geometry_artifacts
+        WHERE id = ANY(${artifactIds})
+        ORDER BY created_at ASC
+      `;
+      return (rows as UnifiedArtifactRow[]).map(rowToArtifact);
+    } else {
+      const rows = await sql`
+        SELECT
+          id, survey_id, geometry_class, authority_state, authority,
+          provenance, confidence, label, limitations, geometry_data,
+          review_state, review_notes, priority, mock_artifact,
+          created_at, updated_at
+        FROM unified_geometry_artifacts
+        WHERE id = ANY(${artifactIds})
+        ORDER BY created_at ASC
+      `;
+      return (rows as UnifiedArtifactBaseRow[]).map(rowToArtifactBase);
+    }
   } catch (err) {
     console.warn(
       '[unifiedArtifactStore] Failed to query unified_geometry_artifacts by IDs:',
@@ -139,9 +256,9 @@ export async function getUnifiedArtifactsByIds(
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 // Query: Check if the unified table has data for a survey
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 
 /**
  * Check whether the unified_geometry_artifacts table has any artifacts
@@ -175,12 +292,12 @@ export async function hasUnifiedArtifactsForSurvey(
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 // Row → Artifact Conversion
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Convert a database row to a UnifiedGeometryArtifact.
+ * Convert a database row (WITH obstruction_metadata) to a UnifiedGeometryArtifact.
  *
  * If `geometry_data` is populated (preferred), it contains the full artifact
  * stored as JSONB — this is the most accurate representation since it preserves
@@ -292,9 +409,115 @@ function rowToArtifact(row: UnifiedArtifactRow): UnifiedGeometryArtifact {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Convert a database row (WITHOUT obstruction_metadata) to a UnifiedGeometryArtifact.
+ * Used when the obstruction_metadata column doesn't exist yet (pre-Migration 081).
+ * obstructionMetadata is always null in this path.
+ */
+function rowToArtifactBase(row: UnifiedArtifactBaseRow): UnifiedGeometryArtifact {
+  // Preferred path: full artifact stored in geometry_data
+  if (row.geometry_data && typeof row.geometry_data === 'object') {
+    const stored = row.geometry_data as Record<string, unknown>;
+
+    // geometry_data may contain obstructionMetadata embedded in the JSONB
+    // (e.g., from a backfill that stored the full artifact). Use it if present.
+    return {
+      id: (stored.id as string) ?? row.id,
+      surveyId: (stored.surveyId as string) ?? row.survey_id,
+      geometryClass: (stored.geometryClass as UnifiedGeometryClass) ?? row.geometry_class as UnifiedGeometryClass,
+      authority: (stored.authority as UnifiedGeometryArtifact['authority']) ??
+        rowToAuthorityBase(row),
+      provenance: (stored.provenance as UnifiedGeometryArtifact['provenance']) ??
+        rowToProvenanceBase(row),
+      confidence: (stored.confidence as number) ?? row.confidence,
+      label: (stored.label as string) ?? row.label,
+      limitations: Array.isArray(stored.limitations)
+        ? stored.limitations as string[]
+        : row.limitations as string[] ?? [],
+      bbox: (stored.bbox as UnifiedGeometryArtifact['bbox']) ?? null,
+      polygon: (stored.polygon as UnifiedGeometryArtifact['polygon']) ?? null,
+      lineSegment: (stored.lineSegment as UnifiedGeometryArtifact['lineSegment']) ?? null,
+      center: (stored.center as UnifiedGeometryArtifact['center']) ?? null,
+      planeType: (stored.planeType as UnifiedGeometryArtifact['planeType']) ?? null,
+      pitchDegrees: (stored.pitchDegrees as number | null) ?? null,
+      azimuthDegrees: (stored.azimuthDegrees as number | null) ?? null,
+      normalVector: (stored.normalVector as UnifiedGeometryArtifact['normalVector']) ?? null,
+      areaSqM: (stored.areaSqM as number | null) ?? null,
+      inlierCount: (stored.inlierCount as number | null) ?? null,
+      totalPoints: (stored.totalPoints as number | null) ?? null,
+      lineSubtype: (stored.lineSubtype as UnifiedGeometryArtifact['lineSubtype']) ?? null,
+      estimatedLengthM: (stored.estimatedLengthM as number | null) ?? null,
+      obstructionSubtype: (stored.obstructionSubtype as UnifiedGeometryArtifact['obstructionSubtype']) ?? null,
+      radiusM: (stored.radiusM as number | null) ?? null,
+      setbackM: (stored.setbackM as number | null) ?? null,
+      heightFt: (stored.heightFt as number | null) ?? null,
+      roofPlaneId: (stored.roofPlaneId as string | null) ?? null,
+      cadImpact: (stored.cadImpact as UnifiedGeometryArtifact['cadImpact']) ?? null,
+      electricalSubtype: (stored.electricalSubtype as UnifiedGeometryArtifact['electricalSubtype']) ?? null,
+      story: (stored.story as number | null) ?? null,
+      isPrimaryInterconnect: (stored.isPrimaryInterconnect as boolean | null) ?? null,
+      depthResolution: (stored.depthResolution as UnifiedGeometryArtifact['depthResolution']) ?? null,
+      depthMetric: (stored.depthMetric as string | null) ?? null,
+      consensusPhotoCount: (stored.consensusPhotoCount as number | null) ?? null,
+      segmentationClass: (stored.segmentationClass as string | null) ?? null,
+      reviewState: (stored.reviewState as UnifiedGeometryArtifact['reviewState']) ?? rowToReviewStateBase(row),
+      reviewNotes: (stored.reviewNotes as string | null) ?? row.review_notes ?? null,
+      priority: (stored.priority as UnifiedGeometryArtifact['priority']) ?? rowToPriorityBase(row),
+      stageTimings: (stored.stageTimings as Record<string, number> | null) ?? null,
+      isSynthetic: (stored.isSynthetic as boolean) ?? false,
+      // No obstruction_metadata column — fall back to embedded data in geometry_data
+      obstructionMetadata: (stored.obstructionMetadata as ObstructionMetadata | null) ?? null,
+    };
+  }
+
+  // Fallback path: reconstruct from row columns (no obstruction_metadata available)
+  return {
+    id: row.id,
+    surveyId: row.survey_id,
+    geometryClass: row.geometry_class as UnifiedGeometryClass,
+    authority: rowToAuthorityBase(row),
+    provenance: rowToProvenanceBase(row),
+    confidence: row.confidence,
+    label: row.label,
+    limitations: Array.isArray(row.limitations) ? row.limitations as string[] : [],
+    bbox: null,
+    polygon: null,
+    lineSegment: null,
+    center: null,
+    planeType: null,
+    pitchDegrees: null,
+    azimuthDegrees: null,
+    normalVector: null,
+    areaSqM: null,
+    inlierCount: null,
+    totalPoints: null,
+    lineSubtype: null,
+    estimatedLengthM: null,
+    obstructionSubtype: null,
+    radiusM: null,
+    setbackM: null,
+    heightFt: null,
+    roofPlaneId: null,
+    cadImpact: null,
+    electricalSubtype: null,
+    story: null,
+    isPrimaryInterconnect: null,
+    depthResolution: null,
+    depthMetric: null,
+    consensusPhotoCount: null,
+    segmentationClass: null,
+    reviewState: rowToReviewStateBase(row),
+    reviewNotes: row.review_notes ?? null,
+    priority: rowToPriorityBase(row),
+    stageTimings: null,
+    isSynthetic: false,
+    obstructionMetadata: null,
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Row Sub-field Reconstruction
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 
 function rowToAuthority(row: UnifiedArtifactRow): UnifiedGeometryArtifact['authority'] {
   const authorityObj = row.authority as Record<string, unknown> | null;
@@ -303,6 +526,29 @@ function rowToAuthority(row: UnifiedArtifactRow): UnifiedGeometryArtifact['autho
 
   // Start from the canonical authority envelope for this state, then overlay
   // any stored values. This ensures all required fields are present.
+  const base = getAuthorityForState(state, isMock);
+  return {
+    ...base,
+    ...(authorityObj ? {
+      state: (authorityObj.state as UnifiedGeometryAuthorityState) ?? base.state,
+      reviewOnly: (authorityObj.reviewOnly as boolean) ?? base.reviewOnly,
+      nonAuthoritative: (authorityObj.nonAuthoritative as boolean) ?? base.nonAuthoritative,
+      cadMutationAllowed: (authorityObj.cadMutationAllowed as boolean) ?? base.cadMutationAllowed,
+      permitGenerationAllowed: (authorityObj.permitGenerationAllowed as boolean) ?? base.permitGenerationAllowed,
+      bomMutationAllowed: (authorityObj.bomMutationAllowed as boolean) ?? base.bomMutationAllowed,
+      canonicalMutationAllowed: (authorityObj.canonicalMutationAllowed as boolean) ?? base.canonicalMutationAllowed,
+      engineeringWorkflowMutationAllowed: (authorityObj.engineeringWorkflowMutationAllowed as boolean) ?? base.engineeringWorkflowMutationAllowed,
+      mockArtifact: (authorityObj.mockArtifact as boolean) ?? base.mockArtifact,
+      cadConsumable: (authorityObj.cadConsumable as boolean) ?? base.cadConsumable,
+    } : {}),
+  };
+}
+
+/** Base-row variant of rowToAuthority (no obstruction_metadata column). */
+function rowToAuthorityBase(row: UnifiedArtifactBaseRow): UnifiedGeometryArtifact['authority'] {
+  const authorityObj = row.authority as Record<string, unknown> | null;
+  const state = (authorityObj?.state as UnifiedGeometryAuthorityState) ?? row.authority_state as UnifiedGeometryAuthorityState;
+  const isMock = (authorityObj?.mockArtifact as boolean) ?? row.mock_artifact;
   const base = getAuthorityForState(state, isMock);
   return {
     ...base,
@@ -337,7 +583,32 @@ function rowToProvenance(row: UnifiedArtifactRow): UnifiedGeometryArtifact['prov
   };
 }
 
+/** Base-row variant of rowToProvenance (no obstruction_metadata column). */
+function rowToProvenanceBase(row: UnifiedArtifactBaseRow): UnifiedGeometryArtifact['provenance'] {
+  const provObj = row.provenance as Record<string, unknown> | null;
+  return {
+    sourcePipeline: (provObj?.sourcePipeline as GeometrySourcePipeline) ?? 'unknown' as GeometrySourcePipeline,
+    toolName: (provObj?.toolName as string) ?? 'unknown',
+    toolVersion: (provObj?.toolVersion as string) ?? '1.0.0',
+    runHash: (provObj?.runHash as string) ?? 'unknown',
+    sourceFileIds: Array.isArray(provObj?.sourceFileIds) ? provObj!.sourceFileIds as string[] : [],
+    derivedFromArtifactIds: Array.isArray(provObj?.derivedFromArtifactIds) ? provObj!.derivedFromArtifactIds as string[] : [],
+    createdAt: (provObj?.createdAt as string) ?? row.created_at,
+    reviewedBy: (provObj?.reviewedBy as string | null) ?? null,
+    reviewedAt: (provObj?.reviewedAt as string | null) ?? null,
+    workerVersion: (provObj?.workerVersion as string | null) ?? null,
+  };
+}
+
 function rowToReviewState(row: UnifiedArtifactRow): UnifiedGeometryArtifact['reviewState'] {
+  switch (row.review_state) {
+    case 'accepted': return 'accepted';
+    case 'rejected': return 'rejected';
+    default: return 'review_required';
+  }
+}
+
+function rowToReviewStateBase(row: UnifiedArtifactBaseRow): UnifiedGeometryArtifact['reviewState'] {
   switch (row.review_state) {
     case 'accepted': return 'accepted';
     case 'rejected': return 'rejected';
@@ -353,9 +624,17 @@ function rowToPriority(row: UnifiedArtifactRow): UnifiedGeometryArtifact['priori
   }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
+function rowToPriorityBase(row: UnifiedArtifactBaseRow): UnifiedGeometryArtifact['priority'] {
+  switch (row.priority) {
+    case 'high': return 'high';
+    case 'low': return 'low';
+    default: return 'medium';
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Write: Persist an obstruction as a unified geometry artifact
-// ──────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 
 /**
  * Write a single obstruction record as a unified geometry artifact.
@@ -369,6 +648,11 @@ function rowToPriority(row: UnifiedArtifactRow): UnifiedGeometryArtifact['priori
  *
  * Uses ON CONFLICT DO NOTHING to be idempotent — if the artifact already
  * exists (by id), the write is silently skipped.
+ *
+ * NOTE: This function requires the obstruction_metadata column to exist
+ * (Migration 081). It is only called when OBSTRUCTION_UNIFIED_WRITE_ENABLED
+ * is true (default OFF), so the column should always be present by the time
+ * this is enabled.
  *
  * @param surveyId - The site survey ID
  * @param obstructionMeta - The full ObstructionMetadata blob
