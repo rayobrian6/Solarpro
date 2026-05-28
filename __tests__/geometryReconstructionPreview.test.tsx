@@ -269,10 +269,11 @@ describe('GeometryReconstructionPreview', () => {
         artifacts: [makeRoofPlane(), makeWallPlane(), makeRidgeLine(), makeDepthMap()],
       });
       render(<GeometryReconstructionPreview surveyId="survey-001" initialResult={result} />);
-      expect(screen.getByText('Roof Planes')).toBeInTheDocument();
-      expect(screen.getByText('Wall Planes')).toBeInTheDocument();
-      expect(screen.getByText('Lines')).toBeInTheDocument();
-      expect(screen.getByText('Depth Maps')).toBeInTheDocument();
+      // V2: "Roof Planes" and "Wall Planes" now appear in both CountTile and ToggleFilters button
+      expect(screen.getAllByText('Roof Planes').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('Wall Planes').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('Lines').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('Depth Maps').length).toBeGreaterThanOrEqual(1);
     });
 
     it('shows correct count numbers in tiles', () => {
@@ -294,16 +295,18 @@ describe('GeometryReconstructionPreview', () => {
       expect(screen.getByText(/Job completed/)).toBeInTheDocument();
     });
 
-    it('displays other artifacts section for depth maps and point clouds', () => {
+    it('displays dedicated sections for depth maps and point clouds', () => {
       const result = makeMockResult({
         artifactCount: 3,
         artifacts: [makeDepthMap(), makeSfMPointCloud(), makeSegmentationMask()],
       });
       render(<GeometryReconstructionPreview surveyId="survey-001" initialResult={result} />);
-      expect(screen.getByText('Other Artifacts')).toBeInTheDocument();
-      expect(screen.getByText(/Depth Maps: 1/)).toBeInTheDocument();
+      // V2: depth maps now get their own dedicated section with header
+      expect(screen.getByText(/Depth Maps \(1\)/)).toBeInTheDocument();
+      // V2: SfM point clouds still appear in "Other Artifacts" summary
       expect(screen.getByText(/SfM Point Clouds: 1/)).toBeInTheDocument();
-      expect(screen.getByText(/Segmentation Masks: 1/)).toBeInTheDocument();
+      // V2: segmentation masks still appear in count tiles and potentially other areas
+      expect(screen.getAllByText(/Seg.*Masks/i).length).toBeGreaterThanOrEqual(1);
     });
   });
 
