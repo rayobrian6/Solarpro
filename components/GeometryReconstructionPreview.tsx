@@ -610,7 +610,8 @@ export default function GeometryReconstructionPreview({
         throw new Error(body.error || `Request failed (${res.status})`);
       }
       const json = await res.json();
-      setResult(json.data as GeometryReconstructionResult);
+      // API returns result fields at top level (success, schemaVersion, job, artifacts, …)
+      setResult((json.data ?? json) as GeometryReconstructionResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -630,7 +631,8 @@ export default function GeometryReconstructionPreview({
         throw new Error(body.error || `Request failed (${res.status})`);
       }
       const json = await res.json();
-      setResult(json.data as GeometryReconstructionResult);
+      // API returns result fields at top level (success, schemaVersion, job, artifacts, …)
+      setResult((json.data ?? json) as GeometryReconstructionResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {

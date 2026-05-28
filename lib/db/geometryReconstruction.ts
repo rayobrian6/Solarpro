@@ -186,6 +186,12 @@ export async function insertReconstructionArtifact(
 
   const fileId = 'fileId' in artifact ? (artifact as { fileId?: string }).fileId : null;
 
+  // limitations is TEXT[] — pass the JS array directly (Neon driver handles conversion).
+  // authority is JSONB — pass as JSON string.
+  const limitationsArray: string[] = Array.isArray(artifact.limitations)
+    ? artifact.limitations.filter((l: unknown) => typeof l === 'string')
+    : [];
+
   await sql`
     INSERT INTO site_survey_geometry_reconstruction_artifacts (
       job_id, survey_id, file_id, artifact_type, pipeline, payload, confidence, limitations, authority
@@ -197,7 +203,7 @@ export async function insertReconstructionArtifact(
       ${pipeline},
       ${JSON.stringify(artifact)},
       ${artifact.confidence},
-      ${JSON.stringify(artifact.limitations)},
+      ${limitationsArray},
       ${JSON.stringify(artifact.authority)}
     )
   `;
