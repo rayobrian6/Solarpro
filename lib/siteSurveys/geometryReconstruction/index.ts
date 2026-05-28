@@ -47,3 +47,9 @@ export {
   validateLineCandidate,
   validateGeometryReconstructionArtifact,
 } from './schemas';
+
+// Mock adapter
+export {
+  generateMockArtifacts,
+  mockGeometryReconstructionService,
+} from './mockAdapter';
