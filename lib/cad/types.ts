@@ -164,7 +164,15 @@ export interface CADObstruction {
   totalRadiusM: number;        // radiusM + setbackM (total exclusion radius)
   heightFt:    number;         // height above roof deck
   roofPlaneId: string | null;  // which plane this sits on
-  source:      'vision' | 'manual' | 'merged';
+  /** Source of this obstruction data.
+   *  - 'promoted_canonical': Passed through unified geometry pipeline + human review (PREFERRED)
+   *  - 'manual': User-entered obstruction (ACCEPTABLE)
+   *  - 'merged': Merged from multiple sources after review (ACCEPTABLE)
+   *  - 'vision': RAW vision pipeline data — DEPRECATED, must go through canonical bridge
+   *  Use canonicalBridge.canonicalToCADInputs() to produce 'promoted_canonical' entries.
+   *  Use assertNoRawVisionInCAD() to enforce no raw vision data in CAD models.
+   */
+  source:      'promoted_canonical' | 'vision' | 'manual' | 'merged';
   confidence:  number;         // 0.0–1.0
 }
 
@@ -179,7 +187,14 @@ export interface CADElectricalNode {
   y:                    number;    // local meters
   story:                number;    // floor/story (1=ground)
   isPrimaryInterconnect: boolean;  // main conduit target
-  source:               'vision' | 'manual' | 'merged';
+  /** Source of this electrical node data.
+   *  - 'promoted_canonical': Passed through unified geometry pipeline + human review (PREFERRED)
+   *  - 'manual': User-entered node (ACCEPTABLE)
+   *  - 'merged': Merged from multiple sources after review (ACCEPTABLE)
+   *  - 'vision': RAW vision pipeline data — DEPRECATED, must go through canonical bridge
+   *  Use canonicalBridge.canonicalToCADInputs() to produce 'promoted_canonical' entries.
+   */
+  source:               'promoted_canonical' | 'vision' | 'manual' | 'merged';
   confidence:           number;
 }
 

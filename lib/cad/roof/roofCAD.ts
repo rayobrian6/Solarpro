@@ -447,6 +447,13 @@ function pointInPolygonLocal(pt: Point2D, poly: Point2D[]): boolean {
  * Build CADObstruction array from SysDefObstruction[].
  * Converts setbackIn → setbackM and computes totalRadiusM.
  * If planeFilter is non-null, only includes obstructions on that plane.
+ *
+ * BYPASS PREVENTION (Phase 6 — CAD Input Lockdown):
+ *   - Obstructions with source='vision' from raw SysDefObstruction are BLOCKED.
+ *   - Only 'promoted_canonical', 'manual', or 'merged' sources are accepted.
+ *   - Raw vision data must go through the unified geometry pipeline:
+ *     canonicalBridge.canonicalToCADInputs() → CADModel.obstructions
+ *   - If raw vision obstructions are found, they are filtered out with a warning.
  */
 function buildCADObstructions(
   obstructions: SysDefObstruction[],
@@ -454,6 +461,19 @@ function buildCADObstructions(
 ): CADObstruction[] {
   return obstructions
     .filter(o => planeFilter === null || o.roofPlaneId === planeFilter)
+    .filter(o => {
+      // BYPASS GUARD: Block raw vision-source obstructions from entering CAD
+      // through the SysDefObstruction path. These must go through the
+      // unified geometry pipeline + canonical bridge instead.
+      if (o.source === 'vision') {
+        console.warn(
+          `[CAD BYPASS GUARD] Blocked raw vision obstruction id=${o.id} type=${o.type} — ` +
+          `must go through canonicalBridge.canonicalToCADInputs() instead of SysDefObstruction`,
+        );
+        return false;
+      }
+      return true;
+    })
     .map(o => {
       const setbackM = o.setbackIn * 0.0254;
       return {
@@ -474,18 +494,35 @@ function buildCADObstructions(
 
 /**
  * Build CADElectricalNode array from SysDefElectricalNode[].
+ *
+ * BYPASS PREVENTION (Phase 6 — CAD Input Lockdown):
+ *   - Nodes with source='vision' from raw SysDefElectricalNode are BLOCKED.
+ *   - Only 'promoted_canonical', 'manual', or 'merged' sources are accepted.
+ *   - Raw vision data must go through canonicalBridge.canonicalToCADInputs().
  */
 function buildCADElectricalNodes(nodes: SysDefElectricalNode[]): CADElectricalNode[] {
-  return nodes.map(n => ({
-    id:                   n.id,
-    type:                 n.type,
-    x:                    n.worldX,
-    y:                    n.worldY,
-    story:                n.story,
-    isPrimaryInterconnect: n.isPrimaryInterconnect,
-    source:               n.source,
-    confidence:           n.confidence,
-  }));
+  return nodes
+    .filter(n => {
+      // BYPASS GUARD: Block raw vision-source electrical nodes from entering CAD
+      if (n.source === 'vision') {
+        console.warn(
+          `[CAD BYPASS GUARD] Blocked raw vision electrical node id=${n.id} type=${n.type} — ` +
+          `must go through canonicalBridge.canonicalToCADInputs() instead of SysDefElectricalNode`,
+        );
+        return false;
+      }
+      return true;
+    })
+    .map(n => ({
+      id:                   n.id,
+      type:                 n.type,
+      x:                    n.worldX,
+      y:                    n.worldY,
+      story:                n.story,
+      isPrimaryInterconnect: n.isPrimaryInterconnect,
+      source:               n.source,
+      confidence:           n.confidence,
+    }));
 }
 
 /**

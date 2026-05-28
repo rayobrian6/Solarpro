@@ -144,7 +144,14 @@ export interface SysDefObstruction {
   setbackIn: number;      // NEC/AHJ required setback in inches
   confidence: number;     // 0.0–1.0
   roofPlaneId: string | null;
-  source: 'vision' | 'manual' | 'merged';
+  /**
+   * Source of this obstruction data.
+   * - 'promoted_canonical': From unified geometry pipeline + human review (PREFERRED)
+   * - 'vision': RAW vision data — BLOCKED by CAD engine guard (Phase 6)
+   * - 'manual': User-entered (ACCEPTABLE)
+   * - 'merged': Merged from multiple sources after review (ACCEPTABLE)
+   */
+  source: 'promoted_canonical' | 'vision' | 'manual' | 'merged';
 }
 
 /** Electrical node (panel, meter, disconnect) with world position */
@@ -156,7 +163,14 @@ export interface SysDefElectricalNode {
   story: number;
   confidence: number;
   isPrimaryInterconnect: boolean;
-  source: 'vision' | 'manual' | 'merged';
+  /**
+   * Source of this electrical node data.
+   * - 'promoted_canonical': From unified geometry pipeline + human review (PREFERRED)
+   * - 'vision': RAW vision data — BLOCKED by CAD engine guard (Phase 6)
+   * - 'manual': User-entered (ACCEPTABLE)
+   * - 'merged': Merged from multiple sources after review (ACCEPTABLE)
+   */
+  source: 'promoted_canonical' | 'vision' | 'manual' | 'merged';
 }
 
 /** Correction to a GPS-derived roof plane polygon */

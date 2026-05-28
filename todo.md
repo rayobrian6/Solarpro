@@ -1,86 +1,53 @@
-# Real Geometry Reconstruction Worker — Task Tracker
+# PIPELINE UNIFICATION + DRIFT AUDIT — Task Tracker
 
-## Phase 1: Semantic Segmentation Layer ✅
-- [x] Extend types.ts with SemanticSegmentationMask (polygon-based, class labels)
-- [x] Extend types.ts with SegmentationClass, NormalizedPoint, StructuralLineType
-- [x] Extend types.ts with StructuralLineCandidate, VanishingPointArtifact, ConsensusPlaneCandidate
-- [x] Extend types.ts ARTIFACT_TYPE_DISCRIMINATORS with new discriminators
-- [x] Extend types.ts GeometryReconstructionArtifact union with new types
-- [x] Extend types.ts pipeline type with new pipeline names
-- [x] Add validators in schemas.ts for 4 new artifact types
-- [x] Update schemas.ts VALIDATOR_MAP with new discriminators
-- [x] Update index.ts barrel exports for new types/validators
-- [x] Create workers/segmentation/runSegmentationWorker.ts
-- [x] Create workers/segmentation/index.ts
-- [x] Create __tests__/segmentationWorker.test.ts (57 tests)
-- [x] Run jest + tsc (217 pass, tsc clean)
-- [x] Commit: `feat: segmentation worker — polygon mask extraction` (b5452e9)
+## Phase 1: Drift Audit ✅
+- [x] Map all geometry-related files, routes, DB tables, APIs, UI components
+- [x] Identify duplicates/orphans/bypasses
+- [x] Produce `docs/GEOMETRY_PIPELINE_DRIFT_AUDIT.md`
 
-## Phase 2: Mask Cleanup
-- [ ] Create workers/segmentation/maskCleanup.ts
-- [ ] Implement hole filling, tiny region removal, island removal, contour smoothing
-- [ ] Create __tests__/maskCleanup.test.ts
-- [ ] Run jest + tsc
-- [ ] Commit: `feat: mask cleanup — hole fill, island removal, smoothing`
+## Phase 2: Define Unified Contract ✅
+- [x] Create `lib/siteSurveys/unifiedGeometry/authority.ts` — unified authority states, envelopes, helpers
+- [x] Create `lib/siteSurveys/unifiedGeometry/types.ts` — canonical geometry types, bundle, building model
+- [x] Create `lib/siteSurveys/unifiedGeometry/index.ts` — barrel export
+- [x] Verify TypeScript compilation
 
-## Phase 3: Line Extraction
-- [ ] Create workers/lineExtraction/runLineExtractionWorker.ts
-- [ ] Implement Hough transform, line clustering, ridge/eave/rake detection
-- [ ] Add validators in schemas.ts (already have StructuralLineCandidate type)
-- [ ] Create __tests__/lineExtractionWorker.test.ts
-- [ ] Run jest + tsc
-- [ ] Commit: `feat: line extraction — Hough, ridge/eave/rake/wall_vertical`
+## Phase 3: Build Unified Geometry Evidence Bundle ✅
+- [x] Create `lib/siteSurveys/unifiedGeometry/pipelineAdapters.ts` — adapters for Pipeline A + B artifacts
+- [x] Create `lib/siteSurveys/unifiedGeometry/bundleBuilder.ts` — unifier consuming both pipelines
+- [x] Verify cross-referencing by source photo / geometry class / authority state
+- [x] Update `index.ts` barrel exports
+- [x] Verify TypeScript compilation
 
-## Phase 4: Vanishing Points
-- [ ] Create workers/perspective/estimateVanishingPoints.ts
-- [ ] Implement RANSAC-based VP estimation (X, Y, vertical)
-- [ ] Add validators in schemas.ts (already have VanishingPointArtifact type)
-- [ ] Create __tests__/vanishingPointEstimation.test.ts
-- [ ] Run jest + tsc
-- [ ] Commit: `feat: vanishing point estimation — RANSAC X/Y/vertical`
+## Phase 4: Create Promotion Workflow ✅
+- [x] Create `lib/siteSurveys/unifiedGeometry/promotion.ts` — promotion bridge functions
+- [x] Create `lib/siteSurveys/unifiedGeometry/promotionStore.ts` — authority transition storage
+- [x] Enforce forward-only transitions with audit trail
+- [x] Add Migration 079 for geometry_promotion_records and unified_geometry_artifacts tables
+- [x] Update index.ts barrel exports
+- [x] Verify TypeScript compilation
 
-## Phase 5: Plane Extraction
-- [ ] Create workers/planeExtraction/runPlaneExtractionWorker.ts
-- [ ] Implement roof plane extraction (roof mask + supporting lines)
-- [ ] Implement wall plane extraction (wall mask + vertical support)
-- [ ] Add validators in schemas.ts (already have ConsensusPlaneCandidate type)
-- [ ] Create __tests__/planeExtractionWorker.test.ts
-- [ ] Run jest + tsc
-- [ ] Commit: `feat: plane extraction — roof/wall from masks + lines`
+## Phase 5: Canonical Building Model ✅
+- [x] Create `lib/siteSurveys/unifiedGeometry/canonicalBuilder.ts` — builder from promoted artifacts
+- [x] Validate only promoted_canonical+ artifacts feed the builder
+- [x] Wire CanonicalBuildingModel into CAD input path (barrel export + TS verified)
 
-## Phase 6: Depth Estimation
-- [ ] Create workers/depth/runDepthWorker.ts
-- [ ] Integrate depth as support-only (not override segmentation)
-- [ ] Create __tests__/depthWorker.test.ts
-- [ ] Run jest + tsc
-- [ ] Commit: `feat: depth estimation — support-only depth worker`
+## Phase 6: CAD Input Lockdown ✅
+- [x] Create `lib/cad/canonicalBridge.ts` — sole legal adapter from CanonicalBuildingModel → CAD inputs
+- [x] Narrow `CADObstruction.source` / `CADElectricalNode.source` types to include `'promoted_canonical'`
+- [x] Add guard in `roofCAD.ts` — reject `source='vision'` from raw SysDefObstruction
+- [x] Add guard in `roofObstructionRegistration.ts` — enforce review-only, no direct CAD mutation
+- [x] Deprecate `patchSystemDefinitionFromVision()` — mark as orphaned, add @deprecated + guard
+- [x] Update SysDefObstruction/SysDefElectricalNode source types to include `'promoted_canonical'`
+- [x] Verify TypeScript compilation — 0 errors
 
-## Phase 7: Multi-Photo Fusion
-- [ ] Create workers/multiViewFusion/runMultiViewFusion.ts
-- [ ] Implement ORB feature matching, homography estimation
-- [ ] Implement consensus plane merging
-- [ ] Create __tests__/multiViewFusionWorker.test.ts
-- [ ] Run jest + tsc
-- [ ] Commit: `feat: multi-photo fusion — consensus plane merging`
+## Phase 7: UI Unification
+- [ ] Refactor page organization into unified flow
+- [ ] Add authority state labels
+- [ ] Replace split Pipeline A/B components with unified view
 
-## Phase 8: UI Preview Updates
-- [ ] Add toggle: Masks / Lines / Planes / Depth / Consensus
-- [ ] Display pitch, azimuth, confidence, provenance
-- [ ] Update GeometryReconstructionPreview.tsx
-- [ ] Create __tests__/geometryReconstructionPreviewV2.test.tsx
-- [ ] Run jest + tsc
-- [ ] Commit: `feat: geometry preview V2 — toggles, provenance, masks/lines/planes`
+## Phase 8: Tests
+- [ ] Write 14 required test cases (listed in directive)
+- [ ] Run full test suite
 
-## Phase 9: Performance / Async / Heartbeat
-- [ ] Add heartbeat column to jobs table (migration)
-- [ ] Add stage_timings + worker_version columns to artifacts table
-- [ ] Implement async job execution with heartbeat updates
-- [ ] Create __tests__/jobHeartbeat.test.ts
-- [ ] Run jest + tsc
-- [ ] Commit: `feat: async jobs with heartbeat support`
-
-## Phase 10: Regression
-- [ ] Run full jest suite
-- [ ] Run tsc --noEmit
-- [ ] Verify no regressions
-- [ ] Push to GitHub
+## Phase 9: Completion Roadmap
+- [ ] Create `docs/CAD_ENGINE_COMPLETION_ROADMAP.md`

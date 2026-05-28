@@ -3462,6 +3462,100 @@ export async function POST(req: NextRequest) {
       results.push(`\u26a0\ufe0f Migration 078f (stuck index): \${(e as Error).message}`);
     }
 
+    // ─── Migration 079: Unified Geometry — promotion records + unified artifacts ───
+
+    // 079a: geometry_promotion_records table
+    try {
+      const tableExists = await sql`
+        SELECT 1 FROM information_schema.tables
+        WHERE table_name = 'geometry_promotion_records'
+      `;
+      if (tableExists.length === 0) {
+        await sql`
+          CREATE TABLE geometry_promotion_records (
+            id TEXT PRIMARY KEY,
+            artifact_id TEXT NOT NULL,
+            survey_id TEXT NOT NULL,
+            from_state TEXT NOT NULL,
+            to_state TEXT NOT NULL,
+            promoted_by TEXT NOT NULL,
+            promoted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            notes TEXT NULL,
+            intelligence_validated BOOLEAN NOT NULL DEFAULT FALSE,
+            intelligence_warnings TEXT[] NOT NULL DEFAULT '{}'
+          )
+        `;
+        await sql`
+          CREATE INDEX idx_promotion_records_artifact
+            ON geometry_promotion_records (artifact_id)
+        `;
+        await sql`
+          CREATE INDEX idx_promotion_records_survey
+            ON geometry_promotion_records (survey_id)
+        `;
+        await sql`
+          CREATE INDEX idx_promotion_records_promoted_by
+            ON geometry_promotion_records (promoted_by)
+        `;
+        results.push('✅ Migration 079a: geometry_promotion_records — created');
+      } else {
+        results.push('⏭ Migration 079a: geometry_promotion_records — already exists');
+      }
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 079a (promotion records): ${(e as Error).message}`);
+    }
+
+    // 079b: unified_geometry_artifacts table
+    try {
+      const tableExists = await sql`
+        SELECT 1 FROM information_schema.tables
+        WHERE table_name = 'unified_geometry_artifacts'
+      `;
+      if (tableExists.length === 0) {
+        await sql`
+          CREATE TABLE unified_geometry_artifacts (
+            id TEXT PRIMARY KEY,
+            survey_id TEXT NOT NULL,
+            geometry_class TEXT NOT NULL,
+            authority_state TEXT NOT NULL DEFAULT 'raw_evidence',
+            authority JSONB NOT NULL,
+            provenance JSONB NOT NULL,
+            confidence REAL NOT NULL DEFAULT 0,
+            label TEXT NOT NULL DEFAULT '',
+            limitations TEXT[] NOT NULL DEFAULT '{}',
+            geometry_data JSONB NULL,
+            review_state TEXT NOT NULL DEFAULT 'review_required',
+            review_notes TEXT NULL,
+            priority TEXT NOT NULL DEFAULT 'medium',
+            mock_artifact BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `;
+        await sql`
+          CREATE INDEX idx_unified_geo_artifacts_survey
+            ON unified_geometry_artifacts (survey_id)
+        `;
+        await sql`
+          CREATE INDEX idx_unified_geo_artifacts_class
+            ON unified_geometry_artifacts (geometry_class)
+        `;
+        await sql`
+          CREATE INDEX idx_unified_geo_artifacts_authority
+            ON unified_geometry_artifacts (authority_state)
+        `;
+        await sql`
+          CREATE INDEX idx_unified_geo_artifacts_review
+            ON unified_geometry_artifacts (review_state)
+        `;
+        results.push('✅ Migration 079b: unified_geometry_artifacts — created');
+      } else {
+        results.push('⏭ Migration 079b: unified_geometry_artifacts — already exists');
+      }
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 079b (unified artifacts): ${(e as Error).message}`);
+    }
+
     return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);

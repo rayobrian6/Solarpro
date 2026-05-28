@@ -1110,6 +1110,27 @@ export function extractObstructionsForFilename(
  *
  * REVIEW-ONLY MODE: No CAD mutation, no permit geometry mutation.
  * This is evidence refinement only.
+ *
+ * ══════════════════════════════════════════════════════════════════════════
+ * PHASE 6 — CAD INPUT LOCKDOWN ENFORCEMENT:
+ *
+ *   The obstruction_data written by this function is RAW EVIDENCE.
+ *   It MUST NOT be consumed directly by the CAD engine.
+ *
+ *   LEGAL PATH to CAD:
+ *     obstruction_data → unifiedGeometry pipeline adapters →
+ *     UnifiedGeometryEvidenceBundle → Human Review/Promotion →
+ *     CanonicalBuildingModel → canonicalBridge.canonicalToCADInputs() →
+ *     CADModel.obstructions
+ *
+ *   ILLEGAL PATH (BLOCKED):
+ *     obstruction_data → SysDefObstruction → CADObstruction
+ *     obstruction_data → roofCAD.buildCADObstructions()
+ *     obstruction_data → patchSystemDefinitionFromVision()
+ *
+ *   The guard below emits a structured warning on every registration
+ *   to make the review-only status explicit and auditable.
+ * ══════════════════════════════════════════════════════════════════════════
  */
 export async function registerObstructionsForSurvey(
   surveyId: string,
@@ -1245,6 +1266,16 @@ export async function registerObstructionsForSurvey(
   }
 
   console.log(`[registerObstructions] Updated ${filesUpdated} filenames with obstruction data (${totalObstructions} total obstructions, Phase 3B schema v2)`);
+
+  // ── PHASE 6 GUARD: Review-only enforcement log ──────────────────────
+  // This data is RAW EVIDENCE — it MUST NOT be consumed by CAD directly.
+  // Legal path: obstruction_data → unifiedGeometry adapters → promotion →
+  //   CanonicalBuildingModel → canonicalBridge → CAD.
+  console.warn(
+    `[REVIEW-ONLY GUARD] surveyId=${surveyId}: ${totalObstructions} obstructions registered as RAW EVIDENCE. ` +
+    `This data MUST NOT feed CAD, permit, or BOM pipelines directly. ` +
+    `Route through: unifiedGeometry pipeline → promotion → canonicalBridge.canonicalToCADInputs()`,
+  );
 
   return {
     surveyId,

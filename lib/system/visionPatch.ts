@@ -93,6 +93,31 @@ export interface VisionPatchResult {
  * SAFETY GUARANTEE: If vision data is empty or all below threshold,
  * the original SystemDefinition is returned unchanged (patched=false).
  *
+ * ══════════════════════════════════════════════════════════════════════════
+ * @deprecated — PHASE 6 CAD INPUT LOCKDOWN
+ *
+ *   This function is DEPRECATED and should NOT be called in new code.
+ *   It writes raw vision data directly into SystemDefinition.obstructions
+ *   without going through the unified geometry pipeline or human review.
+ *
+ *   REPLACEMENT:
+ *     Use `canonicalBridge.canonicalToCADInputs()` instead, which requires
+ *     all geometry to pass through:
+ *       Survey Photos → Evidence Manifest → Pipeline Adapters →
+ *       Unified Geometry Evidence Bundle → Human Review/Promotion →
+ *       CanonicalBuildingModel → canonicalBridge → CAD
+ *
+ *   This function remains in the codebase for backward compatibility but
+ *   will be removed in a future version. Callers should migrate to the
+ *   unified geometry pipeline.
+ *
+ *   If you must call this function (legacy path), be aware that:
+ *   - The CAD engine now blocks source='vision' obstructions (Phase 6 guard)
+ *   - Raw vision obstructions written to SystemDefinition will be filtered
+ *     out by roofCAD.ts's buildCADObstructions() bypass guard
+ *   - Use canonicalBridge.canonicalToCADInputs() for the legal path
+ * ══════════════════════════════════════════════════════════════════════════
+ *
  * @param existing  SystemDefinition built from project data
  * @param vision    VisionAggregationResult from visionAggregator.ts
  * @param options   Confidence gates and merge strategy
@@ -106,7 +131,18 @@ export function patchSystemDefinitionFromVision(
   const log: string[] = [];
   const tag = `[SYSDEF PATCH] projectId=${vision.projectId} surveyId=${vision.surveyId}`;
 
+  // ── DEPRECATION WARNING (Phase 6 — CAD Input Lockdown) ──────────────
+  // This function is DEPRECATED. Raw vision data written to SystemDefinition
+  // will be blocked by the CAD engine's bypass guard (roofCAD.ts).
+  // Use canonicalBridge.canonicalToCADInputs() instead.
+  console.warn(
+    `[DEPRECATED] patchSystemDefinitionFromVision() is deprecated (Phase 6 CAD Input Lockdown). ` +
+    `Raw vision obstructions written to SystemDefinition will be blocked by the CAD engine. ` +
+    `Use canonicalBridge.canonicalToCADInputs() from the unified geometry pipeline instead.`,
+  );
+
   log.push(`${tag} START aggregatedAt=${vision.aggregatedAt} pipelineVersion=${vision.pipelineVersion}`);
+  log.push(`${tag} WARNING: patchSystemDefinitionFromVision() is DEPRECATED — use canonicalBridge instead`);
   log.push(`${tag} input: obstructions=${vision.obstructions.length} electricalNodes=${vision.electricalNodes.length} planeCorrections=${vision.planeCorrections.length}`);
 
   const obsMinConf   = options.obstructionMinConfidence   ?? OBSTRUCTION_MIN_CONFIDENCE;
