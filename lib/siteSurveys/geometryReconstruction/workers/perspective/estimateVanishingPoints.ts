@@ -1,0 +1,348 @@
+/**
+ * Vanishing point estimation worker — produces VanishingPointArtifact
+ * artifacts from structural line candidates using RANSAC-based estimation.
+ *
+ * Approach:
+ * 1. Group lines by likely vanishing direction (X, Y, vertical)
+ *    based on their angle and type
+ * 2. For each direction, use RANSAC to find the intersection point
+ *    that maximizes inlier support
+ * 3. Estimate confidence from inlier ratio and supporting line count
+ *
+ * When a real perspective estimation model is available, this worker
+ * will be upgraded. The current heuristic approach ensures the pipeline
+ * never breaks when models are unavailable.
+ *
+ * REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
+ */
+
+import type {
+  StructuralLineCandidate,
+  VanishingPointArtifact,
+  NormalizedPoint,
+  GeometryReconstructionArtifact,
+  GeometryReconstructionInput,
+} from '../../types';
+import { REVIEW_ONLY_AUTHORITY, BASE_LIMITATIONS } from '../../types';
+import { validateVanishingPointArtifact } from '../../schemas';
+
+// ---------------------------------------------------------------------------
+// Worker version
+// ---------------------------------------------------------------------------
+
+export const VANISHING_POINT_WORKER_VERSION = '1.0.0-vanishing-point-worker';
+
+// ---------------------------------------------------------------------------
+// Limitations
+// ---------------------------------------------------------------------------
+
+const VANISHING_POINT_LIMITATIONS = [
+  ...BASE_LIMITATIONS,
+  'Vanishing point estimation is heuristic RANSAC — not from a trained perspective model.',
+  'When a real perspective estimation model is available, this worker will be upgraded.',
+  'Vanishing point positions are approximations with limited precision.',
+  'Supporting line counts may not reflect true geometric structure.',
+] as const;
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/** Input to the vanishing point estimation worker. */
+export interface VanishingPointWorkerInput {
+  surveyId: string;
+  /** Structural line candidates to estimate vanishing points from. */
+  lines: StructuralLineCandidate[];
+  /** Optional config overrides. */
+  config?: {
+    /** Number of RANSAC iterations. Default: 100 */
+    ransacIterations?: number;
+    /** Inlier threshold in normalized units. Default: 30 */
+    inlierThreshold?: number;
+    /** Minimum number of supporting lines for a valid VP. Default: 2 */
+    minSupportingLines?: number;
+    /** Minimum confidence threshold (0-100). Default: 20 */
+    minConfidence?: number;
+  };
+}
+
+/** Output of the vanishing point estimation worker. */
+export interface VanishingPointWorkerOutput {
+  artifacts: VanishingPointArtifact[];
+  stageTimings: Record<string, number>;
+  workerVersion: string;
+}
+
+/** Internal: a line in homogeneous coordinates for intersection computation. */
+interface LineHomo {
+  a: number;
+  b: number;
+  c: number; // ax + by + c = 0
+  lineId: string;
+  direction: 'x' | 'y' | 'vertical';
+}
+
+// ---------------------------------------------------------------------------
+// Geometry helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert a StructuralLineCandidate to homogeneous line representation.
+ * Line through two points (x1,y1) and (x2,y2):
+ *   (y1-y2)x + (x2-x1)y + (x1*y2 - x2*y1) = 0
+ */
+function lineToHomogeneous(line: StructuralLineCandidate): LineHomo {
+  const { start, end } = line;
+  return {
+    a: start.y - end.y,
+    b: end.x - start.x,
+    c: start.x * end.y - end.x * start.y,
+    lineId: line.id,
+    direction: guessDirection(line),
+  };
+}
+
+/**
+ * Intersect two lines in homogeneous coordinates.
+ * Returns the intersection point, or null if lines are parallel.
+ */
+function intersectLines(l1: LineHomo, l2: LineHomo): NormalizedPoint | null {
+  const det = l1.a * l2.b - l2.a * l1.b;
+  if (Math.abs(det) < 1e-10) return null; // parallel lines
+
+  const x = (l1.b * l2.c - l2.b * l1.c) / det;
+  const y = (l2.a * l1.c - l1.a * l2.c) / det;
+
+  return { x, y, coordinateSystem: 'normalized_image_0_1000' };
+}
+
+/**
+ * Distance from a point to a line (in normalized units).
+ */
+function pointToLineDistance(point: NormalizedPoint, line: LineHomo): number {
+  const denom = Math.sqrt(line.a * line.a + line.b * line.b);
+  if (denom < 1e-10) return Infinity;
+  return Math.abs(line.a * point.x + line.b * point.y + line.c) / denom;
+}
+
+/**
+ * Guess the likely vanishing direction of a structural line
+ * based on its type and orientation.
+ */
+function guessDirection(line: StructuralLineCandidate): 'x' | 'y' | 'vertical' {
+  // wall_vertical lines converge to the vertical VP
+  if (line.lineType === 'wall_vertical') return 'vertical';
+
+  // For roof lines, use angle to guess direction
+  const dx = line.end.x - line.start.x;
+  const dy = line.end.y - line.start.y;
+  const angleDeg = Math.abs(Math.atan2(-dy, dx) * (180 / Math.PI));
+
+  // Near-horizontal lines: if they're roughly parallel to the X axis,
+  // they converge to the X VP; if roughly parallel to Y, to the Y VP.
+  // We use a simple heuristic: if the line extends more in X, it's X direction
+  if (Math.abs(dx) > Math.abs(dy) * 2) {
+    // Primarily horizontal — could be either X or Y depending on perspective
+    // For a typical rooftop photo, ridges are X-direction and eaves are Y-direction
+    if (line.lineType === 'ridge') return 'x';
+    if (line.lineType === 'eave') return 'y';
+    return 'x'; // default
+  }
+
+  // Diagonal lines (rakes) — depend on which side
+  if (line.lineType === 'rake') {
+    // Positive slope → Y direction, negative slope → X direction
+    // (in screen coordinates where Y increases downward)
+    return dy > 0 ? (dx > 0 ? 'y' : 'x') : (dx > 0 ? 'x' : 'y');
+  }
+
+  // Default fallback
+  return 'x';
+}
+
+// ---------------------------------------------------------------------------
+// RANSAC vanishing point estimation
+// ---------------------------------------------------------------------------
+
+/**
+ * RANSAC-based vanishing point estimation for a set of lines
+ * in the same direction group.
+ *
+ * Randomly samples pairs of lines, computes their intersection,
+ * and selects the intersection with the most inlier support.
+ */
+function ransacVanishingPoint(
+  lines: LineHomo[],
+  iterations: number,
+  inlierThreshold: number,
+): { point: NormalizedPoint; inlierIds: string[]; inlierRatio: number } | null {
+  if (lines.length < 2) return null;
+
+  let bestPoint: NormalizedPoint | null = null;
+  let bestInlierIds: string[] = [];
+  let bestInlierRatio = 0;
+
+  for (let iter = 0; iter < iterations; iter++) {
+    // Pick two random lines
+    const i = iter % lines.length;
+    const j = (iter + 1 + Math.floor(iter / lines.length)) % lines.length;
+    if (i === j) continue;
+
+    const intersection = intersectLines(lines[i], lines[j]);
+    if (intersection === null) continue;
+
+    // Skip intersections far outside the image (allow some margin for VPs
+    // that are outside the frame but not infinitely far)
+    if (Math.abs(intersection.x) > 5000 || Math.abs(intersection.y) > 5000) continue;
+
+    // Count inliers
+    const inlierIds: string[] = [];
+    for (const line of lines) {
+      const dist = pointToLineDistance(intersection, line);
+      if (dist <= inlierThreshold) {
+        inlierIds.push(line.lineId);
+      }
+    }
+
+    const inlierRatio = inlierIds.length / lines.length;
+    if (inlierIds.length > bestInlierIds.length ||
+        (inlierIds.length === bestInlierIds.length && inlierRatio > bestInlierRatio)) {
+      bestPoint = intersection;
+      bestInlierIds = inlierIds;
+      bestInlierRatio = inlierRatio;
+    }
+  }
+
+  if (bestPoint === null || bestInlierIds.length < 2) return null;
+
+  return {
+    point: bestPoint,
+    inlierIds: bestInlierIds,
+    inlierRatio: bestInlierRatio,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Main worker function
+// ---------------------------------------------------------------------------
+
+/**
+ * Run the vanishing point estimation worker on a set of structural lines.
+ *
+ * Groups lines by estimated vanishing direction, runs RANSAC for each
+ * direction, and produces VanishingPointArtifact results.
+ */
+export function estimateVanishingPoints(input: VanishingPointWorkerInput): VanishingPointWorkerOutput {
+  const timings: Record<string, number> = {};
+  const artifacts: VanishingPointArtifact[] = [];
+
+  const ransacIterations = input.config?.ransacIterations ?? 100;
+  const inlierThreshold = input.config?.inlierThreshold ?? 30;
+  const minSupportingLines = input.config?.minSupportingLines ?? 2;
+  const minConfidence = input.config?.minConfidence ?? 20;
+
+  // Stage 1: Initialize
+  const t0 = Date.now();
+  if (input.lines.length < 2) {
+    timings['initialization'] = Date.now() - t0;
+    return {
+      artifacts: [],
+      stageTimings: timings,
+      workerVersion: VANISHING_POINT_WORKER_VERSION,
+    };
+  }
+  timings['initialization'] = Date.now() - t0;
+
+  // Stage 2: Convert lines to homogeneous representation
+  const t1 = Date.now();
+  const homoLines = input.lines.map(lineToHomogeneous);
+  timings['line_conversion'] = Date.now() - t1;
+
+  // Stage 3: Group by direction
+  const t2 = Date.now();
+  const directionGroups = new Map<'x' | 'y' | 'vertical', LineHomo[]>();
+  for (const line of homoLines) {
+    if (!directionGroups.has(line.direction)) {
+      directionGroups.set(line.direction, []);
+    }
+    directionGroups.get(line.direction)!.push(line);
+  }
+  timings['direction_grouping'] = Date.now() - t2;
+
+  // Stage 4: RANSAC for each direction
+  const t3 = Date.now();
+  const directions: Array<'x' | 'y' | 'vertical'> = ['x', 'y', 'vertical'];
+  for (const direction of directions) {
+    const group = directionGroups.get(direction);
+    if (!group || group.length < minSupportingLines) continue;
+
+    const result = ransacVanishingPoint(group, ransacIterations, inlierThreshold);
+    if (result === null) continue;
+
+    // Compute confidence based on inlier ratio and supporting line count
+    const lineCountBonus = Math.min(15, result.inlierIds.length * 3);
+    const ratioScore = result.inlierRatio * 70;
+    const confidence = Math.round(Math.min(100, ratioScore + lineCountBonus));
+
+    if (confidence < minConfidence) continue;
+
+    // Clamp the VP point to reasonable bounds for display
+    const clampedPoint: NormalizedPoint = {
+      x: Math.max(-500, Math.min(1500, result.point.x)),
+      y: Math.max(-500, Math.min(1500, result.point.y)),
+      coordinateSystem: 'normalized_image_0_1000',
+    };
+
+    const artifact: VanishingPointArtifact = {
+      artifactType: 'vanishing_point',
+      id: `vp-${direction}-${input.surveyId}`,
+      fileId: input.lines[0].fileId, // Use first line's fileId as reference
+      direction,
+      point: clampedPoint,
+      supportingLineCount: result.inlierIds.length,
+      supportingLineIds: result.inlierIds,
+      inlierRatio: Math.round(result.inlierRatio * 100) / 100,
+      confidence,
+      workerVersion: VANISHING_POINT_WORKER_VERSION,
+      authority: { ...REVIEW_ONLY_AUTHORITY },
+      limitations: [...VANISHING_POINT_LIMITATIONS],
+    };
+
+    // Validate before including
+    const validationResult = validateVanishingPointArtifact(artifact);
+    if (validationResult.valid) {
+      artifacts.push(validationResult.data);
+    }
+  }
+  timings['ransac_estimation'] = Date.now() - t3;
+
+  return {
+    artifacts,
+    stageTimings: timings,
+    workerVersion: VANISHING_POINT_WORKER_VERSION,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Convenience: run from GeometryReconstructionInput + pre-existing lines
+// ---------------------------------------------------------------------------
+
+/**
+ * Run vanishing point estimation from a standard GeometryReconstructionInput
+ * and a set of already-computed structural line candidates.
+ *
+ * Returns VanishingPointArtifact artifacts.
+ */
+export function estimateVanishingPointsFromReconstructionInput(
+  input: GeometryReconstructionInput,
+  lines: StructuralLineCandidate[],
+): GeometryReconstructionArtifact[] {
+  const workerInput: VanishingPointWorkerInput = {
+    surveyId: input.surveyId,
+    lines,
+    config: input.config as VanishingPointWorkerInput['config'] | undefined,
+  };
+
+  const output = estimateVanishingPoints(workerInput);
+  return output.artifacts;
+}
