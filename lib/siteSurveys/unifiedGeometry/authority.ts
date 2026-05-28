@@ -228,6 +228,32 @@ export const MOCK_ARTIFACT_AUTHORITY: UnifiedGeometryAuthority = {
   cadConsumable: false,
 } as const;
 
+/**
+ * Synthetic artifact authority: same restrictions as derived_review_only.
+ *
+ * Synthetic artifacts are produced by heuristic/fake implementations
+ * (e.g., generateHeuristicPolygon, heuristicConfidence) rather than
+ * real ML models or human input. They carry reviewOnly=true and
+ * nonAuthoritative=true as a double-gate:
+ *   1. The authority envelope prevents CAD mutation
+ *   2. The provenance.synthetic flag prevents promotion through canonicalBridge
+ *
+ * Synthetic artifacts CANNOT be promoted regardless of authority state.
+ * The canonicalBridge guard rejects any artifact with provenance.synthetic=true.
+ */
+export const SYNTHETIC_ARTIFACT_AUTHORITY: UnifiedGeometryAuthority = {
+  state: 'derived_review_only',
+  reviewOnly: true,
+  nonAuthoritative: true,
+  cadMutationAllowed: false,
+  permitGenerationAllowed: false,
+  bomMutationAllowed: false,
+  canonicalMutationAllowed: false,
+  engineeringWorkflowMutationAllowed: false,
+  mockArtifact: false,
+  cadConsumable: false,
+} as const;
+
 // ────────────────────────────────────────────────────────────────────────────
 // Authority Lookup
 // ────────────────────────────────────────────────────────────────────────────
@@ -302,6 +328,33 @@ export function assertNoCadMutation(authority: UnifiedGeometryAuthority): void {
     throw new Error(
       `[UNIFIED_GEOMETRY_AUTHORITY_VIOLATION] Mock artifact has state=${authority.state}. ` +
       `Mock artifacts cannot be promoted. This is a programming error.`
+    );
+  }
+}
+
+/**
+ * Check if an artifact is synthetic (produced by heuristic/fake implementation).
+ * Synthetic artifacts cannot be promoted to canonical geometry or enter CAD.
+ *
+ * This checks both the provenance.synthetic flag and the isSynthetic field
+ * on UnifiedGeometryArtifact for defense-in-depth.
+ */
+export function isSyntheticArtifact(provenance: { synthetic?: boolean }): boolean {
+  return provenance.synthetic === true;
+}
+
+/**
+ * Assert that an artifact is NOT synthetic.
+ * Throws if the artifact has provenance.synthetic=true.
+ *
+ * Use this as a runtime guard in promotion and CAD paths.
+ */
+export function assertNotSynthetic(provenance: { synthetic?: boolean; disclaimer?: string }): void {
+  if (provenance.synthetic === true) {
+    throw new Error(
+      `[SYNTHETIC_ARTIFACT_BLOCKED] Artifact with provenance.synthetic=true cannot be promoted or enter CAD. ` +
+      `Reason: ${provenance.disclaimer ?? 'Produced by heuristic implementation, not a real ML model'}. ` +
+      `Await real model integration before this artifact can be used.`
     );
   }
 }

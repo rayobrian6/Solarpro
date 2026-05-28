@@ -27,6 +27,8 @@ import {
   PROMOTED_CANONICAL_AUTHORITY,
   CAD_SAFE_AUTHORITY,
   MOCK_ARTIFACT_AUTHORITY,
+  SYNTHETIC_ARTIFACT_AUTHORITY,
+  isSyntheticArtifact,
   AUTHORITY_LEVEL,
   VALID_AUTHORITY_TRANSITIONS,
 } from './authority';
@@ -95,6 +97,16 @@ export function promoteArtifact(
   if (artifact.authority.mockArtifact) {
     throw new PromotionError(
       `Mock artifacts cannot be promoted. Artifact '${artifact.id}' is a mock artifact.`,
+      artifact.id,
+      fromState,
+      targetState,
+    );
+  }
+
+  // Guard: Synthetic artifacts cannot be promoted
+  if (artifact.isSynthetic || isSyntheticArtifact(artifact.provenance)) {
+    throw new PromotionError(
+      `Synthetic artifacts cannot be promoted. Artifact '${artifact.id}' was produced by heuristic implementation, not a real ML model.`,
       artifact.id,
       fromState,
       targetState,
@@ -295,6 +307,16 @@ export function reviewArtifact(
     );
   }
 
+  // Cannot accept synthetic artifacts for promotion purposes
+  if ((artifact.isSynthetic || isSyntheticArtifact(artifact.provenance)) && decision === 'accepted') {
+    throw new PromotionError(
+      `Cannot accept a synthetic artifact for promotion. Artifact '${artifact.id}' was produced by heuristic implementation, not a real ML model.`,
+      artifact.id,
+      artifact.authority.state,
+      artifact.authority.state,
+    );
+  }
+
   return {
     ...artifact,
     reviewState: decision,
@@ -344,6 +366,13 @@ export function assertCanonicalEligible(artifact: UnifiedGeometryArtifact): void
       `Mock artifacts cannot feed the CanonicalBuildingModel.`,
     );
   }
+  if (artifact.isSynthetic || isSyntheticArtifact(artifact.provenance)) {
+    throw new Error(
+      `[CANONICAL_MODEL_VIOLATION] Artifact '${artifact.id}' is a synthetic artifact. ` +
+      `Synthetic artifacts (produced by heuristic implementations) cannot feed the CanonicalBuildingModel. ` +
+      `Await real model integration.`,
+    );
+  }
 }
 
 /**
@@ -355,6 +384,10 @@ export function canPromote(
 ): { canPromote: boolean; reason?: string } {
   if (artifact.authority.mockArtifact) {
     return { canPromote: false, reason: 'Mock artifacts cannot be promoted' };
+  }
+
+  if (artifact.isSynthetic || isSyntheticArtifact(artifact.provenance)) {
+    return { canPromote: false, reason: 'Synthetic artifacts cannot be promoted — produced by heuristic implementation, not a real ML model' };
   }
 
   if (artifact.reviewState === 'rejected') {

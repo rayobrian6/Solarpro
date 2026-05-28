@@ -236,6 +236,7 @@ function rowToArtifact(row: UnifiedArtifactRow): UnifiedGeometryArtifact {
       reviewNotes: (stored.reviewNotes as string | null) ?? row.review_notes ?? null,
       priority: (stored.priority as UnifiedGeometryArtifact['priority']) ?? rowToPriority(row),
       stageTimings: (stored.stageTimings as Record<string, number> | null) ?? null,
+      isSynthetic: (stored.isSynthetic as boolean) ?? false,
     };
   }
 
@@ -281,6 +282,7 @@ function rowToArtifact(row: UnifiedArtifactRow): UnifiedGeometryArtifact {
     reviewNotes: row.review_notes ?? null,
     priority: rowToPriority(row),
     stageTimings: null,
+    isSynthetic: false,
   };
 }
 

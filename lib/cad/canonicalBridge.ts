@@ -24,7 +24,7 @@
 // ============================================================================
 
 import type { CanonicalBuildingModel, CanonicalObstruction, CanonicalElectricalNode } from '@/lib/siteSurveys/unifiedGeometry/types';
-import { isCadConsumable, assertNoCadMutation } from '@/lib/siteSurveys/unifiedGeometry/authority';
+import { isCadConsumable, assertNoCadMutation, isSyntheticArtifact } from '@/lib/siteSurveys/unifiedGeometry/authority';
 import type { CADObstruction, CADElectricalNode } from './types';
 
 // ── Bridge Types ─────────────────────────────────────────────────────────────
@@ -131,6 +131,32 @@ export function canonicalToCADInputs(
     throw new CanonicalBridgeError(
       'CanonicalBuildingModel contains mock artifacts — mock data is BLOCKED from the CAD pipeline. ' +
       'Ensure all source artifacts are from real pipeline runs, not mock/test data.',
+    );
+  }
+
+  // ── Synthetic artifact gate ──
+  // Check all obstructions and electrical nodes for synthetic provenance.
+  // Synthetic artifacts (produced by heuristic/fake implementations) can NEVER
+  // enter the CAD pipeline, regardless of their authority state.
+  const syntheticObstructions = model.obstructions.filter(
+    obs => isSyntheticArtifact(obs as unknown as { synthetic?: boolean })
+  );
+  const syntheticElectricalNodes = model.electricalNodes.filter(
+    node => isSyntheticArtifact(node as unknown as { synthetic?: boolean })
+  );
+  if (syntheticObstructions.length > 0 || syntheticElectricalNodes.length > 0) {
+    const details: string[] = [];
+    for (const obs of syntheticObstructions) {
+      details.push(`obstruction id=${obs.id} type=${obs.type}`);
+    }
+    for (const node of syntheticElectricalNodes) {
+      details.push(`electricalNode id=${node.id} type=${node.type}`);
+    }
+    throw new CanonicalBridgeError(
+      `CanonicalBuildingModel contains synthetic artifacts — BLOCKED from CAD pipeline. ` +
+      `Synthetic artifacts are produced by heuristic implementations, not real ML models. ` +
+      `${details.length} synthetic item(s): ${details.join(', ')}. ` +
+      `Await real model integration before these artifacts can be used.`
     );
   }
 

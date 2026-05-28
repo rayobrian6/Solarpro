@@ -81,14 +81,23 @@ export interface SegmentationWorkerOutput {
  * Generate a deterministic polygon for a given segmentation class
  * within the normalized image coordinate system (0-1000).
  *
- * These are heuristic approximations based on typical rooftop photo
- * composition. They will be replaced by real model output when SAM
- * or a similar model is integrated.
+ * @deprecated SYNTHETIC — This function produces heuristic polygons unrelated
+ * to actual photo content. It generates deterministic shapes based on a simple
+ * hash of the fileId, not from any real ML model or image analysis.
+ * Awaiting real segmentation model (e.g., SAM) integration.
+ * All artifacts produced by this function carry provenance.synthetic=true
+ * and cannot be promoted to canonical geometry or enter the CAD pipeline.
  */
 function generateHeuristicPolygon(
   segmentationClass: SegmentationClass,
   fileId: string,
 ): NormalizedPoint[] {
+  // DEPRECATED: Runtime warning on every invocation
+  console.warn(
+    `[DEPRECATED] generateHeuristicPolygon() produces synthetic geometry for class='${segmentationClass}'. ` +
+    `Awaiting real model integration. All output is marked provenance.synthetic=true.`
+  );
+
   // Deterministic seed from fileId to vary shapes per photo
   const seed = simpleHash(fileId);
 
@@ -215,10 +224,20 @@ function simpleHash(str: string): number {
 
 /**
  * Generate a deterministic confidence score for a given class + photo combo.
- * These are heuristic scores — they will be replaced by model confidence
- * when a real segmentation model is integrated.
+ *
+ * @deprecated SYNTHETIC — This function produces fabricated confidence scores
+ * unrelated to actual model predictions. Confidence is derived from hardcoded
+ * per-class base values with deterministic variation from a simple hash.
+ * Awaiting real model confidence calibration.
+ * All artifacts using these scores carry provenance.synthetic=true.
  */
 function heuristicConfidence(segmentationClass: SegmentationClass, fileId: string): number {
+  // DEPRECATED: Runtime warning on every invocation
+  console.warn(
+    `[DEPRECATED] heuristicConfidence() produces synthetic confidence for class='${segmentationClass}'. ` +
+    `Awaiting real model integration. All output is marked provenance.synthetic=true.`
+  );
+
   const base: Record<SegmentationClass, number> = {
     roof: 72,
     wall: 68,
