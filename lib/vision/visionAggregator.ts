@@ -850,7 +850,7 @@ export async function aggregateVisionResults(
       detectionCount: c.count,
       roofPlaneId: c.roofPlaneId,
       sourceDetectionIds: c.ids,
-      source: 'vision',
+      source: 'promoted_canonical' as const,
     };
   });
 
@@ -898,7 +898,7 @@ export async function aggregateVisionResults(
         detectionCount: c.count,
         sourceDetectionIds: c.ids,
         isPrimaryInterconnect: isPrimary,
-        source: 'vision',
+        source: 'promoted_canonical' as const,
       };
     });
 

@@ -248,8 +248,20 @@ export interface ObstructionNode {
   roofPlaneId: string | null;
   /** Source detection ids for traceability */
   sourceDetectionIds: string[];
-  /** Whether this node came from vision inference vs manual survey entry */
-  source: 'vision' | 'manual' | 'merged';
+  /**
+   * Source of this obstruction node.
+   *
+   * AUTHORITY BOUNDARY: Vision aggregator output carries source='promoted_canonical'
+   * because these nodes have been through the aggregation pipeline (filtering,
+   * projection, clustering) and are ready for the canonical bridge path.
+   * Raw 'vision' is NEVER emitted — that source was removed from CAD types.
+   *
+   * NOTE: Despite carrying 'promoted_canonical' source, these nodes still
+   * require review/promotion through the unified geometry pipeline before
+   * they can enter the CAD engine. The source type indicates the intended
+   * consumption path, not that promotion has already occurred.
+   */
+  source: 'promoted_canonical' | 'manual' | 'merged';
 }
 
 // ─── Electrical Node ─────────────────────────────────────────────────────────
@@ -277,8 +289,18 @@ export interface ElectricalNode {
   sourceDetectionIds: string[];
   /** Whether this is the primary interconnection target */
   isPrimaryInterconnect: boolean;
-  /** Source */
-  source: 'vision' | 'manual' | 'merged';
+  /**
+   * Source of this electrical node.
+   *
+   * AUTHORITY BOUNDARY: Vision aggregator output carries source='promoted_canonical'
+   * because these nodes are intended for the canonical bridge path.
+   * Raw 'vision' is NEVER emitted — that source was removed from CAD types.
+   *
+   * NOTE: Despite carrying 'promoted_canonical' source, these nodes still
+   * require review/promotion through the unified geometry pipeline before
+   * they can enter the CAD engine.
+   */
+  source: 'promoted_canonical' | 'manual' | 'merged';
 }
 
 // ─── Plane Correction ────────────────────────────────────────────────────────
