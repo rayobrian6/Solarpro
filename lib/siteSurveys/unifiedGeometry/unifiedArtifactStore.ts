@@ -20,7 +20,7 @@
 // ============================================================================
 
 import { getDbReady } from '@/lib/db/core';
-import type { UnifiedGeometryArtifact, UnifiedGeometryClass, GeometrySourcePipeline } from './types';
+import type { UnifiedGeometryArtifact, UnifiedGeometryClass, GeometrySourcePipeline, ObstructionMetadata } from './types';
 import type { UnifiedGeometryAuthorityState } from './authority';
 import { getAuthorityForState } from './authority';
 
@@ -39,6 +39,7 @@ interface UnifiedArtifactRow {
   label: string;
   limitations: unknown;     // TEXT[] → JS array
   geometry_data: unknown;   // JSONB → parsed UnifiedGeometryArtifact
+  obstruction_metadata: unknown;  // JSONB → parsed ObstructionMetadata | null
   review_state: string;
   review_notes: string | null;
   priority: string;
@@ -82,6 +83,7 @@ export async function getUnifiedArtifactsForSurvey(
       SELECT
         id, survey_id, geometry_class, authority_state, authority,
         provenance, confidence, label, limitations, geometry_data,
+        obstruction_metadata,
         review_state, review_notes, priority, mock_artifact,
         created_at, updated_at
       FROM unified_geometry_artifacts
@@ -119,6 +121,7 @@ export async function getUnifiedArtifactsByIds(
       SELECT
         id, survey_id, geometry_class, authority_state, authority,
         provenance, confidence, label, limitations, geometry_data,
+        obstruction_metadata,
         review_state, review_notes, priority, mock_artifact,
         created_at, updated_at
       FROM unified_geometry_artifacts
@@ -237,6 +240,8 @@ function rowToArtifact(row: UnifiedArtifactRow): UnifiedGeometryArtifact {
       priority: (stored.priority as UnifiedGeometryArtifact['priority']) ?? rowToPriority(row),
       stageTimings: (stored.stageTimings as Record<string, number> | null) ?? null,
       isSynthetic: (stored.isSynthetic as boolean) ?? false,
+      obstructionMetadata: (stored.obstructionMetadata as ObstructionMetadata | null) ??
+        (row.obstruction_metadata as ObstructionMetadata | null) ?? null,
     };
   }
 
@@ -283,6 +288,7 @@ function rowToArtifact(row: UnifiedArtifactRow): UnifiedGeometryArtifact {
     priority: rowToPriority(row),
     stageTimings: null,
     isSynthetic: false,
+    obstructionMetadata: (row.obstruction_metadata as ObstructionMetadata | null) ?? null,
   };
 }
 
@@ -345,4 +351,193 @@ function rowToPriority(row: UnifiedArtifactRow): UnifiedGeometryArtifact['priori
     case 'low': return 'low';
     default: return 'medium';
   }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Write: Persist an obstruction as a unified geometry artifact
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Write a single obstruction record as a unified geometry artifact.
+ *
+ * This is the dual-write target for Phase B of the obstruction_data migration.
+ * It creates a new row in unified_geometry_artifacts with:
+ *   - geometryClass = 'obstruction'
+ *   - obstruction_metadata = full ObstructionMetadata JSONB blob
+ *   - authority = SYNTHETIC_ARTIFACT_AUTHORITY (heuristic origin)
+ *   - All geometry fields populated from the metadata where available
+ *
+ * Uses ON CONFLICT DO NOTHING to be idempotent — if the artifact already
+ * exists (by id), the write is silently skipped.
+ *
+ * @param surveyId - The site survey ID
+ * @param obstructionMeta - The full ObstructionMetadata blob
+ * @returns true if the row was inserted, false if it already existed or on error
+ */
+export async function writeObstructionArtifact(
+  surveyId: string,
+  obstructionMeta: ObstructionMetadata,
+): Promise<boolean> {
+  try {
+    const sql = await getDbReady();
+
+    const authority = getAuthorityForState('derived_review_only', false);
+    // Mark as synthetic since obstruction registration is heuristic-based
+    const syntheticAuthority = {
+      ...authority,
+      state: 'derived_review_only' as UnifiedGeometryAuthorityState,
+      reviewOnly: true,
+      nonAuthoritative: true,
+      cadMutationAllowed: false,
+      permitGenerationAllowed: false,
+      bomMutationAllowed: false,
+      canonicalMutationAllowed: false,
+      engineeringWorkflowMutationAllowed: false,
+      cadConsumable: false,
+      mockArtifact: false,
+    };
+
+    const provenance = {
+      sourcePipeline: 'obstruction_registration' as GeometrySourcePipeline,
+      toolName: 'roofObstructionRegistration',
+      toolVersion: '1.0.0',
+      runHash: obstructionMeta.sourceFileId ?? 'unknown',
+      sourceFileIds: obstructionMeta.sourceFileId ? [obstructionMeta.sourceFileId] : [] as string[],
+      derivedFromArtifactIds: [] as string[],
+      createdAt: new Date().toISOString(),
+      synthetic: true,
+      disclaimer: 'Heuristic-generated obstruction from roofObstructionRegistration pipeline',
+      backfilledFrom: null as string | null,
+    };
+
+    // Derive UnifiedGeometryArtifact fields from ObstructionMetadata
+    const label = obstructionMeta.obstructionType ?? 'unknown_obstruction';
+    const confidence01 = Math.min(1, Math.max(0, obstructionMeta.confidence / 100));
+
+    // Build geometry_data JSONB — the full artifact stored as JSON
+    const geometryData: Record<string, unknown> = {
+      id: obstructionMeta.id,
+      surveyId,
+      geometryClass: 'obstruction',
+      authority: syntheticAuthority,
+      provenance,
+      confidence: confidence01,
+      label,
+      limitations: obstructionMeta.limitations ?? [],
+      bbox: {
+        x: obstructionMeta.region.x,
+        y: obstructionMeta.region.y,
+        width: obstructionMeta.region.width,
+        height: obstructionMeta.region.height,
+        coordinateSystem: 'normalized_image_0_1000',
+      },
+      polygon: null,
+      lineSegment: null,
+      center: {
+        x: obstructionMeta.center.x,
+        y: obstructionMeta.center.y,
+        coordinateSystem: 'normalized_image_0_1000',
+      },
+      planeType: null,
+      pitchDegrees: null,
+      azimuthDegrees: null,
+      normalVector: null,
+      areaSqM: obstructionMeta.areaNormalized,
+      inlierCount: null,
+      totalPoints: null,
+      lineSubtype: null,
+      estimatedLengthM: null,
+      obstructionSubtype: mapObstructionTypeToSubtype(obstructionMeta.obstructionType),
+      radiusM: null,
+      setbackM: null,
+      heightFt: null,
+      roofPlaneId: null,
+      cadImpact: {
+        canAffectPanelPlacement: obstructionMeta.canAffectPanelPlacement,
+        canAffectFirePathway: obstructionMeta.canAffectFirePathway,
+        canAffectConduitPath: obstructionMeta.canAffectConduitPath,
+        canAffectStructuralAttachment: obstructionMeta.canAffectStructuralAttachment,
+        layoutAvoidancePriority: obstructionMeta.priority,
+        cadBlockHint: obstructionMeta.cadBlockHint,
+        obstructionFootprintHint: obstructionMeta.obstructionFootprintHint,
+        clearanceRadiusHint: obstructionMeta.clearanceRadiusHint,
+      },
+      electricalSubtype: null,
+      story: null,
+      isPrimaryInterconnect: null,
+      depthResolution: null,
+      depthMetric: null,
+      consensusPhotoCount: null,
+      segmentationClass: null,
+      reviewState: obstructionMeta.reviewState === 'accepted' ? 'accepted' as const
+        : obstructionMeta.reviewState === 'rejected' ? 'rejected' as const
+        : 'review_required' as const,
+      reviewNotes: null,
+      priority: obstructionMeta.priority,
+      stageTimings: null,
+      isSynthetic: true,
+      obstructionMetadata: obstructionMeta,
+    };
+
+    const result = await sql`
+      INSERT INTO unified_geometry_artifacts (
+        id, survey_id, geometry_class, authority_state, authority,
+        provenance, confidence, label, limitations, geometry_data,
+        obstruction_metadata,
+        review_state, priority, mock_artifact, created_at, updated_at
+      ) VALUES (
+        ${obstructionMeta.id},
+        ${surveyId},
+        'obstruction',
+        'derived_review_only',
+        ${JSON.stringify(syntheticAuthority)}::jsonb,
+        ${JSON.stringify(provenance)}::jsonb,
+        ${confidence01},
+        ${label},
+        ${obstructionMeta.limitations ?? []}::text[],
+        ${JSON.stringify(geometryData)}::jsonb,
+        ${JSON.stringify(obstructionMeta)}::jsonb,
+        ${obstructionMeta.reviewState},
+        ${obstructionMeta.priority},
+        FALSE,
+        NOW()::timestamptz,
+        NOW()::timestamptz
+      )
+      ON CONFLICT (id) DO NOTHING
+      RETURNING id
+    `;
+
+    return result.length > 0;
+  } catch (err) {
+    console.warn(
+      '[unifiedArtifactStore] Failed to write obstruction artifact:',
+      err instanceof Error ? err.message : String(err),
+    );
+    return false;
+  }
+}
+
+/**
+ * Map a RoofObstructionType string to the canonical ObstructionSubtype.
+ * This is a best-effort mapping; unknown types fall through to 'other'.
+ */
+function mapObstructionTypeToSubtype(obstructionType: string | null): string {
+  if (!obstructionType) return 'other';
+  const mapping: Record<string, string> = {
+    plumbing_vent: 'vent',
+    exhaust_vent: 'vent',
+    ridge_vent: 'vent',
+    chimney: 'chimney',
+    skylight: 'skylight',
+    pipe_boot: 'vent',
+    satellite_dish: 'satellite_dish',
+    roof_hvac: 'hvac',
+    solar_tube: 'skylight',
+    flashing: 'other',
+    dormer: 'dormer',
+    antenna: 'antenna',
+    roof_jack: 'vent',
+    unknown_obstruction: 'other',
+  };
+  return mapping[obstructionType] ?? 'other';
 }

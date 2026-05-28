@@ -50,6 +50,7 @@ export type {
   GeometryProvenance,
   UnifiedGeometryArtifact,
   ObstructionCadImpact,
+  ObstructionMetadata,
   UnifiedGeometryEvidenceBundle,
   GeometryIntelligenceSummary,
   GeometryPromotionRecord,
@@ -116,6 +117,7 @@ export {
   getUnifiedArtifactsForSurvey,
   getUnifiedArtifactsByIds,
   hasUnifiedArtifactsForSurvey,
+  writeObstructionArtifact,
 } from './unifiedArtifactStore';
 
 // ── Canonical Builder ────────────────────────────────────────────────────────

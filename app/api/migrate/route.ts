@@ -3720,6 +3720,217 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 080 (backfill unified artifacts): ${(e as Error).message}`);
     }
 
+    // ── Migration 081: Add obstruction_metadata column to unified_geometry_artifacts ──
+    try {
+      const columnExists = await sql`
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'unified_geometry_artifacts'
+          AND column_name = 'obstruction_metadata'
+      `;
+      if (columnExists.length === 0) {
+        await sql`
+          ALTER TABLE unified_geometry_artifacts
+          ADD COLUMN obstruction_metadata JSONB NULL
+        `;
+        results.push('✅ Migration 081: obstruction_metadata column — added');
+      } else {
+        results.push('⏭ Migration 081: obstruction_metadata column — already exists');
+      }
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 081 (obstruction_metadata column): ${(e as Error).message}`);
+    }
+
+    // ── Migration 082: Backfill obstruction_data → unified_geometry_artifacts ──
+    // Reads existing obstruction_data JSONB from site_survey_files, parses each
+    // obstruction record, and writes it as a unified geometry artifact with the
+    // full ObstructionMetadata blob. This is a one-time migration that runs only
+    // if the backfill hasn't been completed yet (tracked via a marker query).
+    try {
+      // Check if the obstruction_metadata column exists first
+      const colCheck = await sql`
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'unified_geometry_artifacts'
+          AND column_name = 'obstruction_metadata'
+      `;
+      if (colCheck.length === 0) {
+        results.push('⏭ Migration 082: obstruction_metadata column not yet created — skipping backfill');
+      } else {
+        // Check if we already have obstruction-class artifacts with obstruction_metadata
+        const existingBackfill = await sql`
+          SELECT COUNT(*) as cnt FROM unified_geometry_artifacts
+          WHERE geometry_class = 'obstruction'
+            AND obstruction_metadata IS NOT NULL
+        `;
+        const alreadyBackfilled = Number(existingBackfill[0]?.cnt ?? 0);
+
+        if (alreadyBackfilled > 0) {
+          results.push(`⏭ Migration 082: obstruction backfill — already completed (${alreadyBackfilled} rows)`);
+        } else {
+          // Read all obstruction_data from site_survey_files
+          let backfilledCount = 0;
+          let backfillErrors = 0;
+
+          const obstructionRows = await sql`
+            SELECT survey_id, obstruction_data
+            FROM site_survey_files
+            WHERE obstruction_data IS NOT NULL
+              AND label = 'roof_plane'
+            ORDER BY survey_id, filename
+          `;
+
+          for (const row of obstructionRows) {
+            try {
+              const obsData = row.obstruction_data as Record<string, unknown> | null;
+              if (!obsData || typeof obsData !== 'object') continue;
+
+              const obstructions = obsData.obstructions as Array<Record<string, unknown>> | undefined;
+              if (!Array.isArray(obstructions) || obstructions.length === 0) continue;
+
+              for (const obs of obstructions) {
+                try {
+                  // Build the ObstructionMetadata blob from the stored JSON
+                  const region = obs.region as Record<string, unknown> | undefined;
+                  const center = obs.center as Record<string, unknown> | undefined;
+                  const obsId = String(obs.id ?? `backfill-${row.survey_id}-${backfilledCount}`);
+                  const label = String(obs.obstructionType ?? obs.obstruction_type ?? 'unknown_obstruction');
+
+                  const provenance = {
+                    sourcePipeline: 'obstruction_registration',
+                    toolName: 'roofObstructionRegistration',
+                    toolVersion: '1.0.0',
+                    runHash: String(obs.sourceFileId ?? 'unknown'),
+                    sourceFileIds: obs.sourceFileId ? [String(obs.sourceFileId)] : [] as string[],
+                    derivedFromArtifactIds: [] as string[],
+                    createdAt: new Date().toISOString(),
+                    synthetic: true,
+                    disclaimer: 'Backfilled from site_survey_files.obstruction_data',
+                    backfilledFrom: 'site_survey_files.obstruction_data',
+                  };
+
+                  const confidence01 = Math.min(1, Math.max(0, (Number(obs.confidence) ?? 0) / 100));
+                  const reviewState = String(obs.reviewState ?? obs.review_state ?? 'review_required');
+                  const priority = String(obs.priority ?? 'medium');
+
+                  const geometryData = {
+                    id: obsId,
+                    surveyId: row.survey_id,
+                    geometryClass: 'obstruction',
+                    authority: {
+                      state: 'derived_review_only',
+                      level: 1,
+                      reviewOnly: true,
+                      nonAuthoritative: true,
+                      cadMutationAllowed: false,
+                      permitGenerationAllowed: false,
+                      bomMutationAllowed: false,
+                      canonicalMutationAllowed: false,
+                      engineeringWorkflowMutationAllowed: false,
+                      cadConsumable: false,
+                      mockArtifact: false,
+                    },
+                    provenance,
+                    confidence: confidence01,
+                    label,
+                    limitations: Array.isArray(obs.limitations) ? obs.limitations : [] as string[],
+                    bbox: region ? {
+                      x: Number(region.x ?? 0),
+                      y: Number(region.y ?? 0),
+                      width: Number(region.width ?? 0),
+                      height: Number(region.height ?? 0),
+                      coordinateSystem: 'normalized_image_0_1000',
+                    } : null,
+                    polygon: null,
+                    lineSegment: null,
+                    center: center ? {
+                      x: Number(center.x ?? 0),
+                      y: Number(center.y ?? 0),
+                      coordinateSystem: 'normalized_image_0_1000',
+                    } : null,
+                    planeType: null,
+                    pitchDegrees: null,
+                    azimuthDegrees: null,
+                    normalVector: null,
+                    areaSqM: Number(obs.areaNormalized ?? obs.area_normalized ?? 0),
+                    inlierCount: null,
+                    totalPoints: null,
+                    lineSubtype: null,
+                    estimatedLengthM: null,
+                    obstructionSubtype: String(obs.obstructionType ?? obs.obstruction_type ?? 'other'),
+                    radiusM: null,
+                    setbackM: null,
+                    heightFt: null,
+                    roofPlaneId: null,
+                    cadImpact: {
+                      canAffectPanelPlacement: Boolean(obs.canAffectPanelPlacement ?? false),
+                      canAffectFirePathway: Boolean(obs.canAffectFirePathway ?? false),
+                      canAffectConduitPath: Boolean(obs.canAffectConduitPath ?? false),
+                      canAffectStructuralAttachment: Boolean(obs.canAffectStructuralAttachment ?? false),
+                      layoutAvoidancePriority: priority,
+                      cadBlockHint: String(obs.cadBlockHint ?? 'unknown'),
+                      obstructionFootprintHint: String(obs.obstructionFootprintHint ?? 'unknown'),
+                      clearanceRadiusHint: String(obs.clearanceRadiusHint ?? 'unknown'),
+                    },
+                    electricalSubtype: null,
+                    story: null,
+                    isPrimaryInterconnect: null,
+                    depthResolution: null,
+                    depthMetric: null,
+                    consensusPhotoCount: null,
+                    segmentationClass: null,
+                    reviewState: reviewState === 'accepted' ? 'accepted'
+                      : reviewState === 'rejected' ? 'rejected'
+                      : 'review_required',
+                    reviewNotes: null,
+                    priority,
+                    stageTimings: null,
+                    isSynthetic: true,
+                    obstructionMetadata: obs,  // Store the raw obstruction data as-is
+                  };
+
+                  await sql`
+                    INSERT INTO unified_geometry_artifacts (
+                      id, survey_id, geometry_class, authority_state, authority,
+                      provenance, confidence, label, limitations, geometry_data,
+                      obstruction_metadata,
+                      review_state, priority, mock_artifact, created_at, updated_at
+                    ) VALUES (
+                      ${obsId},
+                      ${row.survey_id},
+                      'obstruction',
+                      'derived_review_only',
+                      ${JSON.stringify(geometryData.authority)}::jsonb,
+                      ${JSON.stringify(provenance)}::jsonb,
+                      ${confidence01},
+                      ${label},
+                      ${geometryData.limitations}::text[],
+                      ${JSON.stringify(geometryData)}::jsonb,
+                      ${JSON.stringify(obs)}::jsonb,
+                      ${reviewState},
+                      ${priority},
+                      FALSE,
+                      NOW()::timestamptz,
+                      NOW()::timestamptz
+                    )
+                    ON CONFLICT (id) DO NOTHING
+                  `;
+                  backfilledCount++;
+                } catch (insertErr) {
+                  backfillErrors++;
+                  console.warn(`[Migration 082] Failed to backfill obstruction:`, insertErr);
+                }
+              }
+            } catch (rowErr) {
+              console.warn('[Migration 082] Failed to process obstruction_data row:', rowErr);
+            }
+          }
+
+          results.push(`✅ Migration 082: obstruction backfill — ${backfilledCount} obstructions written${backfillErrors > 0 ? `, ${backfillErrors} errors` : ''}`);
+        }
+      }
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 082 (obstruction backfill): ${(e as Error).message}`);
+    }
+
     return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);

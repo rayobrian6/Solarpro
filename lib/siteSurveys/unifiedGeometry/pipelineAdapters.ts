@@ -307,6 +307,7 @@ function makeEmptyArtifact(overrides: Partial<UnifiedGeometryArtifact> & Pick<Un
       ? (overrides.confidence >= 80 ? 'high' : overrides.confidence >= 50 ? 'medium' : 'low')
       : 'medium',
     isSynthetic: false,
+    obstructionMetadata: null,
     stageTimings: null,
     ...overrides,
   };

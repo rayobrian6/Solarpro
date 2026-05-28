@@ -38,6 +38,8 @@
  */
 
 import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/categoryRegistry';
+import type { ObstructionMetadata } from '@/lib/siteSurveys/unifiedGeometry/types';
+import { writeObstructionArtifact } from '@/lib/siteSurveys/unifiedGeometry/unifiedArtifactStore';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Section 1: Types
@@ -287,6 +289,17 @@ export const IOU_DUPLICATE_THRESHOLD = Number(
 export const CENTER_DISTANCE_THRESHOLD = Number(
   process.env.CENTER_DISTANCE_THRESHOLD || 100,
 );
+
+/**
+ * Feature flag: Enable dual-write of obstruction data to unified_geometry_artifacts.
+ * When true, registerObstructionsForSurvey() will write each obstruction to BOTH
+ * site_survey_files.obstruction_data (legacy) AND unified_geometry_artifacts (new).
+ * When false (default), only the legacy path is used.
+ *
+ * Set OBSTRUCTION_UNIFIED_WRITE_ENABLED=1 in environment to enable.
+ */
+export const OBSTRUCTION_UNIFIED_WRITE_ENABLED =
+  process.env.OBSTRUCTION_UNIFIED_WRITE_ENABLED === '1';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Section 3: Internal Types for Candidate Processing
@@ -1276,6 +1289,81 @@ export async function registerObstructionsForSurvey(
     `This data MUST NOT feed CAD, permit, or BOM pipelines directly. ` +
     `Route through: unifiedGeometry pipeline → promotion → canonicalBridge.canonicalToCADInputs()`,
   );
+
+  // ── Step 5: Dual-write to unified_geometry_artifacts (Phase B migration) ──
+  // When OBSTRUCTION_UNIFIED_WRITE_ENABLED is true, write each obstruction to
+  // unified_geometry_artifacts in addition to the legacy obstruction_data JSONB.
+  // This is the bridge phase: both paths are written until Phase C backfill completes
+  // and the legacy column can be deprecated.
+  if (OBSTRUCTION_UNIFIED_WRITE_ENABLED) {
+    let unifiedWriteCount = 0;
+    let unifiedWriteErrors = 0;
+
+    for (const summary of photoSummaries) {
+      for (const obs of summary.obstructions) {
+        try {
+          const meta: ObstructionMetadata = {
+            id: obs.id,
+            sourceFilename: obs.sourceFilename,
+            sourceFileId: obs.sourceFileId,
+            region: {
+              x: obs.region.x,
+              y: obs.region.y,
+              width: obs.region.width,
+              height: obs.region.height,
+              coordinateSystem: 'normalized_image_0_1000',
+            },
+            center: {
+              x: obs.center.x,
+              y: obs.center.y,
+              coordinateSystem: 'normalized_image_0_1000',
+            },
+            areaNormalized: obs.areaNormalized,
+            aspectRatio: obs.aspectRatio,
+            sizeBucket: obs.sizeBucket,
+            orientationHint: obs.orientationHint,
+            edgeDistance: obs.edgeDistance,
+            edgeProximity: obs.edgeProximity,
+            quadrant: obs.quadrant,
+            setbackBuffer: obs.setbackBuffer,
+            confidence: obs.confidence,
+            detectionMethod: obs.detectionMethod,
+            limitations: obs.limitations ?? [],
+            sourcePhotoUrl: obs.sourcePhotoUrl ?? null,
+            sourceImageSha256: obs.sourceImageSha256 ?? null,
+            regionIndex: obs.regionIndex,
+            reviewState: obs.reviewState,
+            obstructionType: obs.obstructionType,
+            priority: obs.priority,
+            cadBlockHint: obs.cadBlockHint,
+            obstructionFootprintHint: obs.obstructionFootprintHint,
+            clearanceRadiusHint: obs.clearanceRadiusHint,
+            setbackCategoryHint: obs.setbackCategoryHint,
+            layoutAvoidancePriority: obs.layoutAvoidancePriority,
+            requiresHumanReview: obs.requiresHumanReview,
+            canAffectPanelPlacement: obs.canAffectPanelPlacement,
+            canAffectFirePathway: obs.canAffectFirePathway,
+            canAffectConduitPath: obs.canAffectConduitPath,
+            canAffectStructuralAttachment: obs.canAffectStructuralAttachment,
+          };
+
+          const written = await writeObstructionArtifact(surveyId, meta);
+          if (written) unifiedWriteCount++;
+        } catch (dualWriteErr) {
+          unifiedWriteErrors++;
+          console.warn(
+            `[registerObstructions] Dual-write failed for obstruction ${obs.id}:`,
+            dualWriteErr instanceof Error ? dualWriteErr.message : String(dualWriteErr),
+          );
+        }
+      }
+    }
+
+    console.log(
+      `[registerObstructions] Dual-write: ${unifiedWriteCount} obstructions written to unified_geometry_artifacts` +
+      (unifiedWriteErrors > 0 ? `, ${unifiedWriteErrors} errors` : ''),
+    );
+  }
 
   return {
     surveyId,

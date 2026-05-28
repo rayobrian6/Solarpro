@@ -328,6 +328,14 @@ export interface UnifiedGeometryArtifact {
   /** CAD impact flags */
   cadImpact: ObstructionCadImpact | null;
 
+  /**
+   * Full obstruction metadata from the registration pipeline.
+   * Only populated for geometryClass === 'obstruction' artifacts that were
+   * migrated from site_survey_files.obstruction_data via dual-write or backfill.
+   * Null for all other artifact types or for pre-migration obstruction artifacts.
+   */
+  obstructionMetadata: ObstructionMetadata | null;
+
   // ── Electrical-specific fields ──
 
   /** Electrical node subtype */
@@ -390,6 +398,97 @@ export interface UnifiedGeometryArtifact {
 
   /** Pipeline stage timings in milliseconds */
   stageTimings: Record<string, number> | null;
+}
+
+/**
+ * ObstructionMetadata — a JSONB-storable snapshot of the full RoofObstructionRecord
+ * from the obstruction registration pipeline. Stored in the obstruction_metadata
+ * column of unified_geometry_artifacts so that the unified table becomes the single
+ * source of truth for obstruction data (replacing site_survey_files.obstruction_data).
+ *
+ * Design principle: This is a COPY of the data, not a reference. The unified artifact
+ * owns this data once written. Changes to RoofObstructionRecord's source table should
+ * be dual-written during Phase B, then backfilled in Phase C.
+ *
+ * Every field mirrors RoofObstructionRecord in roofObstructionRegistration.ts.
+ * String-literal union types are re-declared here rather than imported, to keep the
+ * unified geometry module self-contained and avoid circular dependencies.
+ */
+export interface ObstructionMetadata {
+  /** Unique identifier for this obstruction (deterministic_hash from vision candidate) */
+  id: string;
+  /** The filename of the roof_plane photo this obstruction was found on */
+  sourceFilename: string;
+  /** The file_id of the representative file used for extraction */
+  sourceFileId: string;
+  /** Bounding box region in normalized coordinates */
+  region: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    coordinateSystem: 'normalized_image_0_1000';
+  };
+  /** Center point in normalized coordinates */
+  center: {
+    x: number;
+    y: number;
+    coordinateSystem: 'normalized_image_0_1000';
+  };
+  /** Area in normalized units (0-1,000,000 scale) */
+  areaNormalized: number;
+  /** Aspect ratio (width / height) */
+  aspectRatio: number;
+  /** Size bucket category */
+  sizeBucket: 'tiny' | 'small' | 'medium' | 'large' | 'huge';
+  /** Orientation hint based on geometry */
+  orientationHint: 'horizontal' | 'vertical' | 'square' | 'diagonal' | 'irregular';
+  /** Distance from nearest image edge (0-1000 scale) */
+  edgeDistance: number;
+  /** Edge proximity category */
+  edgeProximity: 'center' | 'near_center' | 'edge' | 'corner';
+  /** Roof-plane quadrant */
+  quadrant: 'nw' | 'ne' | 'sw' | 'se' | 'unknown';
+  /** Setback buffer category */
+  setbackBuffer: 'standard' | 'reduced' | 'none';
+  /** Confidence score from the vision worker (0-100 scale) */
+  confidence: number;
+  /** Source detection method */
+  detectionMethod: 'opencv_contour' | 'yolo_detection' | 'hybrid' | 'manual' | 'unknown';
+  /** Any limitations or caveats about this detection */
+  limitations: string[];
+  /** Source photo URL for traceability */
+  sourcePhotoUrl: string | null;
+  /** Source image SHA256 for cache invalidation */
+  sourceImageSha256: string | null;
+  /** Region index from the vision worker */
+  regionIndex: number;
+  /** Review state (default: review_required) */
+  reviewState: 'review_required' | 'accepted' | 'rejected';
+  /** Classification of the obstruction */
+  obstructionType: string | null;
+  /** Priority level for CAD considerations */
+  priority: 'high' | 'medium' | 'low';
+  /** CAD block hint for representation */
+  cadBlockHint: string;
+  /** Obstruction footprint shape hint */
+  obstructionFootprintHint: string;
+  /** Clearance radius hint */
+  clearanceRadiusHint: string;
+  /** Setback category hint */
+  setbackCategoryHint: 'standard' | 'reduced' | 'none';
+  /** Layout avoidance priority (1-10, higher = more important to avoid) */
+  layoutAvoidancePriority: number;
+  /** Whether this obstruction requires human review */
+  requiresHumanReview: boolean;
+  /** Whether this obstruction can affect panel placement */
+  canAffectPanelPlacement: boolean;
+  /** Whether this obstruction can affect fire pathway */
+  canAffectFirePathway: boolean;
+  /** Whether this obstruction can affect conduit path */
+  canAffectConduitPath: boolean;
+  /** Whether this obstruction can affect structural attachment */
+  canAffectStructuralAttachment: boolean;
 }
 
 /**
