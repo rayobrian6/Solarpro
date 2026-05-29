@@ -118,6 +118,9 @@ export {
   getUnifiedArtifactsByIds,
   hasUnifiedArtifactsForSurvey,
   writeObstructionArtifact,
+  writeUnifiedArtifact,
+  writeUnifiedArtifacts,
+  deleteUnifiedArtifactsByPipeline,
 } from './unifiedArtifactStore';
 
 // ── Canonical Builder ────────────────────────────────────────────────────────

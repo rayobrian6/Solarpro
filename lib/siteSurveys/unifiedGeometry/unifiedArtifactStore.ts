@@ -825,3 +825,216 @@ function mapObstructionTypeToSubtype(obstructionType: string | null): string {
   };
   return mapping[obstructionType] ?? 'other';
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Write: Persist any UnifiedGeometryArtifact to the unified table
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Write a single UnifiedGeometryArtifact to the unified_geometry_artifacts table.
+ *
+ * This is the general-purpose write function for persisting adapted artifacts
+ * from Pipeline A (Photo Vision) or Pipeline B (Geometry Reconstruction) into
+ * the unified table. It stores the full artifact as `geometry_data` JSONB, and
+ * also populates the top-level columns for querying/indexing.
+ *
+ * Uses ON CONFLICT (id) DO NOTHING to be idempotent — if the artifact already
+ * exists (by id), the write is silently skipped.
+ *
+ * @param artifact - The fully-populated UnifiedGeometryArtifact to persist
+ * @returns true if the row was inserted, false if it already existed or on error
+ */
+export async function writeUnifiedArtifact(
+  artifact: UnifiedGeometryArtifact,
+): Promise<boolean> {
+  try {
+    const sql = await getDbReady();
+
+    // Derive the authority_state from the artifact's authority
+    const authorityState = artifact.authority.state;
+
+    // Derive mock_artifact flag from the authority
+    const mockArtifact = artifact.authority.mockArtifact ?? false;
+
+    // Serialize authority and provenance as JSONB
+    const authorityJson = JSON.stringify(artifact.authority);
+    const provenanceJson = JSON.stringify(artifact.provenance);
+
+    // Serialize the full artifact as geometry_data JSONB
+    const geometryDataJson = JSON.stringify(artifact);
+
+    // Serialize limitations as text[]
+    const limitationsArray = Array.isArray(artifact.limitations)
+      ? artifact.limitations
+      : [];
+
+    // Serialize obstruction_metadata if present
+    const obstructionMetaJson = artifact.obstructionMetadata
+      ? JSON.stringify(artifact.obstructionMetadata)
+      : null;
+
+    // Build the INSERT statement — with or without obstruction_metadata column
+    const hasObstructionColumn = await checkObstructionMetadataColumn(sql);
+
+    let result;
+    if (hasObstructionColumn && obstructionMetaJson) {
+      result = await sql`
+        INSERT INTO unified_geometry_artifacts (
+          id, survey_id, geometry_class, authority_state, authority,
+          provenance, confidence, label, limitations, geometry_data,
+          obstruction_metadata,
+          review_state, review_notes, priority, mock_artifact, created_at, updated_at
+        ) VALUES (
+          ${artifact.id},
+          ${artifact.surveyId},
+          ${artifact.geometryClass},
+          ${authorityState},
+          ${authorityJson}::jsonb,
+          ${provenanceJson}::jsonb,
+          ${artifact.confidence},
+          ${artifact.label},
+          ${limitationsArray}::text[],
+          ${geometryDataJson}::jsonb,
+          ${obstructionMetaJson}::jsonb,
+          ${artifact.reviewState},
+          ${artifact.reviewNotes},
+          ${artifact.priority},
+          ${mockArtifact},
+          NOW()::timestamptz,
+          NOW()::timestamptz
+        )
+        ON CONFLICT (id) DO NOTHING
+        RETURNING id
+      `;
+    } else if (hasObstructionColumn) {
+      // Column exists but no obstruction metadata — insert with NULL
+      result = await sql`
+        INSERT INTO unified_geometry_artifacts (
+          id, survey_id, geometry_class, authority_state, authority,
+          provenance, confidence, label, limitations, geometry_data,
+          obstruction_metadata,
+          review_state, review_notes, priority, mock_artifact, created_at, updated_at
+        ) VALUES (
+          ${artifact.id},
+          ${artifact.surveyId},
+          ${artifact.geometryClass},
+          ${authorityState},
+          ${authorityJson}::jsonb,
+          ${provenanceJson}::jsonb,
+          ${artifact.confidence},
+          ${artifact.label},
+          ${limitationsArray}::text[],
+          ${geometryDataJson}::jsonb,
+          NULL::jsonb,
+          ${artifact.reviewState},
+          ${artifact.reviewNotes},
+          ${artifact.priority},
+          ${mockArtifact},
+          NOW()::timestamptz,
+          NOW()::timestamptz
+        )
+        ON CONFLICT (id) DO NOTHING
+        RETURNING id
+      `;
+    } else {
+      // No obstruction_metadata column — omit it
+      result = await sql`
+        INSERT INTO unified_geometry_artifacts (
+          id, survey_id, geometry_class, authority_state, authority,
+          provenance, confidence, label, limitations, geometry_data,
+          review_state, review_notes, priority, mock_artifact, created_at, updated_at
+        ) VALUES (
+          ${artifact.id},
+          ${artifact.surveyId},
+          ${artifact.geometryClass},
+          ${authorityState},
+          ${authorityJson}::jsonb,
+          ${provenanceJson}::jsonb,
+          ${artifact.confidence},
+          ${artifact.label},
+          ${limitationsArray}::text[],
+          ${geometryDataJson}::jsonb,
+          ${artifact.reviewState},
+          ${artifact.reviewNotes},
+          ${artifact.priority},
+          ${mockArtifact},
+          NOW()::timestamptz,
+          NOW()::timestamptz
+        )
+        ON CONFLICT (id) DO NOTHING
+        RETURNING id
+      `;
+    }
+
+    return result.length > 0;
+  } catch (err) {
+    console.warn(
+      '[unifiedArtifactStore] Failed to write unified artifact:',
+      err instanceof Error ? err.message : String(err),
+    );
+    return false;
+  }
+}
+
+/**
+ * Write multiple UnifiedGeometryArtifact instances to the unified table.
+ * Uses ON CONFLICT (id) DO NOTHING for idempotency.
+ *
+ * @param artifacts - Array of artifacts to persist
+ * @returns Object with counts of inserted, skipped, and failed writes
+ */
+export async function writeUnifiedArtifacts(
+  artifacts: UnifiedGeometryArtifact[],
+): Promise<{ inserted: number; skipped: number; failed: number }> {
+  let inserted = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const artifact of artifacts) {
+    try {
+      const result = await writeUnifiedArtifact(artifact);
+      if (result) {
+        inserted++;
+      } else {
+        skipped++;
+      }
+    } catch {
+      failed++;
+    }
+  }
+
+  return { inserted, skipped, failed };
+}
+
+/**
+ * Delete all unified geometry artifacts for a survey that match a specific
+ * source pipeline. Used to clean up before re-writing artifacts from a
+ * pipeline re-run.
+ *
+ * @param surveyId - The survey ID
+ * @param sourcePipeline - Only delete artifacts from this source pipeline
+ * @returns Number of deleted rows
+ */
+export async function deleteUnifiedArtifactsByPipeline(
+  surveyId: string,
+  sourcePipeline: string,
+): Promise<number> {
+  try {
+    const sql = await getDbReady();
+
+    const result = await sql`
+      DELETE FROM unified_geometry_artifacts
+      WHERE survey_id = ${surveyId}
+        AND provenance->>'sourcePipeline' = ${sourcePipeline}
+      RETURNING id
+    `;
+
+    return result.length;
+  } catch (err) {
+    console.warn(
+      '[unifiedArtifactStore] Failed to delete artifacts by pipeline:',
+      err instanceof Error ? err.message : String(err),
+    );
+    return 0;
+  }
+}

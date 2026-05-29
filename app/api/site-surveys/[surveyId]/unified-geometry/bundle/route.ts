@@ -6,11 +6,17 @@
 // PRIMARY PATH:  Query `unified_geometry_artifacts` table directly.
 //   This table is populated by Migration 080 backfill and kept current by
 //   the promote route's upsert. It is the canonical source of truth.
+//   HOWEVER: We only use the PRIMARY path if it contains artifacts from
+//   photo_vision or geometry_recon pipelines. If it only has
+//   obstruction_registration artifacts, we still fall through to the
+//   FALLBACK path so Pipeline A/B candidates get included.
 //
-// FALLBACK PATH: If the unified table has no artifacts for this survey
-//   (e.g., backfill hasn't run yet), fall back to on-the-fly adaptation
-//   from Pipeline A (Photo Vision) + Pipeline B (Geometry Reconstruction)
-//   source tables.
+// FALLBACK PATH: If the unified table has no pipeline artifacts for this
+//   survey (e.g., backfill hasn't run yet, or only obstruction_registration
+//   artifacts exist), fall back to on-the-fly adaptation from Pipeline A
+//   (Photo Vision) + Pipeline B (Geometry Reconstruction) source tables.
+//   Any existing unified table artifacts (like obstruction_registration)
+//   are ALSO included in the bundle alongside the adapted candidates.
 //
 // This is the single endpoint for the UI to display all geometry artifacts
 // in a unified panel — no more split Pipeline A/B views.
@@ -41,12 +47,19 @@ export async function GET(
     }
 
     // ── PRIMARY: Query unified_geometry_artifacts directly ──────────────
-    // This table is the canonical source of truth. If it has artifacts
-    // for this survey, we build the bundle from them directly — no
-    // on-the-fly adaptation needed.
+    // This table is the canonical source of truth. If it has pipeline
+    // artifacts (photo_vision or geometry_recon) for this survey, we
+    // build the bundle from them directly — no on-the-fly adaptation needed.
     const unifiedArtifacts = await getUnifiedArtifactsForSurvey(surveyId);
 
-    if (unifiedArtifacts.length > 0) {
+    // Check whether we have any pipeline artifacts (photo_vision or geometry_recon).
+    // If we only have obstruction_registration (or other non-pipeline) artifacts,
+    // we still need to fall through to the fallback path to include Pipeline A/B data.
+    const hasPipelineArtifacts = unifiedArtifacts.some(
+      a => a.provenance.sourcePipeline === 'photo_vision' || a.provenance.sourcePipeline === 'geometry_recon',
+    );
+
+    if (unifiedArtifacts.length > 0 && hasPipelineArtifacts) {
       // Build the bundle from unified table artifacts directly
       const bundle = new BundleBuilder({
         surveyId,
@@ -64,11 +77,13 @@ export async function GET(
     }
 
     // ── FALLBACK: On-the-fly adaptation from source tables ──────────────
-    // The unified table has no artifacts for this survey. This can happen
-    // if Migration 080 backfill hasn't run yet. Fall back to querying
+    // Either the unified table is empty, or it only contains non-pipeline
+    // artifacts (like obstruction_registration). Fall back to querying
     // Pipeline A + Pipeline B source tables and adapting on the fly.
+    // We ALSO include any existing unified table artifacts (e.g., obstruction_registration)
+    // alongside the adapted Pipeline A/B candidates so the bundle is complete.
     console.info(
-      `[GET /unified-geometry/bundle] No artifacts in unified table for survey ${surveyId}, falling back to on-the-fly adaptation`,
+      `[GET /unified-geometry/bundle] No pipeline artifacts in unified table for survey ${surveyId} (total=${unifiedArtifacts.length}, hasPipeline=${hasPipelineArtifacts}), falling back to on-the-fly adaptation`,
     );
 
     const { getOpenSourcePhotoVisionCandidatesBySurvey } = await import('@/lib/db/openSourcePhotoVision');
@@ -96,18 +111,29 @@ export async function GET(
 
     const { adaptPhotoVisionBundle, adaptGeometryReconBundle } = await import('@/lib/siteSurveys/unifiedGeometry/pipelineAdapters');
 
-    const bundle = new BundleBuilder({
+    const builder = new BundleBuilder({
       surveyId,
       includeMocks: true,
       minConfidence: 0,
-    })
-      .addPhotoVisionCandidates(
-        (photoVisionCandidates?.candidates ?? []) as any[],
-      )
-      .addGeometryReconArtifacts(
-        (geometryReconResult?.artifacts ?? []) as any[],
-      )
-      .build();
+    });
+
+    // Add any existing unified table artifacts (e.g., obstruction_registration)
+    // so they're not lost when we build the fallback bundle
+    if (unifiedArtifacts.length > 0) {
+      builder.addUnifiedArtifacts(unifiedArtifacts);
+    }
+
+    // Add adapted Pipeline A candidates
+    builder.addPhotoVisionCandidates(
+      (photoVisionCandidates?.candidates ?? []) as any[],
+    );
+
+    // Add adapted Pipeline B artifacts
+    builder.addGeometryReconArtifacts(
+      (geometryReconResult?.artifacts ?? []) as any[],
+    );
+
+    const bundle = builder.build();
 
     return NextResponse.json({
       success: true,

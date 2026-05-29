@@ -66,6 +66,18 @@ export {
   mockGeometryReconstructionService,
 } from './mockAdapter';
 
+// Full pipeline orchestration
+export {
+  runFullGeometryReconstructionPipeline,
+  runSegmentationOnlyPipeline,
+  runDepthOnlyPipeline,
+} from './runFullPipeline';
+
+export type {
+  PipelineStageResult,
+  FullPipelineResult,
+} from './runFullPipeline';
+
 // Async job manager (heartbeat)
 export {
   HEARTBEAT_TIMEOUT_MS,

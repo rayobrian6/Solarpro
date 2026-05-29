@@ -76,6 +76,8 @@ import type { OpenSourcePhotoVisionRunResult, OpenSourcePhotoVisionCandidate } f
 import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/categoryRegistry';
 import { updateSiteSurveyFileLabels } from '@/lib/db/surveys';
 import { getDbReady } from '@/lib/db/core';
+import { adaptPhotoVisionBundle } from '@/lib/siteSurveys/unifiedGeometry/pipelineAdapters';
+import { writeUnifiedArtifacts, deleteUnifiedArtifactsByPipeline } from '@/lib/siteSurveys/unifiedGeometry';
 
 // ---------------------------------------------------------------------------
 // Timeout constants
@@ -494,6 +496,7 @@ export async function POST(
     if (dryRun) {
       const stagePlan = [
         { stage: 1, name: 'persist', description: 'Persist candidates to DB', timeoutMs: DB_STATEMENT_TIMEOUT_MS, fatal: true },
+        { stage: 1.5, name: 'unify', description: 'Adapt Pipeline A candidates into unified geometry table', timeoutMs: DB_STATEMENT_TIMEOUT_MS, fatal: false },
         { stage: 2, name: 'labels', description: 'Update photo labels from YOLO/OCR candidates', timeoutMs: DB_STATEMENT_TIMEOUT_MS, fatal: true },
         { stage: 3, name: 'obstructions', description: 'Register obstructions on roof_plane photos', timeoutMs: DB_STATEMENT_TIMEOUT_MS, fatal: false },
         { stage: 4, name: 'classification', description: 'OpenAI Vision fallback classification', timeoutMs: VISION_CLASSIFICATION_BUDGET_MS, fatal: false, skipped: !process.env.OPENAI_API_KEY },
@@ -551,6 +554,56 @@ export async function POST(
       throw persistErr;
     }
     finalizationResult.stored = stored;
+
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // STAGE 1.5: Adapt Pipeline A candidates into unified geometry table
+    // ═══════════════════════════════════════════════════════════════════════
+    // This stage bridges Pipeline A (Photo Vision) into the Unified Geometry
+    // system. It adapts all candidates through adaptPhotoVisionCandidate()
+    // and writes them to the unified_geometry_artifacts table with
+    // sourcePipeline='photo_vision'. This makes them visible in the
+    // UNIFIED GEOMETRY panel under "Photo Vision: N".
+    //
+    // This is NON-FATAL — if it fails, the UI will still show data through
+    // the FALLBACK path (on-the-fly adaptation from source tables).
+    // ═══════════════════════════════════════════════════════════════════════
+    checkAbort('pre-unify');
+    const unifyStart = Date.now();
+    console.log(`[finalize:unify:start] jobId=${jobId} runHash=${runHash} candidates=${run.candidates.length}`);
+    await heartbeat('unify');
+    try {
+      // Clean up any previous photo_vision artifacts for this survey
+      // (handles re-finalization with ?retry=1)
+      const deletedCount = await deleteUnifiedArtifactsByPipeline(surveyId, 'photo_vision');
+      if (deletedCount > 0) {
+        console.log(`[finalize:unify] jobId=${jobId} Deleted ${deletedCount} previous photo_vision artifacts`);
+      }
+
+      // Adapt all Pipeline A candidates through the adapter
+      const adaptedArtifacts = adaptPhotoVisionBundle(run.candidates, surveyId);
+
+      // Write all adapted artifacts to the unified table
+      const writeResult = await withTimeout(
+        writeUnifiedArtifacts(adaptedArtifacts),
+        DB_STATEMENT_TIMEOUT_MS,
+        'finalize:unify',
+      );
+
+      console.log(`[finalize:unify:end] jobId=${jobId} runHash=${runHash} adapted=${adaptedArtifacts.length} inserted=${writeResult.inserted} skipped=${writeResult.skipped} failed=${writeResult.failed} durationMs=${Date.now() - unifyStart}`);
+      finalizationResult.unifiedWrite = {
+        adapted: adaptedArtifacts.length,
+        inserted: writeResult.inserted,
+        skipped: writeResult.skipped,
+        failed: writeResult.failed,
+      };
+    } catch (unifyErr) {
+      const durationMs = Date.now() - unifyStart;
+      const errMsg = unifyErr instanceof Error ? unifyErr.message : String(unifyErr);
+      console.error(`[finalize:unify:end] jobId=${jobId} runHash=${runHash} FAILED (non-fatal): ${errMsg} durationMs=${durationMs}`);
+      // Unification failure is NON-FATAL — the FALLBACK path in the bundle route
+      // will adapt on-the-fly from the source tables.
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     // STAGE 2: Update photo labels from YOLO/OCR candidates
