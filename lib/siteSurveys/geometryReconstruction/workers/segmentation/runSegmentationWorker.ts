@@ -136,6 +136,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
       const geometry = await extractGeometryFromPhoto(photo.fileUrl);
 
       // Stage 3: Convert contours to segmentation masks
+      let contourIndex = 0;
       for (const contour of geometry.contours) {
         const segmentationClass = CONTOUR_TO_SEGMENTATION_CLASS[contour.classification];
 
@@ -154,9 +155,11 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
         // Compute bounding box
         const maskBounds = computeMaskBounds(truncatedPolygon);
 
+        // Include contourIndex in ID to ensure uniqueness — multiple contours
+        // of the same class can exist (e.g., multiple roof planes)
         const mask: SemanticSegmentationMask = {
           artifactType: 'semantic_segmentation_mask',
-          id: `seg-${photo.fileId}-${segmentationClass}-${SEGMENTATION_WORKER_VERSION}`,
+          id: `seg-${photo.fileId}-${segmentationClass}-${contourIndex}-${SEGMENTATION_WORKER_VERSION}`,
           fileId: photo.fileId,
           segmentationClass,
           polygon: truncatedPolygon,
@@ -179,6 +182,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
         if (validationResult.valid) {
           artifacts.push(validationResult.data);
         }
+        contourIndex++;
       }
     } catch (error) {
       // Skip photos that fail extraction — don't break the whole batch
