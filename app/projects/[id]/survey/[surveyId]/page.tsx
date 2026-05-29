@@ -1681,15 +1681,16 @@ function OpenSourcePhotoVisionPassPanel({
   const [error, setError] = useState<string | null>(null);
   const [candidateFilter, setCandidateFilter] = useState<"both" | "opencv" | "yolo" | "ocr">("both");
   const [selectedOverlayFileId, setSelectedOverlayFileId] = useState<string | null>(null);
-  const [overlayMode, setOverlayMode] = useState<OverlayMode>("raw");
+  const [overlayMode, setOverlayMode] = useState<OverlayMode>("refined");
+  const [showSuppressed, setShowSuppressed] = useState(false);
   const [retryingFinalization, setRetryingFinalization] = useState(false);
   const [retryJobId, setRetryJobId] = useState<string>("");
   const activeBundle = result?.stored ?? bundle ?? null;
   const allCandidates = safeArray(activeBundle?.candidates);
 
-  // Compute refined geometry when in refined mode
+  // Compute refined geometry — always compute so suppression data is available for UI badges
   const refinedBundle: RefinedGeometryBundle | null = (() => {
-    if (overlayMode !== "refined" || allCandidates.length === 0) return null;
+    if (allCandidates.length === 0) return null;
     const rawInputs: RawRefinementInput[] = allCandidates.map((c) => ({
       id: c.id,
       fileId: c.fileId,
@@ -1698,7 +1699,8 @@ function OpenSourcePhotoVisionPassPanel({
       payload: c.payload,
       confidence: c.confidence,
     }));
-    return refineGeometry(rawInputs);
+    // Enable suppression pipeline with default config (roof ≤4, obstruction ≤8, equipment ≤4, total ≤16)
+    return refineGeometry(rawInputs, { suppression: {} });
   })();
   const candidates = allCandidates.filter((candidate) => {
     const stage = String(candidate.payload?.stage ?? "");
@@ -2127,23 +2129,41 @@ External OpenCV + YOLO/Supervision + Tesseract OCR worker · actual image bytes 
                     {mode === "raw" ? "Raw" : "Refined"}
                   </button>
                 ))}
+                {overlayMode === "refined" && refinedBundle?.suppressionResult?.hasSuppressedCandidates && (
+                  <button
+                    type="button"
+                    onClick={() => setShowSuppressed(!showSuppressed)}
+                    className={`ml-2 rounded-full border px-2 py-0.5 text-[8px] font-semibold uppercase tracking-wider transition ${
+                      showSuppressed
+                        ? "border-amber-400/50 bg-amber-500/20 text-amber-100"
+                        : "border-slate-700 bg-slate-900/60 text-slate-500 hover:text-amber-300"
+                    }`}
+                    title={showSuppressed ? "Hide suppressed candidates" : "Show suppressed candidates (debug)"}
+                  >
+                    {showSuppressed ? "🐛 Debug: All" : "🐛 Debug"}
+                  </button>
+                )}
               </div>
             </div>
             <p className="text-[9px] text-slate-500 mb-3">
               {overlayMode === "refined" ? (
                 <>
-                  Refined geometry preview: noise-filtered, deduplicated, classified, and scored candidates.
+                  Refined geometry preview: noise-filtered, deduplicated, classified, scored, and suppression-gated candidates.
                   Raw candidates are preserved unchanged.{" "}
                   {refinedBundle && (
                     <span className="text-emerald-400/70">
-                      {refinedBundle.refinedCandidateCount} refined from {refinedBundle.rawCandidateCount} raw.
+                      {refinedBundle.suppressionResult
+                        ? `${refinedBundle.suppressionResult.trustedCount} trusted from ${refinedBundle.rawCandidateCount} raw (${refinedBundle.suppressionResult.suppressedCount} suppressed)`
+                        : `${refinedBundle.refinedCandidateCount} refined from ${refinedBundle.rawCandidateCount} raw`}
                     </span>
                   )}
                   {" "}REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY.
                 </>
               ) : (
                 <>
-                  Candidates with <code className="text-slate-400">payload.region</code> or <code className="text-slate-400">payload.bbox</code> geometry rendered as SVG overlays. Dashed borders = review required. REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY.
+                  Candidates with <code className="text-slate-400">payload.region</code> or <code className="text-slate-400">payload.bbox</code> geometry rendered as SVG overlays. Dashed borders = review required.{" "}
+                  <span className="text-amber-400/80">Raw mode shows all persisted candidates without suppression — use Refined mode for production overlays.</span>
+                  {" "}REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY.
                 </>
               )}
             </p>
@@ -2169,6 +2189,7 @@ External OpenCV + YOLO/Supervision + Tesseract OCR worker · actual image bytes 
               overlayMode={overlayMode}
               selectedFileId={selectedOverlayFileId}
               onSelectFile={setSelectedOverlayFileId}
+              showSuppressed={showSuppressed}
             />
           </div>
         )}

@@ -21,15 +21,15 @@
 - [x] Add suppression integration tests to existing geometryRefinement test file
 
 ## Part 5: Validation
-- [x] Run `npx vitest run` — 26 suppression tests + 64 geometry refinement tests pass
-- [x] Run `npx tsc --noEmit` — clean, no errors
-- [ ] Build if renderer/UI code changed
+- [x] Run `npx vitest run` — 90 tests pass (26 suppression + 64 geometry refinement)
+- [x] Run `npx tsc --noEmit` — clean, zero errors
+- [x] Build — `npx next build` succeeds
 
 ## Part 6: Before/after evidence
-- [ ] Run beforeAfterEvidence.ts and document before/after candidate counts
+- [x] Run beforeAfterEvidence.ts: 21 → 10 candidates, all visual targets pass (roof ≤4, obstruction ≤8, equipment ≤4, total ≤16)
 
 ## Part 7: Write final report (10 sections)
-- [ ] Audit findings, ranked to-do, files changed, implementation details, candidate counts, tests, typecheck, what remains, visual safety, mergeability
+- [x] Written to CAD_VISUAL_RECOVERY_REPORT.md
 
 ## Part 8: Push to GitHub
-- [ ] `git push` to dev branch
+- [x] Pushed commit d57b7b1 to dev branch

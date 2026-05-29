@@ -117,16 +117,26 @@ export function PhotoVisionOverlayRenderer({
   }
 
   // ── Raw mode ──
+  const MAX_RAW_CANDIDATES_PER_FILE = 50;
+
   const filesWithDrawableCandidates = filesWithOverlays
-    .map((fw) => ({
-      ...fw,
-      candidates: fw.candidates.filter(
+    .map((fw) => {
+      const drawable = fw.candidates.filter(
         (c) =>
           hasDrawableGeometry(c.payload) &&
           candidatesPassOverlayFilter(c.candidateType, c.payload, candidateFilter),
-      ),
-    }))
+      );
+      const totalDrawable = drawable.length;
+      const capped = drawable.slice(0, MAX_RAW_CANDIDATES_PER_FILE);
+      return { ...fw, candidates: capped, totalDrawable, wasCapped: totalDrawable > MAX_RAW_CANDIDATES_PER_FILE };
+    })
     .filter((fw) => fw.candidates.length > 0);
+
+  const anyFileCapped = filesWithDrawableCandidates.some((fw) => fw.wasCapped);
+  const totalCappedCount = filesWithDrawableCandidates.reduce(
+    (sum, fw) => sum + (fw.wasCapped ? fw.totalDrawable - MAX_RAW_CANDIDATES_PER_FILE : 0),
+    0,
+  );
 
   if (filesWithDrawableCandidates.length === 0) {
     return (
@@ -144,6 +154,16 @@ export function PhotoVisionOverlayRenderer({
 
   return (
     <div className="space-y-3">
+      {/* Raw mode cap warning */}
+      {anyFileCapped && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+          <p className="text-[10px] text-amber-200">
+            ⚠ Raw mode renders up to {MAX_RAW_CANDIDATES_PER_FILE} candidates per file for performance.
+            {' '}<span className="text-amber-400">({totalCappedCount} candidate{totalCappedCount !== 1 ? 's' : ''} not shown — switch to Refined mode for production overlays)</span>
+          </p>
+        </div>
+      )}
+
       {/* File selector strip */}
       {filesWithDrawableCandidates.length > 1 && (
         <div className="flex flex-wrap gap-1.5">
@@ -159,7 +179,9 @@ export function PhotoVisionOverlayRenderer({
               }`}
             >
               {(fw.filename ?? fw.fileId).slice(0, 20)}
-              <span className="ml-1 text-slate-500">({fw.candidates.length})</span>
+              <span className="ml-1 text-slate-500">
+                ({fw.candidates.length}{fw.wasCapped ? `/${fw.totalDrawable}` : ''})
+              </span>
             </button>
           ))}
         </div>
