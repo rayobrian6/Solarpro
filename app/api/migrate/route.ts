@@ -3589,43 +3589,54 @@ export async function POST(req: NextRequest) {
             `;
             for (const row of pipelineARows) {
               try {
+                // Pre-compute all values outside the tagged template to avoid
+                // Neon array-serialization issues (JS arrays can't be sent as
+                // PostgreSQL array parameters over the HTTP driver).
+                const artifactId = `pv-${row.id}`;
+                const authorityJson = JSON.stringify({
+                  state: 'raw_evidence',
+                  level: 0,
+                  reviewOnly: true,
+                  cadConsumable: false,
+                  mockArtifact: false,
+                });
+                const provenanceJson = JSON.stringify({
+                  sourcePipeline: 'photo_vision',
+                  toolName: row.candidate_type ?? 'unknown',
+                  toolVersion: '1.0.0',
+                  runHash: row.id ?? 'unknown',
+                  sourceFileIds: row.file_id ? [row.file_id] : [],
+                  derivedFromArtifactIds: [],
+                });
+                const confidenceVal = Number(row.confidence ?? 0);
+                const labelVal = String(row.candidate_type ?? 'unknown');
+                const geometryDataJson = JSON.stringify({
+                  originalCandidateId: row.id,
+                  candidateType: row.candidate_type,
+                  candidateCategory: row.candidate_category,
+                });
+                const createdAtVal = row.created_at ?? new Date().toISOString();
+
                 await sql`
                   INSERT INTO unified_geometry_artifacts (
                     id, survey_id, geometry_class, authority_state, authority,
                     provenance, confidence, label, limitations, geometry_data,
                     review_state, priority, mock_artifact, created_at, updated_at
                   ) VALUES (
-                    ${`pv-${row.id}`},
+                    ${artifactId},
                     ${row.survey_id},
                     'obstruction',
                     'raw_evidence',
-                    ${JSON.stringify({
-                      state: 'raw_evidence',
-                      level: 0,
-                      reviewOnly: true,
-                      cadConsumable: false,
-                      mockArtifact: false,
-                    })}::jsonb,
-                    ${JSON.stringify({
-                      sourcePipeline: 'photo_vision',
-                      toolName: row.candidate_type ?? 'unknown',
-                      toolVersion: '1.0.0',
-                      runHash: row.id ?? 'unknown',
-                      sourceFileIds: row.file_id ? [row.file_id] : [],
-                      derivedFromArtifactIds: [],
-                    })}::jsonb,
-                    ${Number(row.confidence ?? 0)},
-                    ${String(row.candidate_type ?? 'unknown')},
-                    ARRAY[]::text[],
-                    ${JSON.stringify({
-                      originalCandidateId: row.id,
-                      candidateType: row.candidate_type,
-                      candidateCategory: row.candidate_category,
-                    })}::jsonb,
+                    ${authorityJson}::jsonb,
+                    ${provenanceJson}::jsonb,
+                    ${confidenceVal},
+                    ${labelVal},
+                    '{}'::text[],
+                    ${geometryDataJson}::jsonb,
                     'review_required',
                     'medium',
                     false,
-                    ${row.created_at ?? new Date().toISOString()}::timestamptz,
+                    ${createdAtVal}::timestamptz,
                     NOW()::timestamptz
                   )
                   ON CONFLICT (id) DO NOTHING
@@ -3663,43 +3674,60 @@ export async function POST(req: NextRequest) {
                   vanishing_point: 'vanishing_point',
                   consensus_plane_candidate: 'consensus_plane',
                 };
+
+                // Pre-compute all values outside the tagged template to avoid
+                // Neon array-serialization issues (JS arrays can't be sent as
+                // PostgreSQL array parameters over the HTTP driver).
+                const geometryClass = geometryClassMap[artifactType] ?? 'unknown';
+                const authorityJson = JSON.stringify({
+                  state: 'raw_evidence',
+                  level: 0,
+                  reviewOnly: true,
+                  cadConsumable: false,
+                  mockArtifact: artifactType === 'mock',
+                });
+                const provenanceJson = JSON.stringify({
+                  sourcePipeline: 'geometry_reconstruction',
+                  toolName: artifactType,
+                  toolVersion: row.worker_version ?? '1.0.0',
+                  runHash: row.job_id ?? row.id ?? 'unknown',
+                  sourceFileIds: row.file_id ? [row.file_id] : [],
+                  derivedFromArtifactIds: [],
+                });
+                const confidenceVal = Number(row.confidence ?? 0);
+                // row.limitations is TEXT[] from PostgreSQL — comes back as JS array.
+                // Neon HTTP driver (v0.10.4) cannot send JS arrays as PG array params.
+                // Store limitations in geometry_data JSONB instead; use empty '{}'::text[]
+                // for the limitations column (it has a DEFAULT '{}' anyway).
+                const geometryDataJson = JSON.stringify({
+                  originalArtifactId: row.id,
+                  artifactType,
+                  artifactData: row.payload,
+                  limitations: row.limitations,  // preserve original limitations here
+                });
+                const mockArtifact = artifactType === 'mock';
+                const createdAtVal = row.created_at ?? new Date().toISOString();
+
                 await sql`
                   INSERT INTO unified_geometry_artifacts (
                     id, survey_id, geometry_class, authority_state, authority,
                     provenance, confidence, label, limitations, geometry_data,
                     review_state, priority, mock_artifact, created_at, updated_at
                   ) VALUES (
-                    ${row.id},
+                    ${String(row.id)},
                     ${row.survey_id},
-                    ${geometryClassMap[artifactType] ?? 'unknown'},
+                    ${geometryClass},
                     'raw_evidence',
-                    ${JSON.stringify({
-                      state: 'raw_evidence',
-                      level: 0,
-                      reviewOnly: true,
-                      cadConsumable: false,
-                      mockArtifact: artifactType === 'mock',
-                    })}::jsonb,
-                    ${JSON.stringify({
-                      sourcePipeline: 'geometry_reconstruction',
-                      toolName: artifactType,
-                      toolVersion: row.worker_version ?? '1.0.0',
-                      runHash: row.job_id ?? row.id ?? 'unknown',
-                      sourceFileIds: row.file_id ? [row.file_id] : [],
-                      derivedFromArtifactIds: [],
-                    })}::jsonb,
-                    ${Number(row.confidence ?? 0)},
+                    ${authorityJson}::jsonb,
+                    ${provenanceJson}::jsonb,
+                    ${confidenceVal},
                     ${artifactType},
-                    ${row.limitations},
-                    ${JSON.stringify({
-                      originalArtifactId: row.id,
-                      artifactType,
-                      artifactData: row.payload,
-                    })}::jsonb,
+                    '{}'::text[],
+                    ${geometryDataJson}::jsonb,
                     'review_required',
                     'medium',
-                    ${artifactType === 'mock'},
-                    ${row.created_at ?? new Date().toISOString()}::timestamptz,
+                    ${mockArtifact},
+                    ${createdAtVal}::timestamptz,
                     NOW()::timestamptz
                   )
                   ON CONFLICT (id) DO NOTHING
@@ -3887,6 +3915,16 @@ export async function POST(req: NextRequest) {
                     obstructionMetadata: obs,  // Store the raw obstruction data as-is
                   };
 
+                  // Pre-compute values to avoid Neon array-serialization issues.
+                  // geometryData.limitations is a JS array — Neon HTTP driver (v0.10.4)
+                  // cannot send JS arrays as PostgreSQL array parameters.
+                  // Store limitations in geometry_data JSONB instead; use empty '{}'::text[]
+                  // for the limitations column (it has a DEFAULT '{}' anyway).
+                  const m082AuthorityJson = JSON.stringify(geometryData.authority);
+                  const m082ProvenanceJson = JSON.stringify(provenance);
+                  const m082GeometryDataJson = JSON.stringify(geometryData);
+                  const m082ObsJson = JSON.stringify(obs);
+
                   await sql`
                     INSERT INTO unified_geometry_artifacts (
                       id, survey_id, geometry_class, authority_state, authority,
@@ -3898,13 +3936,13 @@ export async function POST(req: NextRequest) {
                       ${row.survey_id},
                       'obstruction',
                       'derived_review_only',
-                      ${JSON.stringify(geometryData.authority)}::jsonb,
-                      ${JSON.stringify(provenance)}::jsonb,
+                      ${m082AuthorityJson}::jsonb,
+                      ${m082ProvenanceJson}::jsonb,
                       ${confidence01},
                       ${label},
-                      ${geometryData.limitations}::text[],
-                      ${JSON.stringify(geometryData)}::jsonb,
-                      ${JSON.stringify(obs)}::jsonb,
+                      '{}'::text[],
+                      ${m082GeometryDataJson}::jsonb,
+                      ${m082ObsJson}::jsonb,
                       ${reviewState},
                       ${priority},
                       FALSE,
