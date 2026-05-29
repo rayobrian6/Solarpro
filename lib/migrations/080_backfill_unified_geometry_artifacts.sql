@@ -5,7 +5,7 @@
 --
 --   Pipeline A: open_source_photo_vision_candidates
 --     Each candidate becomes an obstruction-class artifact with raw_evidence
---     authority. ID is 'pv-' || id (PK is id; no candidate_id column exists).
+--     authority. ID is 'pv-' || id (PK is id, no candidate_id column exists).
 --
 --   Pipeline B: site_survey_geometry_reconstruction_artifacts
 --     Each artifact is mapped to a geometry_class via the artifact_type mapping.
@@ -35,6 +35,9 @@
 --     a.tool_version -> a.worker_version (078 added worker_version)
 --     a.source_file_ids -> a.file_id (single TEXT column)
 --     a.artifact_data -> a.payload (the JSONB payload column)
+--
+-- IMPORTANT: This file must NOT contain semicolons inside comments or
+-- string literals, because the system-tools runner splits on semicolons.
 -- ============================================================================
 
 -- ============================================================================
@@ -48,23 +51,9 @@ INSERT INTO unified_geometry_artifacts (
   provenance, confidence, label, limitations, geometry_data,
   review_state, priority, mock_artifact, created_at, updated_at
 )
-WITH source AS (
-  SELECT
-    'pv-' || c.id AS artifact_id,
-    c.survey_id,
-    c.candidate_type,
-    c.candidate_category,
-    c.tool_version,
-    c.run_hash,
-    c.file_id,
-    c.confidence,
-    c.limitations,
-    c.created_at
-  FROM open_source_photo_vision_candidates c
-)
 SELECT
-  s.artifact_id,
-  s.survey_id,
+  'pv-' || c.id,
+  c.survey_id,
   'obstruction',
   'raw_evidence',
   jsonb_build_object(
@@ -76,28 +65,30 @@ SELECT
   ),
   jsonb_build_object(
     'sourcePipeline', 'photo_vision',
-    'toolName', COALESCE(s.candidate_type, 'unknown'),
-    'toolVersion', COALESCE(s.tool_version, '1.0.0'),
-    'runHash', COALESCE(s.run_hash, 'unknown'),
-    'sourceFileIds', CASE WHEN s.file_id IS NOT NULL
-                      THEN jsonb_build_array(s.file_id::text)
+    'toolName', COALESCE(c.candidate_type, 'unknown'),
+    'toolVersion', COALESCE(c.tool_version, '1.0.0'),
+    'runHash', COALESCE(c.run_hash, 'unknown'),
+    'sourceFileIds', CASE WHEN c.file_id IS NOT NULL
+                      THEN jsonb_build_array(c.file_id::text)
                       ELSE '[]'::jsonb END,
     'derivedFromArtifactIds', '[]'::jsonb
   ),
-  COALESCE(s.confidence, 0),
-  COALESCE(s.candidate_type, 'unknown'),
-  ARRAY(SELECT jsonb_array_elements_text(s.limitations)),
+  COALESCE(c.confidence, 0),
+  COALESCE(c.candidate_type, 'unknown'),
+  CASE WHEN jsonb_typeof(c.limitations) = 'array'
+       THEN ARRAY(SELECT jsonb_array_elements_text(c.limitations))
+       ELSE '{}'::text[] END,
   jsonb_build_object(
-    'originalCandidateId', s.artifact_id,
-    'candidateType', s.candidate_type,
-    'candidateCategory', s.candidate_category
+    'originalCandidateId', 'pv-' || c.id,
+    'candidateType', c.candidate_type,
+    'candidateCategory', c.candidate_category
   ),
   'review_required',
   'medium',
   FALSE,
-  COALESCE(s.created_at, NOW())::timestamptz,
+  COALESCE(c.created_at, NOW())::timestamptz,
   NOW()::timestamptz
-FROM source s
+FROM open_source_photo_vision_candidates c
 WHERE NOT EXISTS (
   SELECT 1 FROM unified_geometry_artifacts
 )
@@ -113,24 +104,10 @@ INSERT INTO unified_geometry_artifacts (
   provenance, confidence, label, limitations, geometry_data,
   review_state, priority, mock_artifact, created_at, updated_at
 )
-WITH source AS (
-  SELECT
-    a.id,
-    a.survey_id,
-    a.artifact_type,
-    a.worker_version,
-    a.job_id,
-    a.file_id,
-    a.confidence,
-    a.limitations,
-    a.payload,
-    a.created_at
-  FROM site_survey_geometry_reconstruction_artifacts a
-)
 SELECT
-  s.id::text,
-  s.survey_id,
-  CASE s.artifact_type
+  a.id::text,
+  a.survey_id,
+  CASE a.artifact_type
     WHEN 'segmentation_mask'          THEN 'segmentation'
     WHEN 'depth_map'                  THEN 'depth'
     WHEN 'sfm_point_cloud'            THEN 'point_cloud'
@@ -150,32 +127,32 @@ SELECT
     'level', 0,
     'reviewOnly', true,
     'cadConsumable', false,
-    'mockArtifact', (s.artifact_type = 'mock')
+    'mockArtifact', (a.artifact_type = 'mock')
   ),
   jsonb_build_object(
     'sourcePipeline', 'geometry_reconstruction',
-    'toolName', COALESCE(s.artifact_type, 'unknown'),
-    'toolVersion', COALESCE(s.worker_version, '1.0.0'),
-    'runHash', COALESCE(s.job_id::text, s.id::text, 'unknown'),
-    'sourceFileIds', CASE WHEN s.file_id IS NOT NULL
-                      THEN jsonb_build_array(s.file_id)
+    'toolName', COALESCE(a.artifact_type, 'unknown'),
+    'toolVersion', COALESCE(a.worker_version, '1.0.0'),
+    'runHash', COALESCE(a.job_id::text, a.id::text, 'unknown'),
+    'sourceFileIds', CASE WHEN a.file_id IS NOT NULL
+                      THEN jsonb_build_array(a.file_id)
                       ELSE '[]'::jsonb END,
     'derivedFromArtifactIds', '[]'::jsonb
   ),
-  COALESCE(s.confidence, 0),
-  COALESCE(s.artifact_type, 'unknown'),
-  s.limitations,
+  COALESCE(a.confidence, 0),
+  COALESCE(a.artifact_type, 'unknown'),
+  a.limitations,
   jsonb_build_object(
-    'originalArtifactId', s.id::text,
-    'artifactType', COALESCE(s.artifact_type, 'unknown'),
-    'artifactData', s.payload
+    'originalArtifactId', a.id::text,
+    'artifactType', COALESCE(a.artifact_type, 'unknown'),
+    'artifactData', a.payload
   ),
   'review_required',
   'medium',
-  (s.artifact_type = 'mock'),
-  COALESCE(s.created_at, NOW())::timestamptz,
+  (a.artifact_type = 'mock'),
+  COALESCE(a.created_at, NOW())::timestamptz,
   NOW()::timestamptz
-FROM source s
+FROM site_survey_geometry_reconstruction_artifacts a
 WHERE NOT EXISTS (
   SELECT 1 FROM unified_geometry_artifacts
 )
