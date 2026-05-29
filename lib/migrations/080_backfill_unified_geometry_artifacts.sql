@@ -5,76 +5,57 @@
 --
 --   Pipeline A: open_source_photo_vision_candidates
 --     Each candidate becomes an obstruction-class artifact with raw_evidence
---     authority. ID is COALESCE(candidate_id, 'pv-' || id).
+--     authority. ID is 'pv-' || id (no candidate_id column exists; the PK is id).
 --
 --   Pipeline B: site_survey_geometry_reconstruction_artifacts
 --     Each artifact is mapped to a geometry_class via the artifact_type mapping
---     below. ID is the artifact's own id.
+--     below. ID is the artifact's own id cast to text.
 --
--- Idempotency guards:
---   1. Skips entirely if unified_geometry_artifacts table does not exist
---      (requires Migration 079 to have run first).
---   2. Skips if unified_geometry_artifacts already has rows (the inline
---      /api/migrate route checks COUNT(*) > 0).
---   3. Uses ON CONFLICT (id) DO NOTHING on every INSERT so re-runs are safe.
+-- Idempotency (plain SQL only — no DO $$ blocks):
+--   1. INSERT ... SELECT ... WHERE NOT EXISTS guard checks that
+--      unified_geometry_artifacts has zero rows before backfilling.
+--      If rows already exist (from a prior run or the inline route),
+--      the WHERE NOT EXISTS fails and zero rows are inserted.
+--   2. ON CONFLICT (id) DO NOTHING on every INSERT so re-runs are safe
+--      even if the guard is bypassed.
 --
--- IMPORTANT DIFFERENCES FROM INLINE DDL (app/api/migrate/route.ts):
---   The inline migration uses JavaScript procedural logic:
---     - JSON.stringify() to build JSONB columns
---     - Null coalescing (??) for default values
---     - Row-by-row try/catch for individual insert failures
---     - A JS geometryClassMap for Pipeline B artifact_type → geometry_class
+-- SCHEMA NOTES (verified against actual table DDL):
+--   open_source_photo_vision_candidates columns (migration 023):
+--     id TEXT PK, survey_id UUID, file_id UUID, tool_name TEXT,
+--     tool_version TEXT, run_hash TEXT, candidate_type TEXT,
+--     candidate_category TEXT, payload JSONB, confidence NUMERIC,
+--     limitations JSONB, review_status TEXT, deterministic_hash TEXT,
+--     thumbnail_data_url TEXT, created_at TIMESTAMPTZ
 --
---   This SQL file expresses the same backfill as pure SQL using:
---     - COALESCE for defaults
---     - jsonb_build_object for structured columns
---     - CASE for the geometry_class mapping
---     - INSERT ... SELECT ... ON CONFLICT DO NOTHING for set-based backfill
+--   site_survey_geometry_reconstruction_artifacts columns (migration 077+078):
+--     id UUID PK, job_id UUID, survey_id UUID, file_id TEXT,
+--     artifact_type TEXT, pipeline TEXT, payload JSONB,
+--     confidence DOUBLE PRECISION, limitations TEXT[], authority JSONB,
+--     created_at TIMESTAMPTZ, stage_timings JSONB, worker_version TEXT
 --
---   The inline /api/migrate route remains the authoritative runtime executor.
---   This SQL file is the source-of-truth documentation for the migration's
---   schema and data intent. Running this file directly is equivalent in
---   outcome but differs in error handling (SQL stops on first error per
---   statement, whereas the inline route catches and continues per row).
+--   KEY DIFFERENCES from original SQL file:
+--     - c.candidate_id  → c.id  (no candidate_id column; PK is id)
+--     - a.tool_version  → a.worker_version  (078 added worker_version, not tool_version)
+--     - a.source_file_ids → a.file_id wrapped in jsonb_build_array (single TEXT, not array)
+--     - a.artifact_data → a.payload  (the JSONB payload column)
+--     - limitations in Pipeline A is JSONB (not text[]), cast with ::text[]
+--       after unnesting; for the INSERT target it goes to a text[] column
+--       so we convert via jsonb_array_elements_text
 -- ============================================================================
-
--- Guard: skip if table does not exist yet
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.tables
-    WHERE table_name = 'unified_geometry_artifacts'
-  ) THEN
-    RAISE NOTICE 'Migration 080: skipped — unified_geometry_artifacts table does not exist yet (run 079 first)';
-  END IF;
-END $$;
-
--- Guard: skip if already populated
--- (The inline route checks COUNT(*) > 0 before backfilling.)
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM information_schema.tables
-    WHERE table_name = 'unified_geometry_artifacts'
-  ) THEN
-    IF (SELECT COUNT(*) FROM unified_geometry_artifacts) > 0 THEN
-      RAISE NOTICE 'Migration 080: skipped — unified_geometry_artifacts already has rows';
-    END IF;
-  END IF;
-END $$;
 
 -- ============================================================================
 -- Pipeline A: open_source_photo_vision_candidates → unified_geometry_artifacts
 -- ============================================================================
 -- Each photo vision candidate is inserted as an obstruction-class artifact
 -- with raw_evidence authority.
+-- Guard: only insert if unified_geometry_artifacts has zero rows (idempotent).
 INSERT INTO unified_geometry_artifacts (
   id, survey_id, geometry_class, authority_state, authority,
   provenance, confidence, label, limitations, geometry_data,
   review_state, priority, mock_artifact, created_at, updated_at
 )
 SELECT
-  COALESCE(c.candidate_id, 'pv-' || c.id),
+  'pv-' || c.id,
   c.survey_id,
   'obstruction',
   'raw_evidence',
@@ -88,18 +69,22 @@ SELECT
   jsonb_build_object(
     'sourcePipeline', 'photo_vision',
     'toolName', COALESCE(c.candidate_type, 'unknown'),
-    'toolVersion', '1.0.0',
-    'runHash', COALESCE(c.id::text, 'unknown'),
-    'sourceFileIds', CASE WHEN c.survey_id IS NOT NULL
-                      THEN jsonb_build_array(c.survey_id)
+    'toolVersion', COALESCE(c.tool_version, '1.0.0'),
+    'runHash', COALESCE(c.run_hash, c.id, 'unknown'),
+    'sourceFileIds', CASE WHEN c.file_id IS NOT NULL
+                      THEN jsonb_build_array(c.file_id::text)
                       ELSE '[]'::jsonb END,
     'derivedFromArtifactIds', '[]'::jsonb
   ),
   COALESCE(c.confidence, 0),
   COALESCE(c.candidate_type, 'unknown'),
-  '{}'::text[],
+  -- limitations: source is JSONB (not text[]), convert via array_agg
+  COALESCE(
+    (SELECT array_agg(elem::text) FROM jsonb_array_elements_text(c.limitations) elem),
+    '{}'::text[]
+  ),
   jsonb_build_object(
-    'originalCandidateId', COALESCE(c.candidate_id, c.id::text),
+    'originalCandidateId', c.id,
     'candidateType', c.candidate_type,
     'candidateCategory', c.candidate_category
   ),
@@ -109,6 +94,9 @@ SELECT
   COALESCE(c.created_at, NOW())::timestamptz,
   NOW()::timestamptz
 FROM open_source_photo_vision_candidates c
+WHERE NOT EXISTS (
+  SELECT 1 FROM unified_geometry_artifacts
+)
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================================
@@ -128,6 +116,8 @@ ON CONFLICT (id) DO NOTHING;
 --   vanishing_point                 → vanishing_point
 --   consensus_plane_candidate       → consensus_plane
 --   (all others)                    → unknown
+--
+-- Guard: only insert if unified_geometry_artifacts has zero rows (idempotent).
 INSERT INTO unified_geometry_artifacts (
   id, survey_id, geometry_class, authority_state, authority,
   provenance, confidence, label, limitations, geometry_data,
@@ -161,9 +151,11 @@ SELECT
   jsonb_build_object(
     'sourcePipeline', 'geometry_reconstruction',
     'toolName', COALESCE(a.artifact_type, 'unknown'),
-    'toolVersion', COALESCE(a.tool_version, '1.0.0'),
+    'toolVersion', COALESCE(a.worker_version, '1.0.0'),
     'runHash', COALESCE(a.job_id::text, a.id::text, 'unknown'),
-    'sourceFileIds', COALESCE(a.source_file_ids, '[]'::jsonb),
+    'sourceFileIds', CASE WHEN a.file_id IS NOT NULL
+                      THEN jsonb_build_array(a.file_id)
+                      ELSE '[]'::jsonb END,
     'derivedFromArtifactIds', '[]'::jsonb
   ),
   COALESCE(a.confidence, 0),
@@ -172,7 +164,7 @@ SELECT
   jsonb_build_object(
     'originalArtifactId', a.id::text,
     'artifactType', COALESCE(a.artifact_type, 'unknown'),
-    'artifactData', a.artifact_data
+    'artifactData', a.payload
   ),
   'review_required',
   'medium',
@@ -180,4 +172,7 @@ SELECT
   COALESCE(a.created_at, NOW())::timestamptz,
   NOW()::timestamptz
 FROM site_survey_geometry_reconstruction_artifacts a
+WHERE NOT EXISTS (
+  SELECT 1 FROM unified_geometry_artifacts
+)
 ON CONFLICT (id) DO NOTHING;

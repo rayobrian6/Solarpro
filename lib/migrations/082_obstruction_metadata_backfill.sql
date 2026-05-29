@@ -8,69 +8,28 @@
 -- Source: site_survey_files WHERE obstruction_data IS NOT NULL AND label = 'roof_plane'
 -- Target: unified_geometry_artifacts (geometry_class = 'obstruction')
 --
--- Idempotency guards:
---   1. Skips if the obstruction_metadata column does not exist yet
---      (requires Migration 081 to have run first).
---   2. Skips if unified_geometry_artifacts already has obstruction-class
---      rows with obstruction_metadata IS NOT NULL (the inline /api/migrate
---      route checks COUNT(*) of such rows).
---   3. Uses ON CONFLICT (id) DO NOTHING on every INSERT so re-runs are safe.
+-- Idempotency (plain SQL only — no DO $$ blocks):
+--   1. INSERT ... SELECT ... WHERE NOT EXISTS guard checks that there are
+--      zero obstruction-class rows with obstruction_metadata IS NOT NULL.
+--      If such rows already exist (from a prior run or the inline route),
+--      the WHERE NOT EXISTS fails and zero rows are inserted.
+--   2. ON CONFLICT (id) DO NOTHING on every INSERT so re-runs are safe
+--      even if the guard is bypassed.
 --
--- IMPORTANT DIFFERENCES FROM INLINE DDL (app/api/migrate/route.ts):
---   The inline migration uses JavaScript procedural logic:
---     - Iterates over obsData.obstructions array with for...of
---     - Builds geometryData and provenance objects via JS object literals
---     - Uses Math.min/Math.max for confidence clamping (0–1 range)
---     - Converts confidence from 0–100 scale to 0–1 scale
---     - Uses row-by-row try/catch for individual insert failures
---     - Generates IDs as: obs.id ?? 'backfill-{survey_id}-{counter}'
---       (counter is a JS runtime variable, not reproducible in pure SQL)
---     - Stores the raw obs object as obstruction_metadata
+-- SCHEMA NOTES (verified against actual table DDL):
+--   site_survey_files columns (migration 016 + dynamic alter):
+--     id UUID PK, survey_id UUID, file_url TEXT, file_type survey_file_type,
+--     label TEXT, filename TEXT, mime_type TEXT, created_at TIMESTAMPTZ,
+--     obstruction_data JSONB (added dynamically by roofObstructionRegistration.ts)
 --
---   This SQL file expresses the same backfill using:
---     - jsonb_array_elements to unnest the obstructions array
---     - jsonb_build_object for structured columns
---     - LEAST/GREATEST for confidence clamping
---     - COALESCE(obs->>'id', ...) for ID generation
---     - The raw obs JSONB as obstruction_metadata directly
---
---   The inline /api/migrate route remains the authoritative runtime executor.
---   This SQL file is the source-of-truth documentation for the migration's
---   schema and data intent. Running this file directly is equivalent in
---   outcome but differs in error handling (SQL stops on first error per
---   statement, whereas the inline route catches and continues per row).
---
---   NOTE: The inline route generates IDs using a JS counter variable when
---   obs.id is null: 'backfill-{survey_id}-{counter}'. In pure SQL, we use
---   ROW_NUMBER() over the unnested result set to produce a stable equivalent.
+--   unified_geometry_artifacts columns (migration 079 + 081):
+--     id TEXT PK, survey_id TEXT, geometry_class TEXT, authority_state TEXT,
+--     authority JSONB, provenance JSONB, confidence REAL, label TEXT,
+--     limitations TEXT[], geometry_data JSONB, review_state TEXT,
+--     review_notes TEXT, priority TEXT, mock_artifact BOOLEAN,
+--     created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ,
+--     obstruction_metadata JSONB NULL (added by migration 081)
 -- ============================================================================
-
--- Guard: skip if obstruction_metadata column does not exist yet
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'unified_geometry_artifacts'
-      AND column_name = 'obstruction_metadata'
-  ) THEN
-    RAISE NOTICE 'Migration 082: obstruction_metadata column not yet created — skipping backfill';
-  END IF;
-END $$;
-
--- Guard: skip if backfill already completed
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'unified_geometry_artifacts'
-      AND column_name = 'obstruction_metadata'
-  ) THEN
-    IF (SELECT COUNT(*) FROM unified_geometry_artifacts
-        WHERE geometry_class = 'obstruction' AND obstruction_metadata IS NOT NULL) > 0 THEN
-      RAISE NOTICE 'Migration 082: obstruction backfill — already completed';
-    END IF;
-  END IF;
-END $$;
 
 -- ============================================================================
 -- Backfill: site_survey_files.obstruction_data → unified_geometry_artifacts
@@ -78,6 +37,9 @@ END $$;
 -- Unnest the obstructions array from each site_survey_file row, then build
 -- the full geometry_data and provenance JSONB and insert as an obstruction
 -- artifact with derived_review_only authority.
+--
+-- Guard: only insert if no obstruction-class rows with obstruction_metadata
+-- already exist (idempotent — matches inline route behavior).
 INSERT INTO unified_geometry_artifacts (
   id, survey_id, geometry_class, authority_state, authority,
   provenance, confidence, label, limitations, geometry_data,
@@ -267,4 +229,9 @@ SELECT
   NOW()::timestamptz,
   NOW()::timestamptz
 FROM unnested u
+WHERE NOT EXISTS (
+  SELECT 1 FROM unified_geometry_artifacts
+  WHERE geometry_class = 'obstruction'
+    AND obstruction_metadata IS NOT NULL
+)
 ON CONFLICT (id) DO NOTHING;
