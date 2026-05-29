@@ -21,6 +21,7 @@ import {
   type RefinedGeometryClass,
   type RefinedCandidate,
 } from '@/lib/assistedEvidenceSources/geometryRefinement';
+import { DEFAULT_SUPPRESSION_CONFIG } from '@/lib/assistedEvidenceSources/candidateSuppression';
 
 /* ── Fixtures ─────────────────────────────────────────────────────────── */
 
@@ -625,6 +626,108 @@ describe('Full pipeline integration', () => {
     for (const c of result.candidates) {
       expect(c.geometryScore).toBeGreaterThan(0);
       expect(c.authority.cadMutationAllowed).toBe(false);
+    }
+  });
+});
+
+
+/* ── Suppression integration (Stage 5) ────────────────────────────────────── */
+
+describe('Suppression integration (Stage 5)', () => {
+  it('when suppression config is provided, candidates get disposition annotations', () => {
+    const raw = makeRaw({ id: 'a', confidence: 50, payload: { region: REGION_100_100_200_200, source: 'dense_edge' } });
+    const result = refineGeometry([raw], { suppression: {} });
+    expect(result.candidates[0].disposition).toBe('trusted');
+    expect(result.candidates[0].suppressionReason).toBe('');
+  });
+
+  it('when suppression config is provided, low-confidence candidates are suppressed', () => {
+    const raw = makeRaw({ id: 'low-conf', confidence: 5, candidateType: 'rectangular_region_candidate', candidateCategory: 'field_context', payload: { region: REGION_100_100_200_200, source: 'dense_edge' } });
+    const result = refineGeometry([raw], { suppression: {} });
+    // Default confidence threshold for unknown is 30, so 5 should be suppressed
+    expect(result.candidates[0].disposition).toBe('suppressed');
+    expect(result.candidates[0].suppressionReason.length).toBeGreaterThan(0);
+  });
+
+  it('when suppression is NOT configured, no disposition is applied (all trusted)', () => {
+    const raw = makeRaw({ id: 'a', confidence: 5, payload: { region: REGION_100_100_200_200, source: 'dense_edge' } });
+    const result = refineGeometry([raw]);
+    // Without suppression config, all candidates are trusted by default
+    expect(result.candidates[0].disposition).toBe('trusted');
+    expect(result.suppressionResult).toBeNull();
+  });
+
+  it('suppressionResult is populated when suppression is configured', () => {
+    const raw = makeRaw({ id: 'a', confidence: 50, payload: { region: REGION_100_100_200_200, source: 'dense_edge' } });
+    const result = refineGeometry([raw], { suppression: {} });
+    expect(result.suppressionResult).not.toBeNull();
+    expect(result.suppressionResult!.inputCount).toBe(1);
+  });
+
+  it('ground_noise candidates are always suppressed', () => {
+    const raw = makeRaw({
+      id: 'ground',
+      candidateType: 'rectangular_region_candidate',
+      candidateCategory: 'field_context',
+      confidence: 50,
+      payload: { region: { x: 400, y: 800, width: 80, height: 60, coordinateSystem: 'normalized_image_0_1000' as const }, source: 'dense_edge_component' },
+    });
+    const result = refineGeometry([raw], { suppression: {} });
+    // ground_noise should be suppressed by default config
+    expect(result.candidates[0].disposition).toBe('suppressed');
+  });
+
+  it('respects custom suppression config overrides', () => {
+    // rectangular_region_candidate with field_context and REGION_100_100_200_200
+    // gets classified as probable_equipment by geometry heuristics.
+    // Set a high confidence threshold for probable_equipment to suppress it.
+    const raw = makeRaw({ id: 'a', confidence: 50, payload: { region: REGION_100_100_200_200, source: 'dense_edge' } });
+    const result = refineGeometry([raw], {
+      suppression: {
+        confidenceThresholds: { probable_equipment: 80 }, // Raise threshold so 50 is suppressed
+      },
+    });
+    expect(result.candidates[0].disposition).toBe('suppressed');
+  });
+
+  it('top-K per class limits are enforced', () => {
+    const raws: RawRefinementInput[] = [];
+    for (let i = 0; i < 6; i++) {
+      raws.push(makeRaw({
+        id: `roof-${i}`,
+        candidateType: 'roof_edge_candidate',
+        candidateCategory: 'roof_context',
+        confidence: 60 - i * 5,
+        payload: { region: { x: i * 150, y: 100, width: 120, height: 100, coordinateSystem: 'normalized_image_0_1000' as const }, source: 'dense_edge' },
+      }));
+    }
+    const result = refineGeometry(raws, { suppression: {} });
+    const trustedRoof = result.candidates.filter((c) => c.geometryClass === 'probable_roof_plane' && c.disposition === 'trusted');
+    const suppressedRoof = result.candidates.filter((c) => c.geometryClass === 'probable_roof_plane' && c.disposition === 'suppressed');
+    expect(trustedRoof.length).toBeLessThanOrEqual(4);
+    expect(suppressedRoof.length).toBeGreaterThan(0);
+  });
+
+  it('global cap of 16 per file is enforced', () => {
+    const raws: RawRefinementInput[] = [];
+    for (let i = 0; i < 20; i++) {
+      raws.push(makeRaw({
+        id: `c-${i}`,
+        candidateType: 'obstruction_candidate',
+        candidateCategory: 'field_context',
+        confidence: 40,
+        payload: { region: { x: (i % 5) * 180, y: Math.floor(i / 5) * 200, width: 100, height: 100, coordinateSystem: 'normalized_image_0_1000' as const }, source: 'dense_edge' },
+      }));
+    }
+    const result = refineGeometry(raws, { suppression: {} });
+    const trustedPerFile = new Map<string, number>();
+    for (const c of result.candidates) {
+      if (c.disposition === 'trusted') {
+        trustedPerFile.set(c.fileId, (trustedPerFile.get(c.fileId) ?? 0) + 1);
+      }
+    }
+    for (const [, count] of trustedPerFile) {
+      expect(count).toBeLessThanOrEqual(16);
     }
   });
 });

@@ -16,6 +16,8 @@ export default defineConfig({
       'lib/**/*.test.tsx',
       'components/**/*.test.ts',
       'components/**/*.test.tsx',
+      '__tests__/**/*.test.ts',
+      '__tests__/**/*.test.tsx',
     ],
     // Per-file environment overrides: use the @vitest-environment docblock
     // comment at the top of each .test.tsx file that needs jsdom.

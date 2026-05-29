@@ -19,6 +19,14 @@
 
 import type { NormalizedRegion, NormalizedLine } from './overlayCoordinateConversion';
 import { extractDrawableRegion, extractDrawableLine } from './overlayCoordinateConversion';
+import {
+  suppressCandidates,
+  DEFAULT_SUPPRESSION_CONFIG,
+  type SuppressionConfig,
+  type SuppressionResult,
+  type SuppressibleCandidate,
+  type CandidateDisposition,
+} from './candidateSuppression';
 
 /* ── Types ────────────────────────────────────────────────────────────── */
 
@@ -34,6 +42,8 @@ export interface RefinementConfig {
   iouThreshold: number;
   /** Whether to merge overlapping boxes (true) or just keep the higher-scored one (false). Default true. */
   mergeOverlaps: boolean;
+  /** Suppression pipeline configuration. If provided, runs Stage 5 after scoring. */
+  suppression?: Partial<SuppressionConfig>;
 }
 
 export const DEFAULT_REFINEMENT_CONFIG: RefinementConfig = {
@@ -86,6 +96,10 @@ export interface RefinedCandidate {
   confidence: number;
   /** Reason this candidate survived refinement (for debugging). */
   refinementNotes: string[];
+  /** Suppression disposition: 'trusted' (shown by default) or 'suppressed' (hidden unless debug). */
+  disposition: CandidateDisposition;
+  /** Human-readable reason if suppressed. Empty string if trusted. */
+  suppressionReason: string;
   /** Authority flags — always review-only. */
   authority: {
     reviewOnly: true;
@@ -107,6 +121,8 @@ export interface RefinedGeometryBundle {
   candidates: RefinedCandidate[];
   /** The config used for this refinement run. */
   config: RefinementConfig;
+  /** Suppression result (if Stage 5 ran). Null if suppression was not configured. */
+  suppressionResult: SuppressionResult | null;
   /** Authority flags — always review-only. */
   authority: {
     reviewOnly: true;
@@ -155,6 +171,8 @@ export function refineGeometry(
       geometryScore,
       confidence: entry.maxConfidence,
       refinementNotes: entry.notes,
+      disposition: 'trusted' as CandidateDisposition,
+      suppressionReason: '',
       authority: {
         reviewOnly: true as const,
         nonAuthoritative: true as const,
@@ -165,12 +183,44 @@ export function refineGeometry(
     };
   });
 
+  // Stage 5: Candidate suppression (if configured)
+  let suppressionResult: SuppressionResult | null = null;
+  let finalCandidates = refined;
+
+  if (cfg.suppression !== undefined) {
+    const suppressible: SuppressibleCandidate[] = refined.map((c) => ({
+      id: c.id,
+      fileId: c.fileId,
+      geometryClass: c.geometryClass,
+      geometryScore: c.geometryScore,
+      confidence: c.confidence,
+      region: c.region,
+    }));
+
+    suppressionResult = suppressCandidates(suppressible, cfg.suppression);
+
+    // Annotate each candidate with its disposition from suppression
+    const dispositionMap = new Map<string, { disposition: CandidateDisposition; reason: string }>();
+    for (const entry of suppressionResult.entries) {
+      dispositionMap.set(entry.candidate.id, { disposition: entry.disposition, reason: entry.suppressionReason });
+    }
+
+    finalCandidates = refined.map((c) => {
+      const d = dispositionMap.get(c.id);
+      if (d) {
+        return { ...c, disposition: d.disposition, suppressionReason: d.reason };
+      }
+      return c;
+    });
+  }
+
   return {
     schemaVersion: 'refined_geometry_preview_v1',
     rawCandidateCount: rawCandidates.length,
-    refinedCandidateCount: refined.length,
-    candidates: refined,
+    refinedCandidateCount: finalCandidates.length,
+    candidates: finalCandidates,
     config: cfg,
+    suppressionResult,
     authority: {
       reviewOnly: true,
       nonAuthoritative: true,

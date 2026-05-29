@@ -31,6 +31,7 @@ import {
   type OverlayFilterCategory,
 } from '@/lib/assistedEvidenceSources/overlayCoordinateConversion';
 import type { RefinedCandidate, RefinedGeometryClass } from '@/lib/assistedEvidenceSources/geometryRefinement';
+import type { CandidateDisposition } from '@/lib/assistedEvidenceSources/candidateSuppression';
 
 /* ── Types ────────────────────────────────────────────────────────────── */
 
@@ -93,6 +94,7 @@ export function PhotoVisionOverlayRenderer({
   overlayMode,
   selectedFileId,
   onSelectFile,
+  showSuppressed = false,
 }: {
   filesWithOverlays: FileWithOverlays[];
   refinedFilesWithOverlays: FileWithRefinedOverlays[];
@@ -100,6 +102,8 @@ export function PhotoVisionOverlayRenderer({
   overlayMode: OverlayMode;
   selectedFileId: string | null;
   onSelectFile: (fileId: string | null) => void;
+  /** Whether to show suppressed candidates (debug mode). Default false. */
+  showSuppressed?: boolean;
 }) {
   if (overlayMode === 'refined') {
     return (
@@ -107,6 +111,7 @@ export function PhotoVisionOverlayRenderer({
         refinedFiles={refinedFilesWithOverlays}
         selectedFileId={selectedFileId}
         onSelectFile={onSelectFile}
+        showSuppressed={showSuppressed}
       />
     );
   }
@@ -206,12 +211,26 @@ function RefinedOverlayView({
   refinedFiles,
   selectedFileId,
   onSelectFile,
+  showSuppressed = false,
 }: {
   refinedFiles: FileWithRefinedOverlays[];
   selectedFileId: string | null;
   onSelectFile: (fileId: string | null) => void;
+  /** Whether to show suppressed candidates (debug mode). Default false. */
+  showSuppressed?: boolean;
 }) {
-  const filesWithCandidates = refinedFiles.filter((f) => f.refinedCandidates.length > 0);
+  // Separate trusted from suppressed candidates
+  const filesWithCandidates = refinedFiles
+    .map((f) => {
+      const trusted = f.refinedCandidates.filter((c) => c.disposition !== 'suppressed');
+      const suppressed = f.refinedCandidates.filter((c) => c.disposition === 'suppressed');
+      return { ...f, trusted, suppressed };
+    })
+    .filter((f) => showSuppressed ? f.refinedCandidates.length > 0 : f.trusted.length > 0);
+
+  // Check if any file has suppressed candidates
+  const hasSuppressed = refinedFiles.some((f) => f.refinedCandidates.some((c) => c.disposition === 'suppressed'));
+  const totalSuppressed = refinedFiles.reduce((sum, f) => sum + f.refinedCandidates.filter((c) => c.disposition === 'suppressed').length, 0);
 
   if (filesWithCandidates.length === 0) {
     return (
@@ -229,6 +248,16 @@ function RefinedOverlayView({
 
   return (
     <div className="space-y-3">
+      {/* Suppression warning banner */}
+      {hasSuppressed && !showSuppressed && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+          <p className="text-[10px] text-amber-200">
+            ⚠ High raw candidate count suppressed. Showing top trusted candidates only.
+            {' '}<span className="text-amber-400">({totalSuppressed} candidate{totalSuppressed !== 1 ? 's' : ''} hidden)</span>
+          </p>
+        </div>
+      )}
+
       {/* File selector strip */}
       {filesWithCandidates.length > 1 && (
         <div className="flex flex-wrap gap-1.5">
@@ -244,7 +273,9 @@ function RefinedOverlayView({
               }`}
             >
               {(fw.filename ?? fw.fileId).slice(0, 20)}
-              <span className="ml-1 text-slate-500">({fw.refinedCandidates.length})</span>
+              <span className="ml-1 text-slate-500">
+                ({showSuppressed ? fw.refinedCandidates.length : fw.trusted.length})
+              </span>
             </button>
           ))}
         </div>
@@ -255,7 +286,9 @@ function RefinedOverlayView({
         <PhotoWithRefinedOverlays
           fileUrl={activeFile.fileUrl}
           filename={activeFile.filename}
-          refinedCandidates={activeFile.refinedCandidates}
+          refinedCandidates={showSuppressed ? activeFile.refinedCandidates : activeFile.trusted}
+          allRefinedCandidates={activeFile.refinedCandidates}
+          showSuppressed={showSuppressed}
         />
       )}
 
@@ -451,10 +484,16 @@ function PhotoWithRefinedOverlays({
   fileUrl,
   filename,
   refinedCandidates,
+  allRefinedCandidates,
+  showSuppressed = false,
 }: {
   fileUrl: string;
   filename: string | null;
   refinedCandidates: RefinedCandidate[];
+  /** Full candidate list including suppressed (for debug overlay). */
+  allRefinedCandidates?: RefinedCandidate[];
+  /** Whether to show suppressed candidates with distinct styling. */
+  showSuppressed?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [imgNatural, setImgNatural] = useState<{ w: number; h: number } | null>(null);
@@ -466,16 +505,20 @@ function PhotoWithRefinedOverlays({
   }, []);
 
   // Compute overlay elements from refined candidates
+  // When showSuppressed is true, use allRefinedCandidates to show suppressed with dashed styling
+  const candidatesToRender = showSuppressed && allRefinedCandidates ? allRefinedCandidates : refinedCandidates;
   const overlayElements: Array<{
     candidate: RefinedCandidate;
     color: { stroke: string; fill: string; label: string };
     regionSvg: { x: number; y: number; width: number; height: number };
+    isSuppressed: boolean;
   }> = [];
 
-  for (const rc of refinedCandidates) {
+  for (const rc of candidatesToRender) {
     const color = GEOMETRY_CLASS_COLORS[rc.geometryClass] ?? GEOMETRY_CLASS_COLORS.unknown;
     const regionSvg = normalizedRegionToSvgPercent(rc.region);
-    overlayElements.push({ candidate: rc, color, regionSvg });
+    const isSuppressed = rc.disposition === 'suppressed';
+    overlayElements.push({ candidate: rc, color, regionSvg, isSuppressed });
   }
 
   return (
@@ -502,7 +545,9 @@ function PhotoWithRefinedOverlays({
         {overlayElements.map((entry, idx) => {
           const isHovered = hoveredIdx === idx;
           const strokeWidth = isHovered ? 0.7 : 0.4;
-          const fillOpacity = isHovered ? 0.18 : 0.08;
+          const fillOpacity = isHovered ? 0.18 : (entry.isSuppressed ? 0.03 : 0.08);
+          const strokeDash = entry.isSuppressed ? '1,1' : 'none';
+          const strokeOpacity = entry.isSuppressed ? 0.5 : 1;
 
           return (
             <g key={entry.candidate.id}>
@@ -515,6 +560,8 @@ function PhotoWithRefinedOverlays({
                 fillOpacity={fillOpacity}
                 stroke={entry.color.stroke}
                 strokeWidth={strokeWidth}
+                strokeDasharray={strokeDash}
+                strokeOpacity={strokeOpacity}
                 rx={0.2}
                 style={{ pointerEvents: 'auto', cursor: 'pointer' }}
                 onMouseEnter={() => setHoveredIdx(idx)}
@@ -542,10 +589,21 @@ function PhotoWithRefinedOverlays({
             <span className="text-[10px] text-slate-500">
               Conf: {Math.round(overlayElements[hoveredIdx].candidate.confidence)}%
             </span>
-            <span className="text-[9px] text-emerald-300 border border-emerald-500/30 rounded px-1">
-              REFINED
-            </span>
+            {overlayElements[hoveredIdx].isSuppressed ? (
+              <span className="text-[9px] text-red-300 border border-red-500/30 rounded px-1">
+                SUPPRESSED
+              </span>
+            ) : (
+              <span className="text-[9px] text-emerald-300 border border-emerald-500/30 rounded px-1">
+                REFINED
+              </span>
+            )}
           </div>
+          {overlayElements[hoveredIdx].isSuppressed && overlayElements[hoveredIdx].candidate.suppressionReason && (
+            <p className="mt-0.5 text-[9px] text-red-300/70">
+              Reason: {overlayElements[hoveredIdx].candidate.suppressionReason}
+            </p>
+          )}
           <p className="mt-0.5 text-[9px] text-slate-500">
             Sources: {overlayElements[hoveredIdx].candidate.sourceIds.length} &middot;{' '}
             {overlayElements[hoveredIdx].candidate.candidateType.replace(/_/g, ' ')} &middot;{' '}
