@@ -202,10 +202,20 @@ function polygonIoUProxy(a: NormalizedPoint[], b: NormalizedPoint[]): number {
 // Utility: extract polygon from a plane candidate's region
 // ---------------------------------------------------------------------------
 
-/** Extract a polygon from a plane candidate's region field. Falls back to a unit square. */
+/**
+ * Extract a polygon from a plane candidate.
+ * Prefers the real contour polygon (from Canny edge detection) when available,
+ * falls back to deriving a rectangle from the bbox region, and finally
+ * to a unit square — ensuring overlays trace actual home shapes, not boxes.
+ */
 function extractPolygonFromPlane(
   plane: RoofPlaneCandidate | WallPlaneCandidate,
 ): NormalizedPoint[] {
+  // Prefer real contour polygon from Canny edge detection / segmentation masks
+  if (plane.polygon && plane.polygon.length >= 3) {
+    return plane.polygon;
+  }
+  // Fall back to bbox-derived rectangle
   if (plane.region) {
     const r = plane.region;
     // NormalizedRegion is { x, y, width, height, coordinateSystem: 'normalized_image_0_1000' }
@@ -256,7 +266,7 @@ function wrapRoofPlane(plane: RoofPlaneCandidate, fileId: string): PlaneWrapper 
     slopeDegrees: plane.slopeDegrees,
     aspectDegrees: plane.aspectDegrees,
     associatedLineIds: plane.associatedLineIds,
-    sourceMaskIds: [],
+    sourceMaskIds: plane.sourceMaskId ? [plane.sourceMaskId] : [],
   };
 }
 
@@ -270,7 +280,7 @@ function wrapWallPlane(plane: WallPlaneCandidate, fileId: string): PlaneWrapper 
     estimatedHeightM: plane.estimatedHeightM,
     facingDirection: plane.facingDirection,
     associatedLineIds: plane.associatedLineIds,
-    sourceMaskIds: [],
+    sourceMaskIds: plane.sourceMaskId ? [plane.sourceMaskId] : [],
   };
 }
 
