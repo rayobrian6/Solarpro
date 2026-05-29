@@ -986,24 +986,49 @@ export async function writeUnifiedArtifact(
 export async function writeUnifiedArtifacts(
   artifacts: UnifiedGeometryArtifact[],
 ): Promise<{ inserted: number; skipped: number; failed: number }> {
-  let inserted = 0;
-  let skipped = 0;
-  let failed = 0;
+  if (artifacts.length === 0) {
+    return { inserted: 0, skipped: 0, failed: 0 };
+  }
 
-  for (const artifact of artifacts) {
-    try {
-      const result = await writeUnifiedArtifact(artifact);
-      if (result) {
-        inserted++;
-      } else {
-        skipped++;
+  // Process artifacts in concurrent batches for much better throughput
+  // than sequential INSERTs. Each batch runs up to CONCURRENCY INSERTs
+  // in parallel, and we process BATCH_SIZE artifacts at a time.
+  const CONCURRENCY = 20;
+  const BATCH_SIZE = 500;
+  let totalInserted = 0;
+  let totalSkipped = 0;
+  let totalFailed = 0;
+
+  for (let offset = 0; offset < artifacts.length; offset += BATCH_SIZE) {
+    const batch = artifacts.slice(offset, offset + BATCH_SIZE);
+
+    // Process this batch in chunks of CONCURRENCY
+    for (let i = 0; i < batch.length; i += CONCURRENCY) {
+      const chunk = batch.slice(i, i + CONCURRENCY);
+      const results = await Promise.allSettled(
+        chunk.map(async (artifact) => {
+          try {
+            const result = await writeUnifiedArtifact(artifact);
+            return result ? 'inserted' : 'skipped';
+          } catch {
+            return 'failed';
+          }
+        }),
+      );
+
+      for (const r of results) {
+        if (r.status === 'fulfilled') {
+          if (r.value === 'inserted') totalInserted++;
+          else if (r.value === 'skipped') totalSkipped++;
+          else totalFailed++;
+        } else {
+          totalFailed++;
+        }
       }
-    } catch {
-      failed++;
     }
   }
 
-  return { inserted, skipped, failed };
+  return { inserted: totalInserted, skipped: totalSkipped, failed: totalFailed };
 }
 
 /**

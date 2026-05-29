@@ -46,7 +46,7 @@
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
@@ -87,7 +87,7 @@ import { writeUnifiedArtifacts, deleteUnifiedArtifactsByPipeline } from '@/lib/s
 // ---------------------------------------------------------------------------
 
 /** Overall timeout for the entire finalization pipeline (ms). */
-const FINALIZATION_OVERALL_TIMEOUT_MS = 55_000; // 55s — leaves 5s headroom in Vercel's 60s limit
+const FINALIZATION_OVERALL_TIMEOUT_MS = 290_000; // 290s — leaves headroom in Vercel's 300s limit (Pro plan)
 
 /** Timeout per OpenAI Vision classification call (ms). Already has 30s per-call, but add overall budget. */
 const VISION_CLASSIFICATION_BUDGET_MS = 5 * 60_000; // 5 min — but capped by overall timeout
@@ -518,7 +518,7 @@ export async function POST(
     if (dryRun) {
       const stagePlan = [
         { stage: 1, name: 'persist', description: 'Persist candidates to DB', timeoutMs: DB_STATEMENT_TIMEOUT_MS, fatal: true },
-        { stage: 1.5, name: 'unify', description: 'Adapt Pipeline A candidates into unified geometry table', timeoutMs: DB_STATEMENT_TIMEOUT_MS, fatal: false },
+        { stage: 1.5, name: 'unify', description: 'Adapt Pipeline A candidates into unified geometry table', timeoutMs: 120_000, fatal: false },
         { stage: 2, name: 'labels', description: 'Update photo labels from YOLO/OCR candidates', timeoutMs: DB_STATEMENT_TIMEOUT_MS, fatal: true },
         { stage: 3, name: 'obstructions', description: 'Register obstructions on roof_plane photos', timeoutMs: DB_STATEMENT_TIMEOUT_MS, fatal: false },
         { stage: 4, name: 'classification', description: 'OpenAI Vision fallback classification', timeoutMs: VISION_CLASSIFICATION_BUDGET_MS, fatal: false, skipped: !process.env.OPENAI_API_KEY },
@@ -605,10 +605,10 @@ export async function POST(
       // Adapt all Pipeline A candidates through the adapter
       const adaptedArtifacts = adaptPhotoVisionBundle(run.candidates, surveyId);
 
-      // Write all adapted artifacts to the unified table
+      // Write all adapted artifacts to the unified table (batch INSERT — may take up to 2min for large candidate sets)
       const writeResult = await withTimeout(
         writeUnifiedArtifacts(adaptedArtifacts),
-        DB_STATEMENT_TIMEOUT_MS,
+        120_000,
         'finalize:unify',
       );
 
