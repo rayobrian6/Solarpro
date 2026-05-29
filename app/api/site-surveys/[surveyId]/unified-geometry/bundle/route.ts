@@ -24,7 +24,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { isValidUUID } from '@/lib/db-neon';
+import { isValidUUID, getSiteSurveyById, GetSiteSurveyByIdOptions } from '@/lib/db-neon';
 import { getUnifiedArtifactsForSurvey } from '@/lib/siteSurveys/unifiedGeometry/unifiedArtifactStore';
 import {
   BundleBuilder,
@@ -44,6 +44,14 @@ export async function GET(
     const { surveyId } = params;
     if (!isValidUUID(surveyId)) {
       return NextResponse.json({ success: false, error: 'Invalid survey ID' }, { status: 400 });
+    }
+
+    // Verify survey ownership (dev bypass user skips ownership check)
+    const survey = await getSiteSurveyById(surveyId, user.id, {
+      bypassOwnershipCheck: user.id === 'dev-user-bypass-001',
+    } as GetSiteSurveyByIdOptions);
+    if (!survey) {
+      return NextResponse.json({ success: false, error: 'Survey not found' }, { status: 404 });
     }
 
     // ── PRIMARY: Query unified_geometry_artifacts directly ──────────────

@@ -126,6 +126,7 @@ export {
   getSiteSurveysByProject,
   getSiteSurveysByClient,
   getSiteSurveyById,
+  type GetSiteSurveyByIdOptions,
   createSiteSurvey,
   updateSiteSurvey,
   getSiteSurveyFiles,

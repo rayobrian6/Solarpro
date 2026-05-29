@@ -141,25 +141,52 @@ export async function getSiteSurveysByClient(
 // ---------------------------------------------------------------------------
 // getSiteSurveyById
 // ---------------------------------------------------------------------------
+export interface GetSiteSurveyByIdOptions {
+  /** When true, skip the client.user_id ownership check.
+   *  Used by dev auth bypass (dev-user-bypass-001) so the dev user can
+   *  access any survey without needing to be the owner.
+   *  Callers MUST verify the requesting user is a dev/admin before setting
+   *  this flag — the function itself does not re-check. */
+  bypassOwnershipCheck?: boolean;
+}
+
 export async function getSiteSurveyById(
   surveyId: string,
   userId: string,
+  options?: GetSiteSurveyByIdOptions,
 ): Promise<SiteSurvey | null> {
   const sql = await getDbReady();
-  const rows = await sql`
-    SELECT
-      ss.*,
-      c.name AS client_name,
-      p.name AS project_name,
-      COUNT(ssf.id)::int AS file_count
-    FROM site_surveys ss
-    JOIN clients c ON c.id = ss.client_id AND c.user_id = ${userId}
-    LEFT JOIN projects p ON p.id = ss.project_id
-    LEFT JOIN site_survey_files ssf ON ssf.survey_id = ss.id
-    WHERE ss.id = ${surveyId}
-    GROUP BY ss.id, c.name, p.name
-    LIMIT 1
-  `;
+
+  const rows = options?.bypassOwnershipCheck
+    ? await sql`
+        SELECT
+          ss.*,
+          c.name AS client_name,
+          p.name AS project_name,
+          COUNT(ssf.id)::int AS file_count
+        FROM site_surveys ss
+        JOIN clients c ON c.id = ss.client_id
+        LEFT JOIN projects p ON p.id = ss.project_id
+        LEFT JOIN site_survey_files ssf ON ssf.survey_id = ss.id
+        WHERE ss.id = ${surveyId}
+        GROUP BY ss.id, c.name, p.name
+        LIMIT 1
+      `
+    : await sql`
+        SELECT
+          ss.*,
+          c.name AS client_name,
+          p.name AS project_name,
+          COUNT(ssf.id)::int AS file_count
+        FROM site_surveys ss
+        JOIN clients c ON c.id = ss.client_id AND c.user_id = ${userId}
+        LEFT JOIN projects p ON p.id = ss.project_id
+        LEFT JOIN site_survey_files ssf ON ssf.survey_id = ss.id
+        WHERE ss.id = ${surveyId}
+        GROUP BY ss.id, c.name, p.name
+        LIMIT 1
+      `;
+
   if (!rows.length) return null;
   return rowToSiteSurvey(rows[0] as Record<string, unknown>);
 }
