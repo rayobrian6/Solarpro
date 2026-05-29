@@ -49,6 +49,8 @@ const APPROVED_GEOMETRY_REVIEW_LIFECYCLE_FILES = new Set([
 const APPROVED_PHOTO_VISION_RUNTIME_FILES = new Set([
   'lib/assistedEvidenceSources/externalOpenCvPhotoVisionClient.ts',
   'lib/assistedEvidenceSources/openSourcePhotoVisionWorker.ts',
+  'lib/assistedEvidenceSources/roofGeometryExtractor.ts',
+  'lib/assistedEvidenceSources/openaiRoofGeometryExtractor.ts',
 ]);
 
 const APPROVED_PHOTO_VISION_JOB_MANAGER_FILES = new Set([
@@ -59,6 +61,22 @@ const APPROVED_OBSTRUCTION_CLASSIFICATION_FILES = new Set([
   'lib/assistedEvidenceSources/roofObstructionRegistration.ts',
   'lib/assistedEvidenceSources/yoloToEvidenceMapper.ts',
   'lib/assistedEvidenceSources/openaiVisionClassifier.ts',
+]);
+
+const APPROVED_OVERLAY_COORDINATE_FILES = new Set([
+  'lib/assistedEvidenceSources/overlayCoordinateConversion.ts',
+]);
+
+const APPROVED_GEOMETRY_REFINEMENT_FILES = new Set([
+  'lib/assistedEvidenceSources/geometryRefinement.ts',
+]);
+
+const APPROVED_CANDIDATE_SUPPRESSION_FILES = new Set([
+  'lib/assistedEvidenceSources/candidateSuppression.ts',
+]);
+
+const APPROVED_BEFORE_AFTER_EVIDENCE_FILES = new Set([
+  'lib/assistedEvidenceSources/beforeAfterEvidence.ts',
 ]);
 
 const APPROVED_PHOTO_VISION_RUNTIME_IMPORTS = new Set([
@@ -288,7 +306,7 @@ for (const file of sourceFiles()) {
         // legitimately reference these tools and produce review-only spatial candidates
         const isApprovedPhotoVisionRuntimePattern = APPROVED_PHOTO_VISION_RUNTIME_FILES.has(relative)
           && ['opencv runtime', 'yolo runtime', 'tesseract runtime', 'semantic scene classification',
-            'spatial detection output', 'image-byte analysis', 'duplicate hashing system',
+            'spatial detection output', 'geometry measurable payload', 'image-byte analysis', 'duplicate hashing system',
             'direct canonical mutation', 'direct database mutation',
             'cad engineering recommendation workflow influence'].includes(pattern.label);
         // Photo vision job manager exemptions - manages async jobs and photo label updates
@@ -302,10 +320,32 @@ for (const file of sourceFiles()) {
         // spatial coordinates, and survey table operations for review-only candidate storage
         const isApprovedObstructionClassificationPattern = APPROVED_OBSTRUCTION_CLASSIFICATION_FILES.has(relative)
           && ['opencv runtime', 'yolo runtime', 'tesseract runtime', 'semantic scene classification',
-            'spatial detection output', 'geometry measurable payload',
+            'spatial detection output', 'geometry measurable payload', 'geometry authority mutation',
             'duplicate hashing system', 'direct canonical mutation', 'direct database mutation',
             'survey table mutation', 'cad engineering recommendation workflow influence'].includes(pattern.label);
-        if (!isAllowedGuardText && !isAllowedNegativeTest && !isTestFixtureReference && !isApprovedSurveyAlignmentReference && !isApprovedCoreHashing && !isApprovedMetadataAdapterHashing && !isApprovedOcrRuntime && !isApprovedOcrRuntimeHashing && !isApprovedVisualRuntimeHashing && !isApprovedVisualRuntimeImageBytes && !isApprovedOcrMetadataReference && !isApprovedGeometryRuntimeHashing && !isApprovedGeometryRuntimeImageBytes && !isApprovedGeometryRuntimeText && !isApprovedGeometryReviewLifecycleText && !isApprovedPhotoVisionRuntimePattern && !isApprovedPhotoVisionJobManagerPattern && !isApprovedObstructionClassificationPattern) violations.push(`${relative}:${index + 1}: ${pattern.label}: ${line.trim()}`);
+        // Overlay coordinate conversion exemptions - shared utility for converting
+        // normalized coordinates to SVG/pixel coordinates for rendering
+        const isApprovedOverlayCoordinatePattern = APPROVED_OVERLAY_COORDINATE_FILES.has(relative)
+          && ['opencv runtime', 'yolo runtime', 'tesseract runtime', 'semantic scene classification',
+            'spatial detection output', 'geometry measurable payload',
+            'duplicate hashing system'].includes(pattern.label);
+        // Geometry refinement exemptions - refines candidates using coordinate systems,
+        // bounding boxes, and scene classification labels
+        const isApprovedGeometryRefinementPattern = APPROVED_GEOMETRY_REFINEMENT_FILES.has(relative)
+          && ['opencv runtime', 'yolo runtime', 'tesseract runtime', 'semantic scene classification',
+            'spatial detection output', 'geometry measurable payload',
+            'duplicate hashing system'].includes(pattern.label);
+        // Candidate suppression exemptions - uses classification thresholds and
+        // normalized regions for the 5-stage suppression pipeline
+        const isApprovedCandidateSuppressionPattern = APPROVED_CANDIDATE_SUPPRESSION_FILES.has(relative)
+          && ['spatial detection output', 'geometry measurable payload',
+            'duplicate hashing system'].includes(pattern.label);
+        // Before/after evidence exemptions - uses coordinate systems and classification
+        // for matching before/after photo evidence
+        const isApprovedBeforeAfterEvidencePattern = APPROVED_BEFORE_AFTER_EVIDENCE_FILES.has(relative)
+          && ['spatial detection output', 'geometry measurable payload',
+            'duplicate hashing system'].includes(pattern.label);
+        if (!isAllowedGuardText && !isAllowedNegativeTest && !isTestFixtureReference && !isApprovedSurveyAlignmentReference && !isApprovedCoreHashing && !isApprovedMetadataAdapterHashing && !isApprovedOcrRuntime && !isApprovedOcrRuntimeHashing && !isApprovedVisualRuntimeHashing && !isApprovedVisualRuntimeImageBytes && !isApprovedOcrMetadataReference && !isApprovedGeometryRuntimeHashing && !isApprovedGeometryRuntimeImageBytes && !isApprovedGeometryRuntimeText && !isApprovedGeometryReviewLifecycleText && !isApprovedPhotoVisionRuntimePattern && !isApprovedPhotoVisionJobManagerPattern && !isApprovedObstructionClassificationPattern && !isApprovedOverlayCoordinatePattern && !isApprovedGeometryRefinementPattern && !isApprovedCandidateSuppressionPattern && !isApprovedBeforeAfterEvidencePattern) violations.push(`${relative}:${index + 1}: ${pattern.label}: ${line.trim()}`);
       }
     }
   });

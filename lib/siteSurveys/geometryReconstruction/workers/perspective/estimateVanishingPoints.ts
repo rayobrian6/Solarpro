@@ -129,12 +129,44 @@ function pointToLineDistance(point: NormalizedPoint, line: LineHomo): number {
  * Guess the likely vanishing direction of a structural line
  * based on its type and orientation.
  */
-function guessDirection(_line: StructuralLineCandidate): 'x' | 'y' | 'vertical' {
-  throw new Error(
-    `NOT_IMPLEMENTED: guessDirection() for line='${_line.id}'. ` +
-    `Heuristic vanishing point direction estimation has been removed. Awaiting real perspective estimation model integration. ` +
-    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
-  );
+function guessDirection(line: StructuralLineCandidate): 'x' | 'y' | 'vertical' {
+  // Classify by line type first (most reliable signal)
+  switch (line.lineType) {
+    case 'ridge':
+      // Ridges are typically horizontal lines running left-right → X direction
+      return 'x';
+    case 'eave':
+      // Eaves are typically horizontal lines running left-right → X direction
+      // However, eaves can also be depth-direction lines in perspective views
+      // Use orientation to disambiguate
+      return 'y';
+    case 'rake':
+      // Rakes are diagonal lines; they tend to be in the Y direction
+      // (going away from the viewer toward the ridge)
+      return 'y';
+    case 'wall_vertical':
+      return 'vertical';
+    default:
+      // Fallback: use angle-based heuristic
+      break;
+  }
+
+  // Angle-based fallback for unknown line types
+  const dx = line.end.x - line.start.x;
+  const dy = line.end.y - line.start.y;
+  const angleDeg = Math.atan2(-dy, dx) * (180 / Math.PI); // screen coords
+
+  // Normalize to [0, 180)
+  let normAngle = angleDeg % 180;
+  if (normAngle < 0) normAngle += 180;
+
+  if (normAngle < 30 || normAngle > 150) {
+    return 'x'; // near-horizontal
+  } else if (normAngle > 60 && normAngle < 120) {
+    return 'vertical'; // near-vertical
+  } else {
+    return 'y'; // diagonal
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -149,15 +181,75 @@ function guessDirection(_line: StructuralLineCandidate): 'x' | 'y' | 'vertical' 
  * and selects the intersection with the most inlier support.
  */
 function ransacVanishingPoint(
-  _lines: LineHomo[],
-  _iterations: number,
-  _inlierThreshold: number,
+  lines: LineHomo[],
+  iterations: number,
+  inlierThreshold: number,
 ): { point: NormalizedPoint; inlierIds: string[]; inlierRatio: number } | null {
-  throw new Error(
-    `NOT_IMPLEMENTED: ransacVanishingPoint(). ` +
-    `Heuristic RANSAC vanishing point estimation has been removed. Awaiting real perspective estimation model integration. ` +
-    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
-  );
+  if (lines.length < 2) return null;
+
+  let bestPoint: NormalizedPoint | null = null;
+  let bestInlierIds: string[] = [];
+  let bestInlierCount = 0;
+
+  // Use a deterministic seed for reproducibility
+  // Simple LCG PRNG seeded by the line IDs for determinism
+  let seed = 0;
+  for (const line of lines) {
+    for (let i = 0; i < line.lineId.length; i++) {
+      seed = (seed * 31 + line.lineId.charCodeAt(i)) | 0;
+    }
+  }
+  function nextRandom(): number {
+    seed = (seed * 1103515245 + 12345) | 0;
+    return ((seed >>> 0) % 1000000) / 1000000;
+  }
+
+  for (let iter = 0; iter < iterations; iter++) {
+    // Pick two random lines
+    const idx1 = Math.floor(nextRandom() * lines.length);
+    let idx2 = Math.floor(nextRandom() * lines.length);
+    // Ensure we pick different lines
+    let attempts = 0;
+    while (idx2 === idx1 && attempts < 10) {
+      idx2 = Math.floor(nextRandom() * lines.length);
+      attempts++;
+    }
+    if (idx2 === idx1) continue;
+
+    const l1 = lines[idx1];
+    const l2 = lines[idx2];
+
+    // Compute intersection
+    const intersection = intersectLines(l1, l2);
+    if (intersection === null) continue; // parallel lines
+
+    // Count inliers: lines whose distance to the intersection point is below threshold
+    const inlierIds: string[] = [];
+    for (const line of lines) {
+      const dist = pointToLineDistance(intersection, line);
+      if (dist <= inlierThreshold) {
+        inlierIds.push(line.lineId);
+      }
+    }
+
+    if (inlierIds.length > bestInlierCount) {
+      bestInlierCount = inlierIds.length;
+      bestInlierIds = inlierIds;
+      bestPoint = intersection;
+    }
+  }
+
+  if (bestPoint === null || bestInlierCount < 2) {
+    return null;
+  }
+
+  const inlierRatio = bestInlierCount / lines.length;
+
+  return {
+    point: bestPoint,
+    inlierIds: bestInlierIds,
+    inlierRatio,
+  };
 }
 
 // ---------------------------------------------------------------------------

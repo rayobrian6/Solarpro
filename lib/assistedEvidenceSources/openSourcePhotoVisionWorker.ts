@@ -1,16 +1,77 @@
+/**
+ * Open-source photo vision worker — real roof geometry extraction.
+ *
+ * Processes survey photos through a 512×512 Canny edge detection +
+ * contour tracing pipeline to extract actual roof shapes, obstructions,
+ * equipment, and structural lines.
+ *
+ * When OPENAI_API_KEY is available, GPT-4o Vision is used as a
+ * supplementary geometry source for higher-accuracy roof plane polygons.
+ *
+ * All candidates are REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY.
+ * They are operator review aids only and must not be used as canonical
+ * evidence, CAD geometry, permit input, BOM input, or engineering
+ * workflow state.
+ */
+
 import crypto from 'crypto';
 import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
+import {
+  extractRoofGeometry,
+  contourToNormalizedRegion,
+  lineToNormalizedLine,
+  contourToNormalizedPolygon,
+  type ExtractedContour,
+  type ExtractedLine,
+  type ContourClassification,
+  type RoofGeometryExtractionResult,
+  EXTRACTION_SIZE,
+} from './roofGeometryExtractor';
+import {
+  extractRoofGeometryWithVision,
+  visionRoofPlaneToRegion,
+  visionObstructionToRegion,
+  visionEquipmentToRegion,
+  visionStructuralLineToNormalizedLine,
+  type VisionGeometryResult,
+  type VisionRoofPlane,
+  type VisionObstruction,
+  type VisionEquipment,
+  type VisionStructuralLine,
+} from './openaiRoofGeometryExtractor';
+import type { NormalizedRegion, NormalizedLine } from './overlayCoordinateConversion';
 
 export const OPEN_SOURCE_PHOTO_VISION_TOOL_NAME = 'open-source-photo-vision-worker';
-export const OPEN_SOURCE_PHOTO_VISION_TOOL_VERSION = '1.0.0';
+export const OPEN_SOURCE_PHOTO_VISION_TOOL_VERSION = '2.0.0';
 
 export type OpenSourcePhotoVisionToolName = typeof OPEN_SOURCE_PHOTO_VISION_TOOL_NAME | 'external-opencv-photo-vision-worker' | (string & {});
-export type OpenSourcePhotoVisionToolVersion = typeof OPEN_SOURCE_PHOTO_VISION_TOOL_VERSION | '0.1.0' | (string & {});
+export type OpenSourcePhotoVisionToolVersion = typeof OPEN_SOURCE_PHOTO_VISION_TOOL_VERSION | '1.0.0' | '0.1.0' | (string & {});
 
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 9_000;
-const EDGE_SIZE = 96;
 const THUMB_SIZE = 160;
+
+/** Classification → candidate type mapping. */
+const CLASSIFICATION_TYPE_MAP: Record<ContourClassification, OpenSourcePhotoVisionCandidateType> = {
+  probable_roof_plane: 'roof_edge_candidate',
+  probable_wall_plane: 'wall_anchor_candidate',
+  probable_obstruction: 'obstruction_candidate',
+  probable_equipment: 'equipment_anchor_candidate',
+  probable_ground_noise: 'rectangular_region_candidate',
+  probable_sky_region: 'rectangular_region_candidate',
+  unknown: 'rectangular_region_candidate',
+};
+
+/** Classification → candidate category mapping. */
+const CLASSIFICATION_CATEGORY_MAP: Record<ContourClassification, OpenSourcePhotoVisionCandidate['candidateCategory']> = {
+  probable_roof_plane: 'roof_context',
+  probable_wall_plane: 'structure_context',
+  probable_obstruction: 'field_context',
+  probable_equipment: 'electrical_context',
+  probable_ground_noise: 'field_context',
+  probable_sky_region: 'field_context',
+  unknown: 'field_context',
+};
 
 export type OpenSourcePhotoVisionCandidateType =
   | 'edge_map_summary'
@@ -92,6 +153,8 @@ export interface OpenSourcePhotoVisionFileResult {
   candidates: OpenSourcePhotoVisionCandidate[];
   limitations: string[];
   runHash: string;
+  /** Which extraction method was used. */
+  extractionMethod: 'sharp_contour_512' | 'openai_vision' | 'combined' | 'none';
 }
 
 export interface OpenSourcePhotoVisionRunResult {
@@ -127,14 +190,6 @@ export interface OpenSourcePhotoVisionRunResult {
     engineeringWorkflowMutationAllowed: false;
   };
   limitations: string[];
-}
-
-interface PixelAnalysis {
-  brightness: number;
-  sharpness: number;
-  edgeSummary: NonNullable<OpenSourcePhotoVisionFileResult['edgeSummary']>;
-  lines: OpenSourcePhotoVisionLine[];
-  regions: OpenSourcePhotoVisionRegion[];
 }
 
 export async function runOpenSourcePhotoVisionWorker(input: {
@@ -178,21 +233,84 @@ export async function runOpenSourcePhotoVisionWorker(input: {
   };
 }
 
-async function analyzeFile(survey: Pick<SiteSurvey, 'id' | 'projectId'>, file: SiteSurveyFile, createdAt: string): Promise<OpenSourcePhotoVisionFileResult> {
+// ────────────────────────────────────────────────────────────────────────────
+// Per-file analysis — real contour extraction
+// ────────────────────────────────────────────────────────────────────────────
+
+async function analyzeFile(
+  survey: Pick<SiteSurvey, 'id' | 'projectId'>,
+  file: SiteSurveyFile,
+  createdAt: string,
+): Promise<OpenSourcePhotoVisionFileResult> {
   try {
     const bytes = await fetchImageBuffer(file.fileUrl);
     const byteHash = sha256(bytes);
+
     // Dynamic import — sharp has native bindings, keep out of client-side webpack bundle
     const sharp = (await import('sharp')).default;
     const image = sharp(bytes, { failOn: 'none' }).rotate();
     const metadata = await image.metadata();
     const width = metadata.width ?? null;
     const height = metadata.height ?? null;
-    const thumb = await image.clone().resize({ width: THUMB_SIZE, height: THUMB_SIZE, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 72 }).toBuffer();
-    const pixels = await analyzePixels(bytes);
-    const qualityScore = scoreQuality(width, height, bytes.length, pixels.sharpness, pixels.brightness);
-    const runHash = sha256(stable({ fileId: file.id, surveyId: survey.id, byteHash, edgeSummary: pixels.edgeSummary, lines: pixels.lines, regions: pixels.regions }));
-    const candidates = buildCandidates({ survey, file, createdAt, runHash, byteHash, qualityScore, pixels });
+
+    const thumb = await image
+      .clone()
+      .resize({ width: THUMB_SIZE, height: THUMB_SIZE, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 72 })
+      .toBuffer();
+
+    // ── Real geometry extraction at 512×512 ──────────────────────────────
+    const geometry = await extractRoofGeometry(bytes);
+    const qualityScore = scoreQuality(width, height, bytes.length, geometry.metrics.sharpness, geometry.metrics.brightness);
+
+    // ── Optional OpenAI Vision extraction ─────────────────────────────────
+    let visionResult: VisionGeometryResult | null = null;
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (openaiKey && /^https?:\/\//i.test(file.fileUrl)) {
+      try {
+        visionResult = await extractRoofGeometryWithVision(file.fileUrl, file.id, openaiKey);
+      } catch {
+        // Vision extraction failed — continue with sharp-only results
+        visionResult = null;
+      }
+    }
+
+    // Determine extraction method
+    const extractionMethod: OpenSourcePhotoVisionFileResult['extractionMethod'] =
+      visionResult?.success ? 'combined' : 'sharp_contour_512';
+
+    // Build edge summary from extraction metrics
+    const edgeSummary = {
+      edgePixelRatio: geometry.metrics.edgePixelRatio,
+      horizontalStrength: geometry.metrics.horizontalStrength,
+      verticalStrength: geometry.metrics.verticalStrength,
+      diagonalStrength: geometry.metrics.diagonalStrength,
+      denseRegionCount: geometry.contourCount,
+    };
+
+    const runHash = sha256(stable({
+      fileId: file.id,
+      surveyId: survey.id,
+      byteHash,
+      edgeSummary,
+      contourCount: geometry.contourCount,
+      lineCount: geometry.lineCount,
+    }));
+
+    // ── Build real candidates from extracted geometry ─────────────────────
+    const candidates = buildCandidatesFromGeometry({
+      survey,
+      file,
+      createdAt,
+      runHash,
+      byteHash,
+      qualityScore,
+      geometry,
+      visionResult,
+      imgW: geometry.extractionSize,
+      imgH: geometry.extractionSize,
+    });
+
     return {
       surveyId: survey.id,
       fileId: file.id,
@@ -200,15 +318,29 @@ async function analyzeFile(survey: Pick<SiteSurvey, 'id' | 'projectId'>, file: S
       filename: file.filename,
       analyzed: true,
       error: null,
-      metadata: { widthPx: width, heightPx: height, format: metadata.format ?? null, byteSize: bytes.length, sha256: byteHash, dominantBrightness: pixels.brightness, sharpnessScore: pixels.sharpness, qualityScore },
+      metadata: {
+        widthPx: width,
+        heightPx: height,
+        format: metadata.format ?? null,
+        byteSize: bytes.length,
+        sha256: byteHash,
+        dominantBrightness: geometry.metrics.brightness,
+        sharpnessScore: geometry.metrics.sharpness,
+        qualityScore,
+      },
       thumbnailDataUrl: `data:image/jpeg;base64,${thumb.toString('base64')}`,
-      edgeSummary: pixels.edgeSummary,
+      edgeSummary,
       candidates,
       limitations: baseLimitations(),
       runHash,
+      extractionMethod,
     };
   } catch (error) {
-    const runHash = sha256(stable({ surveyId: survey.id, fileId: file.id, error: error instanceof Error ? error.message : String(error) }));
+    const runHash = sha256(stable({
+      surveyId: survey.id,
+      fileId: file.id,
+      error: error instanceof Error ? error.message : String(error),
+    }));
     return {
       surveyId: survey.id,
       fileId: file.id,
@@ -222,8 +354,312 @@ async function analyzeFile(survey: Pick<SiteSurvey, 'id' | 'projectId'>, file: S
       candidates: [],
       limitations: ['Image bytes could not be fetched or decoded; no candidates emitted for this file.', ...baseLimitations()],
       runHash,
+      extractionMethod: 'none',
     };
   }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Candidate builder — real geometry from contours + optional Vision
+// ────────────────────────────────────────────────────────────────────────────
+
+function buildCandidatesFromGeometry(input: {
+  survey: Pick<SiteSurvey, 'id' | 'projectId'>;
+  file: SiteSurveyFile;
+  createdAt: string;
+  runHash: string;
+  byteHash: string;
+  qualityScore: number;
+  geometry: RoofGeometryExtractionResult;
+  visionResult: VisionGeometryResult | null;
+  imgW: number;
+  imgH: number;
+}): OpenSourcePhotoVisionCandidate[] {
+  const { survey, file, createdAt, runHash, byteHash, qualityScore, geometry, visionResult, imgW, imgH } = input;
+
+  const base = {
+    surveyId: survey.id,
+    fileId: file.id,
+    fileUrl: file.fileUrl,
+    filename: file.filename,
+    toolName: OPEN_SOURCE_PHOTO_VISION_TOOL_NAME,
+    toolVersion: OPEN_SOURCE_PHOTO_VISION_TOOL_VERSION,
+    runHash,
+    reviewStatus: 'review_required' as const,
+    nonAuthoritative: true as const,
+    createdAt,
+  };
+
+  const out: Omit<OpenSourcePhotoVisionCandidate, 'candidateId' | 'deterministicHash'>[] = [];
+
+  // ── 1. Edge map summary (quality metadata candidate) ────────────────────
+  out.push({
+    ...base,
+    candidateType: 'edge_map_summary',
+    candidateCategory: 'quality',
+    confidence: clamp(Math.round(geometry.metrics.edgePixelRatio * 220), 5, 85),
+    summary: `512×512 Canny contour extraction: ${geometry.contourCount} contours, ${geometry.lineCount} lines detected.`,
+    payload: {
+      sourceImageSha256: byteHash,
+      qualityScore,
+      edgeSummary: {
+        edgePixelRatio: geometry.metrics.edgePixelRatio,
+        horizontalStrength: geometry.metrics.horizontalStrength,
+        verticalStrength: geometry.metrics.verticalStrength,
+        diagonalStrength: geometry.metrics.diagonalStrength,
+        denseRegionCount: geometry.contourCount,
+      },
+      extractionMethod: 'sharp_contour_512',
+      extractionSize: EXTRACTION_SIZE,
+      contourCount: geometry.contourCount,
+      lineCount: geometry.lineCount,
+    },
+    limitations: baseLimitations(),
+  });
+
+  // ── 2. Contour-based region candidates ──────────────────────────────────
+  for (const contour of geometry.contours) {
+    const candidateType = CLASSIFICATION_TYPE_MAP[contour.classification] ?? 'rectangular_region_candidate';
+    const candidateCategory = CLASSIFICATION_CATEGORY_MAP[contour.classification] ?? 'field_context';
+    const region = contourToNormalizedRegion(contour, imgW, imgH);
+    const polygonVertices = contourToNormalizedPolygon(contour, imgW, imgH);
+
+    // If OpenAI Vision found a matching roof plane, boost confidence
+    let confidenceBoost = 0;
+    if (visionResult?.success && contour.classification === 'probable_roof_plane') {
+      const matchingPlane = findMatchingVisionPlane(contour, visionResult.roofPlanes);
+      if (matchingPlane) {
+        confidenceBoost = 15;
+      }
+    }
+
+    out.push({
+      ...base,
+      candidateType,
+      candidateCategory,
+      confidence: clamp(contour.confidence + confidenceBoost, 10, 85),
+      summary: `${contour.classification.replace(/_/g, ' ')} from 512×512 Canny contour extraction (area=${contour.area}, circularity=${contour.circularity}).`,
+      payload: {
+        sourceImageSha256: byteHash,
+        contourIndex: contour.index,
+        classification: contour.classification,
+        region,
+        polygonVertices,
+        contourArea: contour.area,
+        contourPerimeter: contour.perimeter,
+        contourCircularity: contour.circularity,
+        vertexCount: polygonVertices.length,
+        source: 'canny_contour_512',
+        extractionMethod: 'sharp_contour_512',
+        ...(confidenceBoost > 0 ? { visionBoosted: true, visionBoostAmount: confidenceBoost } : {}),
+      },
+      region,
+      limitations: [
+        'Contour is pixel-derived from Canny edge detection at 512×512 — class is a heuristic review hint.',
+        'Polygon vertices are available in payload.polygonVertices for polygon overlay rendering.',
+        ...baseLimitations(),
+      ],
+    });
+  }
+
+  // ── 3. Line candidates from Hough-like detection ───────────────────────
+  for (const line of geometry.lines) {
+    const normalizedLine = lineToNormalizedLine(line, imgW, imgH);
+    const lineCandidateType: OpenSourcePhotoVisionCandidateType =
+      line.classification === 'ridge_line' || line.classification === 'eave_line' || line.classification === 'rake_line'
+        ? 'roof_edge_candidate'
+        : 'dominant_line_candidate';
+
+    out.push({
+      ...base,
+      candidateType: lineCandidateType,
+      candidateCategory: line.classification === 'wall_edge' ? 'structure_context' : 'roof_context',
+      confidence: clamp(Math.round(line.strength * 82), 12, 80),
+      summary: `${line.classification.replace(/_/g, ' ')} — ${line.orientation} line from Hough projection (length=${Math.round(line.length)}px).`,
+      payload: {
+        sourceImageSha256: byteHash,
+        lineClassification: line.classification,
+        lineOrientation: line.orientation,
+        lineLength: line.length,
+        lineStrength: line.strength,
+        line: normalizedLine,
+        source: 'hough_projection_512',
+      },
+      line: normalizedLine,
+      limitations: [
+        'Line is derived from Hough projection of Canny edge map — classification is heuristic.',
+        ...baseLimitations(),
+      ],
+    });
+  }
+
+  // ── 4. OpenAI Vision candidates (if available) ──────────────────────────
+  if (visionResult?.success) {
+    // Roof plane polygons from GPT-4o Vision
+    for (let i = 0; i < visionResult.roofPlanes.length; i++) {
+      const plane = visionResult.roofPlanes[i];
+      const region = visionRoofPlaneToRegion(plane);
+
+      out.push({
+        ...base,
+        candidateType: 'roof_edge_candidate',
+        candidateCategory: 'roof_context',
+        confidence: clamp(Math.round(plane.confidence * 80), 20, 85),
+        summary: `GPT-4o Vision roof plane "${plane.label}" (slope≈${plane.slopeDegrees ?? '?'}°, aspect≈${plane.aspectDegrees ?? '?'}°).`,
+        payload: {
+          sourceImageSha256: byteHash,
+          visionPlaneIndex: i,
+          visionPlaneLabel: plane.label,
+          visionPlaneVertices: plane.vertices,
+          visionSlopeDegrees: plane.slopeDegrees,
+          visionAspectDegrees: plane.aspectDegrees,
+          visionConfidence: plane.confidence,
+          region,
+          polygonVertices: plane.vertices.map(v => ({
+            x: v.x,
+            y: v.y,
+            coordinateSystem: 'normalized_image_0_1000' as const,
+          })),
+          source: 'openai_vision_gpt4o',
+          extractionMethod: 'openai_vision',
+        },
+        region,
+        limitations: [
+          'Roof plane polygon from GPT-4o Vision — AI-generated geometry, not measured.',
+          'Slope and aspect are estimated by the model, not from physical measurement.',
+          ...baseLimitations(),
+        ],
+      });
+    }
+
+    // Obstructions from GPT-4o Vision
+    for (let i = 0; i < visionResult.obstructions.length; i++) {
+      const obs = visionResult.obstructions[i];
+      const region = visionObstructionToRegion(obs);
+
+      out.push({
+        ...base,
+        candidateType: 'obstruction_candidate',
+        candidateCategory: 'field_context',
+        confidence: clamp(Math.round(obs.confidence * 75), 15, 80),
+        summary: `GPT-4o Vision obstruction: ${obs.type} (confidence=${(obs.confidence * 100).toFixed(0)}%).`,
+        payload: {
+          sourceImageSha256: byteHash,
+          visionObstructionIndex: i,
+          visionObstructionType: obs.type,
+          visionBbox: obs.bbox,
+          visionConfidence: obs.confidence,
+          region,
+          source: 'openai_vision_gpt4o',
+        },
+        region,
+        limitations: [
+          `Obstruction type "${obs.type}" identified by GPT-4o Vision — AI-classified, not verified.`,
+          ...baseLimitations(),
+        ],
+      });
+    }
+
+    // Equipment from GPT-4o Vision
+    for (let i = 0; i < visionResult.equipment.length; i++) {
+      const equip = visionResult.equipment[i];
+      const region = visionEquipmentToRegion(equip);
+
+      out.push({
+        ...base,
+        candidateType: 'equipment_anchor_candidate',
+        candidateCategory: 'electrical_context',
+        confidence: clamp(Math.round(equip.confidence * 75), 15, 80),
+        summary: `GPT-4o Vision equipment: ${equip.type} (confidence=${(equip.confidence * 100).toFixed(0)}%).`,
+        payload: {
+          sourceImageSha256: byteHash,
+          visionEquipmentIndex: i,
+          visionEquipmentType: equip.type,
+          visionBbox: equip.bbox,
+          visionConfidence: equip.confidence,
+          region,
+          source: 'openai_vision_gpt4o',
+        },
+        region,
+        limitations: [
+          `Equipment type "${equip.type}" identified by GPT-4o Vision — AI-classified, not verified.`,
+          ...baseLimitations(),
+        ],
+      });
+    }
+
+    // Structural lines from GPT-4o Vision
+    for (let i = 0; i < visionResult.lines.length; i++) {
+      const vLine = visionResult.lines[i];
+      const normalizedLine = visionStructuralLineToNormalizedLine(vLine);
+
+      out.push({
+        ...base,
+        candidateType: 'roof_edge_candidate',
+        candidateCategory: 'roof_context',
+        confidence: clamp(Math.round(vLine.confidence * 80), 15, 80),
+        summary: `GPT-4o Vision structural line: ${vLine.type}.`,
+        payload: {
+          sourceImageSha256: byteHash,
+          visionLineIndex: i,
+          visionLineType: vLine.type,
+          visionLineStart: vLine.start,
+          visionLineEnd: vLine.end,
+          visionConfidence: vLine.confidence,
+          line: normalizedLine,
+          source: 'openai_vision_gpt4o',
+        },
+        line: normalizedLine,
+        limitations: [
+          `Structural line type "${vLine.type}" from GPT-4o Vision — AI-identified, not measured.`,
+          ...baseLimitations(),
+        ],
+      });
+    }
+  }
+
+  // ── 5. OCR availability note ────────────────────────────────────────────
+  out.push({
+    ...base,
+    candidateType: 'ocr_availability_note',
+    candidateCategory: 'electrical_context',
+    confidence: 10,
+    summary: 'Tesseract OCR adapter is available but not executed in this bounded pass.',
+    payload: { sourceImageSha256: byteHash, tesseractAvailable: true, executed: false },
+    limitations: ['OCR was not executed; this note is diagnostic only.', ...baseLimitations()],
+  });
+
+  return out.map((candidate, index) => finalizeCandidate(candidate, index));
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Find a Vision roof plane that roughly matches a contour's bounding box.
+ * Used to boost confidence when both pipelines agree.
+ */
+function findMatchingVisionPlane(
+  contour: ExtractedContour,
+  planes: VisionRoofPlane[],
+): VisionRoofPlane | null {
+  const bb = contour.boundingBox;
+  const cx = bb.x + bb.width / 2;
+  const cy = bb.y + bb.height / 2;
+
+  for (const plane of planes) {
+    // Compute centroid of the vision plane's vertices
+    const px = plane.vertices.reduce((sum, v) => sum + v.x, 0) / plane.vertices.length;
+    const py = plane.vertices.reduce((sum, v) => sum + v.y, 0) / plane.vertices.length;
+
+    // Check if centroids are within 20% of the image size
+    const dist = Math.sqrt((cx - px) ** 2 + (cy - py) ** 2);
+    if (dist < EXTRACTION_SIZE * 0.2) {
+      return plane;
+    }
+  }
+  return null;
 }
 
 async function fetchImageBuffer(url: string): Promise<Buffer> {
@@ -243,92 +679,6 @@ async function fetchImageBuffer(url: string): Promise<Buffer> {
   }
 }
 
-async function analyzePixels(bytes: Buffer): Promise<PixelAnalysis> {
-  // Dynamic import — sharp has native bindings, keep out of client-side webpack bundle
-  const sharp = (await import('sharp')).default;
-  const { data, info } = await sharp(bytes, { failOn: 'none' }).rotate().resize(EDGE_SIZE, EDGE_SIZE, { fit: 'inside' }).greyscale().raw().toBuffer({ resolveWithObject: true });
-  const w = info.width;
-  const h = info.height;
-  let brightnessSum = 0;
-  let sharpnessSum = 0;
-  let edgeCount = 0;
-  const rowScores = new Array(h).fill(0);
-  const colScores = new Array(w).fill(0);
-  const diagScores = new Array(w + h).fill(0);
-  const dense = new Map<string, number>();
-  for (let y = 1; y < h - 1; y += 1) {
-    for (let x = 1; x < w - 1; x += 1) {
-      const idx = y * w + x;
-      const center = data[idx] ?? 0;
-      brightnessSum += center;
-      const gx = Math.abs((data[idx + 1] ?? center) - (data[idx - 1] ?? center));
-      const gy = Math.abs((data[idx + w] ?? center) - (data[idx - w] ?? center));
-      const edge = gx + gy;
-      sharpnessSum += edge;
-      if (edge > 54) {
-        edgeCount += 1;
-        rowScores[y] += gy;
-        colScores[x] += gx;
-        diagScores[x + Math.round(y / 2)] += Math.abs(gx - gy);
-        const cell = `${Math.floor(x / 16)}:${Math.floor(y / 16)}`;
-        dense.set(cell, (dense.get(cell) ?? 0) + 1);
-      }
-    }
-  }
-  const sampleCount = Math.max(1, (w - 2) * (h - 2));
-  const horizontalStrength = normalizeMax(rowScores);
-  const verticalStrength = normalizeMax(colScores);
-  const diagonalStrength = normalizeMax(diagScores);
-  const edgeSummary = {
-    edgePixelRatio: round(edgeCount / sampleCount, 4),
-    horizontalStrength,
-    verticalStrength,
-    diagonalStrength,
-    denseRegionCount: [...dense.values()].filter(count => count >= 18).length,
-  };
-  return {
-    brightness: Math.round(brightnessSum / sampleCount),
-    sharpness: Math.round(sharpnessSum / sampleCount),
-    edgeSummary,
-    lines: topLines(rowScores, colScores, diagScores, w, h),
-    regions: denseRegions(dense, w, h),
-  };
-}
-
-function topLines(rows: number[], cols: number[], diags: number[], w: number, h: number): OpenSourcePhotoVisionLine[] {
-  const lines: OpenSourcePhotoVisionLine[] = [];
-  for (const y of topIndexes(rows, 3)) lines.push({ x1: 0, y1: norm(y, h), x2: 1000, y2: norm(y, h), orientation: 'horizontal', strength: strength(rows[y] ?? 0, rows), coordinateSystem: 'normalized_image_0_1000' });
-  for (const x of topIndexes(cols, 3)) lines.push({ x1: norm(x, w), y1: 0, x2: norm(x, w), y2: 1000, orientation: 'vertical', strength: strength(cols[x] ?? 0, cols), coordinateSystem: 'normalized_image_0_1000' });
-  for (const d of topIndexes(diags, 2)) lines.push({ x1: norm(Math.max(0, d - h / 2), w), y1: 0, x2: norm(Math.min(w, d), w), y2: 1000, orientation: 'diagonal', strength: strength(diags[d] ?? 0, diags), coordinateSystem: 'normalized_image_0_1000' });
-  return lines.filter(line => line.strength >= 0.18).slice(0, 8);
-}
-
-function denseRegions(dense: Map<string, number>, w: number, h: number): OpenSourcePhotoVisionRegion[] {
-  return [...dense.entries()]
-    .filter(([, count]) => count >= 18)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
-    .map(([key]) => {
-      const [cx, cy] = key.split(':').map(Number);
-      return { x: norm(cx * 16, w), y: norm(cy * 16, h), width: norm(16, w), height: norm(16, h), coordinateSystem: 'normalized_image_0_1000' as const };
-    });
-}
-
-function buildCandidates(input: { survey: Pick<SiteSurvey, 'id' | 'projectId'>; file: SiteSurveyFile; createdAt: string; runHash: string; byteHash: string; qualityScore: number; pixels: PixelAnalysis }): OpenSourcePhotoVisionCandidate[] {
-  const { survey, file, createdAt, runHash, byteHash, qualityScore, pixels } = input;
-  const base = { surveyId: survey.id, fileId: file.id, fileUrl: file.fileUrl, filename: file.filename, toolName: OPEN_SOURCE_PHOTO_VISION_TOOL_NAME, toolVersion: OPEN_SOURCE_PHOTO_VISION_TOOL_VERSION, runHash, reviewStatus: 'review_required', nonAuthoritative: true, createdAt } satisfies Pick<OpenSourcePhotoVisionCandidate, 'surveyId' | 'fileId' | 'fileUrl' | 'filename' | 'toolName' | 'toolVersion' | 'runHash' | 'reviewStatus' | 'nonAuthoritative' | 'createdAt'>;
-  const out: Omit<OpenSourcePhotoVisionCandidate, 'candidateId' | 'deterministicHash'>[] = [];
-  out.push({ ...base, candidateType: 'edge_map_summary', candidateCategory: 'quality', confidence: clamp(Math.round(pixels.edgeSummary.edgePixelRatio * 220), 5, 85), summary: 'Open-source edge map summary from decoded image pixels.', payload: { sourceImageSha256: byteHash, qualityScore, edgeSummary: pixels.edgeSummary }, limitations: baseLimitations() });
-  pixels.lines.forEach((line, index) => out.push({ ...base, candidateType: line.orientation === 'horizontal' ? 'roof_edge_candidate' : 'dominant_line_candidate', candidateCategory: line.orientation === 'horizontal' ? 'roof_context' : 'structure_context', confidence: clamp(Math.round(line.strength * 82), 12, 72), summary: `${line.orientation} dominant line candidate from edge projections.`, payload: { sourceImageSha256: byteHash, lineIndex: index, line, source: 'edge_projection' }, line, limitations: ['Line is a pixel-derived review cue, not a measured roof edge.', ...baseLimitations()] }));
-  pixels.regions.forEach((region, index) => {
-    const electricalHint = /meter|panel|msp|main|inverter|electrical/i.test(`${file.label ?? ''} ${file.filename ?? ''}`);
-    const type: OpenSourcePhotoVisionCandidateType = electricalHint ? 'equipment_anchor_candidate' : index % 2 === 0 ? 'rectangular_region_candidate' : 'obstruction_candidate';
-    out.push({ ...base, candidateType: type, candidateCategory: electricalHint ? 'electrical_context' : 'field_context', confidence: clamp(34 + pixels.edgeSummary.denseRegionCount * 4 - index * 3, 18, 68), summary: `${type.replace(/_/g, ' ')} from dense edge region in image bytes.`, payload: { sourceImageSha256: byteHash, regionIndex: index, region, source: 'dense_edge_component', filenameLabelHintUsedForCategoryOnly: electricalHint }, region, limitations: ['Region is pixel-derived from edges but class is only a review hint.', ...baseLimitations()] });
-  });
-  out.push({ ...base, candidateType: 'ocr_availability_note', candidateCategory: 'electrical_context', confidence: 10, summary: 'Tesseract OCR adapter is available but not executed in this bounded pass.', payload: { sourceImageSha256: byteHash, tesseractAvailable: true, executed: false }, limitations: ['OCR was not executed; this note is diagnostic only.', ...baseLimitations()] });
-  return out.map((candidate, index) => finalizeCandidate(candidate, index));
-}
-
 function finalizeCandidate(candidate: Omit<OpenSourcePhotoVisionCandidate, 'candidateId' | 'deterministicHash'>, index: number): OpenSourcePhotoVisionCandidate {
   const deterministicHash = sha256(stable({ ...candidate, createdAt: 'stable-created-at' }));
   return { ...candidate, candidateId: `ospv_${deterministicHash.slice(0, 24)}_${index + 1}`, deterministicHash };
@@ -346,17 +696,35 @@ function baseLimitations(): string[] {
   return [
     'REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY',
     'No roof plane, obstruction map, equipment location, measurement, permit input, BOM input, or engineering fact is created.',
-    'Native OpenCV/YOLO/Supervision workers are not configured in this runtime; this pass uses sharp pixel processing only.',
+    'Candidates are generated by 512×512 Canny contour extraction and heuristic classification — not from a trained ML model.',
+    'When OPENAI_API_KEY is set, GPT-4o Vision supplements geometry extraction with AI-identified features.',
     'Candidates may guide operator review only and must not mutate canonical evidence or CAD state.',
   ];
 }
 
-function noAuthority() { return { reviewOnly: true as const, nonAuthoritative: true as const, canonicalMutationAllowed: false as const, cadMutationAllowed: false as const, permitGenerationAllowed: false as const, bomMutationAllowed: false as const, engineeringWorkflowMutationAllowed: false as const }; }
-function topIndexes(values: number[], count: number): number[] { return values.map((value, index) => ({ value, index })).filter(item => item.value > 0).sort((a, b) => b.value - a.value).slice(0, count).map(item => item.index); }
-function normalizeMax(values: number[]): number { const max = Math.max(0, ...values); const sum = values.reduce((a, b) => a + b, 0); return round(max / Math.max(1, sum), 4); }
-function strength(value: number, values: number[]): number { return round(value / Math.max(1, Math.max(...values)), 4); }
-function norm(value: number, denom: number): number { return clamp(Math.round((value / Math.max(1, denom)) * 1000), 0, 1000); }
-function round(value: number, places: number): number { const factor = 10 ** places; return Math.round(value * factor) / factor; }
-function clamp(value: number, min: number, max: number): number { return Math.max(min, Math.min(max, value)); }
-function sha256(value: crypto.BinaryLike | string): string { return crypto.createHash('sha256').update(value).digest('hex'); }
-function stable(value: unknown): string { if (value === null || typeof value !== 'object') return JSON.stringify(value); if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`; const record = value as Record<string, unknown>; return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${stable(record[key])}`).join(',')}}`; }
+function noAuthority() {
+  return {
+    reviewOnly: true as const,
+    nonAuthoritative: true as const,
+    canonicalMutationAllowed: false as const,
+    cadMutationAllowed: false as const,
+    permitGenerationAllowed: false as const,
+    bomMutationAllowed: false as const,
+    engineeringWorkflowMutationAllowed: false as const,
+  };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function sha256(value: crypto.BinaryLike | string): string {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function stable(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${stable(record[key])}`).join(',')}}`;
+}

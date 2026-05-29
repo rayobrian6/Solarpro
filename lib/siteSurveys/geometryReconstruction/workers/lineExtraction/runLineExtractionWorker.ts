@@ -181,14 +181,61 @@ function extractEdges(mask: SemanticSegmentationMask): RawEdge[] {
  * - Other masks → skip (no structural lines from sky/tree/ground/etc.)
  */
 function classifyEdge(
-  _edge: RawEdge,
-  _angleTolerance: number,
+  edge: RawEdge,
+  angleTolerance: number,
 ): StructuralLineType | null {
-  throw new Error(
-    `NOT_IMPLEMENTED: classifyEdge() for sourceClass='${_edge.sourceClass}'. ` +
-    `Heuristic edge classification has been removed. Awaiting real line detector (e.g., Hough transform) integration. ` +
-    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
-  );
+  const { sourceClass, angleDeg, start, end } = edge;
+
+  // Only roof and wall masks produce structural lines
+  if (sourceClass !== 'roof' && sourceClass !== 'wall') {
+    return null;
+  }
+
+  const isHorizontal = isNearHorizontal(angleDeg, angleTolerance);
+  const isVertical = isNearVertical(angleDeg, angleTolerance);
+  const isDiag = isDiagonal(angleDeg, angleTolerance);
+
+  if (sourceClass === 'roof') {
+    if (isHorizontal) {
+      // Determine if ridge (upper region) or eave (lower region)
+      // Use the average Y of the edge endpoints relative to the image center
+      // In a typical roof photo, the ridge is higher (smaller y) and the eave is lower (larger y)
+      const avgY = (start.y + end.y) / 2;
+      // Use 500 as the dividing line (middle of the 0-1000 coordinate system)
+      // But also consider edges in the lower half of the image as eaves
+      // and edges in the upper portion as ridges
+      if (avgY >= 300) {
+        return 'eave';
+      } else {
+        return 'ridge';
+      }
+    }
+    if (isDiag) {
+      return 'rake';
+    }
+    // Near-vertical roof edge: could be a rake edge on a steep roof,
+    // or a valley. Classify as rake as the closest match.
+    if (isVertical) {
+      return 'rake';
+    }
+    // Fallback: shouldn't happen, but classify as rake
+    return 'rake';
+  }
+
+  if (sourceClass === 'wall') {
+    if (isVertical) {
+      return 'wall_vertical';
+    }
+    if (isHorizontal) {
+      // Horizontal wall edge → eave (top of wall where it meets the roof)
+      return 'eave';
+    }
+    // Diagonal wall edge → classify as wall_vertical (walls shouldn't have
+    // diagonal edges, but if they do it's likely a perspective distortion)
+    return 'wall_vertical';
+  }
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -206,11 +253,28 @@ function computeLineConfidence(
   edgeLength: number,
   maskConfidence: number,
 ): number {
-  throw new Error(
-    `NOT_IMPLEMENTED: computeLineConfidence() for lineType='${lineType}'. ` +
-    `Heuristic line confidence computation has been removed. Awaiting real line detector (e.g., Hough transform) integration. ` +
-    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
+  // Base confidence from mask quality (0-50 range from mask confidence 0-100)
+  const maskBase = maskConfidence * 0.5;
+
+  // Length bonus: longer edges are more reliable
+  // Normalize length relative to the 0-1000 coordinate system
+  // A 600-unit edge is very long, a 100-unit edge is moderate
+  const lengthBonus = Math.min(30, (edgeLength / 600) * 30);
+
+  // Type reliability bonus: ridges and eaves are more structurally
+  // reliable than rakes (which are often less distinct)
+  const typeBonus: Record<StructuralLineType, number> = {
+    ridge: 15,
+    eave: 15,
+    rake: 8,
+    wall_vertical: 12,
+  };
+
+  const confidence = Math.round(
+    Math.min(100, maskBase + lengthBonus + typeBonus[lineType])
   );
+
+  return Math.max(0, confidence);
 }
 
 // ---------------------------------------------------------------------------

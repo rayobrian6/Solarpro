@@ -290,14 +290,75 @@ interface PlaneCluster {
  * IoU proxy >= overlapThreshold.
  */
 function clusterPlanes(
-  _planes: PlaneWrapper[],
-  _config: MultiViewFusionConfig,
+  planes: PlaneWrapper[],
+  config: MultiViewFusionConfig,
 ): PlaneCluster[] {
-  throw new Error(
-    `NOT_IMPLEMENTED: clusterPlanes(). ` +
-    `Heuristic multi-view plane clustering has been removed. Awaiting real SfM/MVS pipeline integration. ` +
-    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
-  );
+  if (planes.length === 0) return [];
+
+  // Group planes by type first (roof vs wall) — never merge across types
+  const byType = new Map<'roof' | 'wall', PlaneWrapper[]>();
+  for (const plane of planes) {
+    if (!byType.has(plane.planeType)) byType.set(plane.planeType, []);
+    byType.get(plane.planeType)!.push(plane);
+  }
+
+  const allClusters: PlaneCluster[] = [];
+
+  for (const [planeType, typePlanes] of byType) {
+    // Within each type, perform greedy clustering
+    const clusters: PlaneCluster[] = [];
+    const assigned = new Set<number>();
+
+    for (let i = 0; i < typePlanes.length; i++) {
+      if (assigned.has(i)) continue;
+
+      // Start a new cluster with this plane
+      const clusterPlanes_: PlaneWrapper[] = [typePlanes[i]];
+      assigned.add(i);
+
+      // Greedily find all planes that match this cluster
+      for (let j = i + 1; j < typePlanes.length; j++) {
+        if (assigned.has(j)) continue;
+
+        const candidate = typePlanes[j];
+
+        // Check if the candidate matches any plane already in the cluster
+        let matchesCluster = false;
+        for (const clusterMember of clusterPlanes_) {
+          // Must be from a different photo
+          if (candidate.fileId === clusterMember.fileId) {
+            // Same photo — don't merge planes from the same photo into
+            // the same cluster (they represent different surfaces)
+            // but still allow them in the same cluster if they're the same surface
+            // Actually, for simplicity, only merge planes from DIFFERENT photos
+            continue;
+          }
+
+          // Check normal similarity
+          const normalSim = cosineSimilarity(candidate.normal, clusterMember.normal);
+          if (normalSim < config.normalSimilarityThreshold) continue;
+
+          // Check polygon overlap
+          const overlap = polygonIoUProxy(candidate.polygon, clusterMember.polygon);
+          if (overlap < config.overlapThreshold) continue;
+
+          matchesCluster = true;
+          break;
+        }
+
+        if (matchesCluster) {
+          clusterPlanes_.push(candidate);
+          assigned.add(j);
+        }
+      }
+
+      clusters.push({ planes: clusterPlanes_, planeType });
+    }
+
+    allClusters.push(...clusters);
+  }
+
+  return allClusters;
 }
 
 // ---------------------------------------------------------------------------

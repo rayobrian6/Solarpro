@@ -83,6 +83,7 @@ function makeFileResult(overrides: Partial<OpenSourcePhotoVisionFileResult> = {}
     candidates: [makeCandidate()],
     limitations: [],
     runHash: 'hash123',
+    extractionMethod: 'none',
     ...overrides,
   };
 }

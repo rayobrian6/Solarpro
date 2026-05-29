@@ -25,6 +25,7 @@ import type {
   DepthMap,
   GeometryReconstructionArtifact,
   GeometryReconstructionInput,
+  NormalizedPoint,
 } from '../../types';
 import { REVIEW_ONLY_AUTHORITY, BASE_LIMITATIONS } from '../../types';
 
@@ -78,17 +79,111 @@ export interface DepthWorkerOutput {
 
 // ---------------------------------------------------------------------------
 // Depth heuristic
+
+/**
+ * Check if a point (x,y) falls inside a polygon using ray casting.
+ */
+function pointInPolygonDepth(px: number, py: number, polygon: NormalizedPoint[]): boolean {
+  let inside = false;
+  const n = polygon.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = polygon[i].x, yi = polygon[i].y;
+    const xj = polygon[j].x, yj = polygon[j].y;
+    if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/**
+ * Heuristic depth estimation at a point.
+ *
+ * Strategy:
+ * 1. Check which segmentation mask(s) the point falls in.
+ * 2. Assign depth based on semantic class prior:
+ *    - sky → 0.9 (far)
+ *    - roof → 0.5 (mid-range)
+ *    - wall → 0.4 (mid-range, slightly closer)
+ *    - ground → 0.15 (near)
+ *    - tree → 0.6 (mid-far)
+ *    - obstruction → 0.45 (mid-range)
+ *    - equipment → 0.4 (mid-range)
+ * 3. Apply a vertical gradient (higher in image = farther) as baseline.
+ * 4. If vanishing points are available, use them to add a slight
+ *    perspective correction (points closer to VP are farther).
+ * 5. Blend mask-based depth with gradient, preferring mask when available.
+ */
 function heuristicDepth(
   x: number, // 0-1000
   y: number, // 0-1000
-  _masks: SemanticSegmentationMask[],
-  _vanishingPoints: VanishingPointArtifact[],
+  masks: SemanticSegmentationMask[],
+  vanishingPoints: VanishingPointArtifact[],
 ): number {
-  throw new Error(
-    `NOT_IMPLEMENTED: heuristicDepth() at (x=${x}, y=${y}). ` +
-    `Heuristic depth estimation has been removed. Awaiting real depth model (e.g., MiDaS/DPT) integration. ` +
-    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
-  );
+  // Vertical gradient baseline: top of image is far (0.8), bottom is near (0.2)
+  const gradientDepth = 0.8 - (y / 1000) * 0.6;
+
+  // Find which mask this point belongs to (take the one with highest confidence)
+  let bestMask: SemanticSegmentationMask | null = null;
+  let bestConf = -1;
+  for (const mask of masks) {
+    if (mask.confidence > bestConf && pointInPolygonDepth(x, y, mask.polygon)) {
+      bestMask = mask;
+      bestConf = mask.confidence;
+    }
+  }
+
+  if (bestMask === null) {
+    // No mask covers this point — use gradient + optional VP correction
+    let depth = gradientDepth;
+
+    // VP correction: if there's a VP, points closer to it are farther
+    if (vanishingPoints.length > 0) {
+      let vpCorrection = 0;
+      for (const vp of vanishingPoints) {
+        const dx = x - vp.point.x;
+        const dy = y - vp.point.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        // Closer to VP → higher correction (farther)
+        const maxDist = 2000;
+        const correction = Math.max(0, 0.1 * (1 - dist / maxDist));
+        vpCorrection = Math.max(vpCorrection, correction);
+      }
+      depth = Math.min(1, depth + vpCorrection * 0.3);
+    }
+
+    return Math.max(0, Math.min(1, depth));
+  }
+
+  // Mask-based depth priors
+  const classPriors: Record<string, number> = {
+    sky: 0.9,
+    roof: 0.5,
+    wall: 0.4,
+    ground: 0.15,
+    tree: 0.6,
+    obstruction: 0.45,
+    equipment: 0.4,
+  };
+
+  const maskDepth = classPriors[bestMask.segmentationClass] ?? gradientDepth;
+
+  // Blend mask depth with gradient (70% mask, 30% gradient)
+  let depth = maskDepth * 0.7 + gradientDepth * 0.3;
+
+  // VP correction for non-sky masks
+  if (vanishingPoints.length > 0 && bestMask.segmentationClass !== 'sky') {
+    for (const vp of vanishingPoints) {
+      const dx = x - vp.point.x;
+      const dy = y - vp.point.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const maxDist = 2000;
+      const correction = Math.max(0, 0.05 * (1 - dist / maxDist));
+      depth = Math.min(1, depth + correction);
+    }
+  }
+
+  return Math.max(0, Math.min(1, depth));
 }
 
 // ---------------------------------------------------------------------------

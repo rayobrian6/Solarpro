@@ -146,12 +146,77 @@ function pointToSegmentDist(p: NormalizedPoint, a: NormalizedPoint, b: Normalize
 }
 
 /** Check if a line overlaps with a mask polygon. */
-function lineOverlapsMask(_line: StructuralLineCandidate, _mask: SemanticSegmentationMask): boolean {
-  throw new Error(
-    `NOT_IMPLEMENTED: lineOverlapsMask(). ` +
-    `Heuristic line-mask overlap detection has been removed. Awaiting real plane fitting algorithm integration. ` +
-    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
-  );
+function lineOverlapsMask(line: StructuralLineCandidate, mask: SemanticSegmentationMask): boolean {
+  const polygon = mask.polygon;
+  if (polygon.length < 3) return false;
+
+  // Check if either endpoint is inside the polygon
+  if (pointInPolygon(line.start, polygon) || pointInPolygon(line.end, polygon)) {
+    return true;
+  }
+
+  // Check if the line segment intersects with any polygon edge
+  // or if any polygon vertex is close to the line segment
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % polygon.length];
+
+    // Check if the line segment intersects with this polygon edge
+    if (segmentsIntersect(line.start, line.end, a, b)) {
+      return true;
+    }
+  }
+
+  // Check if the line segment's midpoint is inside the polygon
+  const midX = (line.start.x + line.end.x) / 2;
+  const midY = (line.start.y + line.end.y) / 2;
+  const midpoint: NormalizedPoint = { x: midX, y: midY, coordinateSystem: 'normalized_image_0_1000' };
+  if (pointInPolygon(midpoint, polygon)) {
+    return true;
+  }
+
+  // Check if any polygon vertex is close to the line segment
+  const centroid = polygonCentroid(polygon);
+  if (pointToSegmentDist(centroid, line.start, line.end) < 50) {
+    return true;
+  }
+
+  return false;
+}
+
+/** Check if two line segments intersect. */
+function segmentsIntersect(
+  p1: NormalizedPoint, p2: NormalizedPoint,
+  p3: NormalizedPoint, p4: NormalizedPoint,
+): boolean {
+  const d1 = cross2D(p3, p4, p1);
+  const d2 = cross2D(p3, p4, p2);
+  const d3 = cross2D(p1, p2, p3);
+  const d4 = cross2D(p1, p2, p4);
+
+  if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+      ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) {
+    return true;
+  }
+
+  // Check collinear cases
+  if (Math.abs(d1) < 1e-10 && onSegment(p3, p1, p4)) return true;
+  if (Math.abs(d2) < 1e-10 && onSegment(p3, p2, p4)) return true;
+  if (Math.abs(d3) < 1e-10 && onSegment(p1, p3, p2)) return true;
+  if (Math.abs(d4) < 1e-10 && onSegment(p1, p4, p2)) return true;
+
+  return false;
+}
+
+/** Cross product of vectors (p1→p2) × (p1→p3). */
+function cross2D(p1: NormalizedPoint, p2: NormalizedPoint, p3: NormalizedPoint): number {
+  return (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
+}
+
+/** Check if point q lies on segment p1-p2 (assumes collinearity). */
+function onSegment(p1: NormalizedPoint, q: NormalizedPoint, p2: NormalizedPoint): boolean {
+  return q.x <= Math.max(p1.x, p2.x) && q.x >= Math.min(p1.x, p2.x) &&
+         q.y <= Math.max(p1.y, p2.y) && q.y >= Math.min(p1.y, p2.y);
 }
 
 // ---------------------------------------------------------------------------
@@ -168,15 +233,77 @@ function lineOverlapsMask(_line: StructuralLineCandidate, _mask: SemanticSegment
  * - VP directions give aspect
  */
 function estimateRoofParameters(
-  _mask: SemanticSegmentationMask,
-  _associatedLines: StructuralLineCandidate[],
-  _vanishingPoints: VanishingPointArtifact[],
+  mask: SemanticSegmentationMask,
+  associatedLines: StructuralLineCandidate[],
+  vanishingPoints: VanishingPointArtifact[],
 ): { slope: number; aspect: number; normal: [number, number, number] } {
-  throw new Error(
-    `NOT_IMPLEMENTED: estimateRoofParameters(). ` +
-    `Heuristic roof plane parameter estimation has been removed. Awaiting real plane fitting algorithm (e.g., RANSAC on depth data) integration. ` +
-    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
-  );
+  const polygon = mask.polygon;
+  const bounds = polygonBounds(polygon);
+  const centroid = polygonCentroid(polygon);
+
+  // Find ridge and rake lines for slope estimation
+  const ridgeLines = associatedLines.filter(l => l.lineType === 'ridge');
+  const rakeLines = associatedLines.filter(l => l.lineType === 'rake');
+  const eaveLines = associatedLines.filter(l => l.lineType === 'eave');
+
+  // Estimate slope from rake line angles
+  let slope = 25; // default moderate slope
+  if (rakeLines.length > 0) {
+    // Average the rake angles to estimate slope
+    const rakeAngles = rakeLines.map(l => {
+      const dx = l.end.x - l.start.x;
+      const dy = l.end.y - l.start.y;
+      return Math.abs(Math.atan2(dx, -dy) * (180 / Math.PI));
+    });
+    const avgAngle = rakeAngles.reduce((s, a) => s + a, 0) / rakeAngles.length;
+    slope = Math.max(5, Math.min(60, avgAngle));
+  } else if (ridgeLines.length > 0 && eaveLines.length > 0) {
+    // Estimate slope from vertical distance between ridge and eave
+    const ridgeY = ridgeLines.reduce((s, l) => s + (l.start.y + l.end.y) / 2, 0) / ridgeLines.length;
+    const eaveY = eaveLines.reduce((s, l) => s + (l.start.y + l.end.y) / 2, 0) / eaveLines.length;
+    const heightDiff = eaveY - ridgeY; // positive if eave is below ridge
+    const halfWidth = bounds.width / 2;
+    if (halfWidth > 0 && heightDiff > 0) {
+      slope = Math.atan2(heightDiff, halfWidth) * (180 / Math.PI);
+      slope = Math.max(5, Math.min(60, slope));
+    }
+  }
+
+  // Estimate aspect from vanishing points or ridge orientation
+  let aspect = 180; // default south-facing
+  if (ridgeLines.length > 0) {
+    // Ridge direction gives the roof axis; aspect is perpendicular
+    const ridge = ridgeLines[0];
+    const ridgeAngle = Math.atan2(ridge.end.x - ridge.start.x, ridge.end.y - ridge.start.y);
+    aspect = ((ridgeAngle * 180 / Math.PI) + 90 + 360) % 360;
+  } else if (vanishingPoints.length > 0) {
+    // Use X-direction VP to estimate the ridge axis direction
+    const xVp = vanishingPoints.find(vp => vp.direction === 'x');
+    if (xVp) {
+      const vpAngle = Math.atan2(xVp.point.y - centroid.y, xVp.point.x - centroid.x);
+      aspect = ((vpAngle * 180 / Math.PI) + 90 + 360) % 360;
+    }
+  }
+
+  // Compute normal vector from slope and aspect
+  // Normal points outward from the roof surface
+  const aspectRad = aspect * (Math.PI / 180);
+  const slopeRad = slope * (Math.PI / 180);
+  const normal: [number, number, number] = [
+    Math.sin(slopeRad) * Math.cos(aspectRad),
+    Math.sin(slopeRad) * Math.sin(aspectRad),
+    Math.cos(slopeRad),
+  ];
+
+  // Normalize the normal vector
+  const len = Math.sqrt(normal[0] ** 2 + normal[1] ** 2 + normal[2] ** 2);
+  if (len > 1e-10) {
+    normal[0] /= len;
+    normal[1] /= len;
+    normal[2] /= len;
+  }
+
+  return { slope, aspect, normal };
 }
 
 /**
@@ -184,14 +311,68 @@ function estimateRoofParameters(
  * associated lines and mask extent.
  */
 function estimateWallParameters(
-  _mask: SemanticSegmentationMask,
-  _associatedLines: StructuralLineCandidate[],
+  mask: SemanticSegmentationMask,
+  associatedLines: StructuralLineCandidate[],
 ): { height: number; facing: string; normal: [number, number, number] } {
-  throw new Error(
-    `NOT_IMPLEMENTED: estimateWallParameters(). ` +
-    `Heuristic wall plane parameter estimation has been removed. Awaiting real plane fitting algorithm integration. ` +
-    `See P0.3 in WORK_PLAN_GEOMETRY_CAD_PIPELINE_V2.md.`
-  );
+  const polygon = mask.polygon;
+  const bounds = polygonBounds(polygon);
+  const centroid = polygonCentroid(polygon);
+
+  // Estimate height from mask vertical extent
+  // Assume the image covers roughly 10m vertical, so height ~ bounds.height / 1000 * 10
+  // But cap at reasonable wall heights
+  const rawHeight = (bounds.height / 1000) * 8; // 8m total vertical in a typical residential photo
+  const height = Math.max(1, Math.min(15, Math.round(rawHeight * 10) / 10));
+
+  // Estimate facing direction from the mask's horizontal position
+  // and the centroid location relative to the image center
+  const validDirections = ['north', 'south', 'east', 'west'];
+  let facing = 'south'; // default
+
+  if (associatedLines.length > 0) {
+    // Use wall_vertical lines to determine which side the wall is on
+    const wallVerts = associatedLines.filter(l => l.lineType === 'wall_vertical');
+    if (wallVerts.length > 0) {
+      const avgX = wallVerts.reduce((s, l) => s + (l.start.x + l.end.x) / 2, 0) / wallVerts.length;
+      // Left side of image → east-facing, right side → west-facing
+      if (avgX < 350) {
+        facing = 'west';
+      } else if (avgX > 650) {
+        facing = 'east';
+      } else {
+        facing = 'south';
+      }
+    }
+  } else {
+    // No lines — use mask centroid position
+    if (centroid.x < 350) {
+      facing = 'west';
+    } else if (centroid.x > 650) {
+      facing = 'east';
+    } else {
+      facing = 'south';
+    }
+  }
+
+  // Compute normal vector from facing direction
+  const facingToNormal: Record<string, [number, number, number]> = {
+    north: [0, -1, 0],
+    south: [0, 1, 0],
+    east: [1, 0, 0],
+    west: [-1, 0, 0],
+  };
+  let normal: [number, number, number] = facingToNormal[facing] ?? [0, 1, 0];
+
+  // Add a slight Z component to account for perspective
+  normal = [normal[0], normal[1], 0.05];
+  const len = Math.sqrt(normal[0] ** 2 + normal[1] ** 2 + normal[2] ** 2);
+  if (len > 1e-10) {
+    normal[0] /= len;
+    normal[1] /= len;
+    normal[2] /= len;
+  }
+
+  return { height, facing, normal };
 }
 
 // ---------------------------------------------------------------------------

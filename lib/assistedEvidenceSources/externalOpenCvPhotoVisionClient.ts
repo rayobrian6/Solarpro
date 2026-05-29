@@ -199,6 +199,7 @@ function makeFailedFileResult(
     candidates: [],
     limitations: [`Batch request failed; no candidates emitted for this file.`, ...baseLimitations()],
     runHash,
+    extractionMethod: 'none',
   };
 }
 
@@ -341,6 +342,7 @@ function normalizeFileResult(raw: unknown, survey: Pick<SiteSurvey, 'id' | 'proj
     candidates: candidates.map(candidate => ({ ...candidate, thumbnailDataUrl: typeof value.thumbnailDataUrl === 'string' && value.thumbnailDataUrl.startsWith('data:image/') ? value.thumbnailDataUrl : undefined })),
     limitations: normalizeStringArray(value.limitations, baseLimitations()),
     runHash: typeof value.runHash === 'string' ? value.runHash : sha256(stable({ surveyId: survey.id, fileId, error: value.error ?? null })),
+    extractionMethod: typeof (value as Record<string, unknown>).extractionMethod === 'string' ? (value as Record<string, unknown>).extractionMethod as OpenSourcePhotoVisionFileResult['extractionMethod'] : 'none',
   };
 }
 
