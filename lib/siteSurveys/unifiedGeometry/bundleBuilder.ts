@@ -286,15 +286,16 @@ function buildAuthorityStateIndex(artifacts: UnifiedGeometryArtifact[]): Record<
 // ─── Statistics ─────────────────────────────────────────────────────────────
 
 function computePipelineCounts(artifacts: UnifiedGeometryArtifact[]): UnifiedGeometryEvidenceBundle['pipelineCounts'] {
-  const counts = { photoVision: 0, geometryRecon: 0, manual: 0, merged: 0, mock: 0 };
+  const counts = { photoVision: 0, geometryRecon: 0, obstructionRegistration: 0, manual: 0, merged: 0, mock: 0 };
 
   for (const artifact of artifacts) {
     switch (artifact.provenance.sourcePipeline) {
-      case 'photo_vision':  counts.photoVision++; break;
-      case 'geometry_recon': counts.geometryRecon++; break;
-      case 'manual':         counts.manual++; break;
-      case 'merged':         counts.merged++; break;
-      case 'mock':           counts.mock++; break;
+      case 'photo_vision':            counts.photoVision++; break;
+      case 'geometry_recon':          counts.geometryRecon++; break;
+      case 'obstruction_registration': counts.obstructionRegistration++; break;
+      case 'manual':                   counts.manual++; break;
+      case 'merged':                   counts.merged++; break;
+      case 'mock':                     counts.mock++; break;
     }
   }
 

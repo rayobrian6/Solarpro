@@ -131,9 +131,10 @@ function GeometryClassBadge({ geometryClass }: { geometryClass: UnifiedGeometryC
 // ── Pipeline Source Badge ──────────────────────────────────────────────────
 
 function PipelineSourceBadge({ source }: { source: string }) {
-  const variant = source === "photo_vision" ? "info" : source === "geometry_recon" ? "roof" : "default";
+  const variant = source === "photo_vision" ? "info" : source === "geometry_recon" ? "roof" : source === "obstruction_registration" ? "warning" : "default";
   const label = source === "photo_vision" ? "Photo Vision"
     : source === "geometry_recon" ? "Geometry Recon"
+    : source === "obstruction_registration" ? "Obstruction Reg."
     : source === "manual" ? "Manual"
     : source === "merged" ? "Merged"
     : source === "mock" ? "Mock"
@@ -639,6 +640,9 @@ export function UnifiedGeometryPanel({ surveyId, compact = false, className = ""
             </span>
             <span>Photo Vision: {bundle.pipelineCounts.photoVision}</span>
             <span>Geometry Recon: {bundle.pipelineCounts.geometryRecon}</span>
+            {bundle.pipelineCounts.obstructionRegistration > 0 && (
+              <span>Obstructions: {bundle.pipelineCounts.obstructionRegistration}</span>
+            )}
             {bundle.pipelineCounts.mock > 0 && (
               <span className="text-red-400">Mock: {bundle.pipelineCounts.mock}</span>
             )}

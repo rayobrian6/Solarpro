@@ -153,11 +153,12 @@ export type PlaneType = 'roof' | 'wall' | 'ground';
  * This is provenance metadata — it does NOT affect authority.
  */
 export type GeometrySourcePipeline =
-  | 'photo_vision'       // Pipeline A — OpenCV/YOLO/OCR
-  | 'geometry_recon'     // Pipeline B — Segmentation/SfM/Depth
-  | 'manual'             // Human-entered
-  | 'merged'             // Merged from multiple pipelines
-  | 'mock';              // Test/mock data
+  | 'photo_vision'              // Pipeline A — OpenCV/YOLO/OCR
+  | 'geometry_recon'            // Pipeline B — Segmentation/SfM/Depth
+  | 'obstruction_registration'  // Obstruction detection pipeline
+  | 'manual'                    // Human-entered
+  | 'merged'                    // Merged from multiple pipelines
+  | 'mock';                     // Test/mock data
 
 /**
  * Provenance record for a geometry artifact.
@@ -545,6 +546,7 @@ export interface UnifiedGeometryEvidenceBundle {
   pipelineCounts: {
     photoVision: number;
     geometryRecon: number;
+    obstructionRegistration: number;
     manual: number;
     merged: number;
     mock: number;
