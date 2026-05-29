@@ -30,7 +30,10 @@ import {
   UnifiedGeometryOverlayRenderer,
   buildFilesWithUnifiedArtifacts,
 } from '@/components/UnifiedGeometryOverlayRenderer';
-import type { UnifiedGeometryEvidenceBundle } from '@/lib/siteSurveys/unifiedGeometry/types';
+import type {
+  UnifiedGeometryArtifact,
+  UnifiedGeometryEvidenceBundle,
+} from '@/lib/siteSurveys/unifiedGeometry/types';
 
 /* ── Types ──────────────────────────────────────────────────────────── */
 
@@ -49,6 +52,8 @@ interface RoofGeometrySectionProps {
   onGeometryGenerated?: () => void;
 }
 
+const EMPTY_ARTIFACTS: UnifiedGeometryArtifact[] = [];
+
 /* ── Pipeline B Status Display ──────────────────────────────────────── */
 
 type PipelineStatus = 'idle' | 'running' | 'completed' | 'failed';
@@ -66,6 +71,7 @@ export function RoofGeometrySection({
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus>('idle');
   const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [generationSummary, setGenerationSummary] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [bundleLoading, setBundleLoading] = useState(true);
 
@@ -75,7 +81,9 @@ export function RoofGeometrySection({
   const fetchBundle = useCallback(async () => {
     if (!surveyId) return;
     try {
-      const res = await fetch(`/api/site-surveys/${surveyId}/unified-geometry/bundle`);
+      const res = await fetch(`/api/site-surveys/${surveyId}/unified-geometry/bundle`, {
+        credentials: 'include',
+      });
       if (res.status === 401) {
         setAuthRequired(true);
         return;
@@ -99,12 +107,14 @@ export function RoofGeometrySection({
   const runPipelineB = useCallback(async () => {
     setPipelineStatus('running');
     setPipelineError(null);
+    setGenerationSummary(null);
     try {
       const res = await fetch(
         `/api/site-surveys/${surveyId}/geometry-reconstruction/start`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({ pipeline: 'full' }),
         },
       );
@@ -119,6 +129,21 @@ export function RoofGeometrySection({
       if (json.error) {
         throw new Error(json.error);
       }
+      const artifactCount = typeof json.summary?.rawArtifactCount === 'number'
+        ? json.summary.rawArtifactCount
+        : Array.isArray(json.job?.artifacts)
+          ? json.job.artifacts.length
+          : null;
+      const stageCount = Array.isArray(json.pipelineStages) ? json.pipelineStages.length : null;
+      const polygonCount = typeof json.summary?.rawPolygonArtifactCount === 'number'
+        ? json.summary.rawPolygonArtifactCount
+        : null;
+      const consensusCount = typeof json.summary?.rawConsensusPlaneCount === 'number'
+        ? json.summary.rawConsensusPlaneCount
+        : null;
+      setGenerationSummary(
+        `Pipeline B completed${artifactCount != null ? ` with ${artifactCount} artifacts` : ''}${stageCount != null ? ` across ${stageCount} stages` : ''}${polygonCount != null ? `, including ${polygonCount} polygon artifacts` : ''}${consensusCount != null ? ` and ${consensusCount} consensus planes` : ''}.`,
+      );
       setPipelineStatus('completed');
       // Refresh the unified bundle to pick up new Pipeline B artifacts
       await fetchBundle();
@@ -133,12 +158,14 @@ export function RoofGeometrySection({
   const runPipelineA = useCallback(async () => {
     setPipelineStatus('running');
     setPipelineError(null);
+    setGenerationSummary(null);
     try {
       const res = await fetch(
         `/api/site-surveys/${surveyId}/open-source-photo-vision-pass`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
         },
       );
       if (!res.ok) {
@@ -162,12 +189,14 @@ export function RoofGeometrySection({
   }, [surveyId, fetchBundle, onGeometryGenerated]);
 
   // ── Derived data ──────────────────────────────────────────────────
-  const artifacts = unifiedBundle?.artifacts ?? [];
+  const artifacts = unifiedBundle?.artifacts ?? EMPTY_ARTIFACTS;
   const pipelineCounts = unifiedBundle?.pipelineCounts ?? { photoVision: 0, geometryRecon: 0 };
 
   const hasPipelineBData = pipelineCounts.geometryRecon > 0;
   const hasPipelineAData = pipelineCounts.photoVision > 0;
   const hasAnyData = artifacts.length > 0;
+  const polygonArtifactCount = artifacts.filter((a) => a.polygon?.vertices?.length).length;
+  const consensusPlaneCount = artifacts.filter((a) => a.geometryClass === 'consensus_plane').length;
 
   // Count by geometry class
   const classCounts = useMemo(() => {
@@ -264,6 +293,13 @@ export function RoofGeometrySection({
           </div>
         )}
 
+        {pipelineStatus === 'completed' && generationSummary && (
+          <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-2.5">
+            <p className="text-[11px] font-semibold text-emerald-300">Geometry generated</p>
+            <p className="mt-0.5 text-[10px] text-emerald-100/70">{generationSummary}</p>
+          </div>
+        )}
+
         {pipelineStatus === 'failed' && pipelineError && (
           <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-2.5">
             <p className="text-[11px] font-semibold text-red-300">Error</p>
@@ -282,6 +318,12 @@ export function RoofGeometrySection({
                 {cls.replace(/_/g, ' ')}: {count}
               </span>
             ))}
+            <span className="rounded-full border border-slate-700/40 bg-slate-900/30 px-2.5 py-1 text-[10px] text-slate-500">
+              Polygons: {polygonArtifactCount}
+            </span>
+            <span className="rounded-full border border-slate-700/40 bg-slate-900/30 px-2.5 py-1 text-[10px] text-slate-500">
+              Consensus planes: {consensusPlaneCount}
+            </span>
             <span className="rounded-full border border-slate-700/40 bg-slate-900/30 px-2.5 py-1 text-[10px] text-slate-500">
               Source: {hasPipelineBData ? 'Geometry Recon + Photo Vision' : 'Photo Vision (bbox only)'}
             </span>
@@ -313,7 +355,7 @@ export function RoofGeometrySection({
               filesWithArtifacts={filesWithArtifacts}
               selectedFileId={selectedFileId}
               onSelectFile={setSelectedFileId}
-              showMockArtifacts={false}
+              showMockArtifacts={true}
             />
           </div>
         )}

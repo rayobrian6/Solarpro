@@ -62,16 +62,28 @@ export async function POST(
     const pipeline = body.pipeline ?? 'mock';
     const sourceFileIds: string[] = body.sourceFileIds ?? [];
 
-    // Get survey files to build source photos
+    // Get survey photo files to build source photos.
+    // NOTE: SiteSurveyFile uses `fileUrl`/`filename` (not `url`/`originalName`).
+    // The old mapping produced empty URLs, causing the normal logged-in UI flow
+    // to run Pipeline B without usable source images.
     const files = await getSiteSurveyFiles(surveyId);
-    const sourcePhotos: SourcePhoto[] = (sourceFileIds.length > 0
-      ? files.filter((f: { id: string }) => sourceFileIds.includes(f.id))
-      : files
-    ).map((f: { id: string; url?: string; originalName?: string }) => ({
-      fileId: f.id,
-      fileUrl: f.url ?? '',
-      filename: f.originalName ?? null,
-    }));
+    const selectedFiles = sourceFileIds.length > 0
+      ? files.filter((f) => sourceFileIds.includes(f.id))
+      : files;
+    const sourcePhotos: SourcePhoto[] = selectedFiles
+      .filter((f) => f.fileType === 'photo' && Boolean(f.fileUrl))
+      .map((f) => ({
+        fileId: f.id,
+        fileUrl: f.fileUrl,
+        filename: f.filename ?? null,
+      }));
+
+    if (sourcePhotos.length === 0) {
+      return NextResponse.json(
+        { success: false, error: 'No survey photos with usable file URLs were found for geometry reconstruction.' },
+        { status: 400 },
+      );
+    }
 
     const input: GeometryReconstructionInput = {
       surveyId,
@@ -126,6 +138,13 @@ export async function POST(
       }
 
       const { artifacts, stages, totalDurationMs } = pipelineResult;
+      const rawArtifactCount = artifacts.length;
+      const rawConsensusPlaneCount = artifacts.filter(
+        (artifact) => artifact.artifactType === 'consensus_plane_candidate',
+      ).length;
+      const rawPolygonArtifactCount = artifacts.filter(
+        (artifact) => 'polygon' in artifact && Array.isArray(artifact.polygon) && artifact.polygon.length > 0,
+      ).length;
 
       // Persist each artifact
       for (const artifact of artifacts) {
@@ -162,6 +181,12 @@ export async function POST(
         job: completedJob ?? { ...job, status: 'completed', artifacts },
         pipelineStages: stages,
         totalDurationMs,
+        summary: {
+          sourcePhotoCount: sourcePhotos.length,
+          rawArtifactCount,
+          rawConsensusPlaneCount,
+          rawPolygonArtifactCount,
+        },
       });
     } catch (pipelineErr) {
       // Pipeline execution failed — mark job as failed

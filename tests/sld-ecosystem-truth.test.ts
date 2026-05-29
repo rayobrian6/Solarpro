@@ -207,8 +207,7 @@ describe('SLD — SolarEdge SE11400H optimizer_string (36 modules, 3 strings)', 
   test('6. getInverterById(se-11400h).integratedDcDisconnect === true', () => {
     const inv = getInverterById('se-11400h');
     expect(inv).toBeDefined();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((inv as any)?.integratedDcDisconnect).toBe(true);
+    expect(inv?.integratedDcDisconnect).toBe(true);
   });
 
   test('7. DC_STRING_RUN shows OPEN AIR or NEC 690.31 label', () => {
