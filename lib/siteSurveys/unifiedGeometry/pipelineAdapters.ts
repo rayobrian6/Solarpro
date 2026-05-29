@@ -534,6 +534,23 @@ function adaptRoofPlaneCandidate(artifact: RoofPlaneCandidate, surveyId: string)
     'geometry_recon', 'plane_extraction_worker', undefined, [], undefined, undefined,
     isSynth, isSynth ? 'SYNTHETIC: Roof plane candidate produced by heuristic extraction, not real RANSAC on depth data' : undefined,
   );
+  const bbox = artifact.region ? regionToBBox(artifact.region) : null;
+  // Derive a 4-vertex polygon from the bbox so the overlay renderer can
+  // display a filled shape. Real polygon geometry comes from
+  // consensus_plane candidates (Stage 6 multi-view fusion).
+  let polygon: GeometryPolygon | null = null;
+  if (bbox) {
+    const cs = 'normalized_image_0_1000' as const;
+    polygon = {
+      vertices: [
+        { x: bbox.x, y: bbox.y, coordinateSystem: cs },
+        { x: bbox.x + bbox.width, y: bbox.y, coordinateSystem: cs },
+        { x: bbox.x + bbox.width, y: bbox.y + bbox.height, coordinateSystem: cs },
+        { x: bbox.x, y: bbox.y + bbox.height, coordinateSystem: cs },
+      ],
+      coordinateSystem: cs,
+    };
+  }
   return makeEmptyArtifact({
     id: uuid(),
     surveyId,
@@ -543,7 +560,8 @@ function adaptRoofPlaneCandidate(artifact: RoofPlaneCandidate, surveyId: string)
     confidence: artifact.confidence,
     label: isSynth ? `⚠️ Synthetic: Roof plane candidate (inliers: ${artifact.inlierCount}/${artifact.totalPoints})` : `Roof plane candidate (inliers: ${artifact.inlierCount}/${artifact.totalPoints})`,
     limitations: [...artifact.limitations],
-    bbox: artifact.region ? regionToBBox(artifact.region) : null,
+    bbox,
+    polygon,
     planeType: 'roof',
     pitchDegrees: artifact.slopeDegrees,
     azimuthDegrees: artifact.aspectDegrees,
@@ -560,6 +578,23 @@ function adaptWallPlaneCandidate(artifact: WallPlaneCandidate, surveyId: string)
     'geometry_recon', 'plane_extraction_worker', undefined, [], undefined, undefined,
     isSynth, isSynth ? 'SYNTHETIC: Wall plane candidate produced by heuristic extraction' : undefined,
   );
+  const bbox = artifact.region ? regionToBBox(artifact.region) : null;
+  // Derive a 4-vertex polygon from the bbox so the overlay renderer can
+  // display a filled shape. Real polygon geometry comes from
+  // consensus_plane candidates (Stage 6 multi-view fusion).
+  let polygon: GeometryPolygon | null = null;
+  if (bbox) {
+    const cs = 'normalized_image_0_1000' as const;
+    polygon = {
+      vertices: [
+        { x: bbox.x, y: bbox.y, coordinateSystem: cs },
+        { x: bbox.x + bbox.width, y: bbox.y, coordinateSystem: cs },
+        { x: bbox.x + bbox.width, y: bbox.y + bbox.height, coordinateSystem: cs },
+        { x: bbox.x, y: bbox.y + bbox.height, coordinateSystem: cs },
+      ],
+      coordinateSystem: cs,
+    };
+  }
   return makeEmptyArtifact({
     id: uuid(),
     surveyId,
@@ -569,7 +604,8 @@ function adaptWallPlaneCandidate(artifact: WallPlaneCandidate, surveyId: string)
     confidence: artifact.confidence,
     label: isSynth ? `⚠️ Synthetic: Wall plane candidate (inliers: ${artifact.inlierCount}/${artifact.totalPoints})` : `Wall plane candidate (inliers: ${artifact.inlierCount}/${artifact.totalPoints})`,
     limitations: [...artifact.limitations],
-    bbox: artifact.region ? regionToBBox(artifact.region) : null,
+    bbox,
+    polygon,
     planeType: 'wall',
     azimuthDegrees: artifact.facingDirection ? null : null, // facingDirection is a string, not degrees
     normalVector: arrayToNormalVec(artifact.normal),
