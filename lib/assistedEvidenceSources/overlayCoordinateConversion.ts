@@ -49,6 +49,11 @@ export interface SvgPercentLine {
   y2: number;
 }
 
+/** SVG-friendly polygon in percentage units (0–100). */
+export interface SvgPercentPolygon {
+  points: string; // SVG points string "x1,y1 x2,y2 x3,y3 ..."
+}
+
 /** Pixel rect for a known image dimension. */
 export interface PixelRect {
   x: number;
@@ -82,6 +87,23 @@ export function normalizedLineToSvgPercent(line: NormalizedLine): SvgPercentLine
     x2: line.x2 / 10,
     y2: line.y2 / 10,
   };
+}
+
+/**
+ * Convert an array of normalized polygon vertices to an SVG polygon points string.
+ *
+ * Each vertex {x, y} in `normalized_image_0_1000` (0–1000) maps to
+ * percentage coordinates (0–100) by dividing by 10. The result is a
+ * space-separated string of "x,y" pairs suitable for an SVG `<polygon>`
+ * element's `points` attribute.
+ */
+export function normalizedPolygonToSvgPercent(
+  vertices: Array<{ x: number; y: number; coordinateSystem?: string }>,
+): SvgPercentPolygon {
+  const points = vertices
+    .map((v) => `${(v.x / 10).toFixed(2)},${(v.y / 10).toFixed(2)}`)
+    .join(' ');
+  return { points };
 }
 
 /**
@@ -143,6 +165,36 @@ export function extractDrawableLine(
     return line;
   }
   return null;
+}
+
+/**
+ * Extract a drawable polygon from a unified geometry artifact's `polygon` field.
+ *
+ * The polygon has a `vertices` array of `{x, y, coordinateSystem}` objects
+ * in `normalized_image_0_1000` coordinates. Returns the vertices array if
+ * valid, or null if no drawable polygon is found.
+ */
+export function extractDrawablePolygon(
+  artifact: { polygon: unknown },
+): Array<{ x: number; y: number; coordinateSystem: string }> | null {
+  if (!artifact || !artifact.polygon || typeof artifact.polygon !== 'object') {
+    return null;
+  }
+  const poly = artifact.polygon as { vertices?: unknown; coordinateSystem?: string };
+  if (!Array.isArray(poly.vertices) || poly.vertices.length < 3) {
+    return null;
+  }
+  const vertices = poly.vertices as Array<unknown>;
+  // Validate each vertex has x, y numbers
+  const valid = vertices.every(
+    (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      typeof (v as Record<string, unknown>).x === 'number' &&
+      typeof (v as Record<string, unknown>).y === 'number',
+  );
+  if (!valid) return null;
+  return vertices as Array<{ x: number; y: number; coordinateSystem: string }>;
 }
 
 /**

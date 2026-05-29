@@ -368,6 +368,25 @@ export function adaptPhotoVisionCandidate(
       ? 'wall'
       : null;
 
+  // Generate a polygon from the bbox for roof_plane and wall_plane artifacts.
+  // Pipeline A rectangular_region_candidates are rectangular by definition,
+  // so we can derive a 4-vertex polygon from the bounding box coordinates.
+  // This gives the UnifiedGeometryOverlayRenderer actual polygon geometry
+  // to render as filled shapes instead of just bounding box outlines.
+  let polygon: GeometryPolygon | null = null;
+  if (bbox && (geometryClass === 'roof_plane' || geometryClass === 'wall_plane')) {
+    const cs = 'normalized_image_0_1000' as const;
+    polygon = {
+      vertices: [
+        { x: bbox.x, y: bbox.y, coordinateSystem: cs },
+        { x: bbox.x + bbox.width, y: bbox.y, coordinateSystem: cs },
+        { x: bbox.x + bbox.width, y: bbox.y + bbox.height, coordinateSystem: cs },
+        { x: bbox.x, y: bbox.y + bbox.height, coordinateSystem: cs },
+      ],
+      coordinateSystem: cs,
+    };
+  }
+
   return makeEmptyArtifact({
     id: candidate.candidateId,
     surveyId,
@@ -378,6 +397,7 @@ export function adaptPhotoVisionCandidate(
     label: candidate.summary ?? `${candidate.candidateType} (Pipeline A)`,
     limitations: [...candidate.limitations],
     bbox,
+    polygon,
     lineSegment,
     center,
     planeType,

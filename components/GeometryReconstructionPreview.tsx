@@ -619,6 +619,31 @@ export default function GeometryReconstructionPreview({
     }
   }, [surveyId]);
 
+  const runFullPipeline = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/site-surveys/${surveyId}/geometry-reconstruction/start`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pipeline: 'full' }),
+        },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Request failed (${res.status})`);
+      }
+      const json = await res.json();
+      setResult((json.data ?? json) as GeometryReconstructionResult);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  }, [surveyId]);
+
   const loadArtifacts = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -727,6 +752,18 @@ export default function GeometryReconstructionPreview({
 
           {/* Action buttons */}
           <div className="mb-3 flex flex-wrap gap-2">
+            <button
+              onClick={runFullPipeline}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600/80 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loading ? (
+                <RefreshCw size={12} className="animate-spin" />
+              ) : (
+                <Layers size={12} />
+              )}
+              Run Full Pipeline (Real Geometry)
+            </button>
             <button
               onClick={runMockReconstruction}
               disabled={loading}

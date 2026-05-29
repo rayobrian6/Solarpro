@@ -68,6 +68,8 @@ import {
 import { PhotoVisionOverlayRenderer, buildFilesWithOverlays, buildFilesWithRefinedOverlays, type OverlayMode } from "@/components/PhotoVisionOverlayRenderer";
 import GeometryReconstructionPreview from "@/components/GeometryReconstructionPreview";
 import { UnifiedGeometryPanel } from "@/components/UnifiedGeometryPanel";
+import { UnifiedGeometryOverlayRenderer, buildFilesWithUnifiedArtifacts } from "@/components/UnifiedGeometryOverlayRenderer";
+import type { UnifiedGeometryEvidenceBundle, UnifiedGeometryArtifact } from "@/lib/siteSurveys/unifiedGeometry/types";
 import { refineGeometry, type RawRefinementInput, type RefinedGeometryBundle } from "@/lib/assistedEvidenceSources/geometryRefinement";
 import type { ProjectSurveyEvidenceHygieneManifest } from "@/lib/survey/evidence/sessionGrouping";
 import type { SurveyEvidenceEngineeringBridge } from "@/lib/survey/evidence/engineeringBridge";
@@ -1685,6 +1687,8 @@ function OpenSourcePhotoVisionPassPanel({
   const [showSuppressed, setShowSuppressed] = useState(false);
   const [retryingFinalization, setRetryingFinalization] = useState(false);
   const [retryJobId, setRetryJobId] = useState<string>("");
+  const [unifiedGeometryBundle, setUnifiedGeometryBundle] = useState<UnifiedGeometryEvidenceBundle | null>(null);
+  const [selectedUnifiedFileId, setSelectedUnifiedFileId] = useState<string | null>(null);
   const activeBundle = result?.stored ?? bundle ?? null;
   const allCandidates = safeArray(activeBundle?.candidates);
 
@@ -1773,6 +1777,25 @@ function OpenSourcePhotoVisionPassPanel({
       setRetryingFinalization(false);
     }
   }, [surveyId, retryJobId, onDetailRefresh]);
+
+  // ── Fetch unified geometry bundle for overlay rendering ──
+  useEffect(() => {
+    if (!surveyId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/site-surveys/${surveyId}/unified-geometry/bundle`);
+        const data = await res.json();
+        if (!cancelled && data.success && data.bundle) {
+          setUnifiedGeometryBundle(data.bundle);
+        }
+      } catch (err) {
+        // Non-fatal — unified overlay is supplementary
+        console.warn('[survey-page] Failed to fetch unified geometry bundle:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [surveyId]);
 
   const runPass = useCallback(async () => {
     setLoading(true);
@@ -2190,6 +2213,36 @@ External OpenCV + YOLO/Supervision + Tesseract OCR worker · actual image bytes 
               selectedFileId={selectedOverlayFileId}
               onSelectFile={setSelectedOverlayFileId}
               showSuppressed={showSuppressed}
+            />
+          </div>
+        )}
+
+        {/* ── Unified Geometry Overlay (Pipeline A + B combined) ── */}
+        {unifiedGeometryBundle && unifiedGeometryBundle.artifacts.length > 0 && (
+          <div className="rounded-xl border border-teal-500/20 bg-slate-950/40 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-teal-300">
+                Unified Geometry Overlay — Roof Planes &amp; Lines
+              </p>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-slate-500">
+                  {unifiedGeometryBundle.pipelineCounts.photoVision} Photo Vision · {unifiedGeometryBundle.pipelineCounts.geometryRecon} Geometry Recon
+                </span>
+              </div>
+            </div>
+            <p className="text-[9px] text-slate-500 mb-3">
+              Roof plane polygons, structural lines, and obstructions from both pipelines.
+              Polygons (filled shapes) come from Pipeline B geometry reconstruction; bounding boxes come from Pipeline A photo vision.
+              REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY.
+            </p>
+            <UnifiedGeometryOverlayRenderer
+              filesWithArtifacts={buildFilesWithUnifiedArtifacts(
+                unifiedGeometryBundle.artifacts,
+                files.map((f) => ({ id: f.id, fileUrl: f.fileUrl, filename: f.filename })),
+              )}
+              selectedFileId={selectedUnifiedFileId}
+              onSelectFile={setSelectedUnifiedFileId}
+              showMockArtifacts={true}
             />
           </div>
         )}
