@@ -1,21 +1,22 @@
-# SolarPro Real Roof Geometry Extraction — Implementation Plan
+# Fix Survey Page UI & Get Real Roof Geometry Working
 
-## Part 1: Rewrite openSourcePhotoVisionWorker.ts
-- [x] Replace `analyzePixels()` (96×96) with real contour extraction from `roofGeometryExtractor.ts` (512×512)
-- [x] Replace `buildCandidates()` (fake index-parity + fabricated confidence) with real contour-based candidates
-- [x] Integrate OpenAI Vision geometry when OPENAI_API_KEY is available
-- [x] Add polygon vertex data to candidate payloads for polygon rendering
-- [x] Update edge summary metrics from new extraction pipeline
-- [x] Add `extractionMethod` tracking to file results
+## Problem
+The survey page is overwhelming with too many overlapping geometry sections, confusing labels, and no actual roof polygon shapes. The user said "There is soooo much going on here and none of it feels right. This is absolute shit."
 
-## Part 2: Fix the segmentation worker
-- [x] Replace NOT_IMPLEMENTED `generateHeuristicPolygon()` with real contour extraction
-- [x] Replace NOT_IMPLEMENTED `heuristicConfidence()` with real confidence from contour analysis
-- [x] Wire mask cleanup pipeline (Douglas-Peucker) into segmentation output
-- [x] Map `ContourClassification` to `SegmentationClass`
+## Plan
 
-## Part 3: Validation
-- [ ] Run typecheck (`npx tsc --noEmit`)
-- [ ] Run tests (`npx vitest run`)
-- [ ] Update existing test for new pipeline
-- [ ] Push to GitHub
+### 1. Consolidate geometry UI into ONE clean overlay section
+- [x] Create new RoofGeometrySection component (clean, single section)
+- [x] Replace 3 separate geometry sections with one unified section
+- [x] Remove 711 lines of dead OpenSourcePhotoVisionPassPanel code
+- [x] Clean up unused imports
+- [x] Fix type errors (sourcePipeline → provenance.sourcePipeline, confidence scale)
+
+### 2. Make Pipeline B runnable from the UI
+- [ ] Add a clear "Generate Roof Geometry" button to the unified section that triggers Pipeline B
+- [ ] Show progress/status inline
+- [ ] When Pipeline B completes, the overlay should automatically show polygon shapes
+
+### 3. Push and verify
+- [ ] Push changes to GitHub
+- [ ] Verify Vercel deployment
