@@ -1,23 +1,18 @@
-# Fix Survey Page UI & Get Real Roof Geometry Working
+# Roof Geometry Extraction — Session Tasks
 
-## Problem
-The survey page is overwhelming with too many overlapping geometry sections, confusing labels, and no actual roof polygon shapes. The user said "There is soooo much going on here and none of it feels right. This is absolute shit."
+## 1. Fix Pipeline A Button Visibility
+- [ ] Change `{!hasPipelineAData && (...)}` to always show the "Run Photo Vision (Bounding Boxes)" button
+- [ ] Ensure the button is visually distinguishable (secondary style) but always accessible
 
-## Plan
+## 2. Improve Pipeline B Output Quality — Roof Plane Detection
+- [ ] Review Pipeline B workers to understand current heuristic output
+- [ ] Enhance plane extraction worker to produce more realistic polygons
+- [ ] Enhance line extraction worker to detect more roof lines with varied subtypes
+- [ ] Improve segmentation worker to detect obstructions and segmentation masks
+- [ ] Ensure overlay renderer renders all artifact types properly
 
-### 1. Consolidate geometry UI into ONE clean overlay section
-- [x] Create new RoofGeometrySection component (clean, single section)
-- [x] Replace 3 separate geometry sections with one unified section
-- [x] Remove 711 lines of dead OpenSourcePhotoVisionPassPanel code
-- [x] Clean up unused imports
-- [x] Fix type errors (sourcePipeline → provenance.sourcePipeline, confidence scale)
-
-### 2. Make Pipeline B runnable from the UI
-- [x] Added "Generate Roof Geometry" button to the unified section that triggers Pipeline B
-- [x] Added "Run Photo Vision (Bounding Boxes)" button for Pipeline A
-- [x] Shows progress/status inline
-- [x] When Pipeline B completes, the overlay refreshes automatically
-
-### 3. Push and verify
-- [x] Push changes to GitHub
-- [x] Verify Vercel deployment (both solarpro-dev and solarpro-v31 — success)
+## 3. Validate & Commit
+- [ ] Run `npx tsc --noEmit`
+- [ ] Run `npx eslint . --ext .ts,.tsx`
+- [ ] Run `npx vitest run`
+- [ ] Commit and push to dev

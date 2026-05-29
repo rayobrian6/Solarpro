@@ -531,15 +531,18 @@ function adaptPlaneCandidate(artifact: PlaneCandidate, surveyId: string): Unifie
 function adaptRoofPlaneCandidate(artifact: RoofPlaneCandidate, surveyId: string): UnifiedGeometryArtifact {
   const isSynth = isReconArtifactSynthetic(artifact);
   const provenance = makeReconProvenance(
-    'geometry_recon', 'plane_extraction_worker', undefined, [], undefined, undefined,
+    'geometry_recon', 'plane_extraction_worker', artifact.fileId, [], undefined, undefined,
     isSynth, isSynth ? 'SYNTHETIC: Roof plane candidate produced by heuristic extraction, not real RANSAC on depth data' : undefined,
   );
   const bbox = artifact.region ? regionToBBox(artifact.region) : null;
-  // Derive a 4-vertex polygon from the bbox so the overlay renderer can
-  // display a filled shape. Real polygon geometry comes from
-  // consensus_plane candidates (Stage 6 multi-view fusion).
+  // Use the real polygon from the segmentation mask if available.
+  // This carries the actual contour shape from Canny edge detection,
+  // producing much more accurate overlays than the bbox-derived rectangle.
+  // Fall back to bbox-derived polygon only if no real polygon exists.
   let polygon: GeometryPolygon | null = null;
-  if (bbox) {
+  if (artifact.polygon && artifact.polygon.length >= 3) {
+    polygon = reconPointsToPolygon(artifact.polygon);
+  } else if (bbox) {
     const cs = 'normalized_image_0_1000' as const;
     polygon = {
       vertices: [
@@ -575,15 +578,18 @@ function adaptRoofPlaneCandidate(artifact: RoofPlaneCandidate, surveyId: string)
 function adaptWallPlaneCandidate(artifact: WallPlaneCandidate, surveyId: string): UnifiedGeometryArtifact {
   const isSynth = isReconArtifactSynthetic(artifact);
   const provenance = makeReconProvenance(
-    'geometry_recon', 'plane_extraction_worker', undefined, [], undefined, undefined,
+    'geometry_recon', 'plane_extraction_worker', artifact.fileId, [], undefined, undefined,
     isSynth, isSynth ? 'SYNTHETIC: Wall plane candidate produced by heuristic extraction' : undefined,
   );
   const bbox = artifact.region ? regionToBBox(artifact.region) : null;
-  // Derive a 4-vertex polygon from the bbox so the overlay renderer can
-  // display a filled shape. Real polygon geometry comes from
-  // consensus_plane candidates (Stage 6 multi-view fusion).
+  // Use the real polygon from the segmentation mask if available.
+  // This carries the actual contour shape from Canny edge detection,
+  // producing much more accurate overlays than the bbox-derived rectangle.
+  // Fall back to bbox-derived polygon only if no real polygon exists.
   let polygon: GeometryPolygon | null = null;
-  if (bbox) {
+  if (artifact.polygon && artifact.polygon.length >= 3) {
+    polygon = reconPointsToPolygon(artifact.polygon);
+  } else if (bbox) {
     const cs = 'normalized_image_0_1000' as const;
     polygon = {
       vertices: [

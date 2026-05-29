@@ -261,16 +261,14 @@ export function RoofGeometrySection({
               ? 'Generating roof geometry…'
               : 'Generate Roof Geometry'}
           </button>
-          {!hasPipelineAData && (
-            <button
-              onClick={runPipelineA}
-              disabled={pipelineStatus === 'running'}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-300 shadow-sm transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <ScanLine size={12} />
-              Run Photo Vision (Bounding Boxes)
-            </button>
-          )}
+          <button
+            onClick={runPipelineA}
+            disabled={pipelineStatus === 'running'}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-300 shadow-sm transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <ScanLine size={12} />
+            Run Photo Vision (Bounding Boxes)
+          </button>
           {hasAnyData && (
             <button
               onClick={fetchBundle}

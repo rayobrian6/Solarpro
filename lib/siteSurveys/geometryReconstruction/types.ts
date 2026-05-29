@@ -150,6 +150,12 @@ export interface RoofPlaneCandidate {
   totalPoints: number;
   /** Bounding region in a reference photo (normalized coords). */
   region?: import('@/lib/assistedEvidenceSources/overlayCoordinateConversion').NormalizedRegion;
+  /** Polygon outline from segmentation mask (real contour geometry, not bbox-derived). */
+  polygon?: NormalizedPoint[];
+  /** Source segmentation mask ID this plane was derived from. */
+  sourceMaskId?: string;
+  /** Source file ID for overlay rendering. */
+  fileId?: string;
   /** Estimated slope in degrees. */
   slopeDegrees: number;
   /** Estimated aspect/azimuth in degrees. */
@@ -174,6 +180,12 @@ export interface WallPlaneCandidate {
   totalPoints: number;
   /** Bounding region in a reference photo (normalized coords). */
   region?: import('@/lib/assistedEvidenceSources/overlayCoordinateConversion').NormalizedRegion;
+  /** Polygon outline from segmentation mask (real contour geometry, not bbox-derived). */
+  polygon?: NormalizedPoint[];
+  /** Source segmentation mask ID this plane was derived from. */
+  sourceMaskId?: string;
+  /** Source file ID for overlay rendering. */
+  fileId?: string;
   /** Estimated height in meters (if derivable). */
   estimatedHeightM?: number;
   /** Which direction the wall faces. */
