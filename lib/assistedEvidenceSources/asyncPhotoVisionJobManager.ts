@@ -863,3 +863,28 @@ export async function resetStuckOrFailedFinalization(jobId: string): Promise<boo
   `;
   return result.length > 0;
 }
+
+/**
+ * Reset finalization_status from 'complete' back to 'pending'.
+ * Used by the ?retry=1 path to explicitly re-run a completed finalization
+ * (e.g. to re-execute Stage 1.5 unify after a code fix).
+ * Also clears finalizationResult so the pipeline produces fresh results.
+ * Returns true if the reset was applied.
+ */
+export async function resetCompletedFinalization(jobId: string): Promise<boolean> {
+  const sql = await getDbReady();
+  const result = await sql`
+    UPDATE photo_vision_jobs
+    SET finalization_status = 'pending',
+        finalization_started_at = NULL,
+        finalization_error = NULL,
+        finalization_stage = NULL,
+        finalization_last_heartbeat_at = NULL,
+        finalization_result = NULL,
+        updated_at = NOW()
+    WHERE job_id = ${jobId}
+      AND finalization_status = 'complete'
+    RETURNING job_id
+  `;
+  return result.length > 0;
+}

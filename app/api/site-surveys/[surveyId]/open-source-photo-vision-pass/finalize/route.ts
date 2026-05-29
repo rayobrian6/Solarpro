@@ -22,6 +22,8 @@
 // Retry Mode:
 //   - POST /finalize?retry=1 resets 'failed' or stale 'running' (>2min) back to 'pending'
 //     and then re-runs the full pipeline.
+//   - POST /finalize?retry=1 also resets 'complete' back to 'pending', allowing re-execution
+//     of the entire finalization pipeline (e.g. to re-run Stage 1.5 unify after a code fix).
 //
 // Dry-Run Mode:
 //   - POST /finalize?dryRun=1 returns the stage plan without executing or writing anything.
@@ -59,6 +61,7 @@ import {
   markFinalizationFailed,
   resetStuckFinalization,
   resetStuckOrFailedFinalization,
+  resetCompletedFinalization,
   updateFinalizationStage,
   type PhotoVisionJob,
 } from '@/lib/assistedEvidenceSources/asyncPhotoVisionJobManager';
@@ -346,6 +349,25 @@ export async function POST(
       status: job.status,
       finalizationStatus: job.finalizationStatus,
     }, { status: 400 });
+  }
+
+  // ── Handle 'complete' status with ?retry=1 — reset to 'pending' so pipeline re-runs ──
+  // This must come BEFORE the idempotency guard, otherwise retrying a completed finalization
+  // would return the cached result without re-executing (e.g. to re-run Stage 1.5 unify).
+  if (job.finalizationStatus === 'complete' && isRetry) {
+    console.log(`[finalize:retry-complete] jobId=${jobId} resetting complete→pending for retry`);
+    const reset = await withTimeout(resetCompletedFinalization(jobId), DB_READ_TIMEOUT_MS, 'finalize:retry-complete');
+    if (reset) {
+      console.log(`[finalize:retry-complete] jobId=${jobId} reset succeeded, re-reading job`);
+      const refreshed = await withTimeout(getJob(jobId), DB_READ_TIMEOUT_MS, 'finalize:get-job-after-complete-retry');
+      if (refreshed) {
+        job.finalizationStatus = refreshed.finalizationStatus;
+        job.finalizationResult = refreshed.finalizationResult;
+        job.finalizationError = refreshed.finalizationError;
+      }
+    } else {
+      console.log(`[finalize:retry-complete] jobId=${jobId} reset failed — status may have changed`);
+    }
   }
 
   // ── Idempotency: already finalized? Return stored results ──
