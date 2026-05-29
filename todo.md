@@ -13,10 +13,11 @@ The survey page is overwhelming with too many overlapping geometry sections, con
 - [x] Fix type errors (sourcePipeline → provenance.sourcePipeline, confidence scale)
 
 ### 2. Make Pipeline B runnable from the UI
-- [ ] Add a clear "Generate Roof Geometry" button to the unified section that triggers Pipeline B
-- [ ] Show progress/status inline
-- [ ] When Pipeline B completes, the overlay should automatically show polygon shapes
+- [x] Added "Generate Roof Geometry" button to the unified section that triggers Pipeline B
+- [x] Added "Run Photo Vision (Bounding Boxes)" button for Pipeline A
+- [x] Shows progress/status inline
+- [x] When Pipeline B completes, the overlay refreshes automatically
 
 ### 3. Push and verify
-- [ ] Push changes to GitHub
-- [ ] Verify Vercel deployment
+- [x] Push changes to GitHub
+- [x] Verify Vercel deployment (both solarpro-dev and solarpro-v31 — success)

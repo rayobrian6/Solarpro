@@ -70,10 +70,16 @@ export function RoofGeometrySection({
   const [bundleLoading, setBundleLoading] = useState(true);
 
   // ── Fetch unified geometry bundle ─────────────────────────────────
+  const [authRequired, setAuthRequired] = useState(false);
+
   const fetchBundle = useCallback(async () => {
     if (!surveyId) return;
     try {
       const res = await fetch(`/api/site-surveys/${surveyId}/unified-geometry/bundle`);
+      if (res.status === 401) {
+        setAuthRequired(true);
+        return;
+      }
       const data = await res.json();
       if (data.success && data.bundle) {
         setUnifiedBundle(data.bundle);
@@ -104,6 +110,9 @@ export function RoofGeometrySection({
       );
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
+        if (res.status === 401) {
+          throw new Error('Please log in to generate roof geometry. You need to be authenticated to run this pipeline.');
+        }
         throw new Error(body.error || `Request failed (${res.status})`);
       }
       const json = await res.json();
@@ -134,6 +143,9 @@ export function RoofGeometrySection({
       );
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
+        if (res.status === 401) {
+          throw new Error('Please log in to run photo vision. You need to be authenticated to run this pipeline.');
+        }
         throw new Error(body.error || `Photo vision failed (${res.status})`);
       }
       const json = await res.json();
@@ -310,10 +322,16 @@ export function RoofGeometrySection({
         {!hasAnyData && !bundleLoading && (
           <div className="rounded-lg border border-slate-700/40 bg-slate-900/20 p-6 text-center">
             <Box size={24} className="mx-auto text-slate-600 mb-2" />
-            <p className="text-xs text-slate-400">
-              No roof geometry data yet. Click &quot;Generate Roof Geometry&quot; to analyze
-              the survey photos and extract roof plane shapes.
-            </p>
+            {authRequired ? (
+              <p className="text-xs text-slate-400">
+                Please log in to view and generate roof geometry data.
+              </p>
+            ) : (
+              <p className="text-xs text-slate-400">
+                No roof geometry data yet. Click &quot;Generate Roof Geometry&quot; to analyze
+                the survey photos and extract roof plane shapes.
+              </p>
+            )}
           </div>
         )}
 
