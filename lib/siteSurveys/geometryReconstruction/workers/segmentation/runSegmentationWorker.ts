@@ -160,6 +160,10 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   const minConfidence = input.config?.minConfidence ?? 30;
   const includeRawMask = input.config?.includeRawMask ?? true;
   const maxPolygonPoints = input.config?.maxPolygonPoints ?? 50;
+  // SAM 2 masks retain more polygon detail because the model produces
+  // accurate segment boundaries — Canny contours are lower quality and
+  // benefit from aggressive simplification.
+  const sam2MaxPolygonPoints = Math.max(maxPolygonPoints, 100);
 
   // Stage 1: Initialize and validate input
   const t0 = Date.now();
@@ -229,7 +233,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
             if (segmentationClass === null) continue;
             if (mask.confidence < minConfidence) continue;
 
-            const truncatedPolygon = mask.polygon.slice(0, maxPolygonPoints);
+            const truncatedPolygon = mask.polygon.slice(0, sam2MaxPolygonPoints);
             const maskBounds = computeMaskBounds(truncatedPolygon);
 
             const artifact: SemanticSegmentationMask = {

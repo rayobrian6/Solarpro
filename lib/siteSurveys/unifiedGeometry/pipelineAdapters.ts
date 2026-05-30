@@ -59,6 +59,7 @@ import type {
   ObstructionSubtype,
   PlaneType,
   ObstructionCadImpact,
+  SegmentationBackend,
 } from './types';
 
 // ─── Pipeline A Candidate Type → Unified Geometry Class Mapping ─────────────
@@ -159,6 +160,22 @@ function reconPointsToPolygon(pts: ReconNormalizedPoint[]): GeometryPolygon {
  */
 function arrayToNormalVec(normal: [number, number, number]): GeometryNormalVector {
   return { x: normal[0], y: normal[1], z: normal[2] };
+}
+
+// ─── Segmentation Backend Detection ──────────────────────────────────────
+
+/**
+ * Detect which segmentation backend produced a mask from its rawMask prefix.
+ * - "sam2-" → SAM 2 (Meta's Segment Anything Model 2)
+ * - "canny-contour-" → Canny edge detection fallback
+ * - "heuristic-polygon-" → heuristic polygon generation (synthetic)
+ * - undefined/other → null (unknown or legacy)
+ */
+function detectSegmentationBackend(rawMask: string | undefined): SegmentationBackend | null {
+  if (!rawMask) return null;
+  if (rawMask.startsWith('sam2-')) return 'sam2';
+  if (rawMask.startsWith('canny-contour-')) return 'canny';
+  return null;
 }
 
 // ─── Line Type → RoofLineSubtype Mapping ────────────────────────────────────
@@ -301,6 +318,7 @@ function makeEmptyArtifact(overrides: Partial<UnifiedGeometryArtifact> & Pick<Un
     depthMetric: null,
     consensusPhotoCount: null,
     segmentationClass: null,
+    segmentationBackend: null,
     reviewState: 'review_required',
     reviewNotes: null,
     priority: overrides.confidence !== undefined
@@ -669,6 +687,8 @@ function adaptSemanticSegmentationMask(artifact: SemanticSegmentationMask, surve
     ? { ...SYNTHETIC_ARTIFACT_AUTHORITY }
     : { ...RAW_EVIDENCE_AUTHORITY };
 
+  const segmentationBackend = detectSegmentationBackend(artifact.rawMask);
+
   return makeEmptyArtifact({
     id: artifact.id,
     surveyId,
@@ -678,7 +698,11 @@ function adaptSemanticSegmentationMask(artifact: SemanticSegmentationMask, surve
     confidence: artifact.confidence,
     label: isSynthetic
       ? `⚠️ Synthetic: Semantic segmentation (${artifact.segmentationClass})`
-      : `Semantic segmentation (${artifact.segmentationClass})`,
+      : segmentationBackend === 'sam2'
+        ? `SAM 2 Segmentation (${artifact.segmentationClass})`
+        : segmentationBackend === 'canny'
+          ? `Canny Segmentation (${artifact.segmentationClass})`
+          : `Semantic segmentation (${artifact.segmentationClass})`,
     limitations: [...artifact.limitations],
     bbox: regionToBBox(artifact.maskBounds),
     polygon: reconPointsToPolygon(artifact.polygon),
@@ -686,6 +710,7 @@ function adaptSemanticSegmentationMask(artifact: SemanticSegmentationMask, surve
       ? { width: artifact.maskWidth, height: artifact.maskHeight }
       : null,
     segmentationClass: artifact.segmentationClass,
+    segmentationBackend,
     stageTimings: artifact.stageTimings ?? null,
     isSynthetic,
   });

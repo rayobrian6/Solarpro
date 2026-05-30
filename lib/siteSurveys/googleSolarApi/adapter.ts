@@ -290,6 +290,7 @@ function makeEmptyArtifact(
     depthMetric: null,
     consensusPhotoCount: null,
     segmentationClass: null,
+    segmentationBackend: null,
     reviewState: 'review_required',
     reviewNotes: null,
     priority: overrides.confidence >= 80 ? 'high' : overrides.confidence >= 50 ? 'medium' : 'low',

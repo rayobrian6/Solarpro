@@ -35,6 +35,7 @@ import type {
   UnifiedGeometryArtifact,
   UnifiedGeometryClass,
   GeometryLineSegment,
+  SegmentationBackend,
 } from '@/lib/siteSurveys/unifiedGeometry/types';
 
 /* ── Types ────────────────────────────────────────────────────────────── */
@@ -112,6 +113,24 @@ const GEOMETRY_CLASS_OVERLAY_COLORS: Record<
     stroke: '#94a3b8',
     fill: 'rgba(148,163,184,0.06)',
     label: '?',
+  },
+};
+
+/**
+ * Override colors for segmentation_mask artifacts based on backend.
+ * SAM 2 masks get a distinct emerald green to differentiate them from
+ * Canny edge-detection masks (which keep the default cyan).
+ */
+const SEGMENTATION_BACKEND_COLORS: Record<SegmentationBackend, { stroke: string; fill: string; label: string }> = {
+  sam2: {
+    stroke: '#10b981',     // emerald green — SAM 2 produces real ML masks
+    fill: 'rgba(16,185,129,0.15)',
+    label: 'SAM 2 Segmentation',
+  },
+  canny: {
+    stroke: '#22d3ee',     // cyan — Canny edge detection (fallback)
+    fill: 'rgba(34,211,238,0.08)',
+    label: 'Canny Segmentation',
   },
 };
 
@@ -408,6 +427,42 @@ export function UnifiedGeometryOverlayRenderer({
                   )];
               return entries;
             }
+            // For segmentation_mask, expand into per-backend legend entries (SAM 2 vs Canny)
+            if (cls === 'segmentation_mask') {
+              const backends = new Set<SegmentationBackend | null>();
+              filesWithDrawable.forEach(fw =>
+                fw.artifacts
+                  .filter(a => a.geometryClass === 'segmentation_mask')
+                  .forEach(a => backends.add(a.segmentationBackend ?? null))
+              );
+              const entries = Array.from(backends).map(be => {
+                const beColor = be && SEGMENTATION_BACKEND_COLORS[be]
+                  ? SEGMENTATION_BACKEND_COLORS[be]
+                  : color;
+                const beCount = filesWithDrawable.reduce(
+                  (sum, fw) => sum + fw.artifacts.filter(
+                    a => a.geometryClass === 'segmentation_mask' && (a.segmentationBackend ?? null) === be
+                  ).length, 0
+                );
+                const beLabel = be === 'sam2'
+                  ? 'SAM 2 Seg'
+                  : be === 'canny'
+                    ? 'Canny Seg'
+                    : 'Segmentation';
+                return (
+                  <div key={`segmentation_mask-${be ?? 'unknown'}`} className="flex items-center gap-1.5">
+                    <span
+                      className="inline-block h-2.5 w-2.5 rounded-sm border"
+                      style={{ borderColor: beColor.stroke, backgroundColor: beColor.fill }}
+                    />
+                    <span className="text-[9px] text-slate-400">
+                      {beLabel} ({beCount})
+                    </span>
+                  </div>
+                );
+              });
+              return entries;
+            }
             return [(
               <div key={cls} className="flex items-center gap-1.5">
                 <span
@@ -455,7 +510,13 @@ function PhotoWithUnifiedOverlays({
   }> = [];
 
   for (const artifact of artifacts) {
-    const color = GEOMETRY_CLASS_OVERLAY_COLORS[artifact.geometryClass] ?? GEOMETRY_CLASS_OVERLAY_COLORS.unknown;
+    // For segmentation_mask artifacts, use backend-specific colors to
+    // visually distinguish SAM 2 (emerald green) from Canny (cyan)
+    const isSegMask = artifact.geometryClass === 'segmentation_mask';
+    const defaultColor = GEOMETRY_CLASS_OVERLAY_COLORS[artifact.geometryClass] ?? GEOMETRY_CLASS_OVERLAY_COLORS.unknown;
+    const color = isSegMask && artifact.segmentationBackend && SEGMENTATION_BACKEND_COLORS[artifact.segmentationBackend]
+      ? SEGMENTATION_BACKEND_COLORS[artifact.segmentationBackend]
+      : defaultColor;
     const geometry = extractArtifactGeometry(artifact);
     overlayElements.push({
       artifact,
@@ -685,6 +746,13 @@ function PhotoWithUnifiedOverlays({
             {/* Non-plane/non-line: generic details */}
             {!isRoofPlane && !isRoofLine && (
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] text-slate-500">
+                {a.segmentationBackend && (
+                  <span className="text-slate-300">
+                    Backend: <span className={a.segmentationBackend === 'sam2' ? 'text-emerald-300' : 'text-cyan-300'}>
+                      {a.segmentationBackend === 'sam2' ? 'SAM 2' : 'Canny'}
+                    </span>
+                  </span>
+                )}
                 {a.areaSqM != null && (
                   <span>Area: {a.areaSqM.toFixed(1)} m²</span>
                 )}

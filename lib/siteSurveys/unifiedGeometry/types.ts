@@ -144,6 +144,13 @@ export type ElectricalNodeSubtype =
  */
 export type PlaneType = 'roof' | 'wall' | 'ground';
 
+/**
+ * Segmentation backend that produced this mask.
+ * Used to visually distinguish SAM 2 masks from Canny edge-detection masks
+ * in the overlay renderer. Null for non-segmentation artifacts or legacy data.
+ */
+export type SegmentationBackend = 'sam2' | 'canny';
+
 // ────────────────────────────────────────────────────────────────────────────
 // Source Pipeline Provenance
 // ────────────────────────────────────────────────────────────────────────────
@@ -366,6 +373,9 @@ export interface UnifiedGeometryArtifact {
 
   /** Segmentation class label */
   segmentationClass: string | null;
+
+  /** Segmentation backend that produced this mask ('sam2' or 'canny'). Null for non-segmentation artifacts. */
+  segmentationBackend: SegmentationBackend | null;
 
   // ── Review state ──
 
