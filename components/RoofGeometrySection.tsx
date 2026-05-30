@@ -25,6 +25,7 @@ import {
   Eye,
   ScanLine,
   Home,
+  Sun,
 } from 'lucide-react';
 import {
   UnifiedGeometryOverlayRenderer,
@@ -74,6 +75,9 @@ export function RoofGeometrySection({
   const [generationSummary, setGenerationSummary] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [bundleLoading, setBundleLoading] = useState(true);
+  const [pipelineCLoading, setPipelineCLoading] = useState(false);
+  const [pipelineCError, setPipelineCError] = useState<string | null>(null);
+  const [pipelineCSummary, setPipelineCSummary] = useState<string | null>(null);
 
   // ── Fetch unified geometry bundle ─────────────────────────────────
   const [authRequired, setAuthRequired] = useState(false);
@@ -188,12 +192,102 @@ export function RoofGeometrySection({
     }
   }, [surveyId, fetchBundle, onGeometryGenerated]);
 
+  // ── Run Pipeline C (Google Solar API) ──────────────────────────────────
+  const runPipelineC = useCallback(async () => {
+    setPipelineCLoading(true);
+    setPipelineCError(null);
+    setPipelineCSummary(null);
+    setPipelineStatus('running');
+    setPipelineError(null);
+    setGenerationSummary(null);
+    try {
+      // Prompt for lat/lng if not embedded in the survey
+      // For now, use a modal-style prompt via window.prompt
+      // In a production app, this would be a proper form with geocoding
+      const latStr = window.prompt(
+        'Enter the building latitude (decimal degrees):\nExample: 37.422',
+      );
+      if (!latStr) {
+        setPipelineCLoading(false);
+        setPipelineStatus('idle');
+        return; // User cancelled
+      }
+      const lngStr = window.prompt(
+        'Enter the building longitude (decimal degrees):\nExample: -122.084',
+      );
+      if (!lngStr) {
+        setPipelineCLoading(false);
+        setPipelineStatus('idle');
+        return; // User cancelled
+      }
+
+      const lat = parseFloat(latStr);
+      const lng = parseFloat(lngStr);
+
+      if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        throw new Error(`Invalid coordinates: lat=${latStr}, lng=${lngStr}. Latitude must be -90 to 90, longitude -180 to 180.`);
+      }
+
+      const res = await fetch(
+        `/api/site-surveys/${surveyId}/google-solar-api`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ latitude: lat, longitude: lng }),
+        },
+      );
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        if (res.status === 401) {
+          throw new Error('Please log in to use the Google Solar API.');
+        }
+        if (res.status === 503) {
+          throw new Error('Google Solar API is not configured on this server. Ask your administrator to set the GOOGLE_SOLAR_API_KEY environment variable.');
+        }
+        throw new Error(body.error || `Request failed (${res.status})`);
+      }
+
+      const json = await res.json();
+      if (!json.success) {
+        throw new Error(json.error || 'Google Solar API call failed');
+      }
+
+      const summary = json.summary ?? {};
+      const planeCount = summary.roofPlaneCount ?? 0;
+      const lineCount = summary.roofLineCount ?? 0;
+      const polygonCount = summary.polygonCount ?? 0;
+      const imageryInfo = json.imageryInfo;
+
+      setPipelineCSummary(
+        `Pipeline C (Google Solar API) completed: ${planeCount} roof planes with ${polygonCount} polygon outlines, ${lineCount} inferred roof lines.${
+          imageryInfo?.date ? ` Imagery from ${imageryInfo.date}.` : ''
+        }`,
+      );
+      setPipelineStatus('completed');
+      setGenerationSummary(
+        `Google Solar API returned ${planeCount} real roof plane polygons — no more bounding boxes!`,
+      );
+      // Refresh the unified bundle to pick up new Pipeline C artifacts
+      await fetchBundle();
+      onGeometryGenerated?.();
+    } catch (err) {
+      setPipelineStatus('failed');
+      setPipelineCError(err instanceof Error ? err.message : 'Unknown error');
+      setPipelineError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setPipelineCLoading(false);
+    }
+  }, [surveyId, fetchBundle, onGeometryGenerated]);
+
   // ── Derived data ──────────────────────────────────────────────────
   const artifacts = unifiedBundle?.artifacts ?? EMPTY_ARTIFACTS;
-  const pipelineCounts = unifiedBundle?.pipelineCounts ?? { photoVision: 0, geometryRecon: 0 };
+  const pipelineCounts = unifiedBundle?.pipelineCounts ?? { photoVision: 0, geometryRecon: 0, googleSolarApi: 0, obstructionRegistration: 0, manual: 0, merged: 0, mock: 0 };
 
   const hasPipelineBData = pipelineCounts.geometryRecon > 0;
   const hasPipelineAData = pipelineCounts.photoVision > 0;
+  const hasPipelineCData = pipelineCounts.googleSolarApi > 0;
   const hasAnyData = artifacts.length > 0;
   const polygonArtifactCount = artifacts.filter((a) => a.polygon?.vertices?.length).length;
   const consensusPlaneCount = artifacts.filter((a) => a.geometryClass === 'consensus_plane').length;
@@ -233,7 +327,12 @@ export function RoofGeometrySection({
               <CheckCircle size={10} /> Pipeline B
             </span>
           )}
-          {hasPipelineAData && !hasPipelineBData && (
+          {hasPipelineCData && (
+            <span className="flex items-center gap-1 text-[10px] text-amber-400">
+              <Sun size={10} /> Pipeline C (Solar API)
+            </span>
+          )}
+          {hasPipelineAData && !hasPipelineBData && !hasPipelineCData && (
             <span className="flex items-center gap-1 text-[10px] text-amber-400">
               <ScanLine size={10} /> Pipeline A only
             </span>
@@ -268,6 +367,19 @@ export function RoofGeometrySection({
           >
             <ScanLine size={12} />
             Run Photo Vision (Bounding Boxes)
+          </button>
+          <button
+            onClick={runPipelineC}
+            disabled={pipelineStatus === 'running' || pipelineCLoading}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600/80 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50"
+            title="Use Google Solar API to get real roof polygon shapes from aerial imagery (requires lat/lng)"
+          >
+            {pipelineCLoading ? (
+              <RefreshCw size={12} className="animate-spin" />
+            ) : (
+              <Sun size={12} />
+            )}
+            {pipelineCLoading ? 'Fetching Solar API…' : 'Google Solar API (Real Shapes)'}
           </button>
           {hasAnyData && (
             <button
@@ -305,6 +417,22 @@ export function RoofGeometrySection({
           </div>
         )}
 
+        {/* ── Pipeline C (Solar API) Status ── */}
+        {pipelineCSummary && (
+          <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-2.5">
+            <p className="text-[11px] font-semibold text-amber-300">Solar API Result</p>
+            <p className="mt-0.5 text-[10px] text-amber-100/70">{pipelineCSummary}</p>
+          </div>
+        )}
+        {pipelineCError && (
+          <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-2.5">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={12} className="text-amber-400 mt-0.5 flex-shrink-0" />
+              <p className="text-[10px] text-amber-200/70">{pipelineCError}</p>
+            </div>
+          </div>
+        )}
+
         {/* ── Quick Stats ── */}
         {hasAnyData && (
           <div className="flex flex-wrap gap-2">
@@ -323,23 +451,25 @@ export function RoofGeometrySection({
               Consensus planes: {consensusPlaneCount}
             </span>
             <span className="rounded-full border border-slate-700/40 bg-slate-900/30 px-2.5 py-1 text-[10px] text-slate-500">
-              Source: {hasPipelineBData ? 'Geometry Recon + Photo Vision' : 'Photo Vision (bbox only)'}
+              Source: {hasPipelineCData ? 'Google Solar API + ' : ''}{hasPipelineBData ? 'Geometry Recon + ' : ''}Photo Vision
             </span>
           </div>
         )}
 
-        {/* ── Info banner when no Pipeline B data ── */}
-        {hasPipelineAData && !hasPipelineBData && (
+        {/* ── Info banner when no Pipeline B/C data ── */}
+        {hasPipelineAData && !hasPipelineBData && !hasPipelineCData && (
           <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-2.5">
             <div className="flex items-start gap-2">
               <AlertTriangle size={12} className="text-amber-400 mt-0.5 flex-shrink-0" />
               <div>
                 <p className="text-[10px] font-semibold text-amber-200">
-                  Bounding boxes only — click &quot;Generate Roof Geometry&quot; for real roof shapes
+                  Bounding boxes only — use &quot;Google Solar API&quot; for real roof shapes
                 </p>
                 <p className="mt-0.5 text-[10px] text-amber-100/60">
-                  The current overlay shows bounding boxes from photo vision. Running the geometry
-                  reconstruction pipeline will produce actual roof plane polygons.
+                  The current overlay shows bounding boxes from photo vision. The Google Solar API
+                  button fetches actual roof plane polygons with pitch, azimuth, and area data
+                  from aerial imagery. Click &quot;Generate Roof Geometry&quot; for the reconstruction
+                  pipeline alternative.
                 </p>
               </div>
             </div>
@@ -399,7 +529,9 @@ export function RoofGeometrySection({
                       className={`h-2 w-2 rounded-full flex-shrink-0 ${
                         artifact.provenance?.sourcePipeline === 'geometry_recon'
                           ? 'bg-emerald-400'
-                          : 'bg-amber-400'
+                          : artifact.provenance?.sourcePipeline === 'google_solar_api'
+                            ? 'bg-amber-400'
+                            : 'bg-blue-400'
                       }`}
                     />
                     <span className="text-[10px] text-slate-300">
@@ -408,7 +540,7 @@ export function RoofGeometrySection({
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-[9px] text-slate-500">
-                      {artifact.provenance?.sourcePipeline === 'geometry_recon' ? 'Pipeline B' : 'Pipeline A'}
+                      {artifact.provenance?.sourcePipeline === 'google_solar_api' ? 'Pipeline C' : artifact.provenance?.sourcePipeline === 'geometry_recon' ? 'Pipeline B' : 'Pipeline A'}
                     </span>
                     {artifact.confidence != null && (
                       <span className="text-[9px] text-slate-500">

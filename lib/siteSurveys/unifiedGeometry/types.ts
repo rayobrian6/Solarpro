@@ -155,6 +155,7 @@ export type PlaneType = 'roof' | 'wall' | 'ground';
 export type GeometrySourcePipeline =
   | 'photo_vision'              // Pipeline A — OpenCV/YOLO/OCR
   | 'geometry_recon'            // Pipeline B — Segmentation/SfM/Depth
+  | 'google_solar_api'          // Pipeline C — Google Solar API buildingInsights
   | 'obstruction_registration'  // Obstruction detection pipeline
   | 'manual'                    // Human-entered
   | 'merged'                    // Merged from multiple pipelines
@@ -546,6 +547,7 @@ export interface UnifiedGeometryEvidenceBundle {
   pipelineCounts: {
     photoVision: number;
     geometryRecon: number;
+    googleSolarApi: number;
     obstructionRegistration: number;
     manual: number;
     merged: number;

@@ -64,7 +64,7 @@ export async function GET(
     // If we only have obstruction_registration (or other non-pipeline) artifacts,
     // we still need to fall through to the fallback path to include Pipeline A/B data.
     const hasPipelineArtifacts = unifiedArtifacts.some(
-      a => a.provenance.sourcePipeline === 'photo_vision' || a.provenance.sourcePipeline === 'geometry_recon',
+      a => a.provenance.sourcePipeline === 'photo_vision' || a.provenance.sourcePipeline === 'geometry_recon' || a.provenance.sourcePipeline === 'google_solar_api',
     );
 
     if (unifiedArtifacts.length > 0 && hasPipelineArtifacts) {
