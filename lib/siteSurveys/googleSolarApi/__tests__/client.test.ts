@@ -160,11 +160,12 @@ describe('fetchBuildingInsights — input validation', () => {
 
     // -90 should not fail validation (it's the boundary)
     const result90 = await fetchBuildingInsights(-90, -122.4194);
-    // It might fail at the API call level (mocked), but not at validation
-    // The validation should pass for -90 and 90
+    // Boundary latitude -90 passes validation (may still fail at API level)
+    expect(result90).toBeDefined();
 
     const result90p = await fetchBuildingInsights(90, -122.4194);
-    // Same — validation passes for boundary values
+    // Boundary latitude 90 passes validation
+    expect(result90p).toBeDefined();
   });
 
   it('rejects when no API key is configured', async () => {

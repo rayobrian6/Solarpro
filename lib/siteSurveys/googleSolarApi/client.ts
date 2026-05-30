@@ -31,8 +31,6 @@ import { setCachedBuildingInsights } from './cache';
 const DEFAULT_BASE_URL = 'https://solar.googleapis.com';
 const BUILDING_INSIGHTS_PATH = '/v1/buildingInsights:findClosest';
 
-/** Minimum confidence for Google Solar API data — it's authoritative. */
-const GOOGLE_SOLAR_API_CONFIDENCE = 95;
 
 // ─── Client ──────────────────────────────────────────────────────────────────
 

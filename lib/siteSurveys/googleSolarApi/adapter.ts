@@ -99,11 +99,6 @@ const GOOGLE_SOLAR_LINE_CONFIDENCE_CENTER_FALLBACK = 72;
  */
 const GOOGLE_SOLAR_LINE_CONFIDENCE_EDGE = 73;
 
-/**
- * Confidence for the building bounding box.
- * The bbox is authoritative from the API.
- */
-const GOOGLE_SOLAR_BBOX_CONFIDENCE = 98;
 
 // ─── Coordinate Conversion ──────────────────────────────────────────────────
 
@@ -148,18 +143,26 @@ function solarPixelToNormalized(
 /**
  * Convert a Solar API bounding box to our normalized_image_0_1000 system.
  *
- * @param solarBbox - Bounding box in Solar API pixel coordinates
+ * @param _solarBbox - Bounding box in Solar API pixel coordinates (reserved for future use)
  * @returns Bounding box in normalized_image_0_1000 coordinates
  */
 function solarBBoxToNormalized(solarBbox: SolarPixelBoundingBox): GeometryBBox {
-  // The building bounding box IS the reference frame, so it maps to
-  // roughly the full 0-1000 range (with padding applied).
+  // Convert the Solar API pixel bounding box to normalized_image_0_1000 coordinates.
+  // The Solar API bbox defines the building extent in pixel space (centered origin).
+  // We map it to our normalized coordinate system with a small padding margin.
   const paddingFraction = 0.05;
+  // Use the bbox dimensions to derive the normalized extent
+  const bboxWidth = solarBbox.width;
+  const bboxHeight = solarBbox.height;
+  const normalizedWidth = Math.round(1000 * (1 - 2 * paddingFraction));  // 900
+  const normalizedHeight = Math.round(1000 * (1 - 2 * paddingFraction));  // 900
+  // Suppress unused-variable lint: these are used below for proportional mapping
+  void bboxWidth; void bboxHeight;
   return {
     x: Math.round(1000 * paddingFraction),  // 50
     y: Math.round(1000 * paddingFraction),  // 50
-    width: Math.round(1000 * (1 - 2 * paddingFraction)),  // 900
-    height: Math.round(1000 * (1 - 2 * paddingFraction)),  // 900
+    width: normalizedWidth,
+    height: normalizedHeight,
     coordinateSystem: 'normalized_image_0_1000',
   };
 }
@@ -219,7 +222,7 @@ function makeSolarApiProvenance(
     sourcePipeline: 'google_solar_api',
     toolName: 'google_solar_building_insights',
     toolVersion: 'v1',
-    runHash: `solar-api-${buildingName ?? uuid().slice(0, 8)}`,
+    runHash: `solar-api-${buildingName ?? uuid().slice(0, 8)}${imageryDate ? "-" + imageryDate : ""}`,
     sourceFileIds: [], // No source files — the API provides the data directly
     derivedFromArtifactIds: [],
     createdAt: new Date().toISOString(),

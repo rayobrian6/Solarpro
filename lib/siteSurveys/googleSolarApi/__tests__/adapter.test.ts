@@ -19,7 +19,6 @@ import {
   adaptPipelineCResult,
 } from '../adapter';
 import type { BuildingInsightsResponse, SolarRoofPlane, SolarPixelBoundingBox } from '../types';
-import type { UnifiedGeometryArtifact } from '@/lib/siteSurveys/unifiedGeometry/types';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
