@@ -12,8 +12,8 @@ Architecture:
   - Mask-to-polygon conversion via OpenCV findContours + Douglas-Peucker
 
 Deployment:
-  - Render GPU service (T4 or A100)
-  - Docker container with CUDA support
+  - Render web service (CPU or GPU)
+  - Docker container with CPU-only PyTorch (GPU auto-detected at runtime)
   - Environment variable CHECKPOINT controls model size
 
 REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
@@ -42,6 +42,14 @@ logger = logging.getLogger("sam2-service")
 # Configuration
 # ---------------------------------------------------------------------------
 
+def _has_cuda() -> bool:
+    """Check if CUDA GPU is available."""
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
+
 # Checkpoint name — can be overridden via env var for larger/smaller models
 CHECKPOINT_NAME = os.environ.get("SAM2_CHECKPOINT", "sam2.1_hiera_small")
 # Device: "cuda" if GPU available, else "cpu"
@@ -54,18 +62,8 @@ MAX_MASKS = int(os.environ.get("SAM2_MAX_MASKS", "20"))
 DOUGLAS_PEUCKER_EPSILON = float(os.environ.get("SAM2_DOUGLAS_PEUCKER_EPSILON", "5.0"))
 # Minimum polygon points after simplification
 MIN_POLYGON_POINTS = 3
-# Service port
-PORT = int(os.environ.get("PORT", "8000"))
-
-
-def _has_cuda() -> bool:
-    """Check if CUDA GPU is available."""
-    try:
-        import torch
-        return torch.cuda.is_available()
-    except ImportError:
-        return False
-
+# Service port — Render injects PORT=10000 for web services
+PORT = int(os.environ.get("PORT", "10000"))
 
 # ---------------------------------------------------------------------------
 # Pydantic response models
@@ -132,15 +130,9 @@ def load_sam2_model():
         from sam2.automatic_mask_generation import SAM2AutomaticMaskGenerator
 
         # Build the model from the checkpoint registry
-        # sam2.1_hiera_small is the default — registry handles download
         _sam2_model = build_sam(CHECKPOINT_NAME, device=DEVICE)
 
         # Create the automatic mask generator
-        # points_per_side: grid of prompt points for AMG (default 32x32)
-        # points_per_batch: batch size for point inference
-        # pred_iou_thresh: filter masks with predicted IoU below this
-        # stability_score_thresh: filter unstable masks
-        # min_mask_region_area: post-process to remove small disconnected regions
         _sam2_amg = SAM2AutomaticMaskGenerator(
             model=_sam2_model,
             points_per_side=32,
@@ -172,30 +164,20 @@ def mask_to_polygon(mask_bin: np.ndarray, epsilon: float = DOUGLAS_PEUCKER_EPSIL
     """
     Convert a binary mask to a simplified polygon using OpenCV
     contour finding + Douglas-Peucker simplification.
-
-    Returns list of polygon points [{x, y}, ...] or empty list if no
-    valid contour found.
     """
-    # Ensure mask is uint8
     mask_uint8 = (mask_bin * 255).astype(np.uint8) if mask_bin.dtype != np.uint8 else mask_bin
 
-    # Find contours — RETR_EXTERNAL for outer boundary only
     contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     if not contours:
         return []
 
-    # Take the largest contour by area
     best_contour = max(contours, key=cv2.contourArea)
-
-    # Simplify with Douglas-Peucker
     simplified = cv2.approxPolyDP(best_contour, epsilon, closed=True)
 
-    # Need at least 3 points for a valid polygon
     if len(simplified) < MIN_POLYGON_POINTS:
         return []
 
-    # Convert to list of {x, y} dicts
     points = []
     for pt in simplified:
         points.append({"x": float(pt[0][0]), "y": float(pt[0][1])})
@@ -212,42 +194,29 @@ def classify_mask_region(
 ) -> str:
     """
     Heuristic classification of a mask region based on position, size,
-    and geometry. This is NOT semantic classification from SAM 2 (which
-    is class-agnostic) — it's a geometry-based hint for downstream
-    Pipeline B workers.
-
-    Classification logic mirrors the existing roofGeometryExtractor
-    heuristic but is simpler since SAM 2 already provides accurate
-    boundaries — we just need to label what each region likely is.
+    and geometry. SAM 2 is class-agnostic — this provides geometry-based
+    hints for downstream Pipeline B workers.
 
     Returns one of: roof, wall, sky, ground, obstruction, equipment, unknown
     """
     x, y, w, h = bbox
-    # Normalize to 0-1 range
     norm_y_center = (y + h / 2) / img_h
     norm_x_center = (x + w / 2) / img_w
     norm_area = area / (img_w * img_h)
     aspect_ratio = max(w, h) / max(min(w, h), 1)
 
-    # Sky: top of image, large area
     if norm_y_center < 0.35 and norm_area > 0.05:
         return "sky"
-    # Roof: upper half, wide aspect ratio, significant area
     if norm_y_center < 0.55 and norm_area > 0.03 and aspect_ratio > 1.2:
         return "roof"
-    # Roof fallback: upper half, significant area
     if norm_y_center < 0.55 and norm_area > 0.05:
         return "roof"
-    # Wall: middle of image, taller than wide
     if 0.25 <= norm_y_center < 0.8 and h > w * 0.8:
         return "wall"
-    # Ground: bottom of image
     if norm_y_center > 0.65 and norm_area > 0.02:
         return "ground"
-    # Equipment: small area, upper half
     if 0.003 < norm_area < 0.04 and norm_y_center < 0.6:
         return "equipment"
-    # Obstruction: very small area
     if norm_area < 0.01:
         return "obstruction"
 
@@ -264,10 +233,9 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS — allow the Next.js app to call this service
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restrict in production
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -317,14 +285,8 @@ async def segment_image(
     """
     Segment a survey photo using SAM 2 Automatic Mask Generation.
 
-    Returns an array of polygon-based masks with:
-    - Simplified polygon outlines (Douglas-Peucker)
-    - Bounding boxes in pixel coordinates
-    - Stability scores from SAM 2
-    - Heuristic class hints (roof, wall, sky, ground, etc.)
-
-    The masks are sorted by area (largest first) and filtered by
-    minimum area fraction to remove noise regions.
+    Returns an array of polygon-based masks with simplified polygon outlines,
+    bounding boxes, stability scores, and heuristic class hints.
     """
     t0 = time.time()
 
@@ -343,7 +305,6 @@ async def segment_image(
         if len(image_bytes) == 0:
             raise HTTPException(status_code=400, detail="Empty image file")
 
-        # Decode image with OpenCV
         nparr = np.frombuffer(image_bytes, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
@@ -360,10 +321,7 @@ async def segment_image(
 
     # Run SAM 2 Automatic Mask Generation
     try:
-        # SAM 2 expects RGB, OpenCV loads BGR
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-        # Generate all masks
         sam_masks = amg.generate(image_rgb)
 
     except Exception as e:
@@ -378,25 +336,20 @@ async def segment_image(
     result_masks: list[SegmentationMask] = []
 
     for idx, sam_mask in enumerate(sam_masks):
-        # sam_mask is a dict with keys: segmentation, bbox, predicted_iou,
-        # stability_score, point_coords, crop_box
-        mask_binary = sam_mask["segmentation"]  # np bool array
-        bbox = sam_mask["bbox"]  # [x, y, w, h]
+        mask_binary = sam_mask["segmentation"]
+        bbox = sam_mask["bbox"]
         stability = sam_mask["stability_score"]
         predicted_iou = sam_mask["predicted_iou"]
         area_px = int(sam_mask.get("area", np.sum(mask_binary)))
 
-        # Filter by minimum area
         if area_px < min_area_px:
             continue
 
-        # Convert mask to polygon
         polygon_points = mask_to_polygon(mask_binary.astype(np.uint8))
 
         if len(polygon_points) < MIN_POLYGON_POINTS:
             continue
 
-        # Classify the region (heuristic hint)
         class_hint = classify_mask_region(
             bbox=bbox,
             area=float(area_px),
@@ -405,8 +358,6 @@ async def segment_image(
             stability_score=stability,
         )
 
-        # Confidence = blend of SAM 2's predicted IoU and stability score
-        # Scale to 0-100 range for compatibility with Pipeline B
         confidence = min(100, round((predicted_iou * 0.4 + stability * 0.6) * 100))
 
         result_masks.append(SegmentationMask(
@@ -420,7 +371,6 @@ async def segment_image(
             point_count=len(polygon_points),
         ))
 
-    # Sort by area descending, cap at max_masks
     result_masks.sort(key=lambda m: m.area, reverse=True)
     result_masks = result_masks[:max_masks]
 
