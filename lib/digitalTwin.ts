@@ -1,6 +1,12 @@
 /**
  * Digital Twin Data Pipeline
  * Automatically fetches all required geospatial data for a property
+ *
+ * ISOLATION NOTE: This module is part of the 3D DESIGN PIPELINE, used by
+ * SolarEngine3D and DesignStudio. Pipeline C (roof geometry overlays at
+ * lib/siteSurveys/googleSolarApi/) has its own independent client and
+ * adapter. The two pipelines share the same Google Solar API and env vars
+ * but never share runtime state, caches, or DB tables.
  */
 
 export interface ParcelData {

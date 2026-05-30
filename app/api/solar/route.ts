@@ -9,6 +9,12 @@ import { requireAuth } from '@/lib/security';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // SECURITY: Read key from env var only — never hardcoded in source.
+//
+// ISOLATION NOTE: This route serves the 3D DESIGN PIPELINE exclusively.
+// Pipeline C (roof geometry overlays) has its own client at
+// lib/siteSurveys/googleSolarApi/client.ts which reads the SAME env vars
+// but makes its own independent API calls. The two pipelines never share
+// runtime state, request objects, or DB tables. Do NOT merge them.
 const GOOGLE_SOLAR_API_KEY =
   process.env.GOOGLE_SOLAR_API_KEY ||
   process.env.GOOGLE_MAPS_API_KEY ||

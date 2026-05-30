@@ -11,6 +11,20 @@
 // The Google Solar API returns actual polygon shapes for each roof plane,
 // along with accurate pitch, azimuth, and area measurements.
 //
+// ISOLATION NOTE: This route is COMPLETELY INDEPENDENT from the 3D design
+// pipeline's /api/solar route. They share the same Google Solar API and the
+// same env vars (GOOGLE_SOLAR_API_KEY || GOOGLE_MAPS_API_KEY || NEXT_PUBLIC_…)
+// but make separate API calls, use different data models, and write to
+// different DB tables:
+//
+//   - Pipeline C writes to   → unified_geometry_artifacts (overlay rendering)
+//   - 3D design writes to    → project layout data (via DesignStudio save)
+//   - Pipeline C coordinates → normalized_image_0_1000 (SVG overlays)
+//   - 3D design coordinates  → lat/lng (Cesium 3D rendering)
+//
+// These pipelines MUST remain isolated. Do NOT share request objects,
+// caches, or DB writes between them.
+//
 // Auth required. Survey ownership enforced.
 // REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
 // (Artifacts start at raw_evidence authority and must be promoted separately.)
@@ -61,7 +75,7 @@ export async function POST(
       return NextResponse.json(
         {
           success: false,
-          error: 'Google Solar API is not configured. Set the GOOGLE_SOLAR_API_KEY environment variable to enable Pipeline C.',
+          error: 'Google Solar API is not configured. Set GOOGLE_SOLAR_API_KEY, GOOGLE_MAPS_API_KEY, or NEXT_PUBLIC_GOOGLE_MAPS_API_KEY to enable Pipeline C.',
         },
         { status: 503 }, // Service Unavailable
       );

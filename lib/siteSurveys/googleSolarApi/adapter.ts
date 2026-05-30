@@ -17,6 +17,12 @@
 // Pipeline A and Pipeline B, so the existing UnifiedGeometryOverlayRenderer
 // can render them immediately — no UI changes needed for the overlay itself.
 //
+// ISOLATION NOTE: This adapter is used ONLY by Pipeline C (roof geometry
+// overlays on site survey photos). The 3D design pipeline has its own
+// conversion logic in app/api/solar/route.ts (buildRoofPlanes function)
+// which uses a DIFFERENT data model (roofSegmentStats → RoofPlane[] with
+// lat/lng coordinates). These two adapters MUST remain independent.
+//
 // CRITICAL COORDINATE SYSTEM NOTE:
 //   The Google Solar API provides roof plane outlines in a pixel coordinate
 //   system where (0, 0) is the CENTER of the aerial imagery. Our unified

@@ -38,13 +38,23 @@ const GOOGLE_SOLAR_API_CONFIDENCE = 95;
 /**
  * Get the Google Solar API configuration from environment variables.
  *
- * Required env var: NEXT_PUBLIC_GOOGLE_SOLAR_API_KEY or GOOGLE_SOLAR_API_KEY
- * (the non-public version is preferred for server-side use).
+ * Env var resolution order matches the existing 3D design pipeline
+ * (app/api/solar/route.ts, app/api/solar-tile/route.ts, app/api/dsm/route.ts):
+ *
+ *   1. GOOGLE_SOLAR_API_KEY       (preferred, server-side only)
+ *   2. GOOGLE_MAPS_API_KEY        (fallback — same key works for Solar API)
+ *   3. NEXT_PUBLIC_GOOGLE_MAPS_API_KEY  (last resort — client-exposed)
+ *
+ * ISOLATION NOTE: This client is used ONLY by Pipeline C (roof geometry
+ * overlays on site survey photos). The 3D design pipeline uses its own
+ * route at /api/solar which reads the SAME env vars independently. The two
+ * pipelines never share runtime state, request objects, or DB tables.
  */
 function getConfig(): GoogleSolarApiConfig {
   const apiKey =
-    process.env.GOOGLE_SOLAR_API_KEY ??
-    process.env.NEXT_PUBLIC_GOOGLE_SOLAR_API_KEY ??
+    process.env.GOOGLE_SOLAR_API_KEY ||
+    process.env.GOOGLE_MAPS_API_KEY ||
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
     '';
 
   return {
@@ -129,7 +139,7 @@ export async function fetchBuildingInsights(
     return {
       success: false,
       buildingInsights: null,
-      error: 'Google Solar API key not configured. Set GOOGLE_SOLAR_API_KEY environment variable.',
+      error: 'Google Solar API key not configured. Set GOOGLE_SOLAR_API_KEY, GOOGLE_MAPS_API_KEY, or NEXT_PUBLIC_GOOGLE_MAPS_API_KEY environment variable.',
       warnings,
       roofPlaneCount: 0,
       durationMs: Date.now() - startMs,
