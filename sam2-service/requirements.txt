@@ -12,7 +12,8 @@ uvicorn[standard]==0.34.0
 # Image processing
 Pillow==11.1.0
 opencv-python-headless==4.11.0.86
-numpy==1.26.4
+# numpy is installed in Dockerfile step 1 (2.1.2) — don't override it here
+# numpy==1.26.4
 
 # Utilities
 python-multipart==0.0.20

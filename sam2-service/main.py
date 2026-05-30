@@ -59,14 +59,16 @@ def _has_cuda() -> bool:
     except ImportError:
         return False
 
+# Device: "cuda" if GPU available, else "cpu"
+# NOTE: DEVICE and IS_CPU must be defined BEFORE any variable that references them
+DEVICE = "cuda" if _has_cuda() else "cpu"
+# Is this running on CPU?
+IS_CPU = DEVICE == "cpu"
+
 # HuggingFace model ID for SAM 2.1 — can be overridden via env var
 # Supported: facebook/sam2.1-hiera-tiny, facebook/sam2.1-hiera-small,
 #            facebook/sam2.1-hiera-base-plus, facebook/sam2.1-hiera-large
 HF_MODEL_ID = os.environ.get("SAM2_HF_MODEL_ID", "facebook/sam2.1-hiera-tiny" if IS_CPU else "facebook/sam2.1-hiera-small")
-# Device: "cuda" if GPU available, else "cpu"
-DEVICE = "cuda" if _has_cuda() else "cpu"
-# Is this running on CPU?
-IS_CPU = DEVICE == "cpu"
 # Maximum image dimension for processing — larger images are resized
 # 512px on CPU to stay within 8GB RAM on Render Starter plan
 MAX_IMAGE_DIM = int(os.environ.get("SAM2_MAX_IMAGE_DIM", "512" if IS_CPU else "2048"))
