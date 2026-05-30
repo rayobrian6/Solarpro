@@ -17,10 +17,12 @@ Deployment:
   - Environment variable SAM2_HF_MODEL_ID controls model size
 
 CPU Optimization:
-  - Images resized to max 640px before processing
-  - Reduced points_per_side (16 vs default 32) for faster inference
-  - Smaller points_per_batch (32 vs default 64) to reduce memory
+  - Images resized to max 512px before processing
+  - Reduced points_per_side (8 vs default 32) for faster inference
+  - Smaller points_per_batch (16 vs default 64) to reduce memory
+  - crop_n_layers=0 on CPU to avoid expensive multi-scale cropping
   - Model loaded once, reused across requests
+  - gc.collect() after inference to free memory immediately
 
 REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
 """
@@ -60,13 +62,14 @@ def _has_cuda() -> bool:
 # HuggingFace model ID for SAM 2.1 — can be overridden via env var
 # Supported: facebook/sam2.1-hiera-tiny, facebook/sam2.1-hiera-small,
 #            facebook/sam2.1-hiera-base-plus, facebook/sam2.1-hiera-large
-HF_MODEL_ID = os.environ.get("SAM2_HF_MODEL_ID", "facebook/sam2.1-hiera-small")
+HF_MODEL_ID = os.environ.get("SAM2_HF_MODEL_ID", "facebook/sam2.1-hiera-tiny" if IS_CPU else "facebook/sam2.1-hiera-small")
 # Device: "cuda" if GPU available, else "cpu"
 DEVICE = "cuda" if _has_cuda() else "cpu"
 # Is this running on CPU?
 IS_CPU = DEVICE == "cpu"
 # Maximum image dimension for processing — larger images are resized
-MAX_IMAGE_DIM = int(os.environ.get("SAM2_MAX_IMAGE_DIM", "640" if IS_CPU else "2048"))
+# 512px on CPU to stay within 8GB RAM on Render Starter plan
+MAX_IMAGE_DIM = int(os.environ.get("SAM2_MAX_IMAGE_DIM", "512" if IS_CPU else "2048"))
 # Minimum mask area as fraction of image — filters noise masks
 MIN_MASK_AREA_FRACTION = float(os.environ.get("SAM2_MIN_MASK_AREA_FRACTION", "0.02"))
 # Maximum masks to return per image
@@ -146,25 +149,38 @@ def load_sam2_model():
         _sam2_model = build_sam2_hf(model_id=HF_MODEL_ID, device=DEVICE)
 
         # CPU-optimized mask generator settings
-        # On CPU: fewer points per side (16 vs 32) for faster inference
-        # On GPU: use full 32 points per side for better quality
-        points_per_side = 16 if IS_CPU else 32
-        points_per_batch = 32 if IS_CPU else 64
-
-        _sam2_amg = SAM2AutomaticMaskGenerator(
-            model=_sam2_model,
-            points_per_side=points_per_side,
-            points_per_batch=points_per_batch,
-            pred_iou_thresh=0.7,
-            stability_score_thresh=0.92,
-            min_mask_region_area=int(512 * 512 * MIN_MASK_AREA_FRACTION),
-        )
+        # On CPU: aggressive optimization for 8GB RAM Starter plan
+        #   - points_per_side=8 (64 grid points vs 1024 default)
+        #   - points_per_batch=16 (smaller batches to limit peak memory)
+        #   - crop_n_layers=0 (disable multi-crop, huge memory savings)
+        # On GPU: use full settings for better quality
+        if IS_CPU:
+            _sam2_amg = SAM2AutomaticMaskGenerator(
+                model=_sam2_model,
+                points_per_side=8,
+                points_per_batch=16,
+                pred_iou_thresh=0.7,
+                stability_score_thresh=0.92,
+                crop_n_layers=0,
+                crop_n_points_downscale_factor=2,
+                min_mask_region_area=int(512 * 512 * MIN_MASK_AREA_FRACTION),
+            )
+        else:
+            _sam2_amg = SAM2AutomaticMaskGenerator(
+                model=_sam2_model,
+                points_per_side=32,
+                points_per_batch=64,
+                pred_iou_thresh=0.7,
+                stability_score_thresh=0.92,
+                min_mask_region_area=int(512 * 512 * MIN_MASK_AREA_FRACTION),
+            )
 
         _model_load_time = time.time() - t0
         logger.info(
             f"SAM 2 loaded successfully in {_model_load_time:.1f}s "
             f"(model_id={HF_MODEL_ID}, device={DEVICE}, "
-            f"points_per_side={points_per_side})"
+            f"points_per_side={8 if IS_CPU else 32}, "
+            f"crop_n_layers={0 if IS_CPU else 1})"
         )
 
     except Exception as e:
@@ -366,7 +382,9 @@ async def segment_image(
     # Run SAM 2 Automatic Mask Generation
     try:
         image_rgb = cv2.cvtColor(image_resized, cv2.COLOR_BGR2RGB)
+        logger.info(f"Starting SAM 2 inference on {res_w}x{res_h} image (CPU={IS_CPU})")
         sam_masks = amg.generate(image_rgb)
+        logger.info(f"SAM 2 inference produced {len(sam_masks)} raw masks")
 
     except Exception as e:
         logger.error(f"SAM 2 inference failed: {e}")
@@ -426,6 +444,9 @@ async def segment_image(
             point_count=len(polygon_points),
         ))
 
+        # Free mask memory as we go
+        del sam_mask
+
     result_masks.sort(key=lambda m: m.area, reverse=True)
     result_masks = result_masks[:max_masks]
 
@@ -439,6 +460,7 @@ async def segment_image(
 
     # Free memory after processing
     del sam_masks
+    del image_resized
     gc.collect()
 
     return SegmentResponse(
