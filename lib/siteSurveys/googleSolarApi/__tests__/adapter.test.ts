@@ -670,3 +670,254 @@ describe('roof line inference — shared edge tracing', () => {
     }
   });
 });
+
+
+// ─── Multi-Edge Shared Detection ──────────────────────────────────
+
+describe('multi-edge shared detection', () => {
+  const surveyId = 'survey-multiedge-001';
+  /**
+   * L-shaped roof: two planes that share TWO edges (a corner).
+   * Plane 0 is an L-shape polygon, Plane 1 fills the notch.
+   * They share two edges at the corner.
+   */
+  function makeLShapedResponse(): BuildingInsightsResponse {
+    return {
+      name: 'buildings/test-l-shaped',
+      center: { latitude: 37.7749, longitude: -122.4194 },
+      boundingBox: makeBbox(),
+      imageryDate: { year: 2023, month: 6 },
+      roofPlanes: [
+        // L-shaped plane 0: polygon with a notch
+        // Vertices: (100,100) → (300,100) → (300,200) → (200,200) → (200,300) → (100,300)
+        makeRoofPlane({
+          boundingBox: makeBbox({ x: 100, y: 100, width: 200, height: 200 }),
+          planeOutline: {
+            vertices: [
+              { x: 100, y: 100 },
+              { x: 300, y: 100 },
+              { x: 300, y: 200 },
+              { x: 200, y: 200 },
+              { x: 200, y: 300 },
+              { x: 100, y: 300 },
+            ],
+          },
+          azimuth: 180,
+          roofPitch: 25,
+          areaSqMeters: 60,
+          planeIndex: 0,
+        }),
+        // Plane 1 fills the notch: (200,200) → (300,200) → (300,300) → (200,300)
+        // Shares TWO edges with Plane 0:
+        //   Edge A: (200,300)→(200,200) on Plane 0 matches (200,200)→(200,300) on Plane 1 (anti-parallel)
+        //   Edge B: (300,200)→(200,200) on Plane 0 matches (200,200)→(300,200) on Plane 1 (anti-parallel)
+        makeRoofPlane({
+          boundingBox: makeBbox({ x: 190, y: 190, width: 120, height: 120 }),
+          planeOutline: {
+            vertices: [
+              { x: 200, y: 200 },
+              { x: 300, y: 200 },
+              { x: 300, y: 300 },
+              { x: 200, y: 300 },
+            ],
+          },
+          azimuth: 0, // Opposite → ridge lines
+          roofPitch: 25,
+          areaSqMeters: 30,
+          planeIndex: 1,
+        }),
+      ],
+    };
+  }
+
+  it('detects multiple shared edges between L-shaped planes', () => {
+    const response = makeLShapedResponse();
+    const artifacts = adaptBuildingInsightsToUnifiedArtifacts(response, surveyId);
+
+    const ridgeLines = artifacts.filter(
+      (a) => a.geometryClass === 'roof_line' && a.lineSubtype === 'ridge',
+    );
+
+    // Should find TWO shared edges (the two edges of the L-corner)
+    expect(ridgeLines.length).toBeGreaterThanOrEqual(2);
+
+    // All should be traced (not fallback)
+    const traced = ridgeLines.filter((l) => l.label.startsWith('Traced'));
+    expect(traced.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('labels multi-edge shared lines with edge index', () => {
+    const response = makeLShapedResponse();
+    const artifacts = adaptBuildingInsightsToUnifiedArtifacts(response, surveyId);
+
+    const ridgeLines = artifacts.filter(
+      (a) => a.geometryClass === 'roof_line' && a.lineSubtype === 'ridge',
+    );
+
+    // When there are multiple shared edges, labels should include edge index
+    const multiEdgeLabels = ridgeLines.filter(
+      (l) => l.label.includes('edge') && l.label.includes('/'),
+    );
+    expect(multiEdgeLabels.length).toBeGreaterThanOrEqual(2);
+
+    // Labels should be like "Traced ridge line (planes 1-2, edge 1/2)"
+    for (const line of multiEdgeLabels) {
+      expect(line.label).toMatch(/edge \d+\/\d+/);
+    }
+  });
+
+  it('gives all multi-edge shared lines high confidence', () => {
+    const response = makeLShapedResponse();
+    const artifacts = adaptBuildingInsightsToUnifiedArtifacts(response, surveyId);
+
+    const tracedLines = artifacts.filter(
+      (a) => a.geometryClass === 'roof_line' && a.label.startsWith('Traced'),
+    );
+
+    for (const line of tracedLines) {
+      expect(line.confidence).toBeGreaterThanOrEqual(82);
+    }
+  });
+
+  /**
+   * T-shaped roof: three planes, where the top of the T shares an edge
+   * with each wing, creating two shared edges total.
+   */
+  function makeMultiPlaneResponse(): BuildingInsightsResponse {
+    // Three stacked rectangular planes sharing full-width horizontal edges.
+    // This tests that findAllSharedEdges works across multiple plane pairs.
+    return {
+      name: 'buildings/test-multi-plane',
+      center: { latitude: 37.7749, longitude: -122.4194 },
+      boundingBox: makeBbox(),
+      imageryDate: { year: 2023, month: 6 },
+      roofPlanes: [
+        // Top plane
+        makeRoofPlane({
+          boundingBox: makeBbox({ x: 100, y: 100, width: 200, height: 100 }),
+          planeOutline: {
+            vertices: [
+              { x: 100, y: 100 },
+              { x: 300, y: 100 },
+              { x: 300, y: 200 },
+              { x: 100, y: 200 },
+            ],
+          },
+          azimuth: 180,
+          roofPitch: 30,
+          areaSqMeters: 40,
+          planeIndex: 0,
+        }),
+        // Middle plane — shares top edge with top plane, bottom edge with bottom plane
+        makeRoofPlane({
+          boundingBox: makeBbox({ x: 100, y: 195, width: 200, height: 110 }),
+          planeOutline: {
+            vertices: [
+              { x: 100, y: 200 },
+              { x: 300, y: 200 },
+              { x: 300, y: 300 },
+              { x: 100, y: 300 },
+            ],
+          },
+          azimuth: 0, // Opposite → ridge line with top plane
+          roofPitch: 30,
+          areaSqMeters: 40,
+          planeIndex: 1,
+        }),
+        // Bottom plane — shares top edge with middle plane
+        makeRoofPlane({
+          boundingBox: makeBbox({ x: 100, y: 295, width: 200, height: 110 }),
+          planeOutline: {
+            vertices: [
+              { x: 100, y: 300 },
+              { x: 300, y: 300 },
+              { x: 300, y: 400 },
+              { x: 100, y: 400 },
+            ],
+          },
+          azimuth: 180, // Opposite → ridge line with middle plane
+          roofPitch: 30,
+          areaSqMeters: 40,
+          planeIndex: 2,
+        }),
+      ],
+    };
+  }
+
+  it('detects shared edges across multiple plane pairs', () => {
+    const response = makeMultiPlaneResponse();
+    const artifacts = adaptBuildingInsightsToUnifiedArtifacts(response, surveyId);
+
+    const tracedLines = artifacts.filter(
+      (a) => a.geometryClass === 'roof_line' && a.label.startsWith('Traced'),
+    );
+
+    // Should find at least 2 shared edges (top-middle and middle-bottom)
+    expect(tracedLines.length).toBeGreaterThanOrEqual(2);
+
+    // Both should be ridge lines (opposite azimuths)
+    const ridgeLines = tracedLines.filter((a) => a.lineSubtype === 'ridge');
+    expect(ridgeLines.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('still produces fallback lines when overlapping bboxes have no shared edges', () => {
+    // Two planes with overlapping bounding boxes but polygon edges far apart
+    // → no shared edges found, fallback to center-to-center
+    const response: BuildingInsightsResponse = {
+      name: 'buildings/test-no-shared',
+      center: { latitude: 37.7749, longitude: -122.4194 },
+      boundingBox: makeBbox(),
+      imageryDate: { year: 2023, month: 6 },
+      roofPlanes: [
+        // Plane 0: polygon in upper-left area
+        makeRoofPlane({
+          boundingBox: makeBbox({ x: 50, y: 50, width: 120, height: 80 }),
+          planeOutline: {
+            vertices: [
+              { x: 50, y: 50 },
+              { x: 170, y: 50 },
+              { x: 170, y: 130 },
+              { x: 50, y: 130 },
+            ],
+          },
+          azimuth: 180,
+          roofPitch: 25,
+          areaSqMeters: 20,
+          planeIndex: 0,
+        }),
+        // Plane 1: polygon in lower-right area
+        // Bbox overlaps with Plane 0 but polygon edges are far apart
+        makeRoofPlane({
+          boundingBox: makeBbox({ x: 100, y: 80, width: 120, height: 80 }),
+          planeOutline: {
+            vertices: [
+              { x: 150, y: 150 },
+              { x: 220, y: 150 },
+              { x: 220, y: 200 },
+              { x: 150, y: 200 },
+            ],
+          },
+          azimuth: 0,
+          roofPitch: 25,
+          areaSqMeters: 20,
+          planeIndex: 1,
+        }),
+      ],
+    };
+
+    const artifacts = adaptBuildingInsightsToUnifiedArtifacts(response, surveyId);
+
+    // Overlapping bboxes but no nearby parallel edges → fallback center-to-center
+    const inferredLines = artifacts.filter(
+      (a) => a.geometryClass === 'roof_line' && a.label.startsWith('Inferred') && !a.label.includes('edge'),
+    );
+
+    // Should produce fallback center-to-center lines
+    expect(inferredLines.length).toBeGreaterThan(0);
+
+    // Fallback lines should have lower confidence
+    for (const line of inferredLines) {
+      expect(line.confidence).toBeLessThanOrEqual(72);
+    }
+  });
+});

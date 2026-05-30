@@ -501,7 +501,7 @@ function inferRoofLines(
   // sharedEdgeKeys[i] = Set of edge indices in plane i that are shared with another plane
   const sharedEdgeKeys = new Map<number, Set<number>>();
 
-  // ─── Shared edges (ridge, hip, valley) ──────────────────────────────
+  // ─── Shared edges (ridge, hip, valley) ──────────────────────────
 
   for (let i = 0; i < roofPlanes.length; i++) {
     for (let j = i + 1; j < roofPlanes.length; j++) {
@@ -514,39 +514,61 @@ function inferRoofLines(
 
       const lineSubtype = inferRoofLineSubtype(plane1, plane2);
 
-      // Try to find shared edges between the two polygon outlines
-      const sharedSegment = findSharedEdge(
+      // Find ALL shared edges between the two polygon outlines.
+      // Complex roof shapes (L-shaped, T-shaped, mansard) can have
+      // multiple shared edges between adjacent planes.
+      const allSharedSegments = findAllSharedEdges(
         plane1.planeOutline?.vertices ?? [],
         plane2.planeOutline?.vertices ?? [],
         proximityTolerance,
       );
 
-      let lineStart: GeometryPoint2D;
-      let lineEnd: GeometryPoint2D;
-      let estimatedLengthM: number;
-      let limitations: string[];
-      let confidence: number;
+      if (allSharedSegments.length > 0) {
+        // Emit one roof line artifact per shared edge
+        for (let si = 0; si < allSharedSegments.length; si++) {
+          const sharedSegment = allSharedSegments[si];
+          const lineStart = solarPixelToNormalized(sharedSegment.start, buildingBbox);
+          const lineEnd = solarPixelToNormalized(sharedSegment.end, buildingBbox);
+          const estimatedLengthM = sharedSegment.lengthPx * 0.1; // 1 px ≈ 0.1m
 
-      if (sharedSegment) {
-        // We found an actual shared edge — use it for accurate line position
-        lineStart = solarPixelToNormalized(sharedSegment.start, buildingBbox);
-        lineEnd = solarPixelToNormalized(sharedSegment.end, buildingBbox);
-        estimatedLengthM = sharedSegment.lengthPx * 0.1; // 1 px ≈ 0.1m
-        confidence = GOOGLE_SOLAR_LINE_CONFIDENCE_SHARED_EDGE;
-        limitations = [
-          'Roof line traced from shared polygon edge between adjacent roof planes',
-          'Line position is based on nearby parallel edges in polygon outlines',
-          'Line subtype is inferred from azimuth relationship, not directly detected',
-        ];
+          // Mark the shared edges so we don't emit them as eave/rake lines
+          if (sharedSegment.edge1Index >= 0) {
+            if (!sharedEdgeKeys.has(i)) sharedEdgeKeys.set(i, new Set());
+            sharedEdgeKeys.get(i)!.add(sharedSegment.edge1Index);
+          }
+          if (sharedSegment.edge2Index >= 0) {
+            if (!sharedEdgeKeys.has(j)) sharedEdgeKeys.set(j, new Set());
+            sharedEdgeKeys.get(j)!.add(sharedSegment.edge2Index);
+          }
 
-        // Mark the shared edges so we don't emit them as eave/rake lines
-        if (sharedSegment.edge1Index >= 0) {
-          if (!sharedEdgeKeys.has(i)) sharedEdgeKeys.set(i, new Set());
-          sharedEdgeKeys.get(i)!.add(sharedSegment.edge1Index);
-        }
-        if (sharedSegment.edge2Index >= 0) {
-          if (!sharedEdgeKeys.has(j)) sharedEdgeKeys.set(j, new Set());
-          sharedEdgeKeys.get(j)!.add(sharedSegment.edge2Index);
+          const edgeLabel = allSharedSegments.length > 1
+            ? `Traced ${lineSubtype} line (planes ${i + 1}-${j + 1}, edge ${si + 1}/${allSharedSegments.length})`
+            : `Traced ${lineSubtype} line (planes ${i + 1}-${j + 1})`;
+
+          lineArtifacts.push(
+            makeEmptyArtifact({
+              id: uuid(),
+              surveyId,
+              geometryClass: 'roof_line',
+              authority,
+              provenance,
+              confidence: GOOGLE_SOLAR_LINE_CONFIDENCE_SHARED_EDGE,
+              label: edgeLabel,
+              limitations: [
+                'Roof line traced from shared polygon edge between adjacent roof planes',
+                'Line position is based on nearby parallel edges in polygon outlines',
+                'Line subtype is inferred from azimuth relationship, not directly detected',
+              ],
+              lineSegment: {
+                start: lineStart,
+                end: lineEnd,
+                coordinateSystem: 'normalized_image_0_1000',
+              },
+              lineSubtype,
+              estimatedLengthM,
+              isSynthetic: false,
+            }),
+          );
         }
       } else {
         // Fallback: connect bounding box centers (less accurate)
@@ -558,8 +580,6 @@ function inferRoofLines(
           planeCenter(plane2.boundingBox),
           buildingBbox,
         );
-        lineStart = center1;
-        lineEnd = center2;
         const pixelDist = Math.sqrt(
           Math.pow(
             planeCenter(plane1.boundingBox).x - planeCenter(plane2.boundingBox).x,
@@ -570,41 +590,36 @@ function inferRoofLines(
               2,
             ),
         );
-        estimatedLengthM = pixelDist * 0.1;
-        confidence = GOOGLE_SOLAR_LINE_CONFIDENCE_CENTER_FALLBACK;
-        limitations = [
-          'Roof line inferred from adjacent roof planes, not directly from imagery',
-          'Line position is approximate (connects plane centers, not shared edges)',
-          'No shared polygon edge found — center-to-center fallback used',
-          'Line subtype is inferred from azimuth relationship, not directly detected',
-        ];
-      }
+        const estimatedLengthM = pixelDist * 0.1;
 
-      lineArtifacts.push(
-        makeEmptyArtifact({
-          id: uuid(),
-          surveyId,
-          geometryClass: 'roof_line',
-          authority,
-          provenance,
-          confidence,
-          label: sharedSegment
-            ? `Traced ${lineSubtype} line (planes ${i + 1}-${j + 1})`
-            : `Inferred ${lineSubtype} line (planes ${i + 1}-${j + 1})`,
-          limitations,
-          lineSegment: {
-            start: lineStart,
-            end: lineEnd,
-            coordinateSystem: 'normalized_image_0_1000',
-          },
-          lineSubtype,
-          estimatedLengthM,
-          isSynthetic: false,
-        }),
-      );
+        lineArtifacts.push(
+          makeEmptyArtifact({
+            id: uuid(),
+            surveyId,
+            geometryClass: 'roof_line',
+            authority,
+            provenance,
+            confidence: GOOGLE_SOLAR_LINE_CONFIDENCE_CENTER_FALLBACK,
+            label: `Inferred ${lineSubtype} line (planes ${i + 1}-${j + 1})`,
+            limitations: [
+              'Roof line inferred from adjacent roof planes, not directly from imagery',
+              'Line position is approximate (connects plane centers, not shared edges)',
+              'No shared polygon edge found — center-to-center fallback used',
+              'Line subtype is inferred from azimuth relationship, not directly detected',
+            ],
+            lineSegment: {
+              start: center1,
+              end: center2,
+              coordinateSystem: 'normalized_image_0_1000',
+            },
+            lineSubtype,
+            estimatedLengthM,
+            isSynthetic: false,
+          }),
+        );
+      }
     }
   }
-
   // ─── Boundary edges (eave, rake) ────────────────────────────────────
 
   for (let i = 0; i < roofPlanes.length; i++) {
@@ -772,6 +787,103 @@ function findSharedEdge(
   }
 
   return bestResult;
+}
+
+
+/**
+ * Find ALL shared edges between two polygon outlines.
+ *
+ * Unlike findSharedEdge() which returns only the best match, this function
+ * returns all qualifying shared edge pairs. This is important for complex
+ * roof shapes (L-shaped, T-shaped, mansard) where adjacent planes may
+ * share multiple edges.
+ *
+ * Each edge from polygon 1 is matched at most once (to the best-scoring
+ * edge from polygon 2), and vice versa. This prevents duplicate roof lines
+ * when multiple edge pairs overlap.
+ *
+ * Returns an empty array if no shared edges are found.
+ */
+function findAllSharedEdges(
+  vertices1: SolarApiPixelPoint[],
+  vertices2: SolarApiPixelPoint[],
+  proximityTolerance: number,
+): SharedEdgeResult[] {
+  if (vertices1.length < 2 || vertices2.length < 2) return [];
+
+  const edges1 = extractEdges(vertices1);
+  const edges2 = extractEdges(vertices2);
+
+  // Collect all qualifying edge pairs with their scores
+  interface CandidatePair {
+    e1: number;
+    e2: number;
+    result: SharedEdgeResult;
+    score: number;
+  }
+  const candidates: CandidatePair[] = [];
+
+  for (let e1 = 0; e1 < edges1.length; e1++) {
+    for (let e2 = 0; e2 < edges2.length; e2++) {
+      const edge1 = edges1[e1];
+      const edge2 = edges2[e2];
+
+      const angle1 = edgeAngle(edge1);
+      const angle2 = edgeAngle(edge2);
+      const angleDiff = smallestAngleDiff(angle1, angle2);
+
+      const isParallel =
+        angleDiff <= SHARED_EDGE_MAX_ANGLE_DIFF_DEG ||
+        Math.abs(angleDiff - 180) <= SHARED_EDGE_MAX_ANGLE_DIFF_DEG;
+      if (!isParallel) continue;
+
+      const antiParallel = Math.abs(angleDiff - 180) <= SHARED_EDGE_MAX_ANGLE_DIFF_DEG;
+      const effectiveEdge2 = antiParallel
+        ? { start: edge2.end, end: edge2.start }
+        : edge2;
+
+      const mid1 = midpoint(edge1);
+      const mid2 = midpoint(edge2);
+      const midDist = Math.sqrt(
+        Math.pow(mid1.x - mid2.x, 2) + Math.pow(mid1.y - mid2.y, 2),
+      );
+
+      if (midDist > proximityTolerance) continue;
+
+      const overlap = computeEdgeOverlap(edge1, effectiveEdge2);
+      if (!overlap || overlap.lengthPx < 5) continue;
+
+      const score = overlap.lengthPx / (1 + midDist);
+      candidates.push({
+        e1,
+        e2,
+        result: { ...overlap, edge1Index: e1, edge2Index: e2 },
+        score,
+      });
+    }
+  }
+
+  if (candidates.length === 0) return [];
+
+  // Greedy assignment: pick the best-scoring pair, then remove any pairs
+  // that use the same edge indices, repeat until no pairs left.
+  // This ensures each edge from polygon 1 is used at most once, and
+  // each edge from polygon 2 is used at most once.
+  const used1 = new Set<number>();
+  const used2 = new Set<number>();
+  const results: SharedEdgeResult[] = [];
+
+  // Sort candidates by score descending
+  candidates.sort((a, b) => b.score - a.score);
+
+  for (const c of candidates) {
+    if (used1.has(c.e1) || used2.has(c.e2)) continue;
+    used1.add(c.e1);
+    used2.add(c.e2);
+    results.push(c.result);
+  }
+
+  return results;
 }
 
 /**
