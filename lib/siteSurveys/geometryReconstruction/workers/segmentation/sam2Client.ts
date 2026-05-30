@@ -11,7 +11,7 @@
  *   - GET /health → checks service readiness
  *   - Graceful degradation: any failure → return null, caller uses Canny
  *   - Configurable via SAM2_SERVICE_URL env var
- *   - Timeout: 30s per image (GPU inference ~1-2s, CPU ~5-10s)
+ *   - Timeout: 60s per image (GPU inference ~1-2s, CPU ~30-45s)
  *
  * REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
  */
@@ -22,8 +22,8 @@ import type { NormalizedPoint } from '../../types';
 // Configuration
 // ---------------------------------------------------------------------------
 
-/** Request timeout in milliseconds. */
-const SAM2_TIMEOUT_MS = 30_000;
+/** Request timeout in milliseconds. CPU inference can take ~40s on Starter plan. */
+const SAM2_TIMEOUT_MS = 60_000;
 
 /**
  * Read the SAM 2 service URL from the environment at call time.
@@ -73,10 +73,11 @@ interface SAM2SegmentResponse {
   image_height: number;
   processing_time_ms: number;
   model_info: {
-    checkpoint: string;
+    model_id: string;
     device: string;
     cuda_available: boolean;
     model_type: string;
+    inference_resolution?: string;
   };
   error?: string;
 }
@@ -85,7 +86,7 @@ interface SAM2HealthResponse {
   status: string;
   model_loaded: boolean;
   device: string;
-  checkpoint: string;
+  model_id: string;
   cuda_available: boolean;
   uptime_seconds: number;
 }
@@ -132,9 +133,10 @@ export interface SAM2SegmentationResult {
   processingTimeMs: number;
   /** Model info from the service. */
   modelInfo: {
-    checkpoint: string;
+    modelId: string;
     device: string;
     cudaAvailable: boolean;
+    inferenceResolution?: string;
   } | null;
   /** Error message if SAM 2 failed (for logging, not user-facing). */
   error: string | null;
@@ -260,9 +262,10 @@ export async function segmentWithSAM2(
       processingTimeMs: data.processing_time_ms,
       modelInfo: data.model_info
         ? {
-            checkpoint: data.model_info.checkpoint,
+            modelId: data.model_info.model_id,
             device: data.model_info.device,
             cudaAvailable: data.model_info.cuda_available,
+            inferenceResolution: data.model_info.inference_resolution,
           }
         : null,
       error: null,

@@ -81,10 +81,11 @@ const MOCK_SAM2_RESPONSE = {
   image_height: 512,
   processing_time_ms: 1250,
   model_info: {
-    checkpoint: 'sam2.1_hiera_small',
-    device: 'cuda',
-    cuda_available: true,
+    model_id: 'facebook/sam2.1-hiera-tiny',
+    device: 'cpu',
+    cuda_available: false,
     model_type: 'sam2.1_automatic_mask_generation',
+    inference_resolution: '512x384',
   },
 };
 
@@ -141,9 +142,10 @@ describe('sam2Client', () => {
       expect(result!.imageWidth).toBe(512);
       expect(result!.imageHeight).toBe(512);
       expect(result!.modelInfo).toEqual({
-        checkpoint: 'sam2.1_hiera_small',
-        device: 'cuda',
-        cudaAvailable: true,
+        modelId: 'facebook/sam2.1-hiera-tiny',
+        device: 'cpu',
+        cudaAvailable: false,
+        inferenceResolution: '512x384',
       });
       expect(result!.error).toBeNull();
     });
@@ -275,9 +277,9 @@ describe('sam2Client', () => {
         json: async () => ({
           status: 'ready',
           model_loaded: true,
-          device: 'cuda',
-          checkpoint: 'sam2.1_hiera_small',
-          cuda_available: true,
+          device: 'cpu',
+          model_id: 'facebook/sam2.1-hiera-tiny',
+          cuda_available: false,
           uptime_seconds: 3600,
         }),
       });
@@ -286,7 +288,7 @@ describe('sam2Client', () => {
       expect(health).not.toBeNull();
       expect(health!.status).toBe('ready');
       expect(health!.model_loaded).toBe(true);
-      expect(health!.device).toBe('cuda');
+      expect(health!.device).toBe('cpu');
     });
 
     it('returns null when service is unreachable', async () => {

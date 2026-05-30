@@ -93,9 +93,10 @@ export interface SegmentationWorkerOutput {
   cannyPhotoCount: number;
   /** SAM 2 model info if available. */
   sam2ModelInfo: {
-    checkpoint: string;
+    modelId: string;
     device: string;
     cudaAvailable: boolean;
+    inferenceResolution?: string;
   } | null;
 }
 
