@@ -1,32 +1,28 @@
-# SAM 2 Segmentation Service — Minimal Docker image for Render
+# SAM 2 Segmentation Service — Pre-built PyTorch base for Render
 #
-# Strategy: Install PyTorch CPU first (small download, ~200MB),
-# then SAM 2 and remaining deps. Single-stage to keep it simple.
+# Uses the official PyTorch CPU image so torch is ALREADY INSTALLED
+# in the base layer. This avoids the OOM issue during pip install torch
+# on Render's starter build plan (512MB RAM).
+#
+# CPU inference: ~5-10s/image. GPU: upgrade to CUDA base image later.
 
-FROM python:3.11-slim
+FROM pytorch/pytorch:2.5.1-cpu-cudnn9-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# Install only what's needed for pip install + OpenCV runtime
+# Install git (for SAM 2 pip install) + OpenCV runtime libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
-    gcc \
-    g++ \
     libgl1-mesa-glx \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install PyTorch CPU-only first (smallest possible, ~200MB vs 2GB+ for CUDA)
-# This avoids OOM during pip install on Render's starter build plan
-RUN pip install --no-cache-dir --no-deps torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir --no-deps torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir numpy==1.26.4 pillow
+# Install SAM 2 from GitHub (torch is already in the base image)
+RUN pip install --no-cache-dir \
+    git+https://github.com/facebookresearch/sam2.git@v1.1.0
 
-# Install SAM 2 (depends on torch already installed above)
-RUN pip install --no-cache-dir git+https://github.com/facebookresearch/sam2.git@v1.1.0
-
-# Install remaining app dependencies
+# Install app dependencies (no torch/sam2 in this file — already installed)
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
