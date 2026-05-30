@@ -1,36 +1,48 @@
-# SAM 2 Segmentation Service — Pre-built PyTorch base for Render
+# SAM 2 Segmentation Service — Ultra-minimal for Render starter build
 #
-# Uses the official PyTorch CPU image so torch is ALREADY INSTALLED
-# in the base layer. This avoids the OOM issue during pip install torch
-# on Render's starter build plan (512MB RAM).
-#
-# CPU inference: ~5-10s/image. GPU: upgrade to CUDA base image later.
+# This Dockerfile is designed specifically for Render's 512MB build plan.
+# It uses a tiny base image and installs packages one at a time with
+# --no-cache-dir and --no-deps to minimize peak memory usage.
 
-FROM pytorch/pytorch:2.5.1-cpu-cudnn9-runtime
+FROM python:3.12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# Install git (for SAM 2 pip install) + OpenCV runtime libs
+# Minimal system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
-    libgl1-mesa-glx \
+    gcc \
+    libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install SAM 2 from GitHub (torch is already in the base image)
+# Install torch in stages to limit memory:
+# 1. First install numpy (small, needed by torch)
+RUN pip install --no-cache-dir numpy==2.1.2
+
+# 2. Install torch core with --no-deps (we already have numpy)
+RUN pip install --no-cache-dir --no-deps \
+    torch==2.5.1 \
+    --index-url https://download.pytorch.org/whl/cpu
+
+# 3. Install torchvision with --no-deps
+RUN pip install --no-cache-dir --no-deps \
+    torchvision==0.20.1 \
+    --index-url https://download.pytorch.org/whl/cpu
+
+# 4. Install SAM 2
 RUN pip install --no-cache-dir \
     git+https://github.com/facebookresearch/sam2.git@v1.1.0
 
-# Install app dependencies (no torch/sam2 in this file — already installed)
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+# 5. Install remaining deps
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-# Copy application code
+# Copy app
 WORKDIR /app
 COPY main.py /app/main.py
 
-# Model cache directory
 ENV SAM2_CACHE_DIR=/app/.cache
 RUN mkdir -p /app/.cache
 
