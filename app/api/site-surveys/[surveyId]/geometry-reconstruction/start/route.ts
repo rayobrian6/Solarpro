@@ -137,7 +137,7 @@ export async function POST(
           break;
       }
 
-      const { artifacts, stages, totalDurationMs } = pipelineResult;
+      const { artifacts, stages, totalDurationMs, segmentationBackend } = pipelineResult;
       const rawArtifactCount = artifacts.length;
       const rawConsensusPlaneCount = artifacts.filter(
         (artifact) => artifact.artifactType === 'consensus_plane_candidate',
@@ -186,6 +186,7 @@ export async function POST(
           rawArtifactCount,
           rawConsensusPlaneCount,
           rawPolygonArtifactCount,
+          segmentationBackend,
         },
       });
     } catch (pipelineErr) {

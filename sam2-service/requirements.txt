@@ -1,0 +1,28 @@
+# SAM 2 Segmentation Service — Python dependencies
+# Install: pip install -r requirements.txt
+
+# Web framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Image processing
+Pillow==11.1.0
+opencv-python-headless==4.11.0.86
+numpy==1.26.4
+
+# SAM 2 — install from GitHub (Meta's official repo)
+# The sam2 package is installed separately via:
+#   pip install -e ".[build-all]" from the sam2 repo
+# OR from PyPI when available
+# For now we install from the GitHub release wheel
+sam2==1.1.0
+
+# PyTorch — must match CUDA version on Render
+# CPU-only fallback for local dev:
+torch==2.5.1
+torchvision==0.20.1
+
+# Utilities
+python-multipart==0.0.20
+httpx==0.28.1
+pydantic==2.10.4

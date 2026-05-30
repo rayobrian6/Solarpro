@@ -28,7 +28,7 @@ import type {
   DepthMap,
 } from './types';
 
-import { runSegmentationFromReconstructionInput } from './workers/segmentation/runSegmentationWorker';
+import { runSegmentationFromReconstructionInput, runSegmentationFullOutput, SEGMENTATION_WORKER_VERSION } from './workers/segmentation/runSegmentationWorker';
 import { runLineExtractionFromReconstructionInput } from './workers/lineExtraction/runLineExtractionWorker';
 import { estimateVanishingPointsFromReconstructionInput } from './workers/perspective/estimateVanishingPoints';
 import { runDepthFromReconstructionInput } from './workers/depth/runDepthWorker';
@@ -57,6 +57,8 @@ export interface FullPipelineResult {
   artifacts: GeometryReconstructionArtifact[];
   stages: PipelineStageResult[];
   totalDurationMs: number;
+  /** Which segmentation backend was used: 'sam2' or 'canny'. */
+  segmentationBackend: 'sam2' | 'canny';
 }
 
 // ─── Stage Runner Helper ────────────────────────────────────────────────
@@ -107,14 +109,15 @@ export async function runFullGeometryReconstructionPipeline(
   );
 
   // ── Stage 1: Segmentation ───────────────────────────────────────────
-  const segResult = await asyncStageTimer('segmentation', () =>
-    runSegmentationFromReconstructionInput(input),
+  const segFullOutput = await asyncStageTimer('segmentation', () =>
+    runSegmentationFullOutput(input),
   );
-  const segmentationArtifacts = segResult.result;
+  const segmentationArtifacts = segFullOutput.result.artifacts;
+  const segmentationBackend: 'sam2' | 'canny' = segFullOutput.result.backend;
   allArtifacts.push(...segmentationArtifacts);
-  stages.push({ stage: 'segmentation', artifactCount: segmentationArtifacts.length, durationMs: segResult.durationMs });
+  stages.push({ stage: 'segmentation', artifactCount: segmentationArtifacts.length, durationMs: segFullOutput.durationMs });
   console.info(
-    `[Pipeline B] Stage 1 (segmentation): ${segmentationArtifacts.length} artifacts in ${segResult.durationMs}ms`,
+    `[Pipeline B] Stage 1 (segmentation): ${segmentationArtifacts.length} artifacts in ${segFullOutput.durationMs}ms [backend=${segmentationBackend}, sam2=${segFullOutput.result.sam2PhotoCount} photos, canny=${segFullOutput.result.cannyPhotoCount} photos]`,
   );
 
   // Extract typed masks for subsequent stages
@@ -125,7 +128,7 @@ export async function runFullGeometryReconstructionPipeline(
   // Timeout check before Stage 2
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 1 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
-    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart };
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, segmentationBackend };
   }
 
   // ── Stage 2: Line Extraction ────────────────────────────────────────
@@ -147,7 +150,7 @@ export async function runFullGeometryReconstructionPipeline(
   // Timeout check before Stage 3
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 2 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
-    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart };
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, segmentationBackend };
   }
 
   // ── Stage 3: Vanishing Points ───────────────────────────────────────
@@ -169,7 +172,7 @@ export async function runFullGeometryReconstructionPipeline(
   // Timeout check before Stage 4
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 3 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
-    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart };
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, segmentationBackend };
   }
 
   // ── Stage 4: Depth Estimation ───────────────────────────────────────
@@ -186,7 +189,7 @@ export async function runFullGeometryReconstructionPipeline(
   // Timeout check before Stage 5
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 4 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
-    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart };
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, segmentationBackend };
   }
 
   // ── Stage 5: Plane Extraction ───────────────────────────────────────
@@ -203,7 +206,7 @@ export async function runFullGeometryReconstructionPipeline(
   // Timeout check before Stage 6
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 5 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
-    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart };
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, segmentationBackend };
   }
 
   // ── Stage 6: Multi-View Fusion ──────────────────────────────────────
@@ -226,6 +229,7 @@ export async function runFullGeometryReconstructionPipeline(
     artifacts: allArtifacts,
     stages,
     totalDurationMs,
+    segmentationBackend,
   };
 }
 
@@ -238,11 +242,12 @@ export async function runSegmentationOnlyPipeline(
   input: GeometryReconstructionInput,
 ): Promise<FullPipelineResult> {
   const start = Date.now();
-  const artifacts = await runSegmentationFromReconstructionInput(input);
+  const segOutput = await runSegmentationFullOutput(input);
   return {
-    artifacts,
-    stages: [{ stage: 'segmentation', artifactCount: artifacts.length, durationMs: Date.now() - start }],
+    artifacts: segOutput.artifacts,
+    stages: [{ stage: 'segmentation', artifactCount: segOutput.artifacts.length, durationMs: Date.now() - start }],
     totalDurationMs: Date.now() - start,
+    segmentationBackend: segOutput.backend,
   };
 }
 
@@ -256,7 +261,8 @@ export async function runDepthOnlyPipeline(
   const start = Date.now();
 
   // Run segmentation first to get masks
-  const segArtifacts = await runSegmentationFromReconstructionInput(input);
+  const segOutput = await runSegmentationFullOutput(input);
+  const segArtifacts = segOutput.artifacts;
   const masks = segArtifacts.filter(
     (a): a is SemanticSegmentationMask => a.artifactType === 'semantic_segmentation_mask' || a.artifactType === 'segmentation_mask',
   );
@@ -281,5 +287,6 @@ export async function runDepthOnlyPipeline(
       { stage: 'depth_estimation', artifactCount: depthArtifacts.length, durationMs: Date.now() - start },
     ],
     totalDurationMs: Date.now() - start,
+    segmentationBackend: segOutput.backend,
   };
 }

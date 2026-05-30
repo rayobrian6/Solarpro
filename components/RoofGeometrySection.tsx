@@ -26,6 +26,8 @@ import {
   ScanLine,
   Home,
   Sun,
+  Cpu,
+  Zap,
 } from 'lucide-react';
 import {
   UnifiedGeometryOverlayRenderer,
@@ -78,6 +80,7 @@ export function RoofGeometrySection({
   const [pipelineCLoading, setPipelineCLoading] = useState(false);
   const [pipelineCError, setPipelineCError] = useState<string | null>(null);
   const [pipelineCNoCoverage, setPipelineCNoCoverage] = useState(false);
+  const [pipelineBackend, setPipelineBackend] = useState<'sam2' | 'canny' | null>(null);
   const [pipelineCSummary, setPipelineCSummary] = useState<string | null>(null);
   const [googleSolarApiConfigured, setGoogleSolarApiConfigured] = useState<boolean | null>(null); // null = unknown
 
@@ -151,6 +154,10 @@ export function RoofGeometrySection({
       const consensusCount = typeof json.summary?.rawConsensusPlaneCount === 'number'
         ? json.summary.rawConsensusPlaneCount
         : null;
+      // Capture SAM 2 backend info if returned by the pipeline
+      if (json.summary?.segmentationBackend === 'sam2' || json.summary?.segmentationBackend === 'canny') {
+        setPipelineBackend(json.summary.segmentationBackend);
+      }
       setGenerationSummary(
         `Pipeline B completed${artifactCount != null ? ` with ${artifactCount} artifacts` : ''}${stageCount != null ? ` across ${stageCount} stages` : ''}${polygonCount != null ? `, including ${polygonCount} polygon artifacts` : ''}${consensusCount != null ? ` and ${consensusCount} consensus planes` : ''}.`,
       );
@@ -380,6 +387,16 @@ export function RoofGeometrySection({
           {hasPipelineBData && (
             <span className="flex items-center gap-1 text-[10px] text-emerald-400">
               <CheckCircle size={10} /> Pipeline B
+              {pipelineBackend === 'sam2' && (
+                <span className="flex items-center gap-0.5 rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-300">
+                  <Zap size={8} /> SAM 2
+                </span>
+              )}
+              {pipelineBackend === 'canny' && (
+                <span className="flex items-center gap-0.5 rounded-full bg-slate-500/20 px-1.5 py-0.5 text-[9px] font-medium text-slate-400">
+                  <Cpu size={8} /> Canny
+                </span>
+              )}
             </span>
           )}
           {hasPipelineCData && (

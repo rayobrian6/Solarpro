@@ -1,0 +1,41 @@
+# Render service configuration for SAM 2 Segmentation Service
+#
+# Deploy: Connect this repo to Render, select this directory,
+#         and Render will use the Dockerfile automatically.
+#
+# Cost: T4 GPU = ~$0.22/hr (auto-sleeps when idle)
+#       A100 GPU = ~$1.10/hr (for production workloads)
+
+services:
+  - type: web_service
+    name: sam2-segmentation
+    runtime: docker
+    # Path to Dockerfile
+    dockerfilePath: ./Dockerfile
+    # GPU instance — T4 is cheapest with CUDA support
+    plan: starter-gpu
+    # Region — choose closest to your Next.js deployment
+    region: oregon
+    # Auto-sleep after 15 min idle (saves money)
+    autoSuspend:
+      enabled: true
+      idleMinutes: 15
+    # Health check path
+    healthCheckPath: /health
+    # Env vars
+    envVars:
+      - key: SAM2_CHECKPOINT
+        value: sam2.1_hiera_small
+      - key: SAM2_MIN_MASK_AREA_FRACTION
+        value: "0.02"
+      - key: SAM2_MAX_MASKS
+        value: "20"
+      - key: SAM2_DOUGLAS_PEUCKER_EPSILON
+        value: "5.0"
+      - key: PORT
+        value: "8000"
+    # Persistent disk for model cache (avoids re-downloading ~184MB on restart)
+    disks:
+      - name: sam2-model-cache
+        mountPath: /app/.cache
+        sizeGB: 1
