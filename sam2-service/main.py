@@ -14,13 +14,20 @@ Architecture:
 Deployment:
   - Render web service (CPU or GPU)
   - Docker container with CPU-only PyTorch (GPU auto-detected at runtime)
-  - Environment variable CHECKPOINT controls model size
+  - Environment variable SAM2_HF_MODEL_ID controls model size
+
+CPU Optimization:
+  - Images resized to max 640px before processing
+  - Reduced points_per_side (16 vs default 32) for faster inference
+  - Smaller points_per_batch (32 vs default 64) to reduce memory
+  - Model loaded once, reused across requests
 
 REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
 """
 
 import os
 import time
+import gc
 import logging
 import traceback
 from typing import Optional
@@ -56,6 +63,10 @@ def _has_cuda() -> bool:
 HF_MODEL_ID = os.environ.get("SAM2_HF_MODEL_ID", "facebook/sam2.1-hiera-small")
 # Device: "cuda" if GPU available, else "cpu"
 DEVICE = "cuda" if _has_cuda() else "cpu"
+# Is this running on CPU?
+IS_CPU = DEVICE == "cpu"
+# Maximum image dimension for processing — larger images are resized
+MAX_IMAGE_DIM = int(os.environ.get("SAM2_MAX_IMAGE_DIM", "640" if IS_CPU else "2048"))
 # Minimum mask area as fraction of image — filters noise masks
 MIN_MASK_AREA_FRACTION = float(os.environ.get("SAM2_MIN_MASK_AREA_FRACTION", "0.02"))
 # Maximum masks to return per image
@@ -134,11 +145,16 @@ def load_sam2_model():
         # Build the model from HuggingFace — downloads checkpoint automatically
         _sam2_model = build_sam2_hf(model_id=HF_MODEL_ID, device=DEVICE)
 
-        # Create the automatic mask generator
+        # CPU-optimized mask generator settings
+        # On CPU: fewer points per side (16 vs 32) for faster inference
+        # On GPU: use full 32 points per side for better quality
+        points_per_side = 16 if IS_CPU else 32
+        points_per_batch = 32 if IS_CPU else 64
+
         _sam2_amg = SAM2AutomaticMaskGenerator(
             model=_sam2_model,
-            points_per_side=32,
-            points_per_batch=64,
+            points_per_side=points_per_side,
+            points_per_batch=points_per_batch,
             pred_iou_thresh=0.7,
             stability_score_thresh=0.92,
             min_mask_region_area=int(512 * 512 * MIN_MASK_AREA_FRACTION),
@@ -147,7 +163,8 @@ def load_sam2_model():
         _model_load_time = time.time() - t0
         logger.info(
             f"SAM 2 loaded successfully in {_model_load_time:.1f}s "
-            f"(model_id={HF_MODEL_ID}, device={DEVICE})"
+            f"(model_id={HF_MODEL_ID}, device={DEVICE}, "
+            f"points_per_side={points_per_side})"
         )
 
     except Exception as e:
@@ -156,6 +173,26 @@ def load_sam2_model():
         raise
 
     return _sam2_amg
+
+
+# ---------------------------------------------------------------------------
+# Image preprocessing
+# ---------------------------------------------------------------------------
+
+def resize_for_inference(image: np.ndarray, max_dim: int = MAX_IMAGE_DIM):
+    """
+    Resize image to fit within max_dim on its longest side.
+    Returns the resized image and scale factor for coordinate mapping.
+    """
+    h, w = image.shape[:2]
+    if max(h, w) <= max_dim:
+        return image, 1.0
+
+    scale = max_dim / max(h, w)
+    new_w, new_h = int(w * scale), int(h * scale)
+    resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    logger.info(f"Resized image from {w}x{h} to {new_w}x{new_h} (scale={scale:.3f})")
+    return resized, scale
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +269,7 @@ def classify_mask_region(
 app = FastAPI(
     title="SAM 2 Segmentation Service",
     description="Roof geometry segmentation using Meta's SAM 2.1 model",
-    version="2.0.0",
+    version="2.1.0",
 )
 
 app.add_middleware(
@@ -318,17 +355,24 @@ async def segment_image(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Image read error: {str(e)}")
 
-    img_h, img_w = image.shape[:2]
-    min_area_px = img_w * img_h * min_area_fraction
+    orig_h, orig_w = image.shape[:2]
+
+    # Resize for CPU inference to avoid OOM and speed up processing
+    image_resized, scale = resize_for_inference(image)
+    res_h, res_w = image_resized.shape[:2]
+
+    min_area_px = res_w * res_h * min_area_fraction
 
     # Run SAM 2 Automatic Mask Generation
     try:
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image_rgb = cv2.cvtColor(image_resized, cv2.COLOR_BGR2RGB)
         sam_masks = amg.generate(image_rgb)
 
     except Exception as e:
         logger.error(f"SAM 2 inference failed: {e}")
         logger.error(traceback.format_exc())
+        # Force garbage collection to free memory
+        gc.collect()
         raise HTTPException(
             status_code=500,
             detail=f"SAM 2 inference error: {str(e)}",
@@ -352,11 +396,20 @@ async def segment_image(
         if len(polygon_points) < MIN_POLYGON_POINTS:
             continue
 
+        # Scale coordinates back to original image size
+        if scale != 1.0:
+            polygon_points = [
+                {"x": p["x"] / scale, "y": p["y"] / scale}
+                for p in polygon_points
+            ]
+            bbox = [v / scale for v in bbox]
+            area_px = int(area_px / (scale * scale))
+
         class_hint = classify_mask_region(
             bbox=bbox,
             area=float(area_px),
-            img_w=img_w,
-            img_h=img_h,
+            img_w=orig_w,
+            img_h=orig_h,
             stability_score=stability,
         )
 
@@ -379,23 +432,28 @@ async def segment_image(
     processing_time = (time.time() - t0) * 1000
 
     logger.info(
-        f"Segmented {img_w}x{img_h} image: "
+        f"Segmented {orig_w}x{orig_h} image (processed at {res_w}x{res_h}): "
         f"{len(sam_masks)} raw masks → {len(result_masks)} filtered masks "
         f"in {processing_time:.0f}ms"
     )
+
+    # Free memory after processing
+    del sam_masks
+    gc.collect()
 
     return SegmentResponse(
         success=True,
         masks=result_masks,
         mask_count=len(result_masks),
-        image_width=img_w,
-        image_height=img_h,
+        image_width=orig_w,
+        image_height=orig_h,
         processing_time_ms=round(processing_time, 1),
         model_info={
             "model_id": HF_MODEL_ID,
             "device": DEVICE,
             "cuda_available": _has_cuda(),
             "model_type": "sam2.1_automatic_mask_generation",
+            "inference_resolution": f"{res_w}x{res_h}",
         },
     )
 
