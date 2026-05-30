@@ -921,3 +921,137 @@ describe('multi-edge shared detection', () => {
     }
   });
 });
+
+
+// ─── Wall Vertical Detection ──────────────────────────────────────
+
+describe('wall vertical roof line detection', () => {
+  const surveyId = 'survey-wall-vertical-001';
+
+  function makeWallVerticalResponse(): BuildingInsightsResponse {
+    // Flat dormer (5° pitch) against steep main roof (35° pitch)
+    return {
+      name: 'buildings/test-wall-vertical',
+      center: { latitude: 37.7749, longitude: -122.4194 },
+      boundingBox: makeBbox(),
+      imageryDate: { year: 2023, month: 6 },
+      roofPlanes: [
+        // Steep main roof plane
+        makeRoofPlane({
+          boundingBox: makeBbox({ x: 100, y: 100, width: 110, height: 150 }),
+          planeOutline: {
+            vertices: [
+              { x: 100, y: 100 },
+              { x: 210, y: 100 },
+              { x: 210, y: 250 },
+              { x: 100, y: 250 },
+            ],
+          },
+          azimuth: 180,
+          roofPitch: 35, // Steep
+          areaSqMeters: 50,
+          planeIndex: 0,
+        }),
+        // Flat dormer
+        makeRoofPlane({
+          boundingBox: makeBbox({ x: 200, y: 100, width: 110, height: 150 }),
+          planeOutline: {
+            vertices: [
+              { x: 200, y: 100 },
+              { x: 310, y: 100 },
+              { x: 310, y: 250 },
+              { x: 200, y: 250 },
+            ],
+          },
+          azimuth: 180, // Same direction
+          roofPitch: 5, // Nearly flat
+          areaSqMeters: 30,
+          planeIndex: 1,
+        }),
+      ],
+    };
+  }
+
+  it('detects wall_vertical when flat plane meets steep plane', () => {
+    const response = makeWallVerticalResponse();
+    const artifacts = adaptBuildingInsightsToUnifiedArtifacts(response, surveyId);
+
+    const wallVerticalLines = artifacts.filter(
+      (a) => a.geometryClass === 'roof_line' && a.lineSubtype === 'wall_vertical',
+    );
+
+    // Should find wall_vertical lines between the flat dormer and steep main roof
+    expect(wallVerticalLines.length).toBeGreaterThan(0);
+  });
+
+  it('wall_vertical lines have appropriate confidence', () => {
+    const response = makeWallVerticalResponse();
+    const artifacts = adaptBuildingInsightsToUnifiedArtifacts(response, surveyId);
+
+    const wallVerticalLines = artifacts.filter(
+      (a) => a.geometryClass === 'roof_line' && a.lineSubtype === 'wall_vertical',
+    );
+
+    for (const line of wallVerticalLines) {
+      // Wall vertical lines should have shared-edge level confidence if traced
+      expect(line.confidence).toBeGreaterThanOrEqual(72);
+    }
+  });
+
+  it('does not classify similar-pitch planes as wall_vertical', () => {
+    // Two planes with similar pitch (both 25°) should produce ridge or hip, not wall_vertical
+    const response: BuildingInsightsResponse = {
+      name: 'buildings/test-similar-pitch',
+      center: { latitude: 37.7749, longitude: -122.4194 },
+      boundingBox: makeBbox(),
+      imageryDate: { year: 2023, month: 6 },
+      roofPlanes: [
+        makeRoofPlane({
+          boundingBox: makeBbox({ x: 100, y: 100, width: 110, height: 150 }),
+          planeOutline: {
+            vertices: [
+              { x: 100, y: 100 },
+              { x: 210, y: 100 },
+              { x: 210, y: 250 },
+              { x: 100, y: 250 },
+            ],
+          },
+          azimuth: 180,
+          roofPitch: 25,
+          areaSqMeters: 40,
+          planeIndex: 0,
+        }),
+        makeRoofPlane({
+          boundingBox: makeBbox({ x: 200, y: 100, width: 110, height: 150 }),
+          planeOutline: {
+            vertices: [
+              { x: 200, y: 100 },
+              { x: 310, y: 100 },
+              { x: 310, y: 250 },
+              { x: 200, y: 250 },
+            ],
+          },
+          azimuth: 0,
+          roofPitch: 25, // Same pitch — no wall vertical
+          areaSqMeters: 40,
+          planeIndex: 1,
+        }),
+      ],
+    };
+
+    const artifacts = adaptBuildingInsightsToUnifiedArtifacts(response, surveyId);
+
+    const wallVerticalLines = artifacts.filter(
+      (a) => a.geometryClass === 'roof_line' && a.lineSubtype === 'wall_vertical',
+    );
+
+    // No wall_vertical lines for similar-pitch planes
+    expect(wallVerticalLines.length).toBe(0);
+
+    // Should produce ridge lines instead (opposite azimuths)
+    const ridgeLines = artifacts.filter(
+      (a) => a.geometryClass === 'roof_line' && a.lineSubtype === 'ridge',
+    );
+    expect(ridgeLines.length).toBeGreaterThan(0);
+  });
+});

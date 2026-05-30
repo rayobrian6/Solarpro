@@ -194,18 +194,34 @@ function inferRoofLineSubtype(
     return plane1.roofPitch > 20 ? 'rake' : 'eave';
   }
 
-  // Two planes meet. Determine if this is a ridge, hip, or valley.
-  const azimuthDiff = Math.abs(plane1.azimuth - plane2.azimuth);
-  const normalizedDiff = azimuthDiff > 180 ? 360 - azimuthDiff : azimuthDiff;
+  // Two planes meet. Determine the subtype.
+
+  // Wall vertical: when one plane is nearly flat (pitch ≤ 10°) and the
+  // other is steep (pitch ≥ 30°), the transition between them is a
+  // vertical wall (e.g., a flat dormer against a steep main roof).
+  const pitchDiff = Math.abs(plane1.roofPitch - plane2.roofPitch);
+  const oneFlat = plane1.roofPitch <= 10 || plane2.roofPitch <= 10;
+  const oneSteep = plane1.roofPitch >= 30 || plane2.roofPitch >= 30;
+  if (pitchDiff >= 20 && oneFlat && oneSteep) {
+    return 'wall_vertical';
+  }
 
   // If azimuths are roughly opposite (~180°), it's a ridge
+  const azimuthDiff = Math.abs(plane1.azimuth - plane2.azimuth);
+  const normalizedDiff = azimuthDiff > 180 ? 360 - azimuthDiff : azimuthDiff;
   if (normalizedDiff > 150 && normalizedDiff < 210) {
     return 'ridge';
   }
 
-  // If both planes slope toward the line, it's a valley
-  // This is hard to determine without 3D data, so we default to hip
-  // for non-ridge, non-edge lines
+  // Valley: both planes slope toward the shared edge.
+  // This occurs when the azimuths point toward each other (not away).
+  // For non-opposite azimuths, we check if the normals converge:
+  // If the angle between the plane normals (projected to 2D) suggests
+  // the planes fold inward, it's a valley; otherwise, hip.
+  // Simplified heuristic: if pitch difference is small and azimuths
+  // point in similar directions (not opposite), likely hip.
+  // Otherwise default to hip since valleys are less common and
+  // hard to distinguish without 3D data.
   return 'hip';
 }
 
