@@ -225,15 +225,19 @@ export async function checkSAM2Health(): Promise<SAM2HealthResponse | null> {
  *
  * @returns HealthResponse if model is loaded, null if timeout or unreachable
  */
-export async function waitForSAM2Warm(): Promise<SAM2HealthResponse | null> {
+export async function waitForSAM2Warm(
+  deadlineOverride?: number,
+): Promise<SAM2HealthResponse | null> {
   if (!isSAM2Enabled()) return null;
 
   const serviceURL = getSAM2ServiceURL();
-  const deadline = Date.now() + SAM2_WARMUP_POLL_TIMEOUT_MS;
+  // Use the caller-provided deadline if given, otherwise fall back to the default timeout
+  const deadline = deadlineOverride ?? (Date.now() + SAM2_WARMUP_POLL_TIMEOUT_MS);
+  const effectiveTimeoutMs = deadline - Date.now();
   let attempt = 0;
 
   console.info(
-    `[SAM2] Warm-up: polling /health until model_loaded=true (timeout=${SAM2_WARMUP_POLL_TIMEOUT_MS / 1000}s, interval=${SAM2_WARMUP_POLL_INTERVAL_MS / 1000}s)`,
+    `[SAM2] Warm-up: polling /health until model_loaded=true (timeout=${Math.max(0, Math.round(effectiveTimeoutMs / 1000))}s, interval=${SAM2_WARMUP_POLL_INTERVAL_MS / 1000}s)`,
   );
 
   while (Date.now() < deadline) {
@@ -279,7 +283,7 @@ export async function waitForSAM2Warm(): Promise<SAM2HealthResponse | null> {
     await new Promise((resolve) => setTimeout(resolve, sleepMs));
   }
 
-  const totalWaitMs = SAM2_WARMUP_POLL_TIMEOUT_MS;
+  const totalWaitMs = effectiveTimeoutMs;
   console.warn(
     `[SAM2] Warm-up: TIMEOUT after ${attempt} polls over ${totalWaitMs / 1000}s — model NOT loaded, SAM 2 will likely fail`,
   );

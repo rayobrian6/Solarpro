@@ -47,7 +47,7 @@ import {
 // Worker version
 // ---------------------------------------------------------------------------
 
-export const SEGMENTATION_WORKER_VERSION = '3.1.0-sam2-retry-and-warmup';
+export const SEGMENTATION_WORKER_VERSION = '3.2.0-sam2-time-budget';
 
 // ---------------------------------------------------------------------------
 // Limitations
@@ -117,6 +117,15 @@ export interface SegmentationWorkerOutput {
 const MAX_SOURCE_PHOTOS = 15;
 
 /**
+ * Maximum number of source photos to process with SAM 2.
+ * SAM 2 on Render Starter (CPU) takes ~40s per photo for inference.
+ * With warm-up polling (up to 180s) and downstream pipeline stages,
+ * we can only afford ~4-5 photos with SAM 2 before the 240s pipeline
+ * timeout is exceeded. After this limit, remaining photos use Canny.
+ */
+const MAX_SAM2_PHOTOS = 5;
+
+/**
  * Maximum total segmentation masks to produce across ALL photos.
  * With 12 regions per photo × 15 photos = 180 theoretical max,
  * but classification filtering reduces this. Hard cap prevents
@@ -124,6 +133,15 @@ const MAX_SOURCE_PHOTOS = 15;
  * exploding into thousands of artifacts.
  */
 const MAX_TOTAL_MASKS = 150;
+
+/**
+ * Maximum wall-clock milliseconds the segmentation stage may consume.
+ * The full pipeline has PIPELINE_TIMEOUT_MS = 240_000ms (4 minutes).
+ * Segmentation is Stage 1, but we must leave time for 5 more stages
+ * plus DB writes. Capping at 180s leaves 60s for downstream stages
+ * and DB writes — enough for their heuristic implementations.
+ */
+const SEGMENTATION_STAGE_TIMEOUT_MS = 180_000;
 
 
 /** Maps ContourClassification from the extractor to SegmentationClass. */
@@ -183,6 +201,10 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
     };
   }
 
+  // ── SAM 2 TIME BUDGET (declared early for use in warm-up + Stage 2) ─────
+  let sam2BudgetRemaining = isSAM2Enabled() ? MAX_SAM2_PHOTOS : 0;
+  let sam2BudgetExhaustedReason: string | null = null;
+
   // Log which backend will be attempted
   if (isSAM2Enabled()) {
     console.info(`[SAM2] Segmentation worker: SAM 2 enabled — will warm up service then process photos`);
@@ -195,16 +217,23 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
     //
     // The warm-up ping (sent earlier from the route handler) triggers model loading.
     // This poll confirms it's ready. If the service was already warm, this returns
-    // immediately (~100ms). If cold, it waits up to 180s for the model to load.
-    const warmupResult = await waitForSAM2Warm();
+    // immediately (~100ms). If cold, it waits up to 120s for the model to load.
+    //
+    // IMPORTANT: We cap warm-up at 120s (not 180s) to leave time for actual
+    // photo processing within the 180s SEGMENTATION_STAGE_TIMEOUT_MS budget.
+    // If warm-up exceeds 120s, we skip SAM2 and use Canny for all photos.
+    const warmupDeadline = t0 + 120_000; // 120s from pipeline start
+    const warmupResult = await waitForSAM2Warm(warmupDeadline);
     if (warmupResult) {
       console.info(
         `[SAM2] Service is WARM — model_loaded=true, device=${warmupResult.device}, model_id=${warmupResult.model_id}`,
       );
     } else {
       console.warn(
-        `[SAM2] Service warm-up timed out — will try SAM2 per-photo with retry, but Canny fallback is likely`,
+        `[SAM2] Service warm-up timed out — skipping SAM2, using Canny for all photos`,
       );
+      sam2BudgetRemaining = 0;
+      sam2BudgetExhaustedReason = 'warmup_timeout';
     }
   } else {
     console.info(`[SAM2] Segmentation worker: SAM 2 not configured, using Canny fallback`);
@@ -212,6 +241,18 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   timings['initialization'] = Date.now() - t0;
 
   // Stage 2: Extract geometry from each photo
+  // ── SAM 2 TIME BUDGET ──────────────────────────────────────────────────
+  // SAM 2 on Render Starter (CPU) takes ~40s per photo for inference alone.
+  // The segmentation stage must finish within a time budget that leaves room
+  // for 5 downstream pipeline stages + DB writes within the 300s Vercel
+  // maxDuration. The budget is calculated from the start of the function,
+  // so warm-up polling time is already accounted for.
+  //
+  // Strategy: process up to MAX_SAM2_PHOTOS (5) photos with SAM 2, then
+  // switch remaining photos to Canny. Also enforce a wall-clock deadline:
+  // if we've spent too long on SAM2, force-switch to Canny for the rest.
+  const segmentationDeadline = t0 + SEGMENTATION_STAGE_TIMEOUT_MS;
+
   const t1 = Date.now();
   for (const photo of sourcePhotos) {
     if (artifacts.length >= MAX_TOTAL_MASKS) {
@@ -220,18 +261,33 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
       );
       break;
     }
+
+    // ── Check segmentation stage deadline ──
+    const elapsedMs = Date.now() - t1;
+    const remainingMs = segmentationDeadline - Date.now();
+    if (remainingMs <= 0) {
+      console.warn(
+        `[SAM2] Segmentation stage TIMEOUT after ${elapsedMs}ms — switching remaining ${sourcePhotos.length - sam2PhotoCount - cannyPhotoCount} photos to Canny`,
+      );
+      sam2BudgetRemaining = 0;
+      sam2BudgetExhaustedReason = `stage_timeout_after_${elapsedMs}ms`;
+    }
+
     try {
       // --- SAM 2 PATH ---
-      if (isSAM2Enabled()) {
+      // Only attempt SAM2 if we have budget remaining AND time remaining
+      const useSAM2 = isSAM2Enabled() && sam2BudgetRemaining > 0 && remainingMs > 50_000;
+      if (useSAM2) {
         console.info(
-          `[SAM2] Processing photo ${photo.fileId} (${photo.filename ?? 'unnamed'}) — attempting SAM 2`,
+          `[SAM2] Processing photo ${photo.fileId} (${photo.filename ?? 'unnamed'}) — attempting SAM 2 (budget=${sam2BudgetRemaining} remaining, ${Math.round(remainingMs / 1000)}s left)`,
         );
         const sam2Result = await segmentWithSAM2FromPhoto(photo.fileUrl);
         if (sam2Result !== null) {
           // Successfully got SAM 2 masks — convert to artifacts
+          sam2BudgetRemaining--;
           sam2PhotoCount++;
           console.info(
-            `[SAM2] Photo ${photo.fileId}: SAM 2 SUCCESS — ${sam2Result.masks.length} raw masks, backend=sam2 (sam2PhotoCount=${sam2PhotoCount})`,
+            `[SAM2] Photo ${photo.fileId}: SAM 2 SUCCESS — ${sam2Result.masks.length} raw masks, backend=sam2 (sam2PhotoCount=${sam2PhotoCount}, budget=${sam2BudgetRemaining} remaining)`,
           );
           if (sam2Result.modelInfo && !sam2ModelInfo) {
             sam2ModelInfo = sam2Result.modelInfo;
@@ -274,11 +330,22 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
           continue; // SAM 2 succeeded, skip Canny for this photo
         }
 
-        // SAM 2 failed for this photo — fall through to Canny
+        // SAM 2 failed for this photo — decrement budget and fall through to Canny
+        sam2BudgetRemaining--;
         console.warn(
-          `[SAM2] Photo ${photo.fileId}: SAM 2 FAILED — falling back to Canny (cannyPhotoCount will increment)`,
+          `[SAM2] Photo ${photo.fileId}: SAM 2 FAILED — falling back to Canny (cannyPhotoCount will increment, budget=${sam2BudgetRemaining} remaining)`,
         );
-      } else {
+      } else if (isSAM2Enabled() && sam2BudgetRemaining <= 0 && !sam2BudgetExhaustedReason) {
+        // First photo that skipped SAM2 due to budget — log the reason
+        sam2BudgetExhaustedReason = 'max_photos_reached';
+        console.info(
+          `[SAM2] Photo ${photo.fileId}: SAM 2 budget exhausted (MAX_SAM2_PHOTOS=${MAX_SAM2_PHOTOS}) — using Canny for remaining photos`,
+        );
+      } else if (isSAM2Enabled() && sam2BudgetExhaustedReason) {
+        console.info(
+          `[SAM2] Photo ${photo.fileId}: SAM 2 skipped (${sam2BudgetExhaustedReason}) — using Canny`,
+        );
+      } else if (!isSAM2Enabled()) {
         console.info(
           `[SAM2] Photo ${photo.fileId}: SAM 2 not configured — using Canny directly`,
         );
@@ -336,7 +403,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   // Log segmentation summary
   const backend = sam2PhotoCount > 0 ? 'sam2' : 'canny';
   console.info(
-    `[SAM2] Segmentation stage complete: ${artifacts.length} artifacts in ${timings['mask_generation']}ms — backend=${backend} sam2=${sam2PhotoCount} photos canny=${cannyPhotoCount} photos out of ${sourcePhotos.length} total`,
+    `[SAM2] Segmentation stage complete: ${artifacts.length} artifacts in ${timings['mask_generation']}ms — backend=${backend} sam2=${sam2PhotoCount} photos canny=${cannyPhotoCount} photos out of ${sourcePhotos.length} total${sam2BudgetExhaustedReason ? ` (budget_exhausted: ${sam2BudgetExhaustedReason})` : ''}`,
   );
 
   // Stage 4: Post-validation pass
