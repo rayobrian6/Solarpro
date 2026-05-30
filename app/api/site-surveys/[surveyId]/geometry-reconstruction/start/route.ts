@@ -29,7 +29,7 @@ import {
   runSegmentationOnlyPipeline,
   runDepthOnlyPipeline,
 } from '@/lib/siteSurveys/geometryReconstruction/runFullPipeline';
-import { warmupSAM2Service } from '@/lib/siteSurveys/geometryReconstruction/workers/segmentation/sam2Client';
+import { warmupSAM2Service, waitForSAM2Warm } from '@/lib/siteSurveys/geometryReconstruction/workers/segmentation/sam2Client';
 import { adaptGeometryReconBundle } from '@/lib/siteSurveys/unifiedGeometry/pipelineAdapters';
 import { writeUnifiedArtifacts, deleteUnifiedArtifactsByPipeline } from '@/lib/siteSurveys/unifiedGeometry';
 import type { GeometryReconstructionInput, SourcePhoto } from '@/lib/siteSurveys/geometryReconstruction/types';

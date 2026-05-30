@@ -5,7 +5,7 @@
  *
  * Architecture decisions:
  * - PRIMARY: SAM 2 Automatic Mask Generation via Python microservice
- *   (deployed on Render GPU). Produces semantic region masks with
+ *   (deployed on Render). Produces semantic region masks with
  *   model-predicted confidence scores.
  * - FALLBACK: Canny edge detection + contour tracing at 512×512 via sharp.
  *   Used when SAM 2 service is unavailable, unreachable, or misconfigured.
@@ -13,6 +13,7 @@
  * - Raw mask data is preserved alongside cleaned polygon outlines
  * - The SAM 2 service URL is configured via SAM2_SERVICE_URL env var
  * - If SAM2_SERVICE_URL is not set, the worker uses Canny automatically
+ * - SAM 2 cold start is handled via warm-up ping + poll-based waiting
  *
  * REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
  */
@@ -38,6 +39,7 @@ import {
   mapSAM2ClassHint,
   isSAM2Enabled,
   checkSAM2Health,
+  waitForSAM2Warm,
   type SAM2MaskResult,
 } from './sam2Client';
 
@@ -45,7 +47,7 @@ import {
 // Worker version
 // ---------------------------------------------------------------------------
 
-export const SEGMENTATION_WORKER_VERSION = '3.0.0-sam2-segmentation-worker';
+export const SEGMENTATION_WORKER_VERSION = '3.1.0-sam2-retry-and-warmup';
 
 // ---------------------------------------------------------------------------
 // Limitations
@@ -183,20 +185,29 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
 
   // Log which backend will be attempted
   if (isSAM2Enabled()) {
-    console.info(`Segmentation worker: SAM 2 enabled (SAM2_SERVICE_URL configured), will try SAM 2 first`);
-    // Pre-pipeline health check — log service state before processing
-    const healthResult = await checkSAM2Health();
-    if (healthResult) {
+    console.info(`[SAM2] Segmentation worker: SAM 2 enabled — will warm up service then process photos`);
+
+    // ── CRITICAL: Wait for SAM2 model to load before processing photos ──
+    // On Render cold starts, the SAM2 service downloads the model from HuggingFace
+    // and loads it into memory. During this time, ALL /segment requests return 502.
+    // By polling /health until model_loaded=true, we ensure the model is warm
+    // before we send real segmentation requests.
+    //
+    // The warm-up ping (sent earlier from the route handler) triggers model loading.
+    // This poll confirms it's ready. If the service was already warm, this returns
+    // immediately (~100ms). If cold, it waits up to 180s for the model to load.
+    const warmupResult = await waitForSAM2Warm();
+    if (warmupResult) {
       console.info(
-        `[SAM2] Pre-pipeline health: model_loaded=${healthResult.model_loaded} device=${healthResult.device} model_id=${healthResult.model_id} uptime=${healthResult.uptime_seconds}s`,
+        `[SAM2] Service is WARM — model_loaded=true, device=${warmupResult.device}, model_id=${warmupResult.model_id}`,
       );
     } else {
       console.warn(
-        `[SAM2] Pre-pipeline health: service UNREACHABLE or unhealthy — SAM 2 will likely fail, Canny fallback expected`,
+        `[SAM2] Service warm-up timed out — will try SAM2 per-photo with retry, but Canny fallback is likely`,
       );
     }
   } else {
-    console.info(`Segmentation worker: SAM 2 not configured, using Canny fallback`);
+    console.info(`[SAM2] Segmentation worker: SAM 2 not configured, using Canny fallback`);
   }
   timings['initialization'] = Date.now() - t0;
 
@@ -400,7 +411,7 @@ async function segmentWithSAM2FromPhoto(
       `[SAM2] Image fetch: OK — ${bytes.length} bytes (${(bytes.length / 1024).toFixed(1)}KB) in ${fetchElapsedMs}ms from ${urlHost}`,
     );
 
-    // Call SAM 2 service
+    // Call SAM 2 service (with 502/503 retry built in)
     const sam2Result = await segmentWithSAM2(bytes);
     const totalElapsedMs = Date.now() - t0;
 
@@ -497,10 +508,6 @@ function computeMaskBounds(polygon: NormalizedPoint[]): import('@/lib/assistedEv
 // Convenience: run from GeometryReconstructionInput
 // ---------------------------------------------------------------------------
 
-/**
- * Run the segmentation worker from a standard GeometryReconstructionInput.
- * Converts the input format and delegates to runSegmentationWorker.
- */
 /**
  * Run the segmentation worker from a standard GeometryReconstructionInput.
  * Converts the input format and delegates to runSegmentationWorker.

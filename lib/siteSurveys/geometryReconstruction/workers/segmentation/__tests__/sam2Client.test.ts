@@ -104,7 +104,7 @@ describe('sam2Client', () => {
     vi.unstubAllEnvs();
   });
 
-  // ── mapSAM2ClassHint ──────────────────────────────────────────────
+  // ── mapSAM2ClassHint ────────────────────────────────────────────────────
 
   describe('mapSAM2ClassHint', () => {
     it('maps known class hints to segmentation classes', () => {
@@ -124,7 +124,7 @@ describe('sam2Client', () => {
     });
   });
 
-  // ── segmentWithSAM2 — success path ────────────────────────────────
+  // ── segmentWithSAM2 — success path ──────────────────────────────────────
 
   describe('segmentWithSAM2 (success)', () => {
     it('calls SAM 2 service and returns normalized masks', async () => {
@@ -202,19 +202,105 @@ describe('sam2Client', () => {
     });
   });
 
-  // ── segmentWithSAM2 — failure paths ───────────────────────────────
+  // ── segmentWithSAM2 — failure paths ──────────────────────────────────────
 
   describe('segmentWithSAM2 (failure)', () => {
-    it('returns null when SAM 2 service returns non-OK status', async () => {
+    it('returns null when SAM 2 service returns non-OK status (4xx)', async () => {
+      // 4xx errors are NOT retried — should fail immediately
       mockFetch.mockResolvedValueOnce({
         ok: false,
-        status: 503,
-        text: async () => 'Service Unavailable',
+        status: 400,
+        text: async () => 'Bad Request',
       });
 
       const imageBuffer = Buffer.from('fake-image-bytes');
       const result = await segmentWithSAM2(imageBuffer);
       expect(result).toBeNull();
+      // Only one fetch call — no retry for 4xx
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries on 502 and returns null after exhausting retries', async () => {
+      // Use fake timers to skip the exponential backoff delays
+      vi.useFakeTimers();
+
+      // All attempts return 502
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 502,
+        text: async () => 'Bad Gateway',
+      });
+
+      const imageBuffer = Buffer.from('fake-image-bytes');
+      const resultPromise = segmentWithSAM2(imageBuffer);
+
+      // Fast-forward through all retry backoffs
+      // Backoffs: 15s, 30s, 60s, 120s = total 225s
+      await vi.advanceTimersByTimeAsync(225_000);
+
+      const result = await resultPromise;
+      expect(result).toBeNull();
+      // 1 initial + 4 retries = 5 total fetch calls
+      expect(mockFetch).toHaveBeenCalledTimes(5);
+
+      vi.useRealTimers();
+    });
+
+    it('retries on 502 and succeeds on retry', async () => {
+      vi.useFakeTimers();
+
+      // First attempt: 502 (cold start)
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        text: async () => 'Bad Gateway',
+      });
+      // Second attempt: success
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => MOCK_SAM2_RESPONSE,
+      });
+
+      const imageBuffer = Buffer.from('fake-image-bytes');
+      const resultPromise = segmentWithSAM2(imageBuffer);
+
+      // Fast-forward through first backoff (15s)
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      const result = await resultPromise;
+      expect(result).not.toBeNull();
+      expect(result!.usedSAM2).toBe(true);
+      // 1 initial + 1 retry = 2 fetch calls
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+
+      vi.useRealTimers();
+    });
+
+    it('retries on 503 and succeeds on retry', async () => {
+      vi.useFakeTimers();
+
+      // First attempt: 503 (service unavailable)
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        text: async () => 'Service Unavailable',
+      });
+      // Second attempt: success
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => MOCK_SAM2_RESPONSE,
+      });
+
+      const imageBuffer = Buffer.from('fake-image-bytes');
+      const resultPromise = segmentWithSAM2(imageBuffer);
+
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      const result = await resultPromise;
+      expect(result).not.toBeNull();
+      expect(result!.usedSAM2).toBe(true);
+
+      vi.useRealTimers();
     });
 
     it('returns null when SAM 2 service returns success=false', async () => {
@@ -233,27 +319,47 @@ describe('sam2Client', () => {
       expect(result).toBeNull();
     });
 
-    it('returns null when fetch throws (network error)', async () => {
-      mockFetch.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    it('returns null when fetch throws (network error) after retry', async () => {
+      vi.useFakeTimers();
+
+      // All attempts throw network errors
+      mockFetch.mockRejectedValue(new Error('ECONNREFUSED'));
 
       const imageBuffer = Buffer.from('fake-image-bytes');
-      const result = await segmentWithSAM2(imageBuffer);
+      const resultPromise = segmentWithSAM2(imageBuffer);
+
+      // Fast-forward through all retry backoffs
+      await vi.advanceTimersByTimeAsync(225_000);
+
+      const result = await resultPromise;
       expect(result).toBeNull();
+
+      vi.useRealTimers();
     });
 
     it('returns null when fetch times out', async () => {
-      // Simulate an AbortError
+      // Simulate an AbortError — but NOT a TimeoutError/DOMException
+      // The retry logic retries on generic errors, so we need enough
+      // mock rejections to exhaust retries
+      vi.useFakeTimers();
+
       const abortError = new Error('The operation was aborted');
       abortError.name = 'AbortError';
-      mockFetch.mockRejectedValueOnce(abortError);
+      mockFetch.mockRejectedValue(abortError);
 
       const imageBuffer = Buffer.from('fake-image-bytes');
-      const result = await segmentWithSAM2(imageBuffer);
+      const resultPromise = segmentWithSAM2(imageBuffer);
+
+      await vi.advanceTimersByTimeAsync(225_000);
+
+      const result = await resultPromise;
       expect(result).toBeNull();
+
+      vi.useRealTimers();
     });
   });
 
-  // ── segmentWithSAM2 — when not configured ──────────────────────────
+  // ── segmentWithSAM2 — when not configured ───────────────────────────────
 
   describe('segmentWithSAM2 (not configured)', () => {
     it('returns null immediately when SAM2_SERVICE_URL is not set', async () => {
@@ -268,7 +374,7 @@ describe('sam2Client', () => {
     });
   });
 
-  // ── checkSAM2Health ───────────────────────────────────────────────
+  // ── checkSAM2Health ──────────────────────────────────────────────────────
 
   describe('checkSAM2Health', () => {
     it('returns health response when service is healthy', async () => {
@@ -307,7 +413,7 @@ describe('sam2Client', () => {
     });
   });
 
-  // ── Polygon normalization edge cases ───────────────────────────────
+  // ── Polygon normalization edge cases ─────────────────────────────────────
 
   describe('polygon normalization edge cases', () => {
     it('handles images with non-square dimensions', async () => {
