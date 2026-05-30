@@ -30,6 +30,7 @@ import {
   BundleBuilder,
   buildUnifiedEvidenceBundle,
 } from '@/lib/siteSurveys/unifiedGeometry';
+import { isGoogleSolarApiConfigured } from '@/lib/siteSurveys/googleSolarApi/client';
 
 export async function GET(
   req: NextRequest,
@@ -81,6 +82,9 @@ export async function GET(
         success: true,
         bundle,
         source: 'unified_table', // informational — tells the caller which path was used
+        pipelineConfig: {
+          googleSolarApi: isGoogleSolarApiConfigured(),
+        },
       });
     }
 
@@ -147,6 +151,9 @@ export async function GET(
       success: true,
       bundle,
       source: 'fallback_adaptation', // informational — tells the caller backfill hasn't run
+      pipelineConfig: {
+        googleSolarApi: isGoogleSolarApiConfigured(),
+      },
     });
   } catch (err) {
     console.error('[GET /unified-geometry/bundle] Error:', err);

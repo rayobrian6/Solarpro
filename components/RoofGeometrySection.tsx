@@ -78,6 +78,7 @@ export function RoofGeometrySection({
   const [pipelineCLoading, setPipelineCLoading] = useState(false);
   const [pipelineCError, setPipelineCError] = useState<string | null>(null);
   const [pipelineCSummary, setPipelineCSummary] = useState<string | null>(null);
+  const [googleSolarApiConfigured, setGoogleSolarApiConfigured] = useState<boolean | null>(null); // null = unknown
 
   // ── Fetch unified geometry bundle ─────────────────────────────────
   const [authRequired, setAuthRequired] = useState(false);
@@ -95,6 +96,10 @@ export function RoofGeometrySection({
       const data = await res.json();
       if (data.success && data.bundle) {
         setUnifiedBundle(data.bundle);
+      }
+      // Capture pipeline configuration status (e.g., whether Google Solar API key is set)
+      if (data.pipelineConfig) {
+        setGoogleSolarApiConfigured(data.pipelineConfig.googleSolarApi ?? null);
       }
     } catch (err) {
       console.warn('[RoofGeometrySection] Failed to fetch unified bundle:', err);
@@ -352,16 +357,24 @@ export function RoofGeometrySection({
           </button>
           <button
             onClick={runPipelineC}
-            disabled={pipelineStatus === 'running' || pipelineCLoading}
+            disabled={pipelineStatus === 'running' || pipelineCLoading || googleSolarApiConfigured === false}
             className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600/80 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50"
-            title="Use Google Solar API to get real roof polygon shapes from aerial imagery (requires lat/lng)"
+            title={
+              googleSolarApiConfigured === false
+                ? 'Google Solar API key not configured — ask your admin to set GOOGLE_SOLAR_API_KEY'
+                : googleSolarApiConfigured === null
+                  ? 'Checking API configuration…'
+                  : 'Use Google Solar API to get real roof polygon shapes from aerial imagery'
+            }
           >
             {pipelineCLoading ? (
               <RefreshCw size={12} className="animate-spin" />
+            ) : googleSolarApiConfigured === false ? (
+              <Sun size={12} className="opacity-50" />
             ) : (
               <Sun size={12} />
             )}
-            {pipelineCLoading ? 'Fetching Solar API…' : 'Google Solar API (Real Shapes)'}
+            {pipelineCLoading ? 'Fetching Solar API…' : googleSolarApiConfigured === false ? 'Solar API (No Key)' : 'Google Solar API (Real Shapes)'}
           </button>
           {hasAnyData && (
             <button
