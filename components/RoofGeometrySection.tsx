@@ -77,6 +77,7 @@ export function RoofGeometrySection({
   const [bundleLoading, setBundleLoading] = useState(true);
   const [pipelineCLoading, setPipelineCLoading] = useState(false);
   const [pipelineCError, setPipelineCError] = useState<string | null>(null);
+  const [pipelineCNoCoverage, setPipelineCNoCoverage] = useState(false);
   const [pipelineCSummary, setPipelineCSummary] = useState<string | null>(null);
   const [googleSolarApiConfigured, setGoogleSolarApiConfigured] = useState<boolean | null>(null); // null = unknown
 
@@ -205,6 +206,7 @@ export function RoofGeometrySection({
     setPipelineCLoading(true);
     setPipelineCError(null);
     setPipelineCSummary(null);
+    setPipelineCNoCoverage(false);
     setPipelineStatus('running');
     setPipelineError(null);
     setGenerationSummary(null);
@@ -232,6 +234,13 @@ export function RoofGeometrySection({
         }
         if (res.status === 400 && body.code === 'NO_COORDINATES') {
           throw new Error(body.error || "No coordinates found for this survey's project. Enter the project address first to geocode it.");
+        }
+        // Handle "no coverage" — Google Solar API has no data for this area
+        if (res.status === 404 && body.code === 'NO_COVERAGE') {
+          setPipelineCNoCoverage(true);
+          setPipelineCError(body.guidance || body.error || 'The Google Solar API does not have coverage for this area.');
+          setPipelineStatus('idle');
+          return; // Don't set pipelineStatus to 'failed' — this isn't a bug, it's a coverage limitation
         }
         throw new Error(body.error || `Request failed (${res.status})`);
       }
@@ -416,24 +425,28 @@ export function RoofGeometrySection({
           </button>
           <button
             onClick={runPipelineC}
-            disabled={pipelineStatus === 'running' || pipelineCLoading || googleSolarApiConfigured === false}
+            disabled={pipelineStatus === 'running' || pipelineCLoading || googleSolarApiConfigured === false || pipelineCNoCoverage}
             className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600/80 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50"
             title={
-              googleSolarApiConfigured === false
-                ? 'Google Solar API key not configured — ask your admin to set GOOGLE_SOLAR_API_KEY'
-                : googleSolarApiConfigured === null
-                  ? 'Checking API configuration…'
-                  : 'Use Google Solar API to get real roof polygon shapes from aerial imagery'
+              pipelineCNoCoverage
+                ? 'Google Solar API has no coverage for this area. Use Pipeline B (Generate Roof Geometry) instead.'
+                : googleSolarApiConfigured === false
+                  ? 'Google Solar API key not configured — ask your admin to set GOOGLE_SOLAR_API_KEY'
+                  : googleSolarApiConfigured === null
+                    ? 'Checking API configuration…'
+                    : 'Use Google Solar API to get real roof polygon shapes from aerial imagery'
             }
           >
             {pipelineCLoading ? (
               <RefreshCw size={12} className="animate-spin" />
+            ) : pipelineCNoCoverage ? (
+              <AlertTriangle size={12} className="opacity-60" />
             ) : googleSolarApiConfigured === false ? (
               <Sun size={12} className="opacity-50" />
             ) : (
               <Sun size={12} />
             )}
-            {pipelineCLoading ? 'Fetching Solar API…' : googleSolarApiConfigured === false ? 'Solar API (No Key)' : 'Google Solar API (Real Shapes)'}
+            {pipelineCLoading ? 'Fetching Solar API…' : pipelineCNoCoverage ? 'Solar API (No Coverage)' : googleSolarApiConfigured === false ? 'Solar API (No Key)' : 'Google Solar API (Real Shapes)'}
           </button>
           {hasAnyData && (
             <button
@@ -478,7 +491,36 @@ export function RoofGeometrySection({
             <p className="mt-0.5 text-[10px] text-amber-100/70">{pipelineCSummary}</p>
           </div>
         )}
-        {pipelineCError && (
+        {pipelineCNoCoverage && pipelineCError && (
+          <div className="rounded-lg border border-slate-600/30 bg-slate-800/50 p-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={14} className="text-slate-400 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="text-[11px] font-semibold text-slate-300">
+                  Google Solar API — No Coverage for This Area
+                </p>
+                <p className="mt-1 text-[10px] text-slate-400 leading-relaxed">
+                  {pipelineCError}
+                </p>
+                <div className="mt-2">
+                  <button
+                    onClick={runPipelineB}
+                    disabled={pipelineStatus === 'running'}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600/80 px-3 py-1.5 text-[10px] font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {pipelineStatus === 'running' ? (
+                      <RefreshCw size={10} className="animate-spin" />
+                    ) : (
+                      <Layers size={10} />
+                    )}
+                    Generate Roof Geometry Instead
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {pipelineCError && !pipelineCNoCoverage && (
           <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-2.5">
             <div className="flex items-start gap-2">
               <AlertTriangle size={12} className="text-amber-400 mt-0.5 flex-shrink-0" />

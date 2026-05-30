@@ -192,14 +192,40 @@ export async function POST(
       const result = await fetchBuildingInsights(latitude, longitude);
 
       if (!result.success) {
+        // Distinguish "no coverage" (404 from Google) from other API failures.
+        // A 404 from the Solar API means no building was found near the
+        // requested location — this is expected for areas without coverage.
+        // We return HTTP 404 with a structured code so the frontend can
+        // show a clear "no coverage" panel instead of a generic error.
+        const isNoCoverage =
+          result.error?.includes('No building found') ||
+          result.error?.includes('no coverage') ||
+          result.error?.includes('may not have coverage');
+
+        if (isNoCoverage) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: result.error,
+              code: 'NO_COVERAGE',
+              guidance: 'The Google Solar API does not have aerial roof data for this location. This is common in rural areas or regions outside the US/EU. You can still use Pipeline B ("Generate Roof Geometry") to extract roof shapes from your survey photos.',
+              warnings: result.warnings,
+              durationMs: result.durationMs,
+            },
+            { status: 404 },
+          );
+        }
+
+        // Other API errors (403, 429, timeout, etc.) — return as 502
         return NextResponse.json(
           {
             success: false,
             error: result.error ?? 'Google Solar API call failed',
+            code: 'API_ERROR',
             warnings: result.warnings,
             durationMs: result.durationMs,
           },
-          { status: 502 }, // Bad Gateway (upstream API failure)
+          { status: 502 },
         );
       }
 
