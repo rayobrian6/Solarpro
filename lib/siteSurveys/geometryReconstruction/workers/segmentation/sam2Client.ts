@@ -11,7 +11,7 @@
  *   - GET /health → checks service readiness
  *   - Graceful degradation: any failure → return null, caller uses Canny
  *   - Configurable via SAM2_SERVICE_URL env var
- *   - Timeout: 60s per image (GPU inference ~1-2s, CPU ~30-45s)
+ *   - Timeout: 180s per image (GPU inference ~1-2s, CPU ~30-45s, plus cold-start overhead)
  *
  * REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
  */
@@ -180,6 +180,84 @@ export async function checkSAM2Health(): Promise<SAM2HealthResponse | null> {
     console.warn(`[SAM2] Health check: FAILED in ${elapsedMs}ms — ${message}`);
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Warm-up (non-blocking, fire-and-forget)
+// ---------------------------------------------------------------------------
+
+/**
+ * Send a non-blocking warm-up request to the SAM 2 service.
+ *
+ * On Render cold starts, the SAM 2 model must be downloaded from HuggingFace
+ * and loaded into memory (~60-100s for sam2.1-hiera-large). A health check
+ * alone does NOT trigger model loading. By sending a tiny 1x1 white PNG to
+ * the /segment endpoint, we force the model to start loading immediately.
+ *
+ * This function is intentionally fire-and-forget (returns void, not Promise).
+ * Call it as early as possible in the API route handler — the model will be
+ * loading in the background while auth/validation/DB queries run. By the time
+ * the actual segmentation call happens minutes later, the model may already
+ * be warm, saving ~60-100s of cold-start latency.
+ *
+ * If the service is already warm, this is a no-op (the /segment call completes
+ * in ~1-2s on GPU, ~30s on CPU, and the result is discarded).
+ */
+export function warmupSAM2Service(): void {
+  if (!isSAM2Enabled()) return;
+
+  const serviceURL = getSAM2ServiceURL();
+
+  // Fire health check first to see current state
+  const healthPromise = checkSAM2Health();
+
+  // Chain: after health check, send a tiny warm-up segment request
+  // regardless of health status (even if model_loaded=false, the /segment
+  // call will trigger model loading on the server)
+  void healthPromise.then(() => {
+    const t0 = Date.now();
+    console.info(`[SAM2] Warm-up: sending tiny image to /segment to trigger model loading`);
+
+    // Minimal 1x1 white PNG (67 bytes) — smallest valid PNG
+    const MINIMAL_PNG = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
+      0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
+      0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1x1
+      0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, // 8-bit RGB
+      0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, // IDAT chunk
+      0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00, // compressed data
+      0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc, // 
+      0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, // IEND chunk
+      0x44, 0xae, 0x42, 0x60, 0x82,                    // 
+    ]);
+
+    const formData = new FormData();
+    const imageBlob = new Blob([new Uint8Array(MINIMAL_PNG)]);
+    formData.append('file', imageBlob, 'warmup.png');
+
+    const url = new URL(`${serviceURL}/segment`);
+    url.searchParams.set('min_area_fraction', '0.99'); // Reject all masks from 1x1 image
+    url.searchParams.set('max_masks', '1');            // Minimize processing
+
+    fetch(url.toString(), {
+      method: 'POST',
+      body: formData,
+      signal: AbortSignal.timeout(120_000), // Allow up to 2min for cold start
+    })
+      .then((response) => {
+        const elapsedMs = Date.now() - t0;
+        if (response.ok) {
+          console.info(`[SAM2] Warm-up: complete in ${elapsedMs}ms — model should be loaded now`);
+        } else {
+          console.warn(`[SAM2] Warm-up: HTTP ${response.status} in ${elapsedMs}ms — model may still be loading`);
+        }
+      })
+      .catch((error) => {
+        const elapsedMs = Date.now() - t0;
+        const isTimeout = error instanceof DOMException && error.name === 'TimeoutError';
+        console.warn(`[SAM2] Warm-up: ${isTimeout ? 'TIMEOUT' : 'FAILED'} in ${elapsedMs}ms — ${error instanceof Error ? error.message : String(error)}`);
+      });
+  });
 }
 
 // ---------------------------------------------------------------------------

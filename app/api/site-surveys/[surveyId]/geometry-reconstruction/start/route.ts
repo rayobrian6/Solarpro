@@ -29,6 +29,7 @@ import {
   runSegmentationOnlyPipeline,
   runDepthOnlyPipeline,
 } from '@/lib/siteSurveys/geometryReconstruction/runFullPipeline';
+import { warmupSAM2Service } from '@/lib/siteSurveys/geometryReconstruction/workers/segmentation/sam2Client';
 import { adaptGeometryReconBundle } from '@/lib/siteSurveys/unifiedGeometry/pipelineAdapters';
 import { writeUnifiedArtifacts, deleteUnifiedArtifactsByPipeline } from '@/lib/siteSurveys/unifiedGeometry';
 import type { GeometryReconstructionInput, SourcePhoto } from '@/lib/siteSurveys/geometryReconstruction/types';
@@ -115,6 +116,15 @@ export async function POST(
     console.info(
       `[POST geometry-reconstruction/start] Running real pipeline: ${pipeline} for survey=${surveyId}`,
     );
+
+    // Fire non-blocking SAM 2 warm-up as early as possible.
+    // On Render cold starts, the model takes ~60-100s to download and load.
+    // Firing this now gives the service a head start while we do DB writes.
+    // The actual segmentation call later will either find a warm model
+    // (saving ~60-100s) or proceed normally if still loading.
+    if (pipeline !== 'mock') {
+      warmupSAM2Service();
+    }
 
     try {
       // Select the appropriate pipeline runner based on the pipeline mode

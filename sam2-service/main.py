@@ -5,7 +5,9 @@ Runs SAM 2.1 Automatic Mask Generation on survey photos and returns
 polygon-based segmentation masks suitable for Pipeline B consumption.
 
 Architecture:
-  - Loads sam2.1_hiera_small checkpoint from HuggingFace on startup (~184MB download)
+  - Loads SAM 2.1 checkpoint from HuggingFace on startup (model determined by
+    SAM2_HF_MODEL_ID env var; defaults to sam2.1-hiera-tiny on CPU (~40MB),
+    sam2.1-hiera-small on GPU (~184MB))
   - POST /segment: accepts image bytes, returns polygon masks
   - GET /health: service readiness check
   - Runs on GPU when available, falls back to CPU
