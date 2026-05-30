@@ -1,27 +1,13 @@
-# Render service configuration for SAM 2 Segmentation Service
-#
-# Deployed via Render API. This file documents the configuration.
-# To update settings, use the Render dashboard or API.
-#
-# Service URL: https://sam2-segmentation.onrender.com
-# Service ID:  srv-d8dj4mv7f7vs73ca0gtg
-#
-# Plan: standard ($0.005/min active, auto-sleeps when idle)
-# GPU:  Upgrade to GPU from Render dashboard for faster inference
-#       (CPU ~5-10s/image, GPU ~1-2s/image with T4)
-# Cost: ~$7/month with auto-sleep and light usage
-
 services:
   - type: web_service
     name: sam2-segmentation
-    runtime: docker
+    runtime: python
     repo: https://github.com/rayobrian6/Solarpro
     branch: dev
     rootDir: sam2-service
-    dockerfilePath: ./Dockerfile
-    # Start on standard plan; upgrade to GPU via Render dashboard
-    plan: standard
+    plan: pro
     region: oregon
+    buildPlan: pro
     healthCheckPath: /health
     envVars:
       - key: SAM2_CHECKPOINT
@@ -34,3 +20,5 @@ services:
         value: "5.0"
       - key: PORT
         value: "8000"
+      - key: PYTHON_VERSION
+        value: "3.11.0"
