@@ -115,6 +115,68 @@ const GEOMETRY_CLASS_OVERLAY_COLORS: Record<
   },
 };
 
+
+/**
+ * Per-subtype styling for roof_line artifacts.
+ * Makes ridge/eave/rake/wall_vertical visually distinct and highly visible,
+ * matching the expectation of thick colored outlines tracing real roof edges.
+ */
+const ROOF_LINE_SUBTYPE_STYLES: Record<
+  string,
+  { stroke: string; strokeWidth: number; strokeDasharray: string; label: string }
+> = {
+  ridge: {
+    stroke: '#fb923c',    // vibrant orange - ridges are the most important line
+    strokeWidth: 2.5,
+    strokeDasharray: 'none',
+    label: 'Ridge',
+  },
+  eave: {
+    stroke: '#fbbf24',    // bright yellow - eaves are second most important
+    strokeWidth: 2.0,
+    strokeDasharray: 'none',
+    label: 'Eave',
+  },
+  rake: {
+    stroke: '#f59e0b',    // amber - rakes connect ridge to eave
+    strokeWidth: 1.5,
+    strokeDasharray: '4,2',
+    label: 'Rake',
+  },
+  hip: {
+    stroke: '#f97316',    // orange - hip lines
+    strokeWidth: 2.0,
+    strokeDasharray: '6,3',
+    label: 'Hip',
+  },
+  valley: {
+    stroke: '#ef4444',    // red - valleys are critical for drainage
+    strokeWidth: 2.0,
+    strokeDasharray: '3,3',
+    label: 'Valley',
+  },
+  wall_vertical: {
+    stroke: '#60a5fa',    // blue - wall edges
+    strokeWidth: 1.5,
+    strokeDasharray: '2,2',
+    label: 'Wall Edge',
+  },
+};
+
+/** Default roof line style when subtype is unknown */
+const DEFAULT_ROOF_LINE_STYLE = {
+  stroke: '#fbbf24',
+  strokeWidth: 1.5,
+  strokeDasharray: '2,2',
+  label: 'Roof Line',
+};
+
+/** Minimum confidence for a roof_line artifact to be rendered in the overlay. */
+const MIN_ROOF_LINE_CONFIDENCE = 40;
+
+/** Maximum number of roof_line artifacts to render per file. */
+const MAX_ROOF_LINES_PER_FILE = 50;
+
 /* ── Geometry extraction helpers ─────────────────────────────────────── */
 
 /**
@@ -222,8 +284,18 @@ export function UnifiedGeometryOverlayRenderer({
         // Apply class filter
         if (geometryClassFilter && geometryClassFilter.size > 0 && !geometryClassFilter.has(a.geometryClass))
           return false;
+        // Filter low-confidence roof lines - they clutter the overlay
+        if (a.geometryClass === 'roof_line' && (a.confidence ?? 0) < MIN_ROOF_LINE_CONFIDENCE) return false;
         return true;
       });
+      // Cap roof lines per file to prevent clutter (keep highest confidence first)
+      const roofLinesInFile = filtered.filter(a => a.geometryClass === 'roof_line');
+      if (roofLinesInFile.length > MAX_ROOF_LINES_PER_FILE) {
+        // Sort roof lines by confidence descending, keep top N
+        roofLinesInFile.sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+        const keptLineIds = new Set(roofLinesInFile.slice(0, MAX_ROOF_LINES_PER_FILE).map(a => a.id));
+        filtered = filtered.filter(a => a.geometryClass !== 'roof_line' || keptLineIds.has(a.id));
+      }
       const totalDrawable = filtered.length;
       const capped = filtered.slice(0, maxArtifactsPerFile);
       return { ...fw, artifacts: capped, totalDrawable, wasCapped: totalDrawable > maxArtifactsPerFile };
@@ -289,13 +361,54 @@ export function UnifiedGeometryOverlayRenderer({
               fw.artifacts.some((a) => a.geometryClass === cls),
             ),
           )
-          .map((cls) => {
+          .flatMap((cls) => {
             const color = GEOMETRY_CLASS_OVERLAY_COLORS[cls];
             const count = filesWithDrawable.reduce(
               (sum, fw) => sum + fw.artifacts.filter((a) => a.geometryClass === cls).length,
               0,
             );
-            return (
+            // For roof_line, expand into per-subtype legend entries
+            if (cls === 'roof_line') {
+              const subtypes = new Set<string>();
+              filesWithDrawable.forEach(fw =>
+                fw.artifacts
+                  .filter(a => a.geometryClass === 'roof_line' && a.lineSubtype)
+                  .forEach(a => subtypes.add(a.lineSubtype!))
+              );
+              const entries = subtypes.size > 0
+                ? Array.from(subtypes).map(sub => {
+                    const style = ROOF_LINE_SUBTYPE_STYLES[sub] ?? DEFAULT_ROOF_LINE_STYLE;
+                    const subCount = filesWithDrawable.reduce(
+                      (sum, fw) => sum + fw.artifacts.filter(
+                        a => a.geometryClass === 'roof_line' && a.lineSubtype === sub
+                      ).length, 0
+                    );
+                    return (
+                      <div key={`roof_line-${sub}`} className="flex items-center gap-1.5">
+                        <span
+                          className="inline-block h-2.5 w-5 rounded-sm"
+                          style={{ backgroundColor: style.stroke }}
+                        />
+                        <span className="text-[9px] text-slate-400">
+                          {style.label} ({subCount})
+                        </span>
+                      </div>
+                    );
+                  })
+                : [(
+                    <div key="roof_line-default" className="flex items-center gap-1.5">
+                      <span
+                        className="inline-block h-2.5 w-2.5 rounded-sm border"
+                        style={{ borderColor: color.stroke, backgroundColor: color.fill }}
+                      />
+                      <span className="text-[9px] text-slate-400">
+                        {color.label} ({count})
+                      </span>
+                    </div>
+                  )];
+              return entries;
+            }
+            return [(
               <div key={cls} className="flex items-center gap-1.5">
                 <span
                   className="inline-block h-2.5 w-2.5 rounded-sm border"
@@ -305,7 +418,7 @@ export function UnifiedGeometryOverlayRenderer({
                   {color.label} ({count})
                 </span>
               </div>
-            );
+            )];
           })}
       </div>
     </div>
@@ -375,13 +488,22 @@ function PhotoWithUnifiedOverlays({
         {overlayElements.map((entry, idx) => {
           const isHovered = hoveredIdx === idx;
           const isRoofLine = entry.artifact.geometryClass === 'roof_line';
-          const strokeWidth = isHovered
-            ? isRoofLine
-              ? 0.8
-              : 0.6
+          // Per-subtype roof line styling for thick, visible, color-coded lines
+          const lineSubtype = entry.artifact.lineSubtype ?? null;
+          const lineStyle = isRoofLine && lineSubtype
+            ? (ROOF_LINE_SUBTYPE_STYLES[lineSubtype] ?? DEFAULT_ROOF_LINE_STYLE)
             : isRoofLine
-              ? 0.5
+              ? DEFAULT_ROOF_LINE_STYLE
+              : null;
+          const strokeWidth = isHovered
+            ? lineStyle
+              ? lineStyle.strokeWidth + 1.0
+              : 0.6
+            : lineStyle
+              ? lineStyle.strokeWidth
               : 0.35;
+          const lineStroke = lineStyle?.stroke ?? entry.color.stroke;
+          const lineDash = lineStyle?.strokeDasharray ?? 'none';
           const fillOpacity = isHovered ? 0.2 : undefined;
           const strokeDash = entry.artifact.authority?.mockArtifact ? '1,1' : 'none';
 
@@ -391,11 +513,11 @@ function PhotoWithUnifiedOverlays({
               {entry.polygonSvg && (
                 <polygon
                   points={entry.polygonSvg.points}
-                  fill={entry.color.stroke}
-                  fillOpacity={fillOpacity ?? 0.12}
-                  stroke={entry.color.stroke}
+                  fill={isRoofLine ? 'none' : entry.color.stroke}
+                  fillOpacity={fillOpacity ?? (isRoofLine ? 0 : 0.12)}
+                  stroke={lineStroke}
                   strokeWidth={strokeWidth}
-                  strokeDasharray={strokeDash}
+                  strokeDasharray={lineDash}
                   style={{ pointerEvents: 'auto', cursor: 'pointer' }}
                   onMouseEnter={() => setHoveredIdx(idx)}
                   onMouseLeave={() => setHoveredIdx(null)}
@@ -409,11 +531,11 @@ function PhotoWithUnifiedOverlays({
                   y={entry.rectSvg.y}
                   width={entry.rectSvg.width}
                   height={entry.rectSvg.height}
-                  fill={entry.color.stroke}
-                  fillOpacity={fillOpacity ?? 0.06}
-                  stroke={entry.color.stroke}
+                  fill={isRoofLine ? 'none' : entry.color.stroke}
+                  fillOpacity={fillOpacity ?? (isRoofLine ? 0 : 0.06)}
+                  stroke={lineStroke}
                   strokeWidth={strokeWidth}
-                  strokeDasharray={strokeDash}
+                  strokeDasharray={lineDash}
                   rx={0.2}
                   style={{ pointerEvents: 'auto', cursor: 'pointer' }}
                   onMouseEnter={() => setHoveredIdx(idx)}
@@ -421,21 +543,50 @@ function PhotoWithUnifiedOverlays({
                 />
               )}
 
-              {/* Line segment */}
-              {entry.lineSvg && (
-                <line
-                  x1={entry.lineSvg.x1}
-                  y1={entry.lineSvg.y1}
-                  x2={entry.lineSvg.x2}
-                  y2={entry.lineSvg.y2}
-                  stroke={entry.color.stroke}
-                  strokeWidth={isHovered ? 0.8 : 0.5}
-                  strokeDasharray={strokeDash}
-                  style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-                  onMouseEnter={() => setHoveredIdx(idx)}
-                  onMouseLeave={() => setHoveredIdx(null)}
-                />
-              )}
+              {/* Line segment - thick colored lines for roof edges */}
+              {entry.lineSvg && (() => {
+                const isRL = entry.artifact.geometryClass === 'roof_line';
+                const lSub = entry.artifact.lineSubtype ?? null;
+                const ls = isRL && lSub
+                  ? (ROOF_LINE_SUBTYPE_STYLES[lSub] ?? DEFAULT_ROOF_LINE_STYLE)
+                  : isRL
+                    ? DEFAULT_ROOF_LINE_STYLE
+                    : null;
+                const lsColor = ls?.stroke ?? entry.color.stroke;
+                const lsWidth = ls
+                  ? (isHovered ? ls.strokeWidth + 1.0 : ls.strokeWidth)
+                  : (isHovered ? 0.8 : 0.5);
+                const lsDash = ls?.strokeDasharray ?? strokeDash;
+                return (
+                  <g>
+                    {/* Outer glow / outline for visibility on any background */}
+                    <line
+                      x1={entry.lineSvg.x1}
+                      y1={entry.lineSvg.y1}
+                      x2={entry.lineSvg.x2}
+                      y2={entry.lineSvg.y2}
+                      stroke="rgba(0,0,0,0.6)"
+                      strokeWidth={lsWidth + 1.0}
+                      strokeLinecap="round"
+                      style={{ pointerEvents: 'none' }}
+                    />
+                    {/* Main colored line */}
+                    <line
+                      x1={entry.lineSvg.x1}
+                      y1={entry.lineSvg.y1}
+                      x2={entry.lineSvg.x2}
+                      y2={entry.lineSvg.y2}
+                      stroke={lsColor}
+                      strokeWidth={lsWidth}
+                      strokeDasharray={lsDash}
+                      strokeLinecap="round"
+                      style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+                      onMouseEnter={() => setHoveredIdx(idx)}
+                      onMouseLeave={() => setHoveredIdx(null)}
+                    />
+                  </g>
+                );
+              })()}
             </g>
           );
         })}
