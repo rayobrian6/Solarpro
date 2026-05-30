@@ -39,6 +39,7 @@ export const maxDuration = 60;
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { isValidUUID, getSiteSurveyById, GetSiteSurveyByIdOptions } from '@/lib/db-neon';
+import { getProjectById } from '@/lib/db/projects';
 import { fetchBuildingInsights, isGoogleSolarApiConfigured } from '@/lib/siteSurveys/googleSolarApi/client';
 import { adaptBuildingInsightsToUnifiedArtifacts } from '@/lib/siteSurveys/googleSolarApi/adapter';
 import { writeUnifiedArtifacts, deleteUnifiedArtifactsByPipeline } from '@/lib/siteSurveys/unifiedGeometry/unifiedArtifactStore';
@@ -81,21 +82,46 @@ export async function POST(
       );
     }
 
-    // ─── Get lat/lng from request or survey ──────────────────────────────
-    // The caller can provide lat/lng explicitly, or we can try to extract
-    // them from the survey data.
+    // ─── Get lat/lng: auto-resolve from project if not provided ──────────
+    // The caller can provide lat/lng explicitly in the request body.
+    // If not provided, we auto-resolve from the survey's project data,
+    // which stores geocoded lat/lng from the address lookup.
+    // This eliminates the need for the frontend to prompt the user.
     const body = await req.json().catch(() => ({}));
     let latitude = body.latitude as number | undefined;
     let longitude = body.longitude as number | undefined;
 
-    // If lat/lng not provided in request body, try to extract from survey
+    // If lat/lng not in request body, try to auto-resolve from project
     if (latitude === undefined || longitude === undefined) {
-      // Try to get lat/lng from survey address/geocoding
-      // For now, require the caller to provide lat/lng
+      if (survey.projectId) {
+        try {
+          const project = await getProjectById(survey.projectId, user.id);
+          if (project && project.lat != null && project.lng != null) {
+            latitude = project.lat;
+            longitude = project.lng;
+            console.info(
+              `[POST google-solar-api] Auto-resolved lat/lng from project ${project.id}: lat=${latitude}, lng=${longitude}`,
+            );
+          }
+        } catch (projErr) {
+          console.warn(
+            `[POST google-solar-api] Could not look up project for lat/lng: ${
+              projErr instanceof Error ? projErr.message : String(projErr)
+            }`,
+          );
+        }
+      }
+    }
+
+    // If we still don't have coordinates, return a helpful error
+    if (latitude === undefined || longitude === undefined) {
       return NextResponse.json(
         {
           success: false,
-          error: 'Latitude and longitude are required. Provide them in the request body as { latitude, longitude }.',
+          error: survey.projectId
+            ? 'No coordinates found. The project for this survey does not have geocoded latitude/longitude. Enter the project address first to geocode it, then retry Pipeline C.'
+            : 'No coordinates found. This survey is not attached to a project with geocoded coordinates. Either attach it to a project with an address, or provide latitude/longitude in the request body.',
+          code: 'NO_COORDINATES',
         },
         { status: 400 },
       );

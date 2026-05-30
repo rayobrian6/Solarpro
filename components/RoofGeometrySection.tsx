@@ -192,7 +192,10 @@ export function RoofGeometrySection({
     }
   }, [surveyId, fetchBundle, onGeometryGenerated]);
 
-  // ── Run Pipeline C (Google Solar API) ──────────────────────────────────
+  // ── Run Pipeline C (Google Solar API) ─────────────────────────────────
+  // The server auto-resolves lat/lng from the survey's project data,
+  // so no user prompt is needed. If the project has no geocoded address,
+  // the server returns a helpful error message.
   const runPipelineC = useCallback(async () => {
     setPipelineCLoading(true);
     setPipelineCError(null);
@@ -201,40 +204,16 @@ export function RoofGeometrySection({
     setPipelineError(null);
     setGenerationSummary(null);
     try {
-      // Prompt for lat/lng if not embedded in the survey
-      // For now, use a modal-style prompt via window.prompt
-      // In a production app, this would be a proper form with geocoding
-      const latStr = window.prompt(
-        'Enter the building latitude (decimal degrees):\nExample: 37.422',
-      );
-      if (!latStr) {
-        setPipelineCLoading(false);
-        setPipelineStatus('idle');
-        return; // User cancelled
-      }
-      const lngStr = window.prompt(
-        'Enter the building longitude (decimal degrees):\nExample: -122.084',
-      );
-      if (!lngStr) {
-        setPipelineCLoading(false);
-        setPipelineStatus('idle');
-        return; // User cancelled
-      }
-
-      const lat = parseFloat(latStr);
-      const lng = parseFloat(lngStr);
-
-      if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-        throw new Error(`Invalid coordinates: lat=${latStr}, lng=${lngStr}. Latitude must be -90 to 90, longitude -180 to 180.`);
-      }
-
+      // No window.prompt() — the server auto-resolves coordinates from the
+      // survey's project. If the project has no geocoded lat/lng, the server
+      // returns a clear error explaining what to do.
       const res = await fetch(
         `/api/site-surveys/${surveyId}/google-solar-api`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ latitude: lat, longitude: lng }),
+          body: JSON.stringify({}), // lat/lng auto-resolved server-side
         },
       );
 
@@ -245,6 +224,9 @@ export function RoofGeometrySection({
         }
         if (res.status === 503) {
           throw new Error('Google Solar API is not configured on this server. Ask your administrator to set the GOOGLE_SOLAR_API_KEY environment variable.');
+        }
+        if (res.status === 400 && body.code === 'NO_COORDINATES') {
+          throw new Error(body.error || "No coordinates found for this survey's project. Enter the project address first to geocode it.");
         }
         throw new Error(body.error || `Request failed (${res.status})`);
       }
