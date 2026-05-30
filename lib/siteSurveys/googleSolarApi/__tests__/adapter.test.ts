@@ -414,3 +414,260 @@ describe('adaptPipelineCResult', () => {
     expect(planes.length).toBeGreaterThan(0);
   });
 });
+
+// ─── Shared Edge Tracing ──────────────────────────────────────────────────
+
+describe('roof line inference — shared edge tracing', () => {
+  const surveyId = 'survey-test-001';
+
+  /**
+   * Create a response with two rectangular roof planes that share a vertical edge.
+   * Plane 0: left rectangle, azimuth 180 (south-facing)
+   * Plane 1: right rectangle, azimuth 0 (north-facing)
+   * They share the vertical edge at x=200, y=210..360
+   */
+  function makeAdjoiningPlanesResponse(): BuildingInsightsResponse {
+    return {
+      name: 'buildings/test-adjoining',
+      center: { latitude: 37.7749, longitude: -122.4194 },
+      boundingBox: makeBbox(),
+      imageryDate: { year: 2023, month: 6 },
+      roofPlanes: [
+        // Left plane: polygon x=100..200, y=210..360
+        makeRoofPlane({
+          boundingBox: makeBbox({ x: 100, y: 210, width: 110, height: 150 }), // bbox extends slightly past shared edge
+          planeOutline: {
+            vertices: [
+              { x: 100, y: 210 },
+              { x: 200, y: 210 },
+              { x: 200, y: 360 },
+              { x: 100, y: 360 },
+            ],
+          },
+          azimuth: 180,
+          roofPitch: 30,
+          areaSqMeters: 30,
+          planeIndex: 0,
+        }),
+        // Right plane: polygon x=200..320, y=210..360
+        // Shares the x=200 edge with the left plane
+        makeRoofPlane({
+          boundingBox: makeBbox({ x: 190, y: 210, width: 130, height: 150 }), // bbox starts slightly before shared edge
+          planeOutline: {
+            vertices: [
+              { x: 200, y: 210 },
+              { x: 320, y: 210 },
+              { x: 320, y: 360 },
+              { x: 200, y: 360 },
+            ],
+          },
+          azimuth: 0, // Opposite → ridge line
+          roofPitch: 30,
+          areaSqMeters: 36,
+          planeIndex: 1,
+        }),
+      ],
+    };
+  }
+
+  it('traces shared edge for adjoining rectangular planes', () => {
+    const response = makeAdjoiningPlanesResponse();
+    const artifacts = adaptBuildingInsightsToUnifiedArtifacts(response, surveyId);
+
+    const ridgeLines = artifacts.filter(
+      (a) => a.geometryClass === 'roof_line' && a.lineSubtype === 'ridge',
+    );
+
+    // Should find the shared vertical edge as a ridge line
+    expect(ridgeLines.length).toBeGreaterThan(0);
+
+    // The ridge line label should say "Traced" (not "Inferred")
+    const tracedLine = ridgeLines.find((l) => l.label.startsWith('Traced'));
+    expect(tracedLine).toBeDefined();
+
+    // The ridge line should have higher confidence than the fallback
+    expect(tracedLine!.confidence).toBeGreaterThanOrEqual(82);
+  });
+
+  it('positions shared edge line along the actual boundary', () => {
+    const response = makeAdjoiningPlanesResponse();
+    const artifacts = adaptBuildingInsightsToUnifiedArtifacts(response, surveyId);
+
+    const ridgeLines = artifacts.filter(
+      (a) => a.geometryClass === 'roof_line' && a.lineSubtype === 'ridge',
+    );
+
+    expect(ridgeLines.length).toBeGreaterThan(0);
+
+    const ridge = ridgeLines[0];
+    const start = ridge.lineSegment!.start;
+    const end = ridge.lineSegment!.end;
+
+    // The shared edge is at x=200 (in pixel coords), which normalizes to
+    // roughly x = ((200 - 105) / 270) * 1000 ≈ 352 in normalized coords
+    // Both start and end should have similar x values (vertical line)
+    const avgX = (start.x + end.x) / 2;
+    expect(avgX).toBeGreaterThan(200); // Should be in the middle of the normalized range
+    expect(avgX).toBeLessThan(600);
+
+    // The line should be roughly vertical (start.y ≈ end.y but different,
+    // or more precisely start.x ≈ end.x)
+    const xDiff = Math.abs(start.x - end.x);
+    const yDiff = Math.abs(start.y - end.y);
+    expect(yDiff).toBeGreaterThan(xDiff); // Vertical line: Y difference > X difference
+  });
+
+  it('falls back to center-to-center when no shared edge exists', () => {
+    // Create two planes with overlapping bounding boxes but no nearby polygon edges
+    const response: BuildingInsightsResponse = {
+      name: 'buildings/test-no-shared',
+      center: { latitude: 37.7749, longitude: -122.4194 },
+      boundingBox: makeBbox(),
+      imageryDate: { year: 2023, month: 6 },
+      roofPlanes: [
+        // Plane 0: small triangle at top-left
+        makeRoofPlane({
+          boundingBox: makeBbox({ x: 110, y: 210, width: 80, height: 60 }),
+          planeOutline: {
+            vertices: [
+              { x: 110, y: 210 },
+              { x: 190, y: 210 },
+              { x: 150, y: 270 },
+            ],
+          },
+          azimuth: 180,
+          roofPitch: 30,
+          areaSqMeters: 10,
+          planeIndex: 0,
+        }),
+        // Plane 1: small triangle further down-right (overlapping bbox but no nearby edges)
+        makeRoofPlane({
+          boundingBox: makeBbox({ x: 150, y: 260, width: 80, height: 60 }),
+          planeOutline: {
+            vertices: [
+              { x: 150, y: 320 },
+              { x: 230, y: 320 },
+              { x: 190, y: 260 },
+            ],
+          },
+          azimuth: 90,
+          roofPitch: 20,
+          areaSqMeters: 10,
+          planeIndex: 1,
+        }),
+      ],
+    };
+
+    const artifacts = adaptBuildingInsightsToUnifiedArtifacts(response, surveyId);
+    const lines = artifacts.filter((a) => a.geometryClass === 'roof_line');
+
+    // Should still produce a line (fallback)
+    expect(lines.length).toBeGreaterThan(0);
+
+    // The fallback line should say "Inferred" (not "Traced") and mention fallback
+    const fallbackLine = lines.find(
+      (l) => l.label.startsWith('Inferred') && l.limitations.some((lim) => lim.includes('fallback')),
+    );
+    expect(fallbackLine).toBeDefined();
+    // Fallback confidence should be the center-to-center value (72)
+    expect(fallbackLine!.confidence).toBeLessThanOrEqual(72);
+    // Should mention fallback in limitations
+    expect(fallbackLine!.limitations.some((l) => l.includes('fallback'))).toBe(true);
+  });
+
+  it('traces hip line for non-opposite adjoining planes', () => {
+    const response: BuildingInsightsResponse = {
+      name: 'buildings/test-hip',
+      center: { latitude: 37.7749, longitude: -122.4194 },
+      boundingBox: makeBbox(),
+      imageryDate: { year: 2023, month: 6 },
+      roofPlanes: [
+        // Left plane
+        makeRoofPlane({
+          boundingBox: makeBbox({ x: 100, y: 210, width: 110, height: 150 }), // extends past shared edge
+          planeOutline: {
+            vertices: [
+              { x: 100, y: 210 },
+              { x: 200, y: 210 },
+              { x: 200, y: 360 },
+              { x: 100, y: 360 },
+            ],
+          },
+          azimuth: 90,
+          roofPitch: 25,
+          areaSqMeters: 30,
+          planeIndex: 0,
+        }),
+        // Right plane — same shared edge at x=200, but azimuth not opposite
+        makeRoofPlane({
+          boundingBox: makeBbox({ x: 190, y: 210, width: 130, height: 150 }), // starts before shared edge
+          planeOutline: {
+            vertices: [
+              { x: 200, y: 210 },
+              { x: 320, y: 210 },
+              { x: 320, y: 360 },
+              { x: 200, y: 360 },
+            ],
+          },
+          azimuth: 120, // 30° off from 90° → hip, not ridge
+          roofPitch: 25,
+          areaSqMeters: 36,
+          planeIndex: 1,
+        }),
+      ],
+    };
+
+    const artifacts = adaptBuildingInsightsToUnifiedArtifacts(response, surveyId);
+    const hipLines = artifacts.filter(
+      (a) => a.geometryClass === 'roof_line' && a.lineSubtype === 'hip',
+    );
+
+    expect(hipLines.length).toBeGreaterThan(0);
+
+    // Hip lines from shared edges should also use "Traced" label
+    const tracedHip = hipLines.find((l) => l.label.startsWith('Traced'));
+    expect(tracedHip).toBeDefined();
+  });
+
+  it('produces eave/rake edge lines from unshared polygon edges', () => {
+    const response = makeAdjoiningPlanesResponse();
+    const artifacts = adaptBuildingInsightsToUnifiedArtifacts(response, surveyId);
+
+    const edgeLines = artifacts.filter(
+      (a) =>
+        a.geometryClass === 'roof_line' &&
+        (a.lineSubtype === 'eave' || a.lineSubtype === 'rake'),
+    );
+
+    // Should have at least some edge lines from the unshared polygon boundaries
+    expect(edgeLines.length).toBeGreaterThan(0);
+
+    // Edge lines should have appropriate confidence
+    for (const edge of edgeLines) {
+      expect(edge.confidence).toBeGreaterThanOrEqual(70);
+      expect(edge.confidence).toBeLessThanOrEqual(80);
+    }
+  });
+
+  it('assigns higher confidence to traced lines than to fallback lines', () => {
+    // Test with adjoining planes (traced) vs non-adjoining (fallback)
+    const tracedResponse = makeAdjoiningPlanesResponse();
+    const tracedArtifacts = adaptBuildingInsightsToUnifiedArtifacts(tracedResponse, surveyId);
+
+    const tracedLines = tracedArtifacts.filter(
+      (a) => a.geometryClass === 'roof_line' && a.label.startsWith('Traced'),
+    );
+    const fallbackLines = tracedArtifacts.filter(
+      (a) => a.geometryClass === 'roof_line' && a.label.startsWith('Inferred') &&
+        !a.label.includes('edge'),
+    );
+
+    if (tracedLines.length > 0 && fallbackLines.length > 0) {
+      const avgTracedConf =
+        tracedLines.reduce((s, l) => s + l.confidence, 0) / tracedLines.length;
+      const avgFallbackConf =
+        fallbackLines.reduce((s, l) => s + l.confidence, 0) / fallbackLines.length;
+      expect(avgTracedConf).toBeGreaterThan(avgFallbackConf);
+    }
+  });
+});

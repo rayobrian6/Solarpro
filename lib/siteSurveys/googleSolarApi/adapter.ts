@@ -77,12 +77,27 @@ import type { UnifiedGeometryAuthority } from '@/lib/siteSurveys/unifiedGeometry
 const GOOGLE_SOLAR_PLANE_CONFIDENCE = 92;
 
 /**
- * Confidence for roof lines inferred from adjacent plane boundaries.
+ * Confidence for roof lines traced from shared polygon edges.
  *
- * Roof lines are inferred from the shared edges of adjacent roof planes,
- * which is a heuristic process. Lower confidence reflects this.
+ * When we can trace the actual shared boundary between two adjacent roof
+ * planes, the line position is more accurate than a center-to-center guess.
+ * This gets a confidence boost over the fallback method.
  */
-const GOOGLE_SOLAR_LINE_CONFIDENCE = 78;
+const GOOGLE_SOLAR_LINE_CONFIDENCE_SHARED_EDGE = 82;
+
+/**
+ * Confidence for roof lines inferred via center-to-center fallback.
+ *
+ * When no shared polygon edge is found between overlapping planes, we fall
+ * back to connecting their bounding box centers. This is less accurate.
+ */
+const GOOGLE_SOLAR_LINE_CONFIDENCE_CENTER_FALLBACK = 72;
+
+/**
+ * Confidence for edge lines (eave/rake) at the building boundary.
+ * These are inferred from polygon outline edges, which is moderately accurate.
+ */
+const GOOGLE_SOLAR_LINE_CONFIDENCE_EDGE = 73;
 
 /**
  * Confidence for the building bounding box.
@@ -427,25 +442,39 @@ function adaptRoofPlane(
   });
 }
 
-// ─── Roof Line Inference ─────────────────────────────────────────────────────
+// ─── Roof Line Inference ────────────────────────────────────────────────────
 
 /**
  * Infer roof lines from the roof plane data.
  *
  * The Google Solar API doesn't directly provide roof lines (ridge, eave,
- * hip, valley, rake). We infer them by looking at each plane's edges:
+ * hip, valley, rake). We infer them by examining polygon outline edges:
  *
- *   - Edges shared between two planes → ridge, hip, or valley
- *   - Edges not shared (building boundary) → eave or rake
+ *   SHARED EDGES (ridge, hip, valley):
+ *     For each pair of planes whose bounding boxes overlap, we trace the
+ *     actual shared boundary by finding polygon edges from each plane that
+ *     are nearly collinear and close together. The overlapping segment of
+ *     these nearby parallel edges becomes the roof line.
  *
- * For the initial implementation, we take a simpler approach: for each
- * pair of planes whose bounding boxes overlap, we infer a single roof
- * line connecting their centers. The subtype is inferred from the
- * azimuth relationship between the planes.
+ *     If no shared edges are found (e.g., due to low-resolution outlines),
+ *     we fall back to connecting the plane bounding box centers.
  *
- * This is a best-effort heuristic. In Phase 2 (SAM + Contour Tracing),
- * we'll get much more accurate roof lines from contour tracing.
+ *   BOUNDARY EDGES (eave, rake):
+ *     For each plane, we find the longest polygon outline edge that is NOT
+ *     shared with another plane. This represents the building boundary edge,
+ *     which we classify as eave (low pitch) or rake (high pitch).
+ *
+ * This approach produces significantly more accurate roof line positions than
+ * the previous center-to-center method, especially for ridge and hip lines.
  */
+
+// Tolerance for considering two polygon edges as "shared" — expressed as a
+// fraction of the building bounding box diagonal. Two edges are considered
+// nearby if their midpoints are within this distance AND they are roughly
+// parallel (angle difference < 15 degrees).
+const SHARED_EDGE_PROXIMITY_TOLERANCE = 0.08; // 8% of bbox diagonal
+const SHARED_EDGE_MAX_ANGLE_DIFF_DEG = 15;
+
 function inferRoofLines(
   roofPlanes: SolarRoofPlane[],
   buildingBbox: SolarPixelBoundingBox,
@@ -456,42 +485,97 @@ function inferRoofLines(
   const lineArtifacts: UnifiedGeometryArtifact[] = [];
 
   if (roofPlanes.length < 2) {
-    // Need at least 2 planes to have shared edges
     return lineArtifacts;
   }
 
-  // For each pair of planes whose bounding boxes overlap, infer a roof line
+  // Compute tolerance in pixels from building bbox
+  const bboxDiag = Math.sqrt(
+    buildingBbox.width * buildingBbox.width + buildingBbox.height * buildingBbox.height,
+  );
+  const proximityTolerance = bboxDiag * SHARED_EDGE_PROXIMITY_TOLERANCE;
+
+  // Track which plane edges are shared (to avoid duplicating them as eave/rake)
+  // sharedEdgeKeys[i] = Set of edge indices in plane i that are shared with another plane
+  const sharedEdgeKeys = new Map<number, Set<number>>();
+
+  // ─── Shared edges (ridge, hip, valley) ──────────────────────────────
+
   for (let i = 0; i < roofPlanes.length; i++) {
     for (let j = i + 1; j < roofPlanes.length; j++) {
       const plane1 = roofPlanes[i];
       const plane2 = roofPlanes[j];
 
-      // Check if bounding boxes overlap
       if (!bboxesOverlap(plane1.boundingBox, plane2.boundingBox)) {
         continue;
       }
 
-      // Infer the roof line subtype from the plane azimuths
       const lineSubtype = inferRoofLineSubtype(plane1, plane2);
 
-      // Compute the line segment connecting the centers of the two planes
-      const center1 = solarPixelToNormalized(
-        planeCenter(plane1.boundingBox),
-        buildingBbox,
-      );
-      const center2 = solarPixelToNormalized(
-        planeCenter(plane2.boundingBox),
-        buildingBbox,
+      // Try to find shared edges between the two polygon outlines
+      const sharedSegment = findSharedEdge(
+        plane1.planeOutline?.vertices ?? [],
+        plane2.planeOutline?.vertices ?? [],
+        proximityTolerance,
       );
 
-      // Estimate line length from the distance between plane centers
-      // This is approximate — the actual shared edge may be shorter
-      const pixelDist = Math.sqrt(
-        Math.pow(planeCenter(plane1.boundingBox).x - planeCenter(plane2.boundingBox).x, 2) +
-        Math.pow(planeCenter(plane1.boundingBox).y - planeCenter(plane2.boundingBox).y, 2),
-      );
-      // Rough conversion: assume 1 pixel ≈ 0.1m (varies by imagery zoom level)
-      const estimatedLengthM = pixelDist * 0.1;
+      let lineStart: GeometryPoint2D;
+      let lineEnd: GeometryPoint2D;
+      let estimatedLengthM: number;
+      let limitations: string[];
+      let confidence: number;
+
+      if (sharedSegment) {
+        // We found an actual shared edge — use it for accurate line position
+        lineStart = solarPixelToNormalized(sharedSegment.start, buildingBbox);
+        lineEnd = solarPixelToNormalized(sharedSegment.end, buildingBbox);
+        estimatedLengthM = sharedSegment.lengthPx * 0.1; // 1 px ≈ 0.1m
+        confidence = GOOGLE_SOLAR_LINE_CONFIDENCE_SHARED_EDGE;
+        limitations = [
+          'Roof line traced from shared polygon edge between adjacent roof planes',
+          'Line position is based on nearby parallel edges in polygon outlines',
+          'Line subtype is inferred from azimuth relationship, not directly detected',
+        ];
+
+        // Mark the shared edges so we don't emit them as eave/rake lines
+        if (sharedSegment.edge1Index >= 0) {
+          if (!sharedEdgeKeys.has(i)) sharedEdgeKeys.set(i, new Set());
+          sharedEdgeKeys.get(i)!.add(sharedSegment.edge1Index);
+        }
+        if (sharedSegment.edge2Index >= 0) {
+          if (!sharedEdgeKeys.has(j)) sharedEdgeKeys.set(j, new Set());
+          sharedEdgeKeys.get(j)!.add(sharedSegment.edge2Index);
+        }
+      } else {
+        // Fallback: connect bounding box centers (less accurate)
+        const center1 = solarPixelToNormalized(
+          planeCenter(plane1.boundingBox),
+          buildingBbox,
+        );
+        const center2 = solarPixelToNormalized(
+          planeCenter(plane2.boundingBox),
+          buildingBbox,
+        );
+        lineStart = center1;
+        lineEnd = center2;
+        const pixelDist = Math.sqrt(
+          Math.pow(
+            planeCenter(plane1.boundingBox).x - planeCenter(plane2.boundingBox).x,
+            2,
+          ) +
+            Math.pow(
+              planeCenter(plane1.boundingBox).y - planeCenter(plane2.boundingBox).y,
+              2,
+            ),
+        );
+        estimatedLengthM = pixelDist * 0.1;
+        confidence = GOOGLE_SOLAR_LINE_CONFIDENCE_CENTER_FALLBACK;
+        limitations = [
+          'Roof line inferred from adjacent roof planes, not directly from imagery',
+          'Line position is approximate (connects plane centers, not shared edges)',
+          'No shared polygon edge found — center-to-center fallback used',
+          'Line subtype is inferred from azimuth relationship, not directly detected',
+        ];
+      }
 
       lineArtifacts.push(
         makeEmptyArtifact({
@@ -500,16 +584,14 @@ function inferRoofLines(
           geometryClass: 'roof_line',
           authority,
           provenance,
-          confidence: GOOGLE_SOLAR_LINE_CONFIDENCE,
-          label: `Inferred ${lineSubtype} line (planes ${i + 1}-${j + 1})`,
-          limitations: [
-            'Roof line inferred from adjacent roof planes, not directly from imagery',
-            'Line position is approximate (connects plane centers, not shared edges)',
-            'Line subtype is inferred from azimuth relationship, not directly detected',
-          ],
+          confidence,
+          label: sharedSegment
+            ? `Traced ${lineSubtype} line (planes ${i + 1}-${j + 1})`
+            : `Inferred ${lineSubtype} line (planes ${i + 1}-${j + 1})`,
+          limitations,
           lineSegment: {
-            start: center1,
-            end: center2,
+            start: lineStart,
+            end: lineEnd,
             coordinateSystem: 'normalized_image_0_1000',
           },
           lineSubtype,
@@ -520,30 +602,31 @@ function inferRoofLines(
     }
   }
 
-  // Also infer edge lines for planes at the building boundary
-  // These are eave or rake lines where the plane meets the building edge
+  // ─── Boundary edges (eave, rake) ────────────────────────────────────
+
   for (let i = 0; i < roofPlanes.length; i++) {
     const plane = roofPlanes[i];
-    const lineSubtype = inferRoofLineSubtype(plane, null);
-
-    // Use the polygon outline's top and bottom edges as approximate eave/rake lines
     const outline = plane.planeOutline;
-    if (!outline || outline.vertices.length < 2) continue;
+    if (!outline || outline.vertices.length < 3) continue;
 
-    // For simplicity, use the first and last vertices as the line endpoints
-    // (This is a rough approximation — the actual edge would be a specific
-    // segment of the polygon boundary)
-    const start = solarPixelToNormalized(outline.vertices[0], buildingBbox);
-    const end = solarPixelToNormalized(
-      outline.vertices[outline.vertices.length - 1],
-      buildingBbox,
-    );
+    const lineSubtype = inferRoofLineSubtype(plane, null);
+    const sharedEdges = sharedEdgeKeys.get(i) ?? new Set();
 
-    // Skip very short lines
+    // Find the longest edge of this polygon that is NOT shared with another plane
+    const bestEdge = findLongestUnsharedEdge(outline.vertices, sharedEdges);
+
+    if (!bestEdge) continue;
+
+    const start = solarPixelToNormalized(bestEdge.start, buildingBbox);
+    const end = solarPixelToNormalized(bestEdge.end, buildingBbox);
+
+    // Skip very short lines (< 3% of normalized range)
     const dist = Math.sqrt(
       Math.pow(start.x - end.x, 2) + Math.pow(start.y - end.y, 2),
     );
-    if (dist < 30) continue; // Less than 3% of image width
+    if (dist < 30) continue;
+
+    const estimatedLengthM = bestEdge.lengthPx * 0.1;
 
     lineArtifacts.push(
       makeEmptyArtifact({
@@ -552,12 +635,11 @@ function inferRoofLines(
         geometryClass: 'roof_line',
         authority,
         provenance,
-        confidence: GOOGLE_SOLAR_LINE_CONFIDENCE - 5, // Slightly lower confidence for edge lines
+        confidence: GOOGLE_SOLAR_LINE_CONFIDENCE_EDGE,
         label: `Inferred ${lineSubtype} edge line (plane ${i + 1})`,
         limitations: [
-          'Edge line inferred from roof plane boundary, not directly from imagery',
-          'Line endpoints are approximate (polygon vertices, not precise edge detection)',
-          'Line subtype is heuristic (eave vs rake distinction may be incorrect)',
+          'Edge line from longest unshared polygon boundary of roof plane',
+          'Line subtype is heuristic (eave vs rake based on pitch angle)',
         ],
         lineSegment: {
           start,
@@ -565,6 +647,7 @@ function inferRoofLines(
           coordinateSystem: 'normalized_image_0_1000',
         },
         lineSubtype,
+        estimatedLengthM,
         isSynthetic: false,
       }),
     );
@@ -573,12 +656,292 @@ function inferRoofLines(
   // Cap the number of inferred roof lines to avoid cluttering the overlay
   const MAX_ROOF_LINES = 20;
   if (lineArtifacts.length > MAX_ROOF_LINES) {
-    // Keep the highest-confidence lines
     lineArtifacts.sort((a, b) => b.confidence - a.confidence);
     lineArtifacts.length = MAX_ROOF_LINES;
   }
 
   return lineArtifacts;
+}
+
+// ─── Shared Edge Detection Helpers ─────────────────────────────────────────
+
+/**
+ * Result of finding a shared edge between two polygon outlines.
+ */
+interface SharedEdgeResult {
+  /** Start point of the shared segment (in Solar API pixel coords). */
+  start: SolarApiPixelPoint;
+  /** End point of the shared segment (in Solar API pixel coords). */
+  end: SolarApiPixelPoint;
+  /** Length of the shared segment in pixels. */
+  lengthPx: number;
+  /** Index of the matching edge in polygon 1 (-1 if not identified). */
+  edge1Index: number;
+  /** Index of the matching edge in polygon 2 (-1 if not identified). */
+  edge2Index: number;
+}
+
+/**
+ * Result of finding the longest unshared edge of a polygon.
+ */
+interface UnsharedEdgeResult {
+  start: SolarApiPixelPoint;
+  end: SolarApiPixelPoint;
+  lengthPx: number;
+}
+
+/**
+ * Find a shared edge between two polygon outlines.
+ *
+ * Algorithm:
+ * 1. Extract all edges (consecutive vertex segments) from both polygons.
+ * 2. For each pair of edges (one from each polygon), check if they are:
+ *    a. Roughly parallel (angle difference < SHARED_EDGE_MAX_ANGLE_DIFF_DEG)
+ *    b. Close together (midpoint distance < proximityTolerance)
+ * 3. For the best matching pair, compute the overlapping segment by
+ *    projecting both edges onto the shared line direction.
+ *
+ * Returns null if no shared edge is found.
+ */
+function findSharedEdge(
+  vertices1: SolarApiPixelPoint[],
+  vertices2: SolarApiPixelPoint[],
+  proximityTolerance: number,
+): SharedEdgeResult | null {
+  if (vertices1.length < 2 || vertices2.length < 2) return null;
+
+  const edges1 = extractEdges(vertices1);
+  const edges2 = extractEdges(vertices2);
+
+  let bestResult: SharedEdgeResult | null = null;
+  let bestScore = -1; // Higher = better match (longer shared segment, closer edges)
+
+  for (let e1 = 0; e1 < edges1.length; e1++) {
+    for (let e2 = 0; e2 < edges2.length; e2++) {
+      const edge1 = edges1[e1];
+      const edge2 = edges2[e2];
+
+      // Check parallelism
+      const angle1 = edgeAngle(edge1);
+      const angle2 = edgeAngle(edge2);
+      const angleDiff = smallestAngleDiff(angle1, angle2);
+
+      // Two edges are parallel if their angle difference is near 0° (same direction)
+      // OR near 180° (opposite direction — same line traversed in reverse).
+      // e.g. a vertical edge going up (90°) and going down (270°) differ by 180°
+      // but are the same geometric line.
+      const isParallel =
+        angleDiff <= SHARED_EDGE_MAX_ANGLE_DIFF_DEG ||
+        Math.abs(angleDiff - 180) <= SHARED_EDGE_MAX_ANGLE_DIFF_DEG;
+      if (!isParallel) continue;
+
+      // For anti-parallel edges, reverse edge2 so the overlap projection works correctly
+      const antiParallel = Math.abs(angleDiff - 180) <= SHARED_EDGE_MAX_ANGLE_DIFF_DEG;
+      const effectiveEdge2 = antiParallel
+        ? { start: edge2.end, end: edge2.start }
+        : edge2;
+
+      // Check proximity — midpoints must be close
+      const mid1 = midpoint(edge1);
+      const mid2 = midpoint(edge2);
+      const midDist = Math.sqrt(
+        Math.pow(mid1.x - mid2.x, 2) + Math.pow(mid1.y - mid2.y, 2),
+      );
+
+      if (midDist > proximityTolerance) continue;
+
+      // Compute the overlapping segment
+      // Use effectiveEdge2 (reversed if anti-parallel) for correct projection
+      const overlap = computeEdgeOverlap(edge1, effectiveEdge2);
+      if (!overlap || overlap.lengthPx < 5) continue; // Too short to be meaningful
+
+      // Score: prefer longer overlaps with closer midpoints
+      const score = overlap.lengthPx / (1 + midDist);
+      if (score > bestScore) {
+        bestScore = score;
+        bestResult = {
+          ...overlap,
+          edge1Index: e1,
+          edge2Index: e2,
+        };
+      }
+    }
+  }
+
+  return bestResult;
+}
+
+/**
+ * Extract edges from a polygon's vertex list.
+ * Each edge is a pair of consecutive vertices. For a closed polygon,
+ * the last edge connects the last vertex back to the first.
+ */
+function extractEdges(vertices: SolarApiPixelPoint[]): Array<{
+  start: SolarApiPixelPoint;
+  end: SolarApiPixelPoint;
+}> {
+  const edges: Array<{ start: SolarApiPixelPoint; end: SolarApiPixelPoint }> = [];
+  for (let i = 0; i < vertices.length; i++) {
+    const next = (i + 1) % vertices.length;
+    edges.push({ start: vertices[i], end: vertices[next] });
+  }
+  return edges;
+}
+
+/**
+ * Compute the angle of an edge in degrees (0-360, measured from positive X axis).
+ */
+function edgeAngle(edge: { start: SolarApiPixelPoint; end: SolarApiPixelPoint }): number {
+  const dx = edge.end.x - edge.start.x;
+  const dy = edge.end.y - edge.start.y;
+  // Use atan2 for the full angle range
+  let angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+  if (angle < 0) angle += 360;
+  return angle;
+}
+
+/**
+ * Compute the smallest angle difference between two angles (0-180).
+ * Accounts for wrap-around (e.g., 350 and 10 differ by only 20).
+ */
+function smallestAngleDiff(a: number, b: number): number {
+  let diff = Math.abs(a - b);
+  if (diff > 180) diff = 360 - diff;
+  return diff;
+}
+
+/**
+ * Compute the midpoint of an edge.
+ */
+function midpoint(edge: { start: SolarApiPixelPoint; end: SolarApiPixelPoint }): SolarApiPixelPoint {
+  return {
+    x: (edge.start.x + edge.end.x) / 2,
+    y: (edge.start.y + edge.end.y) / 2,
+  };
+}
+
+/**
+ * Compute the overlapping segment of two roughly parallel edges.
+ *
+ * Projects both edges onto the direction of edge1, then finds the
+ * parameter range where both edges overlap. Returns the shared segment.
+ *
+ * The result is positioned at the midpoint between the two edges
+ * (average perpendicular offset), which gives the most accurate
+ * position for the shared roof line.
+ *
+ * Returns null if there is no meaningful overlap.
+ */
+function computeEdgeOverlap(
+  edge1: { start: SolarApiPixelPoint; end: SolarApiPixelPoint },
+  edge2: { start: SolarApiPixelPoint; end: SolarApiPixelPoint },
+): Omit<SharedEdgeResult, 'edge1Index' | 'edge2Index'> | null {
+  // Direction vector of edge1
+  const dx = edge1.end.x - edge1.start.x;
+  const dy = edge1.end.y - edge1.start.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+
+  if (len < 1) return null; // Degenerate edge
+
+  // Unit direction vector
+  const ux = dx / len;
+  const uy = dy / len;
+
+  // Project all 4 endpoints onto the direction of edge1
+  const t1Start = 0; // edge1.start projects to t=0 by definition
+  const t1End = dx * ux + dy * uy; // = len (edge1.end projects to t=len)
+
+  // Project edge2 endpoints onto edge1's direction
+  const d2StartX = edge2.start.x - edge1.start.x;
+  const d2StartY = edge2.start.y - edge1.start.y;
+  const d2EndX = edge2.end.x - edge1.start.x;
+  const d2EndY = edge2.end.y - edge1.start.y;
+
+  const t2Start = d2StartX * ux + d2StartY * uy;
+  const t2End = d2EndX * ux + d2EndY * uy;
+
+  // Find the overlap range along the projection axis
+  const overlapStart = Math.max(Math.min(t1Start, t1End), Math.min(t2Start, t2End));
+  const overlapEnd = Math.min(Math.max(t1Start, t1End), Math.max(t2Start, t2End));
+
+  if (overlapEnd - overlapStart < 5) return null; // Overlap too short
+
+  // Compute the shared segment points by interpolating along edge1
+  const sharedStart: SolarApiPixelPoint = {
+    x: edge1.start.x + ux * overlapStart,
+    y: edge1.start.y + uy * overlapStart,
+  };
+  const sharedEnd: SolarApiPixelPoint = {
+    x: edge1.start.x + ux * overlapEnd,
+    y: edge1.start.y + uy * overlapEnd,
+  };
+
+  // Position the line at the midpoint between the two edges
+  // (average the perpendicular offset for accuracy)
+  const perpX = -uy; // Perpendicular direction
+  const perpY = ux;
+
+  // Perpendicular distance from edge1's line to edge2's endpoints
+  const perpDist2Start = d2StartX * perpX + d2StartY * perpY;
+  const perpDist2End = d2EndX * perpX + d2EndY * perpY;
+  const avgPerpDist = (perpDist2Start + perpDist2End) / 2;
+
+  // Shift the shared segment to the midpoint between the two edges
+  const adjustedStart: SolarApiPixelPoint = {
+    x: sharedStart.x + (perpX * avgPerpDist) / 2,
+    y: sharedStart.y + (perpY * avgPerpDist) / 2,
+  };
+  const adjustedEnd: SolarApiPixelPoint = {
+    x: sharedEnd.x + (perpX * avgPerpDist) / 2,
+    y: sharedEnd.y + (perpY * avgPerpDist) / 2,
+  };
+
+  const overlapLength = overlapEnd - overlapStart;
+
+  return {
+    start: adjustedStart,
+    end: adjustedEnd,
+    lengthPx: overlapLength,
+  };
+}
+
+/**
+ * Find the longest edge of a polygon that is NOT in the shared set.
+ *
+ * Each plane has its boundary edges; some are shared with adjacent planes
+ * (these become ridge/hip/valley lines). The unshared edges are the building
+ * boundary edges, which become eave or rake lines.
+ *
+ * Returns null if all edges are shared or the polygon has no edges.
+ */
+function findLongestUnsharedEdge(
+  vertices: SolarApiPixelPoint[],
+  sharedEdgeIndices: Set<number>,
+): UnsharedEdgeResult | null {
+  if (vertices.length < 2) return null;
+
+  let bestLength = -1;
+  let bestEdge: UnsharedEdgeResult | null = null;
+
+  for (let i = 0; i < vertices.length; i++) {
+    if (sharedEdgeIndices.has(i)) continue; // Skip shared edges
+
+    const next = (i + 1) % vertices.length;
+    const dx = vertices[next].x - vertices[i].x;
+    const dy = vertices[next].y - vertices[i].y;
+    const length = Math.sqrt(dx * dx + dy * dy);
+
+    if (length > bestLength) {
+      bestLength = length;
+      bestEdge = {
+        start: vertices[i],
+        end: vertices[next],
+        lengthPx: length,
+      };
+    }
+  }
+
+  return bestEdge;
 }
 
 // ─── Utility Functions ───────────────────────────────────────────────────────
