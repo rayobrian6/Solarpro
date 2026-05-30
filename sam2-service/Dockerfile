@@ -1,4 +1,4 @@
-# SAM 2 Segmentation Service — Optimized for Render Performance build plan
+# SAM 2 Segmentation Service — Optimized for Render Starter build plan
 #
 # Uses python:3.12-slim base with staged pip install to handle
 # large packages (torch, torchvision, sam2) without OOM.
@@ -7,6 +7,10 @@ FROM python:3.12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
+
+# Skip CUDA extension build — Render runs CPU-only
+ENV SAM2_BUILD_CUDA=0
+ENV SAM2_BUILD_ALLOW_ERRORS=1
 
 # Minimal system deps for OpenCV + git (for sam2 pip install)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -26,11 +30,22 @@ RUN pip install --no-cache-dir --no-deps \
     torchvision==0.20.1 \
     --index-url https://download.pytorch.org/whl/cpu
 
-# 4. SAM 2 from GitHub
-RUN pip install --no-cache-dir \
-    git+https://github.com/facebookresearch/sam2.git@v1.1.0
+# 4. SAM 2 from GitHub (main branch) — --no-deps to avoid torch reinstall
+#    Repo has no git tags, so we use the default branch
+RUN pip install --no-cache-dir --no-deps \
+    git+https://github.com/facebookresearch/sam2.git
 
-# 5. Remaining deps (fastapi, uvicorn, etc.)
+# 5. SAM 2 runtime deps (excluding torch/torchvision/numpy already installed)
+RUN pip install --no-cache-dir \
+    tqdm>=4.66.1 \
+    hydra-core>=1.3.2 \
+    iopath>=0.1.10 \
+    omegaconf>=2.3.0
+
+# 6. HuggingFace Hub — needed by build_sam2_hf() to download checkpoints
+RUN pip install --no-cache-dir huggingface_hub>=0.30.2
+
+# 7. Remaining app deps (fastapi, uvicorn, opencv, etc.)
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
@@ -38,12 +53,11 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 WORKDIR /app
 COPY main.py /app/main.py
 
-# Model cache directory
+# Model cache directory — HF downloads checkpoints here
 ENV SAM2_CACHE_DIR=/app/.cache
 RUN mkdir -p /app/.cache
 
 # Render injects PORT env var (default 10000 for web services)
-# Do NOT hardcode PORT here — let Render control it
 EXPOSE 10000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \

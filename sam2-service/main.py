@@ -5,7 +5,7 @@ Runs SAM 2.1 Automatic Mask Generation on survey photos and returns
 polygon-based segmentation masks suitable for Pipeline B consumption.
 
 Architecture:
-  - Loads sam2.1_hiera_small checkpoint on startup (~184MB download)
+  - Loads sam2.1_hiera_small checkpoint from HuggingFace on startup (~184MB download)
   - POST /segment: accepts image bytes, returns polygon masks
   - GET /health: service readiness check
   - Runs on GPU when available, falls back to CPU
@@ -50,8 +50,10 @@ def _has_cuda() -> bool:
     except ImportError:
         return False
 
-# Checkpoint name — can be overridden via env var for larger/smaller models
-CHECKPOINT_NAME = os.environ.get("SAM2_CHECKPOINT", "sam2.1_hiera_small")
+# HuggingFace model ID for SAM 2.1 — can be overridden via env var
+# Supported: facebook/sam2.1-hiera-tiny, facebook/sam2.1-hiera-small,
+#            facebook/sam2.1-hiera-base-plus, facebook/sam2.1-hiera-large
+HF_MODEL_ID = os.environ.get("SAM2_HF_MODEL_ID", "facebook/sam2.1-hiera-small")
 # Device: "cuda" if GPU available, else "cpu"
 DEVICE = "cuda" if _has_cuda() else "cpu"
 # Minimum mask area as fraction of image — filters noise masks
@@ -100,7 +102,7 @@ class HealthResponse(BaseModel):
     status: str
     model_loaded: bool
     device: str
-    checkpoint: str
+    model_id: str
     cuda_available: bool
     uptime_seconds: float
 
@@ -122,15 +124,15 @@ def load_sam2_model():
     if _sam2_amg is not None:
         return _sam2_amg
 
-    logger.info(f"Loading SAM 2 checkpoint: {CHECKPOINT_NAME} on device: {DEVICE}")
+    logger.info(f"Loading SAM 2 model: {HF_MODEL_ID} on device: {DEVICE}")
     t0 = time.time()
 
     try:
-        from sam2 import build_sam
-        from sam2.automatic_mask_generation import SAM2AutomaticMaskGenerator
+        from sam2.build_sam import build_sam2_hf
+        from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 
-        # Build the model from the checkpoint registry
-        _sam2_model = build_sam(CHECKPOINT_NAME, device=DEVICE)
+        # Build the model from HuggingFace — downloads checkpoint automatically
+        _sam2_model = build_sam2_hf(model_id=HF_MODEL_ID, device=DEVICE)
 
         # Create the automatic mask generator
         _sam2_amg = SAM2AutomaticMaskGenerator(
@@ -145,7 +147,7 @@ def load_sam2_model():
         _model_load_time = time.time() - t0
         logger.info(
             f"SAM 2 loaded successfully in {_model_load_time:.1f}s "
-            f"(checkpoint={CHECKPOINT_NAME}, device={DEVICE})"
+            f"(model_id={HF_MODEL_ID}, device={DEVICE})"
         )
 
     except Exception as e:
@@ -230,7 +232,7 @@ def classify_mask_region(
 app = FastAPI(
     title="SAM 2 Segmentation Service",
     description="Roof geometry segmentation using Meta's SAM 2.1 model",
-    version="1.0.0",
+    version="2.0.0",
 )
 
 app.add_middleware(
@@ -260,7 +262,7 @@ async def health_check():
         status="ready" if _sam2_amg is not None else "loading",
         model_loaded=_sam2_amg is not None,
         device=DEVICE,
-        checkpoint=CHECKPOINT_NAME,
+        model_id=HF_MODEL_ID,
         cuda_available=_has_cuda(),
         uptime_seconds=time.time() - _start_time,
     )
@@ -390,7 +392,7 @@ async def segment_image(
         image_height=img_h,
         processing_time_ms=round(processing_time, 1),
         model_info={
-            "checkpoint": CHECKPOINT_NAME,
+            "model_id": HF_MODEL_ID,
             "device": DEVICE,
             "cuda_available": _has_cuda(),
             "model_type": "sam2.1_automatic_mask_generation",

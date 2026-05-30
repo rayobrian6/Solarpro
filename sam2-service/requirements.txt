@@ -1,9 +1,9 @@
 # SAM 2 Segmentation Service — Python dependencies
 # Install: pip install -r requirements.txt
 #
-# NOTE: PyTorch and SAM 2 are installed separately in the Dockerfile
-# (before this file) because they require special index URLs or
-# building from source. This file contains only the additional deps.
+# NOTE: PyTorch, SAM 2, and their core deps are installed separately
+# in the Dockerfile (steps 1-6) because they require special handling.
+# This file contains only the web/app-specific deps.
 
 # Web framework
 fastapi==0.115.6
