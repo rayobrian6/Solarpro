@@ -7,21 +7,25 @@
  *
  * Pipeline:
  *   1. Resize to 512×512, keep COLOR (not grayscale)
- *   2. Gaussian blur + median-like smoothing to reduce noise
- *   3. Color quantization with finer granularity (6 levels = 216 buckets)
- *   4. Connected component labeling on quantized color regions
- *   5. Merge small regions into their largest neighbor
- *   6. Suzuki-Abe border following for REAL contour extraction
- *      (not convex hull — preserves concavities, L-shapes, notches)
- *   7. Douglas-Peucker simplification → clean polygons
- *   8. Classify by color + geometry + position
- *   9. Emit NormalizedRegion / NormalizedLine candidates
+ *   2. Heavy Gaussian blur to destroy texture/noise detail
+ *   3. COARSE color quantization (3 levels = 27 colors total)
+ *   4. Connected component labeling on quantized color map
+ *   5. AGGRESSIVE small-region merge (anything < 3% of image → neighbor)
+ *   6. Keep only the TOP N largest regions (default 8)
+ *   7. Suzuki-Abe border following for real contour shapes
+ *   8. Douglas-Peucker simplification → clean polygons
+ *   9. Classify the few remaining regions by color + position + geometry
+ *  10. Emit NormalizedRegion / NormalizedLine candidates
  *
- * APPROACH: Instead of edge detection (thin outlines that don't close)
- * or convex hull (destroys concavities), this uses COLOR-BASED REGION
- * GROUPING with SUZUKI-ABE BORDER FOLLOWING — the same algorithm used
- * by OpenCV's findContours(). This produces actual polygon outlines that
- * trace the real boundary of each color region, preserving all concavities.
+ * KEY DESIGN PRINCIPLE: A house photo has ~5-10 major structural regions
+ * (sky, roof planes, walls, ground, vegetation). We WANT to produce only
+ * those large regions with accurate boundary contours — NOT hundreds of tiny
+ * color blobs from texture variations. Coarse quantization + heavy blur +
+ * aggressive merging + cap on total regions ensures we only get the big ones.
+ *
+ * The Suzuki-Abe border following algorithm (same as OpenCV's findContours)
+ * traces the EXACT boundary of each region, preserving concavities,
+ * L-shapes, and notches — unlike convex hull which destroys them.
  *
  * REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
  * These candidates are operator review aids only. They must not be used as
@@ -38,23 +42,37 @@ import type { NormalizedRegion, NormalizedLine } from './overlayCoordinateConver
 /** Processing resolution — much higher than the old 96×96. */
 export const EXTRACTION_SIZE = 512;
 
-/** Number of color quantization levels per channel. 6 = 216 total colors. */
-const QUANT_LEVELS = 6;
+/**
+ * Color quantization levels per channel.
+ * 3 = 27 total colors — COARSE on purpose.
+ * We WANT to collapse subtle color variations (siding texture, shadow
+ * gradients) into the same bucket so that roof planes, walls, sky, and
+ * ground each become ONE large region, not dozens of tiny sub-regions.
+ */
+const QUANT_LEVELS = 3;
 
-/** Minimum region area (in pixels² at EXTRACTION_SIZE) to be considered. */
-const MIN_REGION_AREA = 500;
+/**
+ * Minimum region area as a FRACTION of total image area.
+ * At 512×512, 2% = ~5242 pixels. Regions smaller than this are merged
+ * into neighbors. This ensures only major structural regions survive.
+ */
+const MIN_REGION_AREA_FRACTION = 0.02;
 
-/** Maximum number of regions to extract per image. */
-const MAX_REGIONS = 32;
+/**
+ * Maximum number of regions to output per image.
+ * A typical house photo has ~5-10 meaningful structural regions.
+ * We cap at this to prevent flood of tiny artifacts.
+ */
+const MAX_REGIONS = 12;
 
 /** Douglas-Peucker simplification epsilon (in pixels at EXTRACTION_SIZE). */
-const DOUGLAS_PEUCKER_EPSILON = 4;
+const DOUGLAS_PEUCKER_EPSILON = 5;
 
 /** Maximum line candidates per image. */
-const MAX_LINES = 16;
+const MAX_LINES = 12;
 
 /** Minimum line length (in pixels at EXTRACTION_SIZE). */
-const MIN_LINE_LENGTH = 30;
+const MIN_LINE_LENGTH = 40;
 
 /** Hough vote threshold as fraction of max vote. */
 const HOUGH_VOTE_THRESHOLD = 0.4;
@@ -67,16 +85,15 @@ const CANNY_LOW = 40;
 const CANNY_HIGH = 100;
 
 /** Minimum boundary pixels to form a valid contour. */
-const MIN_CONTOUR_LENGTH = 15;
+const MIN_CONTOUR_LENGTH = 12;
 
 /**
- * After color quantization, merge regions smaller than this fraction
- * of total image area into their largest neighbor.
+ * Gaussian blur sigma for pre-quantization smoothing.
+ * HEAVY blur (sigma=3.0) to destroy texture/noise detail before
+ * quantization. We WANT roof planes to be uniform color blobs so
+ * they become single connected regions.
  */
-const MERGE_SMALL_REGION_THRESHOLD = 0.003;
-
-/** Gaussian blur sigma for pre-quantization smoothing. */
-const PRE_BLUR_SIGMA = 1.5;
+const PRE_BLUR_SIGMA = 3.0;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -163,13 +180,9 @@ export interface RoofGeometryExtractionResult {
  * Extract real roof geometry from image bytes using color-based
  * region grouping at 512×512 resolution.
  *
- * KEY INSIGHT: Canny edge detection + morphological closing doesn't work
- * for real photos because edges don't form closed loops around roof planes.
- * Convex hull destroys concavities. Instead, we use COLOR-BASED REGION
- * GROUPING with SUZUKI-ABE BORDER FOLLOWING — the same algorithm used by
- * OpenCV's findContours(). This produces actual filled regions that
- * correspond to roof planes, walls, sky, and ground, with boundary
- * contours that preserve concavities, L-shapes, and notches.
+ * KEY DESIGN: Coarse quantization (27 colors) + heavy blur produces
+ * only the major structural regions (sky, roof, walls, ground).
+ * Suzuki-Abe border following then traces their exact boundaries.
  */
 export async function extractRoofGeometry(bytes: Buffer): Promise<RoofGeometryExtractionResult> {
   // Dynamic import — sharp has native bindings
@@ -186,20 +199,26 @@ export async function extractRoofGeometry(bytes: Buffer): Promise<RoofGeometryEx
   const h = info.height;
   const channels = info.channels;
 
-  // Step 2: Pre-blur the image to reduce noise before quantization
-  // This prevents tiny color variations from creating spurious regions
+  // Step 2: HEAVY pre-blur to destroy texture/noise detail
+  // This makes roof planes, walls, sky become uniform color blobs
   const smoothed = gaussianBlurRGB(data, w, h, channels, PRE_BLUR_SIGMA);
 
-  // Step 3: Color quantization — reduce to QUANT_LEVELS³ colors
+  // Step 3: COARSE color quantization — only 27 total colors
   const quantized = quantizeColors(smoothed, w, h, channels, QUANT_LEVELS);
 
   // Step 4: Connected component labeling on the quantized color map
   const regions = labelColorRegions(quantized, w, h);
 
-  // Step 5: Merge small regions into their largest neighbor
-  const mergedRegions = mergeSmallRegions(regions, w, h, MERGE_SMALL_REGION_THRESHOLD);
+  // Step 5: AGGRESSIVE small-region merge + cap on total regions
+  const minArea = Math.floor(w * h * MIN_REGION_AREA_FRACTION);
+  const mergedRegions = mergeSmallRegions(regions, w, h, minArea);
 
-  // Step 6: Also compute grayscale metrics and edge-based lines
+  // Step 5b: Keep only the TOP N largest regions
+  const topRegions = mergedRegions
+    .sort((a, b) => b.area - a.area)
+    .slice(0, MAX_REGIONS);
+
+  // Step 6: Compute grayscale metrics and edge-based lines
   const grayscale = rgbToGrayscale(smoothed, w, h, channels);
   const blurred = gaussianBlur(grayscale, w, h, BLUR_KERNEL);
   const { magnitude, direction } = sobelGradients(blurred, w, h);
@@ -207,25 +226,19 @@ export async function extractRoofGeometry(bytes: Buffer): Promise<RoofGeometryEx
   const metrics = computeMetrics(grayscale, magnitude, edges, w, h);
   const lines = detectLines(edges, w, h);
 
-  // Step 7: Build a binary mask per region and extract boundary contours
-  // using Suzuki-Abe border following (OpenCV findContours algorithm)
-  const contours = extractContoursFromRegions(mergedRegions, w, h, smoothed, channels);
+  // Step 7: Suzuki-Abe border following for real contour shapes
+  const contours = extractContoursFromRegions(topRegions, w, h, smoothed, channels);
 
   // Step 8: Classify and score contours using color + geometry + position
   const classifiedContours = contours.map((contour, index) =>
-    classifyAndScoreContour(contour, index, w, h, metrics, smoothed, channels)
+    classifyAndScoreContour(contour, index, w, h, metrics)
   );
-
-  // Step 9: Sort by confidence and limit count
-  const finalContours = classifiedContours
-    .sort((a, b) => b.confidence - a.confidence)
-    .slice(0, MAX_REGIONS);
 
   return {
     extractionSize: EXTRACTION_SIZE,
-    contourCount: finalContours.length,
+    contourCount: classifiedContours.length,
     lineCount: lines.length,
-    contours: finalContours,
+    contours: classifiedContours,
     lines,
     metrics,
     usedOpenAiVision: false,
@@ -238,8 +251,8 @@ export async function extractRoofGeometry(bytes: Buffer): Promise<RoofGeometryEx
 
 /**
  * Apply separable Gaussian blur to RGB image data.
- * Reduces noise so that tiny color variations don't create spurious
- * small regions during quantization.
+ * Heavy blur (sigma=3.0) destroys texture/noise so that roof planes,
+ * walls, sky, and ground become uniform color regions.
  */
 function gaussianBlurRGB(
   data: Buffer,
@@ -300,8 +313,10 @@ function gaussianBlurRGB(
 
 /**
  * Quantize RGB colors to reduce the palette.
- * Each channel is reduced to QUANT_LEVELS values (e.g., 6 → 216 total colors).
- * This groups perceptually similar colors into the same bucket.
+ * Each channel is reduced to QUANT_LEVELS values (e.g., 3 → 27 total colors).
+ * COARSE quantization is INTENTIONAL — we WANT to collapse subtle color
+ * variations (siding texture, shadow gradients) so that roof planes, walls,
+ * sky, and ground each become ONE large connected region.
  */
 function quantizeColors(
   data: Buffer,
@@ -334,17 +349,14 @@ interface ColorRegion {
   pixels: Array<{ x: number; y: number }>;
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
   area: number;
-  /** Average RGB color of this region. */
-  avgR: number;
-  avgG: number;
-  avgB: number;
 }
 
 /**
  * Label connected components on the quantized color map.
  * Two pixels are in the same region if they are 4-connected AND have the
- * same quantized color. This naturally partitions the image into regions
- * of similar color — roof planes, walls, sky, ground, etc.
+ * same quantized color. With coarse quantization (27 colors) + heavy blur,
+ * this naturally partitions the image into a few large regions —
+ * roof planes, walls, sky, ground, etc.
  */
 function labelColorRegions(
   quantized: Uint32Array,
@@ -392,7 +404,6 @@ function labelColorRegions(
         pixels,
         bounds: { minX, minY, maxX, maxY },
         area: pixels.length,
-        avgR: 0, avgG: 0, avgB: 0, // computed later
       });
       nextLabel++;
     }
@@ -402,23 +413,24 @@ function labelColorRegions(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Step 5: Merge small regions
+// Step 5: Merge small regions — AGGRESSIVE
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Merge regions that are smaller than the threshold fraction into their
- * largest 4-connected neighbor. This removes noise regions while keeping
- * the major structural regions (sky, roof planes, walls, ground).
+ * Merge regions smaller than minArea into their largest 4-connected neighbor.
+ * With minArea = 2% of image area (~5242 pixels at 512×512), this removes
+ * ALL noise regions, keeping only the major structural ones (sky, roof,
+ * walls, ground, vegetation).
+ *
+ * Takes an absolute minArea in pixels instead of a fraction to give the
+ * caller control (the caller computes it from the fraction).
  */
 function mergeSmallRegions(
   regions: ColorRegion[],
   w: number,
   h: number,
-  threshold: number,
+  minArea: number,
 ): ColorRegion[] {
-  const totalPixels = w * h;
-  const minArea = totalPixels * threshold;
-
   // Build a label map for neighbor lookups
   const labelMap = new Int32Array(w * h);
   for (const region of regions) {
@@ -435,13 +447,16 @@ function mergeSmallRegions(
 
   // Find small regions and merge them
   const merged = new Set<number>();
-  const regionMerges = new Map<number, number>(); // small label → target label
 
-  for (const region of regions) {
-    if (region.area >= minArea) continue;
+  // Sort small regions by area ascending so smallest get merged first
+  const smallRegions = regions
+    .filter(r => r.area < minArea)
+    .sort((a, b) => a.area - b.area);
+
+  for (const region of smallRegions) {
     if (merged.has(region.label)) continue;
 
-    // Find the largest 4-connected neighbor region
+    // Find the largest 4-connected neighbor region (not already merged)
     const neighborAreas = new Map<number, number>();
     for (const p of region.pixels) {
       const neighbors = [
@@ -472,9 +487,11 @@ function mergeSmallRegions(
 
     if (bestNeighbor) {
       merged.add(region.label);
-      regionMerges.set(region.label, bestNeighbor);
-      // Transfer pixels to the neighbor region
       const target = regionByLabel.get(bestNeighbor)!;
+      // Reassign pixels in labelMap
+      for (const p of region.pixels) {
+        labelMap[p.y * w + p.x] = bestNeighbor;
+      }
       target.pixels.push(...region.pixels);
       target.area += region.area;
       // Update bounds
@@ -507,7 +524,7 @@ function rgbToGrayscale(data: Buffer, w: number, h: number, channels: number): U
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Step 6: Suzuki-Abe border following contour extraction
+// Step 7: Suzuki-Abe border following contour extraction
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -515,11 +532,10 @@ function rgbToGrayscale(data: Buffer, w: number, h: number, channels: number): U
  * SUZUKI-ABE BORDER FOLLOWING (the same algorithm used by OpenCV's
  * findContours()).
  *
- * Instead of collecting boundary pixels and computing a convex hull
- * (which destroys concavities), we:
- * 1. Build a binary mask for each region
+ * For each large region:
+ * 1. Build a binary mask
  * 2. Apply Suzuki-Abe border following to trace the EXACT boundary
- *    of each connected component, preserving all concavities
+ *    preserving all concavities, L-shapes, and notches
  * 3. Simplify with Douglas-Peucker
  *
  * This produces polygons that ACTUALLY MAP the shape of roof planes,
@@ -553,9 +569,6 @@ function extractContoursFromRegions(
   }> = [];
 
   for (const region of regions) {
-    // Skip tiny regions
-    if (region.area < MIN_REGION_AREA) continue;
-
     // Compute average color for this region
     let rSum = 0, gSum = 0, bSum = 0;
     for (const p of region.pixels) {
@@ -578,7 +591,6 @@ function extractContoursFromRegions(
     const borderContours = suzukiAbeFindContours(regionMask, w, h);
 
     // Take the outermost (largest) contour as the main shape
-    // Inner contours are holes — skip them for now
     let bestContour: Array<{ x: number; y: number }> | null = null;
     let bestArea = 0;
 
@@ -668,11 +680,6 @@ interface SuzukiContour {
  * Suzuki-Abe border following algorithm.
  * Traces the boundaries of connected components in a binary image,
  * preserving concavities, notches, and L-shapes — unlike convex hull.
- *
- * @param binary Binary image: 1 = foreground, 0 = background
- * @param w Width
- * @param h Height
- * @returns Array of traced contours with topology info
  */
 function suzukiAbeFindContours(
   binary: Uint8Array,
@@ -682,7 +689,7 @@ function suzukiAbeFindContours(
   // Work on a padded copy (1px border of zeros) to avoid bounds checking
   const pw = w + 2;
   const ph = h + 2;
-  const F = new Int32Array(pw * ph); // padded, will store semantic info
+  const F = new Int32Array(pw * ph);
 
   // Copy binary image into padded array
   for (let y = 0; y < h; y++) {
@@ -691,81 +698,39 @@ function suzukiAbeFindContours(
     }
   }
 
-  let nbd = 1; // current border number
-  let lnbd = 1; // last border number
+  let nbd = 1;
+  let lnbd = 1;
   const contours: SuzukiContour[] = [];
   const contourById = new Map<number, SuzukiContour>();
 
-  // Scan the picture with a TV raster
   for (let i = 1; i < ph - 1; i++) {
     lnbd = 1;
     for (let j = 1; j < pw - 1; j++) {
       const fij = F[i * pw + j];
 
-      // (a) If fij = 1 and fi,j-1 = 0 → outer border starting point
+      // (a) Outer border starting point
       if (fij === 1 && F[i * pw + (j - 1)] === 0) {
         nbd++;
-        const i2 = i, j2 = j - 1; // neighbor from which we entered
-
+        const i2 = i, j2 = j - 1;
         const contour = traceBorder(F, pw, ph, i, j, i2, j2, nbd, false);
         contour.id = nbd;
         contours.push(contour);
         contourById.set(nbd, contour);
-
-        // Determine parent using Table 1
-        const lnbdContour = contourById.get(lnbd);
-        if (lnbdContour) {
-          if (!lnbdContour.isHole) {
-            // LNBD is outer border
-            if (!contour.isHole) {
-              contour.parentId = lnbdContour.parentId;
-            } else {
-              contour.parentId = lnbd;
-            }
-          } else {
-            // LNBD is hole border
-            if (!contour.isHole) {
-              contour.parentId = lnbd;
-            } else {
-              contour.parentId = lnbdContour.parentId;
-            }
-          }
-        }
-
+        setParent(contour, lnbd, contourById);
         if (fij > 1) lnbd = Math.abs(fij);
         continue;
       }
 
-      // (b) If fij >= 1 and fi,j+1 = 0 → hole border starting point
+      // (b) Hole border starting point
       if (fij >= 1 && F[i * pw + (j + 1)] === 0) {
         nbd++;
         const i2 = i, j2 = j + 1;
-
         if (fij > 1) lnbd = Math.abs(fij);
-
         const contour = traceBorder(F, pw, ph, i, j, i2, j2, nbd, true);
         contour.id = nbd;
         contours.push(contour);
         contourById.set(nbd, contour);
-
-        // Determine parent using Table 1
-        const lnbdContour = contourById.get(lnbd);
-        if (lnbdContour) {
-          if (!lnbdContour.isHole) {
-            if (!contour.isHole) {
-              contour.parentId = lnbdContour.parentId;
-            } else {
-              contour.parentId = lnbd;
-            }
-          } else {
-            if (!contour.isHole) {
-              contour.parentId = lnbd;
-            } else {
-              contour.parentId = lnbdContour.parentId;
-            }
-          }
-        }
-
+        setParent(contour, lnbd, contourById);
         if (fij > 1) lnbd = Math.abs(fij);
         continue;
       }
@@ -783,10 +748,26 @@ function suzukiAbeFindContours(
   return contours;
 }
 
+/** Determine parent using Suzuki-Abe Table 1. */
+function setParent(
+  contour: SuzukiContour,
+  lnbd: number,
+  contourById: Map<number, SuzukiContour>,
+): void {
+  const lnbdContour = contourById.get(lnbd);
+  if (!lnbdContour) return;
+
+  if (!lnbdContour.isHole) {
+    // LNBD is outer border
+    contour.parentId = contour.isHole ? lnbd : lnbdContour.parentId;
+  } else {
+    // LNBD is hole border
+    contour.parentId = contour.isHole ? lnbdContour.parentId : lnbd;
+  }
+}
+
 /**
  * Trace a single border using the Suzuki-Abe algorithm.
- * Starting from pixel (i,j), follow the border clockwise
- * (for outer borders) or counter-clockwise (for hole borders).
  */
 function traceBorder(
   F: Int32Array,
@@ -802,7 +783,6 @@ function traceBorder(
   const points: Array<{ x: number; y: number }> = [];
 
   // (3.1) Starting from (i2, j2), look clockwise around (i, j)
-  // to find the first nonzero pixel
   let i1: number, j1: number;
   const cwResult = findClockwiseNonzero(F, pw, ph, iStart, jStart, i2, j2);
 
@@ -816,25 +796,20 @@ function traceBorder(
   i1 = cwResult.i;
   j1 = cwResult.j;
 
-  // (3.2) (i2,j2) ← (i1,j1) and (i3,j3) ← (i,j)
+  // (3.2)
   let ci2 = i1, cj2 = j1;
   let ci3 = iStart, cj3 = jStart;
 
   points.push({ x: jStart, y: iStart });
 
   // (3.3)-(3.5) Follow the border
-  const maxIter = pw * ph; // safety limit
+  const maxIter = pw * ph;
   let iter = 0;
 
   while (iter++ < maxIter) {
-    // (3.3) Starting from the next of (i2,j2) in counter-clockwise
-    // order around (i3,j3), examine counter-clockwise to find nonzero pixel (i4,j4)
     const ccwResult = findCounterClockwiseNonzero(F, pw, ph, ci3, cj3, ci2, cj2);
 
-    if (ccwResult === null) {
-      // Shouldn't happen if we got here, but safety
-      break;
-    }
+    if (ccwResult === null) break;
 
     const i4 = ccwResult.i;
     const j4 = ccwResult.j;
@@ -853,7 +828,6 @@ function traceBorder(
       break;
     }
 
-    // Move to next pixel
     ci2 = ci3;
     cj2 = cj3;
     ci3 = i4;
@@ -863,17 +837,10 @@ function traceBorder(
   return { points, isHole, id: nbd, parentId: null };
 }
 
-/**
- * Moore neighborhood offsets — 8-connected neighbors in clockwise order.
- * Index 0 = East, going clockwise: E, SE, S, SW, W, NW, N, NE
- */
+/** Moore neighborhood offsets — 8-connected neighbors in clockwise order. */
 const MOORE_DX = [1, 1, 0, -1, -1, -1, 0, 1];
 const MOORE_DY = [0, 1, 1, 1, 0, -1, -1, -1];
 
-/**
- * Find the first nonzero pixel in clockwise order around (centerI, centerJ),
- * starting from the neighbor (fromI, fromJ).
- */
 function findClockwiseNonzero(
   F: Int32Array,
   pw: number,
@@ -883,7 +850,6 @@ function findClockwiseNonzero(
   fromI: number,
   fromJ: number,
 ): { i: number; j: number } | null {
-  // Determine the direction index of (fromI, fromJ) relative to center
   const di = fromI - centerI;
   const dj = fromJ - centerJ;
   let startDir = -1;
@@ -895,7 +861,6 @@ function findClockwiseNonzero(
   }
   if (startDir === -1) return null;
 
-  // Search clockwise (decrementing direction index)
   for (let k = 0; k < 8; k++) {
     const dir = ((startDir - k) + 8) % 8;
     const ni = centerI + MOORE_DY[dir];
@@ -909,11 +874,6 @@ function findClockwiseNonzero(
   return null;
 }
 
-/**
- * Find the first nonzero pixel in counter-clockwise order around
- * (centerI, centerJ), starting from the neighbor after (fromI, fromJ)
- * in counter-clockwise order.
- */
 function findCounterClockwiseNonzero(
   F: Int32Array,
   pw: number,
@@ -923,7 +883,6 @@ function findCounterClockwiseNonzero(
   fromI: number,
   fromJ: number,
 ): { i: number; j: number } | null {
-  // Determine the direction index of (fromI, fromJ) relative to center
   const di = fromI - centerI;
   const dj = fromJ - centerJ;
   let startDir = -1;
@@ -935,8 +894,6 @@ function findCounterClockwiseNonzero(
   }
   if (startDir === -1) return null;
 
-  // Search counter-clockwise (incrementing direction index),
-  // starting from the NEXT direction after fromDir
   for (let k = 1; k <= 8; k++) {
     const dir = (startDir + k) % 8;
     const ni = centerI + MOORE_DY[dir];
@@ -950,10 +907,6 @@ function findCounterClockwiseNonzero(
   return null;
 }
 
-/**
- * Compute the signed area of a polygon using the shoelace formula.
- * Positive = counter-clockwise, negative = clockwise.
- */
 function shoelaceArea(points: Array<{ x: number; y: number }>): number {
   let area = 0;
   const n = points.length;
@@ -1018,19 +971,19 @@ function perpendicularDistance(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Step 7: Classify and score contours using color + geometry + position
+// Step 8: Classify and score contours
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
  * Classify a contour based on its average color, geometry, and position.
  *
- * KEY INSIGHT: Color is the most discriminative feature for roof/wall/sky/ground
- * classification in real photos:
- * - Sky: high blue, low saturation, top of image
- * - Roof: dark, low-medium saturation, upper half
- * - Walls: medium brightness, warm tones, middle
- * - Ground: green/brown, bottom of image
- * - Vegetation: high green
+ * With coarse quantization, each contour is a LARGE region (≥2% of image).
+ * Classification uses color + position + shape:
+ * - Sky: high blue, top of image, large
+ * - Roof: dark, upper half, wide aspect ratio
+ * - Walls: warm/medium tones, middle, tall aspect ratio
+ * - Ground: green/brown, bottom, large
+ * - Obstruction: small (2-4%), upper half
  */
 function classifyAndScoreContour(
   contour: {
@@ -1047,8 +1000,6 @@ function classifyAndScoreContour(
   imgW: number,
   imgH: number,
   metrics: RoofGeometryExtractionResult['metrics'],
-  _data: Buffer,
-  _channels: number,
 ): ExtractedContour {
   const { boundingBox: bb, area, perimeter, avgR, avgG, avgB } = contour;
 
@@ -1077,72 +1028,59 @@ function classifyAndScoreContour(
   let confidence = 30;
 
   // ── Sky detection ──
-  // Sky is blueish/very bright, at the top of the image
   if (normYCenter < 0.35 && (isBlueish || isVeryBright) && normArea > 0.05) {
     classification = 'probable_sky_region';
     confidence = 65 + Math.min(15, Math.round(saturation * 30));
   }
-  // Very bright large region at top = sky (overcast)
   else if (normYCenter < 0.35 && isVeryBright && normArea > 0.1) {
     classification = 'probable_sky_region';
     confidence = 60;
   }
   // ── Roof plane detection ──
-  // Roof is typically dark, in the upper half, large area
   else if (normArea > 0.03 && normYCenter < 0.55 && isDark && !isGreenish) {
     classification = 'probable_roof_plane';
     confidence = 55 + Math.min(25, Math.round(normArea * 60));
-    // Wider shapes (typical roof seen from side) get a boost
     if (bb.width > bb.height * 1.2) {
       confidence = Math.min(85, confidence + 8);
     }
   }
-  // Medium-dark region in upper half — still likely roof
   else if (normArea > 0.03 && normYCenter < 0.55 && brightness < 150 && !isGreenish) {
     classification = 'probable_roof_plane';
     confidence = 45 + Math.min(20, Math.round(normArea * 50));
   }
-  // Wide dark region in upper half — roof seen from side
   else if (normArea > 0.02 && normYCenter < 0.55 && isDark && aspectRatio > 1.5) {
     classification = 'probable_roof_plane';
     confidence = 45 + Math.min(15, Math.round(aspectRatio * 5));
   }
   // ── Wall detection ──
-  // Walls are warm-toned (beige/siding), medium brightness, in the middle
   else if (normArea > 0.03 && normYCenter >= 0.25 && normYCenter < 0.8 && isWarmTone) {
     classification = 'probable_wall_plane';
     confidence = 50 + Math.min(20, Math.round(normArea * 40));
   }
-  // Medium region, middle-to-lower portion, taller than wide
   else if (normArea > 0.03 && normYCenter >= 0.3 && normYCenter < 0.8 && bb.height >= bb.width) {
     classification = 'probable_wall_plane';
     confidence = 40 + Math.min(15, Math.round(normArea * 30));
   }
   // ── Ground detection ──
-  // Green/brown at bottom of image
   else if (normYCenter > 0.6 && (isGreenish || normYCenter > 0.75) && normArea > 0.02) {
     classification = 'probable_ground_noise';
     confidence = 40 + Math.min(20, Math.round(normArea * 30));
   }
   // ── Equipment detection ──
-  // Small region in upper half, dark or distinctive color
   else if (normArea > 0.003 && normArea < 0.04 && normYCenter < 0.6) {
     classification = 'probable_equipment';
     confidence = 35 + Math.min(15, Math.round((1 - normYCenter) * 20));
   }
   // ── Obstruction detection ──
-  // Very small region
   else if (normArea < 0.01 && normArea > 0.0005) {
     classification = 'probable_obstruction';
     confidence = 30 + Math.min(15, Math.round(normArea * 1000));
   }
   // ── Fallback ──
-  // Medium region in upper half → guess roof
   else if (normArea > 0.01 && normYCenter < 0.5) {
     classification = 'probable_roof_plane';
     confidence = 35;
   }
-  // Default
   else {
     classification = 'unknown';
     confidence = 25;
@@ -1407,7 +1345,7 @@ function detectLines(
   }
 
   // Horizontal peaks
-  const hPeaks = findProjectionPeaks(hProjection, 8, MIN_LINE_LENGTH / w * 100);
+  const hPeaks = findProjectionPeaks(hProjection, 4, MIN_LINE_LENGTH / w * 100);
   for (const peak of hPeaks) {
     let x1 = 0, x2 = w - 1;
     for (let x = 0; x < w; x++) {
@@ -1432,7 +1370,7 @@ function detectLines(
   }
 
   // Vertical peaks
-  const vPeaks = findProjectionPeaks(vProjection, 8, MIN_LINE_LENGTH / h * 100);
+  const vPeaks = findProjectionPeaks(vProjection, 4, MIN_LINE_LENGTH / h * 100);
   for (const peak of vPeaks) {
     let y1 = 0, y2 = h - 1;
     for (let y = 0; y < h; y++) {
@@ -1456,8 +1394,8 @@ function detectLines(
     });
   }
 
-  // Diagonal lines
-  for (const angleDeg of [30, 45, 60, 120, 135, 150]) {
+  // Diagonal lines — only 2 strongest angles
+  for (const angleDeg of [45, 135]) {
     const angleRad = angleDeg * Math.PI / 180;
     const cosA = Math.cos(angleRad);
     const sinA = Math.sin(angleRad);
