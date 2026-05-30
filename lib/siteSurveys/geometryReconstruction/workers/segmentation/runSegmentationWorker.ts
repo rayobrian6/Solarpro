@@ -37,6 +37,7 @@ import {
   segmentWithSAM2,
   mapSAM2ClassHint,
   isSAM2Enabled,
+  checkSAM2Health,
   type SAM2MaskResult,
 } from './sam2Client';
 
@@ -179,6 +180,17 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   // Log which backend will be attempted
   if (isSAM2Enabled()) {
     console.info(`Segmentation worker: SAM 2 enabled (SAM2_SERVICE_URL configured), will try SAM 2 first`);
+    // Pre-pipeline health check — log service state before processing
+    const healthResult = await checkSAM2Health();
+    if (healthResult) {
+      console.info(
+        `[SAM2] Pre-pipeline health: model_loaded=${healthResult.model_loaded} device=${healthResult.device} model_id=${healthResult.model_id} uptime=${healthResult.uptime_seconds}s`,
+      );
+    } else {
+      console.warn(
+        `[SAM2] Pre-pipeline health: service UNREACHABLE or unhealthy — SAM 2 will likely fail, Canny fallback expected`,
+      );
+    }
   } else {
     console.info(`Segmentation worker: SAM 2 not configured, using Canny fallback`);
   }
@@ -196,10 +208,16 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
     try {
       // --- SAM 2 PATH ---
       if (isSAM2Enabled()) {
+        console.info(
+          `[SAM2] Processing photo ${photo.fileId} (${photo.filename ?? 'unnamed'}) — attempting SAM 2`,
+        );
         const sam2Result = await segmentWithSAM2FromPhoto(photo.fileUrl);
         if (sam2Result !== null) {
           // Successfully got SAM 2 masks — convert to artifacts
           sam2PhotoCount++;
+          console.info(
+            `[SAM2] Photo ${photo.fileId}: SAM 2 SUCCESS — ${sam2Result.masks.length} raw masks, backend=sam2 (sam2PhotoCount=${sam2PhotoCount})`,
+          );
           if (sam2Result.modelInfo && !sam2ModelInfo) {
             sam2ModelInfo = sam2Result.modelInfo;
           }
@@ -243,7 +261,11 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
 
         // SAM 2 failed for this photo — fall through to Canny
         console.warn(
-          `Segmentation worker: SAM 2 failed for photo ${photo.fileId}, falling back to Canny`
+          `[SAM2] Photo ${photo.fileId}: SAM 2 FAILED — falling back to Canny (cannyPhotoCount will increment)`,
+        );
+      } else {
+        console.info(
+          `[SAM2] Photo ${photo.fileId}: SAM 2 not configured — using Canny directly`,
         );
       }
 
@@ -296,6 +318,12 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   }
   timings['mask_generation'] = Date.now() - t1;
 
+  // Log segmentation summary
+  const backend = sam2PhotoCount > 0 ? 'sam2' : 'canny';
+  console.info(
+    `[SAM2] Segmentation stage complete: ${artifacts.length} artifacts in ${timings['mask_generation']}ms — backend=${backend} sam2=${sam2PhotoCount} photos canny=${cannyPhotoCount} photos out of ${sourcePhotos.length} total`,
+  );
+
   // Stage 4: Post-validation pass
   const t2 = Date.now();
   const validatedArtifacts = artifacts.filter((artifact) => {
@@ -316,6 +344,23 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
 }
 
 // ---------------------------------------------------------------------------
+// URL helper for logging (avoids logging full URLs with tokens)
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract the hostname from a URL for safe logging.
+ * Returns the full URL string if parsing fails.
+ */
+function tryExtractHost(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.host;
+  } catch {
+    return url.slice(0, 80);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Geometry extraction helpers
 // ---------------------------------------------------------------------------
 
@@ -327,24 +372,51 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
 async function segmentWithSAM2FromPhoto(
   fileUrl: string,
 ): Promise<import('./sam2Client').SAM2SegmentationResult | null> {
+  const t0 = Date.now();
+  const urlHost = tryExtractHost(fileUrl);
+
   try {
     // Fetch image bytes
+    console.info(`[SAM2] Image fetch: START — ${urlHost} (timeout=8s)`);
     const response = await fetch(fileUrl, {
       signal: AbortSignal.timeout(8_000),
     });
+
     if (!response.ok) {
+      const fetchElapsedMs = Date.now() - t0;
+      console.warn(
+        `[SAM2] Image fetch: FAILED — HTTP ${response.status} in ${fetchElapsedMs}ms from ${urlHost}`,
+      );
       throw new Error(`Failed to fetch image: HTTP ${response.status}`);
     }
     const arrayBuffer = await response.arrayBuffer();
     const bytes = Buffer.from(arrayBuffer);
+    const fetchElapsedMs = Date.now() - t0;
+    console.info(
+      `[SAM2] Image fetch: OK — ${bytes.length} bytes (${(bytes.length / 1024).toFixed(1)}KB) in ${fetchElapsedMs}ms from ${urlHost}`,
+    );
 
     // Call SAM 2 service
-    return await segmentWithSAM2(bytes);
+    const sam2Result = await segmentWithSAM2(bytes);
+    const totalElapsedMs = Date.now() - t0;
+
+    if (sam2Result !== null) {
+      console.info(
+        `[SAM2] Photo pipeline: SUCCESS — ${sam2Result.masks.length} masks, total=${totalElapsedMs}ms (fetch=${fetchElapsedMs}ms, service=${sam2Result.processingTimeMs}ms)`,
+      );
+    } else {
+      console.warn(
+        `[SAM2] Photo pipeline: SAM2 service returned null after ${totalElapsedMs}ms (fetch=${fetchElapsedMs}ms) — will fall back to Canny`,
+      );
+    }
+
+    return sam2Result;
   } catch (error) {
+    const elapsedMs = Date.now() - t0;
+    const message = error instanceof Error ? error.message : String(error);
+    const isTimeout = error instanceof DOMException && error.name === 'TimeoutError';
     console.warn(
-      `SAM 2 segmentation failed for ${fileUrl}: ${
-        error instanceof Error ? error.message : String(error)
-      }`
+      `[SAM2] Photo pipeline: FAILED${isTimeout ? ' (FETCH TIMEOUT at 8s)' : ''} in ${elapsedMs}ms — ${message}`,
     );
     return null;
   }
@@ -355,18 +427,36 @@ async function segmentWithSAM2FromPhoto(
  * Handles fetch errors gracefully and returns an empty result on failure.
  */
 async function extractGeometryFromPhoto(fileUrl: string): Promise<RoofGeometryExtractionResult> {
+  const t0 = Date.now();
+  const urlHost = tryExtractHost(fileUrl);
+
   // Fetch image bytes
+  console.info(`[SAM2] Canny image fetch: START — ${urlHost} (timeout=8s)`);
   const response = await fetch(fileUrl, {
     signal: AbortSignal.timeout(8_000),
   });
+
   if (!response.ok) {
+    const fetchElapsedMs = Date.now() - t0;
+    console.warn(
+      `[SAM2] Canny image fetch: FAILED — HTTP ${response.status} in ${fetchElapsedMs}ms from ${urlHost}`,
+    );
     throw new Error(`Failed to fetch image: HTTP ${response.status}`);
   }
   const arrayBuffer = await response.arrayBuffer();
   const bytes = Buffer.from(arrayBuffer);
+  const fetchElapsedMs = Date.now() - t0;
+  console.info(
+    `[SAM2] Canny image fetch: OK — ${bytes.length} bytes (${(bytes.length / 1024).toFixed(1)}KB) in ${fetchElapsedMs}ms from ${urlHost}`,
+  );
 
   // Run real contour extraction
-  return extractRoofGeometry(bytes);
+  const result = await extractRoofGeometry(bytes);
+  const totalElapsedMs = Date.now() - t0;
+  console.info(
+    `[SAM2] Canny extraction: ${result.contours.length} contours in ${totalElapsedMs}ms (fetch=${fetchElapsedMs}ms)`,
+  );
+  return result;
 }
 
 // ---------------------------------------------------------------------------

@@ -153,15 +153,31 @@ export interface SAM2SegmentationResult {
 export async function checkSAM2Health(): Promise<SAM2HealthResponse | null> {
   if (!isSAM2Enabled()) return null;
 
+  const t0 = Date.now();
+  const serviceURL = getSAM2ServiceURL();
+  console.info(`[SAM2] Health check: GET ${serviceURL}/health (timeout=5s)`);
+
   try {
-    const response = await fetch(`${getSAM2ServiceURL()}/health`, {
+    const response = await fetch(`${serviceURL}/health`, {
       signal: AbortSignal.timeout(5_000),
     });
 
-    if (!response.ok) return null;
+    const elapsedMs = Date.now() - t0;
 
-    return (await response.json()) as SAM2HealthResponse;
-  } catch {
+    if (!response.ok) {
+      console.warn(`[SAM2] Health check: FAILED — HTTP ${response.status} in ${elapsedMs}ms`);
+      return null;
+    }
+
+    const data = (await response.json()) as SAM2HealthResponse;
+    console.info(
+      `[SAM2] Health check: OK in ${elapsedMs}ms — status=${data.status} model_loaded=${data.model_loaded} device=${data.device} model_id=${data.model_id} uptime=${data.uptime_seconds}s`,
+    );
+    return data;
+  } catch (error) {
+    const elapsedMs = Date.now() - t0;
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[SAM2] Health check: FAILED in ${elapsedMs}ms — ${message}`);
     return null;
   }
 }
@@ -190,13 +206,20 @@ export async function segmentWithSAM2(
 ): Promise<SAM2SegmentationResult | null> {
   if (!isSAM2Enabled()) return null;
 
+  const t0 = Date.now();
+  const imageBytesSize = imageBytes.length;
+  const serviceURL = getSAM2ServiceURL();
+  console.info(
+    `[SAM2] Service call: POST ${serviceURL}/segment — imageSize=${imageBytesSize} bytes (${(imageBytesSize / 1024).toFixed(1)}KB) minAreaFraction=${minAreaFraction} maxMasks=${maxMasks} timeout=${SAM2_TIMEOUT_MS}ms`,
+  );
+
   try {
     // Create form data with the image
     const formData = new FormData();
     const imageBlob = new Blob([new Uint8Array(imageBytes)]);
     formData.append('file', imageBlob, 'image.jpg');
 
-    const url = new URL(`${getSAM2ServiceURL()}/segment`);
+    const url = new URL(`${serviceURL}/segment`);
     url.searchParams.set('min_area_fraction', String(minAreaFraction));
     url.searchParams.set('max_masks', String(maxMasks));
 
@@ -206,10 +229,12 @@ export async function segmentWithSAM2(
       signal: AbortSignal.timeout(SAM2_TIMEOUT_MS),
     });
 
+    const fetchElapsedMs = Date.now() - t0;
+
     if (!response.ok) {
       const errorBody = await response.text().catch(() => 'unknown error');
       console.warn(
-        `SAM 2 service returned HTTP ${response.status}: ${errorBody}`
+        `[SAM2] Service call: FAILED — HTTP ${response.status} in ${fetchElapsedMs}ms — ${errorBody}`,
       );
       return null;
     }
@@ -217,7 +242,10 @@ export async function segmentWithSAM2(
     const data = (await response.json()) as SAM2SegmentResponse;
 
     if (!data.success || data.error) {
-      console.warn(`SAM 2 service returned error: ${data.error ?? 'unknown'}`);
+      const totalElapsedMs = Date.now() - t0;
+      console.warn(
+        `[SAM2] Service call: FAILED — service error in ${totalElapsedMs}ms (service_processing=${data.processing_time_ms}ms) — ${data.error ?? 'unknown'}`,
+      );
       return null;
     }
 
@@ -254,6 +282,11 @@ export async function segmentWithSAM2(
       };
     });
 
+    const totalElapsedMs = Date.now() - t0;
+    console.info(
+      `[SAM2] Service call: OK — ${masks.length} masks in ${totalElapsedMs}ms (service_processing=${data.processing_time_ms}ms) — model=${data.model_info?.model_id ?? 'unknown'} device=${data.model_info?.device ?? 'unknown'} image=${data.image_width}x${data.image_height}`,
+    );
+
     return {
       usedSAM2: true,
       masks,
@@ -271,8 +304,12 @@ export async function segmentWithSAM2(
       error: null,
     };
   } catch (error) {
+    const elapsedMs = Date.now() - t0;
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`SAM 2 service call failed: ${message}`);
+    const isTimeout = error instanceof DOMException && error.name === 'TimeoutError';
+    console.warn(
+      `[SAM2] Service call: FAILED${isTimeout ? ' (TIMEOUT)' : ''} in ${elapsedMs}ms — ${message}`,
+    );
     return null;
   }
 }
