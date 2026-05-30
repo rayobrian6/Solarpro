@@ -77,6 +77,7 @@ export async function POST(
         fileId: f.id,
         fileUrl: f.fileUrl,
         filename: f.filename ?? null,
+        label: f.label ?? null,
       }));
 
     if (sourcePhotos.length === 0) {
@@ -147,7 +148,7 @@ export async function POST(
           break;
       }
 
-      const { artifacts, stages, totalDurationMs, segmentationBackend } = pipelineResult;
+      const { artifacts, stages, totalDurationMs, segmentationBackend, sam2PhotoCount, failedPhotoCount, skippedPhotoCount, cannyPhotoCount, photoResults, budgetExhaustedReason } = pipelineResult;
       const rawArtifactCount = artifacts.length;
       const rawConsensusPlaneCount = artifacts.filter(
         (artifact) => artifact.artifactType === 'consensus_plane_candidate',
@@ -197,6 +198,12 @@ export async function POST(
           rawConsensusPlaneCount,
           rawPolygonArtifactCount,
           segmentationBackend,
+          sam2PhotoCount,
+          failedPhotoCount,
+          skippedPhotoCount,
+          cannyPhotoCount,
+          photoResults,
+          budgetExhaustedReason,
         },
       });
     } catch (pipelineErr) {
