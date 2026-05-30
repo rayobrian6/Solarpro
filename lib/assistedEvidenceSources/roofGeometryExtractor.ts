@@ -188,10 +188,15 @@ export async function extractRoofGeometry(bytes: Buffer): Promise<RoofGeometryEx
   // Dynamic import — sharp has native bindings
   const sharp = (await import('sharp')).default;
 
-  // Step 1: Resize to 512×512, keep RGB color
+  // Step 1: Resize to 512×512, keep RGB color, and apply HEAVY pre-blur
+  // Using sharp's native .blur() (libvips) instead of manual pixel-by-pixel
+  // Gaussian — this is orders of magnitude faster and eliminates the 504 timeout.
+  // The heavy blur (sigma=3.0) destroys texture/noise detail so that roof planes,
+  // walls, sky become uniform color blobs before quantization.
   const { data, info } = await sharp(bytes, { failOn: 'none' })
     .rotate()
     .resize(EXTRACTION_SIZE, EXTRACTION_SIZE, { fit: 'inside', withoutEnlargement: true })
+    .blur(PRE_BLUR_SIGMA)
     .raw()
     .toBuffer({ resolveWithObject: true });
 
@@ -199,9 +204,9 @@ export async function extractRoofGeometry(bytes: Buffer): Promise<RoofGeometryEx
   const h = info.height;
   const channels = info.channels;
 
-  // Step 2: HEAVY pre-blur to destroy texture/noise detail
-  // This makes roof planes, walls, sky become uniform color blobs
-  const smoothed = gaussianBlurRGB(data, w, h, channels, PRE_BLUR_SIGMA);
+  // Step 2: PRE-BLUR IS NOW DONE BY SHARP NATIVELY (see .blur() above)
+  // No more manual gaussianBlurRGB — the data buffer is already smoothed.
+  const smoothed = data;
 
   // Step 3: COARSE color quantization — only 27 total colors
   const quantized = quantizeColors(smoothed, w, h, channels, QUANT_LEVELS);
@@ -246,66 +251,12 @@ export async function extractRoofGeometry(bytes: Buffer): Promise<RoofGeometryEx
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Step 2: RGB Gaussian blur for noise reduction before quantization
+// Step 2: REMOVED — pre-blur is now done by sharp's native .blur() in the
+// resize pipeline above. The manual gaussianBlurRGB() was extremely slow
+// (pixel-by-pixel JS loops over 512×512×3 with kernel size 19) and caused
+// Pipeline B 504 timeouts. Sharp's .blur() uses libvips native code and
+// completes in milliseconds instead of seconds per photo.
 // ────────────────────────────────────────────────────────────────────────────
-
-/**
- * Apply separable Gaussian blur to RGB image data.
- * Heavy blur (sigma=3.0) destroys texture/noise so that roof planes,
- * walls, sky, and ground become uniform color regions.
- */
-function gaussianBlurRGB(
-  data: Buffer,
-  w: number,
-  h: number,
-  channels: number,
-  sigma: number,
-): Buffer {
-  const result = Buffer.alloc(data.length);
-  const half = Math.ceil(sigma * 3);
-  const kernelSize = half * 2 + 1;
-
-  // Build 1D Gaussian kernel
-  const kernel: number[] = [];
-  let kernelSum = 0;
-  for (let i = -half; i <= half; i++) {
-    const val = Math.exp(-(i * i) / (2 * sigma * sigma));
-    kernel.push(val);
-    kernelSum += val;
-  }
-  for (let i = 0; i < kernel.length; i++) kernel[i] /= kernelSum;
-
-  // Horizontal pass
-  const temp = Buffer.alloc(data.length);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      for (let c = 0; c < channels; c++) {
-        let sum = 0;
-        for (let k = -half; k <= half; k++) {
-          const nx = Math.min(w - 1, Math.max(0, x + k));
-          sum += data[(y * w + nx) * channels + c] * kernel[k + half];
-        }
-        temp[(y * w + x) * channels + c] = Math.round(sum);
-      }
-    }
-  }
-
-  // Vertical pass
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      for (let c = 0; c < channels; c++) {
-        let sum = 0;
-        for (let k = -half; k <= half; k++) {
-          const ny = Math.min(h - 1, Math.max(0, y + k));
-          sum += temp[(ny * w + x) * channels + c] * kernel[k + half];
-        }
-        result[(y * w + x) * channels + c] = Math.round(sum);
-      }
-    }
-  }
-
-  return result;
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Step 3: Color quantization
