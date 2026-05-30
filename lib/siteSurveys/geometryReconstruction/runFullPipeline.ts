@@ -35,6 +35,16 @@ import { runDepthFromReconstructionInput } from './workers/depth/runDepthWorker'
 import { runPlaneExtractionFromReconstructionInput } from './workers/planeExtraction/runPlaneExtractionWorker';
 import { runMultiViewFusionFromReconstructionInput } from './workers/multiViewFusion/runMultiViewFusion';
 
+// ──── Pipeline timeout safeguard ──────────────────────────────────────────
+
+/**
+ * Maximum pipeline duration in milliseconds before skipping remaining stages.
+ * Set to 240000ms (4 minutes) to leave a 60-second buffer for DB writes and
+ * unified table adaptation before Vercel's maxDuration=300s (5 minutes) kills
+ * the function with a 504 Gateway Timeout.
+ */
+const PIPELINE_TIMEOUT_MS = 240_000;
+
 // ─── Pipeline Stage Result ──────────────────────────────────────────────
 
 export interface PipelineStageResult {
@@ -63,6 +73,14 @@ async function asyncStageTimer<T>(stageName: string, fn: () => Promise<T>): Prom
   const result = await fn();
   const durationMs = Date.now() - start;
   return { result, durationMs };
+}
+
+/**
+ * Check if the pipeline has exceeded its time budget.
+ * Returns true if remaining stages should be skipped to avoid 504 timeout.
+ */
+function isPipelineTimedOut(pipelineStart: number): boolean {
+  return (Date.now() - pipelineStart) >= PIPELINE_TIMEOUT_MS;
 }
 
 // ─── Full Pipeline Orchestration ────────────────────────────────────────
@@ -104,6 +122,12 @@ export async function runFullGeometryReconstructionPipeline(
     (a): a is SemanticSegmentationMask => a.artifactType === 'semantic_segmentation_mask' || a.artifactType === 'segmentation_mask',
   );
 
+  // Timeout check before Stage 2
+  if (isPipelineTimedOut(pipelineStart)) {
+    console.warn(`[Pipeline B] Timeout after Stage 1 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart };
+  }
+
   // ── Stage 2: Line Extraction ────────────────────────────────────────
   const lineResult = stageTimer('line_extraction', () =>
     runLineExtractionFromReconstructionInput(input, masks),
@@ -119,6 +143,12 @@ export async function runFullGeometryReconstructionPipeline(
   const lines = lineArtifacts.filter(
     (a): a is StructuralLineCandidate => a.artifactType === 'structural_line_candidate',
   );
+
+  // Timeout check before Stage 3
+  if (isPipelineTimedOut(pipelineStart)) {
+    console.warn(`[Pipeline B] Timeout after Stage 2 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart };
+  }
 
   // ── Stage 3: Vanishing Points ───────────────────────────────────────
   const vpResult = stageTimer('vanishing_points', () =>
@@ -136,6 +166,12 @@ export async function runFullGeometryReconstructionPipeline(
     (a): a is VanishingPointArtifact => a.artifactType === 'vanishing_point',
   );
 
+  // Timeout check before Stage 4
+  if (isPipelineTimedOut(pipelineStart)) {
+    console.warn(`[Pipeline B] Timeout after Stage 3 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart };
+  }
+
   // ── Stage 4: Depth Estimation ───────────────────────────────────────
   const depthResult = stageTimer('depth_estimation', () =>
     runDepthFromReconstructionInput(input, masks, vanishingPoints),
@@ -147,6 +183,12 @@ export async function runFullGeometryReconstructionPipeline(
     `[Pipeline B] Stage 4 (depth_estimation): ${depthArtifacts.length} artifacts in ${depthResult.durationMs}ms`,
   );
 
+  // Timeout check before Stage 5
+  if (isPipelineTimedOut(pipelineStart)) {
+    console.warn(`[Pipeline B] Timeout after Stage 4 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart };
+  }
+
   // ── Stage 5: Plane Extraction ───────────────────────────────────────
   const planeResult = stageTimer('plane_extraction', () =>
     runPlaneExtractionFromReconstructionInput(input, masks, lines, vanishingPoints),
@@ -157,6 +199,12 @@ export async function runFullGeometryReconstructionPipeline(
   console.info(
     `[Pipeline B] Stage 5 (plane_extraction): ${planeArtifacts.length} artifacts in ${planeResult.durationMs}ms`,
   );
+
+  // Timeout check before Stage 6
+  if (isPipelineTimedOut(pipelineStart)) {
+    console.warn(`[Pipeline B] Timeout after Stage 5 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart };
+  }
 
   // ── Stage 6: Multi-View Fusion ──────────────────────────────────────
   const fusionResult = stageTimer('multi_view_fusion', () =>

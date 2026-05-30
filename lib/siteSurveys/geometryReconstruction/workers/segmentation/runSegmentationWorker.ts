@@ -80,8 +80,27 @@ export interface SegmentationWorkerOutput {
 }
 
 // ---------------------------------------------------------------------------
-// Classification → SegmentationClass mapping
+// Pipeline throughput limits (prevent 504 timeout)
 // ---------------------------------------------------------------------------
+
+/**
+ * Maximum number of source photos to process.
+ * Processing 30+ photos with heavy extraction + 6 downstream stages
+ * causes 504 timeouts on Vercel (maxDuration=300s). Capping at 15
+ * keeps total pipeline time under 4 minutes while still covering
+ * most meaningful angles of a house.
+ */
+const MAX_SOURCE_PHOTOS = 15;
+
+/**
+ * Maximum total segmentation masks to produce across ALL photos.
+ * With 12 regions per photo × 15 photos = 180 theoretical max,
+ * but classification filtering reduces this. Hard cap prevents
+ * downstream stages (line extraction, plane extraction, etc.) from
+ * exploding into thousands of artifacts.
+ */
+const MAX_TOTAL_MASKS = 150;
+
 
 /** Maps ContourClassification from the extractor to SegmentationClass. */
 const CONTOUR_TO_SEGMENTATION_CLASS: Record<ContourClassification, SegmentationClass | null> = {
@@ -118,7 +137,9 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
 
   // Stage 1: Initialize and validate input
   const t0 = Date.now();
-  const sourcePhotos = input.sourcePhotos;
+  // Cap source photos to prevent 504 timeout — processing 30+ photos
+  // with heavy extraction + 6 downstream stages exceeds maxDuration=300s
+  const sourcePhotos = input.sourcePhotos.slice(0, MAX_SOURCE_PHOTOS);
   if (sourcePhotos.length === 0) {
     timings['initialization'] = Date.now() - t0;
     return {
@@ -130,8 +151,16 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   timings['initialization'] = Date.now() - t0;
 
   // Stage 2: Extract real geometry from each photo
+  // Early exit: stop processing more photos once we have enough masks
   const t1 = Date.now();
   for (const photo of sourcePhotos) {
+    // Hard cap on total masks — prevents downstream stages from exploding
+    if (artifacts.length >= MAX_TOTAL_MASKS) {
+      console.info(
+        `Segmentation worker: reached MAX_TOTAL_MASKS=${MAX_TOTAL_MASKS}, stopping after ${artifacts.length} masks`
+      );
+      break;
+    }
     try {
       const geometry = await extractGeometryFromPhoto(photo.fileUrl);
 
@@ -221,7 +250,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
 async function extractGeometryFromPhoto(fileUrl: string): Promise<RoofGeometryExtractionResult> {
   // Fetch image bytes
   const response = await fetch(fileUrl, {
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(8_000),
   });
   if (!response.ok) {
     throw new Error(`Failed to fetch image: HTTP ${response.status}`);
