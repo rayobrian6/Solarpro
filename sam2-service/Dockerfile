@@ -1,20 +1,26 @@
-# SAM 2 Segmentation Service — Docker image for Render GPU deployment
+# SAM 2 Segmentation Service — Docker image for Render deployment
+#
+# Works on both CPU (standard plan) and GPU (pro+ plan with NVIDIA) instances.
+# PyTorch is built with CUDA 12.4 support. On GPU instances it auto-detects
+# and uses CUDA. On CPU-only instances it falls back gracefully.
 #
 # Build: docker build -t sam2-service .
-# Run:   docker run -p 8000:8000 --gpus all sam2-service
-#
-# Render deployment: uses this Dockerfile automatically
+# Run:   docker run -p 8000:8000 sam2-service
+# GPU:   docker run -p 8000:8000 --gpus all sam2-service
 
 # Stage 1: Install SAM 2 from source (requires build tools)
-FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS builder
+FROM ubuntu:22.04 AS builder
 
-# Avoid interactive prompts during build
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
     python3.11 \
     python3.11-venv \
+    python3.11-dev \
     python3-pip \
     git \
     wget \
@@ -23,9 +29,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Set up Python
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
-    update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 && \
+    python3 -m ensurepip --upgrade
 
-# Install PyTorch with CUDA support
+# Install PyTorch with CUDA 12.4 support.
+# On CPU-only hosts, torch.cuda.is_available() returns False and inference
+# runs on CPU (~5-10s/image). On GPU hosts, CUDA is auto-detected (~1-2s/image).
 RUN pip3 install --no-cache-dir \
     torch==2.5.1 \
     torchvision==0.20.1 \
@@ -42,13 +51,16 @@ RUN pip3 install --no-cache-dir -r /app/requirements.txt
 # ---------------------------------------------------------------------------
 # Stage 2: Runtime image (smaller, no build tools)
 # ---------------------------------------------------------------------------
-FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
 # Install minimal runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
     python3.11 \
     libgl1-mesa-glx \
     libglib2.0-0 \

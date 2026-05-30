@@ -1,28 +1,28 @@
 # Render service configuration for SAM 2 Segmentation Service
 #
-# Deploy: Connect this repo to Render, select this directory,
-#         and Render will use the Dockerfile automatically.
+# Deployed via Render API. This file documents the configuration.
+# To update settings, use the Render dashboard or API.
 #
-# Cost: T4 GPU = ~$0.22/hr (auto-sleeps when idle)
-#       A100 GPU = ~$1.10/hr (for production workloads)
+# Service URL: https://sam2-segmentation.onrender.com
+# Service ID:  srv-d8dj4mv7f7vs73ca0gtg
+#
+# Plan: standard ($0.005/min active, auto-sleeps when idle)
+# GPU:  Upgrade to GPU from Render dashboard for faster inference
+#       (CPU ~5-10s/image, GPU ~1-2s/image with T4)
+# Cost: ~$7/month with auto-sleep and light usage
 
 services:
   - type: web_service
     name: sam2-segmentation
     runtime: docker
-    # Path to Dockerfile
+    repo: https://github.com/rayobrian6/Solarpro
+    branch: dev
+    rootDir: sam2-service
     dockerfilePath: ./Dockerfile
-    # GPU instance — T4 is cheapest with CUDA support
-    plan: starter-gpu
-    # Region — choose closest to your Next.js deployment
+    # Start on standard plan; upgrade to GPU via Render dashboard
+    plan: standard
     region: oregon
-    # Auto-sleep after 15 min idle (saves money)
-    autoSuspend:
-      enabled: true
-      idleMinutes: 15
-    # Health check path
     healthCheckPath: /health
-    # Env vars
     envVars:
       - key: SAM2_CHECKPOINT
         value: sam2.1_hiera_small
@@ -34,8 +34,3 @@ services:
         value: "5.0"
       - key: PORT
         value: "8000"
-    # Persistent disk for model cache (avoids re-downloading ~184MB on restart)
-    disks:
-      - name: sam2-model-cache
-        mountPath: /app/.cache
-        sizeGB: 1
