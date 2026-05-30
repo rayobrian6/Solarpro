@@ -20,32 +20,41 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 1. numpy first (small, needed by torch)
 RUN pip install --no-cache-dir numpy==2.1.2
 
-# 2. torch CPU-only with --no-deps
+# 2. torch CPU-only with --no-deps (we install deps separately below)
 RUN pip install --no-cache-dir --no-deps \
     torch==2.5.1 \
     --index-url https://download.pytorch.org/whl/cpu
 
-# 3. torchvision CPU-only with --no-deps
+# 3. torch runtime deps (small packages, won't pull CUDA libs)
+RUN pip install --no-cache-dir \
+    filelock>=3.5.0 \
+    jinja2>=3.0 \
+    networkx>=3.0 \
+    fsspec>=2023.1 \
+    sympy>=1.13.1 \
+    mpmath>=1.1.0 \
+    MarkupSafe>=2.0
+
+# 4. torchvision CPU-only with --no-deps
 RUN pip install --no-cache-dir --no-deps \
     torchvision==0.20.1 \
     --index-url https://download.pytorch.org/whl/cpu
 
-# 4. SAM 2 from GitHub (main branch) — --no-deps to avoid torch reinstall
-#    Repo has no git tags, so we use the default branch
+# 5. SAM 2 from GitHub (main branch) — --no-deps to avoid torch reinstall
 RUN pip install --no-cache-dir --no-deps \
     git+https://github.com/facebookresearch/sam2.git
 
-# 5. SAM 2 runtime deps (excluding torch/torchvision/numpy already installed)
+# 6. SAM 2 runtime deps (excluding torch/torchvision/numpy already installed)
 RUN pip install --no-cache-dir \
     tqdm>=4.66.1 \
     hydra-core>=1.3.2 \
     iopath>=0.1.10 \
     omegaconf>=2.3.0
 
-# 6. HuggingFace Hub — needed by build_sam2_hf() to download checkpoints
+# 7. HuggingFace Hub — needed by build_sam2_hf() to download checkpoints
 RUN pip install --no-cache-dir huggingface_hub>=0.30.2
 
-# 7. Remaining app deps (fastapi, uvicorn, opencv, etc.)
+# 8. Remaining app deps (fastapi, uvicorn, opencv, etc.)
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
