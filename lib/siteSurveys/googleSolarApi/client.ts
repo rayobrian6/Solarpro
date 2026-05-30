@@ -24,6 +24,7 @@ import type {
   GoogleSolarApiConfig,
   PipelineCResult,
 } from './types';
+import { setCachedBuildingInsights } from './cache';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -237,6 +238,12 @@ export async function fetchBuildingInsights(
     console.info(
       `[Pipeline C] buildingInsights success: ${roofPlaneCount} roof planes, ${durationMs}ms`,
     );
+
+    // ─── Cache the response for reuse ──────────────────────────────────
+    // Store in the process-level cache so other routes (e.g., the 3D design
+    // pipeline's /api/solar or subsequent Pipeline C calls) can reuse this
+    // data instead of making another paid API call ($0.015/call).
+    setCachedBuildingInsights(latitude, longitude, data, 'pipeline_c');
 
     return {
       success: true,

@@ -26,6 +26,16 @@ export {
   fetchBuildingInsights,
 } from './client';
 
+// ─── Cache ───────────────────────────────────────────────────────────────────────────
+export {
+  getCachedBuildingInsights,
+  setCachedBuildingInsights,
+  isValidBuildingInsightsData,
+  getCacheStats,
+  clearCache,
+  sweepExpiredEntries,
+} from './cache';
+
 // ─── Adapter ─────────────────────────────────────────────────────────────────
 export {
   adaptBuildingInsightsToUnifiedArtifacts,

@@ -7,6 +7,8 @@ import { handleRouteDbError } from '@/lib/db-neon';
 import { RoofPlane, RoofEdgeType, SolarApiSegment } from '@/types';
 import { requireAuth } from '@/lib/security';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { setCachedBuildingInsights } from '@/lib/siteSurveys/googleSolarApi/cache';
+import type { BuildingInsightsResponse } from '@/lib/siteSurveys/googleSolarApi/types';
 
 // SECURITY: Read key from env var only — never hardcoded in source.
 //
@@ -273,6 +275,25 @@ export async function GET(req: NextRequest) {
 
     const json = await response.json();
 
+    // ─── Cache the raw buildingInsights response for Pipeline C reuse ──────
+    // This allows Pipeline C (roof geometry overlays on survey photos) to
+    // reuse the same data without making another paid API call ($0.015/call).
+    // The raw response contains BOTH roofSegmentStats (used here) and
+    // roofPlanes (used by Pipeline C), so it's a perfect cache candidate.
+    // We cache the raw UNFILTERED response — Pipeline C does its own filtering.
+    if (endpoint === 'buildingInsights' && json.roofPlanes) {
+      const cacheLat = parseFloat(lat as string);
+      const cacheLng = parseFloat(lng as string);
+      if (!isNaN(cacheLat) && !isNaN(cacheLng)) {
+        setCachedBuildingInsights(
+          cacheLat,
+          cacheLng,
+          json as BuildingInsightsResponse,
+          '3d_design_pipeline',
+        );
+      }
+    }
+
     // ── Filter roofSegmentStats for buildingInsights ──────────────────────
     // Google's findClosest API returns segments from the entire response area,
     // which may include adjacent buildings. Filter to only those within
@@ -373,6 +394,19 @@ export async function POST(req: NextRequest) {
     }
 
     const solarJson = await solarRes.json() as any;
+
+    // ─── Cache the raw response for Pipeline C reuse ────────────────────
+    // Same cache write as in the GET handler above. The POST handler makes
+    // its own API call, so we cache this response too.
+    if (solarJson.roofPlanes) {
+      setCachedBuildingInsights(
+        lat,
+        lng,
+        solarJson as BuildingInsightsResponse,
+        '3d_design_pipeline',
+      );
+    }
+
     const rawSegs   = solarJson.solarPotential?.roofSegmentStats ?? [];
 
     if (rawSegs.length === 0) {

@@ -247,8 +247,12 @@ export function RoofGeometrySection({
       const polygonCount = summary.polygonCount ?? 0;
       const imageryInfo = json.imageryInfo;
 
+      const dataSource = summary.dataSource ?? 'api';
+      const cacheHit = summary.cacheHit ?? false;
+      const dataSourceLabel = dataSource === 'cache' ? ' (cached — no API call needed!)' : dataSource === 'pre_fetched' ? ' (pre-fetched data reused)' : '';
+
       setPipelineCSummary(
-        `Pipeline C (Google Solar API) completed: ${planeCount} roof planes with ${polygonCount} polygon outlines, ${lineCount} inferred roof lines.${
+        `Pipeline C (Google Solar API) completed: ${planeCount} roof planes with ${polygonCount} polygon outlines, ${lineCount} inferred roof lines${dataSourceLabel}.${
           imageryInfo?.date ? ` Imagery from ${imageryInfo.date}.` : ''
         }`,
       );

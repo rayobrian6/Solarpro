@@ -22,8 +22,10 @@
 //   - Pipeline C coordinates → normalized_image_0_1000 (SVG overlays)
 //   - 3D design coordinates  → lat/lng (Cesium 3D rendering)
 //
-// These pipelines MUST remain isolated. Do NOT share request objects,
-// caches, or DB writes between them.
+// These pipelines MUST remain isolated. Do NOT share request objects
+// or DB writes between them. (A shared process-level CACHE is used for cost
+// optimization — it avoids duplicate API calls but does NOT share processing
+// state or DB writes. Both pipelines still adapt and store data independently.)
 //
 // Auth required. Survey ownership enforced.
 // REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
@@ -41,7 +43,13 @@ import { getUserFromRequest } from '@/lib/auth';
 import { isValidUUID, getSiteSurveyById, GetSiteSurveyByIdOptions } from '@/lib/db-neon';
 import { getProjectById } from '@/lib/db/projects';
 import { fetchBuildingInsights, isGoogleSolarApiConfigured } from '@/lib/siteSurveys/googleSolarApi/client';
+import type { BuildingInsightsResponse } from '@/lib/siteSurveys/googleSolarApi/types';
 import { adaptBuildingInsightsToUnifiedArtifacts } from '@/lib/siteSurveys/googleSolarApi/adapter';
+import {
+  getCachedBuildingInsights,
+  setCachedBuildingInsights,
+  isValidBuildingInsightsData,
+} from '@/lib/siteSurveys/googleSolarApi/cache';
 import { writeUnifiedArtifacts, deleteUnifiedArtifactsByPipeline } from '@/lib/siteSurveys/unifiedGeometry/unifiedArtifactStore';
 
 export async function POST(
@@ -138,31 +146,75 @@ export async function POST(
       );
     }
 
-    // ─── Call the Google Solar API ────────────────────────────────────────
-    console.info(
-      `[POST google-solar-api] Calling buildingInsights for lat=${latitude}, lng=${longitude}`,
-    );
+    // ─── Resolve buildingInsights data: pre-fetched → cache → API ──────────
+    // Cost optimization: avoid duplicate $0.015/call to Google Solar API.
+    //
+    // 1. If the request body includes `buildingInsightsData`, use it directly
+    //    (the frontend already has this data from the 3D design pipeline).
+    // 2. If the process-level cache has data for this lat/lng, reuse it
+    //    (the 3D design pipeline or a previous Pipeline C call cached it).
+    // 3. Fall back to calling the Google Solar API (paid call).
 
-    const result = await fetchBuildingInsights(latitude, longitude);
+    let buildingInsightsData: BuildingInsightsResponse | null = null;
+    let dataSource: 'pre_fetched' | 'cache' | 'api' = 'api';
+    let apiCallDurationMs = 0;
+    let apiWarnings: string[] = [];
 
-    if (!result.success) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: result.error ?? 'Google Solar API call failed',
-          warnings: result.warnings,
-          durationMs: result.durationMs,
-        },
-        { status: 502 }, // Bad Gateway (upstream API failure)
+    // ─── Option 1: Pre-fetched data from request body ────────────────
+    const preFetchedData = body.buildingInsightsData as unknown;
+    if (preFetchedData && isValidBuildingInsightsData(preFetchedData)) {
+      buildingInsightsData = preFetchedData as BuildingInsightsResponse;
+      dataSource = 'pre_fetched';
+      console.info(
+        `[POST google-solar-api] Using pre-fetched buildingInsights data from request body for lat=${latitude}, lng=${longitude}`,
       );
+      // Also cache it for future reuse
+      setCachedBuildingInsights(latitude, longitude, buildingInsightsData, 'pre_fetched');
     }
 
-    // ─── Adapt the response to unified artifacts ─────────────────────────
+    // ─── Option 2: Check process-level cache ─────────────────────────
+    if (!buildingInsightsData) {
+      const cached = getCachedBuildingInsights(latitude, longitude);
+      if (cached.hit && cached.data) {
+        buildingInsightsData = cached.data;
+        dataSource = 'cache';
+        console.info(
+          `[POST google-solar-api] Cache HIT for lat=${latitude}, lng=${longitude} (age=${cached.ageMs ? (cached.ageMs / 1000).toFixed(0) + 's' : 'unknown'}, source=${cached.source})`,
+        );
+      }
+    }
+
+    // ─── Option 3: Call the Google Solar API (paid call) ─────────────
+    if (!buildingInsightsData) {
+      console.info(
+        `[POST google-solar-api] Cache MISS — calling buildingInsights API for lat=${latitude}, lng=${longitude}`,
+      );
+      const result = await fetchBuildingInsights(latitude, longitude);
+
+      if (!result.success) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: result.error ?? 'Google Solar API call failed',
+            warnings: result.warnings,
+            durationMs: result.durationMs,
+          },
+          { status: 502 }, // Bad Gateway (upstream API failure)
+        );
+      }
+
+      buildingInsightsData = result.buildingInsights!;
+      apiCallDurationMs = result.durationMs;
+      apiWarnings = result.warnings ?? [];
+      // Note: fetchBuildingInsights already writes to the cache internally,
+      // so we don't need to call setCachedBuildingInsights here.
+    }
+
+    // ─── Adapt the response to unified artifacts ──────────────────────────
     const artifacts = adaptBuildingInsightsToUnifiedArtifacts(
-      result.buildingInsights!,
+      buildingInsightsData,
       surveyId,
     );
-
     const roofPlaneCount = artifacts.filter((a) => a.geometryClass === 'roof_plane').length;
     const roofLineCount = artifacts.filter((a) => a.geometryClass === 'roof_line').length;
     const polygonCount = artifacts.filter((a) => a.polygon?.vertices?.length).length;
@@ -212,21 +264,23 @@ export async function POST(
         roofLineCount,
         polygonCount,
         totalArtifacts: artifacts.length,
-        apiCallDurationMs: result.durationMs,
-        roofPlanesFromApi: result.roofPlaneCount,
+        apiCallDurationMs: dataSource === 'api' ? apiCallDurationMs : 0,
+        roofPlanesFromApi: buildingInsightsData.roofPlanes?.length ?? 0,
+        dataSource, // 'pre_fetched' | 'cache' | 'api' — tells UI if data was fresh or reused
+        cacheHit: dataSource !== 'api', // convenience boolean
       },
       writeResult: {
         inserted: writeResult.inserted,
         skipped: writeResult.skipped,
         failed: writeResult.failed,
       },
-      warnings: result.warnings,
+      warnings: apiWarnings,
       // Include imagery metadata for the UI to display
-      imageryInfo: result.buildingInsights?.imageryDate
+      imageryInfo: buildingInsightsData.imageryDate
         ? {
-            date: `${result.buildingInsights.imageryDate.year}-${String(result.buildingInsights.imageryDate.month).padStart(2, '0')}`,
-            processedDate: result.buildingInsights.imageryProcessedDate
-              ? `${result.buildingInsights.imageryProcessedDate.year}-${String(result.buildingInsights.imageryProcessedDate.month).padStart(2, '0')}`
+            date: `${buildingInsightsData.imageryDate.year}-${String(buildingInsightsData.imageryDate.month).padStart(2, '0')}`,
+            processedDate: buildingInsightsData.imageryProcessedDate
+              ? `${buildingInsightsData.imageryProcessedDate.year}-${String(buildingInsightsData.imageryProcessedDate.month).padStart(2, '0')}`
               : null,
           }
         : null,
