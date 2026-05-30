@@ -292,6 +292,61 @@ export function RoofGeometrySection({
     return counts;
   }, [artifacts]);
 
+  // Geometry stats summary for the stats panel
+  const geometryStats = useMemo(() => {
+    const planes = artifacts.filter(a => a.geometryClass === 'roof_plane' || a.geometryClass === 'wall_plane' || a.geometryClass === 'consensus_plane');
+    const lines = artifacts.filter(a => a.geometryClass === 'roof_line');
+
+    // Confidence stats
+    const confidences = artifacts.map(a => a.confidence).filter(c => c != null);
+    const avgConfidence = confidences.length > 0
+      ? confidences.reduce((sum, c) => sum + c, 0) / confidences.length
+      : null;
+
+    // Pitch stats (for roof planes)
+    const pitches = planes.map(a => a.pitchDegrees).filter(p => p != null) as number[];
+    const pitchRange = pitches.length > 0
+      ? { min: Math.min(...pitches), max: Math.max(...pitches) }
+      : null;
+
+    // Azimuth stats (for roof planes)
+    const azimuths = planes.map(a => a.azimuthDegrees).filter(a => a != null) as number[];
+    const azimuthRange = azimuths.length > 0
+      ? { min: Math.min(...azimuths), max: Math.max(...azimuths) }
+      : null;
+
+    // Total area
+    const totalAreaSqM = planes.reduce((sum, a) => sum + (a.areaSqM ?? 0), 0);
+
+    // Line subtype breakdown
+    const lineSubtypes: Record<string, number> = {};
+    for (const l of lines) {
+      const sub = l.lineSubtype ?? 'unclassified';
+      lineSubtypes[sub] = (lineSubtypes[sub] ?? 0) + 1;
+    }
+
+    // Avg line confidence
+    const lineConfidences = lines.map(a => a.confidence).filter(c => c != null);
+    const avgLineConfidence = lineConfidences.length > 0
+      ? lineConfidences.reduce((sum, c) => sum + c, 0) / lineConfidences.length
+      : null;
+
+    // Total estimated line length
+    const totalLineLengthM = lines.reduce((sum, a) => sum + (a.estimatedLengthM ?? 0), 0);
+
+    return {
+      planeCount: planes.length,
+      lineCount: lines.length,
+      avgConfidence,
+      pitchRange,
+      azimuthRange,
+      totalAreaSqM,
+      lineSubtypes,
+      avgLineConfidence,
+      totalLineLengthM,
+    };
+  }, [artifacts]);
+
   // Build overlay data
   const filesWithArtifacts = useMemo(
     () => buildFilesWithUnifiedArtifacts(artifacts, files),
@@ -452,6 +507,68 @@ export function RoofGeometrySection({
             <span className="rounded-full border border-slate-700/40 bg-slate-900/30 px-2.5 py-1 text-[10px] text-slate-500">
               Source: {hasPipelineCData ? 'Google Solar API + ' : ''}{hasPipelineBData ? 'Geometry Recon + ' : ''}Photo Vision
             </span>
+          </div>
+        )}
+
+        {/* ── Geometry Stats Summary Panel ── */}
+        {hasAnyData && (geometryStats.planeCount > 0 || geometryStats.lineCount > 0) && (
+          <div className="rounded-lg border border-slate-700/40 bg-slate-900/30 p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Eye size={12} className="text-slate-400" />
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Geometry Stats</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {/* Total planes */}
+              <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 px-2.5 py-2">
+                <p className="text-[9px] text-emerald-400/70 uppercase tracking-wider">Planes</p>
+                <p className="text-lg font-bold text-emerald-300">{geometryStats.planeCount}</p>
+                {geometryStats.totalAreaSqM > 0 && (
+                  <p className="text-[9px] text-emerald-400/50">{geometryStats.totalAreaSqM.toFixed(1)} m² total</p>
+                )}
+              </div>
+              {/* Total lines */}
+              <div className="rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-2">
+                <p className="text-[9px] text-amber-400/70 uppercase tracking-wider">Roof Lines</p>
+                <p className="text-lg font-bold text-amber-300">{geometryStats.lineCount}</p>
+                {geometryStats.totalLineLengthM > 0 && (
+                  <p className="text-[9px] text-amber-400/50">{geometryStats.totalLineLengthM.toFixed(1)} m total</p>
+                )}
+              </div>
+              {/* Avg confidence */}
+              <div className="rounded-md border border-blue-500/20 bg-blue-500/5 px-2.5 py-2">
+                <p className="text-[9px] text-blue-400/70 uppercase tracking-wider">Avg Confidence</p>
+                <p className="text-lg font-bold text-blue-300">{geometryStats.avgConfidence != null ? `${Math.round(geometryStats.avgConfidence)}%` : '—'}</p>
+                {geometryStats.avgLineConfidence != null && geometryStats.lineCount > 0 && (
+                  <p className="text-[9px] text-blue-400/50">Lines: {Math.round(geometryStats.avgLineConfidence)}%</p>
+                )}
+              </div>
+              {/* Pitch / Azimuth range */}
+              <div className="rounded-md border border-violet-500/20 bg-violet-500/5 px-2.5 py-2">
+                <p className="text-[9px] text-violet-400/70 uppercase tracking-wider">Pitch / Azimuth</p>
+                {geometryStats.pitchRange ? (
+                  <p className="text-sm font-bold text-violet-300">{geometryStats.pitchRange.min}°–{geometryStats.pitchRange.max}°</p>
+                ) : (
+                  <p className="text-sm font-bold text-slate-500">—</p>
+                )}
+                {geometryStats.azimuthRange ? (
+                  <p className="text-[9px] text-violet-400/50">Az: {geometryStats.azimuthRange.min}°–{geometryStats.azimuthRange.max}°</p>
+                ) : null}
+              </div>
+            </div>
+
+            {/* Line subtype breakdown (if any roof lines) */}
+            {geometryStats.lineCount > 0 && Object.keys(geometryStats.lineSubtypes).length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {Object.entries(geometryStats.lineSubtypes).map(([sub, count]) => (
+                  <span
+                    key={sub}
+                    className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[9px] text-amber-300"
+                  >
+                    {sub.replace(/_/g, ' ')}: {count}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

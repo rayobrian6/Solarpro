@@ -592,71 +592,117 @@ function PhotoWithUnifiedOverlays({
         })}
       </svg>
 
-      {/* Hover tooltip */}
-      {hoveredIdx !== null && overlayElements[hoveredIdx] && (
-        <div className="absolute bottom-2 left-2 right-2 rounded-lg border border-slate-700 bg-slate-900/95 p-2 backdrop-blur-sm z-10">
-          <div className="flex items-center gap-2">
-            <span
-              className="inline-block h-2 w-2 rounded-sm"
-              style={{ backgroundColor: overlayElements[hoveredIdx].color.stroke }}
-            />
-            <span className="text-[10px] font-semibold text-slate-200">
-              {overlayElements[hoveredIdx].artifact.geometryClass.replace(/_/g, ' ')}
-            </span>
-            <span className="text-[10px] text-slate-500">
-              {Math.round(overlayElements[hoveredIdx].artifact.confidence)}% conf
-            </span>
-            {overlayElements[hoveredIdx].artifact.lineSubtype && (
-              <span className="text-[9px] text-amber-300 border border-amber-500/30 rounded px-1">
-                {overlayElements[hoveredIdx].artifact.lineSubtype}
-              </span>
-            )}
-            {overlayElements[hoveredIdx].artifact.planeType && (
-              <span className="text-[9px] text-emerald-300 border border-emerald-500/30 rounded px-1">
-                {overlayElements[hoveredIdx].artifact.planeType}
-              </span>
-            )}
-            {overlayElements[hoveredIdx].artifact.authority?.mockArtifact ? (
-              <span className="text-[9px] text-red-300 border border-red-500/30 rounded px-1">
-                MOCK
-              </span>
-            ) : (
-              <span className="text-[9px] text-slate-400 border border-slate-600/30 rounded px-1">
-                {overlayElements[hoveredIdx].artifact.authority?.state?.replace(/_/g, ' ') ?? 'unknown'}
-              </span>
-            )}
-          </div>
+      {/* Hover tooltip — rich details for plane and line artifacts */}
+      {hoveredIdx !== null && overlayElements[hoveredIdx] && (() => {
+        const entry = overlayElements[hoveredIdx];
+        const a = entry.artifact;
+        const isRoofPlane = a.geometryClass === 'roof_plane' || a.geometryClass === 'wall_plane' || a.geometryClass === 'consensus_plane';
+        const isRoofLine = a.geometryClass === 'roof_line';
+        const lineStyle = isRoofLine && a.lineSubtype
+          ? (ROOF_LINE_SUBTYPE_STYLES[a.lineSubtype] ?? DEFAULT_ROOF_LINE_STYLE)
+          : null;
 
-          {/* Extra details */}
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] text-slate-500">
-            {overlayElements[hoveredIdx].artifact.pitchDegrees != null && (
-              <span>Pitch: {overlayElements[hoveredIdx].artifact.pitchDegrees}°</span>
-            )}
-            {overlayElements[hoveredIdx].artifact.azimuthDegrees != null && (
-              <span>Azimuth: {overlayElements[hoveredIdx].artifact.azimuthDegrees}°</span>
-            )}
-            {overlayElements[hoveredIdx].artifact.areaSqM != null && (
-              <span>Area: {overlayElements[hoveredIdx].artifact.areaSqM.toFixed(1)} m²</span>
-            )}
-            {overlayElements[hoveredIdx].artifact.estimatedLengthM != null && (
-              <span>Length: {overlayElements[hoveredIdx].artifact.estimatedLengthM.toFixed(1)} m</span>
-            )}
-            {overlayElements[hoveredIdx].artifact.inlierCount != null && (
-              <span>Inliers: {overlayElements[hoveredIdx].artifact.inlierCount}/{overlayElements[hoveredIdx].artifact.totalPoints}</span>
-            )}
-            {overlayElements[hoveredIdx].artifact.consensusPhotoCount != null && (
-              <span>Photos: {overlayElements[hoveredIdx].artifact.consensusPhotoCount}</span>
-            )}
-            {overlayElements[hoveredIdx].artifact.isSynthetic && (
-              <span className="text-amber-400">⚠ Synthetic</span>
-            )}
-          </div>
+        return (
+          <div className="absolute bottom-2 left-2 right-2 rounded-lg border border-slate-700 bg-slate-900/95 p-2 backdrop-blur-sm z-10">
+            {/* Header row: class + confidence + badges */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span
+                className="inline-block h-2 w-2 rounded-sm flex-shrink-0"
+                style={{ backgroundColor: lineStyle?.stroke ?? entry.color.stroke }}
+              />
+              <span className="text-[10px] font-semibold text-slate-200">
+                {isRoofPlane && a.roofPlaneId
+                  ? `${a.geometryClass.replace(/_/g, ' ')} #${a.roofPlaneId.replace(/solar-plane-/, '')}`
+                  : a.geometryClass.replace(/_/g, ' ')}
+              </span>
+              <span className="text-[10px] text-slate-500">
+                {Math.round(a.confidence)}% conf
+              </span>
+              {a.lineSubtype && (
+                <span className="text-[9px] text-amber-300 border border-amber-500/30 rounded px-1">
+                  {lineStyle?.label ?? a.lineSubtype}
+                </span>
+              )}
+              {a.planeType && (
+                <span className="text-[9px] text-emerald-300 border border-emerald-500/30 rounded px-1">
+                  {a.planeType}
+                </span>
+              )}
+              {a.authority?.mockArtifact ? (
+                <span className="text-[9px] text-red-300 border border-red-500/30 rounded px-1">
+                  MOCK
+                </span>
+              ) : (
+                <span className="text-[9px] text-slate-400 border border-slate-600/30 rounded px-1">
+                  {a.authority?.state?.replace(/_/g, ' ') ?? 'unknown'}
+                </span>
+              )}
+            </div>
 
-          <p className="mt-0.5 text-[9px] text-slate-600">
-            Source: {overlayElements[hoveredIdx].artifact.provenance?.sourcePipeline ?? 'unknown'} / {overlayElements[hoveredIdx].artifact.provenance?.toolName ?? 'unknown'} · REVIEW-ONLY / NON-AUTHORITATIVE
-          </p>
-        </div>
-      )}
+            {/* Plane-specific details: pitch, azimuth, area, vertices */}
+            {isRoofPlane && (
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] text-slate-400">
+                {a.pitchDegrees != null && (
+                  <span className="text-slate-300">Pitch: <span className="text-emerald-300">{a.pitchDegrees}°</span></span>
+                )}
+                {a.azimuthDegrees != null && (
+                  <span className="text-slate-300">Azimuth: <span className="text-emerald-300">{a.azimuthDegrees}°</span></span>
+                )}
+                {a.areaSqM != null && (
+                  <span className="text-slate-300">Area: <span className="text-emerald-300">{a.areaSqM.toFixed(1)} m²</span></span>
+                )}
+                {a.polygon?.vertices != null && (
+                  <span className="text-slate-300">Vertices: <span className="text-slate-200">{a.polygon.vertices.length}</span></span>
+                )}
+                {a.inlierCount != null && (
+                  <span className="text-slate-300">Inliers: <span className="text-slate-200">{a.inlierCount}/{a.totalPoints}</span></span>
+                )}
+                {a.consensusPhotoCount != null && (
+                  <span className="text-slate-300">Photos: <span className="text-slate-200">{a.consensusPhotoCount}</span></span>
+                )}
+                {a.isSynthetic && (
+                  <span className="text-amber-400">⚠ Synthetic</span>
+                )}
+              </div>
+            )}
+
+            {/* Line-specific details: subtype, confidence, length */}
+            {isRoofLine && (
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] text-slate-400">
+                {a.lineSubtype && (
+                  <span className="text-slate-300">Type: <span className="text-amber-300">{lineStyle?.label ?? a.lineSubtype}</span></span>
+                )}
+                <span className="text-slate-300">Confidence: <span className="text-amber-300">{Math.round(a.confidence)}%</span></span>
+                {a.estimatedLengthM != null && (
+                  <span className="text-slate-300">Length: <span className="text-amber-300">{a.estimatedLengthM.toFixed(1)} m</span></span>
+                )}
+                {a.isSynthetic && (
+                  <span className="text-amber-400">⚠ Synthetic</span>
+                )}
+              </div>
+            )}
+
+            {/* Non-plane/non-line: generic details */}
+            {!isRoofPlane && !isRoofLine && (
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] text-slate-500">
+                {a.areaSqM != null && (
+                  <span>Area: {a.areaSqM.toFixed(1)} m²</span>
+                )}
+                {a.estimatedLengthM != null && (
+                  <span>Length: {a.estimatedLengthM.toFixed(1)} m</span>
+                )}
+                {a.isSynthetic && (
+                  <span className="text-amber-400">⚠ Synthetic</span>
+                )}
+              </div>
+            )}
+
+            <p className="mt-0.5 text-[9px] text-slate-600">
+              Source: {a.provenance?.sourcePipeline ?? 'unknown'} / {a.provenance?.toolName ?? 'unknown'} · REVIEW-ONLY / NON-AUTHORITATIVE
+            </p>
+          </div>
+        );
+      })()}
     </div>
   );
 }
