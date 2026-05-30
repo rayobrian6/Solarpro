@@ -377,9 +377,9 @@ async function segmentWithSAM2FromPhoto(
 
   try {
     // Fetch image bytes
-    console.info(`[SAM2] Image fetch: START — ${urlHost} (timeout=8s)`);
+    console.info(`[SAM2] Image fetch: START — ${urlHost} (timeout=30s)`);
     const response = await fetch(fileUrl, {
-      signal: AbortSignal.timeout(8_000),
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!response.ok) {
@@ -416,7 +416,7 @@ async function segmentWithSAM2FromPhoto(
     const message = error instanceof Error ? error.message : String(error);
     const isTimeout = error instanceof DOMException && error.name === 'TimeoutError';
     console.warn(
-      `[SAM2] Photo pipeline: FAILED${isTimeout ? ' (FETCH TIMEOUT at 8s)' : ''} in ${elapsedMs}ms — ${message}`,
+      `[SAM2] Photo pipeline: FAILED${isTimeout ? ' (FETCH TIMEOUT at 30s)' : ''} in ${elapsedMs}ms — ${message}`,
     );
     return null;
   }
@@ -431,9 +431,9 @@ async function extractGeometryFromPhoto(fileUrl: string): Promise<RoofGeometryEx
   const urlHost = tryExtractHost(fileUrl);
 
   // Fetch image bytes
-  console.info(`[SAM2] Canny image fetch: START — ${urlHost} (timeout=8s)`);
+  console.info(`[SAM2] Canny image fetch: START — ${urlHost} (timeout=30s)`);
   const response = await fetch(fileUrl, {
-    signal: AbortSignal.timeout(8_000),
+    signal: AbortSignal.timeout(30_000),
   });
 
   if (!response.ok) {

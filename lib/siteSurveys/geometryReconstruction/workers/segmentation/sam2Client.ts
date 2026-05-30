@@ -22,8 +22,8 @@ import type { NormalizedPoint } from '../../types';
 // Configuration
 // ---------------------------------------------------------------------------
 
-/** Request timeout in milliseconds. CPU inference can take ~40s on Starter plan. */
-const SAM2_TIMEOUT_MS = 60_000;
+/** Request timeout in milliseconds. CPU inference can take ~40s on Starter plan, plus cold-start overhead. */
+const SAM2_TIMEOUT_MS = 180_000;
 
 /**
  * Read the SAM 2 service URL from the environment at call time.
