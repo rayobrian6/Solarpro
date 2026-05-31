@@ -19,9 +19,10 @@ Deployment:
   - Environment variable SAM2_HF_MODEL_ID controls model size
 
 CPU Optimization:
-  - Images resized to max 256px (CPU) / 2048px (GPU) before processing
-  - CPU: points_per_side=9 (81 grid points — stable on Render Standard 4GB RAM;
-    8/64 grid was too coarse (0 masks); 10/100 grid caused ~49s & OOM; 12/144 crashes)
+  - Images resized to max 384px (CPU) / 2048px (GPU) before processing
+  - CPU: points_per_side=8 (64 grid points — stable on Render Standard 4GB RAM;
+    9/81 grid caused ~44s processing & 502; 10/100 caused ~49s & OOM/crash)
+  - At 256px, 8x8 grid misses roofs entirely (0 masks); at 384px, more detail helps
   - GPU: points_per_side=32 with MAX_IMAGE_DIM=2048 (full quality)
   - Lower pred_iou_thresh (0.6) and stability_score_thresh (0.85) for challenging lighting
   - Smaller points_per_batch (16 vs default 64) to reduce peak memory
@@ -77,8 +78,9 @@ IS_CPU = DEVICE == "cpu"
 #            facebook/sam2.1-hiera-base-plus, facebook/sam2.1-hiera-large
 HF_MODEL_ID = os.environ.get("SAM2_HF_MODEL_ID", "facebook/sam2.1-hiera-tiny" if IS_CPU else "facebook/sam2.1-hiera-small")
 # Maximum image dimension for processing — larger images are resized
-# 256px on CPU to stay within 4GB RAM on Render Standard plan
-MAX_IMAGE_DIM = int(os.environ.get("SAM2_MAX_IMAGE_DIM", "256" if IS_CPU else "2048"))
+# 384px on CPU: 8x8 grid can detect roofs at this resolution without OOM
+# 256px on CPU: too small, 8x8 grid misses roofs entirely (0 masks)
+MAX_IMAGE_DIM = int(os.environ.get("SAM2_MAX_IMAGE_DIM", "384" if IS_CPU else "2048"))
 # Minimum mask area as fraction of image — filters noise masks
 MIN_MASK_AREA_FRACTION = float(os.environ.get("SAM2_MIN_MASK_AREA_FRACTION", "0.02"))
 # Prediction confidence and stability thresholds — lower values catch weaker masks
@@ -176,8 +178,9 @@ def load_sam2_model():
 
         # CPU-optimized mask generator settings
         # On CPU: conservative optimization for Render Standard plan (CPU, ~4GB RAM)
-        #   - points_per_side=9 (81 grid points — middle ground for roof detection;
-        #     8/64 grid too coarse (0 masks); 10/100 caused OOM & ~49s)
+        #   - points_per_side=8 (64 grid points — stable; 9 caused ~44s & 502;
+        #     10 caused ~49s & OOM)
+        #   - MAX_IMAGE_DIM=384 on CPU (256px was too small for 8x8 grid, 0 masks)
         #   - MAX_IMAGE_DIM=256 on CPU (reduced from 512→384→256;
         #     image size has minimal impact on timing — grid points dominate)
         #   - points_per_batch=16 (smaller batches to limit peak memory)
