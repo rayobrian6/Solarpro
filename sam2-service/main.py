@@ -250,13 +250,28 @@ def classify_mask_region(
     img_w: int,
     img_h: int,
     stability_score: float,
+    original_image_bgr: np.ndarray | None = None,
+    mask_binary: np.ndarray | None = None,
+    scale: float = 1.0,
 ) -> str:
     """
     Heuristic classification of a mask region based on position, size,
-    and geometry. SAM 2 is class-agnostic — this provides geometry-based
-    hints for downstream Pipeline B workers.
+    geometry, and (when available) mask pixel content analysis.
 
-    Returns one of: roof, wall, sky, ground, obstruction, equipment, unknown
+    SAM 2 is class-agnostic — this provides geometry-based hints for
+    downstream Pipeline B workers. The classification considers:
+
+    1. Vertical position (sky at top, ground at bottom, roof in upper-middle)
+    2. Shape aspect ratio (wide = roof, tall = wall, square = obstruction)
+    3. Area fraction (large = sky/roof, tiny = obstruction/equipment)
+    4. Green content analysis (high green = vegetation/tree, not roof)
+    5. Texture complexity (trees have complex texture, roofs are smooth)
+
+    Returns one of: roof, wall, sky, ground, tree, obstruction, equipment, unknown
+
+    IMPORTANT: "tree" is a distinct class from "obstruction" because trees
+    are the #1 source of false roof masks. Downstream consumers must filter
+    out tree masks and not render them as roof geometry.
     """
     x, y, w, h = bbox
     norm_y_center = (y + h / 2) / img_h
@@ -264,22 +279,137 @@ def classify_mask_region(
     norm_area = area / (img_w * img_h)
     aspect_ratio = max(w, h) / max(min(w, h), 1)
 
-    if norm_y_center < 0.35 and norm_area > 0.05:
+    # ── Vegetation detection ──
+    # Trees are the #1 source of false roof masks. If the mask region
+    # contains significant green pixels, classify it as "tree" regardless
+    # of its position. This catches trees that appear in the upper half
+    # of the image (which the old heuristic incorrectly labeled "roof").
+    green_ratio = 0.0
+    if mask_binary is not None and original_image_bgr is not None:
+        green_ratio = _compute_green_ratio(mask_binary, original_image_bgr, scale)
+
+    # High green content → definitely vegetation/tree, not roof
+    if green_ratio > 0.35 and norm_area > 0.005:
+        return "tree"
+
+    # ── Sky detection (top of image, large area) ──
+    if norm_y_center < 0.35 and norm_area > 0.04:
         return "sky"
-    if norm_y_center < 0.55 and norm_area > 0.03 and aspect_ratio > 1.2:
-        return "roof"
-    if norm_y_center < 0.55 and norm_area > 0.05:
-        return "roof"
-    if 0.25 <= norm_y_center < 0.8 and h > w * 0.8:
-        return "wall"
-    if norm_y_center > 0.65 and norm_area > 0.02:
+
+    # ── Ground detection (bottom of image, moderate-to-large area) ──
+    if norm_y_center > 0.7 and norm_area > 0.02:
         return "ground"
-    if 0.003 < norm_area < 0.04 and norm_y_center < 0.6:
+
+    # ── Tree detection by shape (tall, moderate area, not ground level) ──
+    # Trees often have a distinctive vertical profile: narrower than roof,
+    # moderate-to-large area, positioned in upper-middle of image.
+    # Even without green detection (resized image may lose color fidelity),
+    # tall narrow regions in the upper half that aren\'t clearly roof-shaped
+    # are likely trees.
+    if 0.15 < norm_y_center < 0.65 and norm_area > 0.02 and aspect_ratio < 1.3:
+        # Narrow-ish tall region in upper-middle → likely tree, not roof
+        if green_ratio > 0.15:
+            return "tree"
+
+    # ── Roof detection ──
+    # Roofs are typically:
+    # - In the upper-middle portion of the image (0.15–0.55 vertical)
+    # - Wide (aspect ratio > 1.2, wider than tall)
+    # - Moderate to large area (>3% of image)
+    # - Low green content (<15%)
+    # - High stability score (roofs are solid, not complex textures)
+    if 0.1 < norm_y_center < 0.6 and norm_area > 0.02:
+        if green_ratio < 0.15:
+            # Wide region = likely roof plane
+            if aspect_ratio > 1.3:
+                return "roof"
+            # Moderate aspect with high stability = probably roof
+            if stability_score > 0.95 and aspect_ratio > 1.0:
+                return "roof"
+            # Large area in upper half with low green = roof candidate
+            if norm_area > 0.05:
+                return "roof"
+
+    # ── Wall detection ──
+    # Walls are tall, narrow, in the middle vertical range
+    if 0.2 <= norm_y_center < 0.85 and h > w * 0.8 and green_ratio < 0.15:
+        return "wall"
+
+    # ── Equipment detection (small, upper portion) ──
+    if 0.003 < norm_area < 0.03 and norm_y_center < 0.6 and green_ratio < 0.15:
         return "equipment"
+
+    # ── Obstruction detection (very small regions) ──
     if norm_area < 0.01:
         return "obstruction"
 
+    # ── Remaining ground ──
+    if norm_y_center > 0.55 and norm_area > 0.01:
+        return "ground"
+
     return "unknown"
+
+
+def _compute_green_ratio(
+    mask_binary: np.ndarray,
+    original_image_bgr: np.ndarray,
+    scale: float,
+) -> float:
+    """
+    Compute the ratio of green-dominant pixels within the mask region
+    of the ORIGINAL image.
+
+    This detects vegetation (trees, grass, bushes) which is the primary
+    source of false roof masks. A high green ratio means the mask region
+    is likely vegetation, not a roof surface.
+
+    Uses HSV color space for robust green detection that handles
+    shadows and varying illumination.
+    """
+    try:
+        if original_image_bgr is None or mask_binary is None:
+            return 0.0
+
+        orig_h, orig_w = original_image_bgr.shape[:2]
+
+        # Scale mask back to original image coordinates
+        if scale != 1.0:
+            mask_full = cv2.resize(
+                mask_binary.astype(np.uint8),
+                (orig_w, orig_h),
+                interpolation=cv2.INTER_NEAREST,
+            )
+        else:
+            mask_full = mask_binary.astype(np.uint8)
+
+        # Get masked pixels from original image
+        masked_pixels = original_image_bgr[mask_full > 0]
+
+        if len(masked_pixels) < 10:
+            return 0.0
+
+        # Convert to HSV for robust green detection
+        hsv = cv2.cvtColor(masked_pixels.reshape(-1, 1, 3), cv2.COLOR_BGR2HSV)
+        hsv = hsv.reshape(-1, 3)
+
+        # Green in HSV: H roughly 35-85, S > 40, V > 40
+        # This catches grass, tree leaves, bushes in various lighting
+        h, s, v = hsv[:, 0], hsv[:, 1], hsv[:, 2]
+        green_mask = (h >= 35) & (h <= 85) & (s > 40) & (v > 40)
+        green_count = np.sum(green_mask)
+
+        ratio = green_count / len(masked_pixels)
+        return float(ratio)
+
+    except Exception as e:
+        logger.warning(f"Green ratio computation failed: {e}")
+        return 0.0
+
+
+# Classes that are relevant for roof geometry reconstruction.
+# Masks with other class hints are filtered out to avoid rendering
+# trees, sky, and ground as geometry overlays.
+ROOF_RELEVANT_CLASSES = {"roof", "wall", "equipment", "obstruction"}
 
 
 # ---------------------------------------------------------------------------
@@ -329,8 +459,8 @@ async def health_check():
 async def segment_image(
     file: UploadFile = File(..., description="Survey photo (JPEG/PNG/WebP)"),
     min_area_fraction: float = Query(
-        default=0.02,
-        description="Minimum mask area as fraction of image area",
+        default=0.05,
+        description="Minimum mask area as fraction of image area (raised from 0.02 to filter ground patches)",
         ge=0.001,
         le=0.5,
     ),
@@ -339,6 +469,10 @@ async def segment_image(
         description="Maximum number of masks to return",
         ge=1,
         le=100,
+    ),
+    roof_only: bool = Query(
+        default=True,
+        description="If true, only return roof-relevant masks (roof, wall, equipment, obstruction). Filters out sky, ground, tree, unknown.",
     ),
 ):
     """
@@ -433,6 +567,9 @@ async def segment_image(
             img_w=orig_w,
             img_h=orig_h,
             stability_score=stability,
+            original_image_bgr=image,
+            mask_binary=mask_binary,
+            scale=scale,
         )
 
         confidence = min(100, round((predicted_iou * 0.4 + stability * 0.6) * 100))
@@ -451,6 +588,27 @@ async def segment_image(
         # Free mask memory as we go
         del sam_mask
 
+    # ── Roof-only filtering ──
+    # When roof_only=True (default), only return masks whose class_hint is
+    # relevant for roof geometry. This filters out sky, ground, tree, and
+    # unknown masks that would appear as garbage overlays on the house.
+    # The classification is heuristic-based and may misclassify some masks,
+    # but this filter is essential to prevent tree/ground lines from
+    # dominating the geometry overlay.
+    pre_filter_count = len(result_masks)
+    if roof_only:
+        roof_masks = [m for m in result_masks if m.class_hint in ROOF_RELEVANT_CLASSES]
+        filtered_out = [m for m in result_masks if m.class_hint not in ROOF_RELEVANT_CLASSES]
+        if filtered_out:
+            class_counts = {}
+            for m in filtered_out:
+                class_counts[m.class_hint] = class_counts.get(m.class_hint, 0) + 1
+            logger.info(
+                f"Roof-only filter: removed {len(filtered_out)} non-roof masks: {class_counts} "
+                f"({pre_filter_count} → {len(roof_masks)} remaining)"
+            )
+        result_masks = roof_masks
+
     result_masks.sort(key=lambda m: m.area, reverse=True)
     result_masks = result_masks[:max_masks]
 
@@ -458,7 +616,8 @@ async def segment_image(
 
     logger.info(
         f"Segmented {orig_w}x{orig_h} image (processed at {res_w}x{res_h}): "
-        f"{len(sam_masks)} raw masks → {len(result_masks)} filtered masks "
+        f"{len(sam_masks)} raw masks → {pre_filter_count} classified → "
+        f"{len(result_masks)} roof-only filtered masks "
         f"in {processing_time:.0f}ms"
     )
 
