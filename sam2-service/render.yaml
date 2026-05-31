@@ -18,6 +18,6 @@ services:
       - key: SAM2_DOUGLAS_PEUCKER_EPSILON
         value: "5.0"
       - key: SAM2_MAX_IMAGE_DIM
-        value: "512"
+        value: "384"
       - key: PORT
         value: "10000"
