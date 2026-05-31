@@ -18,7 +18,7 @@ services:
       - key: SAM2_DOUGLAS_PEUCKER_EPSILON
         value: "5.0"
       - key: SAM2_MAX_IMAGE_DIM
-        value: "384"
+        value: "256"
       - key: SAM2_PRED_IOU_THRESH
         value: "0.6"
       - key: SAM2_STABILITY_SCORE_THRESH

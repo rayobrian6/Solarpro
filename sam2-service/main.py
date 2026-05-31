@@ -19,14 +19,15 @@ Deployment:
   - Environment variable SAM2_HF_MODEL_ID controls model size
 
 CPU Optimization:
-  - Images resized to max 384px (CPU) / 2048px (GPU) before processing
-  - CPU: points_per_side=10 with MAX_IMAGE_DIM=384 (balanced speed/detection)
-  - GPU: points_per_side=32 with MAX_IMAGE_DIM=2048 (full quality)
-  - Lower pred_iou_thresh (0.6) and stability_score_thresh (0.85) for challenging lighting
+  - Images resized to max 256px before processing (reduced from 384→256 to prevent OOM)
+  - Reduced points_per_side (10 vs default 32) for faster inference
   - Smaller points_per_batch (16 vs default 64) to reduce memory
   - crop_n_layers=0 on CPU to avoid expensive multi-scale cropping
+  - Lower pred_iou_thresh (0.6 vs default 0.7) and stability_score_thresh (0.85 vs 0.92)
+    to compensate for smaller grid — catches weaker roof masks
   - Model loaded once, reused across requests
   - gc.collect() after inference to free memory immediately
+  - Memory monitoring: logs peak RSS before/after inference
 
 REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
 """
@@ -43,6 +44,16 @@ import numpy as np
 from fastapi import FastAPI, HTTPException, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+
+def _get_memory_mb() -> float:
+    """Get current process RSS in MB for memory monitoring."""
+    try:
+        import resource
+        # resource.getrusage returns kb on Linux
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    except Exception:
+        return 0.0
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -74,11 +85,15 @@ IS_CPU = DEVICE == "cpu"
 #            facebook/sam2.1-hiera-base-plus, facebook/sam2.1-hiera-large
 HF_MODEL_ID = os.environ.get("SAM2_HF_MODEL_ID", "facebook/sam2.1-hiera-tiny" if IS_CPU else "facebook/sam2.1-hiera-small")
 # Maximum image dimension for processing — larger images are resized
-# 512px on CPU to stay within 8GB RAM on Render Starter plan
-MAX_IMAGE_DIM = int(os.environ.get("SAM2_MAX_IMAGE_DIM", "384" if IS_CPU else "2048"))
+# 256px on CPU to stay within memory limits on Render Standard plan (4GB RAM)
+# Previous values: 512 (crashed), 384 (51s processing, still crashed)
+# At 256px, processing should be ~20-25s with ~60% less memory pressure
+MAX_IMAGE_DIM = int(os.environ.get("SAM2_MAX_IMAGE_DIM", "256" if IS_CPU else "2048"))
 # Minimum mask area as fraction of image — filters noise masks
 MIN_MASK_AREA_FRACTION = float(os.environ.get("SAM2_MIN_MASK_AREA_FRACTION", "0.02"))
 # Prediction confidence and stability thresholds — lower values catch weaker masks
+# Lowered from defaults (0.7/0.92) because smaller image + fewer grid points
+# may produce lower-scoring but still valid roof masks
 PRED_IOU_THRESH = float(os.environ.get("SAM2_PRED_IOU_THRESH", "0.6"))
 STABILITY_SCORE_THRESH = float(os.environ.get("SAM2_STABILITY_SCORE_THRESH", "0.85"))
 # Maximum masks to return per image
@@ -158,13 +173,13 @@ def load_sam2_model():
         _sam2_model = build_sam2_hf(model_id=HF_MODEL_ID, device=DEVICE)
 
         # CPU-optimized mask generator settings
-        # On CPU: conservative optimization for Render Standard plan (CPU)
-        #   - points_per_side=10 (100 grid points — needed for roof detection;
-        #     8/64 grid missed roofs entirely on test images)
-        #   - MAX_IMAGE_DIM=384 on CPU (reduced from 512 to keep processing
-        #     under 45s; at 512px, points_per_side=10 caused 52s & OOM)
+        # On CPU: aggressive optimization for Render Standard plan (4GB RAM)
+        #   - points_per_side=10 (100 grid points — good roof detection without
+        #     the 144-point grid that caused 51s processing and OOM crashes)
         #   - points_per_batch=16 (smaller batches to limit peak memory)
         #   - crop_n_layers=0 (disable multi-crop, huge memory savings)
+        #   - pred_iou_thresh=0.6 (lowered from 0.7 to catch weaker masks)
+        #   - stability_score_thresh=0.85 (lowered from 0.92 for same reason)
         # On GPU: use full settings for better quality
         if IS_CPU:
             _sam2_amg = SAM2AutomaticMaskGenerator(
@@ -192,6 +207,9 @@ def load_sam2_model():
             f"SAM 2 loaded successfully in {_model_load_time:.1f}s "
             f"(model_id={HF_MODEL_ID}, device={DEVICE}, "
             f"points_per_side={10 if IS_CPU else 32}, "
+            f"pred_iou_thresh={PRED_IOU_THRESH}, "
+            f"stability_score_thresh={STABILITY_SCORE_THRESH}, "
+            f"MAX_IMAGE_DIM={MAX_IMAGE_DIM}, "
             f"crop_n_layers={0 if IS_CPU else 1})"
         )
 
@@ -529,9 +547,11 @@ async def segment_image(
     # Run SAM 2 Automatic Mask Generation
     try:
         image_rgb = cv2.cvtColor(image_resized, cv2.COLOR_BGR2RGB)
-        logger.info(f"Starting SAM 2 inference on {res_w}x{res_h} image (CPU={IS_CPU})")
+        mem_before = _get_memory_mb()
+        logger.info(f"Starting SAM 2 inference on {res_w}x{res_h} image (CPU={IS_CPU}, RSS={mem_before:.0f}MB)")
         sam_masks = amg.generate(image_rgb)
-        logger.info(f"SAM 2 inference produced {len(sam_masks)} raw masks")
+        mem_after = _get_memory_mb()
+        logger.info(f"SAM 2 inference produced {len(sam_masks)} raw masks (RSS={mem_after:.0f}MB, delta={mem_after-mem_before:.0f}MB)")
 
     except Exception as e:
         logger.error(f"SAM 2 inference failed: {e}")
@@ -627,7 +647,7 @@ async def segment_image(
         f"Segmented {orig_w}x{orig_h} image (processed at {res_w}x{res_h}): "
         f"{len(sam_masks)} raw masks → {pre_filter_count} classified → "
         f"{len(result_masks)} roof-only filtered masks "
-        f"in {processing_time:.0f}ms"
+        f"in {processing_time:.0f}ms (RSS={_get_memory_mb():.0f}MB)"
     )
 
     # Free memory after processing
