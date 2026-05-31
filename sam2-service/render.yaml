@@ -19,5 +19,9 @@ services:
         value: "5.0"
       - key: SAM2_MAX_IMAGE_DIM
         value: "384"
+      - key: SAM2_PRED_IOU_THRESH
+        value: "0.6"
+      - key: SAM2_STABILITY_SCORE_THRESH
+        value: "0.85"
       - key: PORT
         value: "10000"

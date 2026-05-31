@@ -22,6 +22,7 @@ CPU Optimization:
   - Images resized to max 384px (CPU) / 2048px (GPU) before processing
   - CPU: points_per_side=10 with MAX_IMAGE_DIM=384 (balanced speed/detection)
   - GPU: points_per_side=32 with MAX_IMAGE_DIM=2048 (full quality)
+  - Lower pred_iou_thresh (0.6) and stability_score_thresh (0.85) for challenging lighting
   - Smaller points_per_batch (16 vs default 64) to reduce memory
   - crop_n_layers=0 on CPU to avoid expensive multi-scale cropping
   - Model loaded once, reused across requests
@@ -77,6 +78,9 @@ HF_MODEL_ID = os.environ.get("SAM2_HF_MODEL_ID", "facebook/sam2.1-hiera-tiny" if
 MAX_IMAGE_DIM = int(os.environ.get("SAM2_MAX_IMAGE_DIM", "384" if IS_CPU else "2048"))
 # Minimum mask area as fraction of image — filters noise masks
 MIN_MASK_AREA_FRACTION = float(os.environ.get("SAM2_MIN_MASK_AREA_FRACTION", "0.02"))
+# Prediction confidence and stability thresholds — lower values catch weaker masks
+PRED_IOU_THRESH = float(os.environ.get("SAM2_PRED_IOU_THRESH", "0.6"))
+STABILITY_SCORE_THRESH = float(os.environ.get("SAM2_STABILITY_SCORE_THRESH", "0.85"))
 # Maximum masks to return per image
 MAX_MASKS = int(os.environ.get("SAM2_MAX_MASKS", "20"))
 # Douglas-Peucker simplification epsilon (pixels)
@@ -167,8 +171,8 @@ def load_sam2_model():
                 model=_sam2_model,
                 points_per_side=10,
                 points_per_batch=16,
-                pred_iou_thresh=0.7,
-                stability_score_thresh=0.92,
+                pred_iou_thresh=PRED_IOU_THRESH,
+                stability_score_thresh=STABILITY_SCORE_THRESH,
                 crop_n_layers=0,
                 crop_n_points_downscale_factor=2,
                 min_mask_region_area=int(MAX_IMAGE_DIM * MAX_IMAGE_DIM * MIN_MASK_AREA_FRACTION),
@@ -178,8 +182,8 @@ def load_sam2_model():
                 model=_sam2_model,
                 points_per_side=32,
                 points_per_batch=64,
-                pred_iou_thresh=0.7,
-                stability_score_thresh=0.92,
+                pred_iou_thresh=PRED_IOU_THRESH,
+                stability_score_thresh=STABILITY_SCORE_THRESH,
                 min_mask_region_area=int(MAX_IMAGE_DIM * MAX_IMAGE_DIM * MIN_MASK_AREA_FRACTION),
             )
 
