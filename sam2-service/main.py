@@ -22,11 +22,14 @@ CPU Optimization:
   - Images resized to max 384px (CPU) / 2048px (GPU) before processing
   - CPU: points_per_side=8 (64 grid points — stable on Render Standard 4GB RAM;
     9/81 grid caused ~44s processing & 502; 10/100 caused ~49s & OOM/crash)
-  - At 256px, 8x8 grid misses roofs entirely (0 masks); at 384px, more detail helps
+  - At 384px, 8x8 grid produces ~13 raw masks with min_area_fraction=0.005;
+    the previous default min_area_fraction=0.05 filtered ALL masks out (0 results)
   - GPU: points_per_side=32 with MAX_IMAGE_DIM=2048 (full quality)
   - Lower pred_iou_thresh (0.6) and stability_score_thresh (0.85) for challenging lighting
   - Smaller points_per_batch (16 vs default 64) to reduce peak memory
   - crop_n_layers=0 on CPU to avoid expensive multi-scale cropping
+  - min_area_fraction defaults to SAM2_MIN_MASK_AREA_FRACTION env var (0.02),
+    not hardcoded 0.05 — the old 0.05 default was the root cause of "0 masks"
   - Memory monitoring via resource.getrusage (RSS logged before/after inference)
   - Model loaded once, reused across requests
   - gc.collect() after inference to free memory immediately
@@ -82,13 +85,14 @@ HF_MODEL_ID = os.environ.get("SAM2_HF_MODEL_ID", "facebook/sam2.1-hiera-tiny" if
 # 256px on CPU: too small, 8x8 grid misses roofs entirely (0 masks)
 MAX_IMAGE_DIM = int(os.environ.get("SAM2_MAX_IMAGE_DIM", "384" if IS_CPU else "2048"))
 # Minimum mask area as fraction of image — filters noise masks
-MIN_MASK_AREA_FRACTION = float(os.environ.get("SAM2_MIN_MASK_AREA_FRACTION", "0.02"))
+MIN_MASK_AREA_FRACTION = float(os.environ.get("SAM2_MIN_MASK_AREA_FRACTION", "0.01"))
 # Prediction confidence and stability thresholds — lower values catch weaker masks
 PRED_IOU_THRESH = float(os.environ.get("SAM2_PRED_IOU_THRESH", "0.6"))
 STABILITY_SCORE_THRESH = float(os.environ.get("SAM2_STABILITY_SCORE_THRESH", "0.85"))
 # Grid density for AMG — fewer points = faster inference, fewer masks
-# 8 points/side = 64 grid points (stable on Render CPU but too coarse, 0 masks)
-# 9 points/side = 81 grid points (middle ground: enough density for roof detection)
+# 8 points/side = 64 grid points (stable on Render CPU at 384px; ~37s processing;
+#   produces ~13 raw masks with min_area_fraction=0.005, ~8 roof-relevant masks)
+# 9 points/side = 81 grid points (~44s processing, causes 502 during inference)
 # 10 points/side = 100 grid points (causes OOM/crash on 4GB CPU at ~49s)
 # 12 points/side = 144 grid points (crashes even at 256px)
 POINTS_PER_SIDE = int(os.environ.get("SAM2_POINTS_PER_SIDE", "9" if IS_CPU else "32"))
@@ -178,11 +182,10 @@ def load_sam2_model():
 
         # CPU-optimized mask generator settings
         # On CPU: conservative optimization for Render Standard plan (CPU, ~4GB RAM)
-        #   - points_per_side=8 (64 grid points — stable; 9 caused ~44s & 502;
-        #     10 caused ~49s & OOM)
-        #   - MAX_IMAGE_DIM=384 on CPU (256px was too small for 8x8 grid, 0 masks)
-        #   - MAX_IMAGE_DIM=256 on CPU (reduced from 512→384→256;
-        #     image size has minimal impact on timing — grid points dominate)
+        #   - points_per_side=8 (64 grid points — stable at 384px; ~37s processing;
+        #     produces ~13 raw masks, ~8 roof-relevant with min_area_fraction=0.01)
+        #   - MAX_IMAGE_DIM=384 on CPU (256px was too small for 8x8 grid)
+        #   - min_area_fraction=0.01 (lowered from 0.05 — old default filtered ALL masks)
         #   - points_per_batch=16 (smaller batches to limit peak memory)
         #   - crop_n_layers=0 (disable multi-crop, huge memory savings)
         # On GPU: use full settings for better quality
@@ -491,8 +494,8 @@ async def health_check():
 async def segment_image(
     file: UploadFile = File(..., description="Survey photo (JPEG/PNG/WebP)"),
     min_area_fraction: float = Query(
-        default=0.05,
-        description="Minimum mask area as fraction of image area (raised from 0.02 to filter ground patches)",
+        default=MIN_MASK_AREA_FRACTION,
+        description="Minimum mask area as fraction of image area (default from SAM2_MIN_MASK_AREA_FRACTION env var)",
         ge=0.001,
         le=0.5,
     ),

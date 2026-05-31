@@ -12,7 +12,7 @@ services:
       - key: SAM2_HF_MODEL_ID
         value: facebook/sam2.1-hiera-tiny
       - key: SAM2_MIN_MASK_AREA_FRACTION
-        value: "0.02"
+        value: "0.01"
       - key: SAM2_MAX_MASKS
         value: "20"
       - key: SAM2_DOUGLAS_PEUCKER_EPSILON
