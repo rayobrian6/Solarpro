@@ -699,10 +699,10 @@ async function segmentWithSAM2FromPhoto(
     );
 
     // Call SAM 2 service (with 502/503 retry built in)
-    // Use min_area_fraction=0.05 (matches Python default) to filter small
-    // ground patches and tree segments. The roof_only=true param is set in
-    // sam2Client.ts to filter non-roof masks on the Python side as well.
-    const sam2Result = await segmentWithSAM2(bytes, 0.05);
+    // Use min_area_fraction=0.02 (lowered from 0.05 — the old threshold filtered
+    // out legitimate roof masks that occupy 3-5% of the image). The roof_only=true
+    // param is set in sam2Client.ts to filter non-roof masks on the Python side.
+    const sam2Result = await segmentWithSAM2(bytes, 0.02);
     const totalElapsedMs = Date.now() - t0;
 
     if (sam2Result !== null) {

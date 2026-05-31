@@ -476,12 +476,12 @@ async function fetchWithRetry(
  * an error — the caller should fall back to Canny edge detection.
  *
  * @param imageBytes - Raw image bytes (JPEG/PNG/WebP)
- * @param minAreaFraction - Minimum mask area as fraction of image (default 0.05)
+ * @param minAreaFraction - Minimum mask area as fraction of image (default 0.02)
  * @param maxMasks - Maximum masks to return (default 20)
  */
 export async function segmentWithSAM2(
   imageBytes: Buffer,
-  minAreaFraction: number = 0.05,
+  minAreaFraction: number = 0.02,
   maxMasks: number = 20,
 ): Promise<SAM2SegmentationResult | null> {
   if (!isSAM2Enabled()) return null;

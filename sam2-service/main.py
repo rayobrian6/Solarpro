@@ -154,20 +154,21 @@ def load_sam2_model():
 
         # CPU-optimized mask generator settings
         # On CPU: aggressive optimization for 8GB RAM Starter plan
-        #   - points_per_side=8 (64 grid points vs 1024 default)
+        #   - points_per_side=12 (144 grid points — improved roof detection
+        #     over the previous 8/64 points which missed many roofs)
         #   - points_per_batch=16 (smaller batches to limit peak memory)
         #   - crop_n_layers=0 (disable multi-crop, huge memory savings)
         # On GPU: use full settings for better quality
         if IS_CPU:
             _sam2_amg = SAM2AutomaticMaskGenerator(
                 model=_sam2_model,
-                points_per_side=8,
+                points_per_side=12,
                 points_per_batch=16,
                 pred_iou_thresh=0.7,
                 stability_score_thresh=0.92,
                 crop_n_layers=0,
                 crop_n_points_downscale_factor=2,
-                min_mask_region_area=int(512 * 512 * MIN_MASK_AREA_FRACTION),
+                min_mask_region_area=int(MAX_IMAGE_DIM * MAX_IMAGE_DIM * MIN_MASK_AREA_FRACTION),
             )
         else:
             _sam2_amg = SAM2AutomaticMaskGenerator(
@@ -176,14 +177,14 @@ def load_sam2_model():
                 points_per_batch=64,
                 pred_iou_thresh=0.7,
                 stability_score_thresh=0.92,
-                min_mask_region_area=int(512 * 512 * MIN_MASK_AREA_FRACTION),
+                min_mask_region_area=int(MAX_IMAGE_DIM * MAX_IMAGE_DIM * MIN_MASK_AREA_FRACTION),
             )
 
         _model_load_time = time.time() - t0
         logger.info(
             f"SAM 2 loaded successfully in {_model_load_time:.1f}s "
             f"(model_id={HF_MODEL_ID}, device={DEVICE}, "
-            f"points_per_side={8 if IS_CPU else 32}, "
+            f"points_per_side={12 if IS_CPU else 32}, "
             f"crop_n_layers={0 if IS_CPU else 1})"
         )
 
@@ -316,10 +317,11 @@ def classify_mask_region(
     # - In the upper-middle portion of the image (0.15–0.55 vertical)
     # - Wide (aspect ratio > 1.2, wider than tall)
     # - Moderate to large area (>3% of image)
-    # - Low green content (<15%)
+    # - Low-to-moderate green content (<25% — raised from 15% to allow
+    #   mossy/weathered roofs with algae that would previously fall to "unknown")
     # - High stability score (roofs are solid, not complex textures)
     if 0.1 < norm_y_center < 0.6 and norm_area > 0.02:
-        if green_ratio < 0.15:
+        if green_ratio < 0.25:
             # Wide region = likely roof plane
             if aspect_ratio > 1.3:
                 return "roof"
@@ -332,11 +334,11 @@ def classify_mask_region(
 
     # ── Wall detection ──
     # Walls are tall, narrow, in the middle vertical range
-    if 0.2 <= norm_y_center < 0.85 and h > w * 0.8 and green_ratio < 0.15:
+    if 0.2 <= norm_y_center < 0.85 and h > w * 0.8 and green_ratio < 0.25:
         return "wall"
 
     # ── Equipment detection (small, upper portion) ──
-    if 0.003 < norm_area < 0.03 and norm_y_center < 0.6 and green_ratio < 0.15:
+    if 0.003 < norm_area < 0.03 and norm_y_center < 0.6 and green_ratio < 0.25:
         return "equipment"
 
     # ── Obstruction detection (very small regions) ──
