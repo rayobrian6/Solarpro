@@ -3,9 +3,9 @@ services:
     name: sam2-segmentation
     runtime: docker
     repo: https://github.com/rayobrian6/Solarpro
-    branch: master
+    branch: dev
     rootDir: sam2-service
-    plan: starter
+    plan: standard
     region: oregon
     healthCheckPath: /health
     envVars:

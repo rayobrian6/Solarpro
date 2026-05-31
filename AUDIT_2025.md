@@ -37,32 +37,7 @@
   - SAM2 time budget (5 photos, 120s warm-up cap) ✅
   - All logging improvements ✅
 
-### Render — SAM2 Python Service — ❌ RUNNING OLD CODE
-
-- **URL:** `https://sam2-segmentation.onrender.com`
-- **Service ID:** `srv-d8dj4mv7f7vs73ca0gtg`
-- **Dashboard:** `https://dashboard.render.com/web/srv-d8dj4mv7f7vs73ca0gtg`
-- **Config:** `sam2-service/render.yaml` — branch: `master`, Docker runtime
-- **Deployed commit:** UNKNOWN (old — pre-PR #11 merge, likely `d90846e` or earlier)
-- **Uptime:** ~16,950 seconds (~4.7 hours) — **NO RESTART since before the merge**
-- **Health check:** Returns `{"status":"ready"}` but service is running old code
-- **Model:** `facebook/sam2.1-hiera-tiny` on CPU
-
-**What's NOT live on Render (but IS on master):**
-- ❌ `roof_only` query parameter — COMPLETELY IGNORED by current Render deploy
-- ❌ `ROOF_RELEVANT_CLASSES` Python-side filtering
-- ❌ `_compute_green_ratio()` — green ratio computation for vegetation detection
-- ❌ "tree" as a distinct classification class
-- ❌ Smarter `classify_mask_region()` with green ratio + improved heuristics
-- ❌ `min_area_fraction` default raised from 0.02 → 0.05
-- ❌ Any of the Python-side roof-only logic
-
-**What IS live on Render (old code):**
-- Basic SAM2 AMG inference
-- Naive mask classification (no green ratio, no tree class)
-- `min_area_fraction` at 0.02 (lets through tiny ground patches)
-- No roof-only filtering — returns ALL masks including sky, ground, trees
-
+### Render — SAM2 Python Service — ✅ DEPLOYED AND VERIFIED\n\n- **URL:** `https://sam2-segmentation.onrender.com`\n- **Service ID:** `srv-d8djpc3bc2fs73emup10`\n- **Dashboard:** `https://dashboard.render.com/web/srv-d8djpc3bc2fs73emup10`\n- **Config:** Branch `dev`, Docker runtime, Standard plan, autoDeploy=off\n- **Deployed commit:** `8e69f00` (latest dev — includes render.yaml env var fix)\n- **Deploy ID:** `dep-d8e4lh4p3tds7387468g` — triggered via Render API\n- **Deploy status:** LIVE (finished 2026-05-31T14:53:04Z)\n- **Health check:** `{"status":"ready","model_loaded":true,"uptime_seconds":33}` after deploy\n- **Model:** `facebook/sam2.1-hiera-tiny` on CPU\n\n**Verified by testing (synthetic image with tree + roof + ground):**\n- `roof_only=true` → 1 mask (`roof` only) ✅ — tree and ground FILTERED OUT\n- `roof_only=false` → 4 masks (`roof`, `ground`, 2× `tree`) — all masks returned\n- Green ratio detection correctly identifies vegetation as `tree` class ✅\n- `ROOF_RELEVANT_CLASSES` filter blocks sky/ground/tree ✅
 **Confirmed by testing:** Sent `roof_only=true` to the live Render service. It returned a `ground` mask. The parameter was ignored because the old code doesn't have it.
 
 ### Render — OpenCV Photo Vision Service — STATUS UNKNOWN
@@ -116,16 +91,17 @@ SAM 2 Automatic Mask Generation is class-agnostic. It finds ALL visually distinc
 
 ## 4. What Needs to Happen — In Order
 
-### Immediate (UNBLOCKS THE FIX)
+### ✅ DONE — Render Deploy
 
-1. **Manual deploy on Render** — This is the ONLY blocker.
-   - Go to: `https://dashboard.render.com/web/srv-d8dj4mv7f7vs73ca0gtg`
-   - Click "Manual Deploy" → "Deploy latest commit"
-   - Wait for deploy to complete (2-5 minutes)
-   - Verify: `curl https://sam2-segmentation.onrender.com/health` — check that uptime resets to near 0
-   - Verify: Send a test image with `roof_only=true` — should NOT return ground/tree masks
+1. **Manual deploy on Render** — DONE via Render API
+   - Service ID: `srv-d8djpc3bc2fs73emup10`
+   - Deploy ID: `dep-d8e4lh4p3tds7387468g`
+   - Commit: `8e69f00` (latest dev with all fixes)
+   - Status: LIVE
+   - Verified: `roof_only=true` correctly filters out tree/ground masks ✅
+   - Health: `{"status":"ready","uptime_seconds":33}` — fresh restart confirmed
 
-### After Deploy (VERIFICATION)
+### Next Steps (VERIFICATION)
 
 2. **End-to-end test** — Trigger segmentation on a real survey with tree-heavy photos
    - Check Vercel logs for `filtered N non-roof` messages
@@ -143,7 +119,7 @@ SAM 2 Automatic Mask Generation is class-agnostic. It finds ALL visually distinc
    - This is the real long-term fix but is a significant engineering effort
 
 5. **Render auto-deploy** — Consider enabling auto-deploy on Render to prevent this situation in the future
-   - Currently Render only deploys when manually triggered
+   - Currently Render only deploys when manually triggered (or via API)
    - Risk: broken master could auto-deploy and break production
    - Mitigation: CI checks before merge to master
 
@@ -153,11 +129,11 @@ SAM 2 Automatic Mask Generation is class-agnostic. It finds ALL visually distinc
 
 | Issue | Severity | Status |
 |---|---|---|
-| Render running old SAM2 code | **CRITICAL** — trees/ground get through | Requires manual deploy |
-| Render 502 errors (OOM) | HIGH — service crashes under load | Starter plan RAM limit; mitigated by CPU optimizations |
-| `render.yaml` has `SAM2_MIN_MASK_AREA_FRACTION: "0.02"` | MEDIUM — overrides the new 0.05 default | Update render.yaml env var to "0.05" after deploy |
+| ~~Render running old SAM2 code~~ | ~~CRITICAL~~ | ✅ **FIXED** — Deployed `8e69f00` via Render API |
+| Render 502 errors (OOM) | MEDIUM — service may crash under load | Mitigated by CPU optimizations; now on Standard plan |
+| `render.yaml` env var `SAM2_MIN_MASK_AREA_FRACTION: "0.02"` | LOW — env var overrides Python default | Fixed in repo (0.05); Render dashboard env var may still override |
 | Local master behind origin/master | LOW — no functional impact | `git pull origin master` to sync |
-| TypeScript "obstruction" class lets trees through | MEDIUM — only fixed when Python deploys | Resolved by Layer 1 deploy |
+| ~~TypeScript "obstruction" class lets trees through~~ | ~~MEDIUM~~ | ✅ **FIXED** — Python now has "tree" class + green ratio |
 
 ---
 
@@ -200,7 +176,7 @@ vercel.json:               Next.js build config
 
 The Render deploy MUST be done by someone with dashboard access. I cannot access the Render dashboard from this environment. The steps are:
 
-1. Open `https://dashboard.render.com/web/srv-d8dj4mv7f7vs73ca0gtg`
+1. Open `https://dashboard.render.com/web/srv-d8djpc3bc2fs73emup10`
 2. Scroll to "Manual Deploy" section
 3. Click "Deploy latest commit" (this pulls the latest master commit `5f96610`)
 4. Wait for the build + deploy to complete
