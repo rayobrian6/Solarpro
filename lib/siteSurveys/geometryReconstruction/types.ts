@@ -56,6 +56,8 @@ export interface SourcePhoto {
   fileId: string;
   fileUrl: string;
   filename: string | null;
+  /** Photo classification label from the survey file (e.g. 'roof_plane', 'overview'). Used to prioritize SAM 2 processing for roof-domain photos. */
+  label?: string | null;
   /** EXIF or user-provided camera angle metadata if available. */
   captureMetadata?: {
     altitude?: number;

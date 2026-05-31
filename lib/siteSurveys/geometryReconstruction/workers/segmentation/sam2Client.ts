@@ -225,15 +225,19 @@ export async function checkSAM2Health(): Promise<SAM2HealthResponse | null> {
  *
  * @returns HealthResponse if model is loaded, null if timeout or unreachable
  */
-export async function waitForSAM2Warm(): Promise<SAM2HealthResponse | null> {
+export async function waitForSAM2Warm(
+  deadlineOverride?: number,
+): Promise<SAM2HealthResponse | null> {
   if (!isSAM2Enabled()) return null;
 
   const serviceURL = getSAM2ServiceURL();
-  const deadline = Date.now() + SAM2_WARMUP_POLL_TIMEOUT_MS;
+  // Use the caller-provided deadline if given, otherwise fall back to the default timeout
+  const deadline = deadlineOverride ?? (Date.now() + SAM2_WARMUP_POLL_TIMEOUT_MS);
+  const effectiveTimeoutMs = deadline - Date.now();
   let attempt = 0;
 
   console.info(
-    `[SAM2] Warm-up: polling /health until model_loaded=true (timeout=${SAM2_WARMUP_POLL_TIMEOUT_MS / 1000}s, interval=${SAM2_WARMUP_POLL_INTERVAL_MS / 1000}s)`,
+    `[SAM2] Warm-up: polling /health until model_loaded=true (timeout=${Math.max(0, Math.round(effectiveTimeoutMs / 1000))}s, interval=${SAM2_WARMUP_POLL_INTERVAL_MS / 1000}s)`,
   );
 
   while (Date.now() < deadline) {
@@ -279,7 +283,7 @@ export async function waitForSAM2Warm(): Promise<SAM2HealthResponse | null> {
     await new Promise((resolve) => setTimeout(resolve, sleepMs));
   }
 
-  const totalWaitMs = SAM2_WARMUP_POLL_TIMEOUT_MS;
+  const totalWaitMs = effectiveTimeoutMs;
   console.warn(
     `[SAM2] Warm-up: TIMEOUT after ${attempt} polls over ${totalWaitMs / 1000}s — model NOT loaded, SAM 2 will likely fail`,
   );
@@ -335,7 +339,7 @@ export function warmupSAM2Service(): void {
   formData.append('file', imageBlob, 'warmup.png');
 
   const url = new URL(`${serviceURL}/segment`);
-  url.searchParams.set('min_area_fraction', '0.99'); // Reject all masks from 1x1 image
+  url.searchParams.set('min_area_fraction', '0.5'); // Max allowed by Pydantic (le=0.5), rejects tiny masks
   url.searchParams.set('max_masks', '1');            // Minimize processing
 
   // Fire-and-forget: we don't await this, and we handle 502 gracefully
@@ -472,12 +476,12 @@ async function fetchWithRetry(
  * an error — the caller should fall back to Canny edge detection.
  *
  * @param imageBytes - Raw image bytes (JPEG/PNG/WebP)
- * @param minAreaFraction - Minimum mask area as fraction of image (default 0.02)
+ * @param minAreaFraction - Minimum mask area as fraction of image (default 0.05)
  * @param maxMasks - Maximum masks to return (default 20)
  */
 export async function segmentWithSAM2(
   imageBytes: Buffer,
-  minAreaFraction: number = 0.02,
+  minAreaFraction: number = 0.05,
   maxMasks: number = 20,
 ): Promise<SAM2SegmentationResult | null> {
   if (!isSAM2Enabled()) return null;
@@ -498,6 +502,7 @@ export async function segmentWithSAM2(
     const url = new URL(`${serviceURL}/segment`);
     url.searchParams.set('min_area_fraction', String(minAreaFraction));
     url.searchParams.set('max_masks', String(maxMasks));
+    url.searchParams.set('roof_only', 'true'); // Filter out sky/ground/tree masks on the Python side
 
     // Use fetchWithRetry to handle 502/503 from Render cold start
     const response = await fetchWithRetry(url.toString(), {
@@ -595,6 +600,18 @@ export async function segmentWithSAM2(
 // Class hint mapping — SAM 2 class_hint → Pipeline B SegmentationClass
 // ---------------------------------------------------------------------------
 
+/**
+ * Roof-relevant segmentation classes — masks with these class hints are
+ * useful for geometry reconstruction. All other classes (sky, ground, tree)
+ * are filtered out when roof_only=true (the default on the Python side).
+ *
+ * This set is also used on the TypeScript side to double-filter: even if
+ * the Python service returns a non-roof mask (e.g. due to a stale deploy),
+ * the worker will drop it here.
+ */
+export const ROOF_RELEVANT_SEGMENTATION_CLASSES: ReadonlySet<import('../../types').SegmentationClass> =
+  new Set(['roof', 'wall', 'obstruction', 'equipment'] as const);
+
 /** Maps SAM 2 heuristic class hints to Pipeline B SegmentationClass. */
 const SAM2_CLASS_HINT_TO_SEGMENTATION_CLASS: Record<
   string,
@@ -606,7 +623,7 @@ const SAM2_CLASS_HINT_TO_SEGMENTATION_CLASS: Record<
   ground: 'ground',
   obstruction: 'obstruction',
   equipment: 'equipment',
-  tree: 'tree', // SAM 2 doesn't produce this, but future fine-tuning might
+  tree: 'tree', // Vegetation detected by green ratio + position heuristic
   unknown: null,
 };
 
