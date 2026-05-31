@@ -20,7 +20,7 @@ Deployment:
 
 CPU Optimization:
   - Images resized to max 512px before processing
-  - Reduced points_per_side (8 vs default 32) for faster inference
+  - Balanced points_per_side (10 for CPU vs default 32) for speed + quality
   - Smaller points_per_batch (16 vs default 64) to reduce memory
   - crop_n_layers=0 on CPU to avoid expensive multi-scale cropping
   - Model loaded once, reused across requests
@@ -153,16 +153,17 @@ def load_sam2_model():
         _sam2_model = build_sam2_hf(model_id=HF_MODEL_ID, device=DEVICE)
 
         # CPU-optimized mask generator settings
-        # On CPU: aggressive optimization for 8GB RAM Starter plan
-        #   - points_per_side=12 (144 grid points — improved roof detection
-        #     over the previous 8/64 points which missed many roofs)
+        # On CPU: balanced optimization for Render Standard plan (CPU)
+        #   - points_per_side=10 (100 grid points — 56% more than 8/64 which
+        #     missed roofs, but avoids 12/144 which caused 71s processing &
+        #     Render OOM/crashes)
         #   - points_per_batch=16 (smaller batches to limit peak memory)
         #   - crop_n_layers=0 (disable multi-crop, huge memory savings)
         # On GPU: use full settings for better quality
         if IS_CPU:
             _sam2_amg = SAM2AutomaticMaskGenerator(
                 model=_sam2_model,
-                points_per_side=12,
+                points_per_side=10,
                 points_per_batch=16,
                 pred_iou_thresh=0.7,
                 stability_score_thresh=0.92,
@@ -184,7 +185,7 @@ def load_sam2_model():
         logger.info(
             f"SAM 2 loaded successfully in {_model_load_time:.1f}s "
             f"(model_id={HF_MODEL_ID}, device={DEVICE}, "
-            f"points_per_side={12 if IS_CPU else 32}, "
+            f"points_per_side={10 if IS_CPU else 32}, "
             f"crop_n_layers={0 if IS_CPU else 1})"
         )
 
