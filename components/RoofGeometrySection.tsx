@@ -28,6 +28,10 @@ import {
   Sun,
   Cpu,
   Zap,
+  Camera,
+  XCircle,
+  Clock,
+  SkipForward,
 } from 'lucide-react';
 import {
   UnifiedGeometryOverlayRenderer,
@@ -39,6 +43,24 @@ import type {
 } from '@/lib/siteSurveys/unifiedGeometry/types';
 
 /* ── Types ──────────────────────────────────────────────────────────── */
+
+/** Mirrors the PhotoSegmentationResult from runSegmentationWorker.ts */
+type PhotoSegmentationStatus =
+  | 'sam2_success'
+  | 'sam2_failed'
+  | 'skipped_budget'
+  | 'skipped_timeout'
+  | 'skipped_warmup'
+  | 'skipped_not_configured';
+
+interface PhotoSegmentationResult {
+  fileId: string;
+  filename: string | null;
+  label: string | null;
+  status: PhotoSegmentationStatus;
+  maskCount: number;
+  reason: string | null;
+}
 
 interface SurveyFile {
   id: string;
@@ -83,6 +105,8 @@ export function RoofGeometrySection({
   const [pipelineBackend, setPipelineBackend] = useState<'sam2' | 'canny' | null>(null);
   const [pipelineCSummary, setPipelineCSummary] = useState<string | null>(null);
   const [googleSolarApiConfigured, setGoogleSolarApiConfigured] = useState<boolean | null>(null); // null = unknown
+  const [photoResults, setPhotoResults] = useState<PhotoSegmentationResult[]>([]);
+  const [budgetExhaustedReason, setBudgetExhaustedReason] = useState<string | null>(null);
 
   // ── Fetch unified geometry bundle ─────────────────────────────────
   const [authRequired, setAuthRequired] = useState(false);
@@ -121,6 +145,8 @@ export function RoofGeometrySection({
     setPipelineStatus('running');
     setPipelineError(null);
     setGenerationSummary(null);
+    setPhotoResults([]);
+    setBudgetExhaustedReason(null);
     try {
       const res = await fetch(
         `/api/site-surveys/${surveyId}/geometry-reconstruction/start`,
@@ -157,6 +183,13 @@ export function RoofGeometrySection({
       // Capture SAM 2 backend info if returned by the pipeline
       if (json.summary?.segmentationBackend === 'sam2' || json.summary?.segmentationBackend === 'canny') {
         setPipelineBackend(json.summary.segmentationBackend);
+      }
+      // Capture per-photo segmentation results for the status panel
+      if (Array.isArray(json.summary?.photoResults)) {
+        setPhotoResults(json.summary.photoResults);
+      }
+      if (json.summary?.budgetExhaustedReason) {
+        setBudgetExhaustedReason(json.summary.budgetExhaustedReason);
       }
       setGenerationSummary(
         `Pipeline B completed${artifactCount != null ? ` with ${artifactCount} artifacts` : ''}${stageCount != null ? ` across ${stageCount} stages` : ''}${polygonCount != null ? `, including ${polygonCount} polygon artifacts` : ''}${consensusCount != null ? ` and ${consensusCount} consensus planes` : ''}.`,
@@ -542,6 +575,128 @@ export function RoofGeometrySection({
             <div className="flex items-start gap-2">
               <AlertTriangle size={12} className="text-amber-400 mt-0.5 flex-shrink-0" />
               <p className="text-[10px] text-amber-200/70">{pipelineCError}</p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Per-Photo Segmentation Status ── */}
+        {photoResults.length > 0 && (
+          <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Camera size={12} className="text-emerald-400" />
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400">Photo Segmentation Status</span>
+              <span className="text-[9px] text-emerald-300/60">
+                {photoResults.filter(r => r.status === 'sam2_success').length}/{photoResults.length} SAM 2 success
+              </span>
+            </div>
+
+            {/* Summary counts */}
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {(() => {
+                const successCount = photoResults.filter(r => r.status === 'sam2_success').length;
+                const failedCount = photoResults.filter(r => r.status === 'sam2_failed').length;
+                const skippedBudget = photoResults.filter(r => r.status === 'skipped_budget').length;
+                const skippedTimeout = photoResults.filter(r => r.status === 'skipped_timeout').length;
+                const skippedWarmup = photoResults.filter(r => r.status === 'skipped_warmup').length;
+                const skippedNotConfig = photoResults.filter(r => r.status === 'skipped_not_configured').length;
+                return (
+                  <>
+                    {successCount > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[9px] font-medium text-emerald-300">
+                        <CheckCircle size={8} /> {successCount} SAM 2
+                      </span>
+                    )}
+                    {failedCount > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2 py-0.5 text-[9px] font-medium text-red-300">
+                        <XCircle size={8} /> {failedCount} failed
+                      </span>
+                    )}
+                    {skippedBudget > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[9px] font-medium text-amber-300">
+                        <SkipForward size={8} /> {skippedBudget} budget
+                      </span>
+                    )}
+                    {skippedTimeout > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/15 px-2 py-0.5 text-[9px] font-medium text-orange-300">
+                        <Clock size={8} /> {skippedTimeout} timeout
+                      </span>
+                    )}
+                    {skippedWarmup > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/15 px-2 py-0.5 text-[9px] font-medium text-slate-300">
+                        <AlertTriangle size={8} /> {skippedWarmup} warm-up fail
+                      </span>
+                    )}
+                    {skippedNotConfig > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/15 px-2 py-0.5 text-[9px] font-medium text-slate-400">
+                        <Cpu size={8} /> {skippedNotConfig} no SAM 2 URL
+                      </span>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+
+            {budgetExhaustedReason && (
+              <p className="text-[9px] text-amber-300/60 mb-2">Budget reason: {budgetExhaustedReason}</p>
+            )}
+
+            {/* Per-photo list -- successes first, then failures, then skips */}
+            <div className="max-h-40 overflow-y-auto space-y-1">
+              {(() => {
+                const sorted = [...photoResults].sort((a, b) => {
+                  const order: Record<string, number> = {
+                    sam2_success: 0,
+                    sam2_failed: 1,
+                    skipped_budget: 2,
+                    skipped_timeout: 3,
+                    skipped_warmup: 4,
+                    skipped_not_configured: 5,
+                  };
+                  return (order[a.status] ?? 9) - (order[b.status] ?? 9);
+                });
+                return sorted.map((pr) => {
+                  const isSuccess = pr.status === 'sam2_success';
+                  const isFailed = pr.status === 'sam2_failed';
+                  const isSkip = pr.status.startsWith('skipped_');
+                  const icon = isSuccess
+                    ? <CheckCircle size={10} className="text-emerald-400 flex-shrink-0" />
+                    : isFailed
+                      ? <XCircle size={10} className="text-red-400 flex-shrink-0" />
+                      : <SkipForward size={10} className="text-slate-400 flex-shrink-0" />;
+                  const label = pr.label
+                    ? pr.label.replace(/_/g, ' ')
+                    : pr.filename ?? pr.fileId.slice(0, 8);
+                  const statusLabel = pr.status.replace(/_/g, ' ');
+                  const rowBg = isSuccess
+                    ? 'bg-emerald-500/5 border border-emerald-500/10'
+                    : isFailed
+                      ? 'bg-red-500/5 border border-red-500/10'
+                      : 'bg-slate-800/30 border border-slate-700/30';
+                  const textColor = isSuccess
+                    ? 'text-emerald-200'
+                    : isFailed
+                      ? 'text-red-200'
+                      : 'text-slate-400';
+                  return (
+                    <div
+                      key={pr.fileId}
+                      className={"flex items-center gap-2 rounded px-2 py-1 text-[10px] " + rowBg}
+                    >
+                      {icon}
+                      <span className={"truncate flex-1 " + textColor}>{label}</span>
+                      {isSuccess && pr.maskCount > 0 && (
+                        <span className="text-[9px] text-emerald-400/60">{pr.maskCount} mask{pr.maskCount !== 1 ? 's' : ''}</span>
+                      )}
+                      {!isSuccess && (
+                        <span className="text-[9px] text-slate-500">{statusLabel}</span>
+                      )}
+                      {pr.reason && (
+                        <span className="text-[9px] text-slate-500 truncate max-w-[200px]" title={pr.reason}>{pr.reason}</span>
+                      )}
+                    </div>
+                  );
+                });
+              })()}
             </div>
           </div>
         )}
