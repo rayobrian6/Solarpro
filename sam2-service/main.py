@@ -20,8 +20,8 @@ Deployment:
 
 CPU Optimization:
   - Images resized to max 256px (CPU) / 2048px (GPU) before processing
-  - CPU: points_per_side=8 (64 grid points — stable on Render Standard 4GB RAM;
-    10/100 grid caused ~49s processing & OOM; 12/144 crashes outright)
+  - CPU: points_per_side=9 (81 grid points — stable on Render Standard 4GB RAM;
+    8/64 grid was too coarse (0 masks); 10/100 grid caused ~49s & OOM; 12/144 crashes)
   - GPU: points_per_side=32 with MAX_IMAGE_DIM=2048 (full quality)
   - Lower pred_iou_thresh (0.6) and stability_score_thresh (0.85) for challenging lighting
   - Smaller points_per_batch (16 vs default 64) to reduce peak memory
@@ -85,10 +85,11 @@ MIN_MASK_AREA_FRACTION = float(os.environ.get("SAM2_MIN_MASK_AREA_FRACTION", "0.
 PRED_IOU_THRESH = float(os.environ.get("SAM2_PRED_IOU_THRESH", "0.6"))
 STABILITY_SCORE_THRESH = float(os.environ.get("SAM2_STABILITY_SCORE_THRESH", "0.85"))
 # Grid density for AMG — fewer points = faster inference, fewer masks
-# 8 points/side = 64 grid points (stable on Render Standard CPU)
-# 10 points/side = 100 grid points (causes OOM/crash on 4GB CPU)
+# 8 points/side = 64 grid points (stable on Render CPU but too coarse, 0 masks)
+# 9 points/side = 81 grid points (middle ground: enough density for roof detection)
+# 10 points/side = 100 grid points (causes OOM/crash on 4GB CPU at ~49s)
 # 12 points/side = 144 grid points (crashes even at 256px)
-POINTS_PER_SIDE = int(os.environ.get("SAM2_POINTS_PER_SIDE", "8" if IS_CPU else "32"))
+POINTS_PER_SIDE = int(os.environ.get("SAM2_POINTS_PER_SIDE", "9" if IS_CPU else "32"))
 # Maximum masks to return per image
 MAX_MASKS = int(os.environ.get("SAM2_MAX_MASKS", "20"))
 # Douglas-Peucker simplification epsilon (pixels)
@@ -175,8 +176,8 @@ def load_sam2_model():
 
         # CPU-optimized mask generator settings
         # On CPU: conservative optimization for Render Standard plan (CPU, ~4GB RAM)
-        #   - points_per_side=8 (64 grid points — stable on Render Standard;
-        #     10/100 grid caused OOM & ~49s processing; 12/144 crashes)
+        #   - points_per_side=9 (81 grid points — middle ground for roof detection;
+        #     8/64 grid too coarse (0 masks); 10/100 caused OOM & ~49s)
         #   - MAX_IMAGE_DIM=256 on CPU (reduced from 512→384→256;
         #     image size has minimal impact on timing — grid points dominate)
         #   - points_per_batch=16 (smaller batches to limit peak memory)

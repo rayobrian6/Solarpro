@@ -20,7 +20,7 @@ services:
       - key: SAM2_MAX_IMAGE_DIM
         value: "256"
       - key: SAM2_POINTS_PER_SIDE
-        value: "8"
+        value: "9"
       - key: SAM2_PRED_IOU_THRESH
         value: "0.6"
       - key: SAM2_STABILITY_SCORE_THRESH
