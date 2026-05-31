@@ -31,7 +31,7 @@ import {
 } from '@/lib/siteSurveys/geometryReconstruction/runFullPipeline';
 import { warmupSAM2Service, waitForSAM2Warm } from '@/lib/siteSurveys/geometryReconstruction/workers/segmentation/sam2Client';
 import { adaptGeometryReconBundle } from '@/lib/siteSurveys/unifiedGeometry/pipelineAdapters';
-import { writeUnifiedArtifacts, deleteUnifiedArtifactsByPipeline } from '@/lib/siteSurveys/unifiedGeometry';
+import { writeUnifiedArtifacts, deleteUnifiedArtifactsBySurvey } from '@/lib/siteSurveys/unifiedGeometry';
 import type { GeometryReconstructionInput, SourcePhoto } from '@/lib/siteSurveys/geometryReconstruction/types';
 
 export async function POST(
@@ -164,11 +164,15 @@ export async function POST(
 
       // Adapt Pipeline B artifacts into unified geometry table
       try {
-        // Clean up previous geometry_recon artifacts for this survey
-        const deletedCount = await deleteUnifiedArtifactsByPipeline(surveyId, 'geometry_recon');
+        // Clean up ALL previous unified artifacts for this survey.
+        // This ensures stale Canny masks from Pipeline A (photo_vision)
+        // don't coexist with new SAM2 masks from Pipeline B (geometry_recon).
+        // The overlay renderer shows artifacts from ALL pipelines, so old
+        // photo_vision artifacts must be cleared when Pipeline B re-runs.
+        const deletedCount = await deleteUnifiedArtifactsBySurvey(surveyId);
         if (deletedCount > 0) {
           console.info(
-            `[POST geometry-reconstruction/start] Deleted ${deletedCount} previous geometry_recon unified artifacts for survey=${surveyId}`,
+            `[POST geometry-reconstruction/start] Deleted ${deletedCount} previous unified artifacts (all pipelines) for survey=${surveyId}`,
           );
         }
 

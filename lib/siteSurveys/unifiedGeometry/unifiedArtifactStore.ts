@@ -1068,3 +1068,36 @@ export async function deleteUnifiedArtifactsByPipeline(
     return 0;
   }
 }
+
+/**
+ * Delete ALL unified geometry artifacts for a survey, regardless of source pipeline.
+ *
+ * Used when Pipeline B (geometry_recon) re-runs to ensure that stale artifacts
+ * from previous Pipeline A (photo_vision) or Pipeline C (google_solar_api) runs
+ * don't coexist with new SAM 2 masks. Without this, old Canny-based artifacts
+ * from Pipeline A persist and appear alongside new SAM 2 masks in the overlay,
+ * making it look like "Canny is still there" even after the no-fallback fix.
+ *
+ * @returns Number of artifacts deleted
+ */
+export async function deleteUnifiedArtifactsBySurvey(
+  surveyId: string,
+): Promise<number> {
+  try {
+    const sql = await getDbReady();
+
+    const result = await sql`
+      DELETE FROM unified_geometry_artifacts
+      WHERE survey_id = ${surveyId}
+      RETURNING id
+    `;
+
+    return result.length;
+  } catch (err) {
+    console.warn(
+      '[unifiedArtifactStore] Failed to delete artifacts by survey:',
+      err instanceof Error ? err.message : String(err),
+    );
+    return 0;
+  }
+}

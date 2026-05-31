@@ -121,6 +121,7 @@ export {
   writeUnifiedArtifact,
   writeUnifiedArtifacts,
   deleteUnifiedArtifactsByPipeline,
+  deleteUnifiedArtifactsBySurvey,
 } from './unifiedArtifactStore';
 
 // ── Canonical Builder ────────────────────────────────────────────────────────
