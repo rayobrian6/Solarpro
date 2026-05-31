@@ -20,7 +20,7 @@ Deployment:
 
 CPU Optimization:
   - Images resized to max 512px before processing
-  - Balanced points_per_side (10 for CPU vs default 32) for speed + quality
+  - Conservative points_per_side (8 for CPU vs default 32) — stable at ~35s on CPU
   - Smaller points_per_batch (16 vs default 64) to reduce memory
   - crop_n_layers=0 on CPU to avoid expensive multi-scale cropping
   - Model loaded once, reused across requests
@@ -153,17 +153,19 @@ def load_sam2_model():
         _sam2_model = build_sam2_hf(model_id=HF_MODEL_ID, device=DEVICE)
 
         # CPU-optimized mask generator settings
-        # On CPU: balanced optimization for Render Standard plan (CPU)
-        #   - points_per_side=10 (100 grid points — 56% more than 8/64 which
-        #     missed roofs, but avoids 12/144 which caused 71s processing &
-        #     Render OOM/crashes)
+        # On CPU: conservative optimization for Render Standard plan (CPU)
+        #   - points_per_side=8 (64 grid points — stable at ~35s on CPU;
+        #     points_per_side=10 caused 52s & 12 caused 71s, both triggering
+        #     Render service OOM/crashes)
+        #   - The min_area_fraction 0.05→0.02 fix is the primary win:
+        #     roof masks at 3-5% of image were being filtered out
         #   - points_per_batch=16 (smaller batches to limit peak memory)
         #   - crop_n_layers=0 (disable multi-crop, huge memory savings)
         # On GPU: use full settings for better quality
         if IS_CPU:
             _sam2_amg = SAM2AutomaticMaskGenerator(
                 model=_sam2_model,
-                points_per_side=10,
+                points_per_side=8,
                 points_per_batch=16,
                 pred_iou_thresh=0.7,
                 stability_score_thresh=0.92,
@@ -185,7 +187,7 @@ def load_sam2_model():
         logger.info(
             f"SAM 2 loaded successfully in {_model_load_time:.1f}s "
             f"(model_id={HF_MODEL_ID}, device={DEVICE}, "
-            f"points_per_side={10 if IS_CPU else 32}, "
+            f"points_per_side={8 if IS_CPU else 32}, "
             f"crop_n_layers={0 if IS_CPU else 1})"
         )
 
