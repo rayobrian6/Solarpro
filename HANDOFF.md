@@ -1,7 +1,7 @@
-# HANDOFF — MiDaS Depth Upgrade (Stages 1–4 Complete)
+# HANDOFF — MiDaS Depth Upgrade (Stages 1–4 Complete + Visualization Utility)
 
 **Date:** 2025-06-01  
-**Branch:** `dev` (commit `9201fbe`)  
+**Branch:** `dev` (latest commit `7722294`)  
 **Render Deploy:** `dep-d8ee7e77f7vs73d36qt0` (LIVE)
 
 ---
@@ -41,6 +41,17 @@ All four stages of the MiDaS/DPT depth estimation upgrade are **complete and ver
 - `/segment` on Render: 37s, 4 masks — no regression from MiDaS addition
 - TypeScript base64 decode + inversion pipeline verified locally
 - Full data path works: Python → base64 → HTTP → TypeScript decode → invert → DepthMap artifact
+
+### Bonus: Depth Map Visualization Utility ✅
+- New `depthMapDecode.ts`: decode, statistics, heatmap visualization pipeline
+  - `decodeDepthMap(depthMap)`: base64 → Float32Array roundtrip
+  - `computeDepthStats(grid)`: min/max/mean/median/p25/p75/nearZeroFraction/nearOneFraction
+  - `depthGridToRGBA(grid, w, h, options)`: heatmap RGBA generation (inferno + viridis colormaps)
+  - `rgbaToBase64PNG(rgba, w, h)`: minimal PNG encoder with CRC32 (Node.js server-side)
+  - `depthMapToHeatmapDataURL(depthMap, options)`: one-stop DepthMap → PNG data URL (default 4x upscale)
+- Barrel exports updated in `depth/index.ts`
+- 27 tests in `depthMapDecode.test.ts` (all pass)
+- Three-check suite: tsc 0, eslint 0 errors, vitest 6050 pass
 
 ---
 
@@ -87,10 +98,12 @@ Pipeline Stage 4: Depth Estimation
 | `sam2-service/Dockerfile` | Added `transformers>=4.37.0` pip install | Yes (Stage 1) |
 | `sam2-service/render.yaml` | MiDaS env vars (reference only — use API for actual) | Yes (Stage 1) |
 | `lib/.../workers/depth/midasClient.ts` | HTTP client for `/depth` endpoint | **NEW** (Stage 3) |
+| `lib/.../workers/depth/depthMapDecode.ts` | Decode, stats, heatmap visualization | **NEW** (Bonus) |
 | `lib/.../workers/depth/runDepthWorker.ts` | Depth worker: MiDaS primary, heuristic fallback | Yes (Stage 3) |
-| `lib/.../workers/depth/index.ts` | Barrel exports including midasClient | Yes (Stage 3) |
+| `lib/.../workers/depth/index.ts` | Barrel exports including midasClient + depthMapDecode | Yes (Stage 3+Bonus) |
 | `lib/.../runFullPipeline.ts` | Pipeline: depth stage uses asyncStageTimer | Yes (Stage 3) |
 | `__tests__/depthWorker.test.ts` | Tests updated for async worker | Yes (Stage 3) |
+| `__tests__/depthMapDecode.test.ts` | Tests for decode/stats/heatmap/PNG | **NEW** (Bonus) |
 
 ---
 
@@ -169,13 +182,49 @@ curl -X PUT "https://api.render.com/v1/services/srv-d8djpc3bc2fs73emup10/env-var
 
 2. **Upgrade plane extraction to consume DepthMap data** — The depth artifacts are now much richer (MiDaS confidence 60-80% vs heuristic 35-65%). Plane extraction can use depth gradients to identify roof planes more accurately.
 
-3. **Depth map visualization** — Add a UI component that decodes and renders the depth grid as a heatmap overlay on the source photo. This would make the depth data visible for review.
+3. **Depth map visualization UI component** ✅ Backend utility done — `depthMapDecode.ts` provides `depthMapToHeatmapDataURL()` which produces a PNG data URL. Next step is a React component that renders the heatmap overlay on the source photo (see `DepthHeatmapOverlay` sketch below).
 
 4. **Larger MiDaS model** — `Intel/dpt-swinv2-tiny-256` is 41MB. The `Intel/dpt-swinv2-large-256` (213MB) would give better accuracy but may push RAM usage over limits on Render Standard. Test on Render Pro first.
 
 5. **Depth map caching** — Currently each pipeline run re-estimates depth. Cache DepthMap artifacts keyed by (fileId, model version) to avoid redundant inference.
 
 6. **Multi-view depth consistency** — When multiple photos overlap, fuse their depth maps using the existing multi-view fusion stage. This is a natural extension of the pipeline architecture.
+
+### depthMapDecode API Quick Reference
+
+```typescript
+import {
+  decodeDepthMap,            // DepthMap → Float32Array
+  computeDepthStats,         // Float32Array → DepthStatistics
+  depthGridToRGBA,           // Float32Array → Uint8ClampedArray (RGBA heatmap)
+  rgbaToBase64PNG,           // RGBA → base64 PNG data URL (Node.js only)
+  depthMapToHeatmapDataURL,  // DepthMap → PNG data URL (one-stop)
+} from '@/lib/siteSurveys/geometryReconstruction/workers/depth';
+
+// Example: produce a heatmap overlay from a DepthMap artifact
+const dataURL = depthMapToHeatmapDataURL(depthMap, {
+  colormap: 'inferno',  // or 'viridis'
+  alpha: 180,           // transparency (0-255)
+  scale: 4,             // upscale factor (64→256px default)
+  normalize: true,      // normalize to [0,1] before coloring
+});
+// Use as <img src={dataURL} /> or CSS background
+```
+
+### DepthStatistics Shape
+```typescript
+interface DepthStatistics {
+  min: number;
+  max: number;
+  mean: number;
+  median: number;
+  p25: number;           // 25th percentile
+  p75: number;           // 75th percentile
+  nearZeroFraction: number;  // fraction < 0.05 (likely sky in MiDaS raw)
+  nearOneFraction: number;   // fraction > 0.95 (likely sky in our convention)
+  totalPixels: number;
+}
+```
 
 ---
 
