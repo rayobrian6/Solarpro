@@ -1,7 +1,7 @@
 # HANDOFF — MiDaS Depth Upgrade (Stages 1–4 Complete + Visualization Utility)
 
-**Date:** 2025-06-01  
-**Branch:** `dev` (latest commit `af54a28`)  
+**Date:** 2025-06-02  
+**Branch:** `dev` (latest commit `4162f19`)  
 **Render Deploy:** `dep-d8ee7e77f7vs73d36qt0` (LIVE)
 
 ---
@@ -97,32 +97,78 @@ All four stages of the MiDaS/DPT depth estimation upgrade are **complete and ver
 - 46 tests in `depthPlaneExtraction.test.ts` covering extraction, orientation, edges, segmentation, confidence, options, edge cases, integration, and 64x64 grids (all pass)
 - Three-check suite: tsc 0, eslint 0 errors, vitest 6153 pass
 
+### Stage 5: Depth-Augmented Plane Extraction Integration ✅
+- **`runPlaneExtractionWorker.ts`** refactored to v2.0.0-plane-extraction-depth
+  - Two code paths in main worker:
+    1. **Depth-augmented path** (when `depthMaps` array provided in input):
+       - Calls `extractDepthPlanes()` for each DepthMap
+       - Maps `DepthPlaneCandidate` to `RoofPlaneCandidate` (orientation='slanted') or `WallPlaneCandidate` (orientation='vertical')
+       - Parameter estimation helpers: `estimateDepthRoofParameters()` (slope, aspect, normal from gradient + bounds center) and `estimateDepthWallParameters()` (height, facing, normal from vertical extent + horizontal position)
+       - Confidence blending: `blendConfidence()` — 70/30 depth/heuristic with MiDaS, 50/50 without
+       - Overlap detection: `depthPlaneOverlapsMask()` — AABB overlap test between depth plane bounds [0,1] and mask.maskBounds [0,1000]
+       - Tracks `processedMaskIds` to avoid duplicating candidates already covered by depth
+    2. **Heuristic-only path** (no depth maps): extracted into `runHeuristicExtraction()` helper — identical logic to original worker
+  - Fallback: heuristic masks not covered by any depth plane still become candidates
+  - Added `PLANE_EXTRACTION_LIMITATIONS_DEPTH` (separate from heuristic limitations)
+  - `PlaneExtractionWorkerInput` expanded with optional `depthMaps?`, `usedMidas?`, `config?` fields
+  - `runPlaneExtractionFromReconstructionInput()` updated with optional `depthMaps?` and `usedMidas?` parameters
+- **`runFullPipeline.ts`** Stage 5 updated
+  - Extracts `depthMaps` from depth artifacts after Stage 4
+  - Determines `usedMidas` flag from depth map confidence levels
+  - Passes both to `runPlaneExtractionFromReconstructionInput()`
+- **`planeExtractionWorker.test.ts`** — 2 existing tests fixed + 9 new depth-specific tests
+  - Fixed: limitations test (flexible check for 'heuristic'/'flood-fill'/'depth gradient')
+  - Fixed: stage timings test (checks for 'heuristic_extraction' or 'depth_extraction')
+  - New: depth-augmented path activation, artifact types, roof slope/aspect, wall height/facing, depth-specific limitations, heuristic blending, fallback for unprocessed masks, heuristic-only path still works, minConfidence in depth path, usedMidas confidence blending
+- Three-check suite: tsc 0, eslint 0 errors, vitest 6163 pass
+
 ---
 
 ## Architecture
 
 ```
 Pipeline Stage 4: Depth Estimation
-┌─────────────────────────────────────────────────┐
-│ runDepthFromReconstructionInput()               │
-│   for each sourcePhoto:                         │
-│     fetchImageBytes(photo.fileUrl) ──→ Buffer   │
-│     runDepthWorker({imageBytes, masks, vps})    │
-│       │                                         │
-│       ├─ MiDaS path (if enabled + bytes):       │
-│       │   estimateDepthWithMidas(bytes, 64)      │
-│       │     → POST /depth (midasClient.ts)      │
-│       │     → decode base64 → Float32Array       │
-│       │     → invertMidasDepth(): 1.0 - value   │
-│       │     → confidence: 60-80%                │
-│       │                                         │
-│       └─ Heuristic fallback (otherwise):        │
-│           generateDepthGrid(64, masks, vps)     │
-│           → class priors + gradient + VP correct │
-│           → confidence: 35-65%                  │
-│                                                 │
-│     → DepthMap artifact (base64 encoded)        │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│ runDepthFromReconstructionInput()                     │
+│   for each sourcePhoto:                               │
+│     fetchImageBytes(photo.fileUrl) ──→ Buffer         │
+│     runDepthWorker({imageBytes, masks, vps})          │
+│       │                                               │
+│       ├─ MiDaS path (if enabled + bytes):             │
+│       │   estimateDepthWithMidas(bytes, 64)           │
+│       │     → POST /depth (midasClient.ts)            │
+│       │     → decode base64 → Float32Array            │
+│       │     → invertMidasDepth(): 1.0 - value        │
+│       │     → confidence: 60-80%                      │
+│       │                                               │
+│       └─ Heuristic fallback (otherwise):              │
+│           generateDepthGrid(64, masks, vps)           │
+│           → class priors + gradient + VP correct      │
+│           → confidence: 35-65%                        │
+│                                                       │
+│     → DepthMap artifact (base64 encoded)              │
+└──────────────────────────────────────────────────────┘
+
+Pipeline Stage 5: Plane Extraction (depth-augmented)
+┌──────────────────────────────────────────────────────┐
+│ runPlaneExtractionFromReconstructionInput(            │
+│   input, masks, lines, vps, depthMaps?, usedMidas?   │
+│ )                                                     │
+│   if depthMaps provided:                              │
+│     for each depthMap:                                │
+│       extractDepthPlanes(depthMap, usedMidas)         │
+│       for each DepthPlaneCandidate:                   │
+│         orientation='slanted' → RoofPlaneCandidate    │
+│           estimateDepthRoofParameters(slope,aspect,n) │
+│         orientation='vertical' → WallPlaneCandidate   │
+│           estimateDepthWallParameters(height,facing,n)│
+│         blend with overlapping heuristic mask:        │
+│           MiDaS: 70% depth + 30% heuristic           │
+│           non-MiDaS: 50% depth + 50% heuristic        │
+│     unprocessed heuristic masks → fallback candidates │
+│   else:                                               │
+│     runHeuristicExtraction() (original path)          │
+└──────────────────────────────────────────────────────┘
 ```
 
 ### Depth Convention (CRITICAL — both paths consistent)
@@ -148,12 +194,14 @@ Pipeline Stage 4: Depth Estimation
 | `lib/.../workers/depth/depthPlaneExtraction.ts` | Flood-fill plane extraction + orientation classification | **NEW** (Bonus) |
 | `lib/.../workers/depth/runDepthWorker.ts` | Depth worker: MiDaS primary, heuristic fallback + cache | Yes (Stage 3+Bonus) |
 | `lib/.../workers/depth/index.ts` | Barrel exports including midasClient + depthMapDecode | Yes (Stage 3+Bonus) |
-| `lib/.../runFullPipeline.ts` | Pipeline: depth stage uses asyncStageTimer | Yes (Stage 3) |
+| `lib/.../runFullPipeline.ts` | Pipeline: depth stage uses asyncStageTimer; Stage 5 passes depthMaps+usedMidas | Yes (Stage 3+5) |
 | `__tests__/depthWorker.test.ts` | Tests updated for async worker | Yes (Stage 3) |
 | `__tests__/depthMapDecode.test.ts` | Tests for decode/stats/heatmap/PNG | **NEW** (Bonus) |
 | `__tests__/depthQualityReport.test.ts` | Tests for quality report + usability | **NEW** (Bonus) |
 | `__tests__/depthCache.test.ts` | Tests for LRU cache + TTL + stats | **NEW** (Bonus) |
 | `__tests__/depthPlaneExtraction.test.ts` | Tests for plane extraction (46 tests) | **NEW** (Bonus) |
+| `lib/.../workers/planeExtraction/runPlaneExtractionWorker.ts` | Plane extraction: depth-augmented + heuristic fallback | Yes (Stage 5) |
+| `__tests__/planeExtractionWorker.test.ts` | Tests for plane extraction worker (2 fixed + 9 new) | Yes (Stage 5) |
 
 ---
 
@@ -220,7 +268,7 @@ curl -X PUT "https://api.render.com/v1/services/srv-d8djpc3bc2fs73emup10/env-var
 
 6. **Depth convention**: Higher values = farther. MiDaS raw output is inverted. If you ever change the model or the convention, check `invertMidasDepth()` in `runDepthWorker.ts`.
 
-7. **Plane extraction integration pending**: The `depthPlaneExtraction.ts` utility now provides depth-aware plane detection, but the downstream `runPlaneExtractionWorker.ts` still uses the heuristic approach. Integration is the natural next step — replace or augment the heuristic with `extractDepthPlanes()` output.
+7. **Plane extraction now depth-augmented** (completed this session): `runPlaneExtractionWorker.ts` v2.0.0 integrates `extractDepthPlanes()` when DepthMap artifacts are available. Two code paths: depth-augmented (primary) and heuristic-only (fallback). Confidence blending: 70/30 depth/heuristic with MiDaS, 50/50 without. Heuristic masks not covered by depth planes still pass through as fallback candidates.
 
 8. **Sandbox disk full**: The workspace hit 100% disk during this session. `sam2-service/__pycache__/` is untracked and can be cleaned. Large model downloads are the main culprit.
 
@@ -230,7 +278,7 @@ curl -X PUT "https://api.render.com/v1/services/srv-d8djpc3bc2fs73emup10/env-var
 
 1. **Set `MIDAS_SERVICE_URL` in the Next.js/Vercel environment** — This activates the MiDaS path in production. Without it, the depth worker stays on heuristic.
 
-2. **Upgrade plane extraction to consume DepthMap data** ✅ Backend utility done — `depthPlaneExtraction.ts` provides `extractDepthPlanes()` which uses flood-fill segmentation, gradient edge detection, and orientation classification. Next step would be integrating this into `runPlaneExtractionWorker.ts` to replace or augment the existing heuristic approach.
+2. **Upgrade plane extraction to consume DepthMap data** ✅ DONE — `runPlaneExtractionWorker.ts` v2.0.0 now has two code paths: depth-augmented (when `depthMaps[]` provided) and heuristic-only (fallback). Depth-derived `DepthPlaneCandidate` objects are mapped to `RoofPlaneCandidate` (orientation='slanted') and `WallPlaneCandidate` (orientation='vertical') with estimated slope/aspect/height/facing parameters. Confidence is blended between depth and heuristic signals when overlapping masks exist (70/30 with MiDaS, 50/50 without). `runFullPipeline.ts` Stage 5 passes `depthMaps` and `usedMidas` from Stage 4 depth artifacts.
 
 3. **Depth map visualization UI component** ✅ Backend utility done — `depthMapDecode.ts` provides `depthMapToHeatmapDataURL()` which produces a PNG data URL. Next step is a React component that renders the heatmap overlay on the source photo (see `DepthHeatmapOverlay` sketch below).
 
