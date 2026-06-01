@@ -1,7 +1,7 @@
 # HANDOFF — MiDaS Depth Upgrade (Stages 1–4 Complete + Visualization Utility)
 
 **Date:** 2025-06-01  
-**Branch:** `dev` (latest commit `7722294`)  
+**Branch:** `dev` (latest commit `f91b084`)  
 **Render Deploy:** `dep-d8ee7e77f7vs73d36qt0` (LIVE)
 
 ---
@@ -53,6 +53,21 @@ All four stages of the MiDaS/DPT depth estimation upgrade are **complete and ver
 - 27 tests in `depthMapDecode.test.ts` (all pass)
 - Three-check suite: tsc 0, eslint 0 errors, vitest 6050 pass
 
+### Bonus: Depth Quality Report Utility ✅
+- New `depthQualityReport.ts`: structured quality assessment for depth data
+  - `generateDepthQualityReport(depthMap, usedMidas, confidence)`: grade A-F across 5 dimensions
+    - Range quality: is depth well-distributed?
+    - Sky separation: is sky/ground bimodality clear?
+    - Noise quality: are there artifacts or flat regions?
+    - Confidence quality: is worker confidence high?
+    - Coverage quality: are most pixels meaningful?
+  - `isDepthUsableFor(report, purpose)`: quick check for plane_extraction, sky_detection, multi_view_fusion, visualization
+  - Weighted scoring: confidence 25%, range 25%, sky 20%, noise 15%, coverage 15%
+  - Recommendation engine: suggests MiDaS upgrade when heuristic produces poor quality
+- Barrel exports updated in `depth/index.ts`
+- 24 tests in `depthQualityReport.test.ts` (all pass)
+- Three-check suite: tsc 0, eslint 0 errors, vitest 6074 pass
+
 ---
 
 ## Architecture
@@ -99,11 +114,13 @@ Pipeline Stage 4: Depth Estimation
 | `sam2-service/render.yaml` | MiDaS env vars (reference only — use API for actual) | Yes (Stage 1) |
 | `lib/.../workers/depth/midasClient.ts` | HTTP client for `/depth` endpoint | **NEW** (Stage 3) |
 | `lib/.../workers/depth/depthMapDecode.ts` | Decode, stats, heatmap visualization | **NEW** (Bonus) |
+| `lib/.../workers/depth/depthQualityReport.ts` | Quality assessment (grade A-F) + usability checks | **NEW** (Bonus) |
 | `lib/.../workers/depth/runDepthWorker.ts` | Depth worker: MiDaS primary, heuristic fallback | Yes (Stage 3) |
 | `lib/.../workers/depth/index.ts` | Barrel exports including midasClient + depthMapDecode | Yes (Stage 3+Bonus) |
 | `lib/.../runFullPipeline.ts` | Pipeline: depth stage uses asyncStageTimer | Yes (Stage 3) |
 | `__tests__/depthWorker.test.ts` | Tests updated for async worker | Yes (Stage 3) |
 | `__tests__/depthMapDecode.test.ts` | Tests for decode/stats/heatmap/PNG | **NEW** (Bonus) |
+| `__tests__/depthQualityReport.test.ts` | Tests for quality report + usability | **NEW** (Bonus) |
 
 ---
 
@@ -209,6 +226,27 @@ const dataURL = depthMapToHeatmapDataURL(depthMap, {
   normalize: true,      // normalize to [0,1] before coloring
 });
 // Use as <img src={dataURL} /> or CSS background
+```
+
+### depthQualityReport API Quick Reference
+
+```typescript
+import {
+  generateDepthQualityReport,  // DepthMap → DepthQualityReport (grade A-F)
+  isDepthUsableFor,            // (report, purpose) → boolean
+} from '@/lib/siteSurveys/geometryReconstruction/workers/depth';
+
+// Example: assess depth quality
+const report = generateDepthQualityReport(depthMap, true, 75);
+console.log(report.grade);     // 'A' | 'B' | 'C' | 'D' | 'F'
+console.log(report.score);     // 0-100
+console.log(report.summary);   // Human-readable description
+console.log(report.recommendations); // String[] of actionable suggestions
+
+// Example: check if depth is usable for plane extraction
+if (isDepthUsableFor(report, 'plane_extraction')) {
+  // Safe to use depth for roof plane identification
+}
 ```
 
 ### DepthStatistics Shape
