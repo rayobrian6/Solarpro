@@ -1668,7 +1668,6 @@ async def estimate_depth(
 
 if __name__ == "__main__":
     import uvicorn
-    import signal
     
     # Log environment for debugging Pro deploy failures
     logger.info(f"=== ENVIRONMENT DUMP ===")
@@ -1687,14 +1686,6 @@ if __name__ == "__main__":
             logger.info(f"  ENV {key}={os.environ[key]}")
     logger.info(f"=== END ENVIRONMENT DUMP ===")
     
-    # Install signal handlers to log termination causes
-    def _signal_handler(sig, frame):
-        logger.warning(f"Received signal {sig} ({signal.Signals(sig).name}) — shutting down gracefully")
-        raise SystemExit(0)  # Exit with 0, not 1
-    
-    signal.signal(signal.SIGTERM, _signal_handler)
-    signal.signal(signal.SIGINT, _signal_handler)
-    
     try:
         uvicorn.run(
             app,
@@ -1702,22 +1693,15 @@ if __name__ == "__main__":
             port=PORT,
             log_level="info",
             timeout_keep_alive=30,
-            # Don't use reload or access_log on production
         )
     except SystemExit as e:
-        # SystemExit(0) from signal handler — exit cleanly
+        # Re-raise SystemExit(0) cleanly (from uvicorn or signal)
+        # For non-zero, let the entrypoint.sh handle the retry
         logger.info(f"uvicorn exiting with SystemExit({e.code})")
-        if e.code != 0:
-            logger.warning(f"Overriding exit code {e.code} → 0 to prevent Render deploy failure")
-            os._exit(0)
         raise
     except Exception as e:
-        # Top-level catch to prevent exit code 1 on Render.
-        # Render interprets non-zero exit as deploy failure and kills the instance.
+        # Log the crash but let the process exit naturally
+        # The entrypoint.sh wrapper will retry or keep container alive
         logger.error(f"uvicorn crashed: {e}")
         logger.error(traceback.format_exc())
-        # EXIT WITH CODE 0 to prevent Render from marking deploy as failed
-        # This is a last resort — the service will be in a broken state but
-        # the container stays alive for debugging.
-        logger.warning("Overriding exit code to 0 to keep container alive for debugging")
-        os._exit(0)
+        raise

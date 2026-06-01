@@ -70,6 +70,8 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 WORKDIR /app
 COPY main.py /app/main.py
 COPY onnx_sam2_amg.py /app/onnx_sam2_amg.py
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Model cache directory — HF downloads checkpoints here
 ENV SAM2_CACHE_DIR=/app/.cache
@@ -90,4 +92,4 @@ EXPOSE 10000
 HEALTHCHECK --interval=60s --timeout=30s --start-period=600s --retries=3 \
     CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-10000}/health', timeout=10)" || exit 1
 
-CMD ["python3", "main.py"]
+CMD ["/app/entrypoint.sh"]
