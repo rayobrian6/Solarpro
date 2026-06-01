@@ -7,8 +7,9 @@ suitable for Pipeline B consumption.
 
 Architecture:
   - Loads SAM 2.1 checkpoint from HuggingFace on startup (model determined by
-    SAM2_HF_MODEL_ID env var; defaults to sam2.1-hiera-tiny on CPU (~40MB),
-    sam2.1-hiera-small on GPU (~184MB))
+    SAM2_HF_MODEL_ID env var; defaults to sam2.1-hiera-small on both CPU and GPU)
+  - Uses ONNX Runtime by default for faster inference (SAM2_INFERENCE_BACKEND=onnx)
+  - ONNX small model encoder: 131.6MB (vs tiny 104.4MB, same I/O shapes)
   - Loads MiDaS/DPT depth model from HuggingFace on startup (model determined by
     MIDAS_MODEL_ID env var; defaults to Intel/dpt-swinv2-tiny-256 on CPU (~41MB))
   - POST /segment: accepts image bytes, returns polygon masks
@@ -25,13 +26,12 @@ Deployment:
   - Environment variable MIDAS_MODEL_ID controls depth model size
 
 CPU Optimization (Segmentation):
-  - Images resized to max 384px (CPU) / 2048px (GPU) before processing
-  - CPU: points_per_side=8 (64 grid points — stable on Render Standard 4GB RAM;
-    9/81 grid caused ~44s processing & 502; 10/100 caused ~49s & OOM/crash)
-  - At 384px, 8x8 grid produces ~13 raw masks with min_area_fraction=0.005;
-    the previous default min_area_fraction=0.05 filtered ALL masks out (0 results)
+  - Images resized to max 512px (CPU) / 2048px (GPU) before processing
+  - CPU: points_per_side=10 (100 grid points) with ONNX small model on Render Standard 4GB RAM
+  - ONNX small model encoder (131.6MB) + decoder (15.8MB) fit comfortably in 4GB with MiDaS
+  - min_area_fraction=0.005 allows small roof features (dormers, sheds) through
   - GPU: points_per_side=32 with MAX_IMAGE_DIM=2048 (full quality)
-  - Lower pred_iou_thresh (0.6) and stability_score_thresh (0.85) for challenging lighting
+  - Lower pred_iou_thresh (0.5) and stability_score_thresh (0.8) for challenging lighting
   - Smaller points_per_batch (16 vs default 64) to reduce peak memory
   - crop_n_layers=0 on CPU to avoid expensive multi-scale cropping
   - min_area_fraction defaults to SAM2_MIN_MASK_AREA_FRACTION env var (0.02),
@@ -44,8 +44,8 @@ CPU Optimization (Depth):
   - Images resized to max 256px (MiDaS native resolution) before depth inference
   - Intel/dpt-swinv2-tiny-256: 40.9M params, ~3-5s inference on CPU
   - Depth grid output resolution configurable via MIDAS_OUTPUT_RESOLUTION env var
-  - Both models (SAM2 + MiDaS) coexist in ~4GB RAM: SAM2 tiny (~40MB) + DPT tiny (~41MB)
-    leaves plenty of headroom on Render Standard (4GB)
+  - Both models (SAM2 + MiDaS) coexist in ~4GB RAM: SAM2 small ONNX (~132MB encoder + ~16MB decoder)
+    + DPT tiny (~41MB) leaves plenty of headroom on Render Standard (4GB)
 
 Health Check Resilience:
   - SAM2 and MiDaS inference run in ThreadPoolExecutor threads, NOT on the
@@ -104,7 +104,7 @@ IS_CPU = DEVICE == "cpu"
 # HuggingFace model ID for SAM 2.1 — can be overridden via env var
 # Supported: facebook/sam2.1-hiera-tiny, facebook/sam2.1-hiera-small,
 #            facebook/sam2.1-hiera-base-plus, facebook/sam2.1-hiera-large
-HF_MODEL_ID = os.environ.get("SAM2_HF_MODEL_ID", "facebook/sam2.1-hiera-tiny" if IS_CPU else "facebook/sam2.1-hiera-small")
+HF_MODEL_ID = os.environ.get("SAM2_HF_MODEL_ID", "facebook/sam2.1-hiera-small")
 # Maximum image dimension for processing — larger images are resized
 # 384px on CPU: 8x8 grid can detect roofs at this resolution without OOM
 # 256px on CPU: too small, 8x8 grid misses roofs entirely (0 masks)

@@ -10,7 +10,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: SAM2_HF_MODEL_ID
-        value: facebook/sam2.1-hiera-tiny
+        value: facebook/sam2.1-hiera-small
       - key: SAM2_MIN_MASK_AREA_FRACTION
         value: "0.005"
       - key: SAM2_MAX_MASKS
@@ -21,12 +21,16 @@ services:
         value: "512"
       - key: SAM2_POINTS_PER_SIDE
         value: "10"
+      - key: SAM2_POINTS_PER_BATCH
+        value: "4"
       - key: SAM2_PRED_IOU_THRESH
         value: "0.5"
       - key: SAM2_STABILITY_SCORE_THRESH
         value: "0.8"
       - key: SAM2_INFERENCE_BACKEND
         value: onnx
+      - key: SAM2_ONNX_MODEL_FILENAME
+        value: sam2.1_hiera_small_20260221.zip
       - key: MIDAS_ENABLED
         value: "true"
       - key: MIDAS_MODEL_ID

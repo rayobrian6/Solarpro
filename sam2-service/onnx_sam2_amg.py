@@ -11,7 +11,7 @@ Architecture:
   - AMG grid-of-points logic: pure NumPy (same algorithm as PyTorch AMG)
   - Mask post-processing: OpenCV (same as PyTorch path)
 
-ONNX Encoder I/O (from SharpAI/sam2-hiera-tiny-onnx spec):
+ONNX Encoder I/O (same for tiny/small/base-plus/large — Hiera backbone variants):
   Input:  image               Float32[1, 3, 1024, 1024]  normalized RGB
   Output: image_embed          Float32[1, 256, 64, 64]    image embeddings
   Output: high_res_feats_0     Float32[1, 32, 256, 256]   high-res features
@@ -71,7 +71,7 @@ ONNX_MODEL_REPO_ID = os.environ.get(
 # Which zip file to download from the repo
 ONNX_MODEL_FILENAME = os.environ.get(
     "SAM2_ONNX_MODEL_FILENAME",
-    "sam2.1_hiera_tiny_20260221.zip",
+    "sam2.1_hiera_small_20260221.zip",  # small model: 131.6MB encoder, same I/O shapes as tiny but richer features
 )
 # Local directory to extract ONNX models
 ONNX_MODEL_DIR = os.environ.get(
@@ -90,7 +90,7 @@ ONNX_INTER_OP_THREADS = int(os.environ.get("SAM2_ONNX_INTER_OP_THREADS", "0"))
 
 def _download_and_extract_onnx_models():
     """Download SAM2.1 ONNX models from HuggingFace and extract to local dir."""
-    # The zip may contain model-specific names like sam2.1_hiera_tiny.encoder.onnx
+    # The zip may contain model-specific names like sam2.1_hiera_small.encoder.onnx
     # We search for encoder/decoder files by pattern matching.
     encoder_path = None
     decoder_path = None
