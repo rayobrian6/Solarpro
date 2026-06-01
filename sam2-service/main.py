@@ -836,7 +836,7 @@ ROOF_RELEVANT_CLASSES = {"roof", "wall", "equipment", "obstruction"}
 app = FastAPI(
     title="SAM 2 Segmentation Service",
     description="Roof geometry segmentation using Meta's SAM 2.1 model",
-    version="2.1.0",
+    version="2.2.0",
 )
 
 app.add_middleware(
