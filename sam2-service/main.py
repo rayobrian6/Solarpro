@@ -163,8 +163,11 @@ if INFERENCE_BACKEND not in ("pytorch", "onnx"):
     INFERENCE_BACKEND = "pytorch"
 # Batch size for ONNX decoder — number of point prompts to process per decoder call.
 # Higher = fewer Python→ONNX bridge calls (faster), but more memory per batch.
-# 16 is a good balance on Render Standard (2GB RAM); 64 matches PyTorch default.
-POINTS_PER_BATCH = int(os.environ.get("SAM2_POINTS_PER_BATCH", "16" if IS_CPU else "64"))
+# IMPORTANT: On Render Standard (2GB RAM), batch_size=16 causes OOM crashes because
+# tiling encoder features (32×256×256 per point) uses ~200MB per point + ONNX overhead.
+# batch_size=4 is memory-safe on 2GB (~50MB per batch) while still being 4x faster
+# than single-point decoding (16 calls → 4 calls for 64 points).
+POINTS_PER_BATCH = int(os.environ.get("SAM2_POINTS_PER_BATCH", "4" if IS_CPU else "64"))
 
 # ---------------------------------------------------------------------------
 # Pydantic response models

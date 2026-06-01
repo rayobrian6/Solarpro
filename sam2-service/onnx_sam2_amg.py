@@ -215,7 +215,7 @@ class ONNXSAM2AutomaticMaskGenerator:
     def __init__(
         self,
         points_per_side: int = 8,
-        points_per_batch: int = 16,
+        points_per_batch: int = 4,
         pred_iou_thresh: float = 0.6,
         stability_score_thresh: float = 0.85,
         crop_n_layers: int = 0,
@@ -269,6 +269,14 @@ class ONNXSAM2AutomaticMaskGenerator:
         if self._decoder_has_orig_im_size:
             logger.info("Decoder has orig_im_size input — will pass original image dimensions")
 
+        # Estimate memory per batch point to auto-reduce batch size if needed.
+        # The main memory cost of batching is tiling encoder features across
+        # the batch dimension. We compute the estimated bytes per point so
+        # we can clamp batch size at runtime to avoid OOM on memory-constrained
+        # hosts like Render Standard (2GB RAM).
+        self._est_bytes_per_point = self._estimate_batch_memory_per_point()
+        logger.info(f"Estimated batch memory per point: {self._est_bytes_per_point / 1024 / 1024:.1f}MB")
+
         logger.info(
             f"ONNX SAM2 AMG initialized in {load_time:.1f}s "
             f"(points_per_side={points_per_side}, "
@@ -277,7 +285,83 @@ class ONNXSAM2AutomaticMaskGenerator:
             f"stability_score_thresh={stability_score_thresh})"
         )
 
-    def generate(self, image: np.ndarray) -> list[dict[str, Any]]:
+    def _estimate_batch_memory_per_point(self) -> int:
+        """
+        Estimate the additional memory (bytes) consumed per batched point
+        when tiling encoder outputs for the ONNX decoder.
+
+        The main cost is np.repeat(encoder_output, N, axis=0) for each
+        feature tensor, plus the mask_input zeros and output tensors.
+        We also add a 3x overhead factor for ONNX Runtime internal
+        scratch space (attention matrices, intermediate activations).
+        """
+        total_bytes = 0
+        for name in self._decoder_input_names:
+            if name in self._encoder_output_names:
+                # These get tiled: cost = tensor_size per point
+                # We'll get the actual sizes from the encoder session outputs
+                for out_info in self.encoder_session.get_outputs():
+                    if out_info.name == name:
+                        shape = out_info.shape
+                        # shape is like [1, C, H, W] — compute elements per batch item
+                        elements = 1
+                        for dim in shape[1:]:  # skip batch dim
+                            if isinstance(dim, int):
+                                elements *= dim
+                        total_bytes += elements * 4  # float32
+                        break
+            elif "mask" in name and "has" not in name and "orig" not in name:
+                # mask_input: (1, 1, H//4, W//4) per point
+                mask_h = self._encoder_input_h // 4
+                mask_w = self._encoder_input_w // 4
+                total_bytes += mask_h * mask_w * 4  # float32
+            elif "point_coord" in name:
+                total_bytes += 2 * 2 * 4  # (2, 2) float32
+            elif "point_label" in name:
+                total_bytes += 2 * 4  # (2,) float32
+            elif "has_mask" in name:
+                total_bytes += 4  # scalar float32
+            elif "orig_im_size" in name:
+                total_bytes += 2 * 4  # [H, W] float32
+
+        # Add 3x multiplier for ONNX Runtime internal scratch (attention, etc.)
+        return total_bytes * 3
+
+    def _safe_batch_size(self, n_points: int) -> int:
+        """
+        Compute a memory-safe batch size, reducing if necessary to stay
+        within available RAM. On Render Standard (2GB), we target leaving
+        at least 512MB free for the batch inference.
+
+        Returns the clamped batch size (min 1, max n_points).
+        """
+        if self._est_bytes_per_point == 0:
+            return min(self.points_per_batch, n_points)
+
+        # Get available memory (Linux: from /proc/meminfo)
+        avail_mb = 512  # conservative default
+        try:
+            with open("/proc/meminfo", "r") as f:
+                for line in f:
+                    if line.startswith("MemAvailable:"):
+                        avail_mb = int(line.split()[1]) / 1024  # kB → MB
+                        break
+        except Exception:
+            pass
+
+        # Target: leave at least 384MB for OS + other processes, use the rest
+        budget_mb = max(avail_mb - 384, 128)
+        max_points_by_mem = int(budget_mb * 1024 * 1024 / self._est_bytes_per_point)
+        safe_batch = max(1, min(self.points_per_batch, max_points_by_mem, n_points))
+
+        if safe_batch < self.points_per_batch:
+            logger.warning(
+                f"Reducing batch size from {self.points_per_batch} to {safe_batch} "
+                f"due to memory constraints (avail={avail_mb:.0f}MB, "
+                f"per_point={self._est_bytes_per_point/1024/1024:.1f}MB)"
+            )
+
+        return safe_batch
         """
         Generate masks for an image using ONNX Runtime inference.
 
@@ -309,9 +393,11 @@ class ONNXSAM2AutomaticMaskGenerator:
         # Instead of calling decoder once per point (64 calls × ~0.4s = ~26s),
         # batch multiple points into a single decoder call by tiling encoder
         # outputs across the batch dimension. This reduces overhead dramatically.
+        # Memory safety: _safe_batch_size() reduces batch size if tiling would
+        # exceed available RAM (critical on Render Standard with 2GB).
         t1 = time.time()
         all_masks = []
-        batch_size = self.points_per_batch
+        batch_size = self._safe_batch_size(len(point_coords))
 
         for batch_start in range(0, len(point_coords), batch_size):
             batch_end = min(batch_start + batch_size, len(point_coords))
@@ -323,13 +409,19 @@ class ONNXSAM2AutomaticMaskGenerator:
                 image_w=w,
             )
             all_masks.extend(batch_masks)
+            # Free batch memory between iterations to keep peak RSS low
+            gc.collect()
 
         decode_time = time.time() - t1
         logger.info(
             f"ONNX decoder: {len(point_coords)} points in "
-            f"{(len(point_coords) + batch_size - 1) // batch_size} batches -> "
+            f"{(len(point_coords) + batch_size - 1) // batch_size} batches (batch_size={batch_size}) -> "
             f"{len(all_masks)} raw masks in {decode_time:.1f}s"
         )
+
+        # Free encoder outputs — no longer needed after decoder batches
+        del encoder_outputs
+        gc.collect()
 
         # Step 4: Filter by IoU and stability thresholds
         filtered_masks = [
