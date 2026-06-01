@@ -362,6 +362,8 @@ class ONNXSAM2AutomaticMaskGenerator:
             )
 
         return safe_batch
+
+    def generate(self, image: np.ndarray) -> list[dict[str, Any]]:
         """
         Generate masks for an image using ONNX Runtime inference.
 
