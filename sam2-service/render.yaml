@@ -16,7 +16,7 @@ services:
       - key: SAM2_MAX_MASKS
         value: "20"
       - key: SAM2_DOUGLAS_PEUCKER_EPSILON
-        value: "5.0"
+        value: "2.0"
       - key: SAM2_MAX_IMAGE_DIM
         value: "512"
       - key: SAM2_POINTS_PER_SIDE

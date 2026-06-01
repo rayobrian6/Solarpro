@@ -267,8 +267,11 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   const maxPolygonPoints = input.config?.maxPolygonPoints ?? 50;
   // SAM 2 masks retain more polygon detail because the model produces
   // accurate segment boundaries — Canny contours are lower quality and
-  // benefit from aggressive simplification.
-  const sam2MaxPolygonPoints = Math.max(maxPolygonPoints, 100);
+  // benefit from aggressive simplification. Higher polygon point counts
+  // preserve the precise mask boundaries needed for line extraction:
+  // the line extraction worker classifies polygon EDGES as ridges/eaves/rakes,
+  // so more detailed polygons → more accurate structural lines.
+  const sam2MaxPolygonPoints = Math.max(maxPolygonPoints, 200);
 
   const sam2Enabled = isSAM2Enabled();
 
@@ -723,10 +726,13 @@ async function segmentWithSAM2FromPhoto(
     );
 
     // Call SAM 2 service (with 502/503 retry built in)
-    // Use min_area_fraction=0.02 (lowered from 0.05 — the old threshold filtered
-    // out legitimate roof masks that occupy 3-5% of the image). The roof_only=true
-    // param is set in sam2Client.ts to filter non-roof masks on the Python side.
-    const sam2Result = await segmentWithSAM2(bytes, 0.02);
+    // Use min_area_fraction=0.005 (matching the Python env var SAM2_MIN_MASK_AREA_FRACTION).
+    // Previously hardcoded to 0.02, which filtered out legitimate small roof masks
+    // (e.g. a dormer or shed roof occupying 1-3% of the image). The Python side
+    // already filters at 0.005, so double-filtering at 0.02 on the TS side was
+    // discarding valid masks. The roof_only=true param is set in sam2Client.ts
+    // to filter non-roof masks on the Python side.
+    const sam2Result = await segmentWithSAM2(bytes, 0.005);
     const totalElapsedMs = Date.now() - t0;
 
     if (sam2Result !== null) {
