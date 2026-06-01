@@ -226,6 +226,14 @@ export async function runFullGeometryReconstructionPipeline(
     `[Pipeline B] Stage 4 (depth_estimation): ${depthArtifacts.length} artifacts in ${depthResult.durationMs}ms`,
   );
 
+  // Extract typed depth maps for Stage 5 (depth-augmented plane extraction)
+  const depthMaps = depthArtifacts.filter(
+    (a): a is DepthMap => a.artifactType === 'depth_map',
+  );
+
+  // Determine whether MiDaS was used (any depth map with confidence >= 60 implies MiDaS)
+  const usedMidas = depthMaps.some(dm => dm.confidence >= 60);
+
   // Timeout check before Stage 5
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 4 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
@@ -233,8 +241,9 @@ export async function runFullGeometryReconstructionPipeline(
   }
 
   // ── Stage 5: Plane Extraction ──────────────────────────────────────────
+  // Now depth-augmented: passes DepthMap artifacts from Stage 4
   const planeResult = stageTimer('plane_extraction', () =>
-    runPlaneExtractionFromReconstructionInput(input, masks, lines, vanishingPoints),
+    runPlaneExtractionFromReconstructionInput(input, masks, lines, vanishingPoints, depthMaps, usedMidas),
   );
   const planeArtifacts = planeResult.result;
   allArtifacts.push(...planeArtifacts);

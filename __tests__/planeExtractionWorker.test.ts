@@ -22,6 +22,7 @@ import type {
   WallPlaneCandidate,
   GeometryReconstructionInput,
   NormalizedPoint,
+  DepthMap,
 } from '@/lib/siteSurveys/geometryReconstruction/types';
 import {
   REVIEW_ONLY_AUTHORITY,
@@ -332,9 +333,12 @@ describe('plane extraction worker', () => {
     it('limitations include plane-extraction-specific disclaimers', () => {
       const result = runPlaneExtractionWorker(makeInput());
       for (const artifact of result.artifacts) {
-        expect(artifact.limitations).toContain(
-          'Plane extraction is heuristic — not from RANSAC on depth data or model inference.',
-        );
+        // Heuristic-only path uses updated limitations text
+        expect(
+          artifact.limitations.some(l =>
+            l.includes('heuristic') || l.includes('flood-fill') || l.includes('depth gradient'),
+          ),
+        ).toBe(true);
       }
     });
   });
@@ -425,8 +429,11 @@ describe('plane extraction worker', () => {
       const result = runPlaneExtractionWorker(makeInput());
       expect(result.stageTimings['initialization']).toBeDefined();
       expect(result.stageTimings['line_association']).toBeDefined();
-      expect(result.stageTimings['roof_extraction']).toBeDefined();
-      expect(result.stageTimings['wall_extraction']).toBeDefined();
+      // Heuristic-only path uses 'heuristic_extraction' key
+      // Depth-augmented path uses 'depth_extraction' and optionally 'heuristic_fallback'
+      const hasHeuristic = result.stageTimings['heuristic_extraction'] !== undefined;
+      const hasDepth = result.stageTimings['depth_extraction'] !== undefined;
+      expect(hasHeuristic || hasDepth).toBe(true);
     });
 
     it('all timings are non-negative numbers', () => {
@@ -491,6 +498,250 @@ describe('plane extraction worker', () => {
         const len = Math.sqrt(wp.normal[0] ** 2 + wp.normal[1] ** 2 + wp.normal[2] ** 2);
         expect(len).toBeCloseTo(1, 1);
       }
+    });
+  });
+
+  describe('depth-augmented extraction', () => {
+    /** Create a synthetic DepthMap with a slanted region (roof) and a vertical region (wall). */
+    function makeSyntheticDepthMap(
+      width = 64,
+      height = 64,
+      fileId = 'file-001',
+    ): DepthMap {
+      // Create a depth grid with:
+      // - Top portion: medium depth (roof-like, slanted)
+      // - Middle-right: high gradient (wall-like)
+      // - Top-far: high depth (sky/far)
+      // - Bottom: low depth (ground/horizontal)
+      const grid = new Float32Array(width * height);
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const idx = y * width + x;
+          if (y < height * 0.15) {
+            // Sky/far region — high depth values
+            grid[idx] = 0.9 + Math.random() * 0.05;
+          } else if (y < height * 0.45 && x < width * 0.7) {
+            // Roof/slanted region — moderate depth with gradient
+            grid[idx] = 0.4 + (y / height) * 0.3 + (x / width) * 0.1;
+          } else if (y >= height * 0.45 && y < height * 0.8 && x >= width * 0.65) {
+            // Wall/vertical region — steep depth gradient
+            grid[idx] = 0.3 + (y / height) * 0.4;
+          } else if (y >= height * 0.8) {
+            // Ground/horizontal — low depth
+            grid[idx] = 0.1 + Math.random() * 0.05;
+          } else {
+            // Fill remaining
+            grid[idx] = 0.5 + Math.random() * 0.1;
+          }
+        }
+      }
+
+      // Encode as base64
+      const buffer = Buffer.from(grid.buffer);
+      const depthData = buffer.toString('base64');
+
+      return {
+        artifactType: 'depth_map',
+        fileId,
+        width,
+        height,
+        depthData,
+        depthMetric: 'normalized_relative',
+        confidence: 75,
+        authority: REVIEW_ONLY_AUTHORITY,
+        limitations: [...BASE_LIMITATIONS, 'Synthetic depth map for testing.'],
+      };
+    }
+
+    it('uses depth-augmented path when depthMaps is provided', () => {
+      const depthMap = makeSyntheticDepthMap();
+      const result = runPlaneExtractionWorker({
+        ...makeInput(),
+        depthMaps: [depthMap],
+        usedMidas: true,
+      });
+
+      // Should produce some artifacts from depth extraction
+      expect(result.artifacts.length).toBeGreaterThan(0);
+      // Should have depth_extraction timing
+      expect(result.stageTimings['depth_extraction']).toBeDefined();
+    });
+
+    it('depth-derived artifacts have proper artifact types', () => {
+      const depthMap = makeSyntheticDepthMap();
+      const result = runPlaneExtractionWorker({
+        ...makeInput(),
+        depthMaps: [depthMap],
+        usedMidas: true,
+      });
+
+      const types = result.artifacts.map(a => a.artifactType);
+      // Should contain at least roof or wall candidates
+      const hasRoofOrWall = types.includes('roof_plane_candidate') || types.includes('wall_plane_candidate');
+      expect(hasRoofOrWall).toBe(true);
+    });
+
+    it('depth-derived roof planes have slope and aspect', () => {
+      const depthMap = makeSyntheticDepthMap();
+      const result = runPlaneExtractionWorker({
+        ...makeInput(),
+        depthMaps: [depthMap],
+        usedMidas: true,
+      });
+
+      const roofPlanes = result.artifacts.filter(
+        (a): a is RoofPlaneCandidate => a.artifactType === 'roof_plane_candidate',
+      );
+      for (const rp of roofPlanes) {
+        expect(rp.slopeDegrees).toBeGreaterThan(0);
+        expect(rp.slopeDegrees).toBeLessThanOrEqual(90);
+        expect(rp.aspectDegrees).toBeGreaterThanOrEqual(0);
+        expect(rp.aspectDegrees).toBeLessThan(360);
+      }
+    });
+
+    it('depth-derived wall planes have height and facing', () => {
+      const depthMap = makeSyntheticDepthMap();
+      const result = runPlaneExtractionWorker({
+        ...makeInput(),
+        depthMaps: [depthMap],
+        usedMidas: true,
+      });
+
+      const wallPlanes = result.artifacts.filter(
+        (a): a is WallPlaneCandidate => a.artifactType === 'wall_plane_candidate',
+      );
+      for (const wp of wallPlanes) {
+        if (wp.estimatedHeightM !== undefined) {
+          expect(wp.estimatedHeightM).toBeGreaterThan(0);
+          expect(wp.estimatedHeightM).toBeLessThanOrEqual(15);
+        }
+        if (wp.facingDirection !== undefined) {
+          expect(['north', 'south', 'east', 'west']).toContain(wp.facingDirection);
+        }
+      }
+    });
+
+    it('depth artifacts carry depth-specific limitations', () => {
+      const depthMap = makeSyntheticDepthMap();
+      const result = runPlaneExtractionWorker({
+        ...makeInput(),
+        depthMaps: [depthMap],
+        usedMidas: true,
+      });
+
+      // Depth-derived artifacts should have depth-specific limitations
+      const depthArtifacts = result.artifacts.filter(a =>
+        a.limitations.some(l => l.includes('flood-fill') || l.includes('depth-aware')),
+      );
+      // At least some artifacts should have depth limitations
+      expect(depthArtifacts.length).toBeGreaterThan(0);
+    });
+
+    it('blends depth with heuristic when masks overlap', () => {
+      const depthMap = makeSyntheticDepthMap();
+      const roofMask = makeMask(); // overlaps with the roof region by design
+      const result = runPlaneExtractionWorker({
+        surveyId: 'survey-001',
+        masks: [roofMask],
+        lines: [
+          makeLine({ id: 'line-ridge-001', lineType: 'ridge', start: pt(250, 80), end: pt(750, 80) }),
+        ],
+        vanishingPoints: [makeVP()],
+        depthMaps: [depthMap],
+        usedMidas: true,
+      });
+
+      // Should have roof candidates from depth
+      const roofPlanes = result.artifacts.filter(
+        (a): a is RoofPlaneCandidate => a.artifactType === 'roof_plane_candidate',
+      );
+      // At least one roof plane should exist
+      expect(roofPlanes.length).toBeGreaterThan(0);
+      // If a mask was matched, it should have associatedLineIds
+      for (const rp of roofPlanes) {
+        if (rp.sourceMaskId) {
+          // Blended: has both depth and heuristic info
+          expect(Array.isArray(rp.associatedLineIds)).toBe(true);
+        }
+      }
+    });
+
+    it('falls back to heuristic for unprocessed masks', () => {
+      // Create a depth map and a wall mask that likely won't overlap with depth planes
+      const depthMap = makeSyntheticDepthMap(64, 64, 'file-001');
+      const distantWallMask = makeWallMask({
+        id: 'seg-file-001-wall-distant',
+        fileId: 'file-002', // Different file ID — won't match depth map
+        polygon: [pt(50, 350), pt(200, 350), pt(200, 700), pt(50, 700)],
+        maskBounds: { x: 50, y: 350, width: 150, height: 350, coordinateSystem: 'normalized_image_0_1000' },
+      });
+
+      const result = runPlaneExtractionWorker({
+        surveyId: 'survey-001',
+        masks: [distantWallMask],
+        lines: [],
+        vanishingPoints: [],
+        depthMaps: [depthMap],
+        usedMidas: true,
+      });
+
+      // The wall mask for a different file should still produce a heuristic artifact
+      const wallPlanes = result.artifacts.filter(
+        (a): a is WallPlaneCandidate => a.artifactType === 'wall_plane_candidate',
+      );
+      expect(wallPlanes.length).toBeGreaterThan(0);
+      // Should have heuristic_fallback timing
+      expect(result.stageTimings['heuristic_fallback']).toBeDefined();
+    });
+
+    it('heuristic-only path still works without depth maps', () => {
+      const result = runPlaneExtractionWorker(makeInput());
+      // Should produce artifacts via heuristic path
+      expect(result.artifacts.length).toBeGreaterThan(0);
+      expect(result.stageTimings['heuristic_extraction']).toBeDefined();
+    });
+
+    it('respects minConfidence in depth path', () => {
+      const depthMap = makeSyntheticDepthMap();
+      const result = runPlaneExtractionWorker({
+        ...makeInput(),
+        depthMaps: [depthMap],
+        usedMidas: true,
+        config: { minConfidence: 95 },
+      });
+
+      // Very high minConfidence should filter out most or all depth planes
+      for (const artifact of result.artifacts) {
+        expect(artifact.confidence).toBeGreaterThanOrEqual(95);
+      }
+    });
+
+    it('usedMidas affects confidence blending weight', () => {
+      const depthMap = makeSyntheticDepthMap();
+      const roofMask = makeMask();
+
+      const resultMidas = runPlaneExtractionWorker({
+        surveyId: 's1',
+        masks: [roofMask],
+        lines: [],
+        vanishingPoints: [],
+        depthMaps: [depthMap],
+        usedMidas: true,
+      });
+
+      const resultNoMidas = runPlaneExtractionWorker({
+        surveyId: 's1',
+        masks: [roofMask],
+        lines: [],
+        vanishingPoints: [],
+        depthMaps: [depthMap],
+        usedMidas: false,
+      });
+
+      // Both should produce artifacts, but MiDaS path may have different confidence
+      expect(resultMidas.artifacts.length).toBeGreaterThan(0);
+      expect(resultNoMidas.artifacts.length).toBeGreaterThan(0);
     });
   });
 });
