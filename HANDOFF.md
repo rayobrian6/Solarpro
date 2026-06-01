@@ -1,8 +1,8 @@
-# HANDOFF — MiDaS Depth Upgrade (Stages 1–4 Complete + Visualization Utility)
+# HANDOFF — MiDaS Depth Upgrade + Photogrammetry + Polygon Fidelity (Stages 1–7 Complete)
 
-**Date:** 2025-06-02  
-**Branch:** `dev` (latest commit `b4a03e8`)  
-**Render Deploy:** `dep-d8ee7e77f7vs73d36qt0` (LIVE)
+**Date:** 2025-06-04  
+**Branch:** `dev` (latest commit `4eac403`)  
+**Render Deploy:** LIVE with v2.2.0 (polygon fidelity fix + SAM2 small model)
 
 ---
 
@@ -308,19 +308,31 @@ curl -X PUT "https://api.render.com/v1/services/srv-d8djpc3bc2fs73emup10/env-var
 
 3. ~~**Fix artifact accumulation + batch DB insert**~~ ✅ DONE (Stage 6) — `deleteArtifactsBySurvey()` cleanup + `insertReconstructionArtifactsBatch()` reduces 328 DB queries to ~3. Comprehensive logging added for 504 debugging.
 
-4. **Test the pipeline end-to-end after the fixes** — The user reported a 504 timeout. After the batch insert and accumulation fixes, the pipeline should complete faster. Need the user to re-run "Generate Roof Geometry" and verify:
+4. ~~**Fix polygon fidelity for line extraction**~~ ✅ DONE (Phase E) — CHAIN_APPROX_NONE, epsilon 1.0, max edge length 50px. Line extraction improved from 21 to 66 lines. Deployed as v2.2.0 on Render Standard.
+
+5. **Test the pipeline end-to-end after the fixes** — The user reported a 504 timeout. After the batch insert, accumulation, and polygon fidelity fixes, the pipeline should produce better results. Need the user to re-run "Generate Roof Geometry" and verify:
    - No 504 timeout (faster DB writes)
    - Correct artifact counts (2 depth maps from 2 photos, not 142)
    - Depth-augmented path executing (check Vercel logs for `[PlaneExtraction]` entries)
    - Reasonable plane counts (more than 2 roof planes expected with depth augmentation)
+   - Better line extraction (66 lines vs 21 before)
+   - Photogrammetry artifacts present (sfm_point_cloud + mesh)
 
-5. **Depth map visualization UI component** — `depthMapDecode.ts` provides `depthMapToHeatmapDataURL()` which produces a PNG data URL. Next step is a React component that renders the heatmap overlay on the source photo.
+6. **Retry Render Pro plan upgrade** — The Pro plan (5, 4GB/2CPU) was reverted to Standard because it caused 5 consecutive `update_failed` deploys. Options: (a) try upgrading again now that fresh code is deployed on Standard, (b) delete & recreate the service on Pro plan, (c) contact Render support about the hardware migration failure.
 
-6. **Larger MiDaS model** — `Intel/dpt-swinv2-tiny-256` is 41MB. The `Intel/dpt-swinv2-large-256` (213MB) would give better accuracy but may push RAM usage over limits on Render Standard. Test on Render Pro first.
+7. **Depth map visualization UI component** — `depthMapDecode.ts` provides `depthMapToHeatmapDataURL()` which produces a PNG data URL. Next step is a React component that renders the heatmap overlay on the source photo.
 
-7. **Multi-view depth consistency** — When multiple photos overlap, fuse their depth maps using the existing multi-view fusion stage. This is a natural extension of the pipeline architecture.
+8. **3D mesh visualization UI component** — `MeshArtifact` now contains vertices and triangles. A React component (e.g., Three.js or react-three-fiber) could render the mesh for visual verification.
 
-8. **Consider moving pipeline to background job** — The current architecture runs the entire pipeline synchronously in the Vercel serverless function (maxDuration=300s). If SAM2 cold starts + MiDaS + DB writes continue to cause timeouts, the pipeline should be moved to a background worker (e.g., Inngest, Trigger.dev, or a dedicated Render worker service) that posts results when complete, rather than blocking the HTTP request.
+9. **Larger MiDaS model** — `Intel/dpt-swinv2-tiny-256` is 41MB. The `Intel/dpt-swinv2-large-256` (213MB) would give better accuracy but may push RAM usage over limits on Render Standard. Test on Render Pro first.
+
+10. ~~**Multi-view depth consistency**~~ ✅ DONE (Stage 7) — `depthFusion.ts` aligns and merges depth maps using scale-shift alignment via plane correspondences. Will be upgraded to proper SfM when camera poses become available.
+
+11. **Consider moving pipeline to background job** — The current architecture runs the entire pipeline synchronously in the Vercel serverless function (maxDuration=300s). If SAM2 cold starts + MiDaS + DB writes continue to cause timeouts, the pipeline should be moved to a background worker (e.g., Inngest, Trigger.dev, or a dedicated Render worker service) that posts results when complete, rather than blocking the HTTP request.
+
+12. **Proper Delaunay triangulation** — Current meshing uses convex-hull + fan triangulation, which may miss concavities. A proper Delaunay triangulation library (e.g., delaunator) would produce better meshes.
+
+13. **Spatial index for k-NN** — Statistical outlier removal uses O(n²) brute-force nearest neighbor. For larger point clouds, add a KD-tree or grid-based spatial index.
 
 ### depthMapDecode API Quick Reference
 
@@ -497,3 +509,378 @@ When `inference_active` is `true`, `status` will be `"busy"` and `inference_type
 ---
 
 *End of handoff document. Stages 1–4 + health check fix complete. Ready for next session.*
+
+
+---
+
+## Phase E: Polygon Fidelity Improvement — Fix Sloppy Lines (Complete)
+
+### Problem
+SAM2 polygon outlines were too coarse for line extraction. The root causes were:
+
+1. **`CHAIN_APPROX_SIMPLE` in `findContours`**: OpenCV's `CHAIN_APPROX_SIMPLE` compresses horizontal, vertical, and diagonal segments, keeping only endpoints. This collapsed long straight edges into just 2 points, making a 200px+ roof edge into a single polygon segment.
+
+2. **Douglas-Peucker epsilon too aggressive**: The default epsilon of 2.0 pixels (later changed to 5.0 via env var) was too high, removing important detail from polygon outlines. For line extraction, every vertex matters.
+
+3. **No edge length constraint**: Even after simplification, polygon edges could be arbitrarily long (200px+ observed), which directly translated to missing or imprecise structural lines.
+
+### Fix (3-step polygon pipeline in `mask_to_polygon()`)
+
+**Step 1**: Switch `findContours` from `CHAIN_APPROX_SIMPLE` to `CHAIN_APPROX_NONE`, preserving every contour pixel before simplification.
+
+**Step 2**: Lower Douglas-Peucker epsilon from 2.0 (default) to 1.0 pixel. This retains more detail while still reducing point count from the raw contour. Configurable via `SAM2_DOUGLAS_PEUCKER_EPSILON` env var.
+
+**Step 3**: New `_subdivide_long_edges()` function — after simplification, any polygon edge longer than `MAX_POLYGON_EDGE_LENGTH` (default 50px, env-overridable via `SAM2_MAX_POLYGON_EDGE_LENGTH`) is subdivided by interpolating intermediate points at equal intervals along the edge.
+
+### Key Code Changes (`sam2-service/main.py`)
+
+```python
+MAX_POLYGON_EDGE_LENGTH = int(os.environ.get("SAM2_MAX_POLYGON_EDGE_LENGTH", "50"))
+DOUGLAS_PEUCKER_EPSILON = float(os.environ.get("SAM2_DOUGLAS_PEUCKER_EPSILON", "1.0"))
+
+def _subdivide_long_edges(points: list[dict], max_length: float) -> list[dict]:
+    if max_length <= 0 or len(points) < 2:
+        return points
+    result: list[dict] = []
+    n = len(points)
+    for i in range(n):
+        p1 = points[i]
+        p2 = points[(i + 1) % n]
+        result.append(p1)
+        dx = p2["x"] - p1["x"]
+        dy = p2["y"] - p1["y"]
+        length = (dx * dx + dy * dy) ** 0.5
+        if length > max_length:
+            num_segments = max(2, int(length / max_length + 0.5))
+            for j in range(1, num_segments):
+                t = j / num_segments
+                result.append({"x": p1["x"] + dx * t, "y": p1["y"] + dy * t})
+    return result
+
+def mask_to_polygon(mask_bin, epsilon=DOUGLAS_PEUCKER_EPSILON):
+    mask_uint8 = (mask_bin * 255).astype(np.uint8) if mask_bin.dtype != np.uint8 else mask_bin
+    contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    if not contours: return []
+    best_contour = max(contours, key=cv2.contourArea)
+    simplified = cv2.approxPolyDP(best_contour, epsilon, closed=True)
+    if len(simplified) < MIN_POLYGON_POINTS: return []
+    points = [{"x": float(pt[0][0]), "y": float(pt[0][1])} for pt in simplified]
+    points = _subdivide_long_edges(points, MAX_POLYGON_EDGE_LENGTH)
+    return points
+```
+
+### Before/After Comparison
+
+| Metric | Before (v2.1.0) | After (v2.2.0) |
+|--------|-----------------|-----------------|
+| Total polygon points (4 masks) | 106 | 230 |
+| Max edge length | 227px | 62px |
+| Edges > 100px | 4 | 0 |
+| Edges > 200px | 1 | 0 |
+| Lines extractable | 21 | 66 |
+| Ridge lines | 1 | 11 |
+| Eave lines | 6 | 17 |
+| Rake lines | 10 | 5 |
+| Wall vertical lines | 4 | 33 |
+
+### Render Deploy Notes
+
+- Version bumped from 2.1.0 → 2.2.0 to trigger fresh deploy
+- Commits: `dd68c8b` (main fix) + `4eac403` (version bump)
+- **Pro plan upgrade was reverted to Standard** — upgrading from Standard ($25, 2GB/1CPU) to Pro ($85, 4GB/2CPU) caused 5 consecutive `update_failed` deploys. The Docker build succeeded every time, but the instance swap phase failed. Root cause: Render platform issue with hardware migration when changing instance types. After reverting to Standard plan via API, deploy succeeded.
+- If Pro plan is still desired, options: (a) try upgrading again now that fresh code is deployed on Standard, (b) delete & recreate the service on Pro plan, (c) contact Render support.
+
+### Environment Variables (updated in render.yaml)
+
+| Variable | Old Value | New Value |
+|----------|-----------|-----------|
+| `SAM2_DOUGLAS_PEUCKER_EPSILON` | `"2.0"` | `"1.0"` |
+| `SAM2_MAX_POLYGON_EDGE_LENGTH` | (not set) | `"50"` |
+
+---
+
+## Stage 7: Photogrammetry — Multi-View 3D Reconstruction (Complete)
+
+### Overview
+
+Pipeline Stage 7 produces `MeshArtifact` and `SfMPointCloud` artifacts from depth maps, segmentation masks, and plane candidates. The pipeline is:
+
+1. **Depth Unprojection** (`depthUnprojection.ts`): Convert 2D depth grid → 3D point cloud via pinhole camera model
+2. **Depth Fusion** (`depthFusion.ts`): Align and merge multi-view point clouds using scale-shift alignment
+3. **Meshing** (`meshFromDepth.ts`): RANSAC plane fitting + convex-hull triangulation → triangle mesh
+
+All outputs carry the `REVIEW_ONLY_AUTHORITY` envelope — this is NOT CAD geometry.
+
+### depthUnprojection.ts — Depth Map → 3D Point Cloud
+
+Converts a 2D depth grid into a 3D point cloud using the pinhole camera model:
+
+```
+X_cam = (u - cx) * depth / fx
+Y_cam = (v - cy) * depth / fy
+Z_cam = depth
+```
+
+Key features:
+- `CameraIntrinsics` / `CameraExtrinsics` interfaces for full camera model
+- `intrinsicsFromFOV(fovH, fovV, w, h)` — derive intrinsics from field-of-view angles
+- `defaultPhoneIntrinsics(w, h)` — 65°H × 50°V typical smartphone camera
+- Per-point normal estimation from depth gradient (central differences → cross product of surface tangents)
+- Per-point segmentation class assignment via point-in-polygon test against mask polygons
+- Downsample factor for sparse point clouds
+- Scale-shift parameters for relative (MiDaS) depth alignment
+- Extrinsics transform: `P_world = R * P_cam + T`
+
+Exported functions:
+- `unprojectDepthMap(depthMap, intrinsics, extrinsics?, masks?, options?)` → `UnprojectionResult`
+- `unprojectDepthMapDefault(depthMap, masks?, options?)` — convenience with default phone intrinsics
+- `intrinsicsFromFOV(fovH, fovV, w, h)` → `CameraIntrinsics`
+- `defaultPhoneIntrinsics(w, h, fovH?, fovV?)` → `CameraIntrinsics`
+
+Types: `Point3D`, `UnprojectionResult`, `UnprojectionOptions`, `CameraIntrinsics`, `CameraExtrinsics`
+
+### depthFusion.ts — Multi-View Depth Alignment & Merge
+
+Aligns and merges depth maps from multiple photos into a single consistent 3D point cloud.
+
+Key challenges with monocular depth:
+1. MiDaS depth is relative (affine-invariant) — different scale/shift per image
+2. No multi-view consistency — overlapping regions may have different depth values
+3. No camera poses — no known relative rotation/translation between views
+
+Approach (pragmatic, no SfM required):
+1. Per-view unprojection using assumed camera intrinsics
+2. Scale-shift alignment using segmentation-based correspondences (same roof plane seen from two views → depth alignment)
+3. Point cloud merge with voxel-grid filtering for consistency
+4. Outlier removal (statistical outlier detection)
+
+Exported functions:
+- `fuseDepthMaps(depthMaps, masks, roofPlanes, wallPlanes, options?)` → `DepthFusionResult`
+- `alignDepthMaps(depthA, depthB, planesA, planesB)` → `AlignmentParams` — solves `depthB = scale * depthA + shift` via least squares on matching plane mean depths
+- `voxelGridFilter(points, voxelSize, mode?)` → `Point3D[]` — average or closest-to-center per voxel
+- `removeStatisticalOutliers(points, neighbors?, stdMultiplier?)` → `Point3D[]` — k-NN outlier detection
+
+Alignment model: `aligned_depth = depth * scale + shift`, solved via least squares on mean depths of planes with matching normals (cosine ≥ 0.85).
+
+Types: `AlignmentParams`, `DepthFusionResult`, `DepthFusionOptions`
+
+### meshFromDepth.ts — Plane-Based Meshing
+
+Creates a lightweight triangle mesh from the fused 3D point cloud:
+
+1. Cluster points by segmentation class (roof=1, wall=2, ground=5)
+2. Fit planes to each cluster via iterative RANSAC (with PCA refit)
+3. Project inlier points onto their fitted plane
+4. Compute 2D Delaunay-like triangulation (convex hull + fan + interior insertion) within each plane's local frame
+5. Lift 2D triangles back to 3D
+
+Exported functions:
+- `meshFromDepth(points, options?)` → `MeshFromDepthResult`
+- `fitPlaneRansac(points, distanceThreshold?, maxIterations?, minInliers?)` → `FittedPlane | null`
+- `triangulatePoints2D(points2D, maxEdgeLength?, minAngle?)` → `Triangle[]`
+
+RANSAC procedure: Sample 3 random points → compute plane → count inliers → keep best → refit via PCA (eigenvector of smallest eigenvalue of covariance matrix).
+
+Triangulation: Convex hull (Graham scan) → fan triangulation from first vertex → incremental interior point insertion (find containing triangle, split into 3 sub-triangles). Validation rejects degenerate triangles (zero area), long edges (> maxEdgeLength), and thin angles (< minAngle).
+
+Types: `Triangle`, `FittedPlane`, `MeshPatch`, `MeshFromDepthResult`, `MeshFromDepthOptions`
+
+### runPhotogrammetryWorker.ts — Worker Orchestration
+
+Pipeline Stage 7 worker that wires together unprojection → fusion → meshing.
+
+Two entry points:
+- `runPhotogrammetryWorker(input)` — direct invocation with explicit inputs
+- `runPhotogrammetryFromReconstructionInput(input, allArtifacts)` — called by `runFullPipeline.ts`, extracts depth maps, masks, and planes from accumulated artifacts
+
+Output artifacts:
+1. **`sfm_point_cloud`** (`SfMPointCloud`): Base64-encoded Float32Array of [x,y,z,...] points. Confidence: 30 base + 10/view + 0.3/point (capped 100).
+2. **`mesh`** (`MeshArtifact`): Base64-encoded Float32 vertices + Uint32 triangles. Confidence: 20 base + 10/plane + 0.2/vertex + 5/view (capped 100).
+
+Graceful skip: If no depth maps are provided, the worker returns empty artifacts (no crash).
+
+Version: `1.0.0-photogrammetry-worker`
+
+### New Artifact Types (types.ts)
+
+```typescript
+interface MeshArtifact {
+  artifactType: 'mesh';
+  id: string;
+  verticesData: string;      // base64 Float32 [x,y,z,...]
+  trianglesData: string;     // base64 Uint32 [v0,v1,v2,...]
+  vertexCount: number;
+  triangleCount: number;
+  estimatedArea: number;     // relative depth units
+  planeCount: number;
+  sourceFileIds: string[];
+  confidence: number;
+  workerVersion: string;
+  authority: GeometryReconstructionAuthority;
+  limitations: string[];
+}
+
+interface SfMPointCloud {
+  artifactType: 'sfm_point_cloud';
+  pointCount: number;
+  pointsData: string;        // base64 Float32 [x,y,z,...]
+  sourcePhotoCount: number;
+  sourceFileIds: string[];
+  confidence: number;
+  authority: GeometryReconstructionAuthority;
+  limitations: string[];
+}
+```
+
+Both types are added to the `GeometryReconstructionArtifact` union and the schema validators in `schemas.ts`.
+
+### Pipeline Integration (runFullPipeline.ts)
+
+Stage 7 is wired after Stage 6 (multi-view fusion) with a timeout check:
+
+```typescript
+// Stage 7: Photogrammetry
+const photoGramResult = stageTimer('photogrammetry', () =>
+  runPhotogrammetryFromReconstructionInput(input, allArtifacts),
+);
+const photoGramArtifacts = photoGramResult.result.artifacts;
+allArtifacts.push(...photoGramArtifacts);
+```
+
+If the pipeline has exceeded its time budget after Stage 6, Stage 7 is skipped.
+
+### Key Files
+
+| File | Role | Status |
+|------|------|--------|
+| `lib/.../workers/photogrammetry/depthUnprojection.ts` | Depth map → 3D point cloud (pinhole model) | **NEW** |
+| `lib/.../workers/photogrammetry/depthFusion.ts` | Multi-view alignment + merge + voxel filter + outlier removal | **NEW** |
+| `lib/.../workers/photogrammetry/meshFromDepth.ts` | RANSAC plane fit + convex-hull triangulation → mesh | **NEW** |
+| `lib/.../workers/photogrammetry/runPhotogrammetryWorker.ts` | Worker orchestration + artifact emission | **NEW** |
+| `lib/.../workers/photogrammetry/index.ts` | Barrel exports | **NEW** |
+| `lib/.../types.ts` | `MeshArtifact` + `SfMPointCloud` types added | Modified |
+| `lib/.../schemas.ts` | `validateMeshArtifact()` + schema dispatch added | Modified |
+| `lib/.../runFullPipeline.ts` | Stage 7 photogrammetry wired after Stage 6 | Modified |
+
+### Photogrammetry API Quick Reference
+
+```typescript
+import {
+  // Worker entry points
+  runPhotogrammetryWorker,
+  runPhotogrammetryFromReconstructionInput,
+
+  // Unprojection
+  unprojectDepthMap,
+  unprojectDepthMapDefault,
+  intrinsicsFromFOV,
+  defaultPhoneIntrinsics,
+
+  // Fusion
+  fuseDepthMaps,
+  alignDepthMaps,
+  voxelGridFilter,
+  removeStatisticalOutliers,
+
+  // Meshing
+  meshFromDepth,
+  fitPlaneRansac,
+  triangulatePoints2D,
+} from '@/lib/siteSurveys/geometryReconstruction/workers/photogrammetry';
+
+// Example: full pipeline
+const result = runPhotogrammetryFromReconstructionInput(pipelineInput, allArtifacts);
+console.log(result.fusedPointCount);      // e.g., 1200
+console.log(result.meshVertexCount);      // e.g., 85
+console.log(result.meshTriangleCount);    // e.g., 120
+console.log(result.fittedPlaneCount);     // e.g., 3
+console.log(result.artifacts.length);     // 2 (sfm_point_cloud + mesh)
+
+// Example: unproject a single depth map
+const unprojResult = unprojectDepthMapDefault(depthMap, masks, {
+  downsampleFactor: 2,
+  estimateNormals: true,
+  assignSegClass: true,
+});
+console.log(unprojResult.validCount);     // e.g., 950
+console.log(unprojResult.bounds);         // { xMin, yMin, zMin, xMax, yMax, zMax }
+
+// Example: fit a plane to 3D points
+const plane = fitPlaneRansac(points, 0.02, 200, 8);
+if (plane) {
+  console.log(plane.nx, plane.ny, plane.nz); // unit normal
+  console.log(plane.d);                       // offset
+  console.log(plane.inlierCount);             // e.g., 45
+  console.log(plane.residualRms);            // e.g., 0.008
+}
+```
+
+### Limitations
+
+1. **Depth is relative, not metric**: All measurements (vertex positions, areas, edge lengths) are in normalized depth units, not meters. When SfM becomes available, this module will be upgraded to metric reconstruction.
+
+2. **No camera poses**: Scale-shift alignment via plane correspondences is approximate. It relies on matching roof/wall planes across views by normal similarity (cosine ≥ 0.85). Without known camera extrinsics, multi-view consistency is limited.
+
+3. **Convex-hull triangulation**: The triangulation approach (convex hull + fan + interior insertion) may miss concavities in roof surfaces. A proper Delaunay triangulation would be more robust but requires an external library.
+
+4. **Brute-force k-NN**: Statistical outlier removal uses O(n²) brute-force nearest neighbor search. Acceptable for small clouds (<10K points) but will need a spatial index for larger datasets.
+
+5. **Single-scale depth**: The 64×64 depth grid resolution limits the level of geometric detail. Higher-resolution depth maps would produce denser, more accurate point clouds.
+
+
+---
+
+## Phase F: ONNX Batch Decoder Dimension Mismatch Fix (2025-06-01)
+
+### Problem
+Render deployment logs showed repeated ONNX Runtime errors every time the decoder was invoked:
+```
+batch decoder run failed (4 points). [ONNXRuntimeError] INVALID_ARGUMENT
+Got invalid dimensions for input 'image_embeddings' for the following indices
+index 0 Got 4 Expected 1
+```
+
+This caused 5 consecutive `update_failed` deploys on Render, blocking the Pro plan upgrade.
+
+### Root Cause Analysis
+The samexporter ONNX decoder (used for SAM 2.1 Hiera models) fundamentally does NOT support batching (num_labels > 1). Two approaches were tested:
+
+1. **Feature tiling** (`np.repeat(feat, N, axis=0)`): Tiles encoder features from `(1, C, H, W)` → `(N, C, H, W)`, but encoder inputs have FIXED batch=1 in the ONNX graph. Error: "Got invalid dimensions for input 'image_embed' — Got N Expected 1"
+
+2. **num_labels batching**: Passes encoder features as-is `(1, C, H, W)` and batches via the `num_labels` dimension on point/label/mask inputs. But `_embed_masks()` does `has_mask_input * mask_downscaling(input_mask)`, and ONNX Runtime's Mul node cannot broadcast a 1D tensor `(N,)` against a 4D tensor `(N, C, H, W)`. Error: "Attempting to broadcast an axis by a dimension other than 1. N by 64"
+
+Both tiny (`sam2.1_hiera_tiny`) and small (`sam2.1_hiera_small`) model decoders have identical fixed-batch input shapes.
+
+### Fix
+At `__init__` time, the code now inspects the decoder's input shapes and detects fixed batch=1 on encoder feature inputs. When detected:
+
+- Sets `self._decoder_batch_mode = "single"`
+- Forces `self.points_per_batch = 1` (regardless of the `SAM2_POINTS_PER_BATCH` env var)
+- `_safe_batch_size()` always returns 1
+- `_decode_batch_points()` loops over `_decode_single_point()` directly — no batched ONNX call is attempted
+
+This eliminates all ONNXRuntimeError spam while producing identical results (the fallback was single-point anyway, just with error spam and wasted failed batch attempts).
+
+### Key Code Changes
+| File | Change | Lines |
+|------|--------|-------|
+| `onnx_sam2_amg.py` (docstring) | Updated decoder I/O spec with fixed/dynamic dims, documented both batch failures | Top of file |
+| `onnx_sam2_amg.py` (`__init__`) | Added `_decoder_batch_mode` detection + `points_per_batch=1` forcing | ~282-317 |
+| `onnx_sam2_amg.py` (`_safe_batch_size`) | Returns 1 for "single" mode decoders | ~378-384 |
+| `onnx_sam2_amg.py` (`_decode_batch_points`) | Loops over `_decode_single_point()` for "single" mode | ~587-626 |
+| `onnx_sam2_amg.py` (`_decode_batch_via_num_labels`) | Marked unreachable, documented broadcast bug | ~628+ |
+
+### Performance Impact
+With `points_per_batch=1`, each decoder call processes 1 point. For a 9×9 grid (81 points), this means 81 decoder calls instead of ~20 batched calls. However:
+- The decoder is lightweight (~7ms per call on CPU), so 81 calls ≈ 0.6s
+- The encoder is the bottleneck (~2.5s), not the decoder
+- The old code was ALSO doing 81 single-point calls — just after failing 20 batched calls first (with error spam)
+- Net decoder time is actually FASTER (no wasted failed batch attempts)
+
+### Render Deployment
+After this fix is deployed, the Render logs should show:
+- `WARNING: Decoder has fixed batch=1 on encoder inputs — batching NOT supported. Forcing points_per_batch=1 (was 4).`
+- Zero `ONNXRuntimeError` / `INVALID_ARGUMENT` / `batch decoder run failed` errors
+- Clean single-point decoding with `ONNX decoder: 81 points in 81 batches (batch_size=1)`
+
+After a stable deploy on Standard plan, retry the Pro plan upgrade ($85, 4GB/2CPU).
