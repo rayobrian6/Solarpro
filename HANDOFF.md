@@ -1,7 +1,7 @@
 # HANDOFF — MiDaS Depth Upgrade (Stages 1–4 Complete + Visualization Utility)
 
 **Date:** 2025-06-01  
-**Branch:** `dev` (latest commit `3c8dfd6`)  
+**Branch:** `dev` (latest commit `af54a28`)  
 **Render Deploy:** `dep-d8ee7e77f7vs73d36qt0` (LIVE)
 
 ---
@@ -83,6 +83,20 @@ All four stages of the MiDaS/DPT depth estimation upgrade are **complete and ver
 - 33 tests in `depthCache.test.ts` covering LRU eviction, TTL, stats, singleton
 - Three-check suite: tsc 0, eslint 0 errors, vitest 6107 pass
 
+### Bonus: Depth-Aware Plane Extraction ✅
+- New `depthPlaneExtraction.ts`: identifies roof planes from DepthMap artifacts
+  - `extractDepthPlanes(depthMap, usedMidas, options)`: flood-fill segmentation + gradient analysis
+  - Pipeline: compute gradient → detect edges → flood-fill segment → classify orientation → score confidence → merge similar → sort by area
+  - Orientation classification: `'horizontal'` (ground), `'slanted'` (roof), `'vertical'` (wall), `'far'` (sky)
+  - Confidence scoring: depth quality * 0.3 + area bonus + consistency bonus + MiDaS bonus + orientation bonus
+  - Optional merging of adjacent planes with similar depth and same orientation
+  - Uses depth gradient (central differences) for edge detection
+  - Depth quality report integrated per-plane for downstream filtering
+  - Authority envelope: review-only, non-authoritative
+- Barrel exports updated in `depth/index.ts`
+- 46 tests in `depthPlaneExtraction.test.ts` covering extraction, orientation, edges, segmentation, confidence, options, edge cases, integration, and 64x64 grids (all pass)
+- Three-check suite: tsc 0, eslint 0 errors, vitest 6153 pass
+
 ---
 
 ## Architecture
@@ -131,6 +145,7 @@ Pipeline Stage 4: Depth Estimation
 | `lib/.../workers/depth/depthMapDecode.ts` | Decode, stats, heatmap visualization | **NEW** (Bonus) |
 | `lib/.../workers/depth/depthQualityReport.ts` | Quality assessment (grade A-F) + usability checks | **NEW** (Bonus) |
 | `lib/.../workers/depth/depthCache.ts` | LRU cache with TTL + stats | **NEW** (Bonus) |
+| `lib/.../workers/depth/depthPlaneExtraction.ts` | Flood-fill plane extraction + orientation classification | **NEW** (Bonus) |
 | `lib/.../workers/depth/runDepthWorker.ts` | Depth worker: MiDaS primary, heuristic fallback + cache | Yes (Stage 3+Bonus) |
 | `lib/.../workers/depth/index.ts` | Barrel exports including midasClient + depthMapDecode | Yes (Stage 3+Bonus) |
 | `lib/.../runFullPipeline.ts` | Pipeline: depth stage uses asyncStageTimer | Yes (Stage 3) |
@@ -138,6 +153,7 @@ Pipeline Stage 4: Depth Estimation
 | `__tests__/depthMapDecode.test.ts` | Tests for decode/stats/heatmap/PNG | **NEW** (Bonus) |
 | `__tests__/depthQualityReport.test.ts` | Tests for quality report + usability | **NEW** (Bonus) |
 | `__tests__/depthCache.test.ts` | Tests for LRU cache + TTL + stats | **NEW** (Bonus) |
+| `__tests__/depthPlaneExtraction.test.ts` | Tests for plane extraction (46 tests) | **NEW** (Bonus) |
 
 ---
 
@@ -204,7 +220,7 @@ curl -X PUT "https://api.render.com/v1/services/srv-d8djpc3bc2fs73emup10/env-var
 
 6. **Depth convention**: Higher values = farther. MiDaS raw output is inverted. If you ever change the model or the convention, check `invertMidasDepth()` in `runDepthWorker.ts`.
 
-7. **Plane extraction doesn't consume DepthMap yet**: The downstream `runPlaneExtractionWorker.ts` is heuristic-based and doesn't decode depth data. This is the natural next upgrade target.
+7. **Plane extraction integration pending**: The `depthPlaneExtraction.ts` utility now provides depth-aware plane detection, but the downstream `runPlaneExtractionWorker.ts` still uses the heuristic approach. Integration is the natural next step — replace or augment the heuristic with `extractDepthPlanes()` output.
 
 8. **Sandbox disk full**: The workspace hit 100% disk during this session. `sam2-service/__pycache__/` is untracked and can be cleaned. Large model downloads are the main culprit.
 
@@ -214,7 +230,7 @@ curl -X PUT "https://api.render.com/v1/services/srv-d8djpc3bc2fs73emup10/env-var
 
 1. **Set `MIDAS_SERVICE_URL` in the Next.js/Vercel environment** — This activates the MiDaS path in production. Without it, the depth worker stays on heuristic.
 
-2. **Upgrade plane extraction to consume DepthMap data** — The depth artifacts are now much richer (MiDaS confidence 60-80% vs heuristic 35-65%). Plane extraction can use depth gradients to identify roof planes more accurately.
+2. **Upgrade plane extraction to consume DepthMap data** ✅ Backend utility done — `depthPlaneExtraction.ts` provides `extractDepthPlanes()` which uses flood-fill segmentation, gradient edge detection, and orientation classification. Next step would be integrating this into `runPlaneExtractionWorker.ts` to replace or augment the existing heuristic approach.
 
 3. **Depth map visualization UI component** ✅ Backend utility done — `depthMapDecode.ts` provides `depthMapToHeatmapDataURL()` which produces a PNG data URL. Next step is a React component that renders the heatmap overlay on the source photo (see `DepthHeatmapOverlay` sketch below).
 
@@ -287,6 +303,49 @@ console.log(cache.getStats());
 
 // The cache is automatically used by runDepthFromReconstructionInput()
 // — cache hits skip both image fetch and MiDaS inference
+```
+
+### depthPlaneExtraction API Quick Reference
+
+```typescript
+import {
+  extractDepthPlanes,
+} from '@/lib/siteSurveys/geometryReconstruction/workers/depth';
+
+import type {
+  DepthPlaneCandidate,
+  DepthPlaneOptions,
+  DepthPlaneExtractionResult,
+} from '@/lib/siteSurveys/geometryReconstruction/workers/depth';
+
+// Example: extract roof planes from a DepthMap
+const result = extractDepthPlanes(depthMap, usedMidas, {
+  depthThreshold: 0.12,   // flood-fill similarity (default 0.12)
+  minAreaFraction: 0.02,  // minimum 2% of image (default 0.02)
+  maxPlanes: 10,           // cap on results (default 10)
+  mergeSimilar: 0.08,     // merge planes within 0.08 depth (default 0.08)
+});
+
+// Result structure
+result.planes;          // DepthPlaneCandidate[], sorted by area (largest first)
+result.edgeCount;       // number of depth discontinuity pixels
+result.qualityReport;   // DepthQualityReport for the input depth
+result.stats;           // DepthStatistics for the input depth
+result.authority;       // { reviewOnly: true, ... }
+
+// Each plane candidate
+const plane = result.planes[0];
+plane.id;                  // 'depth-plane-0'
+plane.label;               // 'roof_plane_1' | 'sky_2' | 'ground_3' | 'wall_4'
+plane.orientation;         // 'slanted' | 'far' | 'horizontal' | 'vertical'
+plane.areaFraction;        // fraction of total pixels
+plane.meanDepth;           // average depth value
+plane.depthStdDev;         // depth consistency
+plane.gradientMagnitude;   // steepness proxy
+plane.confidence;          // 0-100
+plane.bounds;              // { xMin, yMin, xMax, yMax } in [0,1]
+plane.boundaryPolygon;    // NormalizedPoint[] in normalized_image_0_1000
+plane.depthQuality;        // DepthQualityReport
 ```
 
 ### DepthStatistics Shape
