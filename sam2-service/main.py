@@ -161,6 +161,10 @@ INFERENCE_BACKEND = os.environ.get("SAM2_INFERENCE_BACKEND", "pytorch").lower()
 if INFERENCE_BACKEND not in ("pytorch", "onnx"):
     logger.warning(f"Invalid SAM2_INFERENCE_BACKEND={INFERENCE_BACKEND}, using pytorch")
     INFERENCE_BACKEND = "pytorch"
+# Batch size for ONNX decoder — number of point prompts to process per decoder call.
+# Higher = fewer Python→ONNX bridge calls (faster), but more memory per batch.
+# 16 is a good balance on Render Standard (2GB RAM); 64 matches PyTorch default.
+POINTS_PER_BATCH = int(os.environ.get("SAM2_POINTS_PER_BATCH", "16" if IS_CPU else "64"))
 
 # ---------------------------------------------------------------------------
 # Pydantic response models
@@ -286,7 +290,7 @@ def load_sam2_model():
             _sam2_amg = SAM2AutomaticMaskGenerator(
                 model=_sam2_model,
                 points_per_side=POINTS_PER_SIDE,
-                points_per_batch=16,
+                points_per_batch=POINTS_PER_BATCH,
                 pred_iou_thresh=PRED_IOU_THRESH,
                 stability_score_thresh=STABILITY_SCORE_THRESH,
                 crop_n_layers=0,
@@ -345,7 +349,7 @@ def load_onnx_amg():
 
         _onnx_amg = ONNXSAM2AutomaticMaskGenerator(
             points_per_side=POINTS_PER_SIDE,
-            points_per_batch=16 if IS_CPU else 64,
+            points_per_batch=POINTS_PER_BATCH,
             pred_iou_thresh=PRED_IOU_THRESH,
             stability_score_thresh=STABILITY_SCORE_THRESH,
             crop_n_layers=0 if IS_CPU else 1,

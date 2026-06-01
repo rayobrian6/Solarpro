@@ -305,21 +305,29 @@ class ONNXSAM2AutomaticMaskGenerator:
         point_coords = self._generate_grid_points(h, w)
         logger.info(f"AMG grid: {len(point_coords)} points ({self.points_per_side}x{self.points_per_side})")
 
-        # Step 3: Run decoder for each point, collect masks
+        # Step 3: Run decoder in batches for much faster inference
+        # Instead of calling decoder once per point (64 calls × ~0.4s = ~26s),
+        # batch multiple points into a single decoder call by tiling encoder
+        # outputs across the batch dimension. This reduces overhead dramatically.
         t1 = time.time()
         all_masks = []
-        for i in range(len(point_coords)):
-            point_masks = self._decode_single_point(
+        batch_size = self.points_per_batch
+
+        for batch_start in range(0, len(point_coords), batch_size):
+            batch_end = min(batch_start + batch_size, len(point_coords))
+            batch_points = point_coords[batch_start:batch_end]
+            batch_masks = self._decode_batch_points(
                 encoder_outputs=encoder_outputs,
-                point_coord=point_coords[i],
+                point_coords=batch_points,
                 image_h=h,
                 image_w=w,
             )
-            all_masks.extend(point_masks)
+            all_masks.extend(batch_masks)
 
         decode_time = time.time() - t1
         logger.info(
-            f"ONNX decoder: {len(point_coords)} points -> "
+            f"ONNX decoder: {len(point_coords)} points in "
+            f"{(len(point_coords) + batch_size - 1) // batch_size} batches -> "
             f"{len(all_masks)} raw masks in {decode_time:.1f}s"
         )
 
@@ -426,6 +434,144 @@ class ONNXSAM2AutomaticMaskGenerator:
                 points.append([x, y])
 
         return np.array(points, dtype=np.float32)
+
+    def _decode_batch_points(
+        self,
+        encoder_outputs: dict[str, np.ndarray],
+        point_coords: np.ndarray,
+        image_h: int,
+        image_w: int,
+    ) -> list[dict[str, Any]]:
+        """
+        Run the ONNX decoder for a batch of point prompts in a single call.
+
+        Instead of calling the decoder N times (once per point), we batch
+        all points by tiling encoder outputs across the batch dimension.
+        This reduces Python→ONNX bridge overhead from N calls to 1 call.
+
+        Args:
+            encoder_outputs: Dict of encoder output name -> ndarray
+            point_coords: (N, 2) array of [x, y] coordinates in image pixel space
+            image_h, image_w: Original image dimensions
+
+        Returns:
+            List of mask dicts from all points in the batch
+        """
+        n_points = len(point_coords)
+
+        # Scale all points from original image space → encoder input space
+        scaled_coords = point_coords.copy()
+        scaled_coords[:, 0] = point_coords[:, 0] / image_w * self._encoder_input_w
+        scaled_coords[:, 1] = point_coords[:, 1] / image_h * self._encoder_input_h
+
+        # Build decoder feed dict with batched inputs
+        feed = {}
+
+        # Map encoder outputs → tile across batch dimension
+        for name in self._decoder_input_names:
+            if name in encoder_outputs:
+                # Tile encoder output: (1, C, H, W) → (N, C, H, W)
+                feat = encoder_outputs[name]
+                feed[name] = np.repeat(feat, n_points, axis=0)
+            elif "point_coord" in name:
+                # Point coords: (N, 2, 2) — scaled point + padding per batch item
+                coords = np.zeros((n_points, 2, 2), dtype=np.float32)
+                coords[:, 0, 0] = scaled_coords[:, 0]  # x
+                coords[:, 0, 1] = scaled_coords[:, 1]  # y
+                # coords[:, 1, :] = 0 (padding, already zeros)
+                feed[name] = coords
+            elif "point_label" in name:
+                # Point labels: (N, 2) — [1, -1] per batch item
+                labels = np.zeros((n_points, 2), dtype=np.float32)
+                labels[:, 0] = 1.0   # foreground
+                labels[:, 1] = -1.0  # padding
+                feed[name] = labels
+            elif "mask" in name and "has" not in name and "orig" not in name:
+                # Mask input: (N, 1, 256, 256) — zeros = no prior mask
+                mask_h = self._encoder_input_h // 4
+                mask_w = self._encoder_input_w // 4
+                feed[name] = np.zeros((n_points, 1, mask_h, mask_w), dtype=np.float32)
+            elif "has_mask" in name:
+                # Has mask flag: (N,) — [0] = no prior mask
+                feed[name] = np.zeros(n_points, dtype=np.float32)
+            elif "orig_im_size" in name:
+                # Original image size: [H, W] — tile for batch
+                feed[name] = np.tile(
+                    np.array([float(image_h), float(image_w)], dtype=np.float32),
+                    (n_points, 1),
+                )
+            else:
+                logger.warning(f"Unknown decoder input in batch: {name}")
+
+        # Run decoder — single call for entire batch
+        try:
+            decoder_outputs = self.decoder_session.run(None, feed)
+        except Exception as e:
+            logger.warning(f"Batch decoder run failed ({n_points} points): {e}")
+            # Fall back to single-point decoding
+            all_masks = []
+            for i in range(n_points):
+                point_masks = self._decode_single_point(
+                    encoder_outputs=encoder_outputs,
+                    point_coord=point_coords[i],
+                    image_h=image_h,
+                    image_w=image_w,
+                )
+                all_masks.extend(point_masks)
+            return all_masks
+
+        # Parse batch outputs
+        masks_raw = decoder_outputs[0]   # (N, n_proposals, H, W) or (N, H, W)
+        iou_preds = decoder_outputs[1]   # (N, n_proposals) or (N,)
+
+        result_masks = []
+        n_proposals = masks_raw.shape[1] if masks_raw.ndim >= 3 else 1
+
+        for i in range(n_points):
+            for j in range(n_proposals):
+                # Get IoU prediction for this point + proposal
+                if iou_preds.ndim >= 2:
+                    iou_score = float(iou_preds[i, j])
+                else:
+                    iou_score = float(iou_preds[i])
+
+                if iou_score < self.pred_iou_thresh:
+                    continue
+
+                # Get mask for this point + proposal
+                if masks_raw.ndim == 4:
+                    mask_low_res = masks_raw[i, j]  # (H, W)
+                elif masks_raw.ndim == 3:
+                    mask_low_res = masks_raw[i]  # (H, W)
+                else:
+                    mask_low_res = masks_raw  # (H, W)
+
+                # Resize mask to original image dimensions if needed
+                if self._decoder_has_orig_im_size:
+                    mask_upscaled = mask_low_res.astype(np.float32)
+                else:
+                    mask_upscaled = cv2.resize(
+                        mask_low_res.astype(np.float32),
+                        (image_w, image_h),
+                        interpolation=cv2.INTER_LINEAR,
+                    )
+
+                # Compute stability score
+                stability = self._compute_stability_score(mask_upscaled, 0.0, 1.0)
+                if stability < self.stability_score_thresh:
+                    continue
+
+                # Binarize at threshold 0
+                mask_bin = mask_upscaled > 0.0
+
+                result_masks.append({
+                    "segmentation": mask_bin,
+                    "predicted_iou": iou_score,
+                    "stability_score": stability,
+                    "point_coords": [point_coords[i].tolist()],
+                })
+
+        return result_masks
 
     def _decode_single_point(
         self,
