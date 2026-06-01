@@ -14,3 +14,13 @@ export type {
   DepthWorkerInput,
   DepthWorkerOutput,
 } from './runDepthWorker';
+
+export {
+  estimateDepthWithMidas,
+  isMidasEnabled,
+  checkMidasHealth,
+} from './midasClient';
+
+export type {
+  MidasDepthResult,
+} from './midasClient';

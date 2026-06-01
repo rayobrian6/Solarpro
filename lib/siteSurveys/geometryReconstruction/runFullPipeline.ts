@@ -215,7 +215,8 @@ export async function runFullGeometryReconstructionPipeline(
   }
 
   // ── Stage 4: Depth Estimation ──────────────────────────────────────────
-  const depthResult = stageTimer('depth_estimation', () =>
+  // Now async — MiDaS service call requires network I/O
+  const depthResult = await asyncStageTimer('depth_estimation', () =>
     runDepthFromReconstructionInput(input, masks, vanishingPoints),
   );
   const depthArtifacts = depthResult.result;
@@ -318,7 +319,7 @@ export async function runDepthOnlyPipeline(
     (a): a is VanishingPointArtifact => a.artifactType === 'vanishing_point',
   );
 
-  const depthArtifacts = runDepthFromReconstructionInput(input, masks, vanishingPoints);
+  const depthArtifacts = await runDepthFromReconstructionInput(input, masks, vanishingPoints);
   const allArtifacts = [...segArtifacts, ...lineArtifacts, ...vpArtifacts, ...depthArtifacts];
 
   return {
