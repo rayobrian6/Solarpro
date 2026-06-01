@@ -63,3 +63,13 @@ export type {
   DepthCacheStats,
   DepthCacheOptions,
 } from './depthCache';
+
+export {
+  extractDepthPlanes,
+} from './depthPlaneExtraction';
+
+export type {
+  DepthPlaneCandidate,
+  DepthPlaneOptions,
+  DepthPlaneExtractionResult,
+} from './depthPlaneExtraction';
