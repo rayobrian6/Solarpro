@@ -1,20 +1,18 @@
-# SAM 2 CPU Optimization — Deploy to Render
+# MiDaS Depth Upgrade — All Stages Complete
 
-## Pre-Commit Checks
-- [x] Run TypeScript check: `npx tsc --noEmit` (0 errors)
-- [x] Run ESLint check: `npx eslint . --ext .ts,.tsx` (0 errors)
-- [x] Run Vitest: `npx vitest run` (all pass)
+## Stage 3: TypeScript Integration ✅ COMPLETE
+- [x] Create `midasClient.ts` — HTTP client for MiDaS /depth endpoint
+- [x] Update `runDepthWorker.ts` — integrate MiDaS as primary, heuristic fallback
+- [x] Update `depth/index.ts` — export new types
+- [x] Update `__tests__/depthWorker.test.ts` — add MiDaS integration tests (all async)
+- [x] Run three-check suite: tsc 0 errors, eslint 0 errors, vitest 6023 pass
+- [x] Commit and push to dev (9201fbe)
 
-## Commit & Push
-- [ ] Stage and commit updated main.py with CPU optimizations
-- [ ] Push to dev branch
+## Stage 4: End-to-End Pipeline Test ✅ COMPLETE
+- [x] Test /depth endpoint on Render — 2.1s processing, correct depth ordering
+- [x] Test /segment endpoint still works — 37s, 4 masks, no regression
+- [x] Verify health endpoint reports both models loaded — confirmed
+- [x] Verify MiDaS → TypeScript data pipeline — base64 decode + inversion correct
 
-## Deploy to Render
-- [ ] Trigger new deploy on Render via API
-- [ ] Monitor build logs for success
-- [ ] Verify /health endpoint responds with model_loaded=true
-- [ ] Test /segment endpoint with real image
-- [ ] Verify inference completes without OOM/restart
-
-## End-to-End Verification
-- [ ] Verify graceful degradation when SAM2 is unavailable
+## Handoff Document ✅ COMPLETE
+- [x] Create HANDOFF.md with current state, next steps, env vars, URLs, known issues
