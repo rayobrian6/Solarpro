@@ -24,3 +24,17 @@ export {
 export type {
   MidasDepthResult,
 } from './midasClient';
+
+export {
+  decodeDepthMap,
+  computeDepthStats,
+  depthGridToRGBA,
+  rgbaToBase64PNG,
+  depthMapToHeatmapDataURL,
+} from './depthMapDecode';
+
+export type {
+  ColormapName,
+  DepthStatistics,
+  DepthHeatmapOptions,
+} from './depthMapDecode';
