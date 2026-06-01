@@ -51,9 +51,9 @@ import { runPhotogrammetryFromReconstructionInput } from './workers/photogrammet
  * pipeline stages if exceeded. The hard limit is Vercel's maxDuration=300s.
  *
  * With points_per_side=12 on Render Pro, SAM2 inference takes ~19s per photo.
- * 15 photos ÷ 2 concurrency = ~8 batches × 19s ≈ 152s for segmentation.
+ * 10 photos ÷ 2 concurrency = 5 batches × ~50s ≈ 250s for segmentation.
  * Plus warm-up, depth estimation, downstream stages, and DB writes ≈ ~50s.
- * Total ≈ 202s, well within Vercel's 300s hard limit.
+ * Total ≈ 300s, which matches Vercel's maxDuration=300s hard limit exactly.
  *
  * The PIPELINE_TIMEOUT_MS is set below the Vercel hard limit so we can
  * gracefully skip remaining stages rather than getting killed mid-write.

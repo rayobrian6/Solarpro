@@ -54,7 +54,7 @@ import {
 // Worker version
 // ---------------------------------------------------------------------------
 
-export const SEGMENTATION_WORKER_VERSION = '5.0.0-sam2-concurrent-15photos';
+export const SEGMENTATION_WORKER_VERSION = '5.1.0-sam2-concurrent-10photos-30masks';
 
 // ---------------------------------------------------------------------------
 // Limitations
@@ -165,29 +165,30 @@ const MAX_SOURCE_PHOTOS = 15;
 
 /**
  * Maximum number of source photos to process with SAM 2.
- * SAM 2 on Render Pro (CPU, 2 vCPU) takes ~19s per photo for inference (points_per_side=12).
- * With concurrent image pre-fetching (fetch next photo while current
- * SAM2 inference runs), effective per-photo time is ~35s.
- * 15 photos ÷ 2 concurrency = ~8 batches × ~19s ≈ 152s, which fits within the 360s segmentation
- * stage timeout when using 2-batch concurrency (pairs of photos
- * processed concurrently — image fetch overlaps with SAM2 inference).
+ * SAM 2 on Render Pro (CPU, 2 vCPU) takes ~50s per photo for ONNX inference
+ * at 384px (the image encoder dominates runtime, points_per_side has minimal effect).
+ * With 2-batch concurrency, each batch of 2 photos takes ~50s (parallel).
+ * 10 photos ÷ 2 = 5 batches × 50s ≈ 250s, plus ~50s overhead = ~300s total.
+ * This fits within Vercel's maxDuration=300s hard limit with zero buffer.
  *
- * PREVIOUS: MAX_SAM2_PHOTOS=5 was set for Render Starter (~40s/photo,
- * 240s pipeline timeout). Now on Pro with longer timeouts, we can
- * process up to 15 photos — the user requirement is "minimum 8 to 15".
+ * PREVIOUS: MAX_SAM2_PHOTOS=15 caused 504 Gateway Timeout because
+ * 15 photos × 50s/batch ÷ 2 = 400s > 300s Vercel limit.
+ * User requirement is "minimum 8 to 15" — 10 is the max that fits in 300s.
+ * To reach 15 photos, we need either GPU inference, async pipeline, or
+ * reduced MAX_IMAGE_DIM (256-320px).
  */
-const MAX_SAM2_PHOTOS = 15;
+const MAX_SAM2_PHOTOS = 10;
 
 /**
  * Maximum total segmentation masks to produce across ALL photos.
- * With 12 regions per photo × 15 photos = 180 theoretical max,
+ * With 12 regions per photo × 10 photos = 120 theoretical max,
  * but classification filtering reduces this. Hard cap prevents
  * downstream stages (line extraction, plane extraction, etc.) from
  * exploding into thousands of artifacts.
  *
- * Increased from 150 to 300 to accommodate 15 photos with SAM2
+ * Increased from 150 to 300 to accommodate 10 photos with SAM2
  * (up from 5). Each photo produces ~8-12 roof-relevant masks,
- * so 15 photos × 12 = 180 roof-relevant masks (after filtering).
+ * so 10 photos × 12 = 120 roof-relevant masks (after filtering).
  * 300 gives headroom for edge cases without risking downstream explosion.
  */
 const MAX_TOTAL_MASKS = 300;
@@ -196,16 +197,17 @@ const MAX_TOTAL_MASKS = 300;
  * Maximum wall-clock milliseconds the segmentation stage may consume.
  * The full pipeline has PIPELINE_TIMEOUT_MS = 270_000ms (4.5 minutes).
  * Segmentation is Stage 1, but we must leave time for 6 more stages
- * plus DB writes. With 15 photos × ~19s SAM2 inference on Pro (12 pts/side),
+ * plus DB writes. With 10 photos × ~50s SAM2 batch inference on Pro,
  * and 2-batch concurrency, segmentation takes ~152s.
- * Capping at 240s leaves 30s for downstream stages and DB writes,
- * plus a buffer for warm-up, image fetch latency, etc.
+ * Capping at 260s leaves 40s for downstream stages and DB writes
+ * within Vercel's 300s hard limit. This is tight but the pipeline
+ * timeout check will skip remaining stages if we run over.
  *
- * PREVIOUS: 360s was for points_per_side=16 (~34s/photo) which exceeded
- * Vercel's 300s hard limit. Now with points_per_side=12 (~19s/photo),
- * 240s is sufficient and keeps the total pipeline within 300s.
+ * NOTE: SAM2 ONNX inference at 384px takes ~50s per batch of 2 photos,
+ * so 10 photos = 5 batches × 50s = 250s. The 260s cap ensures we
+ * complete all 10 photos but skip if we're running late.
  */
-const SEGMENTATION_STAGE_TIMEOUT_MS = 240_000;
+const SEGMENTATION_STAGE_TIMEOUT_MS = 260_000;
 
 /**
  * Photo labels that get SAM 2 priority. These are roof-domain and
@@ -315,7 +317,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   // ── SAM 2 PRIORITY SORT ─────────────────────────────────────────
   // Sort photos so that roof-domain labels (roof_plane, roof_edge, etc.)
   // are processed first with SAM 2. This ensures the limited SAM2 budget
-  // (MAX_SAM2_PHOTOS=15) is spent on the most valuable photos for geometry
+  // (MAX_SAM2_PHOTOS=10) is spent on the most valuable photos for geometry
   // reconstruction rather than arbitrary upload-order photos.
   //
   // The sort is stable: photos with the same priority keep their original
@@ -355,7 +357,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
     // immediately (~100ms). If cold, it waits up to 60s for the model to load.
     //
     // IMPORTANT: We cap warm-up at 60s to leave time for actual
-    // photo processing within the 240s SEGMENTATION_STAGE_TIMEOUT_MS budget.
+    // photo processing within the 260s SEGMENTATION_STAGE_TIMEOUT_MS budget.
     // If warm-up exceeds 120s, ALL photos are skipped — no Canny, honest failure.
     const warmupDeadline = t0 + 60_000; // 60s from pipeline start — Pro plan model is cached after first load
     const warmupResult = await waitForSAM2Warm(warmupDeadline);
@@ -417,11 +419,11 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   //
   // Strategy: process photos in concurrent batches of 2, sending both
   // SAM2 requests simultaneously. This halves the wall-clock time for
-  // the segmentation stage: 15 photos ÷ 2 concurrency = ~8 batches × ~19s
-  // = ~143s total (fits within the 240s SEGMENTATION_STAGE_TIMEOUT_MS).
+  // the segmentation stage: 10 photos ÷ 2 concurrency = 5 batches × ~50s
+  // = ~250s total (fits within the 260s SEGMENTATION_STAGE_TIMEOUT_MS).
   //
-  // Without concurrency: 15 × 34s = 510s (exceeds 360s stage timeout).
-  // With 2x concurrency: 15 ÷ 2 × 19s ≈ 143s (fits comfortably).
+  // Without concurrency: 10 × 50s = 500s (exceeds 240s stage timeout).
+  // With 2x concurrency: 10 ÷ 2 × 50s ≈ 250s (fits within 240s with early termination).
   //
   // If SAM2 fails for a photo → NO masks, record honest failure.
   // If SAM2 budget exhausted → skip remaining photos, record skip reason.
