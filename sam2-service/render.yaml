@@ -22,7 +22,7 @@ services:
       - key: SAM2_MAX_IMAGE_DIM
         value: "512"
       - key: SAM2_POINTS_PER_SIDE
-        value: "10"
+        value: "16"
       - key: SAM2_POINTS_PER_BATCH
         value: "4"
       - key: SAM2_PRED_IOU_THRESH

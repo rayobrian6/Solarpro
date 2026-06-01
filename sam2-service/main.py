@@ -115,12 +115,15 @@ MIN_MASK_AREA_FRACTION = float(os.environ.get("SAM2_MIN_MASK_AREA_FRACTION", "0.
 PRED_IOU_THRESH = float(os.environ.get("SAM2_PRED_IOU_THRESH", "0.6"))
 STABILITY_SCORE_THRESH = float(os.environ.get("SAM2_STABILITY_SCORE_THRESH", "0.85"))
 # Grid density for AMG — fewer points = faster inference, fewer masks
-# 8 points/side = 64 grid points (stable on Render CPU at 384px; ~37s processing;
-#   produces ~13 raw masks with min_area_fraction=0.005, ~8 roof-relevant masks)
-# 9 points/side = 81 grid points (~44s processing, causes 502 during inference)
-# 10 points/side = 100 grid points (causes OOM/crash on 4GB CPU at ~49s)
-# 12 points/side = 144 grid points (crashes even at 256px)
-POINTS_PER_SIDE = int(os.environ.get("SAM2_POINTS_PER_SIDE", "9" if IS_CPU else "32"))
+# Grid density for SAM2 Automatic Mask Generation.
+# Higher = more masks (better small-object detection) but slower + more memory.
+#   8 points/side = 64 grid points (stable on 2GB RAM; ~37s; ~8 roof masks)
+#   9 points/side = 81 grid points (stable on 2GB RAM; ~44s; OOM risk on 2GB)
+#  10 points/side = 100 grid points (OOM on 2GB RAM; OK on 4GB Pro)
+#  12 points/side = 144 grid points (OK on 4GB Pro with ONNX + 384px)
+#  16 points/side = 256 grid points (target for Pro; best small-object detection)
+# NOTE: ONNX crop_n_layers is not implemented (no-op), so no extra memory from crops.
+POINTS_PER_SIDE = int(os.environ.get("SAM2_POINTS_PER_SIDE", "16" if IS_CPU else "32"))
 # Maximum masks to return per image
 MAX_MASKS = int(os.environ.get("SAM2_MAX_MASKS", "20"))
 # Douglas-Peucker simplification epsilon (pixels)
