@@ -1,7 +1,7 @@
 # HANDOFF — MiDaS Depth Upgrade (Stages 1–4 Complete + Visualization Utility)
 
 **Date:** 2025-06-02  
-**Branch:** `dev` (latest commit `4162f19`)  
+**Branch:** `dev` (latest commit `b4a03e8`)  
 **Render Deploy:** `dep-d8ee7e77f7vs73d36qt0` (LIVE)
 
 ---
@@ -121,6 +121,32 @@ All four stages of the MiDaS/DPT depth estimation upgrade are **complete and ver
   - Fixed: stage timings test (checks for 'heuristic_extraction' or 'depth_extraction')
   - New: depth-augmented path activation, artifact types, roof slope/aspect, wall height/facing, depth-specific limitations, heuristic blending, fallback for unprocessed masks, heuristic-only path still works, minConfidence in depth path, usedMidas confidence blending
 - Three-check suite: tsc 0, eslint 0 errors, vitest 6163 pass
+
+### Stage 6: Runtime Bug Fixes — 504 Timeout + Artifact Accumulation ✅
+Three critical fixes for the 504 timeout and runtime issues reported by the user:
+
+1. **ARTIFACT ACCUMULATION FIX**: The \`site_survey_geometry_reconstruction_artifacts\` table was never cleaned between pipeline runs, causing 142 depth maps from only 2 photos (old artifacts accumulated across runs while the \`unified_geometry_artifacts\` table WAS cleaned).
+   - Added \`deleteArtifactsBySurvey()\` in \`lib/db/geometryReconstruction.ts\` — deletes all old reconstruction artifacts for a survey before persisting new ones
+   - Called in the start route before batch insert: \`const deletedReconCount = await deleteArtifactsBySurvey(surveyId)\`
+
+2. **BATCH DB INSERT**: Replaced one-by-one \`insertReconstructionArtifact()\` loop with \`insertReconstructionArtifactsBatch()\` using PostgreSQL \`UNNEST\`. This reduces DB round-trips from ~328 (164 artifacts × 2 queries each: auth check + insert) to ~3 (1 auth + 1 delete + 1 batch insert). Estimated savings: 30-60s per pipeline run.
+   - New function in \`lib/db/geometryReconstruction.ts\`: builds parallel arrays for job_id, survey_id, file_id, etc. and inserts via \`SELECT * FROM unnest(...)\` 
+   - Fallback: if batch insert fails, falls back to single inserts for resilience
+   - The mock pipeline path still uses single inserts (only a handful of artifacts, not a bottleneck)
+
+3. **DEPTH-AUGMENTED LOGGING**: Added comprehensive logging to the plane extraction worker and start route to verify the depth path is executing and to debug 504 timeouts:
+   - Start route: per-stage timing summary in logs (\`segmentation=37200ms(4 artifacts), line_extraction=12ms(16 artifacts), ...\`)
+   - Start route: batch insert timing (\`Batch inserted 164/164 reconstruction artifacts in 2.3s\`)
+   - Start route: unified table adaptation timing
+   - Plane extraction: entry log showing roofMasks, wallMasks, hasDepthMaps, depthMapCount, usedMidas
+   - Plane extraction: per depth-map processing log with fileId, dimensions, confidence
+   - Plane extraction: per depth-map extraction result (slanted/vertical/far/horizontal counts)
+   - Plane extraction: depth-augmented path summary with total depth-derived planes and timing
+   - Plane extraction: final worker summary with roof/wall counts and all stage timings
+   - Safety cap: max 10 depth maps processed (protects against future N-photo runs)
+
+- Three-check suite: tsc 0, eslint 0 errors, vitest 6163 pass
+- Commit: \`b4a03e8\` pushed to dev
 
 ---
 
@@ -278,15 +304,23 @@ curl -X PUT "https://api.render.com/v1/services/srv-d8djpc3bc2fs73emup10/env-var
 
 1. **Set `MIDAS_SERVICE_URL` in the Next.js/Vercel environment** — This activates the MiDaS path in production. Without it, the depth worker stays on heuristic.
 
-2. **Upgrade plane extraction to consume DepthMap data** ✅ DONE — `runPlaneExtractionWorker.ts` v2.0.0 now has two code paths: depth-augmented (when `depthMaps[]` provided) and heuristic-only (fallback). Depth-derived `DepthPlaneCandidate` objects are mapped to `RoofPlaneCandidate` (orientation='slanted') and `WallPlaneCandidate` (orientation='vertical') with estimated slope/aspect/height/facing parameters. Confidence is blended between depth and heuristic signals when overlapping masks exist (70/30 with MiDaS, 50/50 without). `runFullPipeline.ts` Stage 5 passes `depthMaps` and `usedMidas` from Stage 4 depth artifacts.
+2. ~~**Upgrade plane extraction to consume DepthMap data**~~ ✅ DONE (Stage 5)
 
-3. **Depth map visualization UI component** ✅ Backend utility done — `depthMapDecode.ts` provides `depthMapToHeatmapDataURL()` which produces a PNG data URL. Next step is a React component that renders the heatmap overlay on the source photo (see `DepthHeatmapOverlay` sketch below).
+3. ~~**Fix artifact accumulation + batch DB insert**~~ ✅ DONE (Stage 6) — `deleteArtifactsBySurvey()` cleanup + `insertReconstructionArtifactsBatch()` reduces 328 DB queries to ~3. Comprehensive logging added for 504 debugging.
 
-4. **Larger MiDaS model** — `Intel/dpt-swinv2-tiny-256` is 41MB. The `Intel/dpt-swinv2-large-256` (213MB) would give better accuracy but may push RAM usage over limits on Render Standard. Test on Render Pro first.
+4. **Test the pipeline end-to-end after the fixes** — The user reported a 504 timeout. After the batch insert and accumulation fixes, the pipeline should complete faster. Need the user to re-run "Generate Roof Geometry" and verify:
+   - No 504 timeout (faster DB writes)
+   - Correct artifact counts (2 depth maps from 2 photos, not 142)
+   - Depth-augmented path executing (check Vercel logs for `[PlaneExtraction]` entries)
+   - Reasonable plane counts (more than 2 roof planes expected with depth augmentation)
 
-5. **Depth map caching** ✅ Backend cache done — `depthCache.ts` provides LRU with TTL. Next step would be persistent storage (Redis/SQLite) for cross-process persistence, but the in-memory cache already avoids redundant MiDaS calls within a pipeline run.
+5. **Depth map visualization UI component** — `depthMapDecode.ts` provides `depthMapToHeatmapDataURL()` which produces a PNG data URL. Next step is a React component that renders the heatmap overlay on the source photo.
 
-6. **Multi-view depth consistency** — When multiple photos overlap, fuse their depth maps using the existing multi-view fusion stage. This is a natural extension of the pipeline architecture.
+6. **Larger MiDaS model** — `Intel/dpt-swinv2-tiny-256` is 41MB. The `Intel/dpt-swinv2-large-256` (213MB) would give better accuracy but may push RAM usage over limits on Render Standard. Test on Render Pro first.
+
+7. **Multi-view depth consistency** — When multiple photos overlap, fuse their depth maps using the existing multi-view fusion stage. This is a natural extension of the pipeline architecture.
+
+8. **Consider moving pipeline to background job** — The current architecture runs the entire pipeline synchronously in the Vercel serverless function (maxDuration=300s). If SAM2 cold starts + MiDaS + DB writes continue to cause timeouts, the pipeline should be moved to a background worker (e.g., Inngest, Trigger.dev, or a dedicated Render worker service) that posts results when complete, rather than blocking the HTTP request.
 
 ### depthMapDecode API Quick Reference
 
