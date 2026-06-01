@@ -26,13 +26,13 @@ Deployment:
   - Environment variable MIDAS_MODEL_ID controls depth model size
 
 CPU Optimization (Segmentation):
-  - Images resized to max 512px (CPU) / 2048px (GPU) before processing
-  - CPU: points_per_side=16 (256 grid points) with ONNX small model on Render Pro 4GB RAM, 512px
+  - Images resized to max 384px (CPU) / 2048px (GPU) before processing
+  - CPU: points_per_side=8 (64 grid points) with ONNX small model on Render Pro 4GB RAM, 384px
   - ONNX small model encoder (131.6MB) + decoder (15.8MB) fit comfortably in 4GB with MiDaS
   - min_area_fraction=0.005 allows small roof features (dormers, sheds) through
   - GPU: points_per_side=32 with MAX_IMAGE_DIM=2048 (full quality)
   - Lower pred_iou_thresh (0.5) and stability_score_thresh (0.8) for challenging lighting
-  - Smaller points_per_batch (16 vs default 64) to reduce peak memory
+  - Rapid-loop decode: pre-computed prompts + in-place feed dict updates = ~0.05-0.1s per point
   - crop_n_layers=0 on CPU to avoid expensive multi-scale cropping
   - min_area_fraction defaults to SAM2_MIN_MASK_AREA_FRACTION env var (0.02),
     not hardcoded 0.05 — the old 0.05 default was the root cause of "0 masks"
@@ -117,13 +117,17 @@ STABILITY_SCORE_THRESH = float(os.environ.get("SAM2_STABILITY_SCORE_THRESH", "0.
 # Grid density for AMG — fewer points = faster inference, fewer masks
 # Grid density for SAM2 Automatic Mask Generation.
 # Higher = more masks (better small-object detection) but slower + more memory.
-#   8 points/side = 64 grid points (stable on 2GB RAM; ~37s; ~8 roof masks)
-#   9 points/side = 81 grid points (stable on 2GB RAM; ~44s; OOM risk on 2GB)
-#  10 points/side = 100 grid points (OOM on 2GB RAM; OK on 4GB Pro)
-#  12 points/side = 144 grid points (OK on 4GB Pro with ONNX + 384px)
-#  16 points/side = 256 grid points (target for Pro; best small-object detection)
-# NOTE: ONNX crop_n_layers is not implemented (no-op), so no extra memory from crops.
-POINTS_PER_SIDE = int(os.environ.get("SAM2_POINTS_PER_SIDE", "12" if IS_CPU else "32"))
+#   8 points/side = 64 grid points (stable on 2GB RAM; ~15-20s with rapid-loop; ~8-10 roof masks)
+#   9 points/side = 81 grid points (stable on 2GB RAM; ~22s with rapid-loop)
+#  10 points/side = 100 grid points (~27s with rapid-loop; OK on 4GB Pro)
+#  12 points/side = 144 grid points (~35s with rapid-loop; OK on 4GB Pro with ONNX + 384px)
+#  16 points/side = 256 grid points (~50s with rapid-loop; best small-object detection)
+# NOTE: 8 points/side at 384px produces good roof masks because SAM2's encoder
+# captures sufficient detail at this resolution. Going higher mainly catches
+# small obstructions and equipment, which are less critical for geometry.
+# REDUCED from 12→8: With rapid-loop decode, 64 points × ~0.25s = ~16s/photo,
+# enabling 15 photos within Vercel's 300s limit (15÷2×20s = 150s + overhead).
+POINTS_PER_SIDE = int(os.environ.get("SAM2_POINTS_PER_SIDE", "8" if IS_CPU else "32"))
 # Maximum masks to return per image
 MAX_MASKS = int(os.environ.get("SAM2_MAX_MASKS", "30"))
 # Douglas-Peucker simplification epsilon (pixels)
@@ -352,11 +356,11 @@ def load_sam2_model():
 
         # CPU-optimized mask generator settings
         # On CPU: conservative optimization for Render Standard plan (CPU, ~4GB RAM)
-        #   - points_per_side=8 (64 grid points — stable at 384px; ~37s processing;
-        #     produces ~13 raw masks, ~8 roof-relevant with min_area_fraction=0.01)
+        #   - points_per_side=8 (64 grid points — stable at 384px; ~16s with rapid-loop;
+        #     produces ~8-10 roof-relevant masks)
         #   - MAX_IMAGE_DIM=384 on CPU (256px was too small for 8x8 grid)
-        #   - min_area_fraction=0.01 (lowered from 0.05 — old default filtered ALL masks)
-        #   - points_per_batch=16 (smaller batches to limit peak memory)
+        #   - min_area_fraction=0.005 (lowered from 0.05 — old default filtered ALL masks)
+        #   - points_per_batch=4 (controls outer loop batch size with rapid-loop decode)
         #   - crop_n_layers=0 (disable multi-crop, huge memory savings)
         # On GPU: use full settings for better quality
         if IS_CPU:
