@@ -27,7 +27,7 @@ Deployment:
 
 CPU Optimization (Segmentation):
   - Images resized to max 512px (CPU) / 2048px (GPU) before processing
-  - CPU: points_per_side=10 (100 grid points) with ONNX small model on Render Standard 4GB RAM
+  - CPU: points_per_side=16 (256 grid points) with ONNX small model on Render Pro 4GB RAM, 512px
   - ONNX small model encoder (131.6MB) + decoder (15.8MB) fit comfortably in 4GB with MiDaS
   - min_area_fraction=0.005 allows small roof features (dormers, sheds) through
   - GPU: points_per_side=32 with MAX_IMAGE_DIM=2048 (full quality)
@@ -110,10 +110,10 @@ HF_MODEL_ID = os.environ.get("SAM2_HF_MODEL_ID", "facebook/sam2.1-hiera-small")
 # 256px on CPU: too small, 8x8 grid misses roofs entirely (0 masks)
 MAX_IMAGE_DIM = int(os.environ.get("SAM2_MAX_IMAGE_DIM", "384" if IS_CPU else "2048"))
 # Minimum mask area as fraction of image — filters noise masks
-MIN_MASK_AREA_FRACTION = float(os.environ.get("SAM2_MIN_MASK_AREA_FRACTION", "0.01"))
+MIN_MASK_AREA_FRACTION = float(os.environ.get("SAM2_MIN_MASK_AREA_FRACTION", "0.005"))
 # Prediction confidence and stability thresholds — lower values catch weaker masks
-PRED_IOU_THRESH = float(os.environ.get("SAM2_PRED_IOU_THRESH", "0.6"))
-STABILITY_SCORE_THRESH = float(os.environ.get("SAM2_STABILITY_SCORE_THRESH", "0.85"))
+PRED_IOU_THRESH = float(os.environ.get("SAM2_PRED_IOU_THRESH", "0.5"))
+STABILITY_SCORE_THRESH = float(os.environ.get("SAM2_STABILITY_SCORE_THRESH", "0.80"))
 # Grid density for AMG — fewer points = faster inference, fewer masks
 # Grid density for SAM2 Automatic Mask Generation.
 # Higher = more masks (better small-object detection) but slower + more memory.
@@ -125,7 +125,7 @@ STABILITY_SCORE_THRESH = float(os.environ.get("SAM2_STABILITY_SCORE_THRESH", "0.
 # NOTE: ONNX crop_n_layers is not implemented (no-op), so no extra memory from crops.
 POINTS_PER_SIDE = int(os.environ.get("SAM2_POINTS_PER_SIDE", "16" if IS_CPU else "32"))
 # Maximum masks to return per image
-MAX_MASKS = int(os.environ.get("SAM2_MAX_MASKS", "20"))
+MAX_MASKS = int(os.environ.get("SAM2_MAX_MASKS", "30"))
 # Douglas-Peucker simplification epsilon (pixels)
 # Lower = more polygon detail, higher = coarser polygons.
 # At 512px image dim, epsilon=1.0 preserves ~3x more boundary detail than 5.0.

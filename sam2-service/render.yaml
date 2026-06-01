@@ -14,13 +14,13 @@ services:
       - key: SAM2_MIN_MASK_AREA_FRACTION
         value: "0.005"
       - key: SAM2_MAX_MASKS
-        value: "20"
+        value: "30"
       - key: SAM2_DOUGLAS_PEUCKER_EPSILON
         value: "1.0"
       - key: SAM2_MAX_POLYGON_EDGE_LENGTH
         value: "50"
       - key: SAM2_MAX_IMAGE_DIM
-        value: "512"
+        value: "384"
       - key: SAM2_POINTS_PER_SIDE
         value: "16"
       - key: SAM2_POINTS_PER_BATCH

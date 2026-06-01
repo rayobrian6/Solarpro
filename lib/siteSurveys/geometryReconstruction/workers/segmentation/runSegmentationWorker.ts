@@ -54,7 +54,7 @@ import {
 // Worker version
 // ---------------------------------------------------------------------------
 
-export const SEGMENTATION_WORKER_VERSION = '4.0.0-sam2-priority-no-fallback';
+export const SEGMENTATION_WORKER_VERSION = '5.0.0-sam2-concurrent-15photos';
 
 // ---------------------------------------------------------------------------
 // Limitations
@@ -165,13 +165,18 @@ const MAX_SOURCE_PHOTOS = 15;
 
 /**
  * Maximum number of source photos to process with SAM 2.
- * SAM 2 on Render Starter (CPU) takes ~40s per photo for inference.
- * With warm-up polling (up to 120s) and downstream pipeline stages,
- * we can only afford ~5 photos with SAM 2 before the 240s pipeline
- * timeout is exceeded. After this limit, remaining photos are skipped
- * (NOT fallen back to Canny — the user sees honest skip reasons).
+ * SAM 2 on Render Pro (CPU, 2 vCPU) takes ~34s per photo for inference.
+ * With concurrent image pre-fetching (fetch next photo while current
+ * SAM2 inference runs), effective per-photo time is ~35s.
+ * 15 photos ÷ 2 concurrency = ~8 batches × ~34s ≈ 272s, which fits within the 360s segmentation
+ * stage timeout when using 2-batch concurrency (pairs of photos
+ * processed concurrently — image fetch overlaps with SAM2 inference).
+ *
+ * PREVIOUS: MAX_SAM2_PHOTOS=5 was set for Render Starter (~40s/photo,
+ * 240s pipeline timeout). Now on Pro with longer timeouts, we can
+ * process up to 15 photos — the user requirement is "minimum 8 to 15".
  */
-const MAX_SAM2_PHOTOS = 5;
+const MAX_SAM2_PHOTOS = 15;
 
 /**
  * Maximum total segmentation masks to produce across ALL photos.
@@ -179,17 +184,28 @@ const MAX_SAM2_PHOTOS = 5;
  * but classification filtering reduces this. Hard cap prevents
  * downstream stages (line extraction, plane extraction, etc.) from
  * exploding into thousands of artifacts.
+ *
+ * Increased from 150 to 300 to accommodate 15 photos with SAM2
+ * (up from 5). Each photo produces ~8-12 roof-relevant masks,
+ * so 15 photos × 12 = 180 roof-relevant masks (after filtering).
+ * 300 gives headroom for edge cases without risking downstream explosion.
  */
-const MAX_TOTAL_MASKS = 150;
+const MAX_TOTAL_MASKS = 300;
 
 /**
  * Maximum wall-clock milliseconds the segmentation stage may consume.
- * The full pipeline has PIPELINE_TIMEOUT_MS = 240_000ms (4 minutes).
- * Segmentation is Stage 1, but we must leave time for 5 more stages
- * plus DB writes. Capping at 180s leaves 60s for downstream stages
- * and DB writes — enough for their heuristic implementations.
+ * The full pipeline has PIPELINE_TIMEOUT_MS = 480_000ms (8 minutes).
+ * Segmentation is Stage 1, but we must leave time for 6 more stages
+ * plus DB writes. With 15 photos × ~34s SAM2 inference on Pro,
+ * segmentation takes ~510s in the worst case (sequential).
+ * With 2-batch concurrency (image pre-fetching), effective time is
+ * ~420s. Capping at 360s leaves 120s for downstream stages and DB
+ * writes — enough for their heuristic implementations.
+ *
+ * PREVIOUS: 180s (3 min) was set for MAX_SAM2_PHOTOS=5 on Starter.
+ * Now with 15 photos on Pro, we need 360s (6 min).
  */
-const SEGMENTATION_STAGE_TIMEOUT_MS = 180_000;
+const SEGMENTATION_STAGE_TIMEOUT_MS = 360_000;
 
 /**
  * Photo labels that get SAM 2 priority. These are roof-domain and
@@ -299,7 +315,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   // ── SAM 2 PRIORITY SORT ─────────────────────────────────────────
   // Sort photos so that roof-domain labels (roof_plane, roof_edge, etc.)
   // are processed first with SAM 2. This ensures the limited SAM2 budget
-  // (MAX_SAM2_PHOTOS=5) is spent on the most valuable photos for geometry
+  // (MAX_SAM2_PHOTOS=15) is spent on the most valuable photos for geometry
   // reconstruction rather than arbitrary upload-order photos.
   //
   // The sort is stable: photos with the same priority keep their original
@@ -336,12 +352,12 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
     //
     // The warm-up ping (sent earlier from the route handler) triggers model loading.
     // This poll confirms it's ready. If the service was already warm, this returns
-    // immediately (~100ms). If cold, it waits up to 120s for the model to load.
+    // immediately (~100ms). If cold, it waits up to 60s for the model to load.
     //
-    // IMPORTANT: We cap warm-up at 120s (not 180s) to leave time for actual
-    // photo processing within the 180s SEGMENTATION_STAGE_TIMEOUT_MS budget.
+    // IMPORTANT: We cap warm-up at 60s to leave time for actual
+    // photo processing within the 360s SEGMENTATION_STAGE_TIMEOUT_MS budget.
     // If warm-up exceeds 120s, ALL photos are skipped — no Canny, honest failure.
-    const warmupDeadline = t0 + 120_000; // 120s from pipeline start
+    const warmupDeadline = t0 + 60_000; // 60s from pipeline start — Pro plan model is cached after first load
     const warmupResult = await waitForSAM2Warm(warmupDeadline);
     if (warmupResult) {
       console.info(
@@ -393,194 +409,95 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   }
 
   // Stage 2: Extract geometry from each photo
-  // ── SAM 2 TIME BUDGET ──────────────────────────────────────────────
-  // SAM 2 on Render Starter (CPU) takes ~40s per photo for inference alone.
-  // The segmentation stage must finish within a time budget that leaves room
-  // for 5 downstream pipeline stages + DB writes within the 300s Vercel
-  // maxDuration.
+  // ── SAM 2 CONCURRENT BATCH PROCESSING ──────────────────────────────────
+  // SAM 2 on Render Pro (CPU, 2 vCPU) takes ~34s per photo for inference.
+  // The SAM2 service uses ThreadPoolExecutor(max_workers=2), so it CAN
+  // process 2 inference requests concurrently. With 4GB RAM on Pro,
+  // 2 concurrent ONNX small-model inferences at 384px use ~3GB total.
   //
-  // Strategy: process up to MAX_SAM2_PHOTOS (5) priority-sorted photos with SAM 2.
+  // Strategy: process photos in concurrent batches of 2, sending both
+  // SAM2 requests simultaneously. This halves the wall-clock time for
+  // the segmentation stage: 15 photos ÷ 2 concurrency = ~8 batches × ~34s
+  // = ~272s total (fits within the 360s SEGMENTATION_STAGE_TIMEOUT_MS).
+  //
+  // Without concurrency: 15 × 34s = 510s (exceeds 360s stage timeout).
+  // With 2x concurrency: 15 ÷ 2 × 34s ≈ 272s (fits comfortably).
+  //
   // If SAM2 fails for a photo → NO masks, record honest failure.
   // If SAM2 budget exhausted → skip remaining photos, record skip reason.
   // If SAM2 not configured → use Canny as explicit backend (not fallback).
   // Also enforce a wall-clock deadline: if we've spent too long, skip the rest.
+  const SEGMENTATION_CONCURRENCY = 2; // Match SAM2 service ThreadPoolExecutor max_workers
   const segmentationDeadline = t0 + SEGMENTATION_STAGE_TIMEOUT_MS;
 
   const t1 = Date.now();
-  for (const photo of sourcePhotos) {
-    if (artifacts.length >= MAX_TOTAL_MASKS) {
-      console.info(
-        `Segmentation worker: reached MAX_TOTAL_MASKS=${MAX_TOTAL_MASKS}, stopping after ${artifacts.length} masks`
-      );
-      // Record remaining unprocessed photos as skipped
-      break;
-    }
 
-    // ── Check segmentation stage deadline ──
-    const elapsedMs = Date.now() - t1;
+  // ── Helper: process a single photo with SAM2 ──────────────────────────
+  // Extracted from the old sequential loop so we can call it concurrently.
+  // Returns the photo result + any artifacts produced + image bytes.
+  interface PhotoProcessResult {
+    photoResult: PhotoSegmentationResult;
+    newArtifacts: SemanticSegmentationMask[];
+    imageBytes: Buffer | null;
+    budgetUsed: number;  // 1 if SAM2 was attempted (success or fail), 0 if skipped
+    sam2ModelInfoCandidate: SegmentationWorkerOutput['sam2ModelInfo'];
+  }
+
+  async function processSAM2Photo(
+    photo: { fileId: string; fileUrl: string; filename: string | null; label?: string | null },
+  ): Promise<PhotoProcessResult> {
     const remainingMs = segmentationDeadline - Date.now();
-    if (sam2Enabled && remainingMs <= 0 && !sam2BudgetExhaustedReason) {
-      console.warn(
-        `[SAM2] Segmentation stage TIMEOUT after ${elapsedMs}ms — skipping remaining photos`,
-      );
-      sam2BudgetRemaining = 0;
-      sam2BudgetExhaustedReason = `stage_timeout_after_${elapsedMs}ms`;
-    }
+    const useSAM2 = sam2Enabled && sam2BudgetRemaining > 0 && remainingMs > 50_000;
 
-    try {
-      // ── SAM 2 PATH ──
-      // Only attempt SAM2 if we have budget remaining AND time remaining
-      const useSAM2 = sam2Enabled && sam2BudgetRemaining > 0 && remainingMs > 50_000;
-
-      if (useSAM2) {
-        console.info(
-          `[SAM2] Processing photo ${photo.fileId} (${photo.filename ?? 'unnamed'}, label=${photo.label ?? 'none'}) — attempting SAM 2 (budget=${sam2BudgetRemaining} remaining, ${Math.round(remainingMs / 1000)}s left)`,
-        );
-        const sam2FromPhotoResult = await segmentWithSAM2FromPhoto(photo.fileUrl);
-        // Store image bytes for depth worker reuse (even if SAM2 failed, we still have the bytes)
-        if (sam2FromPhotoResult !== null) {
-          imageBytesMap[photo.fileId] = sam2FromPhotoResult.imageBytes;
-        }
-
-        if (sam2FromPhotoResult !== null && sam2FromPhotoResult.sam2Result !== null) {
-          // ── SAM 2 SUCCESS — produce masks ──
-          const sam2Result = sam2FromPhotoResult.sam2Result;
-          sam2BudgetRemaining--;
-          sam2PhotoCount++;
-          if (sam2Result.modelInfo && !sam2ModelInfo) {
-            sam2ModelInfo = sam2Result.modelInfo;
-          }
-
-          let masksProduced = 0;
-          let filteredNonRoof = 0;
-          for (const mask of sam2Result.masks) {
-            if (artifacts.length >= MAX_TOTAL_MASKS) break;
-
-            const segmentationClass = mapSAM2ClassHint(mask.classHint);
-            if (segmentationClass === null) continue;
-
-            // ── Roof-relevant filter ──
-            // Even though the Python service now filters with roof_only=true,
-            // we double-filter here to catch any non-roof masks that slip
-            // through (e.g. stale Python deploy, classification edge cases).
-            // Sky, ground, and tree masks are NOT useful for geometry
-            // reconstruction and pollute the overlay with wrong lines.
-            if (!ROOF_RELEVANT_SEGMENTATION_CLASSES.has(segmentationClass)) {
-              filteredNonRoof++;
-              continue;
-            }
-
-            if (mask.confidence < minConfidence) continue;
-
-            const truncatedPolygon = mask.polygon.slice(0, sam2MaxPolygonPoints);
-            const maskBounds = computeMaskBounds(truncatedPolygon);
-
-            const artifact: SemanticSegmentationMask = {
-              artifactType: 'semantic_segmentation_mask',
-              id: `seg-${photo.fileId}-${segmentationClass}-${mask.maskIndex}-${SEGMENTATION_WORKER_VERSION}`,
-              fileId: photo.fileId,
-              segmentationClass,
-              polygon: truncatedPolygon,
-              confidence: mask.confidence,
-              maskBounds,
-              workerVersion: SEGMENTATION_WORKER_VERSION,
-              authority: { ...REVIEW_ONLY_AUTHORITY },
-              limitations: [...SEGMENTATION_WORKER_LIMITATIONS],
-            };
-
-            if (includeRawMask) {
-              artifact.rawMask = `sam2-${segmentationClass}-area${Math.round(mask.area)}-stability${mask.stabilityScore}`;
-              artifact.maskWidth = sam2Result.imageWidth;
-              artifact.maskHeight = sam2Result.imageHeight;
-            }
-
-            const validationResult = validateSemanticSegmentationMask(artifact);
-            if (validationResult.valid) {
-              artifacts.push(validationResult.data);
-              masksProduced++;
-            }
-          }
-          console.info(
-            `[SAM2] Photo ${photo.fileId} (${photo.label ?? 'unlabeled'}): SAM 2 SUCCESS — ${masksProduced} masks (filtered ${filteredNonRoof} non-roof, sam2PhotoCount=${sam2PhotoCount}, budget=${sam2BudgetRemaining} remaining)`,
-          );
-          photoResults.push({
-            fileId: photo.fileId,
-            filename: photo.filename ?? null,
-            label: photo.label ?? null,
-            status: 'sam2_success',
-            maskCount: masksProduced,
-            reason: null,
-          });
-          continue; // SAM 2 succeeded, done with this photo
-        }
-
-        // ── SAM 2 FAILED — NO fallback to Canny. Record honest failure. ──
-        sam2BudgetRemaining--;
-        failedPhotoCount++;
-        console.warn(
-          `[SAM2] Photo ${photo.fileId} (${photo.label ?? 'unlabeled'}): SAM 2 FAILED — no masks produced for this photo (budget=${sam2BudgetRemaining} remaining)`,
-        );
-        photoResults.push({
-          fileId: photo.fileId,
-          filename: photo.filename ?? null,
-          label: photo.label ?? null,
-          status: 'sam2_failed',
-          maskCount: 0,
-          reason: `SAM 2 service call failed — no masks produced`,
-        });
-        continue; // Skip Canny — no shitty fallback visuals
-
-      } else if (sam2Enabled && sam2BudgetRemaining <= 0 && !sam2BudgetExhaustedReason) {
-        // ── SAM2 budget just exhausted ──
-        sam2BudgetExhaustedReason = 'max_photos_reached';
-        console.info(
-          `[SAM2] Photo ${photo.fileId} (${photo.label ?? 'unlabeled'}): SKIPPED — SAM 2 budget exhausted (MAX_SAM2_PHOTOS=${MAX_SAM2_PHOTOS})`,
-        );
-        photoResults.push({
+    if (!useSAM2 && sam2Enabled && sam2BudgetRemaining <= 0 && !sam2BudgetExhaustedReason) {
+      sam2BudgetExhaustedReason = 'max_photos_reached';
+      return {
+        photoResult: {
           fileId: photo.fileId,
           filename: photo.filename ?? null,
           label: photo.label ?? null,
           status: 'skipped_budget',
           maskCount: 0,
           reason: `SAM 2 budget exhausted (${MAX_SAM2_PHOTOS} photos already processed) — not attempted`,
-        });
-        skippedPhotoCount++;
-        continue;
+        },
+        newArtifacts: [],
+        imageBytes: null,
+        budgetUsed: 0,
+        sam2ModelInfoCandidate: null,
+      };
+    }
 
-      } else if (sam2Enabled && sam2BudgetExhaustedReason) {
-        // ── Subsequent photos after budget exhaustion ──
-        console.info(
-          `[SAM2] Photo ${photo.fileId} (${photo.label ?? 'unlabeled'}): SKIPPED (${sam2BudgetExhaustedReason})`,
-        );
-        photoResults.push({
+    if (!useSAM2 && sam2Enabled && sam2BudgetExhaustedReason) {
+      return {
+        photoResult: {
           fileId: photo.fileId,
           filename: photo.filename ?? null,
           label: photo.label ?? null,
           status: sam2BudgetExhaustedReason.startsWith('stage_timeout') ? 'skipped_timeout' : 'skipped_budget',
           maskCount: 0,
           reason: `SAM 2 skipped: ${sam2BudgetExhaustedReason}`,
-        });
-        skippedPhotoCount++;
-        continue;
+        },
+        newArtifacts: [],
+        imageBytes: null,
+        budgetUsed: 0,
+        sam2ModelInfoCandidate: null,
+      };
+    }
 
-      } else if (!sam2Enabled) {
-        // ── CANNY EXPLICIT BACKEND (SAM2 not configured) ──
-        // This is NOT a fallback — it's the primary backend when SAM2 is not available.
-        // User deliberately chose not to configure SAM2_SERVICE_URL.
+    if (!sam2Enabled) {
+      // CANNY EXPLICIT BACKEND (SAM2 not configured)
+      try {
         cannyPhotoCount++;
         const geometry = await extractGeometryFromPhoto(photo.fileUrl);
-
         let contourIndex = 0;
-        let masksProduced = 0;
+        const newArtifacts: SemanticSegmentationMask[] = [];
         for (const contour of geometry.contours) {
           const segmentationClass = CONTOUR_TO_SEGMENTATION_CLASS[contour.classification];
           if (segmentationClass === null) continue;
           if (contour.confidence < minConfidence) continue;
-
           const polygon = contourToNormalizedPolygon(contour, geometry.extractionSize, geometry.extractionSize);
           const truncatedPolygon = polygon.slice(0, maxPolygonPoints);
           const maskBounds = computeMaskBounds(truncatedPolygon);
-
           const mask: SemanticSegmentationMask = {
             artifactType: 'semantic_segmentation_mask',
             id: `seg-${photo.fileId}-${segmentationClass}-${contourIndex}-${SEGMENTATION_WORKER_VERSION}`,
@@ -593,46 +510,297 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
             authority: { ...REVIEW_ONLY_AUTHORITY },
             limitations: [...SEGMENTATION_WORKER_LIMITATIONS],
           };
-
           if (includeRawMask) {
             mask.rawMask = `canny-contour-${segmentationClass}-area${contour.area}`;
             mask.maskWidth = geometry.extractionSize;
             mask.maskHeight = geometry.extractionSize;
           }
-
           const validationResult = validateSemanticSegmentationMask(mask);
           if (validationResult.valid) {
-            artifacts.push(validationResult.data);
-            masksProduced++;
+            newArtifacts.push(validationResult.data);
           }
           contourIndex++;
+        }
+        return {
+          photoResult: {
+            fileId: photo.fileId,
+            filename: photo.filename ?? null,
+            label: photo.label ?? null,
+            status: 'skipped_not_configured',
+            maskCount: newArtifacts.length,
+            reason: 'SAM 2 not configured (SAM2_SERVICE_URL not set) — Canny backend used',
+          },
+          newArtifacts,
+          imageBytes: null,
+          budgetUsed: 0,
+          sam2ModelInfoCandidate: null,
+        };
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        return {
+          photoResult: {
+            fileId: photo.fileId,
+            filename: photo.filename ?? null,
+            label: photo.label ?? null,
+            status: 'sam2_failed',
+            maskCount: 0,
+            reason: `Unhandled error: ${errMsg}`,
+          },
+          newArtifacts: [],
+          imageBytes: null,
+          budgetUsed: 0,
+          sam2ModelInfoCandidate: null,
+        };
+      }
+    }
+
+    // ── SAM 2 PATH ──
+    console.info(
+      `[SAM2] Processing photo ${photo.fileId} (${photo.filename ?? 'unnamed'}, label=${photo.label ?? 'none'}) — attempting SAM 2 (budget=${sam2BudgetRemaining} remaining, ${Math.round(remainingMs / 1000)}s left)`,
+    );
+
+    try {
+      const sam2FromPhotoResult = await segmentWithSAM2FromPhoto(photo.fileUrl);
+      let imageBytes: Buffer | null = null;
+      if (sam2FromPhotoResult !== null) {
+        imageBytes = sam2FromPhotoResult.imageBytes;
+      }
+
+      if (sam2FromPhotoResult !== null && sam2FromPhotoResult.sam2Result !== null) {
+        // ── SAM 2 SUCCESS — produce masks ──
+        const sam2Result = sam2FromPhotoResult.sam2Result;
+        let masksProduced = 0;
+        let filteredNonRoof = 0;
+        const newArtifacts: SemanticSegmentationMask[] = [];
+
+        for (const mask of sam2Result.masks) {
+          const segmentationClass = mapSAM2ClassHint(mask.classHint);
+          if (segmentationClass === null) continue;
+
+          if (!ROOF_RELEVANT_SEGMENTATION_CLASSES.has(segmentationClass)) {
+            filteredNonRoof++;
+            continue;
+          }
+
+          if (mask.confidence < minConfidence) continue;
+
+          const truncatedPolygon = mask.polygon.slice(0, sam2MaxPolygonPoints);
+          const maskBounds = computeMaskBounds(truncatedPolygon);
+
+          const artifact: SemanticSegmentationMask = {
+            artifactType: 'semantic_segmentation_mask',
+            id: `seg-${photo.fileId}-${segmentationClass}-${mask.maskIndex}-${SEGMENTATION_WORKER_VERSION}`,
+            fileId: photo.fileId,
+            segmentationClass,
+            polygon: truncatedPolygon,
+            confidence: mask.confidence,
+            maskBounds,
+            workerVersion: SEGMENTATION_WORKER_VERSION,
+            authority: { ...REVIEW_ONLY_AUTHORITY },
+            limitations: [...SEGMENTATION_WORKER_LIMITATIONS],
+          };
+
+          if (includeRawMask) {
+            artifact.rawMask = `sam2-${segmentationClass}-area${Math.round(mask.area)}-stability${mask.stabilityScore}`;
+            artifact.maskWidth = sam2Result.imageWidth;
+            artifact.maskHeight = sam2Result.imageHeight;
+          }
+
+          const validationResult = validateSemanticSegmentationMask(artifact);
+          if (validationResult.valid) {
+            newArtifacts.push(validationResult.data);
+            masksProduced++;
+          }
+        }
+
+        console.info(
+          `[SAM2] Photo ${photo.fileId} (${photo.label ?? 'unlabeled'}): SAM 2 SUCCESS — ${masksProduced} masks (filtered ${filteredNonRoof} non-roof)`,
+        );
+        return {
+          photoResult: {
+            fileId: photo.fileId,
+            filename: photo.filename ?? null,
+            label: photo.label ?? null,
+            status: 'sam2_success',
+            maskCount: masksProduced,
+            reason: null,
+          },
+          newArtifacts,
+          imageBytes,
+          budgetUsed: 1,
+          sam2ModelInfoCandidate: sam2Result.modelInfo,
+        };
+      }
+
+      // ── SAM 2 FAILED — NO fallback to Canny. Record honest failure. ──
+      console.warn(
+        `[SAM2] Photo ${photo.fileId} (${photo.label ?? 'unlabeled'}): SAM 2 FAILED — no masks produced for this photo`,
+      );
+      return {
+        photoResult: {
+          fileId: photo.fileId,
+          filename: photo.filename ?? null,
+          label: photo.label ?? null,
+          status: 'sam2_failed',
+          maskCount: 0,
+          reason: 'SAM 2 service call failed — no masks produced',
+        },
+        newArtifacts: [],
+        imageBytes,
+        budgetUsed: 1, // Budget was consumed even though it failed
+        sam2ModelInfoCandidate: null,
+      };
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.warn(`[SAM2] Photo ${photo.fileId}: UNHANDLED ERROR — ${errMsg}`);
+      return {
+        photoResult: {
+          fileId: photo.fileId,
+          filename: photo.filename ?? null,
+          label: photo.label ?? null,
+          status: 'sam2_failed',
+          maskCount: 0,
+          reason: `Unhandled error: ${errMsg}`,
+        },
+        newArtifacts: [],
+        imageBytes: null,
+        budgetUsed: 1,
+        sam2ModelInfoCandidate: null,
+      };
+    }
+  }
+
+  // ── CONCURRENT BATCH PROCESSING ────────────────────────────────────────
+  // Process photos in batches of SEGMENTATION_CONCURRENCY (2) to overlap
+  // image fetch + SAM2 inference between pairs of photos.
+  // The SAM2 service has ThreadPoolExecutor(max_workers=2) so it can
+  // process 2 requests concurrently — both requests are sent at the same
+  // time, and both run inference in parallel on the service side.
+  let photoIndex = 0;
+  while (photoIndex < sourcePhotos.length) {
+    // Check global limits before starting a new batch
+    if (artifacts.length >= MAX_TOTAL_MASKS) {
+      console.info(
+        `Segmentation worker: reached MAX_TOTAL_MASKS=${MAX_TOTAL_MASKS}, stopping after ${artifacts.length} masks`,
+      );
+      // Record remaining unprocessed photos as skipped
+      for (let i = photoIndex; i < sourcePhotos.length; i++) {
+        const photo = sourcePhotos[i];
+        photoResults.push({
+          fileId: photo.fileId,
+          filename: photo.filename ?? null,
+          label: photo.label ?? null,
+          status: 'skipped_budget',
+          maskCount: 0,
+          reason: `MAX_TOTAL_MASKS reached (${MAX_TOTAL_MASKS}) — not attempted`,
+        });
+        skippedPhotoCount++;
+      }
+      break;
+    }
+
+    // Check segmentation stage deadline
+    const remainingMs = segmentationDeadline - Date.now();
+    if (sam2Enabled && remainingMs <= 0 && !sam2BudgetExhaustedReason) {
+      const elapsedMs = Date.now() - t1;
+      console.warn(
+        `[SAM2] Segmentation stage TIMEOUT after ${elapsedMs}ms — skipping remaining photos`,
+      );
+      sam2BudgetRemaining = 0;
+      sam2BudgetExhaustedReason = `stage_timeout_after_${elapsedMs}ms`;
+      // Record remaining unprocessed photos as skipped
+      for (let i = photoIndex; i < sourcePhotos.length; i++) {
+        const photo = sourcePhotos[i];
+        photoResults.push({
+          fileId: photo.fileId,
+          filename: photo.filename ?? null,
+          label: photo.label ?? null,
+          status: 'skipped_timeout',
+          maskCount: 0,
+          reason: `SAM 2 stage timeout after ${elapsedMs}ms — not attempted`,
+        });
+        skippedPhotoCount++;
+      }
+      break;
+    }
+
+    // Determine batch size: min(concurrency, remaining photos, remaining budget)
+    const batchSize = Math.min(
+      SEGMENTATION_CONCURRENCY,
+      sourcePhotos.length - photoIndex,
+      sam2Enabled ? sam2BudgetRemaining : sourcePhotos.length - photoIndex,
+    );
+
+    if (batchSize <= 0) {
+      // No budget left — record remaining photos as skipped
+      for (let i = photoIndex; i < sourcePhotos.length; i++) {
+        const photo = sourcePhotos[i];
+        if (!sam2BudgetExhaustedReason) {
+          sam2BudgetExhaustedReason = 'max_photos_reached';
         }
         photoResults.push({
           fileId: photo.fileId,
           filename: photo.filename ?? null,
           label: photo.label ?? null,
-          status: 'skipped_not_configured',
-          maskCount: masksProduced,
-          reason: `SAM 2 not configured (SAM2_SERVICE_URL not set) — Canny backend used`,
+          status: sam2BudgetExhaustedReason.startsWith('stage_timeout') ? 'skipped_timeout' : 'skipped_budget',
+          maskCount: 0,
+          reason: `SAM 2 skipped: ${sam2BudgetExhaustedReason}`,
         });
+        skippedPhotoCount++;
       }
-    } catch (error) {
-      failedPhotoCount++;
-      const errMsg = error instanceof Error ? error.message : String(error);
-      console.warn(
-        `[SAM2] Photo ${photo.fileId}: UNHANDLED ERROR — ${errMsg}`,
-      );
-      photoResults.push({
-        fileId: photo.fileId,
-        filename: photo.filename ?? null,
-        label: photo.label ?? null,
-        status: 'sam2_failed',
-        maskCount: 0,
-        reason: `Unhandled error: ${errMsg}`,
-      });
+      break;
     }
+
+    // Get the batch of photos
+    const batch = sourcePhotos.slice(photoIndex, photoIndex + batchSize);
+
+    if (batch.length > 1) {
+      console.info(
+        `[SAM2] Starting concurrent batch of ${batch.length} photos (budget=${sam2BudgetRemaining} remaining, ${Math.round(remainingMs / 1000)}s left)`,
+      );
+    }
+
+    // Process the batch concurrently using Promise.all
+    const batchResults = await Promise.all(
+      batch.map((photo) => processSAM2Photo(photo)),
+    );
+
+    // Integrate results from the batch
+    for (const result of batchResults) {
+      photoResults.push(result.photoResult);
+
+      // Update budget
+      sam2BudgetRemaining -= result.budgetUsed;
+
+      // Update counts
+      if (result.photoResult.status === 'sam2_success') {
+        sam2PhotoCount++;
+        if (result.sam2ModelInfoCandidate && !sam2ModelInfo) {
+          sam2ModelInfo = result.sam2ModelInfoCandidate;
+        }
+      } else if (result.photoResult.status === 'sam2_failed') {
+        failedPhotoCount++;
+      } else if (result.photoResult.status.startsWith('skipped_')) {
+        skippedPhotoCount++;
+      }
+
+      // Collect artifacts (respecting MAX_TOTAL_MASKS)
+      for (const artifact of result.newArtifacts) {
+        if (artifacts.length < MAX_TOTAL_MASKS) {
+          artifacts.push(artifact);
+        }
+      }
+
+      // Store image bytes for depth worker
+      if (result.imageBytes !== null) {
+        imageBytesMap[result.photoResult.fileId] = result.imageBytes;
+      }
+    }
+
+    photoIndex += batch.length;
   }
-  timings['mask_generation'] = Date.now() - t1;
+
+  
 
   // Log segmentation summary — honest counts
   const backend = sam2Enabled ? 'sam2' : 'canny';

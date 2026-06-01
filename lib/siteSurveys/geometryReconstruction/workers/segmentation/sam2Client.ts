@@ -24,28 +24,36 @@ import type { NormalizedPoint } from '../../types';
 // Configuration
 // ---------------------------------------------------------------------------
 
-/** Request timeout in milliseconds. CPU inference can take ~40s on Starter plan, plus cold-start overhead. */
-const SAM2_TIMEOUT_MS = 180_000;
+/** Request timeout in milliseconds. CPU inference takes ~34s on Pro plan (ONNX, 384px, 16pts/side).
+ * With 2x concurrent processing, each request still takes ~34s but two run in parallel.
+ * 120s per request is generous enough for retry overhead while keeping batches moving. */
+const SAM2_TIMEOUT_MS = 120_000;
 
 /**
  * Maximum number of retry attempts for 502/503 responses.
  * Render returns 502 while the SAM2 service is cold-starting (model download + load).
- * With 4 retries and exponential backoff starting at 15s, total wait = 15+30+60+120 = 225s,
- * which fits within the 300s Vercel function maxDuration.
+ * With 2 retries and exponential backoff starting at 5s, total wait = 5+10 = 15s,
+ * which is minimal overhead when processing 15 photos concurrently.
+ * The warm-up phase (waitForSAM2Warm) already handles cold starts, so
+ * retries here are just for edge cases where the service briefly restarts.
  */
-const SAM2_MAX_RETRIES = 4;
+const SAM2_MAX_RETRIES = 2;
 
-/** Initial backoff delay in milliseconds for retry after 502/503. */
-const SAM2_RETRY_BACKOFF_INITIAL_MS = 15_000;
+/** Initial backoff delay in milliseconds for retry after 502/503. Reduced from 15s to 5s
+ * since the warm-up phase already handles cold starts. */
+const SAM2_RETRY_BACKOFF_INITIAL_MS = 5_000;
 
 /** Maximum backoff delay cap in milliseconds. */
 const SAM2_RETRY_BACKOFF_CAP_MS = 120_000;
 
 /**
  * How long to poll /health waiting for model_loaded=true.
- * Set to 180s to allow for full model download + load on Render cold start.
+ * Set to 60s to allow for model load on Render Pro (model is cached after first load).
+ * Previously 180s for cold start with model download, but on Pro the model
+ * is typically already cached. With 15 photos to process, we need the
+ * segmentation stage time budget for actual inference, not warm-up.
  */
-const SAM2_WARMUP_POLL_TIMEOUT_MS = 180_000;
+const SAM2_WARMUP_POLL_TIMEOUT_MS = 60_000;
 
 /** Interval between /health polls while waiting for warm-up. */
 const SAM2_WARMUP_POLL_INTERVAL_MS = 5_000;

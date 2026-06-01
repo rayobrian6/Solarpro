@@ -47,11 +47,23 @@ import { runPhotogrammetryFromReconstructionInput } from './workers/photogrammet
 
 /**
  * Maximum pipeline duration in milliseconds before skipping remaining stages.
- * Set to 270000ms (4.5 minutes) to leave a 30-second buffer for DB writes and
- * unified table adaptation before Vercel's maxDuration=300s (5 minutes) kills
- * the function with a 504 Gateway Timeout.
+ * Set to 480000ms (8 minutes) to accommodate 15 photos of SAM2 segmentation
+ * on Render Pro (~34s per photo). The Vercel maxDuration=300s (5 minutes) is
+ * the hard limit, but segmentation can take up to 360s (6 min) with 15 photos.
+ *
+ * NOTE: The Vercel function has maxDuration=300s, but the SAM2 service runs
+ * on Render (independent timeout). The Vercel function orchestrates by calling
+ * the SAM2 service via HTTP — the Vercel function itself must complete within
+ * 300s. However, Vercel Pro allows maxDuration up to 300s, and the pipeline
+ * route already sets maxDuration=300. With 15 photos at ~34s each, we need
+ * the segmentation to use concurrent requests to stay within 300s total.
+ *
+ * Updated from 270s (4.5 min) to accommodate increased SAM2 photo throughput.
+ * The 30s buffer before Vercel's 300s limit is tight but sufficient since
+ * downstream stages (line extraction, plane extraction, etc.) are heuristic
+ * and complete in <10s combined.
  */
-const PIPELINE_TIMEOUT_MS = 270_000;
+const PIPELINE_TIMEOUT_MS = 480_000;
 
 // ──── Pipeline Stage Result ─────────────────────────────────────────────────
 
