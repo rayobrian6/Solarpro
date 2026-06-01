@@ -38,3 +38,15 @@ export type {
   DepthStatistics,
   DepthHeatmapOptions,
 } from './depthMapDecode';
+
+export {
+  generateDepthQualityReport,
+  isDepthUsableFor,
+} from './depthQualityReport';
+
+export type {
+  DepthQualityGrade,
+  DepthQualityReport,
+  DepthQualityDimensions,
+  DepthPurpose,
+} from './depthQualityReport';
