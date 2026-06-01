@@ -121,6 +121,12 @@ export interface SegmentationWorkerOutput {
   artifacts: SemanticSegmentationMask[];
   stageTimings: Record<string, number>;
   workerVersion: string;
+  /**
+   * Pre-fetched image bytes keyed by fileId.
+   * Passed to the depth worker to avoid redundant re-fetching
+   * (saves ~10-20s per photo on slow Vercel Blob downloads).
+   */
+  imageBytesMap: Record<string, Buffer>;
   /** Which segmentation backend was used: 'sam2' or 'canny'. */
   backend: 'sam2' | 'canny';
   /** Number of photos processed with SAM 2 successfully. */
@@ -249,6 +255,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   const timings: Record<string, number> = {};
   const artifacts: SemanticSegmentationMask[] = [];
   const photoResults: PhotoSegmentationResult[] = [];
+  const imageBytesMap: Record<string, Buffer> = {};
   let sam2PhotoCount = 0;
   let failedPhotoCount = 0;
   let skippedPhotoCount = 0;
@@ -274,6 +281,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
       artifacts: [],
       stageTimings: timings,
       workerVersion: SEGMENTATION_WORKER_VERSION,
+      imageBytesMap: {},
       backend: sam2Enabled ? 'sam2' : 'canny',
       sam2PhotoCount: 0,
       failedPhotoCount: 0,
@@ -369,6 +377,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
       artifacts: [],
       stageTimings: timings,
       workerVersion: SEGMENTATION_WORKER_VERSION,
+      imageBytesMap: {},
       backend: 'sam2',
       sam2PhotoCount: 0,
       failedPhotoCount: 0,
@@ -424,9 +433,15 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
         console.info(
           `[SAM2] Processing photo ${photo.fileId} (${photo.filename ?? 'unnamed'}, label=${photo.label ?? 'none'}) — attempting SAM 2 (budget=${sam2BudgetRemaining} remaining, ${Math.round(remainingMs / 1000)}s left)`,
         );
-        const sam2Result = await segmentWithSAM2FromPhoto(photo.fileUrl);
-        if (sam2Result !== null) {
+        const sam2FromPhotoResult = await segmentWithSAM2FromPhoto(photo.fileUrl);
+        // Store image bytes for depth worker reuse (even if SAM2 failed, we still have the bytes)
+        if (sam2FromPhotoResult !== null) {
+          imageBytesMap[photo.fileId] = sam2FromPhotoResult.imageBytes;
+        }
+
+        if (sam2FromPhotoResult !== null && sam2FromPhotoResult.sam2Result !== null) {
           // ── SAM 2 SUCCESS — produce masks ──
+          const sam2Result = sam2FromPhotoResult.sam2Result;
           sam2BudgetRemaining--;
           sam2PhotoCount++;
           if (sam2Result.modelInfo && !sam2ModelInfo) {
@@ -634,6 +649,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
     artifacts: validatedArtifacts,
     stageTimings: timings,
     workerVersion: SEGMENTATION_WORKER_VERSION,
+    imageBytesMap,
     backend: sam2PhotoCount > 0 ? 'sam2' : (cannyPhotoCount > 0 ? 'canny' : 'sam2'),
     sam2PhotoCount,
     failedPhotoCount,
@@ -666,14 +682,22 @@ function tryExtractHost(url: string): string {
 // Geometry extraction helpers
 // ---------------------------------------------------------------------------
 
+/** Result from segmentWithSAM2FromPhoto — includes pre-fetched image bytes for reuse by depth worker. */
+interface SAM2FromPhotoResult {
+  sam2Result: import('./sam2Client').SAM2SegmentationResult;
+  /** Raw image bytes fetched from URL — reuse for MiDaS depth to avoid re-download. */
+  imageBytes: Buffer;
+}
+
 /**
  * Extract geometry from a photo URL using the SAM 2 service.
- * Fetches image bytes, sends them to SAM 2, and returns the result.
+ * Fetches image bytes, sends them to SAM 2, and returns the result
+ * alongside the raw image bytes (for reuse by the depth worker).
  * Returns null if SAM 2 is unavailable or fails — caller records honest failure.
  */
 async function segmentWithSAM2FromPhoto(
   fileUrl: string,
-): Promise<import('./sam2Client').SAM2SegmentationResult | null> {
+): Promise<SAM2FromPhotoResult | null> {
   const t0 = Date.now();
   const urlHost = tryExtractHost(fileUrl);
 
@@ -709,13 +733,14 @@ async function segmentWithSAM2FromPhoto(
       console.info(
         `[SAM2] Photo pipeline: SUCCESS — ${sam2Result.masks.length} masks, total=${totalElapsedMs}ms (fetch=${fetchElapsedMs}ms, service=${sam2Result.processingTimeMs}ms)`,
       );
+      return { sam2Result, imageBytes: bytes };
     } else {
       console.warn(
         `[SAM2] Photo pipeline: SAM2 service returned null after ${totalElapsedMs}ms (fetch=${fetchElapsedMs}ms) — recording honest failure`,
       );
+      // Still return the image bytes for depth worker reuse even if SAM2 failed
+      return { sam2Result, imageBytes: bytes };
     }
-
-    return sam2Result;
   } catch (error) {
     const elapsedMs = Date.now() - t0;
     const message = error instanceof Error ? error.message : String(error);

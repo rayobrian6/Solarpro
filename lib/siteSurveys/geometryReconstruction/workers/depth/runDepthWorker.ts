@@ -438,6 +438,8 @@ export async function runDepthFromReconstructionInput(
   input: GeometryReconstructionInput,
   masks: SemanticSegmentationMask[],
   vanishingPoints: VanishingPointArtifact[],
+  /** Pre-fetched image bytes from segmentation stage (keyed by fileId). Avoids redundant re-download. */
+  preFetchedImageBytes: Record<string, Buffer> = {},
 ): Promise<GeometryReconstructionArtifact[]> {
   const results: GeometryReconstructionArtifact[] = [];
   const cache = getGlobalDepthCache();
@@ -456,11 +458,19 @@ export async function runDepthFromReconstructionInput(
       continue;
     }
 
-    // Attempt to fetch image bytes for MiDaS
+    // Use pre-fetched image bytes from segmentation stage if available,
+    // otherwise fall back to fetching from URL
     let imageBytes: Buffer | undefined;
-    if (isMidasEnabled() && photo.fileUrl) {
-      const fetched = await fetchImageBytes(photo.fileUrl);
-      imageBytes = fetched ?? undefined;
+    if (isMidasEnabled()) {
+      if (preFetchedImageBytes[photo.fileId]) {
+        imageBytes = preFetchedImageBytes[photo.fileId];
+        console.info(
+          `[DepthWorker] Using pre-fetched image bytes for ${photo.fileId} (${imageBytes.length} bytes) — skipping re-download`,
+        );
+      } else if (photo.fileUrl) {
+        const fetched = await fetchImageBytes(photo.fileUrl);
+        imageBytes = fetched ?? undefined;
+      }
     }
 
     const workerInput: DepthWorkerInput = {

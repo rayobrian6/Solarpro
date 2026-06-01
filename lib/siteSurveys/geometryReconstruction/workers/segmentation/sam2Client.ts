@@ -339,8 +339,8 @@ export function warmupSAM2Service(): void {
   formData.append('file', imageBlob, 'warmup.png');
 
   const url = new URL(`${serviceURL}/segment`);
-  url.searchParams.set('min_area_fraction', '0.5'); // Max allowed by Pydantic (le=0.5), rejects tiny masks
-  url.searchParams.set('max_masks', '1');            // Minimize processing
+  url.searchParams.set('min_area_fraction', '0.01'); // Low threshold to avoid 400 Bad Request on tiny warmup image
+  url.searchParams.set('max_masks', '1');             // Minimize processing
 
   // Fire-and-forget: we don't await this, and we handle 502 gracefully
   fetch(url.toString(), {

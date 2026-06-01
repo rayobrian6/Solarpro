@@ -45,11 +45,11 @@ import { runMultiViewFusionFromReconstructionInput } from './workers/multiViewFu
 
 /**
  * Maximum pipeline duration in milliseconds before skipping remaining stages.
- * Set to 240000ms (4 minutes) to leave a 60-second buffer for DB writes and
+ * Set to 270000ms (4.5 minutes) to leave a 30-second buffer for DB writes and
  * unified table adaptation before Vercel's maxDuration=300s (5 minutes) kills
  * the function with a 504 Gateway Timeout.
  */
-const PIPELINE_TIMEOUT_MS = 240_000;
+const PIPELINE_TIMEOUT_MS = 270_000;
 
 // ──── Pipeline Stage Result ─────────────────────────────────────────────────
 
@@ -217,7 +217,7 @@ export async function runFullGeometryReconstructionPipeline(
   // ── Stage 4: Depth Estimation ──────────────────────────────────────────
   // Now async — MiDaS service call requires network I/O
   const depthResult = await asyncStageTimer('depth_estimation', () =>
-    runDepthFromReconstructionInput(input, masks, vanishingPoints),
+    runDepthFromReconstructionInput(input, masks, vanishingPoints, segResult.imageBytesMap),
   );
   const depthArtifacts = depthResult.result;
   allArtifacts.push(...depthArtifacts);
@@ -328,7 +328,7 @@ export async function runDepthOnlyPipeline(
     (a): a is VanishingPointArtifact => a.artifactType === 'vanishing_point',
   );
 
-  const depthArtifacts = await runDepthFromReconstructionInput(input, masks, vanishingPoints);
+  const depthArtifacts = await runDepthFromReconstructionInput(input, masks, vanishingPoints, {});
   const allArtifacts = [...segArtifacts, ...lineArtifacts, ...vpArtifacts, ...depthArtifacts];
 
   return {
