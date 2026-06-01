@@ -12,19 +12,19 @@ services:
       - key: SAM2_HF_MODEL_ID
         value: facebook/sam2.1-hiera-tiny
       - key: SAM2_MIN_MASK_AREA_FRACTION
-        value: "0.01"
+        value: "0.005"
       - key: SAM2_MAX_MASKS
         value: "20"
       - key: SAM2_DOUGLAS_PEUCKER_EPSILON
         value: "5.0"
       - key: SAM2_MAX_IMAGE_DIM
-        value: "384"
+        value: "512"
       - key: SAM2_POINTS_PER_SIDE
-        value: "8"
+        value: "10"
       - key: SAM2_PRED_IOU_THRESH
-        value: "0.6"
+        value: "0.5"
       - key: SAM2_STABILITY_SCORE_THRESH
-        value: "0.85"
+        value: "0.8"
       - key: SAM2_INFERENCE_BACKEND
         value: onnx
       - key: MIDAS_ENABLED

@@ -626,6 +626,186 @@ export async function segmentWithSAM2(
 }
 
 // ---------------------------------------------------------------------------
+// Prompted segmentation — user-provided click points
+// ---------------------------------------------------------------------------
+
+/** A prompt point for SAM 2 prompted segmentation. */
+export interface SAM2PromptPoint {
+  /** X coordinate in original image pixel space. */
+  x: number;
+  /** Y coordinate in original image pixel space. */
+  y: number;
+  /** 1 = foreground (include this region), 0 = background (exclude). */
+  label?: 1 | 0;
+}
+
+/** Result of a SAM 2 prompted segmentation call. */
+export interface SAM2PromptedSegmentationResult {
+  /** Whether the SAM 2 service was used successfully. */
+  usedSAM2: boolean;
+  /** Masks from SAM 2 (empty if service unavailable). */
+  masks: SAM2MaskResult[];
+  /** Image dimensions from the service response. */
+  imageWidth: number;
+  imageHeight: number;
+  /** Processing time reported by the service. */
+  processingTimeMs: number;
+  /** Model info from the service response. */
+  modelInfo: {
+    modelId: string;
+    device: string;
+    cudaAvailable: boolean;
+    inferenceResolution?: string;
+  } | null;
+  /** Number of prompt points sent to the service. */
+  promptPointCount: number;
+  /** Error message if SAM 2 failed (for logging, not user-facing). */
+  error: string | null;
+}
+
+/**
+ * Segment specific regions of an image using user-provided click points.
+ *
+ * This is SAM2's intended use case and produces dramatically better results
+ * than AMG (automatic mask generation). Instead of a dumb grid that can miss
+ * roof planes, the user clicks approximate areas of interest and SAM2 returns
+ * precise masks around those points.
+ *
+ * Usage:
+ * 1. User clicks on roof areas in the frontend (foreground points, label=1)
+ * 2. Optionally clicks on trees/sky to EXCLUDE those areas (background points, label=0)
+ * 3. SAM2 encodes the image once, then decodes precise masks around each click
+ *
+ * Processing is ~9s on CPU (vs ~43s for AMG) because only the encoder + targeted
+ * decoder runs are needed, not the full grid-of-points scan.
+ *
+ * @param imageBytes - Raw image bytes (JPEG/PNG/WebP)
+ * @param points - Array of prompt points with x, y, and label (1=foreground, 0=background)
+ * @param minAreaFraction - Minimum mask area as fraction of image (default 0.005)
+ */
+export async function segmentPromptedWithSAM2(
+  imageBytes: Buffer,
+  points: SAM2PromptPoint[],
+  minAreaFraction: number = 0.005,
+): Promise<SAM2PromptedSegmentationResult | null> {
+  if (!isSAM2Enabled()) return null;
+  if (!points || points.length === 0) {
+    console.warn('[SAM2] Prompted segmentation: no points provided');
+    return null;
+  }
+
+  const t0 = Date.now();
+  const imageBytesSize = imageBytes.length;
+  const serviceURL = getSAM2ServiceURL();
+  console.info(
+    `[SAM2] Prompted call: POST ${serviceURL}/segment-prompted — imageSize=${imageBytesSize} bytes (${(imageBytesSize / 1024).toFixed(1)}KB) points=${points.length} timeout=${SAM2_TIMEOUT_MS}ms`,
+  );
+
+  try {
+    // Create form data with the image
+    const formData = new FormData();
+    const imageBlob = new Blob([new Uint8Array(imageBytes)]);
+    formData.append('file', imageBlob, 'image.jpg');
+
+    const url = new URL(`${serviceURL}/segment-prompted`);
+    url.searchParams.set('points', JSON.stringify(points));
+    url.searchParams.set('min_area_fraction', String(minAreaFraction));
+    // Don't set roof_only for prompted mode — user controls what to segment
+
+    // Use fetchWithRetry to handle 502/503 from Render cold start
+    const response = await fetchWithRetry(url.toString(), {
+      method: 'POST',
+      body: formData,
+      signal: AbortSignal.timeout(SAM2_TIMEOUT_MS),
+    });
+
+    const fetchElapsedMs = Date.now() - t0;
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => 'unknown error');
+      console.warn(
+        `[SAM2] Prompted call: FAILED — HTTP ${response.status} in ${fetchElapsedMs}ms — ${errorBody}`,
+      );
+      return null;
+    }
+
+    const data = (await response.json()) as SAM2SegmentResponse;
+
+    if (!data.success || data.error) {
+      const totalElapsedMs = Date.now() - t0;
+      console.warn(
+        `[SAM2] Prompted call: FAILED — service error in ${totalElapsedMs}ms (service_processing=${data.processing_time_ms}ms) — ${data.error ?? 'unknown'}`,
+      );
+      return null;
+    }
+
+    // Convert SAM 2 masks to Pipeline B normalized format
+    const masks: SAM2MaskResult[] = data.masks.map((mask) => {
+      const imgW = data.image_width;
+      const imgH = data.image_height;
+
+      // Convert polygon from pixel coords to normalized 0-1000
+      const polygon: NormalizedPoint[] = mask.polygon.map((pt) => ({
+        x: Math.round((pt.x / imgW) * 1000),
+        y: Math.round((pt.y / imgH) * 1000),
+        coordinateSystem: 'normalized_image_0_1000' as const,
+      }));
+
+      // Convert bbox from pixel coords to normalized 0-1000
+      const [bx, by, bw, bh] = mask.bbox;
+      const maskBounds = {
+        x: Math.round((bx / imgW) * 1000),
+        y: Math.round((by / imgH) * 1000),
+        width: Math.round((bw / imgW) * 1000),
+        height: Math.round((bh / imgH) * 1000),
+      };
+
+      return {
+        maskIndex: mask.mask_index,
+        polygon,
+        area: mask.area,
+        maskBounds,
+        confidence: mask.confidence,
+        stabilityScore: mask.stability_score,
+        classHint: mask.class_hint,
+        pointCount: mask.point_count,
+      };
+    });
+
+    const totalElapsedMs = Date.now() - t0;
+    console.info(
+      `[SAM2] Prompted call: OK — ${masks.length} masks in ${totalElapsedMs}ms (service_processing=${data.processing_time_ms}ms) — model=${data.model_info?.model_id ?? 'unknown'} points=${points.length}`,
+    );
+
+    return {
+      usedSAM2: true,
+      masks,
+      imageWidth: data.image_width,
+      imageHeight: data.image_height,
+      processingTimeMs: data.processing_time_ms,
+      modelInfo: data.model_info
+        ? {
+            modelId: data.model_info.model_id,
+            device: data.model_info.device,
+            cudaAvailable: data.model_info.cuda_available,
+            inferenceResolution: data.model_info.inference_resolution,
+          }
+        : null,
+      promptPointCount: points.length,
+      error: null,
+    };
+  } catch (error) {
+    const elapsedMs = Date.now() - t0;
+    const message = error instanceof Error ? error.message : String(error);
+    const isTimeout = error instanceof DOMException && error.name === 'TimeoutError';
+    console.warn(
+      `[SAM2] Prompted call: FAILED${isTimeout ? ' (TIMEOUT)' : ''} in ${elapsedMs}ms — ${message}`,
+    );
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Class hint mapping — SAM 2 class_hint → Pipeline B SegmentationClass
 // ---------------------------------------------------------------------------
 

@@ -130,6 +130,21 @@ MIN_POLYGON_POINTS = 3
 # Service port — Render injects PORT=10000 for web services
 PORT = int(os.environ.get("PORT", "10000"))
 
+# ---------------------------------------------------------------------------
+# Classifier Configuration (heuristic class hints for SAM2 masks)
+# ---------------------------------------------------------------------------
+
+# Green ratio threshold: above this → definitely vegetation/tree
+CLASSIFIER_GREEN_RATIO_TREE = float(os.environ.get("SAM2_CLASSIFIER_GREEN_RATIO_TREE", "0.35"))
+# Green ratio threshold for tree-by-shape: moderate green in upper-middle → tree
+CLASSIFIER_GREEN_RATIO_TREE_MODERATE = float(os.environ.get("SAM2_CLASSIFIER_GREEN_RATIO_TREE_MODERATE", "0.15"))
+# Green ratio ceiling for roof: above this → NOT roof (even if shape/position match)
+CLASSIFIER_GREEN_RATIO_ROOF_MAX = float(os.environ.get("SAM2_CLASSIFIER_GREEN_RATIO_ROOF_MAX", "0.25"))
+# Sky detection: norm_y_center below this threshold → sky (if area > 4%)
+CLASSIFIER_SKY_Y_MAX = float(os.environ.get("SAM2_CLASSIFIER_SKY_Y_MAX", "0.35"))
+# Ground detection: norm_y_center above this threshold → ground
+CLASSIFIER_GROUND_Y_MIN = float(os.environ.get("SAM2_CLASSIFIER_GROUND_Y_MIN", "0.7"))
+
 # ---------------------------------------------------------------------------\
 # MiDaS / DPT Depth Estimation Configuration
 # ---------------------------------------------------------------------------
@@ -561,6 +576,8 @@ def classify_mask_region(
     original_image_bgr: np.ndarray | None = None,
     mask_binary: np.ndarray | None = None,
     scale: float = 1.0,
+    prompted_mode: bool = False,
+    prompt_points: list[dict] | None = None,
 ) -> str:
     """
     Heuristic classification of a mask region based on position, size,
@@ -580,6 +597,14 @@ def classify_mask_region(
     IMPORTANT: "tree" is a distinct class from "obstruction" because trees
     are the #1 source of false roof masks. Downstream consumers must filter
     out tree masks and not render them as roof geometry.
+
+    When prompted_mode=True, position-based sky/ground rules are weakened
+    because the user explicitly clicked on those regions — a foreground
+    click on a roof plane near the sky shouldn't be classified as "sky"
+    just because it's in the upper portion of the image. Instead, we rely
+    more heavily on green_ratio and shape heuristics. If prompt_points are
+    provided, we check whether any foreground point falls within the mask
+    bbox — if so, position-based rejections are skipped for that mask.
     """
     x, y, w, h = bbox
     norm_y_center = (y + h / 2) / img_h
@@ -597,16 +622,40 @@ def classify_mask_region(
         green_ratio = _compute_green_ratio(mask_binary, original_image_bgr, scale)
 
     # High green content → definitely vegetation/tree, not roof
-    if green_ratio > 0.35 and norm_area > 0.005:
+    # This rule is ALWAYS active — green content is a strong signal regardless
+    # of prompted mode. If the user clicks on a tree, it should still be "tree".
+    if green_ratio > CLASSIFIER_GREEN_RATIO_TREE and norm_area > 0.005:
         return "tree"
 
+    # ── Check if a foreground prompt point falls within this mask bbox ──
+    # In prompted mode, if the user explicitly clicked inside this mask's
+    # bounding box, position-based sky/ground rules should be weakened.
+    # The user chose this region — trust their intent over position heuristics.
+    has_fg_point_in_bbox = False
+    if prompted_mode and prompt_points:
+        x_min, y_min, bw, bh = bbox
+        x_max = x_min + bw
+        y_max = y_min + bh
+        for pt in prompt_points:
+            if pt.get("label", 1) == 1:  # foreground point
+                px, py = pt.get("x", 0), pt.get("y", 0)
+                if x_min <= px <= x_max and y_min <= py <= y_max:
+                    has_fg_point_in_bbox = True
+                    break
+
     # ── Sky detection (top of image, large area) ──
-    if norm_y_center < 0.35 and norm_area > 0.04:
-        return "sky"
+    # In prompted mode with a foreground point in this bbox, skip sky
+    # classification — the user clicked here intentionally, likely on a
+    # roof plane that SAM2 grouped with adjacent sky region.
+    if not (prompted_mode and has_fg_point_in_bbox):
+        if norm_y_center < CLASSIFIER_SKY_Y_MAX and norm_area > 0.04:
+            return "sky"
 
     # ── Ground detection (bottom of image, moderate-to-large area) ──
-    if norm_y_center > 0.7 and norm_area > 0.02:
-        return "ground"
+    # Same logic: if user clicked foreground in this area, don't call it ground.
+    if not (prompted_mode and has_fg_point_in_bbox):
+        if norm_y_center > CLASSIFIER_GROUND_Y_MIN and norm_area > 0.02:
+            return "ground"
 
     # ── Tree detection by shape (tall, moderate area, not ground level) ──
     # Trees often have a distinctive vertical profile: narrower than roof,
@@ -616,7 +665,7 @@ def classify_mask_region(
     # are likely trees.
     if 0.15 < norm_y_center < 0.65 and norm_area > 0.02 and aspect_ratio < 1.3:
         # Narrow-ish tall region in upper-middle → likely tree, not roof
-        if green_ratio > 0.15:
+        if green_ratio > CLASSIFIER_GREEN_RATIO_TREE_MODERATE:
             return "tree"
 
     # ── Roof detection ──
@@ -628,7 +677,7 @@ def classify_mask_region(
     #   mossy/weathered roofs with algae that would previously fall to "unknown")
     # - High stability score (roofs are solid, not complex textures)
     if 0.1 < norm_y_center < 0.6 and norm_area > 0.02:
-        if green_ratio < 0.25:
+        if green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
             # Wide region = likely roof plane
             if aspect_ratio > 1.3:
                 return "roof"
@@ -641,11 +690,11 @@ def classify_mask_region(
 
     # ── Wall detection ──
     # Walls are tall, narrow, in the middle vertical range
-    if 0.2 <= norm_y_center < 0.85 and h > w * 0.8 and green_ratio < 0.25:
+    if 0.2 <= norm_y_center < 0.85 and h > w * 0.8 and green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
         return "wall"
 
     # ── Equipment detection (small, upper portion) ──
-    if 0.003 < norm_area < 0.03 and norm_y_center < 0.6 and green_ratio < 0.25:
+    if 0.003 < norm_area < 0.03 and norm_y_center < 0.6 and green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
         return "equipment"
 
     # ── Obstruction detection (very small regions) ──
@@ -1250,6 +1299,8 @@ async def segment_prompted(
             original_image_bgr=image,
             mask_binary=mask_binary,
             scale=scale,
+            prompted_mode=True,
+            prompt_points=prompt_points,
         )
 
         confidence = min(100, round((predicted_iou * 0.4 + stability * 0.6) * 100))
