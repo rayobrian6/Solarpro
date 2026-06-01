@@ -10,6 +10,7 @@
 //   4. Depth Estimation  → DepthMap[]
 //   5. Plane Extraction  → RoofPlaneCandidate[], WallPlaneCandidate[]
 //   6. Multi-View Fusion → ConsensusPlaneCandidate[]
+//   7. Photogrammetry    → MeshArtifact, SfMPointCloud
 //
 // Each stage feeds its outputs into subsequent stages. All artifacts are
 // collected and returned as a flat array of GeometryReconstructionArtifact[].
@@ -40,6 +41,7 @@ import { estimateVanishingPointsFromReconstructionInput } from './workers/perspe
 import { runDepthFromReconstructionInput } from './workers/depth/runDepthWorker';
 import { runPlaneExtractionFromReconstructionInput } from './workers/planeExtraction/runPlaneExtractionWorker';
 import { runMultiViewFusionFromReconstructionInput } from './workers/multiViewFusion/runMultiViewFusion';
+import { runPhotogrammetryFromReconstructionInput } from './workers/photogrammetry/runPhotogrammetryWorker';
 
 // ──── Pipeline timeout safeguard ────────────────────────────────────────────
 
@@ -267,6 +269,23 @@ export async function runFullGeometryReconstructionPipeline(
   stages.push({ stage: 'multi_view_fusion', artifactCount: fusionArtifacts.length, durationMs: fusionResult.durationMs });
   console.info(
     `[Pipeline B] Stage 6 (multi_view_fusion): ${fusionArtifacts.length} artifacts in ${fusionResult.durationMs}ms`,
+  );
+
+  // Timeout check before Stage 7
+  if (isPipelineTimedOut(pipelineStart)) {
+    console.warn(`[Pipeline B] Timeout after Stage 6 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, ...segFields };
+  }
+
+  // ──── Stage 7: Photogrammetry ────────────────────────────────────────────
+  const photoGramResult = stageTimer('photogrammetry', () =>
+    runPhotogrammetryFromReconstructionInput(input, allArtifacts),
+  );
+  const photoGramArtifacts = photoGramResult.result.artifacts;
+  allArtifacts.push(...photoGramArtifacts);
+  stages.push({ stage: 'photogrammetry', artifactCount: photoGramArtifacts.length, durationMs: photoGramResult.durationMs });
+  console.info(
+    `[Pipeline B] Stage 7 (photogrammetry): ${photoGramArtifacts.length} artifacts in ${photoGramResult.durationMs}ms`,
   );
 
   const totalDurationMs = Date.now() - pipelineStart;

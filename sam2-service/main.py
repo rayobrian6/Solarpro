@@ -124,7 +124,9 @@ POINTS_PER_SIDE = int(os.environ.get("SAM2_POINTS_PER_SIDE", "9" if IS_CPU else 
 # Maximum masks to return per image
 MAX_MASKS = int(os.environ.get("SAM2_MAX_MASKS", "20"))
 # Douglas-Peucker simplification epsilon (pixels)
-DOUGLAS_PEUCKER_EPSILON = float(os.environ.get("SAM2_DOUGLAS_PEUCKER_EPSILON", "5.0"))
+# Lower = more polygon detail, higher = coarser polygons.
+# At 512px image dim, epsilon=1.0 preserves ~3x more boundary detail than 5.0.
+DOUGLAS_PEUCKER_EPSILON = float(os.environ.get("SAM2_DOUGLAS_PEUCKER_EPSILON", "1.0"))
 # Minimum polygon points after simplification
 MIN_POLYGON_POINTS = 3
 # Service port — Render injects PORT=10000 for web services
@@ -542,14 +544,68 @@ def np_to_base64(arr: np.ndarray) -> str:
 # Mask-to-polygon conversion
 # ---------------------------------------------------------------------------
 
+# Maximum edge length in pixels after simplification — edges longer than this
+# will be subdivided to preserve boundary detail for line extraction.
+# Without this, Douglas-Peucker collapses long roof edges into single straight
+# segments (200+ pixels), which produces "sloppy lines" in downstream extraction.
+MAX_POLYGON_EDGE_LENGTH = int(os.environ.get("SAM2_MAX_POLYGON_EDGE_LENGTH", "50"))
+
+
+def _subdivide_long_edges(points: list[dict], max_length: float) -> list[dict]:
+    """
+    Subdivide polygon edges longer than max_length by inserting intermediate
+    points. This prevents Douglas-Peucker from collapsing long roof/wall edges
+    into single straight segments that lose boundary curvature detail.
+
+    For each edge (p1 → p2) longer than max_length, we insert points at equal
+    intervals along the edge. The number of subdivisions = ceil(length / max_length) - 1.
+    """
+    if max_length <= 0 or len(points) < 2:
+        return points
+
+    result: list[dict] = []
+    n = len(points)
+
+    for i in range(n):
+        p1 = points[i]
+        p2 = points[(i + 1) % n]
+        result.append(p1)
+
+        dx = p2["x"] - p1["x"]
+        dy = p2["y"] - p1["y"]
+        length = (dx * dx + dy * dy) ** 0.5
+
+        if length > max_length:
+            num_segments = max(2, int(length / max_length + 0.5))
+            for j in range(1, num_segments):
+                t = j / num_segments
+                result.append({
+                    "x": p1["x"] + dx * t,
+                    "y": p1["y"] + dy * t,
+                })
+
+    return result
+
+
 def mask_to_polygon(mask_bin: np.ndarray, epsilon: float = DOUGLAS_PEUCKER_EPSILON):
     """
     Convert a binary mask to a simplified polygon using OpenCV
-    contour finding + Douglas-Peucker simplification.
+    contour finding + Douglas-Peucker simplification + edge subdivision.
+
+    Pipeline:
+      1. findContours with CHAIN_APPROX_NONE (preserve ALL contour points)
+      2. approxPolyDP with epsilon (simplify — but may collapse long edges)
+      3. Subdivide edges longer than MAX_POLYGON_EDGE_LENGTH (recover detail)
+
+    Previously used CHAIN_APPROX_SIMPLE which removed intermediate points on
+    straight/diagonal segments BEFORE simplification, compounding point loss
+    and producing overly coarse polygons with 200+ pixel single-segment edges.
     """
     mask_uint8 = (mask_bin * 255).astype(np.uint8) if mask_bin.dtype != np.uint8 else mask_bin
 
-    contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # CHAIN_APPROX_NONE preserves all contour points — essential for
+    # high-fidelity polygon boundaries that produce accurate structural lines.
+    contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
 
     if not contours:
         return []
@@ -563,6 +619,9 @@ def mask_to_polygon(mask_bin: np.ndarray, epsilon: float = DOUGLAS_PEUCKER_EPSIL
     points = []
     for pt in simplified:
         points.append({"x": float(pt[0][0]), "y": float(pt[0][1])})
+
+    # Subdivide long edges to preserve boundary detail for line extraction
+    points = _subdivide_long_edges(points, MAX_POLYGON_EDGE_LENGTH)
 
     return points
 

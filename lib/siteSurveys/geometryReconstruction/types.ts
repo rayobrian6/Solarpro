@@ -105,6 +105,35 @@ export interface DepthMap {
   limitations: string[];
 }
 
+/** Mesh artifact — triangulated surface from depth-based reconstruction. */
+export interface MeshArtifact {
+  artifactType: 'mesh';
+  /** Unique artifact ID. */
+  id: string;
+  /** Flat Float32 array [x,y,z,x,y,z,...] of vertex positions. Stored as base64. */
+  verticesData: string;
+  /** Flat Uint32 array [v0,v1,v2,v0,v1,v2,...] of triangle indices. Stored as base64. */
+  trianglesData: string;
+  /** Number of vertices. */
+  vertexCount: number;
+  /** Number of triangles. */
+  triangleCount: number;
+  /** Total estimated surface area (in relative depth units). */
+  estimatedArea: number;
+  /** Number of fitted planes this mesh was constructed from. */
+  planeCount: number;
+  /** IDs of source photos used. */
+  sourceFileIds: string[];
+  /** Confidence score (0-100). */
+  confidence: number;
+  /** Worker version that produced this artifact. */
+  workerVersion: string;
+  /** Authority envelope — always review-only. */
+  authority: GeometryReconstructionAuthority;
+  /** Limitations and disclaimers. */
+  limitations: string[];
+}
+
 /** SfM point cloud from multi-view reconstruction. */
 export interface SfMPointCloud {
   artifactType: 'sfm_point_cloud';
@@ -401,6 +430,7 @@ export type GeometryReconstructionArtifact =
   | SegmentationMask
   | DepthMap
   | SfMPointCloud
+  | MeshArtifact
   | PlaneCandidate
   | RoofPlaneCandidate
   | WallPlaneCandidate
@@ -415,6 +445,7 @@ export const ARTIFACT_TYPE_DISCRIMINATORS = [
   'segmentation_mask',
   'depth_map',
   'sfm_point_cloud',
+  'mesh',
   'plane_candidate',
   'roof_plane_candidate',
   'wall_plane_candidate',

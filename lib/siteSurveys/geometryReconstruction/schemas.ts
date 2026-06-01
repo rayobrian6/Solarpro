@@ -23,6 +23,7 @@ import type {
   StructuralLineType,
   VanishingPointArtifact,
   ConsensusPlaneCandidate,
+  MeshArtifact,
   GeometryReconstructionArtifact,
   ArtifactTypeDiscriminator,
   ValidationResult,
@@ -239,6 +240,32 @@ export function validateSfMPointCloud(payload: unknown): ValidationResult<SfMPoi
 
   if (errors.length > 0) return { valid: false, errors };
   return { valid: true, data: p as unknown as SfMPointCloud };
+}
+
+/** Validate a MeshArtifact payload. */
+export function validateMeshArtifact(payload: unknown): ValidationResult<MeshArtifact> {
+  const errors: string[] = [];
+  if (!isRecord(payload)) return { valid: false, errors: ['Payload must be a non-null object'] };
+  const p = payload as Record<string, unknown>;
+
+  if (p.artifactType !== 'mesh') {
+    errors.push(`artifactType must be "mesh", got "${String(p.artifactType)}"`);
+  }
+  assertString(p, 'id', errors);
+  assertString(p, 'verticesData', errors);
+  assertString(p, 'trianglesData', errors);
+  assertNumber(p, 'vertexCount', errors);
+  assertNumber(p, 'triangleCount', errors);
+  assertNumber(p, 'estimatedArea', errors);
+  assertNumber(p, 'planeCount', errors);
+  assertStringArray(p, 'sourceFileIds', errors);
+  assertConfidence(p, errors);
+  assertString(p, 'workerVersion', errors);
+  assertAuthority(p, errors);
+  assertLimitations(p, errors);
+
+  if (errors.length > 0) return { valid: false, errors };
+  return { valid: true, data: p as unknown as MeshArtifact };
 }
 
 /** Validate a PlaneCandidate payload. */
@@ -636,6 +663,10 @@ const VALIDATOR_MAP: Record<ArtifactTypeDiscriminator, (payload: unknown) => Val
   },
   sfm_point_cloud: (p) => {
     const r = validateSfMPointCloud(p);
+    return r.valid ? { valid: true, data: r.data } : r as ValidationResult<GeometryReconstructionArtifact>;
+  },
+  mesh: (p) => {
+    const r = validateMeshArtifact(p);
     return r.valid ? { valid: true, data: r.data } : r as ValidationResult<GeometryReconstructionArtifact>;
   },
   plane_candidate: (p) => {
