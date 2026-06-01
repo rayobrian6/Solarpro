@@ -25,5 +25,13 @@ services:
         value: "0.6"
       - key: SAM2_STABILITY_SCORE_THRESH
         value: "0.85"
+      - key: MIDAS_ENABLED
+        value: "true"
+      - key: MIDAS_MODEL_ID
+        value: Intel/dpt-swinv2-tiny-256
+      - key: MIDAS_MAX_IMAGE_DIM
+        value: "256"
+      - key: MIDAS_OUTPUT_RESOLUTION
+        value: "64"
       - key: PORT
         value: "10000"
