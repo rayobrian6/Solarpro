@@ -47,15 +47,27 @@ CPU Optimization (Depth):
   - Both models (SAM2 + MiDaS) coexist in ~4GB RAM: SAM2 tiny (~40MB) + DPT tiny (~41MB)
     leaves plenty of headroom on Render Standard (4GB)
 
+Health Check Resilience:
+  - SAM2 and MiDaS inference run in ThreadPoolExecutor threads, NOT on the
+    async event loop. This keeps the event loop responsive for /health checks.
+  - Render's platform health check has a 5-second timeout. Previously, SAM2
+    CPU inference (35-40s) blocked the event loop, causing health check
+    failures → server_failed events → instance restarts → 503/504 errors.
+  - /health endpoint reports inference_active and inference_type so monitoring
+    can distinguish "busy but healthy" from "actually broken".
+  - Status "busy" means the service is healthy but processing a request.
+
 REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
 """
 
 import os
 import time
 import gc
+import asyncio
 import logging
 import resource
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 import cv2
@@ -176,6 +188,8 @@ class HealthResponse(BaseModel):
     uptime_seconds: float
     depth_model_loaded: bool = False
     depth_model_id: str = ""
+    inference_active: bool = False     # True while SAM2/MiDaS inference is in progress
+    inference_type: str = ""           # "segment" or "depth" when active
 
 class DepthResponse(BaseModel):
     """Response from the /depth endpoint."""
@@ -201,6 +215,19 @@ _model_load_time = None
 _midas_model = None
 _midas_load_time = None
 _start_time = time.time()
+
+# ---------------------------------------------------------------------------
+# Inference thread pool — runs CPU-bound SAM2/MiDaS inference in threads
+# so the FastAPI async event loop stays responsive for /health checks.
+# Render's platform health check has a 5-second timeout; SAM2 inference
+# takes 35-40s on CPU, which blocks the event loop and causes health
+# check failures → server_failed events → instance restarts → 503/504.
+# ---------------------------------------------------------------------------
+_inference_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="inference")
+_inference_active = False  # True while SAM2 or MiDaS inference is running
+_inference_type = ""      # "segment" or "depth" — which endpoint is active
+_last_inference_start = 0.0
+_last_inference_end = 0.0
 
 
 def _get_memory_mb() -> float:
@@ -596,15 +623,25 @@ async def startup_event():
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
-    """Check service health and model readiness."""
+    """Check service health and model readiness.
+
+    IMPORTANT: This endpoint MUST respond instantly (non-blocking) because
+    Render's platform health check has a 5-second timeout. If SAM2 or MiDaS
+    inference is running (which takes 35-40s on CPU), we still respond
+    immediately with inference_active=True. This prevents Render from
+    marking the instance as unhealthy during long-running inference.
+    """
     sam2_ready = _sam2_amg is not None
     midas_ready = _midas_model is not None if MIDAS_ENABLED else False
 
     # Service is "ready" if SAM2 is loaded (primary function)
     # Depth is optional — service is still "ready" without it
+    # Even during inference, the service is "ready" — it's just busy
     status = "ready" if sam2_ready else "loading"
     if sam2_ready and MIDAS_ENABLED and not midas_ready:
         status = "ready_depth_loading"
+    if _inference_active:
+        status = "busy"  # healthy but busy — Render should not restart
 
     return HealthResponse(
         status=status,
@@ -615,6 +652,8 @@ async def health_check():
         uptime_seconds=time.time() - _start_time,
         depth_model_loaded=midas_ready,
         depth_model_id=MIDAS_MODEL_ID if MIDAS_ENABLED else "",
+        inference_active=_inference_active,
+        inference_type=_inference_type if _inference_active else "",
     )
 
 
@@ -680,16 +719,39 @@ async def segment_image(
 
     min_area_px = res_w * res_h * min_area_fraction
 
-    # Run SAM 2 Automatic Mask Generation
+    # Run SAM 2 Automatic Mask Generation in a thread so the event loop
+    # stays responsive for /health checks. SAM2 CPU inference takes 35-40s
+    # which would block the async event loop and cause Render health check
+    # failures (5s timeout) → server_failed → instance restart → 503/504.
     try:
         image_rgb = cv2.cvtColor(image_resized, cv2.COLOR_BGR2RGB)
         mem_before = _get_memory_mb()
         logger.info(f"Starting SAM 2 inference on {res_w}x{res_h} image (CPU={IS_CPU}, RSS={mem_before:.0f}MB)")
-        sam_masks = amg.generate(image_rgb)
+
+        # Track inference state for /health reporting
+        global _inference_active, _inference_type, _last_inference_start, _last_inference_end
+        _inference_active = True
+        _inference_type = "segment"
+        _last_inference_start = time.time()
+
+        loop = asyncio.get_event_loop()
+        sam_masks = await loop.run_in_executor(
+            _inference_executor,
+            amg.generate,
+            image_rgb,
+        )
+
+        _inference_active = False
+        _inference_type = ""
+        _last_inference_end = time.time()
+
         mem_after = _get_memory_mb()
         logger.info(f"SAM 2 inference produced {len(sam_masks)} raw masks (RSS={mem_after:.0f}MB, delta={mem_after-mem_before:.0f}MB)")
 
     except Exception as e:
+        _inference_active = False
+        _inference_type = ""
+        _last_inference_end = time.time()
         logger.error(f"SAM 2 inference failed: {e}")
         logger.error(traceback.format_exc())
         # Force garbage collection to free memory
@@ -879,7 +941,9 @@ async def estimate_depth(
     image_resized, scale = resize_for_inference(image, max_dim=MIDAS_MAX_IMAGE_DIM)
     res_h, res_w = image_resized.shape[:2]
 
-    # Run MiDaS depth estimation
+    # Run MiDaS depth estimation in a thread so the event loop stays
+    # responsive for /health checks. MiDaS CPU inference takes ~3-5s which
+    # could still block long enough to miss a health check window.
     try:
         from PIL import Image as PILImage
 
@@ -890,8 +954,23 @@ async def estimate_depth(
         mem_before = _get_memory_mb()
         logger.info(f"Starting MiDaS depth inference on {res_w}x{res_h} image (CPU={IS_CPU}, RSS={mem_before:.0f}MB)")
 
-        # pipeline returns dict with "predicted_depth" (tensor) and "depth" (PIL Image)
-        result = midas_pipe(pil_image)
+        # Track inference state for /health reporting
+        global _inference_active, _inference_type, _last_inference_start, _last_inference_end
+        _inference_active = True
+        _inference_type = "depth"
+        _last_inference_start = time.time()
+
+        # Run MiDaS pipeline in thread pool
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            _inference_executor,
+            midas_pipe,
+            pil_image,
+        )
+
+        _inference_active = False
+        _inference_type = ""
+        _last_inference_end = time.time()
 
         # Extract raw depth prediction (tensor)
         depth_tensor = result["predicted_depth"]
@@ -904,6 +983,9 @@ async def estimate_depth(
         )
 
     except Exception as e:
+        _inference_active = False
+        _inference_type = ""
+        _last_inference_end = time.time()
         logger.error(f"MiDaS depth inference failed: {e}")
         logger.error(traceback.format_exc())
         gc.collect()

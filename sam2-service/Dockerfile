@@ -72,7 +72,7 @@ RUN mkdir -p /app/.cache
 # Render injects PORT env var (default 10000 for web services)
 EXPOSE 10000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \
-    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-10000}/health')" || exit 1
+HEALTHCHECK --interval=30s --timeout=15s --start-period=180s --retries=5 \
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-10000}/health', timeout=10)" || exit 1
 
 CMD ["python3", "main.py"]

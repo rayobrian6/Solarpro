@@ -365,6 +365,45 @@ interface DepthStatistics {
 
 ---
 
+## Render Health Check Fix (Session 2)
+
+### Problem
+Render's platform health check has a **5-second timeout** on `/health`. During SAM2 CPU inference (35-40s), the synchronous `amg.generate()` call blocked the FastAPI async event loop, making `/health` unresponsive. Render marked instances as `unhealthy` → `server_failed` events → instance restarts → 503/504 errors for clients.
+
+Multiple `server_failed` events observed in Render API:
+- `HTTP health check failed (timed out after 5 seconds)`
+- `connection refused` (during instance restart)
+
+### Fix
+1. **ThreadPoolExecutor** for SAM2 and MiDaS inference — `amg.generate()` and `midas_pipe()` now run in a thread pool via `loop.run_in_executor()`, keeping the event loop responsive for health checks.
+2. **Inference tracking** — `_inference_active` / `_inference_type` globals track whether inference is running. The `/health` endpoint reports these so monitoring distinguishes "busy but healthy" from "actually broken".
+3. **Health status "busy"** — When inference is active, `/health` returns `status: "busy"` (not "ready") with `inference_active: true` and `inference_type: "segment"|"depth"`.
+4. **Dockerfile HEALTHCHECK** — Updated to `timeout=15s` (from 10s), `retries=5` (from 3), and inner `urlopen timeout=10` for more resilience during model loading.
+
+### Key Changes
+- `sam2-service/main.py`: Added `import asyncio`, `ThreadPoolExecutor`, inference tracking globals, `run_in_executor()` in both `/segment` and `/depth`, updated `/health` response model and handler.
+- `sam2-service/Dockerfile`: HEALTHCHECK timeout 10s→15s, retries 3→5, inner timeout 10s.
+
+### Health Response Shape (Updated)
+```json
+{
+  "status": "ready" | "loading" | "ready_depth_loading" | "busy",
+  "model_loaded": true,
+  "device": "cpu",
+  "model_id": "facebook/sam2.1-hiera-tiny",
+  "cuda_available": false,
+  "uptime_seconds": 1234.5,
+  "depth_model_loaded": true,
+  "depth_model_id": "Intel/dpt-swinv2-tiny-256",
+  "inference_active": false,
+  "inference_type": ""
+}
+```
+
+When `inference_active` is `true`, `status` will be `"busy"` and `inference_type` will be `"segment"` or `"depth"`.
+
+---
+
 ## Standing Rules
 
 - **Never push to master** — always dev
@@ -375,4 +414,4 @@ interface DepthStatistics {
 
 ---
 
-*End of handoff document. All four stages complete. Ready for next session.*
+*End of handoff document. Stages 1–4 + health check fix complete. Ready for next session.*
