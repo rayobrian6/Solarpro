@@ -447,6 +447,21 @@ export async function runDepthFromReconstructionInput(
   for (const photo of input.sourcePhotos) {
     const photoMasks = masks.filter(m => m.fileId === photo.fileId);
 
+    // ── CRITICAL: Only run MiDaS on photos that SAM2 actually processed ──
+    // Photos without SAM2 masks AND without pre-fetched image bytes were
+    // skipped by SAM2 (budget exhausted, timeout, etc.). Running MiDaS on
+    // them wastes ~8-10s per photo on inference for photos that have no
+    // roof segmentation — the depth data is useless without corresponding
+    // segmentation masks. With 15 photos and only 3 processed by SAM2,
+    // this saves ~100-120s (12 photos × ~8-10s each).
+    const hasSAM2Data = Boolean(preFetchedImageBytes[photo.fileId]) || photoMasks.length > 0;
+    if (!hasSAM2Data && isMidasEnabled()) {
+      console.info(
+        `[DepthWorker] Skipping photo ${photo.fileId} — no SAM2 masks or pre-fetched bytes (SAM2 skipped this photo)`,
+      );
+      continue;
+    }
+
     // Check cache first — avoid redundant MiDaS inference
     const cacheKey = { fileId: photo.fileId, modelVersion: DEPTH_WORKER_VERSION };
     const cached = cache.get(cacheKey);
@@ -459,7 +474,7 @@ export async function runDepthFromReconstructionInput(
     }
 
     // Use pre-fetched image bytes from segmentation stage if available,
-    // otherwise fall back to fetching from URL
+    // otherwise fall back to fetching from URL (only for photos with SAM2 masks)
     let imageBytes: Buffer | undefined;
     if (isMidasEnabled()) {
       if (preFetchedImageBytes[photo.fileId]) {
@@ -467,7 +482,8 @@ export async function runDepthFromReconstructionInput(
         console.info(
           `[DepthWorker] Using pre-fetched image bytes for ${photo.fileId} (${imageBytes.length} bytes) — skipping re-download`,
         );
-      } else if (photo.fileUrl) {
+      } else if (photo.fileUrl && photoMasks.length > 0) {
+        // Only fetch if this photo has SAM2 masks — don't waste time on unsegmented photos
         const fetched = await fetchImageBytes(photo.fileUrl);
         imageBytes = fetched ?? undefined;
       }

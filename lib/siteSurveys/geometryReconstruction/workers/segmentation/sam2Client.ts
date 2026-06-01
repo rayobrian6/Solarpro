@@ -299,7 +299,7 @@ export async function waitForSAM2Warm(
  *
  * On Render cold starts, the SAM 2 model must be downloaded from HuggingFace
  * and loaded into memory. A health check alone does NOT trigger model loading.
- * By sending a tiny 1x1 white PNG to the /segment endpoint, we force the
+ * By sending a small 8x8 gray PNG to the /segment endpoint, we force the
  * model to start loading immediately.
  *
  * This function is intentionally fire-and-forget (returns void, not Promise).
@@ -316,30 +316,33 @@ export function warmupSAM2Service(): void {
 
   const serviceURL = getSAM2ServiceURL();
 
-  // Send a tiny 1x1 PNG to /segment to trigger model loading.
-  // This is fire-and-forget — the response (or 502) is logged but not awaited.
+  // On Render cold starts, the SAM 2 service must download the model from
+  // HuggingFace and load it into memory. Just hitting /health does NOT
+  // trigger model loading -- it only reports whether the model is loaded.
+  //
+  // Previous approach: send a 1x1 PNG to /segment. This failed with HTTP 400
+  // because cv2.imdecode on a 1x1 image produces a 1x1 array that SAM2
+  // cannot process (no masks found -> 400 or inference error).
+  //
+  // Better approach: send a small but valid 8x8 gray PNG to /segment.
+  // This is large enough for cv2.imdecode to produce a valid numpy array,
+  // and SAM2 can run inference on it (producing 0 masks, which is fine --
+  // the goal is to trigger model loading, not to get results).
+  // The image is tiny enough that inference should be fast even on CPU.
   const t0 = Date.now();
-  console.info(`[SAM2] Warm-up ping: sending tiny image to /segment to trigger model loading`);
+  console.info(`[SAM2] Warm-up ping: sending small image to /segment to trigger model loading`);
 
-  // Minimal 1x1 white PNG (67 bytes) — smallest valid PNG
-  const MINIMAL_PNG = Buffer.from([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
-    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
-    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1x1
-    0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, // 8-bit RGB
-    0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, // IDAT chunk
-    0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00, // compressed data
-    0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc, // 
-    0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, // IEND chunk
-    0x44, 0xae, 0x42, 0x60, 0x82,                    // 
-  ]);
+  // Create a small 8x8 gray PNG (enough for cv2.imdecode to produce a real
+  // numpy array that SAM2 can process, avoiding the HTTP 400 that the
+  // 1x1 PNG caused).
+  const gray8x8 = WARMUP_PNG_8X8;
 
   const formData = new FormData();
-  const imageBlob = new Blob([new Uint8Array(MINIMAL_PNG)]);
+  const imageBlob = new Blob([new Uint8Array(gray8x8)]);
   formData.append('file', imageBlob, 'warmup.png');
 
   const url = new URL(`${serviceURL}/segment`);
-  url.searchParams.set('min_area_fraction', '0.01'); // Low threshold to avoid 400 Bad Request on tiny warmup image
+  url.searchParams.set('min_area_fraction', '0.01'); // Low threshold
   url.searchParams.set('max_masks', '1');             // Minimize processing
 
   // Fire-and-forget: we don't await this, and we handle 502 gracefully
@@ -351,11 +354,11 @@ export function warmupSAM2Service(): void {
     .then((response) => {
       const elapsedMs = Date.now() - t0;
       if (response.ok) {
-        console.info(`[SAM2] Warm-up ping: complete in ${elapsedMs}ms — model should be loaded now`);
+        console.info(`[SAM2] Warm-up ping: complete in ${elapsedMs}ms -- model should be loaded now`);
       } else {
-        // 502 is expected during cold start — the request still triggered model loading
+        // 502 is expected during cold start -- the request still triggered model loading
         console.info(
-          `[SAM2] Warm-up ping: HTTP ${response.status} in ${elapsedMs}ms — ` +
+          `[SAM2] Warm-up ping: HTTP ${response.status} in ${elapsedMs}ms -- ` +
           (response.status === 502 || response.status === 503
             ? 'expected during cold start, model loading triggered'
             : 'unexpected error'),
@@ -366,11 +369,37 @@ export function warmupSAM2Service(): void {
       const elapsedMs = Date.now() - t0;
       const isTimeout = error instanceof DOMException && error.name === 'TimeoutError';
       console.info(
-        `[SAM2] Warm-up ping: ${isTimeout ? 'TIMEOUT' : 'FAILED'} in ${elapsedMs}ms — ` +
+        `[SAM2] Warm-up ping: ${isTimeout ? 'TIMEOUT' : 'FAILED'} in ${elapsedMs}ms -- ` +
         'model loading may still be in progress on server',
       );
     });
 }
+
+/**
+ * Pre-computed 8x8 grayscale PNG for the SAM2 warm-up ping.
+ *
+ * The previous 1x1 PNG caused HTTP 400 from the Python service because
+ * cv2.imdecode on a 1x1 image produces a 1x1 numpy array, which SAM2
+ * cannot meaningfully process (image too small for mask generation).
+ *
+ * This 8x8 image is large enough for cv2.imdecode to produce a valid
+ * numpy array (8x8x1) and for SAM2 to attempt inference. It will produce
+ * 0 masks, which is fine -- the goal is to trigger model loading, not
+ * to get segmentation results. The image is only 71 bytes.
+ *
+ * Generated programmatically: 8x8 grayscale PNG, 8-bit depth, mid-gray (128).
+ */
+const WARMUP_PNG_8X8 = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
+  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
+  0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x08, // 8x8 dimensions
+  0x08, 0x00, 0x00, 0x00, 0x00, 0xe1, 0x64, 0xe1, // 8-bit grayscale
+  0x57, 0x00, 0x00, 0x00, 0x0e, 0x49, 0x44, 0x41, // IDAT chunk
+  0x54, 0x78, 0x9c, 0x63, 0x68, 0x80, 0x02, 0x06, // zlib-compressed data
+  0xca, 0x18, 0x00, 0x80, 0x84, 0x20, 0x01, 0x0d, // (8 rows of mid-gray)
+  0x80, 0x24, 0x61, 0x00, 0x00, 0x00, 0x00, 0x49, // IEND chunk
+  0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,       //
+]);
 
 // ---------------------------------------------------------------------------
 // Retry helper for 502/503 (Render cold start)
