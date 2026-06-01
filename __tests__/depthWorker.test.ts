@@ -15,6 +15,7 @@ import {
   runDepthWorker,
   runDepthFromReconstructionInput,
   DEPTH_WORKER_VERSION,
+  resetGlobalDepthCache,
 } from '@/lib/siteSurveys/geometryReconstruction/workers/depth';
 import type { DepthWorkerInput } from '@/lib/siteSurveys/geometryReconstruction/workers/depth';
 import type {
@@ -95,6 +96,11 @@ function makeReconstructionInput(): GeometryReconstructionInput {
 // ---------------------------------------------------------------------------
 
 describe('depth estimation worker', () => {
+  // Clear the depth cache between test runs to prevent leakage
+  afterEach(() => {
+    resetGlobalDepthCache();
+  });
+
   describe('basic output shape', () => {
     it('returns an object with artifacts, stageTimings, workerVersion, and usedMidas', async () => {
       const result = await runDepthWorker(makeInput());

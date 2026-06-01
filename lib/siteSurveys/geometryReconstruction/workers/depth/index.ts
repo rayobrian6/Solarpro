@@ -50,3 +50,16 @@ export type {
   DepthQualityDimensions,
   DepthPurpose,
 } from './depthQualityReport';
+
+export {
+  DepthCache,
+  getGlobalDepthCache,
+  resetGlobalDepthCache,
+} from './depthCache';
+
+export type {
+  DepthCacheKey,
+  DepthCacheEntry,
+  DepthCacheStats,
+  DepthCacheOptions,
+} from './depthCache';

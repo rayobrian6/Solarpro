@@ -40,6 +40,8 @@ import type {
 } from '../../types';
 import { REVIEW_ONLY_AUTHORITY, BASE_LIMITATIONS } from '../../types';
 import { estimateDepthWithMidas, isMidasEnabled } from './midasClient';
+import { getGlobalDepthCache } from './depthCache';
+import type { DepthCacheEntry } from './depthCache';
 import type { MidasDepthResult } from './midasClient';
 
 // ---------------------------------------------------------------------------
@@ -438,9 +440,21 @@ export async function runDepthFromReconstructionInput(
   vanishingPoints: VanishingPointArtifact[],
 ): Promise<GeometryReconstructionArtifact[]> {
   const results: GeometryReconstructionArtifact[] = [];
+  const cache = getGlobalDepthCache();
 
   for (const photo of input.sourcePhotos) {
     const photoMasks = masks.filter(m => m.fileId === photo.fileId);
+
+    // Check cache first — avoid redundant MiDaS inference
+    const cacheKey = { fileId: photo.fileId, modelVersion: DEPTH_WORKER_VERSION };
+    const cached = cache.get(cacheKey);
+    if (cached !== null) {
+      console.info(
+        `[DepthWorker] Cache hit for ${photo.fileId} (model=${cacheKey.modelVersion}) — skipping inference`,
+      );
+      results.push(cached.depthMap);
+      continue;
+    }
 
     // Attempt to fetch image bytes for MiDaS
     let imageBytes: Buffer | undefined;
@@ -459,6 +473,14 @@ export async function runDepthFromReconstructionInput(
     };
 
     const output = await runDepthWorker(workerInput);
+
+    // Store result in cache (only if artifacts were produced)
+    if (output.artifacts.length > 0) {
+      for (const artifact of output.artifacts) {
+        cache.set(cacheKey, artifact, output.usedMidas);
+      }
+    }
+
     results.push(...output.artifacts);
   }
 
