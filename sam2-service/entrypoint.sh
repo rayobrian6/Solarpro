@@ -20,6 +20,9 @@ echo "[entrypoint] Starting SAM2 service supervisor"
 echo "[entrypoint] PORT=${PORT:-10000}"
 echo "[entrypoint] SAM2_INFERENCE_BACKEND=${SAM2_INFERENCE_BACKEND:-not set}"
 echo "[entrypoint] SAM2_POINTS_PER_SIDE=${SAM2_POINTS_PER_SIDE:-not set}"
+echo "[entrypoint] WEB_CONCURRENCY=${WEB_CONCURRENCY:-not set}"
+echo "[entrypoint] RENDER_WEB_CONCURRENCY=${RENDER_WEB_CONCURRENCY:-not set}"
+echo "[entrypoint] RENDER_CPU_COUNT=${RENDER_CPU_COUNT:-not set}"
 
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     echo "[entrypoint] Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES — starting python3 main.py"

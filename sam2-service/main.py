@@ -1668,7 +1668,7 @@ async def estimate_depth(
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     # Log environment for debugging Pro deploy failures
     logger.info(f"=== ENVIRONMENT DUMP ===")
     logger.info(f"PORT={PORT}")
@@ -1681,18 +1681,35 @@ if __name__ == "__main__":
     logger.info(f"RENDER_SERVICE_ID={os.environ.get('RENDER_SERVICE_ID', 'not set')}")
     logger.info(f"RENDER_INSTANCE_ID={os.environ.get('RENDER_INSTANCE_ID', 'not set')}")
     logger.info(f"RENDER_ENVIRONMENT={os.environ.get('RENDER_ENVIRONMENT', 'not set')}")
+    logger.info(f"WEB_CONCURRENCY={os.environ.get('WEB_CONCURRENCY', 'not set')}")
+    logger.info(f"RENDER_WEB_CONCURRENCY={os.environ.get('RENDER_WEB_CONCURRENCY', 'not set')}")
     for key in sorted(os.environ):
-        if key.startswith(('RENDER', 'PORT', 'SAM2', 'MIDAS', 'ONNX')):
+        if key.startswith(('RENDER', 'PORT', 'SAM2', 'MIDAS', 'ONNX', 'WEB_CONCURRENCY')):
             logger.info(f"  ENV {key}={os.environ[key]}")
     logger.info(f"=== END ENVIRONMENT DUMP ===")
-    
+
+    # CRITICAL: Render auto-sets WEB_CONCURRENCY on Pro plan (e.g., "2" for 2 CPUs).
+    # Uvicorn reads WEB_CONCURRENCY and sets config.workers = int(WEB_CONCURRENCY).
+    # When workers > 1 AND app is passed as a callable object (not a string),
+    # uvicorn prints "You must pass the application as an import string" and
+    # calls sys.exit(1), which crashes the container on every deploy.
+    #
+    # Fix: Pass workers=1 explicitly (SAM2 ONNX uses too much RAM for multi-worker)
+    #      AND pass app as import string "main:app" as belt-and-suspenders safety.
+
+    # Override WEB_CONCURRENCY to prevent uvicorn from spawning multiple workers.
+    # SAM2 ONNX inference is memory-intensive (~600MB+ per instance); multiple
+    # workers would OOM on Render Pro (4GB RAM) with 2x model sessions.
+    os.environ["WEB_CONCURRENCY"] = "1"
+
     try:
         uvicorn.run(
-            app,
+            "main:app",
             host="0.0.0.0",
             port=PORT,
             log_level="info",
             timeout_keep_alive=30,
+            workers=1,
         )
     except SystemExit as e:
         # Re-raise SystemExit(0) cleanly (from uvicorn or signal)
