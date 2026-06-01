@@ -1,7 +1,7 @@
 # HANDOFF — MiDaS Depth Upgrade (Stages 1–4 Complete + Visualization Utility)
 
 **Date:** 2025-06-01  
-**Branch:** `dev` (latest commit `f91b084`)  
+**Branch:** `dev` (latest commit `3c8dfd6`)  
 **Render Deploy:** `dep-d8ee7e77f7vs73d36qt0` (LIVE)
 
 ---
@@ -68,6 +68,21 @@ All four stages of the MiDaS/DPT depth estimation upgrade are **complete and ver
 - 24 tests in `depthQualityReport.test.ts` (all pass)
 - Three-check suite: tsc 0, eslint 0 errors, vitest 6074 pass
 
+### Bonus: Depth Map LRU Cache ✅
+- New `depthCache.ts`: in-memory LRU cache for DepthMap artifacts
+  - `DepthCache` class with configurable `maxSize` (default 100) and `ttlMs` (default 30 min)
+  - Keyed by `(fileId, modelVersion)` — same photo with different model = cache miss
+  - Stats tracking: hits/misses/evictions/hitRate for monitoring
+  - `purgeExpired()` for explicit TTL cleanup
+  - Global singleton: `getGlobalDepthCache()` / `resetGlobalDepthCache()`
+- Integrated into `runDepthFromReconstructionInput()`:
+  - Checks cache before fetching image or calling MiDaS
+  - Stores DepthMap artifacts after successful inference
+  - Cache hit skips both image fetch AND MiDaS HTTP call
+  - Added `afterEach(resetGlobalDepthCache)` to depth worker tests
+- 33 tests in `depthCache.test.ts` covering LRU eviction, TTL, stats, singleton
+- Three-check suite: tsc 0, eslint 0 errors, vitest 6107 pass
+
 ---
 
 ## Architecture
@@ -115,12 +130,14 @@ Pipeline Stage 4: Depth Estimation
 | `lib/.../workers/depth/midasClient.ts` | HTTP client for `/depth` endpoint | **NEW** (Stage 3) |
 | `lib/.../workers/depth/depthMapDecode.ts` | Decode, stats, heatmap visualization | **NEW** (Bonus) |
 | `lib/.../workers/depth/depthQualityReport.ts` | Quality assessment (grade A-F) + usability checks | **NEW** (Bonus) |
-| `lib/.../workers/depth/runDepthWorker.ts` | Depth worker: MiDaS primary, heuristic fallback | Yes (Stage 3) |
+| `lib/.../workers/depth/depthCache.ts` | LRU cache with TTL + stats | **NEW** (Bonus) |
+| `lib/.../workers/depth/runDepthWorker.ts` | Depth worker: MiDaS primary, heuristic fallback + cache | Yes (Stage 3+Bonus) |
 | `lib/.../workers/depth/index.ts` | Barrel exports including midasClient + depthMapDecode | Yes (Stage 3+Bonus) |
 | `lib/.../runFullPipeline.ts` | Pipeline: depth stage uses asyncStageTimer | Yes (Stage 3) |
 | `__tests__/depthWorker.test.ts` | Tests updated for async worker | Yes (Stage 3) |
 | `__tests__/depthMapDecode.test.ts` | Tests for decode/stats/heatmap/PNG | **NEW** (Bonus) |
 | `__tests__/depthQualityReport.test.ts` | Tests for quality report + usability | **NEW** (Bonus) |
+| `__tests__/depthCache.test.ts` | Tests for LRU cache + TTL + stats | **NEW** (Bonus) |
 
 ---
 
@@ -203,7 +220,7 @@ curl -X PUT "https://api.render.com/v1/services/srv-d8djpc3bc2fs73emup10/env-var
 
 4. **Larger MiDaS model** — `Intel/dpt-swinv2-tiny-256` is 41MB. The `Intel/dpt-swinv2-large-256` (213MB) would give better accuracy but may push RAM usage over limits on Render Standard. Test on Render Pro first.
 
-5. **Depth map caching** — Currently each pipeline run re-estimates depth. Cache DepthMap artifacts keyed by (fileId, model version) to avoid redundant inference.
+5. **Depth map caching** ✅ Backend cache done — `depthCache.ts` provides LRU with TTL. Next step would be persistent storage (Redis/SQLite) for cross-process persistence, but the in-memory cache already avoids redundant MiDaS calls within a pipeline run.
 
 6. **Multi-view depth consistency** — When multiple photos overlap, fuse their depth maps using the existing multi-view fusion stage. This is a natural extension of the pipeline architecture.
 
@@ -247,6 +264,29 @@ console.log(report.recommendations); // String[] of actionable suggestions
 if (isDepthUsableFor(report, 'plane_extraction')) {
   // Safe to use depth for roof plane identification
 }
+```
+
+### depthCache API Quick Reference
+
+```typescript
+import {
+  DepthCache,
+  getGlobalDepthCache,
+  resetGlobalDepthCache,
+} from '@/lib/siteSurveys/geometryReconstruction/workers/depth';
+
+// Use the global singleton (recommended)
+const cache = getGlobalDepthCache();
+
+// Or create a custom instance
+const customCache = new DepthCache({ maxSize: 50, ttlMs: 600_000 }); // 10 min TTL
+
+// Cache stats
+console.log(cache.getStats());
+// { size: 3, maxSize: 100, hits: 12, misses: 5, evictions: 0, hitRate: 0.706 }
+
+// The cache is automatically used by runDepthFromReconstructionInput()
+// — cache hits skip both image fetch and MiDaS inference
 ```
 
 ### DepthStatistics Shape
