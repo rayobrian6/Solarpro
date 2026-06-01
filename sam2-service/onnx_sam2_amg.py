@@ -383,12 +383,14 @@ class ONNXSAM2AutomaticMaskGenerator:
         at least 512MB free for the batch inference.
 
         For fixed-batch decoders (self._decoder_batch_mode == "single"),
-        always returns 1 — batching is not supported.
+        rapid-loop decode processes ALL points in one call (it loops
+        internally), so we return n_points to avoid splitting into
+        tiny batches that defeat the optimization.
 
         Returns the clamped batch size (min 1, max n_points).
         """
         if self._decoder_batch_mode == "single":
-            return 1
+            return n_points  # rapid-loop handles all points in one call
 
         if self._est_bytes_per_point == 0:
             return min(self.points_per_batch, n_points)
@@ -446,33 +448,21 @@ class ONNXSAM2AutomaticMaskGenerator:
         point_coords = self._generate_grid_points(h, w)
         logger.info(f"AMG grid: {len(point_coords)} points ({self.points_per_side}x{self.points_per_side})")
 
-        # Step 3: Run decoder in batches for much faster inference
-        # Instead of calling decoder once per point (64 calls × ~0.4s = ~26s),
-        # batch multiple points into a single decoder call by tiling encoder
-        # outputs across the batch dimension. This reduces overhead dramatically.
-        # Memory safety: _safe_batch_size() reduces batch size if tiling would
-        # exceed available RAM (critical on Render Standard with 2GB).
+        # Step 3: Run decoder for all grid points
+        # For fixed-batch decoders: rapid-loop decode processes all points in
+        # one call (pre-allocates feed dict, updates coords in-place per point).
+        # For dynamic-batch decoders: points are processed in batches via
+        # feature tiling, with batch size clamped by available memory.
         t1 = time.time()
-        all_masks = []
-        batch_size = self._safe_batch_size(len(point_coords))
-
-        for batch_start in range(0, len(point_coords), batch_size):
-            batch_end = min(batch_start + batch_size, len(point_coords))
-            batch_points = point_coords[batch_start:batch_end]
-            batch_masks = self._decode_batch_points(
-                encoder_outputs=encoder_outputs,
-                point_coords=batch_points,
-                image_h=h,
-                image_w=w,
-            )
-            all_masks.extend(batch_masks)
-            # Free batch memory between iterations to keep peak RSS low
-            gc.collect()
-
+        all_masks = self._decode_batch_points(
+            encoder_outputs=encoder_outputs,
+            point_coords=point_coords,
+            image_h=h,
+            image_w=w,
+        )
         decode_time = time.time() - t1
         logger.info(
-            f"ONNX decoder: {len(point_coords)} points in "
-            f"{(len(point_coords) + batch_size - 1) // batch_size} batches (batch_size={batch_size}) -> "
+            f"ONNX decoder: {len(point_coords)} points -> "
             f"{len(all_masks)} raw masks in {decode_time:.1f}s"
         )
 
