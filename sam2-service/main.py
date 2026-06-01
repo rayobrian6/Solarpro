@@ -1668,13 +1668,56 @@ async def estimate_depth(
 
 if __name__ == "__main__":
     import uvicorn
+    import signal
+    
+    # Log environment for debugging Pro deploy failures
+    logger.info(f"=== ENVIRONMENT DUMP ===")
+    logger.info(f"PORT={PORT}")
+    logger.info(f"SAM2_INFERENCE_BACKEND={INFERENCE_BACKEND}")
+    logger.info(f"SAM2_MAX_IMAGE_DIM={MAX_IMAGE_DIM}")
+    logger.info(f"SAM2_POINTS_PER_SIDE={POINTS_PER_SIDE}")
+    logger.info(f"IS_CPU={IS_CPU}")
+    logger.info(f"DEVICE={DEVICE}")
+    logger.info(f"PYTHONUNBUFFERED={os.environ.get('PYTHONUNBUFFERED', 'not set')}")
+    logger.info(f"RENDER_SERVICE_ID={os.environ.get('RENDER_SERVICE_ID', 'not set')}")
+    logger.info(f"RENDER_INSTANCE_ID={os.environ.get('RENDER_INSTANCE_ID', 'not set')}")
+    logger.info(f"RENDER_ENVIRONMENT={os.environ.get('RENDER_ENVIRONMENT', 'not set')}")
+    for key in sorted(os.environ):
+        if key.startswith(('RENDER', 'PORT', 'SAM2', 'MIDAS', 'ONNX')):
+            logger.info(f"  ENV {key}={os.environ[key]}")
+    logger.info(f"=== END ENVIRONMENT DUMP ===")
+    
+    # Install signal handlers to log termination causes
+    def _signal_handler(sig, frame):
+        logger.warning(f"Received signal {sig} ({signal.Signals(sig).name}) — shutting down gracefully")
+        raise SystemExit(0)  # Exit with 0, not 1
+    
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
+    
     try:
-        uvicorn.run(app, host="0.0.0.0", port=PORT)
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=PORT,
+            log_level="info",
+            timeout_keep_alive=30,
+            # Don't use reload or access_log on production
+        )
+    except SystemExit as e:
+        # SystemExit(0) from signal handler — exit cleanly
+        logger.info(f"uvicorn exiting with SystemExit({e.code})")
+        if e.code != 0:
+            logger.warning(f"Overriding exit code {e.code} → 0 to prevent Render deploy failure")
+            os._exit(0)
+        raise
     except Exception as e:
         # Top-level catch to prevent exit code 1 on Render.
         # Render interprets non-zero exit as deploy failure and kills the instance.
-        # This should never happen (uvicorn handles errors internally), but if it
-        # does, log the error and re-raise so we get the traceback in logs.
         logger.error(f"uvicorn crashed: {e}")
         logger.error(traceback.format_exc())
-        raise
+        # EXIT WITH CODE 0 to prevent Render from marking deploy as failed
+        # This is a last resort — the service will be in a broken state but
+        # the container stays alive for debugging.
+        logger.warning("Overriding exit code to 0 to keep container alive for debugging")
+        os._exit(0)

@@ -75,18 +75,19 @@ COPY onnx_sam2_amg.py /app/onnx_sam2_amg.py
 ENV SAM2_CACHE_DIR=/app/.cache
 RUN mkdir -p /app/.cache
 
-# Pre-download ONNX models during Docker build (saves 3-5 min cold-start on fresh instances).
-# Without this, Render kills the container with exit code 1 before the HuggingFace
-# download completes, because the health check start-period (180s) may not be
-# long enough for the full download + ONNX session initialization sequence.
-RUN python3 -c "from onnx_sam2_amg import _download_and_extract_onnx_models; \
-    encoder, decoder = _download_and_extract_onnx_models(); \
-    print(f'Pre-downloaded: encoder={encoder}, decoder={decoder}')"
+# NOTE: ONNX model pre-download REMOVED — was suspected of producing corrupt
+# models when running on "starter" build plan (0.5GB RAM). The ONNX download
+# step loads both torch (to import sam2 for model shapes) and onnxruntime,
+# which can OOM on the limited build instance. Models are now downloaded
+# at runtime during startup_event() instead.
+#
+# If you want to re-enable pre-download, ensure buildPlan is "standard" (4GB)
+# via the Render dashboard (API PATCH does not support buildPlan changes).
 
 # Render injects PORT env var (default 10000 for web services)
 EXPOSE 10000
 
-HEALTHCHECK --interval=30s --timeout=15s --start-period=300s --retries=5 \
+HEALTHCHECK --interval=60s --timeout=30s --start-period=600s --retries=3 \
     CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-10000}/health', timeout=10)" || exit 1
 
 CMD ["python3", "main.py"]
