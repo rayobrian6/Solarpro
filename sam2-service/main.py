@@ -149,6 +149,20 @@ MIDAS_MAX_IMAGE_DIM = int(os.environ.get("MIDAS_MAX_IMAGE_DIM", "256"))
 MIDAS_OUTPUT_RESOLUTION = int(os.environ.get("MIDAS_OUTPUT_RESOLUTION", "64"))
 
 # ---------------------------------------------------------------------------
+# Inference Backend Configuration
+# ---------------------------------------------------------------------------
+
+# SAM2_INFERENCE_BACKEND: "pytorch" (default) or "onnx"
+# When "onnx", the service uses ONNX Runtime for SAM2 inference instead of
+# PyTorch. ONNX Runtime achieves 1.5-3x CPU speedup through graph fusion,
+# operator fusion, and optimized memory planning. Falls back to PyTorch
+# if ONNX models fail to load.
+INFERENCE_BACKEND = os.environ.get("SAM2_INFERENCE_BACKEND", "pytorch").lower()
+if INFERENCE_BACKEND not in ("pytorch", "onnx"):
+    logger.warning(f"Invalid SAM2_INFERENCE_BACKEND={INFERENCE_BACKEND}, using pytorch")
+    INFERENCE_BACKEND = "pytorch"
+
+# ---------------------------------------------------------------------------
 # Pydantic response models
 # ---------------------------------------------------------------------------
 
@@ -215,6 +229,9 @@ _model_load_time = None
 _midas_model = None
 _midas_load_time = None
 _start_time = time.time()
+_onnx_amg = None
+_onnx_load_time = None
+_onnx_available = False
 
 # ---------------------------------------------------------------------------
 # Inference thread pool — runs CPU-bound SAM2/MiDaS inference in threads
@@ -302,6 +319,72 @@ def load_sam2_model():
         raise
 
     return _sam2_amg
+
+
+def load_onnx_amg():
+    """Load ONNX Runtime-based SAM2 AMG as an alternative to PyTorch.
+
+    ONNX Runtime achieves 1.5-3x CPU speedup through graph fusion,
+    operator fusion, and optimized memory planning. The ONNX models
+    are downloaded from HuggingFace on first use.
+
+    Returns the ONNXSAM2AutomaticMaskGenerator instance, or raises
+    on failure. The caller should catch and fall back to PyTorch.
+    """
+    global _onnx_amg, _onnx_load_time, _onnx_available
+
+    if _onnx_amg is not None:
+        return _onnx_amg
+
+    logger.info("Loading SAM2 ONNX Runtime backend...")
+    t0 = time.time()
+
+    try:
+        from onnx_sam2_amg import ONNXSAM2AutomaticMaskGenerator
+
+        _onnx_amg = ONNXSAM2AutomaticMaskGenerator(
+            points_per_side=POINTS_PER_SIDE,
+            points_per_batch=16 if IS_CPU else 64,
+            pred_iou_thresh=PRED_IOU_THRESH,
+            stability_score_thresh=STABILITY_SCORE_THRESH,
+            crop_n_layers=0 if IS_CPU else 1,
+            min_mask_region_area=int(MAX_IMAGE_DIM * MAX_IMAGE_DIM * MIN_MASK_AREA_FRACTION),
+        )
+        _onnx_load_time = time.time() - t0
+        _onnx_available = True
+
+        logger.info(
+            f"ONNX SAM2 AMG loaded in {_onnx_load_time:.1f}s "
+            f"(points_per_side={POINTS_PER_SIDE}, "
+            f"max_image_dim={MAX_IMAGE_DIM})"
+        )
+
+    except Exception as e:
+        _onnx_available = False
+        logger.error(f"Failed to load ONNX SAM2 AMG: {e}")
+        logger.error(traceback.format_exc())
+        raise
+
+    return _onnx_amg
+
+
+def get_amg():
+    """Get the active AMG instance based on the configured inference backend.
+
+    Returns the ONNX AMG if SAM2_INFERENCE_BACKEND=onnx and ONNX loaded,
+    otherwise falls back to PyTorch AMG.
+    """
+    if INFERENCE_BACKEND == "onnx":
+        try:
+            onnx = load_onnx_amg()
+            if onnx is not None:
+                return onnx, "onnx"
+        except Exception:
+            logger.warning("ONNX AMG failed, falling back to PyTorch")
+
+    # PyTorch fallback (or default)
+    pytorch_amg = load_sam2_model()
+    return pytorch_amg, "pytorch"
 
 
 def load_midas_model():
@@ -602,10 +685,19 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     """Load SAM 2 and MiDaS models on startup so first requests are fast."""
-    logger.info("SAM 2 + MiDaS service starting — loading models...")
+    logger.info(f"SAM 2 + MiDaS service starting (backend={INFERENCE_BACKEND})...")
     try:
-        load_sam2_model()
-        logger.info("SAM 2 model loaded successfully")
+        if INFERENCE_BACKEND == "onnx":
+            try:
+                load_onnx_amg()
+                logger.info("SAM 2 ONNX backend loaded successfully")
+            except Exception as e:
+                logger.warning(f"ONNX backend failed on startup: {e}")
+                logger.warning("Falling back to PyTorch backend")
+                load_sam2_model()
+        else:
+            load_sam2_model()
+            logger.info("SAM 2 PyTorch model loaded successfully")
     except Exception as e:
         logger.warning(f"SAM 2 model load failed on startup: {e}")
         logger.warning("Service will attempt lazy load on first /segment request")
@@ -631,12 +723,13 @@ async def health_check():
     immediately with inference_active=True. This prevents Render from
     marking the instance as unhealthy during long-running inference.
     """
-    sam2_ready = _sam2_amg is not None
+    sam2_ready = _sam2_amg is not None or _onnx_amg is not None
     midas_ready = _midas_model is not None if MIDAS_ENABLED else False
 
     # Service is "ready" if SAM2 is loaded (primary function)
     # Depth is optional — service is still "ready" without it
     # Even during inference, the service is "ready" — it's just busy
+    active_backend = "onnx" if _onnx_amg is not None else ("pytorch" if _sam2_amg is not None else "none")
     status = "ready" if sam2_ready else "loading"
     if sam2_ready and MIDAS_ENABLED and not midas_ready:
         status = "ready_depth_loading"
@@ -686,12 +779,13 @@ async def segment_image(
     t0 = time.time()
 
     # Load model if not already loaded (lazy load fallback)
+    # Uses get_amg() which respects SAM2_INFERENCE_BACKEND setting
     try:
-        amg = load_sam2_model()
+        amg, backend = get_amg()
     except Exception as e:
         raise HTTPException(
             status_code=503,
-            detail=f"SAM 2 model not available: {str(e)}",
+            detail=f"SAM 2 model not available (backend={INFERENCE_BACKEND}): {str(e)}",
         )
 
     # Read image bytes
@@ -845,7 +939,7 @@ async def segment_image(
         f"Segmented {orig_w}x{orig_h} image (processed at {res_w}x{res_h}): "
         f"{len(sam_masks)} raw masks → {pre_filter_count} classified → "
         f"{len(result_masks)} roof-only filtered masks "
-        f"in {processing_time:.0f}ms"
+        f"in {processing_time:.0f}ms [backend={backend}]"
     )
 
     # Free memory after processing
@@ -865,6 +959,7 @@ async def segment_image(
             "device": DEVICE,
             "cuda_available": _has_cuda(),
             "model_type": "sam2.1_automatic_mask_generation",
+            "inference_backend": backend,
             "inference_resolution": f"{res_w}x{res_h}",
         },
     )

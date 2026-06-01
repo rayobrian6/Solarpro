@@ -25,6 +25,8 @@ services:
         value: "0.6"
       - key: SAM2_STABILITY_SCORE_THRESH
         value: "0.85"
+      - key: SAM2_INFERENCE_BACKEND
+        value: onnx
       - key: MIDAS_ENABLED
         value: "true"
       - key: MIDAS_MODEL_ID

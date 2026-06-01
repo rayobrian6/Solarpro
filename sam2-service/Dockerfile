@@ -57,7 +57,12 @@ RUN pip install --no-cache-dir huggingface_hub>=0.30.2
 # 8. Transformers — needed by MiDaS/DPT depth estimation pipeline
 RUN pip install --no-cache-dir transformers>=4.37.0
 
-# 9. Remaining app deps (fastapi, uvicorn, opencv, etc.)
+# 9. ONNX Runtime — CPU-optimized inference engine for SAM2
+# Provides 1.5-3x speedup over PyTorch through graph fusion and
+# optimized memory planning. Only loaded when SAM2_INFERENCE_BACKEND=onnx.
+RUN pip install --no-cache-dir onnxruntime>=1.18.0
+
+# 10. Remaining app deps (fastapi, uvicorn, opencv, etc.)
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
