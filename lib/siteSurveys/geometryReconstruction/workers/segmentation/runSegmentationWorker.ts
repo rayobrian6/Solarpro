@@ -165,10 +165,10 @@ const MAX_SOURCE_PHOTOS = 15;
 
 /**
  * Maximum number of source photos to process with SAM 2.
- * SAM 2 on Render Pro (CPU, 2 vCPU) takes ~34s per photo for inference.
+ * SAM 2 on Render Pro (CPU, 2 vCPU) takes ~19s per photo for inference (points_per_side=12).
  * With concurrent image pre-fetching (fetch next photo while current
  * SAM2 inference runs), effective per-photo time is ~35s.
- * 15 photos ÷ 2 concurrency = ~8 batches × ~34s ≈ 272s, which fits within the 360s segmentation
+ * 15 photos ÷ 2 concurrency = ~8 batches × ~19s ≈ 152s, which fits within the 360s segmentation
  * stage timeout when using 2-batch concurrency (pairs of photos
  * processed concurrently — image fetch overlaps with SAM2 inference).
  *
@@ -194,18 +194,18 @@ const MAX_TOTAL_MASKS = 300;
 
 /**
  * Maximum wall-clock milliseconds the segmentation stage may consume.
- * The full pipeline has PIPELINE_TIMEOUT_MS = 480_000ms (8 minutes).
+ * The full pipeline has PIPELINE_TIMEOUT_MS = 270_000ms (4.5 minutes).
  * Segmentation is Stage 1, but we must leave time for 6 more stages
- * plus DB writes. With 15 photos × ~34s SAM2 inference on Pro,
- * segmentation takes ~510s in the worst case (sequential).
- * With 2-batch concurrency (image pre-fetching), effective time is
- * ~420s. Capping at 360s leaves 120s for downstream stages and DB
- * writes — enough for their heuristic implementations.
+ * plus DB writes. With 15 photos × ~19s SAM2 inference on Pro (12 pts/side),
+ * and 2-batch concurrency, segmentation takes ~152s.
+ * Capping at 240s leaves 30s for downstream stages and DB writes,
+ * plus a buffer for warm-up, image fetch latency, etc.
  *
- * PREVIOUS: 180s (3 min) was set for MAX_SAM2_PHOTOS=5 on Starter.
- * Now with 15 photos on Pro, we need 360s (6 min).
+ * PREVIOUS: 360s was for points_per_side=16 (~34s/photo) which exceeded
+ * Vercel's 300s hard limit. Now with points_per_side=12 (~19s/photo),
+ * 240s is sufficient and keeps the total pipeline within 300s.
  */
-const SEGMENTATION_STAGE_TIMEOUT_MS = 360_000;
+const SEGMENTATION_STAGE_TIMEOUT_MS = 240_000;
 
 /**
  * Photo labels that get SAM 2 priority. These are roof-domain and
@@ -355,7 +355,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
     // immediately (~100ms). If cold, it waits up to 60s for the model to load.
     //
     // IMPORTANT: We cap warm-up at 60s to leave time for actual
-    // photo processing within the 360s SEGMENTATION_STAGE_TIMEOUT_MS budget.
+    // photo processing within the 240s SEGMENTATION_STAGE_TIMEOUT_MS budget.
     // If warm-up exceeds 120s, ALL photos are skipped — no Canny, honest failure.
     const warmupDeadline = t0 + 60_000; // 60s from pipeline start — Pro plan model is cached after first load
     const warmupResult = await waitForSAM2Warm(warmupDeadline);
@@ -410,18 +410,18 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
 
   // Stage 2: Extract geometry from each photo
   // ── SAM 2 CONCURRENT BATCH PROCESSING ──────────────────────────────────
-  // SAM 2 on Render Pro (CPU, 2 vCPU) takes ~34s per photo for inference.
+  // SAM 2 on Render Pro (CPU, 2 vCPU) takes ~19s per photo for inference (points_per_side=12).
   // The SAM2 service uses ThreadPoolExecutor(max_workers=2), so it CAN
   // process 2 inference requests concurrently. With 4GB RAM on Pro,
   // 2 concurrent ONNX small-model inferences at 384px use ~3GB total.
   //
   // Strategy: process photos in concurrent batches of 2, sending both
   // SAM2 requests simultaneously. This halves the wall-clock time for
-  // the segmentation stage: 15 photos ÷ 2 concurrency = ~8 batches × ~34s
-  // = ~272s total (fits within the 360s SEGMENTATION_STAGE_TIMEOUT_MS).
+  // the segmentation stage: 15 photos ÷ 2 concurrency = ~8 batches × ~19s
+  // = ~143s total (fits within the 240s SEGMENTATION_STAGE_TIMEOUT_MS).
   //
   // Without concurrency: 15 × 34s = 510s (exceeds 360s stage timeout).
-  // With 2x concurrency: 15 ÷ 2 × 34s ≈ 272s (fits comfortably).
+  // With 2x concurrency: 15 ÷ 2 × 19s ≈ 143s (fits comfortably).
   //
   // If SAM2 fails for a photo → NO masks, record honest failure.
   // If SAM2 budget exhausted → skip remaining photos, record skip reason.
@@ -900,7 +900,7 @@ async function segmentWithSAM2FromPhoto(
     // already filters at 0.005, so double-filtering at 0.02 on the TS side was
     // discarding valid masks. The roof_only=true param is set in sam2Client.ts
     // to filter non-roof masks on the Python side.
-    const sam2Result = await segmentWithSAM2(bytes, 0.005);
+    const sam2Result = await segmentWithSAM2(bytes, 0.005, 30);
     const totalElapsedMs = Date.now() - t0;
 
     if (sam2Result !== null) {

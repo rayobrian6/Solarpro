@@ -47,23 +47,20 @@ import { runPhotogrammetryFromReconstructionInput } from './workers/photogrammet
 
 /**
  * Maximum pipeline duration in milliseconds before skipping remaining stages.
- * Set to 480000ms (8 minutes) to accommodate 15 photos of SAM2 segmentation
- * on Render Pro (~34s per photo). The Vercel maxDuration=300s (5 minutes) is
- * the hard limit, but segmentation can take up to 360s (6 min) with 15 photos.
+ * Set to 270000ms (4.5 minutes) — this is a soft limit that skips remaining
+ * pipeline stages if exceeded. The hard limit is Vercel's maxDuration=300s.
  *
- * NOTE: The Vercel function has maxDuration=300s, but the SAM2 service runs
- * on Render (independent timeout). The Vercel function orchestrates by calling
- * the SAM2 service via HTTP — the Vercel function itself must complete within
- * 300s. However, Vercel Pro allows maxDuration up to 300s, and the pipeline
- * route already sets maxDuration=300. With 15 photos at ~34s each, we need
- * the segmentation to use concurrent requests to stay within 300s total.
+ * With points_per_side=12 on Render Pro, SAM2 inference takes ~19s per photo.
+ * 15 photos ÷ 2 concurrency = ~8 batches × 19s ≈ 152s for segmentation.
+ * Plus warm-up, depth estimation, downstream stages, and DB writes ≈ ~50s.
+ * Total ≈ 202s, well within Vercel's 300s hard limit.
  *
- * Updated from 270s (4.5 min) to accommodate increased SAM2 photo throughput.
- * The 30s buffer before Vercel's 300s limit is tight but sufficient since
- * downstream stages (line extraction, plane extraction, etc.) are heuristic
- * and complete in <10s combined.
+ * The PIPELINE_TIMEOUT_MS is set below the Vercel hard limit so we can
+ * gracefully skip remaining stages rather than getting killed mid-write.
+ * Updated from 480s (overkill) to 270s — provides buffer for downstream
+ * stages while ensuring we return results before Vercel kills the function.
  */
-const PIPELINE_TIMEOUT_MS = 480_000;
+const PIPELINE_TIMEOUT_MS = 270_000;
 
 // ──── Pipeline Stage Result ─────────────────────────────────────────────────
 

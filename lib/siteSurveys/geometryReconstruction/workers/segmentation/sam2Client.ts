@@ -514,12 +514,12 @@ async function fetchWithRetry(
  *
  * @param imageBytes - Raw image bytes (JPEG/PNG/WebP)
  * @param minAreaFraction - Minimum mask area as fraction of image (default 0.02)
- * @param maxMasks - Maximum masks to return (default 20)
+ * @param maxMasks - Maximum masks to return (default 30, matching SAM2 service MAX_MASKS env var)
  */
 export async function segmentWithSAM2(
   imageBytes: Buffer,
   minAreaFraction: number = 0.02,
-  maxMasks: number = 20,
+  maxMasks: number = 30,
 ): Promise<SAM2SegmentationResult | null> {
   if (!isSAM2Enabled()) return null;
 

@@ -123,7 +123,7 @@ STABILITY_SCORE_THRESH = float(os.environ.get("SAM2_STABILITY_SCORE_THRESH", "0.
 #  12 points/side = 144 grid points (OK on 4GB Pro with ONNX + 384px)
 #  16 points/side = 256 grid points (target for Pro; best small-object detection)
 # NOTE: ONNX crop_n_layers is not implemented (no-op), so no extra memory from crops.
-POINTS_PER_SIDE = int(os.environ.get("SAM2_POINTS_PER_SIDE", "16" if IS_CPU else "32"))
+POINTS_PER_SIDE = int(os.environ.get("SAM2_POINTS_PER_SIDE", "12" if IS_CPU else "32"))
 # Maximum masks to return per image
 MAX_MASKS = int(os.environ.get("SAM2_MAX_MASKS", "30"))
 # Douglas-Peucker simplification epsilon (pixels)
@@ -971,7 +971,7 @@ async def segment_image(
         le=0.5,
     ),
     max_masks: int = Query(
-        default=20,
+        default=MAX_MASKS,
         description="Maximum number of masks to return",
         ge=1,
         le=100,
