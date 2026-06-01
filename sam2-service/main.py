@@ -1,24 +1,30 @@
 """
-SAM 2 Segmentation Service — FastAPI microservice for roof geometry extraction.
+SAM 2 Segmentation + MiDaS Depth Service — FastAPI microservice for roof geometry extraction.
 
-Runs SAM 2.1 Automatic Mask Generation on survey photos and returns
-polygon-based segmentation masks suitable for Pipeline B consumption.
+Runs SAM 2.1 Automatic Mask Generation and MiDaS/DPT monocular depth estimation
+on survey photos, returning polygon-based segmentation masks and depth maps
+suitable for Pipeline B consumption.
 
 Architecture:
   - Loads SAM 2.1 checkpoint from HuggingFace on startup (model determined by
     SAM2_HF_MODEL_ID env var; defaults to sam2.1-hiera-tiny on CPU (~40MB),
     sam2.1-hiera-small on GPU (~184MB))
+  - Loads MiDaS/DPT depth model from HuggingFace on startup (model determined by
+    MIDAS_MODEL_ID env var; defaults to Intel/dpt-swinv2-tiny-256 on CPU (~41MB))
   - POST /segment: accepts image bytes, returns polygon masks
-  - GET /health: service readiness check
+  - POST /depth: accepts image bytes, returns depth map grid
+  - GET /health: service readiness check (reports both models)
   - Runs on GPU when available, falls back to CPU
   - Mask-to-polygon conversion via OpenCV findContours + Douglas-Peucker
+  - Depth map produced as normalized float32 grid (base64-encoded)
 
 Deployment:
   - Render web service (CPU or GPU)
   - Docker container with CPU-only PyTorch (GPU auto-detected at runtime)
-  - Environment variable SAM2_HF_MODEL_ID controls model size
+  - Environment variable SAM2_HF_MODEL_ID controls segmentation model size
+  - Environment variable MIDAS_MODEL_ID controls depth model size
 
-CPU Optimization:
+CPU Optimization (Segmentation):
   - Images resized to max 384px (CPU) / 2048px (GPU) before processing
   - CPU: points_per_side=8 (64 grid points — stable on Render Standard 4GB RAM;
     9/81 grid caused ~44s processing & 502; 10/100 caused ~49s & OOM/crash)
@@ -33,6 +39,13 @@ CPU Optimization:
   - Memory monitoring via resource.getrusage (RSS logged before/after inference)
   - Model loaded once, reused across requests
   - gc.collect() after inference to free memory immediately
+
+CPU Optimization (Depth):
+  - Images resized to max 256px (MiDaS native resolution) before depth inference
+  - Intel/dpt-swinv2-tiny-256: 40.9M params, ~3-5s inference on CPU
+  - Depth grid output resolution configurable via MIDAS_OUTPUT_RESOLUTION env var
+  - Both models (SAM2 + MiDaS) coexist in ~4GB RAM: SAM2 tiny (~40MB) + DPT tiny (~41MB)
+    leaves plenty of headroom on Render Standard (4GB)
 
 REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
 """
@@ -105,6 +118,24 @@ MIN_POLYGON_POINTS = 3
 # Service port — Render injects PORT=10000 for web services
 PORT = int(os.environ.get("PORT", "10000"))
 
+# ---------------------------------------------------------------------------\
+# MiDaS / DPT Depth Estimation Configuration
+# ---------------------------------------------------------------------------
+
+# HuggingFace model ID for MiDaS/DPT depth estimation
+# Supported: Intel/dpt-swinv2-tiny-256 (40.9M params, ~3-5s CPU),
+#            Intel/dpt-hybrid-midas (larger, better quality, ~10s CPU),
+#            Intel/dpt-large (very large, GPU recommended)
+# Set MIDAS_ENABLED=false to disable depth endpoint entirely
+MIDAS_ENABLED = os.environ.get("MIDAS_ENABLED", "true").lower() == "true"
+MIDAS_MODEL_ID = os.environ.get("MIDAS_MODEL_ID", "Intel/dpt-swinv2-tiny-256")
+# Maximum image dimension for depth inference — MiDaS models are trained at 256x256
+# or 384x384. On CPU, 256px is fast and sufficient for relative depth.
+MIDAS_MAX_IMAGE_DIM = int(os.environ.get("MIDAS_MAX_IMAGE_DIM", "256"))
+# Output depth grid resolution (width × height) — the depth map is resized to
+# this resolution before encoding. Default 64 matches the heuristic depth worker.
+MIDAS_OUTPUT_RESOLUTION = int(os.environ.get("MIDAS_OUTPUT_RESOLUTION", "64"))
+
 # ---------------------------------------------------------------------------
 # Pydantic response models
 # ---------------------------------------------------------------------------
@@ -143,6 +174,21 @@ class HealthResponse(BaseModel):
     model_id: str
     cuda_available: bool
     uptime_seconds: float
+    depth_model_loaded: bool = False
+    depth_model_id: str = ""
+
+class DepthResponse(BaseModel):
+    """Response from the /depth endpoint."""
+    success: bool
+    depth_data: str  # base64-encoded float32 depth grid
+    width: int       # grid width
+    height: int      # grid height
+    depth_metric: str = "normalized_relative"  # MiDaS produces relative inverse depth
+    image_width: int  # original image width
+    image_height: int # original image height
+    processing_time_ms: float
+    model_info: dict
+    error: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +198,8 @@ class HealthResponse(BaseModel):
 _sam2_model = None
 _sam2_amg = None
 _model_load_time = None
+_midas_model = None
+_midas_load_time = None
 _start_time = time.time()
 
 
@@ -229,6 +277,54 @@ def load_sam2_model():
     return _sam2_amg
 
 
+def load_midas_model():
+    """Load MiDaS/DPT depth estimation model from HuggingFace.
+
+    Uses the transformers pipeline API for simple, reliable loading.
+    The model is lazy-loaded on first /depth request if MIDAS_ENABLED=true.
+    Returns the pipeline object, or None if MiDaS is disabled.
+    """
+    global _midas_model, _midas_load_time
+
+    if not MIDAS_ENABLED:
+        logger.info("MiDaS depth estimation disabled (MIDAS_ENABLED=false)")
+        return None
+
+    if _midas_model is not None:
+        return _midas_model
+
+    logger.info(f"Loading MiDaS depth model: {MIDAS_MODEL_ID} on device: {DEVICE}")
+    t0 = time.time()
+
+    try:
+        from transformers import pipeline as hf_pipeline
+
+        # Use HuggingFace depth-estimation pipeline
+        # device=-1 means CPU, device=0 means GPU
+        device_arg = -1 if IS_CPU else 0
+        _midas_model = hf_pipeline(
+            task="depth-estimation",
+            model=MIDAS_MODEL_ID,
+            device=device_arg,
+        )
+        _midas_load_time = time.time() - t0
+        logger.info(
+            f"MiDaS loaded successfully in {_midas_load_time:.1f}s "
+            f"(model_id={MIDAS_MODEL_ID}, device={DEVICE}, "
+            f"max_image_dim={MIDAS_MAX_IMAGE_DIM}, "
+            f"output_resolution={MIDAS_OUTPUT_RESOLUTION})"
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to load MiDaS depth model: {e}")
+        logger.error(traceback.format_exc())
+        # Don't raise — depth is optional. Service still serves /segment.
+        _midas_model = None
+        return None
+
+    return _midas_model
+
+
 # ---------------------------------------------------------------------------
 # Image preprocessing
 # ---------------------------------------------------------------------------
@@ -247,6 +343,17 @@ def resize_for_inference(image: np.ndarray, max_dim: int = MAX_IMAGE_DIM):
     resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
     logger.info(f"Resized image from {w}x{h} to {new_w}x{new_h} (scale={scale:.3f})")
     return resized, scale
+
+
+def np_to_base64(arr: np.ndarray) -> str:
+    """
+    Encode a numpy array as base64 string for transport.
+
+    The array is stored as raw bytes (dtype preserved) and base64-encoded.
+    The receiver must decode base64 → bytes → np.frombuffer with the same dtype.
+    """
+    import base64
+    return base64.b64encode(arr.tobytes()).decode("ascii")
 
 
 # ---------------------------------------------------------------------------
@@ -467,26 +574,47 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    """Load SAM 2 model on startup so first request is fast."""
-    logger.info("SAM 2 service starting — loading model...")
+    """Load SAM 2 and MiDaS models on startup so first requests are fast."""
+    logger.info("SAM 2 + MiDaS service starting — loading models...")
     try:
         load_sam2_model()
-        logger.info("Model loaded successfully — service ready")
+        logger.info("SAM 2 model loaded successfully")
     except Exception as e:
-        logger.warning(f"Model load failed on startup: {e}")
-        logger.warning("Service will attempt lazy load on first request")
+        logger.warning(f"SAM 2 model load failed on startup: {e}")
+        logger.warning("Service will attempt lazy load on first /segment request")
+
+    try:
+        load_midas_model()
+        if _midas_model is not None:
+            logger.info("MiDaS depth model loaded successfully — /depth endpoint ready")
+        else:
+            logger.info("MiDaS depth model not loaded — /depth endpoint unavailable")
+    except Exception as e:
+        logger.warning(f"MiDaS model load failed on startup: {e}")
+        logger.warning("/depth endpoint will return 503 until model loads")
 
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Check service health and model readiness."""
+    sam2_ready = _sam2_amg is not None
+    midas_ready = _midas_model is not None if MIDAS_ENABLED else False
+
+    # Service is "ready" if SAM2 is loaded (primary function)
+    # Depth is optional — service is still "ready" without it
+    status = "ready" if sam2_ready else "loading"
+    if sam2_ready and MIDAS_ENABLED and not midas_ready:
+        status = "ready_depth_loading"
+
     return HealthResponse(
-        status="ready" if _sam2_amg is not None else "loading",
-        model_loaded=_sam2_amg is not None,
+        status=status,
+        model_loaded=sam2_ready,
         device=DEVICE,
         model_id=HF_MODEL_ID,
         cuda_available=_has_cuda(),
         uptime_seconds=time.time() - _start_time,
+        depth_model_loaded=midas_ready,
+        depth_model_id=MIDAS_MODEL_ID if MIDAS_ENABLED else "",
     )
 
 
@@ -676,6 +804,182 @@ async def segment_image(
             "cuda_available": _has_cuda(),
             "model_type": "sam2.1_automatic_mask_generation",
             "inference_resolution": f"{res_w}x{res_h}",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Depth estimation endpoint
+# ---------------------------------------------------------------------------
+
+@app.post("/depth", response_model=DepthResponse)
+async def estimate_depth(
+    file: UploadFile = File(..., description="Survey photo (JPEG/PNG/WebP)"),
+    output_resolution: int = Query(
+        default=MIDAS_OUTPUT_RESOLUTION,
+        description="Depth grid output resolution (width × height). Default from MIDAS_OUTPUT_RESOLUTION env var.",
+        ge=16,
+        le=512,
+    ),
+):
+    """
+    Estimate monocular depth from a survey photo using MiDaS/DPT.
+
+    Returns a normalized relative depth map as a base64-encoded float32 grid.
+    MiDaS produces inverse relative depth: higher values = closer to camera,
+    lower values = farther from camera. The depth is NOT metric (not in meters)
+    but relative — sufficient for depth ordering and plane separation.
+
+    The output grid resolution is configurable (default 64×64) to match
+    Pipeline B's DepthMap artifact format.
+    """
+    t0 = time.time()
+
+    # Load MiDaS model if not already loaded
+    if not MIDAS_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="MiDaS depth estimation is disabled (MIDAS_ENABLED=false)",
+        )
+
+    try:
+        midas_pipe = load_midas_model()
+    except Exception as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"MiDaS depth model not available: {str(e)}",
+        )
+
+    if midas_pipe is None:
+        raise HTTPException(
+            status_code=503,
+            detail="MiDaS depth model failed to load — /depth endpoint unavailable",
+        )
+
+    # Read image bytes
+    try:
+        image_bytes = await file.read()
+        if len(image_bytes) == 0:
+            raise HTTPException(status_code=400, detail="Empty image file")
+
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        if image is None:
+            raise HTTPException(status_code=400, detail="Could not decode image")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Image read error: {str(e)}")
+
+    orig_h, orig_w = image.shape[:2]
+
+    # Resize for depth inference — MiDaS works best at its training resolution
+    image_resized, scale = resize_for_inference(image, max_dim=MIDAS_MAX_IMAGE_DIM)
+    res_h, res_w = image_resized.shape[:2]
+
+    # Run MiDaS depth estimation
+    try:
+        from PIL import Image as PILImage
+
+        # HuggingFace pipeline expects PIL image
+        image_rgb = cv2.cvtColor(image_resized, cv2.COLOR_BGR2RGB)
+        pil_image = PILImage.fromarray(image_rgb)
+
+        mem_before = _get_memory_mb()
+        logger.info(f"Starting MiDaS depth inference on {res_w}x{res_h} image (CPU={IS_CPU}, RSS={mem_before:.0f}MB)")
+
+        # pipeline returns dict with "predicted_depth" (tensor) and "depth" (PIL Image)
+        result = midas_pipe(pil_image)
+
+        # Extract raw depth prediction (tensor)
+        depth_tensor = result["predicted_depth"]
+        depth_np = depth_tensor.cpu().numpy()
+
+        mem_after = _get_memory_mb()
+        logger.info(
+            f"MiDaS inference produced depth map {depth_np.shape[1]}x{depth_np.shape[0]} "
+            f"(RSS={mem_after:.0f}MB, delta={mem_after - mem_before:.0f}MB)"
+        )
+
+    except Exception as e:
+        logger.error(f"MiDaS depth inference failed: {e}")
+        logger.error(traceback.format_exc())
+        gc.collect()
+        raise HTTPException(
+            status_code=500,
+            detail=f"MiDaS depth inference error: {str(e)}",
+        )
+
+    # Post-process depth map:
+    # 1. Normalize to [0, 1] range (relative depth, no metric meaning)
+    # 2. Invert so higher = closer (MiDaS outputs inverse depth by default,
+    #    but we normalize to make the convention explicit)
+    # 3. Resize to requested output resolution
+    # 4. Encode as float32 base64
+    try:
+        # Normalize to [0, 1]
+        depth_min = depth_np.min()
+        depth_max = depth_np.max()
+        if depth_max - depth_min > 1e-6:
+            depth_normalized = (depth_np - depth_min) / (depth_max - depth_min)
+        else:
+            depth_normalized = np.zeros_like(depth_np)
+
+        # Resize to output resolution
+        # depth_normalized shape: (H, W) — float64 values in [0, 1]
+        if depth_normalized.shape[0] != output_resolution or depth_normalized.shape[1] != output_resolution:
+            depth_resized = cv2.resize(
+                depth_normalized,
+                (output_resolution, output_resolution),
+                interpolation=cv2.INTER_LINEAR,
+            )
+        else:
+            depth_resized = depth_normalized
+
+        # Encode as float32 → base64
+        depth_f32 = depth_resized.astype(np.float32)
+        depth_base64 = np_to_base64(depth_f32)
+
+    except Exception as e:
+        logger.error(f"Depth post-processing failed: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"Depth post-processing error: {str(e)}",
+        )
+
+    # Free memory
+    del depth_np, depth_resized, image_resized, pil_image
+    if 'depth_normalized' in dir():
+        del depth_normalized
+    gc.collect()
+
+    processing_time = (time.time() - t0) * 1000
+
+    logger.info(
+        f"Depth estimation: {orig_w}x{orig_h} image (processed at {res_w}x{res_h}), "
+        f"output {output_resolution}x{output_resolution} grid, "
+        f"in {processing_time:.0f}ms"
+    )
+
+    return DepthResponse(
+        success=True,
+        depth_data=depth_base64,
+        width=output_resolution,
+        height=output_resolution,
+        depth_metric="normalized_relative",
+        image_width=orig_w,
+        image_height=orig_h,
+        processing_time_ms=round(processing_time, 1),
+        model_info={
+            "model_id": MIDAS_MODEL_ID,
+            "device": DEVICE,
+            "cuda_available": _has_cuda(),
+            "model_type": "midas_dpt_depth_estimation",
+            "inference_resolution": f"{res_w}x{res_h}",
+            "output_resolution": f"{output_resolution}x{output_resolution}",
         },
     )
 

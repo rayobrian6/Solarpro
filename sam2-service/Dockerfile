@@ -54,7 +54,10 @@ RUN pip install --no-cache-dir \
 # 7. HuggingFace Hub — needed by build_sam2_hf() to download checkpoints
 RUN pip install --no-cache-dir huggingface_hub>=0.30.2
 
-# 8. Remaining app deps (fastapi, uvicorn, opencv, etc.)
+# 8. Transformers — needed by MiDaS/DPT depth estimation pipeline
+RUN pip install --no-cache-dir transformers>=4.37.0
+
+# 9. Remaining app deps (fastapi, uvicorn, opencv, etc.)
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
