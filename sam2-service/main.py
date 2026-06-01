@@ -279,6 +279,7 @@ _start_time = time.time()
 _onnx_amg = None
 _onnx_load_time = None
 _onnx_available = False
+_starting_up = True  # Set to False once startup_event completes — prevents false "ready" during model load
 
 # ---------------------------------------------------------------------------
 # Inference thread pool — runs CPU-bound SAM2/MiDaS inference in threads
@@ -860,7 +861,15 @@ async def startup_event():
     1. When ONNX backend is active, PyTorch SAM2 is NOT loaded (saves ~400MB+)
     2. MiDaS is lazy-loaded only on first /depth request (saves ~200MB at idle)
     3. On /depth request, SAM2 encoder outputs are freed before MiDaS loads
+
+    STARTUP RESILIENCE:
+    The _starting_up flag is set to True before this function runs and False
+    after it completes. The /health endpoint uses this to report "starting"
+    during model load, which tells Render the container is alive but not yet
+    ready. This prevents Render from killing the container with exit code 1
+    during the model download/initialization period on fresh instances.
     """
+    global _starting_up
     logger.info(f"SAM 2 service starting (backend={INFERENCE_BACKEND})...")
     mem_start = _get_memory_mb()
     logger.info(f"Memory at startup: {mem_start:.0f}MB")
@@ -873,12 +882,20 @@ async def startup_event():
             except Exception as e:
                 logger.warning(f"ONNX backend failed on startup: {e}")
                 logger.warning("Falling back to PyTorch backend")
-                load_sam2_model()
+                try:
+                    load_sam2_model()
+                except Exception as e2:
+                    logger.warning(f"PyTorch fallback also failed: {e2}")
+                    logger.warning("Service will attempt lazy load on first /segment request")
         else:
-            load_sam2_model()
-            logger.info("SAM 2 PyTorch model loaded successfully")
+            try:
+                load_sam2_model()
+                logger.info("SAM 2 PyTorch model loaded successfully")
+            except Exception as e:
+                logger.warning(f"SAM 2 PyTorch model load failed on startup: {e}")
+                logger.warning("Service will attempt lazy load on first /segment request")
     except Exception as e:
-        logger.warning(f"SAM 2 model load failed on startup: {e}")
+        logger.warning(f"Unexpected error during startup: {e}")
         logger.warning("Service will attempt lazy load on first /segment request")
 
     # MiDaS: NOT loaded at startup to save ~200MB on Render Standard (2GB RAM).
@@ -887,6 +904,10 @@ async def startup_event():
     # would otherwise exceed the 2GB limit simultaneously.
     logger.info("MiDaS depth model will be lazy-loaded on first /depth request (saves ~200MB at startup)")
     logger.info(f"Memory after SAM2 load: {_get_memory_mb():.0f}MB")
+
+    # Signal that startup is complete — /health now reports accurate status
+    _starting_up = False
+    logger.info("Startup complete — service is ready to accept requests")
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -898,17 +919,29 @@ async def health_check():
     inference is running (which takes 35-40s on CPU), we still respond
     immediately with inference_active=True. This prevents Render from
     marking the instance as unhealthy during long-running inference.
+
+    STARTUP RESILIENCE: Returns HTTP 200 with status="starting" during the
+    startup_event() model load. Render's HTTP health check only checks the
+    HTTP status code (200 = healthy), NOT the response body. This ensures
+    the container stays alive during the model download/initialization
+    period, even on fresh Pro instances where HuggingFace download takes
+    3-5 minutes. The Dockerfile HEALTHCHECK also uses urllib.request.urlopen
+    which only checks HTTP status code.
     """
     sam2_ready = _sam2_amg is not None or _onnx_amg is not None
     midas_ready = _midas_model is not None if MIDAS_ENABLED else False
 
-    # Service is "ready" if SAM2 is loaded (primary function)
-    # Depth is optional — service is still "ready" without it (lazy-loaded)
-    # Even during inference, the service is "ready" — it's just busy
     active_backend = "onnx" if _onnx_amg is not None else ("pytorch" if _sam2_amg is not None else "none")
-    status = "ready" if sam2_ready else "loading"
-    if _inference_active:
-        status = "busy"  # healthy but busy — Render should not restart
+
+    # Determine status — always returns HTTP 200 to keep Render happy
+    if _starting_up:
+        status = "starting"  # container alive, model loading — Render sees HTTP 200
+    elif _inference_active:
+        status = "busy"  # healthy but processing — Render should not restart
+    elif sam2_ready:
+        status = "ready"
+    else:
+        status = "loading"  # model not loaded yet (lazy load mode)
 
     return HealthResponse(
         status=status,
@@ -1635,4 +1668,13 @@ async def estimate_depth(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=PORT)
+    except Exception as e:
+        # Top-level catch to prevent exit code 1 on Render.
+        # Render interprets non-zero exit as deploy failure and kills the instance.
+        # This should never happen (uvicorn handles errors internally), but if it
+        # does, log the error and re-raise so we get the traceback in logs.
+        logger.error(f"uvicorn crashed: {e}")
+        logger.error(traceback.format_exc())
+        raise

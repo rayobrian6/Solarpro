@@ -75,10 +75,18 @@ COPY onnx_sam2_amg.py /app/onnx_sam2_amg.py
 ENV SAM2_CACHE_DIR=/app/.cache
 RUN mkdir -p /app/.cache
 
+# Pre-download ONNX models during Docker build (saves 3-5 min cold-start on fresh instances).
+# Without this, Render kills the container with exit code 1 before the HuggingFace
+# download completes, because the health check start-period (180s) may not be
+# long enough for the full download + ONNX session initialization sequence.
+RUN python3 -c "from onnx_sam2_amg import _download_and_extract_onnx_models; \
+    encoder, decoder = _download_and_extract_onnx_models(); \
+    print(f'Pre-downloaded: encoder={encoder}, decoder={decoder}')"
+
 # Render injects PORT env var (default 10000 for web services)
 EXPOSE 10000
 
-HEALTHCHECK --interval=30s --timeout=15s --start-period=180s --retries=5 \
+HEALTHCHECK --interval=30s --timeout=15s --start-period=300s --retries=5 \
     CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-10000}/health', timeout=10)" || exit 1
 
 CMD ["python3", "main.py"]
