@@ -204,6 +204,7 @@ class HealthResponse(BaseModel):
     depth_model_id: str = ""
     inference_active: bool = False     # True while SAM2/MiDaS inference is in progress
     inference_type: str = ""           # "segment" or "depth" when active
+    inference_backend: str = "pytorch" # "onnx" or "pytorch"
 
 class DepthResponse(BaseModel):
     """Response from the /depth endpoint."""
@@ -747,6 +748,7 @@ async def health_check():
         depth_model_id=MIDAS_MODEL_ID if MIDAS_ENABLED else "",
         inference_active=_inference_active,
         inference_type=_inference_type if _inference_active else "",
+        inference_backend=active_backend,
     )
 
 
