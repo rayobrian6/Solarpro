@@ -461,6 +461,7 @@ class ONNXSAM2AutomaticMaskGenerator:
 
         return final_masks
 
+
     def _encode_image(self, image: np.ndarray) -> dict[str, np.ndarray]:
         """
         Run the ONNX image encoder to produce image embedding + high-res features.
@@ -888,3 +889,338 @@ class ONNXSAM2AutomaticMaskGenerator:
             return 0.0
 
         return float(intersection / union)
+
+    # -------------------------------------------------------------------
+    # Prompted segmentation — use user-provided click points instead of
+    # the AMG grid. This is SAM2's intended use case and produces far
+    # better masks than automatic mask generation for roof segmentation.
+    # -------------------------------------------------------------------
+
+    def generate_prompted(
+        self,
+        image: np.ndarray,
+        points: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """
+        Generate masks for an image using user-provided prompt points.
+
+        This is the PRIMARY way to use SAM2 for roof segmentation.
+        Instead of the dumb AMG grid that misses roof planes, the user
+        (or frontend) provides approximate click points on roof areas
+        and SAM2 returns precise masks around those points.
+
+        Args:
+            image: RGB image as numpy array (H, W, 3), uint8.
+            points: List of point dicts with keys:
+                - x: float, x coordinate in original image pixel space
+                - y: float, y coordinate in original image pixel space
+                - label: int, 1 = foreground (include), 0 = background (exclude)
+
+        Returns:
+            List of mask dicts with keys:
+                segmentation: bool np array (H, W)
+                bbox: [x, y, w, h] in pixel coords
+                area: int, pixel count
+                predicted_iou: float
+                stability_score: float
+                point_coords: list of [x, y] points used
+        """
+        h, w = image.shape[:2]
+        t0 = time.time()
+
+        if not points:
+            logger.warning("generate_prompted called with no points")
+            return []
+
+        # Step 1: Run encoder to get image embedding + high-res features
+        encoder_outputs = self._encode_image(image)
+        encode_time = time.time() - t0
+        logger.info(
+            f"ONNX encoder (prompted): {h}x{w} -> encoded in {encode_time:.1f}s"
+        )
+
+        # Step 2: Decode with prompt points
+        # Separate foreground and background points
+        fg_points = [(p["x"], p["y"]) for p in points if p.get("label", 1) == 1]
+        bg_points = [(p["x"], p["y"]) for p in points if p.get("label", 1) == 0]
+
+        if not fg_points:
+            logger.warning(
+                "generate_prompted: no foreground points, using all as foreground"
+            )
+            fg_points = [(p["x"], p["y"]) for p in points]
+            bg_points = []
+
+        # Run prompted decoder with all points together
+        all_point_coords = fg_points + bg_points
+        all_point_labels = [1] * len(fg_points) + [0] * len(bg_points)
+
+        t1 = time.time()
+        masks = self._decode_prompted_points(
+            encoder_outputs=encoder_outputs,
+            point_coords=all_point_coords,
+            point_labels=all_point_labels,
+            image_h=h,
+            image_w=w,
+        )
+        decode_time = time.time() - t1
+        logger.info(
+            f"ONNX prompted decoder: {len(fg_points)} fg + {len(bg_points)} bg "
+            f"points -> {len(masks)} masks in {decode_time:.1f}s"
+        )
+
+        # Free encoder outputs
+        del encoder_outputs
+        gc.collect()
+
+        # Step 3: Filter and finalize masks
+        filtered_masks = [
+            m for m in masks
+            if m["predicted_iou"] >= self.pred_iou_thresh
+            and m["stability_score"] >= self.stability_score_thresh
+        ]
+
+        # Compute bbox and filter by minimum area
+        final_masks = []
+        for mask_data in filtered_masks:
+            mask_bin = mask_data["segmentation"]
+            area = int(np.sum(mask_bin))
+            if area < self.min_mask_region_area:
+                continue
+
+            ys, xs = np.where(mask_bin)
+            if len(xs) == 0:
+                continue
+            x_min, x_max = int(xs.min()), int(xs.max())
+            y_min, y_max = int(ys.min()), int(ys.max())
+            mask_data["area"] = area
+            mask_data["bbox"] = [x_min, y_min, x_max - x_min, y_max - y_min]
+            final_masks.append(mask_data)
+
+        total_time = time.time() - t0
+        logger.info(
+            f"ONNX prompted total: {len(masks)} raw -> "
+            f"{len(filtered_masks)} filtered -> {len(final_masks)} final "
+            f"in {total_time:.1f}s"
+        )
+
+        return final_masks
+
+    def _decode_prompted_points(
+        self,
+        encoder_outputs: dict[str, np.ndarray],
+        point_coords: list[tuple[float, float]],
+        point_labels: list[int],
+        image_h: int,
+        image_w: int,
+    ) -> list[dict[str, Any]]:
+        """
+        Run the ONNX decoder with arbitrary foreground + background points.
+
+        The SAM2 decoder supports multiple points per call:
+        - point_coords: (1, N, 2) - all point coordinates in encoder space
+        - point_labels: (1, N) - 1 for foreground, 0 for background
+
+        However, the samexporter ONNX decoder typically expects exactly
+        2 points (padded). If we have more points than the decoder can
+        accept in one call, we iterate with different point subsets.
+        """
+        n_points = len(point_coords)
+
+        # Scale all points from original image space -> encoder input space
+        scaled_coords = []
+        for x, y in point_coords:
+            sx = x / image_w * self._encoder_input_w
+            sy = y / image_h * self._encoder_input_h
+            scaled_coords.append([sx, sy])
+
+        # Check decoder input shape for point_coords to determine max points
+        point_coord_input = None
+        for inp in self.decoder_session.get_inputs():
+            if "point_coord" in inp.name:
+                point_coord_input = inp
+                break
+
+        if point_coord_input is None:
+            logger.error("Decoder has no point_coords input")
+            return []
+
+        # Determine max points the decoder can accept
+        expected_shape = point_coord_input.shape
+        if len(expected_shape) >= 2 and isinstance(expected_shape[1], int):
+            max_decoder_points = expected_shape[1]
+        else:
+            max_decoder_points = 2  # safe default for samexporter
+
+        logger.info(
+            f"Decoder point_coords expected shape: {expected_shape}, "
+            f"have {n_points} points, max_per_call={max_decoder_points}"
+        )
+
+        result_masks = []
+
+        if n_points <= max_decoder_points:
+            # All points fit in a single decoder call
+            masks = self._run_decoder_with_points(
+                encoder_outputs=encoder_outputs,
+                scaled_coords=scaled_coords,
+                point_labels=point_labels,
+                image_h=image_h,
+                image_w=image_w,
+                max_points=max_decoder_points,
+            )
+            result_masks.extend(masks)
+        else:
+            # More points than decoder can handle in one call.
+            # Strategy: iterate over foreground points, each with background
+            # points as context. This produces one mask per foreground point.
+            logger.info(
+                f"More points ({n_points}) than decoder max ({max_decoder_points}). "
+                f"Iterating over foreground points with background context."
+            )
+            fg_scaled = [sc for sc, lbl in zip(scaled_coords, point_labels) if lbl == 1]
+            bg_scaled = [sc for sc, lbl in zip(scaled_coords, point_labels) if lbl == 0]
+            fg_orig = [(x, y) for (x, y), lbl in zip(point_coords, point_labels) if lbl == 1]
+
+            for fg_idx, (fg_sc, (fg_ox, fg_oy)) in enumerate(
+                zip(fg_scaled, fg_orig)
+            ):
+                # Pack: foreground point + background points (up to max-1)
+                batch_coords = [fg_sc]
+                batch_labels = [1]
+                for bg_sc in bg_scaled[: max_decoder_points - 1]:
+                    batch_coords.append(bg_sc)
+                    batch_labels.append(0)
+
+                masks = self._run_decoder_with_points(
+                    encoder_outputs=encoder_outputs,
+                    scaled_coords=batch_coords,
+                    point_labels=batch_labels,
+                    image_h=image_h,
+                    image_w=image_w,
+                    max_points=max_decoder_points,
+                )
+                for m in masks:
+                    m["prompt_point_index"] = fg_idx
+                    m["prompt_point_coords"] = [fg_ox, fg_oy]
+                result_masks.extend(masks)
+
+        # Deduplicate overlapping masks from multi-point iteration
+        if len(result_masks) > 1:
+            result_masks = self._deduplicate_masks(result_masks, iou_threshold=0.6)
+
+        return result_masks
+
+    def _run_decoder_with_points(
+        self,
+        encoder_outputs: dict[str, np.ndarray],
+        scaled_coords: list[list[float]],
+        point_labels: list[int],
+        image_h: int,
+        image_w: int,
+        max_points: int = 2,
+    ) -> list[dict[str, Any]]:
+        """
+        Run the ONNX decoder with a set of prompt points.
+        Handles padding to the decoder's expected input shape.
+        """
+        n_points = len(scaled_coords)
+
+        # Build decoder feed dict
+        feed = {}
+
+        for name in self._decoder_input_names:
+            if name in encoder_outputs:
+                feed[name] = encoder_outputs[name]
+            elif "point_coord" in name:
+                # Point coords: (1, max_points, 2) - pad with zeros
+                coords = np.zeros((1, max_points, 2), dtype=np.float32)
+                for i, sc in enumerate(scaled_coords[:max_points]):
+                    coords[0, i, 0] = sc[0]
+                    coords[0, i, 1] = sc[1]
+                feed[name] = coords
+            elif "point_label" in name:
+                # Point labels: (1, max_points) - pad with -1 (ignored)
+                labels = np.full((1, max_points), -1, dtype=np.float32)
+                for i, lbl in enumerate(point_labels[:max_points]):
+                    labels[0, i] = float(lbl)
+                feed[name] = labels
+            elif "mask" in name and "has" not in name and "orig" not in name:
+                mask_h = self._encoder_input_h // 4
+                mask_w = self._encoder_input_w // 4
+                feed[name] = np.zeros((1, 1, mask_h, mask_w), dtype=np.float32)
+            elif "has_mask" in name:
+                feed[name] = np.array([0.0], dtype=np.float32)
+            elif "orig_im_size" in name:
+                feed[name] = np.array(
+                    [float(image_h), float(image_w)], dtype=np.float32
+                )
+            else:
+                logger.warning(f"Unknown decoder input in prompted mode: {name}")
+
+        # Run decoder
+        try:
+            decoder_outputs = self.decoder_session.run(None, feed)
+        except Exception as e:
+            logger.warning(f"Prompted decoder run failed ({n_points} pts): {e}")
+            return []
+
+        # Parse outputs
+        masks_raw = decoder_outputs[0]   # (1, n_proposals, H, W) or (1, H, W)
+        iou_preds = decoder_outputs[1]   # (1, n_proposals) or (1,)
+
+        result_masks = []
+        n_proposals = masks_raw.shape[1] if masks_raw.ndim >= 3 else 1
+
+        best_mask = None
+        best_iou = 0.0
+
+        for j in range(n_proposals):
+            if iou_preds.ndim >= 2:
+                iou_score = float(iou_preds[0, j])
+            else:
+                iou_score = float(iou_preds[j])
+
+            if iou_score < self.pred_iou_thresh:
+                continue
+
+            if masks_raw.ndim == 4:
+                mask_low_res = masks_raw[0, j]
+            elif masks_raw.ndim == 3:
+                mask_low_res = masks_raw[0]
+            else:
+                mask_low_res = masks_raw
+
+            # Resize to original image dimensions
+            if self._decoder_has_orig_im_size:
+                mask_upscaled = mask_low_res.astype(np.float32)
+            else:
+                mask_upscaled = cv2.resize(
+                    mask_low_res.astype(np.float32),
+                    (image_w, image_h),
+                    interpolation=cv2.INTER_LINEAR,
+                )
+
+            # Compute stability score
+            stability = self._compute_stability_score(mask_upscaled, 0.0, 1.0)
+            if stability < self.stability_score_thresh:
+                continue
+
+            # For prompted mode, pick the best mask by IoU
+            if iou_score > best_iou:
+                best_iou = iou_score
+                best_mask = {
+                    "segmentation": mask_upscaled > 0.0,
+                    "predicted_iou": iou_score,
+                    "stability_score": stability,
+                    "point_coords": [
+                        [c[0] * image_w / self._encoder_input_w,
+                         c[1] * image_h / self._encoder_input_h]
+                        for c in scaled_coords
+                    ],
+                }
+
+        if best_mask is not None:
+            result_masks.append(best_mask)
+
+        return result_masks

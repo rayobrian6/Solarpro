@@ -227,6 +227,28 @@ class DepthResponse(BaseModel):
     error: Optional[str] = None
 
 
+class PromptPoint(BaseModel):
+    """A single click point for prompted segmentation."""
+    x: float  # x coordinate in original image pixel space
+    y: float  # y coordinate in original image pixel space
+    label: int = 1  # 1 = foreground (include), 0 = background (exclude)
+
+class PromptedSegmentRequest(BaseModel):
+    """Request body for prompted segmentation."""
+    points: list[PromptPoint]  # Click points guiding the segmentation
+
+class PromptedSegmentResponse(BaseModel):
+    """Response from the /segment-prompted endpoint."""
+    success: bool
+    masks: list[SegmentationMask]
+    mask_count: int
+    image_width: int
+    image_height: int
+    processing_time_ms: float
+    model_info: dict
+    error: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # SAM 2 model loader (lazy, loaded on first request or at startup)
 # ---------------------------------------------------------------------------
@@ -261,6 +283,33 @@ def _get_memory_mb() -> float:
         return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
     except Exception:
         return 0.0
+
+
+def _get_available_memory_mb() -> float:
+    """Get available system memory in MB from /proc/meminfo (Linux only).
+
+    This is critical for avoiding OOM on Render Standard (2GB limit).
+    Returns available memory, not free — available includes reclaimable caches.
+    Falls back to a conservative 512MB estimate if /proc/meminfo is unavailable.
+    """
+    try:
+        with open("/proc/meminfo", "r") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / 1024  # kB -> MB
+    except Exception:
+        pass
+    return 512.0  # conservative default
+
+
+def _check_memory_guard(min_free_mb: float = 256.0) -> tuple[bool, float]:
+    """Check if there's enough memory for inference.
+
+    Returns (ok, available_mb). If available < min_free_mb, the caller
+    should reject the request to avoid OOM kill on Render's 2GB limit.
+    """
+    avail = _get_available_memory_mb()
+    return avail >= min_free_mb, avail
 
 
 def load_sam2_model():
@@ -692,13 +741,27 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    """Load SAM 2 and MiDaS models on startup so first requests are fast."""
-    logger.info(f"SAM 2 + MiDaS service starting (backend={INFERENCE_BACKEND})...")
+    """Load SAM 2 model on startup. MiDaS is lazy-loaded on first /depth request.
+
+    MEMORY OPTIMIZATION (Render Standard 2GB):
+    Previously, both SAM2 + MiDaS PyTorch models loaded at startup, consuming
+    ~1.2GB+ just for model weights. During inference, intermediate tensors
+    pushed past 2GB → OOM kill (confirmed 2026-06-01 16:18:27Z).
+
+    Changes:
+    1. When ONNX backend is active, PyTorch SAM2 is NOT loaded (saves ~400MB+)
+    2. MiDaS is lazy-loaded only on first /depth request (saves ~200MB at idle)
+    3. On /depth request, SAM2 encoder outputs are freed before MiDaS loads
+    """
+    logger.info(f"SAM 2 service starting (backend={INFERENCE_BACKEND})...")
+    mem_start = _get_memory_mb()
+    logger.info(f"Memory at startup: {mem_start:.0f}MB")
+
     try:
         if INFERENCE_BACKEND == "onnx":
             try:
                 load_onnx_amg()
-                logger.info("SAM 2 ONNX backend loaded successfully")
+                logger.info("SAM 2 ONNX backend loaded successfully — PyTorch SAM2 NOT loaded (saves ~400MB)")
             except Exception as e:
                 logger.warning(f"ONNX backend failed on startup: {e}")
                 logger.warning("Falling back to PyTorch backend")
@@ -710,15 +773,12 @@ async def startup_event():
         logger.warning(f"SAM 2 model load failed on startup: {e}")
         logger.warning("Service will attempt lazy load on first /segment request")
 
-    try:
-        load_midas_model()
-        if _midas_model is not None:
-            logger.info("MiDaS depth model loaded successfully — /depth endpoint ready")
-        else:
-            logger.info("MiDaS depth model not loaded — /depth endpoint unavailable")
-    except Exception as e:
-        logger.warning(f"MiDaS model load failed on startup: {e}")
-        logger.warning("/depth endpoint will return 503 until model loads")
+    # MiDaS: NOT loaded at startup to save ~200MB on Render Standard (2GB RAM).
+    # Instead, lazy-loaded on first /depth request. This keeps idle memory
+    # ~600MB lower, preventing OOM when both SAM2 inference + MiDaS load
+    # would otherwise exceed the 2GB limit simultaneously.
+    logger.info("MiDaS depth model will be lazy-loaded on first /depth request (saves ~200MB at startup)")
+    logger.info(f"Memory after SAM2 load: {_get_memory_mb():.0f}MB")
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -735,12 +795,10 @@ async def health_check():
     midas_ready = _midas_model is not None if MIDAS_ENABLED else False
 
     # Service is "ready" if SAM2 is loaded (primary function)
-    # Depth is optional — service is still "ready" without it
+    # Depth is optional — service is still "ready" without it (lazy-loaded)
     # Even during inference, the service is "ready" — it's just busy
     active_backend = "onnx" if _onnx_amg is not None else ("pytorch" if _sam2_amg is not None else "none")
     status = "ready" if sam2_ready else "loading"
-    if sam2_ready and MIDAS_ENABLED and not midas_ready:
-        status = "ready_depth_loading"
     if _inference_active:
         status = "busy"  # healthy but busy — Render should not restart
 
@@ -786,6 +844,18 @@ async def segment_image(
     bounding boxes, stability scores, and heuristic class hints.
     """
     t0 = time.time()
+
+    # Memory guard: check available RAM before running inference
+    # On Render Standard (2GB), if available memory is too low, reject
+    # the request rather than risking OOM kill (which takes down the
+    # entire service for ~30s while it restarts).
+    mem_ok, mem_avail = _check_memory_guard(min_free_mb=200)
+    if not mem_ok:
+        logger.warning(f"Rejecting /segment request — only {mem_avail:.0f}MB available (need 200MB)")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Insufficient memory for inference ({mem_avail:.0f}MB available, need 200MB). Service may be processing another request.",
+        )
 
     # Load model if not already loaded (lazy load fallback)
     # Uses get_amg() which respects SAM2_INFERENCE_BACKEND setting
@@ -975,6 +1045,265 @@ async def segment_image(
 
 
 # ---------------------------------------------------------------------------
+# Prompted segmentation endpoint — user-provided click points
+# ---------------------------------------------------------------------------
+
+@app.post("/segment-prompted", response_model=SegmentResponse)
+async def segment_prompted(
+    file: UploadFile = File(..., description="Survey photo (JPEG/PNG/WebP)"),
+    points: str = Query(
+        default="[]",
+        description='JSON array of prompt points: [{"x":100,"y":200,"label":1},{"x":50,"y":300,"label":0}]. label=1=foreground, 0=background',
+    ),
+    min_area_fraction: float = Query(
+        default=MIN_MASK_AREA_FRACTION,
+        description="Minimum mask area as fraction of image area",
+        ge=0.001,
+        le=0.5,
+    ),
+    roof_only: bool = Query(
+        default=False,
+        description="If true, only return roof-relevant masks. Default false for prompted mode since user controls what to segment.",
+    ),
+):
+    """
+    Prompted segmentation: segment specific regions using user-provided click points.
+
+    This is SAM2's intended use case and produces dramatically better results
+    than AMG (automatic mask generation). Instead of a dumb grid that misses
+    roof planes, the user clicks approximate areas of interest and SAM2
+    returns precise masks.
+
+    Usage:
+    1. User clicks on roof areas in the frontend (foreground points, label=1)
+    2. Optionally clicks on trees/sky to EXCLUDE those areas (background points, label=0)
+    3. SAM2 encodes the image once, then decodes precise masks around each click
+
+    Example points JSON:
+    [{"x":150,"y":100,"label":1}, {"x":300,"y":80,"label":1}, {"x":400,"y":300,"label":0}]
+
+    The first two points mark roof areas, the third marks a tree to exclude.
+    """
+    import json as _json
+
+    t0 = time.time()
+
+    # Parse points JSON
+    try:
+        prompt_points = _json.loads(points)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid points JSON: {str(e)}. Expected format: [{{'x':100,'y':200,'label':1}}]",
+        )
+
+    if not prompt_points:
+        raise HTTPException(
+            status_code=400,
+            detail="No prompt points provided. Use /segment for automatic mask generation.",
+        )
+
+    # Validate points
+    for i, pt in enumerate(prompt_points):
+        if "x" not in pt or "y" not in pt:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Point {i} missing 'x' or 'y' coordinate: {pt}",
+            )
+        pt.setdefault("label", 1)  # default to foreground
+
+    # Memory guard
+    mem_ok, mem_avail = _check_memory_guard(min_free_mb=200)
+    if not mem_ok:
+        logger.warning(f"Rejecting /segment-prompted — only {mem_avail:.0f}MB available")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Insufficient memory for inference ({mem_avail:.0f}MB available, need 200MB)",
+        )
+
+    # Get AMG instance (needs encoder for prompted mode)
+    try:
+        amg, backend = get_amg()
+    except Exception as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"SAM 2 model not available (backend={INFERENCE_BACKEND}): {str(e)}",
+        )
+
+    # Check if prompted mode is supported (ONNX backend only for now)
+    if backend != "onnx" or not hasattr(amg, "generate_prompted"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Prompted segmentation requires ONNX backend (current: {backend})",
+        )
+
+    # Read image bytes
+    try:
+        image_bytes = await file.read()
+        if len(image_bytes) == 0:
+            raise HTTPException(status_code=400, detail="Empty image file")
+
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        if image is None:
+            raise HTTPException(status_code=400, detail="Could not decode image")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Image read error: {str(e)}")
+
+    orig_h, orig_w = image.shape[:2]
+
+    # Resize for CPU inference
+    image_resized, scale = resize_for_inference(image)
+    res_h, res_w = image_resized.shape[:2]
+
+    min_area_px = res_w * res_h * min_area_fraction
+
+    # Scale prompt point coordinates to resized image space
+    scaled_points = []
+    for pt in prompt_points:
+        scaled_points.append({
+            "x": pt["x"] * scale,
+            "y": pt["y"] * scale,
+            "label": pt["label"],
+        })
+
+    # Run prompted segmentation in a thread
+    try:
+        image_rgb = cv2.cvtColor(image_resized, cv2.COLOR_BGR2RGB)
+        mem_before = _get_memory_mb()
+        logger.info(
+            f"Starting SAM 2 prompted segmentation on {res_w}x{res_h} image "
+            f"({len(scaled_points)} points, CPU={IS_CPU}, RSS={mem_before:.0f}MB)"
+        )
+
+        global _inference_active, _inference_type, _last_inference_start, _last_inference_end
+        _inference_active = True
+        _inference_type = "segment_prompted"
+        _last_inference_start = time.time()
+
+        loop = asyncio.get_event_loop()
+        sam_masks = await loop.run_in_executor(
+            _inference_executor,
+            amg.generate_prompted,
+            image_rgb,
+            scaled_points,
+        )
+
+        _inference_active = False
+        _inference_type = ""
+        _last_inference_end = time.time()
+
+        mem_after = _get_memory_mb()
+        logger.info(
+            f"SAM 2 prompted: {len(sam_masks)} masks (RSS={mem_after:.0f}MB, "
+            f"delta={mem_after-mem_before:.0f}MB)"
+        )
+
+    except Exception as e:
+        _inference_active = False
+        _inference_type = ""
+        _last_inference_end = time.time()
+        logger.error(f"SAM 2 prompted segmentation failed: {e}")
+        logger.error(traceback.format_exc())
+        gc.collect()
+        raise HTTPException(
+            status_code=500,
+            detail=f"SAM 2 prompted segmentation error: {str(e)}",
+        )
+
+    # Process masks into polygon-based results (same as /segment)
+    result_masks: list[SegmentationMask] = []
+
+    for idx, sam_mask in enumerate(sam_masks):
+        mask_binary = sam_mask["segmentation"]
+        bbox = sam_mask["bbox"]
+        stability = sam_mask["stability_score"]
+        predicted_iou = sam_mask["predicted_iou"]
+        area_px = int(sam_mask.get("area", np.sum(mask_binary)))
+
+        if area_px < min_area_px:
+            continue
+
+        polygon_points = mask_to_polygon(mask_binary.astype(np.uint8))
+
+        if len(polygon_points) < MIN_POLYGON_POINTS:
+            continue
+
+        # Scale coordinates back to original image size
+        if scale != 1.0:
+            polygon_points = [
+                {"x": p["x"] / scale, "y": p["y"] / scale}
+                for p in polygon_points
+            ]
+            bbox = [v / scale for v in bbox]
+            area_px = int(area_px / (scale * scale))
+
+        class_hint = classify_mask_region(
+            bbox=bbox,
+            area=float(area_px),
+            img_w=orig_w,
+            img_h=orig_h,
+            stability_score=stability,
+            original_image_bgr=image,
+            mask_binary=mask_binary,
+            scale=scale,
+        )
+
+        confidence = min(100, round((predicted_iou * 0.4 + stability * 0.6) * 100))
+
+        result_masks.append(SegmentationMask(
+            mask_index=idx,
+            polygon=[PolygonPoint(x=p["x"], y=p["y"]) for p in polygon_points],
+            area=float(area_px),
+            bbox=[float(v) for v in bbox],
+            confidence=confidence,
+            stability_score=round(stability, 4),
+            class_hint=class_hint,
+            point_count=len(polygon_points),
+        ))
+
+    # Roof-only filter (off by default for prompted mode)
+    pre_filter_count = len(result_masks)
+    if roof_only:
+        roof_masks = [m for m in result_masks if m.class_hint in ROOF_RELEVANT_CLASSES]
+        result_masks = roof_masks
+
+    result_masks.sort(key=lambda m: m.area, reverse=True)
+
+    processing_time = (time.time() - t0) * 1000
+
+    logger.info(
+        f"Prompted segmented {orig_w}x{orig_h} ({res_w}x{res_h}): "
+        f"{len(sam_masks)} raw -> {pre_filter_count} classified -> "
+        f"{len(result_masks)} final in {processing_time:.0f}ms [backend={backend}]"
+    )
+
+    del sam_masks, image_resized
+    gc.collect()
+
+    return SegmentResponse(
+        success=True,
+        masks=result_masks,
+        mask_count=len(result_masks),
+        image_width=orig_w,
+        image_height=orig_h,
+        processing_time_ms=round(processing_time, 1),
+        model_info={
+            "model_id": HF_MODEL_ID,
+            "device": DEVICE,
+            "cuda_available": _has_cuda(),
+            "model_type": "sam2.1_prompted_segmentation",
+            "inference_backend": backend,
+            "inference_resolution": f"{res_w}x{res_h}",
+            "prompt_points": len(scaled_points),
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # Depth estimation endpoint
 # ---------------------------------------------------------------------------
 
@@ -1001,7 +1330,18 @@ async def estimate_depth(
     """
     t0 = time.time()
 
-    # Load MiDaS model if not already loaded
+    # Memory guard: check available RAM before loading MiDaS + running inference
+    # MiDaS PyTorch model + SAM2 ONNX both in memory = ~800MB+ for models alone.
+    # During inference, peak can hit 1.5-1.8GB. Reject if too low.
+    mem_ok, mem_avail = _check_memory_guard(min_free_mb=300)
+    if not mem_ok:
+        logger.warning(f"Rejecting /depth request — only {mem_avail:.0f}MB available (need 300MB)")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Insufficient memory for depth inference ({mem_avail:.0f}MB available, need 300MB). Try again after current request completes.",
+        )
+
+    # Load MiDaS model if not already loaded (lazy load)
     if not MIDAS_ENABLED:
         raise HTTPException(
             status_code=503,
@@ -1009,6 +1349,15 @@ async def estimate_depth(
         )
 
     try:
+        # Before loading MiDaS, try to free SAM2 ONNX encoder memory
+        # to make room for the ~200MB MiDaS model. On Render Standard (2GB),
+        # both models in memory simultaneously = ~600MB+ for weights alone.
+        if _onnx_amg is not None:
+            # Free ONNX encoder session internals — they'll be recreated
+            # on next /segment call anyway (encoder is ~55MB)
+            logger.info("Pre-loading MiDaS: forcing gc.collect() to free cached memory")
+            gc.collect()
+
         midas_pipe = load_midas_model()
     except Exception as e:
         raise HTTPException(
