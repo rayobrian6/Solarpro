@@ -209,6 +209,122 @@ export async function insertReconstructionArtifact(
   `;
 }
 
+/**
+ * Batch-insert reconstruction artifacts for a survey.
+ *
+ * Unlike the single-insert function, this:
+ * 1. Performs auth check ONCE (not per artifact)
+ * 2. Inserts all artifacts in a single SQL transaction using UNNEST
+ * 3. Returns { inserted, failed } counts
+ *
+ * This is dramatically faster than calling insertReconstructionArtifact
+ * in a loop: 2 queries total vs 2×N queries (auth + insert per artifact).
+ * With 164 artifacts, that's ~2 queries vs ~328 queries to Neon Postgres.
+ */
+export async function insertReconstructionArtifactsBatch(
+  jobId: string,
+  surveyId: string,
+  userId: string,
+  artifacts: GeometryReconstructionArtifact[],
+  pipeline: string,
+): Promise<{ inserted: number; failed: number }> {
+  if (artifacts.length === 0) return { inserted: 0, failed: 0 };
+
+  // Single auth check for the whole batch
+  await verifySurveyOwnership(surveyId, userId);
+  const sql = await getDbReady();
+
+  // Build parallel arrays for UNNEST insertion
+  const jobIds: string[] = [];
+  const surveyIds: string[] = [];
+  const fileIds: (string | null)[] = [];
+  const artifactTypes: string[] = [];
+  const pipelines: string[] = [];
+  const payloads: string[] = [];
+  const confidences: number[] = [];
+  const limitationsArrays: string[][] = [];
+  const authorities: string[] = [];
+
+  for (const artifact of artifacts) {
+    const fileId = 'fileId' in artifact ? (artifact as { fileId?: string }).fileId : null;
+    const limitationsArray: string[] = Array.isArray(artifact.limitations)
+      ? artifact.limitations.filter((l: unknown) => typeof l === 'string')
+      : [];
+
+    jobIds.push(jobId);
+    surveyIds.push(surveyId);
+    fileIds.push(fileId ?? null);
+    artifactTypes.push(artifact.artifactType);
+    pipelines.push(pipeline);
+    payloads.push(JSON.stringify(artifact));
+    confidences.push(artifact.confidence);
+    limitationsArrays.push(limitationsArray);
+    authorities.push(JSON.stringify(artifact.authority));
+  }
+
+  try {
+    const result = await sql`
+      INSERT INTO site_survey_geometry_reconstruction_artifacts (
+        job_id, survey_id, file_id, artifact_type, pipeline, payload, confidence, limitations, authority
+      )
+      SELECT * FROM unnest(
+        ${jobIds}::uuid[],
+        ${surveyIds}::uuid[],
+        ${fileIds}::text[],
+        ${artifactTypes}::text[],
+        ${pipelines}::text[],
+        ${payloads}::jsonb[],
+        ${confidences}::numeric[],
+        ${limitationsArrays}::text[][],
+        ${authorities}::jsonb[]
+      )
+      RETURNING id
+    `;
+
+    return { inserted: result.length, failed: artifacts.length - result.length };
+  } catch (err) {
+    console.error(
+      '[geometryReconstruction] Batch insert failed:',
+      err instanceof Error ? err.message : String(err),
+    );
+    // Fallback: try single inserts for resilience
+    let inserted = 0;
+    let failed = 0;
+    for (const artifact of artifacts) {
+      try {
+        await insertReconstructionArtifact(jobId, surveyId, userId, artifact, pipeline);
+        inserted++;
+      } catch {
+        failed++;
+      }
+    }
+    return { inserted, failed };
+  }
+}
+
+/** Delete all reconstruction artifacts for a survey (no auth check — internal use). */
+export async function deleteArtifactsBySurvey(
+  surveyId: string,
+): Promise<number> {
+  try {
+    const sql = await getDbReady();
+
+    const result = await sql`
+      DELETE FROM site_survey_geometry_reconstruction_artifacts
+      WHERE survey_id = ${surveyId}
+      RETURNING id
+    `;
+
+    return result.length;
+  } catch (err) {
+    console.warn(
+      '[geometryReconstruction] Failed to delete artifacts by survey:',
+      err instanceof Error ? err.message : String(err),
+    );
+    return 0;
+  }
+}
+
 /** Get all reconstruction artifacts for a survey (with auth check). */
 export async function getArtifactsBySurvey(
   surveyId: string,

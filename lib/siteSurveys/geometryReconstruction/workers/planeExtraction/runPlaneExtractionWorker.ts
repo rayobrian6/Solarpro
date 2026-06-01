@@ -584,6 +584,11 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
   const usedMidas = input.usedMidas ?? false;
   timings['initialization'] = Date.now() - t0;
 
+  console.info(
+    `[PlaneExtraction] Starting: roofMasks=${roofMasks.length}, wallMasks=${wallMasks.length}, ` +
+    `hasDepthMaps=${hasDepthMaps}, depthMapCount=${input.depthMaps?.length ?? 0}, usedMidas=${usedMidas}`,
+  );
+
   // Stage 2: Find associated lines for each mask (used by both paths)
   const t1 = Date.now();
   const maskLineAssociations = new Map<string, StructuralLineCandidate[]>();
@@ -600,12 +605,36 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
     const depthArtifacts: Array<RoofPlaneCandidate | WallPlaneCandidate> = [];
     const processedMaskIds = new Set<string>();
 
-    for (const depthMap of input.depthMaps!) {
+    // Safety limit: cap depth maps processed to avoid runaway compute.
+    // With 2 photos this is trivial, but protects against future N-photo runs.
+    const maxDepthMaps = Math.min(input.depthMaps!.length, 10);
+    if (input.depthMaps!.length > maxDepthMaps) {
+      console.warn(
+        `[PlaneExtraction] Capping depth maps from ${input.depthMaps!.length} to ${maxDepthMaps} to avoid timeout`,
+      );
+    }
+
+    for (let dmIdx = 0; dmIdx < maxDepthMaps; dmIdx++) {
+      const depthMap = input.depthMaps![dmIdx];
+
+      console.info(
+        `[PlaneExtraction] Processing depth map ${dmIdx + 1}/${maxDepthMaps}: fileId=${depthMap.fileId}, ` +
+        `${depthMap.width}x${depthMap.height}, confidence=${depthMap.confidence}`,
+      );
+
       // Run depth-aware plane extraction
       const depthResult: DepthPlaneExtractionResult = extractDepthPlanes(
         depthMap,
         usedMidas,
         input.config?.depthPlaneOptions,
+      );
+
+      console.info(
+        `[PlaneExtraction] Depth map ${dmIdx + 1}: ${depthResult.planes.length} depth planes extracted ` +
+        `(${depthResult.planes.filter(p => p.orientation === 'slanted').length} slanted, ` +
+        `${depthResult.planes.filter(p => p.orientation === 'vertical').length} vertical, ` +
+        `${depthResult.planes.filter(p => p.orientation === 'far').length} far, ` +
+        `${depthResult.planes.filter(p => p.orientation === 'horizontal').length} horizontal)`,
       );
 
       // Map depth planes to RoofPlaneCandidate / WallPlaneCandidate
@@ -803,6 +832,13 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
     artifacts.push(...depthArtifacts);
     timings['depth_extraction'] = Date.now() - tDepth;
 
+    console.info(
+      `[PlaneExtraction] Depth-augmented path: ${depthArtifacts.length} depth-derived planes ` +
+      `(${depthArtifacts.filter(a => a.artifactType === 'roof_plane_candidate').length} roof, ` +
+      `${depthArtifacts.filter(a => a.artifactType === 'wall_plane_candidate').length} wall) ` +
+      `in ${timings['depth_extraction']}ms, processedMaskIds=${processedMaskIds.size}`,
+    );
+
     // ── Heuristic fallback for unprocessed masks ────────────────────────
     // Any roof/wall mask that wasn't matched to a depth plane still gets
     // the heuristic treatment. This ensures coverage when depth misses a
@@ -840,6 +876,13 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
     artifacts.push(...heuristicArtifacts);
     timings['heuristic_extraction'] = Date.now() - tHeuristic;
   }
+
+  console.info(
+    `[PlaneExtraction] Complete: ${artifacts.length} total planes ` +
+    `(${artifacts.filter(a => a.artifactType === 'roof_plane_candidate').length} roof, ` +
+    `${artifacts.filter(a => a.artifactType === 'wall_plane_candidate').length} wall) ` +
+    `timings={${Object.entries(timings).map(([k,v]) => `${k}=${v}ms`).join(', ')}}`,
+  );
 
   return {
     artifacts,

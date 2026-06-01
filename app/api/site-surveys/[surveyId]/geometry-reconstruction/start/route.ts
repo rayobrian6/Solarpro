@@ -22,6 +22,8 @@ import {
   insertReconstructionJob,
   updateReconstructionJobStatus,
   insertReconstructionArtifact,
+  insertReconstructionArtifactsBatch,
+  deleteArtifactsBySurvey,
 } from '@/lib/db/geometryReconstruction';
 import { generateMockArtifacts } from '@/lib/siteSurveys/geometryReconstruction/mockAdapter';
 import {
@@ -149,6 +151,13 @@ export async function POST(
       }
 
       const { artifacts, stages, totalDurationMs, segmentationBackend, sam2PhotoCount, failedPhotoCount, skippedPhotoCount, cannyPhotoCount, photoResults, budgetExhaustedReason } = pipelineResult;
+
+      // Log per-stage timing for 504 debugging
+      const stageSummary = stages.map(s => `${s.stage}=${s.durationMs}ms(${s.artifactCount} artifacts)`).join(', ');
+      console.info(
+        `[POST geometry-reconstruction/start] Pipeline completed: ${totalDurationMs}ms total, stages: [${stageSummary}]`,
+      );
+
       const rawArtifactCount = artifacts.length;
       const rawConsensusPlaneCount = artifacts.filter(
         (artifact) => artifact.artifactType === 'consensus_plane_candidate',
@@ -157,13 +166,23 @@ export async function POST(
         (artifact) => 'polygon' in artifact && Array.isArray(artifact.polygon) && artifact.polygon.length > 0,
       ).length;
 
-      // Persist each artifact
-      for (const artifact of artifacts) {
-        await insertReconstructionArtifact(job.id, surveyId, user.id, artifact, pipeline);
+      // Persist artifacts (clean up old artifacts first to avoid accumulation)
+      // Use batch insert instead of one-by-one to reduce DB round-trips from ~328 to ~3
+      const tDbStart = Date.now();
+      const deletedReconCount = await deleteArtifactsBySurvey(surveyId);
+      if (deletedReconCount > 0) {
+        console.info(
+          `[POST geometry-reconstruction/start] Deleted ${deletedReconCount} previous reconstruction artifacts for survey=${surveyId}`,
+        );
       }
+      const batchResult = await insertReconstructionArtifactsBatch(job.id, surveyId, user.id, artifacts, pipeline);
+      console.info(
+        `[POST geometry-reconstruction/start] Batch inserted ${batchResult.inserted}/${artifacts.length} reconstruction artifacts (failed=${batchResult.failed}) in ${Date.now() - tDbStart}ms`,
+      );
 
       // Adapt Pipeline B artifacts into unified geometry table
       try {
+        const tUnifiedStart = Date.now();
         // Clean up ALL previous unified artifacts for this survey.
         // This ensures stale Canny masks from Pipeline A (photo_vision)
         // don't coexist with new SAM2 masks from Pipeline B (geometry_recon).
@@ -179,7 +198,7 @@ export async function POST(
         const adaptedArtifacts = adaptGeometryReconBundle(artifacts, surveyId);
         const writeResult = await writeUnifiedArtifacts(adaptedArtifacts);
         console.info(
-          `[POST geometry-reconstruction/start] Adapted ${adaptedArtifacts.length} Pipeline B artifacts to unified: inserted=${writeResult.inserted} skipped=${writeResult.skipped} failed=${writeResult.failed}`,
+          `[POST geometry-reconstruction/start] Adapted ${adaptedArtifacts.length} Pipeline B artifacts to unified: inserted=${writeResult.inserted} skipped=${writeResult.skipped} failed=${writeResult.failed} in ${Date.now() - tUnifiedStart}ms`,
         );
       } catch (adaptErr) {
         // Non-fatal: unified table write failure should not block the pipeline result
