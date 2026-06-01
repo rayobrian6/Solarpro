@@ -69,6 +69,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # Copy app code
 WORKDIR /app
 COPY main.py /app/main.py
+COPY onnx_sam2_amg.py /app/onnx_sam2_amg.py
 
 # Model cache directory — HF downloads checkpoints here
 ENV SAM2_CACHE_DIR=/app/.cache
