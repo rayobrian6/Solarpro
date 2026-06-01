@@ -18,15 +18,28 @@ ONNX Encoder I/O (same for tiny/small/base-plus/large — Hiera backbone variant
   Output: high_res_feats_1     Float32[1, 64, 128, 128]   high-res features
 
 ONNX Decoder I/O (from samexporter/export_sam2.py spec):
-  Input:  image_embed          Float32[1, 256, 64, 64]    from encoder
-  Input:  high_res_feats_0     Float32[1, 32, 256, 256]   from encoder
-  Input:  high_res_feats_1     Float32[1, 64, 128, 128]   from encoder
-  Input:  point_coords         Float32[1, 2, 2]            [[x,y],[0,0]] IN ENCODER SPACE
-  Input:  point_labels         Float32[1, 2]               [1, -1] padded
-  Input:  mask_input           Float32[1, 1, 256, 256]    zeros = no prior mask
-  Input:  has_mask_input       Float32[1]                  [0] = no prior mask
-  Output: masks                Float32[1, 2, 256, 256]    2 mask candidates (multimask)
-  Output: iou_predictions      Float32[1, 2]              IoU score per mask
+  Input:  image_embed          Float32[1, 256, 64, 64]    FIXED batch=1 (shared)
+  Input:  high_res_feats_0     Float32[1, 32, 256, 256]   FIXED batch=1 (shared)
+  Input:  high_res_feats_1     Float32[1, 64, 128, 128]   FIXED batch=1 (shared)
+  Input:  point_coords         Float32[num_labels, 2, 2]   DYNAMIC (batch axis)
+  Input:  point_labels         Float32[num_labels, 2]      DYNAMIC (batch axis)
+  Input:  mask_input           Float32[num_labels, 1, 256, 256]  DYNAMIC (batch axis)
+  Input:  has_mask_input       Float32[num_labels]         DYNAMIC (batch axis)
+  Output: masks                Float32[num_labels, 2, 256, 256]  2 mask candidates
+  Output: iou_predictions      Float32[num_labels, 2]     IoU score per mask
+
+  CRITICAL: The samexporter ONNX decoder does NOT support batching (num_labels > 1).
+  Two approaches were tested and both fail:
+    1. Feature tiling (np.repeat): Fails because encoder inputs have FIXED batch=1.
+       Error: "Got invalid dimensions for input 'image_embed' — Got N Expected 1"
+    2. num_labels batching: Fails because _embed_masks() does has_mask_input * mask_downscaling(input_mask),
+       and ONNX Runtime's Mul node cannot broadcast a 1D tensor (N,) against a 4D tensor (N, C, H, W).
+       Error: "Attempting to broadcast an axis by a dimension other than 1. N by 64"
+
+  Therefore, the only working approach is single-point decoding (num_labels=1 per call).
+  At __init__ time, we detect fixed-batch decoders and force points_per_batch=1,
+  which makes _decode_batch_points() loop over _decode_single_point() directly.
+  This eliminates all ONNXRuntimeError spam while producing identical results.
 
   NOTE on point_coords coordinate space:
   The samexporter ONNX decoder wraps SAM2's _embed_points which does:
@@ -269,6 +282,41 @@ class ONNXSAM2AutomaticMaskGenerator:
         if self._decoder_has_orig_im_size:
             logger.info("Decoder has orig_im_size input — will pass original image dimensions")
 
+        # Detect whether the decoder supports batched inference (num_labels > 1).
+        # The samexporter ONNX decoder has FIXED batch=1 for encoder feature inputs
+        # and its _embed_masks() function cannot handle num_labels > 1 due to a
+        # broadcast bug (has_mask_input (N,) × Conv output (N, C, H, W)).
+        # If we detect fixed batch=1 on any encoder feature input, we force
+        # points_per_batch=1 and use single-point decoding exclusively.
+        self._decoder_batch_mode = "batch"  # optimistic default
+        for inp in self.decoder_session.get_inputs():
+            if inp.name in self._encoder_output_names and len(inp.shape) >= 1:
+                first_dim = inp.shape[0]
+                if isinstance(first_dim, int) and first_dim == 1:
+                    self._decoder_batch_mode = "single"
+                    break
+
+        if self._decoder_batch_mode == "single":
+            if self.points_per_batch > 1:
+                logger.warning(
+                    f"Decoder has fixed batch=1 on encoder inputs — "
+                    f"batching NOT supported. Forcing points_per_batch=1 "
+                    f"(was {self.points_per_batch}). Single-point decoding "
+                    f"produces identical results without ONNX batch errors."
+                )
+                self.points_per_batch = 1
+            else:
+                logger.info(
+                    "Decoder has fixed batch=1 on encoder inputs — "
+                    "using single-point decoding (points_per_batch=1)."
+                )
+        else:
+            logger.info(
+                "Decoder has dynamic batch on encoder inputs — "
+                "batched decoding enabled (points_per_batch=%d)."
+                % self.points_per_batch
+            )
+
         # Estimate memory per batch point to auto-reduce batch size if needed.
         # The main memory cost of batching is tiling encoder features across
         # the batch dimension. We compute the estimated bytes per point so
@@ -333,8 +381,14 @@ class ONNXSAM2AutomaticMaskGenerator:
         within available RAM. On Render Standard (2GB), we target leaving
         at least 512MB free for the batch inference.
 
+        For fixed-batch decoders (self._decoder_batch_mode == "single"),
+        always returns 1 — batching is not supported.
+
         Returns the clamped batch size (min 1, max n_points).
         """
+        if self._decoder_batch_mode == "single":
+            return 1
+
         if self._est_bytes_per_point == 0:
             return min(self.points_per_batch, n_points)
 
@@ -538,11 +592,15 @@ class ONNXSAM2AutomaticMaskGenerator:
         image_w: int,
     ) -> list[dict[str, Any]]:
         """
-        Run the ONNX decoder for a batch of point prompts in a single call.
+        Run the ONNX decoder for a batch of point prompts.
 
-        Instead of calling the decoder N times (once per point), we batch
-        all points by tiling encoder outputs across the batch dimension.
-        This reduces Python→ONNX bridge overhead from N calls to 1 call.
+        For samexporter ONNX decoders (which have fixed batch=1 on encoder
+        inputs and a broadcast bug in _embed_masks that prevents num_labels > 1),
+        this loops over _decode_single_point() directly — no batched call
+        is attempted, eliminating all ONNXRuntimeError spam.
+
+        For custom ONNX exports with dynamic batch on encoder inputs,
+        this uses feature tiling for true batched inference.
 
         Args:
             encoder_outputs: Dict of encoder output name -> ndarray
@@ -554,29 +612,79 @@ class ONNXSAM2AutomaticMaskGenerator:
         """
         n_points = len(point_coords)
 
-        # Scale all points from original image space → encoder input space
+        # Fast path for fixed-batch decoders: loop over single-point decoding.
+        # This avoids the futile (and error-spamming) batched calls that
+        # always fail and fall back to single-point anyway.
+        if self._decoder_batch_mode == "single":
+            all_masks = []
+            for i in range(n_points):
+                point_masks = self._decode_single_point(
+                    encoder_outputs=encoder_outputs,
+                    point_coord=point_coords[i],
+                    image_h=image_h,
+                    image_w=image_w,
+                )
+                all_masks.extend(point_masks)
+            return all_masks
+
+        # Dynamic-batch decoder: use feature tiling for true batched inference
         scaled_coords = point_coords.copy()
         scaled_coords[:, 0] = point_coords[:, 0] / image_w * self._encoder_input_w
         scaled_coords[:, 1] = point_coords[:, 1] / image_h * self._encoder_input_h
 
-        # Build decoder feed dict with batched inputs
+        return self._decode_batch_via_feature_tiling(
+            encoder_outputs, scaled_coords, point_coords,
+            image_h, image_w, n_points,
+        )
+
+    def _decode_batch_via_num_labels(
+        self,
+        encoder_outputs: dict[str, np.ndarray],
+        scaled_coords: np.ndarray,
+        point_coords: np.ndarray,
+        image_h: int,
+        image_w: int,
+        n_points: int,
+    ) -> list[dict[str, Any]]:
+        """
+        Batch N point prompts using the 'num_labels' dimension.
+
+        NOTE: This method is currently UNREACHABLE because the samexporter
+        ONNX decoder has a broadcast bug in _embed_masks() that prevents
+        num_labels > 1 from working. When _decoder_batch_mode == "single",
+        _decode_batch_points() loops over _decode_single_point() directly.
+        This method is retained for potential future use if a fixed ONNX
+        export becomes available.
+
+        The broadcast bug: _embed_masks() does has_mask_input * mask_downscaling(input_mask).
+        When num_labels=N, has_mask_input is (N,) and mask_downscaling output is (N, C, H, W).
+        ONNX Runtime's Mul node cannot broadcast 1D (N,) against 4D (N, C, H, W) —
+        error: "Attempting to broadcast an axis by a dimension other than 1. N by 64"
+
+        Feed dict (when this method IS reachable):
+          image_embed:       (1, 256, 64, 64)  — shared, not tiled
+          high_res_feats_0:  (1, 32, 256, 256) — shared, not tiled
+          high_res_feats_1:  (1, 64, 128, 128) — shared, not tiled
+          point_coords:      (N, 2, 2) — N label sets × 2 points × 2 coords
+          point_labels:      (N, 2)    — N label sets × [1, -1]
+          mask_input:        (N, 1, 256, 256) — separate mask per label set
+          has_mask_input:    (N,)      — [0, 0, ...] no prior mask
+        """
         feed = {}
 
-        # Map encoder outputs → tile across batch dimension
         for name in self._decoder_input_names:
             if name in encoder_outputs:
-                # Tile encoder output: (1, C, H, W) → (N, C, H, W)
-                feat = encoder_outputs[name]
-                feed[name] = np.repeat(feat, n_points, axis=0)
+                # Encoder features: pass through as-is (batch=1, shared)
+                feed[name] = encoder_outputs[name]
             elif "point_coord" in name:
-                # Point coords: (N, 2, 2) — scaled point + padding per batch item
+                # Point coords: (N, 2, 2) — foreground point + padding per label set
                 coords = np.zeros((n_points, 2, 2), dtype=np.float32)
                 coords[:, 0, 0] = scaled_coords[:, 0]  # x
                 coords[:, 0, 1] = scaled_coords[:, 1]  # y
                 # coords[:, 1, :] = 0 (padding, already zeros)
                 feed[name] = coords
             elif "point_label" in name:
-                # Point labels: (N, 2) — [1, -1] per batch item
+                # Point labels: (N, 2) — [1, -1] per label set
                 labels = np.zeros((n_points, 2), dtype=np.float32)
                 labels[:, 0] = 1.0   # foreground
                 labels[:, 1] = -1.0  # padding
@@ -596,13 +704,16 @@ class ONNXSAM2AutomaticMaskGenerator:
                     (n_points, 1),
                 )
             else:
-                logger.warning(f"Unknown decoder input in batch: {name}")
+                logger.warning(f"Unknown decoder input in num_labels batch: {name}")
 
         # Run decoder — single call for entire batch
         try:
             decoder_outputs = self.decoder_session.run(None, feed)
         except Exception as e:
-            logger.warning(f"Batch decoder run failed ({n_points} points): {e}")
+            logger.warning(
+                f"num_labels batch decoder failed ({n_points} points): {e}. "
+                f"Falling back to single-point decoding."
+            )
             # Fall back to single-point decoding
             all_masks = []
             for i in range(n_points):
@@ -659,6 +770,124 @@ class ONNXSAM2AutomaticMaskGenerator:
                 # Binarize at threshold 0
                 mask_bin = mask_upscaled > 0.0
 
+                result_masks.append({
+                    "segmentation": mask_bin,
+                    "predicted_iou": iou_score,
+                    "stability_score": stability,
+                    "point_coords": [point_coords[i].tolist()],
+                })
+
+        return result_masks
+
+    def _decode_batch_via_feature_tiling(
+        self,
+        encoder_outputs: dict[str, np.ndarray],
+        scaled_coords: np.ndarray,
+        point_coords: np.ndarray,
+        image_h: int,
+        image_w: int,
+        n_points: int,
+    ) -> list[dict[str, Any]]:
+        """
+        Batch N point prompts by tiling encoder features across the batch
+        dimension. This only works when the decoder has a DYNAMIC batch
+        dimension for encoder feature inputs (e.g., some custom ONNX exports).
+
+        Feed dict:
+          image_embed:       (N, 256, 64, 64)  — tiled from (1, ...)
+          high_res_feats_0:  (N, 32, 256, 256) — tiled from (1, ...)
+          high_res_feats_1:  (N, 64, 128, 128) — tiled from (1, ...)
+          point_coords:      (N, 2, 2)
+          point_labels:      (N, 2)
+          mask_input:        (N, 1, 256, 256)
+          has_mask_input:    (N,)
+        """
+        feed = {}
+
+        for name in self._decoder_input_names:
+            if name in encoder_outputs:
+                # Tile encoder output: (1, C, H, W) → (N, C, H, W)
+                feat = encoder_outputs[name]
+                feed[name] = np.repeat(feat, n_points, axis=0)
+            elif "point_coord" in name:
+                coords = np.zeros((n_points, 2, 2), dtype=np.float32)
+                coords[:, 0, 0] = scaled_coords[:, 0]
+                coords[:, 0, 1] = scaled_coords[:, 1]
+                feed[name] = coords
+            elif "point_label" in name:
+                labels = np.zeros((n_points, 2), dtype=np.float32)
+                labels[:, 0] = 1.0
+                labels[:, 1] = -1.0
+                feed[name] = labels
+            elif "mask" in name and "has" not in name and "orig" not in name:
+                mask_h = self._encoder_input_h // 4
+                mask_w = self._encoder_input_w // 4
+                feed[name] = np.zeros((n_points, 1, mask_h, mask_w), dtype=np.float32)
+            elif "has_mask" in name:
+                feed[name] = np.zeros(n_points, dtype=np.float32)
+            elif "orig_im_size" in name:
+                feed[name] = np.tile(
+                    np.array([float(image_h), float(image_w)], dtype=np.float32),
+                    (n_points, 1),
+                )
+            else:
+                logger.warning(f"Unknown decoder input in feature-tiling batch: {name}")
+
+        try:
+            decoder_outputs = self.decoder_session.run(None, feed)
+        except Exception as e:
+            logger.warning(
+                f"Feature-tiling batch decoder failed ({n_points} points): {e}. "
+                f"Falling back to single-point decoding."
+            )
+            all_masks = []
+            for i in range(n_points):
+                point_masks = self._decode_single_point(
+                    encoder_outputs=encoder_outputs,
+                    point_coord=point_coords[i],
+                    image_h=image_h,
+                    image_w=image_w,
+                )
+                all_masks.extend(point_masks)
+            return all_masks
+
+        # Parse batch outputs (same logic as num_labels path)
+        masks_raw = decoder_outputs[0]
+        iou_preds = decoder_outputs[1]
+        result_masks = []
+        n_proposals = masks_raw.shape[1] if masks_raw.ndim >= 3 else 1
+
+        for i in range(n_points):
+            for j in range(n_proposals):
+                if iou_preds.ndim >= 2:
+                    iou_score = float(iou_preds[i, j])
+                else:
+                    iou_score = float(iou_preds[i])
+
+                if iou_score < self.pred_iou_thresh:
+                    continue
+
+                if masks_raw.ndim == 4:
+                    mask_low_res = masks_raw[i, j]
+                elif masks_raw.ndim == 3:
+                    mask_low_res = masks_raw[i]
+                else:
+                    mask_low_res = masks_raw
+
+                if self._decoder_has_orig_im_size:
+                    mask_upscaled = mask_low_res.astype(np.float32)
+                else:
+                    mask_upscaled = cv2.resize(
+                        mask_low_res.astype(np.float32),
+                        (image_w, image_h),
+                        interpolation=cv2.INTER_LINEAR,
+                    )
+
+                stability = self._compute_stability_score(mask_upscaled, 0.0, 1.0)
+                if stability < self.stability_score_thresh:
+                    continue
+
+                mask_bin = mask_upscaled > 0.0
                 result_masks.append({
                     "segmentation": mask_bin,
                     "predicted_iou": iou_score,
