@@ -54,7 +54,7 @@ import {
 // Worker version
 // ---------------------------------------------------------------------------
 
-export const SEGMENTATION_WORKER_VERSION = '5.1.0-sam2-concurrent-10photos-30masks';
+export const SEGMENTATION_WORKER_VERSION = '5.2.0-sam2-rapidloop-15photos-30masks';
 
 // ---------------------------------------------------------------------------
 // Limitations
@@ -165,30 +165,29 @@ const MAX_SOURCE_PHOTOS = 15;
 
 /**
  * Maximum number of source photos to process with SAM 2.
- * SAM 2 on Render Pro (CPU, 2 vCPU) takes ~50s per photo for ONNX inference
- * at 384px (the image encoder dominates runtime, points_per_side has minimal effect).
- * With 2-batch concurrency, each batch of 2 photos takes ~50s (parallel).
- * 10 photos ÷ 2 = 5 batches × 50s ≈ 250s, plus ~50s overhead = ~300s total.
- * This fits within Vercel's maxDuration=300s hard limit with zero buffer.
+ * SAM 2 on Render Pro (CPU, 2 vCPU) with rapid-loop decode + points_per_side=8
+ * takes ~16-20s per photo for ONNX inference at 384px. The image encoder
+ * still dominates runtime (~15s), but decoder is now ~3-5s (was ~35s)
+ * thanks to pre-allocated feed dict + in-place coord updates.
+ * With 2-batch concurrency, each batch of 2 photos takes ~20s (parallel).
+ * 15 photos ÷ 2 = 8 batches × 20s ≈ 160s, plus ~40s overhead = ~200s total.
+ * This fits within Vercel's maxDuration=300s hard limit with 100s buffer.
  *
- * PREVIOUS: MAX_SAM2_PHOTOS=15 caused 504 Gateway Timeout because
- * 15 photos × 50s/batch ÷ 2 = 400s > 300s Vercel limit.
- * User requirement is "minimum 8 to 15" — 10 is the max that fits in 300s.
- * To reach 15 photos, we need either GPU inference, async pipeline, or
- * reduced MAX_IMAGE_DIM (256-320px).
+ * PREVIOUS: MAX_SAM2_PHOTOS=10 with ~50s/photo → 250s + overhead ≈ 300s.
+ * Now with rapid-loop decode (~20s/photo), 15 photos fits in ~200s.
+ * User requirement is "minimum 8 to 15" — 15 now fits in 300s.
  */
-const MAX_SAM2_PHOTOS = 10;
+const MAX_SAM2_PHOTOS = 15;
 
 /**
  * Maximum total segmentation masks to produce across ALL photos.
- * With 12 regions per photo × 10 photos = 120 theoretical max,
+ * With 12 regions per photo × 15 photos = 180 theoretical max,
  * but classification filtering reduces this. Hard cap prevents
  * downstream stages (line extraction, plane extraction, etc.) from
  * exploding into thousands of artifacts.
  *
- * Increased from 150 to 300 to accommodate 10 photos with SAM2
- * (up from 5). Each photo produces ~8-12 roof-relevant masks,
- * so 10 photos × 12 = 120 roof-relevant masks (after filtering).
+ * Each photo produces ~8-12 roof-relevant masks after filtering,
+ * so 15 photos × 12 = 180 roof-relevant masks (after filtering).
  * 300 gives headroom for edge cases without risking downstream explosion.
  */
 const MAX_TOTAL_MASKS = 300;
@@ -197,15 +196,14 @@ const MAX_TOTAL_MASKS = 300;
  * Maximum wall-clock milliseconds the segmentation stage may consume.
  * The full pipeline has PIPELINE_TIMEOUT_MS = 270_000ms (4.5 minutes).
  * Segmentation is Stage 1, but we must leave time for 6 more stages
- * plus DB writes. With 10 photos × ~50s SAM2 batch inference on Pro,
- * and 2-batch concurrency, segmentation takes ~152s.
+ * plus DB writes. With 15 photos × ~20s SAM2 inference on Pro,
+ * and 2-batch concurrency, segmentation takes ~160s.
  * Capping at 260s leaves 40s for downstream stages and DB writes
- * within Vercel's 300s hard limit. This is tight but the pipeline
- * timeout check will skip remaining stages if we run over.
+ * within Vercel's 300s hard limit.
  *
- * NOTE: SAM2 ONNX inference at 384px takes ~50s per batch of 2 photos,
- * so 10 photos = 5 batches × 50s = 250s. The 260s cap ensures we
- * complete all 10 photos but skip if we're running late.
+ * NOTE: SAM2 ONNX inference at 384px with rapid-loop decode takes
+ * ~20s per batch of 2 photos, so 15 photos = 8 batches × 20s = 160s.
+ * The 260s cap gives generous buffer for warm-up + image fetches.
  */
 const SEGMENTATION_STAGE_TIMEOUT_MS = 260_000;
 
@@ -411,19 +409,20 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   }
 
   // Stage 2: Extract geometry from each photo
-  // ── SAM 2 CONCURRENT BATCH PROCESSING ──────────────────────────────────
-  // SAM 2 on Render Pro (CPU, 2 vCPU) takes ~19s per photo for inference (points_per_side=12).
+  // ── SAM 2 CONCURRENT BATCH PROCESSING ────────────────────────────
+  // SAM 2 on Render Pro (CPU, 2 vCPU) with rapid-loop decode takes ~16-20s
+  // per photo for ONNX inference at 384px (points_per_side=8).
   // The SAM2 service uses ThreadPoolExecutor(max_workers=2), so it CAN
   // process 2 inference requests concurrently. With 4GB RAM on Pro,
   // 2 concurrent ONNX small-model inferences at 384px use ~3GB total.
   //
   // Strategy: process photos in concurrent batches of 2, sending both
   // SAM2 requests simultaneously. This halves the wall-clock time for
-  // the segmentation stage: 10 photos ÷ 2 concurrency = 5 batches × ~50s
-  // = ~250s total (fits within the 260s SEGMENTATION_STAGE_TIMEOUT_MS).
+  // the segmentation stage: 15 photos ÷ 2 concurrency = 8 batches × ~20s
+  // = ~160s total (fits within the 260s SEGMENTATION_STAGE_TIMEOUT_MS).
   //
-  // Without concurrency: 10 × 50s = 500s (exceeds 240s stage timeout).
-  // With 2x concurrency: 10 ÷ 2 × 50s ≈ 250s (fits within 240s with early termination).
+  // Without concurrency: 15 × 20s = 300s (exceeds 260s stage timeout).
+  // With 2x concurrency: 15 ÷ 2 × 20s ≈ 160s (fits with 100s buffer).
   //
   // If SAM2 fails for a photo → NO masks, record honest failure.
   // If SAM2 budget exhausted → skip remaining photos, record skip reason.
