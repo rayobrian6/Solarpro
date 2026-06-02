@@ -537,6 +537,45 @@ describe('Test 7: Pipeline B adapter (adaptGeometryReconArtifact)', () => {
     expect(artifact.geometryClass).toBeDefined();
     expect(artifact.surveyId).toBe('survey-001');
   });
+
+  it('keeps semantic classes metadata-only and out of structural geometry mappings', () => {
+    const makeMask = (segmentationClass: string) => ({
+      ...artifactFixtures.semantic_segmentation_mask,
+      id: `ssm-${segmentationClass}`,
+      segmentationClass,
+      polygon: [
+        { x: 100, y: 100, coordinateSystem: 'normalized_image_0_1000' as const },
+        { x: 250, y: 100, coordinateSystem: 'normalized_image_0_1000' as const },
+        { x: 250, y: 220, coordinateSystem: 'normalized_image_0_1000' as const },
+        { x: 100, y: 220, coordinateSystem: 'normalized_image_0_1000' as const },
+      ],
+      maskBounds: { x: 100, y: 100, width: 150, height: 120 },
+      isOccluder: segmentationClass === 'truck' ? true : null,
+    });
+
+    const cases = [
+      { cls: 'truck', role: 'temporary_occluder', flags: { isTemporaryOccluder: true, isStructure: false } },
+      { cls: 'driveway', role: 'ground_surface', flags: { isGroundSurface: true, isStructure: false } },
+      { cls: 'window', role: 'facade', flags: { isStructure: false } },
+      { cls: 'utility_meter', role: 'electrical_context', flags: { isStructure: false } },
+      { cls: 'roof', role: 'structure', flags: { isStructure: true } },
+      { cls: 'wall', role: 'structure', flags: { isStructure: true } },
+    ];
+
+    for (const testCase of cases) {
+      const artifact = adaptGeometryReconArtifact(makeMask(testCase.cls) as any, 'survey-001');
+      expect(artifact.geometryClass).toBe('segmentation_mask');
+      expect(['roof_plane', 'wall_plane', 'roof_line', 'consensus_plane']).not.toContain(artifact.geometryClass);
+      expect(artifact.semanticClass).toBe(testCase.cls);
+      expect(artifact.sceneRole).toBe(testCase.role);
+      expect(artifact.cadRelevance).toBe(testCase.cls === 'roof' || testCase.cls === 'wall' ? 'existing_pipeline_only' : 'review_context');
+      expect(artifact.reviewRequired).toBe(true);
+      for (const [flag, expected] of Object.entries(testCase.flags)) {
+        expect((artifact as any)[flag]).toBe(expected);
+      }
+    }
+  });
+
 });
 
 // ══════════════════════════════════════════════════════════════════════════════

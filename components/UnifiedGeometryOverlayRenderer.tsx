@@ -290,6 +290,100 @@ const MIN_ROOF_LINE_CONFIDENCE = 40;
 
 /** Maximum number of roof_line artifacts to render per file. */
 const MAX_ROOF_LINES_PER_FILE = 50;
+const NORMALIZED_IMAGE_MAX = 1000;
+const MAX_NON_BACKGROUND_POLYGON_AREA_RATIO = 0.95;
+
+function warnInvalidOverlayGeometry(artifact: UnifiedGeometryArtifact, reason: string): void {
+  if (process.env.NODE_ENV !== 'production') {
+    // eslint-disable-next-line no-console
+    console.warn('[UnifiedGeometryOverlayRenderer] Skipping invalid overlay polygon', {
+      artifactId: artifact.id,
+      geometryClass: artifact.geometryClass,
+      segmentationClass: artifact.segmentationClass,
+      reason,
+    });
+  }
+}
+
+function clampNormalized(value: number): number {
+  return Math.min(NORMALIZED_IMAGE_MAX, Math.max(0, value));
+}
+
+function polygonArea(vertices: Array<{ x: number; y: number }>): number {
+  let sum = 0;
+  for (let i = 0; i < vertices.length; i += 1) {
+    const a = vertices[i];
+    const b = vertices[(i + 1) % vertices.length];
+    sum += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(sum) / 2;
+}
+
+function sanitizePolygonVertices(
+  artifact: UnifiedGeometryArtifact,
+  vertices: Array<{ x: number; y: number; coordinateSystem?: string }>,
+): Array<{ x: number; y: number; coordinateSystem: 'normalized_image_0_1000' }> | null {
+  if (!Array.isArray(vertices) || vertices.length < 3) {
+    warnInvalidOverlayGeometry(artifact, 'polygon has fewer than 3 points');
+    return null;
+  }
+
+  const validVertices: Array<{ x: number; y: number; coordinateSystem: 'normalized_image_0_1000' }> = [];
+  let sawOutOfBounds = false;
+
+  for (const vertex of vertices) {
+    if (!Number.isFinite(vertex.x) || !Number.isFinite(vertex.y)) {
+      warnInvalidOverlayGeometry(artifact, 'polygon contains NaN or Infinity coordinates');
+      return null;
+    }
+
+    if (vertex.x < 0 || vertex.x > NORMALIZED_IMAGE_MAX || vertex.y < 0 || vertex.y > NORMALIZED_IMAGE_MAX) {
+      sawOutOfBounds = true;
+    }
+
+    const clamped = {
+      x: clampNormalized(vertex.x),
+      y: clampNormalized(vertex.y),
+      coordinateSystem: 'normalized_image_0_1000' as const,
+    };
+
+    const previous = validVertices[validVertices.length - 1];
+    if (!previous || previous.x !== clamped.x || previous.y !== clamped.y) {
+      validVertices.push(clamped);
+    }
+  }
+
+  if (validVertices.length > 2) {
+    const first = validVertices[0];
+    const last = validVertices[validVertices.length - 1];
+    if (first.x === last.x && first.y === last.y) validVertices.pop();
+  }
+
+  if (validVertices.length < 3) {
+    warnInvalidOverlayGeometry(artifact, 'polygon collapsed below 3 unique points after clamping');
+    return null;
+  }
+
+  const xs = validVertices.map(v => v.x);
+  const ys = validVertices.map(v => v.y);
+  const width = Math.max(...xs) - Math.min(...xs);
+  const height = Math.max(...ys) - Math.min(...ys);
+  const bboxAreaRatio = (width * height) / (NORMALIZED_IMAGE_MAX * NORMALIZED_IMAGE_MAX);
+  const areaRatio = polygonArea(validVertices) / (NORMALIZED_IMAGE_MAX * NORMALIZED_IMAGE_MAX);
+  const isBackgroundLike = artifact.segmentationClass === 'sky' || artifact.segmentationClass === 'ground' || artifact.geometryClass === 'ground_plane';
+
+  if (!isBackgroundLike && areaRatio > MAX_NON_BACKGROUND_POLYGON_AREA_RATIO) {
+    warnInvalidOverlayGeometry(artifact, `polygon area too large: ${areaRatio.toFixed(3)}`);
+    return null;
+  }
+
+  if (!isBackgroundLike && sawOutOfBounds && bboxAreaRatio > MAX_NON_BACKGROUND_POLYGON_AREA_RATIO) {
+    warnInvalidOverlayGeometry(artifact, 'out-of-bounds polygon spans nearly the full image');
+    return null;
+  }
+
+  return validVertices;
+}
 
 /* ── Geometry extraction helpers ─────────────────────────────────────── */
 
@@ -316,7 +410,8 @@ function extractArtifactGeometry(artifact: UnifiedGeometryArtifact): {
     Array.isArray(artifact.polygon.vertices) &&
     artifact.polygon.vertices.length >= 3
   ) {
-    polygonSvg = normalizedPolygonToSvgPercent(artifact.polygon.vertices);
+    const safeVertices = sanitizePolygonVertices(artifact, artifact.polygon.vertices);
+    polygonSvg = safeVertices ? normalizedPolygonToSvgPercent(safeVertices) : null;
   }
 
   // Bounding box — either as fallback rect, or derive polygon for plane artifacts
@@ -337,7 +432,8 @@ function extractArtifactGeometry(artifact: UnifiedGeometryArtifact): {
         { x: b.x + b.width, y: b.y + b.height },
         { x: b.x, y: b.y + b.height },
       ];
-      polygonSvg = normalizedPolygonToSvgPercent(derivedVertices);
+      const safeVertices = sanitizePolygonVertices(artifact, derivedVertices);
+      polygonSvg = safeVertices ? normalizedPolygonToSvgPercent(safeVertices) : null;
     } else {
       // Non-plane artifacts: render as rect
       rectSvg = normalizedRegionToSvgPercent({

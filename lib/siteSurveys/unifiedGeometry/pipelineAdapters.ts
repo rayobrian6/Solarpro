@@ -335,6 +335,14 @@ function makeEmptyArtifact(overrides: Partial<UnifiedGeometryArtifact> & Pick<Un
     siteContextSubtype: null,
     conditionFlags: null,
     isOccluder: null,
+    semanticClass: null,
+    sceneRole: null,
+    isStructure: null,
+    isTemporaryOccluder: null,
+    isVegetation: null,
+    isGroundSurface: null,
+    cadRelevance: null,
+    reviewRequired: null,
     reviewState: 'review_required',
     reviewNotes: null,
     priority: overrides.confidence !== undefined
@@ -706,18 +714,16 @@ function adaptSemanticSegmentationMask(artifact: SemanticSegmentationMask, surve
   const segmentationBackend = detectSegmentationBackend(artifact.rawMask);
   const segClass = artifact.segmentationClass as SegmentationClass;
 
-  // ── Map segmentation class to the appropriate geometryClass ──
-  // Electrical classes → electrical_node (with electricalSubtype)
-  // Occluder classes → segmentation_mask with isOccluder=true (review-only)
-  // Everything else → segmentation_mask (with optional facade/siteContext subtype)
-  let geometryClass: UnifiedGeometryClass = 'segmentation_mask';
+  // Semantic segmentation masks are metadata-only review artifacts.
+  // Do not promote any semantic class into structural geometry here. Roof/wall
+  // geometry may only come from the existing roof_plane/wall_plane candidate paths.
+  const geometryClass: UnifiedGeometryClass = 'segmentation_mask';
   let electricalSubtype: ElectricalNodeSubtype | null = null;
   let facadeSubtype: FacadeSubtype | null = null;
   let siteContextSubtype: SiteContextSubtype | null = null;
 
   if (ELECTRICAL_SEGMENTATION_CLASSES.has(segClass)) {
-    geometryClass = 'electrical_node';
-    // Map segmentation class to electrical subtype
+    // Preserve electrical identity as review metadata on the mask only.
     const electricalMap: Partial<Record<SegmentationClass, ElectricalNodeSubtype>> = {
       utility_meter: 'utility_meter',
       main_service_panel: 'main_service_panel',
@@ -727,9 +733,6 @@ function adaptSemanticSegmentationMask(artifact: SemanticSegmentationMask, surve
       battery: 'battery',
     };
     electricalSubtype = electricalMap[segClass] ?? 'unknown_electrical';
-  } else if (segClass === 'ac_unit' || segClass === 'existing_solar_panel') {
-    // These are obstructions from a solar perspective
-    geometryClass = 'obstruction';
   } else if (FACADE_SEGMENTATION_CLASSES.has(segClass)) {
     // Facade classes stay as segmentation_mask but get a facadeSubtype
     const facadeMap: Partial<Record<SegmentationClass, FacadeSubtype>> = {
@@ -768,18 +771,40 @@ function adaptSemanticSegmentationMask(artifact: SemanticSegmentationMask, surve
     conditionFlags = [segClass as UnifiedConditionFlag];
   }
 
-  // Occluder flag: propagate from artifact
+  // Occluder flag: propagate from artifact. Trucks/cars/trailers remain masks, never geometry.
   const isOccluder = artifact.isOccluder ?? (OCCLUDER_SEGMENTATION_CLASSES.has(segClass) || null);
+
+  const isStructure = segClass === 'roof' || segClass === 'wall';
+  const isTemporaryOccluder = OCCLUDER_SEGMENTATION_CLASSES.has(segClass);
+  const isVegetation = segClass === 'tree' || segClass === 'trees' || segClass === 'bushes' || segClass === 'grass' || segClass === 'overgrown_grass' || segClass === 'vegetation_touching_structure';
+  const isGroundSurface = segClass === 'ground' || segClass === 'grass' || segClass === 'overgrown_grass' || segClass === 'gravel' || segClass === 'driveway' || segClass === 'sidewalk';
+  const sceneRole = isTemporaryOccluder
+    ? 'temporary_occluder'
+    : isVegetation
+      ? 'vegetation'
+      : isGroundSurface
+        ? 'ground_surface'
+        : facadeSubtype
+          ? 'facade'
+          : ELECTRICAL_SEGMENTATION_CLASSES.has(segClass)
+            ? 'electrical_context'
+            : isStructure
+              ? 'structure'
+              : siteContextSubtype
+                ? 'site_context'
+                : 'unknown';
+  const cadRelevance = isStructure ? 'existing_pipeline_only' : sceneRole === 'unknown' ? 'none' : 'review_context';
+  const reviewRequired = true;
 
   // Build label with class context
   const backendLabel = segmentationBackend === 'sam2' ? 'SAM 2' : segmentationBackend === 'canny' ? 'Canny' : 'Segmentation';
-  const classLabel = geometryClass === 'electrical_node'
-    ? `Electrical: ${segClass}`
-    : geometryClass === 'obstruction'
-      ? `Obstruction: ${segClass}`
+  const classLabel = electricalSubtype
+    ? `Electrical context: ${segClass}`
+    : isTemporaryOccluder
+      ? `Occluder: ${segClass}`
       : facadeSubtype
         ? `Facade: ${segClass}`
-        : siteContextSubtype
+        : siteContextSubtype || isGroundSurface
           ? `Site: ${segClass}`
           : segClass;
 
@@ -806,6 +831,14 @@ function adaptSemanticSegmentationMask(artifact: SemanticSegmentationMask, surve
     siteContextSubtype,
     conditionFlags,
     isOccluder,
+    semanticClass: artifact.segmentationClass,
+    sceneRole,
+    isStructure,
+    isTemporaryOccluder,
+    isVegetation,
+    isGroundSurface,
+    cadRelevance,
+    reviewRequired,
     stageTimings: artifact.stageTimings ?? null,
     isSynthetic,
   });
