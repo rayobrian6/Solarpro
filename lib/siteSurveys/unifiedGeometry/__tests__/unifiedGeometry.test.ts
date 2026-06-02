@@ -332,27 +332,32 @@ describe('Test 5: Bundle builder mock exclusion', () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe('Test 6: Pipeline A adapter (adaptPhotoVisionCandidate)', () => {
+  const makePipelineACandidate = (overrides: Record<string, unknown> = {}) => ({
+    candidateId: 'cand-001',
+    surveyId: 'survey-001',
+    fileId: 'file-001',
+    fileUrl: 'https://example.com/photo.jpg',
+    toolName: 'yolo_v8',
+    toolVersion: '1.0.0',
+    runHash: 'run-hash-001',
+    candidateType: 'obstruction_candidate' as const,
+    candidateCategory: 'obstruction' as const,
+    payload: {
+      region: { x: 100, y: 200, width: 50, height: 60 },
+      confidence: 0.85,
+    },
+    region: { x: 100, y: 200, width: 50, height: 60, coordinateSystem: 'normalized_image_0_1000' as const },
+    confidence: 85,
+    limitations: ['review_only', 'non_authoritative'],
+    reviewStatus: 'review_required' as const,
+    deterministicHash: 'det-hash-001',
+    thumbnailDataUrl: null,
+    createdAt: new Date().toISOString(),
+    ...overrides,
+  });
+
   it('produces correct UnifiedGeometryArtifact with raw_evidence authority', () => {
-    const candidate = {
-      candidateId: 'cand-001',
-      surveyId: 'survey-001',
-      fileId: 'file-001',
-      toolName: 'yolo_v8',
-      toolVersion: '1.0.0',
-      runHash: 'run-hash-001',
-      candidateType: 'obstruction_candidate' as const,
-      candidateCategory: 'obstruction' as const,
-      payload: {
-        region: { x: 100, y: 200, width: 50, height: 60 },
-        confidence: 0.85,
-      },
-      confidence: 85,
-      limitations: ['review_only', 'non_authoritative'],
-      reviewStatus: 'review_required' as const,
-      deterministicHash: 'det-hash-001',
-      thumbnailDataUrl: null,
-      createdAt: new Date().toISOString(),
-    };
+    const candidate = makePipelineACandidate();
 
     const artifact = adaptPhotoVisionCandidate(candidate, 'survey-001');
 
@@ -372,6 +377,59 @@ describe('Test 6: Pipeline A adapter (adaptPhotoVisionCandidate)', () => {
 
     // Geometry class mapping
     expect(artifact.geometryClass).toBe('obstruction');
+  });
+
+  it('does not convert incidental Pipeline A obstruction/electrical lines into drawable unified line segments', () => {
+    const incidentalLine = {
+      x1: 50,
+      y1: 100,
+      x2: 950,
+      y2: 900,
+      orientation: 'diagonal' as const,
+      strength: 0.9,
+      coordinateSystem: 'normalized_image_0_1000' as const,
+    };
+
+    const obstruction = adaptPhotoVisionCandidate(makePipelineACandidate({
+      candidateId: 'obstruction-with-line',
+      candidateType: 'obstruction_candidate' as const,
+      line: incidentalLine,
+    }), 'survey-001');
+
+    const electrical = adaptPhotoVisionCandidate(makePipelineACandidate({
+      candidateId: 'equipment-with-line',
+      candidateType: 'equipment_anchor_candidate' as const,
+      candidateCategory: 'electrical_context' as const,
+      line: incidentalLine,
+    }), 'survey-001');
+
+    expect(obstruction.geometryClass).toBe('obstruction');
+    expect(obstruction.lineSegment).toBeNull();
+    expect(obstruction.lineSubtype).toBeNull();
+    expect(electrical.geometryClass).toBe('electrical_node');
+    expect(electrical.lineSegment).toBeNull();
+    expect(electrical.lineSubtype).toBeNull();
+  });
+
+  it('preserves Pipeline A roof line candidate line segments', () => {
+    const roofLine = adaptPhotoVisionCandidate(makePipelineACandidate({
+      candidateId: 'roof-line-001',
+      candidateType: 'roof_edge_candidate' as const,
+      candidateCategory: 'roof_geometry' as const,
+      line: {
+        x1: 100,
+        y1: 300,
+        x2: 900,
+        y2: 300,
+        orientation: 'horizontal' as const,
+        strength: 0.95,
+        coordinateSystem: 'normalized_image_0_1000' as const,
+      },
+    }), 'survey-001');
+
+    expect(roofLine.geometryClass).toBe('roof_line');
+    expect(roofLine.lineSegment).not.toBeNull();
+    expect(roofLine.lineSubtype).toBe('eave');
   });
 });
 

@@ -350,6 +350,15 @@ const DEFAULT_ROOF_LINE_STYLE = {
 /** Minimum confidence for a roof_line artifact to be rendered in the overlay. */
 const MIN_ROOF_LINE_CONFIDENCE = 40;
 
+/**
+ * Only dedicated line artifacts should render SVG strokes. Other unified
+ * artifacts may contain legacy/incidental lineSegment values from evidence
+ * workers, but those are not architectural overlay geometry.
+ */
+function canRenderArtifactLineSegment(artifact: UnifiedGeometryArtifact): boolean {
+  return artifact.geometryClass === 'roof_line';
+}
+
 /** Maximum number of roof_line artifacts to render per file. */
 const MAX_ROOF_LINES_PER_FILE = 50;
 
@@ -413,7 +422,7 @@ function extractArtifactGeometry(artifact: UnifiedGeometryArtifact): {
   }
 
   // Line segment
-  if (artifact.lineSegment) {
+  if (artifact.lineSegment && canRenderArtifactLineSegment(artifact)) {
     const seg = artifact.lineSegment as GeometryLineSegment;
     lineSvg = normalizedLineToSvgPercent({
       x1: seg.start.x,

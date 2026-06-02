@@ -133,6 +133,16 @@ function regionToBBox(region: OpenSourcePhotoVisionRegion | NormalizedRegion): G
   };
 }
 
+/** Pipeline A candidate types that are allowed to become drawable line geometry. */
+const PIPELINE_A_LINE_CANDIDATE_TYPES = new Set<OpenSourcePhotoVisionCandidateType>([
+  'dominant_line_candidate',
+  'roof_edge_candidate',
+]);
+
+function canPipelineACandidateCarryLine(candidate: OpenSourcePhotoVisionCandidate): boolean {
+  return PIPELINE_A_LINE_CANDIDATE_TYPES.has(candidate.candidateType);
+}
+
 /**
  * Convert a Pipeline A line (normalized_image_0_1000) to a unified GeometryLineSegment.
  */
@@ -385,15 +395,21 @@ export function adaptPhotoVisionCandidate(
     ? { ...MOCK_ARTIFACT_AUTHORITY }
     : { ...RAW_EVIDENCE_AUTHORITY };
 
-  // Build geometry fields based on geometry class
+  // Build geometry fields based on geometry class. Some Pipeline A tools attach
+  // incidental edge lines to equipment/obstruction detections; those are evidence
+  // hints, not drawable roof geometry. Only true line candidate types may carry a
+  // UnifiedGeometry lineSegment, otherwise the unified overlay can turn review
+  // hints into full-image crisscrossing strokes.
   const bbox = candidate.region ? regionToBBox(candidate.region) : null;
-  const lineSegment = candidate.line ? pipelineALineToSegment(candidate.line) : null;
+  const lineSegment = candidate.line && canPipelineACandidateCarryLine(candidate)
+    ? pipelineALineToSegment(candidate.line)
+    : null;
   const center = bbox
     ? { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2, coordinateSystem: 'normalized_image_0_1000' as const }
     : null;
 
   // Class-specific field population
-  const lineSubtype = candidate.line
+  const lineSubtype = candidate.line && canPipelineACandidateCarryLine(candidate)
     ? orientationToLineSubtype(candidate.line.orientation)
     : null;
 
