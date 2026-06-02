@@ -4,8 +4,8 @@
  * Start a new geometry reconstruction job (ASYNC).
  *
  * Architecture:
- *   POST /start → create job (queued) → return 202 { jobId } → trigger /execute
- *   POST /execute → mark running → run pipeline via waitUntil() → return 200 immediately
+ *   POST /start → create job (queued) → return 202 → trigger /execute
+ *   POST /execute → mark running → await pipeline directly → return 200/500
  *   GET /status → poll DB → return progress
  *
  * Why async instead of inline?
@@ -14,18 +14,19 @@
  *   points + depth + planes + multi-view fusion) could exceed the Vercel Pro
  *   300-second timeout, causing a 504. The client never received a response.
  *
- *   The new async approach returns 202 immediately with a jobId. The client
+ *   The async approach returns 202 immediately with a jobId. The client
  *   polls GET /status for progress. The pipeline runs in a separate serverless
- *   function invocation (/execute) using waitUntil() to extend its lifetime.
- *   If /execute times out, the job is marked as failed via heartbeat staleness
- *   detection — the client sees an explicit failure, not a silent 504.
+ *   function invocation (/execute) which awaits the pipeline DIRECTLY (not via
+ *   waitUntil) to ensure outbound fetch calls to the SAM2 Render service are
+ *   properly sustained for the full pipeline duration.
  *
- * Why waitUntil instead of fire-and-forget?
- *   The original fire-and-forget (return 202, then fetch(/execute) without
- *   waiting) was unreliable on Vercel — the serverless function could freeze
- *   before the fetch was even sent. waitUntil() guarantees the fetch promise
- *   completes before the function is suspended. Since /execute returns 200
- *   quickly (after marking the job as running), the fetch resolves fast.
+ * How /start triggers /execute:
+ *   We use waitUntil(fetch('/execute')) to ensure the fetch request is SENT
+ *   before /start's function exits. The /execute function then awaits the
+ *   pipeline directly (up to 270s). Since /start has maxDuration=60, the
+ *   waitUntil will be cancelled after 60s — but /execute is a SEPARATE
+ *   Vercel function invocation that continues running independently.
+ *   The client already received the 202 and is polling GET /status.
  *
  * Mock pipeline: runs synchronously and returns 200 with results (backward compat).
  *
@@ -112,7 +113,7 @@ export async function POST(
     // Create job row — status='queued'
     const job = await insertReconstructionJob(surveyId, user.id, pipeline, input);
 
-    // ── Mock pipeline: run synchronously for backward compatibility ──────────
+    // ── Mock pipeline: run synchronously for backward compatibility ────────────
     if (pipeline === 'mock') {
       const artifacts = generateMockArtifacts(input);
       for (const artifact of artifacts) {
@@ -125,7 +126,7 @@ export async function POST(
       });
     }
 
-    // ── Real Pipeline B: async — trigger /execute, return 202 immediately ───
+    // ── Real Pipeline B: async — trigger /execute, return 202 immediately ──────
     console.info(
       `[POST geometry-reconstruction/start] Job ${job.id} created for pipeline=${pipeline}. ` +
       `Triggering async execution via /execute.`,
@@ -140,9 +141,24 @@ export async function POST(
         : 'http://localhost:3000';
     const executeUrl = `${baseUrl}/api/site-surveys/${surveyId}/geometry-reconstruction/execute`;
 
+    console.info(
+      `[POST geometry-reconstruction/start] Firing fetch to /execute at ${executeUrl} for job=${job.id}`,
+    );
+
     // Fire the execute request using waitUntil — this guarantees the fetch
-    // is sent before the function is suspended. The /execute route returns
-    // 200 quickly (after marking the job as running), so this resolves fast.
+    // is SENT before the function is suspended.
+    //
+    // NOTE: /execute now awaits the pipeline DIRECTLY (not via waitUntil).
+    // This means /execute won't return until the pipeline finishes (up to 270s).
+    // Since /start has maxDuration=60, the waitUntil will be cancelled after 60s.
+    // This is FINE — /execute is a separate Vercel function invocation that
+    // continues running independently. The client already received 202 and is
+    // polling GET /status.
+    //
+    // The important thing is that the fetch REQUEST is sent. Once it reaches
+    // /execute, the pipeline starts running in a separate function with its
+    // own 300s lifetime. Even if /start's waitUntil is cancelled, /execute
+    // keeps running.
     waitUntil(
       fetch(executeUrl, {
         method: 'POST',

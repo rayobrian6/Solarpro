@@ -3,16 +3,41 @@
  *
  * Background worker endpoint for executing the geometry reconstruction pipeline.
  *
- * This endpoint is triggered by the /start route via waitUntil(fetch()).
- * It marks the job as running, returns 200 immediately, then uses waitUntil()
- * to run the pipeline in the background. This gives the pipeline the full
- * serverless function lifetime (up to 300s with Vercel Pro) without blocking
- * the /start route's response.
+ * This endpoint is triggered by the /start route via waitUntil(fetch()). 
+ * It awaits the pipeline DIRECTLY (not via waitUntil) to ensure outbound
+ * fetch calls to the SAM2 Render service are properly sustained for the
+ * full duration of the pipeline.
  *
  * Architecture:
  *   POST /start -> create job (queued) -> return 202 -> waitUntil(fetch(/execute))
- *   POST /execute -> mark running -> return 200 -> waitUntil(run pipeline)
+ *   POST /execute -> mark running -> await pipeline (up to 300s) -> return 200/500
  *   GET /status -> poll DB -> return progress
+ *
+ * WHY WE AWAIT DIRECTLY (not waitUntil):
+ *   The previous implementation used waitUntil() to run the pipeline after 
+ *   returning 200 immediately. This was unreliable — waitUntil() is designed 
+ *   for short-lived side effects (analytics, logging), NOT for running long 
+ *   background jobs. Per Vercel docs: "Promises passed to waitUntil() will 
+ *   have the same timeout as the function itself. If the function times out, 
+ *   the promises will be cancelled." Per Inngest: "waitUntil is not designed 
+ *   for running background jobs."
+ *
+ *   The pipeline's outbound fetch calls to the SAM2 Render service (which can 
+ *   take 20-40s per photo) were not being sustained inside waitUntil(). The 
+ *   Node.js event loop was not keeping those connections alive after the 
+ *   response was sent. This caused Render to never receive the segmentation 
+ *   requests, resulting in "Render logs aren't popping off."
+ *
+ *   By awaiting the pipeline directly, the /execute function keeps its Node.js 
+ *   event loop alive for the full pipeline duration (up to 300s with Vercel Pro). 
+ *   Outbound fetch calls to Render are properly sustained because the function 
+ *   is actively awaiting the pipeline result.
+ *
+ *   The /start route uses waitUntil(fetch('/execute')) to trigger this endpoint.
+ *   Since /execute now takes up to 270s to respond, /start's waitUntil will be 
+ *   cancelled when /start times out (maxDuration=60). This is FINE — /execute 
+ *   is a separate Vercel function invocation that continues running independently.
+ *   The client already received the 202 from /start and is polling GET /status.
  *
  * Heartbeat protocol:
  *   - Initial heartbeat written when job is marked as running (stage='segmentation')
@@ -22,11 +47,6 @@
  *   - If the function times out or crashes, heartbeat staleness detection
  *     (HEARTBEAT_TIMEOUT_MS = 10min) will mark the job as failed
  *
- * If the pipeline fails or times out:
- *   - On failure: job is marked as 'failed' with partial artifacts preserved
- *   - On timeout: heartbeat staleness detector marks job as 'failed'
- *   - In both cases: the client sees an explicit failure via GET /status
- *
  * Security: Requires X-Internal-Auth header matching INTERNAL_WORKER_AUTH_TOKEN.
  * This endpoint is NOT intended for external use -- it's an internal worker trigger.
  *
@@ -35,10 +55,9 @@
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300; // Full 5-minute timeout -- pipeline runs via waitUntil
+export const maxDuration = 300; // Full 5-minute timeout — pipeline is awaited directly
 
 import { NextRequest, NextResponse } from 'next/server';
-import { waitUntil } from '@vercel/functions';
 import {
   updateReconstructionJobStatus,
   updateJobHeartbeatInDb,
@@ -50,7 +69,7 @@ import {
   runSegmentationOnlyPipeline,
   runDepthOnlyPipeline,
 } from '@/lib/siteSurveys/geometryReconstruction/runFullPipeline';
-import { warmupSAM2Service } from '@/lib/siteSurveys/geometryReconstruction/workers/segmentation/sam2Client';
+import { warmupSAM2Service, isSAM2Enabled } from '@/lib/siteSurveys/geometryReconstruction/workers/segmentation/sam2Client';
 import { adaptGeometryReconBundle } from '@/lib/siteSurveys/unifiedGeometry/pipelineAdapters';
 import { writeUnifiedArtifacts, deleteUnifiedArtifactsBySurvey } from '@/lib/siteSurveys/unifiedGeometry';
 import type { GeometryReconstructionInput } from '@/lib/siteSurveys/geometryReconstruction/types';
@@ -86,6 +105,7 @@ export async function POST(
   { params }: { params: { surveyId: string } },
 ) {
   const surveyId = params?.surveyId ?? 'unknown';
+  const tRouteStart = Date.now();
 
   // -- Internal auth check ---------------------------------------------------
   const authToken = req.headers.get('X-Internal-Auth');
@@ -137,149 +157,174 @@ export async function POST(
     );
   }
 
-  // -- Return 200 immediately, then run pipeline via waitUntil ---------------
-  // This is the key change: we return 200 so the /start route's waitUntil(fetch)
-  // resolves quickly. The pipeline then runs in the background using this
-  // function's own waitUntil, which has the full 300s timeout.
-  const response = NextResponse.json({
-    success: true,
-    jobId,
-    status: 'running',
-    message: 'Pipeline execution started. Use GET /status to monitor progress.',
-  });
-
-  // Fire SAM2 warmup as early as possible
+  // -- Fire SAM2 warmup as early as possible ---------------------------------
+  // This triggers model loading on Render's cold start while we set up.
+  const sam2WasEnabled = isSAM2Enabled();
+  if (sam2WasEnabled) {
+    console.info(
+      `[POST geometry-reconstruction/execute] SAM2 is enabled — firing warmup ping to Render service`,
+    );
+  } else {
+    console.warn(
+      `[POST geometry-reconstruction/execute] SAM2_SERVICE_URL is NOT set — pipeline will use Canny as explicit backend (no Render calls)`,
+    );
+  }
   warmupSAM2Service();
 
-  // Run the pipeline in the background using waitUntil
-  waitUntil(
-    (async () => {
-      // Start periodic heartbeat timer to prevent staleness during long stages
-      const stopHeartbeat = startHeartbeatTimer(jobId);
+  // -- Run the pipeline DIRECTLY (await, not waitUntil) ---------------------
+  // This is the key fix: we await the pipeline directly instead of using
+  // waitUntil(). This keeps the Node.js event loop alive and sustains
+  // outbound fetch calls to the SAM2 Render service for the full pipeline
+  // duration (up to 300s with Vercel Pro).
+  //
+  // The /start route's waitUntil(fetch('/execute')) will time out after 60s
+  // (since /start has maxDuration=60), but this /execute function is a 
+  // SEPARATE Vercel invocation with its own 300s lifetime. It continues 
+  // running even after /start's waitUntil is cancelled.
+  //
+  // The client already received 202 from /start and is polling GET /status.
 
-      try {
+  const stopHeartbeat = startHeartbeatTimer(jobId);
+
+  try {
+    console.info(
+      `[POST geometry-reconstruction/execute] Starting pipeline execution for job=${jobId}, pipeline=${pipeline} (SAM2 enabled: ${sam2WasEnabled})`,
+    );
+
+    // Select the appropriate pipeline runner based on the pipeline mode
+    let pipelineResult;
+    switch (pipeline) {
+      case 'segmentation_only':
+      case 'segmentation':
+        await updateJobHeartbeatInDb(jobId, 'segmentation');
+        pipelineResult = await runSegmentationOnlyPipeline(input);
+        break;
+      case 'depth_only':
+      case 'depth_estimation':
+        await updateJobHeartbeatInDb(jobId, 'segmentation');
+        pipelineResult = await runDepthOnlyPipeline(input);
+        break;
+      case 'full':
+      case 'line_extraction':
+      case 'plane_extraction':
+      case 'multi_view_fusion':
+      default:
+        pipelineResult = await runFullGeometryReconstructionPipeline(input);
+        break;
+    }
+
+    const { artifacts, stages, totalDurationMs, segmentationBackend, sam2PhotoCount, failedPhotoCount, skippedPhotoCount, cannyPhotoCount, photoResults, budgetExhaustedReason } = pipelineResult;
+
+    // Update currentStage based on the last completed pipeline stage.
+    if (stages.length > 0) {
+      const lastStage = stages[stages.length - 1].stage;
+      const stageMap: Record<string, string> = {
+        'segmentation': 'segmentation',
+        'line_extraction': 'line_extraction',
+        'vanishing_points': 'vanishing_point_estimation',
+        'depth_estimation': 'depth_estimation',
+        'plane_extraction': 'plane_extraction',
+        'multi_view_fusion': 'multi_view_fusion',
+        'photogrammetry': 'completed',
+      };
+      const dbStage = stageMap[lastStage] ?? lastStage;
+      await updateJobHeartbeatInDb(jobId, dbStage);
+    }
+
+    // Log per-stage timing for debugging
+    const stageSummary = stages.map(s => `${s.stage}=${s.durationMs}ms(${s.artifactCount} artifacts)`).join(', ');
+    console.info(
+      `[POST geometry-reconstruction/execute] Pipeline completed for job=${jobId}: ${totalDurationMs}ms total, backend=${segmentationBackend}, stages: [${stageSummary}]`,
+    );
+
+    const rawArtifactCount = artifacts.length;
+    const rawConsensusPlaneCount = artifacts.filter(
+      (artifact) => artifact.artifactType === 'consensus_plane_candidate',
+    ).length;
+    const rawPolygonArtifactCount = artifacts.filter(
+      (artifact) => 'polygon' in artifact && Array.isArray(artifact.polygon) && artifact.polygon.length > 0,
+    ).length;
+
+    // Persist artifacts (clean up old artifacts first to avoid accumulation)
+    const tDbStart = Date.now();
+    const deletedReconCount = await deleteArtifactsBySurvey(surveyId);
+    if (deletedReconCount > 0) {
+      console.info(
+        `[POST geometry-reconstruction/execute] Deleted ${deletedReconCount} previous reconstruction artifacts for survey=${surveyId}`,
+      );
+    }
+    const batchResult = await insertReconstructionArtifactsBatch(jobId, surveyId, 'system-worker', artifacts, pipeline);
+    console.info(
+      `[POST geometry-reconstruction/execute] Batch inserted ${batchResult.inserted}/${artifacts.length} reconstruction artifacts (failed=${batchResult.failed}) in ${Date.now() - tDbStart}ms`,
+    );
+
+    // Adapt Pipeline B artifacts into unified geometry table
+    try {
+      const tUnifiedStart = Date.now();
+      const deletedCount = await deleteUnifiedArtifactsBySurvey(surveyId);
+      if (deletedCount > 0) {
         console.info(
-          `[POST geometry-reconstruction/execute] Starting pipeline execution for job=${jobId}, pipeline=${pipeline}`,
+          `[POST geometry-reconstruction/execute] Deleted ${deletedCount} previous unified artifacts for survey=${surveyId}`,
         );
-
-        // Select the appropriate pipeline runner based on the pipeline mode
-        let pipelineResult;
-        switch (pipeline) {
-          case 'segmentation_only':
-          case 'segmentation':
-            await updateJobHeartbeatInDb(jobId, 'segmentation');
-            pipelineResult = await runSegmentationOnlyPipeline(input);
-            break;
-          case 'depth_only':
-          case 'depth_estimation':
-            await updateJobHeartbeatInDb(jobId, 'segmentation');
-            pipelineResult = await runDepthOnlyPipeline(input);
-            break;
-          case 'full':
-          case 'line_extraction':
-          case 'plane_extraction':
-          case 'multi_view_fusion':
-          default:
-            pipelineResult = await runFullGeometryReconstructionPipeline(input);
-            break;
-        }
-
-        const { artifacts, stages, totalDurationMs, segmentationBackend, sam2PhotoCount, failedPhotoCount, skippedPhotoCount, cannyPhotoCount, photoResults, budgetExhaustedReason } = pipelineResult;
-
-        // Update currentStage based on the last completed pipeline stage.
-        // The pipeline returns a `stages` array with each stage name; we map
-        // the last stage name to the DB's current_stage column so that
-        // GET /status can show which stage the pipeline reached.
-        if (stages.length > 0) {
-          const lastStage = stages[stages.length - 1].stage;
-          // Map pipeline stage names to DB stage names (pipeline uses slightly
-          // different names than the PIPELINE_STAGES array in asyncJobManager)
-          const stageMap: Record<string, string> = {
-            'segmentation': 'segmentation',
-            'line_extraction': 'line_extraction',
-            'vanishing_points': 'vanishing_point_estimation',
-            'depth_estimation': 'depth_estimation',
-            'plane_extraction': 'plane_extraction',
-            'multi_view_fusion': 'multi_view_fusion',
-            'photogrammetry': 'completed',
-          };
-          const dbStage = stageMap[lastStage] ?? lastStage;
-          await updateJobHeartbeatInDb(jobId, dbStage);
-        }
-
-        // Log per-stage timing for debugging
-        const stageSummary = stages.map(s => `${s.stage}=${s.durationMs}ms(${s.artifactCount} artifacts)`).join(', ');
-        console.info(
-          `[POST geometry-reconstruction/execute] Pipeline completed for job=${jobId}: ${totalDurationMs}ms total, stages: [${stageSummary}]`,
-        );
-
-        const rawArtifactCount = artifacts.length;
-        const rawConsensusPlaneCount = artifacts.filter(
-          (artifact) => artifact.artifactType === 'consensus_plane_candidate',
-        ).length;
-        const rawPolygonArtifactCount = artifacts.filter(
-          (artifact) => 'polygon' in artifact && Array.isArray(artifact.polygon) && artifact.polygon.length > 0,
-        ).length;
-
-        // Persist artifacts (clean up old artifacts first to avoid accumulation)
-        const tDbStart = Date.now();
-        const deletedReconCount = await deleteArtifactsBySurvey(surveyId);
-        if (deletedReconCount > 0) {
-          console.info(
-            `[POST geometry-reconstruction/execute] Deleted ${deletedReconCount} previous reconstruction artifacts for survey=${surveyId}`,
-          );
-        }
-        const batchResult = await insertReconstructionArtifactsBatch(jobId, surveyId, 'system-worker', artifacts, pipeline);
-        console.info(
-          `[POST geometry-reconstruction/execute] Batch inserted ${batchResult.inserted}/${artifacts.length} reconstruction artifacts (failed=${batchResult.failed}) in ${Date.now() - tDbStart}ms`,
-        );
-
-        // Adapt Pipeline B artifacts into unified geometry table
-        try {
-          const tUnifiedStart = Date.now();
-          const deletedCount = await deleteUnifiedArtifactsBySurvey(surveyId);
-          if (deletedCount > 0) {
-            console.info(
-              `[POST geometry-reconstruction/execute] Deleted ${deletedCount} previous unified artifacts for survey=${surveyId}`,
-            );
-          }
-
-          const adaptedArtifacts = adaptGeometryReconBundle(artifacts, surveyId);
-          const writeResult = await writeUnifiedArtifacts(adaptedArtifacts);
-          console.info(
-            `[POST geometry-reconstruction/execute] Adapted ${adaptedArtifacts.length} Pipeline B artifacts to unified: inserted=${writeResult.inserted} skipped=${writeResult.skipped} failed=${writeResult.failed} in ${Date.now() - tUnifiedStart}ms`,
-          );
-        } catch (adaptErr) {
-          const errMsg = adaptErr instanceof Error ? adaptErr.message : String(adaptErr);
-          console.error(
-            `[POST geometry-reconstruction/execute] Failed to adapt Pipeline B artifacts to unified table (non-fatal): ${errMsg}`,
-          );
-        }
-
-        // Mark job as completed
-        await updateReconstructionJobStatus(jobId, 'completed');
-
-        console.info(
-          `[POST geometry-reconstruction/execute] Job ${jobId} completed successfully: ${rawArtifactCount} artifacts, ${totalDurationMs}ms`,
-        );
-      } catch (pipelineErr) {
-        // Pipeline execution failed -- mark job as failed, preserving partial artifacts
-        const errMsg = pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr);
-        console.error(`[POST geometry-reconstruction/execute] Pipeline execution failed for job=${jobId}: ${errMsg}`);
-        try {
-          await updateReconstructionJobStatus(jobId, 'failed');
-        } catch (markFailedErr) {
-          console.error(
-            `[POST geometry-reconstruction/execute] Also failed to mark job=${jobId} as failed:`,
-            markFailedErr instanceof Error ? markFailedErr.message : String(markFailedErr),
-          );
-        }
-      } finally {
-        // Always stop the heartbeat timer
-        stopHeartbeat();
       }
-    })()
-  );
 
-  return response;
+      const adaptedArtifacts = adaptGeometryReconBundle(artifacts, surveyId);
+      const writeResult = await writeUnifiedArtifacts(adaptedArtifacts);
+      console.info(
+        `[POST geometry-reconstruction/execute] Adapted ${adaptedArtifacts.length} Pipeline B artifacts to unified: inserted=${writeResult.inserted} skipped=${writeResult.skipped} failed=${writeResult.failed} in ${Date.now() - tUnifiedStart}ms`,
+      );
+    } catch (adaptErr) {
+      const errMsg = adaptErr instanceof Error ? adaptErr.message : String(adaptErr);
+      console.error(
+        `[POST geometry-reconstruction/execute] Failed to adapt Pipeline B artifacts to unified table (non-fatal): ${errMsg}`,
+      );
+    }
+
+    // Mark job as completed
+    await updateReconstructionJobStatus(jobId, 'completed');
+
+    const routeDurationMs = Date.now() - tRouteStart;
+    console.info(
+      `[POST geometry-reconstruction/execute] Job ${jobId} completed successfully: ${rawArtifactCount} artifacts, ${totalDurationMs}ms pipeline, ${routeDurationMs}ms total route`,
+    );
+
+    // Return 200 with pipeline results
+    return NextResponse.json({
+      success: true,
+      jobId,
+      status: 'completed',
+      artifactCount: rawArtifactCount,
+      totalDurationMs,
+      segmentationBackend,
+      sam2PhotoCount,
+      failedPhotoCount,
+      skippedPhotoCount,
+      cannyPhotoCount,
+      budgetExhaustedReason,
+    });
+
+  } catch (pipelineErr) {
+    // Pipeline execution failed -- mark job as failed, preserving partial artifacts
+    const errMsg = pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr);
+    console.error(`[POST geometry-reconstruction/execute] Pipeline execution failed for job=${jobId}: ${errMsg}`);
+    try {
+      await updateReconstructionJobStatus(jobId, 'failed');
+    } catch (markFailedErr) {
+      console.error(
+        `[POST geometry-reconstruction/execute] Also failed to mark job=${jobId} as failed:`,
+        markFailedErr instanceof Error ? markFailedErr.message : String(markFailedErr),
+      );
+    }
+
+    return NextResponse.json({
+      success: false,
+      jobId,
+      status: 'failed',
+      error: errMsg,
+    }, { status: 500 });
+
+  } finally {
+    // Always stop the heartbeat timer
+    stopHeartbeat();
+  }
 }
