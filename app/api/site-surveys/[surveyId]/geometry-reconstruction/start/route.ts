@@ -3,15 +3,19 @@
  *
  * Start a new geometry reconstruction job.
  *
- * ASYNC PATTERN (fixes 504 errors):
- *   - Creates job record with status='queued' and returns immediately (202)
- *   - Fires a non-blocking background fetch to /execute to run the pipeline
- *   - Client polls GET /status for progress and results
- *   - Mock pipeline still runs synchronously for backward compatibility
+ * RUNS PIPELINE INLINE:
+ *   - Creates job record with status='running'
+ *   - Executes the pipeline directly within this request
+ *   - Returns results when complete (200) or error (500)
+ *   - Client can also poll GET /status for progress
+ *   - Mock pipeline runs synchronously for backward compatibility
  *
- * The old synchronous pattern (running the entire pipeline within the
- * Vercel request) caused 504 errors because the pipeline takes 200-400s
- * while Vercel's maxDuration is 300s.
+ * Why inline instead of fire-and-forget?
+ *   The previous pattern (fire-and-forget fetch to /execute) was broken on
+ *   Vercel and Render — when the /start handler returned 202, the serverless
+ *   function could freeze/terminate before the background fetch completed,
+ *   leaving the job stuck at 'queued' forever with no logs.
+ *   Running inline guarantees the pipeline actually executes.
  *
  * Auth required. Survey ownership enforced.
  * REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
@@ -19,7 +23,7 @@
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 30; // Reduced from 300 — we no longer run the pipeline here
+export const maxDuration = 300; // Full 5-minute timeout — pipeline runs in this request
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
@@ -29,8 +33,18 @@ import {
   insertReconstructionJob,
   updateReconstructionJobStatus,
   insertReconstructionArtifact,
+  insertReconstructionArtifactsBatch,
+  deleteArtifactsBySurvey,
 } from '@/lib/db/geometryReconstruction';
 import { generateMockArtifacts } from '@/lib/siteSurveys/geometryReconstruction/mockAdapter';
+import {
+  runFullGeometryReconstructionPipeline,
+  runSegmentationOnlyPipeline,
+  runDepthOnlyPipeline,
+} from '@/lib/siteSurveys/geometryReconstruction/runFullPipeline';
+import { warmupSAM2Service } from '@/lib/siteSurveys/geometryReconstruction/workers/segmentation/sam2Client';
+import { adaptGeometryReconBundle } from '@/lib/siteSurveys/unifiedGeometry/pipelineAdapters';
+import { writeUnifiedArtifacts, deleteUnifiedArtifactsBySurvey } from '@/lib/siteSurveys/unifiedGeometry';
 import type { GeometryReconstructionInput, SourcePhoto } from '@/lib/siteSurveys/geometryReconstruction/types';
 
 export async function POST(
@@ -92,7 +106,7 @@ export async function POST(
     // Create job row — status='queued'
     const job = await insertReconstructionJob(surveyId, user.id, pipeline, input);
 
-    // ── Mock pipeline: run synchronously for backward compatibility ────────
+    // ── Mock pipeline: run synchronously for backward compatibility ────────────
     if (pipeline === 'mock') {
       const artifacts = generateMockArtifacts(input);
       for (const artifact of artifacts) {
@@ -105,65 +119,139 @@ export async function POST(
       });
     }
 
-    // ── Real Pipeline B: fire-and-return async pattern ────────────────────
+    // ── Real Pipeline B: run inline ────────────────────────────────────────────
     console.info(
       `[POST geometry-reconstruction/start] Job ${job.id} created for pipeline=${pipeline}. ` +
-      `Firing background execution.`,
+      `Running pipeline inline.`,
     );
 
-    // Fire non-blocking background execution.
-    // We use fetch() to hit the /execute endpoint which runs the pipeline
-    // outside this request's lifecycle. The fire-and-forget pattern means
-    // we don't await this — the pipeline runs independently.
+    // Mark job as running
+    await updateReconstructionJobStatus(job.id, 'running');
+
+    // Fire SAM2 warmup as early as possible
+    warmupSAM2Service();
+
     try {
-      const baseUrl = process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
-        : process.env.NEXT_PUBLIC_APP_URL
-          ? new URL(process.env.NEXT_PUBLIC_APP_URL).origin
-          : `http://localhost:3000`;
+      // Select the appropriate pipeline runner based on the pipeline mode
+      let pipelineResult;
+      switch (pipeline) {
+        case 'segmentation_only':
+        case 'segmentation':
+          pipelineResult = await runSegmentationOnlyPipeline(input);
+          break;
+        case 'depth_only':
+        case 'depth_estimation':
+          pipelineResult = await runDepthOnlyPipeline(input);
+          break;
+        case 'full':
+        case 'line_extraction':
+        case 'plane_extraction':
+        case 'multi_view_fusion':
+        default:
+          pipelineResult = await runFullGeometryReconstructionPipeline(input);
+          break;
+      }
 
-      // Fire and forget — we do NOT await this fetch
-      const executeUrl = `${baseUrl}/api/site-surveys/${surveyId}/geometry-reconstruction/execute`;
-      fetch(executeUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          // Internal auth token to verify the request comes from our own server
-          'X-Internal-Auth': process.env.INTERNAL_WORKER_AUTH_TOKEN ?? 'geometry-recon-worker-2025',
-        },
-        body: JSON.stringify({
-          jobId: job.id,
-          surveyId,
-          pipeline,
-          input,
-        }),
-      }).catch((fetchErr) => {
-        // Log but don't block — the job will be picked up by the stale-job recovery cron
-        console.error(
-          `[POST geometry-reconstruction/start] Failed to fire background execution for job ${job.id}:`,
-          fetchErr instanceof Error ? fetchErr.message : String(fetchErr),
-        );
-      });
-    } catch (fireErr) {
-      // Non-fatal: if we can't fire the background task, the job stays 'queued'
-      // and will be picked up by the next stale-job recovery sweep
-      console.error(
-        `[POST geometry-reconstruction/start] Error firing background execution for job ${job.id}:`,
-        fireErr instanceof Error ? fireErr.message : String(fireErr),
+      const {
+        artifacts,
+        stages,
+        totalDurationMs,
+        segmentationBackend,
+        sam2PhotoCount,
+        failedPhotoCount,
+        skippedPhotoCount,
+        cannyPhotoCount,
+        photoResults,
+        budgetExhaustedReason,
+      } = pipelineResult;
+
+      // Log per-stage timing
+      const stageSummary = stages.map(s => `${s.stage}=${s.durationMs}ms(${s.artifactCount} artifacts)`).join(', ');
+      console.info(
+        `[POST geometry-reconstruction/start] Pipeline completed for job=${job.id}: ${totalDurationMs}ms total, stages: [${stageSummary}]`,
       );
-    }
 
-    // Return 202 Accepted immediately — client should poll GET /status
-    return NextResponse.json(
-      {
+      const rawArtifactCount = artifacts.length;
+      const rawConsensusPlaneCount = artifacts.filter(
+        (artifact) => artifact.artifactType === 'consensus_plane_candidate',
+      ).length;
+      const rawPolygonArtifactCount = artifacts.filter(
+        (artifact) => 'polygon' in artifact && Array.isArray(artifact.polygon) && artifact.polygon.length > 0,
+      ).length;
+
+      // Persist artifacts (clean up old artifacts first to avoid accumulation)
+      const tDbStart = Date.now();
+      const deletedReconCount = await deleteArtifactsBySurvey(surveyId);
+      if (deletedReconCount > 0) {
+        console.info(
+          `[POST geometry-reconstruction/start] Deleted ${deletedReconCount} previous reconstruction artifacts for survey=${surveyId}`,
+        );
+      }
+      const batchResult = await insertReconstructionArtifactsBatch(job.id, surveyId, 'system-worker', artifacts, pipeline);
+      console.info(
+        `[POST geometry-reconstruction/start] Batch inserted ${batchResult.inserted}/${artifacts.length} reconstruction artifacts (failed=${batchResult.failed}) in ${Date.now() - tDbStart}ms`,
+      );
+
+      // Adapt Pipeline B artifacts into unified geometry table
+      try {
+        const tUnifiedStart = Date.now();
+        const deletedCount = await deleteUnifiedArtifactsBySurvey(surveyId);
+        if (deletedCount > 0) {
+          console.info(
+            `[POST geometry-reconstruction/start] Deleted ${deletedCount} previous unified artifacts for survey=${surveyId}`,
+          );
+        }
+
+        const adaptedArtifacts = adaptGeometryReconBundle(artifacts, surveyId);
+        const writeResult = await writeUnifiedArtifacts(adaptedArtifacts);
+        console.info(
+          `[POST geometry-reconstruction/start] Adapted ${adaptedArtifacts.length} Pipeline B artifacts to unified: inserted=${writeResult.inserted} skipped=${writeResult.skipped} failed=${writeResult.failed} in ${Date.now() - tUnifiedStart}ms`,
+        );
+      } catch (adaptErr) {
+        const errMsg = adaptErr instanceof Error ? adaptErr.message : String(adaptErr);
+        console.error(
+          `[POST geometry-reconstruction/start] Failed to adapt Pipeline B artifacts to unified table (non-fatal): ${errMsg}`,
+        );
+      }
+
+      // Mark job as completed
+      await updateReconstructionJobStatus(job.id, 'completed');
+
+      console.info(
+        `[POST geometry-reconstruction/start] Job ${job.id} completed successfully: ${rawArtifactCount} artifacts, ${totalDurationMs}ms`,
+      );
+
+      // Return 200 with full results (UI can use this directly)
+      return NextResponse.json({
         success: true,
         jobId: job.id,
-        status: 'queued',
-        message: 'Geometry reconstruction job created. Poll GET /status for progress.',
-        pollEndpoint: `/api/site-surveys/${surveyId}/geometry-reconstruction/status?jobId=${job.id}`,
-      },
-      { status: 202 },
-    );
+        status: 'completed',
+        pipelineStages: stages,
+        totalDurationMs,
+        summary: {
+          sourcePhotoCount: input.sourcePhotos.length,
+          rawArtifactCount,
+          rawConsensusPlaneCount,
+          rawPolygonArtifactCount,
+          segmentationBackend,
+          sam2PhotoCount,
+          failedPhotoCount,
+          skippedPhotoCount,
+          cannyPhotoCount,
+          photoResults,
+          budgetExhaustedReason,
+        },
+      });
+    } catch (pipelineErr) {
+      // Pipeline execution failed — mark job as failed
+      const errMsg = pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr);
+      console.error(`[POST geometry-reconstruction/start] Pipeline execution failed for job=${job.id}: ${errMsg}`);
+      await updateReconstructionJobStatus(job.id, 'failed');
+      return NextResponse.json(
+        { success: false, error: `Pipeline execution failed: ${errMsg}`, jobId: job.id },
+        { status: 500 },
+      );
+    }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error(`[POST geometry-reconstruction/start] Error:`, message);
