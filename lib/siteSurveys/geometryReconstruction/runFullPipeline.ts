@@ -62,6 +62,17 @@ import { runPhotogrammetryFromReconstructionInput } from './workers/photogrammet
  */
 const PIPELINE_TIMEOUT_MS = 270_000;
 
+/**
+ * Full Pipeline B must produce geometry, not just segmentation masks. The
+ * segmentation worker's default budget is intentionally generous for
+ * segmentation-only runs, but using that same 260s budget in a 270s full run
+ * can starve line/depth/plane/fusion stages. These limits reserve roughly two
+ * minutes for downstream geometry and DB writes under Vercel's 300s hard cap.
+ */
+const FULL_PIPELINE_SEGMENTATION_STAGE_TIMEOUT_MS = 150_000;
+const FULL_PIPELINE_MAX_SAM2_PHOTOS = 8;
+const FULL_PIPELINE_MIN_REMAINING_MS_FOR_SAM2_ATTEMPT = 35_000;
+
 // ──── Pipeline Stage Result ─────────────────────────────────────────────────
 
 export interface PipelineStageResult {
@@ -134,6 +145,20 @@ function isPipelineTimedOut(pipelineStart: number): boolean {
   return (Date.now() - pipelineStart) >= PIPELINE_TIMEOUT_MS;
 }
 
+function withFullPipelineSegmentationBudget(
+  input: GeometryReconstructionInput,
+): GeometryReconstructionInput {
+  return {
+    ...input,
+    config: {
+      ...(input.config ?? {}),
+      maxSam2Photos: FULL_PIPELINE_MAX_SAM2_PHOTOS,
+      stageTimeoutMs: FULL_PIPELINE_SEGMENTATION_STAGE_TIMEOUT_MS,
+      minRemainingMsForSam2Attempt: FULL_PIPELINE_MIN_REMAINING_MS_FOR_SAM2_ATTEMPT,
+    },
+  };
+}
+
 // ──── Full Pipeline Orchestration ───────────────────────────────────────────
 
 /**
@@ -158,8 +183,9 @@ export async function runFullGeometryReconstructionPipeline(
   );
 
   // ── Stage 1: Segmentation ──────────────────────────────────────────────
+  const segmentationInput = withFullPipelineSegmentationBudget(input);
   const segFullOutput = await asyncStageTimer('segmentation', () =>
-    runSegmentationFullOutput(input),
+    runSegmentationFullOutput(segmentationInput),
   );
   const segResult = segFullOutput.result;
   const segFields = segReportFields(segResult);

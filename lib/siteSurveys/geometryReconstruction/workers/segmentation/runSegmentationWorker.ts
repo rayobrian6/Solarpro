@@ -90,6 +90,12 @@ export interface SegmentationWorkerInput {
     includeRawMask?: boolean;
     /** Maximum number of polygon points per mask. Default: 50 */
     maxPolygonPoints?: number;
+    /** Maximum number of photos to attempt with SAM 2. Default: 15 */
+    maxSam2Photos?: number;
+    /** Maximum wall-clock milliseconds segmentation may consume. Default: 260000 */
+    stageTimeoutMs?: number;
+    /** Minimum remaining stage budget before starting another SAM 2 photo. Default: 50000 */
+    minRemainingMsForSam2Attempt?: number;
   };
 }
 
@@ -308,6 +314,9 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   const minConfidence = input.config?.minConfidence ?? 30;
   const includeRawMask = input.config?.includeRawMask ?? true;
   const maxPolygonPoints = input.config?.maxPolygonPoints ?? 50;
+  const maxSam2Photos = Math.max(0, Math.floor(input.config?.maxSam2Photos ?? MAX_SAM2_PHOTOS));
+  const segmentationStageTimeoutMs = Math.max(1, Math.floor(input.config?.stageTimeoutMs ?? SEGMENTATION_STAGE_TIMEOUT_MS));
+  const minRemainingMsForSam2Attempt = Math.max(0, Math.floor(input.config?.minRemainingMsForSam2Attempt ?? 50_000));
   // SAM 2 masks retain more polygon detail because the model produces
   // accurate segment boundaries — Canny contours are lower quality and
   // benefit from aggressive simplification. Higher polygon point counts
@@ -359,17 +368,17 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
       .filter((p) => sam2PhotoPriority(p.label) < 99)
       .map((p) => `${p.label}(${p.fileId.slice(0, 8)})`);
     console.info(
-      `[SAM2] Photo priority sort: ${sourcePhotos.length} photos — ${labeledCount} with priority labels [${roofLabels.join(', ')}], ${sourcePhotos.length - labeledCount} unlabeled/other. First ${Math.min(MAX_SAM2_PHOTOS, sourcePhotos.length)} photos will get SAM 2.`,
+      `[SAM2] Photo priority sort: ${sourcePhotos.length} photos — ${labeledCount} with priority labels [${roofLabels.join(', ')}], ${sourcePhotos.length - labeledCount} unlabeled/other. First ${Math.min(maxSam2Photos, sourcePhotos.length)} photos will get SAM 2.`,
     );
   }
 
   // ── SAM 2 TIME BUDGET (declared early for use in warm-up + Stage 2) ────────
-  let sam2BudgetRemaining = sam2Enabled ? MAX_SAM2_PHOTOS : 0;
+  let sam2BudgetRemaining = sam2Enabled ? maxSam2Photos : 0;
   let sam2BudgetExhaustedReason: string | null = null;
 
   // Log which backend will be attempted
   if (sam2Enabled) {
-    console.info(`[SAM2] Segmentation worker: SAM 2 enabled — will warm up service then process photos`);
+    console.info(`[SAM2] Segmentation worker: SAM 2 enabled — will warm up service then process photos (maxSam2Photos=${maxSam2Photos}, stageTimeoutMs=${segmentationStageTimeoutMs}, minRemainingMsForSam2Attempt=${minRemainingMsForSam2Attempt})`);
 
     // ── CRITICAL: Wait for SAM2 model to load before processing photos ────
     // On Render cold starts, the SAM2 service downloads the model from HuggingFace
@@ -456,7 +465,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   // If SAM2 not configured → use Canny as explicit backend (not fallback).
   // Also enforce a wall-clock deadline: if we've spent too long, skip the rest.
   const SEGMENTATION_CONCURRENCY = 2; // Match SAM2 service ThreadPoolExecutor max_workers
-  const segmentationDeadline = t0 + SEGMENTATION_STAGE_TIMEOUT_MS;
+  const segmentationDeadline = t0 + segmentationStageTimeoutMs;
 
   const t1 = Date.now();
 
@@ -475,7 +484,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
     photo: { fileId: string; fileUrl: string; filename: string | null; label?: string | null },
   ): Promise<PhotoProcessResult> {
     const remainingMs = segmentationDeadline - Date.now();
-    const useSAM2 = sam2Enabled && sam2BudgetRemaining > 0 && remainingMs > 50_000;
+    const useSAM2 = sam2Enabled && sam2BudgetRemaining > 0 && remainingMs > minRemainingMsForSam2Attempt;
 
     if (!useSAM2 && sam2Enabled && sam2BudgetRemaining <= 0 && !sam2BudgetExhaustedReason) {
       sam2BudgetExhaustedReason = 'max_photos_reached';
@@ -486,7 +495,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
           label: photo.label ?? null,
           status: 'skipped_budget',
           maskCount: 0,
-          reason: `SAM 2 budget exhausted (${MAX_SAM2_PHOTOS} photos already processed) — not attempted`,
+          reason: `SAM 2 budget exhausted (${maxSam2Photos} photos already processed) — not attempted`,
         },
         newArtifacts: [],
         imageBytes: null,
