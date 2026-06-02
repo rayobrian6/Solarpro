@@ -3,41 +3,29 @@
  *
  * Background worker endpoint for executing the geometry reconstruction pipeline.
  *
- * This endpoint is triggered by the /start route via waitUntil(fetch()). 
- * It awaits the pipeline DIRECTLY (not via waitUntil) to ensure outbound
- * fetch calls to the SAM2 Render service are properly sustained for the
- * full duration of the pipeline.
+ * NOTE: The /start route now runs the pipeline INLINE (maxDuration=300) and
+ * returns 200 with results directly. This /execute endpoint is kept as a
+ * fallback for:
+ *   - Stale-job recovery: if a job is stuck in 'queued' or 'running' state
+ *   - Manual retry: if the inline execution failed and needs to be re-run
+ *   - Debugging: can be called directly to test the pipeline
  *
- * Architecture:
- *   POST /start -> create job (queued) -> return 202 -> waitUntil(fetch(/execute))
- *   POST /execute -> mark running -> await pipeline (up to 300s) -> return 200/500
+ * This endpoint is NOT called by the normal /start flow. The /start route
+ * runs the pipeline directly and returns the result inline.
+ *
+ * Architecture (current):
+ *   POST /start -> create job -> run pipeline inline -> return 200/500
  *   GET /status -> poll DB -> return progress
+ *   POST /execute -> (fallback) run pipeline for a specific job
  *
  * WHY WE AWAIT DIRECTLY (not waitUntil):
- *   The previous implementation used waitUntil() to run the pipeline after 
- *   returning 200 immediately. This was unreliable — waitUntil() is designed 
- *   for short-lived side effects (analytics, logging), NOT for running long 
- *   background jobs. Per Vercel docs: "Promises passed to waitUntil() will 
- *   have the same timeout as the function itself. If the function times out, 
- *   the promises will be cancelled." Per Inngest: "waitUntil is not designed 
- *   for running background jobs."
- *
- *   The pipeline's outbound fetch calls to the SAM2 Render service (which can 
- *   take 20-40s per photo) were not being sustained inside waitUntil(). The 
- *   Node.js event loop was not keeping those connections alive after the 
- *   response was sent. This caused Render to never receive the segmentation 
- *   requests, resulting in "Render logs aren't popping off."
- *
- *   By awaiting the pipeline directly, the /execute function keeps its Node.js 
- *   event loop alive for the full pipeline duration (up to 300s with Vercel Pro). 
- *   Outbound fetch calls to Render are properly sustained because the function 
- *   is actively awaiting the pipeline result.
- *
- *   The /start route uses waitUntil(fetch('/execute')) to trigger this endpoint.
- *   Since /execute now takes up to 270s to respond, /start's waitUntil will be 
- *   cancelled when /start times out (maxDuration=60). This is FINE — /execute 
- *   is a separate Vercel function invocation that continues running independently.
- *   The client already received the 202 from /start and is polling GET /status.
+ *   The /start route now runs the pipeline inline, so this endpoint is only
+ *   used as a fallback. When called directly (e.g., for stale-job recovery),
+ *   we await the pipeline directly to ensure outbound fetch calls to the
+ *   SAM2 Render service are properly sustained for the full pipeline duration.
+ *   This is critical — the old waitUntil() approach caused Render to never
+ *   receive segmentation requests because waitUntil is designed for short-lived
+ *   side effects, not long-running background jobs.
  *
  * Heartbeat protocol:
  *   - Initial heartbeat written when job is marked as running (stage='segmentation')
