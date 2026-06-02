@@ -269,8 +269,48 @@ export type FacadeSegmentationClass =
   | 'gutter' | 'downspout' | 'porch' | 'deck' | 'steps' | 'railing';
 
 /**
+ * Roof feature segmentation classes — objects on or penetrating the roof
+ * that affect panel placement, mounting, setback, and fire code compliance.
+ * These are critical for shade analysis and conduit routing.
+ */
+export type RoofFeatureSegmentationClass =
+  | 'chimney' | 'dormer' | 'vent_pipe' | 'satellite_dish' | 'skylight'
+  | 'roof_hatch' | 'flashing' | 'solar_tube' | 'flue' | 'antenna';
+
+/**
+ * Site structure segmentation classes — ground-level and detached
+ * structures that affect access, equipment placement, and fire setbacks.
+ * A full site survey must account for ALL structures on the property.
+ */
+export type SiteStructureSegmentationClass =
+  | 'foundation' | 'detached_structure' | 'retaining_wall' | 'pillar' | 'column'
+  | 'pool' | 'awning' | 'shed' | 'garage_detached' | 'pergola' | 'carport';
+
+/**
+ * Landscaping segmentation classes — vegetation and ground cover that
+ * affects shade, access, equipment staging, and maintenance planning.
+ * Overgrown vegetation signals neglect (potential structural issues)
+ * and current/future shading problems.
+ */
+export type LandscapingSegmentationClass =
+  | 'grass' | 'overgrown_grass' | 'bushes' | 'hedge' | 'flower_bed'
+  | 'mulch_area' | 'overgrown_vegetation' | 'vegetation_touching_structure'
+  | 'trees' | 'stump';
+
+/**
+ * Neighbor & context segmentation classes — adjacent properties and
+ * objects that create shade, restrict access, or affect installation.
+ * Neighbor structures are permanent shade sources.
+ */
+export type NeighborContextSegmentationClass =
+  | 'neighbor_house' | 'neighbor_structure' | 'power_line' | 'utility_pole'
+  | 'street_light' | 'mailbox' | 'fire_hydrant';
+
+/**
  * Site context segmentation classes — ground-level features that
  * affect installation planning and access.
+ * (Retained for backward compatibility; new classes use the more specific
+ * categories above: LandscapingSegmentationClass, SiteStructureSegmentationClass, etc.)
  */
 export type SiteContextSegmentationClass =
   | 'grass' | 'overgrown_grass' | 'sidewalk' | 'driveway' | 'gravel'
@@ -283,6 +323,15 @@ export type SiteContextSegmentationClass =
 export type ElectricalSegmentationClass =
   | 'utility_meter' | 'main_service_panel' | 'disconnect' | 'conduit'
   | 'inverter' | 'battery' | 'ac_unit' | 'existing_solar_panel';
+
+/**
+ * Site debris segmentation classes — objects that affect crew access,
+ * equipment staging, and safety during installation. Important for
+ * pre-installation site assessment and work order planning.
+ */
+export type SiteDebrisSegmentationClass =
+  | 'junk_yard_debris' | 'construction_debris' | 'piled_materials'
+  | 'dumpster' | 'storage_container';
 
 /**
  * Occluder segmentation classes — objects to IGNORE for geometry
@@ -306,11 +355,16 @@ export type ConditionSegmentationClass =
  */
 export type LegacySegmentationClass = 'roof' | 'wall' | 'sky' | 'tree' | 'ground' | 'obstruction' | 'equipment';
 
-/** Semantic class labels for segmentation — expanded from 7 to 33 classes. */
+/** Semantic class labels for segmentation — expanded from 7 to 33+ classes. */
 export type SegmentationClass =
   | LegacySegmentationClass
   | FacadeSegmentationClass
+  | RoofFeatureSegmentationClass
+  | SiteStructureSegmentationClass
+  | LandscapingSegmentationClass
+  | NeighborContextSegmentationClass
   | SiteContextSegmentationClass
+  | SiteDebrisSegmentationClass
   | ElectricalSegmentationClass
   | OccluderSegmentationClass
   | ConditionSegmentationClass;
@@ -322,9 +376,25 @@ export const SEGMENTATION_CLASSES: readonly SegmentationClass[] = [
   // Facade
   'siding', 'window', 'door', 'garage_door', 'fascia', 'soffit',
   'gutter', 'downspout', 'porch', 'deck', 'steps', 'railing',
-  // Site context
+  // Roof features — penetrations, protrusions, attachments
+  'chimney', 'dormer', 'vent_pipe', 'satellite_dish', 'skylight',
+  'roof_hatch', 'flashing', 'solar_tube', 'flue', 'antenna',
+  // Site structures — ground-level & detached
+  'foundation', 'detached_structure', 'retaining_wall', 'pillar', 'column',
+  'pool', 'awning', 'shed', 'garage_detached', 'pergola', 'carport',
+  // Landscaping — vegetation & ground cover (shade + access)
+  'grass', 'overgrown_grass', 'bushes', 'hedge', 'flower_bed',
+  'mulch_area', 'overgrown_vegetation', 'vegetation_touching_structure',
+  'trees', 'stump',
+  // Neighbor & context — adjacent properties and utilities
+  'neighbor_house', 'neighbor_structure', 'power_line', 'utility_pole',
+  'street_light', 'mailbox', 'fire_hydrant',
+  // Site context (legacy ground-level)
   'grass', 'overgrown_grass', 'sidewalk', 'driveway', 'gravel',
   'fence', 'bushes', 'trees', 'vegetation_touching_structure',
+  // Site debris — affects crew access and safety
+  'junk_yard_debris', 'construction_debris', 'piled_materials',
+  'dumpster', 'storage_container',
   // Electrical/solar
   'utility_meter', 'main_service_panel', 'disconnect', 'conduit',
   'inverter', 'battery', 'ac_unit', 'existing_solar_panel',
@@ -343,6 +413,37 @@ export const SEGMENTATION_CLASSES: readonly SegmentationClass[] = [
 export const FACADE_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass> = new Set([
   'siding', 'window', 'door', 'garage_door', 'fascia', 'soffit',
   'gutter', 'downspout', 'porch', 'deck', 'steps', 'railing',
+] as const);
+
+/** Roof feature classes — penetrations, protrusions, and attachments on the roof. */
+export const ROOF_FEATURE_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  'chimney', 'dormer', 'vent_pipe', 'satellite_dish', 'skylight',
+  'roof_hatch', 'flashing', 'solar_tube', 'flue', 'antenna',
+] as const);
+
+/** Site structure classes — ground-level and detached structures. */
+export const SITE_STRUCTURE_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  'foundation', 'detached_structure', 'retaining_wall', 'pillar', 'column',
+  'pool', 'awning', 'shed', 'garage_detached', 'pergola', 'carport',
+] as const);
+
+/** Landscaping classes — vegetation and ground cover affecting shade and access. */
+export const LANDSCAPING_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  'grass', 'overgrown_grass', 'bushes', 'hedge', 'flower_bed',
+  'mulch_area', 'overgrown_vegetation', 'vegetation_touching_structure',
+  'trees', 'stump',
+] as const);
+
+/** Neighbor & context classes — adjacent properties and infrastructure. */
+export const NEIGHBOR_CONTEXT_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  'neighbor_house', 'neighbor_structure', 'power_line', 'utility_pole',
+  'street_light', 'mailbox', 'fire_hydrant',
+] as const);
+
+/** Site debris classes — objects affecting crew access and safety. */
+export const SITE_DEBRIS_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  'junk_yard_debris', 'construction_debris', 'piled_materials',
+  'dumpster', 'storage_container',
 ] as const);
 
 /** Site context classes — ground-level features that affect installation planning. */
@@ -374,13 +475,18 @@ export const CONDITION_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass> = ne
  *
  * Expanded from {roof, wall, obstruction, equipment} to include:
  * - Facade features (affect mounting, conduit routing, setback)
+ * - Roof features (affect panel placement, fire setbacks, shade)
+ * - Site structures (affect access, equipment staging, setbacks)
+ * - Landscaping (shade source, access impedance, condition indicator)
+ * - Neighbor context (permanent shade sources)
+ * - Site debris (access/safety concerns for crew)
  * - Electrical/solar (existing infrastructure)
  * - Condition flags (affect installation feasibility)
- * - Vegetation touching structure (clearance issue)
- * - Fence/bushes (may affect access planning)
  *
  * NOT included (filtered out before artifact creation):
- * - Sky, ground, tree (already filtered — not useful for site assessment)
+ * - Sky (not structural)
+ * - Ground (too generic; use site context classes instead)
+ * - Tree (use specific landscaping classes instead)
  * - Grass, sidewalk, driveway, gravel (site context, not geometry)
  * - Car, truck, person, etc. (occluders — not structural)
  */
@@ -390,15 +496,27 @@ export const SOLAR_RELEVANT_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass>
   // Facade — relevant for conduit routing, mounting points, setback
   'siding', 'window', 'door', 'garage_door', 'fascia', 'soffit',
   'gutter', 'downspout', 'porch', 'deck', 'steps', 'railing',
+  // Roof features — affect panel placement, fire setbacks, shade
+  'chimney', 'dormer', 'vent_pipe', 'satellite_dish', 'skylight',
+  'roof_hatch', 'flashing', 'solar_tube', 'flue', 'antenna',
+  // Site structures — affect access, equipment staging, setbacks
+  'foundation', 'detached_structure', 'retaining_wall', 'pillar', 'column',
+  'pool', 'awning', 'shed', 'garage_detached', 'pergola', 'carport',
+  // Landscaping — shade sources, access impedance, condition indicator
+  'overgrown_grass', 'bushes', 'hedge', 'overgrown_vegetation',
+  'vegetation_touching_structure', 'trees', 'stump',
+  // Neighbor context — permanent shade sources, setback constraints
+  'neighbor_house', 'neighbor_structure', 'power_line', 'utility_pole',
+  // Site debris — crew access and safety concerns
+  'junk_yard_debris', 'construction_debris', 'piled_materials',
+  'dumpster', 'storage_container',
   // Electrical/solar — critical for system design
   'utility_meter', 'main_service_panel', 'disconnect', 'conduit',
   'inverter', 'battery', 'ac_unit', 'existing_solar_panel',
   // Condition — affects installation decisions
   'moss', 'algae', 'damaged_siding', 'blocked_access', 'muddy_work_area',
-  // Vegetation touching structure — clearance issue
-  'vegetation_touching_structure',
-  // Bushes/fence — may affect access planning
-  'fence', 'bushes',
+  // Site context — select classes relevant to solar
+  'driveway', 'fence',
 ] as const);
 
 // ---------------------------------------------------------------------------
@@ -473,8 +591,28 @@ export interface SemanticSegmentationMask {
 // Structural line candidate — extended line types (Phase 3)
 // ---------------------------------------------------------------------------
 
-/** Extended structural line type including wall_vertical. */
-export type StructuralLineType = 'ridge' | 'eave' | 'rake' | 'wall_vertical';
+/** Extended structural line type — architectural truths enforced by geometry. */
+export type StructuralLineType =
+  // Roof structural lines
+  | 'ridge'          // Ridge line: horizontal intersection of two roof planes (TOP of roof)
+  | 'eave'           // Eave line: horizontal roof edge at wall junction (BOTTOM of roof)
+  | 'rake'           // Rake edge: diagonal roof edge from ridge to eave (GABLE END)
+  | 'valley'         // Valley line: interior intersection of two roof planes (water channel)
+  | 'hip'            // Hip line: exterior intersection of two roof planes (ridged but not at top)
+  // Wall/facade architectural truth lines
+  | 'wall_vertical'  // Vertical wall edge (corner or framing line)
+  | 'gutter_line'    // Gutter: approximately TRUE LEVEL (horizontal reference)
+  | 'sill_line'      // Window sill: approximately TRUE LEVEL (horizontal reference)
+  | 'soffit_line'    // Soffit underside: approximately TRUE LEVEL at roof-wall junction
+  | 'fascia_line'    // Fascia board: vertical face at eave edge
+  // Ground/foundation lines
+  | 'foundation_line' // Foundation top: approximately TRUE LEVEL (horizontal reference)
+  | 'retaining_wall_line' // Retaining wall top: approximately LEVEL
+  // Roof feature lines
+  | 'chimney_edge'   // Chimney perimeter edge on roof
+  | 'dormer_ridge'   // Dormer ridge line (mini ridge on dormer)
+  | 'dormer_rake'    // Dormer rake edge (dormer side connecting to main roof)
+  ;
 
 /** A structural line candidate with 2D image-space coordinates. */
 export interface StructuralLineCandidate {

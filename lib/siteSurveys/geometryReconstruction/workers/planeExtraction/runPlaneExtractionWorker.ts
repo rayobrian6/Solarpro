@@ -20,6 +20,16 @@
  *   - Confidence-blended between depth and heuristic signals
  *   - Heuristic-only planes that have no depth overlap are kept as fallback
  *
+ * Approach (v3 — architectural truth boundaries):
+ * Instead of using raw blobby mask polygons as plane boundaries, v3 constructs
+ * plane boundaries from the INTERSECTION POINTS of structural lines that bound
+ * the plane region. This produces architecturally truthful polygons:
+ *   - Roof boundaries from ridge/eave/rake/valley/hip line intersections
+ *   - Wall boundaries from eave/wall_vertical/gutter/sill/foundation intersections
+ *   - Level enforcement: gutters, sills, eaves, foundations snapped to true horizontal
+ *   - Vertical enforcement: walls, pillars, chimneys snapped to true vertical
+ *   - Graceful fallback: if insufficient line data, falls back to mask polygon
+ *
  * The heuristic path remains the default when depth data is absent, ensuring
  * the pipeline never breaks when models are unavailable.
  *
@@ -29,6 +39,7 @@
 import type {
   SemanticSegmentationMask,
   StructuralLineCandidate,
+  StructuralLineType,
   VanishingPointArtifact,
   RoofPlaneCandidate,
   WallPlaneCandidate,
@@ -52,7 +63,7 @@ import type {
 // Worker version
 // ---------------------------------------------------------------------------
 
-export const PLANE_EXTRACTION_WORKER_VERSION = '2.0.0-plane-extraction-depth';
+export const PLANE_EXTRACTION_WORKER_VERSION = '3.0.0-plane-extraction-line-boundaries';
 
 // ---------------------------------------------------------------------------
 // Limitations
@@ -61,6 +72,8 @@ export const PLANE_EXTRACTION_WORKER_VERSION = '2.0.0-plane-extraction-depth';
 const PLANE_EXTRACTION_LIMITATIONS = [
   ...BASE_LIMITATIONS,
   'Plane extraction is heuristic when depth data is unavailable — not from RANSAC or model inference.',
+  'Plane boundaries are constructed from structural line intersections where available, falling back to raw mask polygons.',
+  'Architectural truth enforcement snaps level edges (gutters, sills, eaves) to true horizontal and vertical edges (walls, pillars) to true vertical.',
   'When depth maps are available, planes are derived from flood-fill segmentation on depth gradients.',
   'Depth-derived normals are estimated from depth gradient direction, not from 3D measurements.',
   'Slope and aspect are approximations based on depth gradient geometry or heuristic line orientations.',
@@ -70,6 +83,7 @@ const PLANE_EXTRACTION_LIMITATIONS = [
 const PLANE_EXTRACTION_LIMITATIONS_DEPTH = [
   ...BASE_LIMITATIONS,
   'Plane extracted from depth-aware flood-fill segmentation — not from RANSAC on 3D point clouds.',
+  'Plane boundaries are constructed from structural line intersections where available, enforcing architectural truth (level/vertical).',
   'Depth is monocular relative (not metric) — plane parameters are approximations, not survey-grade.',
   'Depth convention: higher values = farther from camera. Orientation classified by gradient magnitude.',
   'Slope and aspect estimated from depth gradient direction — more reliable than heuristic but not CAD.',
@@ -254,6 +268,379 @@ function onSegment(p1: NormalizedPoint, q: NormalizedPoint, p2: NormalizedPoint)
   return q.x <= Math.max(p1.x, p2.x) && q.x >= Math.min(p1.x, p2.x) &&
          q.y <= Math.max(p1.y, p2.y) && q.y >= Math.min(p1.y, p2.y);
 }
+
+// ---------------------------------------------------------------------------
+// Line intersection → polygon boundary construction (v3 architectural truth)
+// ---------------------------------------------------------------------------
+
+/**
+ * Line types that form the BOUNDARY of a roof plane.
+ * These lines define the edges of a roof region — their intersection
+ * points become the vertices of the plane polygon.
+ */
+const ROOF_BOUNDARY_LINE_TYPES: StructuralLineType[] = [
+  'ridge', 'eave', 'rake', 'valley', 'hip',
+  'chimney_edge', 'dormer_ridge', 'dormer_rake',
+];
+
+/**
+ * Line types that form the BOUNDARY of a wall plane.
+ * These lines define the edges of a wall region — their intersection
+ * points become the vertices of the wall polygon.
+ */
+const WALL_BOUNDARY_LINE_TYPES: StructuralLineType[] = [
+  'eave', 'wall_vertical', 'gutter_line', 'sill_line',
+  'soffit_line', 'fascia_line', 'foundation_line',
+];
+
+/**
+ * Line types that are LEVEL (horizontal) and define truth-level
+ * boundaries. These should produce polygon edges at exactly 0°
+ * in image space.
+ */
+const LEVEL_LINE_TYPES: StructuralLineType[] = [
+  'eave', 'ridge', 'gutter_line', 'sill_line', 'soffit_line',
+  'foundation_line', 'retaining_wall_line', 'dormer_ridge',
+];
+
+/**
+ * Line types that are VERTICAL and define truth-vertical
+ * boundaries.
+ */
+const VERTICAL_LINE_TYPES: StructuralLineType[] = [
+  'wall_vertical',
+];
+
+/**
+ * Compute the intersection point of two infinite lines defined by
+ * segments (a1→a2) and (b1→b2). Returns null if lines are parallel.
+ */
+function lineLineIntersection(
+  a1: NormalizedPoint, a2: NormalizedPoint,
+  b1: NormalizedPoint, b2: NormalizedPoint,
+): NormalizedPoint | null {
+  const d1x = a2.x - a1.x, d1y = a2.y - a1.y;
+  const d2x = b2.x - b1.x, d2y = b2.y - b1.y;
+  const denom = d1x * d2y - d1y * d2x;
+  if (Math.abs(denom) < 1e-10) return null; // parallel or near-parallel
+
+  const t = ((b1.x - a1.x) * d2y - (b1.y - a1.y) * d2x) / denom;
+  return {
+    x: a1.x + t * d1x,
+    y: a1.y + t * d1y,
+    coordinateSystem: 'normalized_image_0_1000',
+  };
+}
+
+/**
+ * Compute the intersection of two finite line segments.
+ * Returns the intersection point only if it lies within both segments
+ * (within tolerance). Tolerance is in normalized coordinates (0-1000 scale).
+ */
+function segmentSegmentIntersection(
+  a1: NormalizedPoint, a2: NormalizedPoint,
+  b1: NormalizedPoint, b2: NormalizedPoint,
+  tolerance: number = 30, // ~3% of image width
+): NormalizedPoint | null {
+  const pt = lineLineIntersection(a1, a2, b1, b2);
+  if (!pt) return null;
+
+  // Check that intersection point is within tolerance of both segments
+  const dA = pointToSegmentDist(pt, a1, a2);
+  const dB = pointToSegmentDist(pt, b1, b2);
+  if (dA > tolerance || dB > tolerance) return null;
+
+  // Clamp to reasonable image bounds [−50, 1050] (slight overflow allowed)
+  pt.x = Math.max(-50, Math.min(1050, pt.x));
+  pt.y = Math.max(-50, Math.min(1050, pt.y));
+
+  return pt;
+}
+
+/**
+ * Sort polygon vertices into counter-clockwise order using the
+ * centroid and atan2. This produces a well-formed polygon from
+ * a set of unordered intersection vertices.
+ */
+function sortVerticesCCW(vertices: NormalizedPoint[]): NormalizedPoint[] {
+  if (vertices.length < 3) return vertices;
+  const cx = vertices.reduce((s, p) => s + p.x, 0) / vertices.length;
+  const cy = vertices.reduce((s, p) => s + p.y, 0) / vertices.length;
+  return [...vertices].sort((a, b) => {
+    return Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx);
+  });
+}
+
+/**
+ * Remove duplicate vertices (within tolerance distance).
+ * Prevents degenerate polygons with repeated near-identical points.
+ */
+function deduplicateVertices(vertices: NormalizedPoint[], tolerance: number = 15): NormalizedPoint[] {
+  if (vertices.length <= 1) return vertices;
+  const result: NormalizedPoint[] = [vertices[0]];
+  for (let i = 1; i < vertices.length; i++) {
+    const last = result[result.length - 1];
+    const dx = vertices[i].x - last.x;
+    const dy = vertices[i].y - last.y;
+    if (Math.sqrt(dx * dx + dy * dy) > tolerance) {
+      result.push(vertices[i]);
+    }
+  }
+  // Check wrap-around
+  if (result.length > 1) {
+    const dx = result[0].x - result[result.length - 1].x;
+    const dy = result[0].y - result[result.length - 1].y;
+    if (Math.sqrt(dx * dx + dy * dy) < tolerance) {
+      result.pop();
+    }
+  }
+  return result;
+}
+
+/**
+ * Compute a plane boundary polygon from the intersection points
+ * of structural lines that bound the plane region.
+ *
+ * This is the core architectural-truth function: instead of using
+ * the raw blobby segmentation mask polygon, we construct the plane
+ * boundary from where the structural lines (ridges, eaves, rakes,
+ * valleys, hips, etc.) intersect each other.
+ *
+ * Algorithm:
+ * 1. Select boundary-relevant lines for the plane class (roof vs wall)
+ * 2. Compute pairwise intersection points between all boundary lines
+ * 3. Filter intersections to those within the mask region (anchor to reality)
+ * 4. Add line endpoints that fall within the mask region
+ * 5. Deduplicate and sort vertices into CCW order
+ * 6. If insufficient vertices, fall back to mask polygon
+ *
+ * The resulting polygon has architecturally truthful edges: gutters
+ * are level, ridges are straight, corners are at line intersections.
+ */
+function constructPlaneBoundaryFromLines(
+  mask: SemanticSegmentationMask,
+  associatedLines: StructuralLineCandidate[],
+  isRoof: boolean,
+  fallbackPolygon: NormalizedPoint[] | undefined,
+): NormalizedPoint[] | undefined {
+  const polygon = mask.polygon;
+  if (polygon.length < 3) return fallbackPolygon;
+
+  // Step 1: Select boundary-relevant lines
+  const boundaryTypes = isRoof ? ROOF_BOUNDARY_LINE_TYPES : WALL_BOUNDARY_LINE_TYPES;
+  const boundaryLines = associatedLines.filter(l => boundaryTypes.includes(l.lineType));
+
+  // If no boundary lines, fall back to mask polygon
+  if (boundaryLines.length < 2) {
+    console.info(
+      `[PlaneBoundary] ${isRoof ? 'Roof' : 'Wall'} mask ${mask.id}: ` +
+      `only ${boundaryLines.length} boundary lines, using mask polygon`,
+    );
+    return fallbackPolygon;
+  }
+
+  // Step 2: Compute pairwise intersection points
+  const intersections: NormalizedPoint[] = [];
+  for (let i = 0; i < boundaryLines.length; i++) {
+    for (let j = i + 1; j < boundaryLines.length; j++) {
+      const li = boundaryLines[i];
+      const lj = boundaryLines[j];
+
+      // Skip same-type pairs that are parallel (e.g., two ridge lines)
+      if (li.lineType === lj.lineType && isApproximatelyParallel(li, lj)) {
+        continue;
+      }
+
+      const pt = segmentSegmentIntersection(li.start, li.end, lj.start, lj.end);
+      if (pt) {
+        intersections.push(pt);
+      }
+    }
+  }
+
+  // Step 3: Filter intersections to those near the mask region
+  // A point is "near" if it's inside the mask polygon or within 80 normalized
+  // units of the mask centroid (ensures we don't include far-away intersections)
+  const maskCentroid = polygonCentroid(polygon);
+  const maxDist = 400; // max distance from centroid to accept (40% of image)
+  const nearIntersections = intersections.filter(pt => {
+    // Prefer points inside the mask polygon
+    if (pointInPolygon(pt, polygon)) return true;
+    // Accept points close to the mask region
+    const dx = pt.x - maskCentroid.x;
+    const dy = pt.y - maskCentroid.y;
+    return Math.sqrt(dx * dx + dy * dy) < maxDist;
+  });
+
+  // Step 4: Add line endpoints that fall within or near the mask region
+  const lineEndpoints: NormalizedPoint[] = [];
+  for (const line of boundaryLines) {
+    for (const pt of [line.start, line.end]) {
+      if (pointInPolygon(pt, polygon)) {
+        lineEndpoints.push(pt);
+      } else {
+        // Accept endpoints close to the polygon boundary
+        let minDist = Infinity;
+        for (let k = 0; k < polygon.length; k++) {
+          const d = pointToSegmentDist(pt, polygon[k], polygon[(k + 1) % polygon.length]);
+          if (d < minDist) minDist = d;
+        }
+        if (minDist < 80) { // within 8% of image dimension
+          lineEndpoints.push(pt);
+        }
+      }
+    }
+  }
+
+  // Combine all vertices
+  const allVertices = [...nearIntersections, ...lineEndpoints];
+
+  // Step 5: Deduplicate and sort
+  const deduped = deduplicateVertices(allVertices);
+  const sorted = sortVerticesCCW(deduped);
+
+  // Step 6: Validate — need at least 3 vertices for a meaningful polygon
+  if (sorted.length < 3) {
+    console.info(
+      `[PlaneBoundary] ${isRoof ? 'Roof' : 'Wall'} mask ${mask.id}: ` +
+      `only ${sorted.length} line-derived vertices (${intersections.length} intersections, ` +
+      `${lineEndpoints.length} endpoints), using mask polygon`,
+    );
+    return fallbackPolygon;
+  }
+
+  // Compute area of the constructed polygon to sanity-check it
+  const area = polygonArea(sorted);
+  const maskArea = polygonArea(polygon);
+
+  // If the line-constructed polygon is less than 10% or more than 500% of
+  // the mask area, something went wrong — fall back
+  if (maskArea > 0 && (area < maskArea * 0.1 || area > maskArea * 5)) {
+    console.info(
+      `[PlaneBoundary] ${isRoof ? 'Roof' : 'Wall'} mask ${mask.id}: ` +
+      `line polygon area=${area.toFixed(0)} vs mask area=${maskArea.toFixed(0)}, ` +
+      `using mask polygon`,
+    );
+    return fallbackPolygon;
+  }
+
+  console.info(
+    `[PlaneBoundary] ${isRoof ? 'Roof' : 'Wall'} mask ${mask.id}: ` +
+    `constructed polygon from ${boundaryLines.length} boundary lines → ` +
+    `${intersections.length} intersections, ${lineEndpoints.length} endpoints → ` +
+    `${sorted.length} vertices (mask had ${polygon.length})`,
+  );
+
+  return sorted;
+}
+
+/**
+ * Check if two structural lines are approximately parallel.
+ * Used to skip intersection computation for parallel same-type lines.
+ */
+function isApproximatelyParallel(a: StructuralLineCandidate, b: StructuralLineCandidate): boolean {
+  const dxA = a.end.x - a.start.x, dyA = a.end.y - a.start.y;
+  const dxB = b.end.x - b.start.x, dyB = b.end.y - b.start.y;
+  const lenA = Math.sqrt(dxA * dxA + dyA * dyA);
+  const lenB = Math.sqrt(dxB * dxB + dyB * dyB);
+  if (lenA < 1e-10 || lenB < 1e-10) return false;
+
+  // Cross product of unit direction vectors
+  const cross = (dxA / lenA) * (dyB / lenB) - (dyA / lenA) * (dxB / lenB);
+  return Math.abs(cross) < 0.15; // ~8.5° tolerance for "approximately parallel"
+}
+
+/**
+ * Compute the signed area of a polygon (normalized coordinates).
+ * Used for sanity-checking constructed polygon sizes.
+ * Returns absolute area regardless of winding direction.
+ */
+function polygonArea(polygon: NormalizedPoint[]): number {
+  let area = 0;
+  const n = polygon.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area += polygon[i].x * polygon[j].y;
+    area -= polygon[j].x * polygon[i].y;
+  }
+  return Math.abs(area / 2);
+}
+
+/**
+ * Enforce architectural truth on a polygon derived from line intersections:
+ * edges that should be level (0°) or vertical (90°) are snapped to exact
+ * angles. This ensures that gutters are truly level, walls are truly
+ * vertical, etc.
+ *
+ * Works by checking each edge's angle against the class-specific
+ * enforcement rules and snapping endpoints if within tolerance.
+ */
+function enforceArchitecturalTruth(
+  polygon: NormalizedPoint[] | undefined,
+  segmentationClass: string,
+  snapTolerance: number = 10, // degrees
+): NormalizedPoint[] | undefined {
+  if (!polygon || polygon.length < 3) return polygon;
+
+  // Determine which angle constraints apply
+  const shouldEnforceLevel = LEVEL_ENFORCED_CLASSES_FOR_PLANES.has(segmentationClass);
+  const shouldEnforceVertical = VERTICAL_ENFORCED_CLASSES_FOR_PLANES.has(segmentationClass);
+
+  if (!shouldEnforceLevel && !shouldEnforceVertical) return polygon;
+
+  const result = polygon.map(p => ({ ...p })); // deep copy
+
+  for (let i = 0; i < result.length; i++) {
+    const j = (i + 1) % result.length;
+    const dx = result[j].x - result[i].x;
+    const dy = result[j].y - result[i].y;
+
+    if (Math.abs(dx) < 1e-10 && Math.abs(dy) < 1e-10) continue;
+
+    const angle = Math.atan2(dx, -dy) * (180 / Math.PI); // angle from vertical (image Y-down)
+    // In image coords: angle 0 = straight up, 90 = right, -90 = left, 180 = down
+    // Level line: angle ≈ ±90° (horizontal in image)
+    // Vertical line: angle ≈ 0° or 180° (vertical in image)
+
+    // Normalize angle to [-180, 180]
+    const normAngle = ((angle + 180) % 360) - 180;
+
+    if (shouldEnforceLevel && (Math.abs(normAngle - 90) < snapTolerance || Math.abs(normAngle + 90) < snapTolerance)) {
+      // Snap to level: make Y coordinates identical
+      const avgY = (result[i].y + result[j].y) / 2;
+      result[i].y = avgY;
+      result[j].y = avgY;
+    } else if (shouldEnforceVertical && (Math.abs(normAngle) < snapTolerance || Math.abs(normAngle - 180) < snapTolerance || Math.abs(normAngle + 180) < snapTolerance)) {
+      // Snap to vertical: make X coordinates identical
+      const avgX = (result[i].x + result[j].x) / 2;
+      result[i].x = avgX;
+      result[j].x = avgX;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Classes whose plane polygons should have level edges enforced
+ * (gutters, sills, foundations, eaves should all be truly horizontal).
+ */
+const LEVEL_ENFORCED_CLASSES_FOR_PLANES = new Set([
+  'roof', 'gutter', 'soffit', 'fascia', 'eave',
+  'siding', 'window', 'door', 'foundation', 'porch',
+  'deck', 'steps', 'railing', 'garage_door', 'retaining_wall',
+  'awning', 'carport', 'sill_line', 'gutter_line',
+]);
+
+/**
+ * Classes whose plane polygons should have vertical edges enforced
+ * (walls, pillars, chimneys should have truly vertical sides).
+ */
+const VERTICAL_ENFORCED_CLASSES_FOR_PLANES = new Set([
+  'wall', 'siding', 'door', 'window', 'downspout',
+  'pillar', 'column', 'chimney', 'vent_pipe', 'flue',
+  'utility_pole', 'fence', 'wall_vertical',
+]);
 
 // ---------------------------------------------------------------------------
 // Depth-to-artifact mapping helpers
@@ -696,9 +1083,55 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
             // Mark this mask as processed (so heuristic path doesn't duplicate it)
             processedMaskIds.add(bestMask.id);
 
-            // Use heuristic polygon if depth polygon is sparse
-            if (bestMask.polygon.length >= 3 && (!polygon || polygon.length < bestMask.polygon.length)) {
+            // Construct plane boundary from line intersections (architectural truth)
+            // Prefer line-constructed polygon over raw depth or mask polygon
+            const rawMaskPolygon = bestMask.polygon.length >= 3 ? bestMask.polygon : undefined;
+            const lineBoundary = constructPlaneBoundaryFromLines(
+              bestMask, maskLines, true, rawMaskPolygon,
+            );
+            // Enforce architectural truth on the boundary (level ridges/eaves)
+            const enforcedBoundary = enforceArchitecturalTruth(lineBoundary, bestMask.segmentationClass);
+
+            if (enforcedBoundary && enforcedBoundary.length >= 3) {
+              polygon = enforcedBoundary;
+            } else if (bestMask.polygon.length >= 3 && (!polygon || polygon.length < bestMask.polygon.length)) {
+              // Fall back to heuristic polygon if line construction failed
               polygon = bestMask.polygon;
+            }
+          } else {
+            // No overlapping mask — try constructing boundary from any associated
+            // lines that overlap this depth plane region
+            const depthRegion: NormalizedRegion = {
+              x: plane.bounds.xMin * 1000,
+              y: plane.bounds.yMin * 1000,
+              width: (plane.bounds.xMax - plane.bounds.xMin) * 1000,
+              height: (plane.bounds.yMax - plane.bounds.yMin) * 1000,
+              coordinateSystem: 'normalized_image_0_1000',
+            };
+            // Use boundary lines whose midpoints fall within the depth region
+            const nearbyLines = input.lines.filter(l => {
+              const midX = (l.start.x + l.end.x) / 2;
+              const midY = (l.start.y + l.end.y) / 2;
+              return midX >= depthRegion.x && midX <= depthRegion.x + depthRegion.width &&
+                     midY >= depthRegion.y && midY <= depthRegion.y + depthRegion.height &&
+                     ROOF_BOUNDARY_LINE_TYPES.includes(l.lineType);
+            });
+            if (nearbyLines.length >= 2) {
+              // Build a synthetic mask polygon from the depth plane bounds for reference
+              const syntheticPoly: NormalizedPoint[] = [
+                { x: depthRegion.x, y: depthRegion.y, coordinateSystem: 'normalized_image_0_1000' },
+                { x: depthRegion.x + depthRegion.width, y: depthRegion.y, coordinateSystem: 'normalized_image_0_1000' },
+                { x: depthRegion.x + depthRegion.width, y: depthRegion.y + depthRegion.height, coordinateSystem: 'normalized_image_0_1000' },
+                { x: depthRegion.x, y: depthRegion.y + depthRegion.height, coordinateSystem: 'normalized_image_0_1000' },
+              ];
+              const syntheticMask = { ...roofMasks[0], polygon: syntheticPoly, id: `depth-${plane.id}` };
+              const lineBoundary = constructPlaneBoundaryFromLines(
+                syntheticMask, nearbyLines, true, syntheticPoly,
+              );
+              const enforcedBoundary = enforceArchitecturalTruth(lineBoundary, 'roof');
+              if (enforcedBoundary && enforcedBoundary.length >= 3) {
+                polygon = enforcedBoundary;
+              }
             }
           }
 
@@ -710,14 +1143,16 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
 
           if (finalConf < minConfidence) continue;
 
-          // Compute region from depth bounds
-          const region: NormalizedRegion = {
-            x: plane.bounds.xMin * 1000,
-            y: plane.bounds.yMin * 1000,
-            width: (plane.bounds.xMax - plane.bounds.xMin) * 1000,
-            height: (plane.bounds.yMax - plane.bounds.yMin) * 1000,
-            coordinateSystem: 'normalized_image_0_1000',
-          };
+          // Compute region from depth bounds or polygon
+          const region: NormalizedRegion = polygon
+            ? polygonBounds(polygon)
+            : {
+                x: plane.bounds.xMin * 1000,
+                y: plane.bounds.yMin * 1000,
+                width: (plane.bounds.xMax - plane.bounds.xMin) * 1000,
+                height: (plane.bounds.yMax - plane.bounds.yMin) * 1000,
+                coordinateSystem: 'normalized_image_0_1000',
+              };
 
           const candidate: RoofPlaneCandidate = {
             artifactType: 'roof_plane_candidate',
@@ -785,7 +1220,17 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
 
             processedMaskIds.add(bestMask.id);
 
-            if (bestMask.polygon.length >= 3 && (!polygon || polygon.length < bestMask.polygon.length)) {
+            // Construct plane boundary from line intersections (architectural truth)
+            const rawMaskPolygon = bestMask.polygon.length >= 3 ? bestMask.polygon : undefined;
+            const lineBoundary = constructPlaneBoundaryFromLines(
+              bestMask, maskLines, false, rawMaskPolygon,
+            );
+            // Enforce architectural truth (level sills/gutters, vertical edges)
+            const enforcedBoundary = enforceArchitecturalTruth(lineBoundary, bestMask.segmentationClass);
+
+            if (enforcedBoundary && enforcedBoundary.length >= 3) {
+              polygon = enforcedBoundary;
+            } else if (bestMask.polygon.length >= 3 && (!polygon || polygon.length < bestMask.polygon.length)) {
               polygon = bestMask.polygon;
             }
           }
@@ -798,13 +1243,15 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
 
           if (finalConf < minConfidence) continue;
 
-          const region: NormalizedRegion = {
-            x: plane.bounds.xMin * 1000,
-            y: plane.bounds.yMin * 1000,
-            width: (plane.bounds.xMax - plane.bounds.xMin) * 1000,
-            height: (plane.bounds.yMax - plane.bounds.yMin) * 1000,
-            coordinateSystem: 'normalized_image_0_1000',
-          };
+          const region: NormalizedRegion = polygon
+            ? polygonBounds(polygon)
+            : {
+                x: plane.bounds.xMin * 1000,
+                y: plane.bounds.yMin * 1000,
+                width: (plane.bounds.xMax - plane.bounds.xMin) * 1000,
+                height: (plane.bounds.yMax - plane.bounds.yMin) * 1000,
+                coordinateSystem: 'normalized_image_0_1000',
+              };
 
           const candidate: WallPlaneCandidate = {
             artifactType: 'wall_plane_candidate',
@@ -927,7 +1374,15 @@ function runHeuristicExtraction(
 
     if (confidence < minConfidence) continue;
 
-    const region = polygonBounds(mask.polygon);
+    // Construct plane boundary from line intersections (architectural truth)
+    const rawMaskPolygon = mask.polygon.length >= 3 ? mask.polygon : undefined;
+    const lineBoundary = constructPlaneBoundaryFromLines(
+      mask, associatedLines, true, rawMaskPolygon,
+    );
+    // Enforce architectural truth (level ridges/eaves, vertical rakes)
+    const polygon = enforceArchitecturalTruth(lineBoundary, mask.segmentationClass);
+
+    const region = polygonBounds(polygon ?? mask.polygon);
 
     const candidate: RoofPlaneCandidate = {
       artifactType: 'roof_plane_candidate',
@@ -936,7 +1391,7 @@ function runHeuristicExtraction(
       inlierCount: associatedLines.length,
       totalPoints: lines.length,
       region,
-      polygon: mask.polygon.length >= 3 ? mask.polygon : undefined,
+      polygon,
       sourceMaskId: mask.id,
       fileId: mask.fileId,
       slopeDegrees: Math.round(slope * 10) / 10,
@@ -965,7 +1420,15 @@ function runHeuristicExtraction(
 
     if (confidence < minConfidence) continue;
 
-    const region = polygonBounds(mask.polygon);
+    // Construct plane boundary from line intersections (architectural truth)
+    const rawMaskPolygon = mask.polygon.length >= 3 ? mask.polygon : undefined;
+    const lineBoundary = constructPlaneBoundaryFromLines(
+      mask, associatedLines, false, rawMaskPolygon,
+    );
+    // Enforce architectural truth (level sills/gutters, vertical edges)
+    const polygon = enforceArchitecturalTruth(lineBoundary, mask.segmentationClass);
+
+    const region = polygonBounds(polygon ?? mask.polygon);
 
     const candidate: WallPlaneCandidate = {
       artifactType: 'wall_plane_candidate',
@@ -974,7 +1437,7 @@ function runHeuristicExtraction(
       inlierCount: associatedLines.length,
       totalPoints: lines.length,
       region,
-      polygon: mask.polygon.length >= 3 ? mask.polygon : undefined,
+      polygon,
       sourceMaskId: mask.id,
       fileId: mask.fileId,
       estimatedHeightM: Math.round(height * 10) / 10,
