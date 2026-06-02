@@ -254,28 +254,6 @@ class DepthResponse(BaseModel):
     error: Optional[str] = None
 
 
-class EdgeLine(BaseModel):
-    """A single detected edge line segment."""
-    start_x: float
-    start_y: float
-    end_x: float
-    end_y: float
-    length: float          # Length in pixels
-    angle_deg: float       # Angle in degrees (0=horizontal, 90=vertical)
-    confidence: float      # Detection confidence (0-100)
-
-class EdgeDetectionResponse(BaseModel):
-    """Response from the /edges endpoint."""
-    success: bool
-    lines: list[EdgeLine]
-    line_count: int
-    image_width: int
-    image_height: int
-    processing_time_ms: float
-    model_info: dict
-    error: Optional[str] = None
-
-
 class PromptPoint(BaseModel):
     """A single click point for prompted segmentation."""
     x: float  # x coordinate in original image pixel space
@@ -688,18 +666,8 @@ def classify_mask_region(
 
     Returns one of: roof, wall, sky, ground, tree, obstruction, equipment,
     siding, window, door, garage_door, fascia, soffit, gutter, downspout,
-    porch, deck, steps, railing,
-    chimney, dormer, vent_pipe, satellite_dish, skylight, roof_hatch,
-    flashing, solar_tube, flue, antenna,
-    foundation, detached_structure, retaining_wall, pillar, pool, awning,
-    carport,
-    neighbor_house, neighbor_structure,
-    junk_yard_debris, construction_debris, piled_materials, dumpster,
-    storage_container,
-    power_line, utility_pole,
-    hedge, overgrown_vegetation,
-    grass, overgrown_grass, sidewalk, driveway, gravel, fence, bushes,
-    vegetation_touching_structure,
+    porch, deck, steps, railing, grass, overgrown_grass, sidewalk, driveway,
+    gravel, fence, bushes, vegetation_touching_structure,
     utility_meter, main_service_panel, disconnect, conduit, inverter, battery,
     ac_unit, existing_solar_panel,
     car, truck, person, ladder, trash_can, tools, temporary_materials,
@@ -806,139 +774,6 @@ def classify_mask_region(
             if norm_area > 0.05:
                 return "roof"
 
-    # ── Roof feature detection ──
-    # Small-to-tiny regions in the roof zone with specific shapes
-    if 0.05 < norm_y_center < 0.55 and green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
-        # Chimney: small tall region near roof ridge/center, low green, moderate aspect
-        if 0.003 < norm_area < 0.015 and aspect_ratio < 0.8:
-            return "chimney"
-        # Vent pipe: very small, very tall narrow (plumbing stack on roof)
-        if 0.001 < norm_area < 0.004 and aspect_ratio < 0.35:
-            return "vent_pipe"
-        # Satellite dish: small, roughly circular on roof or wall edge
-        if 0.002 < norm_area < 0.008 and 0.7 < aspect_ratio < 1.5:
-            if norm_x_center < 0.25 or norm_x_center > 0.75:
-                return "satellite_dish"
-        # Skylight: small square-ish on roof plane, darker than roof
-        if 0.003 < norm_area < 0.02 and 0.6 < aspect_ratio < 1.6:
-            return "skylight"
-        # Dormer: moderate area on roof with wall-like shape
-        # Dormers are small "walls" that protrude from the roof plane
-        if 0.01 < norm_area < 0.06 and 0.5 < aspect_ratio < 1.2:
-            if 0.3 < norm_x_center < 0.7:
-                return "dormer"
-        # Flue: very small thin vertical on roof (similar to vent_pipe but even smaller)
-        if 0.0005 < norm_area < 0.002 and aspect_ratio < 0.3:
-            return "flue"
-        # Antenna: tiny thin vertical at roof peak
-        if norm_area < 0.001 and aspect_ratio < 0.2:
-            return "antenna"
-        # Roof hatch: small square on roof, near ridge
-        if 0.002 < norm_area < 0.01 and 0.8 < aspect_ratio < 1.3:
-            return "roof_hatch"
-        # Flashing: thin strip at roof penetration or junction
-        if norm_area < 0.005 and aspect_ratio > 2.5:
-            return "flashing"
-
-    # ── Occluder detection ──
-    # IMPORTANT: Check for occluders (car, truck, person) BEFORE site structures.
-    # Cars have overlapping criteria with carport/detached_structure/shed.
-    # We must identify them FIRST so they don't get misclassified as structures.
-    # Large objects at ground level that block the view of the structure
-    if norm_y_center > 0.5 and green_ratio < 0.10:
-        # Car/truck: large horizontal area at ground level
-        if 0.04 < norm_area < 0.2 and aspect_ratio > 1.5:
-            return "car" if norm_area < 0.12 else "truck"
-        # Person: very tall narrow at ground level
-        if 0.003 < norm_area < 0.02 and aspect_ratio < 0.5:
-            return "person"
-        # Ladder: thin tall at ground level
-        if norm_area < 0.003 and aspect_ratio < 0.25:
-            return "ladder"
-        # Trash can: small square at ground level
-        if 0.002 < norm_area < 0.008 and 0.6 < aspect_ratio < 1.5:
-            return "trash_can"
-
-    # ── Site structure detection (ground-level structures) ──
-    if green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
-        # Foundation: thin horizontal strip at ground-wall junction
-        if 0.005 < norm_area < 0.03 and aspect_ratio > 2.5 and 0.55 < norm_y_center < 0.75:
-            return "foundation"
-        # Detached structure (shed, detached garage): moderate area, ground level, not main house
-        if 0.03 < norm_area < 0.2 and norm_y_center > 0.4:
-            if norm_x_center < 0.2 or norm_x_center > 0.8:
-                return "detached_structure"
-        # Retaining wall: thin horizontal in lower portion, non-green
-        if 0.003 < norm_area < 0.02 and aspect_ratio > 3.0 and norm_y_center > 0.6:
-            return "retaining_wall"
-        # Pillar/column: very thin tall vertical, supporting porch or structure
-        if 0.001 < norm_area < 0.005 and aspect_ratio < 0.3 and 0.3 < norm_y_center < 0.75:
-            return "pillar"
-        # Pool: moderate-large area at ground level, blue-ish or reflective
-        if 0.02 < norm_area < 0.15 and norm_y_center > 0.6 and aspect_ratio > 1.0:
-            return "pool"
-        # Awning: thin horizontal overhang attached to wall
-        if 0.005 < norm_area < 0.03 and aspect_ratio > 2.0 and 0.35 < norm_y_center < 0.55:
-            return "awning"
-        # Carport: horizontal structure at ground level, open sides
-        if 0.04 < norm_area < 0.12 and aspect_ratio > 1.3 and norm_y_center > 0.5:
-            if 0.6 < norm_x_center:
-                return "carport"
-
-    # ── Neighbor house detection ──
-    # Large non-green structures in the periphery of the image (not the main house)
-    if green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
-        if norm_area > 0.05 and aspect_ratio > 0.8:
-            # Neighbor house: large structure on the far left/right edge
-            if norm_x_center < 0.15 or norm_x_center > 0.85:
-                if norm_y_center < 0.6:
-                    return "neighbor_house"
-            # Neighbor structure: smaller structure on edges
-            if 0.02 < norm_area < 0.1 and (norm_x_center < 0.2 or norm_x_center > 0.8):
-                return "neighbor_structure"
-
-    # ── Site debris detection ──
-    # Small-to-moderate non-green regions at ground level with irregular shapes
-    if norm_y_center > 0.55 and green_ratio < 0.10:
-        # Junk yard debris: moderate area, irregular (not car-shaped), at ground level
-        if 0.01 < norm_area < 0.08 and aspect_ratio > 0.5:
-            return "junk_yard_debris"
-        # Construction debris: smaller, scattered
-        if 0.005 < norm_area < 0.03 and aspect_ratio > 0.8:
-            return "construction_debris"
-        # Dumpster: rectangular, at ground level, usually near driveway
-        if 0.01 < norm_area < 0.05 and 1.2 < aspect_ratio < 2.0 and norm_y_center > 0.65:
-            return "dumpster"
-        # Piled materials: moderate area, irregular shape
-        if 0.008 < norm_area < 0.04 and aspect_ratio < 1.5:
-            return "piled_materials"
-        # Storage container: larger rectangular at ground
-        if 0.03 < norm_area < 0.1 and 1.5 < aspect_ratio < 3.0:
-            return "storage_container"
-
-    # ── Power line / utility pole detection ──
-    # Very thin horizontal lines across sky/upper region = power line
-    if norm_area < 0.002 and aspect_ratio > 5.0 and norm_y_center < 0.5:
-        return "power_line"
-    # Very thin tall vertical in upper portion = utility pole
-    if norm_area < 0.003 and aspect_ratio < 0.2 and 0.1 < norm_y_center < 0.6:
-        return "utility_pole"
-
-    # ── Hedge detection ──
-    # Green at ground level but shaped like a wall (trimmed hedge)
-    if 0.3 < norm_y_center < 0.7 and 0.02 < norm_area < 0.08:
-        if CLASSIFIER_GREEN_RATIO_TREE_MODERATE < green_ratio < CLASSIFIER_GREEN_RATIO_TREE:
-            if aspect_ratio > 1.5:
-                return "hedge"
-            if aspect_ratio < 0.5:
-                return "overgrown_vegetation"
-
-    # ── Overgrown vegetation (not tree, not grass) ──
-    if green_ratio > CLASSIFIER_GREEN_RATIO_TREE_MODERATE:
-        # Overgrown: at various heights, irregular shape, touching or near structure
-        if 0.3 < norm_y_center < 0.65 and norm_area > 0.02 and aspect_ratio < 1.5:
-            return "overgrown_vegetation"
-
     # ── Wall/facade detection ──
     if 0.2 <= norm_y_center < 0.85 and h > w * 0.8 and green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
         return "wall"
@@ -1002,6 +837,22 @@ def classify_mask_region(
         # Equipment (small, upper portion) — fallback
         if 0.003 < norm_area < 0.03 and norm_y_center < 0.6:
             return "equipment"
+
+    # ── Occluder detection ──
+    # Large objects at ground level that block the view of the structure
+    if norm_y_center > 0.5 and green_ratio < 0.10:
+        # Car/truck: large horizontal area at ground level
+        if 0.04 < norm_area < 0.2 and aspect_ratio > 1.5:
+            return "car" if norm_area < 0.12 else "truck"
+        # Person: very tall narrow at ground level
+        if 0.003 < norm_area < 0.02 and aspect_ratio < 0.5:
+            return "person"
+        # Ladder: thin tall at ground level
+        if norm_area < 0.003 and aspect_ratio < 0.25:
+            return "ladder"
+        # Trash can: small square at ground level
+        if 0.002 < norm_area < 0.008 and 0.6 < aspect_ratio < 1.5:
+            return "trash_can"
 
     # ── Obstruction detection (very small regions) ──
     if norm_area < 0.01:
@@ -1073,35 +924,20 @@ def _compute_green_ratio(
 
 
 # Classes that are relevant for solar installation assessment.
-# Expanded from roof-only to include facade, roof features, site structures,
-# landscaping, neighbor context, debris, electrical, and condition classes.
-# Occluders (car, person, etc.) are excluded because they only block the
-# view — they don't affect solar feasibility.
+# Expanded from roof-only to include facade, electrical, site context,
+# and condition classes. Occluders (car, person, etc.) are excluded
+# because they only block the view — they don't affect solar feasibility.
 SOLAR_RELEVANT_CLASSES = {
     # Legacy roof-critical
     "roof", "wall", "equipment", "obstruction",
     # Facade
     "siding", "window", "door", "garage_door", "fascia", "soffit",
     "gutter", "downspout", "porch", "deck", "steps", "railing",
-    # Roof features — affect panel placement, fire setbacks, shade
-    "chimney", "dormer", "vent_pipe", "satellite_dish", "skylight",
-    "roof_hatch", "flashing", "solar_tube", "flue", "antenna",
-    # Site structures — affect access, equipment staging, setbacks
-    "foundation", "detached_structure", "retaining_wall", "pillar", "column",
-    "pool", "awning", "shed", "garage_detached", "pergola", "carport",
-    # Landscaping — shade sources, access impedance, condition indicator
-    "overgrown_grass", "bushes", "hedge", "overgrown_vegetation",
-    "vegetation_touching_structure", "trees", "stump",
-    # Neighbor context — permanent shade sources, setback constraints
-    "neighbor_house", "neighbor_structure", "power_line", "utility_pole",
-    # Site debris — crew access and safety concerns
-    "junk_yard_debris", "construction_debris", "piled_materials",
-    "dumpster", "storage_container",
-    # Site context (solar-relevant)
-    "driveway", "fence",
     # Electrical/solar
     "utility_meter", "main_service_panel", "disconnect", "conduit",
     "inverter", "battery", "ac_unit", "existing_solar_panel",
+    # Site context (solar-relevant)
+    "driveway", "fence", "bushes", "vegetation_touching_structure",
     # Condition flags
     "moss", "algae", "damaged_siding", "blocked_access", "muddy_work_area",
 }
@@ -1935,229 +1771,6 @@ async def estimate_depth(
             "model_type": "midas_dpt_depth_estimation",
             "inference_resolution": f"{res_w}x{res_h}",
             "output_resolution": f"{output_resolution}x{output_resolution}",
-        },
-    )
-
-
-# ---------------------------------------------------------------------------
-# Edge detection endpoint (Canny + Hough transform)
-# ---------------------------------------------------------------------------
-
-@app.post("/edges", response_model=EdgeDetectionResponse)
-async def detect_edges(
-    file: UploadFile = File(..., description="Survey photo (JPEG/PNG/WebP)"),
-    canny_low: int = Query(
-        default=50,
-        description="Canny edge detection low threshold (0-255)",
-        ge=1,
-        le=255,
-    ),
-    canny_high: int = Query(
-        default=150,
-        description="Canny edge detection high threshold (0-255)",
-        ge=1,
-        le=255,
-    ),
-    hough_threshold: int = Query(
-        default=80,
-        description="HoughLinesP accumulator threshold (higher = fewer lines)",
-        ge=10,
-        le=500,
-    ),
-    hough_min_length: int = Query(
-        default=50,
-        description="Minimum line segment length in pixels",
-        ge=5,
-        le=500,
-    ),
-    hough_max_gap: int = Query(
-        default=20,
-        description="Maximum allowed gap between line segments in pixels",
-        ge=1,
-        le=100,
-    ),
-    max_lines: int = Query(
-        default=200,
-        description="Maximum number of lines to return",
-        ge=1,
-        le=1000,
-    ),
-    snap_architectural: bool = Query(
-        default=True,
-        description="If true, snap line angles to nearest architecturally-valid angle (0°, 90°, roof slopes)",
-    ),
-    snap_tolerance: float = Query(
-        default=10.0,
-        description="Angle tolerance in degrees for architectural snapping",
-        ge=1.0,
-        le=45.0,
-    ),
-):
-    """
-    Detect structural edge lines in a survey photo using Canny edge detection
-    and probabilistic Hough transform.
-
-    This endpoint provides REAL edge detection from image pixels, unlike the
-    heuristic polygon-edge tracing in the line extraction worker. The detected
-    lines can be used to:
-    1. Snap segmentation mask polygon edges to real image structure
-    2. Validate heuristic line classifications against actual pixel edges
-    3. Detect lines that segmentation masks miss (e.g., faint ridges)
-
-    ARCHITECTURAL SNAPPING:
-    When snap_architectural=True (default), detected line angles are snapped
-    to the nearest architecturally-valid angle:
-    - 0° (LEVEL): gutters, sills, soffits, foundations, eaves
-    - 90° (VERTICAL): wall corners, downspouts
-    - 18°-60°: common roof pitch angles (4/12 through 20/12)
-
-    This enforces the geometric truths of construction: buildings are built
-    with levels and plumb bobs, so edges that are close to 0° or 90° ARE 0° or 90°.
-
-    Returns line segments with start/end coordinates, angle, and confidence.
-    """
-    t0 = time.time()
-
-    # Read image bytes
-    try:
-        image_bytes = await file.read()
-        if len(image_bytes) == 0:
-            raise HTTPException(status_code=400, detail="Empty image file")
-
-        nparr = np.frombuffer(image_bytes, np.uint8)
-        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-        if image is None:
-            raise HTTPException(status_code=400, detail="Could not decode image")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Image read error: {str(e)}")
-
-    orig_h, orig_w = image.shape[:2]
-
-    # Convert to grayscale for edge detection
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    # Apply Gaussian blur to reduce noise before Canny
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-
-    # Canny edge detection
-    edges = cv2.Canny(blurred, canny_low, canny_high)
-
-    # Probabilistic Hough Line Transform
-    # Returns line segments as (x1, y1, x2, y2) endpoints
-    raw_lines = cv2.HoughLinesP(
-        edges,
-        rho=1,                    # Distance resolution in pixels
-        theta=np.pi / 180,        # Angle resolution in radians (1°)
-        threshold=hough_threshold, # Accumulator threshold
-        minLineLength=hough_min_length,
-        maxLineGap=hough_max_gap,
-    )
-
-    if raw_lines is None:
-        processing_time = (time.time() - t0) * 1000
-        return EdgeDetectionResponse(
-            success=True,
-            lines=[],
-            line_count=0,
-            image_width=orig_w,
-            image_height=orig_h,
-            processing_time_ms=round(processing_time, 1),
-            model_info={
-                "model_type": "canny_hough_edge_detection",
-                "canny_thresholds": f"{canny_low}/{canny_high}",
-                "hough_params": f"thresh={hough_threshold}, min_len={hough_min_length}, max_gap={hough_max_gap}",
-            },
-        )
-
-    # Architectural angle snapping constants
-    ARCH_ANGLES = [0, 18, 27, 34, 45, 53, 60, 90]
-    ARCH_ANGLES_FULL = ARCH_ANGLES + [180 - a for a in ARCH_ANGLES if a not in (0, 90)]
-    ARCH_ANGLES_FULL = sorted(set(ARCH_ANGLES_FULL))
-
-    # Process detected lines
-    result_lines: list[EdgeLine] = []
-
-    for line in raw_lines:
-        x1, y1, x2, y2 = line[0]
-
-        dx = x2 - x1
-        dy = y2 - y1
-        length = np.sqrt(dx * dx + dy * dy)
-
-        if length < hough_min_length:
-            continue
-
-        # Compute angle: in screen coords (y-down), atan2 gives angle from x-axis
-        # We want: 0° = horizontal, 90° = vertical
-        angle_rad = np.arctan2(abs(dy), abs(dx))  # Use abs for undirected angle
-        angle_deg = float(angle_rad * 180.0 / np.pi)
-
-        # Optional: snap to nearest architectural angle
-        if snap_architectural:
-            best_angle = angle_deg
-            best_delta = float('inf')
-            for arch_angle in ARCH_ANGLES:
-                delta = abs(angle_deg - arch_angle)
-                # Also check complement (90° - arch_angle for the perpendicular)
-                if delta < best_delta and delta <= snap_tolerance:
-                    best_delta = delta
-                    best_angle = arch_angle
-
-            if best_delta <= snap_tolerance:
-                # Re-compute endpoint at snapped angle, preserving start point and length
-                snapped_rad = best_angle * np.pi / 180.0
-                # Determine sign of dx and dy to maintain general direction
-                sign_x = 1 if dx >= 0 else -1
-                sign_y = 1 if dy >= 0 else -1
-                new_dx = length * np.cos(snapped_rad) * sign_x
-                new_dy = length * np.sin(snapped_rad) * sign_y
-                x2 = x1 + new_dx
-                y2 = y1 + new_dy
-                angle_deg = best_angle
-
-        # Confidence based on line length and edge strength
-        # Longer lines in areas with strong edges are more confident
-        confidence = min(100, round(length * 0.5 + 20))
-
-        result_lines.append(EdgeLine(
-            start_x=float(x1),
-            start_y=float(y1),
-            end_x=float(x2),
-            end_y=float(y2),
-            length=float(length),
-            angle_deg=round(angle_deg, 1),
-            confidence=confidence,
-        ))
-
-    # Sort by confidence (highest first) and limit count
-    result_lines.sort(key=lambda l: l.confidence, reverse=True)
-    result_lines = result_lines[:max_lines]
-
-    processing_time = (time.time() - t0) * 1000
-
-    logger.info(
-        f"Edge detection: {orig_w}x{orig_h}, "
-        f"Canny({canny_low},{canny_high}), Hough(thresh={hough_threshold}), "
-        f"{len(raw_lines)} raw → {len(result_lines)} lines in {processing_time:.0f}ms"
-    )
-
-    return EdgeDetectionResponse(
-        success=True,
-        lines=result_lines,
-        line_count=len(result_lines),
-        image_width=orig_w,
-        image_height=orig_h,
-        processing_time_ms=round(processing_time, 1),
-        model_info={
-            "model_type": "canny_hough_edge_detection",
-            "canny_thresholds": f"{canny_low}/{canny_high}",
-            "hough_params": f"thresh={hough_threshold}, min_len={hough_min_length}, max_gap={hough_max_gap}",
-            "architectural_snap": snap_architectural,
-            "snap_tolerance_deg": snap_tolerance,
         },
     )
 

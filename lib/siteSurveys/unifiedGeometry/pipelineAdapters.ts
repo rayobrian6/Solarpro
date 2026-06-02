@@ -71,11 +71,6 @@ import {
   ELECTRICAL_SEGMENTATION_CLASSES,
   OCCLUDER_SEGMENTATION_CLASSES,
   CONDITION_SEGMENTATION_CLASSES,
-  ROOF_FEATURE_SEGMENTATION_CLASSES,
-  SITE_STRUCTURE_SEGMENTATION_CLASSES,
-  LANDSCAPING_SEGMENTATION_CLASSES,
-  NEIGHBOR_CONTEXT_SEGMENTATION_CLASSES,
-  SITE_DEBRIS_SEGMENTATION_CLASSES,
   type SegmentationClass,
 } from '../geometryReconstruction/types';
 
@@ -131,16 +126,6 @@ function regionToBBox(region: OpenSourcePhotoVisionRegion | NormalizedRegion): G
     height: region.height,
     coordinateSystem: 'normalized_image_0_1000',
   };
-}
-
-/** Pipeline A candidate types that are allowed to become drawable line geometry. */
-const PIPELINE_A_LINE_CANDIDATE_TYPES = new Set<OpenSourcePhotoVisionCandidateType>([
-  'dominant_line_candidate',
-  'roof_edge_candidate',
-]);
-
-function canPipelineACandidateCarryLine(candidate: OpenSourcePhotoVisionCandidate): boolean {
-  return PIPELINE_A_LINE_CANDIDATE_TYPES.has(candidate.candidateType);
 }
 
 /**
@@ -395,21 +380,15 @@ export function adaptPhotoVisionCandidate(
     ? { ...MOCK_ARTIFACT_AUTHORITY }
     : { ...RAW_EVIDENCE_AUTHORITY };
 
-  // Build geometry fields based on geometry class. Some Pipeline A tools attach
-  // incidental edge lines to equipment/obstruction detections; those are evidence
-  // hints, not drawable roof geometry. Only true line candidate types may carry a
-  // UnifiedGeometry lineSegment, otherwise the unified overlay can turn review
-  // hints into full-image crisscrossing strokes.
+  // Build geometry fields based on geometry class
   const bbox = candidate.region ? regionToBBox(candidate.region) : null;
-  const lineSegment = candidate.line && canPipelineACandidateCarryLine(candidate)
-    ? pipelineALineToSegment(candidate.line)
-    : null;
+  const lineSegment = candidate.line ? pipelineALineToSegment(candidate.line) : null;
   const center = bbox
     ? { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2, coordinateSystem: 'normalized_image_0_1000' as const }
     : null;
 
   // Class-specific field population
-  const lineSubtype = candidate.line && canPipelineACandidateCarryLine(candidate)
+  const lineSubtype = candidate.line
     ? orientationToLineSubtype(candidate.line.orientation)
     : null;
 
@@ -730,11 +709,6 @@ function adaptSemanticSegmentationMask(artifact: SemanticSegmentationMask, surve
   // ── Map segmentation class to the appropriate geometryClass ──
   // Electrical classes → electrical_node (with electricalSubtype)
   // Occluder classes → segmentation_mask with isOccluder=true (review-only)
-  // Roof features → obstruction (chimney, skylight, etc. are obstructions for solar)
-  // Site structures → segmentation_mask with siteContextSubtype
-  // Landscaping → segmentation_mask with siteContextSubtype
-  // Neighbor context → segmentation_mask with siteContextSubtype
-  // Site debris → segmentation_mask with siteContextSubtype
   // Everything else → segmentation_mask (with optional facade/siteContext subtype)
   let geometryClass: UnifiedGeometryClass = 'segmentation_mask';
   let electricalSubtype: ElectricalNodeSubtype | null = null;
@@ -753,10 +727,6 @@ function adaptSemanticSegmentationMask(artifact: SemanticSegmentationMask, surve
       battery: 'battery',
     };
     electricalSubtype = electricalMap[segClass] ?? 'unknown_electrical';
-  } else if (ROOF_FEATURE_SEGMENTATION_CLASSES.has(segClass)) {
-    // Roof features (chimney, dormer, skylight, vent_pipe, etc.) are
-    // obstructions from a solar perspective — they block panel placement
-    geometryClass = 'obstruction';
   } else if (segClass === 'ac_unit' || segClass === 'existing_solar_panel') {
     // These are obstructions from a solar perspective
     geometryClass = 'obstruction';
@@ -777,52 +747,6 @@ function adaptSemanticSegmentationMask(artifact: SemanticSegmentationMask, surve
       railing: 'railing',
     };
     facadeSubtype = facadeMap[segClass] ?? 'unknown_facade';
-  } else if (SITE_STRUCTURE_SEGMENTATION_CLASSES.has(segClass)) {
-    // Site structures (foundation, shed, detached_structure, etc.) get siteContextSubtype
-    const structureMap: Partial<Record<SegmentationClass, SiteContextSubtype>> = {
-      foundation: 'fence',         // closest existing subtype
-      detached_structure: 'fence',
-      retaining_wall: 'fence',
-      pillar: 'fence',
-      column: 'fence',
-      pool: 'fence',
-      awning: 'fence',
-      shed: 'fence',
-      garage_detached: 'driveway',
-      pergola: 'fence',
-      carport: 'driveway',
-    };
-    siteContextSubtype = structureMap[segClass] ?? 'unknown_site_context';
-  } else if (LANDSCAPING_SEGMENTATION_CLASSES.has(segClass)) {
-    // Landscaping classes → siteContextSubtype
-    const landscapingMap: Partial<Record<SegmentationClass, SiteContextSubtype>> = {
-      grass: 'grass',
-      overgrown_grass: 'overgrown_grass',
-      bushes: 'bushes',
-      hedge: 'bushes',
-      flower_bed: 'bushes',
-      mulch_area: 'gravel',
-      overgrown_vegetation: 'vegetation_touching_structure',
-      vegetation_touching_structure: 'vegetation_touching_structure',
-      trees: 'bushes',
-      stump: 'bushes',
-    };
-    siteContextSubtype = landscapingMap[segClass] ?? 'unknown_site_context';
-  } else if (NEIGHBOR_CONTEXT_SEGMENTATION_CLASSES.has(segClass)) {
-    // Neighbor context → siteContextSubtype (shade sources, setbacks)
-    const neighborMap: Partial<Record<SegmentationClass, SiteContextSubtype>> = {
-      neighbor_house: 'fence',
-      neighbor_structure: 'fence',
-      power_line: 'fence',
-      utility_pole: 'fence',
-      street_light: 'fence',
-      mailbox: 'fence',
-      fire_hydrant: 'fence',
-    };
-    siteContextSubtype = neighborMap[segClass] ?? 'unknown_site_context';
-  } else if (SITE_DEBRIS_SEGMENTATION_CLASSES.has(segClass)) {
-    // Site debris → siteContextSubtype (access/safety concerns)
-    siteContextSubtype = 'unknown_site_context';
   } else if (SITE_CONTEXT_SEGMENTATION_CLASSES.has(segClass)) {
     // Site context classes stay as segmentation_mask but get a siteContextSubtype
     const siteMap: Partial<Record<SegmentationClass, SiteContextSubtype>> = {

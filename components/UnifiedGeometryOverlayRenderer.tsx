@@ -46,11 +46,6 @@ import {
   ELECTRICAL_SEGMENTATION_CLASSES,
   OCCLUDER_SEGMENTATION_CLASSES,
   CONDITION_SEGMENTATION_CLASSES,
-  ROOF_FEATURE_SEGMENTATION_CLASSES,
-  SITE_STRUCTURE_SEGMENTATION_CLASSES,
-  LANDSCAPING_SEGMENTATION_CLASSES,
-  NEIGHBOR_CONTEXT_SEGMENTATION_CLASSES,
-  SITE_DEBRIS_SEGMENTATION_CLASSES,
   type SegmentationClass,
 } from '@/lib/siteSurveys/geometryReconstruction/types';
 
@@ -194,50 +189,6 @@ const SEGMENTATION_CLASS_COLORS: Partial<Record<SegmentationClass, { stroke: str
   fence:                       { stroke: '#92400e', fill: 'rgba(146,64,14,0.08)',  label: 'Fence' },
   bushes:                      { stroke: '#15803d', fill: 'rgba(21,128,61,0.08)',  label: 'Bushes' },
   vegetation_touching_structure:{ stroke: '#dc2626', fill: 'rgba(220,38,38,0.10)', label: 'Veg. Touching Structure' },
-  // Roof features — penetrations, protrusions, attachments
-  chimney:        { stroke: '#ef4444', fill: 'rgba(239,68,68,0.12)',  label: 'Chimney' },
-  dormer:         { stroke: '#f97316', fill: 'rgba(249,115,22,0.10)', label: 'Dormer' },
-  vent_pipe:      { stroke: '#fb923c', fill: 'rgba(251,146,60,0.08)', label: 'Vent Pipe' },
-  satellite_dish: { stroke: '#eab308', fill: 'rgba(234,179,8,0.08)',  label: 'Satellite Dish' },
-  skylight:       { stroke: '#38bdf8', fill: 'rgba(56,189,248,0.12)', label: 'Skylight' },
-  roof_hatch:     { stroke: '#0ea5e9', fill: 'rgba(14,165,233,0.08)', label: 'Roof Hatch' },
-  flashing:       { stroke: '#64748b', fill: 'rgba(100,116,139,0.08)',label: 'Flashing' },
-  solar_tube:     { stroke: '#22d3ee', fill: 'rgba(34,211,238,0.10)', label: 'Solar Tube' },
-  flue:           { stroke: '#a1a1aa', fill: 'rgba(161,161,170,0.08)',label: 'Flue' },
-  antenna:        { stroke: '#71717a', fill: 'rgba(113,113,122,0.08)',label: 'Antenna' },
-  // Site structures — ground-level & detached
-  foundation:         { stroke: '#78716c', fill: 'rgba(120,113,108,0.12)',label: 'Foundation' },
-  detached_structure: { stroke: '#a8a29e', fill: 'rgba(168,162,158,0.10)',label: 'Detached Structure' },
-  retaining_wall:    { stroke: '#57534e', fill: 'rgba(87,83,78,0.10)',  label: 'Retaining Wall' },
-  pillar:            { stroke: '#44403c', fill: 'rgba(68,64,60,0.10)', label: 'Pillar' },
-  column:            { stroke: '#44403c', fill: 'rgba(68,64,60,0.10)', label: 'Column' },
-  pool:              { stroke: '#06b6d4', fill: 'rgba(6,182,212,0.08)',  label: 'Pool' },
-  awning:            { stroke: '#d97706', fill: 'rgba(217,119,6,0.08)', label: 'Awning' },
-  shed:              { stroke: '#a16207', fill: 'rgba(161,98,7,0.10)',  label: 'Shed' },
-  garage_detached:   { stroke: '#854d0e', fill: 'rgba(133,77,14,0.10)', label: 'Detached Garage' },
-  pergola:           { stroke: '#b45309', fill: 'rgba(180,83,9,0.08)', label: 'Pergola' },
-  carport:           { stroke: '#92400e', fill: 'rgba(146,64,14,0.10)',label: 'Carport' },
-  // Landscaping — additional vegetation & ground cover
-  hedge:              { stroke: '#15803d', fill: 'rgba(21,128,61,0.08)', label: 'Hedge' },
-  flower_bed:         { stroke: '#e879f9', fill: 'rgba(232,121,249,0.06)',label: 'Flower Bed' },
-  mulch_area:         { stroke: '#a16207', fill: 'rgba(161,98,7,0.06)', label: 'Mulch Area' },
-  overgrown_vegetation:{ stroke: '#dc2626', fill: 'rgba(220,38,38,0.08)',label: 'Overgrown Vegetation' },
-  trees:              { stroke: '#22c55e', fill: 'rgba(34,197,94,0.08)', label: 'Trees' },
-  stump:              { stroke: '#78716c', fill: 'rgba(120,113,108,0.06)',label: 'Stump' },
-  // Neighbor & context
-  neighbor_house:     { stroke: '#6366f1', fill: 'rgba(99,102,241,0.08)', label: 'Neighbor House' },
-  neighbor_structure: { stroke: '#818cf8', fill: 'rgba(129,140,248,0.08)',label: 'Neighbor Structure' },
-  power_line:         { stroke: '#fbbf24', fill: 'rgba(251,191,36,0.06)', label: 'Power Line' },
-  utility_pole:       { stroke: '#a16207', fill: 'rgba(161,98,7,0.08)',  label: 'Utility Pole' },
-  street_light:       { stroke: '#facc15', fill: 'rgba(250,204,21,0.06)',label: 'Street Light' },
-  mailbox:            { stroke: '#6b7280', fill: 'rgba(107,114,128,0.06)',label: 'Mailbox' },
-  fire_hydrant:       { stroke: '#ef4444', fill: 'rgba(239,68,68,0.06)', label: 'Fire Hydrant' },
-  // Site debris
-  junk_yard_debris:    { stroke: '#78716c', fill: 'rgba(120,113,108,0.08)',label: 'Junk/Debris' },
-  construction_debris: { stroke: '#a8a29e', fill: 'rgba(168,162,158,0.08)',label: 'Construction Debris' },
-  piled_materials:     { stroke: '#d6d3d1', fill: 'rgba(214,211,209,0.06)',label: 'Piled Materials' },
-  dumpster:            { stroke: '#57534e', fill: 'rgba(87,83,78,0.08)',  label: 'Dumpster' },
-  storage_container:   { stroke: '#78716c', fill: 'rgba(120,113,108,0.08)',label: 'Storage Container' },
   // Electrical/solar
   utility_meter:       { stroke: '#a855f7', fill: 'rgba(168,85,247,0.10)', label: 'Utility Meter' },
   main_service_panel:  { stroke: '#7c3aed', fill: 'rgba(124,58,237,0.10)', label: 'Main Panel' },
@@ -269,19 +220,6 @@ const SEGMENTATION_CLASS_COLORS: Partial<Record<SegmentationClass, { stroke: str
  */
 function isOccluderClass(cls: SegmentationClass): boolean {
   return OCCLUDER_SEGMENTATION_CLASSES.has(cls);
-}
-
-/**
- * Site-intelligence masks are still preserved in the data model, but the default
- * visual overlay should focus on the primary house. Rendering every secondary
- * structure / landscaping / neighbor / debris mask by default makes the photo
- * look like a chaotic wireframe instead of a readable house assessment.
- */
-function isDefaultHiddenSiteContextClass(cls: SegmentationClass): boolean {
-  return SITE_STRUCTURE_SEGMENTATION_CLASSES.has(cls) ||
-    LANDSCAPING_SEGMENTATION_CLASSES.has(cls) ||
-    NEIGHBOR_CONTEXT_SEGMENTATION_CLASSES.has(cls) ||
-    SITE_DEBRIS_SEGMENTATION_CLASSES.has(cls);
 }
 
 /**
@@ -350,15 +288,6 @@ const DEFAULT_ROOF_LINE_STYLE = {
 /** Minimum confidence for a roof_line artifact to be rendered in the overlay. */
 const MIN_ROOF_LINE_CONFIDENCE = 40;
 
-/**
- * Only dedicated line artifacts should render SVG strokes. Other unified
- * artifacts may contain legacy/incidental lineSegment values from evidence
- * workers, but those are not architectural overlay geometry.
- */
-function canRenderArtifactLineSegment(artifact: UnifiedGeometryArtifact): boolean {
-  return artifact.geometryClass === 'roof_line';
-}
-
 /** Maximum number of roof_line artifacts to render per file. */
 const MAX_ROOF_LINES_PER_FILE = 50;
 
@@ -422,7 +351,7 @@ function extractArtifactGeometry(artifact: UnifiedGeometryArtifact): {
   }
 
   // Line segment
-  if (artifact.lineSegment && canRenderArtifactLineSegment(artifact)) {
+  if (artifact.lineSegment) {
     const seg = artifact.lineSegment as GeometryLineSegment;
     lineSvg = normalizedLineToSvgPercent({
       x1: seg.start.x,
@@ -459,7 +388,6 @@ export function UnifiedGeometryOverlayRenderer({
   maxArtifactsPerFile?: number;
 }) {
   // Filter and cap artifacts per file
-  const hasExplicitClassFilter = Boolean(geometryClassFilter && geometryClassFilter.size > 0);
   const filesWithDrawable = filesWithArtifacts
     .map((fw) => {
       let filtered = fw.artifacts.filter((a) => {
@@ -468,27 +396,10 @@ export function UnifiedGeometryOverlayRenderer({
         // Skip if no drawable geometry at all
         if (!a.polygon && !a.bbox && !a.lineSegment) return false;
         // Apply class filter
-        if (hasExplicitClassFilter && !geometryClassFilter?.has(a.geometryClass))
+        if (geometryClassFilter && geometryClassFilter.size > 0 && !geometryClassFilter.has(a.geometryClass))
           return false;
-        // Raw segmentation polygons are intelligence/debug artifacts, not the
-        // default human photo review layer. They can dominate the photo with
-        // hundreds of mask outlines, so hide them unless an explicit class filter
-        // asks for segmentation_mask.
-        if (!hasExplicitClassFilter && a.geometryClass === 'segmentation_mask') return false;
         // Filter low-confidence roof lines - they clutter the overlay
         if (a.geometryClass === 'roof_line' && (a.confidence ?? 0) < MIN_ROOF_LINE_CONFIDENCE) return false;
-        // Skip occluder masks (cars, trucks, people, etc.) — they block the view
-        // of structure, not part of the structure. User feedback: "we aren't tracing
-        // cars and secondary structures any more."
-        if (a.isOccluder === true) return false;
-        // Also hide secondary/site-context segmentation masks in the default view.
-        // Explicit class-filter/debug views may still inspect the preserved masks.
-        if (
-          !hasExplicitClassFilter &&
-          a.geometryClass === 'segmentation_mask' &&
-          a.segmentationClass &&
-          isDefaultHiddenSiteContextClass(a.segmentationClass as SegmentationClass)
-        ) return false;
         return true;
       });
       // Cap roof lines per file to prevent clutter (keep highest confidence first)

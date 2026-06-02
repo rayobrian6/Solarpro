@@ -34,7 +34,7 @@ import { validateStructuralLineCandidate } from '../../schemas';
 // Worker version
 // ---------------------------------------------------------------------------
 
-export const LINE_EXTRACTION_WORKER_VERSION = '2.0.0-line-extraction-architectural';
+export const LINE_EXTRACTION_WORKER_VERSION = '1.0.0-line-extraction-worker';
 
 // ---------------------------------------------------------------------------
 // Limitations
@@ -42,10 +42,8 @@ export const LINE_EXTRACTION_WORKER_VERSION = '2.0.0-line-extraction-architectur
 
 const LINE_EXTRACTION_LIMITATIONS = [
   ...BASE_LIMITATIONS,
-  'Line extraction combines heuristic polygon-edge tracing with architectural truth enforcement.',
-  'Architectural truth lines (gutter, sill, soffit, foundation) are snapped to TRUE LEVEL.',
-  'Roof slope lines (ridge, valley, hip, rake) are snapped to valid architectural pitch angles.',
-  'When a real Canny+Hough line detector is available, edge quality will further improve.',
+  'Line extraction is heuristic — not from Hough transform or model inference.',
+  'When a real line detector is available, this worker will be upgraded.',
   'Line confidence reflects heuristic certainty, not geometric measurement quality.',
   'Line endpoints are approximations from polygon edge analysis.',
 ] as const;
@@ -174,29 +172,13 @@ function extractEdges(mask: SemanticSegmentationMask): RawEdge[] {
  * Classify a raw edge into a StructuralLineType based on its angle,
  * source mask class, and position in the image.
  *
- * Classification rules (expanded for full site intelligence):
- *
- * ROOF LINES:
+ * Classification rules:
  * - Roof mask, near-horizontal, upper half → ridge
  * - Roof mask, near-horizontal, lower half → eave
- * - Roof mask, diagonal → rake (or hip if at exterior intersection)
- * - Roof mask, near-vertical → valley (interior roof intersection)
- *
- * WALL/FACADE LINES (ARCHITECTURAL TRUTHS):
- * - Wall/siding mask, near-vertical → wall_vertical
- * - Wall/siding mask, near-horizontal → eave (top of wall) or foundation_line (bottom)
- * - Gutter mask, near-horizontal → gutter_line (TRUE LEVEL)
- * - Window mask, near-horizontal → sill_line (TRUE LEVEL)
- * - Soffit mask, near-horizontal → soffit_line (TRUE LEVEL)
- * - Fascia mask, near-horizontal → fascia_line
- * - Foundation mask, near-horizontal → foundation_line (TRUE LEVEL)
- *
- * ROOF FEATURE LINES:
- * - Chimney mask edges → chimney_edge
- * - Dormer mask, near-horizontal → dormer_ridge
- * - Dormer mask, diagonal → dormer_rake
- *
- * OTHER MASKS → skip (no structural lines from sky/tree/ground/etc.)
+ * - Roof mask, diagonal → rake
+ * - Wall mask, near-vertical → wall_vertical
+ * - Wall mask, near-horizontal → eave (top of wall)
+ * - Other masks → skip (no structural lines from sky/tree/ground/etc.)
  */
 function classifyEdge(
   edge: RawEdge,
@@ -204,61 +186,24 @@ function classifyEdge(
 ): StructuralLineType | null {
   const { sourceClass, angleDeg, start, end } = edge;
 
+  // Only roof and wall masks produce structural lines
+  if (sourceClass !== 'roof' && sourceClass !== 'wall') {
+    return null;
+  }
+
   const isHorizontal = isNearHorizontal(angleDeg, angleTolerance);
   const isVertical = isNearVertical(angleDeg, angleTolerance);
   const isDiag = isDiagonal(angleDeg, angleTolerance);
-  const avgY = (start.y + end.y) / 2;
 
-  // ── Roof feature lines ──
-  if (sourceClass === 'chimney') {
-    return 'chimney_edge';
-  }
-
-  if (sourceClass === 'dormer') {
-    if (isHorizontal) {
-      return 'dormer_ridge';
-    }
-    return 'dormer_rake';
-  }
-
-  // ── Architectural truth lines (horizontal references) ──
-  // These features are built LEVEL by construction.
-  // Gutters, sills, soffits, foundations are TRUE LEVEL.
-
-  if (sourceClass === 'gutter' || sourceClass === 'downspout') {
-    if (isHorizontal) return 'gutter_line';
-    if (isVertical) return 'wall_vertical';
-    return null;
-  }
-
-  if (sourceClass === 'window') {
-    if (isHorizontal) return 'sill_line';
-    if (isVertical) return 'wall_vertical';
-    return null;
-  }
-
-  if (sourceClass === 'soffit') {
-    if (isHorizontal) return 'soffit_line';
-    return null;
-  }
-
-  if (sourceClass === 'fascia') {
-    if (isHorizontal) return 'fascia_line';
-    if (isVertical) return 'wall_vertical';
-    return null;
-  }
-
-  if (sourceClass === 'foundation' || sourceClass === 'retaining_wall') {
-    if (isHorizontal) return sourceClass === 'foundation' ? 'foundation_line' : 'retaining_wall_line';
-    if (isVertical) return 'wall_vertical';
-    return null;
-  }
-
-  // ── Roof lines ──
   if (sourceClass === 'roof') {
     if (isHorizontal) {
       // Determine if ridge (upper region) or eave (lower region)
+      // Use the average Y of the edge endpoints relative to the image center
       // In a typical roof photo, the ridge is higher (smaller y) and the eave is lower (larger y)
+      const avgY = (start.y + end.y) / 2;
+      // Use 500 as the dividing line (middle of the 0-1000 coordinate system)
+      // But also consider edges in the lower half of the image as eaves
+      // and edges in the upper portion as ridges
       if (avgY >= 300) {
         return 'eave';
       } else {
@@ -266,49 +211,30 @@ function classifyEdge(
       }
     }
     if (isDiag) {
-      // Distinguish hip from rake:
-      // Rake lines are gable-end edges (the diagonal boundary of a single roof plane).
-      // Hip lines are where two roof planes meet at an exterior ridge (not the gable end).
-      // Since polygon edges are always on the BOUNDARY of a single mask,
-      // they can only be rakes (gable ends), not hips.
-      // Hips come from interior intersections of two overlapping roof plane masks.
       return 'rake';
     }
-    // Near-vertical roof edge: valley (interior intersection where water flows)
+    // Near-vertical roof edge: could be a rake edge on a steep roof,
+    // or a valley. Classify as rake as the closest match.
     if (isVertical) {
-      return 'valley';
+      return 'rake';
     }
-    // Fallback: classify as rake
+    // Fallback: shouldn't happen, but classify as rake
     return 'rake';
   }
 
-  // ── Wall/facade lines ──
-  if (sourceClass === 'wall' || sourceClass === 'siding' || sourceClass === 'door' || sourceClass === 'garage_door') {
+  if (sourceClass === 'wall') {
     if (isVertical) {
       return 'wall_vertical';
     }
     if (isHorizontal) {
-      // Horizontal wall edge — is it at the top (eave) or bottom (foundation)?
-      if (avgY > 700) {
-        return 'foundation_line';
-      }
-      return 'eave'; // top of wall where it meets the roof
+      // Horizontal wall edge → eave (top of wall where it meets the roof)
+      return 'eave';
     }
-    // Diagonal wall edge — likely perspective distortion
+    // Diagonal wall edge → classify as wall_vertical (walls shouldn't have
+    // diagonal edges, but if they do it's likely a perspective distortion)
     return 'wall_vertical';
   }
 
-  // ── Structural columns/pillars ──
-  if (sourceClass === 'pillar' || sourceClass === 'column') {
-    if (isVertical) return 'wall_vertical';
-    if (isHorizontal) return 'sill_line'; // pillar cap
-    return null;
-  }
-
-  // ── Other classes don't produce structural lines ──
-  // Porch, deck, steps, railing produce area masks, not lines
-  // Electrical classes (utility_meter, etc.) are point features, not lines
-  // Vegetation, occluder, condition classes don't produce lines
   return null;
 }
 
@@ -336,25 +262,12 @@ function computeLineConfidence(
   const lengthBonus = Math.min(30, (edgeLength / 600) * 30);
 
   // Type reliability bonus: ridges and eaves are more structurally
-  // reliable than rakes (which are often less distinct).
-  // Architectural truth lines (gutter, sill, soffit, foundation)
-  // get the highest bonus because they enforce LEVEL by construction.
+  // reliable than rakes (which are often less distinct)
   const typeBonus: Record<StructuralLineType, number> = {
     ridge: 15,
     eave: 15,
     rake: 8,
     wall_vertical: 12,
-    valley: 10,
-    hip: 12,
-    gutter_line: 18,     // Gutter = TRUE LEVEL, highest confidence
-    sill_line: 16,       // Window sill = TRUE LEVEL
-    soffit_line: 16,     // Soffit = TRUE LEVEL
-    fascia_line: 14,     // Fascia board at eave
-    foundation_line: 18, // Foundation = TRUE LEVEL
-    retaining_wall_line: 14,
-    chimney_edge: 10,
-    dormer_ridge: 12,
-    dormer_rake: 8,
   };
 
   const confidence = Math.round(
