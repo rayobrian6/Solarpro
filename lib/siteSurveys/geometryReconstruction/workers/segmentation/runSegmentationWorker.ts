@@ -167,15 +167,15 @@ const MAX_SOURCE_PHOTOS = 15;
 /**
  * Maximum number of source photos to process with SAM 2.
  * SAM 2 on Render Pro (CPU, 2 vCPU) with tiny+INT8 encoder + rapid-loop decode
- * takes ~34s per photo for ONNX inference at 384px. The image encoder
- * dominates runtime (~29s with tiny+INT8, was ~40s with small FP32),
+ * takes ~22s per photo for ONNX inference at 384px (measured on Render).
+ * The tiny+INT8 encoder dominates runtime (~17s, was ~40s with small FP32),
  * decoder is ~4.5s with rapid-loop (was ~11s).
- * With 2-batch concurrency, each batch of 2 photos takes ~34s (parallel).
- * 15 photos / 2 = 8 batches x 34s ~ 255s, plus ~20s overhead ~ 275s total.
- * This fits within Vercel's maxDuration=300s hard limit with ~25s buffer.
+ * With 2-batch concurrency, each batch of 2 photos takes ~22s (parallel).
+ * 15 photos / 2 = 8 batches x 22s ~ 172s, plus ~28s overhead ~ 200s total.
+ * This fits within Vercel's maxDuration=300s hard limit with 100s buffer.
  *
  * PREVIOUS: MAX_SAM2_PHOTOS=10 with ~45s/photo (small FP32 encoder) ~ 250s.
- * Now with tiny+INT8 encoder (~34s/photo), 15 photos fits in ~275s.
+ * Now with tiny+INT8 encoder (~22s/photo), 15 photos fits in ~200s.
  * User requirement is "minimum 8 to 15" - 15 now fits in 300s.
  */
  */
@@ -198,13 +198,13 @@ const MAX_TOTAL_MASKS = 300;
  * Maximum wall-clock milliseconds the segmentation stage may consume.
  * The full pipeline has PIPELINE_TIMEOUT_MS = 270_000ms (4.5 minutes).
  * Segmentation is Stage 1, but we must leave time for 6 more stages
- * plus DB writes. With 15 photos × ~20s SAM2 inference on Pro,
- * and 2-batch concurrency, segmentation takes ~160s.
- * Capping at 260s leaves 40s for downstream stages and DB writes
+ * plus DB writes. With 15 photos x ~22s SAM2 inference on Pro,
+ * and 2-batch concurrency, segmentation takes ~172s.
+ * Capping at 260s leaves generous buffer for downstream stages and DB writes
  * within Vercel's 300s hard limit.
  *
- * NOTE: SAM2 ONNX inference at 384px with rapid-loop decode takes
- * ~20s per batch of 2 photos, so 15 photos = 8 batches × 20s = 160s.
+ * NOTE: SAM2 ONNX inference at 384px with tiny+INT8 encoder takes
+ * ~22s per batch of 2 photos, so 15 photos = 8 batches x 22s = 172s.
  * The 260s cap gives generous buffer for warm-up + image fetches.
  */
 const SEGMENTATION_STAGE_TIMEOUT_MS = 260_000;
