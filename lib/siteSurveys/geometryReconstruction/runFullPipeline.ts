@@ -72,6 +72,37 @@ const PIPELINE_TIMEOUT_MS = 270_000;
 const FULL_PIPELINE_SEGMENTATION_STAGE_TIMEOUT_MS = 150_000;
 const FULL_PIPELINE_MAX_SAM2_PHOTOS = 8;
 const FULL_PIPELINE_MIN_REMAINING_MS_FOR_SAM2_ATTEMPT = 35_000;
+const FULL_PIPELINE_MIN_CONSENSUS_PHOTOS = 2;
+
+function fullPipelineConfig(input: GeometryReconstructionInput): Record<string, unknown> {
+  const inputConfig = input.config ?? {};
+  const inputFusionConfig = (inputConfig.fusionConfig as Record<string, unknown> | undefined) ?? {};
+  const requestedConsensusCount = Number(inputFusionConfig.minConsensusCount);
+  const minConsensusCount = Number.isFinite(requestedConsensusCount)
+    ? Math.max(FULL_PIPELINE_MIN_CONSENSUS_PHOTOS, Math.floor(requestedConsensusCount))
+    : FULL_PIPELINE_MIN_CONSENSUS_PHOTOS;
+
+  return {
+    ...inputConfig,
+    // Full Pipeline B should not turn a weak mask into a drawable plane unless
+    // there is structural line support. Standalone worker tests/tools can still
+    // opt out explicitly, but production full runs must be conservative.
+    requireSupportingLines: true,
+    fusionConfig: {
+      ...inputFusionConfig,
+      minConsensusCount,
+    },
+  };
+}
+
+function withFullPipelineGeometryConfig(
+  input: GeometryReconstructionInput,
+): GeometryReconstructionInput {
+  return {
+    ...input,
+    config: fullPipelineConfig(input),
+  };
+}
 
 // ──── Pipeline Stage Result ─────────────────────────────────────────────────
 
@@ -151,7 +182,7 @@ function withFullPipelineSegmentationBudget(
   return {
     ...input,
     config: {
-      ...(input.config ?? {}),
+      ...fullPipelineConfig(input),
       maxSam2Photos: FULL_PIPELINE_MAX_SAM2_PHOTOS,
       stageTimeoutMs: FULL_PIPELINE_SEGMENTATION_STAGE_TIMEOUT_MS,
       minRemainingMsForSam2Attempt: FULL_PIPELINE_MIN_REMAINING_MS_FOR_SAM2_ATTEMPT,
@@ -278,9 +309,12 @@ export async function runFullGeometryReconstructionPipeline(
   }
 
   // ── Stage 5: Plane Extraction ──────────────────────────────────────────
-  // Now depth-augmented: passes DepthMap artifacts from Stage 4
+  // Now depth-augmented: passes DepthMap artifacts from Stage 4. Full Pipeline B
+  // uses stricter geometry config so weak segmentation masks cannot become
+  // trusted roof/wall overlays without structural support.
+  const geometryInput = withFullPipelineGeometryConfig(input);
   const planeResult = stageTimer('plane_extraction', () =>
-    runPlaneExtractionFromReconstructionInput(input, masks, lines, vanishingPoints, depthMaps, usedMidas),
+    runPlaneExtractionFromReconstructionInput(geometryInput, masks, lines, vanishingPoints, depthMaps, usedMidas),
   );
   const planeArtifacts = planeResult.result;
   allArtifacts.push(...planeArtifacts);
@@ -297,7 +331,7 @@ export async function runFullGeometryReconstructionPipeline(
 
   // ── Stage 6: Multi-View Fusion ─────────────────────────────────────────
   const fusionResult = stageTimer('multi_view_fusion', () =>
-    runMultiViewFusionFromReconstructionInput(input, allArtifacts),
+    runMultiViewFusionFromReconstructionInput(geometryInput, allArtifacts),
   );
   const fusionArtifacts = fusionResult.result.artifacts;
   allArtifacts.push(...fusionArtifacts);

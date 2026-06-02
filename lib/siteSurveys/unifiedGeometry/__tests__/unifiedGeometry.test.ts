@@ -595,6 +595,18 @@ describe('Test 7: Pipeline B adapter (adaptGeometryReconArtifact)', () => {
     expect(artifact.geometryClass).toBeDefined();
     expect(artifact.surveyId).toBe('survey-001');
   });
+
+  it('keeps raw Pipeline B plane candidates as non-drawable review evidence', () => {
+    const roofCandidate = adaptGeometryReconArtifact(artifactFixtures.roof_plane_candidate as any, 'survey-001');
+    const wallCandidate = adaptGeometryReconArtifact(artifactFixtures.wall_plane_candidate as any, 'survey-001');
+    const genericPlaneCandidate = adaptGeometryReconArtifact(artifactFixtures.ground_plane_candidate as any, 'survey-001');
+
+    expect(roofCandidate.geometryClass).toBe('unknown');
+    expect(roofCandidate.polygon).toBeNull();
+    expect(wallCandidate.geometryClass).toBe('unknown');
+    expect(wallCandidate.polygon).toBeNull();
+    expect(genericPlaneCandidate.geometryClass).toBe('unknown');
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════

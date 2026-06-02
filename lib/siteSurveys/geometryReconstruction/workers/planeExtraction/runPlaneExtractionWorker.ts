@@ -996,8 +996,8 @@ function estimateWallParameters(
  * When depth maps are available (from Stage 4), the worker uses
  * extractDepthPlanes() to identify planar regions via flood-fill
  * segmentation, then maps those regions to RoofPlaneCandidate and
- * WallPlaneCandidate artifacts. Heuristic-only planes that have no
- * depth overlap are kept as fallback.
+ * WallPlaneCandidate artifacts. Heuristic-only fallbacks require structural
+ * line support by default so weak masks do not become fake roof geometry.
  *
  * When depth maps are not available, the worker falls back to the
  * v1 heuristic approach (lines + VP + mask geometry).
@@ -1007,7 +1007,7 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
   const artifacts: Array<RoofPlaneCandidate | WallPlaneCandidate> = [];
 
   const minConfidence = input.config?.minConfidence ?? 25;
-  const requireSupportingLines = input.config?.requireSupportingLines ?? false;
+  const requireSupportingLines = input.config?.requireSupportingLines ?? true;
 
   // Stage 1: Initialize
   const t0 = Date.now();

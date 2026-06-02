@@ -26,7 +26,21 @@ function makeMask(id: string, segmentationClass: SegmentationClass): SemanticSeg
 }
 
 describe('runPlaneExtractionWorker structural taxonomy', () => {
-  it('extracts roof and wall plane candidates from expanded structural segmentation classes', () => {
+  it('does not create mask-only heuristic planes by default', () => {
+    const output = runPlaneExtractionWorker({
+      surveyId: 'survey-1',
+      masks: [makeMask('m-roof-dormer', 'dormer')],
+      lines: [],
+      vanishingPoints: [],
+      config: {
+        minConfidence: 25,
+      },
+    });
+
+    expect(output.artifacts).toHaveLength(0);
+  });
+
+  it('extracts roof and wall plane candidates from expanded structural segmentation classes when explicitly allowing mask-only heuristics', () => {
     const output = runPlaneExtractionWorker({
       surveyId: 'survey-1',
       masks: [

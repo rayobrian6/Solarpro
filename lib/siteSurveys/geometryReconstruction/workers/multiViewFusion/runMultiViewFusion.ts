@@ -63,7 +63,7 @@ export interface MultiViewFusionConfig {
   normalSimilarityThreshold: number;
   /** Minimum IoU proxy (polygon overlap) to consider planes matching. Default: 0.15 */
   overlapThreshold: number;
-  /** Minimum consensus photo count to produce a consensus plane. Default: 1 */
+  /** Minimum consensus photo count to produce a consensus plane. Default: 2 */
   minConsensusCount: number;
   /** Minimum confidence for output artifacts. Default: 10 */
   minConfidence: number;
@@ -72,7 +72,7 @@ export interface MultiViewFusionConfig {
 const DEFAULT_FUSION_CONFIG: MultiViewFusionConfig = {
   normalSimilarityThreshold: 0.85,
   overlapThreshold: 0.15,
-  minConsensusCount: 1,
+  minConsensusCount: 2,
   minConfidence: 10,
 };
 
@@ -205,8 +205,9 @@ function polygonIoUProxy(a: NormalizedPoint[], b: NormalizedPoint[]): number {
 /**
  * Extract a polygon from a plane candidate.
  * Prefers the real contour polygon (from Canny edge detection) when available,
- * falls back to deriving a rectangle from the bbox region, and finally
- * to a unit square — ensuring overlays trace actual home shapes, not boxes.
+ * falls back to deriving a rectangle from the bbox region. If neither exists,
+ * returns an empty polygon so invalid candidates are rejected instead of
+ * manufacturing fake centered-square geometry.
  */
 function extractPolygonFromPlane(
   plane: RoofPlaneCandidate | WallPlaneCandidate,
@@ -229,13 +230,7 @@ function extractPolygonFromPlane(
       ];
     }
   }
-  // Fallback: unit square centered at 500,500
-  return [
-    { x: 400, y: 400, coordinateSystem: 'normalized_image_0_1000' as const },
-    { x: 600, y: 400, coordinateSystem: 'normalized_image_0_1000' as const },
-    { x: 600, y: 600, coordinateSystem: 'normalized_image_0_1000' as const },
-    { x: 400, y: 600, coordinateSystem: 'normalized_image_0_1000' as const },
-  ];
+  return [];
 }
 
 // ---------------------------------------------------------------------------
@@ -412,15 +407,18 @@ function buildConsensusPlane(
   config: MultiViewFusionConfig,
 ): ConsensusPlaneCandidate | null {
   const { planes } = cluster;
-  if (planes.length < config.minConsensusCount) return null;
-
-  // Collect unique source file IDs
+  // Collect unique source file IDs first; true consensus means distinct photos,
+  // not multiple candidate fragments from the same photo.
   const sourceFileIds = [...new Set(planes.map((p) => p.fileId))];
   const consensusPhotoCount = sourceFileIds.length;
+  if (consensusPhotoCount < config.minConsensusCount) return null;
 
-  // Merge polygons via convex hull
+  // Merge polygons via convex hull. Reject clusters with no real polygon rather
+  // than inventing geometry.
   const allPoints: NormalizedPoint[] = planes.flatMap((p) => p.polygon);
+  if (allPoints.length < 3) return null;
   const mergedPolygon = convexHull(allPoints);
+  if (mergedPolygon.length < 3) return null;
 
   // Average normal
   const normals = planes.map((p) => p.normal);
@@ -487,29 +485,15 @@ function buildConsensusPlane(
     limitations: [...MULTI_VIEW_FUSION_LIMITATIONS],
   };
 
-  // Validate
+  // Validate; invalid consensus candidates are discarded. Do not repair them
+  // with synthetic fallback polygons because those become misleading overlays.
   const validation = validateConsensusPlaneCandidate(candidate);
   if (!validation.valid) {
-    // Fall back to minimum valid artifact
-    return {
-      artifactType: 'consensus_plane_candidate',
-      id: uniqueId(),
-      planeType: cluster.planeType,
-      polygon: mergedPolygon.length >= 3 ? mergedPolygon : [
-        { x: 400, y: 400, coordinateSystem: 'normalized_image_0_1000' as const },
-        { x: 600, y: 400, coordinateSystem: 'normalized_image_0_1000' as const },
-        { x: 600, y: 600, coordinateSystem: 'normalized_image_0_1000' as const },
-        { x: 400, y: 600, coordinateSystem: 'normalized_image_0_1000' as const },
-      ],
-      normalVector: avgNormal,
-      confidence: Math.max(config.minConfidence, 10),
-      sourceMaskIds: [],
-      sourceFileIds,
-      consensusPhotoCount,
-      workerVersion: MULTI_VIEW_FUSION_WORKER_VERSION,
-      authority: { ...REVIEW_ONLY_AUTHORITY },
-      limitations: [...MULTI_VIEW_FUSION_LIMITATIONS],
-    };
+    const errors = 'errors' in validation ? validation.errors : ['unknown validation error'];
+    console.warn(
+      `[MultiViewFusion] Rejecting invalid consensus plane for survey cluster type=${cluster.planeType}: ${errors.join('; ')}`,
+    );
+    return null;
   }
 
   return candidate;
