@@ -411,25 +411,35 @@ export function RoofGeometrySection({
   const hasPipelineAData = pipelineCounts.photoVision > 0;
   const hasPipelineCData = pipelineCounts.googleSolarApi > 0;
   const hasAnyData = artifacts.length > 0;
-  const polygonArtifactCount = artifacts.filter((a) => a.polygon?.vertices?.length).length;
-  const consensusPlaneCount = artifacts.filter((a) => a.geometryClass === 'consensus_plane').length;
 
-  // Count by geometry class
+  // The default overlay is for human photo review. Raw segmentation masks are
+  // preserved as intelligence/debug artifacts, but they should not drive the
+  // primary visible counts or make users think 100+ hidden masks are active
+  // roof geometry.
+  const visibleReviewArtifacts = useMemo(
+    () => artifacts.filter((a) => a.geometryClass !== 'segmentation_mask'),
+    [artifacts],
+  );
+  const hiddenSegmentationMaskCount = artifacts.length - visibleReviewArtifacts.length;
+  const visiblePolygonArtifactCount = visibleReviewArtifacts.filter((a) => a.polygon?.vertices?.length).length;
+  const consensusPlaneCount = visibleReviewArtifacts.filter((a) => a.geometryClass === 'consensus_plane').length;
+
+  // Count visible review artifacts by geometry class
   const classCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const a of artifacts) {
+    for (const a of visibleReviewArtifacts) {
       counts[a.geometryClass] = (counts[a.geometryClass] ?? 0) + 1;
     }
     return counts;
-  }, [artifacts]);
+  }, [visibleReviewArtifacts]);
 
   // Geometry stats summary for the stats panel
   const geometryStats = useMemo(() => {
-    const planes = artifacts.filter(a => a.geometryClass === 'roof_plane' || a.geometryClass === 'wall_plane' || a.geometryClass === 'consensus_plane');
-    const lines = artifacts.filter(a => a.geometryClass === 'roof_line');
+    const planes = visibleReviewArtifacts.filter(a => a.geometryClass === 'roof_plane' || a.geometryClass === 'wall_plane' || a.geometryClass === 'consensus_plane');
+    const lines = visibleReviewArtifacts.filter(a => a.geometryClass === 'roof_line');
 
     // Confidence stats
-    const confidences = artifacts.map(a => a.confidence).filter(c => c != null);
+    const confidences = visibleReviewArtifacts.map(a => a.confidence).filter(c => c != null);
     const avgConfidence = confidences.length > 0
       ? confidences.reduce((sum, c) => sum + c, 0) / confidences.length
       : null;
@@ -476,7 +486,7 @@ export function RoofGeometrySection({
       avgLineConfidence,
       totalLineLengthM,
     };
-  }, [artifacts]);
+  }, [visibleReviewArtifacts]);
 
   // Build overlay data
   const filesWithArtifacts = useMemo(
@@ -494,7 +504,7 @@ export function RoofGeometrySection({
           <h3 className="text-sm font-semibold text-white">Roof Geometry</h3>
           {hasAnyData && (
             <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
-              {artifacts.length} artifacts
+              {visibleReviewArtifacts.length} visible artifacts
             </span>
           )}
         </div>
@@ -794,8 +804,13 @@ export function RoofGeometrySection({
                 {cls.replace(/_/g, ' ')}: {count}
               </span>
             ))}
+            {hiddenSegmentationMaskCount > 0 && (
+              <span className="rounded-full border border-cyan-700/30 bg-cyan-950/20 px-2.5 py-1 text-[10px] text-cyan-300/70" title="Raw segmentation masks are hidden from the default photo review overlay so the image stays readable.">
+                Segmentation masks hidden: {hiddenSegmentationMaskCount}
+              </span>
+            )}
             <span className="rounded-full border border-slate-700/40 bg-slate-900/30 px-2.5 py-1 text-[10px] text-slate-500">
-              Polygons: {polygonArtifactCount}
+              Visible polygons: {visiblePolygonArtifactCount}
             </span>
             <span className="rounded-full border border-slate-700/40 bg-slate-900/30 px-2.5 py-1 text-[10px] text-slate-500">
               Consensus planes: {consensusPlaneCount}
