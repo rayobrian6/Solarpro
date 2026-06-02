@@ -98,6 +98,7 @@ export function RoofGeometrySection({
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [generationSummary, setGenerationSummary] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [showDebugRoofLines, setShowDebugRoofLines] = useState(false);
   const [bundleLoading, setBundleLoading] = useState(true);
   const [pipelineCLoading, setPipelineCLoading] = useState(false);
   const [pipelineCError, setPipelineCError] = useState<string | null>(null);
@@ -891,11 +892,39 @@ export function RoofGeometrySection({
         {/* ── Photo + Geometry Overlay ── */}
         {hasAnyData && filesWithArtifacts.length > 0 && (
           <div className="rounded-lg border border-slate-700/40 bg-slate-950/30 p-2">
+            {/* Debug roof-line toggle */}
+            <div className="flex items-center gap-2 mb-2">
+              <button
+                type="button"
+                onClick={() => setShowDebugRoofLines(!showDebugRoofLines)}
+                className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[9px] font-medium transition ${
+                  showDebugRoofLines
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30'
+                    : 'bg-slate-800/50 text-slate-500 border border-slate-700/40 hover:text-slate-300'
+                }`}
+                title={showDebugRoofLines
+                  ? 'Currently showing ALL roof-line candidates with thick debug rendering. Click to return to review-friendly thin lines.'
+                  : 'Currently showing only high-confidence, deduplicated roof lines. Click to show ALL candidates with thick debug rendering.'
+                }
+              >
+                {showDebugRoofLines ? (
+                  <>🔍 Debug Lines: ON (showing all candidates)</>
+                ) : (
+                  <>📏 Show Debug Roof-Line Candidates</>
+                )}
+              </button>
+              {showDebugRoofLines && (
+                <span className="text-[8px] text-amber-400/60">
+                  Thick lines visible. Low-confidence & duplicate lines shown.
+                </span>
+              )}
+            </div>
             <UnifiedGeometryOverlayRenderer
               filesWithArtifacts={filesWithArtifacts}
               selectedFileId={selectedFileId}
               onSelectFile={setSelectedFileId}
               showMockArtifacts={true}
+              showDebugRoofLines={showDebugRoofLines}
             />
           </div>
         )}

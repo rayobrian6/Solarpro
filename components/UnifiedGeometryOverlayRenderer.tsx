@@ -231,65 +231,137 @@ function isConditionClass(cls: SegmentationClass): boolean {
 
 
 /**
- * Per-subtype styling for roof_line artifacts.
- * Makes ridge/eave/rake/wall_vertical visually distinct and highly visible,
- * matching the expectation of thick colored outlines tracing real roof edges.
+ * Per-subtype styling for roof_line artifacts — DEFAULT (review-friendly) mode.
+ * Thin, subtle lines that don't obscure the underlying photo.
+ * Stroke widths are calibrated for SVG viewBox="0 0 100 100" (percentage coords):
+ *   0.3 = 0.3% of image width — thin evidence line, review-friendly
  */
-const ROOF_LINE_SUBTYPE_STYLES: Record<
+const ROOF_LINE_SUBTYPE_STYLES_DEFAULT: Record<
   string,
   { stroke: string; strokeWidth: number; strokeDasharray: string; label: string }
 > = {
   ridge: {
-    stroke: '#fb923c',    // vibrant orange - ridges are the most important line
-    strokeWidth: 2.5,
+    stroke: '#fb923c',    // vibrant orange — ridges are the most important line
+    strokeWidth: 0.4,
     strokeDasharray: 'none',
     label: 'Ridge',
   },
   eave: {
-    stroke: '#fbbf24',    // bright yellow - eaves are second most important
-    strokeWidth: 2.0,
+    stroke: '#fbbf24',    // bright yellow — eaves are second most important
+    strokeWidth: 0.35,
     strokeDasharray: 'none',
     label: 'Eave',
   },
   rake: {
-    stroke: '#f59e0b',    // amber - rakes connect ridge to eave
+    stroke: '#f59e0b',    // amber — rakes connect ridge to eave
+    strokeWidth: 0.3,
+    strokeDasharray: '1.5,0.8',
+    label: 'Rake',
+  },
+  hip: {
+    stroke: '#f97316',    // orange — hip lines
+    strokeWidth: 0.4,
+    strokeDasharray: '2,1',
+    label: 'Hip',
+  },
+  valley: {
+    stroke: '#ef4444',    // red — valleys are critical for drainage
+    strokeWidth: 0.4,
+    strokeDasharray: '1,1',
+    label: 'Valley',
+  },
+  wall_vertical: {
+    stroke: '#60a5fa',    // blue — wall edges
+    strokeWidth: 0.3,
+    strokeDasharray: '0.8,0.8',
+    label: 'Wall Edge',
+  },
+};
+
+/**
+ * Per-subtype styling for roof_line artifacts — DEBUG mode.
+ * Thick, highly visible lines for inspecting all raw line candidates.
+ * Only shown when the user explicitly enables "Show debug roof-line candidates".
+ */
+const ROOF_LINE_SUBTYPE_STYLES_DEBUG: Record<
+  string,
+  { stroke: string; strokeWidth: number; strokeDasharray: string; label: string }
+> = {
+  ridge: {
+    stroke: '#fb923c',
     strokeWidth: 1.5,
+    strokeDasharray: 'none',
+    label: 'Ridge',
+  },
+  eave: {
+    stroke: '#fbbf24',
+    strokeWidth: 1.2,
+    strokeDasharray: 'none',
+    label: 'Eave',
+  },
+  rake: {
+    stroke: '#f59e0b',
+    strokeWidth: 1.0,
     strokeDasharray: '4,2',
     label: 'Rake',
   },
   hip: {
-    stroke: '#f97316',    // orange - hip lines
-    strokeWidth: 2.0,
+    stroke: '#f97316',
+    strokeWidth: 1.2,
     strokeDasharray: '6,3',
     label: 'Hip',
   },
   valley: {
-    stroke: '#ef4444',    // red - valleys are critical for drainage
-    strokeWidth: 2.0,
+    stroke: '#ef4444',
+    strokeWidth: 1.2,
     strokeDasharray: '3,3',
     label: 'Valley',
   },
   wall_vertical: {
-    stroke: '#60a5fa',    // blue - wall edges
-    strokeWidth: 1.5,
+    stroke: '#60a5fa',
+    strokeWidth: 1.0,
     strokeDasharray: '2,2',
     label: 'Wall Edge',
   },
 };
 
-/** Default roof line style when subtype is unknown */
+/** Default roof line style when subtype is unknown — thin for review mode */
 const DEFAULT_ROOF_LINE_STYLE = {
   stroke: '#fbbf24',
-  strokeWidth: 1.5,
+  strokeWidth: 0.3,
+  strokeDasharray: '0.8,0.8',
+  label: 'Roof Line',
+};
+
+/** Default roof line style for debug mode when subtype is unknown */
+const DEFAULT_ROOF_LINE_STYLE_DEBUG = {
+  stroke: '#fbbf24',
+  strokeWidth: 1.0,
   strokeDasharray: '2,2',
   label: 'Roof Line',
 };
 
-/** Minimum confidence for a roof_line artifact to be rendered in the overlay. */
+/** Minimum confidence for a roof_line artifact to be rendered in the overlay
+ *  when debug mode is active. Lower threshold shows all candidates. */
 const MIN_ROOF_LINE_CONFIDENCE = 40;
 
-/** Maximum number of roof_line artifacts to render per file. */
-const MAX_ROOF_LINES_PER_FILE = 50;
+/** Minimum confidence for a roof_line to be shown in default (non-debug) mode.
+ *  Higher threshold so the default view only shows trusted geometry. */
+const MIN_ROOF_LINE_CONFIDENCE_DEFAULT_MODE = 60;
+
+/** Maximum number of roof_line artifacts to render per file in default mode. */
+const MAX_ROOF_LINES_PER_FILE_DEFAULT = 20;
+
+/** Maximum number of roof_line artifacts to render per file in debug mode. */
+const MAX_ROOF_LINES_PER_FILE_DEBUG = 100;
+
+/** Minimum distance (in normalized 0-1000 units) between line midpoints
+ *  to consider them non-duplicate. Lines closer than this are near-duplicates. */
+const DUPLICATE_LINE_MIN_DISTANCE = 40;
+
+/** Minimum angle difference (degrees) between two lines at similar positions
+ *  to consider them non-duplicate. */
+const DUPLICATE_LINE_MIN_ANGLE_DIFF = 15;
 const NORMALIZED_IMAGE_MAX = 1000;
 const MAX_NON_BACKGROUND_POLYGON_AREA_RATIO = 0.95;
 
@@ -385,6 +457,90 @@ function sanitizePolygonVertices(
   return validVertices;
 }
 
+/* ── Near-duplicate roof line detection ────────────────────────────────────── */
+
+/**
+ * Compute the midpoint of a line segment (from artifact.lineSegment).
+ * Returns null if the artifact has no lineSegment.
+ */
+function lineMidpoint(a: UnifiedGeometryArtifact): { x: number; y: number } | null {
+  if (!a.lineSegment) return null;
+  return {
+    x: (a.lineSegment.start.x + a.lineSegment.end.x) / 2,
+    y: (a.lineSegment.start.y + a.lineSegment.end.y) / 2,
+  };
+}
+
+/**
+ * Compute the angle of a line segment in degrees (0-180, undirected).
+ * Returns null if the artifact has no lineSegment.
+ */
+function lineAngleDeg(a: UnifiedGeometryArtifact): number | null {
+  if (!a.lineSegment) return null;
+  const dx = a.lineSegment.end.x - a.lineSegment.start.x;
+  const dy = a.lineSegment.end.y - a.lineSegment.start.y;
+  let angle = Math.atan2(-dy, dx) * (180 / Math.PI);
+  if (angle < 0) angle += 180;
+  return angle % 180;
+}
+
+/**
+ * Euclidean distance between two 2D points.
+ */
+function pointDistance(a: { x: number; y: number }, b: { x: number; y: number }): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
+ * Given an array of roof_line artifacts sorted by confidence (descending),
+ * remove near-duplicate lines. A line is a duplicate if another higher-confidence
+ * line of the same subtype has a midpoint within DUPLICATE_LINE_MIN_DISTANCE
+ * and an angle within DUPLICATE_LINE_MIN_ANGLE_DIFF.
+ *
+ * Returns a new array with duplicates removed.
+ */
+function deduplicateRoofLines(lines: UnifiedGeometryArtifact[]): UnifiedGeometryArtifact[] {
+  if (lines.length <= 1) return lines;
+
+  const kept: UnifiedGeometryArtifact[] = [];
+  const keptMeta: Array<{ mid: { x: number; y: number }; angle: number; subtype: string | null }> = [];
+
+  for (const line of lines) {
+    const mid = lineMidpoint(line);
+    const angle = lineAngleDeg(line);
+    if (!mid || angle === null) {
+      kept.push(line);
+      continue;
+    }
+
+    const subtype = line.lineSubtype ?? null;
+    let isDuplicate = false;
+
+    for (const existing of keptMeta) {
+      if (existing.subtype !== subtype) continue;
+
+      const dist = pointDistance(mid, existing.mid);
+      if (dist > DUPLICATE_LINE_MIN_DISTANCE) continue;
+
+      let angleDiff = Math.abs(angle - existing.angle);
+      if (angleDiff > 90) angleDiff = 180 - angleDiff;
+      if (angleDiff < DUPLICATE_LINE_MIN_ANGLE_DIFF) {
+        isDuplicate = true;
+        break;
+      }
+    }
+
+    if (!isDuplicate) {
+      kept.push(line);
+      keptMeta.push({ mid, angle, subtype });
+    }
+  }
+
+  return kept;
+}
+
 /* ── Geometry extraction helpers ─────────────────────────────────────── */
 
 /**
@@ -471,6 +627,7 @@ export function UnifiedGeometryOverlayRenderer({
   onSelectFile,
   geometryClassFilter,
   showMockArtifacts = false,
+  showDebugRoofLines = false,
   maxArtifactsPerFile = 200,
 }: {
   filesWithArtifacts: FileWithUnifiedArtifacts[];
@@ -480,9 +637,28 @@ export function UnifiedGeometryOverlayRenderer({
   geometryClassFilter?: Set<UnifiedGeometryClass>;
   /** Whether to show mock artifacts. Default false. */
   showMockArtifacts?: boolean;
+  /** Whether to show all roof-line candidates with thick debug rendering.
+   *  Default false: only high-confidence, deduplicated lines shown thin. */
+  showDebugRoofLines?: boolean;
   /** Max artifacts to render per file for performance. */
   maxArtifactsPerFile?: number;
 }) {
+  // Select style tables based on debug mode
+  const ROOF_LINE_SUBTYPE_STYLES = showDebugRoofLines
+    ? ROOF_LINE_SUBTYPE_STYLES_DEBUG
+    : ROOF_LINE_SUBTYPE_STYLES_DEFAULT;
+  const activeDefaultLineStyle = showDebugRoofLines
+    ? DEFAULT_ROOF_LINE_STYLE_DEBUG
+    : DEFAULT_ROOF_LINE_STYLE;
+
+  // Effective confidence threshold and cap based on debug mode
+  const effectiveMinConfidence = showDebugRoofLines
+    ? MIN_ROOF_LINE_CONFIDENCE                    // 40 — show all candidates
+    : MIN_ROOF_LINE_CONFIDENCE_DEFAULT_MODE;      // 60 — only trusted lines
+  const effectiveMaxLines = showDebugRoofLines
+    ? MAX_ROOF_LINES_PER_FILE_DEBUG               // 100
+    : MAX_ROOF_LINES_PER_FILE_DEFAULT;            // 20
+
   // Filter and cap artifacts per file
   const filesWithDrawable = filesWithArtifacts
     .map((fw) => {
@@ -494,20 +670,34 @@ export function UnifiedGeometryOverlayRenderer({
         // Apply class filter
         if (geometryClassFilter && geometryClassFilter.size > 0 && !geometryClassFilter.has(a.geometryClass))
           return false;
-        // Filter low-confidence roof lines - they clutter the overlay
-        if (a.geometryClass === 'roof_line' && (a.confidence ?? 0) < MIN_ROOF_LINE_CONFIDENCE) return false;
+        // Filter low-confidence roof lines using effective threshold
+        if (a.geometryClass === 'roof_line' && (a.confidence ?? 0) < effectiveMinConfidence) return false;
         return true;
       });
-      // Cap roof lines per file to prevent clutter (keep highest confidence first)
-      const roofLinesInFile = filtered.filter(a => a.geometryClass === 'roof_line');
-      if (roofLinesInFile.length > MAX_ROOF_LINES_PER_FILE) {
-        // Sort roof lines by confidence descending, keep top N
+
+      // Deduplicate and cap roof lines per file
+      let roofLinesInFile = filtered.filter(a => a.geometryClass === 'roof_line');
+      const nonLineArtifacts = filtered.filter(a => a.geometryClass !== 'roof_line');
+
+      if (roofLinesInFile.length > 0) {
+        // Sort by confidence descending (highest confidence first)
         roofLinesInFile.sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
-        const keptLineIds = new Set(roofLinesInFile.slice(0, MAX_ROOF_LINES_PER_FILE).map(a => a.id));
-        filtered = filtered.filter(a => a.geometryClass !== 'roof_line' || keptLineIds.has(a.id));
+
+        // Remove near-duplicate lines (same subtype, similar position & angle)
+        if (!showDebugRoofLines) {
+          roofLinesInFile = deduplicateRoofLines(roofLinesInFile);
+        }
+
+        // Cap to max per file (keep highest confidence)
+        if (roofLinesInFile.length > effectiveMaxLines) {
+          roofLinesInFile = roofLinesInFile.slice(0, effectiveMaxLines);
+        }
       }
-      const totalDrawable = filtered.length;
-      const capped = filtered.slice(0, maxArtifactsPerFile);
+
+      // Rebuild filtered list: non-line artifacts first, then capped roof lines
+      const rebuiltFiltered = [...nonLineArtifacts, ...roofLinesInFile];
+      const totalDrawable = rebuiltFiltered.length;
+      const capped = rebuiltFiltered.slice(0, maxArtifactsPerFile);
       return { ...fw, artifacts: capped, totalDrawable, wasCapped: totalDrawable > maxArtifactsPerFile };
     })
     .filter((fw) => fw.artifacts.length > 0);
@@ -560,6 +750,7 @@ export function UnifiedGeometryOverlayRenderer({
           fileUrl={activeFile.fileUrl}
           filename={activeFile.filename}
           artifacts={activeFile.artifacts}
+          showDebugRoofLines={showDebugRoofLines}
         />
       )}
 
@@ -587,7 +778,7 @@ export function UnifiedGeometryOverlayRenderer({
               );
               const entries = subtypes.size > 0
                 ? Array.from(subtypes).map(sub => {
-                    const style = ROOF_LINE_SUBTYPE_STYLES[sub] ?? DEFAULT_ROOF_LINE_STYLE;
+                    const style = ROOF_LINE_SUBTYPE_STYLES[sub] ?? activeDefaultLineStyle;
                     const subCount = filesWithDrawable.reduce(
                       (sum, fw) => sum + fw.artifacts.filter(
                         a => a.geometryClass === 'roof_line' && a.lineSubtype === sub
@@ -667,24 +858,59 @@ export function UnifiedGeometryOverlayRenderer({
             )];
           })}
       </div>
+
+      {/* Debug toggle for roof-line candidates */}
+      <div className="flex items-center gap-2 px-1 mt-1">
+        <label className="flex items-center gap-1.5 cursor-pointer group">
+          <span
+            className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[9px] font-medium transition ${
+              showDebugRoofLines
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                : 'bg-slate-800/50 text-slate-500 border border-slate-700/40'
+            }`}
+            title={showDebugRoofLines
+              ? 'Debug mode: showing all roof-line candidates with thick rendering. Duplicates and low-confidence lines are visible.'
+              : 'Default mode: only high-confidence, deduplicated roof lines shown thin. Toggle in parent component to see all candidates.'
+            }
+          >
+            {showDebugRoofLines ? '🔍 Debug: All line candidates' : '📏 Review: Trusted lines only'}
+          </span>
+        </label>
+        {showDebugRoofLines && (
+          <span className="text-[8px] text-amber-400/60">
+            Thick lines = debug mode. Low-conf & duplicates visible.
+          </span>
+        )}
+      </div>
     </div>
   );
 }
 
-/* ── Single photo with SVG overlays from unified artifacts ──────────── */
+/* ── Single photo with SVG overlays from unified artifacts ─────────────────────── */
 
 function PhotoWithUnifiedOverlays({
   fileUrl,
   filename,
   artifacts,
+  showDebugRoofLines = false,
 }: {
   fileUrl: string;
   filename: string | null;
   artifacts: UnifiedGeometryArtifact[];
+  /** Whether to use thick debug rendering for roof lines. */
+  showDebugRoofLines?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [imgNatural, setImgNatural] = useState<{ w: number; h: number } | null>(null);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+
+  // Select style tables based on debug mode
+  const activeSubtypeStyles = showDebugRoofLines
+    ? ROOF_LINE_SUBTYPE_STYLES_DEBUG
+    : ROOF_LINE_SUBTYPE_STYLES_DEFAULT;
+  const activeDefaultStyle = showDebugRoofLines
+    ? DEFAULT_ROOF_LINE_STYLE_DEBUG
+    : DEFAULT_ROOF_LINE_STYLE;
 
   const handleImgLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
@@ -748,12 +974,12 @@ function PhotoWithUnifiedOverlays({
         {overlayElements.map((entry, idx) => {
           const isHovered = hoveredIdx === idx;
           const isRoofLine = entry.artifact.geometryClass === 'roof_line';
-          // Per-subtype roof line styling for thick, visible, color-coded lines
+          // Per-subtype roof line styling — thin in review mode, thick in debug mode
           const lineSubtype = entry.artifact.lineSubtype ?? null;
           const lineStyle = isRoofLine && lineSubtype
-            ? (ROOF_LINE_SUBTYPE_STYLES[lineSubtype] ?? DEFAULT_ROOF_LINE_STYLE)
+            ? (activeSubtypeStyles[lineSubtype] ?? activeDefaultStyle)
             : isRoofLine
-              ? DEFAULT_ROOF_LINE_STYLE
+              ? activeDefaultStyle
               : null;
           const strokeWidth = isHovered
             ? lineStyle
@@ -813,9 +1039,9 @@ function PhotoWithUnifiedOverlays({
                 const isRL = entry.artifact.geometryClass === 'roof_line';
                 const lSub = entry.artifact.lineSubtype ?? null;
                 const ls = isRL && lSub
-                  ? (ROOF_LINE_SUBTYPE_STYLES[lSub] ?? DEFAULT_ROOF_LINE_STYLE)
+                  ? (activeSubtypeStyles[lSub] ?? activeDefaultStyle)
                   : isRL
-                    ? DEFAULT_ROOF_LINE_STYLE
+                    ? activeDefaultStyle
                     : null;
                 const lsColor = ls?.stroke ?? entry.color.stroke;
                 const lsWidth = ls
@@ -824,17 +1050,19 @@ function PhotoWithUnifiedOverlays({
                 const lsDash = ls?.strokeDasharray ?? strokeDash;
                 return (
                   <g>
-                    {/* Outer glow / outline for visibility on any background */}
-                    <line
-                      x1={entry.lineSvg.x1}
-                      y1={entry.lineSvg.y1}
-                      x2={entry.lineSvg.x2}
-                      y2={entry.lineSvg.y2}
-                      stroke="rgba(0,0,0,0.6)"
-                      strokeWidth={lsWidth + 1.0}
-                      strokeLinecap="round"
-                      style={{ pointerEvents: 'none' }}
-                    />
+                    {/* Outer glow / outline — only in debug mode for visibility on any background */}
+                    {showDebugRoofLines && (
+                      <line
+                        x1={entry.lineSvg.x1}
+                        y1={entry.lineSvg.y1}
+                        x2={entry.lineSvg.x2}
+                        y2={entry.lineSvg.y2}
+                        stroke="rgba(0,0,0,0.5)"
+                        strokeWidth={lsWidth + 0.5}
+                        strokeLinecap="round"
+                        style={{ pointerEvents: 'none' }}
+                      />
+                    )}
                     {/* Main colored line */}
                     <line
                       x1={entry.lineSvg.x1}
@@ -864,7 +1092,7 @@ function PhotoWithUnifiedOverlays({
         const isRoofPlane = a.geometryClass === 'roof_plane' || a.geometryClass === 'wall_plane' || a.geometryClass === 'consensus_plane';
         const isRoofLine = a.geometryClass === 'roof_line';
         const lineStyle = isRoofLine && a.lineSubtype
-          ? (ROOF_LINE_SUBTYPE_STYLES[a.lineSubtype] ?? DEFAULT_ROOF_LINE_STYLE)
+          ? (activeSubtypeStyles[a.lineSubtype] ?? activeDefaultStyle)
           : null;
 
         return (
