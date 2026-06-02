@@ -140,15 +140,18 @@ export function RoofGeometrySection({
     fetchBundle();
   }, [fetchBundle]);
 
-  // ── Run Pipeline B (Generate Roof Geometry) ──────────────────────
+  // ── Run Pipeline B (Generate Roof Geometry) ───────────────────────────────
+  // Pipeline B is now async: POST /start → 202 { jobId } → poll GET /status
   const runPipelineB = useCallback(async () => {
     setPipelineStatus('running');
     setPipelineError(null);
     setGenerationSummary(null);
     setPhotoResults([]);
     setBudgetExhaustedReason(null);
+
     try {
-      const res = await fetch(
+      // ── Step 1: Start the job ────────────────────────────────────────────
+      const startRes = await fetch(
         `/api/site-surveys/${surveyId}/geometry-reconstruction/start`,
         {
           method: 'POST',
@@ -157,53 +160,126 @@ export function RoofGeometrySection({
           body: JSON.stringify({ pipeline: 'full' }),
         },
       );
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        if (res.status === 401) {
+
+      if (!startRes.ok) {
+        const body = await startRes.json().catch(() => ({}));
+        if (startRes.status === 401) {
           throw new Error('Please log in to generate roof geometry. You need to be authenticated to run this pipeline.');
         }
-        throw new Error(body.error || `Request failed (${res.status})`);
+        throw new Error(body.error || `Request failed (${startRes.status})`);
       }
-      const json = await res.json();
-      if (json.error) {
-        throw new Error(json.error);
+
+      const startJson = await startRes.json();
+
+      // Handle errors in the response body
+      if (startJson.error) {
+        throw new Error(startJson.error);
       }
-      const artifactCount = typeof json.summary?.rawArtifactCount === 'number'
-        ? json.summary.rawArtifactCount
-        : Array.isArray(json.job?.artifacts)
-          ? json.job.artifacts.length
-          : null;
-      const stageCount = Array.isArray(json.pipelineStages) ? json.pipelineStages.length : null;
-      const polygonCount = typeof json.summary?.rawPolygonArtifactCount === 'number'
-        ? json.summary.rawPolygonArtifactCount
-        : null;
-      const consensusCount = typeof json.summary?.rawConsensusPlaneCount === 'number'
-        ? json.summary.rawConsensusPlaneCount
-        : null;
-      // Capture SAM 2 backend info if returned by the pipeline
-      if (json.summary?.segmentationBackend === 'sam2' || json.summary?.segmentationBackend === 'canny') {
-        setPipelineBackend(json.summary.segmentationBackend);
+
+      // ── Mock pipeline: runs synchronously, returns results immediately ──
+      if (startJson.job?.status === 'completed' || startRes.status === 200) {
+        const artifactCount = typeof startJson.summary?.rawArtifactCount === 'number'
+          ? startJson.summary.rawArtifactCount
+          : Array.isArray(startJson.job?.artifacts)
+            ? startJson.job.artifacts.length
+            : null;
+        setGenerationSummary(
+          `Pipeline B completed${artifactCount != null ? ` with ${artifactCount} artifacts` : ''}.`,
+        );
+        setPipelineStatus('completed');
+        await fetchBundle();
+        onGeometryGenerated?.();
+        return;
       }
-      // Capture per-photo segmentation results for the status panel
-      if (Array.isArray(json.summary?.photoResults)) {
-        setPhotoResults(json.summary.photoResults);
+
+      // ── Real pipeline: 202 Accepted — must poll /status ──────────────
+      const jobId = startJson.jobId;
+      if (!jobId) {
+        throw new Error('Server returned async response but no jobId for polling.');
       }
-      if (json.summary?.budgetExhaustedReason) {
-        setBudgetExhaustedReason(json.summary.budgetExhaustedReason);
+
+      // ── Step 2: Poll GET /status until completed/failed ────────────────
+      const POLL_INTERVAL_MS = 3000;   // poll every 3 seconds
+      const POLL_TIMEOUT_MS = 600000;  // give up after 10 minutes
+      const startTime = Date.now();
+      let lastProgress = 0;
+
+      while (Date.now() - startTime < POLL_TIMEOUT_MS) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+
+        const statusRes = await fetch(
+          `/api/site-surveys/${surveyId}/geometry-reconstruction/status?jobId=${jobId}`,
+          { credentials: 'include' },
+        );
+
+        if (!statusRes.ok) {
+          // Non-fatal: network blip — keep polling
+          console.warn('[runPipelineB] Status poll failed, retrying…');
+          continue;
+        }
+
+        const statusJson = await statusRes.json();
+
+        // Update progress UI with current stage
+        const stage = statusJson.currentStage ?? '';
+        const progress = typeof statusJson.progress === 'number' ? statusJson.progress : null;
+        if (progress !== null && progress > lastProgress) {
+          lastProgress = progress;
+        }
+        const stageLabel = stage.replace(/_/g, ' ');
+        setGenerationSummary(
+          `Pipeline B running — stage: ${stageLabel}${progress !== null ? ` (${Math.round(progress * 100)}%)` : ''}…`,
+        );
+
+        // ── Completed ──
+        if (statusJson.status === 'completed') {
+          const artifactCount = typeof statusJson.artifactCount === 'number'
+            ? statusJson.artifactCount
+            : Array.isArray(statusJson.artifacts)
+              ? statusJson.artifacts.length
+              : null;
+          const grouped = statusJson.groupedArtifactCounts as Record<string, number> | undefined;
+          const planeCount = grouped?.consensus_plane_candidate ?? grouped?.consensus_plane ?? 0;
+          const segCount = grouped?.semantic_segmentation_mask ?? 0;
+          const lineCount = grouped?.roof_line_candidate ?? grouped?.roof_line ?? 0;
+
+          setGenerationSummary(
+            `Pipeline B completed with ${artifactCount ?? '?'} artifacts` +
+            (segCount ? `, ${segCount} segmentation masks` : '') +
+            (lineCount ? `, ${lineCount} roof lines` : '') +
+            (planeCount ? `, ${planeCount} consensus planes` : '') +
+            '.',
+          );
+          setPipelineStatus('completed');
+          await fetchBundle();
+          onGeometryGenerated?.();
+          return;
+        }
+
+        // ── Failed ──
+        if (statusJson.status === 'failed') {
+          throw new Error(
+            statusJson.error || 'Pipeline B execution failed. Check the job for partial results.',
+          );
+        }
+
+        // ── Stale heartbeat warning ──
+        if (statusJson.warning) {
+          console.warn(`[runPipelineB] ${statusJson.warning}`);
+        }
+
+        // Otherwise: status is 'queued' or 'running' — keep polling
       }
-      setGenerationSummary(
-        `Pipeline B completed${artifactCount != null ? ` with ${artifactCount} artifacts` : ''}${stageCount != null ? ` across ${stageCount} stages` : ''}${polygonCount != null ? `, including ${polygonCount} polygon artifacts` : ''}${consensusCount != null ? ` and ${consensusCount} consensus planes` : ''}.`,
+
+      // ── Timeout ──
+      throw new Error(
+        'Pipeline B did not complete within 10 minutes. The job may still be running — refresh the page to check.',
       );
-      setPipelineStatus('completed');
-      // Refresh the unified bundle to pick up new Pipeline B artifacts
-      await fetchBundle();
-      onGeometryGenerated?.();
     } catch (err) {
       setPipelineStatus('failed');
       setPipelineError(err instanceof Error ? err.message : 'Unknown error');
     }
   }, [surveyId, fetchBundle, onGeometryGenerated]);
-
   // ── Also run Pipeline A (Photo Vision) ───────────────────────────
   const runPipelineA = useCallback(async () => {
     setPipelineStatus('running');
