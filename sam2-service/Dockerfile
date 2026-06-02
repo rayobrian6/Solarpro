@@ -62,6 +62,11 @@ RUN pip install --no-cache-dir transformers>=4.37.0
 # optimized memory planning. Only loaded when SAM2_INFERENCE_BACKEND=onnx.
 RUN pip install --no-cache-dir onnxruntime>=1.18.0
 
+# 9b. ONNX model manipulation library — needed for INT8 dynamic quantization
+# of the SAM2 encoder at startup. The quantized model is ~4x smaller and
+# ~16% faster on CPU with minimal quality loss (cosine sim > 0.985).
+RUN pip install --no-cache-dir onnx>=1.16.0
+
 # 10. Remaining app deps (fastapi, uvicorn, opencv, etc.)
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt

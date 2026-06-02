@@ -54,7 +54,7 @@ import {
 // Worker version
 // ---------------------------------------------------------------------------
 
-export const SEGMENTATION_WORKER_VERSION = '5.2.0-sam2-rapidloop-15photos-30masks';
+export const SEGMENTATION_WORKER_VERSION = '5.3.0-sam2-tiny-quantized-15photos-30masks';
 
 // ---------------------------------------------------------------------------
 // Limitations
@@ -164,18 +164,20 @@ export interface SegmentationWorkerOutput {
 const MAX_SOURCE_PHOTOS = 15;
 
 /**
+/**
  * Maximum number of source photos to process with SAM 2.
- * SAM 2 on Render Pro (CPU, 2 vCPU) with rapid-loop decode + points_per_side=8
- * takes ~16-20s per photo for ONNX inference at 384px. The image encoder
- * still dominates runtime (~15s), but decoder is now ~3-5s (was ~35s)
- * thanks to pre-allocated feed dict + in-place coord updates.
- * With 2-batch concurrency, each batch of 2 photos takes ~20s (parallel).
- * 15 photos ÷ 2 = 8 batches × 20s ≈ 160s, plus ~40s overhead = ~200s total.
- * This fits within Vercel's maxDuration=300s hard limit with 100s buffer.
+ * SAM 2 on Render Pro (CPU, 2 vCPU) with tiny+INT8 encoder + rapid-loop decode
+ * takes ~34s per photo for ONNX inference at 384px. The image encoder
+ * dominates runtime (~29s with tiny+INT8, was ~40s with small FP32),
+ * decoder is ~4.5s with rapid-loop (was ~11s).
+ * With 2-batch concurrency, each batch of 2 photos takes ~34s (parallel).
+ * 15 photos / 2 = 8 batches x 34s ~ 255s, plus ~20s overhead ~ 275s total.
+ * This fits within Vercel's maxDuration=300s hard limit with ~25s buffer.
  *
- * PREVIOUS: MAX_SAM2_PHOTOS=10 with ~50s/photo → 250s + overhead ≈ 300s.
- * Now with rapid-loop decode (~20s/photo), 15 photos fits in ~200s.
- * User requirement is "minimum 8 to 15" — 15 now fits in 300s.
+ * PREVIOUS: MAX_SAM2_PHOTOS=10 with ~45s/photo (small FP32 encoder) ~ 250s.
+ * Now with tiny+INT8 encoder (~34s/photo), 15 photos fits in ~275s.
+ * User requirement is "minimum 8 to 15" - 15 now fits in 300s.
+ */
  */
 const MAX_SAM2_PHOTOS = 15;
 

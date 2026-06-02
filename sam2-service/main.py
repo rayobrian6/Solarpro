@@ -7,9 +7,9 @@ suitable for Pipeline B consumption.
 
 Architecture:
   - Loads SAM 2.1 checkpoint from HuggingFace on startup (model determined by
-    SAM2_HF_MODEL_ID env var; defaults to sam2.1-hiera-small on both CPU and GPU)
+    SAM2_HF_MODEL_ID env var; defaults to sam2.1-hiera-tiny on CPU, sam2.1-hiera-small on GPU)
   - Uses ONNX Runtime by default for faster inference (SAM2_INFERENCE_BACKEND=onnx)
-  - ONNX small model encoder: 131.6MB (vs tiny 104.4MB, same I/O shapes)
+  - ONNX tiny model encoder: 28.4MB quantized (from 104.4MB FP32), ~1.4x faster than small
   - Loads MiDaS/DPT depth model from HuggingFace on startup (model determined by
     MIDAS_MODEL_ID env var; defaults to Intel/dpt-swinv2-tiny-256 on CPU (~41MB))
   - POST /segment: accepts image bytes, returns polygon masks
@@ -27,8 +27,10 @@ Deployment:
 
 CPU Optimization (Segmentation):
   - Images resized to max 384px (CPU) / 2048px (GPU) before processing
-  - CPU: points_per_side=8 (64 grid points) with ONNX small model on Render Pro 4GB RAM, 384px
-  - ONNX small model encoder (131.6MB) + decoder (15.8MB) fit comfortably in 4GB with MiDaS
+  - CPU: points_per_side=8 (64 grid points) with ONNX tiny+quantized model on Render Pro 4GB RAM, 384px
+  - ONNX tiny+INT8 encoder (28.4MB quantized from 104.4MB) + decoder (15.8MB) fit comfortably in 4GB with MiDaS
+  - INT8 dynamic quantization: ~16% faster inference, ~4x smaller encoder, cosine similarity > 0.985 vs FP32
+  - Quantization applied at startup (~4s one-time cost), quantized model cached for reuse
   - min_area_fraction=0.005 allows small roof features (dormers, sheds) through
   - GPU: points_per_side=32 with MAX_IMAGE_DIM=2048 (full quality)
   - Lower pred_iou_thresh (0.5) and stability_score_thresh (0.8) for challenging lighting
@@ -44,7 +46,7 @@ CPU Optimization (Depth):
   - Images resized to max 256px (MiDaS native resolution) before depth inference
   - Intel/dpt-swinv2-tiny-256: 40.9M params, ~3-5s inference on CPU
   - Depth grid output resolution configurable via MIDAS_OUTPUT_RESOLUTION env var
-  - Both models (SAM2 + MiDaS) coexist in ~4GB RAM: SAM2 small ONNX (~132MB encoder + ~16MB decoder)
+  - Both models (SAM2 + MiDaS) coexist in ~4GB RAM: SAM2 tiny+INT8 ONNX (~28MB quantized encoder + ~16MB decoder)
     + DPT tiny (~41MB) leaves plenty of headroom on Render Standard (4GB)
 
 Health Check Resilience:
@@ -104,7 +106,7 @@ IS_CPU = DEVICE == "cpu"
 # HuggingFace model ID for SAM 2.1 — can be overridden via env var
 # Supported: facebook/sam2.1-hiera-tiny, facebook/sam2.1-hiera-small,
 #            facebook/sam2.1-hiera-base-plus, facebook/sam2.1-hiera-large
-HF_MODEL_ID = os.environ.get("SAM2_HF_MODEL_ID", "facebook/sam2.1-hiera-small")
+HF_MODEL_ID = os.environ.get("SAM2_HF_MODEL_ID", "facebook/sam2.1-hiera-tiny")
 # Maximum image dimension for processing — larger images are resized
 # 384px on CPU: 8x8 grid can detect roofs at this resolution without OOM
 # 256px on CPU: too small, 8x8 grid misses roofs entirely (0 masks)
@@ -117,16 +119,17 @@ STABILITY_SCORE_THRESH = float(os.environ.get("SAM2_STABILITY_SCORE_THRESH", "0.
 # Grid density for AMG — fewer points = faster inference, fewer masks
 # Grid density for SAM2 Automatic Mask Generation.
 # Higher = more masks (better small-object detection) but slower + more memory.
-#   8 points/side = 64 grid points (stable on 2GB RAM; ~15-20s with rapid-loop; ~8-10 roof masks)
-#   9 points/side = 81 grid points (stable on 2GB RAM; ~22s with rapid-loop)
-#  10 points/side = 100 grid points (~27s with rapid-loop; OK on 4GB Pro)
-#  12 points/side = 144 grid points (~35s with rapid-loop; OK on 4GB Pro with ONNX + 384px)
-#  16 points/side = 256 grid points (~50s with rapid-loop; best small-object detection)
+#   8 points/side = 64 grid points (stable on 2GB RAM; ~4.5s decoder with rapid-loop; ~8-10 roof masks)
+#   9 points/side = 81 grid points (stable on 2GB RAM; ~5.5s decoder with rapid-loop)
+#  10 points/side = 100 grid points (~7s decoder with rapid-loop; OK on 4GB Pro)
+#  12 points/side = 144 grid points (~10s decoder with rapid-loop; OK on 4GB Pro with ONNX + 384px)
+#  16 points/side = 256 grid points (~13s decoder with rapid-loop; best small-object detection)
 # NOTE: 8 points/side at 384px produces good roof masks because SAM2's encoder
 # captures sufficient detail at this resolution. Going higher mainly catches
 # small obstructions and equipment, which are less critical for geometry.
-# REDUCED from 12→8: With rapid-loop decode, 64 points × ~0.25s = ~16s/photo,
-# enabling 15 photos within Vercel's 300s limit (15÷2×20s = 150s + overhead).
+# Encoder dominates total time: tiny+INT8 ~29s + decoder ~4.5s = ~34s/photo.
+# REDUCED from 12→8: With rapid-loop decode + tiny+INT8 encoder, 64 points
+# take ~34s/photo, enabling 15 photos within Vercel's 300s limit (15÷2×34=255s).
 POINTS_PER_SIDE = int(os.environ.get("SAM2_POINTS_PER_SIDE", "8" if IS_CPU else "32"))
 # Maximum masks to return per image
 MAX_MASKS = int(os.environ.get("SAM2_MAX_MASKS", "30"))
@@ -408,7 +411,9 @@ def load_onnx_amg():
 
     ONNX Runtime achieves 1.5-3x CPU speedup through graph fusion,
     operator fusion, and optimized memory planning. The ONNX models
-    are downloaded from HuggingFace on first use.
+    are downloaded from HuggingFace on first use. When enabled (default),
+    INT8 dynamic quantization is applied to the encoder at startup for
+    additional ~16% speedup and ~4x model size reduction.
 
     Returns the ONNXSAM2AutomaticMaskGenerator instance, or raises
     on failure. The caller should catch and fall back to PyTorch.

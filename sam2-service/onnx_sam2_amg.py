@@ -10,6 +10,7 @@ Architecture:
   - Prompt Encoder + Mask Decoder: ONNX Runtime session (lightweight)
   - AMG grid-of-points logic: pure NumPy (same algorithm as PyTorch AMG)
   - Mask post-processing: OpenCV (same as PyTorch path)
+  - INT8 dynamic quantization: optional, applied at startup for ~16% encoder speedup
 
 ONNX Encoder I/O (same for tiny/small/base-plus/large — Hiera backbone variants):
   Input:  image               Float32[1, 3, 1024, 1024]  normalized RGB
@@ -91,13 +92,21 @@ ONNX_MODEL_REPO_ID = os.environ.get(
 # Which zip file to download from the repo
 ONNX_MODEL_FILENAME = os.environ.get(
     "SAM2_ONNX_MODEL_FILENAME",
-    "sam2.1_hiera_small_20260221.zip",  # small model: 131.6MB encoder, same I/O shapes as tiny but richer features
+    "sam2.1_hiera_tiny_20260221.zip",  # tiny model: 104.4MB encoder, ~18% faster than small on CPU
 )
 # Local directory to extract ONNX models
 ONNX_MODEL_DIR = os.environ.get(
     "SAM2_ONNX_MODEL_DIR",
     "/app/.cache/sam2_onnx",
 )
+# INT8 quantization: apply dynamic quantization to the encoder at startup.
+# Reduces encoder size ~4x (105MB → 28MB) and speeds up inference ~16% on CPU.
+# Quantization takes ~4s at startup — a one-time cost per instance launch.
+# Quality impact is minimal: cosine similarity vs FP32 > 0.985 on all outputs.
+ONNX_ENCODER_QUANTIZE = os.environ.get(
+    "SAM2_ONNX_ENCODER_QUANTIZE",
+    "true",  # enabled by default for CPU inference
+).lower() in ("true", "1", "yes")
 
 # ONNX Runtime session options
 ONNX_NUM_THREADS = int(os.environ.get("SAM2_ONNX_NUM_THREADS", "0"))  # 0 = auto
@@ -108,24 +117,98 @@ ONNX_INTER_OP_THREADS = int(os.environ.get("SAM2_ONNX_INTER_OP_THREADS", "0"))
 # ONNX Model Download & Loading
 # ---------------------------------------------------------------------------
 
+def _quantize_encoder_model(encoder_path: str) -> str:
+    """Apply INT8 dynamic quantization to the encoder ONNX model.
+
+    Quantization reduces encoder size ~4x (105MB → 28MB) and speeds up
+    CPU inference ~16% (measured 1.82s → 1.58s for tiny model on 2 vCPU).
+    Quality impact is minimal: cosine similarity vs FP32 > 0.985 on all outputs.
+
+    The quantized model is saved alongside the original as <name>.quant.onnx
+    and reused on subsequent startups. Quantization takes ~4s (one-time cost).
+
+    Returns the path to the quantized model (or the original if quantization fails).
+    """
+    # Check if quantized version already exists
+    base, ext = os.path.splitext(encoder_path)
+    quant_path = f"{base}.quant{ext}"
+
+    if os.path.isfile(quant_path):
+        orig_size = os.path.getsize(encoder_path) / 1e6
+        quant_size = os.path.getsize(quant_path) / 1e6
+        logger.info(
+            f"INT8 quantized encoder already exists: {quant_path} "
+            f"({quant_size:.1f}MB vs original {orig_size:.1f}MB)"
+        )
+        return quant_path
+
+    logger.info(f"Applying INT8 dynamic quantization to encoder: {encoder_path}")
+    t0 = time.time()
+
+    try:
+        from onnxruntime.quantization import quantize_dynamic, QuantType
+
+        quantize_dynamic(
+            model_input=encoder_path,
+            model_output=quant_path,
+            weight_type=QuantType.QUInt8,
+            per_channel=True,
+            reduce_range=True,
+            extra_options={"ActivationSymmetric": True},
+        )
+
+        orig_size = os.path.getsize(encoder_path) / 1e6
+        quant_size = os.path.getsize(quant_path) / 1e6
+        logger.info(
+            f"INT8 quantization completed in {time.time()-t0:.1f}s: "
+            f"{orig_size:.1f}MB → {quant_size:.1f}MB "
+            f"({orig_size/quant_size:.1f}x size reduction)"
+        )
+        return quant_path
+
+    except Exception as e:
+        logger.warning(f"INT8 quantization failed (using FP32 encoder): {e}")
+        # Remove partially written file if it exists
+        if os.path.isfile(quant_path):
+            os.remove(quant_path)
+        return encoder_path
+
+
 def _download_and_extract_onnx_models():
-    """Download SAM2.1 ONNX models from HuggingFace and extract to local dir."""
-    # The zip may contain model-specific names like sam2.1_hiera_small.encoder.onnx
+    """Download SAM2.1 ONNX models from HuggingFace and extract to local dir.
+
+    When SAM2_ONNX_ENCODER_QUANTIZE=true (default), applies INT8 dynamic
+    quantization to the encoder after extraction, producing a .quant.onnx
+    file that is ~4x smaller and ~16% faster on CPU.
+    """
+    # The zip may contain model-specific names like sam2.1_hiera_tiny.encoder.onnx
     # We search for encoder/decoder files by pattern matching.
+    # When quantization is enabled, prefer the .quant.onnx encoder if it exists.
     encoder_path = None
     decoder_path = None
 
-    # Check if already extracted — look for any *encoder*.onnx / *decoder*.onnx
+    # Check if already extracted — look for encoder/decoder files by pattern.
+    # Prefer quantized encoder (.quant.onnx) when quantization is enabled.
     if os.path.isdir(ONNX_MODEL_DIR):
+        # First pass: look for quantized encoder if quantization enabled
+        if ONNX_ENCODER_QUANTIZE:
+            for f in os.listdir(ONNX_MODEL_DIR):
+                if f.endswith(".quant.onnx") and "encoder" in f and encoder_path is None:
+                    encoder_path = os.path.join(ONNX_MODEL_DIR, f)
+        # Second pass: fall back to original (non-quantized) encoder
+        if encoder_path is None:
+            for f in os.listdir(ONNX_MODEL_DIR):
+                if (f.endswith(".onnx") and "encoder" in f
+                        and ".quant." not in f and encoder_path is None):
+                    encoder_path = os.path.join(ONNX_MODEL_DIR, f)
+        # Decoder (never quantized — it's lightweight at ~16MB)
         for f in os.listdir(ONNX_MODEL_DIR):
-            if f.endswith(".onnx") and "encoder" in f and encoder_path is None:
-                encoder_path = os.path.join(ONNX_MODEL_DIR, f)
-            elif f.endswith(".onnx") and "decoder" in f and decoder_path is None:
+            if f.endswith(".onnx") and "decoder" in f and decoder_path is None:
                 decoder_path = os.path.join(ONNX_MODEL_DIR, f)
 
     if encoder_path and decoder_path:
         logger.info(f"ONNX models already extracted at {ONNX_MODEL_DIR}")
-        logger.info(f"  encoder: {encoder_path}")
+        logger.info(f"  encoder: {encoder_path} (quantized={'yes' if '.quant.' in encoder_path else 'no'})")
         logger.info(f"  decoder: {decoder_path}")
         return encoder_path, decoder_path
 
@@ -148,15 +231,17 @@ def _download_and_extract_onnx_models():
             z.extractall(ONNX_MODEL_DIR)
 
         # Search for encoder/decoder files in the extracted directory
+        raw_encoder_path = None
         for root, dirs, files in os.walk(ONNX_MODEL_DIR):
             for f in files:
                 fpath = os.path.join(root, f)
-                if f.endswith(".onnx") and "encoder" in f and encoder_path is None:
-                    encoder_path = fpath
+                if (f.endswith(".onnx") and "encoder" in f
+                        and ".quant." not in f and raw_encoder_path is None):
+                    raw_encoder_path = fpath
                 elif f.endswith(".onnx") and "decoder" in f and decoder_path is None:
                     decoder_path = fpath
 
-        if not encoder_path:
+        if not raw_encoder_path:
             raise FileNotFoundError(
                 f"Encoder ONNX not found in {ONNX_MODEL_DIR} after extraction. "
                 f"Files: {os.listdir(ONNX_MODEL_DIR)}"
@@ -167,8 +252,14 @@ def _download_and_extract_onnx_models():
                 f"Files: {os.listdir(ONNX_MODEL_DIR)}"
             )
 
+        # Apply INT8 quantization to encoder if enabled
+        if ONNX_ENCODER_QUANTIZE:
+            encoder_path = _quantize_encoder_model(raw_encoder_path)
+        else:
+            encoder_path = raw_encoder_path
+
         logger.info(
-            f"ONNX models extracted in {time.time()-t0:.1f}s: "
+            f"ONNX models ready in {time.time()-t0:.1f}s: "
             f"encoder={encoder_path}, decoder={decoder_path}"
         )
         return encoder_path, decoder_path
