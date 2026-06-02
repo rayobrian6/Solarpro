@@ -127,9 +127,9 @@ STABILITY_SCORE_THRESH = float(os.environ.get("SAM2_STABILITY_SCORE_THRESH", "0.
 # NOTE: 8 points/side at 384px produces good roof masks because SAM2's encoder
 # captures sufficient detail at this resolution. Going higher mainly catches
 # small obstructions and equipment, which are less critical for geometry.
-# Encoder dominates total time: tiny+INT8 ~29s + decoder ~4.5s = ~34s/photo.
+# Encoder dominates total time: tiny+INT8 ~17s + decoder ~4.5s = ~22s/photo (measured on Render).
 # REDUCED from 12→8: With rapid-loop decode + tiny+INT8 encoder, 64 points
-# take ~34s/photo, enabling 15 photos within Vercel's 300s limit (15÷2×34=255s).
+# take ~22s/photo, enabling 15 photos within Vercel's 300s limit (15÷2×22=165s).
 POINTS_PER_SIDE = int(os.environ.get("SAM2_POINTS_PER_SIDE", "8" if IS_CPU else "32"))
 # Maximum masks to return per image
 MAX_MASKS = int(os.environ.get("SAM2_MAX_MASKS", "30"))
