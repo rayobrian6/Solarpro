@@ -49,12 +49,14 @@ import {
   SOLAR_RELEVANT_SEGMENTATION_CLASSES,
   type SAM2MaskResult,
 } from './sam2Client';
+import { cleanSegmentationMask } from './maskCleanup';
+import { extendPlanesThroughOccluders } from './planeExtension';
 
 // ---------------------------------------------------------------------------
 // Worker version
 // ---------------------------------------------------------------------------
 
-export const SEGMENTATION_WORKER_VERSION = '5.3.0-sam2-tiny-quantized-15photos-30masks';
+export const SEGMENTATION_WORKER_VERSION = '5.4.0-architectural-shape-reconstruction';
 
 // ---------------------------------------------------------------------------
 // Limitations
@@ -544,7 +546,25 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
           }
           const validationResult = validateSemanticSegmentationMask(mask);
           if (validationResult.valid) {
-            newArtifacts.push(validationResult.data);
+            // Run mask cleanup pipeline: hole filling, smoothing, architectural
+            // angle snapping, and architectural shape reconstruction.
+            // This transforms blobby contour boundaries into architecturally
+            // correct shapes (walls→rectangles, roofs→trapezoids/triangles).
+            const cleanedMask = cleanSegmentationMask(validationResult.data, {
+              segmentationClass,
+              architecturalSnap: true,
+              architecturalSnapTolerance: 10,
+            });
+            if (cleanedMask !== null) {
+              const cleanedValidation = validateSemanticSegmentationMask(cleanedMask);
+              if (cleanedValidation.valid) {
+                newArtifacts.push(cleanedValidation.data);
+              } else {
+                // If cleaned mask fails validation, use original
+                newArtifacts.push(validationResult.data);
+              }
+            }
+            // If cleanup returned null (mask too small), skip it entirely
           }
           contourIndex++;
         }
@@ -636,8 +656,27 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
 
           const validationResult = validateSemanticSegmentationMask(artifact);
           if (validationResult.valid) {
-            newArtifacts.push(validationResult.data);
-            masksProduced++;
+            // Run mask cleanup pipeline: hole filling, smoothing, architectural
+            // angle snapping, and architectural shape reconstruction.
+            // This transforms blobby SAM2 mask boundaries into architecturally
+            // correct shapes (walls→rectangles, roofs→trapezoids/triangles).
+            const cleanedMask = cleanSegmentationMask(validationResult.data, {
+              segmentationClass,
+              architecturalSnap: true,
+              architecturalSnapTolerance: 10,
+            });
+            if (cleanedMask !== null) {
+              const cleanedValidation = validateSemanticSegmentationMask(cleanedMask);
+              if (cleanedValidation.valid) {
+                newArtifacts.push(cleanedValidation.data);
+                masksProduced++;
+              } else {
+                // If cleaned mask fails validation, use original
+                newArtifacts.push(validationResult.data);
+                masksProduced++;
+              }
+            }
+            // If cleanup returned null (mask too small), skip it entirely
           }
         }
 
@@ -845,8 +884,30 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   });
   timings['validation'] = Date.now() - t2;
 
+  // Stage 5: Plane extension through occluders
+  // Cross-mask post-processing: extend structural planes (walls, roofs)
+  // through occluder regions (trees, bushes, cars) so the overlay
+  // shows where the plane WOULD be behind the obstruction.
+  // Must run AFTER individual mask cleanup (which produces rectangular/
+  // trapezoidal polygons) and AFTER validation.
+  let finalArtifacts = validatedArtifacts;
+  const t3 = Date.now();
+  const extensionResult = extendPlanesThroughOccluders(validatedArtifacts, {
+    enabled: true,
+    minOccluderOverlap: 0.10,
+    maxExtensionFraction: 1.0,
+    maxExtensionPixels: 200,
+  });
+  finalArtifacts = extensionResult.extendedMasks;
+  timings['plane_extension'] = Date.now() - t3;
+  if (extensionResult.extendedCount > 0) {
+    console.info(
+      `[PlaneExtension] Extended ${extensionResult.extendedCount} structural planes through occluders in ${timings['plane_extension']}ms`,
+    );
+  }
+
   return {
-    artifacts: validatedArtifacts,
+    artifacts: finalArtifacts,
     stageTimings: timings,
     workerVersion: SEGMENTATION_WORKER_VERSION,
     imageBytesMap,

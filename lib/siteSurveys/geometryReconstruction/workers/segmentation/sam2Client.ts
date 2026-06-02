@@ -819,9 +819,11 @@ export async function segmentPromptedWithSAM2(
 
 /**
  * Classes relevant to solar installation assessment.
- * Expanded from the original roof-only set to include facade elements,
- * electrical infrastructure, condition flags, and vegetation that touches
- * or blocks the structure. Occluders (car, person, etc.) are excluded
+ * Expanded to match the full 68-class taxonomy from types.ts.
+ *
+ * Includes all structural, facade, roof feature, site structure, landscaping,
+ * neighbor context, debris, electrical, and condition classes that affect
+ * solar site assessment. Occluders (car, truck, person, etc.) are excluded
  * because they don't affect solar feasibility — they only block the view.
  *
  * This set is also used on the TypeScript side to double-filter: even if
@@ -830,34 +832,59 @@ export async function segmentPromptedWithSAM2(
  */
 export const SOLAR_RELEVANT_SEGMENTATION_CLASSES: ReadonlySet<import('../../types').SegmentationClass> =
   new Set([
-    // Legacy roof-critical
+    // Legacy roof-relevant
     'roof', 'wall', 'obstruction', 'equipment',
-    // Facade
+    // Facade — relevant for conduit routing, mounting points, setback
     'siding', 'window', 'door', 'garage_door', 'fascia', 'soffit',
     'gutter', 'downspout', 'porch', 'deck', 'steps', 'railing',
-    // Electrical/solar
+    // Roof features — affect panel placement, fire setbacks, shade
+    'chimney', 'dormer', 'vent_pipe', 'satellite_dish', 'skylight',
+    'roof_hatch', 'flashing', 'solar_tube', 'flue', 'antenna',
+    // Site structures — affect access, equipment staging, setbacks
+    'foundation', 'detached_structure', 'retaining_wall', 'pillar', 'column',
+    'pool', 'awning', 'shed', 'garage_detached', 'pergola', 'carport',
+    // Landscaping — shade sources, access impedance, condition indicator
+    'overgrown_grass', 'bushes', 'hedge', 'overgrown_vegetation',
+    'vegetation_touching_structure', 'trees', 'stump',
+    // Neighbor context — permanent shade sources, setback constraints
+    'neighbor_house', 'neighbor_structure', 'power_line', 'utility_pole',
+    // Site debris — crew access and safety concerns
+    'junk_yard_debris', 'construction_debris', 'piled_materials',
+    'dumpster', 'storage_container',
+    // Electrical/solar — critical for system design
     'utility_meter', 'main_service_panel', 'disconnect', 'conduit',
     'inverter', 'battery', 'ac_unit', 'existing_solar_panel',
-    // Site context (solar-relevant)
-    'driveway', 'fence', 'bushes', 'vegetation_touching_structure',
-    // Condition flags
+    // Condition — affects installation decisions
     'moss', 'algae', 'damaged_siding', 'blocked_access', 'muddy_work_area',
+    // Site context — select classes relevant to solar
+    'driveway', 'fence',
   ] as const);
 
-/** Maps SAM 2 heuristic class hints to Pipeline B SegmentationClass. */
+/**
+ * Maps SAM 2 heuristic class hints to Pipeline B SegmentationClass.
+ * Covers ALL 68 classes from the expanded taxonomy in types.ts.
+ * New classes from Phase 1 expansion: chimney, dormer, vent_pipe,
+ * satellite_dish, skylight, roof_hatch, flashing, solar_tube, flue,
+ * antenna, foundation, detached_structure, retaining_wall, pillar,
+ * column, pool, awning, shed, garage_detached, pergola, carport,
+ * hedge, flower_bed, mulch_area, overgrown_vegetation, stump,
+ * neighbor_house, neighbor_structure, power_line, utility_pole,
+ * street_light, mailbox, fire_hydrant, junk_yard_debris,
+ * construction_debris, piled_materials, dumpster, storage_container.
+ */
 const SAM2_CLASS_HINT_TO_SEGMENTATION_CLASS: Record<
   string,
   import('../../types').SegmentationClass | null
 > = {
-  // Legacy
+  // ── Legacy (original 7) ──
   roof: 'roof',
   wall: 'wall',
   sky: 'sky',
   ground: 'ground',
   obstruction: 'obstruction',
   equipment: 'equipment',
-  tree: 'tree', // Vegetation detected by green ratio + position heuristic
-  // Facade
+  tree: 'tree',
+  // ── Facade ──
   siding: 'siding',
   window: 'window',
   door: 'door',
@@ -870,17 +897,60 @@ const SAM2_CLASS_HINT_TO_SEGMENTATION_CLASS: Record<
   deck: 'deck',
   steps: 'steps',
   railing: 'railing',
-  // Site context
+  // ── Roof features — penetrations, protrusions, attachments ──
+  chimney: 'chimney',
+  dormer: 'dormer',
+  vent_pipe: 'vent_pipe',
+  satellite_dish: 'satellite_dish',
+  skylight: 'skylight',
+  roof_hatch: 'roof_hatch',
+  flashing: 'flashing',
+  solar_tube: 'solar_tube',
+  flue: 'flue',
+  antenna: 'antenna',
+  // ── Site structures — ground-level & detached ──
+  foundation: 'foundation',
+  detached_structure: 'detached_structure',
+  retaining_wall: 'retaining_wall',
+  pillar: 'pillar',
+  column: 'column',
+  pool: 'pool',
+  awning: 'awning',
+  shed: 'shed',
+  garage_detached: 'garage_detached',
+  pergola: 'pergola',
+  carport: 'carport',
+  // ── Landscaping — vegetation & ground cover ──
   grass: 'grass',
   overgrown_grass: 'overgrown_grass',
+  bushes: 'bushes',
+  hedge: 'hedge',
+  flower_bed: 'flower_bed',
+  mulch_area: 'mulch_area',
+  overgrown_vegetation: 'overgrown_vegetation',
+  vegetation_touching_structure: 'vegetation_touching_structure',
+  trees: 'tree', // plural form from Python → map to legacy 'tree'
+  stump: 'stump',
+  // ── Site context (legacy ground-level) ──
   sidewalk: 'sidewalk',
   driveway: 'driveway',
   gravel: 'gravel',
   fence: 'fence',
-  bushes: 'bushes',
-  trees: 'tree', // plural form from Python → map to legacy 'tree'
-  vegetation_touching_structure: 'vegetation_touching_structure',
-  // Electrical/solar
+  // ── Neighbor & context ──
+  neighbor_house: 'neighbor_house',
+  neighbor_structure: 'neighbor_structure',
+  power_line: 'power_line',
+  utility_pole: 'utility_pole',
+  street_light: 'street_light',
+  mailbox: 'mailbox',
+  fire_hydrant: 'fire_hydrant',
+  // ── Site debris ──
+  junk_yard_debris: 'junk_yard_debris',
+  construction_debris: 'construction_debris',
+  piled_materials: 'piled_materials',
+  dumpster: 'dumpster',
+  storage_container: 'storage_container',
+  // ── Electrical/solar ──
   utility_meter: 'utility_meter',
   main_service_panel: 'main_service_panel',
   disconnect: 'disconnect',
@@ -889,7 +959,7 @@ const SAM2_CLASS_HINT_TO_SEGMENTATION_CLASS: Record<
   battery: 'battery',
   ac_unit: 'ac_unit',
   existing_solar_panel: 'existing_solar_panel',
-  // Occluder (mapped but filtered out by SOLAR_RELEVANT unless needed for overlay)
+  // ── Occluder (mapped but filtered out by SOLAR_RELEVANT + isOccluder) ──
   car: 'car',
   truck: 'truck',
   trailer: 'trailer',
@@ -898,13 +968,13 @@ const SAM2_CLASS_HINT_TO_SEGMENTATION_CLASS: Record<
   trash_can: 'trash_can',
   tools: 'tools',
   temporary_materials: 'temporary_materials',
-  // Condition
+  // ── Condition ──
   moss: 'moss',
   algae: 'algae',
   damaged_siding: 'damaged_siding',
   blocked_access: 'blocked_access',
   muddy_work_area: 'muddy_work_area',
-  // Catch-all
+  // ── Catch-all ──
   unknown: null,
 };
 

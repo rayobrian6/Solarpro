@@ -233,6 +233,364 @@ function isConvex(polygon: NormalizedPoint[]): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Architectural shape reconstruction — Stage 6
+// ---------------------------------------------------------------------------
+
+/**
+ * Classes whose polygons should be reconstructed as rectangles.
+ * Walls, siding, doors, windows, garage doors — all are built as rectangles.
+ * The SAM2 mask boundary is organic/blobby; the architectural truth is a rectangle.
+ */
+const RECTANGLE_ENFORCED_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  'wall', 'siding', 'door', 'window', 'garage_door',
+  'fence', 'retaining_wall', 'foundation',
+  'shed', 'garage_detached', 'carport',
+  'pillar', 'column',
+] as const);
+
+/**
+ * Classes whose polygons should be reconstructed as trapezoids
+ * (4 vertices: level top, level bottom, vertical or near-vertical sides).
+ * Roofs in perspective view appear as trapezoids, not irregular blobs.
+ */
+const TRAPEZOID_ENFORCED_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  'roof', 'dormer', 'awning', 'pergola',
+] as const);
+
+/**
+ * Classes whose polygons should be reconstructed as small rectangles
+ * (chimneys, vent pipes are small rectangular protrusions on roofs).
+ */
+const SMALL_RECTANGLE_ENFORCED_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  'chimney', 'vent_pipe', 'flue', 'satellite_dish', 'antenna',
+  'skylight', 'roof_hatch', 'solar_tube', 'flashing',
+  'utility_meter', 'main_service_panel', 'disconnect',
+  'ac_unit', 'existing_solar_panel', 'inverter', 'battery',
+] as const);
+
+/**
+ * Classes whose polygons should NOT be shape-reconstructed —
+ * they are naturally organic (vegetation) or too small/irregular.
+ */
+const NO_SHAPE_RECONSTRUCTION_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  'sky', 'ground', 'tree', 'grass', 'overgrown_grass', 'bushes',
+  'hedge', 'flower_bed', 'mulch_area', 'overgrown_vegetation',
+  'vegetation_touching_structure', 'trees', 'stump',
+  'moss', 'algae', 'damaged_siding', 'blocked_access', 'muddy_work_area',
+  'car', 'truck', 'trailer', 'person', 'ladder', 'trash_can',
+  'tools', 'temporary_materials',
+  'conduit', 'downspout', 'gutter', 'soffit', 'fascia',
+  'railing', 'steps', 'porch', 'deck',
+  'power_line', 'utility_pole', 'street_light',
+  'junk_yard_debris', 'construction_debris', 'piled_materials',
+  'dumpster', 'storage_container',
+  'obstruction', 'equipment',
+] as const);
+
+/**
+ * Compute the axis-aligned bounding rectangle of a polygon.
+ * Returns the four corners in CCW order: TL, TR, BR, BL.
+ */
+function boundingRectangle(polygon: NormalizedPoint[]): NormalizedPoint[] {
+  let xMin = 1000, yMin = 1000, xMax = 0, yMax = 0;
+  for (const pt of polygon) {
+    if (pt.x < xMin) xMin = pt.x;
+    if (pt.y < yMin) yMin = pt.y;
+    if (pt.x > xMax) xMax = pt.x;
+    if (pt.y > yMax) yMax = pt.y;
+  }
+  return [
+    { x: xMin, y: yMin, coordinateSystem: 'normalized_image_0_1000' }, // TL
+    { x: xMax, y: yMin, coordinateSystem: 'normalized_image_0_1000' }, // TR
+    { x: xMax, y: yMax, coordinateSystem: 'normalized_image_0_1000' }, // BR
+    { x: xMin, y: yMax, coordinateSystem: 'normalized_image_0_1000' }, // BL
+  ];
+}
+
+/**
+ * Compute the minimum-area rotated rectangle (oriented bounding box) of a polygon.
+ * Uses the rotating calipers approach: for each edge direction, compute the
+ * bounding box aligned with that edge and pick the one with smallest area.
+ * Returns 4 corners in CCW order.
+ */
+function orientedBoundingBox(polygon: NormalizedPoint[]): NormalizedPoint[] {
+  if (polygon.length < 3) return boundingRectangle(polygon);
+
+  let bestArea = Infinity;
+  let bestCorners: NormalizedPoint[] = boundingRectangle(polygon);
+
+  // Try each edge direction as the orientation of the bounding box
+  for (let i = 0; i < polygon.length; i++) {
+    const j = (i + 1) % polygon.length;
+    const dx = polygon[j].x - polygon[i].x;
+    const dy = polygon[j].y - polygon[i].y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 0.5) continue; // Skip degenerate edges
+
+    // Unit vectors for the rotated coordinate system
+    const ux = dx / len; // along edge
+    const uy = dy / len;
+    // Perpendicular (rotated 90° CCW in screen coords)
+    const vx = -uy;
+    const vy = ux;
+
+    // Project all points onto u and v axes
+    let uMin = Infinity, uMax = -Infinity;
+    let vMin = Infinity, vMax = -Infinity;
+    for (const pt of polygon) {
+      const u = pt.x * ux + pt.y * uy;
+      const v = pt.x * vx + pt.y * vy;
+      if (u < uMin) uMin = u;
+      if (u > uMax) uMax = u;
+      if (v < vMin) vMin = v;
+      if (v > vMax) vMax = v;
+    }
+
+    const area = (uMax - uMin) * (vMax - vMin);
+    if (area < bestArea) {
+      bestArea = area;
+      // Convert back to image coordinates
+      // Corner points in uv space, converted back to xy
+      const corners: NormalizedPoint[] = [
+        { x: uMin * ux + vMin * vx, y: uMin * uy + vMin * vy, coordinateSystem: 'normalized_image_0_1000' },
+        { x: uMax * ux + vMin * vx, y: uMax * uy + vMin * vy, coordinateSystem: 'normalized_image_0_1000' },
+        { x: uMax * ux + vMax * vx, y: uMax * uy + vMax * vy, coordinateSystem: 'normalized_image_0_1000' },
+        { x: uMin * ux + vMax * vx, y: uMin * uy + vMax * vy, coordinateSystem: 'normalized_image_0_1000' },
+      ];
+      bestCorners = corners;
+    }
+  }
+
+  return bestCorners;
+}
+
+/**
+ * Reconstruct a wall/facade polygon as a rectangle.
+ *
+ * Architecture truth: walls are rectangles. The SAM2 mask is blobby.
+ * This function computes the oriented bounding box (rotated rectangle)
+ * of the polygon, then snaps it to axis-aligned if the OBB is close
+ * to axis-aligned (walls are typically vertical in the image).
+ *
+ * The reconstructed rectangle preserves the polygon's orientation
+ * but replaces the organic boundary with crisp 90° corners.
+ */
+function reconstructRectangle(polygon: NormalizedPoint[]): NormalizedPoint[] {
+  const obb = orientedBoundingBox(polygon);
+
+  // Check if the OBB is close to axis-aligned
+  // (most walls appear approximately vertical in photos)
+  const topEdgeAngle = edgeAngleDeg(obb[0], obb[1]);
+  const rightEdgeAngle = edgeAngleDeg(obb[1], obb[2]);
+
+  // If the top edge is within 10° of level, snap to axis-aligned rectangle
+  const nearLevel = Math.min(topEdgeAngle, 180 - topEdgeAngle) < 10;
+  const nearVertical = Math.min(rightEdgeAngle, 180 - rightEdgeAngle) < 10;
+
+  if (nearLevel && nearVertical) {
+    // Use axis-aligned bounding rectangle — simpler and cleaner
+    return boundingRectangle(polygon);
+  }
+
+  // Otherwise use the oriented bounding box (perspective-distorted wall)
+  // But snap the edges to architectural angles
+  return snapOBBEdges(obb);
+}
+
+/**
+ * Snap OBB edges to nearest architectural angles.
+ * This ensures the reconstructed rectangle has crisp 90° corners
+ * even when the mask polygon was slightly rotated.
+ */
+function snapOBBEdges(corners: NormalizedPoint[]): NormalizedPoint[] {
+  if (corners.length !== 4) return corners;
+
+  const snapped = corners.map(p => ({ ...p }));
+
+  // Snap each edge to the nearest architectural angle
+  for (let i = 0; i < 4; i++) {
+    const start = snapped[i];
+    const end = snapped[(i + 1) % 4];
+    const angle = edgeAngleDeg(start, end);
+
+    // For rectangles, edges should be level or vertical
+    const result = findNearestArchitecturalAngle(angle, 15, true, true, false);
+    if (result) {
+      const newEnd = snapEdgeToArchitecturalAngle(start, end, result.snappedAngle);
+      snapped[(i + 1) % 4] = newEnd;
+    }
+  }
+
+  return snapped;
+}
+
+/**
+ * Reconstruct a roof polygon as a trapezoid.
+ *
+ * Architecture truth: a roof plane viewed from the ground appears as a
+ * trapezoid (perspective makes the far edge shorter). The SAM2 mask is
+ * blobby. This function:
+ * 1. Finds the longest level-ish edge (eave or ridge)
+ * 2. Finds the opposite level-ish edge
+ * 3. Connects them with straight rake edges
+ *
+ * For a gable end view, the roof appears as a triangle:
+ * the ridge is a point (degenerate top edge), and two rake edges
+ * meet at the top.
+ */
+function reconstructTrapezoid(polygon: NormalizedPoint[]): NormalizedPoint[] {
+  if (polygon.length < 3) return polygon;
+
+  // Find the two most horizontal edges (eave at bottom, ridge at top)
+  // and the leftmost/rightmost points for rake edges
+  let yMin = 1000, yMax = 0;
+  let xMin = 1000, xMax = 0;
+  for (const pt of polygon) {
+    if (pt.y < yMin) yMin = pt.y;
+    if (pt.y > yMax) yMax = pt.y;
+    if (pt.x < xMin) xMin = pt.x;
+    if (pt.x > xMax) xMax = pt.x;
+  }
+
+  // Find the best level edges at top and bottom
+  // Top edge: points near yMin (ridge)
+  // Bottom edge: points near yMax (eave)
+  const yRange = yMax - yMin;
+  if (yRange < 20) {
+    // Very flat polygon — treat as rectangle
+    return boundingRectangle(polygon);
+  }
+
+  // Gather points near the top (top 30%)
+  const topThreshold = yMin + yRange * 0.3;
+  const bottomThreshold = yMax - yRange * 0.3;
+
+  const topPoints = polygon.filter(p => p.y <= topThreshold);
+  const bottomPoints = polygon.filter(p => p.y >= bottomThreshold);
+
+  // Find leftmost and rightmost in each group
+  let topLeft = topPoints.reduce((best, p) => p.x < best.x ? p : best, topPoints[0] || polygon[0]);
+  let topRight = topPoints.reduce((best, p) => p.x > best.x ? p : best, topPoints[0] || polygon[0]);
+  let bottomLeft = bottomPoints.reduce((best, p) => p.x < best.x ? p : best, bottomPoints[0] || polygon[0]);
+  let bottomRight = bottomPoints.reduce((best, p) => p.x > best.x ? p : best, bottomPoints[0] || polygon[0]);
+
+  // If we couldn't find top/bottom points, fall back to bounding box extremes
+  if (topPoints.length === 0) {
+    topLeft = { x: xMin, y: yMin, coordinateSystem: 'normalized_image_0_1000' };
+    topRight = { x: xMax, y: yMin, coordinateSystem: 'normalized_image_0_1000' };
+  }
+  if (bottomPoints.length === 0) {
+    bottomLeft = { x: xMin, y: yMax, coordinateSystem: 'normalized_image_0_1000' };
+    bottomRight = { x: xMax, y: yMax, coordinateSystem: 'normalized_image_0_1000' };
+  }
+
+  // Snap top and bottom edges to LEVEL (architectural truth: eaves and ridges are level)
+  topLeft = { ...topLeft, y: Math.round(topLeft.y) };
+  topRight = { ...topRight, y: Math.round(topLeft.y), coordinateSystem: 'normalized_image_0_1000' }; // Same y as topLeft
+  bottomLeft = { ...bottomLeft, y: Math.round(bottomLeft.y) };
+  bottomRight = { ...bottomRight, y: Math.round(bottomLeft.y), coordinateSystem: 'normalized_image_0_1000' }; // Same y as bottomLeft
+
+  // Check if this is a triangle (gable end) — top edge is very short compared to bottom
+  const topWidth = Math.abs(topRight.x - topLeft.x);
+  const bottomWidth = Math.abs(bottomRight.x - bottomLeft.x);
+
+  if (topWidth < bottomWidth * 0.15) {
+    // Triangle: ridge is a single point at the midpoint of the top edge
+    const apex = {
+      x: Math.round((topLeft.x + topRight.x) / 2),
+      y: Math.round(Math.min(topLeft.y, topRight.y)),
+      coordinateSystem: 'normalized_image_0_1000' as const,
+    };
+    return [apex, bottomRight, bottomLeft];
+  }
+
+  // Trapezoid: 4 vertices CCW
+  return [topLeft, topRight, bottomRight, bottomLeft];
+}
+
+/**
+ * Reconstruct a small rectangular feature (chimney, vent pipe, skylight, etc.)
+ * These appear as small rectangular outlines on the roof.
+ */
+function reconstructSmallRectangle(polygon: NormalizedPoint[]): NormalizedPoint[] {
+  // For small features, axis-aligned bounding rectangle is usually correct
+  return boundingRectangle(polygon);
+}
+
+/**
+ * Apply architectural shape reconstruction to a polygon.
+ *
+ * This is the KEY stage that transforms blobby SAM2 mask boundaries
+ * into architecturally correct shapes:
+ * - Walls → rectangles (4 crisp 90° corners)
+ * - Roofs → trapezoids or triangles (level eaves/ridges, straight rakes)
+ * - Chimneys/vents → small rectangles
+ *
+ * The raw mask polygon faithfully reproduces pixel boundaries, which are
+ * organic and blobby. But architecture has geometric truths — walls are
+ * rectangular, eaves are level, ridges are straight. This stage enforces
+ * those truths by REPLACING the organic polygon with a reconstructed shape.
+ *
+ * The reconstruction preserves the polygon's overall position and extent
+ * (same bounding box area) but replaces the boundary with crisp lines
+ * at architecturally valid angles.
+ */
+
+/**
+ * Clamp all polygon coordinates to the valid image bounds [0, 1000].
+ *
+ * Shape reconstruction steps (oriented bounding box, angle snapping)
+ * can produce coordinates outside the valid range, especially when the
+ * polygon is near an image edge. This function ensures all points stay
+ * within bounds while preserving the coordinateSystem field.
+ */
+function clampToImageBounds(polygon: NormalizedPoint[]): NormalizedPoint[] {
+  return polygon.map(pt => ({
+    x: Math.max(0, Math.min(1000, pt.x)),
+    y: Math.max(0, Math.min(1000, pt.y)),
+    coordinateSystem: pt.coordinateSystem,
+  }));
+}
+
+function applyArchitecturalShapeReconstruction(
+  polygon: NormalizedPoint[],
+  config: Required<MaskCleanupConfig>,
+): NormalizedPoint[] {
+  if (polygon.length < 3) return polygon;
+
+  const segClass = config.segmentationClass as SegmentationClass;
+
+  // Skip classes that shouldn't be shape-reconstructed
+  if (NO_SHAPE_RECONSTRUCTION_CLASSES.has(segClass)) return polygon;
+
+  let reconstructed: NormalizedPoint[];
+
+  // Choose reconstruction strategy based on class
+  if (RECTANGLE_ENFORCED_CLASSES.has(segClass)) {
+    reconstructed = reconstructRectangle(polygon);
+  } else if (TRAPEZOID_ENFORCED_CLASSES.has(segClass)) {
+    reconstructed = reconstructTrapezoid(polygon);
+  } else if (SMALL_RECTANGLE_ENFORCED_CLASSES.has(segClass)) {
+    reconstructed = reconstructSmallRectangle(polygon);
+  } else {
+    // For any other class, try OBB reconstruction if the polygon is roughly rectangular
+    // (convex hull has ~4 dominant vertices)
+    const hull = convexHull(polygon);
+    if (hull.length <= 6) {
+      // Simple polygon — try OBB reconstruction
+      reconstructed = reconstructRectangle(polygon);
+    } else {
+      // No shape reconstruction — keep as-is
+      return polygon;
+    }
+  }
+
+  // Clamp all coordinates to image bounds [0, 1000]
+  // Shape reconstruction (OBB, snap) can produce out-of-bounds points
+  return clampToImageBounds(reconstructed);
+}
+
+// ---------------------------------------------------------------------------
 // Angle computation and snapping
 // ---------------------------------------------------------------------------
 
@@ -439,7 +797,9 @@ function applyArchitecturalSnap(
   // After snapping, re-apply Douglas-Peucker with a smaller epsilon
   // to clean up any artifacts from the angle snapping
   if (anySnapped) {
-    return douglasPeucker(snapped, config.smoothingEpsilon / 2);
+    const simplified = douglasPeucker(snapped, config.smoothingEpsilon / 2);
+    // Clamp to image bounds — angle snapping can push points out of [0, 1000]
+    return clampToImageBounds(simplified);
   }
 
   return snapped;
@@ -773,7 +1133,7 @@ export function cleanMask(
   }
 
   // Stage 5: Architectural angle snapping
-  // THE KEY STAGE: Enforce architectural truths on polygon edges.
+  // Enforce architectural truths on polygon edges.
   // Gutters → LEVEL, Walls → VERTICAL, Roof → valid pitches.
   if (resolvedConfig.architecturalSnap) {
     const t0 = Date.now();
@@ -797,6 +1157,33 @@ export function cleanMask(
       }
     }
     appliedStages.push('architectural_snap');
+  }
+
+  // Stage 6: Architectural shape reconstruction
+  // THE CRITICAL STAGE: Replace blobby mask polygons with architecturally
+  // correct shapes — walls → rectangles, roofs → trapezoids/triangles.
+  // This is what makes the overlay look like a house, not a blob.
+  {
+    const t0 = Date.now();
+    const reconstructed = applyArchitecturalShapeReconstruction(current, resolvedConfig);
+    stageTimings['architectural_shape_reconstruction'] = Date.now() - t0;
+    if (reconstructed !== current) {
+      let shapeModified = reconstructed.length !== current.length;
+      if (!shapeModified) {
+        for (let i = 0; i < reconstructed.length; i++) {
+          if (Math.abs(reconstructed[i].x - current[i].x) > 0.5 ||
+              Math.abs(reconstructed[i].y - current[i].y) > 0.5) {
+            shapeModified = true;
+            break;
+          }
+        }
+      }
+      if (shapeModified) {
+        current = reconstructed;
+        wasModified = true;
+      }
+    }
+    appliedStages.push('architectural_shape_reconstruction');
   }
 
   return {

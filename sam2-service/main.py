@@ -840,6 +840,25 @@ def classify_mask_region(
         if norm_area < 0.005 and aspect_ratio > 2.5:
             return "flashing"
 
+    # ── Occluder detection ──
+    # IMPORTANT: Check for occluders (car, truck, person) BEFORE site structures.
+    # Cars have overlapping criteria with carport/detached_structure/shed.
+    # We must identify them FIRST so they don't get misclassified as structures.
+    # Large objects at ground level that block the view of the structure
+    if norm_y_center > 0.5 and green_ratio < 0.10:
+        # Car/truck: large horizontal area at ground level
+        if 0.04 < norm_area < 0.2 and aspect_ratio > 1.5:
+            return "car" if norm_area < 0.12 else "truck"
+        # Person: very tall narrow at ground level
+        if 0.003 < norm_area < 0.02 and aspect_ratio < 0.5:
+            return "person"
+        # Ladder: thin tall at ground level
+        if norm_area < 0.003 and aspect_ratio < 0.25:
+            return "ladder"
+        # Trash can: small square at ground level
+        if 0.002 < norm_area < 0.008 and 0.6 < aspect_ratio < 1.5:
+            return "trash_can"
+
     # ── Site structure detection (ground-level structures) ──
     if green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
         # Foundation: thin horizontal strip at ground-wall junction
@@ -983,22 +1002,6 @@ def classify_mask_region(
         # Equipment (small, upper portion) — fallback
         if 0.003 < norm_area < 0.03 and norm_y_center < 0.6:
             return "equipment"
-
-    # ── Occluder detection ──
-    # Large objects at ground level that block the view of the structure
-    if norm_y_center > 0.5 and green_ratio < 0.10:
-        # Car/truck: large horizontal area at ground level
-        if 0.04 < norm_area < 0.2 and aspect_ratio > 1.5:
-            return "car" if norm_area < 0.12 else "truck"
-        # Person: very tall narrow at ground level
-        if 0.003 < norm_area < 0.02 and aspect_ratio < 0.5:
-            return "person"
-        # Ladder: thin tall at ground level
-        if norm_area < 0.003 and aspect_ratio < 0.25:
-            return "ladder"
-        # Trash can: small square at ground level
-        if 0.002 < norm_area < 0.008 and 0.6 < aspect_ratio < 1.5:
-            return "trash_can"
 
     # ── Obstruction detection (very small regions) ──
     if norm_area < 0.01:
