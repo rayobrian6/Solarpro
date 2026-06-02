@@ -195,20 +195,24 @@ export class CanonicalModelBuilder {
   // ─── Private Builders ────────────────────────────────────────────────────
 
   private buildCanonicalRoofPlane(artifact: UnifiedGeometryArtifact): CanonicalRoofPlane {
-    // Use polygon if available; otherwise construct from center + bbox
+    // Use polygon if available; otherwise construct from bbox
     const polygon = artifact.polygon ?? this.inferPolygonFromBBox(artifact);
+
+    // CRITICAL: Do NOT silently fabricate a 100×100 placeholder polygon.
+    // That garbage geometry would flow into CAD without any warning, producing
+    // nonsensical panel layouts. Instead, mark the plane as degraded so
+    // downstream consumers (CAD bridge, permit engine) can reject or flag it.
+    if (!polygon) {
+      console.error(
+        `[CANONICAL_BUILDER] Roof plane artifact ${artifact.id} has neither polygon nor bbox — ` +
+        'marking as degraded. Downstream consumers MUST NOT use this geometry for CAD/permit output.'
+      );
+    }
 
     return {
       id: uuid(),
-      polygon: polygon ?? {
-        vertices: [
-          { x: 0, y: 0, coordinateSystem: 'normalized_image_0_1000' },
-          { x: 100, y: 0, coordinateSystem: 'normalized_image_0_1000' },
-          { x: 100, y: 100, coordinateSystem: 'normalized_image_0_1000' },
-          { x: 0, y: 100, coordinateSystem: 'normalized_image_0_1000' },
-        ],
-        coordinateSystem: 'normalized_image_0_1000',
-      },
+      polygon: polygon ?? undefined,
+      degradedNoGeometry: !polygon,
       pitchDegrees: artifact.pitchDegrees ?? 0,
       azimuthDegrees: artifact.azimuthDegrees ?? 0,
       areaSqM: artifact.areaSqM ?? 0,
@@ -223,17 +227,20 @@ export class CanonicalModelBuilder {
   }
 
   private buildCanonicalWallPlane(artifact: UnifiedGeometryArtifact): CanonicalWallPlane {
+    const polygon = artifact.polygon ?? this.inferPolygonFromBBox(artifact);
+
+    // Same as roof planes: do NOT silently fabricate placeholder geometry.
+    if (!polygon) {
+      console.error(
+        `[CANONICAL_BUILDER] Wall plane artifact ${artifact.id} has neither polygon nor bbox — ` +
+        'marking as degraded. Downstream consumers MUST NOT use this geometry for CAD/permit output.'
+      );
+    }
+
     return {
       id: uuid(),
-      polygon: artifact.polygon ?? this.inferPolygonFromBBox(artifact) ?? {
-        vertices: [
-          { x: 0, y: 0, coordinateSystem: 'normalized_image_0_1000' },
-          { x: 100, y: 0, coordinateSystem: 'normalized_image_0_1000' },
-          { x: 100, y: 100, coordinateSystem: 'normalized_image_0_1000' },
-          { x: 0, y: 100, coordinateSystem: 'normalized_image_0_1000' },
-        ],
-        coordinateSystem: 'normalized_image_0_1000',
-      },
+      polygon: polygon ?? undefined,
+      degradedNoGeometry: !polygon,
       estimatedHeightM: null,
       facingDirection: null,
       sourceArtifactId: artifact.id,

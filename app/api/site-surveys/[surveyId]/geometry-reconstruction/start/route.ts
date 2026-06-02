@@ -260,7 +260,7 @@ export async function POST(
       // Adapt Pipeline B artifacts into unified geometry table
       try {
         const tUnifiedStart = Date.now();
-        const deletedCount = await deleteUnifiedArtifactsBySurvey(surveyId);
+        const deletedCount = await deleteUnifiedArtifactsBySurvey(surveyId, user.id);
         if (deletedCount > 0) {
           console.info(
             `[POST geometry-reconstruction/start] Deleted ${deletedCount} previous unified artifacts for survey=${surveyId}`,

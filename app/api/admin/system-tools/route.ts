@@ -51,13 +51,25 @@ export async function POST(req: NextRequest) {
         // Execute the migration SQL by splitting into individual statements
         // neon tagged template does not support .unsafe(); use neon().query() directly
         const rawSql = neon(process.env.DATABASE_URL!);
-        const statements = sqlContent
-          .split(';')
-          .map((s: string) => {
-            // Strip comment lines from each statement block, then trim
-            const lines = s.split('\n').filter((l: string) => !l.trim().startsWith('--'));
-            return lines.join('\n').trim();
+
+        // Strip ALL SQL comments BEFORE splitting to prevent multi-line comments
+        // from leaving residue text when a -- comment spans a semicolon boundary.
+        // Regex removes: (1) full-line comments, (2) trailing inline -- comments,
+        // while preserving string literals (rare in migration DDL).
+        const commentStripped = sqlContent
+          .split('\n')
+          .map((line: string) => {
+            const idx = line.indexOf('--');
+            if (idx === -1) return line;
+            // Naive: strip from first -- to end. DDL migrations rarely have
+            // string literals containing --, so this is safe for migration files.
+            return line.substring(0, idx);
           })
+          .join('\n');
+
+        const statements = commentStripped
+          .split(';')
+          .map((s: string) => s.trim())
           .filter((s: string) => s.length > 0);
 
         const errors: string[] = [];

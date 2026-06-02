@@ -1098,13 +1098,48 @@ export async function deleteUnifiedArtifactsByPipeline(
  * from Pipeline A persist and appear alongside new SAM 2 masks in the overlay,
  * making it look like "Canny is still there" even after the no-fallback fix.
  *
+ * SECURITY: Requires ownerId to verify that the requesting user owns the survey.
+ * Prevents any authenticated user from deleting another user's survey artifacts.
+ *
+ * @param surveyId - The survey ID whose artifacts should be deleted
+ * @param ownerId  - The user ID of the requesting user (must own the survey)
  * @returns Number of artifacts deleted
+ * @throws Error if the user does not own the survey
  */
 export async function deleteUnifiedArtifactsBySurvey(
   surveyId: string,
+  ownerId: string,
 ): Promise<number> {
   try {
     const sql = await getDbReady();
+
+    // Verify ownership: the requesting user must own the survey
+    const surveyCheck = await sql`
+      SELECT project_id FROM site_surveys
+      WHERE id = ${surveyId}
+    `;
+
+    if (surveyCheck.length === 0) {
+      console.warn(
+        '[unifiedArtifactStore] deleteUnifiedArtifactsBySurvey: survey not found:',
+        surveyId,
+      );
+      return 0;
+    }
+
+    // Verify the user owns the project this survey belongs to
+    const projectId = surveyCheck[0].project_id;
+    const ownershipCheck = await sql`
+      SELECT 1 FROM projects
+      WHERE id = ${projectId}
+        AND user_id = ${ownerId}
+    `;
+
+    if (ownershipCheck.length === 0) {
+      throw new Error(
+        `[unifiedArtifactStore] deleteUnifiedArtifactsBySurvey: user ${ownerId} does not own survey ${surveyId} (project ${projectId})`,
+      );
+    }
 
     const result = await sql`
       DELETE FROM unified_geometry_artifacts
@@ -1114,6 +1149,10 @@ export async function deleteUnifiedArtifactsBySurvey(
 
     return result.length;
   } catch (err) {
+    // Re-throw ownership violations so callers can surface 403 errors
+    if (err instanceof Error && err.message.includes('does not own')) {
+      throw err;
+    }
     console.warn(
       '[unifiedArtifactStore] Failed to delete artifacts by survey:',
       err instanceof Error ? err.message : String(err),

@@ -1,0 +1,52 @@
+/**
+ * GET /api/cron/stale-job-cleanup
+ *
+ * Vercel Cron Job endpoint that marks stale geometry reconstruction
+ * jobs as failed. Called automatically by Vercel Cron (configured in
+ * vercel.json) or manually by admins.
+ *
+ * A job is considered stale if:
+ *   - It's been "running" with no heartbeat for 10+ minutes (crashed)
+ *   - It's been "queued" for 30+ minutes (orphaned, never picked up)
+ *
+ * Auth: Requires CRON_SECRET header to prevent unauthorized invocation.
+ * Vercel Cron automatically sends this header.
+ *
+ * SECURITY: This endpoint does NOT require user auth — it's called by
+ * the Vercel platform, not by end users. The CRON_SECRET header prevents
+ * abuse.
+ */
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
+import { NextRequest, NextResponse } from 'next/server';
+import { markStaleJobsAsFailed } from '@/lib/siteSurveys/geometryReconstruction/staleJobCleanup';
+
+export async function GET(req: NextRequest) {
+  // Verify CRON_SECRET to prevent unauthorized access
+  const cronSecret = req.headers.get('X-CRON-SECRET') ?? req.headers.get('Authorization')?.replace('Bearer ', '');
+  const expectedSecret = process.env.CRON_SECRET;
+
+  if (expectedSecret && cronSecret !== expectedSecret) {
+    return NextResponse.json(
+      { success: false, error: 'Invalid or missing CRON_SECRET' },
+      { status: 401 },
+    );
+  }
+
+  try {
+    const result = await markStaleJobsAsFailed();
+    return NextResponse.json({
+      success: true,
+      ...result,
+    });
+  } catch (err) {
+    console.error('[cron/stale-job-cleanup] Error:', err);
+    return NextResponse.json(
+      { success: false, error: err instanceof Error ? err.message : 'Unknown error' },
+      { status: 500 },
+    );
+  }
+}

@@ -804,7 +804,11 @@ export interface CanonicalBuildingModel {
  */
 export interface CanonicalRoofPlane {
   id: string;
-  polygon: GeometryPolygon;  // local_meters_xy
+  polygon?: GeometryPolygon;  // local_meters_xy — undefined when source artifact lacks geometry
+  /** If true, the source artifact had neither polygon nor bbox.
+   *  Downstream consumers (CAD bridge, permit engine) MUST reject or flag
+   *  degraded planes — never silently use them for layout generation. */
+  degradedNoGeometry?: boolean;
   pitchDegrees: number;
   azimuthDegrees: number;
   areaSqM: number;
@@ -822,7 +826,10 @@ export interface CanonicalRoofPlane {
  */
 export interface CanonicalWallPlane {
   id: string;
-  polygon: GeometryPolygon;  // local_meters_xy
+  polygon?: GeometryPolygon;  // local_meters_xy — undefined when source artifact lacks geometry
+  /** If true, the source artifact had neither polygon nor bbox.
+   *  Downstream consumers MUST reject or flag degraded planes. */
+  degradedNoGeometry?: boolean;
   estimatedHeightM: number | null;
   facingDirection: string | null;
   sourceArtifactId: string;
