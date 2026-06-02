@@ -107,7 +107,7 @@ export type UnifiedGeometryClass =
 /**
  * Roof line subtypes — the canonical line types for solar CAD.
  */
-export type RoofLineSubtype = 'ridge' | 'eave' | 'rake' | 'hip' | 'valley' | 'wall_vertical';
+export type RoofLineSubtype = 'ridge' | 'eave' | 'rake' | 'hip' | 'valley' | 'wall_vertical' | 'wall_bottom_edge';
 
 /**
  * Obstruction subtypes — canonical classification for solar CAD.

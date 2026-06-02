@@ -203,6 +203,7 @@ function structuralLineTypeToSubtype(lineType: string): RoofLineSubtype | null {
     hip: 'hip',
     valley: 'valley',
     wall_vertical: 'wall_vertical',
+    wall_bottom_edge: 'wall_bottom_edge',
   };
   return map[lineType] ?? null;
 }
@@ -851,6 +852,7 @@ function adaptStructuralLineCandidate(artifact: StructuralLineCandidate, surveyI
     'geometry_recon', 'line_extraction_worker', artifact.fileId, [], artifact.workerVersion, artifact.id,
     isSynth, isSynth ? 'SYNTHETIC: Structural line produced by heuristic extraction, not real Hough/model inference' : undefined,
   );
+  const isWallBottomEdge = artifact.lineType === 'wall_bottom_edge';
   return makeEmptyArtifact({
     id: artifact.id,
     surveyId,
@@ -858,7 +860,9 @@ function adaptStructuralLineCandidate(artifact: StructuralLineCandidate, surveyI
     authority: isSynth ? { ...SYNTHETIC_ARTIFACT_AUTHORITY } : { ...RAW_EVIDENCE_AUTHORITY },
     provenance,
     confidence: artifact.confidence,
-    label: isSynth ? `⚠️ Synthetic: Structural ${artifact.lineType} line` : `Structural ${artifact.lineType} line`,
+    label: isSynth
+      ? `⚠️ Synthetic: Structural ${artifact.lineType} line${isWallBottomEdge ? ' (foundation edge — review required)' : ''}`
+      : `Structural ${artifact.lineType} line${isWallBottomEdge ? ' (foundation edge — review required)' : ''}`,
     limitations: [...artifact.limitations],
     lineSegment: {
       start: reconPointToGeometryPoint(artifact.start),
@@ -866,6 +870,7 @@ function adaptStructuralLineCandidate(artifact: StructuralLineCandidate, surveyI
       coordinateSystem: 'normalized_image_0_1000',
     },
     lineSubtype,
+    reviewRequired: true,
     stageTimings: artifact.stageTimings ?? null,
     isSynthetic: isSynth,
   });

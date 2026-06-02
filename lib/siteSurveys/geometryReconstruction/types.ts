@@ -473,8 +473,8 @@ export interface SemanticSegmentationMask {
 // Structural line candidate — extended line types (Phase 3)
 // ---------------------------------------------------------------------------
 
-/** Extended structural line type including wall_vertical. */
-export type StructuralLineType = 'ridge' | 'eave' | 'rake' | 'wall_vertical';
+/** Extended structural line type including wall_vertical and wall_bottom_edge. */
+export type StructuralLineType = 'ridge' | 'eave' | 'rake' | 'wall_vertical' | 'wall_bottom_edge';
 
 /** A structural line candidate with 2D image-space coordinates. */
 export interface StructuralLineCandidate {

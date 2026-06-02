@@ -276,6 +276,12 @@ const ROOF_LINE_SUBTYPE_STYLES_DEFAULT: Record<
     strokeDasharray: '0.8,0.8',
     label: 'Wall Edge',
   },
+  wall_bottom_edge: {
+    stroke: '#a78bfa',    // purple — foundation/wall-ground boundary
+    strokeWidth: 0.35,
+    strokeDasharray: '2,1,0.5,1',
+    label: 'Foundation Edge',
+  },
 };
 
 /**
@@ -322,6 +328,12 @@ const ROOF_LINE_SUBTYPE_STYLES_DEBUG: Record<
     strokeWidth: 1.0,
     strokeDasharray: '2,2',
     label: 'Wall Edge',
+  },
+  wall_bottom_edge: {
+    stroke: '#a78bfa',    // purple — foundation/wall-ground boundary
+    strokeWidth: 1.0,
+    strokeDasharray: '4,2,1,2',
+    label: 'Foundation Edge',
   },
 };
 

@@ -536,7 +536,7 @@ export function validateStructuralLineCandidate(payload: unknown): ValidationRes
   assertString(p, 'fileId', errors);
 
   // Validate lineType
-  const validLineTypes: StructuralLineType[] = ['ridge', 'eave', 'rake', 'wall_vertical'];
+  const validLineTypes: StructuralLineType[] = ['ridge', 'eave', 'rake', 'wall_vertical', 'wall_bottom_edge'];
   if (!('lineType' in p)) {
     errors.push('Missing required field: lineType');
   } else if (!isString(p.lineType) || !validLineTypes.includes(p.lineType as StructuralLineType)) {
