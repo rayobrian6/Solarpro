@@ -164,7 +164,6 @@ export interface SegmentationWorkerOutput {
 const MAX_SOURCE_PHOTOS = 15;
 
 /**
-/**
  * Maximum number of source photos to process with SAM 2.
  * SAM 2 on Render Pro (CPU, 2 vCPU) with tiny+INT8 encoder + rapid-loop decode
  * takes ~22s per photo for ONNX inference at 384px (measured on Render).
@@ -177,7 +176,6 @@ const MAX_SOURCE_PHOTOS = 15;
  * PREVIOUS: MAX_SAM2_PHOTOS=10 with ~45s/photo (small FP32 encoder) ~ 250s.
  * Now with tiny+INT8 encoder (~22s/photo), 15 photos fits in ~200s.
  * User requirement is "minimum 8 to 15" - 15 now fits in 300s.
- */
  */
 const MAX_SAM2_PHOTOS = 15;
 
@@ -803,7 +801,8 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
     photoIndex += batch.length;
   }
 
-  
+  // Record mask_generation timing (t1 was set at start of Stage 2)
+  timings['mask_generation'] = Date.now() - t1;
 
   // Log segmentation summary — honest counts
   const backend = sam2Enabled ? 'sam2' : 'canny';

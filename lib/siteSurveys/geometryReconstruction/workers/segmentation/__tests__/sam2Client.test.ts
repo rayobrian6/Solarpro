@@ -236,13 +236,13 @@ describe('sam2Client', () => {
       const resultPromise = segmentWithSAM2(imageBuffer);
 
       // Fast-forward through all retry backoffs
-      // Backoffs: 15s, 30s, 60s, 120s = total 225s
-      await vi.advanceTimersByTimeAsync(225_000);
+      // Backoffs: 5s, 10s = total 15s (SAM2_MAX_RETRIES=2, SAM2_RETRY_BACKOFF_INITIAL_MS=5000)
+      await vi.advanceTimersByTimeAsync(15_000);
 
       const result = await resultPromise;
       expect(result).toBeNull();
-      // 1 initial + 4 retries = 5 total fetch calls
-      expect(mockFetch).toHaveBeenCalledTimes(5);
+      // 1 initial + 2 retries = 3 total fetch calls
+      expect(mockFetch).toHaveBeenCalledTimes(3);
 
       vi.useRealTimers();
     });
