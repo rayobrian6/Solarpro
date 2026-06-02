@@ -272,6 +272,19 @@ function isOccluderClass(cls: SegmentationClass): boolean {
 }
 
 /**
+ * Site-intelligence masks are still preserved in the data model, but the default
+ * visual overlay should focus on the primary house. Rendering every secondary
+ * structure / landscaping / neighbor / debris mask by default makes the photo
+ * look like a chaotic wireframe instead of a readable house assessment.
+ */
+function isDefaultHiddenSiteContextClass(cls: SegmentationClass): boolean {
+  return SITE_STRUCTURE_SEGMENTATION_CLASSES.has(cls) ||
+    LANDSCAPING_SEGMENTATION_CLASSES.has(cls) ||
+    NEIGHBOR_CONTEXT_SEGMENTATION_CLASSES.has(cls) ||
+    SITE_DEBRIS_SEGMENTATION_CLASSES.has(cls);
+}
+
+/**
  * Whether a segmentation class is a condition flag (render with warning badge).
  */
 function isConditionClass(cls: SegmentationClass): boolean {
@@ -453,6 +466,14 @@ export function UnifiedGeometryOverlayRenderer({
         // of structure, not part of the structure. User feedback: "we aren't tracing
         // cars and secondary structures any more."
         if (a.isOccluder === true) return false;
+        // Also hide secondary/site-context segmentation masks by default. We still
+        // preserve them as intelligence artifacts for review/reporting, but they
+        // should not dominate the primary structure overlay.
+        if (
+          a.geometryClass === 'segmentation_mask' &&
+          a.segmentationClass &&
+          isDefaultHiddenSiteContextClass(a.segmentationClass as SegmentationClass)
+        ) return false;
         return true;
       });
       // Cap roof lines per file to prevent clutter (keep highest confidence first)

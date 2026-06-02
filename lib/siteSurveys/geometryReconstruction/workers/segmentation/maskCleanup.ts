@@ -242,10 +242,11 @@ function isConvex(polygon: NormalizedPoint[]): boolean {
  * The SAM2 mask boundary is organic/blobby; the architectural truth is a rectangle.
  */
 const RECTANGLE_ENFORCED_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  // Primary house envelope / facade only. Do NOT reconstruct secondary
+  // structures by default; crisping sheds/carports/fences into large planes
+  // can make the overlay look like a chaotic wireframe.
   'wall', 'siding', 'door', 'window', 'garage_door',
-  'fence', 'retaining_wall', 'foundation',
-  'shed', 'garage_detached', 'carport',
-  'pillar', 'column',
+  'foundation',
 ] as const);
 
 /**

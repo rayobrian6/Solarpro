@@ -893,7 +893,11 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   let finalArtifacts = validatedArtifacts;
   const t3 = Date.now();
   const extensionResult = extendPlanesThroughOccluders(validatedArtifacts, {
-    enabled: true,
+    // Emergency stabilization: keep inferred plane extension disabled for
+    // production overlays until we can render it as a separate, opt-in
+    // "inferred behind obstruction" layer. Feeding extended masks into the
+    // normal geometry pipeline can create chaotic whole-image wireframes.
+    enabled: false,
     minOccluderOverlap: 0.10,
     maxExtensionFraction: 1.0,
     maxExtensionPixels: 200,
