@@ -36,7 +36,18 @@ import type {
   UnifiedGeometryClass,
   GeometryLineSegment,
   SegmentationBackend,
+  FacadeSubtype,
+  SiteContextSubtype,
+  UnifiedConditionFlag,
 } from '@/lib/siteSurveys/unifiedGeometry/types';
+import {
+  FACADE_SEGMENTATION_CLASSES,
+  SITE_CONTEXT_SEGMENTATION_CLASSES,
+  ELECTRICAL_SEGMENTATION_CLASSES,
+  OCCLUDER_SEGMENTATION_CLASSES,
+  CONDITION_SEGMENTATION_CLASSES,
+  type SegmentationClass,
+} from '@/lib/siteSurveys/geometryReconstruction/types';
 
 /* ── Types ────────────────────────────────────────────────────────────── */
 
@@ -133,6 +144,90 @@ const SEGMENTATION_BACKEND_COLORS: Record<SegmentationBackend, { stroke: string;
     label: 'Canny Segmentation',
   },
 };
+
+/**
+ * Per-segmentationClass color map for fine-grained visual distinction.
+ * Used when geometryClass === 'segmentation_mask' and a segmentationClass is available.
+ * Falls back to SEGMENTATION_BACKEND_COLORS if no per-class entry exists.
+ *
+ * Color scheme:
+ *   Facade:      warm ambers/oranges (building envelope features)
+ *   Site context: greens/browns (ground-level features)
+ *   Electrical:  purples (electrical infrastructure)
+ *   Occluder:    grays, dashed (things blocking the view)
+ *   Condition:   reds (quality/safety issues)
+ *   Legacy:      original colors
+ */
+const SEGMENTATION_CLASS_COLORS: Partial<Record<SegmentationClass, { stroke: string; fill: string; label: string }>> = {
+  // Legacy
+  roof:       { stroke: '#34d399', fill: 'rgba(52,211,153,0.12)',  label: 'Roof' },
+  wall:       { stroke: '#60a5fa', fill: 'rgba(96,165,250,0.10)',  label: 'Wall' },
+  sky:        { stroke: '#38bdf8', fill: 'rgba(56,189,248,0.06)',  label: 'Sky' },
+  tree:       { stroke: '#22c55e', fill: 'rgba(34,197,94,0.10)',   label: 'Tree' },
+  ground:     { stroke: '#a3e635', fill: 'rgba(163,230,53,0.08)',  label: 'Ground' },
+  obstruction:{ stroke: '#f472b6', fill: 'rgba(244,114,182,0.10)', label: 'Obstruction' },
+  equipment:  { stroke: '#c084fc', fill: 'rgba(192,132,252,0.10)', label: 'Equipment' },
+  // Facade
+  siding:      { stroke: '#d97706', fill: 'rgba(217,119,6,0.10)',  label: 'Siding' },
+  window:      { stroke: '#3b82f6', fill: 'rgba(59,130,246,0.12)', label: 'Window' },
+  door:        { stroke: '#7c3aed', fill: 'rgba(124,58,237,0.10)', label: 'Door' },
+  garage_door: { stroke: '#6d28d9', fill: 'rgba(109,40,217,0.10)', label: 'Garage Door' },
+  fascia:      { stroke: '#b45309', fill: 'rgba(180,83,9,0.08)',   label: 'Fascia' },
+  soffit:      { stroke: '#92400e', fill: 'rgba(146,64,14,0.08)',  label: 'Soffit' },
+  gutter:      { stroke: '#78716c', fill: 'rgba(120,113,108,0.10)',label: 'Gutter' },
+  downspout:   { stroke: '#57534e', fill: 'rgba(87,83,78,0.10)',   label: 'Downspout' },
+  porch:       { stroke: '#a16207', fill: 'rgba(161,98,7,0.08)',   label: 'Porch' },
+  deck:        { stroke: '#854d0e', fill: 'rgba(133,77,14,0.08)',  label: 'Deck' },
+  steps:       { stroke: '#ca8a04', fill: 'rgba(202,138,4,0.08)',  label: 'Steps' },
+  railing:     { stroke: '#eab308', fill: 'rgba(234,179,8,0.08)',  label: 'Railing' },
+  // Site context
+  grass:                       { stroke: '#4ade80', fill: 'rgba(74,222,128,0.06)', label: 'Grass' },
+  overgrown_grass:             { stroke: '#16a34a', fill: 'rgba(22,163,74,0.08)',  label: 'Overgrown Grass' },
+  sidewalk:                    { stroke: '#9ca3af', fill: 'rgba(156,163,175,0.06)',label: 'Sidewalk' },
+  driveway:                    { stroke: '#78716c', fill: 'rgba(120,113,108,0.06)',label: 'Driveway' },
+  gravel:                      { stroke: '#a8a29e', fill: 'rgba(168,162,158,0.06)',label: 'Gravel' },
+  fence:                       { stroke: '#92400e', fill: 'rgba(146,64,14,0.08)',  label: 'Fence' },
+  bushes:                      { stroke: '#15803d', fill: 'rgba(21,128,61,0.08)',  label: 'Bushes' },
+  vegetation_touching_structure:{ stroke: '#dc2626', fill: 'rgba(220,38,38,0.10)', label: 'Veg. Touching Structure' },
+  // Electrical/solar
+  utility_meter:       { stroke: '#a855f7', fill: 'rgba(168,85,247,0.10)', label: 'Utility Meter' },
+  main_service_panel:  { stroke: '#7c3aed', fill: 'rgba(124,58,237,0.10)', label: 'Main Panel' },
+  disconnect:          { stroke: '#6d28d9', fill: 'rgba(109,40,217,0.10)', label: 'Disconnect' },
+  conduit:             { stroke: '#8b5cf6', fill: 'rgba(139,92,246,0.08)', label: 'Conduit' },
+  inverter:            { stroke: '#c084fc', fill: 'rgba(192,132,252,0.10)',label: 'Inverter' },
+  battery:             { stroke: '#e879f9', fill: 'rgba(232,121,249,0.10)',label: 'Battery' },
+  ac_unit:             { stroke: '#f472b6', fill: 'rgba(244,114,182,0.10)',label: 'AC Unit' },
+  existing_solar_panel:{ stroke: '#fbbf24', fill: 'rgba(251,191,36,0.12)', label: 'Existing Solar' },
+  // Occluder (gray, dashed — blocks view of structure)
+  car:                { stroke: '#6b7280', fill: 'rgba(107,114,128,0.04)',label: 'Car' },
+  truck:              { stroke: '#6b7280', fill: 'rgba(107,114,128,0.04)',label: 'Truck' },
+  trailer:            { stroke: '#6b7280', fill: 'rgba(107,114,128,0.04)',label: 'Trailer' },
+  person:             { stroke: '#6b7280', fill: 'rgba(107,114,128,0.04)',label: 'Person' },
+  ladder:             { stroke: '#6b7280', fill: 'rgba(107,114,128,0.04)',label: 'Ladder' },
+  trash_can:          { stroke: '#6b7280', fill: 'rgba(107,114,128,0.04)',label: 'Trash Can' },
+  tools:              { stroke: '#6b7280', fill: 'rgba(107,114,128,0.04)',label: 'Tools' },
+  temporary_materials:{ stroke: '#6b7280', fill: 'rgba(107,114,128,0.04)',label: 'Temp Materials' },
+  // Condition (red flags — safety/quality issues)
+  moss:            { stroke: '#ef4444', fill: 'rgba(239,68,68,0.10)', label: 'Moss' },
+  algae:           { stroke: '#f87171', fill: 'rgba(248,113,113,0.08)',label: 'Algae' },
+  damaged_siding:  { stroke: '#dc2626', fill: 'rgba(220,38,38,0.12)',  label: 'Damaged Siding' },
+  blocked_access:  { stroke: '#b91c1c', fill: 'rgba(185,28,28,0.12)',  label: 'Blocked Access' },
+  muddy_work_area: { stroke: '#991b1b', fill: 'rgba(153,27,27,0.12)',  label: 'Muddy Work Area' },
+};
+
+/**
+ * Whether a segmentation class should render with dashed lines (occluder styling).
+ */
+function isOccluderClass(cls: SegmentationClass): boolean {
+  return OCCLUDER_SEGMENTATION_CLASSES.has(cls);
+}
+
+/**
+ * Whether a segmentation class is a condition flag (render with warning badge).
+ */
+function isConditionClass(cls: SegmentationClass): boolean {
+  return CONDITION_SEGMENTATION_CLASSES.has(cls);
+}
 
 
 /**
@@ -510,13 +605,21 @@ function PhotoWithUnifiedOverlays({
   }> = [];
 
   for (const artifact of artifacts) {
-    // For segmentation_mask artifacts, use backend-specific colors to
-    // visually distinguish SAM 2 (emerald green) from Canny (cyan)
+    // Color selection priority:
+    //   1. Per-segmentationClass color (most specific)
+    //   2. Per-backend color (SAM 2 vs Canny)
+    //   3. Per-geometryClass default
     const isSegMask = artifact.geometryClass === 'segmentation_mask';
+    const segClass = artifact.segmentationClass as SegmentationClass | null;
     const defaultColor = GEOMETRY_CLASS_OVERLAY_COLORS[artifact.geometryClass] ?? GEOMETRY_CLASS_OVERLAY_COLORS.unknown;
-    const color = isSegMask && artifact.segmentationBackend && SEGMENTATION_BACKEND_COLORS[artifact.segmentationBackend]
+    // Try per-class color first, then backend color, then geometry class default
+    const perClassColor = isSegMask && segClass && SEGMENTATION_CLASS_COLORS[segClass]
+      ? SEGMENTATION_CLASS_COLORS[segClass]
+      : null;
+    const backendColor = isSegMask && artifact.segmentationBackend && SEGMENTATION_BACKEND_COLORS[artifact.segmentationBackend]
       ? SEGMENTATION_BACKEND_COLORS[artifact.segmentationBackend]
-      : defaultColor;
+      : null;
+    const color = perClassColor ?? backendColor ?? defaultColor;
     const geometry = extractArtifactGeometry(artifact);
     overlayElements.push({
       artifact,
@@ -566,7 +669,12 @@ function PhotoWithUnifiedOverlays({
           const lineStroke = lineStyle?.stroke ?? entry.color.stroke;
           const lineDash = lineStyle?.strokeDasharray ?? 'none';
           const fillOpacity = isHovered ? 0.2 : undefined;
-          const strokeDash = entry.artifact.authority?.mockArtifact ? '1,1' : 'none';
+          const strokeDash = entry.artifact.authority?.mockArtifact ? '1,1'
+            : entry.artifact.isOccluder ? '6,3'  // Dashed lines for occluders
+            : 'none';
+          // Condition flag badge: show ⚠ for condition annotations
+          const hasConditionFlags = entry.artifact.conditionFlags && entry.artifact.conditionFlags.length > 0;
+          const isOccluderMask = entry.artifact.isOccluder === true;
 
           return (
             <g key={entry.artifact.id}>
@@ -696,6 +804,35 @@ function PhotoWithUnifiedOverlays({
               ) : (
                 <span className="text-[9px] text-slate-400 border border-slate-600/30 rounded px-1">
                   {a.authority?.state?.replace(/_/g, ' ') ?? 'unknown'}
+                </span>
+              )}
+              {/* Occluder badge */}
+              {a.isOccluder && (
+                <span className="text-[9px] text-gray-400 border border-gray-500/30 rounded px-1">
+                  OCCLUDER
+                </span>
+              )}
+              {/* Condition flag badges */}
+              {a.conditionFlags && a.conditionFlags.map((flag, fi) => (
+                <span key={fi} className="text-[9px] text-red-300 border border-red-500/30 rounded px-1">
+                  ⚠ {flag.replace(/_/g, ' ')}
+                </span>
+              ))}
+              {/* Segmentation class badge for segmentation_mask */}
+              {a.geometryClass === 'segmentation_mask' && a.segmentationClass && (
+                <span className="text-[9px] text-cyan-300 border border-cyan-500/30 rounded px-1">
+                  {a.segmentationClass.replace(/_/g, ' ')}
+                </span>
+              )}
+              {/* Facade/site context subtype badges */}
+              {a.facadeSubtype && (
+                <span className="text-[9px] text-amber-300 border border-amber-500/30 rounded px-1">
+                  {a.facadeSubtype.replace(/_/g, ' ')}
+                </span>
+              )}
+              {a.siteContextSubtype && (
+                <span className="text-[9px] text-lime-300 border border-lime-500/30 rounded px-1">
+                  {a.siteContextSubtype.replace(/_/g, ' ')}
                 </span>
               )}
             </div>

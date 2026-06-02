@@ -31,7 +31,7 @@ import type {
   NormalizedPoint,
   GeometryReconstructionArtifact,
 } from '../../types';
-import { REVIEW_ONLY_AUTHORITY, BASE_LIMITATIONS, SEGMENTATION_CLASSES } from '../../types';
+import { REVIEW_ONLY_AUTHORITY, BASE_LIMITATIONS, SEGMENTATION_CLASSES, OCCLUDER_SEGMENTATION_CLASSES } from '../../types';
 import { validateSemanticSegmentationMask } from '../../schemas';
 import {
   extractRoofGeometry,
@@ -46,7 +46,7 @@ import {
   isSAM2Enabled,
   checkSAM2Health,
   waitForSAM2Warm,
-  ROOF_RELEVANT_SEGMENTATION_CLASSES,
+  SOLAR_RELEVANT_SEGMENTATION_CLASSES,
   type SAM2MaskResult,
 } from './sam2Client';
 
@@ -240,12 +240,37 @@ function sam2PhotoPriority(label: string | null | undefined): number {
 
 /** Maps ContourClassification from the extractor to SegmentationClass. */
 const CONTOUR_TO_SEGMENTATION_CLASS: Record<ContourClassification, SegmentationClass | null> = {
+  // Legacy
   probable_roof_plane: 'roof',
   probable_wall_plane: 'wall',
   probable_obstruction: 'obstruction',
   probable_equipment: 'equipment',
   probable_ground_noise: 'ground',
   probable_sky_region: 'sky',
+  // Facade
+  probable_siding: 'siding',
+  probable_window: 'window',
+  probable_door: 'door',
+  probable_garage_door: 'garage_door',
+  probable_gutter: 'gutter',
+  probable_downspout: 'downspout',
+  probable_porch: 'porch',
+  probable_deck: 'deck',
+  // Site context
+  probable_driveway: 'driveway',
+  probable_fence: 'fence',
+  probable_bushes: 'bushes',
+  // Electrical/solar
+  probable_ac_unit: 'ac_unit',
+  probable_utility_meter: 'utility_meter',
+  probable_existing_solar: 'existing_solar_panel',
+  // Occluder
+  probable_vehicle: 'car',
+  probable_person: 'person',
+  // Condition
+  probable_moss: 'moss',
+  probable_damaged_area: 'damaged_siding',
+  // Catch-all
   unknown: null, // Skip unknown classifications
 };
 
@@ -510,6 +535,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
             workerVersion: SEGMENTATION_WORKER_VERSION,
             authority: { ...REVIEW_ONLY_AUTHORITY },
             limitations: [...SEGMENTATION_WORKER_LIMITATIONS],
+            isOccluder: OCCLUDER_SEGMENTATION_CLASSES.has(segmentationClass) || null,
           };
           if (includeRawMask) {
             mask.rawMask = `canny-contour-${segmentationClass}-area${contour.area}`;
@@ -578,7 +604,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
           const segmentationClass = mapSAM2ClassHint(mask.classHint);
           if (segmentationClass === null) continue;
 
-          if (!ROOF_RELEVANT_SEGMENTATION_CLASSES.has(segmentationClass)) {
+          if (!SOLAR_RELEVANT_SEGMENTATION_CLASSES.has(segmentationClass)) {
             filteredNonRoof++;
             continue;
           }
@@ -599,6 +625,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
             workerVersion: SEGMENTATION_WORKER_VERSION,
             authority: { ...REVIEW_ONLY_AUTHORITY },
             limitations: [...SEGMENTATION_WORKER_LIMITATIONS],
+            isOccluder: OCCLUDER_SEGMENTATION_CLASSES.has(segmentationClass) || null,
           };
 
           if (includeRawMask) {

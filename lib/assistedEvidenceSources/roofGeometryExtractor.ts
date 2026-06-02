@@ -123,12 +123,37 @@ export interface ExtractedContour {
 
 /** Classification of an extracted contour. */
 export type ContourClassification =
+  // ── Legacy ──
   | 'probable_roof_plane'
   | 'probable_wall_plane'
   | 'probable_obstruction'
   | 'probable_equipment'
   | 'probable_ground_noise'
   | 'probable_sky_region'
+  // ── Facade ──
+  | 'probable_siding'
+  | 'probable_window'
+  | 'probable_door'
+  | 'probable_garage_door'
+  | 'probable_gutter'
+  | 'probable_downspout'
+  | 'probable_porch'
+  | 'probable_deck'
+  // ── Site context ──
+  | 'probable_driveway'
+  | 'probable_fence'
+  | 'probable_bushes'
+  // ── Electrical/solar ──
+  | 'probable_ac_unit'
+  | 'probable_utility_meter'
+  | 'probable_existing_solar'
+  // ── Occluder ──
+  | 'probable_vehicle'
+  | 'probable_person'
+  // ── Condition ──
+  | 'probable_moss'
+  | 'probable_damaged_area'
+  // ── Catch-all ──
   | 'unknown';
 
 /** A line detected in the image via Hough-like projection. */

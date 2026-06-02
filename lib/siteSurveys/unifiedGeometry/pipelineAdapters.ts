@@ -60,7 +60,19 @@ import type {
   PlaneType,
   ObstructionCadImpact,
   SegmentationBackend,
+  FacadeSubtype,
+  SiteContextSubtype,
+  ElectricalNodeSubtype,
+  UnifiedConditionFlag,
 } from './types';
+import {
+  FACADE_SEGMENTATION_CLASSES,
+  SITE_CONTEXT_SEGMENTATION_CLASSES,
+  ELECTRICAL_SEGMENTATION_CLASSES,
+  OCCLUDER_SEGMENTATION_CLASSES,
+  CONDITION_SEGMENTATION_CLASSES,
+  type SegmentationClass,
+} from '../geometryReconstruction/types';
 
 // ─── Pipeline A Candidate Type → Unified Geometry Class Mapping ─────────────
 
@@ -319,6 +331,10 @@ function makeEmptyArtifact(overrides: Partial<UnifiedGeometryArtifact> & Pick<Un
     consensusPhotoCount: null,
     segmentationClass: null,
     segmentationBackend: null,
+    facadeSubtype: null,
+    siteContextSubtype: null,
+    conditionFlags: null,
+    isOccluder: null,
     reviewState: 'review_required',
     reviewNotes: null,
     priority: overrides.confidence !== undefined
@@ -688,21 +704,95 @@ function adaptSemanticSegmentationMask(artifact: SemanticSegmentationMask, surve
     : { ...RAW_EVIDENCE_AUTHORITY };
 
   const segmentationBackend = detectSegmentationBackend(artifact.rawMask);
+  const segClass = artifact.segmentationClass as SegmentationClass;
+
+  // ── Map segmentation class to the appropriate geometryClass ──
+  // Electrical classes → electrical_node (with electricalSubtype)
+  // Occluder classes → segmentation_mask with isOccluder=true (review-only)
+  // Everything else → segmentation_mask (with optional facade/siteContext subtype)
+  let geometryClass: UnifiedGeometryClass = 'segmentation_mask';
+  let electricalSubtype: ElectricalNodeSubtype | null = null;
+  let facadeSubtype: FacadeSubtype | null = null;
+  let siteContextSubtype: SiteContextSubtype | null = null;
+
+  if (ELECTRICAL_SEGMENTATION_CLASSES.has(segClass)) {
+    geometryClass = 'electrical_node';
+    // Map segmentation class to electrical subtype
+    const electricalMap: Partial<Record<SegmentationClass, ElectricalNodeSubtype>> = {
+      utility_meter: 'utility_meter',
+      main_service_panel: 'main_service_panel',
+      disconnect: 'disconnect',
+      conduit: 'conduit_run',
+      inverter: 'inverter',
+      battery: 'battery',
+    };
+    electricalSubtype = electricalMap[segClass] ?? 'unknown_electrical';
+  } else if (segClass === 'ac_unit' || segClass === 'existing_solar_panel') {
+    // These are obstructions from a solar perspective
+    geometryClass = 'obstruction';
+  } else if (FACADE_SEGMENTATION_CLASSES.has(segClass)) {
+    // Facade classes stay as segmentation_mask but get a facadeSubtype
+    const facadeMap: Partial<Record<SegmentationClass, FacadeSubtype>> = {
+      siding: 'siding',
+      window: 'window',
+      door: 'door',
+      garage_door: 'garage_door',
+      fascia: 'fascia',
+      soffit: 'soffit',
+      gutter: 'gutter',
+      downspout: 'downspout',
+      porch: 'porch',
+      deck: 'deck',
+      steps: 'steps',
+      railing: 'railing',
+    };
+    facadeSubtype = facadeMap[segClass] ?? 'unknown_facade';
+  } else if (SITE_CONTEXT_SEGMENTATION_CLASSES.has(segClass)) {
+    // Site context classes stay as segmentation_mask but get a siteContextSubtype
+    const siteMap: Partial<Record<SegmentationClass, SiteContextSubtype>> = {
+      grass: 'grass',
+      overgrown_grass: 'overgrown_grass',
+      sidewalk: 'sidewalk',
+      driveway: 'driveway',
+      gravel: 'gravel',
+      fence: 'fence',
+      bushes: 'bushes',
+      vegetation_touching_structure: 'vegetation_touching_structure',
+    };
+    siteContextSubtype = siteMap[segClass] ?? 'unknown_site_context';
+  }
+
+  // Condition flags: propagate from artifact if present, or infer from condition classes
+  let conditionFlags: UnifiedConditionFlag[] | null = artifact.conditionFlags ?? null;
+  if (conditionFlags === null && CONDITION_SEGMENTATION_CLASSES.has(segClass)) {
+    conditionFlags = [segClass as UnifiedConditionFlag];
+  }
+
+  // Occluder flag: propagate from artifact
+  const isOccluder = artifact.isOccluder ?? (OCCLUDER_SEGMENTATION_CLASSES.has(segClass) || null);
+
+  // Build label with class context
+  const backendLabel = segmentationBackend === 'sam2' ? 'SAM 2' : segmentationBackend === 'canny' ? 'Canny' : 'Segmentation';
+  const classLabel = geometryClass === 'electrical_node'
+    ? `Electrical: ${segClass}`
+    : geometryClass === 'obstruction'
+      ? `Obstruction: ${segClass}`
+      : facadeSubtype
+        ? `Facade: ${segClass}`
+        : siteContextSubtype
+          ? `Site: ${segClass}`
+          : segClass;
 
   return makeEmptyArtifact({
     id: artifact.id,
     surveyId,
-    geometryClass: 'segmentation_mask',
+    geometryClass,
     authority,
     provenance,
     confidence: artifact.confidence,
     label: isSynthetic
-      ? `⚠️ Synthetic: Semantic segmentation (${artifact.segmentationClass})`
-      : segmentationBackend === 'sam2'
-        ? `SAM 2 Segmentation (${artifact.segmentationClass})`
-        : segmentationBackend === 'canny'
-          ? `Canny Segmentation (${artifact.segmentationClass})`
-          : `Semantic segmentation (${artifact.segmentationClass})`,
+      ? `⚠️ Synthetic: ${classLabel}`
+      : `${backendLabel} ${classLabel}`,
     limitations: [...artifact.limitations],
     bbox: regionToBBox(artifact.maskBounds),
     polygon: reconPointsToPolygon(artifact.polygon),
@@ -711,6 +801,11 @@ function adaptSemanticSegmentationMask(artifact: SemanticSegmentationMask, surve
       : null,
     segmentationClass: artifact.segmentationClass,
     segmentationBackend,
+    electricalSubtype,
+    facadeSubtype,
+    siteContextSubtype,
+    conditionFlags,
+    isOccluder,
     stageTimings: artifact.stageTimings ?? null,
     isSynthetic,
   });

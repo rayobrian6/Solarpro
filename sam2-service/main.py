@@ -664,7 +664,15 @@ def classify_mask_region(
     4. Green content analysis (high green = vegetation/tree, not roof)
     5. Texture complexity (trees have complex texture, roofs are smooth)
 
-    Returns one of: roof, wall, sky, ground, tree, obstruction, equipment, unknown
+    Returns one of: roof, wall, sky, ground, tree, obstruction, equipment,
+    siding, window, door, garage_door, fascia, soffit, gutter, downspout,
+    porch, deck, steps, railing, grass, overgrown_grass, sidewalk, driveway,
+    gravel, fence, bushes, vegetation_touching_structure,
+    utility_meter, main_service_panel, disconnect, conduit, inverter, battery,
+    ac_unit, existing_solar_panel,
+    car, truck, person, ladder, trash_can, tools, temporary_materials,
+    moss, algae, damaged_siding, blocked_access, muddy_work_area,
+    unknown
 
     IMPORTANT: "tree" is a distinct class from "obstruction" because trees
     are the #1 source of false roof masks. Downstream consumers must filter
@@ -677,6 +685,12 @@ def classify_mask_region(
     more heavily on green_ratio and shape heuristics. If prompt_points are
     provided, we check whether any foreground point falls within the mask
     bbox — if so, position-based rejections are skipped for that mask.
+
+    EXPANDED TAXONOMY (v2.3):
+    The original 8-class taxonomy has been expanded to ~33 classes covering
+    facade features, electrical infrastructure, site context, occluders, and
+    condition flags. These new classes are primarily heuristic-based and
+    map to the expanded SegmentationClass type in the TypeScript pipeline.
     """
     x, y, w, h = bbox
     norm_y_center = (y + h / 2) / img_h
@@ -685,24 +699,36 @@ def classify_mask_region(
     aspect_ratio = max(w, h) / max(min(w, h), 1)
 
     # ── Vegetation detection ──
-    # Trees are the #1 source of false roof masks. If the mask region
-    # contains significant green pixels, classify it as "tree" regardless
-    # of its position. This catches trees that appear in the upper half
-    # of the image (which the old heuristic incorrectly labeled "roof").
     green_ratio = 0.0
     if mask_binary is not None and original_image_bgr is not None:
         green_ratio = _compute_green_ratio(mask_binary, original_image_bgr, scale)
 
-    # High green content → definitely vegetation/tree, not roof
-    # This rule is ALWAYS active — green content is a strong signal regardless
-    # of prompted mode. If the user clicks on a tree, it should still be "tree".
+    # ── Condition flags: moss/algae on structure ──
+    # Moderate green on structural positions = moss or algae, not a tree
+    if green_ratio > CLASSIFIER_GREEN_RATIO_TREE_MODERATE and green_ratio < CLASSIFIER_GREEN_RATIO_TREE:
+        # Green on roof position
+        if 0.1 < norm_y_center < 0.6 and norm_area < 0.08:
+            return "moss"
+        # Green on wall/siding position
+        if 0.3 <= norm_y_center < 0.75 and aspect_ratio > 0.7:
+            return "algae"
+
+    # High green content → definitely vegetation, not structure
     if green_ratio > CLASSIFIER_GREEN_RATIO_TREE and norm_area > 0.005:
+        # Ground-level green = grass
+        if norm_y_center > CLASSIFIER_GROUND_Y_MIN:
+            if norm_area > 0.05:
+                return "overgrown_grass" if green_ratio > 0.5 else "grass"
+            return "grass"
+        # Moderate height, near structure edges = vegetation touching structure
+        if 0.35 < norm_y_center < 0.7:
+            if norm_x_center < 0.3 or norm_x_center > 0.7:
+                return "vegetation_touching_structure"
+            return "bushes"
+        # Tall narrow green = tree
         return "tree"
 
     # ── Check if a foreground prompt point falls within this mask bbox ──
-    # In prompted mode, if the user explicitly clicked inside this mask's
-    # bounding box, position-based sky/ground rules should be weakened.
-    # The user chose this region — trust their intent over position heuristics.
     has_fg_point_in_bbox = False
     if prompted_mode and prompt_points:
         x_min, y_min, bw, bh = bbox
@@ -716,58 +742,117 @@ def classify_mask_region(
                     break
 
     # ── Sky detection (top of image, large area) ──
-    # In prompted mode with a foreground point in this bbox, skip sky
-    # classification — the user clicked here intentionally, likely on a
-    # roof plane that SAM2 grouped with adjacent sky region.
     if not (prompted_mode and has_fg_point_in_bbox):
         if norm_y_center < CLASSIFIER_SKY_Y_MAX and norm_area > 0.04:
             return "sky"
 
-    # ── Ground detection (bottom of image, moderate-to-large area) ──
-    # Same logic: if user clicked foreground in this area, don't call it ground.
+    # ── Ground detection (bottom of image) ──
     if not (prompted_mode and has_fg_point_in_bbox):
         if norm_y_center > CLASSIFIER_GROUND_Y_MIN and norm_area > 0.02:
+            # Distinguish ground subtypes by color and area
+            if green_ratio > CLASSIFIER_GREEN_RATIO_TREE_MODERATE:
+                return "overgrown_grass" if norm_area > 0.1 else "grass"
+            # Non-green ground = driveway or sidewalk
+            if green_ratio < 0.05:
+                if norm_area > 0.08:
+                    return "driveway"
+                return "sidewalk"
             return "ground"
 
-    # ── Tree detection by shape (tall, moderate area, not ground level) ──
-    # Trees often have a distinctive vertical profile: narrower than roof,
-    # moderate-to-large area, positioned in upper-middle of image.
-    # Even without green detection (resized image may lose color fidelity),
-    # tall narrow regions in the upper half that aren\'t clearly roof-shaped
-    # are likely trees.
+    # ── Tree detection by shape ──
     if 0.15 < norm_y_center < 0.65 and norm_area > 0.02 and aspect_ratio < 1.3:
-        # Narrow-ish tall region in upper-middle → likely tree, not roof
         if green_ratio > CLASSIFIER_GREEN_RATIO_TREE_MODERATE:
             return "tree"
 
     # ── Roof detection ──
-    # Roofs are typically:
-    # - In the upper-middle portion of the image (0.15–0.55 vertical)
-    # - Wide (aspect ratio > 1.2, wider than tall)
-    # - Moderate to large area (>3% of image)
-    # - Low-to-moderate green content (<25% — raised from 15% to allow
-    #   mossy/weathered roofs with algae that would previously fall to "unknown")
-    # - High stability score (roofs are solid, not complex textures)
     if 0.1 < norm_y_center < 0.6 and norm_area > 0.02:
         if green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
-            # Wide region = likely roof plane
             if aspect_ratio > 1.3:
                 return "roof"
-            # Moderate aspect with high stability = probably roof
             if stability_score > 0.95 and aspect_ratio > 1.0:
                 return "roof"
-            # Large area in upper half with low green = roof candidate
             if norm_area > 0.05:
                 return "roof"
 
-    # ── Wall detection ──
-    # Walls are tall, narrow, in the middle vertical range
+    # ── Wall/facade detection ──
     if 0.2 <= norm_y_center < 0.85 and h > w * 0.8 and green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
         return "wall"
 
-    # ── Equipment detection (small, upper portion) ──
-    if 0.003 < norm_area < 0.03 and norm_y_center < 0.6 and green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
-        return "equipment"
+    # ── Facade elements (sub-regions on the wall plane) ──
+    if 0.2 <= norm_y_center < 0.85 and green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
+        # Windows: small, roughly square, in upper wall area
+        if 0.003 < norm_area < 0.02 and 0.6 < aspect_ratio < 1.8:
+            if norm_y_center < 0.6:
+                return "window"
+        # Doors: small, tall narrow, in lower wall area
+        if 0.005 < norm_area < 0.04 and aspect_ratio < 0.7:
+            if norm_y_center > 0.5:
+                return "door"
+        # Garage door: moderate area, tall wide, in lower-middle wall
+        if 0.02 < norm_area < 0.1 and 0.8 < aspect_ratio < 1.5:
+            if 0.4 < norm_y_center < 0.75:
+                return "garage_door"
+        # Gutter: very thin horizontal strip at top of wall
+        if norm_area < 0.005 and aspect_ratio > 3.0 and norm_y_center < 0.45:
+            return "gutter"
+        # Downspout: very thin vertical strip along wall edge
+        if norm_area < 0.003 and aspect_ratio < 0.3 and (norm_x_center < 0.15 or norm_x_center > 0.85):
+            return "downspout"
+        # Porch: moderate area, bottom of wall, extends outward
+        if 0.03 < norm_area < 0.1 and norm_y_center > 0.6 and aspect_ratio > 1.2:
+            return "porch"
+        # Deck: similar to porch but at ground level
+        if 0.03 < norm_area < 0.15 and norm_y_center > 0.7 and aspect_ratio > 1.5:
+            return "deck"
+        # Steps: small area, very bottom
+        if 0.005 < norm_area < 0.02 and norm_y_center > 0.75 and aspect_ratio > 1.0:
+            return "steps"
+        # Railing: thin horizontal line in lower-middle
+        if norm_area < 0.003 and aspect_ratio > 4.0 and 0.4 < norm_y_center < 0.7:
+            return "railing"
+        # Siding: large wall-like region (fallback for wall sub-areas)
+        if norm_area > 0.04 and aspect_ratio > 0.8:
+            return "siding"
+        # Fascia/soffit: thin strip at roof-wall junction
+        if norm_area < 0.01 and aspect_ratio > 2.0 and 0.3 < norm_y_center < 0.5:
+            return "fascia"
+
+    # ── Electrical/solar equipment detection ──
+    if green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
+        # Utility meter: very small, near ground level on wall
+        if 0.002 < norm_area < 0.005 and 0.55 < norm_y_center < 0.75:
+            if norm_x_center < 0.2 or norm_x_center > 0.8:
+                return "utility_meter"
+        # AC unit: small-to-moderate square, at ground or wall level
+        if 0.003 < norm_area < 0.02 and 0.7 < aspect_ratio < 1.5:
+            if norm_y_center > 0.5:
+                return "ac_unit"
+        # Existing solar panel: moderate area, on roof, dark low-green
+        if 0.01 < norm_area < 0.06 and 0.1 < norm_y_center < 0.5:
+            if aspect_ratio > 1.2 and green_ratio < 0.10:
+                return "existing_solar_panel"
+        # Conduit: thin vertical line on wall
+        if norm_area < 0.002 and aspect_ratio < 0.3 and 0.3 < norm_y_center < 0.8:
+            return "conduit"
+        # Equipment (small, upper portion) — fallback
+        if 0.003 < norm_area < 0.03 and norm_y_center < 0.6:
+            return "equipment"
+
+    # ── Occluder detection ──
+    # Large objects at ground level that block the view of the structure
+    if norm_y_center > 0.5 and green_ratio < 0.10:
+        # Car/truck: large horizontal area at ground level
+        if 0.04 < norm_area < 0.2 and aspect_ratio > 1.5:
+            return "car" if norm_area < 0.12 else "truck"
+        # Person: very tall narrow at ground level
+        if 0.003 < norm_area < 0.02 and aspect_ratio < 0.5:
+            return "person"
+        # Ladder: thin tall at ground level
+        if norm_area < 0.003 and aspect_ratio < 0.25:
+            return "ladder"
+        # Trash can: small square at ground level
+        if 0.002 < norm_area < 0.008 and 0.6 < aspect_ratio < 1.5:
+            return "trash_can"
 
     # ── Obstruction detection (very small regions) ──
     if norm_area < 0.01:
@@ -775,6 +860,8 @@ def classify_mask_region(
 
     # ── Remaining ground ──
     if norm_y_center > 0.55 and norm_area > 0.01:
+        if green_ratio > CLASSIFIER_GREEN_RATIO_TREE_MODERATE:
+            return "grass"
         return "ground"
 
     return "unknown"
@@ -836,10 +923,24 @@ def _compute_green_ratio(
         return 0.0
 
 
-# Classes that are relevant for roof geometry reconstruction.
-# Masks with other class hints are filtered out to avoid rendering
-# trees, sky, and ground as geometry overlays.
-ROOF_RELEVANT_CLASSES = {"roof", "wall", "equipment", "obstruction"}
+# Classes that are relevant for solar installation assessment.
+# Expanded from roof-only to include facade, electrical, site context,
+# and condition classes. Occluders (car, person, etc.) are excluded
+# because they only block the view — they don't affect solar feasibility.
+SOLAR_RELEVANT_CLASSES = {
+    # Legacy roof-critical
+    "roof", "wall", "equipment", "obstruction",
+    # Facade
+    "siding", "window", "door", "garage_door", "fascia", "soffit",
+    "gutter", "downspout", "porch", "deck", "steps", "railing",
+    # Electrical/solar
+    "utility_meter", "main_service_panel", "disconnect", "conduit",
+    "inverter", "battery", "ac_unit", "existing_solar_panel",
+    # Site context (solar-relevant)
+    "driveway", "fence", "bushes", "vegetation_touching_structure",
+    # Condition flags
+    "moss", "algae", "damaged_siding", "blocked_access", "muddy_work_area",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -1150,8 +1251,8 @@ async def segment_image(
     # dominating the geometry overlay.
     pre_filter_count = len(result_masks)
     if roof_only:
-        roof_masks = [m for m in result_masks if m.class_hint in ROOF_RELEVANT_CLASSES]
-        filtered_out = [m for m in result_masks if m.class_hint not in ROOF_RELEVANT_CLASSES]
+        roof_masks = [m for m in result_masks if m.class_hint in SOLAR_RELEVANT_CLASSES]
+        filtered_out = [m for m in result_masks if m.class_hint not in SOLAR_RELEVANT_CLASSES]
         if filtered_out:
             class_counts = {}
             for m in filtered_out:
@@ -1423,7 +1524,7 @@ async def segment_prompted(
     # Roof-only filter (off by default for prompted mode)
     pre_filter_count = len(result_masks)
     if roof_only:
-        roof_masks = [m for m in result_masks if m.class_hint in ROOF_RELEVANT_CLASSES]
+        roof_masks = [m for m in result_masks if m.class_hint in SOLAR_RELEVANT_CLASSES]
         result_masks = roof_masks
 
     result_masks.sort(key=lambda m: m.area, reverse=True)

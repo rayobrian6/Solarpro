@@ -124,6 +124,8 @@ export type ObstructionSubtype =
   | 'weatherhead'
   | 'solar_tube'
   | 'dormer'
+  | 'ac_unit'
+  | 'existing_solar_panel'
   | 'unknown_obstruction';
 
 /**
@@ -133,11 +135,60 @@ export type ElectricalNodeSubtype =
   | 'main_service_panel'
   | 'subpanel'
   | 'meter'
+  | 'utility_meter'
   | 'disconnect'
   | 'junction_box'
   | 'conduit'
+  | 'conduit_run'
   | 'grounding'
+  | 'inverter'
+  | 'battery'
   | 'unknown_electrical';
+
+/**
+ * Facade subtypes — building envelope features relevant to solar installation.
+ * These are review-only; they do NOT enter the CAD pipeline.
+ */
+export type FacadeSubtype =
+  | 'siding'
+  | 'window'
+  | 'door'
+  | 'garage_door'
+  | 'fascia'
+  | 'soffit'
+  | 'gutter'
+  | 'downspout'
+  | 'porch'
+  | 'deck'
+  | 'steps'
+  | 'railing'
+  | 'unknown_facade';
+
+/**
+ * Site context subtypes — ground-level features relevant to solar site assessment.
+ * These are review-only; they do NOT enter the CAD pipeline.
+ */
+export type SiteContextSubtype =
+  | 'grass'
+  | 'overgrown_grass'
+  | 'sidewalk'
+  | 'driveway'
+  | 'gravel'
+  | 'fence'
+  | 'bushes'
+  | 'vegetation_touching_structure'
+  | 'unknown_site_context';
+
+/**
+ * Condition flags — quality/condition indicators on geometry artifacts.
+ * These are review-only annotations; they do NOT enter the CAD pipeline.
+ */
+export type UnifiedConditionFlag =
+  | 'moss'
+  | 'algae'
+  | 'damaged_siding'
+  | 'blocked_access'
+  | 'muddy_work_area';
 
 /**
  * Plane type discriminator.
@@ -376,6 +427,24 @@ export interface UnifiedGeometryArtifact {
 
   /** Segmentation backend that produced this mask ('sam2' or 'canny'). Null for non-segmentation artifacts. */
   segmentationBackend: SegmentationBackend | null;
+
+  // ── Facade-specific fields (review-only, not CAD-safe) ──
+
+  /** Facade subtype for building envelope features */
+  facadeSubtype: FacadeSubtype | null;
+
+  // ── Site context fields (review-only, not CAD-safe) ──
+
+  /** Site context subtype for ground-level features */
+  siteContextSubtype: SiteContextSubtype | null;
+
+  // ── Condition & occluder flags (review-only annotations) ──
+
+  /** Condition flags detected on this artifact (moss, damage, access issues) */
+  conditionFlags: UnifiedConditionFlag[] | null;
+
+  /** Whether this artifact represents an occluder that blocks view of structure */
+  isOccluder: boolean | null;
 
   // ── Review state ──
 

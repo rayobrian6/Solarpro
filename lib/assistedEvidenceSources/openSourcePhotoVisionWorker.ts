@@ -59,6 +59,29 @@ const CLASSIFICATION_TYPE_MAP: Record<ContourClassification, OpenSourcePhotoVisi
   probable_equipment: 'equipment_anchor_candidate',
   probable_ground_noise: 'rectangular_region_candidate',
   probable_sky_region: 'rectangular_region_candidate',
+  // Facade
+  probable_siding: 'rectangular_region_candidate',
+  probable_window: 'rectangular_region_candidate',
+  probable_door: 'rectangular_region_candidate',
+  probable_garage_door: 'rectangular_region_candidate',
+  probable_gutter: 'rectangular_region_candidate',
+  probable_downspout: 'rectangular_region_candidate',
+  probable_porch: 'rectangular_region_candidate',
+  probable_deck: 'rectangular_region_candidate',
+  // Site context
+  probable_driveway: 'rectangular_region_candidate',
+  probable_fence: 'rectangular_region_candidate',
+  probable_bushes: 'rectangular_region_candidate',
+  // Electrical/solar
+  probable_ac_unit: 'equipment_anchor_candidate',
+  probable_utility_meter: 'equipment_anchor_candidate',
+  probable_existing_solar: 'equipment_anchor_candidate',
+  // Occluder
+  probable_vehicle: 'rectangular_region_candidate',
+  probable_person: 'rectangular_region_candidate',
+  // Condition
+  probable_moss: 'rectangular_region_candidate',
+  probable_damaged_area: 'rectangular_region_candidate',
   unknown: 'rectangular_region_candidate',
 };
 
@@ -70,6 +93,29 @@ const CLASSIFICATION_CATEGORY_MAP: Record<ContourClassification, OpenSourcePhoto
   probable_equipment: 'electrical_context',
   probable_ground_noise: 'field_context',
   probable_sky_region: 'field_context',
+  // Facade
+  probable_siding: 'structure_context',
+  probable_window: 'structure_context',
+  probable_door: 'structure_context',
+  probable_garage_door: 'structure_context',
+  probable_gutter: 'structure_context',
+  probable_downspout: 'structure_context',
+  probable_porch: 'structure_context',
+  probable_deck: 'structure_context',
+  // Site context
+  probable_driveway: 'field_context',
+  probable_fence: 'field_context',
+  probable_bushes: 'field_context',
+  // Electrical/solar
+  probable_ac_unit: 'electrical_context',
+  probable_utility_meter: 'electrical_context',
+  probable_existing_solar: 'electrical_context',
+  // Occluder
+  probable_vehicle: 'field_context',
+  probable_person: 'field_context',
+  // Condition
+  probable_moss: 'quality',
+  probable_damaged_area: 'quality',
   unknown: 'field_context',
 };
 

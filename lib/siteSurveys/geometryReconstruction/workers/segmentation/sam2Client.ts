@@ -818,22 +818,38 @@ export async function segmentPromptedWithSAM2(
 // ---------------------------------------------------------------------------
 
 /**
- * Roof-relevant segmentation classes — masks with these class hints are
- * useful for geometry reconstruction. All other classes (sky, ground, tree)
- * are filtered out when roof_only=true (the default on the Python side).
+ * Classes relevant to solar installation assessment.
+ * Expanded from the original roof-only set to include facade elements,
+ * electrical infrastructure, condition flags, and vegetation that touches
+ * or blocks the structure. Occluders (car, person, etc.) are excluded
+ * because they don't affect solar feasibility — they only block the view.
  *
  * This set is also used on the TypeScript side to double-filter: even if
- * the Python service returns a non-roof mask (e.g. due to a stale deploy),
+ * the Python service returns a non-relevant mask (e.g. due to a stale deploy),
  * the worker will drop it here.
  */
-export const ROOF_RELEVANT_SEGMENTATION_CLASSES: ReadonlySet<import('../../types').SegmentationClass> =
-  new Set(['roof', 'wall', 'obstruction', 'equipment'] as const);
+export const SOLAR_RELEVANT_SEGMENTATION_CLASSES: ReadonlySet<import('../../types').SegmentationClass> =
+  new Set([
+    // Legacy roof-critical
+    'roof', 'wall', 'obstruction', 'equipment',
+    // Facade
+    'siding', 'window', 'door', 'garage_door', 'fascia', 'soffit',
+    'gutter', 'downspout', 'porch', 'deck', 'steps', 'railing',
+    // Electrical/solar
+    'utility_meter', 'main_service_panel', 'disconnect', 'conduit',
+    'inverter', 'battery', 'ac_unit', 'existing_solar_panel',
+    // Site context (solar-relevant)
+    'driveway', 'fence', 'bushes', 'vegetation_touching_structure',
+    // Condition flags
+    'moss', 'algae', 'damaged_siding', 'blocked_access', 'muddy_work_area',
+  ] as const);
 
 /** Maps SAM 2 heuristic class hints to Pipeline B SegmentationClass. */
 const SAM2_CLASS_HINT_TO_SEGMENTATION_CLASS: Record<
   string,
   import('../../types').SegmentationClass | null
 > = {
+  // Legacy
   roof: 'roof',
   wall: 'wall',
   sky: 'sky',
@@ -841,6 +857,54 @@ const SAM2_CLASS_HINT_TO_SEGMENTATION_CLASS: Record<
   obstruction: 'obstruction',
   equipment: 'equipment',
   tree: 'tree', // Vegetation detected by green ratio + position heuristic
+  // Facade
+  siding: 'siding',
+  window: 'window',
+  door: 'door',
+  garage_door: 'garage_door',
+  fascia: 'fascia',
+  soffit: 'soffit',
+  gutter: 'gutter',
+  downspout: 'downspout',
+  porch: 'porch',
+  deck: 'deck',
+  steps: 'steps',
+  railing: 'railing',
+  // Site context
+  grass: 'grass',
+  overgrown_grass: 'overgrown_grass',
+  sidewalk: 'sidewalk',
+  driveway: 'driveway',
+  gravel: 'gravel',
+  fence: 'fence',
+  bushes: 'bushes',
+  trees: 'tree', // plural form from Python → map to legacy 'tree'
+  vegetation_touching_structure: 'vegetation_touching_structure',
+  // Electrical/solar
+  utility_meter: 'utility_meter',
+  main_service_panel: 'main_service_panel',
+  disconnect: 'disconnect',
+  conduit: 'conduit',
+  inverter: 'inverter',
+  battery: 'battery',
+  ac_unit: 'ac_unit',
+  existing_solar_panel: 'existing_solar_panel',
+  // Occluder (mapped but filtered out by SOLAR_RELEVANT unless needed for overlay)
+  car: 'car',
+  truck: 'truck',
+  trailer: 'trailer',
+  person: 'person',
+  ladder: 'ladder',
+  trash_can: 'trash_can',
+  tools: 'tools',
+  temporary_materials: 'temporary_materials',
+  // Condition
+  moss: 'moss',
+  algae: 'algae',
+  damaged_siding: 'damaged_siding',
+  blocked_access: 'blocked_access',
+  muddy_work_area: 'muddy_work_area',
+  // Catch-all
   unknown: null,
 };
 

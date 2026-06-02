@@ -28,7 +28,7 @@ import type {
   ArtifactTypeDiscriminator,
   ValidationResult,
 } from './types';
-import { ARTIFACT_TYPE_DISCRIMINATORS, SEGMENTATION_CLASSES } from './types';
+import { ARTIFACT_TYPE_DISCRIMINATORS, SEGMENTATION_CLASSES, CONDITION_FLAGS, type ConditionFlag } from './types';
 
 // ---------------------------------------------------------------------------
 // Authority validation
@@ -498,6 +498,26 @@ export function validateSemanticSegmentationMask(payload: unknown): ValidationRe
 
   assertAuthority(p, errors);
   assertLimitations(p, errors);
+
+  // conditionFlags is optional — if present, must be an array of valid ConditionFlag values
+  if ('conditionFlags' in p && p.conditionFlags !== undefined && p.conditionFlags !== null) {
+    if (!Array.isArray(p.conditionFlags)) {
+      errors.push('conditionFlags must be an array if present');
+    } else {
+      for (const flag of p.conditionFlags as unknown[]) {
+        if (!isString(flag) || !CONDITION_FLAGS.includes(flag as ConditionFlag)) {
+          errors.push(`conditionFlags entry must be one of: ${CONDITION_FLAGS.join(', ')}, got "${String(flag)}"`);
+        }
+      }
+    }
+  }
+
+  // isOccluder is optional — if present, must be boolean
+  if ('isOccluder' in p && p.isOccluder !== undefined && p.isOccluder !== null) {
+    if (typeof p.isOccluder !== 'boolean') {
+      errors.push('isOccluder must be a boolean if present');
+    }
+  }
 
   if (errors.length > 0) return { valid: false, errors };
   return { valid: true, data: p as unknown as SemanticSegmentationMask };

@@ -256,25 +256,162 @@ export type RakeLineCandidate = LineCandidate & { artifactType: 'rake_line_candi
 // Semantic segmentation — polygon-based masks (Phase 1)
 // ---------------------------------------------------------------------------
 
-/** Semantic class labels for segmentation. */
+// ---------------------------------------------------------------------------
+// Segmentation class taxonomy — expanded for residential site survey
+// ---------------------------------------------------------------------------
+
+/**
+ * Facade segmentation classes — visible house features relevant for
+ * solar site assessment (conduit routing, mounting, setback).
+ */
+export type FacadeSegmentationClass =
+  | 'siding' | 'window' | 'door' | 'garage_door' | 'fascia' | 'soffit'
+  | 'gutter' | 'downspout' | 'porch' | 'deck' | 'steps' | 'railing';
+
+/**
+ * Site context segmentation classes — ground-level features that
+ * affect installation planning and access.
+ */
+export type SiteContextSegmentationClass =
+  | 'grass' | 'overgrown_grass' | 'sidewalk' | 'driveway' | 'gravel'
+  | 'fence' | 'bushes' | 'trees' | 'vegetation_touching_structure';
+
+/**
+ * Electrical/solar segmentation classes — existing infrastructure
+ * critical for solar system design and interconnection.
+ */
+export type ElectricalSegmentationClass =
+  | 'utility_meter' | 'main_service_panel' | 'disconnect' | 'conduit'
+  | 'inverter' | 'battery' | 'ac_unit' | 'existing_solar_panel';
+
+/**
+ * Occluder segmentation classes — objects to IGNORE for geometry
+ * purposes. Kept for review/display but NEVER fed to downstream
+ * geometry stages (line extraction, plane extraction, etc.).
+ */
+export type OccluderSegmentationClass =
+  | 'car' | 'truck' | 'trailer' | 'person' | 'ladder' | 'trash_can'
+  | 'tools' | 'temporary_materials';
+
+/**
+ * Condition segmentation classes — quality/condition indicators
+ * that affect installation feasibility or require remediation.
+ */
+export type ConditionSegmentationClass =
+  | 'moss' | 'algae' | 'damaged_siding' | 'blocked_access' | 'muddy_work_area';
+
+/**
+ * Legacy segmentation classes — the original 7 classes kept for
+ * backward compatibility with existing artifacts and DB data.
+ */
+export type LegacySegmentationClass = 'roof' | 'wall' | 'sky' | 'tree' | 'ground' | 'obstruction' | 'equipment';
+
+/** Semantic class labels for segmentation — expanded from 7 to 33 classes. */
 export type SegmentationClass =
-  | 'roof'
-  | 'wall'
-  | 'sky'
-  | 'tree'
-  | 'ground'
-  | 'obstruction'
-  | 'equipment';
+  | LegacySegmentationClass
+  | FacadeSegmentationClass
+  | SiteContextSegmentationClass
+  | ElectricalSegmentationClass
+  | OccluderSegmentationClass
+  | ConditionSegmentationClass;
 
 /** All recognized segmentation classes. */
 export const SEGMENTATION_CLASSES: readonly SegmentationClass[] = [
-  'roof',
-  'wall',
-  'sky',
-  'tree',
-  'ground',
-  'obstruction',
-  'equipment',
+  // Legacy (original 7)
+  'roof', 'wall', 'sky', 'tree', 'ground', 'obstruction', 'equipment',
+  // Facade
+  'siding', 'window', 'door', 'garage_door', 'fascia', 'soffit',
+  'gutter', 'downspout', 'porch', 'deck', 'steps', 'railing',
+  // Site context
+  'grass', 'overgrown_grass', 'sidewalk', 'driveway', 'gravel',
+  'fence', 'bushes', 'trees', 'vegetation_touching_structure',
+  // Electrical/solar
+  'utility_meter', 'main_service_panel', 'disconnect', 'conduit',
+  'inverter', 'battery', 'ac_unit', 'existing_solar_panel',
+  // Occluder
+  'car', 'truck', 'trailer', 'person', 'ladder', 'trash_can',
+  'tools', 'temporary_materials',
+  // Condition
+  'moss', 'algae', 'damaged_siding', 'blocked_access', 'muddy_work_area',
+] as const;
+
+// ---------------------------------------------------------------------------
+// Segmentation class category sets — for filtering and classification
+// ---------------------------------------------------------------------------
+
+/** Facade classes — visible house features relevant for site assessment. */
+export const FACADE_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  'siding', 'window', 'door', 'garage_door', 'fascia', 'soffit',
+  'gutter', 'downspout', 'porch', 'deck', 'steps', 'railing',
+] as const);
+
+/** Site context classes — ground-level features that affect installation planning. */
+export const SITE_CONTEXT_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  'grass', 'overgrown_grass', 'sidewalk', 'driveway', 'gravel',
+  'fence', 'bushes', 'trees', 'vegetation_touching_structure',
+] as const);
+
+/** Electrical/solar classes — existing infrastructure relevant to system design. */
+export const ELECTRICAL_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  'utility_meter', 'main_service_panel', 'disconnect', 'conduit',
+  'inverter', 'battery', 'ac_unit', 'existing_solar_panel',
+] as const);
+
+/** Occluder classes — objects to IGNORE for geometry, flag for review only. */
+export const OCCLUDER_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  'car', 'truck', 'trailer', 'person', 'ladder', 'trash_can',
+  'tools', 'temporary_materials',
+] as const);
+
+/** Condition flag classes — quality/condition indicators. */
+export const CONDITION_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  'moss', 'algae', 'damaged_siding', 'blocked_access', 'muddy_work_area',
+] as const);
+
+/**
+ * Classes that ARE relevant for solar site assessment geometry.
+ * These pass through the SAM2 filter and produce UnifiedGeometryArtifacts.
+ *
+ * Expanded from {roof, wall, obstruction, equipment} to include:
+ * - Facade features (affect mounting, conduit routing, setback)
+ * - Electrical/solar (existing infrastructure)
+ * - Condition flags (affect installation feasibility)
+ * - Vegetation touching structure (clearance issue)
+ * - Fence/bushes (may affect access planning)
+ *
+ * NOT included (filtered out before artifact creation):
+ * - Sky, ground, tree (already filtered — not useful for site assessment)
+ * - Grass, sidewalk, driveway, gravel (site context, not geometry)
+ * - Car, truck, person, etc. (occluders — not structural)
+ */
+export const SOLAR_RELEVANT_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  // Legacy roof-relevant
+  'roof', 'wall', 'obstruction', 'equipment',
+  // Facade — relevant for conduit routing, mounting points, setback
+  'siding', 'window', 'door', 'garage_door', 'fascia', 'soffit',
+  'gutter', 'downspout', 'porch', 'deck', 'steps', 'railing',
+  // Electrical/solar — critical for system design
+  'utility_meter', 'main_service_panel', 'disconnect', 'conduit',
+  'inverter', 'battery', 'ac_unit', 'existing_solar_panel',
+  // Condition — affects installation decisions
+  'moss', 'algae', 'damaged_siding', 'blocked_access', 'muddy_work_area',
+  // Vegetation touching structure — clearance issue
+  'vegetation_touching_structure',
+  // Bushes/fence — may affect access planning
+  'fence', 'bushes',
+] as const);
+
+// ---------------------------------------------------------------------------
+// Condition flags — quality indicators on segmentation masks
+// ---------------------------------------------------------------------------
+
+/** Condition flags detected on a segmentation mask region. */
+export type ConditionFlag =
+  | 'moss' | 'algae' | 'damaged_siding' | 'blocked_access' | 'muddy_work_area';
+
+/** All valid condition flag values (for validation). */
+export const CONDITION_FLAGS: readonly ConditionFlag[] = [
+  'moss', 'algae', 'damaged_siding', 'blocked_access', 'muddy_work_area',
 ] as const;
 
 /** A 2D point in normalized image coordinates (0-1000). */
@@ -315,6 +452,21 @@ export interface SemanticSegmentationMask {
   authority: GeometryReconstructionAuthority;
   /** Limitations and disclaimers. */
   limitations: string[];
+  /**
+   * Condition flags detected on this mask region.
+   * Populated when the mask's segmentationClass is a condition class,
+   * OR when a secondary detection finds condition indicators on a
+   * structural mask (e.g., moss on a roof mask).
+   * Null/undefined when no conditions detected.
+   */
+  conditionFlags?: ConditionFlag[] | null;
+  /**
+   * Whether this mask represents an occluder that should be ignored
+   * for geometry purposes. Occluder masks (car, person, ladder, etc.)
+   * are kept for review/display but NEVER fed to downstream geometry
+   * stages (line extraction, plane extraction, etc.).
+   */
+  isOccluder?: boolean | null;
 }
 
 // ---------------------------------------------------------------------------
