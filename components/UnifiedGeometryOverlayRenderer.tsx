@@ -459,6 +459,7 @@ export function UnifiedGeometryOverlayRenderer({
   maxArtifactsPerFile?: number;
 }) {
   // Filter and cap artifacts per file
+  const hasExplicitClassFilter = Boolean(geometryClassFilter && geometryClassFilter.size > 0);
   const filesWithDrawable = filesWithArtifacts
     .map((fw) => {
       let filtered = fw.artifacts.filter((a) => {
@@ -467,18 +468,23 @@ export function UnifiedGeometryOverlayRenderer({
         // Skip if no drawable geometry at all
         if (!a.polygon && !a.bbox && !a.lineSegment) return false;
         // Apply class filter
-        if (geometryClassFilter && geometryClassFilter.size > 0 && !geometryClassFilter.has(a.geometryClass))
+        if (hasExplicitClassFilter && !geometryClassFilter?.has(a.geometryClass))
           return false;
+        // Raw segmentation polygons are intelligence/debug artifacts, not the
+        // default human photo review layer. They can dominate the photo with
+        // hundreds of mask outlines, so hide them unless an explicit class filter
+        // asks for segmentation_mask.
+        if (!hasExplicitClassFilter && a.geometryClass === 'segmentation_mask') return false;
         // Filter low-confidence roof lines - they clutter the overlay
         if (a.geometryClass === 'roof_line' && (a.confidence ?? 0) < MIN_ROOF_LINE_CONFIDENCE) return false;
         // Skip occluder masks (cars, trucks, people, etc.) — they block the view
         // of structure, not part of the structure. User feedback: "we aren't tracing
         // cars and secondary structures any more."
         if (a.isOccluder === true) return false;
-        // Also hide secondary/site-context segmentation masks by default. We still
-        // preserve them as intelligence artifacts for review/reporting, but they
-        // should not dominate the primary structure overlay.
+        // Also hide secondary/site-context segmentation masks in the default view.
+        // Explicit class-filter/debug views may still inspect the preserved masks.
         if (
+          !hasExplicitClassFilter &&
           a.geometryClass === 'segmentation_mask' &&
           a.segmentationClass &&
           isDefaultHiddenSiteContextClass(a.segmentationClass as SegmentationClass)
