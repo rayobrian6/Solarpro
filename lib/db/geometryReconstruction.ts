@@ -80,6 +80,25 @@ async function verifySurveyOwnership(surveyId: string, userId: string): Promise<
   }
 }
 
+/**
+ * Look up the owner's user_id for a survey.
+ * Used by internal worker routes (e.g., /execute) that don't have a user session
+ * but need a valid UUID userId for verifySurveyOwnership during artifact insertion.
+ * Returns null if the survey doesn't exist.
+ */
+export async function getSurveyOwnerId(surveyId: string): Promise<string | null> {
+  const sql = await getDbReady();
+  const rows = await sql`
+    SELECT c.user_id
+    FROM site_surveys ss
+    JOIN clients c ON c.id = ss.client_id
+    WHERE ss.id = ${surveyId}
+    LIMIT 1
+  `;
+  if (!rows.length) return null;
+  return (rows[0] as { user_id: string }).user_id;
+}
+
 // ---------------------------------------------------------------------------
 // Job operations
 // ---------------------------------------------------------------------------

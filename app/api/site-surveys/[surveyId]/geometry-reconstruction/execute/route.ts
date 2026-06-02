@@ -51,6 +51,7 @@ import {
   updateJobHeartbeatInDb,
   insertReconstructionArtifactsBatch,
   deleteArtifactsBySurvey,
+  getSurveyOwnerId,
 } from '@/lib/db/geometryReconstruction';
 import {
   runFullGeometryReconstructionPipeline,
@@ -234,6 +235,13 @@ export async function POST(
     ).length;
 
     // Persist artifacts (clean up old artifacts first to avoid accumulation)
+    // Resolve the survey owner's userId — needed for verifySurveyOwnership inside
+    // insertReconstructionArtifactsBatch. We can't use 'system-worker' because
+    // that's not a valid UUID and will fail the clients.user_id JOIN.
+    const surveyOwnerUserId = await getSurveyOwnerId(surveyId);
+    if (!surveyOwnerUserId) {
+      throw new Error(`Survey owner not found for surveyId=${surveyId} — cannot persist artifacts`);
+    }
     const tDbStart = Date.now();
     const deletedReconCount = await deleteArtifactsBySurvey(surveyId);
     if (deletedReconCount > 0) {
@@ -241,7 +249,7 @@ export async function POST(
         `[POST geometry-reconstruction/execute] Deleted ${deletedReconCount} previous reconstruction artifacts for survey=${surveyId}`,
       );
     }
-    const batchResult = await insertReconstructionArtifactsBatch(jobId, surveyId, 'system-worker', artifacts, pipeline);
+    const batchResult = await insertReconstructionArtifactsBatch(jobId, surveyId, surveyOwnerUserId, artifacts, pipeline);
     console.info(
       `[POST geometry-reconstruction/execute] Batch inserted ${batchResult.inserted}/${artifacts.length} reconstruction artifacts (failed=${batchResult.failed}) in ${Date.now() - tDbStart}ms`,
     );

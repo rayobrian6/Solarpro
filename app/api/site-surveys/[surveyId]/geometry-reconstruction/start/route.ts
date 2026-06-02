@@ -252,7 +252,7 @@ export async function POST(
           `[POST geometry-reconstruction/start] Deleted ${deletedReconCount} previous reconstruction artifacts for survey=${surveyId}`,
         );
       }
-      const batchResult = await insertReconstructionArtifactsBatch(job.id, surveyId, 'system-worker', artifacts, pipeline);
+      const batchResult = await insertReconstructionArtifactsBatch(job.id, surveyId, user.id, artifacts, pipeline);
       console.info(
         `[POST geometry-reconstruction/start] Batch inserted ${batchResult.inserted}/${artifacts.length} reconstruction artifacts (failed=${batchResult.failed}) in ${Date.now() - tDbStart}ms`,
       );
