@@ -34,6 +34,7 @@
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.37.0",
     "@vercel/blob": "^2.3.3",
+    "@vercel/functions": "^3.6.1",
     "autoprefixer": "^10.4.20",
     "bcryptjs": "^3.0.3",
     "cesium": "^1.138.0",

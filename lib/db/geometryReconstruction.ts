@@ -134,6 +134,30 @@ export async function getReconstructionJobById(jobId: string): Promise<GeometryR
   return rowToJob(jobRow, artifacts);
 }
 
+/** Update job heartbeat (current_stage + last_heartbeat_at) without changing status. Uses RETURNING (Neon driver quirk). */
+export async function updateJobHeartbeatInDb(
+  jobId: string,
+  currentStage: string,
+): Promise<void> {
+  try {
+    const sql = await getDbReady();
+    await sql`
+      UPDATE site_survey_geometry_reconstruction_jobs
+      SET current_stage = ${currentStage},
+          last_heartbeat_at = NOW(),
+          updated_at = NOW()
+      WHERE id = ${jobId}::uuid
+      RETURNING id
+    `;
+  } catch (err) {
+    // Best-effort: heartbeat failure should not crash the pipeline
+    console.warn(
+      '[geometryReconstruction] Heartbeat update failed for job=' + jobId + ':',
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
 /** Update job status. Uses RETURNING (Neon driver quirk). */
 export async function updateReconstructionJobStatus(
   jobId: string,
