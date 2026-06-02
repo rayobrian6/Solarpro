@@ -59,6 +59,9 @@ export async function markStaleJobsAsFailed(
   let orphanMarkedFailed = 0;
 
   // 1. Mark running jobs with stale heartbeats as failed
+  // NOTE: Neon tagged templates parameterize ${value} interpolations. We cannot
+  // embed a parameter inside INTERVAL '...' — it becomes INTERVAL '$1 minutes'
+  // which is invalid. Instead, multiply INTERVAL '1 minute' by the parameter.
   const staleResult = await sql`
     UPDATE site_survey_geometry_reconstruction_jobs
     SET
@@ -66,7 +69,7 @@ export async function markStaleJobsAsFailed(
       completed_at = NOW(),
       updated_at = NOW()
     WHERE status IN (${ACTIVE_STATUSES[0]}, ${ACTIVE_STATUSES[2]})
-      AND last_heartbeat_at < NOW() - INTERVAL '${staleThresholdMinutes} minutes'
+      AND last_heartbeat_at < NOW() - INTERVAL '1 minute' * ${staleThresholdMinutes}
     RETURNING id
   `;
 
@@ -76,6 +79,7 @@ export async function markStaleJobsAsFailed(
   }
 
   // 2. Mark orphan queued jobs as failed
+  // Same INTERVAL pattern as above — multiply INTERVAL '1 minute' by parameter
   const orphanResult = await sql`
     UPDATE site_survey_geometry_reconstruction_jobs
     SET
@@ -83,7 +87,7 @@ export async function markStaleJobsAsFailed(
       completed_at = NOW(),
       updated_at = NOW()
     WHERE status = ${ACTIVE_STATUSES[1]}
-      AND created_at < NOW() - INTERVAL '${orphanThresholdMinutes} minutes'
+      AND created_at < NOW() - INTERVAL '1 minute' * ${orphanThresholdMinutes}
     RETURNING id
   `;
 
