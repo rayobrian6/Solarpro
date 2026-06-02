@@ -267,18 +267,11 @@ function classifyEdge(
     }
     if (isDiag) {
       // Distinguish hip from rake:
-      // Hip lines are at exterior intersections (convex corners)
-      // Rake lines are at gable ends
-      // Heuristic: hip lines tend to be in the middle of the roof,
-      // rake lines tend to be at the edges
-      const avgX = (start.x + end.x) / 2;
-      if (150 < avgX && avgX < 850) {
-        // Could be hip if in middle area — use edge direction
-        // Hip lines slope downward from ridge, rake lines slope downward from ridge to eave
-        // For now, use a simple heuristic based on whether the edge
-        // is in the interior of the roof (hip) or at the boundary (rake)
-        return 'hip';
-      }
+      // Rake lines are gable-end edges (the diagonal boundary of a single roof plane).
+      // Hip lines are where two roof planes meet at an exterior ridge (not the gable end).
+      // Since polygon edges are always on the BOUNDARY of a single mask,
+      // they can only be rakes (gable ends), not hips.
+      // Hips come from interior intersections of two overlapping roof plane masks.
       return 'rake';
     }
     // Near-vertical roof edge: valley (interior intersection where water flows)

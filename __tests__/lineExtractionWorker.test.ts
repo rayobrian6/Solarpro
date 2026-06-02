@@ -239,7 +239,7 @@ describe('line extraction worker', () => {
       const result = runLineExtractionWorker(makeInput());
       for (const artifact of result.artifacts) {
         expect(artifact.limitations).toContain(
-          'Line extraction is heuristic — not from Hough transform or model inference.',
+          'Line extraction combines heuristic polygon-edge tracing with architectural truth enforcement.',
         );
       }
     });

@@ -332,13 +332,14 @@ describe('cleanMask', () => {
   });
 
   describe('applied stages', () => {
-    it('applies all 4 stages with default config', () => {
+    it('applies all 5 stages with default config', () => {
       const result = cleanMask(rect(100, 100, 400, 300));
       expect(result.appliedStages).toContain('hole_filling');
       expect(result.appliedStages).toContain('tiny_region_removal');
       expect(result.appliedStages).toContain('island_removal');
       expect(result.appliedStages).toContain('contour_smoothing');
-      expect(result.appliedStages.length).toBe(4);
+      expect(result.appliedStages).toContain('architectural_snap');
+      expect(result.appliedStages.length).toBe(5);
     });
 
     it('skips hole_filling when fillHoles is false', () => {
@@ -527,7 +528,7 @@ describe('cleanMask', () => {
       // Should not throw
       const result = cleanMask(rect(100, 100, 400, 300));
       expect(result.cleanedPolygon).not.toBeNull();
-      expect(result.appliedStages.length).toBe(4);
+      expect(result.appliedStages.length).toBe(5);
     });
 
     it('merges partial config with defaults', () => {
