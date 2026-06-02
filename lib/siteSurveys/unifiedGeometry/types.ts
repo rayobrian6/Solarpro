@@ -179,6 +179,20 @@ export type SiteContextSubtype =
   | 'vegetation_touching_structure'
   | 'unknown_site_context';
 
+/** Semantic role assigned to a segmentation mask. Review metadata only. */
+export type SemanticSceneRole =
+  | 'structure'
+  | 'facade'
+  | 'vegetation'
+  | 'ground_surface'
+  | 'temporary_occluder'
+  | 'site_context'
+  | 'electrical_context'
+  | 'unknown';
+
+/** How relevant a semantic mask is to downstream CAD. Metadata only; never promotion authority. */
+export type SemanticCadRelevance = 'none' | 'review_context' | 'existing_pipeline_only';
+
 /**
  * Condition flags — quality/condition indicators on geometry artifacts.
  * These are review-only annotations; they do NOT enter the CAD pipeline.
@@ -445,6 +459,32 @@ export interface UnifiedGeometryArtifact {
 
   /** Whether this artifact represents an occluder that blocks view of structure */
   isOccluder: boolean | null;
+
+  // ── Semantic classification metadata (review-only; not CAD/geometry authority) ──
+
+  /** Semantic class attached to a mask. Mirrors segmentationClass for mask artifacts. */
+  semanticClass?: string | null;
+
+  /** Scene role for semantic mask review/display. */
+  sceneRole?: SemanticSceneRole | null;
+
+  /** True only for classes that describe existing structural surfaces. Metadata only. */
+  isStructure?: boolean | null;
+
+  /** True for temporary occluders such as truck/car/trailer/person/ladder. */
+  isTemporaryOccluder?: boolean | null;
+
+  /** True for vegetation classes such as tree/bush/grass. */
+  isVegetation?: boolean | null;
+
+  /** True for ground/site-surface classes such as grass/gravel/driveway. */
+  isGroundSurface?: boolean | null;
+
+  /** CAD relevance hint. Does not create or promote CAD geometry. */
+  cadRelevance?: SemanticCadRelevance | null;
+
+  /** Whether a human should review the semantic label/mask. */
+  reviewRequired?: boolean | null;
 
   // ── Review state ──
 
