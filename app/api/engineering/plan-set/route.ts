@@ -924,7 +924,7 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (err: unknown) {
-    return handleRouteDbError('[plan-se', err);
+    return handleRouteDbError('[plan-set/route.ts]', err);
   } finally {
     for (const f of tmpFiles) {
       try { if (existsSync(f)) unlinkSync(f); } catch (_: unknown) {}
