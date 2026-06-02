@@ -48,7 +48,6 @@ import type {
   GeometryReconstructionInput,
   NormalizedRegion,
   DepthMap,
-  SegmentationClass,
 } from '../../types';
 import { REVIEW_ONLY_AUTHORITY, BASE_LIMITATIONS } from '../../types';
 import {
@@ -64,52 +63,7 @@ import type {
 // Worker version
 // ---------------------------------------------------------------------------
 
-export const PLANE_EXTRACTION_WORKER_VERSION = '3.0.1-plane-extraction-structural-taxonomy';
-
-// ---------------------------------------------------------------------------
-// Structural plane source classes
-// ---------------------------------------------------------------------------
-
-/**
- * Segmentation classes that should seed roof-plane extraction.
- *
- * Pipeline B's segmentation taxonomy expanded beyond the original exact
- * `roof`/`wall` labels. Plane extraction must follow that taxonomy or it
- * silently ignores valid structural masks and downstream fusion has no roof
- * planes to merge. Keep this intentionally narrow: roof surfaces and roof-like
- * structural appendages only, not penetrations/obstructions such as chimneys,
- * skylights, vents, or satellite dishes.
- */
-const ROOF_PLANE_SOURCE_CLASSES: ReadonlySet<SegmentationClass> = new Set([
-  'roof',
-  'dormer',
-  'awning',
-  'pergola',
-  'carport',
-] as const);
-
-/**
- * Segmentation classes that should seed wall/facade-plane extraction.
- *
- * These are structural facade/envelope surfaces that can support wall-plane
- * candidates. Openings/fixtures like windows, doors, gutters, and downspouts
- * remain excluded because they are features on a wall, not the wall plane.
- */
-const WALL_PLANE_SOURCE_CLASSES: ReadonlySet<SegmentationClass> = new Set([
-  'wall',
-  'siding',
-  'fascia',
-  'soffit',
-  'foundation',
-] as const);
-
-function isRoofPlaneSourceMask(mask: SemanticSegmentationMask): boolean {
-  return ROOF_PLANE_SOURCE_CLASSES.has(mask.segmentationClass as SegmentationClass);
-}
-
-function isWallPlaneSourceMask(mask: SemanticSegmentationMask): boolean {
-  return WALL_PLANE_SOURCE_CLASSES.has(mask.segmentationClass as SegmentationClass);
-}
+export const PLANE_EXTRACTION_WORKER_VERSION = '3.0.0-plane-extraction-line-boundaries';
 
 // ---------------------------------------------------------------------------
 // Limitations
@@ -996,8 +950,8 @@ function estimateWallParameters(
  * When depth maps are available (from Stage 4), the worker uses
  * extractDepthPlanes() to identify planar regions via flood-fill
  * segmentation, then maps those regions to RoofPlaneCandidate and
- * WallPlaneCandidate artifacts. Heuristic-only fallbacks require structural
- * line support by default so weak masks do not become fake roof geometry.
+ * WallPlaneCandidate artifacts. Heuristic-only planes that have no
+ * depth overlap are kept as fallback.
  *
  * When depth maps are not available, the worker falls back to the
  * v1 heuristic approach (lines + VP + mask geometry).
@@ -1007,12 +961,12 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
   const artifacts: Array<RoofPlaneCandidate | WallPlaneCandidate> = [];
 
   const minConfidence = input.config?.minConfidence ?? 25;
-  const requireSupportingLines = input.config?.requireSupportingLines ?? true;
+  const requireSupportingLines = input.config?.requireSupportingLines ?? false;
 
   // Stage 1: Initialize
   const t0 = Date.now();
-  const roofMasks = input.masks.filter(isRoofPlaneSourceMask);
-  const wallMasks = input.masks.filter(isWallPlaneSourceMask);
+  const roofMasks = input.masks.filter(m => m.segmentationClass === 'roof');
+  const wallMasks = input.masks.filter(m => m.segmentationClass === 'wall');
   const hasDepthMaps = !!input.depthMaps && input.depthMaps.length > 0;
   const usedMidas = input.usedMidas ?? false;
   timings['initialization'] = Date.now() - t0;

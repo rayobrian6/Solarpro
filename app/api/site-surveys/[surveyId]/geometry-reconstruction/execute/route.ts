@@ -35,7 +35,7 @@ import {
 } from '@/lib/siteSurveys/geometryReconstruction/runFullPipeline';
 import { warmupSAM2Service } from '@/lib/siteSurveys/geometryReconstruction/workers/segmentation/sam2Client';
 import { adaptGeometryReconBundle } from '@/lib/siteSurveys/unifiedGeometry/pipelineAdapters';
-import { writeUnifiedArtifacts, deleteUnifiedArtifactsByPipeline } from '@/lib/siteSurveys/unifiedGeometry';
+import { writeUnifiedArtifacts, deleteUnifiedArtifactsBySurvey } from '@/lib/siteSurveys/unifiedGeometry';
 import type { GeometryReconstructionInput } from '@/lib/siteSurveys/geometryReconstruction/types';
 
 // Internal auth token — must match the token used by /start route
@@ -133,7 +133,7 @@ export async function POST(
       // Adapt Pipeline B artifacts into unified geometry table
       try {
         const tUnifiedStart = Date.now();
-        const deletedCount = await deleteUnifiedArtifactsByPipeline(surveyId, 'geometry_recon');
+        const deletedCount = await deleteUnifiedArtifactsBySurvey(surveyId);
         if (deletedCount > 0) {
           console.info(
             `[POST geometry-reconstruction/execute] Deleted ${deletedCount} previous unified artifacts for survey=${surveyId}`,
