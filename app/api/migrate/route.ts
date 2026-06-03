@@ -3995,6 +3995,45 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 083 (physical_data engineering columns): ${(e as Error).message}`);
     }
 
+
+    // ──────────────────────────────────────────────────────────────────
+    // Migration 084: geometry reconstruction stage_durations
+    // Adds stage_durations JSONB and failure_stage columns to track pipeline
+    // execution timing and failure points.
+    // ──────────────────────────────────────────────────────────────────
+
+    try {
+      await sql`ALTER TABLE site_survey_geometry_reconstruction_jobs ADD COLUMN IF NOT EXISTS stage_durations JSONB NULL`;
+      await sql`ALTER TABLE site_survey_geometry_reconstruction_jobs ADD COLUMN IF NOT EXISTS failure_stage TEXT NULL`;
+      results.push('✅ Migration 084: geometry reconstruction stage_durations — 2 columns added');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 084 (stage_durations): ${(e as Error).message}`);
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Migration 085: geometry reconstruction worker ownership
+    // Adds locked_by, locked_at columns for atomic job claiming by Render workers.
+    // ──────────────────────────────────────────────────────────────────
+
+    try {
+      await sql`ALTER TABLE site_survey_geometry_reconstruction_jobs ADD COLUMN IF NOT EXISTS locked_by TEXT NULL`;
+      await sql`ALTER TABLE site_survey_geometry_reconstruction_jobs ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ NULL`;
+      results.push('✅ Migration 085: worker ownership columns — 2 columns added');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 085 (worker ownership): ${(e as Error).message}`);
+    }
+
+    try {
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_geom_recon_jobs_claimable
+          ON site_survey_geometry_reconstruction_jobs (status, locked_by)
+          WHERE status = 'queued' AND locked_by IS NULL
+      `;
+      results.push('✅ Migration 085: idx_geom_recon_jobs_claimable — index created');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 085 (claimable index): ${(e as Error).message}`);
+    }
+
     return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);
