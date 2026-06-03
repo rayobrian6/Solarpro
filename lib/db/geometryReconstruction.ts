@@ -25,6 +25,29 @@ import type {
 import { REVIEW_ONLY_AUTHORITY, BASE_LIMITATIONS } from '@/lib/siteSurveys/geometryReconstruction/types';
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a JS string array as a PostgreSQL array literal string.
+ *
+ * The Neon serverless driver (@neondatabase/serverless) cannot serialize
+ * 2D JS arrays (string[][]) as PostgreSQL text[][]. This helper formats
+ * each inner array as a self-contained PG text[] literal like '{"a","b"}',
+ * which can be passed as a 1D text[] parameter and then cast back to text[]
+ * in the SELECT clause of an UNNEST insert.
+ *
+ * Escaping rules: backslash → \\, double-quote → \", per PG array literal spec.
+ */
+function pgArrayLiteral(arr: string[]): string {
+  if (arr.length === 0) return '{}';
+  const escaped = arr.map((s) =>
+    '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'
+  );
+  return '{' + escaped.join(',') + '}';
+}
+
+// ---------------------------------------------------------------------------
 // Row types
 // ---------------------------------------------------------------------------
 
@@ -241,8 +264,9 @@ export async function insertReconstructionArtifact(
 
   const fileId = 'fileId' in artifact ? (artifact as { fileId?: string }).fileId : null;
 
-  // limitations is TEXT[] — pass the JS array directly (Neon driver handles conversion).
-  // authority is JSONB — pass as JSON string.
+  // limitations is TEXT[] — format as PG array literal and cast explicitly.
+  // The Neon driver may inconsistently handle JS array → PG text[] binding,
+  // so we use the same literal + cast approach as the batch insert for reliability.
   const limitationsArray: string[] = Array.isArray(artifact.limitations)
     ? artifact.limitations.filter((l: unknown) => typeof l === 'string')
     : [];
@@ -258,7 +282,7 @@ export async function insertReconstructionArtifact(
       ${pipeline},
       ${JSON.stringify(artifact)},
       ${artifact.confidence},
-      ${limitationsArray},
+      ${pgArrayLiteral(limitationsArray)}::text[],
       ${JSON.stringify(artifact.authority)}
     )
   `;
@@ -299,7 +323,7 @@ export async function insertReconstructionArtifactsBatch(
   const pipelines: string[] = [];
   const payloads: string[] = [];
   const confidences: number[] = [];
-  const limitationsArrays: string[][] = [];
+  const limitationsLiterals: string[] = [];  // PG array literal strings for text[] column
   const authorities: string[] = [];
   const stageTimingsArr: (string | null)[] = [];
   const workerVersions: (string | null)[] = [];
@@ -317,7 +341,12 @@ export async function insertReconstructionArtifactsBatch(
     pipelines.push(pipeline);
     payloads.push(JSON.stringify(artifact));
     confidences.push(artifact.confidence);
-    limitationsArrays.push(limitationsArray);
+    // Format limitations as PG array literal: '{"item1","item2"}'
+    // The Neon serverless driver cannot serialize 2D JS arrays (string[][])
+    // as PostgreSQL text[][]. Instead, we format each inner array as a PG
+    // array literal string and pass as a 1D text[] parameter. Each element
+    // is then cast back to text[] in the SELECT clause.
+    limitationsLiterals.push(pgArrayLiteral(limitationsArray));
     authorities.push(JSON.stringify(artifact.authority));
     stageTimingsArr.push(stageTimings ? JSON.stringify(stageTimings) : null);
     workerVersions.push(workerVersion);
@@ -329,7 +358,13 @@ export async function insertReconstructionArtifactsBatch(
         job_id, survey_id, file_id, artifact_type, pipeline, payload, confidence, limitations, authority,
         stage_timings, worker_version
       )
-      SELECT * FROM unnest(
+      SELECT
+        job_id, survey_id, file_id, artifact_type, pipeline, payload, confidence,
+        -- Neon driver can't pass 2D arrays; each limitations element is a text[]
+        -- literal string like '{"a","b"}' which we cast back to text[] here.
+        limitations::text[],
+        authority, stage_timings, worker_version
+      FROM unnest(
         ${jobIds}::uuid[],
         ${surveyIds}::uuid[],
         ${fileIds}::text[],
@@ -337,7 +372,7 @@ export async function insertReconstructionArtifactsBatch(
         ${pipelines}::text[],
         ${payloads}::jsonb[],
         ${confidences}::numeric[],
-        ${limitationsArrays}::text[][],
+        ${limitationsLiterals}::text[],  -- each element is a PG text[] literal like '{"a","b"}'
         ${authorities}::jsonb[],
         ${stageTimingsArr}::jsonb[],
         ${workerVersions}::text[]

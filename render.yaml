@@ -68,7 +68,7 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: SAM2_SERVICE_URL
-        value: "http://sam2-segmentation.onrender.com"
+        value: "https://sam2-segmentation.onrender.com"
       - key: WORKER_POLL_INTERVAL_MS
         value: "5000"
       - key: WORKER_ID
