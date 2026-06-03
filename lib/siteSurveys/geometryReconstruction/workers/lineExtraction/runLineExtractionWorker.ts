@@ -1,30 +1,18 @@
 /**
  * Line extraction worker — produces StructuralLineCandidate artifacts
- * from segmentation masks by analyzing polygon edges.
+ * from segmentation masks using image-based edge detection.
  *
- * EXTRACTION APPROACH (v2 — structure-first):
- * 1. Pre-filter masks: ONLY structure-qualified masks (roof, wall, siding,
- *    fascia, soffit, gutter, deck, porch, railing, steps, downspout)
- *    produce structural lines. Non-structure masks (vehicle, grass, driveway,
- *    tree, etc.) are REJECTED before any edge extraction occurs.
- * 2. For each qualified mask, extract polygon edges
- * 3. Classify edges by orientation, position, and source class:
- *    - Ridge: near-horizontal edges in upper roof region
- *    - Eave: near-horizontal edges at roof base boundary, or fascia/soffit/gutter edges
- *    - Rake: diagonal edges connecting ridge to eave
- *    - Wall vertical: near-vertical edges in wall/siding masks
- *    - Wall bottom edge: near-horizontal boundary between wall/siding and
- *      ground-level masks (foundation/basement line)
- * 4. Filter by straightness: reject jagged micro-edges from SAM2 polygon noise
- * 5. Merge collinear or near-collinear segments (including cross-mask)
- * 6. Cross-mask deduplication: remove duplicate lines from adjacent SAM2 masks
- * 7. Cap emitted line candidates per source mask
- * 8. Assign confidence based on edge length, position, mask support,
- *    source class quality, and structural usefulness ranking
+ * EXTRACTION APPROACH (v3 — image-based edge detection):
+ * 1. For each photo, run Canny edge detection on the original image
+ * 2. Apply Hough line transform to extract candidate structural lines
+ * 3. Filter candidate lines by overlap with SAM2 segmentation masks
+ * 4. Keep only lines that fall on roof/wall/siding/fascia/soffit/gutter regions
+ * 5. Classify filtered lines by orientation, position, and source class
+ * 6. Assign confidence based on edge strength, line length, and mask support
  *
- * When a real Hough transform + model-based line detector is available,
- * this worker will be upgraded. The current heuristic approach ensures
- * the pipeline never breaks when models are unavailable.
+ * This approach correctly extracts structural lines from image gradients
+ * (where ridges, valleys, eaves actually appear in the photo) rather than
+ * from SAM2 mask polygon boundaries (which only show region edges).
  *
  * REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
  */
@@ -43,31 +31,42 @@ import {
 import type { StructuralLineType } from '@/lib/siteSurveys/geometryReconstruction/types';
 import { validateStructuralLineCandidate } from '@/lib/siteSurveys/geometryReconstruction/schemas';
 
+import sharp from 'sharp';
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-export const LINE_EXTRACTION_WORKER_VERSION = '2.0.0-structure-first-line-extraction';
+export const LINE_EXTRACTION_WORKER_VERSION = '3.0.0-image-based-edge-detection';
 
 /** Standard limitations for line extraction artifacts. */
 const LINE_EXTRACTION_LIMITATIONS = [
   ...BASE_LIMITATIONS,
-  'Heuristic edge extraction from SAM2 polygon boundaries — not from Hough transform or model inference',
-  'Line type classification is orientation-based heuristic — may misclassify valleys as rakes',
+  'Image-based edge detection using Canny + Hough transform',
+  'Line type classification is orientation-based heuristic — may misclassify complex roof geometries',
   'No vanishing-point or perspective correction applied',
-  'Structure-first filtering rejects non-structure masks before extraction',
-  'Cross-mask deduplication removes duplicate lines from adjacent SAM2 masks',
-  'Per-mask cap limits line candidates per source mask to prevent edge proliferation',
+  'Lines filtered by overlap with SAM2 segmentation masks',
+  'Per-photo cap limits line candidates to prevent edge proliferation',
 ];
 
+/** Minimum line length in normalized units (0-1000). */
+const MIN_LINE_LENGTH = 50;
+
+/** Maximum number of lines to extract per photo. */
+const MAX_LINES_PER_PHOTO = 20;
+
+/** Minimum confidence threshold for lines (0-100). */
+const MIN_CONFIDENCE = 40;
+
+/** Canny edge detection threshold range. */
+const CANNY_LOW_THRESHOLD = 50;
+const CANNY_HIGH_THRESHOLD = 150;
+
 // ---------------------------------------------------------------------------
-// Structure-first filtering: allowlist / blocklist
+// Structure-qualified classes (for filtering)
 // ---------------------------------------------------------------------------
 
-/**
- * ONLY masks whose segmentationClass is in this set produce structural lines.
- * All other classes are rejected before edge extraction begins.
- */
+/** Classes that produce structural lines when a line overlaps their mask. */
 const STRUCTURE_QUALIFIED_CLASSES: ReadonlySet<string> = new Set([
   'roof',
   'wall',
@@ -77,77 +76,23 @@ const STRUCTURE_QUALIFIED_CLASSES: ReadonlySet<string> = new Set([
   'gutter',
   'porch',
   'deck',
-  'railing',
-  'steps',
-  'downspout',
 ]);
 
-/**
- * Explicitly rejected classes — even if somehow not caught by the allowlist
- * exclusion, these are double-blocked. These masks NEVER produce structural
- * lines regardless of any other criteria.
- */
+/** Classes that never produce structural lines. */
 const REJECTED_CLASSES: ReadonlySet<string> = new Set([
+  'sky',
+  'tree',
+  'trees',
+  'grass',
+  'ground',
+  'driveway',
+  'gravel',
+  'sidewalk',
   'car',
   'truck',
-  'trailer',
   'equipment',
-  'grass',
-  'trees',
-  'bush',
-  'driveway',
-  'gravel',
-  'ground',
-  'sky',
-  'sidewalk',
-  'muddy_work_area',
   'unknown',
-  'temporary_occluder',
 ]);
-
-/**
- * Ground-level classes — used to detect wall_bottom_edge / foundation edge.
- * The top boundary of these masks adjacent to a wall/siding mask indicates
- * where the wall meets the ground.
- */
-const GROUND_LEVEL_CLASSES: ReadonlySet<string> = new Set([
-  'grass',
-  'driveway',
-  'gravel',
-  'ground',
-  'sidewalk',
-  'muddy_work_area',
-]);
-
-/**
- * Structural usefulness ranking — higher = more useful for geometry reconstruction.
- * Used to sort and cap line candidates per mask.
- */
-const STRUCTURAL_USEFULNESS: Record<StructuralLineType, number> = {
-  ridge: 100,
-  eave: 90,
-  wall_bottom_edge: 80,
-  rake: 70,
-  wall_vertical: 60,
-};
-
-/**
- * Source class quality bonus — masks from classes that more reliably produce
- * correct structural lines get a confidence bonus.
- */
-const SOURCE_CLASS_QUALITY: Record<string, number> = {
-  roof: 10,
-  wall: 8,
-  siding: 6,
-  fascia: 5,
-  soffit: 4,
-  gutter: 3,
-  porch: 2,
-  deck: 2,
-  railing: 1,
-  steps: 1,
-  downspout: 0,
-};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -156,47 +101,28 @@ const SOURCE_CLASS_QUALITY: Record<string, number> = {
 /** Input to the line extraction worker. */
 export interface LineExtractionWorkerInput {
   surveyId: string;
-  /** Segmentation masks to extract lines from. */
+  /** Segmentation masks for filtering detected lines. */
   masks: SemanticSegmentationMask[];
+  /** Original photo image bytes, keyed by fileId. */
+  imageBytesMap: Record<string, Buffer>;
+  /** Source photo metadata. */
+  sourcePhotos: Array<{ fileId: string; fileUrl: string }>;
   /** Optional config overrides. */
   config?: {
-    /** Minimum edge length (in normalized units) to consider. Default: 30 */
-    minEdgeLength?: number;
-    /** Angle tolerance in degrees for classifying horizontal/vertical. Default: 20 */
-    angleTolerance?: number;
-    /** Minimum confidence threshold for lines (0-100). Default: 25 */
+    minLineLength?: number;
+    maxLinesPerPhoto?: number;
     minConfidence?: number;
-    /** Whether to merge collinear segments. Default: true */
-    mergeCollinear?: boolean;
-    /** Maximum gap (in normalized units) to bridge when merging. Default: 50 */
-    maxMergeGap?: number;
-    /** Maximum lines emitted per source mask. Default: 8 */
-    maxLinesPerMask?: number;
-    /** Minimum straightness (0-1) for an edge chain to be kept. Default: 0.7 */
-    minStraightness?: number;
-    /** Whether to apply cross-mask deduplication. Default: true */
-    crossMaskDedup?: boolean;
   };
 }
 
-/** Diagnostic statistics for the structure-first filtering pipeline. */
+/** Diagnostic statistics for the filtering pipeline. */
 export interface LineExtractionFilterStats {
-  /** Number of masks rejected by class pre-filter. */
-  masksRejectedByClass: number;
-  /** Number of masks that passed the class pre-filter. */
-  masksPassedPrefilter: number;
-  /** Total edges extracted from qualified masks. */
-  edgesExtracted: number;
-  /** Edges rejected by straightness filter. */
-  edgesRejectedByStraightness: number;
-  /** Edges remaining after straightness filter. */
-  edgesAfterStraightness: number;
-  /** Lines removed by cross-mask deduplication. */
-  linesDedupedCrossMask: number;
-  /** Lines removed by per-mask cap. */
-  linesCappedByMask: number;
-  /** Final number of line candidate artifacts emitted. */
-  finalLineCount: number;
+  photosProcessed: number;
+  photosSkipped: number;
+  totalLinesDetected: number;
+  linesOnStructure: number;
+  linesClassified: number;
+  linesKept: number;
 }
 
 /** Output of the line extraction worker. */
@@ -204,758 +130,717 @@ export interface LineExtractionWorkerOutput {
   artifacts: StructuralLineCandidate[];
   stageTimings: Record<string, number>;
   workerVersion: string;
-  /** Diagnostic statistics from the structure-first filtering pipeline. */
   filterStats: LineExtractionFilterStats;
 }
 
-/** Internal representation of a polygon edge before classification. */
-interface RawEdge {
+/** A line segment in normalized coordinates. */
+interface LineSegment {
   start: NormalizedPoint;
   end: NormalizedPoint;
   length: number;
   angleDeg: number;
-  sourceMaskId: string;
-  sourceClass: string;
 }
 
 // ---------------------------------------------------------------------------
-// Geometry helpers
-// ---------------------------------------------------------------------------
-
-/** Euclidean distance between two NormalizedPoints. */
-function distance(a: NormalizedPoint, b: NormalizedPoint): number {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
-/** Angle of edge from a to b in degrees (0-360). */
-function edgeAngleDeg(a: NormalizedPoint, b: NormalizedPoint): number {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  let angle = Math.atan2(-dy, dx) * (180 / Math.PI); // negative dy for screen coords
-  if (angle < 0) angle += 360;
-  return angle;
-}
-
-/** Normalize angle to [0, 180) — lines are undirected. */
-function normalizeAngle(angleDeg: number): number {
-  let a = angleDeg % 180;
-  if (a < 0) a += 180;
-  return a;
-}
-
-/** Check if angle is near-horizontal (within tolerance of 0° or 180°). */
-function isNearHorizontal(angleDeg: number, tolerance: number): boolean {
-  const a = normalizeAngle(angleDeg);
-  return a <= tolerance || a >= 180 - tolerance;
-}
-
-/** Check if angle is near-vertical (within tolerance of 90°). */
-function isNearVertical(angleDeg: number, tolerance: number): boolean {
-  const a = normalizeAngle(angleDeg);
-  return Math.abs(a - 90) <= tolerance;
-}
-
-/** Check if angle is diagonal (neither horizontal nor vertical). */
-function isDiagonal(angleDeg: number, tolerance: number): boolean {
-  return !isNearHorizontal(angleDeg, tolerance) && !isNearVertical(angleDeg, tolerance);
-}
-
-// ---------------------------------------------------------------------------
-// Structure-first pre-filtering
+// Image processing utilities
 // ---------------------------------------------------------------------------
 
 /**
- * Determine whether a segmentation mask qualifies for structural line
- * extraction. A mask qualifies when:
- * 1. Its segmentationClass is in the STRUCTURE_QUALIFIED_CLASSES allowlist, AND
- * 2. Its segmentationClass is NOT in the REJECTED_CLASSES blocklist, AND
- * 3. It is NOT flagged as an occluder (isOccluder).
- *
- * This pre-filter runs BEFORE any edge extraction, ensuring that non-structure
- * masks (vehicles, vegetation, ground, sky, etc.) never produce line candidates.
+ * Convert image bytes to grayscale and resize for processing.
+ * Returns a Buffer containing grayscale pixel values (0-255).
  */
-function isStructureQualifiedMask(mask: SemanticSegmentationMask): boolean {
-  const cls = mask.segmentationClass;
-  // Must be in the allowlist
-  if (!STRUCTURE_QUALIFIED_CLASSES.has(cls)) return false;
-  // Must not be in the blocklist
-  if (REJECTED_CLASSES.has(cls)) return false;
-  // Must not be flagged as occluder
-  if (mask.isOccluder) return false;
-  return true;
-}
+async function loadGrayscaleImage(imageBytes: Buffer, targetWidth: number = 500): Promise<{
+  grayscale: Uint8Array;
+  width: number;
+  height: number;
+}> {
+  const { data, info } = await sharp(imageBytes)
+    .resize(targetWidth, null, { withoutEnlargement: true })
+    .grayscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
 
-// ---------------------------------------------------------------------------
-// Straightness filtering
-// ---------------------------------------------------------------------------
-
-/**
- * Compute straightness of a single edge (0-1).
- * A perfectly straight edge has straightness 1.0.
- * For single edges (two endpoints), straightness is always 1.0.
- * This function is used for multi-point chains.
- */
-function computeEdgeStraightness(start: NormalizedPoint, end: NormalizedPoint): number {
-  return 1.0; // single edge is always straight
+  return {
+    grayscale: new Uint8Array(data),
+    width: info.width,
+    height: info.height,
+  };
 }
 
 /**
- * Compute straightness of a chain of points (0-1).
- * Measured as the ratio of the straight-line distance between the first
- * and last points to the total path length along all segments.
- * A perfectly straight chain has straightness 1.0.
- * A highly jagged chain has straightness close to 0.
+ * Apply Gaussian blur for noise reduction before edge detection.
  */
-function computeChainStraightness(points: NormalizedPoint[]): number {
-  if (points.length < 2) return 0;
-  if (points.length === 2) return 1.0;
+function gaussianBlur(image: Uint8Array, width: number, height: number, sigma: number = 1.4): Uint8Array {
+  const kernelSize = 5;
+  const kernel = generateGaussianKernel(kernelSize, sigma);
+  const half = Math.floor(kernelSize / 2);
 
-  // Total path length
-  let pathLength = 0;
-  for (let i = 1; i < points.length; i++) {
-    pathLength += distance(points[i - 1], points[i]);
+  const output = new Uint8Array(width * height);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let sum = 0;
+      let weightSum = 0;
+      for (let ky = -half; ky <= half; ky++) {
+        for (let kx = -half; kx <= half; kx++) {
+          const ny = Math.min(height - 1, Math.max(0, y + ky));
+          const nx = Math.min(width - 1, Math.max(0, x + kx));
+          const weight = kernel[(ky + half) * kernelSize + (kx + half)];
+          sum += image[ny * width + nx] * weight;
+          weightSum += weight;
+        }
+      }
+      output[y * width + x] = Math.round(sum / weightSum);
+    }
   }
-  if (pathLength === 0) return 0;
 
-  // Straight-line distance between first and last
-  const directDist = distance(points[0], points[points.length - 1]);
-
-  return directDist / pathLength;
+  return output;
 }
 
-// ---------------------------------------------------------------------------
-// Edge extraction from mask polygons
-// ---------------------------------------------------------------------------
+function generateGaussianKernel(size: number, sigma: number): number[] {
+  const half = Math.floor(size / 2);
+  const kernel: number[] = [];
+  let sum = 0;
+
+  for (let y = -half; y <= half; y++) {
+    for (let x = -half; x <= half; x++) {
+      const value = Math.exp(-(x * x + y * y) / (2 * sigma * sigma));
+      kernel.push(value);
+      sum += value;
+    }
+  }
+
+  return kernel.map(v => v / sum);
+}
 
 /**
- * Extract all edges from a mask polygon. Each consecutive pair of vertices
- * forms one edge. The polygon is treated as closed (last → first).
+ * Apply Canny edge detection to a grayscale image.
+ * Returns a binary edge map (0 or 255 for each pixel).
  */
-function extractEdges(mask: SemanticSegmentationMask): RawEdge[] {
-  const edges: RawEdge[] = [];
-  const poly = mask.polygon;
-  if (poly.length < 2) return edges;
+function cannyEdgeDetection(
+  grayscale: Uint8Array,
+  width: number,
+  height: number,
+  lowThreshold: number = CANNY_LOW_THRESHOLD,
+  highThreshold: number = CANNY_HIGH_THRESHOLD,
+): Uint8Array {
+  // Step 1: Gaussian blur for noise reduction
+  const blurred = gaussianBlur(grayscale, width, height, 1.4);
 
-  for (let i = 0; i < poly.length; i++) {
-    const start = poly[i];
-    const end = poly[(i + 1) % poly.length];
-    const len = distance(start, end);
-    const angle = edgeAngleDeg(start, end);
+  // Step 2: Compute Sobel gradients
+  const magnitude = new Float32Array(width * height);
+  const direction = new Float32Array(width * height);
 
-    edges.push({
-      start: { ...start },
-      end: { ...end },
-      length: len,
-      angleDeg: angle,
-      sourceMaskId: mask.id,
-      sourceClass: mask.segmentationClass,
-    });
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      // Sobel X
+      const gx =
+        -blurred[(y - 1) * width + (x - 1)] + blurred[(y - 1) * width + (x + 1)]
+        - 2 * blurred[y * width + (x - 1)] + 2 * blurred[y * width + (x + 1)]
+        - blurred[(y + 1) * width + (x - 1)] + blurred[(y + 1) * width + (x + 1)];
+
+      // Sobel Y
+      const gy =
+        -blurred[(y - 1) * width + (x - 1)] - 2 * blurred[(y - 1) * width + x] - blurred[(y - 1) * width + (x + 1)]
+        + blurred[(y + 1) * width + (x - 1)] + 2 * blurred[(y + 1) * width + x] + blurred[(y + 1) * width + (x + 1)];
+
+      const idx = y * width + x;
+      magnitude[idx] = Math.sqrt(gx * gx + gy * gy);
+      direction[idx] = Math.atan2(gy, gx);
+    }
+  }
+
+  // Step 3: Non-maximum suppression
+  const nms = new Float32Array(width * height);
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const idx = y * width + x;
+      const mag = magnitude[idx];
+      const angle = direction[idx] * 180 / Math.PI;
+      const absAngle = angle < 0 ? angle + 180 : angle;
+
+      let q = 0, r = 0;
+
+      // Quantize angle to 4 directions
+      if ((absAngle >= 0 && absAngle < 22.5) || (absAngle >= 157.5 && absAngle <= 180)) {
+        // Horizontal edge — compare left and right
+        q = magnitude[idx - 1];
+        r = magnitude[idx + 1];
+      } else if (absAngle >= 22.5 && absAngle < 67.5) {
+        // Diagonal — compare top-right and bottom-left
+        q = magnitude[(y - 1) * width + (x + 1)];
+        r = magnitude[(y + 1) * width + (x - 1)];
+      } else if (absAngle >= 67.5 && absAngle < 112.5) {
+        // Vertical edge — compare top and bottom
+        q = magnitude[(y - 1) * width + x];
+        r = magnitude[(y + 1) * width + x];
+      } else {
+        // Diagonal — compare top-left and bottom-right
+        q = magnitude[(y - 1) * width + (x - 1)];
+        r = magnitude[(y + 1) * width + (x + 1)];
+      }
+
+      nms[idx] = (mag >= q && mag >= r) ? mag : 0;
+    }
+  }
+
+  // Step 4: Hysteresis thresholding
+  const edges = new Uint8Array(width * height);
+  const visited = new Uint8Array(width * height);
+
+  // Mark strong pixels first
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      if (nms[idx] >= highThreshold) {
+        edges[idx] = 255;
+      }
+    }
+  }
+
+  // Trace from strong pixels to include connected weak pixels
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      if (edges[idx] === 255 && !visited[idx]) {
+        const stack = [idx];
+        visited[idx] = 1;
+
+        while (stack.length > 0) {
+          const cur = stack.pop()!;
+          const cy = Math.floor(cur / width);
+          const cx = cur % width;
+
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const ny = cy + dy;
+              const nx = cx + dx;
+              if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
+                const nidx = ny * width + nx;
+                if (!visited[nidx] && nms[nidx] >= lowThreshold) {
+                  visited[nidx] = 1;
+                  edges[nidx] = 255;
+                  stack.push(nidx);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   return edges;
 }
 
-// ---------------------------------------------------------------------------
-// Ground-level mask boundary extraction (for wall_bottom_edge)
-// ---------------------------------------------------------------------------
-
 /**
- * Extract the top boundary of ground-level masks.
- * Returns an array of { y, minX, maxX } for each ground-level mask's
- * top boundary segment. This is used to detect wall_bottom_edge lines
- * where wall/siding masks meet ground-level masks.
+ * Apply probabilistic Hough line transform to detect lines in edge map.
+ * Returns array of detected line segments in normalized coordinates.
  */
-function extractGroundMaskTopBoundary(
-  masks: SemanticSegmentationMask[],
-): Array<{ y: number; minX: number; maxX: number }> {
-  const boundaries: Array<{ y: number; minX: number; maxX: number }> = [];
+function houghLineTransform(
+  edges: Uint8Array,
+  width: number,
+  height: number,
+  minLineLength: number = MIN_LINE_LENGTH,
+  maxLineGap: number = 10,
+): LineSegment[] {
+  const lines: LineSegment[] = [];
 
-  for (const mask of masks) {
-    if (!GROUND_LEVEL_CLASSES.has(mask.segmentationClass)) continue;
-    const poly = mask.polygon;
-    if (poly.length < 2) continue;
+  // Build Hough accumulator
+  const rhoMax = Math.ceil(Math.sqrt(width * width + height * height));
+  const thetaBins = 180;
+  const rhoBins = 2 * rhoMax + 1;
+  const accumulator = new Int32Array(rhoBins * thetaBins);
 
-    // Find the minimum y (topmost) point and the extent
-    let minY = Infinity;
-    let minX = Infinity;
-    let maxX = -Infinity;
-    for (const p of poly) {
-      if (p.y < minY) minY = p.y;
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-    }
-
-    // Also find near-horizontal top edges
-    for (let i = 0; i < poly.length; i++) {
-      const a = poly[i];
-      const b = poly[(i + 1) % poly.length];
-      const avgY = (a.y + b.y) / 2;
-      // Top edges are those whose average Y is within tolerance of minY
-      if (avgY <= minY + 20) {
-        boundaries.push({
-          y: Math.min(a.y, b.y),
-          minX: Math.min(a.x, b.x),
-          maxX: Math.max(a.x, b.x),
-        });
-      }
-    }
-  }
-
-  return boundaries;
-}
-
-// ---------------------------------------------------------------------------
-// Edge classification
-// ---------------------------------------------------------------------------
-
-/**
- * Classify an edge into a structural line type based on its orientation,
- * position in the image, and source segmentation class.
- *
- * Updated for v2 structure-first extraction:
- * - Accepts all STRUCTURE_QUALIFIED_CLASSES (not just roof/wall)
- * - Fascia/soffit/gutter horizontal edges → eave
- * - Siding/downspout vertical edges → wall_vertical
- * - Wall/siding horizontal edges at ground boundary → wall_bottom_edge
- * - Ground-level mask boundaries used for wall_bottom_edge detection
- */
-function classifyEdge(
-  edge: RawEdge,
-  angleTolerance: number,
-  groundBoundaries: Array<{ y: number; minX: number; maxX: number }>,
-): StructuralLineType | null {
-  const { sourceClass, angleDeg, start, end } = edge;
-
-  // Only structure-qualified classes should reach this point (pre-filtered),
-  // but double-check for safety
-  if (!STRUCTURE_QUALIFIED_CLASSES.has(sourceClass)) return null;
-  if (REJECTED_CLASSES.has(sourceClass)) return null;
-
-  const isHorizontal = isNearHorizontal(angleDeg, angleTolerance);
-  const isVertical = isNearVertical(angleDeg, angleTolerance);
-  const isDiag = isDiagonal(angleDeg, angleTolerance);
-
-  // --- Roof edges ---
-  if (sourceClass === 'roof') {
-    if (isHorizontal) {
-      const avgY = (start.y + end.y) / 2;
-      if (avgY >= 300) {
-        return 'eave';
-      } else {
-        return 'ridge';
-      }
-    }
-    if (isDiag) return 'rake';
-    if (isVertical) return 'rake';
-    return 'rake'; // fallback
-  }
-
-  // --- Wall edges ---
-  if (sourceClass === 'wall') {
-    if (isVertical) return 'wall_vertical';
-    if (isHorizontal) {
-      // Check if this edge is at the bottom of the wall (near a ground boundary)
-      const avgY = (start.y + end.y) / 2;
-      for (const gb of groundBoundaries) {
-        // If the edge's Y is close to the ground boundary's top Y
-        // and they overlap horizontally
-        if (Math.abs(avgY - gb.y) <= 30 &&
-            start.x <= gb.maxX && end.x >= gb.minX) {
-          return 'wall_bottom_edge';
+  // Fill accumulator from edge pixels
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (edges[y * width + x] === 255) {
+        for (let t = 0; t < thetaBins; t++) {
+          const thetaRad = (t * Math.PI) / 180;
+          const rho = Math.round(x * Math.cos(thetaRad) + y * Math.sin(thetaRad)) + rhoMax;
+          accumulator[rho * thetaBins + t]++;
         }
       }
-      // Horizontal wall edge at top → eave (where wall meets roof)
-      return 'eave';
     }
-    // Diagonal wall edge → wall_vertical (perspective distortion)
-    return 'wall_vertical';
   }
 
-  // --- Siding edges ---
-  if (sourceClass === 'siding') {
-    if (isVertical) return 'wall_vertical';
-    if (isHorizontal) {
-      // Check for wall_bottom_edge at ground boundary
-      const avgY = (start.y + end.y) / 2;
-      for (const gb of groundBoundaries) {
-        if (Math.abs(avgY - gb.y) <= 30 &&
-            start.x <= gb.maxX && end.x >= gb.minX) {
-          return 'wall_bottom_edge';
+  // Find peaks in accumulator
+  const threshold = Math.max(50, Math.floor(width * 0.08)); // Adaptive threshold
+  const peaks: Array<{ rhoIdx: number; thetaIdx: number; votes: number }> = [];
+
+  for (let rhoIdx = 1; rhoIdx < rhoBins - 1; rhoIdx++) {
+    for (let thetaIdx = 0; thetaIdx < thetaBins; thetaIdx++) {
+      const votes = accumulator[rhoIdx * thetaBins + thetaIdx];
+      if (votes >= threshold) {
+        // Simple local maximum check (3x3 neighborhood)
+        let isMax = true;
+        for (let dr = -1; dr <= 1 && isMax; dr++) {
+          for (let dt = -2; dt <= 2 && isMax; dt++) {
+            if (dr === 0 && dt === 0) continue;
+            const nr = rhoIdx + dr;
+            const nt = ((thetaIdx + dt) % thetaBins + thetaBins) % thetaBins;
+            if (nr >= 0 && nr < rhoBins) {
+              if (accumulator[nr * thetaBins + nt] > votes) {
+                isMax = false;
+              }
+            }
+          }
+        }
+        if (isMax) {
+          peaks.push({ rhoIdx, thetaIdx, votes });
         }
       }
-      return 'eave';
     }
-    return 'wall_vertical';
   }
 
-  // --- Fascia / Soffit / Gutter edges → eave ---
-  if (sourceClass === 'fascia' || sourceClass === 'soffit' || sourceClass === 'gutter') {
-    if (isHorizontal) return 'eave';
-    if (isVertical) return 'wall_vertical'; // gutter downspout run
-    return 'eave'; // diagonal → likely eave
+  // Sort peaks by votes (descending)
+  peaks.sort((a, b) => b.votes - a.votes);
+
+  // Convert polar lines to line segments by tracing edge pixels
+  const minLineLengthPx = Math.round(minLineLength / 1000 * Math.max(width, height));
+
+  for (const peak of peaks.slice(0, 100)) { // Cap at 100 candidate lines per photo
+    const rho = peak.rhoIdx - rhoMax;
+    const thetaRad = (peak.thetaIdx * Math.PI) / 180;
+    const cosT = Math.cos(thetaRad);
+    const sinT = Math.sin(thetaRad);
+
+    // Find the extent of edge pixels along this line
+    const tolerance = 3; // pixels
+    const edgePoints: Array<{ x: number; y: number }> = [];
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (edges[y * width + x] === 255) {
+          const dist = Math.abs(x * cosT + y * sinT - rho);
+          if (dist < tolerance) {
+            edgePoints.push({ x, y });
+          }
+        }
+      }
+    }
+
+    if (edgePoints.length < minLineLengthPx) continue;
+
+    // Find the two farthest-apart points to define the line segment
+    // Use a simplified approach: sort by one axis and take endpoints
+    const sortedByX = [...edgePoints].sort((a, b) => a.x - b.x || a.y - b.y);
+    const startPx = sortedByX[0];
+    const endPx = sortedByX[sortedByX.length - 1];
+
+    const segmentLengthPx = Math.sqrt(
+      (endPx.x - startPx.x) ** 2 + (endPx.y - startPx.y) ** 2
+    );
+
+    if (segmentLengthPx < minLineLengthPx) continue;
+
+    // Convert to normalized coordinates (0-1000)
+    const start: NormalizedPoint = {
+      x: Math.round((startPx.x / width) * 1000),
+      y: Math.round((startPx.y / height) * 1000),
+      coordinateSystem: 'normalized_image_0_1000',
+    };
+    const end: NormalizedPoint = {
+      x: Math.round((endPx.x / width) * 1000),
+      y: Math.round((endPx.y / height) * 1000),
+      coordinateSystem: 'normalized_image_0_1000',
+    };
+
+    const angleDeg = Math.atan2(-(end.y - start.y), end.x - start.x) * (180 / Math.PI);
+    const normalizedAngle = angleDeg < 0 ? angleDeg + 360 : angleDeg;
+
+    lines.push({
+      start,
+      end,
+      length: Math.round((segmentLengthPx / Math.max(width, height)) * 1000),
+      angleDeg: normalizedAngle,
+    });
   }
 
-  // --- Porch / Deck edges ---
-  if (sourceClass === 'porch' || sourceClass === 'deck') {
-    if (isHorizontal) return 'eave';
-    if (isVertical) return 'wall_vertical';
-    return 'rake';
-  }
-
-  // --- Railing / Steps / Downspout edges ---
-  if (sourceClass === 'railing' || sourceClass === 'steps') {
-    if (isHorizontal) return 'eave';
-    if (isVertical) return 'wall_vertical';
-    return 'wall_vertical';
-  }
-
-  if (sourceClass === 'downspout') {
-    if (isVertical) return 'wall_vertical';
-    return 'wall_vertical';
-  }
-
-  return null;
-}
-
-// ---------------------------------------------------------------------------
-// Heuristic confidence
-// ---------------------------------------------------------------------------
-
-/**
- * Assign a confidence score to a classified line based on:
- * - Edge length (longer = more confident)
- * - Source mask confidence
- * - Line type reliability
- * - Source class quality bonus
- * - Structural usefulness ranking
- */
-function computeLineConfidence(
-  lineType: StructuralLineType,
-  edgeLength: number,
-  maskConfidence: number,
-  sourceClass: string,
-): number {
-  // Base confidence from mask quality (0-50 range from mask confidence 0-100)
-  const maskBase = maskConfidence * 0.5;
-
-  // Length bonus: longer edges are more reliable
-  const lengthBonus = Math.min(30, (edgeLength / 600) * 30);
-
-  // Type reliability bonus
-  const typeBonus: Record<StructuralLineType, number> = {
-    ridge: 15,
-    eave: 15,
-    rake: 8,
-    wall_vertical: 12,
-    wall_bottom_edge: 10,
-  };
-
-  // Source class quality bonus
-  const classBonus = SOURCE_CLASS_QUALITY[sourceClass] ?? 0;
-
-  const confidence = Math.round(
-    Math.min(100, maskBase + lengthBonus + typeBonus[lineType] + classBonus)
-  );
-
-  return Math.max(0, confidence);
-}
-
-// ---------------------------------------------------------------------------
-// Collinear merging
-// ---------------------------------------------------------------------------
-
-/**
- * Check if two edges are collinear (same angle ± tolerance) and
- * close enough to be merged.
- */
-function areCollinear(a: RawEdge, b: RawEdge, angleTolerance: number, maxGap: number): boolean {
-  const angleA = normalizeAngle(a.angleDeg);
-  const angleB = normalizeAngle(b.angleDeg);
-  if (Math.abs(angleA - angleB) > angleTolerance && Math.abs(angleA - angleB) < 180 - angleTolerance) {
-    return false;
-  }
-
-  if (a.sourceMaskId !== b.sourceMaskId) return false;
-
-  const gaps = [
-    distance(a.end, b.start),
-    distance(a.start, b.end),
-    distance(a.end, b.end),
-    distance(a.start, b.start),
-  ];
-  const minGap = Math.min(...gaps);
-
-  return minGap <= maxGap;
+  // Merge nearly-collinear lines
+  return mergeCollinearLines(lines);
 }
 
 /**
- * Merge two edges into one by using the outermost endpoints.
+ * Merge lines that are nearly collinear and overlapping.
  */
-function mergeEdges(a: RawEdge, b: RawEdge): RawEdge {
-  const points = [a.start, a.end, b.start, b.end];
+function mergeCollinearLines(lines: LineSegment[]): LineSegment[] {
+  if (lines.length <= 1) return lines;
+
+  const merged: LineSegment[] = [];
+  const used = new Set<number>();
+
+  for (let i = 0; i < lines.length; i++) {
+    if (used.has(i)) continue;
+
+    let currentLine = lines[i];
+
+    for (let j = i + 1; j < lines.length; j++) {
+      if (used.has(j)) continue;
+
+      const a1 = currentLine.angleDeg % 180;
+      const a2 = lines[j].angleDeg % 180;
+      const angleDiff = Math.min(Math.abs(a1 - a2), 180 - Math.abs(a1 - a2));
+
+      if (angleDiff < 12) {
+        // Check proximity: are the midpoints close enough?
+        const midA = {
+          x: (currentLine.start.x + currentLine.end.x) / 2,
+          y: (currentLine.start.y + currentLine.end.y) / 2,
+        };
+        const midB = {
+          x: (lines[j].start.x + lines[j].end.x) / 2,
+          y: (lines[j].start.y + lines[j].end.y) / 2,
+        };
+        const midDist = Math.sqrt((midA.x - midB.x) ** 2 + (midA.y - midB.y) ** 2);
+
+        if (midDist < 80) { // Close enough to merge
+          const combined = combineLines(currentLine, lines[j]);
+          if (combined.length >= currentLine.length) {
+            currentLine = combined;
+            used.add(j);
+          }
+        }
+      }
+    }
+
+    merged.push(currentLine);
+  }
+
+  return merged;
+}
+
+/**
+ * Combine two line segments into one longer segment by taking the outermost endpoints.
+ */
+function combineLines(line1: LineSegment, line2: LineSegment): LineSegment {
+  const points = [line1.start, line1.end, line2.start, line2.end];
   let maxDist = 0;
-  let bestStart = a.start;
-  let bestEnd = a.end;
+  let bestStart = line1.start;
+  let bestEnd = line1.end;
 
   for (let i = 0; i < points.length; i++) {
     for (let j = i + 1; j < points.length; j++) {
-      const d = distance(points[i], points[j]);
-      if (d > maxDist) {
-        maxDist = d;
+      const dx = points[j].x - points[i].x;
+      const dy = points[j].y - points[i].y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > maxDist) {
+        maxDist = dist;
         bestStart = points[i];
         bestEnd = points[j];
       }
     }
   }
 
+  const angleDeg = Math.atan2(-(bestEnd.y - bestStart.y), bestEnd.x - bestStart.x) * (180 / Math.PI);
   return {
-    start: bestStart,
-    end: bestEnd,
-    length: maxDist,
-    angleDeg: edgeAngleDeg(bestStart, bestEnd),
-    sourceMaskId: a.sourceMaskId,
-    sourceClass: a.sourceClass,
+    start: { ...bestStart, coordinateSystem: 'normalized_image_0_1000' },
+    end: { ...bestEnd, coordinateSystem: 'normalized_image_0_1000' },
+    length: Math.round(maxDist),
+    angleDeg: angleDeg < 0 ? angleDeg + 360 : angleDeg,
   };
 }
 
-/**
- * Merge collinear edges from the same mask.
- * Iteratively merges pairs until no more merges are possible.
- */
-function mergeCollinearEdges(
-  edges: RawEdge[],
-  angleTolerance: number,
-  maxGap: number,
-): RawEdge[] {
-  const merged = [...edges];
-  let didMerge = true;
+// ---------------------------------------------------------------------------
+// Mask filtering
+// ---------------------------------------------------------------------------
 
-  while (didMerge) {
-    didMerge = false;
-    for (let i = 0; i < merged.length && !didMerge; i++) {
-      for (let j = i + 1; j < merged.length && !didMerge; j++) {
-        if (areCollinear(merged[i], merged[j], angleTolerance, maxGap)) {
-          const newEdge = mergeEdges(merged[i], merged[j]);
-          merged.splice(j, 1);
-          merged[i] = newEdge;
-          didMerge = true;
-        }
-      }
+/**
+ * Ray-casting algorithm to check if a point is inside a polygon.
+ * Polygon vertices are in normalized coordinates (0-1000).
+ */
+function pointInPolygon(
+  point: { x: number; y: number },
+  polygon: Array<{ x: number; y: number }>,
+): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x, yi = polygon[i].y;
+    const xj = polygon[j].x, yj = polygon[j].y;
+
+    if (((yi > point.y) !== (yj > point.y)) &&
+      (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi)) {
+      inside = !inside;
     }
   }
+  return inside;
+}
 
-  return merged;
+/**
+ * Check if a line segment overlaps with a segmentation mask.
+ * Samples points along the line and checks if they fall inside the mask polygon.
+ */
+function lineOverlapsMask(line: LineSegment, mask: SemanticSegmentationMask): boolean {
+  const poly = mask.polygon;
+
+  if (poly.length < 3) return false;
+
+  const samples = 20;
+  for (let i = 0; i <= samples; i++) {
+    const t = i / samples;
+    const x = line.start.x * (1 - t) + line.end.x * t;
+    const y = line.start.y * (1 - t) + line.end.y * t;
+
+    if (pointInPolygon({ x, y }, poly)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Get all masks for a specific file ID, filtered to structure-qualified classes only.
+ */
+function getStructureMasksForFile(fileId: string, masks: SemanticSegmentationMask[]): SemanticSegmentationMask[] {
+  return masks.filter(m =>
+    m.fileId === fileId &&
+    !REJECTED_CLASSES.has(m.segmentationClass) &&
+    !m.isOccluder
+  );
 }
 
 // ---------------------------------------------------------------------------
-// Cross-mask deduplication
+// Line classification
 // ---------------------------------------------------------------------------
 
 /**
- * Deduplicate lines across different masks that share edges.
- * Adjacent SAM2 masks often share boundary edges, producing duplicate lines.
- * For each pair of lines from different masks with similar midpoints and
- * angles, keep the one with higher confidence + usefulness score.
+ * Classify a line segment based on its orientation, position, and overlapping masks.
  */
-function deduplicateAcrossMasks(
-  edges: Array<RawEdge & { lineType: StructuralLineType }>,
-  dedupDistance: number = 25,
-  dedupAngleTolerance: number = 10,
-): Array<RawEdge & { lineType: StructuralLineType }> {
-  if (edges.length <= 1) return edges;
+function classifyLine(line: LineSegment, masks: SemanticSegmentationMask[]): StructuralLineType | null {
+  const angleDeg = line.angleDeg;
+  const normalizedAngle = angleDeg % 180;
+  const isHorizontal = normalizedAngle < 20 || normalizedAngle > 160;
+  const isVertical = Math.abs(normalizedAngle - 90) < 20;
+  const isDiagonal = !isHorizontal && !isVertical;
 
-  const kept: Array<RawEdge & { lineType: StructuralLineType }> = [];
-  const removed = new Set<number>();
+  const avgY = (line.start.y + line.end.y) / 2;
 
-  for (let i = 0; i < edges.length; i++) {
-    if (removed.has(i)) continue;
+  // Check what class of mask this line passes through
+  const overlappingMasks = masks.filter(m => lineOverlapsMask(line, m));
+  const overlappingClasses = new Set(overlappingMasks.map(m => m.segmentationClass));
 
-    const a = edges[i];
-    const midA = { x: (a.start.x + a.end.x) / 2, y: (a.start.y + a.end.y) / 2, coordinateSystem: a.start.coordinateSystem };
-    let bestScore = a.length + (STRUCTURAL_USEFULNESS[a.lineType] ?? 0);
-    let bestIdx = i;
+  const hasRoof = overlappingClasses.has('roof');
+  const hasWall = overlappingClasses.has('wall') || overlappingClasses.has('siding');
+  const hasFascia = overlappingClasses.has('fascia') || overlappingClasses.has('soffit') || overlappingClasses.has('gutter');
 
-    for (let j = i + 1; j < edges.length; j++) {
-      if (removed.has(j)) continue;
-      // Only dedup across different masks
-      if (edges[i].sourceMaskId === edges[j].sourceMaskId) continue;
-
-      const b = edges[j];
-      const midB = { x: (b.start.x + b.end.x) / 2, y: (b.start.y + b.end.y) / 2 };
-
-      // Same line type
-      if (a.lineType !== b.lineType) continue;
-
-      // Similar midpoint distance
-      const midDist = Math.sqrt((midA.x - midB.x) ** 2 + (midA.y - midB.y) ** 2);
-      if (midDist > dedupDistance) continue;
-
-      // Similar angle
-      const angleA = normalizeAngle(a.angleDeg);
-      const angleB = normalizeAngle(b.angleDeg);
-      const angleDiff = Math.abs(angleA - angleB);
-      if (angleDiff > dedupAngleTolerance && angleDiff < 180 - dedupAngleTolerance) continue;
-
-      // Duplicate found — keep the one with higher score (length + usefulness)
-      const scoreB = b.length + (STRUCTURAL_USEFULNESS[b.lineType] ?? 0);
-      if (scoreB > bestScore) {
-        removed.add(bestIdx);
-        bestIdx = j;
-        bestScore = scoreB;
+  // Classification logic — roof lines first (most important)
+  if (hasRoof) {
+    if (isHorizontal) {
+      if (avgY < 350) {
+        return 'ridge'; // Upper roof horizontal line
       } else {
-        removed.add(j);
+        return 'eave'; // Lower roof horizontal line
       }
-    }
-
-    if (bestIdx === i) {
-      kept.push(a);
-    } else {
-      kept.push(edges[bestIdx]);
+    } else if (isDiagonal) {
+      return 'rake'; // Diagonal roof edge
+    } else if (isVertical) {
+      return 'rake'; // Vertical could be rake in perspective
     }
   }
 
-  return kept;
+  // Wall lines
+  if (hasWall) {
+    if (isVertical) {
+      return 'wall_vertical';
+    } else if (isHorizontal) {
+      return 'eave'; // Wall-roof boundary
+    }
+  }
+
+  // Fascia/soffit/gutter lines
+  if (hasFascia) {
+    if (isHorizontal) {
+      return 'eave';
+    }
+  }
+
+  // Other structure classes
+  if (overlappingClasses.size > 0) {
+    if (isHorizontal) return 'eave';
+    if (isVertical) return 'wall_vertical';
+    if (isDiagonal) return 'rake';
+  }
+
+  return null; // Don't classify if not on structure
+}
+
+/**
+ * Compute confidence score for a classified line.
+ */
+function computeLineConfidence(
+  line: LineSegment,
+  lineType: StructuralLineType,
+  maskCount: number,
+): number {
+  // Base confidence from line length (longer = more confident)
+  const lengthScore = Math.min(40, (line.length / 300) * 40);
+
+  // Bonus for mask support
+  const maskBonus = Math.min(25, maskCount * 8);
+
+  // Type-specific bonus
+  const typeBonus: Record<StructuralLineType, number> = {
+    ridge: 25,
+    eave: 20,
+    rake: 15,
+    wall_vertical: 15,
+    wall_bottom_edge: 10,
+  };
+
+  const confidence = Math.round(
+    Math.min(100, lengthScore + maskBonus + typeBonus[lineType])
+  );
+
+  return Math.max(MIN_CONFIDENCE, confidence);
 }
 
 // ---------------------------------------------------------------------------
-// Main worker function
+// Main worker function (ASYNC — uses sharp for image loading)
 // ---------------------------------------------------------------------------
 
 /**
- * Run the line extraction worker on a set of segmentation masks.
+ * Run the line extraction worker on a set of photos and segmentation masks.
  *
- * Structure-first approach (v2):
- * 1. Pre-filter masks to ONLY structure-qualified classes
- * 2. Extract ground-level mask boundaries for wall_bottom_edge detection
- * 3. Extract edges from qualified masks only
- * 4. Filter by edge length and straightness
- * 5. Classify edges (ridge, eave, rake, wall_vertical, wall_bottom_edge)
- * 6. Merge collinear segments
- * 7. Cross-mask deduplication
- * 8. Per-mask cap on emitted lines
- * 9. Create validated artifacts
+ * For each photo:
+ * 1. Load the original image and convert to grayscale
+ * 2. Run Canny edge detection on the image
+ * 3. Run Hough line transform to detect candidate structural lines
+ * 4. Filter lines by overlap with SAM2 segmentation masks
+ * 5. Classify filtered lines by orientation + position
+ * 6. Create validated artifacts
  */
-export function runLineExtractionWorker(input: LineExtractionWorkerInput): LineExtractionWorkerOutput {
-  const timings: Record<string, number> = {};
+export async function runLineExtractionWorker(input: LineExtractionWorkerInput): Promise<LineExtractionWorkerOutput> {
+  const timings: Record<string, number> = [];
   const artifacts: StructuralLineCandidate[] = [];
-  const minEdgeLength = input.config?.minEdgeLength ?? 30;
-  const angleTolerance = input.config?.angleTolerance ?? 20;
-  const minConfidence = input.config?.minConfidence ?? 25;
-  const mergeCollinear = input.config?.mergeCollinear ?? true;
-  const maxMergeGap = input.config?.maxMergeGap ?? 50;
-  const maxLinesPerMask = input.config?.maxLinesPerMask ?? 8;
-  const minStraightness = input.config?.minStraightness ?? 0.7;
-  const crossMaskDedup = input.config?.crossMaskDedup ?? true;
+
+  const minLineLength = input.config?.minLineLength ?? MIN_LINE_LENGTH;
+  const maxLinesPerPhoto = input.config?.maxLinesPerPhoto ?? MAX_LINES_PER_PHOTO;
+  const minConfidence = input.config?.minConfidence ?? MIN_CONFIDENCE;
 
   const filterStats: LineExtractionFilterStats = {
-    masksRejectedByClass: 0,
-    masksPassedPrefilter: 0,
-    edgesExtracted: 0,
-    edgesRejectedByStraightness: 0,
-    edgesAfterStraightness: 0,
-    linesDedupedCrossMask: 0,
-    linesCappedByMask: 0,
-    finalLineCount: 0,
+    photosProcessed: 0,
+    photosSkipped: 0,
+    totalLinesDetected: 0,
+    linesOnStructure: 0,
+    linesClassified: 0,
+    linesKept: 0,
   };
 
-  // Stage 1: Initialize and pre-filter masks
   const t0 = Date.now();
-  if (input.masks.length === 0) {
-    timings['initialization'] = Date.now() - t0;
-    return {
-      artifacts: [],
-      stageTimings: timings,
-      workerVersion: LINE_EXTRACTION_WORKER_VERSION,
-      filterStats,
-    };
-  }
 
-  // Structure-first: separate qualified vs rejected masks
-  const qualifiedMasks: SemanticSegmentationMask[] = [];
-  const rejectedMasks: SemanticSegmentationMask[] = [];
+  // Group masks by file ID
+  const masksByFile = new Map<string, SemanticSegmentationMask[]>();
   for (const mask of input.masks) {
-    if (isStructureQualifiedMask(mask)) {
-      qualifiedMasks.push(mask);
-    } else {
-      rejectedMasks.push(mask);
+    if (!masksByFile.has(mask.fileId)) {
+      masksByFile.set(mask.fileId, []);
     }
-  }
-  filterStats.masksRejectedByClass = rejectedMasks.length;
-  filterStats.masksPassedPrefilter = qualifiedMasks.length;
-
-  // If no qualified masks, return empty
-  if (qualifiedMasks.length === 0) {
-    timings['mask_prefilter'] = Date.now() - t0;
-    return {
-      artifacts: [],
-      stageTimings: timings,
-      workerVersion: LINE_EXTRACTION_WORKER_VERSION,
-      filterStats,
-    };
-  }
-  timings['mask_prefilter'] = Date.now() - t0;
-
-  // Extract ground-level mask boundaries for wall_bottom_edge detection
-  // This uses ALL masks (including rejected ones) since ground-level masks
-  // are needed to find where walls meet the ground
-  const groundBoundaries = extractGroundMaskTopBoundary(input.masks);
-
-  // Stage 2: Extract edges from qualified masks only
-  const t1 = Date.now();
-  const allEdges: RawEdge[] = [];
-  const maskConfidenceMap = new Map<string, number>();
-
-  for (const mask of qualifiedMasks) {
-    const edges = extractEdges(mask);
-    allEdges.push(...edges);
-    maskConfidenceMap.set(mask.id, mask.confidence);
-  }
-  filterStats.edgesExtracted = allEdges.length;
-  timings['edge_extraction'] = Date.now() - t1;
-
-  // Stage 3: Filter short edges
-  const t2 = Date.now();
-  const longEdges = allEdges.filter(e => e.length >= minEdgeLength);
-  timings['edge_filtering'] = Date.now() - t2;
-
-  // Stage 4: Straightness filter
-  // For single edges (two endpoints), straightness is always 1.0.
-  // But we can check if the polygon around the edge is jagged.
-  // For simplicity, we apply straightness to the edge itself —
-  // single edges are always straight. The straightness filter is
-  // more relevant when multi-point chains are used (future enhancement).
-  const t2b = Date.now();
-  const straightEdges = longEdges.filter(e => {
-    // Single edge is always straight
-    const straightness = computeEdgeStraightness(e.start, e.end);
-    return straightness >= minStraightness;
-  });
-  filterStats.edgesRejectedByStraightness = longEdges.length - straightEdges.length;
-  filterStats.edgesAfterStraightness = straightEdges.length;
-  timings['straightness_filter'] = Date.now() - t2b;
-
-  // Stage 5: Classify edges
-  const t3 = Date.now();
-  const classifiedEdges: Array<RawEdge & { lineType: StructuralLineType }> = [];
-
-  for (const edge of straightEdges) {
-    const lineType = classifyEdge(edge, angleTolerance, groundBoundaries);
-    if (lineType !== null) {
-      classifiedEdges.push({ ...edge, lineType });
-    }
-  }
-  timings['edge_classification'] = Date.now() - t3;
-
-  // Stage 6: Merge collinear segments
-  const t4 = Date.now();
-  let finalEdges: typeof classifiedEdges = classifiedEdges;
-  if (mergeCollinear) {
-    const grouped = new Map<string, typeof classifiedEdges>();
-    for (const edge of classifiedEdges) {
-      const key = `${edge.lineType}-${edge.sourceMaskId}`;
-      if (!grouped.has(key)) grouped.set(key, []);
-      grouped.get(key)!.push(edge);
-    }
-
-    const mergedGroups: typeof classifiedEdges = [];
-    for (const [key, group] of grouped) {
-      const lineType = key.split('-')[0] as StructuralLineType;
-      if (group.length <= 1) {
-        mergedGroups.push(...group);
-        continue;
-      }
-      const rawEdges: RawEdge[] = group.map(e => ({
-        start: e.start,
-        end: e.end,
-        length: e.length,
-        angleDeg: e.angleDeg,
-        sourceMaskId: e.sourceMaskId,
-        sourceClass: e.sourceClass,
-      }));
-      const merged = mergeCollinearEdges(rawEdges, angleTolerance, maxMergeGap);
-      for (const m of merged) {
-        mergedGroups.push({ ...m, lineType });
-      }
-    }
-    finalEdges = mergedGroups;
-  }
-  timings['collinear_merging'] = Date.now() - t4;
-
-  // Stage 7: Cross-mask deduplication
-  const t6 = Date.now();
-  if (crossMaskDedup && finalEdges.length > 1) {
-    const preDedupCount = finalEdges.length;
-    finalEdges = deduplicateAcrossMasks(finalEdges);
-    filterStats.linesDedupedCrossMask = preDedupCount - finalEdges.length;
-  }
-  timings['cross_mask_dedup'] = Date.now() - t6;
-
-  // Stage 8: Per-mask cap — limit lines per source mask by structural usefulness
-  const t7 = Date.now();
-  const edgesByMask = new Map<string, typeof finalEdges>();
-  for (const edge of finalEdges) {
-    if (!edgesByMask.has(edge.sourceMaskId)) edgesByMask.set(edge.sourceMaskId, []);
-    edgesByMask.get(edge.sourceMaskId)!.push(edge);
+    masksByFile.get(mask.fileId)!.push(mask);
   }
 
-  const cappedEdges: typeof finalEdges = [];
-  for (const [maskId, maskEdges] of edgesByMask) {
-    if (maskEdges.length <= maxLinesPerMask) {
-      cappedEdges.push(...maskEdges);
+  // Process each photo that has both image bytes AND masks
+  for (const photo of input.sourcePhotos) {
+    const { fileId } = photo;
+    const imageBytes = input.imageBytesMap[fileId];
+    const fileMasks = masksByFile.get(fileId);
+
+    if (!imageBytes) {
+      console.warn(`[LineExtraction v3] No image bytes for fileId=${fileId}, skipping`);
+      filterStats.photosSkipped++;
       continue;
     }
-    // Sort by structural usefulness (descending), then by length (descending)
-    const sorted = [...maskEdges].sort((a, b) => {
-      const useA = STRUCTURAL_USEFULNESS[a.lineType] ?? 0;
-      const useB = STRUCTURAL_USEFULNESS[b.lineType] ?? 0;
-      if (useA !== useB) return useB - useA;
-      return b.length - a.length;
-    });
-    // Take up to maxLinesPerMask edges
-    const kept = sorted.slice(0, maxLinesPerMask);
-    filterStats.linesCappedByMask += maskEdges.length - kept.length;
-    cappedEdges.push(...kept);
-  }
-  finalEdges = cappedEdges;
-  timings['per_mask_cap'] = Date.now() - t7;
 
-  // Stage 9: Create artifacts
-  const t5 = Date.now();
-  let lineIndex = 0;
-  for (const edge of finalEdges) {
-    const maskConf = maskConfidenceMap.get(edge.sourceMaskId) ?? 50;
-    const confidence = computeLineConfidence(edge.lineType, edge.length, maskConf, edge.sourceClass);
-
-    if (confidence < minConfidence) continue;
-
-    const lineId = `line-${edge.sourceMaskId}-${edge.lineType}-${lineIndex}`;
-    lineIndex++;
-
-    const candidate: StructuralLineCandidate = {
-      artifactType: 'structural_line_candidate',
-      id: lineId,
-      fileId: edge.sourceMaskId.replace(/^seg-/, '').replace(/-(roof|wall|siding|fascia|soffit|gutter|porch|deck|railing|steps|downspout|sky|tree|ground|obstruction|equipment)-.*$/, ''),
-      lineType: edge.lineType,
-      start: { ...edge.start },
-      end: { ...edge.end },
-      confidence,
-      sourceMaskId: edge.sourceMaskId,
-      workerVersion: LINE_EXTRACTION_WORKER_VERSION,
-      authority: { ...REVIEW_ONLY_AUTHORITY },
-      limitations: [...LINE_EXTRACTION_LIMITATIONS],
-    };
-
-    // Validate before including
-    const validationResult = validateStructuralLineCandidate(candidate);
-    if (validationResult.valid) {
-      artifacts.push(validationResult.data);
+    if (!fileMasks || fileMasks.length === 0) {
+      console.warn(`[LineExtraction v3] No masks for fileId=${fileId}, skipping`);
+      filterStats.photosSkipped++;
+      continue;
     }
-  }
-  timings['artifact_creation'] = Date.now() - t5;
 
-  filterStats.finalLineCount = artifacts.length;
+    const tPhoto = Date.now();
+
+    try {
+      // Step 1: Load grayscale image (async — uses sharp)
+      const { grayscale, width, height } = await loadGrayscaleImage(imageBytes, 500);
+
+      // Step 2: Canny edge detection
+      const edges = cannyEdgeDetection(grayscale, width, height);
+
+      // Step 3: Hough line transform
+      const detectedLines = houghLineTransform(edges, width, height, minLineLength);
+      filterStats.totalLinesDetected += detectedLines.length;
+
+      // Step 4: Filter lines by mask overlap — keep only lines on structure
+      const structureMasks = getStructureMasksForFile(fileId, fileMasks);
+      const structureLines = detectedLines.filter(line =>
+        structureMasks.some(mask => lineOverlapsMask(line, mask))
+      );
+      filterStats.linesOnStructure += structureLines.length;
+
+      // Step 5: Classify lines
+      const classified: Array<LineSegment & { lineType: StructuralLineType; maskSupport: number }> = [];
+      for (const line of structureLines) {
+        const lineType = classifyLine(line, structureMasks);
+        if (lineType) {
+          const maskSupport = structureMasks.filter(m => lineOverlapsMask(line, m)).length;
+          classified.push({ ...line, lineType, maskSupport });
+        }
+      }
+      filterStats.linesClassified += classified.length;
+
+      // Step 6: Score, cap, and create artifacts
+      const scored = classified.map(c => ({
+        ...c,
+        confidence: computeLineConfidence(c, c.lineType, c.maskSupport),
+      }));
+
+      // Sort by confidence (descending) and cap per photo
+      scored.sort((a, b) => b.confidence - a.confidence);
+      const kept = scored.slice(0, maxLinesPerPhoto).filter(s => s.confidence >= minConfidence);
+
+      for (let i = 0; i < kept.length; i++) {
+        const { lineType, start, end, confidence, maskSupport } = kept[i];
+        const lineId = `line-${fileId}-${lineType}-${i}`;
+
+        const candidate: StructuralLineCandidate = {
+          artifactType: 'structural_line_candidate',
+          id: lineId,
+          fileId,
+          lineType,
+          start: { x: start.x, y: start.y, coordinateSystem: 'normalized_image_0_1000' },
+          end: { x: end.x, y: end.y, coordinateSystem: 'normalized_image_0_1000' },
+          confidence,
+          sourceMaskId: structureMasks[0]?.id,
+          workerVersion: LINE_EXTRACTION_WORKER_VERSION,
+          authority: { ...REVIEW_ONLY_AUTHORITY },
+          limitations: [...LINE_EXTRACTION_LIMITATIONS],
+        };
+
+        const validationResult = validateStructuralLineCandidate(candidate);
+        if (validationResult.valid) {
+          artifacts.push(validationResult.data);
+        }
+      }
+
+      filterStats.linesKept += kept.length;
+      filterStats.photosProcessed++;
+
+      console.info(
+        `[LineExtraction v3] fileId=${fileId}: ${detectedLines.length} detected → ${structureLines.length} on structure → ${kept.length} kept (conf≥${minConfidence})`,
+      );
+
+    } catch (err) {
+      console.error(`[LineExtraction v3] Failed to process fileId=${fileId}:`, err);
+      filterStats.photosSkipped++;
+    }
+
+    timings[fileId] = Date.now() - tPhoto;
+  }
+
+  timings['total'] = Date.now() - t0;
+
+  console.info(
+    `[LineExtraction v3] Total: ${artifacts.length} lines from ${filterStats.photosProcessed} photos in ${timings['total']}ms`,
+  );
 
   return {
     artifacts,
@@ -973,18 +858,21 @@ export function runLineExtractionWorker(input: LineExtractionWorkerInput): LineE
  * Run the line extraction worker from a standard GeometryReconstructionInput
  * and a set of already-computed segmentation masks.
  *
- * Returns StructuralLineCandidate artifacts.
+ * Now ASYNC and requires imageBytesMap from the segmentation stage.
  */
-export function runLineExtractionFromReconstructionInput(
+export async function runLineExtractionFromReconstructionInput(
   input: GeometryReconstructionInput,
   masks: SemanticSegmentationMask[],
-): GeometryReconstructionArtifact[] {
+  imageBytesMap: Record<string, Buffer>,
+): Promise<GeometryReconstructionArtifact[]> {
   const workerInput: LineExtractionWorkerInput = {
     surveyId: input.surveyId,
     masks,
+    imageBytesMap,
+    sourcePhotos: input.sourcePhotos.map(p => ({ fileId: p.fileId, fileUrl: p.fileUrl })),
     config: input.config as LineExtractionWorkerInput['config'] | undefined,
   };
 
-  const output = runLineExtractionWorker(workerInput);
+  const output = await runLineExtractionWorker(workerInput);
   return output.artifacts;
 }

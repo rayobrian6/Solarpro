@@ -331,8 +331,8 @@ export async function runFullGeometryReconstructionPipeline(
   }
 
   // ──── Stage 2: Line Extraction ────────────────────────────────────────────
-  const lineResult = stageTimer('line_extraction', () =>
-    runLineExtractionFromReconstructionInput(input, masks),
+  const lineResult = await asyncStageTimer('line_extraction', () =>
+    runLineExtractionFromReconstructionInput(input, masks, segResult.imageBytesMap),
   );
   const lineArtifacts = lineResult.result;
   allArtifacts.push(...lineArtifacts);
@@ -600,7 +600,7 @@ export async function runDepthOnlyPipeline(
   }
 
   // Run vanishing points (needed for depth)
-  const lineArtifacts = runLineExtractionFromReconstructionInput(input, masks);
+  const lineArtifacts = await runLineExtractionFromReconstructionInput(input, masks, segOutput.imageBytesMap);
   const lines = lineArtifacts.filter(
     (a): a is StructuralLineCandidate => a.artifactType === 'structural_line_candidate',
   );

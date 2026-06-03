@@ -11,6 +11,11 @@ FROM node:20-slim
 
 WORKDIR /app
 
+# Install build dependencies for sharp (native image processing)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libvips-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy everything
 COPY . ./
 
@@ -18,6 +23,7 @@ COPY . ./
 RUN npm install
 
 # Bundle the worker with esbuild (resolves TypeScript path aliases at build time)
+# sharp must be --external because it has native binaries that can't be bundled
 RUN npx esbuild worker/main.ts \
     --bundle \
     --platform=node \
@@ -27,6 +33,7 @@ RUN npx esbuild worker/main.ts \
     --alias:@=. \
     --external:@neondatabase/serverless \
     --external:uuid \
+    --external:sharp \
     --log-level=info
 
 # Run the bundled worker
