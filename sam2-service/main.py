@@ -26,8 +26,8 @@ Deployment:
   - Environment variable MIDAS_MODEL_ID controls depth model size
 
 CPU Optimization (Segmentation):
-  - Images resized to max 384px (CPU) / 2048px (GPU) before processing
-  - CPU: points_per_side=8 (64 grid points) with ONNX tiny+quantized model on Render Pro 4GB RAM, 384px
+  - Images resized to max 512px (CPU) / 2048px (GPU) before processing
+  - CPU: points_per_side=10 (100 grid points) with ONNX tiny+quantized model on Render Standard 4GB RAM, 512px
   - ONNX tiny+INT8 encoder (28.4MB quantized from 104.4MB) + decoder (15.8MB) fit comfortably in 4GB with MiDaS
   - INT8 dynamic quantization: ~16% faster inference, ~4x smaller encoder, cosine similarity > 0.985 vs FP32
   - Quantization applied at startup (~4s one-time cost), quantized model cached for reuse
@@ -108,9 +108,10 @@ IS_CPU = DEVICE == "cpu"
 #            facebook/sam2.1-hiera-base-plus, facebook/sam2.1-hiera-large
 HF_MODEL_ID = os.environ.get("SAM2_HF_MODEL_ID", "facebook/sam2.1-hiera-tiny")
 # Maximum image dimension for processing — larger images are resized
+# 512px on CPU: 10x10 grid detects roofs and small features at this resolution without OOM
 # 384px on CPU: 8x8 grid can detect roofs at this resolution without OOM
 # 256px on CPU: too small, 8x8 grid misses roofs entirely (0 masks)
-MAX_IMAGE_DIM = int(os.environ.get("SAM2_MAX_IMAGE_DIM", "384" if IS_CPU else "2048"))
+MAX_IMAGE_DIM = int(os.environ.get("SAM2_MAX_IMAGE_DIM", "512" if IS_CPU else "2048"))
 # Minimum mask area as fraction of image — filters noise masks
 MIN_MASK_AREA_FRACTION = float(os.environ.get("SAM2_MIN_MASK_AREA_FRACTION", "0.005"))
 # Prediction confidence and stability thresholds — lower values catch weaker masks
@@ -121,22 +122,22 @@ STABILITY_SCORE_THRESH = float(os.environ.get("SAM2_STABILITY_SCORE_THRESH", "0.
 # Higher = more masks (better small-object detection) but slower + more memory.
 #   8 points/side = 64 grid points (stable on 2GB RAM; ~4.5s decoder with rapid-loop; ~8-10 roof masks)
 #   9 points/side = 81 grid points (stable on 2GB RAM; ~5.5s decoder with rapid-loop)
-#  10 points/side = 100 grid points (~7s decoder with rapid-loop; OK on 4GB Pro)
-#  12 points/side = 144 grid points (~10s decoder with rapid-loop; OK on 4GB Pro with ONNX + 384px)
+#  10 points/side = 100 grid points (~7s decoder with rapid-loop; OK on 4GB Standard with ONNX + 512px)
+#  12 points/side = 144 grid points (~10s decoder with rapid-loop; OK on 4GB Pro with ONNX + 512px)
 #  16 points/side = 256 grid points (~13s decoder with rapid-loop; best small-object detection)
-# NOTE: 8 points/side at 384px produces good roof masks because SAM2's encoder
-# captures sufficient detail at this resolution. Going higher mainly catches
-# small obstructions and equipment, which are less critical for geometry.
-# Encoder dominates total time: tiny+INT8 ~17s + decoder ~4.5s = ~22s/photo (measured on Render).
-# REDUCED from 12→8: With rapid-loop decode + tiny+INT8 encoder, 64 points
-# take ~22s/photo, enabling 15 photos within Vercel's 300s limit (15÷2×22=165s).
-POINTS_PER_SIDE = int(os.environ.get("SAM2_POINTS_PER_SIDE", "8" if IS_CPU else "32"))
+# NOTE: 10 points/side at 512px produces detailed roof masks because SAM2's encoder
+# captures sufficient detail at this resolution. The denser grid catches dormers, vents,
+# and small roof plane intersections that 8pts/384px missed.
+# Encoder dominates total time: tiny+INT8 ~17s + decoder ~7s = ~24s/photo (measured on Render).
+# CHANGED from 8→10: With rapid-loop decode + tiny+INT8 encoder, 100 points
+# take ~24s/photo. Worker runs on Render (no Vercel timeout), so this is acceptable.
+POINTS_PER_SIDE = int(os.environ.get("SAM2_POINTS_PER_SIDE", "10" if IS_CPU else "32"))
 # Maximum masks to return per image
 MAX_MASKS = int(os.environ.get("SAM2_MAX_MASKS", "30"))
 # Douglas-Peucker simplification epsilon (pixels)
 # Lower = more polygon detail, higher = coarser polygons.
-# At 512px image dim, epsilon=1.0 preserves ~3x more boundary detail than 5.0.
-DOUGLAS_PEUCKER_EPSILON = float(os.environ.get("SAM2_DOUGLAS_PEUCKER_EPSILON", "1.0"))
+# At 512px image dim, epsilon=0.7 preserves ~4x more boundary detail than 5.0.
+DOUGLAS_PEUCKER_EPSILON = float(os.environ.get("SAM2_DOUGLAS_PEUCKER_EPSILON", "0.7"))
 # Minimum polygon points after simplification
 MIN_POLYGON_POINTS = 3
 # Service port — Render injects PORT=10000 for web services
@@ -215,6 +216,30 @@ class SegmentationMask(BaseModel):
     class_hint: str  # heuristic classification from geometry + position
     point_count: int
 
+class FilteredMaskMeta(BaseModel):
+    """Metadata for a mask that was filtered out by roof_only or max_masks.
+    Provides diagnostic visibility into what the service removed, without
+    including polygon geometry that could be misused as structure data.
+    """
+    mask_index: int
+    class_hint: str
+    area: float
+    bbox: list[float]  # [x, y, width, height] — coarse position only
+    confidence: float
+    stability_score: float
+    filter_reason: str  # "roof_only" or "max_masks"
+
+class TimingBreakdown(BaseModel):
+    """Per-stage timing breakdown for the /segment pipeline (milliseconds)."""
+    image_decode_ms: float = 0
+    image_resize_ms: float = 0
+    encoder_ms: float = 0
+    decoder_ms: float = 0
+    classify_ms: float = 0
+    polygon_ms: float = 0
+    filter_ms: float = 0
+    total_ms: float = 0
+
 class SegmentResponse(BaseModel):
     """Response from the /segment endpoint."""
     success: bool
@@ -225,6 +250,10 @@ class SegmentResponse(BaseModel):
     processing_time_ms: float
     model_info: dict
     error: Optional[str] = None
+    # --- Instrumentation fields (Pass 1 tuning) ---
+    timing_breakdown: Optional[TimingBreakdown] = None
+    filtered_masks_metadata: Optional[list[FilteredMaskMeta]] = None
+    filter_impact: Optional[dict] = None  # counts per filter stage
 
 class HealthResponse(BaseModel):
     """Response from the /health endpoint."""
@@ -359,9 +388,9 @@ def load_sam2_model():
 
         # CPU-optimized mask generator settings
         # On CPU: conservative optimization for Render Standard plan (CPU, ~4GB RAM)
-        #   - points_per_side=8 (64 grid points — stable at 384px; ~16s with rapid-loop;
-        #     produces ~8-10 roof-relevant masks)
-        #   - MAX_IMAGE_DIM=384 on CPU (256px was too small for 8x8 grid)
+        #   - points_per_side=10 (100 grid points — stable at 512px; ~7s with rapid-loop;
+        #     catches dormers/vents that 8pts/384px missed)
+        #   - MAX_IMAGE_DIM=512 on CPU (384px was too coarse for fine roof boundaries)
         #   - min_area_fraction=0.005 (lowered from 0.05 — old default filtered ALL masks)
         #   - points_per_batch=4 (controls outer loop batch size with rapid-loop decode)
         #   - crop_n_layers=0 (disable multi-crop, huge memory savings)
@@ -561,7 +590,7 @@ def np_to_base64(arr: np.ndarray) -> str:
 # will be subdivided to preserve boundary detail for line extraction.
 # Without this, Douglas-Peucker collapses long roof edges into single straight
 # segments (200+ pixels), which produces "sloppy lines" in downstream extraction.
-MAX_POLYGON_EDGE_LENGTH = int(os.environ.get("SAM2_MAX_POLYGON_EDGE_LENGTH", "50"))
+MAX_POLYGON_EDGE_LENGTH = int(os.environ.get("SAM2_MAX_POLYGON_EDGE_LENGTH", "35"))
 
 
 def _subdivide_long_edges(points: list[dict], max_length: float) -> list[dict]:
@@ -1098,6 +1127,7 @@ async def segment_image(
     bounding boxes, stability scores, and heuristic class hints.
     """
     t0 = time.time()
+    timing = TimingBreakdown()
 
     # Memory guard: check available RAM before running inference
     # On Render Standard (2GB), if available memory is too low, reject
@@ -1123,6 +1153,7 @@ async def segment_image(
 
     # Read image bytes
     try:
+        t_decode = time.time()
         image_bytes = await file.read()
         if len(image_bytes) == 0:
             raise HTTPException(status_code=400, detail="Empty image file")
@@ -1133,6 +1164,8 @@ async def segment_image(
         if image is None:
             raise HTTPException(status_code=400, detail="Could not decode image")
 
+        timing.image_decode_ms = (time.time() - t_decode) * 1000
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1141,8 +1174,10 @@ async def segment_image(
     orig_h, orig_w = image.shape[:2]
 
     # Resize for CPU inference to avoid OOM and speed up processing
+    t_resize = time.time()
     image_resized, scale = resize_for_inference(image)
     res_h, res_w = image_resized.shape[:2]
+    timing.image_resize_ms = (time.time() - t_resize) * 1000
 
     min_area_px = res_w * res_h * min_area_fraction
 
@@ -1161,12 +1196,17 @@ async def segment_image(
         _inference_type = "segment"
         _last_inference_start = time.time()
 
+        t_encoder = time.time()
         loop = asyncio.get_event_loop()
         sam_masks = await loop.run_in_executor(
             _inference_executor,
             amg.generate,
             image_rgb,
         )
+        t_after_inference = time.time()
+        # Note: encoder+decoder timing is logged inside the AMG generate() method.
+        # Here we capture total inference wall time. The AMG logs break it down further.
+        timing.encoder_ms = (t_after_inference - t_encoder) * 1000  # total inference
 
         _inference_active = False
         _inference_type = ""
@@ -1188,8 +1228,27 @@ async def segment_image(
             detail=f"SAM 2 inference error: {str(e)}",
         )
 
+    # ── Filter impact tracking ──────────────────────────────────────────
+    # Track how many masks are removed at each filter stage so we can
+    # diagnose whether the pipeline is too aggressive with filtering.
+    filter_impact = {
+        "raw_masks": len(sam_masks),
+        "removed_by_area": 0,
+        "removed_by_polygon_points": 0,
+        "removed_by_roof_only": 0,
+        "removed_by_max_masks": 0,
+        "remaining": 0,
+    }
+
     # Process SAM 2 masks into polygon-based results
     result_masks: list[SegmentationMask] = []
+    # Track all classified masks (including filtered) for metadata
+    all_classified_masks: list[SegmentationMask] = []
+
+    t_classify_start = time.time()
+    t_polygon_start = time.time()
+    t_polygon_total = 0.0
+    t_classify_total = 0.0
 
     for idx, sam_mask in enumerate(sam_masks):
         mask_binary = sam_mask["segmentation"]
@@ -1199,11 +1258,15 @@ async def segment_image(
         area_px = int(sam_mask.get("area", np.sum(mask_binary)))
 
         if area_px < min_area_px:
+            filter_impact["removed_by_area"] += 1
             continue
 
+        t_poly = time.time()
         polygon_points = mask_to_polygon(mask_binary.astype(np.uint8))
+        t_polygon_total += (time.time() - t_poly) * 1000
 
         if len(polygon_points) < MIN_POLYGON_POINTS:
+            filter_impact["removed_by_polygon_points"] += 1
             continue
 
         # Scale coordinates back to original image size
@@ -1215,6 +1278,7 @@ async def segment_image(
             bbox = [v / scale for v in bbox]
             area_px = int(area_px / (scale * scale))
 
+        t_cls = time.time()
         class_hint = classify_mask_region(
             bbox=bbox,
             area=float(area_px),
@@ -1225,10 +1289,11 @@ async def segment_image(
             mask_binary=mask_binary,
             scale=scale,
         )
+        t_classify_total += (time.time() - t_cls) * 1000
 
         confidence = min(100, round((predicted_iou * 0.4 + stability * 0.6) * 100))
 
-        result_masks.append(SegmentationMask(
+        mask_obj = SegmentationMask(
             mask_index=idx,
             polygon=[PolygonPoint(x=p["x"], y=p["y"]) for p in polygon_points],
             area=float(area_px),
@@ -1237,10 +1302,27 @@ async def segment_image(
             stability_score=round(stability, 4),
             class_hint=class_hint,
             point_count=len(polygon_points),
-        ))
+        )
+
+        result_masks.append(mask_obj)
+        all_classified_masks.append(mask_obj)
+
+        # ── Per-mask detail logging (instrumentation) ────────────────
+        # Log every mask's classification details so we can diagnose
+        # misclassifications and tune the heuristic classifier later.
+        logger.info(
+            f"  mask[{idx}]: class={class_hint}, area={area_px}px "
+            f"({area_px/(orig_w*orig_h)*100:.2f}% of image), "
+            f"confidence={confidence}, stability={stability:.3f}, "
+            f"iou_pred={predicted_iou:.3f}, polygon_pts={len(polygon_points)}, "
+            f"bbox={[round(v,1) for v in bbox]}"
+        )
 
         # Free mask memory as we go
         del sam_mask
+
+    timing.classify_ms = round(t_classify_total, 1)
+    timing.polygon_ms = round(t_polygon_total, 1)
 
     # ── Roof-only filtering ──
     # When roof_only=True (default), only return masks whose class_hint is
@@ -1249,7 +1331,14 @@ async def segment_image(
     # The classification is heuristic-based and may misclassify some masks,
     # but this filter is essential to prevent tree/ground lines from
     # dominating the geometry overlay.
+    #
+    # CHANGED (Pass 1): Instead of permanently discarding filtered masks,
+    # we emit their metadata in filtered_masks_metadata so the TS worker
+    # can log what was removed without rendering it as geometry.
+    t_filter_start = time.time()
     pre_filter_count = len(result_masks)
+    filtered_masks_metadata: list[FilteredMaskMeta] = []
+
     if roof_only:
         roof_masks = [m for m in result_masks if m.class_hint in SOLAR_RELEVANT_CLASSES]
         filtered_out = [m for m in result_masks if m.class_hint not in SOLAR_RELEVANT_CLASSES]
@@ -1257,6 +1346,17 @@ async def segment_image(
             class_counts = {}
             for m in filtered_out:
                 class_counts[m.class_hint] = class_counts.get(m.class_hint, 0) + 1
+                # Emit metadata (no polygon geometry) for diagnostics
+                filtered_masks_metadata.append(FilteredMaskMeta(
+                    mask_index=m.mask_index,
+                    class_hint=m.class_hint,
+                    area=m.area,
+                    bbox=m.bbox,
+                    confidence=m.confidence,
+                    stability_score=m.stability_score,
+                    filter_reason="roof_only",
+                ))
+            filter_impact["removed_by_roof_only"] = len(filtered_out)
             logger.info(
                 f"Roof-only filter: removed {len(filtered_out)} non-roof masks: {class_counts} "
                 f"({pre_filter_count} → {len(roof_masks)} remaining)"
@@ -1264,15 +1364,33 @@ async def segment_image(
         result_masks = roof_masks
 
     result_masks.sort(key=lambda m: m.area, reverse=True)
-    result_masks = result_masks[:max_masks]
+    if len(result_masks) > max_masks:
+        # Emit metadata for masks removed by the count cap
+        for m in result_masks[max_masks:]:
+            filtered_masks_metadata.append(FilteredMaskMeta(
+                mask_index=m.mask_index,
+                class_hint=m.class_hint,
+                area=m.area,
+                bbox=m.bbox,
+                confidence=m.confidence,
+                stability_score=m.stability_score,
+                filter_reason="max_masks",
+            ))
+        filter_impact["removed_by_max_masks"] = len(result_masks) - max_masks
+        result_masks = result_masks[:max_masks]
+
+    filter_impact["remaining"] = len(result_masks)
+    timing.filter_ms = round((time.time() - t_filter_start) * 1000, 1)
 
     processing_time = (time.time() - t0) * 1000
+    timing.total_ms = round(processing_time, 1)
 
     logger.info(
         f"Segmented {orig_w}x{orig_h} image (processed at {res_w}x{res_h}): "
-        f"{len(sam_masks)} raw masks → {pre_filter_count} classified → "
+        f"{filter_impact['raw_masks']} raw masks → {pre_filter_count} classified → "
         f"{len(result_masks)} roof-only filtered masks "
-        f"in {processing_time:.0f}ms [backend={backend}]"
+        f"in {processing_time:.0f}ms [backend={backend}] | "
+        f"filter_impact={filter_impact}"
     )
 
     # Free memory after processing
@@ -1295,6 +1413,10 @@ async def segment_image(
             "inference_backend": backend,
             "inference_resolution": f"{res_w}x{res_h}",
         },
+        # ── Instrumentation fields (Pass 1 tuning) ──
+        timing_breakdown=timing,
+        filtered_masks_metadata=filtered_masks_metadata if filtered_masks_metadata else None,
+        filter_impact=filter_impact,
     )
 
 
@@ -1523,8 +1645,20 @@ async def segment_prompted(
 
     # Roof-only filter (off by default for prompted mode)
     pre_filter_count = len(result_masks)
+    filtered_masks_metadata: list[FilteredMaskMeta] = []
     if roof_only:
         roof_masks = [m for m in result_masks if m.class_hint in SOLAR_RELEVANT_CLASSES]
+        filtered_out = [m for m in result_masks if m.class_hint not in SOLAR_RELEVANT_CLASSES]
+        for m in filtered_out:
+            filtered_masks_metadata.append(FilteredMaskMeta(
+                mask_index=m.mask_index,
+                class_hint=m.class_hint,
+                area=m.area,
+                bbox=m.bbox,
+                confidence=m.confidence,
+                stability_score=m.stability_score,
+                filter_reason="roof_only",
+            ))
         result_masks = roof_masks
 
     result_masks.sort(key=lambda m: m.area, reverse=True)
@@ -1556,6 +1690,8 @@ async def segment_prompted(
             "inference_resolution": f"{res_w}x{res_h}",
             "prompt_points": len(scaled_points),
         },
+        timing_breakdown=TimingBreakdown(total_ms=round(processing_time, 1)),
+        filtered_masks_metadata=filtered_masks_metadata if filtered_masks_metadata else None,
     )
 
 

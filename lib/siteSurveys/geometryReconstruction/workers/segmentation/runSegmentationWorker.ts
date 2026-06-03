@@ -1013,6 +1013,22 @@ async function segmentWithSAM2FromPhoto(
       console.info(
         `[SAM2] Photo pipeline: SUCCESS — ${sam2Result.masks.length} masks, total=${totalElapsedMs}ms (fetch=${fetchElapsedMs}ms, service=${sam2Result.processingTimeMs}ms)`,
       );
+      // ── Instrumentation logging (Pass 1 tuning) ──
+      if (sam2Result.filterImpact) {
+        const fi = sam2Result.filterImpact;
+        console.info(
+          `[SAM2] Filter impact: raw=${fi.raw_masks ?? '?'} area=${fi.removed_by_area ?? 0} poly=${fi.removed_by_polygon_points ?? 0} roof_only=${fi.removed_by_roof_only ?? 0} max=${fi.removed_by_max_masks ?? 0} → ${fi.remaining ?? sam2Result.masks.length}`,
+        );
+      }
+      if (sam2Result.filteredMasksMetadata && sam2Result.filteredMasksMetadata.length > 0) {
+        const filteredClasses: Record<string, number> = {};
+        for (const fm of sam2Result.filteredMasksMetadata) {
+          filteredClasses[fm.class_hint] = (filteredClasses[fm.class_hint] ?? 0) + 1;
+        }
+        console.info(
+          `[SAM2] Filtered mask metadata: ${sam2Result.filteredMasksMetadata.length} removed — ${JSON.stringify(filteredClasses)}`,
+        );
+      }
       return { sam2Result, imageBytes: bytes };
     } else {
       console.warn(

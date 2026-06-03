@@ -113,6 +113,33 @@ interface SAM2SegmentResponse {
     inference_resolution?: string;
   };
   error?: string;
+  // ── Instrumentation fields (Pass 1 tuning) ──
+  timing_breakdown?: SAM2TimingBreakdown;
+  filtered_masks_metadata?: SAM2FilteredMaskMeta[];
+  filter_impact?: Record<string, number>;
+}
+
+/** Per-stage timing from the SAM2 /segment pipeline. */
+interface SAM2TimingBreakdown {
+  image_decode_ms: number;
+  image_resize_ms: number;
+  encoder_ms: number;
+  decoder_ms: number;
+  classify_ms: number;
+  polygon_ms: number;
+  filter_ms: number;
+  total_ms: number;
+}
+
+/** Metadata for a mask that was filtered out by roof_only or max_masks. */
+interface SAM2FilteredMaskMeta {
+  mask_index: number;
+  class_hint: string;
+  area: number;
+  bbox: number[];
+  confidence: number;
+  stability_score: number;
+  filter_reason: string; // "roof_only" | "max_masks"
 }
 
 interface SAM2HealthResponse {
@@ -173,6 +200,13 @@ export interface SAM2SegmentationResult {
   } | null;
   /** Error message if SAM 2 failed (for logging, not user-facing). */
   error: string | null;
+  // ── Instrumentation fields (Pass 1 tuning) ──
+  /** Per-stage timing breakdown from the Python service. */
+  timingBreakdown?: SAM2TimingBreakdown;
+  /** Metadata for masks removed by roof_only or max_masks filters. */
+  filteredMasksMetadata?: SAM2FilteredMaskMeta[];
+  /** Counts of masks removed at each filter stage. */
+  filterImpact?: Record<string, number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -606,6 +640,29 @@ export async function segmentWithSAM2(
       `[SAM2] Service call: OK — ${masks.length} masks in ${totalElapsedMs}ms (service_processing=${data.processing_time_ms}ms) — model=${data.model_info?.model_id ?? 'unknown'} device=${data.model_info?.device ?? 'unknown'} image=${data.image_width}x${data.image_height}`,
     );
 
+    // ── Instrumentation logging (Pass 1 tuning) ──
+    if (data.timing_breakdown) {
+      const tb = data.timing_breakdown;
+      console.info(
+        `[SAM2] Timing breakdown: decode=${tb.image_decode_ms.toFixed(0)}ms resize=${tb.image_resize_ms.toFixed(0)}ms encoder+decoder=${tb.encoder_ms.toFixed(0)}ms classify=${tb.classify_ms.toFixed(0)}ms polygon=${tb.polygon_ms.toFixed(0)}ms filter=${tb.filter_ms.toFixed(0)}ms total=${tb.total_ms.toFixed(0)}ms`,
+      );
+    }
+    if (data.filter_impact) {
+      const fi = data.filter_impact;
+      console.info(
+        `[SAM2] Filter impact: raw=${fi.raw_masks} → removed_by_area=${fi.removed_by_area} polygon_pts=${fi.removed_by_polygon_points} roof_only=${fi.removed_by_roof_only} max_masks=${fi.removed_by_max_masks} → remaining=${fi.remaining}`,
+      );
+    }
+    if (data.filtered_masks_metadata && data.filtered_masks_metadata.length > 0) {
+      const classCounts: Record<string, number> = {};
+      for (const fm of data.filtered_masks_metadata) {
+        classCounts[fm.class_hint] = (classCounts[fm.class_hint] ?? 0) + 1;
+      }
+      console.info(
+        `[SAM2] Filtered masks metadata: ${data.filtered_masks_metadata.length} masks removed — classes: ${JSON.stringify(classCounts)}`,
+      );
+    }
+
     return {
       usedSAM2: true,
       masks,
@@ -621,6 +678,10 @@ export async function segmentWithSAM2(
           }
         : null,
       error: null,
+      // ── Instrumentation fields (Pass 1 tuning) ──
+      timingBreakdown: data.timing_breakdown ?? undefined,
+      filteredMasksMetadata: data.filtered_masks_metadata ?? undefined,
+      filterImpact: data.filter_impact ?? undefined,
     };
   } catch (error) {
     const elapsedMs = Date.now() - t0;

@@ -325,7 +325,7 @@ class ONNXSAM2AutomaticMaskGenerator:
 
     def __init__(
         self,
-        points_per_side: int = 8,
+        points_per_side: int = 10,
         points_per_batch: int = 4,
         pred_iou_thresh: float = 0.6,
         stability_score_thresh: float = 0.85,

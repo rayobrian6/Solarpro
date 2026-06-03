@@ -16,13 +16,13 @@ services:
       - key: SAM2_MAX_MASKS
         value: "30"
       - key: SAM2_DOUGLAS_PEUCKER_EPSILON
-        value: "1.0"
+        value: "0.7"
       - key: SAM2_MAX_POLYGON_EDGE_LENGTH
-        value: "50"
+        value: "35"
       - key: SAM2_MAX_IMAGE_DIM
-        value: "384"
+        value: "512"
       - key: SAM2_POINTS_PER_SIDE
-        value: "8"
+        value: "10"
       - key: SAM2_POINTS_PER_BATCH
         value: "4"
       - key: SAM2_PRED_IOU_THRESH
