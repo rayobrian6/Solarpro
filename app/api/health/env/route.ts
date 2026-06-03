@@ -51,22 +51,22 @@ export async function GET(_req: NextRequest) {
     const checks: Record<string, EnvCheck> = {};
 
     // ── Auth (server-side) ──────────────────────────────────────────────────
-    checks.DATABASE_URL            = checkEnv('DATABASE_URL', 20, 'postgresql');
-    checks.JWT_SECRET              = checkEnv('JWT_SECRET', 20);
+    checks['auth_db']    = checkEnv('DATABASE_URL', 20, 'postgresql');
+    checks['auth_jwt']   = checkEnv('JWT_SECRET', 20);
 
     // ── Google Maps / 3D Tiles (client-side — NEXT_PUBLIC_*) ────────────────
-    checks.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY = checkEnv('NEXT_PUBLIC_GOOGLE_MAPS_API_KEY', 20);
+    checks['maps_client'] = checkEnv('NEXT_PUBLIC_GOOGLE_MAPS_API_KEY', 20);
 
     // ── Google server-side APIs ──────────────────────────────────────────────
-    checks.GOOGLE_MAPS_API_KEY     = checkEnv('GOOGLE_MAPS_API_KEY', 20);
-    checks.GOOGLE_SOLAR_API_KEY    = checkEnv('GOOGLE_SOLAR_API_KEY', 20);
+    checks['maps_server'] = checkEnv('GOOGLE_MAPS_API_KEY', 20);
+    checks['solar_api']   = checkEnv('GOOGLE_SOLAR_API_KEY', 20);
 
     // ── Optional but useful ─────────────────────────────────────────────────
-    checks.NEXT_PUBLIC_CESIUM_ION_TOKEN = checkEnv('NEXT_PUBLIC_CESIUM_ION_TOKEN', 10);
-    checks.OPENAI_API_KEY               = checkEnv('OPENAI_API_KEY', 20);
+    checks['cesium'] = checkEnv('NEXT_PUBLIC_CESIUM_ION_TOKEN', 10);
+    checks['ai']     = checkEnv('OPENAI_API_KEY', 20);
 
     // ── Critical checks (login + 3D tiles) ──────────────────────────────────
-    const criticalKeys = ['DATABASE_URL', 'JWT_SECRET', 'NEXT_PUBLIC_GOOGLE_MAPS_API_KEY'];
+    const criticalKeys = ['auth_db', 'auth_jwt', 'maps_client'];
     const allCriticalOk = criticalKeys.every(k => checks[k].status === 'ok');
     const anyMissing    = Object.values(checks).some(c => c.status !== 'ok');
 

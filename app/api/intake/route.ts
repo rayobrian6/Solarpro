@@ -20,10 +20,19 @@ export const runtime = 'nodejs';
 export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
+import { timingSafeEqual } from 'crypto';
 import { runIntakePipeline } from '@/lib/intake/intakePipeline';
 
+/** Constant-time string comparison to prevent timing attacks. */
+function safeStrEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  // ── Auth
+  // ── Auth (timing-safe comparison)
   const intakeKey = req.headers.get('x-intake-key') || req.headers.get('X-Intake-Key');
   const configuredKey = process.env.INTAKE_API_KEY;
 
@@ -32,7 +41,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Intake endpoint not configured' }, { status: 503 });
   }
 
-  if (!intakeKey || intakeKey !== configuredKey) {
+  if (!intakeKey || !safeStrEqual(intakeKey, configuredKey)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

@@ -22,18 +22,29 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from 'next/server';
+import { timingSafeEqual } from 'crypto';
 import { markStaleJobsAsFailed } from '@/lib/siteSurveys/geometryReconstruction/staleJobCleanup';
 
+/** Constant-time string comparison to prevent timing attacks. */
+function safeStrEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
 export async function GET(req: NextRequest) {
-  // Verify CRON_SECRET to prevent unauthorized access
+  // Verify CRON_SECRET to prevent unauthorized access (timing-safe)
   const cronSecret = req.headers.get('X-CRON-SECRET') ?? req.headers.get('Authorization')?.replace('Bearer ', '');
   const expectedSecret = process.env.CRON_SECRET;
 
-  if (expectedSecret && cronSecret !== expectedSecret) {
-    return NextResponse.json(
-      { success: false, error: 'Invalid or missing CRON_SECRET' },
-      { status: 401 },
-    );
+  if (expectedSecret) {
+    if (!cronSecret || !safeStrEqual(cronSecret, expectedSecret)) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid or missing CRON_SECRET' },
+        { status: 401 },
+      );
+    }
   }
 
   try {

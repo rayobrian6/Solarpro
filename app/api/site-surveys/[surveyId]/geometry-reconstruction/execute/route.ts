@@ -29,6 +29,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 300; // Full 5-minute timeout — pipeline is awaited directly
 
 import { NextRequest, NextResponse } from 'next/server';
+import { timingSafeEqual } from 'crypto';
 import {
   updateReconstructionJobStatus,
   updateJobHeartbeatInDb,
@@ -52,7 +53,16 @@ import { writeUnifiedArtifacts, deleteUnifiedArtifactsBySurvey } from '@/lib/sit
 import type { GeometryReconstructionInput } from '@/lib/siteSurveys/geometryReconstruction/types';
 
 // Internal auth token -- must match the token used by /start route
-const INTERNAL_AUTH_TOKEN = process.env.INTERNAL_WORKER_AUTH_TOKEN ?? 'geometry-recon-worker-2025';
+// SECURITY: No hardcoded fallback — env var is REQUIRED. If not set, endpoint is disabled.
+const INTERNAL_AUTH_TOKEN = process.env.INTERNAL_WORKER_AUTH_TOKEN ?? '';
+
+/** Constant-time string comparison to prevent timing attacks. */
+function safeStrEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
 
 /** Heartbeat interval: update last_heartbeat_at every 30s during pipeline execution. */
 const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -79,9 +89,9 @@ export async function POST(
   const surveyId = params?.surveyId ?? 'unknown';
   const tRouteStart = Date.now();
 
-  // -- Internal auth check ---------------------------------------------------
-  const authToken = req.headers.get('X-Internal-Auth');
-  if (authToken !== INTERNAL_AUTH_TOKEN) {
+  // -- Internal auth check (timing-safe, no fallback token) -------------------
+  const authToken = req.headers.get('X-Internal-Auth') ?? '';
+  if (!INTERNAL_AUTH_TOKEN || !safeStrEqual(authToken, INTERNAL_AUTH_TOKEN)) {
     console.warn(`[POST geometry-reconstruction/execute] Unauthorized execution attempt for survey=${surveyId}`);
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
   }

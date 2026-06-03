@@ -43,8 +43,8 @@ import bcrypt from 'bcryptjs';
 
 function secretFingerprint(secret: string): string {
   if (!secret) return 'EMPTY';
-  const sum = secret.split('').reduce((s, c) => s + c.charCodeAt(0), 0) % 9999;
-  return `len=${secret.length}_head=${secret.slice(0, 4)}_tail=${secret.slice(-4)}_sum=${sum}`;
+  // SECURITY: Only report length — do not expose head/tail/sum which enable partial reconstruction
+  return `len=${secret.length}`;
 }
 
 export async function GET(req: NextRequest) {
@@ -64,7 +64,6 @@ export async function GET(req: NextRequest) {
     : null;
 
   const result: Record<string, unknown> = {
-    nodeEnv:         process.env.NODE_ENV ?? 'unknown',
     cookieName:      COOKIE_NAME,
     cookieOptions: {
       httpOnly: true,
@@ -128,11 +127,11 @@ export async function GET(req: NextRequest) {
       if (rows.length > 0) {
         result.userId = rows[0].id;
         result.userRole = rows[0].role;
-        // Check if password_hash looks valid (bcrypt hashes start with $2b$ or $2a$)
+        // SECURITY: Do not return password_hash or any derived hash details to the API response.
+        // Report only whether a hash is present and looks structurally valid.
         const hash = rows[0].password_hash ?? '';
         result.passwordHashPresent = !!hash;
         result.passwordHashLooksValid = hash.startsWith('$2b$') || hash.startsWith('$2a$');
-        result.passwordHashLength = hash.length;
 
         // ── 6. Password verify (non-prod only, optional) ────────────────────
         if (password && process.env.NODE_ENV !== 'production') {

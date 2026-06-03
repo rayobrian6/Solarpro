@@ -51,11 +51,11 @@ export async function GET() {
     dbError = (err as Error)?.message ?? 'unknown error';
   }
 
-  // 2. Required env vars
+  // 2. Required env vars — only report count, not names (prevents enumeration)
   const REQUIRED = ['DATABASE_URL', 'JWT_SECRET'];
-  const missingRequired = REQUIRED.filter(v => !process.env[v]);
+  const missingRequiredCount = REQUIRED.filter(v => !process.env[v]).length;
 
-  // 3. Optional/recommended env vars
+  // 3. Optional/recommended env vars — only report count, not names (prevents enumeration)
   const OPTIONAL = [
     'RESEND_API_KEY',
     'NEXT_PUBLIC_APP_URL',
@@ -66,12 +66,12 @@ export async function GET() {
     'STRIPE_WEBHOOK_SECRET',
     'NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY',
   ];
-  const missingOptional = OPTIONAL.filter(v => {
+  const missingOptionalCount = OPTIONAL.filter(v => {
     const val = process.env[v];
     if (!val) return true;
     if (val.includes('YOUR_') || val === 're_YOUR_RESEND_API_KEY_HERE') return true;
     return false;
-  });
+  }).length;
 
   // 4. Base URL check
   const baseUrlValue = getBaseUrl();
@@ -92,15 +92,13 @@ export async function GET() {
   const monitoringProvider = monitoringOk ? 'sentry' : 'console-only';
 
   // Overall status
-  const unhealthy = !dbOk || missingRequired.length > 0;
-  const degraded  = !unhealthy && (missingOptional.length > 0 || !baseUrlOk || !emailConfigured);
+  const unhealthy = !dbOk || missingRequiredCount > 0;
+  const degraded  = !unhealthy && (missingOptionalCount > 0 || !baseUrlOk || !emailConfigured);
   const status    = unhealthy ? 'unhealthy' : degraded ? 'degraded' : 'healthy';
 
   const body = {
     status,
     version:    BUILD_VERSION,
-    node_env:   process.env.NODE_ENV   ?? 'unknown',
-    vercel_env: process.env.VERCEL_ENV ?? 'local',
     timestamp:  new Date().toISOString(),
     elapsed_ms: Date.now() - start,
 
@@ -111,17 +109,16 @@ export async function GET() {
         ...(dbError ? { error: dbError } : {}),
       },
       env_required: {
-        ok:      missingRequired.length === 0,
-        missing: missingRequired,
+        ok:            missingRequiredCount === 0,
+        missing_count: missingRequiredCount,
       },
       env_optional: {
-        ok:      missingOptional.length === 0,
-        missing: missingOptional,
+        ok:            missingOptionalCount === 0,
+        missing_count: missingOptionalCount,
       },
       base_url: {
         ok:     baseUrlOk,
-        value:  baseUrlValue,
-        source: baseUrlSource,
+        // Don't expose the actual base URL value or source to unauthenticated callers
       },
       email: {
         ok:         emailConfigured,
@@ -130,9 +127,6 @@ export async function GET() {
       monitoring: {
         ok:       monitoringOk,
         provider: monitoringProvider,
-        note:     monitoringOk
-          ? 'Sentry DSN configured -- errors will be reported'
-          : 'Set SENTRY_DSN env var to enable Sentry error reporting',
       },
     },
   };

@@ -17,6 +17,7 @@ export const revalidate = 0;
 export const maxDuration = 45;
 
 import { NextRequest, NextResponse } from 'next/server';
+import { timingSafeEqual } from 'crypto';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, isValidUUID, handleRouteDbError } from '@/lib/db-neon';
 import { buildCanonicalProposal } from '@/lib/proposal/buildCanonicalProposal';
@@ -24,6 +25,14 @@ import { renderProposalHTML, ProposalBranding } from '@/lib/proposal/renderPropo
 import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
 import type { Proposal } from '@/types';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+
+/** Constant-time string comparison to prevent timing attacks on share tokens. */
+function safeStrEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
 
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -46,8 +55,8 @@ async function loadProposal(id: string, req: NextRequest): Promise<Proposal | nu
   if (!user && !tokenParam) return null;
 
   if (!user && tokenParam) {
-    // Public share token path — validate token
-    if (row.share_token !== tokenParam) return null;
+    // Public share token path — validate token (timing-safe)
+    if (!safeStrEqual(row.share_token as string, tokenParam)) return null;
   } else if (user) {
     // Auth path — verify ownership via projects JOIN
     const owned = await sql`

@@ -90,3 +90,4 @@ __pycache__/
 
 # Worker build output
 worker/dist/
+.env*

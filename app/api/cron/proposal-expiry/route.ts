@@ -21,9 +21,18 @@ export const runtime     = 'nodejs';
 export const maxDuration = 60;
 
 import { NextRequest, NextResponse }       from 'next/server';
+import { timingSafeEqual }                 from 'crypto';
 import { getDbReady, handleRouteDbError }  from '@/lib/db-neon';
 import { sendProposalExpiryReminderEmail } from '@/lib/email';
 import { getBaseUrl }                      from '@/lib/env';
+
+/** Constant-time string comparison to prevent timing attacks. */
+function safeStrEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
 
 const REMINDER_DAYS_BEFORE = 3;    // send reminder 3 days before expiry
 const WINDOW_HOURS         = 12;   // ±12h window to avoid duplicate sends
@@ -35,7 +44,7 @@ export async function GET(req: NextRequest) {
 
   if (cronSecret) {
     const expectedBearer = `Bearer ${cronSecret}`;
-    if (!authHeader || authHeader !== expectedBearer) {
+    if (!authHeader || !safeStrEqual(authHeader, expectedBearer)) {
       return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
     }
   } else if (process.env.NODE_ENV === 'production') {

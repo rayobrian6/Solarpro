@@ -241,7 +241,7 @@ export function middleware(req: NextRequest) {
       return new NextResponse(null, {
         status: 204,
         headers: {
-          'Access-Control-Allow-Origin':  isTrustedOrigin ? origin : '*',
+          'Access-Control-Allow-Origin':  isTrustedOrigin ? origin : '',
           'Access-Control-Allow-Methods': 'GET, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type',
           'Access-Control-Max-Age':       '86400',
