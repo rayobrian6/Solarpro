@@ -41,6 +41,7 @@ import {
   SEGMENTATION_WORKER_VERSION,
   type SegmentationWorkerOutput,
   type PhotoSegmentationResult,
+  type SegmentationBatchCallback,
 } from './workers/segmentation/runSegmentationWorker';
 import { runLineExtractionFromReconstructionInput } from './workers/lineExtraction/runLineExtractionWorker';
 import { estimateVanishingPointsFromReconstructionInput } from './workers/perspective/estimateVanishingPoints';
@@ -204,6 +205,54 @@ function nextStageAfter(currentStage: string): string | null {
   return STAGE_ORDER[idx + 1];
 }
 
+/**
+ * Adapt a CheckpointCallback into a SegmentationBatchCallback for sub-stage
+ * checkpointing during the long-running segmentation stage.
+ *
+ * Problem: P0 checkpoints fire only AFTER a complete stage, but SAM2
+ * segmentation takes 200–440s (multiple batches × ~55s each). If the
+ * process dies mid-segmentation, zero artifacts survive.
+ *
+ * Solution: This adapter fires the pipeline's CheckpointCallback after each
+ * SAM2 batch completes, treating each batch as a partial "segmentation"
+ * checkpoint. The callback receives the accumulated artifacts so far,
+ * enabling incremental DB persistence every ~20–40s instead of ~440s.
+ *
+ * The stage name is always 'segmentation' and nextStage is always
+ * 'line_extraction' (the stage after segmentation), because the pipeline
+ * hasn't moved past segmentation yet. This is intentional — the caller
+ * can use the batchIndex to distinguish sub-stage from final-stage
+ * checkpoints if needed.
+ */
+function adaptBatchCallback(
+  checkpointCallback: CheckpointCallback | undefined,
+  pipelineStart: number,
+  stageDurationsRef: { value: Record<string, number> },
+): SegmentationBatchCallback | undefined {
+  if (!checkpointCallback) return undefined;
+
+  return async (batchCheckpoint) => {
+    // Build a PipelineCheckpoint from the batch checkpoint.
+    // The segmentation stage is still in progress, so we report
+    // the partial duration accumulated so far.
+    const partialDurationMs = batchCheckpoint.elapsedMs;
+    const stageDurations = { ...stageDurationsRef.value };
+    // Don't overwrite a previous segmentation duration — accumulate
+    if (!stageDurations['segmentation']) {
+      stageDurations['segmentation'] = partialDurationMs;
+    }
+
+    await checkpointCallback({
+      stage: 'segmentation',
+      stageArtifacts: batchCheckpoint.allArtifacts,
+      allArtifacts: batchCheckpoint.allArtifacts,
+      stageDurations,
+      elapsedMs: Date.now() - pipelineStart,
+      nextStage: 'line_extraction',
+    });
+  };
+}
+
 // ──── Full Pipeline Orchestration ─────────────────────────────────────────────
 
 /**
@@ -237,9 +286,18 @@ export async function runFullGeometryReconstructionPipeline(
     `[Pipeline B] Starting full pipeline for survey=${input.surveyId} photos=${input.sourcePhotos.length} pipeline=${input.pipeline}`,
   );
 
-  // ──── Stage 1: Segmentation ──────────────────────────────────────────────
+  // ──── Stage 1: Segmentation ────────────────────────────────────────────
+  // P1 — Adapt the pipeline checkpoint callback into a sub-stage batch
+  // callback so that each SAM2 batch (~20-40s) persists artifacts instead
+  // of waiting for the full segmentation stage (~200-440s) to complete.
+  const stageDurationsRef = { value: stageDurations };
+  const segBatchCallback = adaptBatchCallback(
+    checkpointCallback,
+    pipelineStart,
+    stageDurationsRef,
+  );
   const segFullOutput = await asyncStageTimer('segmentation', () =>
-    runSegmentationFullOutput(input),
+    runSegmentationFullOutput(input, segBatchCallback),
   );
   const segResult = segFullOutput.result;
   const segFields = segReportFields(segResult);
@@ -478,7 +536,9 @@ export async function runSegmentationOnlyPipeline(
   checkpointCallback?: CheckpointCallback,
 ): Promise<FullPipelineResult> {
   const start = Date.now();
-  const segOutput = await runSegmentationFullOutput(input);
+  const stageDurationsRef = { value: {} as Record<string, number> };
+  const segBatchCallback = adaptBatchCallback(checkpointCallback, start, stageDurationsRef);
+  const segOutput = await runSegmentationFullOutput(input, segBatchCallback);
   const segFields = segReportFields(segOutput);
   const durationMs = Date.now() - start;
   const stageDurations: Record<string, number> = { segmentation: durationMs };
@@ -515,8 +575,10 @@ export async function runDepthOnlyPipeline(
   const start = Date.now();
   const stageDurations: Record<string, number> = {};
 
-  // Run segmentation first to get masks
-  const segOutput = await runSegmentationFullOutput(input);
+  // Run segmentation first to get masks (with sub-stage batch checkpointing)
+  const stageDurationsRef = { value: stageDurations };
+  const segBatchCallback = adaptBatchCallback(checkpointCallback, start, stageDurationsRef);
+  const segOutput = await runSegmentationFullOutput(input, segBatchCallback);
   const segFields = segReportFields(segOutput);
   const segArtifacts = segOutput.artifacts;
   const segDurationMs = Date.now() - start;

@@ -87,3 +87,6 @@ build-output.log
 .psiphon_data/
 __pycache__/
 *.pyc
+
+# Worker build output
+worker/dist/

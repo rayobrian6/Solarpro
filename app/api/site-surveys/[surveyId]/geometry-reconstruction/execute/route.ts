@@ -1,46 +1,22 @@
 /**
  * POST /api/site-surveys/[surveyId]/geometry-reconstruction/execute
  *
- * Background worker endpoint for executing the geometry reconstruction pipeline.
+ * Internal worker endpoint for executing the geometry reconstruction pipeline.
  *
- * NOTE: The /start route now runs the pipeline INLINE (maxDuration=300) and
- * returns 200 with results directly. This /execute endpoint is kept as a
- * fallback for:
- *   - Stale-job recovery: if a job is stuck in 'queued' or 'running' state
- *   - Manual retry: if the inline execution failed and needs to be re-run
- *   - Debugging: can be called directly to test the pipeline
+ * P1 — Execution Architecture: Render Background Worker
+ *   - This endpoint is a MANUAL TRIGGER / FALLBACK for pipeline execution.
+ *   - The primary execution path is the Render background worker (worker/main.ts),
+ *     which polls DB for queued jobs and claims them directly.
+ *   - This endpoint can be used for:
+ *     - Stale-job recovery: re-run a job that's stuck in 'queued' or 'running'
+ *     - Manual retry: re-execute a failed job
+ *     - Debugging: test the pipeline directly
+ *     - Vercel Cron fallback: if the Render worker is down, a Vercel Cron
+ *       can call this endpoint to trigger execution
  *
- * This endpoint is NOT called by the normal /start flow. The /start route
- * runs the pipeline directly and returns the result inline.
- *
- * Architecture (current):
- *   POST /start -> create job -> run pipeline inline -> return 200/500
- *   GET /status -> poll DB -> return progress
- *   POST /execute -> (fallback) run pipeline for a specific job
- *
- * P0 — Execution Stability (checkpoint persistence):
- *   - checkpointCallback persists stageArtifacts to DB after each stage
- *   - deleteArtifactsByJob (not deleteArtifactsBySurvey) preserves partial
- *     artifacts from other jobs/runs on the same survey
- *   - stageDurations and failureStage are recorded on the job for diagnostics
- *   - Heartbeat timer includes current stage name for real-time progress
- *
- * WHY WE AWAIT DIRECTLY (not waitUntil):
- *   The /start route now runs the pipeline inline, so this endpoint is only
- *   used as a fallback. When called directly (e.g., for stale-job recovery),
- *   we await the pipeline directly to ensure outbound fetch calls to the
- *   SAM2 Render service are properly sustained for the full pipeline duration.
- *   This is critical — the old waitUntil() approach caused Render to never
- *   receive segmentation requests because waitUntil is designed for short-lived
- *   side effects, not long-running background jobs.
- *
- * Heartbeat protocol:
- *   - Initial heartbeat written when job is marked as running (stage='segmentation')
- *   - After each pipeline stage completes, currentStage + last_heartbeat_at are updated
- *   - A periodic heartbeat timer fires every 30s to prevent staleness during
- *     long-running stages (especially SAM2 segmentation which can take ~250s)
- *   - If the function times out or crashes, heartbeat staleness detection
- *     (HEARTBEAT_TIMEOUT_MS = 10min) will mark the job as failed
+ * NOTE: This endpoint is still subject to Vercel's maxDuration=300 limit.
+ * For production use, the Render worker (which has no timeout) is preferred.
+ * This endpoint exists as a safety net and for development/testing.
  *
  * Security: Requires X-Internal-Auth header matching INTERNAL_WORKER_AUTH_TOKEN.
  * This endpoint is NOT intended for external use -- it's an internal worker trigger.
@@ -61,6 +37,8 @@ import {
   updateJobStageDurations,
   updateJobFailureStage,
   getSurveyOwnerId,
+  claimJobById,
+  releaseJobLock,
 } from '@/lib/db/geometryReconstruction';
 import {
   runFullGeometryReconstructionPipeline,
@@ -134,25 +112,25 @@ export async function POST(
     );
   }
 
-  // -- Mark job as running with initial heartbeat ----------------------------
-  try {
-    await updateReconstructionJobStatus(jobId, 'running');
-    // Set initial stage to 'segmentation' (first pipeline stage)
-    await updateJobHeartbeatInDb(jobId, 'segmentation');
-    console.info(
-      `[POST geometry-reconstruction/execute] Job ${jobId} marked as running for pipeline=${pipeline}, survey=${surveyId}`,
+  // -- Claim the job atomically (P1: prevents duplicate execution) -----------
+  const workerId = `vercel-execute-${Date.now()}`;
+  const claimedJob = await claimJobById(jobId, workerId);
+  if (!claimedJob) {
+    console.warn(
+      `[POST geometry-reconstruction/execute] Could not claim job=${jobId} — ` +
+      `already claimed or not in 'queued' status`,
     );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[POST geometry-reconstruction/execute] Failed to mark job=${jobId} as running: ${msg}`);
     return NextResponse.json(
-      { success: false, error: `Failed to mark job as running: ${msg}` },
-      { status: 500 },
+      { success: false, error: `Job ${jobId} could not be claimed — it may already be running or completed` },
+      { status: 409 },
     );
   }
 
+  console.info(
+    `[POST geometry-reconstruction/execute] Job ${jobId} claimed by worker=${workerId} for pipeline=${pipeline}`,
+  );
+
   // -- Fire SAM2 warmup as early as possible ---------------------------------
-  // This triggers model loading on Render's cold start while we set up.
   const sam2WasEnabled = isSAM2Enabled();
   if (sam2WasEnabled) {
     console.info(
@@ -160,15 +138,12 @@ export async function POST(
     );
   } else {
     console.warn(
-      `[POST geometry-reconstruction/execute] SAM2_SERVICE_URL is NOT set — pipeline will use Canny as explicit backend (no Render calls)`,
+      `[POST geometry-reconstruction/execute] SAM2_SERVICE_URL is NOT set — pipeline will use Canny as explicit backend`,
     );
   }
   warmupSAM2Service();
 
   // -- Resolve survey owner's userId for artifact persistence ----------------
-  // This endpoint runs with internal auth (no user session), so we need
-  // to look up the survey owner to pass to verifySurveyOwnership inside
-  // insertReconstructionArtifactsBatch.
   let surveyOwnerUserId: string | null = null;
   try {
     surveyOwnerUserId = await getSurveyOwnerId(surveyId);
@@ -179,6 +154,7 @@ export async function POST(
     const msg = ownerErr instanceof Error ? ownerErr.message : String(ownerErr);
     console.error(`[POST geometry-reconstruction/execute] ${msg}`);
     await updateReconstructionJobStatus(jobId, 'failed');
+    await releaseJobLock(jobId);
     return NextResponse.json({ success: false, error: msg }, { status: 500 });
   }
 
@@ -189,9 +165,7 @@ export async function POST(
   // Start heartbeat timer — includes current stage name
   const stopHeartbeat = startHeartbeatTimer(jobId, () => latestStage);
 
-  // ── Checkpoint callback: persists artifacts to DB after each stage ────────
-  // P0 fix: artifacts are persisted incrementally so that if the Vercel
-  // function times out at 300s, all artifacts from completed stages survive.
+  // ── Checkpoint callback: persists artifacts to DB after each stage ──────────
   const checkpointCallback: CheckpointCallback = async (checkpoint) => {
     const { stage, stageArtifacts, stageDurations, elapsedMs, nextStage } = checkpoint;
 
@@ -291,17 +265,8 @@ export async function POST(
     );
 
     const rawArtifactCount = artifacts.length;
-    const rawConsensusPlaneCount = artifacts.filter(
-      (artifact) => artifact.artifactType === 'consensus_plane_candidate',
-    ).length;
-    const rawPolygonArtifactCount = artifacts.filter(
-      (artifact) => 'polygon' in artifact && Array.isArray(artifact.polygon) && artifact.polygon.length > 0,
-    ).length;
 
-    // ── Final artifact persistence ─────────────────────────────────────────
-    // Replace checkpointed partial artifacts with the complete set.
-    // deleteArtifactsByJob (not deleteArtifactsBySurvey) preserves artifacts
-    // from other jobs on the same survey.
+    // ── Final artifact persistence ────────────────────────────────────────────
     const tDbStart = Date.now();
     const deletedReconCount = await deleteArtifactsByJob(jobId);
     if (deletedReconCount > 0) {
@@ -342,8 +307,9 @@ export async function POST(
       );
     }
 
-    // Mark job as completed
+    // Mark job as completed and release lock
     await updateReconstructionJobStatus(jobId, 'completed');
+    await releaseJobLock(jobId);
 
     const routeDurationMs = Date.now() - tRouteStart;
     console.info(
@@ -367,10 +333,7 @@ export async function POST(
     });
 
   } catch (pipelineErr) {
-    // ── Pipeline execution failed — preserve partial artifacts ───────────────
-    // P0 fix: artifacts from completed stages were already checkpointed to DB
-    // by the callback. We record the failure metadata but do NOT delete the
-    // checkpointed artifacts — they survive as partial results for diagnostics.
+    // ── Pipeline execution failed — preserve partial artifacts ──────────────
     const errMsg = pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr);
     console.error(`[POST geometry-reconstruction/execute] Pipeline execution failed for job=${jobId}: ${errMsg}`);
 
@@ -385,7 +348,7 @@ export async function POST(
       );
     }
 
-    // Mark job as failed (best-effort)
+    // Mark job as failed and release lock (best-effort)
     try {
       await updateReconstructionJobStatus(jobId, 'failed');
     } catch (markFailedErr) {
@@ -394,12 +357,7 @@ export async function POST(
         markFailedErr instanceof Error ? markFailedErr.message : String(markFailedErr),
       );
     }
-
-    // Log how many checkpointed artifacts survived the failure
-    console.info(
-      `[POST geometry-reconstruction/execute] Job ${jobId} failed at stage=${latestStage}. ` +
-      `Checkpointed artifacts from earlier stages may be available in the DB.`,
-    );
+    await releaseJobLock(jobId);
 
     return NextResponse.json({
       success: false,

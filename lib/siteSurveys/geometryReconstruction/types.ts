@@ -650,6 +650,10 @@ export interface GeometryReconstructionJob {
   stageDurations: Record<string, number> | null;
   /** Stage where the pipeline failed (null if completed or not started yet). */
   failureStage: string | null;
+  /** Worker identity that claimed this job (e.g. 'render-worker-abc123'). Null if unclaimed. */
+  lockedBy: string | null;
+  /** When this job was claimed by a worker. Null if unclaimed. */
+  lockedAt: string | null;
   authority: GeometryReconstructionAuthority;
   limitations: string[];
 }

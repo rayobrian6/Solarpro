@@ -219,6 +219,8 @@ export const mockGeometryReconstructionService: GeometryReconstructionService = 
       workerVersion: 'mock-1.0.0',
       stageDurations: null,
       failureStage: null,
+      lockedBy: null,
+      lockedAt: null,
       authority: { ...REVIEW_ONLY_AUTHORITY },
       limitations: [...MOCK_LIMITATIONS],
     };
@@ -254,6 +256,8 @@ export const mockGeometryReconstructionService: GeometryReconstructionService = 
       workerVersion: 'mock-1.0.0',
       stageDurations: null,
       failureStage: null,
+      lockedBy: null,
+      lockedAt: null,
       authority: { ...REVIEW_ONLY_AUTHORITY },
       limitations: [...MOCK_LIMITATIONS],
     };

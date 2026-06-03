@@ -275,6 +275,55 @@ const CONTOUR_TO_SEGMENTATION_CLASS: Record<ContourClassification, SegmentationC
 };
 
 // ---------------------------------------------------------------------------
+// Sub-stage checkpoint — persists artifacts after each SAM2 batch
+// ---------------------------------------------------------------------------
+
+/**
+ * Sub-stage checkpoint emitted after each batch of photos is processed
+ * during the segmentation stage. This enables incremental persistence
+ * of segmentation masks before the entire stage completes.
+ *
+ * Without sub-stage checkpoints, the P0 checkpoint system fires only
+ * AFTER segmentation completes — but segmentation itself takes 200-440s,
+ * so if the process dies mid-segmentation, zero artifacts survive.
+ * With sub-stage checkpoints, each batch of 2 photos (~20-40s) produces
+ * artifacts that are persisted immediately.
+ *
+ * P1 — Execution Architecture: Render Background Worker
+ * REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
+ */
+export interface SegmentationBatchCheckpoint {
+  /** Which batch this is (0-indexed). */
+  batchIndex: number;
+  /** Total photos in this batch. */
+  batchSize: number;
+  /** Artifacts produced by this batch only. */
+  batchArtifacts: SemanticSegmentationMask[];
+  /** All artifacts accumulated so far across all batches. */
+  allArtifacts: SemanticSegmentationMask[];
+  /** Photos successfully processed so far. */
+  photosProcessed: number;
+  /** Total photos to process. */
+  photosTotal: number;
+  /** Elapsed time since segmentation stage start in ms. */
+  elapsedMs: number;
+}
+
+/**
+ * Callback invoked after each SAM2 batch completes during segmentation.
+ * Used for sub-stage checkpoint persistence — the caller can persist
+ * batch artifacts to DB immediately, ensuring no work is lost if the
+ * process is killed during the long-running segmentation stage.
+ *
+ * The callback is best-effort: if it throws, the segmentation worker
+ * logs the error but continues processing. Checkpoint failures must NOT
+ * abort the segmentation stage.
+ */
+export type SegmentationBatchCallback = (
+  checkpoint: SegmentationBatchCheckpoint,
+) => Promise<void>;
+
+// ---------------------------------------------------------------------------
 // Main worker function (async — uses sharp for real extraction)
 // ---------------------------------------------------------------------------
 
@@ -292,7 +341,10 @@ const CONTOUR_TO_SEGMENTATION_CLASS: Record<ContourClassification, SegmentationC
  * sees "FAILED" — not garbage Canny visuals pretending to be real segmentation.
  * Canny is only used as an explicit backend when SAM2 is not configured at all.
  */
-export async function runSegmentationWorker(input: SegmentationWorkerInput): Promise<SegmentationWorkerOutput> {
+export async function runSegmentationWorker(
+  input: SegmentationWorkerInput,
+  batchCallback?: SegmentationBatchCallback,
+): Promise<SegmentationWorkerOutput> {
   const timings: Record<string, number> = {};
   const artifacts: SemanticSegmentationMask[] = [];
   const photoResults: PhotoSegmentationResult[] = [];
@@ -705,6 +757,7 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
   // process 2 requests concurrently — both requests are sent at the same
   // time, and both run inference in parallel on the service side.
   let photoIndex = 0;
+  let batchIndex = 0;
   while (photoIndex < sourcePhotos.length) {
     // Check global limits before starting a new batch
     if (artifacts.length >= MAX_TOTAL_MASKS) {
@@ -825,7 +878,31 @@ export async function runSegmentationWorker(input: SegmentationWorkerInput): Pro
       }
     }
 
+    // ── Sub-stage checkpoint: persist batch artifacts immediately ──────────
+    // P1 — Each SAM2 batch takes ~20-40s. Without this checkpoint, if the
+    // process is killed mid-segmentation, all artifacts from completed
+    // batches are lost. With this, artifacts from each batch survive.
+    if (batchCallback && artifacts.length > 0) {
+      try {
+        await batchCallback({
+          batchIndex,
+          batchSize: batch.length,
+          batchArtifacts: batchResults.flatMap((r) => r.newArtifacts),
+          allArtifacts: [...artifacts],
+          photosProcessed: photoIndex + batch.length,
+          photosTotal: sourcePhotos.length,
+          elapsedMs: Date.now() - t1,
+        });
+      } catch (callbackErr) {
+        const cbMsg = callbackErr instanceof Error ? callbackErr.message : String(callbackErr);
+        console.warn(
+          `[SAM2] Sub-stage checkpoint failed for batch=${batchIndex}: ${cbMsg} (non-fatal)`,
+        );
+      }
+    }
+
     photoIndex += batch.length;
+    batchIndex++;
   }
 
   // Record mask_generation timing (t1 was set at start of Stage 2)
@@ -1034,6 +1111,7 @@ function computeMaskBounds(polygon: NormalizedPoint[]): import('@/lib/assistedEv
  */
 export async function runSegmentationFromReconstructionInput(
   input: GeometryReconstructionInput,
+  batchCallback?: SegmentationBatchCallback,
 ): Promise<GeometryReconstructionArtifact[]> {
   const workerInput: SegmentationWorkerInput = {
     surveyId: input.surveyId,
@@ -1046,7 +1124,7 @@ export async function runSegmentationFromReconstructionInput(
     config: input.config as SegmentationWorkerInput['config'] | undefined,
   };
 
-  const output = await runSegmentationWorker(workerInput);
+  const output = await runSegmentationWorker(workerInput, batchCallback);
   return output.artifacts;
 }
 
@@ -1056,6 +1134,7 @@ export async function runSegmentationFromReconstructionInput(
  */
 export async function runSegmentationFullOutput(
   input: GeometryReconstructionInput,
+  batchCallback?: SegmentationBatchCallback,
 ): Promise<SegmentationWorkerOutput> {
   const workerInput: SegmentationWorkerInput = {
     surveyId: input.surveyId,
@@ -1068,5 +1147,5 @@ export async function runSegmentationFullOutput(
     config: input.config as SegmentationWorkerInput['config'] | undefined,
   };
 
-  return runSegmentationWorker(workerInput);
+  return runSegmentationWorker(workerInput, batchCallback);
 }

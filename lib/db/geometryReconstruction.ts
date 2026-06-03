@@ -43,6 +43,8 @@ interface JobRow {
   worker_version: string | null;
   stage_durations: Record<string, number> | null;
   failure_stage: string | null;
+  locked_by: string | null;
+  locked_at: string | null;
 }
 
 /** DB row shape for site_survey_geometry_reconstruction_artifacts. */
@@ -124,7 +126,8 @@ export async function insertReconstructionJob(
       ${surveyId}, 'queued', ${pipeline}, ${JSON.stringify(input)}
     )
     RETURNING id, survey_id, status, pipeline, input, created_at, updated_at, completed_at,
-              current_stage, last_heartbeat_at, worker_version, stage_durations, failure_stage
+              current_stage, last_heartbeat_at, worker_version, stage_durations, failure_stage,
+              locked_by, locked_at
   `;
 
   const row = rows[0] as unknown as JobRow;
@@ -137,7 +140,8 @@ export async function getReconstructionJobById(jobId: string): Promise<GeometryR
 
   const rows = await sql`
     SELECT id, survey_id, status, pipeline, input, created_at, updated_at, completed_at,
-           current_stage, last_heartbeat_at, worker_version, stage_durations, failure_stage
+           current_stage, last_heartbeat_at, worker_version, stage_durations, failure_stage,
+           locked_by, locked_at
     FROM site_survey_geometry_reconstruction_jobs
     WHERE id = ${jobId}
     LIMIT 1
@@ -200,7 +204,8 @@ export async function updateReconstructionJobStatus(
         completed_at = ${completedValue}
     WHERE id = ${jobId}
     RETURNING id, survey_id, status, pipeline, input, created_at, updated_at, completed_at,
-              current_stage, last_heartbeat_at, worker_version, stage_durations, failure_stage
+              current_stage, last_heartbeat_at, worker_version, stage_durations, failure_stage,
+              locked_by, locked_at
   `;
 
   if (!rows.length) return null;
@@ -475,7 +480,8 @@ export async function getArtifactsBySurvey(
   const jobRows = await sql`
     SELECT id, survey_id, status, pipeline, input, created_at, updated_at, completed_at,
            current_stage, last_heartbeat_at, worker_version,
-           stage_durations, failure_stage
+           stage_durations, failure_stage,
+           locked_by, locked_at
     FROM site_survey_geometry_reconstruction_jobs
     WHERE survey_id = ${surveyId}
     ORDER BY created_at DESC
@@ -502,6 +508,8 @@ export async function getArtifactsBySurvey(
       workerVersion: null,
       stageDurations: null,
       failureStage: null,
+      lockedBy: null,
+      lockedAt: null,
       authority: REVIEW_ONLY_AUTHORITY,
       limitations: [...BASE_LIMITATIONS],
     };
@@ -515,6 +523,141 @@ export async function getArtifactsBySurvey(
     authority: REVIEW_ONLY_AUTHORITY,
     limitations: [...BASE_LIMITATIONS],
   };
+}
+
+// ---------------------------------------------------------------------------
+// Worker claim / lock operations
+// ---------------------------------------------------------------------------
+
+/** Lock timeout — if a lock is older than this, consider it stale and reclaimable. */
+const LOCK_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+/**
+ * Claim the next available queued job for a worker. Atomic CAS on locked_by IS NULL.
+ * Returns the claimed job (with status set to 'running') or null if no job available.
+ *
+ * This is the core of the P1 worker architecture: only one worker can claim a given job.
+ * The CAS pattern (WHERE locked_by IS NULL) prevents duplicate execution.
+ */
+export async function claimNextQueuedJob(
+  workerId: string,
+): Promise<GeometryReconstructionJob | null> {
+  const sql = await getDbReady();
+
+  // First, reclaim any stale locks (locked_at > 10 min ago, still 'queued' or 'running')
+  await sql`
+    UPDATE site_survey_geometry_reconstruction_jobs
+    SET locked_by = NULL,
+        locked_at = NULL,
+        updated_at = NOW()
+    WHERE locked_by IS NOT NULL
+      AND locked_at < NOW() - INTERVAL '10 minutes'
+      AND status IN ('queued', 'running')
+  `;
+
+  // Claim the next available queued job atomically
+  const rows = await sql`
+    UPDATE site_survey_geometry_reconstruction_jobs
+    SET status = 'running',
+        locked_by = ${workerId},
+        locked_at = NOW(),
+        current_stage = 'segmentation',
+        last_heartbeat_at = NOW(),
+        updated_at = NOW()
+    WHERE id = (
+      SELECT id FROM site_survey_geometry_reconstruction_jobs
+      WHERE status = 'queued' AND locked_by IS NULL
+      ORDER BY created_at ASC
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING id, survey_id, status, pipeline, input, created_at, updated_at, completed_at,
+              current_stage, last_heartbeat_at, worker_version, stage_durations, failure_stage,
+              locked_by, locked_at
+  `;
+
+  if (!rows.length) return null;
+
+  const jobRow = rows[0] as unknown as JobRow;
+
+  // Fetch artifacts for this job (likely empty for a queued job, but consistent)
+  const artifactRows = await sql`
+    SELECT id, job_id, survey_id, file_id, artifact_type, pipeline, payload, confidence, limitations, authority, created_at
+    FROM site_survey_geometry_reconstruction_artifacts
+    WHERE job_id = ${jobRow.id}
+    ORDER BY created_at ASC
+  `;
+
+  const artifacts = (artifactRows as unknown as ArtifactRow[]).map(rowToArtifact);
+  return rowToJob(jobRow, artifacts);
+}
+
+/**
+ * Release the lock on a job (after completion or failure).
+ * Sets locked_by = NULL, locked_at = NULL.
+ * Best-effort — does not throw on failure.
+ */
+export async function releaseJobLock(
+  jobId: string,
+): Promise<void> {
+  try {
+    const sql = await getDbReady();
+    await sql`
+      UPDATE site_survey_geometry_reconstruction_jobs
+      SET locked_by = NULL,
+          locked_at = NULL,
+          updated_at = NOW()
+      WHERE id = ${jobId}
+      RETURNING id
+    `;
+  } catch (err) {
+    console.warn(
+      '[geometryReconstruction] Failed to release lock for job=' + jobId + ':',
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
+/**
+ * Find a specific queued job by ID and claim it for a worker.
+ * Used when /start creates a job and wants a specific worker to pick it up.
+ * Atomic CAS on locked_by IS NULL + status = 'queued'.
+ */
+export async function claimJobById(
+  jobId: string,
+  workerId: string,
+): Promise<GeometryReconstructionJob | null> {
+  const sql = await getDbReady();
+
+  const rows = await sql`
+    UPDATE site_survey_geometry_reconstruction_jobs
+    SET status = 'running',
+        locked_by = ${workerId},
+        locked_at = NOW(),
+        current_stage = 'segmentation',
+        last_heartbeat_at = NOW(),
+        updated_at = NOW()
+    WHERE id = ${jobId}
+      AND status = 'queued'
+      AND locked_by IS NULL
+    RETURNING id, survey_id, status, pipeline, input, created_at, updated_at, completed_at,
+              current_stage, last_heartbeat_at, worker_version, stage_durations, failure_stage,
+              locked_by, locked_at
+  `;
+
+  if (!rows.length) return null;
+
+  const jobRow = rows[0] as unknown as JobRow;
+
+  const artifactRows = await sql`
+    SELECT id, job_id, survey_id, file_id, artifact_type, pipeline, payload, confidence, limitations, authority, created_at
+    FROM site_survey_geometry_reconstruction_artifacts
+    WHERE job_id = ${jobRow.id}
+    ORDER BY created_at ASC
+  `;
+
+  const artifacts = (artifactRows as unknown as ArtifactRow[]).map(rowToArtifact);
+  return rowToJob(jobRow, artifacts);
 }
 
 // ---------------------------------------------------------------------------
@@ -548,6 +691,8 @@ function rowToJob(row: JobRow, artifacts: GeometryReconstructionArtifact[]): Geo
           : row.stage_durations) as Record<string, number>
       : null,
     failureStage: row.failure_stage ?? null,
+    lockedBy: row.locked_by ?? null,
+    lockedAt: row.locked_at ?? null,
     authority: REVIEW_ONLY_AUTHORITY,
     limitations: [...BASE_LIMITATIONS],
   };
