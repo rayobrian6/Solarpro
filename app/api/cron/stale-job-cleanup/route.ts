@@ -45,7 +45,16 @@ export async function GET(req: NextRequest) {
         { status: 401 },
       );
     }
+  } else if (process.env.VERCEL_ENV === 'production' || process.env.VERCEL_ENV === 'preview') {
+    // In Vercel production/preview, CRON_SECRET MUST be set to prevent
+    // unauthorized invocation of this endpoint.
+    console.error('[cron/stale-job-cleanup] CRON_SECRET is not set in production — aborting');
+    return NextResponse.json(
+      { success: false, error: 'CRON_SECRET not configured' },
+      { status: 500 },
+    );
   }
+  // In dev with no CRON_SECRET set, allow through (for local testing)
 
   try {
     const result = await markStaleJobsAsFailed();

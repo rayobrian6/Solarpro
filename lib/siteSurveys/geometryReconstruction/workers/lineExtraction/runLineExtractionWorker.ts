@@ -711,7 +711,7 @@ function computeLineConfidence(
  * 6. Create validated artifacts
  */
 export async function runLineExtractionWorker(input: LineExtractionWorkerInput): Promise<LineExtractionWorkerOutput> {
-  const timings: Record<string, number> = [];
+  const timings: Record<string, number> = {};
   const artifacts: StructuralLineCandidate[] = [];
 
   const minLineLength = input.config?.minLineLength ?? MIN_LINE_LENGTH;

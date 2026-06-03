@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
     if (!authHeader || !safeStrEqual(authHeader, expectedBearer)) {
       return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
     }
-  } else if (process.env.NODE_ENV === 'production') {
+  } else if (process.env.VERCEL_ENV === 'production' || process.env.VERCEL_ENV === 'preview') {
     // In production, CRON_SECRET MUST be set
     console.error('[cron/proposal-expiry] CRON_SECRET is not set — aborting');
     return NextResponse.json({ success: false, error: 'CRON_SECRET not configured' }, { status: 500 });

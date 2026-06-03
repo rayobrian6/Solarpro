@@ -111,10 +111,83 @@ function decodeJwtPayload(token: string): { id: string; email: string; exp?: num
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Allow public paths
+  // ── CORS OPTIONS preflight for cross-origin API paths ──────────────────
+  // SECURITY FIX: These CORS handlers must run BEFORE the PUBLIC_PATHS check,
+  // because PUBLIC_PATHS returns NextResponse.next() which skips all CORS logic.
+  // Without this fix, OPTIONS preflight from trusted origins (e.g., Render mobile
+  // backend) gets no Access-Control-Allow-Origin header, breaking cross-origin flows.
+  const TRUSTED_API_ORIGINS = [
+    'site-survey-api-bpyz.onrender.com',  // Mobile field app backend (Render)
+  ];
+
+  if (pathname.startsWith('/api/mobile/') && req.method === 'OPTIONS') {
+    const origin = req.headers.get('origin') ?? '';
+    let originHost = '';
+    try { originHost = new URL(origin).host; } catch { /* no origin header */ }
+    const isTrustedOrigin = TRUSTED_API_ORIGINS.includes(originHost)
+      || originHost === 'localhost:3000'
+      || originHost === 'localhost:3008';
+    return new NextResponse(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin':  isTrustedOrigin ? origin : '',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Requested-With',
+        'Access-Control-Max-Age':       '86400',
+      },
+    });
+  }
+
+  const isAuthorize = pathname === '/api/auth/authorize';
+  if (isAuthorize && req.method === 'OPTIONS') {
+    const origin = req.headers.get('origin') ?? '';
+    let originHost = '';
+    try { originHost = new URL(origin).host; } catch { /* no origin header */ }
+    const isTrustedOrigin = TRUSTED_API_ORIGINS.includes(originHost)
+      || originHost === 'localhost:3000'
+      || originHost === 'localhost:3008';
+    return new NextResponse(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin':  isTrustedOrigin ? origin : '',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Max-Age':       '86400',
+      },
+    });
+  }
+
+  // Allow public paths — with CORS headers for cross-origin API routes
   if (PUBLIC_PATHS.some(p => pathname.startsWith(p))) {
-    // Public path — no logging needed
-    return NextResponse.next();
+    const res = NextResponse.next();
+
+    // ── Attach CORS response headers for cross-origin public API paths ──
+    // OPTIONS preflight is already handled above; this adds headers on
+    // actual GET/POST responses so the browser allows the cross-origin read.
+    const isMobileApi = pathname.startsWith('/api/mobile/');
+    const isAuthorize = pathname === '/api/auth/authorize';
+
+    if (isMobileApi || isAuthorize) {
+      const origin = req.headers.get('origin') ?? '';
+      let originHost = '';
+      try { originHost = new URL(origin).host; } catch { /* no origin header */ }
+
+      const isTrustedOrigin = TRUSTED_API_ORIGINS.includes(originHost)
+        || originHost === 'localhost:3000'
+        || originHost === 'localhost:3008';
+
+      if (isTrustedOrigin) {
+        res.headers.set('Access-Control-Allow-Origin', origin);
+        if (isMobileApi) {
+          res.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+          res.headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Requested-With');
+        } else {
+          res.headers.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        }
+      }
+    }
+
+    return res;
   }
 
   // Allow static files and Next.js internals
@@ -138,14 +211,6 @@ export function middleware(req: NextRequest) {
   // Both are also in PUBLIC_PATHS so they bypass auth entirely; this is belt-and-suspenders.
   const isWebhook = pathname.startsWith('/api/stripe/webhook') ||
                     pathname.startsWith('/api/webhooks/survey-complete');
-
-  // ── Trusted external API origins ──────────────────────────────────────────
-  // These hosts are allowed to make cross-origin requests to /api/mobile/*
-  // and /api/auth/authorize. They use Bearer JWT auth (not session cookies)
-  // so CSRF doesn't apply.
-  const TRUSTED_API_ORIGINS = [
-    'site-survey-api-bpyz.onrender.com',  // Mobile field app backend (Render)
-  ];
 
   // /api/mobile/* routes are Bearer-JWT authenticated — CSRF does not apply.
   // Allow trusted API origins through without CSRF check.
@@ -188,74 +253,12 @@ export function middleware(req: NextRequest) {
     // (browsers always send Origin on cross-origin POST requests)
   }
 
-  // ── CORS headers for /api/mobile/* ────────────────────────────────────────
-  // Add Access-Control-Allow-Origin for trusted API origins on mobile routes.
-  // This allows the Render-hosted mobile backend to call our mobile API.
-  if (isMobileApi) {
-    const origin = req.headers.get('origin') ?? '';
-    let originHost = '';
-    try { originHost = new URL(origin).host; } catch { /* no origin header */ }
 
-    const isTrustedOrigin = TRUSTED_API_ORIGINS.includes(originHost)
-      || originHost === 'localhost:3000'
-      || originHost === 'localhost:3008';
-
-    // Handle OPTIONS preflight
-    if (req.method === 'OPTIONS') {
-      return new NextResponse(null, {
-        status: 204,
-        headers: {
-          'Access-Control-Allow-Origin':  isTrustedOrigin ? origin : '',
-          'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Requested-With',
-          'Access-Control-Max-Age':       '86400',
-        },
-      });
-    }
-
-    // Pass through with CORS headers attached
-    const res = NextResponse.next();
-    if (isTrustedOrigin) {
-      res.headers.set('Access-Control-Allow-Origin',  origin);
-      res.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-      res.headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Requested-With');
-    }
-    return res;
-  }
-
-  // ── CORS headers for /api/auth/authorize (SSO entry point) ────────────────
-  // The survey app backend on Render opens this endpoint cross-origin to
-  // initiate the SSO flow. Allow OPTIONS preflight and attach CORS headers
-  // for trusted origins. The route handler itself validates redirect_uri.
-  const isAuthorize = pathname === '/api/auth/authorize';
-  if (isAuthorize) {
-    const origin = req.headers.get('origin') ?? '';
-    let originHost = '';
-    try { originHost = new URL(origin).host; } catch { /* no origin header */ }
-
-    const isTrustedOrigin = TRUSTED_API_ORIGINS.includes(originHost)
-      || originHost === 'localhost:3000'
-      || originHost === 'localhost:3008';
-
-    if (req.method === 'OPTIONS') {
-      return new NextResponse(null, {
-        status: 204,
-        headers: {
-          'Access-Control-Allow-Origin':  isTrustedOrigin ? origin : '',
-          'Access-Control-Allow-Methods': 'GET, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type',
-          'Access-Control-Max-Age':       '86400',
-        },
-      });
-    }
-
-    const res = NextResponse.next();
-    if (isTrustedOrigin) {
-      res.headers.set('Access-Control-Allow-Origin',  origin);
-      res.headers.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    }
-    return res;
-  }
+  // ── CORS for cross-origin API paths (non-OPTIONS) ──────────────────────
+  // NOTE: /api/mobile/* and /api/auth/authorize are in PUBLIC_PATHS and are
+  // handled above (with CORS headers attached). This section handles non-public
+  // cross-origin paths that pass auth — currently none need CORS.
+  // The dead CORS code for PUBLIC_PATHS was removed in the security audit fix.
 
   // ── Dev auth bypass (non-production only) ──────────────────────────────────
   // Active when: VERCEL_ENV !== 'production' AND DEV_AUTH_BYPASS=true in env
