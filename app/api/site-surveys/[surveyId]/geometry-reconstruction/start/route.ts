@@ -56,7 +56,6 @@ import {
   insertReconstructionArtifact,
   insertReconstructionArtifactsBatch,
   deleteArtifactsByJob,
-  deleteArtifactsBySurvey,
   updateJobHeartbeatInDb,
   updateJobStageDurations,
   updateJobFailureStage,

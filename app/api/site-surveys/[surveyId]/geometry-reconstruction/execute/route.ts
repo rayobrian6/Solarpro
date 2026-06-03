@@ -182,8 +182,9 @@ export async function POST(
     return NextResponse.json({ success: false, error: msg }, { status: 500 });
   }
 
-  // -- Track latest stage for heartbeat + failure reporting ------------------
+  // -- Track latest stage + durations for heartbeat + failure reporting -------
   let latestStage = 'segmentation';
+  let latestStageDurations: Record<string, number> = {};
 
   // Start heartbeat timer — includes current stage name
   const stopHeartbeat = startHeartbeatTimer(jobId, () => latestStage);
@@ -199,10 +200,11 @@ export async function POST(
       `${stageArtifacts.length} stage artifacts, ${elapsedMs}ms elapsed, nextStage=${nextStage}`,
     );
 
-    // Update the tracked stage for heartbeat timer
+    // Update the tracked stage/durations for heartbeat timer and failure reporting
     if (nextStage) {
       latestStage = nextStage;
     }
+    latestStageDurations = stageDurations;
 
     // Persist this stage's artifacts to DB immediately (best-effort)
     if (stageArtifacts.length > 0) {
@@ -374,6 +376,7 @@ export async function POST(
 
     // Record failure metadata on the job (best-effort, non-blocking)
     try {
+      await updateJobStageDurations(jobId, latestStageDurations);
       await updateJobFailureStage(jobId, latestStage);
     } catch (metaErr) {
       console.error(
@@ -403,6 +406,7 @@ export async function POST(
       jobId,
       status: 'failed',
       failureStage: latestStage,
+      stageDurations: latestStageDurations,
       error: errMsg,
     }, { status: 500 });
 
