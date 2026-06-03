@@ -360,8 +360,6 @@ export async function insertReconstructionArtifactsBatch(
       )
       SELECT
         job_id, survey_id, file_id, artifact_type, pipeline, payload, confidence,
-        -- Neon driver can't pass 2D arrays; each limitations element is a text[]
-        -- literal string like '{"a","b"}' which we cast back to text[] here.
         limitations::text[],
         authority, stage_timings, worker_version
       FROM unnest(
@@ -376,7 +374,8 @@ export async function insertReconstructionArtifactsBatch(
         ${authorities}::jsonb[],
         ${stageTimingsArr}::jsonb[],
         ${workerVersions}::text[]
-      )
+      ) AS t(job_id, survey_id, file_id, artifact_type, pipeline, payload, confidence,
+             limitations, authority, stage_timings, worker_version)
       RETURNING id
     `;
 
