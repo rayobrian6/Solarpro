@@ -794,6 +794,7 @@ def classify_mask_region(
             return "tree"
 
     # ── Roof detection ──
+    # Standard pitched roofs: large area, wide aspect ratio, upper-middle position
     if 0.1 < norm_y_center < 0.6 and norm_area > 0.02:
         if green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
             if aspect_ratio > 1.3:
@@ -801,6 +802,24 @@ def classify_mask_region(
             if stability_score > 0.95 and aspect_ratio > 1.0:
                 return "roof"
             if norm_area > 0.05:
+                return "roof"
+
+    # ── Flat / low-slope roof detection ──
+    # Flat rubber/membrane roofs viewed from the side appear as thin, wide,
+    # dark horizontal strips at the top of the structure. They typically have:
+    #   - Very high aspect ratio (>2.5, often 4-10x wider than tall)
+    #   - Small norm_area (0.005–0.02, thin strip < 2% of image)
+    #   - Low green_ratio (dark gray/black rubber or white TPO)
+    #   - Upper-middle position (norm_y_center 0.15–0.55)
+    # Without this path, SAM2 correctly segments the flat roof region but
+    # the classifier misses it because norm_area < 0.02, and it falls through
+    # to "siding", "gutter", or "unknown".
+    if 0.15 < norm_y_center < 0.55 and norm_area > 0.003:
+        if green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
+            if aspect_ratio > 2.5:
+                return "roof"
+            # Moderate aspect flat roof — stability_score confirms it's a real region
+            if aspect_ratio > 1.8 and stability_score > 0.92:
                 return "roof"
 
     # ── Wall/facade detection ──

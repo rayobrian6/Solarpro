@@ -570,22 +570,54 @@ function pointInPolygon(
 /**
  * Check if a line segment overlaps with a segmentation mask.
  * Samples points along the line and checks if they fall inside the mask polygon.
+ * Also checks bounding-box proximity for thin masks (e.g. flat roof strips)
+ * where the line may run along the edge rather than through the interior.
  */
 function lineOverlapsMask(line: LineSegment, mask: SemanticSegmentationMask): boolean {
   const poly = mask.polygon;
 
   if (poly.length < 3) return false;
 
+  // Sample points along the line for polygon hit test
   const samples = 20;
+  let hits = 0;
   for (let i = 0; i <= samples; i++) {
     const t = i / samples;
     const x = line.start.x * (1 - t) + line.end.x * t;
     const y = line.start.y * (1 - t) + line.end.y * t;
 
     if (pointInPolygon({ x, y }, poly)) {
-      return true;
+      hits++;
+      if (hits >= 2) return true; // 2+ sample hits = definite overlap
     }
   }
+
+  // For thin masks (flat roof strips, gutters, fascia), the line may run
+  // along the mask edge without interior hits. Check bounding-box proximity
+  // as a fallback: if the line passes within a small distance of the mask
+  // bounds AND is the right class, count it as overlapping.
+  if (mask.maskBounds && hits === 0) {
+    const mb = mask.maskBounds;
+    // Check if any sample point falls within a tolerance-expanded bounding box
+    const tolerance = Math.max(mb.width, mb.height) * 0.3; // 30% of mask dimension
+    for (let i = 0; i <= samples; i++) {
+      const t = i / samples;
+      const px = line.start.x * (1 - t) + line.end.x * t;
+      const py = line.start.y * (1 - t) + line.end.y * t;
+
+      if (
+        px >= mb.x - tolerance && px <= mb.x + mb.width + tolerance &&
+        py >= mb.y - tolerance && py <= mb.y + mb.height + tolerance
+      ) {
+        // Only count proximity for structure classes that produce thin masks
+        const thinClasses: Set<string> = new Set(['roof', 'fascia', 'soffit', 'gutter', 'railing']);
+        if (thinClasses.has(mask.segmentationClass)) {
+          return true;
+        }
+      }
+    }
+  }
+
   return false;
 }
 
@@ -624,13 +656,35 @@ function classifyLine(line: LineSegment, masks: SemanticSegmentationMask[]): Str
   const hasWall = overlappingClasses.has('wall') || overlappingClasses.has('siding');
   const hasFascia = overlappingClasses.has('fascia') || overlappingClasses.has('soffit') || overlappingClasses.has('gutter');
 
+  // Compute relative position within roof masks for ridge/eave disambiguation.
+  // Instead of the old hardcoded avgY < 350 (which is resolution-dependent),
+  // compare the line's Y position to the roof masks' vertical extent.
+  // A line near the TOP of a roof region → ridge; near the BOTTOM → eave.
+  const roofMasks = overlappingMasks.filter(m => m.segmentationClass === 'roof');
+  let relativeRoofY = 0.5; // default: middle of roof (safe fallback)
+  if (roofMasks.length > 0) {
+    // Find the overall roof bounding box from maskBounds
+    let roofMinY = Infinity, roofMaxY = -Infinity;
+    for (const rm of roofMasks) {
+      if (rm.maskBounds) {
+        roofMinY = Math.min(roofMinY, rm.maskBounds.y);
+        roofMaxY = Math.max(roofMaxY, rm.maskBounds.y + rm.maskBounds.height);
+      }
+    }
+    if (roofMinY < Infinity && roofMaxY > roofMinY) {
+      // Normalize: 0 = top of roof, 1 = bottom of roof
+      relativeRoofY = (avgY - roofMinY) / (roofMaxY - roofMinY);
+      relativeRoofY = Math.max(0, Math.min(1, relativeRoofY));
+    }
+  }
+
   // Classification logic — roof lines first (most important)
   if (hasRoof) {
     if (isHorizontal) {
-      if (avgY < 350) {
-        return 'ridge'; // Upper roof horizontal line
+      if (relativeRoofY < 0.4) {
+        return 'ridge'; // Upper portion of roof → ridge
       } else {
-        return 'eave'; // Lower roof horizontal line
+        return 'eave'; // Lower portion of roof → eave
       }
     } else if (isDiagonal) {
       return 'rake'; // Diagonal roof edge
