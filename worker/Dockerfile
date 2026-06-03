@@ -13,10 +13,12 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# Install dependencies first (layer caching)
+# Copy package files first (layer caching)
 COPY package.json package-lock.json* ./
-RUN npm install --omit=dev --ignore-scripts && \
-    npm install --save-dev typescript @types/node
+
+# Install ALL dependencies (including devDeps for TypeScript compilation)
+# --ignore-scripts avoids optional deps like sharp's native build
+RUN npm install --ignore-scripts
 
 # Copy source files needed for worker compilation
 COPY lib/ lib/
