@@ -104,6 +104,8 @@ export function buildNewJob(
     currentStage: 'queued',
     lastHeartbeatAt: now,
     workerVersion,
+    stageDurations: null,
+    failureStage: null,
     authority: { ...REVIEW_ONLY_AUTHORITY },
     limitations: [...BASE_LIMITATIONS],
   };

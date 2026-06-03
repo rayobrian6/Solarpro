@@ -646,6 +646,10 @@ export interface GeometryReconstructionJob {
   lastHeartbeatAt: string | null;
   /** Worker version that is processing or processed this job. */
   workerVersion: string | null;
+  /** Per-stage duration breakdown in milliseconds: { "segmentation": 12345, "line_extraction": 678, ... } */
+  stageDurations: Record<string, number> | null;
+  /** Stage where the pipeline failed (null if completed or not started yet). */
+  failureStage: string | null;
   authority: GeometryReconstructionAuthority;
   limitations: string[];
 }

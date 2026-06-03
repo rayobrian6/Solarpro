@@ -41,6 +41,8 @@ interface JobRow {
   current_stage: string | null;
   last_heartbeat_at: string | null;
   worker_version: string | null;
+  stage_durations: Record<string, number> | null;
+  failure_stage: string | null;
 }
 
 /** DB row shape for site_survey_geometry_reconstruction_artifacts. */
@@ -55,6 +57,8 @@ interface ArtifactRow {
   confidence: number;
   limitations: unknown;
   authority: unknown;
+  stage_timings: Record<string, number> | null;
+  worker_version: string | null;
   created_at: string;
 }
 
@@ -119,7 +123,8 @@ export async function insertReconstructionJob(
     ) VALUES (
       ${surveyId}, 'queued', ${pipeline}, ${JSON.stringify(input)}
     )
-    RETURNING id, survey_id, status, pipeline, input, created_at, updated_at, completed_at
+    RETURNING id, survey_id, status, pipeline, input, created_at, updated_at, completed_at,
+              current_stage, last_heartbeat_at, worker_version, stage_durations, failure_stage
   `;
 
   const row = rows[0] as unknown as JobRow;
@@ -131,7 +136,8 @@ export async function getReconstructionJobById(jobId: string): Promise<GeometryR
   const sql = await getDbReady();
 
   const rows = await sql`
-    SELECT id, survey_id, status, pipeline, input, created_at, updated_at, completed_at
+    SELECT id, survey_id, status, pipeline, input, created_at, updated_at, completed_at,
+           current_stage, last_heartbeat_at, worker_version, stage_durations, failure_stage
     FROM site_survey_geometry_reconstruction_jobs
     WHERE id = ${jobId}
     LIMIT 1
@@ -193,7 +199,8 @@ export async function updateReconstructionJobStatus(
         updated_at = now(),
         completed_at = ${completedValue}
     WHERE id = ${jobId}
-    RETURNING id, survey_id, status, pipeline, input, created_at, updated_at, completed_at
+    RETURNING id, survey_id, status, pipeline, input, created_at, updated_at, completed_at,
+              current_stage, last_heartbeat_at, worker_version, stage_durations, failure_stage
   `;
 
   if (!rows.length) return null;
@@ -270,6 +277,8 @@ export async function insertReconstructionArtifactsBatch(
   userId: string,
   artifacts: GeometryReconstructionArtifact[],
   pipeline: string,
+  stageTimings: Record<string, number> | null = null,
+  workerVersion: string | null = null,
 ): Promise<{ inserted: number; failed: number }> {
   if (artifacts.length === 0) return { inserted: 0, failed: 0 };
 
@@ -287,6 +296,8 @@ export async function insertReconstructionArtifactsBatch(
   const confidences: number[] = [];
   const limitationsArrays: string[][] = [];
   const authorities: string[] = [];
+  const stageTimingsArr: (string | null)[] = [];
+  const workerVersions: (string | null)[] = [];
 
   for (const artifact of artifacts) {
     const fileId = 'fileId' in artifact ? (artifact as { fileId?: string }).fileId : null;
@@ -303,12 +314,15 @@ export async function insertReconstructionArtifactsBatch(
     confidences.push(artifact.confidence);
     limitationsArrays.push(limitationsArray);
     authorities.push(JSON.stringify(artifact.authority));
+    stageTimingsArr.push(stageTimings ? JSON.stringify(stageTimings) : null);
+    workerVersions.push(workerVersion);
   }
 
   try {
     const result = await sql`
       INSERT INTO site_survey_geometry_reconstruction_artifacts (
-        job_id, survey_id, file_id, artifact_type, pipeline, payload, confidence, limitations, authority
+        job_id, survey_id, file_id, artifact_type, pipeline, payload, confidence, limitations, authority,
+        stage_timings, worker_version
       )
       SELECT * FROM unnest(
         ${jobIds}::uuid[],
@@ -319,7 +333,9 @@ export async function insertReconstructionArtifactsBatch(
         ${payloads}::jsonb[],
         ${confidences}::numeric[],
         ${limitationsArrays}::text[][],
-        ${authorities}::jsonb[]
+        ${authorities}::jsonb[],
+        ${stageTimingsArr}::jsonb[],
+        ${workerVersions}::text[]
       )
       RETURNING id
     `;
@@ -368,6 +384,76 @@ export async function deleteArtifactsBySurvey(
   }
 }
 
+/** Delete reconstruction artifacts for a specific job only (not the whole survey).
+ *  This preserves artifacts from other jobs (e.g., partial checkpoint artifacts
+ *  from a previous run that may still be useful).
+ */
+export async function deleteArtifactsByJob(
+  jobId: string,
+): Promise<number> {
+  try {
+    const sql = await getDbReady();
+
+    const result = await sql`
+      DELETE FROM site_survey_geometry_reconstruction_artifacts
+      WHERE job_id = ${jobId}::uuid
+      RETURNING id
+    `;
+
+    return result.length;
+  } catch (err) {
+    console.warn(
+      '[geometryReconstruction] Failed to delete artifacts by job:',
+      err instanceof Error ? err.message : String(err),
+    );
+    return 0;
+  }
+}
+
+/** Update the stage_durations JSONB on a job record. Best-effort — does not throw on failure. */
+export async function updateJobStageDurations(
+  jobId: string,
+  stageDurations: Record<string, number>,
+): Promise<void> {
+  try {
+    const sql = await getDbReady();
+    await sql`
+      UPDATE site_survey_geometry_reconstruction_jobs
+      SET stage_durations = ${JSON.stringify(stageDurations)}::jsonb,
+          updated_at = NOW()
+      WHERE id = ${jobId}::uuid
+      RETURNING id
+    `;
+  } catch (err) {
+    console.warn(
+      '[geometryReconstruction] Failed to update stage_durations for job=' + jobId + ':',
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
+/** Update the failure_stage on a job record. Best-effort — does not throw on failure. */
+export async function updateJobFailureStage(
+  jobId: string,
+  failureStage: string,
+): Promise<void> {
+  try {
+    const sql = await getDbReady();
+    await sql`
+      UPDATE site_survey_geometry_reconstruction_jobs
+      SET failure_stage = ${failureStage},
+          updated_at = NOW()
+      WHERE id = ${jobId}::uuid
+      RETURNING id
+    `;
+  } catch (err) {
+    console.warn(
+      '[geometryReconstruction] Failed to update failure_stage for job=' + jobId + ':',
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
 /** Get all reconstruction artifacts for a survey (with auth check). */
 export async function getArtifactsBySurvey(
   surveyId: string,
@@ -388,7 +474,8 @@ export async function getArtifactsBySurvey(
   // Get the latest job for this survey to include in the result
   const jobRows = await sql`
     SELECT id, survey_id, status, pipeline, input, created_at, updated_at, completed_at,
-           current_stage, last_heartbeat_at, worker_version
+           current_stage, last_heartbeat_at, worker_version,
+           stage_durations, failure_stage
     FROM site_survey_geometry_reconstruction_jobs
     WHERE survey_id = ${surveyId}
     ORDER BY created_at DESC
@@ -413,6 +500,8 @@ export async function getArtifactsBySurvey(
       currentStage: null,
       lastHeartbeatAt: null,
       workerVersion: null,
+      stageDurations: null,
+      failureStage: null,
       authority: REVIEW_ONLY_AUTHORITY,
       limitations: [...BASE_LIMITATIONS],
     };
@@ -453,6 +542,12 @@ function rowToJob(row: JobRow, artifacts: GeometryReconstructionArtifact[]): Geo
     currentStage: row.current_stage ?? null,
     lastHeartbeatAt: row.last_heartbeat_at ?? null,
     workerVersion: row.worker_version ?? null,
+    stageDurations: row.stage_durations
+      ? (typeof row.stage_durations === 'string'
+          ? JSON.parse(row.stage_durations)
+          : row.stage_durations) as Record<string, number>
+      : null,
+    failureStage: row.failure_stage ?? null,
     authority: REVIEW_ONLY_AUTHORITY,
     limitations: [...BASE_LIMITATIONS],
   };

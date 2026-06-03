@@ -18,6 +18,13 @@
  *   GET /status -> poll DB -> return progress
  *   POST /execute -> (fallback) run pipeline for a specific job
  *
+ * P0 — Execution Stability (checkpoint persistence):
+ *   - checkpointCallback persists stageArtifacts to DB after each stage
+ *   - deleteArtifactsByJob (not deleteArtifactsBySurvey) preserves partial
+ *     artifacts from other jobs/runs on the same survey
+ *   - stageDurations and failureStage are recorded on the job for diagnostics
+ *   - Heartbeat timer includes current stage name for real-time progress
+ *
  * WHY WE AWAIT DIRECTLY (not waitUntil):
  *   The /start route now runs the pipeline inline, so this endpoint is only
  *   used as a fallback. When called directly (e.g., for stale-job recovery),
@@ -50,13 +57,16 @@ import {
   updateReconstructionJobStatus,
   updateJobHeartbeatInDb,
   insertReconstructionArtifactsBatch,
-  deleteArtifactsBySurvey,
+  deleteArtifactsByJob,
+  updateJobStageDurations,
+  updateJobFailureStage,
   getSurveyOwnerId,
 } from '@/lib/db/geometryReconstruction';
 import {
   runFullGeometryReconstructionPipeline,
   runSegmentationOnlyPipeline,
   runDepthOnlyPipeline,
+  type CheckpointCallback,
 } from '@/lib/siteSurveys/geometryReconstruction/runFullPipeline';
 import { warmupSAM2Service, isSAM2Enabled } from '@/lib/siteSurveys/geometryReconstruction/workers/segmentation/sam2Client';
 import { adaptGeometryReconBundle } from '@/lib/siteSurveys/unifiedGeometry/pipelineAdapters';
@@ -71,18 +81,13 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 
 /**
  * Start a periodic heartbeat timer that updates the job's heartbeat in the DB.
+ * The current stage name is included in each heartbeat for real-time progress.
  * Returns a cleanup function that stops the timer.
- *
- * This prevents the heartbeat from going stale during long-running stages
- * (especially SAM2 segmentation which can take ~250s for 10 photos).
- * Without this, the 10-minute staleness detector could falsely mark a
- * healthy job as failed if a single stage takes >10 minutes.
- *
- * The timer is best-effort: heartbeat failures are logged but don't crash the pipeline.
  */
-function startHeartbeatTimer(jobId: string): () => void {
+function startHeartbeatTimer(jobId: string, getCurrentStage: () => string): () => void {
   const timer = setInterval(() => {
-    updateJobHeartbeatInDb(jobId, 'running_heartbeat').catch(() => {
+    const stage = getCurrentStage();
+    updateJobHeartbeatInDb(jobId, stage).catch(() => {
       // Best-effort: timer heartbeat failure should not affect the pipeline
     });
   }, HEARTBEAT_INTERVAL_MS);
@@ -160,20 +165,76 @@ export async function POST(
   }
   warmupSAM2Service();
 
-  // -- Run the pipeline DIRECTLY (await, not waitUntil) ---------------------
-  // This is the key fix: we await the pipeline directly instead of using
-  // waitUntil(). This keeps the Node.js event loop alive and sustains
-  // outbound fetch calls to the SAM2 Render service for the full pipeline
-  // duration (up to 300s with Vercel Pro).
-  //
-  // The /start route's waitUntil(fetch('/execute')) will time out after 60s
-  // (since /start has maxDuration=60), but this /execute function is a 
-  // SEPARATE Vercel invocation with its own 300s lifetime. It continues 
-  // running even after /start's waitUntil is cancelled.
-  //
-  // The client already received 202 from /start and is polling GET /status.
+  // -- Resolve survey owner's userId for artifact persistence ----------------
+  // This endpoint runs with internal auth (no user session), so we need
+  // to look up the survey owner to pass to verifySurveyOwnership inside
+  // insertReconstructionArtifactsBatch.
+  let surveyOwnerUserId: string | null = null;
+  try {
+    surveyOwnerUserId = await getSurveyOwnerId(surveyId);
+    if (!surveyOwnerUserId) {
+      throw new Error(`Survey owner not found for surveyId=${surveyId} — cannot persist artifacts`);
+    }
+  } catch (ownerErr) {
+    const msg = ownerErr instanceof Error ? ownerErr.message : String(ownerErr);
+    console.error(`[POST geometry-reconstruction/execute] ${msg}`);
+    await updateReconstructionJobStatus(jobId, 'failed');
+    return NextResponse.json({ success: false, error: msg }, { status: 500 });
+  }
 
-  const stopHeartbeat = startHeartbeatTimer(jobId);
+  // -- Track latest stage for heartbeat + failure reporting ------------------
+  let latestStage = 'segmentation';
+
+  // Start heartbeat timer — includes current stage name
+  const stopHeartbeat = startHeartbeatTimer(jobId, () => latestStage);
+
+  // ── Checkpoint callback: persists artifacts to DB after each stage ────────
+  // P0 fix: artifacts are persisted incrementally so that if the Vercel
+  // function times out at 300s, all artifacts from completed stages survive.
+  const checkpointCallback: CheckpointCallback = async (checkpoint) => {
+    const { stage, stageArtifacts, stageDurations, elapsedMs, nextStage } = checkpoint;
+
+    console.info(
+      `[POST geometry-reconstruction/execute] Checkpoint after stage=${stage}: ` +
+      `${stageArtifacts.length} stage artifacts, ${elapsedMs}ms elapsed, nextStage=${nextStage}`,
+    );
+
+    // Update the tracked stage for heartbeat timer
+    if (nextStage) {
+      latestStage = nextStage;
+    }
+
+    // Persist this stage's artifacts to DB immediately (best-effort)
+    if (stageArtifacts.length > 0) {
+      try {
+        const batchResult = await insertReconstructionArtifactsBatch(
+          jobId,
+          surveyId,
+          surveyOwnerUserId!,
+          stageArtifacts,
+          pipeline,
+          stageDurations,
+        );
+        console.info(
+          `[POST geometry-reconstruction/execute] Checkpoint persisted ${batchResult.inserted}/${stageArtifacts.length} artifacts from stage=${stage}`,
+        );
+      } catch (insertErr) {
+        const errMsg = insertErr instanceof Error ? insertErr.message : String(insertErr);
+        console.error(
+          `[POST geometry-reconstruction/execute] Checkpoint insert failed for stage=${stage}: ${errMsg}`,
+        );
+        // Best-effort: checkpoint failure must NOT abort the pipeline
+      }
+    }
+
+    // Update stageDurations on the job record (best-effort)
+    await updateJobStageDurations(jobId, stageDurations);
+
+    // Update heartbeat with current stage
+    if (nextStage) {
+      await updateJobHeartbeatInDb(jobId, nextStage);
+    }
+  };
 
   try {
     console.info(
@@ -186,23 +247,23 @@ export async function POST(
       case 'segmentation_only':
       case 'segmentation':
         await updateJobHeartbeatInDb(jobId, 'segmentation');
-        pipelineResult = await runSegmentationOnlyPipeline(input);
+        pipelineResult = await runSegmentationOnlyPipeline(input, checkpointCallback);
         break;
       case 'depth_only':
       case 'depth_estimation':
         await updateJobHeartbeatInDb(jobId, 'segmentation');
-        pipelineResult = await runDepthOnlyPipeline(input);
+        pipelineResult = await runDepthOnlyPipeline(input, checkpointCallback);
         break;
       case 'full':
       case 'line_extraction':
       case 'plane_extraction':
       case 'multi_view_fusion':
       default:
-        pipelineResult = await runFullGeometryReconstructionPipeline(input);
+        pipelineResult = await runFullGeometryReconstructionPipeline(input, checkpointCallback);
         break;
     }
 
-    const { artifacts, stages, totalDurationMs, segmentationBackend, sam2PhotoCount, failedPhotoCount, skippedPhotoCount, cannyPhotoCount, photoResults, budgetExhaustedReason } = pipelineResult;
+    const { artifacts, stages, totalDurationMs, stageDurations, segmentationBackend, sam2PhotoCount, failedPhotoCount, skippedPhotoCount, cannyPhotoCount, photoResults, budgetExhaustedReason } = pipelineResult;
 
     // Update currentStage based on the last completed pipeline stage.
     if (stages.length > 0) {
@@ -218,6 +279,7 @@ export async function POST(
       };
       const dbStage = stageMap[lastStage] ?? lastStage;
       await updateJobHeartbeatInDb(jobId, dbStage);
+      latestStage = dbStage;
     }
 
     // Log per-stage timing for debugging
@@ -234,30 +296,32 @@ export async function POST(
       (artifact) => 'polygon' in artifact && Array.isArray(artifact.polygon) && artifact.polygon.length > 0,
     ).length;
 
-    // Persist artifacts (clean up old artifacts first to avoid accumulation)
-    // Resolve the survey owner's userId — needed for verifySurveyOwnership inside
-    // insertReconstructionArtifactsBatch. We can't use 'system-worker' because
-    // that's not a valid UUID and will fail the clients.user_id JOIN.
-    const surveyOwnerUserId = await getSurveyOwnerId(surveyId);
-    if (!surveyOwnerUserId) {
-      throw new Error(`Survey owner not found for surveyId=${surveyId} — cannot persist artifacts`);
-    }
+    // ── Final artifact persistence ─────────────────────────────────────────
+    // Replace checkpointed partial artifacts with the complete set.
+    // deleteArtifactsByJob (not deleteArtifactsBySurvey) preserves artifacts
+    // from other jobs on the same survey.
     const tDbStart = Date.now();
-    const deletedReconCount = await deleteArtifactsBySurvey(surveyId);
+    const deletedReconCount = await deleteArtifactsByJob(jobId);
     if (deletedReconCount > 0) {
       console.info(
-        `[POST geometry-reconstruction/execute] Deleted ${deletedReconCount} previous reconstruction artifacts for survey=${surveyId}`,
+        `[POST geometry-reconstruction/execute] Deleted ${deletedReconCount} checkpointed artifacts for job=${jobId} (replacing with complete set)`,
       );
     }
-    const batchResult = await insertReconstructionArtifactsBatch(jobId, surveyId, surveyOwnerUserId, artifacts, pipeline);
+    const batchResult = await insertReconstructionArtifactsBatch(
+      jobId, surveyId, surveyOwnerUserId!, artifacts, pipeline,
+      stageDurations,
+    );
     console.info(
       `[POST geometry-reconstruction/execute] Batch inserted ${batchResult.inserted}/${artifacts.length} reconstruction artifacts (failed=${batchResult.failed}) in ${Date.now() - tDbStart}ms`,
     );
 
+    // Persist final stageDurations on the job record
+    await updateJobStageDurations(jobId, stageDurations);
+
     // Adapt Pipeline B artifacts into unified geometry table
     try {
       const tUnifiedStart = Date.now();
-      const deletedCount = await deleteUnifiedArtifactsBySurvey(surveyId, surveyOwnerUserId);
+      const deletedCount = await deleteUnifiedArtifactsBySurvey(surveyId, surveyOwnerUserId!);
       if (deletedCount > 0) {
         console.info(
           `[POST geometry-reconstruction/execute] Deleted ${deletedCount} previous unified artifacts for survey=${surveyId}`,
@@ -291,6 +355,7 @@ export async function POST(
       status: 'completed',
       artifactCount: rawArtifactCount,
       totalDurationMs,
+      stageDurations,
       segmentationBackend,
       sam2PhotoCount,
       failedPhotoCount,
@@ -300,9 +365,24 @@ export async function POST(
     });
 
   } catch (pipelineErr) {
-    // Pipeline execution failed -- mark job as failed, preserving partial artifacts
+    // ── Pipeline execution failed — preserve partial artifacts ───────────────
+    // P0 fix: artifacts from completed stages were already checkpointed to DB
+    // by the callback. We record the failure metadata but do NOT delete the
+    // checkpointed artifacts — they survive as partial results for diagnostics.
     const errMsg = pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr);
     console.error(`[POST geometry-reconstruction/execute] Pipeline execution failed for job=${jobId}: ${errMsg}`);
+
+    // Record failure metadata on the job (best-effort, non-blocking)
+    try {
+      await updateJobFailureStage(jobId, latestStage);
+    } catch (metaErr) {
+      console.error(
+        `[POST geometry-reconstruction/execute] Also failed to record failure metadata for job=${jobId}:`,
+        metaErr instanceof Error ? metaErr.message : String(metaErr),
+      );
+    }
+
+    // Mark job as failed (best-effort)
     try {
       await updateReconstructionJobStatus(jobId, 'failed');
     } catch (markFailedErr) {
@@ -312,10 +392,17 @@ export async function POST(
       );
     }
 
+    // Log how many checkpointed artifacts survived the failure
+    console.info(
+      `[POST geometry-reconstruction/execute] Job ${jobId} failed at stage=${latestStage}. ` +
+      `Checkpointed artifacts from earlier stages may be available in the DB.`,
+    );
+
     return NextResponse.json({
       success: false,
       jobId,
       status: 'failed',
+      failureStage: latestStage,
       error: errMsg,
     }, { status: 500 });
 

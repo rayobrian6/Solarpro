@@ -10,6 +10,16 @@
  *   - Client can also poll GET /status for progress
  *   - Mock pipeline runs synchronously for backward compatibility
  *
+ * P0 — Execution Stability (checkpoint persistence):
+ *   - After each pipeline stage, the checkpointCallback persists that
+ *     stage's artifacts to DB immediately via insertReconstructionArtifactsBatch.
+ *   - If the pipeline times out or crashes, already-checkpointed artifacts
+ *     survive in the database — no work is lost.
+ *   - On successful completion, checkpointed artifacts are replaced with
+ *     the complete set (deleteArtifactsByJob + full batch insert).
+ *   - On failure, partial artifacts are preserved and the failure stage is
+ *     recorded on the job record.
+ *
  * Why inline instead of waitUntil(fetch('/execute'))?
  *   The waitUntil(fetch('/execute')) pattern was fundamentally broken.
  *   waitUntil() is designed for short-lived side effects (analytics, logging),
@@ -45,8 +55,11 @@ import {
   updateReconstructionJobStatus,
   insertReconstructionArtifact,
   insertReconstructionArtifactsBatch,
+  deleteArtifactsByJob,
   deleteArtifactsBySurvey,
   updateJobHeartbeatInDb,
+  updateJobStageDurations,
+  updateJobFailureStage,
 } from '@/lib/db/geometryReconstruction';
 import { generateMockArtifacts } from '@/lib/siteSurveys/geometryReconstruction/mockAdapter';
 import {
@@ -54,6 +67,7 @@ import {
   runSegmentationOnlyPipeline,
   runDepthOnlyPipeline,
 } from '@/lib/siteSurveys/geometryReconstruction/runFullPipeline';
+import type { CheckpointCallback, PipelineCheckpoint } from '@/lib/siteSurveys/geometryReconstruction/runFullPipeline';
 import { warmupSAM2Service, isSAM2Enabled } from '@/lib/siteSurveys/geometryReconstruction/workers/segmentation/sam2Client';
 import { adaptGeometryReconBundle } from '@/lib/siteSurveys/unifiedGeometry/pipelineAdapters';
 import { writeUnifiedArtifacts, deleteUnifiedArtifactsBySurvey } from '@/lib/siteSurveys/unifiedGeometry';
@@ -64,11 +78,17 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 
 /**
  * Start a periodic heartbeat timer that updates the job's heartbeat in the DB.
- * Returns a cleanup function that stops the timer.
+ * The timer includes the current pipeline stage name for progress tracking.
+ * Returns a cleanup function that stops the timer AND exposes the latest stage
+ * so the catch block can determine which stage the pipeline was in when it failed.
  */
-function startHeartbeatTimer(jobId: string): () => void {
+function startHeartbeatTimer(
+  jobId: string,
+  getStage: () => string,
+): () => void {
   const timer = setInterval(() => {
-    updateJobHeartbeatInDb(jobId, 'running_heartbeat').catch(() => {
+    const currentStage = getStage();
+    updateJobHeartbeatInDb(jobId, currentStage).catch(() => {
       // Best-effort: timer heartbeat failure should not affect the pipeline
     });
   }, HEARTBEAT_INTERVAL_MS);
@@ -135,7 +155,7 @@ export async function POST(
     // Create job row — status='queued'
     const job = await insertReconstructionJob(surveyId, user.id, pipeline, input);
 
-    // ── Mock pipeline: run synchronously for backward compatibility ──────
+    // ── Mock pipeline: run synchronously for backward compatibility ──────────
     if (pipeline === 'mock') {
       const artifacts = generateMockArtifacts(input);
       for (const artifact of artifacts) {
@@ -148,10 +168,10 @@ export async function POST(
       });
     }
 
-    // ── Real Pipeline B: run inline ──────────────────────────────────────
+    // ── Real Pipeline B: run inline with checkpoint persistence ──────────────
     console.info(
       `[POST geometry-reconstruction/start] Job ${job.id} created for pipeline=${pipeline}. ` +
-      `Running pipeline inline.`,
+      `Running pipeline inline with checkpoint persistence.`,
     );
 
     // Mark job as running with initial heartbeat
@@ -171,33 +191,92 @@ export async function POST(
     }
     warmupSAM2Service();
 
-    // Start heartbeat timer for long-running pipeline stages
-    const stopHeartbeat = startHeartbeatTimer(job.id);
+    // ── Track the latest checkpoint stage for heartbeat and failure reporting ──
+    let latestStage: string = 'segmentation';
+    let latestStageDurations: Record<string, number> = {};
+
+    // ── Create checkpoint callback that persists artifacts incrementally ────
+    // After each pipeline stage, this callback:
+    // 1. Inserts the stage's artifacts to DB immediately
+    // 2. Updates the job's current stage in the heartbeat
+    // 3. Updates the job's stage_durations JSONB
+    // This ensures no work is lost if the pipeline times out or crashes.
+    const checkpointCallback: CheckpointCallback = async (checkpoint: PipelineCheckpoint) => {
+      const { stage, stageArtifacts, stageDurations, elapsedMs } = checkpoint;
+
+      // Track the latest stage for heartbeat + failure reporting
+      latestStage = stage;
+      latestStageDurations = stageDurations;
+
+      console.info(
+        `[POST geometry-reconstruction/start] Checkpoint after stage=${stage}: ` +
+        `${stageArtifacts.length} stage artifacts, ${elapsedMs}ms elapsed, ` +
+        `next=${checkpoint.nextStage}`,
+      );
+
+      // Persist this stage's artifacts to DB immediately (incremental insert)
+      if (stageArtifacts.length > 0) {
+        try {
+          const batchResult = await insertReconstructionArtifactsBatch(
+            job.id,
+            surveyId,
+            user.id,
+            stageArtifacts,
+            pipeline,
+            stageDurations,
+            'p0-checkpoint',
+          );
+          console.info(
+            `[POST geometry-reconstruction/start] Checkpoint persisted ${batchResult.inserted}/${stageArtifacts.length} ` +
+            `artifacts for stage=${stage} (failed=${batchResult.failed})`,
+          );
+        } catch (insertErr) {
+          // Best-effort: checkpoint failure must NOT abort the pipeline.
+          // The artifacts are still in-memory and will be persisted on the
+          // final write if the pipeline completes successfully.
+          console.error(
+            `[POST geometry-reconstruction/start] Checkpoint insert failed for stage=${stage}:`,
+            insertErr instanceof Error ? insertErr.message : String(insertErr),
+          );
+        }
+      }
+
+      // Update job heartbeat with current stage
+      await updateJobHeartbeatInDb(job.id, stage);
+
+      // Update stage_durations on job record (best-effort)
+      await updateJobStageDurations(job.id, stageDurations);
+    };
+
+    // Start heartbeat timer for long-running pipeline stages.
+    // The timer reads latestStage to include the current stage name.
+    const stopHeartbeat = startHeartbeatTimer(job.id, () => latestStage);
 
     try {
       console.info(
         `[POST geometry-reconstruction/start] Starting pipeline execution for job=${job.id}, pipeline=${pipeline} (SAM2 enabled: ${sam2WasEnabled})`,
       );
 
-      // Select the appropriate pipeline runner based on the pipeline mode
+      // Select the appropriate pipeline runner based on the pipeline mode,
+      // passing the checkpoint callback for incremental persistence
       let pipelineResult;
       switch (pipeline) {
         case 'segmentation_only':
         case 'segmentation':
           await updateJobHeartbeatInDb(job.id, 'segmentation');
-          pipelineResult = await runSegmentationOnlyPipeline(input);
+          pipelineResult = await runSegmentationOnlyPipeline(input, checkpointCallback);
           break;
         case 'depth_only':
         case 'depth_estimation':
           await updateJobHeartbeatInDb(job.id, 'segmentation');
-          pipelineResult = await runDepthOnlyPipeline(input);
+          pipelineResult = await runDepthOnlyPipeline(input, checkpointCallback);
           break;
         case 'full':
         case 'line_extraction':
         case 'plane_extraction':
         case 'multi_view_fusion':
         default:
-          pipelineResult = await runFullGeometryReconstructionPipeline(input);
+          pipelineResult = await runFullGeometryReconstructionPipeline(input, checkpointCallback);
           break;
       }
 
@@ -205,6 +284,7 @@ export async function POST(
         artifacts,
         stages,
         totalDurationMs,
+        stageDurations,
         segmentationBackend,
         sam2PhotoCount,
         failedPhotoCount,
@@ -213,6 +293,9 @@ export async function POST(
         photoResults,
         budgetExhaustedReason,
       } = pipelineResult;
+
+      // Update latestStageDurations with the final pipeline result
+      latestStageDurations = stageDurations;
 
       // Update currentStage based on the last completed pipeline stage.
       if (stages.length > 0) {
@@ -244,18 +327,33 @@ export async function POST(
         (artifact) => 'polygon' in artifact && Array.isArray(artifact.polygon) && artifact.polygon.length > 0,
       ).length;
 
-      // Persist artifacts (clean up old artifacts first to avoid accumulation)
+      // ── Persist complete artifacts ──────────────────────────────────────
+      // Pipeline completed successfully. Replace checkpointed partial artifacts
+      // with the complete set from the full pipeline run.
+      // We use deleteArtifactsByJob (not deleteArtifactsBySurvey) to preserve
+      // artifacts from other jobs on the same survey.
       const tDbStart = Date.now();
-      const deletedReconCount = await deleteArtifactsBySurvey(surveyId);
+      const deletedReconCount = await deleteArtifactsByJob(job.id);
       if (deletedReconCount > 0) {
         console.info(
-          `[POST geometry-reconstruction/start] Deleted ${deletedReconCount} previous reconstruction artifacts for survey=${surveyId}`,
+          `[POST geometry-reconstruction/start] Replaced ${deletedReconCount} checkpointed artifacts for job=${job.id} with complete set`,
         );
       }
-      const batchResult = await insertReconstructionArtifactsBatch(job.id, surveyId, user.id, artifacts, pipeline);
+      const batchResult = await insertReconstructionArtifactsBatch(
+        job.id,
+        surveyId,
+        user.id,
+        artifacts,
+        pipeline,
+        stageDurations,
+        'p0-final',
+      );
       console.info(
         `[POST geometry-reconstruction/start] Batch inserted ${batchResult.inserted}/${artifacts.length} reconstruction artifacts (failed=${batchResult.failed}) in ${Date.now() - tDbStart}ms`,
       );
+
+      // Update stage_durations on the job record (final, complete version)
+      await updateJobStageDurations(job.id, stageDurations);
 
       // Adapt Pipeline B artifacts into unified geometry table
       try {
@@ -294,6 +392,7 @@ export async function POST(
         status: 'completed',
         pipelineStages: stages,
         totalDurationMs,
+        stageDurations,
         summary: {
           rawArtifactCount,
           rawConsensusPlaneCount,
@@ -310,9 +409,20 @@ export async function POST(
       });
 
     } catch (pipelineErr) {
-      // Pipeline execution failed — mark job as failed
+      // Pipeline execution failed — preserve partial artifacts and record failure
       const errMsg = pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr);
       console.error(`[POST geometry-reconstruction/start] Pipeline execution failed for job=${job.id}: ${errMsg}`);
+
+      // Record which stage the pipeline was in when it failed
+      // (best-effort — these must not throw and mask the original error)
+      try {
+        await updateJobStageDurations(job.id, latestStageDurations);
+      } catch { /* best-effort */ }
+      try {
+        await updateJobFailureStage(job.id, latestStage);
+      } catch { /* best-effort */ }
+
+      // Mark job as failed
       try {
         await updateReconstructionJobStatus(job.id, 'failed');
       } catch (markFailedErr) {
@@ -322,10 +432,16 @@ export async function POST(
         );
       }
 
+      // Note: Checkpointed artifacts from earlier stages are already in the DB
+      // and are NOT deleted on failure — they survive as partial results that
+      // the user can inspect for debugging.
+
       return NextResponse.json({
         success: false,
         jobId: job.id,
         status: 'failed',
+        failureStage: latestStage,
+        stageDurations: latestStageDurations,
         error: errMsg,
       }, { status: 500 });
 

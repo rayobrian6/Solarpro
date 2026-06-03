@@ -217,6 +217,8 @@ export const mockGeometryReconstructionService: GeometryReconstructionService = 
       currentStage: 'completed',
       lastHeartbeatAt: new Date().toISOString(),
       workerVersion: 'mock-1.0.0',
+      stageDurations: null,
+      failureStage: null,
       authority: { ...REVIEW_ONLY_AUTHORITY },
       limitations: [...MOCK_LIMITATIONS],
     };
@@ -250,6 +252,8 @@ export const mockGeometryReconstructionService: GeometryReconstructionService = 
       currentStage: 'completed',
       lastHeartbeatAt: new Date().toISOString(),
       workerVersion: 'mock-1.0.0',
+      stageDurations: null,
+      failureStage: null,
       authority: { ...REVIEW_ONLY_AUTHORITY },
       limitations: [...MOCK_LIMITATIONS],
     };

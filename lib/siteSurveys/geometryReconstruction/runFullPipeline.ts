@@ -15,6 +15,12 @@
 // Each stage feeds its outputs into subsequent stages. All artifacts are
 // collected and returned as a flat array of GeometryReconstructionArtifact[].
 //
+// P0 — Execution Stability:
+//   - checkpointCallback is called after each stage with accumulated artifacts
+//     and stage timing data, enabling incremental DB persistence
+//   - stageDurations map is built progressively and included in the result
+//   - Timeout returns preserve all artifacts accumulated so far
+//
 // REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
 // ============================================================================
 
@@ -62,7 +68,7 @@ import { runPhotogrammetryFromReconstructionInput } from './workers/photogrammet
  */
 const PIPELINE_TIMEOUT_MS = 270_000;
 
-// ──── Pipeline Stage Result ─────────────────────────────────────────────────
+// ──── Pipeline Stage Result ──────────────────────────────────────────────────
 
 export interface PipelineStageResult {
   stage: string;
@@ -74,6 +80,8 @@ export interface FullPipelineResult {
   artifacts: GeometryReconstructionArtifact[];
   stages: PipelineStageResult[];
   totalDurationMs: number;
+  /** Per-stage duration map: { "segmentation": 12345, "line_extraction": 678, ... } */
+  stageDurations: Record<string, number>;
   /** Which segmentation backend was used: 'sam2' or 'canny'. */
   segmentationBackend: 'sam2' | 'canny';
   /** Number of photos processed with SAM 2 successfully. */
@@ -89,6 +97,32 @@ export interface FullPipelineResult {
   /** Why SAM2 budget was exhausted (null if not exhausted). */
   budgetExhaustedReason: string | null;
 }
+
+/** Checkpoint data emitted after each pipeline stage completes. */
+export interface PipelineCheckpoint {
+  /** The stage that just completed. */
+  stage: string;
+  /** Artifacts produced by THIS stage only. */
+  stageArtifacts: GeometryReconstructionArtifact[];
+  /** All artifacts accumulated so far (from all completed stages). */
+  allArtifacts: GeometryReconstructionArtifact[];
+  /** Per-stage timing data for all completed stages so far. */
+  stageDurations: Record<string, number>;
+  /** Elapsed time since pipeline start in milliseconds. */
+  elapsedMs: number;
+  /** Which stage the pipeline will attempt next (null if pipeline is complete). */
+  nextStage: string | null;
+}
+
+/**
+ * Callback invoked after each pipeline stage completes.
+ * Used for checkpoint persistence — the caller can persist intermediate
+ * artifacts to DB immediately, ensuring no work is lost on timeout.
+ *
+ * The callback is best-effort: if it throws, the pipeline logs the error
+ * but continues running. Checkpoint failures must NOT abort the pipeline.
+ */
+export type CheckpointCallback = (checkpoint: PipelineCheckpoint) => Promise<void>;
 
 /**
  * Extract the segmentation reporting fields from a SegmentationWorkerOutput
@@ -110,7 +144,7 @@ function segReportFields(seg: SegmentationWorkerOutput): Pick<FullPipelineResult
   };
 }
 
-// ──── Stage Runner Helper ───────────────────────────────────────────────────
+// ──── Stage Runner Helper ─────────────────────────────────────────────────────
 
 function stageTimer<T>(stageName: string, fn: () => T): { result: T; durationMs: number } {
   const start = Date.now();
@@ -134,7 +168,43 @@ function isPipelineTimedOut(pipelineStart: number): boolean {
   return (Date.now() - pipelineStart) >= PIPELINE_TIMEOUT_MS;
 }
 
-// ──── Full Pipeline Orchestration ───────────────────────────────────────────
+/**
+ * Invoke the checkpoint callback, logging but not throwing on error.
+ * Checkpoint failures must never abort the pipeline.
+ */
+async function invokeCheckpoint(
+  callback: CheckpointCallback | undefined,
+  checkpoint: PipelineCheckpoint,
+): Promise<void> {
+  if (!callback) return;
+  try {
+    await callback(checkpoint);
+  } catch (err) {
+    console.error(
+      `[Pipeline B] Checkpoint callback failed after stage=${checkpoint.stage}:`,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
+// Stage order for determining nextStage in checkpoint
+const STAGE_ORDER = [
+  'segmentation',
+  'line_extraction',
+  'vanishing_points',
+  'depth_estimation',
+  'plane_extraction',
+  'multi_view_fusion',
+  'photogrammetry',
+] as const;
+
+function nextStageAfter(currentStage: string): string | null {
+  const idx = STAGE_ORDER.indexOf(currentStage as typeof STAGE_ORDER[number]);
+  if (idx < 0 || idx >= STAGE_ORDER.length - 1) return null;
+  return STAGE_ORDER[idx + 1];
+}
+
+// ──── Full Pipeline Orchestration ─────────────────────────────────────────────
 
 /**
  * Run the full Pipeline B (Geometry Reconstruction) orchestration.
@@ -143,21 +213,31 @@ function isPipelineTimedOut(pipelineStart: number): boolean {
  * subsequent stages as needed. Returns ALL artifacts from ALL stages
  * as a flat array, plus per-stage timing information.
  *
+ * P0 — Execution Stability:
+ *   - `checkpointCallback` is invoked after each stage with accumulated
+ *     artifacts and stageDurations, enabling the route handler to persist
+ *     intermediate results to DB incrementally. If the pipeline times out
+ *     or the Vercel function is killed, the already-checkpointed artifacts
+ *     survive in the database.
+ *   - stageDurations is built progressively and included in the return value.
+ *
  * This is the function that should be called when `pipeline === 'full'`
  * (or any non-mock pipeline) is requested via the start route.
  */
 export async function runFullGeometryReconstructionPipeline(
   input: GeometryReconstructionInput,
+  checkpointCallback?: CheckpointCallback,
 ): Promise<FullPipelineResult> {
   const pipelineStart = Date.now();
   const stages: PipelineStageResult[] = [];
   const allArtifacts: GeometryReconstructionArtifact[] = [];
+  const stageDurations: Record<string, number> = {};
 
   console.info(
     `[Pipeline B] Starting full pipeline for survey=${input.surveyId} photos=${input.sourcePhotos.length} pipeline=${input.pipeline}`,
   );
 
-  // ── Stage 1: Segmentation ──────────────────────────────────────────────
+  // ──── Stage 1: Segmentation ──────────────────────────────────────────────
   const segFullOutput = await asyncStageTimer('segmentation', () =>
     runSegmentationFullOutput(input),
   );
@@ -165,10 +245,21 @@ export async function runFullGeometryReconstructionPipeline(
   const segFields = segReportFields(segResult);
   const segmentationArtifacts = segResult.artifacts;
   allArtifacts.push(...segmentationArtifacts);
+  stageDurations['segmentation'] = segFullOutput.durationMs;
   stages.push({ stage: 'segmentation', artifactCount: segmentationArtifacts.length, durationMs: segFullOutput.durationMs });
   console.info(
     `[Pipeline B] Stage 1 (segmentation): ${segmentationArtifacts.length} artifacts in ${segFullOutput.durationMs}ms [backend=${segFields.segmentationBackend}, sam2=${segFields.sam2PhotoCount} photos, failed=${segFields.failedPhotoCount}, skipped=${segFields.skippedPhotoCount}, canny=${segFields.cannyPhotoCount}]${segFields.budgetExhaustedReason ? ` budget_exhausted=${segFields.budgetExhaustedReason}` : ''}`,
   );
+
+  // Checkpoint: persist segmentation artifacts immediately
+  await invokeCheckpoint(checkpointCallback, {
+    stage: 'segmentation',
+    stageArtifacts: segmentationArtifacts,
+    allArtifacts: [...allArtifacts],
+    stageDurations: { ...stageDurations },
+    elapsedMs: Date.now() - pipelineStart,
+    nextStage: nextStageAfter('segmentation'),
+  });
 
   // Extract typed masks for subsequent stages
   const masks = segmentationArtifacts.filter(
@@ -178,19 +269,30 @@ export async function runFullGeometryReconstructionPipeline(
   // Timeout check before Stage 2
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 1 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
-    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, ...segFields };
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, ...segFields };
   }
 
-  // ── Stage 2: Line Extraction ────────────────────────────────────────────
+  // ──── Stage 2: Line Extraction ────────────────────────────────────────────
   const lineResult = stageTimer('line_extraction', () =>
     runLineExtractionFromReconstructionInput(input, masks),
   );
   const lineArtifacts = lineResult.result;
   allArtifacts.push(...lineArtifacts);
+  stageDurations['line_extraction'] = lineResult.durationMs;
   stages.push({ stage: 'line_extraction', artifactCount: lineArtifacts.length, durationMs: lineResult.durationMs });
   console.info(
     `[Pipeline B] Stage 2 (line_extraction): ${lineArtifacts.length} artifacts in ${lineResult.durationMs}ms`,
   );
+
+  // Checkpoint: persist line extraction artifacts
+  await invokeCheckpoint(checkpointCallback, {
+    stage: 'line_extraction',
+    stageArtifacts: lineArtifacts,
+    allArtifacts: [...allArtifacts],
+    stageDurations: { ...stageDurations },
+    elapsedMs: Date.now() - pipelineStart,
+    nextStage: nextStageAfter('line_extraction'),
+  });
 
   // Extract typed structural lines for subsequent stages
   const lines = lineArtifacts.filter(
@@ -200,19 +302,30 @@ export async function runFullGeometryReconstructionPipeline(
   // Timeout check before Stage 3
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 2 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
-    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, ...segFields };
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, ...segFields };
   }
 
-  // ── Stage 3: Vanishing Points ──────────────────────────────────────────
+  // ──── Stage 3: Vanishing Points ──────────────────────────────────────────
   const vpResult = stageTimer('vanishing_points', () =>
     estimateVanishingPointsFromReconstructionInput(input, lines),
   );
   const vpArtifacts = vpResult.result;
   allArtifacts.push(...vpArtifacts);
+  stageDurations['vanishing_points'] = vpResult.durationMs;
   stages.push({ stage: 'vanishing_points', artifactCount: vpArtifacts.length, durationMs: vpResult.durationMs });
   console.info(
     `[Pipeline B] Stage 3 (vanishing_points): ${vpArtifacts.length} artifacts in ${vpResult.durationMs}ms`,
   );
+
+  // Checkpoint: persist vanishing point artifacts
+  await invokeCheckpoint(checkpointCallback, {
+    stage: 'vanishing_points',
+    stageArtifacts: vpArtifacts,
+    allArtifacts: [...allArtifacts],
+    stageDurations: { ...stageDurations },
+    elapsedMs: Date.now() - pipelineStart,
+    nextStage: nextStageAfter('vanishing_points'),
+  });
 
   // Extract typed vanishing points for subsequent stages
   const vanishingPoints = vpArtifacts.filter(
@@ -222,20 +335,31 @@ export async function runFullGeometryReconstructionPipeline(
   // Timeout check before Stage 4
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 3 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
-    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, ...segFields };
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, ...segFields };
   }
 
-  // ── Stage 4: Depth Estimation ──────────────────────────────────────────
+  // ──── Stage 4: Depth Estimation ──────────────────────────────────────────
   // Now async — MiDaS service call requires network I/O
   const depthResult = await asyncStageTimer('depth_estimation', () =>
     runDepthFromReconstructionInput(input, masks, vanishingPoints, segResult.imageBytesMap),
   );
   const depthArtifacts = depthResult.result;
   allArtifacts.push(...depthArtifacts);
+  stageDurations['depth_estimation'] = depthResult.durationMs;
   stages.push({ stage: 'depth_estimation', artifactCount: depthArtifacts.length, durationMs: depthResult.durationMs });
   console.info(
     `[Pipeline B] Stage 4 (depth_estimation): ${depthArtifacts.length} artifacts in ${depthResult.durationMs}ms`,
   );
+
+  // Checkpoint: persist depth artifacts
+  await invokeCheckpoint(checkpointCallback, {
+    stage: 'depth_estimation',
+    stageArtifacts: depthArtifacts,
+    allArtifacts: [...allArtifacts],
+    stageDurations: { ...stageDurations },
+    elapsedMs: Date.now() - pipelineStart,
+    nextStage: nextStageAfter('depth_estimation'),
+  });
 
   // Extract typed depth maps for Stage 5 (depth-augmented plane extraction)
   const depthMaps = depthArtifacts.filter(
@@ -248,42 +372,64 @@ export async function runFullGeometryReconstructionPipeline(
   // Timeout check before Stage 5
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 4 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
-    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, ...segFields };
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, ...segFields };
   }
 
-  // ── Stage 5: Plane Extraction ──────────────────────────────────────────
+  // ──── Stage 5: Plane Extraction ──────────────────────────────────────────
   // Now depth-augmented: passes DepthMap artifacts from Stage 4
   const planeResult = stageTimer('plane_extraction', () =>
     runPlaneExtractionFromReconstructionInput(input, masks, lines, vanishingPoints, depthMaps, usedMidas),
   );
   const planeArtifacts = planeResult.result;
   allArtifacts.push(...planeArtifacts);
+  stageDurations['plane_extraction'] = planeResult.durationMs;
   stages.push({ stage: 'plane_extraction', artifactCount: planeArtifacts.length, durationMs: planeResult.durationMs });
   console.info(
     `[Pipeline B] Stage 5 (plane_extraction): ${planeArtifacts.length} artifacts in ${planeResult.durationMs}ms`,
   );
 
+  // Checkpoint: persist plane artifacts
+  await invokeCheckpoint(checkpointCallback, {
+    stage: 'plane_extraction',
+    stageArtifacts: planeArtifacts,
+    allArtifacts: [...allArtifacts],
+    stageDurations: { ...stageDurations },
+    elapsedMs: Date.now() - pipelineStart,
+    nextStage: nextStageAfter('plane_extraction'),
+  });
+
   // Timeout check before Stage 6
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 5 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
-    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, ...segFields };
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, ...segFields };
   }
 
-  // ── Stage 6: Multi-View Fusion ─────────────────────────────────────────
+  // ──── Stage 6: Multi-View Fusion ──────────────────────────────────────────
   const fusionResult = stageTimer('multi_view_fusion', () =>
     runMultiViewFusionFromReconstructionInput(input, allArtifacts),
   );
   const fusionArtifacts = fusionResult.result.artifacts;
   allArtifacts.push(...fusionArtifacts);
+  stageDurations['multi_view_fusion'] = fusionResult.durationMs;
   stages.push({ stage: 'multi_view_fusion', artifactCount: fusionArtifacts.length, durationMs: fusionResult.durationMs });
   console.info(
     `[Pipeline B] Stage 6 (multi_view_fusion): ${fusionArtifacts.length} artifacts in ${fusionResult.durationMs}ms`,
   );
 
+  // Checkpoint: persist fusion artifacts
+  await invokeCheckpoint(checkpointCallback, {
+    stage: 'multi_view_fusion',
+    stageArtifacts: fusionArtifacts,
+    allArtifacts: [...allArtifacts],
+    stageDurations: { ...stageDurations },
+    elapsedMs: Date.now() - pipelineStart,
+    nextStage: nextStageAfter('multi_view_fusion'),
+  });
+
   // Timeout check before Stage 7
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 6 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
-    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, ...segFields };
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, ...segFields };
   }
 
   // ──── Stage 7: Photogrammetry ────────────────────────────────────────────
@@ -292,10 +438,21 @@ export async function runFullGeometryReconstructionPipeline(
   );
   const photoGramArtifacts = photoGramResult.result.artifacts;
   allArtifacts.push(...photoGramArtifacts);
+  stageDurations['photogrammetry'] = photoGramResult.durationMs;
   stages.push({ stage: 'photogrammetry', artifactCount: photoGramArtifacts.length, durationMs: photoGramResult.durationMs });
   console.info(
     `[Pipeline B] Stage 7 (photogrammetry): ${photoGramArtifacts.length} artifacts in ${photoGramResult.durationMs}ms`,
   );
+
+  // Final checkpoint: pipeline complete
+  await invokeCheckpoint(checkpointCallback, {
+    stage: 'photogrammetry',
+    stageArtifacts: photoGramArtifacts,
+    allArtifacts: [...allArtifacts],
+    stageDurations: { ...stageDurations },
+    elapsedMs: Date.now() - pipelineStart,
+    nextStage: null, // pipeline is complete
+  });
 
   const totalDurationMs = Date.now() - pipelineStart;
   console.info(
@@ -306,25 +463,43 @@ export async function runFullGeometryReconstructionPipeline(
     artifacts: allArtifacts,
     stages,
     totalDurationMs,
+    stageDurations,
     ...segFields,
   };
 }
 
-// ──── Partial Pipeline Runners ──────────────────────────────────────────────
+// ──── Partial Pipeline Runners ────────────────────────────────────────────────
 
 /**
  * Run only the segmentation stage of Pipeline B.
  */
 export async function runSegmentationOnlyPipeline(
   input: GeometryReconstructionInput,
+  checkpointCallback?: CheckpointCallback,
 ): Promise<FullPipelineResult> {
   const start = Date.now();
   const segOutput = await runSegmentationFullOutput(input);
   const segFields = segReportFields(segOutput);
+  const durationMs = Date.now() - start;
+  const stageDurations: Record<string, number> = { segmentation: durationMs };
+
+  // Checkpoint: persist segmentation artifacts
+  if (checkpointCallback) {
+    await invokeCheckpoint(checkpointCallback, {
+      stage: 'segmentation',
+      stageArtifacts: segOutput.artifacts,
+      allArtifacts: [...segOutput.artifacts],
+      stageDurations,
+      elapsedMs: durationMs,
+      nextStage: null,
+    });
+  }
+
   return {
     artifacts: segOutput.artifacts,
-    stages: [{ stage: 'segmentation', artifactCount: segOutput.artifacts.length, durationMs: Date.now() - start }],
-    totalDurationMs: Date.now() - start,
+    stages: [{ stage: 'segmentation', artifactCount: segOutput.artifacts.length, durationMs }],
+    totalDurationMs: durationMs,
+    stageDurations,
     ...segFields,
   };
 }
@@ -335,16 +510,32 @@ export async function runSegmentationOnlyPipeline(
  */
 export async function runDepthOnlyPipeline(
   input: GeometryReconstructionInput,
+  checkpointCallback?: CheckpointCallback,
 ): Promise<FullPipelineResult> {
   const start = Date.now();
+  const stageDurations: Record<string, number> = {};
 
   // Run segmentation first to get masks
   const segOutput = await runSegmentationFullOutput(input);
   const segFields = segReportFields(segOutput);
   const segArtifacts = segOutput.artifacts;
+  const segDurationMs = Date.now() - start;
+  stageDurations['segmentation'] = segDurationMs;
   const masks = segArtifacts.filter(
     (a): a is SemanticSegmentationMask => a.artifactType === 'semantic_segmentation_mask' || a.artifactType === 'segmentation_mask',
   );
+
+  // Checkpoint after segmentation
+  if (checkpointCallback) {
+    await invokeCheckpoint(checkpointCallback, {
+      stage: 'segmentation',
+      stageArtifacts: segArtifacts,
+      allArtifacts: [...segArtifacts],
+      stageDurations: { ...stageDurations },
+      elapsedMs: Date.now() - start,
+      nextStage: 'depth_estimation',
+    });
+  }
 
   // Run vanishing points (needed for depth)
   const lineArtifacts = runLineExtractionFromReconstructionInput(input, masks);
@@ -358,14 +549,29 @@ export async function runDepthOnlyPipeline(
 
   const depthArtifacts = await runDepthFromReconstructionInput(input, masks, vanishingPoints, {});
   const allArtifacts = [...segArtifacts, ...lineArtifacts, ...vpArtifacts, ...depthArtifacts];
+  const depthDurationMs = Date.now() - start - segDurationMs;
+  stageDurations['depth_estimation'] = depthDurationMs;
+
+  // Checkpoint after depth
+  if (checkpointCallback) {
+    await invokeCheckpoint(checkpointCallback, {
+      stage: 'depth_estimation',
+      stageArtifacts: depthArtifacts,
+      allArtifacts: [...allArtifacts],
+      stageDurations: { ...stageDurations },
+      elapsedMs: Date.now() - start,
+      nextStage: null,
+    });
+  }
 
   return {
     artifacts: allArtifacts,
     stages: [
-      { stage: 'segmentation', artifactCount: segArtifacts.length, durationMs: 0 },
-      { stage: 'depth_estimation', artifactCount: depthArtifacts.length, durationMs: Date.now() - start },
+      { stage: 'segmentation', artifactCount: segArtifacts.length, durationMs: segDurationMs },
+      { stage: 'depth_estimation', artifactCount: depthArtifacts.length, durationMs: depthDurationMs },
     ],
     totalDurationMs: Date.now() - start,
+    stageDurations,
     ...segFields,
   };
 }
