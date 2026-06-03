@@ -1,0 +1,7 @@
+node_modules
+.next
+.git
+worker/dist
+__tests__
+*.test.ts
+*.spec.ts
