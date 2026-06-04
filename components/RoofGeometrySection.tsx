@@ -32,6 +32,7 @@ import {
   XCircle,
   Clock,
   SkipForward,
+  Shapes,
 } from 'lucide-react';
 import {
   UnifiedGeometryOverlayRenderer,
@@ -100,6 +101,7 @@ export function RoofGeometrySection({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [showDebugRoofLines, setShowDebugRoofLines] = useState(false);
   const [bundleLoading, setBundleLoading] = useState(true);
+  const [bundleMode, setBundleMode] = useState<'stats' | 'overlay'>('stats');
   const [pipelineCLoading, setPipelineCLoading] = useState(false);
   const [pipelineCError, setPipelineCError] = useState<string | null>(null);
   const [pipelineCNoCoverage, setPipelineCNoCoverage] = useState(false);
@@ -112,19 +114,51 @@ export function RoofGeometrySection({
   // ── Fetch unified geometry bundle ─────────────────────────────────
   const [authRequired, setAuthRequired] = useState(false);
 
-  const fetchBundle = useCallback(async () => {
+  const fetchBundle = useCallback(async (mode: 'stats' | 'overlay' = 'stats') => {
     if (!surveyId) return;
+    setBundleLoading(true);
     try {
-      const res = await fetch(`/api/site-surveys/${surveyId}/unified-geometry/bundle`, {
+      const res = await fetch(`/api/site-surveys/${surveyId}/unified-geometry/bundle?mode=${mode}`, {
         credentials: 'include',
       });
       if (res.status === 401) {
         setAuthRequired(true);
         return;
       }
-      const data = await res.json();
+
+      // ── Defensive JSON parsing ──
+      // The bundle response can be very large (~30+ MB with many segmentation
+      // masks). If any geometry_data JSONB value contains an unescaped character
+      // (newline, raw backslash, etc.), res.json() will throw "Unterminated
+      // string" or similar. We catch that, log a helpful diagnostic, and fall
+      // back to showing the error in the UI rather than crashing silently.
+      let data: any;
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        const msg = jsonErr instanceof Error ? jsonErr.message : String(jsonErr);
+        console.error('[RoofGeometrySection] JSON parse error in bundle response:', msg);
+
+        // Attempt to read the raw text to diagnose where the malformed JSON is
+        let rawSnippet = '(could not read body)';
+        try {
+          // res.body was already consumed by the failed res.json(), but we can
+          // try cloning — if the response is too large this may also fail.
+          // We skip this for now since the body is already consumed.
+        } catch { /* ignore */ }
+
+        setPipelineError(
+          `Failed to parse geometry data from server: ${msg}. ` +
+          `This may be caused by corrupted geometry data in the database. ` +
+          `Try refreshing — if the error persists, the survey's geometry data may need to be re-generated.`
+        );
+        setBundleLoading(false);
+        return;
+      }
+
       if (data.success && data.bundle) {
         setUnifiedBundle(data.bundle);
+        setBundleMode(mode);
       }
       // Capture pipeline configuration status (e.g., whether Google Solar API key is set)
       if (data.pipelineConfig) {
@@ -140,6 +174,15 @@ export function RoofGeometrySection({
   useEffect(() => {
     fetchBundle();
   }, [fetchBundle]);
+
+  // ── Load overlay-mode data when user wants polygon-level detail ──────
+  // In stats mode (default), segmentation mask vertices are stripped to keep
+  // the response under Vercel's 4.5MB limit. When the user wants to see
+  // detailed polygon shapes in the overlay, they can trigger overlay mode.
+  const loadOverlayData = useCallback(async () => {
+    if (bundleMode === 'overlay') return; // already in overlay mode
+    await fetchBundle('overlay');
+  }, [bundleMode, fetchBundle]);
 
   // ── Run Pipeline B (Generate Roof Geometry) ──────────────────────────────────────────────
   // Pipeline B is async: POST /start → 202 { jobId } → poll GET /status
@@ -603,7 +646,7 @@ export function RoofGeometrySection({
           </button>
           {hasAnyData && (
             <button
-              onClick={fetchBundle}
+              onClick={() => fetchBundle()}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/60 px-2.5 py-1.5 text-[10px] text-slate-400 transition hover:text-slate-200"
             >
               <RefreshCw size={10} />
@@ -934,8 +977,8 @@ export function RoofGeometrySection({
         {/* ── Photo + Geometry Overlay ── */}
         {hasAnyData && filesWithArtifacts.length > 0 && (
           <div className="rounded-lg border border-slate-700/40 bg-slate-950/30 p-2">
-            {/* Debug roof-line toggle */}
-            <div className="flex items-center gap-2 mb-2">
+            {/* Debug roof-line toggle & polygon detail toggle */}
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
               <button
                 type="button"
                 onClick={() => setShowDebugRoofLines(!showDebugRoofLines)}
@@ -952,12 +995,30 @@ export function RoofGeometrySection({
                 {showDebugRoofLines ? (
                   <>🔍 Debug Lines: ON (showing all candidates)</>
                 ) : (
-                  <>📏 Show Debug Roof-Line Candidates</>
+                  <>📋 Show Debug Roof-Line Candidates</>
                 )}
               </button>
               {showDebugRoofLines && (
                 <span className="text-[8px] text-amber-400/60">
                   Thick lines visible. Low-confidence & duplicate lines shown.
+                </span>
+              )}
+              {bundleMode === 'stats' && (
+                <button
+                  type="button"
+                  onClick={loadOverlayData}
+                  disabled={bundleLoading}
+                  className="inline-flex items-center gap-1.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 px-2.5 py-1 text-[9px] font-medium transition hover:bg-cyan-500/25 disabled:opacity-50"
+                  title="Load detailed polygon shapes for segmentation masks. Currently showing bounding-box outlines only (faster load)."
+                >
+                  <Shapes size={10} />
+                  Show Detailed Polygons
+                </button>
+              )}
+              {bundleMode === 'overlay' && (
+                <span className="inline-flex items-center gap-1 text-[9px] text-cyan-400/60">
+                  <Shapes size={10} />
+                  Full polygon detail loaded
                 </span>
               )}
             </div>

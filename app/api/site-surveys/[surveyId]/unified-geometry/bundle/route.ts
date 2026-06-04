@@ -3,6 +3,21 @@
 //
 // Fetch the unified geometry evidence bundle for a survey.
 //
+// QUERY PARAMETERS:
+//   ?mode=stats    (default) — Strips polygon.vertices from segmentation_mask
+//                  artifacts to keep the response under Vercel's 4.5MB
+//                  serverless function body limit. Stats, counts, and bbox
+//                  data are all preserved. The overlay renderer will render
+//                  segmentation masks as bounding-box rectangles instead of
+//                  detailed polygon shapes.
+//   ?mode=overlay  — Includes full polygon vertex data for all artifacts.
+//                  Use this when the overlay renderer needs detailed polygon
+//                  shapes (e.g., for a specific photo being viewed).
+//                  WARNING: Can exceed Vercel's 4.5MB response limit for
+//                  surveys with many segmentation masks. Use per-photo
+//                  fetching or streaming for large surveys.
+//   ?mode=full     — Alias for overlay (backward compat).
+//
 // PRIMARY PATH:  Query `unified_geometry_artifacts` table directly.
 //   This table is populated by Migration 080 backfill and kept current by
 //   the promote route's upsert. It is the canonical source of truth.
@@ -31,6 +46,58 @@ import {
   buildUnifiedEvidenceBundle,
 } from '@/lib/siteSurveys/unifiedGeometry';
 import { isGoogleSolarApiConfigured } from '@/lib/siteSurveys/googleSolarApi/client';
+import type { UnifiedGeometryArtifact } from '@/lib/siteSurveys/unifiedGeometry/types';
+
+// ── Bundle mode types ────────────────────────────────────────────────────────
+
+type BundleMode = 'stats' | 'overlay' | 'full';
+
+/**
+ * Strips polygon vertex arrays from segmentation_mask artifacts to dramatically
+ * reduce bundle size. Segmentation masks (typically 150+ per survey) carry the
+ * bulk of the data — each mask can have hundreds of polygon vertices. In stats
+ * mode, the overlay renderer falls back to rendering bounding-box rectangles
+ * for these masks instead of detailed polygon shapes.
+ *
+ * This function does NOT strip vertices from roof_plane, wall_plane,
+ * consensus_plane, or other geometry classes — those have much smaller polygon
+ * counts and are essential for the overlay renderer.
+ *
+ * Returns a new array; does not mutate the input.
+ */
+function stripSegmentationMaskVertices(artifacts: UnifiedGeometryArtifact[]): UnifiedGeometryArtifact[] {
+  return artifacts.map(artifact => {
+    // Only strip vertices from segmentation_mask artifacts that have a polygon
+    if (artifact.geometryClass !== 'segmentation_mask' || !artifact.polygon) {
+      return artifact;
+    }
+
+    // Strip vertices but keep the polygon shell (with coordinateSystem) so the
+    // frontend knows a polygon WAS present. The overlay renderer will see
+    // polygon.vertices === [] and fall back to bbox rendering.
+    return {
+      ...artifact,
+      polygon: {
+        vertices: [],
+        coordinateSystem: artifact.polygon.coordinateSystem,
+      },
+    };
+  });
+}
+
+/**
+ * Estimate the JSON byte size of the response payload.
+ * Used to log a warning when the response may exceed Vercel's 4.5MB limit.
+ */
+function estimateJsonByteSize(obj: unknown): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(obj), 'utf-8');
+  } catch {
+    return -1;
+  }
+}
+
+const VERCEL_RESPONSE_LIMIT_BYTES = 4.5 * 1024 * 1024; // 4.5MB
 
 export async function GET(
   req: NextRequest,
@@ -47,6 +114,12 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Invalid survey ID' }, { status: 400 });
     }
 
+    // ── Parse ?mode= query parameter ──────────────────────────────────────
+    const modeParam = req.nextUrl.searchParams.get('mode') ?? 'stats';
+    const mode: BundleMode = (modeParam === 'overlay' || modeParam === 'full')
+      ? modeParam
+      : 'stats';
+
     // Verify survey ownership (dev bypass user skips ownership check)
     const survey = await getSiteSurveyById(surveyId, user.id, {
       bypassOwnershipCheck: user.id === 'dev-user-bypass-001',
@@ -55,7 +128,7 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Survey not found' }, { status: 404 });
     }
 
-    // ── PRIMARY: Query unified_geometry_artifacts directly ──────────────
+    // ── PRIMARY: Query unified_geometry_artifacts directly ────────────────
     // This table is the canonical source of truth. If it has pipeline
     // artifacts (photo_vision or geometry_recon) for this survey, we
     // build the bundle from them directly — no on-the-fly adaptation needed.
@@ -78,17 +151,41 @@ export async function GET(
         .addUnifiedArtifacts(unifiedArtifacts)
         .build();
 
-      return NextResponse.json({
+      // ── Apply mode-based vertex stripping ─────────────────────────────
+      const processedArtifacts = mode === 'stats'
+        ? stripSegmentationMaskVertices(bundle.artifacts)
+        : bundle.artifacts;
+
+      const responsePayload = {
         success: true,
-        bundle,
+        bundle: {
+          ...bundle,
+          artifacts: processedArtifacts,
+        },
         source: 'unified_table', // informational — tells the caller which path was used
+        mode, // echo back the mode so the frontend knows
         pipelineConfig: {
           googleSolarApi: isGoogleSolarApiConfigured(),
         },
-      });
+      };
+
+      // ── Size warning for overlay/full mode ────────────────────────────
+      if (mode !== 'stats') {
+        const estimatedSize = estimateJsonByteSize(responsePayload);
+        if (estimatedSize > VERCEL_RESPONSE_LIMIT_BYTES) {
+          console.warn(
+            `[GET /unified-geometry/bundle] WARNING: Response for survey ${surveyId} ` +
+            `in mode=${mode} is ~${(estimatedSize / 1024 / 1024).toFixed(1)}MB, ` +
+            `which exceeds Vercel's 4.5MB limit. The response will be truncated. ` +
+            `Use ?mode=stats for the stats panel, or fetch per-photo overlay data.`
+          );
+        }
+      }
+
+      return NextResponse.json(responsePayload);
     }
 
-    // ── FALLBACK: On-the-fly adaptation from source tables ──────────────
+    // ── FALLBACK: On-the-fly adaptation from source tables ────────────────
     // Either the unified table is empty, or it only contains non-pipeline
     // artifacts (like obstruction_registration). Fall back to querying
     // Pipeline A + Pipeline B source tables and adapting on the fly.
@@ -147,14 +244,38 @@ export async function GET(
 
     const bundle = builder.build();
 
-    return NextResponse.json({
+    // ── Apply mode-based vertex stripping ─────────────────────────────
+    const processedArtifacts = mode === 'stats'
+      ? stripSegmentationMaskVertices(bundle.artifacts)
+      : bundle.artifacts;
+
+    const responsePayload = {
       success: true,
-      bundle,
+      bundle: {
+        ...bundle,
+        artifacts: processedArtifacts,
+      },
       source: 'fallback_adaptation', // informational — tells the caller backfill hasn't run
+      mode,
       pipelineConfig: {
         googleSolarApi: isGoogleSolarApiConfigured(),
       },
-    });
+    };
+
+    // ── Size warning for overlay/full mode ────────────────────────────
+    if (mode !== 'stats') {
+      const estimatedSize = estimateJsonByteSize(responsePayload);
+      if (estimatedSize > VERCEL_RESPONSE_LIMIT_BYTES) {
+        console.warn(
+          `[GET /unified-geometry/bundle] WARNING: Fallback response for survey ${surveyId} ` +
+          `in mode=${mode} is ~${(estimatedSize / 1024 / 1024).toFixed(1)}MB, ` +
+          `which exceeds Vercel's 4.5MB limit. The response will be truncated. ` +
+          `Use ?mode=stats for the stats panel, or fetch per-photo overlay data.`
+        );
+      }
+    }
+
+    return NextResponse.json(responsePayload);
   } catch (err) {
     console.error('[GET /unified-geometry/bundle] Error:', err);
     const message = err instanceof Error ? err.message : 'Internal server error';

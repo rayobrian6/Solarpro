@@ -189,108 +189,99 @@ export async function getUnifiedArtifactsForSurvey(
   }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Query: Get specific artifacts by ID
-// ────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Geometry Data Sanitization
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Get specific UnifiedGeometryArtifact instances by their IDs.
- * Useful when a promotion request specifies particular artifact IDs.
+ * Sanitize a geometry_data JSONB value before it's used to reconstruct an
+ * artifact. This prevents malformed string values (unescaped newlines,
+ * backslashes, control characters) from breaking JSON serialization when
+ * the bundle is sent as an HTTP response.
  *
- * MIGRATION DRIFT GUARD: Same column check as getUnifiedArtifactsForSurvey.
- * Also includes a table existence check — if the table doesn't exist,
- * returns [] instead of throwing.
+ * The root cause of "Unterminated string in JSON at position 33M" errors is
+ * that some geometry_data JSONB fields contain string values with characters
+ * that are invalid in JSON strings (raw newlines \n, tabs \t, or unescaped
+ * backslashes). While PostgreSQL JSONB stores these fine, JavaScript's
+ * JSON.stringify() will produce malformed output if the JS string contains
+ * such characters outside of proper JSON escape sequences.
+ *
+ * This function walks the object recursively and sanitizes all string values.
  */
-export async function getUnifiedArtifactsByIds(
-  artifactIds: string[],
-): Promise<UnifiedGeometryArtifact[]> {
-  if (artifactIds.length === 0) return [];
+function sanitizeGeometryData(obj: unknown): unknown {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj === 'string') {
+    // Replace characters that break JSON string serialization
+    // eslint-disable-next-line no-control-regex
+    return obj
+      .replace(/\\/g, '\\\\')     // escape backslashes first
+      .replace(/"/g, '\\"')       // escape double quotes
+      .replace(/\n/g, '\\n')      // escape newlines
+      .replace(/\r/g, '\\r')      // escape carriage returns
+      .replace(/\t/g, '\\t')      // escape tabs
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\x00-\x1f]/g, (ch) => {
+        // Replace other control characters with Unicode escape
+        const hex = ch.charCodeAt(0).toString(16).padStart(4, '0');
+        return `\\u${hex}`;
+      });
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(sanitizeGeometryData);
+  }
+  if (typeof obj === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+      result[key] = sanitizeGeometryData(value);
+    }
+    return result;
+  }
+  // Numbers, booleans — pass through unchanged
+  return obj;
+}
+
+/**
+ * Re-serialize and re-parse geometry_data to guarantee valid JSON.
+ *
+ * If geometry_data contains string values with characters that would break
+ * JSON.stringify(), this function catches the error and falls back to a
+ * recursive sanitization pass, then tries again.
+ *
+ * Returns the parsed object if successful, or null if the data is
+ * fundamentally unparseable (in which case the artifact is reconstructed
+ * from row columns instead).
+ */
+function safeReconstructGeometryData(geometryData: unknown): Record<string, unknown> | null {
+  if (!geometryData || typeof geometryData !== 'object') return null;
+
+  // First, try a round-trip: JSON.stringify → JSON.parse.
+  // If the data is already clean (the common case), this is fast.
+  try {
+    const serialized = JSON.stringify(geometryData);
+    const reparsed = JSON.parse(serialized);
+    return reparsed as Record<string, unknown>;
+  } catch {
+    // stringify failed — the data has malformed string values.
+    // Sanitize and retry.
+    console.warn(
+      '[unifiedArtifactStore] geometry_data round-trip failed, sanitizing...',
+    );
+  }
 
   try {
-    const sql = await getDbReady();
-
-    // Check if the table exists first (graceful degradation)
-    const tableCheck = await sql`
-      SELECT 1 FROM information_schema.tables
-      WHERE table_name = 'unified_geometry_artifacts'
-    `;
-    if (tableCheck.length === 0) {
-      return [];
-    }
-
-    // Check if the obstruction_metadata column exists (Migration 081 guard)
-    const hasObstructionColumn = await checkObstructionMetadataColumn(sql);
-
-    if (hasObstructionColumn) {
-      const rows = await sql`
-        SELECT
-          id, survey_id, geometry_class, authority_state, authority,
-          provenance, confidence, label, limitations, geometry_data,
-          obstruction_metadata,
-          review_state, review_notes, priority, mock_artifact,
-          created_at, updated_at
-        FROM unified_geometry_artifacts
-        WHERE id = ANY(${artifactIds})
-        ORDER BY created_at ASC
-      `;
-      return (rows as UnifiedArtifactRow[]).map(rowToArtifact);
-    } else {
-      const rows = await sql`
-        SELECT
-          id, survey_id, geometry_class, authority_state, authority,
-          provenance, confidence, label, limitations, geometry_data,
-          review_state, review_notes, priority, mock_artifact,
-          created_at, updated_at
-        FROM unified_geometry_artifacts
-        WHERE id = ANY(${artifactIds})
-        ORDER BY created_at ASC
-      `;
-      return (rows as UnifiedArtifactBaseRow[]).map(rowToArtifactBase);
-    }
+    const sanitized = sanitizeGeometryData(geometryData);
+    const serialized = JSON.stringify(sanitized);
+    const reparsed = JSON.parse(serialized);
+    return reparsed as Record<string, unknown>;
   } catch (err) {
-    console.warn(
-      '[unifiedArtifactStore] Failed to query unified_geometry_artifacts by IDs:',
+    console.error(
+      '[unifiedArtifactStore] geometry_data sanitization failed, discarding:',
       err instanceof Error ? err.message : String(err),
     );
-    return [];
+    return null;
   }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Query: Check if the unified table has data for a survey
-// ────────────────────────────────────────────────────────────────────────────
-
-/**
- * Check whether the unified_geometry_artifacts table has any artifacts
- * for the given survey. Returns true if at least one artifact exists.
- *
- * This is used to decide whether to query the unified table directly
- * or fall back to on-the-fly adaptation from source tables.
- */
-export async function hasUnifiedArtifactsForSurvey(
-  surveyId: string,
-): Promise<boolean> {
-  try {
-    const sql = await getDbReady();
-
-    const tableCheck = await sql`
-      SELECT 1 FROM information_schema.tables
-      WHERE table_name = 'unified_geometry_artifacts'
-    `;
-    if (tableCheck.length === 0) {
-      return false;
-    }
-
-    const result = await sql`
-      SELECT 1 FROM unified_geometry_artifacts
-      WHERE survey_id = ${surveyId}
-      LIMIT 1
-    `;
-    return result.length > 0;
-  } catch {
-    return false;
-  }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Row → Artifact Conversion
@@ -304,13 +295,16 @@ export async function hasUnifiedArtifactsForSurvey(
  * all nested fields (authority, provenance, geometry fields, etc.).
  *
  * If `geometry_data` is null (e.g., from Migration 080 backfill that only stored
- * metadata), we reconstruct from the row columns with sensible defaults.
+ * metadata), we reconstruct from the row columns.
+ *
+ * IMPORTANT: geometry_data is sanitized via safeReconstructGeometryData() to
+ * prevent malformed string values (unescaped newlines, backslashes, etc.) from
+ * breaking JSON serialization when the bundle is sent as an HTTP response.
  */
 function rowToArtifact(row: UnifiedArtifactRow): UnifiedGeometryArtifact {
-  // Preferred path: full artifact stored in geometry_data
-  if (row.geometry_data && typeof row.geometry_data === 'object') {
-    const stored = row.geometry_data as Record<string, unknown>;
-
+  // Preferred path: full artifact stored in geometry_data (with safe reconstruction)
+  const stored = safeReconstructGeometryData(row.geometry_data);
+  if (stored) {
     // The stored artifact should have all the fields we need.
     // Ensure critical fields are present and consistent.
     return {
@@ -423,11 +417,14 @@ function rowToArtifact(row: UnifiedArtifactRow): UnifiedGeometryArtifact {
  * Convert a database row (WITHOUT obstruction_metadata) to a UnifiedGeometryArtifact.
  * Used when the obstruction_metadata column doesn't exist yet (pre-Migration 081).
  * obstructionMetadata is always null in this path.
+ *
+ * IMPORTANT: geometry_data is sanitized via safeReconstructGeometryData() to
+ * prevent malformed string values from breaking JSON serialization.
  */
 function rowToArtifactBase(row: UnifiedArtifactBaseRow): UnifiedGeometryArtifact {
-  // Preferred path: full artifact stored in geometry_data
-  if (row.geometry_data && typeof row.geometry_data === 'object') {
-    const stored = row.geometry_data as Record<string, unknown>;
+  // Preferred path: full artifact stored in geometry_data (with safe reconstruction)
+  const stored = safeReconstructGeometryData(row.geometry_data);
+  if (stored) {
 
     // geometry_data may contain obstructionMetadata embedded in the JSONB
     // (e.g., from a backfill that stored the full artifact). Use it if present.

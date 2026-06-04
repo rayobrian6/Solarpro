@@ -1220,8 +1220,11 @@ function PhotoWithUnifiedOverlays({
                 {a.areaSqM != null && (
                   <span className="text-slate-300">Area: <span className="text-emerald-300">{a.areaSqM.toFixed(1)} m²</span></span>
                 )}
-                {a.polygon?.vertices != null && (
+                {a.polygon?.vertices != null && a.polygon.vertices.length > 0 && (
                   <span className="text-slate-300">Vertices: <span className="text-slate-200">{a.polygon.vertices.length}</span></span>
+                )}
+                {a.polygon?.vertices != null && a.polygon.vertices.length === 0 && a.geometryClass === 'segmentation_mask' && (
+                  <span className="text-slate-400/60 italic">Vertices: stripped (stats mode)</span>
                 )}
                 {a.inlierCount != null && (
                   <span className="text-slate-300">Inliers: <span className="text-slate-200">{a.inlierCount}/{a.totalPoints}</span></span>
