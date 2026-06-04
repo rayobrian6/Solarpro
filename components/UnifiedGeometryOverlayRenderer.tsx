@@ -67,12 +67,12 @@ const GEOMETRY_CLASS_OVERLAY_COLORS: Record<
 > = {
   roof_plane: {
     stroke: '#34d399',
-    fill: 'rgba(52,211,153,0.12)',
+    fill: 'rgba(52,211,153,0.15)',
     label: 'Roof Plane',
   },
   wall_plane: {
-    stroke: '#60a5fa',
-    fill: 'rgba(96,165,250,0.10)',
+    stroke: '#06b6d4',
+    fill: 'rgba(6,182,212,0.15)',
     label: 'Wall Plane',
   },
   roof_line: {
@@ -160,18 +160,18 @@ const SEGMENTATION_BACKEND_COLORS: Record<SegmentationBackend, { stroke: string;
  */
 const SEGMENTATION_CLASS_COLORS: Partial<Record<SegmentationClass, { stroke: string; fill: string; label: string }>> = {
   // Legacy
-  roof:       { stroke: '#34d399', fill: 'rgba(52,211,153,0.12)',  label: 'Roof' },
-  wall:       { stroke: '#60a5fa', fill: 'rgba(96,165,250,0.10)',  label: 'Wall' },
+  roof:       { stroke: '#34d399', fill: 'rgba(52,211,153,0.15)',  label: 'Roof' },
+  wall:       { stroke: '#06b6d4', fill: 'rgba(6,182,212,0.15)',   label: 'Wall' },
   sky:        { stroke: '#38bdf8', fill: 'rgba(56,189,248,0.06)',  label: 'Sky' },
-  tree:       { stroke: '#22c55e', fill: 'rgba(34,197,94,0.10)',   label: 'Tree' },
+  tree:       { stroke: '#22c55e', fill: 'rgba(34,197,94,0.14)',   label: 'Tree' },
   ground:     { stroke: '#a3e635', fill: 'rgba(163,230,53,0.08)',  label: 'Ground' },
   obstruction:{ stroke: '#f472b6', fill: 'rgba(244,114,182,0.10)', label: 'Obstruction' },
   equipment:  { stroke: '#c084fc', fill: 'rgba(192,132,252,0.10)', label: 'Equipment' },
   // Facade
-  siding:      { stroke: '#d97706', fill: 'rgba(217,119,6,0.10)',  label: 'Siding' },
-  window:      { stroke: '#3b82f6', fill: 'rgba(59,130,246,0.12)', label: 'Window' },
-  door:        { stroke: '#7c3aed', fill: 'rgba(124,58,237,0.10)', label: 'Door' },
-  garage_door: { stroke: '#6d28d9', fill: 'rgba(109,40,217,0.10)', label: 'Garage Door' },
+  siding:      { stroke: '#d97706', fill: 'rgba(217,119,6,0.14)',  label: 'Siding' },
+  window:      { stroke: '#3b82f6', fill: 'rgba(59,130,246,0.18)', label: 'Window' },
+  door:        { stroke: '#eab308', fill: 'rgba(234,179,8,0.15)',  label: 'Door' },
+  garage_door: { stroke: '#f59e0b', fill: 'rgba(245,158,11,0.15)', label: 'Garage Door' },
   fascia:      { stroke: '#b45309', fill: 'rgba(180,83,9,0.08)',   label: 'Fascia' },
   soffit:      { stroke: '#92400e', fill: 'rgba(146,64,14,0.08)',  label: 'Soffit' },
   gutter:      { stroke: '#78716c', fill: 'rgba(120,113,108,0.10)',label: 'Gutter' },
@@ -187,8 +187,8 @@ const SEGMENTATION_CLASS_COLORS: Partial<Record<SegmentationClass, { stroke: str
   driveway:                    { stroke: '#78716c', fill: 'rgba(120,113,108,0.06)',label: 'Driveway' },
   gravel:                      { stroke: '#a8a29e', fill: 'rgba(168,162,158,0.06)',label: 'Gravel' },
   fence:                       { stroke: '#92400e', fill: 'rgba(146,64,14,0.08)',  label: 'Fence' },
-  bushes:                      { stroke: '#15803d', fill: 'rgba(21,128,61,0.08)',  label: 'Bushes' },
-  vegetation_touching_structure:{ stroke: '#dc2626', fill: 'rgba(220,38,38,0.10)', label: 'Veg. Touching Structure' },
+  bushes:                      { stroke: '#15803d', fill: 'rgba(21,128,61,0.12)',  label: 'Bushes' },
+  vegetation_touching_structure:{ stroke: '#dc2626', fill: 'rgba(220,38,38,0.14)', label: 'Veg. Touching Structure' },
   // Electrical/solar
   utility_meter:       { stroke: '#a855f7', fill: 'rgba(168,85,247,0.10)', label: 'Utility Meter' },
   main_service_panel:  { stroke: '#7c3aed', fill: 'rgba(124,58,237,0.10)', label: 'Main Panel' },
@@ -227,6 +227,19 @@ function isOccluderClass(cls: SegmentationClass): boolean {
  */
 function isConditionClass(cls: SegmentationClass): boolean {
   return CONDITION_SEGMENTATION_CLASSES.has(cls);
+}
+
+/**
+ * Structural segmentation classes that represent building envelope features.
+ * These get thicker borders and stronger fill tints for visibility.
+ */
+const STRUCTURAL_SEGMENTATION_CLASSES = new Set<SegmentationClass>([
+  'wall', 'window', 'door', 'garage_door', 'siding', 'fascia', 'soffit',
+  'gutter', 'downspout', 'porch', 'deck', 'steps', 'railing', 'roof',
+]);
+
+function isStructuralClass(cls: SegmentationClass): boolean {
+  return STRUCTURAL_SEGMENTATION_CLASSES.has(cls);
 }
 
 
@@ -271,13 +284,13 @@ const ROOF_LINE_SUBTYPE_STYLES_DEFAULT: Record<
     label: 'Valley',
   },
   wall_vertical: {
-    stroke: '#60a5fa',    // blue — wall edges
+    stroke: '#06b6d4',    // cyan — wall edges (matches wall_plane/segmentation wall color)
     strokeWidth: 0.3,
     strokeDasharray: '0.8,0.8',
     label: 'Wall Edge',
   },
   wall_bottom_edge: {
-    stroke: '#a78bfa',    // purple — foundation/wall-ground boundary
+    stroke: '#06b6d4',    // cyan — foundation/wall-ground boundary (matches wall color)
     strokeWidth: 0.35,
     strokeDasharray: '2,1,0.5,1',
     label: 'Foundation Edge',
@@ -324,13 +337,13 @@ const ROOF_LINE_SUBTYPE_STYLES_DEBUG: Record<
     label: 'Valley',
   },
   wall_vertical: {
-    stroke: '#60a5fa',
+    stroke: '#06b6d4',
     strokeWidth: 1.0,
     strokeDasharray: '2,2',
     label: 'Wall Edge',
   },
   wall_bottom_edge: {
-    stroke: '#a78bfa',    // purple — foundation/wall-ground boundary
+    stroke: '#06b6d4',    // cyan — foundation/wall-ground boundary
     strokeWidth: 1.0,
     strokeDasharray: '4,2,1,2',
     label: 'Foundation Edge',
@@ -999,14 +1012,18 @@ function PhotoWithUnifiedOverlays({
               : 0.6
             : lineStyle
               ? lineStyle.strokeWidth
-              : 0.35;
+              : (isStructuralClass((entry.artifact.segmentationClass as SegmentationClass | null) ?? 'sky') || entry.artifact.geometryClass === 'wall_plane' || entry.artifact.geometryClass === 'roof_plane')
+                ? 0.5   // Thicker stroke for structural masks and plane geometry
+                : 0.35;
           const lineStroke = lineStyle?.stroke ?? entry.color.stroke;
           const lineDash = lineStyle?.strokeDasharray ?? 'none';
           // Pass 3E: Excluded masks get reduced opacity and dashed borders
           const isExcludedFromGeometry = entry.artifact.excludeFromGeometry === true;
           const excludedFillOpacity = isExcludedFromGeometry ? 0.04 : undefined;
           const excludedStrokeDash = isExcludedFromGeometry ? '4,4' : undefined;
+          const isStructural = isStructuralClass((entry.artifact.segmentationClass as SegmentationClass | null) ?? 'sky') || entry.artifact.geometryClass === 'wall_plane' || entry.artifact.geometryClass === 'roof_plane';
           const fillOpacity = isHovered ? 0.2 : excludedFillOpacity ?? undefined;
+          const structuralFillOpacity = isStructural ? 0.18 : 0.12;
           const strokeDash = entry.artifact.authority?.mockArtifact ? '1,1'
             : entry.artifact.isOccluder ? '6,3'  // Dashed lines for occluders
             : excludedStrokeDash ?? 'none';  // Pass 3E: excluded masks get 4,4 dash
@@ -1021,7 +1038,7 @@ function PhotoWithUnifiedOverlays({
                 <polygon
                   points={entry.polygonSvg.points}
                   fill={isRoofLine ? 'none' : entry.color.stroke}
-                  fillOpacity={fillOpacity ?? (isRoofLine ? 0 : 0.12)}
+                  fillOpacity={fillOpacity ?? (isRoofLine ? 0 : structuralFillOpacity)}
                   stroke={lineStroke}
                   strokeWidth={strokeWidth}
                   strokeDasharray={lineDash}
@@ -1039,7 +1056,7 @@ function PhotoWithUnifiedOverlays({
                   width={entry.rectSvg.width}
                   height={entry.rectSvg.height}
                   fill={isRoofLine ? 'none' : entry.color.stroke}
-                  fillOpacity={fillOpacity ?? (isRoofLine ? 0 : 0.06)}
+                  fillOpacity={fillOpacity ?? (isRoofLine ? 0 : isStructural ? 0.12 : 0.06)}
                   stroke={lineStroke}
                   strokeWidth={strokeWidth}
                   strokeDasharray={lineDash}
