@@ -105,6 +105,42 @@ export interface DepthMap {
   limitations: string[];
 }
 
+// ---------------------------------------------------------------------------
+// Phase 0 — Depth-Class Contradiction Detection (WP-2)
+// ---------------------------------------------------------------------------
+
+/** Severity of a depth-class contradiction. */
+export type ContradictionSeverity = 'none' | 'minor' | 'moderate' | 'major';
+
+/** A depth-class contradiction report — produced when the estimated depth
+ *  for a segmentation mask contradicts the expected depth range for its class.
+ *
+ *  Example: a mask classified as 'sky' (expected depth > 0.75) but estimated
+ *  at depth 0.1 (very close to camera) is a 'major' contradiction.
+ *
+ *  Phase 0 (P0-2.1): These types are the foundation for contradiction
+ *  detection in the depth worker (P0-2.3) and the canonical promotion
+ *  quality gate (P0-4.2).
+ */
+export interface DepthContradictionReport {
+  /** The segmentation class of the mask that was contradicted. */
+  segmentationClass: SegmentationClass;
+  /** The mask ID that triggered the contradiction. */
+  maskId: string;
+  /** Expected depth range for the class [min, max] in normalized depth (0=far, 1=near). */
+  expectedRange: [number, number];
+  /** Actual estimated depth of the mask region (normalized, 0=far, 1=near). */
+  actualDepth: number;
+  /** How far outside the expected range the actual depth is (absolute difference). */
+  deviation: number;
+  /** Severity of the contradiction. 'major' and 'moderate' block canonical promotion (P0-4.2). */
+  severity: ContradictionSeverity;
+  /** Confidence penalty applied to the depth estimate (0 for 'none'/'minor', >0 for 'moderate'/'major'). */
+  confidencePenalty: number;
+  /** Human-readable description of the contradiction. */
+  description: string;
+}
+
 /** Mesh artifact — triangulated surface from depth-based reconstruction. */
 export interface MeshArtifact {
   artifactType: 'mesh';
