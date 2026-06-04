@@ -37,12 +37,18 @@ import type {
   GeometryReconstructionArtifact,
   GeometryReconstructionInput,
   NormalizedPoint,
+  DepthContradictionReport,
 } from '../../types';
 import { REVIEW_ONLY_AUTHORITY, BASE_LIMITATIONS } from '../../types';
 import { estimateDepthWithMidas, isMidasEnabled } from './midasClient';
 import { getGlobalDepthCache } from './depthCache';
 import type { DepthCacheEntry } from './depthCache';
 import type { MidasDepthResult } from './midasClient';
+import {
+  isPhase0DepthContradictionEnabled,
+  detectDepthContradictions,
+  applyContradictionPenalty,
+} from './depthContradictionDetector';
 
 // ---------------------------------------------------------------------------
 // Worker version
@@ -103,6 +109,11 @@ export interface DepthWorkerOutput {
   workerVersion: string;
   /** Whether MiDaS was used successfully (false = heuristic fallback). */
   usedMidas: boolean;
+  /** Depth-class contradiction reports (Phase 0, P0-2.4).
+   *  Populated when PHASE0_DEPTH_CONTRADICTION is active and MiDaS was used.
+   *  Empty array when: (1) flag is off, (2) heuristic path was used,
+   *  (3) no contradictions detected, or (4) no masks provided. */
+  contradictionReports: DepthContradictionReport[];
 }
 
 // ---------------------------------------------------------------------------
@@ -197,8 +208,21 @@ function heuristicDepth(
 
   const maskDepth = classPriors[bestMask.segmentationClass] ?? gradientDepth;
 
-  // Blend mask depth with gradient (70% mask, 30% gradient)
-  let depth = maskDepth * 0.7 + gradientDepth * 0.3;
+  // Phase 0 (P0-2.4): When contradiction detection is active, skip blending
+  // on the heuristic path. The 70/30 blend averages away class-depth
+  // contradictions by smoothing class priors toward the vertical gradient.
+  // Using the class prior directly makes the heuristic output more honest
+  // about what it knows (class-based depth) vs. what it's fabricating (gradient).
+  // The heuristic path is already low-confidence (35 base), so the risk of
+  // removing blending is minimal — this path is only used when MiDaS is down.
+  let depth: number;
+  if (isPhase0DepthContradictionEnabled()) {
+    // Use class prior directly (no blending with gradient)
+    depth = maskDepth;
+  } else {
+    // Blend mask depth with gradient (70% mask, 30% gradient) — original behavior
+    depth = maskDepth * 0.7 + gradientDepth * 0.3;
+  }
 
   // VP correction for non-sky masks
   if (vanishingPoints.length > 0 && bestMask.segmentationClass !== 'sky') {
@@ -365,6 +389,46 @@ export async function runDepthWorker(input: DepthWorkerInput): Promise<DepthWork
   }
   timings['grid_generation'] = Date.now() - t2;
 
+  // Stage 3.5: Depth-class contradiction detection (Phase 0, P0-2.4)
+  // Only runs when: (1) PHASE0_DEPTH_CONTRADICTION flag is active,
+  // (2) MiDaS was used (not heuristic — heuristic uses class priors,
+  // so detecting contradictions against those same priors is circular),
+  // and (3) there are masks to check against.
+  let contradictionReports: DepthContradictionReport[] = [];
+  let contradictionPenalty = 0;
+
+  if (isPhase0DepthContradictionEnabled() && usedMidas && hasMasks) {
+    const tContradiction = Date.now();
+    const detectorOutput = detectDepthContradictions({
+      masks: input.masks,
+      depthGrid,
+      gridWidth: gridResolution,
+      gridHeight: gridResolution,
+      usedMidas: true,
+      minReportSeverity: 'minor',
+    });
+
+    contradictionReports = detectorOutput.reports;
+    contradictionPenalty = detectorOutput.totalConfidencePenalty;
+
+    if (detectorOutput.masksContradicted > 0) {
+      console.info(
+        `[DepthWorker] Contradiction detection: ${detectorOutput.masksContradicted}/${detectorOutput.masksChecked} ` +
+        `masks contradicted, total penalty=${contradictionPenalty}, ` +
+        `severity breakdown: ${summarizeSeverities(contradictionReports)}`,
+      );
+    } else {
+      console.info(
+        `[DepthWorker] Contradiction detection: 0/${detectorOutput.masksChecked} masks contradicted`,
+      );
+    }
+
+    // Apply confidence penalty to the depth estimate
+    confidence = applyContradictionPenalty(confidence, contradictionPenalty);
+
+    timings['contradiction_detection'] = Date.now() - tContradiction;
+  }
+
   // Stage 4: Encode and create artifact
   const t3 = Date.now();
   const depthData = encodeFloat32ToBase64(depthGrid);
@@ -391,7 +455,24 @@ export async function runDepthWorker(input: DepthWorkerInput): Promise<DepthWork
     stageTimings: timings,
     workerVersion: DEPTH_WORKER_VERSION,
     usedMidas,
+    contradictionReports,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Contradiction severity summary helper (Phase 0, P0-2.4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Summarize the severity distribution of contradiction reports for logging.
+ * Returns a string like "none=0, minor=2, moderate=1, major=0".
+ */
+function summarizeSeverities(reports: DepthContradictionReport[]): string {
+  const counts = { none: 0, minor: 0, moderate: 0, major: 0 };
+  for (const report of reports) {
+    counts[report.severity]++;
+  }
+  return `none=${counts.none}, minor=${counts.minor}, moderate=${counts.moderate}, major=${counts.major}`;
 }
 
 // ---------------------------------------------------------------------------
