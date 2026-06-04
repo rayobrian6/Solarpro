@@ -1,9 +1,18 @@
 /**
  * Pass 3C regression and unit tests — Segmentation Stability / Artifact Validity Patch
+ * Pass 3D unit tests — Rogue Lines Fix
  *
  * Tests cover:
+ * Pass 3C:
  * 1. Inferred wall bottom edge has all required LineSegment fields
  * 2. Windows/doors/garage_doors are NOT in WALL_FOUNDATION_OCCLUDER_CLASSES
+ *
+ * Pass 3D:
+ * 3. Line on tree mask does NOT pass lineOverlapsMask for roof mask (proximity fallback rejection)
+ * 4. Line with < 3 polygon hits is NOT classified (minimum overlap threshold)
+ * 5. Rejected classes (bushes, fence, etc.) do NOT produce structural lines
+ * 6. Near-parallel duplicate lines are merged into one
+ * 7. REJECTED_CLASSES includes all Pass 3D additions
  */
 
 import { describe, expect, it } from 'vitest';
@@ -21,6 +30,12 @@ import {
 import {
   WALL_FOUNDATION_OCCLUDER_CLASSES,
   inferWallBottomEdge,
+  REJECTED_CLASSES,
+  STRUCTURE_QUALIFIED_CLASSES,
+  lineOverlapsMask,
+  classifyLine,
+  deduplicateNearParallelLines,
+  type LineSegment,
 } from './runLineExtractionWorker';
 
 // ---------------------------------------------------------------------------
@@ -77,8 +92,39 @@ function makeOccluderMask(
   );
 }
 
+function makeLine(
+  startX: number, startY: number,
+  endX: number, endY: number,
+): LineSegment {
+  const dx = endX - startX;
+  const dy = endY - startY;
+  const length = Math.sqrt(dx * dx + dy * dy);
+  const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
+  return {
+    start: { x: startX, y: startY, coordinateSystem: 'normalized_image_0_1000' },
+    end: { x: endX, y: endY, coordinateSystem: 'normalized_image_0_1000' },
+    length,
+    angleDeg,
+  };
+}
+
+function makeRoofMask(
+  x = 100, y = 50, w = 400, h = 300,
+): SemanticSegmentationMask {
+  return makeMask(
+    'roof',
+    [
+      { x, y, coordinateSystem: 'normalized_image_0_1000' },
+      { x: x + w, y, coordinateSystem: 'normalized_image_0_1000' },
+      { x: x + w, y: y + h, coordinateSystem: 'normalized_image_0_1000' },
+      { x, y: y + h, coordinateSystem: 'normalized_image_0_1000' },
+    ],
+    { x, y, width: w, height: h },
+  );
+}
+
 // ---------------------------------------------------------------------------
-// 1. INFERRED WALL BOTTOM EDGE FIELD VALIDATION
+// 1. INFERRED WALL BOTTOM EDGE FIELD VALIDATION (Pass 3C)
 // ---------------------------------------------------------------------------
 
 describe('inferWallBottomEdge — required field validation (Pass 3C Fix 1)', () => {
@@ -139,7 +185,7 @@ describe('inferWallBottomEdge — required field validation (Pass 3C Fix 1)', ()
 });
 
 // ---------------------------------------------------------------------------
-// 2. WINDOW / DOOR OCCLUDER REGRESSION
+// 2. WINDOW / DOOR OCCLUDER REGRESSION (Pass 3C)
 // ---------------------------------------------------------------------------
 
 describe('WALL_FOUNDATION_OCCLUDER_CLASSES — window/door exclusion (Pass 3C Fix 5)', () => {
@@ -186,5 +232,238 @@ describe('WALL_FOUNDATION_OCCLUDER_CLASSES — window/door exclusion (Pass 3C Fi
     // Window should NOT count as occluder — no occluder bonus
     const line = results[0];
     expect(line.maskSupport).toBeLessThan(20); // No occluder bonus for windows
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. PASS 3D: LINE ON TREE MASK DOES NOT PASS lineOverlapsMask FOR ROOF MASK
+//    (Proximity fallback rejection — Fix A)
+// ---------------------------------------------------------------------------
+
+describe('lineOverlapsMask — proximity fallback rejection (Pass 3D Fix A)', () => {
+  it('line far from roof mask does NOT pass via proximity fallback', () => {
+    // A roof mask in the upper portion of the image
+    const roofMask = makeRoofMask(100, 50, 400, 300);
+
+    // A line on vegetation far below the roof (100+ px away)
+    // This line should NOT pass the proximity check with 10% tolerance
+    const treeLine = makeLine(50, 700, 500, 720);
+
+    expect(lineOverlapsMask(treeLine, roofMask)).toBe(false);
+  });
+
+  it('line barely grazing roof mask with < 3 polygon hits does NOT pass via proximity fallback', () => {
+    // Use a smaller mask so that the 10% proximity tolerance is only 10 units
+    // (not 40, which happens with a 400-wide mask). This makes it possible
+    // for a grazing line to have < 5 proximity zone hits.
+    //
+    // Mask: makeRoofMask(300, 200, 100, 100)
+    //   polygon: (300,200), (400,200), (400,300), (300,300)
+    //   maskBounds: {x:300, y:200, width:100, height:100}
+    //   tolerance = max(100,100)*0.1 = 10
+    //   proximity zone: x=[290,410], y=[190,310]
+    //
+    // Line from (280,180) to (292,192): approaches from upper-left, ending
+    // just inside the proximity zone corner. Only the last 4 sample points
+    // (t=0.85–1.0) fall in the proximity zone, and NONE are inside the polygon.
+    // Result: 0 polygon hits, 4 proximity hits → both thresholds fail → false.
+    const roofMask = makeRoofMask(300, 200, 100, 100);
+    const grazingLine = makeLine(280, 180, 292, 192);
+
+    expect(lineOverlapsMask(grazingLine, roofMask)).toBe(false);
+  });
+
+  it('line clearly inside roof mask passes with 3+ hits', () => {
+    const roofMask = makeRoofMask(300, 200, 100, 100);
+
+    // A line clearly inside the roof mask
+    const insideLine = makeLine(320, 250, 380, 250);
+
+    expect(lineOverlapsMask(insideLine, roofMask)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. PASS 3D: LINE WITH < 3 INTERIOR HITS IS NOT CLASSIFIED
+//    (Minimum overlap threshold — Fix B)
+// ---------------------------------------------------------------------------
+
+describe('classifyLine — minimum overlap threshold (Pass 3D Fix B)', () => {
+  it('line with minimal mask overlap is NOT classified as structural', () => {
+    const roofMask = makeRoofMask(100, 100, 400, 300);
+
+    // A line that barely enters the roof mask from just below the top edge,
+    // producing only ~2 sample points inside the polygon — below the
+    // MIN_INTERIOR_HITS=3 threshold in classifyLine
+    const barelyOverlappingLine = makeLine(150, 99, 155, 100.053);
+
+    const result = classifyLine(barelyOverlappingLine, [roofMask]);
+    expect(result).toBeNull();
+  });
+
+  it('line well inside roof mask IS classified', () => {
+    const roofMask = makeRoofMask(100, 100, 400, 300);
+
+    // A line clearly inside the roof mask
+    const insideLine = makeLine(150, 200, 450, 200);
+
+    const result = classifyLine(insideLine, [roofMask]);
+    expect(result).not.toBeNull();
+    // Should be classified as a roof line type
+    expect(['ridge', 'eave', 'rake', 'valley', 'hip']).toContain(result);
+  });
+
+  it('no catch-all fallback for lines on non-structure classes', () => {
+    // A line that overlaps a chimney mask (structure-qualified but not
+    // roof/wall/fascia) should NOT be classified via catch-all fallback
+    const chimneyMask = makeMask(
+      'chimney',
+      [
+        { x: 400, y: 100, coordinateSystem: 'normalized_image_0_1000' },
+        { x: 450, y: 100, coordinateSystem: 'normalized_image_0_1000' },
+        { x: 450, y: 250, coordinateSystem: 'normalized_image_0_1000' },
+        { x: 400, y: 250, coordinateSystem: 'normalized_image_0_1000' },
+      ],
+      { x: 400, y: 100, width: 50, height: 150 },
+    );
+
+    // A vertical line through the chimney
+    const chimneyLine = makeLine(425, 80, 425, 270);
+
+    const result = classifyLine(chimneyLine, [chimneyMask]);
+    // With catch-all removed, a line overlapping only a chimney (not roof/wall/fascia)
+    // should NOT be classified
+    expect(result).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. PASS 3D: REJECTED CLASSES EXPANDED
+//    (Fix C — bushes, fence, vegetation_touching_structure, etc.)
+// ---------------------------------------------------------------------------
+
+describe('REJECTED_CLASSES — Pass 3D expansion (Fix C)', () => {
+  it('includes all new Pass 3D non-structural classes', () => {
+    // All classes added in Pass 3D
+    expect(REJECTED_CLASSES.has('bushes')).toBe(true);
+    expect(REJECTED_CLASSES.has('fence')).toBe(true);
+    expect(REJECTED_CLASSES.has('vegetation_touching_structure')).toBe(true);
+    expect(REJECTED_CLASSES.has('porch')).toBe(true);
+    expect(REJECTED_CLASSES.has('deck')).toBe(true);
+    expect(REJECTED_CLASSES.has('steps')).toBe(true);
+    expect(REJECTED_CLASSES.has('railing')).toBe(true);
+    expect(REJECTED_CLASSES.has('trash_can')).toBe(true);
+    expect(REJECTED_CLASSES.has('person')).toBe(true);
+    expect(REJECTED_CLASSES.has('ladder')).toBe(true);
+    expect(REJECTED_CLASSES.has('tools')).toBe(true);
+    expect(REJECTED_CLASSES.has('temporary_materials')).toBe(true);
+    expect(REJECTED_CLASSES.has('ac_unit')).toBe(true);
+    expect(REJECTED_CLASSES.has('existing_solar_panel')).toBe(true);
+    expect(REJECTED_CLASSES.has('moss')).toBe(true);
+    expect(REJECTED_CLASSES.has('algae')).toBe(true);
+    expect(REJECTED_CLASSES.has('trailer')).toBe(true);
+  });
+
+  it('still includes original Pass 3C rejected classes', () => {
+    expect(REJECTED_CLASSES.has('sky')).toBe(true);
+    expect(REJECTED_CLASSES.has('tree')).toBe(true);
+    expect(REJECTED_CLASSES.has('trees')).toBe(true);
+    expect(REJECTED_CLASSES.has('grass')).toBe(true);
+    expect(REJECTED_CLASSES.has('ground')).toBe(true);
+    expect(REJECTED_CLASSES.has('driveway')).toBe(true);
+    expect(REJECTED_CLASSES.has('gravel')).toBe(true);
+    expect(REJECTED_CLASSES.has('sidewalk')).toBe(true);
+    expect(REJECTED_CLASSES.has('car')).toBe(true);
+    expect(REJECTED_CLASSES.has('truck')).toBe(true);
+    expect(REJECTED_CLASSES.has('equipment')).toBe(true);
+    expect(REJECTED_CLASSES.has('unknown')).toBe(true);
+  });
+
+  it('does NOT include structure-qualified classes', () => {
+    // These should NOT be rejected — they produce structural lines
+    expect(REJECTED_CLASSES.has('roof')).toBe(false);
+    expect(REJECTED_CLASSES.has('wall')).toBe(false);
+    expect(REJECTED_CLASSES.has('siding')).toBe(false);
+    expect(REJECTED_CLASSES.has('fascia')).toBe(false);
+    expect(REJECTED_CLASSES.has('soffit')).toBe(false);
+    expect(REJECTED_CLASSES.has('gutter')).toBe(false);
+    expect(REJECTED_CLASSES.has('chimney')).toBe(false);
+    expect(REJECTED_CLASSES.has('vent_pipe')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. PASS 3D: NEAR-PARALLEL LINE DEDUPLICATION
+//    (Fix G — merge duplicate lines along the same edge)
+// ---------------------------------------------------------------------------
+
+describe('deduplicateNearParallelLines — Pass 3D Fix G', () => {
+  it('merges near-parallel duplicate lines of the same type', () => {
+    // Two eave lines that are nearly identical (same angle, close position)
+    const line1 = {
+      ...makeLine(100, 400, 500, 400),
+      lineType: 'eave' as const,
+      maskSupport: 2,
+    };
+    const line2 = {
+      ...makeLine(105, 403, 503, 403),
+      lineType: 'eave' as const,
+      maskSupport: 1,
+    };
+
+    const result = deduplicateNearParallelLines([line1, line2]);
+    // Should keep only one (the first encountered, which is higher confidence)
+    expect(result.length).toBe(1);
+  });
+
+  it('keeps lines of different types even if parallel', () => {
+    // An eave and a wall_bottom_edge at similar positions should both be kept
+    const eave = {
+      ...makeLine(100, 400, 500, 400),
+      lineType: 'eave' as const,
+      maskSupport: 2,
+    };
+    const wallBottom = {
+      ...makeLine(105, 403, 503, 403),
+      lineType: 'wall_bottom_edge' as const,
+      maskSupport: 1,
+    };
+
+    const result = deduplicateNearParallelLines([eave, wallBottom]);
+    expect(result.length).toBe(2);
+  });
+
+  it('keeps lines that are far apart even if same type and angle', () => {
+    // Two eave lines on opposite sides of the image
+    const line1 = {
+      ...makeLine(100, 400, 500, 400),
+      lineType: 'eave' as const,
+      maskSupport: 2,
+    };
+    const line2 = {
+      ...makeLine(100, 800, 500, 800),
+      lineType: 'eave' as const,
+      maskSupport: 1,
+    };
+
+    const result = deduplicateNearParallelLines([line1, line2]);
+    expect(result.length).toBe(2);
+  });
+
+  it('returns empty array for empty input', () => {
+    const result = deduplicateNearParallelLines([]);
+    expect(result).toEqual([]);
+  });
+
+  it('returns single line unchanged', () => {
+    const line = {
+      ...makeLine(100, 400, 500, 400),
+      lineType: 'eave' as const,
+      maskSupport: 2,
+    };
+
+    const result = deduplicateNearParallelLines([line]);
+    expect(result.length).toBe(1);
+    expect(result[0]).toEqual(line);
   });
 });

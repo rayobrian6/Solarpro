@@ -37,7 +37,7 @@ import sharp from 'sharp';
 // Constants
 // ---------------------------------------------------------------------------
 
-export const LINE_EXTRACTION_WORKER_VERSION = '3.1.0-tuning-pass-3b';
+export const LINE_EXTRACTION_WORKER_VERSION = '3.1.0-tuning-pass-3d';
 
 /** Standard limitations for line extraction artifacts. */
 const LINE_EXTRACTION_LIMITATIONS = [
@@ -53,11 +53,17 @@ const LINE_EXTRACTION_LIMITATIONS = [
 /** Minimum line length in normalized units (0-1000). */
 const MIN_LINE_LENGTH = 40;
 
-/** Maximum number of lines to extract per photo. */
-const MAX_LINES_PER_PHOTO = 30;
+/** Maximum number of lines to extract per photo.
+ * Lowered from 30 to 15 in Pass 3D — most roof scenes have 5-10 meaningful
+ * structural lines; 30 creates visual clutter and rogue line proliferation.
+ */
+const MAX_LINES_PER_PHOTO = 15;
 
-/** Minimum confidence threshold for lines (0-100). */
-const MIN_CONFIDENCE = 35;
+/** Minimum confidence threshold for lines (0-100).
+ * Raised from 35 to 45 in Pass 3D — lines below 45% confidence are typically
+ * noise or very weak edges that produce rogue structural lines.
+ */
+const MIN_CONFIDENCE = 45;
 
 /** Canny edge detection threshold range — multi-scale will use these as base values. */
 const CANNY_LOW_THRESHOLD = 40;
@@ -75,33 +81,62 @@ const CANNY_SCALE_HIGH = { low: 20, high: 70 };    // Sensitive — thin/low-con
 // Structure-qualified classes (for filtering)
 // ---------------------------------------------------------------------------
 
-/** Classes that produce structural lines when a line overlaps their mask. */
-const STRUCTURE_QUALIFIED_CLASSES: ReadonlySet<string> = new Set([
+/** Classes that produce structural lines when a line overlaps their mask.
+ * Only true structure surfaces belong here — porch/deck were removed in Pass 3D
+ * because they are occluders/site context, not structural surfaces.
+ */
+export const STRUCTURE_QUALIFIED_CLASSES: ReadonlySet<string> = new Set([
   'roof',
   'wall',
   'siding',
   'fascia',
   'soffit',
   'gutter',
-  'porch',
-  'deck',
   'chimney',
   'vent_pipe',
 ]);
 
-/** Classes that never produce structural lines. */
-const REJECTED_CLASSES: ReadonlySet<string> = new Set([
+/** Classes that never produce structural lines.
+ * Expanded in Pass 3D to cover ALL non-structural classes — occluders,
+ * site context, vegetation, and condition flags should never yield
+ * eave/ridge/rake/wall_vertical lines.
+ */
+export const REJECTED_CLASSES: ReadonlySet<string> = new Set([
+  // Sky / atmosphere
   'sky',
+  // Vegetation / landscape
   'tree',
   'trees',
   'grass',
   'ground',
+  'bushes',
+  'vegetation_touching_structure',
+  'moss',
+  'algae',
+  // Hardscape / ground-level
   'driveway',
   'gravel',
   'sidewalk',
+  'fence',
+  'porch',
+  'deck',
+  'steps',
+  'railing',
+  // Vehicles
   'car',
   'truck',
+  'trailer',
+  // Equipment / temporary
   'equipment',
+  'ac_unit',
+  'trash_can',
+  'person',
+  'ladder',
+  'tools',
+  'temporary_materials',
+  // Existing solar
+  'existing_solar_panel',
+  // Unknown / unclassified
   'unknown',
 ]);
 
@@ -179,7 +214,7 @@ export interface LineExtractionWorkerOutput {
 }
 
 /** A line segment in normalized coordinates. */
-interface LineSegment {
+export interface LineSegment {
   start: NormalizedPoint;
   end: NormalizedPoint;
   length: number;
@@ -474,6 +509,60 @@ function strengthenEdgesInMaskRegions(
 }
 
 /**
+ * Suppress edge pixels that are NOT within or adjacent to structure mask regions.
+ *
+ * Pass 3D addition: After strengthening edges inside structure masks, this step
+ * zeros out edges that fall outside a dilated structure region. This prevents
+ * the Hough transform from finding lines in vegetation, ground texture, vehicle
+ * edges, etc. — which was the primary source of rogue structural lines.
+ *
+ * Approach: Create a "structure region" binary mask by dilating all structure
+ * mask bounding boxes by ~20px (normalized to image scale), then AND the edge
+ * map with this mask. Only edges within structure regions survive.
+ */
+function suppressEdgesOutsideStructureMasks(
+  edges: Uint8Array,
+  width: number,
+  height: number,
+  masks: SemanticSegmentationMask[],
+  dilationPx: number = 20,
+): Uint8Array {
+  const suppressed = new Uint8Array(edges);
+
+  // Build a binary mask marking structure regions (dilated)
+  const structureRegion = new Uint8Array(width * height);
+
+  for (const mask of masks) {
+    if (!mask.maskBounds) continue;
+    // Only suppress around structure-qualified masks (roof, wall, siding, etc.)
+    if (!STRUCTURE_QUALIFIED_CLASSES.has(mask.segmentationClass)) continue;
+
+    const mb = mask.maskBounds;
+    // Convert mask bounds from normalized (0-1000) to pixel coordinates
+    const px = Math.round((mb.x / 1000) * width);
+    const py = Math.round((mb.y / 1000) * height);
+    const px2 = Math.round(((mb.x + mb.width) / 1000) * width);
+    const py2 = Math.round(((mb.y + mb.height) / 1000) * height);
+
+    // Dilate the bounding box by dilationPx to catch edges at mask boundaries
+    for (let y = Math.max(0, py - dilationPx); y < Math.min(height, py2 + dilationPx); y++) {
+      for (let x = Math.max(0, px - dilationPx); x < Math.min(width, px2 + dilationPx); x++) {
+        structureRegion[y * width + x] = 1;
+      }
+    }
+  }
+
+  // AND edge map with structure region mask — only edges inside structure regions survive
+  for (let i = 0; i < suppressed.length; i++) {
+    if (!structureRegion[i]) {
+      suppressed[i] = 0; // Zero out edges outside structure regions
+    }
+  }
+
+  return suppressed;
+}
+
+/**
  * Apply probabilistic Hough line transform to detect lines in edge map.
  * Returns array of detected line segments in normalized coordinates.
  */
@@ -760,8 +849,13 @@ function pointInPolygon(
  * Samples points along the line and checks if they fall inside the mask polygon.
  * Also checks bounding-box proximity for thin masks (e.g. flat roof strips)
  * where the line may run along the edge rather than through the interior.
+ *
+ * Pass 3D tightening: proximity tolerance reduced from 30% to 10%, minimum
+ * 3 polygon hits required (was 2), minimum 5 proximity zone hits required
+ * (was 0). This prevents lines on nearby vegetation/vehicles from passing
+ * the overlap test via the proximity fallback.
  */
-function lineOverlapsMask(line: LineSegment, mask: SemanticSegmentationMask): boolean {
+export function lineOverlapsMask(line: LineSegment, mask: SemanticSegmentationMask): boolean {
   const poly = mask.polygon;
 
   if (poly.length < 3) return false;
@@ -776,18 +870,26 @@ function lineOverlapsMask(line: LineSegment, mask: SemanticSegmentationMask): bo
 
     if (pointInPolygon({ x, y }, poly)) {
       hits++;
-      if (hits >= 2) return true; // 2+ sample hits = definite overlap
     }
   }
+
+  // Pass 3D: require 3+ polygon hits (was 2) — ensures the line actually
+  // passes through the mask interior, not just grazing a corner
+  if (hits >= 3) return true;
 
   // For thin masks (flat roof strips, gutters, fascia), the line may run
   // along the mask edge without interior hits. Check bounding-box proximity
   // as a fallback: if the line passes within a small distance of the mask
   // bounds AND is the right class, count it as overlapping.
-  if (mask.maskBounds && hits === 0) {
+  //
+  // Pass 3D: tolerance reduced from 30% to 10%, and minimum 5 proximity
+  // zone hits required (was 0). A line that merely passes near a mask
+  // with only 1-2 sample points in the tolerance zone should NOT qualify.
+  if (mask.maskBounds && hits < 3) {
     const mb = mask.maskBounds;
-    // Check if any sample point falls within a tolerance-expanded bounding box
-    const tolerance = Math.max(mb.width, mb.height) * 0.3; // 30% of mask dimension
+    // Pass 3D: 10% of mask dimension (was 30% — far too loose)
+    const tolerance = Math.max(mb.width, mb.height) * 0.1;
+    let proximityHits = 0;
     for (let i = 0; i <= samples; i++) {
       const t = i / samples;
       const px = line.start.x * (1 - t) + line.end.x * t;
@@ -797,12 +899,14 @@ function lineOverlapsMask(line: LineSegment, mask: SemanticSegmentationMask): bo
         px >= mb.x - tolerance && px <= mb.x + mb.width + tolerance &&
         py >= mb.y - tolerance && py <= mb.y + mb.height + tolerance
       ) {
-        // Only count proximity for structure classes that produce thin masks
-        const thinClasses: Set<string> = new Set(['roof', 'fascia', 'soffit', 'gutter', 'railing']);
-        if (thinClasses.has(mask.segmentationClass)) {
-          return true;
-        }
+        proximityHits++;
       }
+    }
+
+    // Only count proximity for structure classes that produce thin masks
+    const thinClasses: Set<string> = new Set(['roof', 'fascia', 'soffit', 'gutter', 'railing']);
+    if (thinClasses.has(mask.segmentationClass) && proximityHits >= 5) {
+      return true;
     }
   }
 
@@ -827,7 +931,7 @@ function getStructureMasksForFile(fileId: string, masks: SemanticSegmentationMas
 /**
  * Classify a line segment based on its orientation, position, and overlapping masks.
  */
-function classifyLine(
+export function classifyLine(
   line: LineSegment,
   masks: SemanticSegmentationMask[],
   allRoofMasks?: SemanticSegmentationMask[],
@@ -843,6 +947,25 @@ function classifyLine(
   // Check what class of mask this line passes through
   const overlappingMasks = masks.filter(m => lineOverlapsMask(line, m));
   const overlappingClasses = new Set(overlappingMasks.map(m => m.segmentationClass));
+
+  // Pass 3D: Minimum overlap threshold — if fewer than 3 out of 20 sample points
+  // hit ANY overlapping mask polygon interior, reject the line. This prevents
+  // lines that barely graze a structure mask from being classified as structural.
+  const OVERLAP_SAMPLES = 20;
+  const MIN_INTERIOR_HITS = 3;
+  let totalInteriorHits = 0;
+  for (let i = 0; i <= OVERLAP_SAMPLES; i++) {
+    const t = i / OVERLAP_SAMPLES;
+    const x = line.start.x * (1 - t) + line.end.x * t;
+    const y = line.start.y * (1 - t) + line.end.y * t;
+    for (const m of overlappingMasks) {
+      if (m.polygon.length >= 3 && pointInPolygon({ x, y }, m.polygon)) {
+        totalInteriorHits++;
+        break; // Count each sample point once even if it hits multiple masks
+      }
+    }
+  }
+  if (totalInteriorHits < MIN_INTERIOR_HITS) return null;
 
   const hasRoof = overlappingClasses.has('roof');
   const hasWall = overlappingClasses.has('wall') || overlappingClasses.has('siding');
@@ -931,12 +1054,12 @@ function classifyLine(
     }
   }
 
-  // Other structure classes
-  if (overlappingClasses.size > 0) {
-    if (isHorizontal) return 'eave';
-    if (isVertical) return 'wall_vertical';
-    if (isDiagonal) return 'rake';
-  }
+  // Pass 3D: REMOVED catch-all fallback that classified ANY overlapping line
+  // as structural (eave/rake/wall_vertical). Lines must overlap a recognized
+  // structure surface (roof, wall, siding, fascia, soffit, gutter) to be
+  // classified. Lines on other structure-qualified classes (chimney, vent_pipe)
+  // without roof/wall/fascia overlap are not classified — a missing line is
+  // better than a rogue line.
 
   return null; // Don't classify if not on structure
 }
@@ -992,6 +1115,71 @@ function countAdjacentRoofMasks(line: LineSegment, roofMasks: SemanticSegmentati
 /**
  * Compute confidence score for a classified line.
  */
+/**
+ * Deduplicate near-parallel lines that the Hough detector often finds along
+ * the same structural edge (2-3 nearly identical parallel lines).
+ *
+ * Pass 3D addition: Merges lines that are:
+ * - Same lineType
+ * - Within 10 normalized units of each other (start/end point proximity)
+ * - Within 5° of each other in angle
+ *
+ * Keeps the higher-confidence line, discards duplicates.
+ * This reduces visual clutter from duplicate lines along the same edge.
+ */
+export function deduplicateNearParallelLines<T extends LineSegment & { lineType: StructuralLineType; maskSupport: number }>(
+  lines: T[],
+): T[] {
+  if (lines.length <= 1) return lines;
+
+  const ANGLE_THRESHOLD_DEG = 5;
+  const DISTANCE_THRESHOLD = 10; // normalized units (0-1000)
+
+  const result: T[] = [];
+
+  for (const line of lines) {
+    let isDuplicate = false;
+
+    for (const existing of result) {
+      // Must be same type to be considered duplicates
+      if (existing.lineType !== line.lineType) continue;
+
+      // Check angle similarity
+      const angleDiff = Math.abs(line.angleDeg - existing.angleDeg);
+      const normalizedAngleDiff = Math.min(angleDiff, 180 - angleDiff);
+      if (normalizedAngleDiff > ANGLE_THRESHOLD_DEG) continue;
+
+      // Check spatial proximity — are start/end points close?
+      const startDist = Math.sqrt(
+        (line.start.x - existing.start.x) ** 2 + (line.start.y - existing.start.y) ** 2
+      );
+      const endDist = Math.sqrt(
+        (line.end.x - existing.end.x) ** 2 + (line.end.y - existing.end.y) ** 2
+      );
+      // Also check cross-distances (line start vs existing end and vice versa)
+      const crossDist1 = Math.sqrt(
+        (line.start.x - existing.end.x) ** 2 + (line.start.y - existing.end.y) ** 2
+      );
+      const crossDist2 = Math.sqrt(
+        (line.end.x - existing.start.x) ** 2 + (line.end.y - existing.start.y) ** 2
+      );
+      const minDist = Math.min(startDist, endDist, crossDist1, crossDist2);
+
+      if (minDist <= DISTANCE_THRESHOLD) {
+        // This line is a near-duplicate of an existing line — skip it
+        isDuplicate = true;
+        break;
+      }
+    }
+
+    if (!isDuplicate) {
+      result.push(line);
+    }
+  }
+
+  return result;
+}
+
 function computeLineConfidence(
   line: LineSegment,
   lineType: StructuralLineType,
@@ -1237,7 +1425,11 @@ export async function runLineExtractionWorker(input: LineExtractionWorkerInput):
       // Step 2b: Strengthen edges within mask regions
       // This boosts faint roof boundaries that the multi-scale Canny may detect weakly
       const structureMasks = getStructureMasksForFile(fileId, fileMasks);
-      const edges = strengthenEdgesInMaskRegions(multiEdges, width, height, structureMasks);
+      const strengthened = strengthenEdgesInMaskRegions(multiEdges, width, height, structureMasks);
+
+      // Step 2c (Pass 3D): Suppress edges outside structure mask regions
+      // This prevents Hough from finding lines in vegetation, ground texture, vehicle edges, etc.
+      const edges = suppressEdgesOutsideStructureMasks(strengthened, width, height, structureMasks);
 
       // Step 3: Hough line transform (with lowered thresholds for thin roof edges)
       const detectedLines = houghLineTransform(edges, width, height, minLineLength);
@@ -1285,8 +1477,13 @@ export async function runLineExtractionWorker(input: LineExtractionWorkerInput):
         }
       }
 
+      // Step 5c (Pass 3D): Deduplicate near-parallel lines
+      // The Hough detector often finds 2-3 nearly identical parallel lines along
+      // the same edge. Merge them — keep the highest-confidence candidate.
+      const deduped = deduplicateNearParallelLines(classified);
+
       // Step 6: Score, cap, and create artifacts
-      const scored = classified.map(c => ({
+      const scored = deduped.map(c => ({
         ...c,
         confidence: computeLineConfidence(c, c.lineType, c.maskSupport),
       }));
