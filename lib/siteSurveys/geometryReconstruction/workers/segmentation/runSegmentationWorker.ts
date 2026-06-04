@@ -47,6 +47,7 @@ import {
   isSAM2Enabled,
   checkSAM2Health,
   waitForSAM2Warm,
+  isPhase0BackgroundClassEnabled,
   SOLAR_RELEVANT_SEGMENTATION_CLASSES,
   type SAM2MaskResult,
 } from './sam2Client';
@@ -859,7 +860,14 @@ export async function runSegmentationWorker(
           const segmentationClass = mapSAM2ClassHint(mask.classHint);
           if (segmentationClass === null) continue;
 
-          if (!SOLAR_RELEVANT_SEGMENTATION_CLASSES.has(segmentationClass)) {
+          // Phase 0 (P0-8.2): background masks are created for overlay display
+          // and review but are excluded from Pipeline B geometry processing.
+          // When PHASE0_BACKGROUND_CLASS is OFF, unknown hints return null and
+          // the mask is skipped entirely (continue above). When ON, they return
+          // 'background' and we create the mask with excludeFromGeometry: true.
+          const isBackground = segmentationClass === 'background';
+
+          if (!SOLAR_RELEVANT_SEGMENTATION_CLASSES.has(segmentationClass) && !isBackground) {
             filteredNonRoof++;
             continue;
           }

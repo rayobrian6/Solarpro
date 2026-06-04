@@ -975,12 +975,33 @@ const SAM2_CLASS_HINT_TO_SEGMENTATION_CLASS: Record<
   unknown: null,
 };
 
+// ---------------------------------------------------------------------------
+// Phase 0 feature flag — Background / Unknown Class Support (P0-8.2)
+// ---------------------------------------------------------------------------
+
+/** Whether Phase 0 background class routing is enabled. Read at call time. */
+export function isPhase0BackgroundClassEnabled(): boolean {
+  const val = process.env.PHASE0_BACKGROUND_CLASS ?? '';
+  return val === 'true' || val === '1';
+}
+
 /**
  * Map a SAM 2 class_hint to a Pipeline B SegmentationClass.
- * Returns null for unknown/unmapped classes.
+ *
+ * When PHASE0_BACKGROUND_CLASS is enabled, unrecognized class hints (including
+ * 'unknown') are mapped to 'background' instead of null. Background masks are
+ * created and stored but filtered from Pipeline B by SOLAR_RELEVANT_SEGMENTATION_CLASSES.
+ *
+ * When the flag is disabled (default), returns null for unknown/unmapped classes,
+ * which causes the segmentation worker to skip those masks entirely.
  */
 export function mapSAM2ClassHint(
   classHint: string,
 ): import('../../types').SegmentationClass | null {
-  return SAM2_CLASS_HINT_TO_SEGMENTATION_CLASS[classHint] ?? null;
+  const mapped = SAM2_CLASS_HINT_TO_SEGMENTATION_CLASS[classHint] ?? null;
+  if (mapped !== null) return mapped;
+
+  // Flag OFF (default): return null — caller skips the mask
+  // Flag ON: return 'background' — caller creates a background mask
+  return isPhase0BackgroundClassEnabled() ? 'background' : null;
 }
