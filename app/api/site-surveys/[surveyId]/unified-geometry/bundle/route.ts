@@ -11,12 +11,18 @@
 //                  segmentation masks as bounding-box rectangles instead of
 //                  detailed polygon shapes.
 //   ?mode=overlay  — Includes full polygon vertex data for all artifacts.
-//                  Use this when the overlay renderer needs detailed polygon
-//                  shapes (e.g., for a specific photo being viewed).
-//                  WARNING: Can exceed Vercel's 4.5MB response limit for
-//                  surveys with many segmentation masks. Use per-photo
-//                  fetching or streaming for large surveys.
+//                  When used with ?fileId=, only returns polygon data for
+//                  artifacts associated with that specific photo — keeping
+//                  the response well under 4.5MB (~1-2MB per photo).
+//                  WARNING: Without ?fileId=, can exceed Vercel's 4.5MB
+//                  response limit for surveys with many segmentation masks.
 //   ?mode=full     — Alias for overlay (backward compat).
+//   ?fileId=       — Filter artifacts to only those whose provenance.sourceFileIds
+//                  includes the given file ID. This is the key to making overlay
+//                  mode safe: per-photo overlay requests are ~1-2MB instead of
+//                  ~33MB for all photos combined. When fileId is specified and
+//                  mode is not explicitly set, mode defaults to 'overlay' (since
+//                  the per-photo response is small enough).
 //
 // PRIMARY PATH:  Query `unified_geometry_artifacts` table directly.
 //   This table is populated by Migration 080 backfill and kept current by
@@ -86,6 +92,35 @@ function stripSegmentationMaskVertices(artifacts: UnifiedGeometryArtifact[]): Un
 }
 
 /**
+ * Filter artifacts to only those associated with a specific file ID.
+ * Uses the provenance.sourceFileIds array on each artifact.
+ *
+ * When ?fileId= is specified, this dramatically reduces the response size
+ * because only artifacts for one photo are returned (~8-15 segmentation masks
+ * instead of 150+). This is the key mechanism for making overlay mode safe
+ * under Vercel's 4.5MB serverless function response limit.
+ *
+ * Some artifacts (e.g., consensus_plane, roof_line) may span multiple files
+ * or have empty sourceFileIds. These are included when fileId is specified
+ * ONLY if their sourceFileIds array is empty (meaning they're survey-level,
+ * not photo-level). If sourceFileIds is non-empty but doesn't include the
+ * requested fileId, the artifact is excluded.
+ */
+function filterArtifactsByFileId(
+  artifacts: UnifiedGeometryArtifact[],
+  fileId: string,
+): UnifiedGeometryArtifact[] {
+  return artifacts.filter(artifact => {
+    const sourceFileIds = artifact.provenance?.sourceFileIds;
+    // If no sourceFileIds at all (shouldn't happen but defensive), include it
+    if (!sourceFileIds || !Array.isArray(sourceFileIds) || sourceFileIds.length === 0) {
+      return true; // survey-level artifact (e.g., consensus planes from merged data)
+    }
+    return sourceFileIds.includes(fileId);
+  });
+}
+
+/**
  * Estimate the JSON byte size of the response payload.
  * Used to log a warning when the response may exceed Vercel's 4.5MB limit.
  */
@@ -114,11 +149,28 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Invalid survey ID' }, { status: 400 });
     }
 
-    // ── Parse ?mode= query parameter ──────────────────────────────────────
-    const modeParam = req.nextUrl.searchParams.get('mode') ?? 'stats';
-    const mode: BundleMode = (modeParam === 'overlay' || modeParam === 'full')
-      ? modeParam
-      : 'stats';
+    // ── Parse ?mode= and ?fileId= query parameters ────────────────────────────
+    const modeParam = req.nextUrl.searchParams.get('mode');
+    const fileIdParam = req.nextUrl.searchParams.get('fileId');
+
+    // When fileId is specified without an explicit mode, default to overlay
+    // (per-photo overlay responses are small enough to stay under 4.5MB)
+    let mode: BundleMode;
+    if (modeParam === 'overlay' || modeParam === 'full') {
+      mode = modeParam;
+    } else if (!modeParam && fileIdParam) {
+      mode = 'overlay'; // auto-upgrade to overlay when filtering by photo
+    } else {
+      mode = 'stats';
+    }
+
+    // Validate fileId if provided
+    if (fileIdParam && !isValidUUID(fileIdParam)) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid fileId parameter. Must be a valid UUID.' },
+        { status: 400 },
+      );
+    }
 
     // Verify survey ownership (dev bypass user skips ownership check)
     const survey = await getSiteSurveyById(surveyId, user.id, {
@@ -151,10 +203,15 @@ export async function GET(
         .addUnifiedArtifacts(unifiedArtifacts)
         .build();
 
+      // ── Filter by fileId if specified ───────────────────────────────────
+      const fileIdFilteredArtifacts = fileIdParam
+        ? filterArtifactsByFileId(bundle.artifacts, fileIdParam)
+        : bundle.artifacts;
+
       // ── Apply mode-based vertex stripping ─────────────────────────────
       const processedArtifacts = mode === 'stats'
-        ? stripSegmentationMaskVertices(bundle.artifacts)
-        : bundle.artifacts;
+        ? stripSegmentationMaskVertices(fileIdFilteredArtifacts)
+        : fileIdFilteredArtifacts;
 
       const responsePayload = {
         success: true,
@@ -164,6 +221,7 @@ export async function GET(
         },
         source: 'unified_table', // informational — tells the caller which path was used
         mode, // echo back the mode so the frontend knows
+        fileId: fileIdParam ?? null, // echo back the fileId filter (null if not specified)
         pipelineConfig: {
           googleSolarApi: isGoogleSolarApiConfigured(),
         },
@@ -244,10 +302,15 @@ export async function GET(
 
     const bundle = builder.build();
 
+    // ── Filter by fileId if specified ───────────────────────────────────
+    const fileIdFilteredArtifacts = fileIdParam
+      ? filterArtifactsByFileId(bundle.artifacts, fileIdParam)
+      : bundle.artifacts;
+
     // ── Apply mode-based vertex stripping ─────────────────────────────
     const processedArtifacts = mode === 'stats'
-      ? stripSegmentationMaskVertices(bundle.artifacts)
-      : bundle.artifacts;
+      ? stripSegmentationMaskVertices(fileIdFilteredArtifacts)
+      : fileIdFilteredArtifacts;
 
     const responsePayload = {
       success: true,
@@ -257,6 +320,7 @@ export async function GET(
       },
       source: 'fallback_adaptation', // informational — tells the caller backfill hasn't run
       mode,
+      fileId: fileIdParam ?? null, // echo back the fileId filter (null if not specified)
       pipelineConfig: {
         googleSolarApi: isGoogleSolarApiConfigured(),
       },

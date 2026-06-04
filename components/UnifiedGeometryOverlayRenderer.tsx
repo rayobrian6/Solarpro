@@ -1224,7 +1224,7 @@ function PhotoWithUnifiedOverlays({
                   <span className="text-slate-300">Vertices: <span className="text-slate-200">{a.polygon.vertices.length}</span></span>
                 )}
                 {a.polygon?.vertices != null && a.polygon.vertices.length === 0 && a.geometryClass === 'segmentation_mask' && (
-                  <span className="text-slate-400/60 italic">Vertices: stripped (stats mode)</span>
+                  <span className="text-slate-400/60 italic">Vertices: loading polygon detail...</span>
                 )}
                 {a.inlierCount != null && (
                   <span className="text-slate-300">Inliers: <span className="text-slate-200">{a.inlierCount}/{a.totalPoints}</span></span>

@@ -102,6 +102,8 @@ export function RoofGeometrySection({
   const [showDebugRoofLines, setShowDebugRoofLines] = useState(false);
   const [bundleLoading, setBundleLoading] = useState(true);
   const [bundleMode, setBundleMode] = useState<'stats' | 'overlay'>('stats');
+  const [overlayArtifactsByFile, setOverlayArtifactsByFile] = useState<Map<string, UnifiedGeometryArtifact[]>>(new Map());
+  const [overlayLoading, setOverlayLoading] = useState(false);
   const [pipelineCLoading, setPipelineCLoading] = useState(false);
   const [pipelineCError, setPipelineCError] = useState<string | null>(null);
   const [pipelineCNoCoverage, setPipelineCNoCoverage] = useState(false);
@@ -175,13 +177,73 @@ export function RoofGeometrySection({
     fetchBundle();
   }, [fetchBundle]);
 
-  // ── Load overlay-mode data when user wants polygon-level detail ──────
-  // In stats mode (default), segmentation mask vertices are stripped to keep
-  // the response under Vercel's 4.5MB limit. When the user wants to see
-  // detailed polygon shapes in the overlay, they can trigger overlay mode.
-  const loadOverlayData = useCallback(async () => {
-    if (bundleMode === 'overlay') return; // already in overlay mode
+  // ── Fetch per-photo overlay data (polygon vertices for one photo) ────────
+  // This is the key mechanism for making polygon rendering the default:
+  // - On mount, we fetch ?mode=stats (fast, small — gives counts/bbox for all photos)
+  // - When a photo is selected, we auto-fetch ?mode=overlay&fileId=... for that photo
+  // - Per-photo responses are ~1-2MB instead of ~33MB for all photos
+  // - Previously loaded photo polygons are cached in overlayArtifactsByFile
+  const fetchPhotoOverlay = useCallback(async (fileId: string) => {
+    if (!surveyId || !fileId) return;
+    // Skip if already cached for this file
+    if (overlayArtifactsByFile.has(fileId)) return;
+    // Skip if we already loaded all overlay data (bundleMode === 'overlay' without fileId)
+    if (bundleMode === 'overlay') return;
+
+    setOverlayLoading(true);
+    try {
+      const res = await fetch(
+        `/api/site-surveys/${surveyId}/unified-geometry/bundle?mode=overlay&fileId=${fileId}`,
+        { credentials: 'include' },
+      );
+      if (res.status === 401) {
+        setAuthRequired(true);
+        return;
+      }
+
+      let data: any;
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        const msg = jsonErr instanceof Error ? jsonErr.message : String(jsonErr);
+        console.warn('[RoofGeometrySection] JSON parse error in per-photo overlay response:', msg);
+        return; // silent fail — the stats-mode bbox data is still showing
+      }
+
+      if (data.success && data.bundle?.artifacts) {
+        // Cache the overlay artifacts for this specific file
+        setOverlayArtifactsByFile(prev => {
+          const next = new Map(prev);
+          next.set(fileId, data.bundle.artifacts);
+          return next;
+        });
+      }
+    } catch (err) {
+      console.warn('[RoofGeometrySection] Failed to fetch per-photo overlay:', err);
+    } finally {
+      setOverlayLoading(false);
+    }
+  }, [surveyId, overlayArtifactsByFile, bundleMode]);
+
+  // ── Auto-load overlay data when a photo is selected ────────────────────────
+  // When the user clicks on a photo in the overlay renderer, we automatically
+  // fetch the detailed polygon data for that photo. This makes polygon rendering
+  // the default experience without any manual button click.
+  useEffect(() => {
+    if (selectedFileId && bundleMode === 'stats') {
+      fetchPhotoOverlay(selectedFileId);
+    }
+  }, [selectedFileId, bundleMode, fetchPhotoOverlay]);
+
+  // ── Load all overlay data (power-user fallback) ───────────────────────────
+  // This loads overlay data for ALL photos at once. For large surveys this may
+  // exceed Vercel's 4.5MB response limit. It's kept as a manual fallback for
+  // users who want all polygons loaded at once.
+  const loadAllOverlayData = useCallback(async () => {
+    if (bundleMode === 'overlay') return; // already loaded everything
     await fetchBundle('overlay');
+    // Clear the per-photo cache since we now have full data
+    setOverlayArtifactsByFile(new Map());
   }, [bundleMode, fetchBundle]);
 
   // ── Run Pipeline B (Generate Roof Geometry) ──────────────────────────────────────────────
@@ -456,7 +518,36 @@ export function RoofGeometrySection({
   }, [surveyId, fetchBundle, onGeometryGenerated]);
 
   // ── Derived data ──────────────────────────────────────────────────
-  const artifacts = unifiedBundle?.artifacts ?? EMPTY_ARTIFACTS;
+  // ── Merge per-photo overlay data into the base bundle ────────────────────
+  // In stats mode, segmentation mask vertices are stripped (empty arrays).
+  // When per-photo overlay data is fetched (?mode=overlay&fileId=...), those
+  // artifacts have full polygon vertices. We merge them by replacing
+  // stats-mode artifacts with their overlay counterparts (matched by ID).
+  const mergedArtifacts = useMemo(() => {
+    const base = unifiedBundle?.artifacts ?? EMPTY_ARTIFACTS;
+
+    // If no per-photo overlay data cached, return base as-is
+    if (overlayArtifactsByFile.size === 0) return base;
+
+    // Build a lookup map of overlay artifacts by ID
+    const overlayById = new Map<string, UnifiedGeometryArtifact>();
+    for (const [, arts] of overlayArtifactsByFile) {
+      for (const a of arts) {
+        if (a.id) overlayById.set(a.id, a);
+      }
+    }
+
+    // If no overlay artifacts found (unlikely), return base
+    if (overlayById.size === 0) return base;
+
+    // Replace stats-mode artifacts with their overlay counterparts
+    return base.map(a => {
+      const overlay = a.id ? overlayById.get(a.id) : undefined;
+      return overlay ?? a;
+    });
+  }, [unifiedBundle?.artifacts, overlayArtifactsByFile]);
+
+  const artifacts = mergedArtifacts;
   const pipelineCounts = unifiedBundle?.pipelineCounts ?? { photoVision: 0, geometryRecon: 0, googleSolarApi: 0, obstructionRegistration: 0, manual: 0, merged: 0, mock: 0 };
 
   const hasPipelineBData = pipelineCounts.geometryRecon > 0;
@@ -1003,23 +1094,43 @@ export function RoofGeometrySection({
                   Thick lines visible. Low-confidence & duplicate lines shown.
                 </span>
               )}
-              {bundleMode === 'stats' && (
-                <button
-                  type="button"
-                  onClick={loadOverlayData}
-                  disabled={bundleLoading}
-                  className="inline-flex items-center gap-1.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 px-2.5 py-1 text-[9px] font-medium transition hover:bg-cyan-500/25 disabled:opacity-50"
-                  title="Load detailed polygon shapes for segmentation masks. Currently showing bounding-box outlines only (faster load)."
-                >
+              {/* Per-photo overlay status indicator */}
+              {bundleMode === 'stats' && overlayArtifactsByFile.size === 0 && !overlayLoading && selectedFileId && (
+                <span className="inline-flex items-center gap-1 text-[9px] text-slate-500">
                   <Shapes size={10} />
-                  Show Detailed Polygons
-                </button>
+                  Click a photo to load polygons
+                </span>
+              )}
+              {bundleMode === 'stats' && overlayLoading && (
+                <span className="inline-flex items-center gap-1 text-[9px] text-cyan-400 animate-pulse">
+                  <Shapes size={10} />
+                  Loading polygons...
+                </span>
+              )}
+              {bundleMode === 'stats' && overlayArtifactsByFile.size > 0 && !overlayLoading && (
+                <span className="inline-flex items-center gap-1 text-[9px] text-cyan-400/60">
+                  <Shapes size={10} />
+                  Polygons loaded for {overlayArtifactsByFile.size} photo{overlayArtifactsByFile.size !== 1 ? 's' : ''}
+                </span>
               )}
               {bundleMode === 'overlay' && (
                 <span className="inline-flex items-center gap-1 text-[9px] text-cyan-400/60">
                   <Shapes size={10} />
-                  Full polygon detail loaded
+                  All polygon detail loaded
                 </span>
+              )}
+              {/* Power-user: Load ALL overlay data at once (may be slow/large) */}
+              {bundleMode === 'stats' && (
+                <button
+                  type="button"
+                  onClick={loadAllOverlayData}
+                  disabled={bundleLoading || overlayLoading}
+                  className="inline-flex items-center gap-1.5 rounded bg-slate-800/50 text-slate-500 border border-slate-700/40 px-2 py-0.5 text-[8px] font-medium transition hover:text-slate-300 hover:border-slate-600/60 disabled:opacity-50"
+                  title="Load polygon detail for ALL photos at once. May be slow for large surveys."
+                >
+                  <Shapes size={8} />
+                  Load All Polygons
+                </button>
               )}
             </div>
             <UnifiedGeometryOverlayRenderer
