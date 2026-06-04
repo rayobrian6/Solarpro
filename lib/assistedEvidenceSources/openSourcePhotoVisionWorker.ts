@@ -83,6 +83,8 @@ const CLASSIFICATION_TYPE_MAP: Record<ContourClassification, OpenSourcePhotoVisi
   probable_moss: 'rectangular_region_candidate',
   probable_damaged_area: 'rectangular_region_candidate',
   unknown: 'rectangular_region_candidate',
+  // Phase 0 (P0-8.3): background regions — unclassifiable, mapped to generic candidate
+  background: 'rectangular_region_candidate',
 };
 
 /** Classification → candidate category mapping. */
@@ -117,6 +119,8 @@ const CLASSIFICATION_CATEGORY_MAP: Record<ContourClassification, OpenSourcePhoto
   probable_moss: 'quality',
   probable_damaged_area: 'quality',
   unknown: 'field_context',
+  // Phase 0 (P0-8.3): background regions — unclassifiable, categorized as field context
+  background: 'field_context',
 };
 
 export type OpenSourcePhotoVisionCandidateType =

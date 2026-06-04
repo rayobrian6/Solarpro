@@ -471,6 +471,10 @@ const CONTOUR_TO_SEGMENTATION_CLASS: Record<ContourClassification, SegmentationC
   probable_damaged_area: 'damaged_siding',
   // Catch-all
   unknown: null, // Skip unknown classifications
+  // Phase 0 (P0-8.3): Canny fallback routes unclassifiable contours to
+  // 'background' instead of 'probable_roof_plane' when PHASE0_CANNY_BACKGROUND_FIX
+  // is enabled. Background masks are created but excluded from Pipeline B.
+  background: 'background',
 };
 
 // ---------------------------------------------------------------------------
@@ -771,7 +775,13 @@ export async function runSegmentationWorker(
         for (const contour of geometry.contours) {
           const segmentationClass = CONTOUR_TO_SEGMENTATION_CLASS[contour.classification];
           if (segmentationClass === null) continue;
-          if (contour.confidence < minConfidence) continue;
+
+          // Phase 0 (P0-8.3): background masks from Canny bypass minConfidence
+          // filter — they exist for overlay display and review, not for pipeline
+          // processing. Their confidence (20) is intentionally below the default
+          // minConfidence (30) to prevent them from entering geometry stages.
+          const isBackground = segmentationClass === 'background';
+          if (!isBackground && contour.confidence < minConfidence) continue;
           const polygon = contourToNormalizedPolygon(contour, geometry.extractionSize, geometry.extractionSize);
           const truncatedPolygon = polygon.slice(0, maxPolygonPoints);
           const maskBounds = computeMaskBounds(truncatedPolygon);
