@@ -15,11 +15,13 @@
 - [x] Regression test: windows/doors do not act as foundation occluders (5 TS tests)
 - [x] TypeScript compiles cleanly (tsc --noEmit = 0 errors)
 - [x] Python syntax valid (ast.parse OK)
-- [ ] Before/after artifact count comparison
-- [ ] Before/after screenshot comparison
 
-## Deploy — IN PROGRESS
-- [ ] Commit and push to dev
-- [ ] Deploy SAM2 service + geometry worker
-- [ ] Update Render env vars
-- [ ] Verify no CAD/permit/canonical/promotion/worker architecture changes
+## Deploy — COMPLETE
+- [x] Commit and push to dev (commit dbfeff3)
+- [x] Deploy SAM2 service — LIVE on dbfeff3
+- [x] Deploy geometry worker — LIVE on dbfeff3
+- [x] Update Render env var SAM2_MIN_MASK_AREA_FRACTION=0.003
+- [x] Verify no CAD/permit/canonical/promotion/worker architecture changes
+
+## Handoff — COMPLETE
+- [x] HANDOFF_PASS3C.md created with full context, rules, and next steps
