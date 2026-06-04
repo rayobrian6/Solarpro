@@ -324,6 +324,35 @@ export async function runFullGeometryReconstructionPipeline(
     (a): a is SemanticSegmentationMask => a.artifactType === 'semantic_segmentation_mask' || a.artifactType === 'segmentation_mask',
   );
 
+  // ──── Pass 3E: Geometry participation flag filtering ────
+  // Masks with excludeFromGeometry=true are viewable overlays but do not feed any geometry stage.
+  // Each downstream stage receives only masks whose participation flag allows it.
+  // Masks without participation flags default to full participation (backward compatible).
+  const masksForLines = masks.filter(m =>
+    m.excludeFromGeometry !== true
+    && m.participation?.participatesInLines !== false,
+  );
+  const masksForPlanes = masks.filter(m =>
+    m.excludeFromGeometry !== true
+    && m.participation?.participatesInPlanes !== false,
+  );
+  const masksForDepth = masks.filter(m =>
+    m.excludeFromGeometry !== true
+    && m.participation?.participatesInDepthFusion !== false,
+  );
+  // Photogrammetry is more permissive: vegetation participates but vehicles/sky do not
+  const masksForPhotogrammetry = masks.filter(m =>
+    m.excludeFromGeometry !== true
+    && m.participation?.participatesInPhotogrammetry !== false,
+  );
+
+  console.info(
+    `[Pass3E] Mask distribution: total=${masks.length}, ` +
+    `lines=${masksForLines.length}, planes=${masksForPlanes.length}, ` +
+    `depth=${masksForDepth.length}, photogrammetry=${masksForPhotogrammetry.length}` +
+    (masks.some(m => m.excludeFromGeometry === true) ? `, excludedFromGeometry=${masks.filter(m => m.excludeFromGeometry === true).length}` : ''),
+  );
+
   // Timeout check before Stage 2
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 1 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
@@ -331,8 +360,9 @@ export async function runFullGeometryReconstructionPipeline(
   }
 
   // ──── Stage 2: Line Extraction ────────────────────────────────────────────
+  // Pass 3E: only masks with participatesInLines=true (and not excluded) feed line extraction
   const lineResult = await asyncStageTimer('line_extraction', () =>
-    runLineExtractionFromReconstructionInput(input, masks, segResult.imageBytesMap),
+    runLineExtractionFromReconstructionInput(input, masksForLines, segResult.imageBytesMap),
   );
   const lineArtifacts = lineResult.result;
   allArtifacts.push(...lineArtifacts);
@@ -399,7 +429,7 @@ export async function runFullGeometryReconstructionPipeline(
   // ──── Stage 4: Depth Estimation ──────────────────────────────────────────
   // Now async — MiDaS service call requires network I/O
   const depthResult = await asyncStageTimer('depth_estimation', () =>
-    runDepthFromReconstructionInput(input, masks, vanishingPoints, segResult.imageBytesMap),
+    runDepthFromReconstructionInput(input, masksForDepth, vanishingPoints, segResult.imageBytesMap),
   );
   const depthArtifacts = depthResult.result;
   allArtifacts.push(...depthArtifacts);
@@ -436,7 +466,7 @@ export async function runFullGeometryReconstructionPipeline(
   // ──── Stage 5: Plane Extraction ──────────────────────────────────────────
   // Now depth-augmented: passes DepthMap artifacts from Stage 4
   const planeResult = stageTimer('plane_extraction', () =>
-    runPlaneExtractionFromReconstructionInput(input, masks, lines, vanishingPoints, depthMaps, usedMidas),
+    runPlaneExtractionFromReconstructionInput(input, masksForPlanes, lines, vanishingPoints, depthMaps, usedMidas),
   );
   const planeArtifacts = planeResult.result;
   allArtifacts.push(...planeArtifacts);
@@ -586,8 +616,15 @@ export async function runDepthOnlyPipeline(
   const masks = segArtifacts.filter(
     (a): a is SemanticSegmentationMask => a.artifactType === 'semantic_segmentation_mask' || a.artifactType === 'segmentation_mask',
   );
-
-  // Checkpoint after segmentation
+  // Pass 3E: apply participation flag filtering for depth-only pipeline
+  const masksForLines = masks.filter(m =>
+    m.excludeFromGeometry !== true
+    && m.participation?.participatesInLines !== false,
+  );
+  const masksForDepth = masks.filter(m =>
+    m.excludeFromGeometry !== true
+    && m.participation?.participatesInDepthFusion !== false,
+  );
   if (checkpointCallback) {
     await invokeCheckpoint(checkpointCallback, {
       stage: 'segmentation',
@@ -600,7 +637,7 @@ export async function runDepthOnlyPipeline(
   }
 
   // Run vanishing points (needed for depth)
-  const lineArtifacts = await runLineExtractionFromReconstructionInput(input, masks, segOutput.imageBytesMap);
+  const lineArtifacts = await runLineExtractionFromReconstructionInput(input, masksForLines, segOutput.imageBytesMap);
   const lines = lineArtifacts.filter(
     (a): a is StructuralLineCandidate => a.artifactType === 'structural_line_candidate',
   );
@@ -609,7 +646,7 @@ export async function runDepthOnlyPipeline(
     (a): a is VanishingPointArtifact => a.artifactType === 'vanishing_point',
   );
 
-  const depthArtifacts = await runDepthFromReconstructionInput(input, masks, vanishingPoints, {});
+  const depthArtifacts = await runDepthFromReconstructionInput(input, masksForDepth, vanishingPoints, {});
   const allArtifacts = [...segArtifacts, ...lineArtifacts, ...vpArtifacts, ...depthArtifacts];
   const depthDurationMs = Date.now() - start - segDurationMs;
   stageDurations['depth_estimation'] = depthDurationMs;

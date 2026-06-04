@@ -410,6 +410,214 @@ export const SOLAR_RELEVANT_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass>
 // Condition flags — quality indicators on segmentation masks
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Geometry participation controls — Pass 3E
+// ---------------------------------------------------------------------------
+
+/**
+ * Geometry participation flags — control which downstream stages a
+ * segmentation mask may feed into. These are metadata-only fields that
+ * prevent non-structural masks (sky, vegetation, vehicles, etc.) from
+ * contaminating geometry extraction while keeping them available for
+ * overlay rendering and obstruction/shading context.
+ *
+ * All fields default to true for backward compatibility — existing masks
+ * without these fields participate in all stages. Only masks that
+ * explicitly set flags=false are excluded from specific stages.
+ */
+export interface GeometryParticipationFlags {
+  /** Whether this mask feeds into structural line extraction (Hough lines, ridge/eave/rake). */
+  participatesInLines?: boolean;
+  /** Whether this mask feeds into plane extraction (roof planes, wall planes). */
+  participatesInPlanes?: boolean;
+  /** Whether this mask feeds into depth fusion (MiDaS depth map alignment). */
+  participatesInDepthFusion?: boolean;
+  /** Whether this mask feeds into photogrammetry (SfM point cloud, mesh reconstruction). */
+  participatesInPhotogrammetry?: boolean;
+}
+
+/**
+ * Per-class geometry participation defaults.
+ * Controls which downstream stages each segmentation class may feed into.
+ * These defaults are applied when masks are created in the segmentation worker.
+ *
+ * Design principles:
+ * - Roof/wall/fascia/soffit/gutter/chimney: full participation (structure surfaces)
+ * - Sky: no participation at all (giant sky polygons poison geometry)
+ * - Vegetation: no lines/planes/depth (trees are obstruction context only, not geometry)
+ * - Vehicles/occluders: no participation (temporary objects, not structural)
+ * - Ground/hardscape: no lines/planes (flat surfaces produce spurious horizontal lines)
+ * - Condition flags (moss, algae): no geometry (quality indicators, not surfaces)
+ * - Electrical equipment: no geometry (existing infrastructure, not structural surface)
+ */
+export const GEOMETRY_PARTICIPATION_DEFAULTS: Readonly<Record<SegmentationClass, GeometryParticipationFlags>> = {
+  // ── Structure surfaces: full participation ──
+  roof:   { participatesInLines: true, participatesInPlanes: true, participatesInDepthFusion: true, participatesInPhotogrammetry: true },
+  wall:   { participatesInLines: true, participatesInPlanes: true, participatesInDepthFusion: true, participatesInPhotogrammetry: true },
+  siding: { participatesInLines: true, participatesInPlanes: true, participatesInDepthFusion: true, participatesInPhotogrammetry: true },
+  fascia: { participatesInLines: true, participatesInPlanes: true, participatesInDepthFusion: true, participatesInPhotogrammetry: true },
+  soffit: { participatesInLines: true, participatesInPlanes: true, participatesInDepthFusion: true, participatesInPhotogrammetry: true },
+  gutter: { participatesInLines: true, participatesInPlanes: true, participatesInDepthFusion: true, participatesInPhotogrammetry: true },
+  chimney:   { participatesInLines: true, participatesInPlanes: true, participatesInDepthFusion: true, participatesInPhotogrammetry: true },
+  vent_pipe: { participatesInLines: true, participatesInPlanes: true, participatesInDepthFusion: true, participatesInPhotogrammetry: true },
+  skylight:  { participatesInLines: true, participatesInPlanes: true, participatesInDepthFusion: true, participatesInPhotogrammetry: true },
+
+  // ── Sky: NO participation (giant sky masks poison all geometry stages) ──
+  sky: { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+
+  // ── Vegetation: obstruction/shading context only, NOT geometry ──
+  tree:                        { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: true },
+  trees:                       { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: true },
+  bushes:                      { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: true },
+  vegetation_touching_structure: { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: true },
+  grass:                       { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: true },
+  overgrown_grass:             { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: true },
+  moss:                        { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: true },
+  algae:                       { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: true },
+
+  // ── Ground / hardscape: no lines or planes (spurious horizontal lines) ──
+  ground:   { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: true,  participatesInPhotogrammetry: true },
+  driveway: { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: true,  participatesInPhotogrammetry: true },
+  gravel:   { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: true,  participatesInPhotogrammetry: true },
+  sidewalk: { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: true,  participatesInPhotogrammetry: true },
+
+  // ── Vehicles: no participation (temporary objects, not structural) ──
+  car:    { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+  truck:  { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+  trailer: { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+
+  // ── Occluder / temporary: no participation ──
+  person:             { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+  ladder:             { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+  trash_can:          { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+  tools:              { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+  temporary_materials: { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+
+  // ── Facade openings: no geometry (openings are voids, not surfaces) ──
+  window:      { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: true,  participatesInPhotogrammetry: true },
+  door:        { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: true,  participatesInPhotogrammetry: true },
+  garage_door: { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: true,  participatesInPhotogrammetry: true },
+
+  // ── Facade non-structure: porch/deck/steps/railing are site context ──
+  porch:   { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: true,  participatesInPhotogrammetry: true },
+  deck:    { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: true,  participatesInPhotogrammetry: true },
+  steps:   { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: true,  participatesInPhotogrammetry: true },
+  railing: { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: true,  participatesInPhotogrammetry: true },
+  fence:   { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: true,  participatesInPhotogrammetry: true },
+
+  // ── Electrical / solar: no geometry (existing infrastructure, not surfaces) ──
+  ac_unit:              { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+  existing_solar_panel: { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+  utility_meter:        { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+  main_service_panel:   { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+  disconnect:           { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+  conduit:              { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+  inverter:             { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+  battery:              { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+
+  // ── Downspout: no geometry ──
+  downspout: { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: true,  participatesInPhotogrammetry: true },
+
+  // ── Condition flags: no geometry (quality indicators, not surfaces) ──
+  damaged_siding: { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+  blocked_access: { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+  muddy_work_area: { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+
+  // ── Legacy catch-alls ──
+  obstruction: { participatesInLines: true,  participatesInPlanes: true,  participatesInDepthFusion: true,  participatesInPhotogrammetry: true },
+  equipment:   { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+};
+
+/**
+ * Vegetation segmentation classes — these produce obstruction/shading context
+ * but must NEVER produce structural geometry (lines, planes, depth fusion).
+ * Vegetation masks remain viewable as overlays and participate in photogrammetry
+ * for scene context, but are excluded from all geometry extraction stages.
+ */
+export const VEGETATION_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  'tree',
+  'trees',
+  'bushes',
+  'vegetation_touching_structure',
+  'grass',
+  'overgrown_grass',
+  'moss',
+  'algae',
+] as const);
+
+/**
+ * Maximum fraction of the total image area that a sky mask may occupy
+ * before being excluded from geometry participation. Giant sky masks
+ * (often 40-70% of the image) produce huge polygons that contaminate
+ * downstream geometry stages with spurious boundary lines and
+ * incorrect plane associations.
+ *
+ * Sky masks below this threshold are kept but still have all
+ * participation flags set to false (they never participate in geometry).
+ * Sky masks above this threshold are additionally marked with
+ * excludeFromGeometry=true to signal that they should be suppressed
+ * entirely from geometry processing, even as occluder context.
+ *
+ * The threshold is generous (80%) to avoid suppressing legitimate
+ * small-sky regions in tight framing. The real problem is the
+ * giant "background" sky masks that span 40-70% of the image.
+ */
+export const MAX_MASK_AREA_FRACTION_SKY = 0.80;
+
+/**
+ * Structure classes that may produce structural geometry (lines, planes).
+ * Used by the structure boundary tightening logic (Pass 3E Task D) to
+ * identify which masks are structure candidates that should be scrutinized.
+ */
+export const STRUCTURE_CANDIDATE_CLASSES: ReadonlySet<SegmentationClass> = new Set([
+  'roof', 'wall', 'siding', 'fascia', 'soffit', 'gutter', 'chimney',
+  'vent_pipe', 'skylight', 'porch', 'deck', 'steps', 'railing',
+] as const);
+
+/**
+ * Minimum confidence for a structure mask to survive boundary tightening.
+ * Masks below this threshold are likely fragmentary detections from
+ * low-contrast boundaries or partial occlusion. Set at 25 (out of 100)
+ * to suppress the weakest fragments while preserving moderate detections.
+ *
+ * Pass 3E Task D: suppress low-confidence structure fragments.
+ */
+export const MIN_STRUCTURE_CONFIDENCE = 25;
+
+/**
+ * Minimum mask area (in normalized 0-1000 coordinate units squared) for a
+ * wall-class mask to survive boundary tightening. Wall fragments smaller
+ * than this are typically disconnected noise or edge artifacts rather than
+ * meaningful structural surfaces.
+ *
+ * 1000 normalized² = ~0.1% of image area, which is roughly a 32×32 pixel
+ * region in a 1000×1000 normalized image — too small for reliable geometry.
+ *
+ * Pass 3E Task D: suppress tiny disconnected wall fragments.
+ */
+export const MIN_WALL_MASK_AREA = 1000;
+
+/**
+ * Maximum overlap fraction between a structure mask and sky masks before
+ * the structure mask is suppressed. A structure mask that overlaps heavily
+ * with sky (>40%) is likely a false detection at the roof-sky boundary
+ * where SAM2 bleeds structure classification into the sky region.
+ *
+ * Pass 3E Task D: suppress sky-overlapping structure masks.
+ */
+export const MAX_SKY_OVERLAP_FRACTION = 0.40;
+
+/**
+ * Maximum overlap fraction between a roof mask and vegetation masks before
+ * the roof mask is suppressed. A roof mask that overlaps heavily with
+ * vegetation (>50%) is likely a misclassification where tree canopy has
+ * been partially classified as roof surface, which would produce
+ * spurious roof planes in the geometry pipeline.
+ *
+ * Pass 3E Task D: suppress roof fragments merged with vegetation.
+ */
+export const MAX_ROOF_VEGETATION_OVERLAP_FRACTION = 0.50;
+
 /** Condition flags detected on a segmentation mask region. */
 export type ConditionFlag =
   | 'moss' | 'algae' | 'damaged_siding' | 'blocked_access' | 'muddy_work_area';
@@ -472,6 +680,42 @@ export interface SemanticSegmentationMask {
    * stages (line extraction, plane extraction, etc.).
    */
   isOccluder?: boolean | null;
+  /**
+   * Whether this mask should be entirely excluded from geometry
+   * processing, even as occluder context. Set to true for giant
+   * sky masks that span most of the image and would poison geometry
+   * stages. The mask remains viewable as an overlay but is
+   * completely suppressed from line extraction, plane extraction,
+   * depth fusion, and photogrammetry.
+   *
+   * Pass 3E — Sky Containment.
+   */
+  excludeFromGeometry?: boolean | null;
+  /**
+   * Geometry participation flags — control which downstream stages
+   * this mask feeds into. These are metadata-only fields that prevent
+   * non-structural masks from contaminating geometry extraction while
+   * keeping them available for overlay rendering and obstruction/shading.
+   *
+   * When absent, defaults are determined by GEOMETRY_PARTICIPATION_DEFAULTS
+   * based on the segmentationClass. When present, the explicit values
+   * override the class defaults.
+   *
+   * Pass 3E — Geometry Participation Controls.
+   */
+  participation?: GeometryParticipationFlags | null;
+  /**
+   * Whether this mask represents vegetation. Vegetation masks are
+   * useful for solar obstruction/shading analysis but must NEVER
+   * produce structural geometry (lines, planes). Vegetation masks
+   * have participatesInLines=false, participatesInPlanes=false,
+   * and participatesInDepthFusion=false by default.
+   *
+   * Set to true for classes in VEGETATION_CLASSES.
+   *
+   * Pass 3E — Vegetation Containment.
+   */
+  isVegetation?: boolean | null;
 }
 
 // ---------------------------------------------------------------------------

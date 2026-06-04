@@ -519,6 +519,34 @@ export function validateSemanticSegmentationMask(payload: unknown): ValidationRe
     }
   }
 
+  // excludeFromGeometry is optional — Pass 3E sky containment
+  if ('excludeFromGeometry' in p && p.excludeFromGeometry !== undefined && p.excludeFromGeometry !== null) {
+    if (typeof p.excludeFromGeometry !== 'boolean') {
+      errors.push('excludeFromGeometry must be a boolean if present');
+    }
+  }
+
+  // participation is optional — Pass 3E geometry participation flags
+  if ('participation' in p && p.participation !== undefined && p.participation !== null) {
+    if (!isRecord(p.participation)) {
+      errors.push('participation must be an object if present');
+    } else {
+      const part = p.participation as Record<string, unknown>;
+      for (const key of ['participatesInLines', 'participatesInPlanes', 'participatesInDepthFusion', 'participatesInPhotogrammetry']) {
+        if (key in part && part[key] !== undefined && typeof part[key] !== 'boolean') {
+          errors.push(`participation.${key} must be a boolean if present`);
+        }
+      }
+    }
+  }
+
+  // isVegetation is optional — Pass 3E vegetation containment
+  if ('isVegetation' in p && p.isVegetation !== undefined && p.isVegetation !== null) {
+    if (typeof p.isVegetation !== 'boolean') {
+      errors.push('isVegetation must be a boolean if present');
+    }
+  }
+
   if (errors.length > 0) return { valid: false, errors };
   return { valid: true, data: p as unknown as SemanticSegmentationMask };
 }

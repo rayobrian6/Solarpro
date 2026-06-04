@@ -31,7 +31,8 @@ import type {
   NormalizedPoint,
   GeometryReconstructionArtifact,
 } from '../../types';
-import { REVIEW_ONLY_AUTHORITY, BASE_LIMITATIONS, SEGMENTATION_CLASSES, OCCLUDER_SEGMENTATION_CLASSES } from '../../types';
+import { REVIEW_ONLY_AUTHORITY, BASE_LIMITATIONS, SEGMENTATION_CLASSES, OCCLUDER_SEGMENTATION_CLASSES, GEOMETRY_PARTICIPATION_DEFAULTS, VEGETATION_CLASSES, MAX_MASK_AREA_FRACTION_SKY, STRUCTURE_CANDIDATE_CLASSES, MIN_STRUCTURE_CONFIDENCE, MIN_WALL_MASK_AREA, MAX_SKY_OVERLAP_FRACTION, MAX_ROOF_VEGETATION_OVERLAP_FRACTION } from '../../types';
+import type { GeometryParticipationFlags } from '../../types';
 import { validateSemanticSegmentationMask } from '../../schemas';
 import {
   extractRoofGeometry,
@@ -51,10 +52,207 @@ import {
 } from './sam2Client';
 
 // ---------------------------------------------------------------------------
+// Geometry participation and containment logic — Pass 3E
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute geometry participation flags for a mask based on its segmentation class.
+ * Uses GEOMETRY_PARTICIPATION_DEFAULTS as the source of truth for per-class rules.
+ * Returns the participation flags and whether the mask should be excluded from
+ * geometry entirely (giant sky masks).
+ *
+ * Pass 3E — Tasks A, B, C: Sky containment, geometry participation, vegetation containment.
+ */
+export function computeGeometryParticipation(
+  segmentationClass: SegmentationClass,
+  maskBounds: { x: number; y: number; width: number; height: number },
+  imageWidth: number,
+  imageHeight: number,
+): {
+  participation: GeometryParticipationFlags;
+  excludeFromGeometry: boolean;
+  isVegetation: boolean;
+} {
+  // Look up class-specific defaults
+  const defaults = GEOMETRY_PARTICIPATION_DEFAULTS[segmentationClass] ?? {
+    participatesInLines: true,
+    participatesInPlanes: true,
+    participatesInDepthFusion: true,
+    participatesInPhotogrammetry: true,
+  };
+
+  const participation: GeometryParticipationFlags = { ...defaults };
+
+  // Task A — Sky Containment: check if this is a giant sky mask
+  let excludeFromGeometry = false;
+  if (segmentationClass === 'sky') {
+    // Compute mask area fraction relative to total image area
+    // maskBounds and image dimensions are in normalized_image_0_1000 coords
+    // where the image spans 0-1000 in both axes
+    const IMAGE_NORM_AREA = 1000 * 1000; // total normalized image area
+    const maskArea = maskBounds.width * maskBounds.height;
+    const areaFraction = maskArea / IMAGE_NORM_AREA;
+
+    if (areaFraction > MAX_MASK_AREA_FRACTION_SKY) {
+      excludeFromGeometry = true;
+      console.info(
+        `[Pass3E] Giant sky mask suppressed: area=${maskArea.toFixed(0)} (${(areaFraction * 100).toFixed(1)}% of image), exceeds MAX_MASK_AREA_FRACTION_SKY=${MAX_MASK_AREA_FRACTION_SKY}`,
+      );
+    }
+  }
+
+  // Task C — Vegetation Containment: check if this is a vegetation mask
+  const isVegetation = VEGETATION_CLASSES.has(segmentationClass);
+
+  return { participation, excludeFromGeometry, isVegetation };
+}
+
+// ---------------------------------------------------------------------------
+// Structure boundary tightening — Pass 3E Task D
+// ---------------------------------------------------------------------------
+
+/**
+ * Suppress weak structure masks that would produce spurious geometry.
+ *
+ * Four suppression rules (all gating-only, NO new segmentation classes):
+ * 1. Sky-overlapping structure masks: structure mask whose bounding box
+ *    overlaps >MAX_SKY_OVERLAP_FRACTION with any sky mask's bounding box.
+ * 2. Low-confidence structure fragments: structure mask with confidence
+ *    <MIN_STRUCTURE_CONFIDENCE.
+ * 3. Tiny disconnected wall fragments: wall-class mask with bounding box
+ *    area <MIN_WALL_MASK_AREA.
+ * 4. Roof fragments merged with vegetation: roof mask whose bounding box
+ *    overlaps >MAX_ROOF_VEGETATION_OVERLAP_FRACTION with any vegetation mask.
+ *
+ * Suppressed masks are NOT deleted — they get excludeFromGeometry=true and
+ * all participation flags set to false, so they remain as viewable overlays
+ * but do not feed any downstream geometry stage.
+ */
+export function suppressWeakStructureMasks(masks: SemanticSegmentationMask[]): SemanticSegmentationMask[] {
+  if (masks.length === 0) return masks;
+
+  // Pre-compute sky masks and vegetation masks for overlap checks
+  const skyMasks = masks.filter(m => m.segmentationClass === 'sky' && m.excludeFromGeometry !== true);
+  const vegetationMasks = masks.filter(m => m.isVegetation === true);
+
+  let suppressedCount = 0;
+  const result: SemanticSegmentationMask[] = [];
+
+  for (const mask of masks) {
+    // Only scrutinize structure candidate classes
+    if (!STRUCTURE_CANDIDATE_CLASSES.has(mask.segmentationClass)) {
+      result.push(mask);
+      continue;
+    }
+
+    // Already excluded from geometry (e.g. giant sky mask) — don't double-suppress
+    if (mask.excludeFromGeometry === true) {
+      result.push(mask);
+      continue;
+    }
+
+    let suppress = false;
+    let reason = '';
+
+    // Rule 1: Sky-overlapping structure mask
+    if (skyMasks.length > 0 && !suppress) {
+      const maskArea = mask.maskBounds.width * mask.maskBounds.height;
+      if (maskArea > 0) {
+        let overlapArea = 0;
+        for (const sky of skyMasks) {
+          // Axis-aligned bounding box intersection
+          const xOverlap = Math.max(0,
+            Math.min(mask.maskBounds.x + mask.maskBounds.width, sky.maskBounds.x + sky.maskBounds.width)
+            - Math.max(mask.maskBounds.x, sky.maskBounds.x),
+          );
+          const yOverlap = Math.max(0,
+            Math.min(mask.maskBounds.y + mask.maskBounds.height, sky.maskBounds.y + sky.maskBounds.height)
+            - Math.max(mask.maskBounds.y, sky.maskBounds.y),
+          );
+          overlapArea += xOverlap * yOverlap;
+        }
+        const overlapFraction = overlapArea / maskArea;
+        if (overlapFraction > MAX_SKY_OVERLAP_FRACTION) {
+          suppress = true;
+          reason = `sky overlap ${(overlapFraction * 100).toFixed(1)}% > ${MAX_SKY_OVERLAP_FRACTION * 100}%`;
+        }
+      }
+    }
+
+    // Rule 2: Low-confidence structure fragment
+    if (!suppress && mask.confidence < MIN_STRUCTURE_CONFIDENCE) {
+      suppress = true;
+      reason = `confidence ${mask.confidence} < ${MIN_STRUCTURE_CONFIDENCE}`;
+    }
+
+    // Rule 3: Tiny disconnected wall fragment
+    if (!suppress && mask.segmentationClass === 'wall') {
+      const maskArea = mask.maskBounds.width * mask.maskBounds.height;
+      if (maskArea < MIN_WALL_MASK_AREA) {
+        suppress = true;
+        reason = `wall area ${maskArea.toFixed(0)} < ${MIN_WALL_MASK_AREA}`;
+      }
+    }
+
+    // Rule 4: Roof fragment merged with vegetation
+    if (!suppress && mask.segmentationClass === 'roof' && vegetationMasks.length > 0) {
+      const maskArea = mask.maskBounds.width * mask.maskBounds.height;
+      if (maskArea > 0) {
+        let overlapArea = 0;
+        for (const veg of vegetationMasks) {
+          const xOverlap = Math.max(0,
+            Math.min(mask.maskBounds.x + mask.maskBounds.width, veg.maskBounds.x + veg.maskBounds.width)
+            - Math.max(mask.maskBounds.x, veg.maskBounds.x),
+          );
+          const yOverlap = Math.max(0,
+            Math.min(mask.maskBounds.y + mask.maskBounds.height, veg.maskBounds.y + veg.maskBounds.height)
+            - Math.max(mask.maskBounds.y, veg.maskBounds.y),
+          );
+          overlapArea += xOverlap * yOverlap;
+        }
+        const overlapFraction = overlapArea / maskArea;
+        if (overlapFraction > MAX_ROOF_VEGETATION_OVERLAP_FRACTION) {
+          suppress = true;
+          reason = `roof-veg overlap ${(overlapFraction * 100).toFixed(1)}% > ${MAX_ROOF_VEGETATION_OVERLAP_FRACTION * 100}%`;
+        }
+      }
+    }
+
+    if (suppress) {
+      suppressedCount++;
+      console.info(
+        `[Pass3E] Weak structure mask suppressed: class=${mask.segmentationClass} id=${mask.id} reason=${reason}`,
+      );
+      // Suppress: mark as excluded from geometry, set all participation flags to false
+      result.push({
+        ...mask,
+        excludeFromGeometry: true,
+        participation: {
+          participatesInLines: false,
+          participatesInPlanes: false,
+          participatesInDepthFusion: false,
+          participatesInPhotogrammetry: false,
+        },
+      });
+    } else {
+      result.push(mask);
+    }
+  }
+
+  if (suppressedCount > 0) {
+    console.info(
+      `[Pass3E] Structure boundary tightening: ${suppressedCount} weak structure masks suppressed out of ${masks.filter(m => STRUCTURE_CANDIDATE_CLASSES.has(m.segmentationClass)).length} structure candidates`,
+    );
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Worker version
 // ---------------------------------------------------------------------------
 
-export const SEGMENTATION_WORKER_VERSION = '5.3.0-sam2-tiny-quantized-15photos-30masks';
+export const SEGMENTATION_WORKER_VERSION = '5.4.0-pass3e-containment-participation';
 
 // ---------------------------------------------------------------------------
 // Limitations
@@ -576,6 +774,8 @@ export async function runSegmentationWorker(
           const polygon = contourToNormalizedPolygon(contour, geometry.extractionSize, geometry.extractionSize);
           const truncatedPolygon = polygon.slice(0, maxPolygonPoints);
           const maskBounds = computeMaskBounds(truncatedPolygon);
+          // Pass 3E — compute geometry participation flags, sky containment, vegetation containment
+          const geoParticipation = computeGeometryParticipation(segmentationClass, maskBounds, geometry.extractionSize, geometry.extractionSize);
           const mask: SemanticSegmentationMask = {
             artifactType: 'semantic_segmentation_mask',
             id: `seg-${photo.fileId}-${segmentationClass}-${contourIndex}-${SEGMENTATION_WORKER_VERSION}`,
@@ -588,6 +788,9 @@ export async function runSegmentationWorker(
             authority: { ...REVIEW_ONLY_AUTHORITY },
             limitations: [...SEGMENTATION_WORKER_LIMITATIONS],
             isOccluder: OCCLUDER_SEGMENTATION_CLASSES.has(segmentationClass) || null,
+            participation: geoParticipation.participation,
+            excludeFromGeometry: geoParticipation.excludeFromGeometry || null,
+            isVegetation: geoParticipation.isVegetation || null,
           };
           if (includeRawMask) {
             mask.rawMask = `canny-contour-${segmentationClass}-area${contour.area}`;
@@ -666,6 +869,8 @@ export async function runSegmentationWorker(
           const truncatedPolygon = mask.polygon.slice(0, sam2MaxPolygonPoints);
           const maskBounds = computeMaskBounds(truncatedPolygon);
 
+          // Pass 3E — compute geometry participation flags, sky containment, vegetation containment
+          const geoParticipation = computeGeometryParticipation(segmentationClass, maskBounds, sam2Result.imageWidth, sam2Result.imageHeight);
           const artifact: SemanticSegmentationMask = {
             artifactType: 'semantic_segmentation_mask',
             id: `seg-${photo.fileId}-${segmentationClass}-${mask.maskIndex}-${SEGMENTATION_WORKER_VERSION}`,
@@ -678,6 +883,9 @@ export async function runSegmentationWorker(
             authority: { ...REVIEW_ONLY_AUTHORITY },
             limitations: [...SEGMENTATION_WORKER_LIMITATIONS],
             isOccluder: OCCLUDER_SEGMENTATION_CLASSES.has(segmentationClass) || null,
+            participation: geoParticipation.participation,
+            excludeFromGeometry: geoParticipation.excludeFromGeometry || null,
+            isVegetation: geoParticipation.isVegetation || null,
           };
 
           if (includeRawMask) {
@@ -922,8 +1130,15 @@ export async function runSegmentationWorker(
   });
   timings['validation'] = Date.now() - t2;
 
+  // Stage 5: Structure boundary tightening — Pass 3E Task D
+  // Suppress weak structure masks (sky-overlapping, low-confidence, tiny,
+  // vegetation-merged) so they don't feed downstream geometry stages.
+  const t3 = Date.now();
+  const tightenedArtifacts = suppressWeakStructureMasks(validatedArtifacts);
+  timings['boundary_tightening'] = Date.now() - t3;
+
   return {
-    artifacts: validatedArtifacts,
+    artifacts: tightenedArtifacts,
     stageTimings: timings,
     workerVersion: SEGMENTATION_WORKER_VERSION,
     imageBytesMap,
