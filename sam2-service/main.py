@@ -157,6 +157,14 @@ CLASSIFIER_GREEN_RATIO_ROOF_MAX = float(os.environ.get("SAM2_CLASSIFIER_GREEN_RA
 CLASSIFIER_SKY_Y_MAX = float(os.environ.get("SAM2_CLASSIFIER_SKY_Y_MAX", "0.35"))
 # Ground detection: norm_y_center above this threshold → ground
 CLASSIFIER_GROUND_Y_MIN = float(os.environ.get("SAM2_CLASSIFIER_GROUND_Y_MIN", "0.7"))
+# Texture score thresholds: Laplacian std dev for surface classification
+CLASSIFIER_TEXTURE_ROOF_MAX = float(os.environ.get("SAM2_CLASSIFIER_TEXTURE_ROOF_MAX", "15"))
+CLASSIFIER_TEXTURE_TREE_MIN = float(os.environ.get("SAM2_CLASSIFIER_TEXTURE_TREE_MIN", "20"))
+# Brightness thresholds for surface type detection
+CLASSIFIER_BRIGHTNESS_SKY_V_MIN = float(os.environ.get("SAM2_CLASSIFIER_BRIGHTNESS_SKY_V_MIN", "200"))
+CLASSIFIER_BRIGHTNESS_SKY_STD_V_MAX = float(os.environ.get("SAM2_CLASSIFIER_BRIGHTNESS_SKY_STD_V_MAX", "12"))
+CLASSIFIER_BRIGHTNESS_GRAY_S_MAX = float(os.environ.get("SAM2_CLASSIFIER_BRIGHTNESS_GRAY_S_MAX", "30"))
+CLASSIFIER_BRIGHTNESS_DARK_V_MAX = float(os.environ.get("SAM2_CLASSIFIER_BRIGHTNESS_DARK_V_MAX", "80"))
 
 # ---------------------------------------------------------------------------\
 # MiDaS / DPT Depth Estimation Configuration
@@ -732,6 +740,37 @@ def classify_mask_region(
     if mask_binary is not None and original_image_bgr is not None:
         green_ratio = _compute_green_ratio(mask_binary, original_image_bgr, scale)
 
+    # ── Brightness and texture analysis (Tuning Pass 3A) ──
+    # These provide much stronger signals than green_ratio alone:
+    #   - Dark rubber roof: low saturation, moderate luminance, low texture
+    #   - White TPO roof: very low saturation, high luminance, low texture
+    #   - Tree/vegetation: higher saturation, variable luminance, high texture
+    #   - Sky: very low saturation, very high luminance, near-zero texture
+    brightness = {"mean_v": 0, "std_v": 0, "mean_s": 0, "std_s": 0,
+                  "dark_ratio": 0, "bright_ratio": 0, "gray_ratio": 0}
+    texture_score = 0.0
+    if mask_binary is not None and original_image_bgr is not None:
+        brightness = _compute_brightness_stats(mask_binary, original_image_bgr, scale)
+        texture_score = _compute_texture_score(mask_binary, original_image_bgr, scale)
+
+    # Unpack brightness stats for convenient access
+    mean_v = brightness["mean_v"]
+    std_v = brightness["std_v"]
+    mean_s = brightness["mean_s"]
+    std_s = brightness["std_s"]
+    dark_ratio = brightness["dark_ratio"]
+    bright_ratio = brightness["bright_ratio"]
+    gray_ratio = brightness["gray_ratio"]
+
+    # ── Composite signals derived from green_ratio + brightness + texture ──
+    is_smooth_surface = texture_score < CLASSIFIER_TEXTURE_ROOF_MAX  # Low texture = likely roof/wall
+    is_textured_surface = texture_score > CLASSIFIER_TEXTURE_TREE_MIN  # High texture = likely vegetation
+    is_dark_surface = mean_v < CLASSIFIER_BRIGHTNESS_DARK_V_MAX       # Dark rubber/shadow
+    is_bright_surface = mean_v > CLASSIFIER_BRIGHTNESS_SKY_V_MIN      # Bright sky/TPO
+    is_low_saturation = mean_s < CLASSIFIER_BRIGHTNESS_GRAY_S_MAX     # Gray/neutral = not vegetation
+    is_uniform_surface = std_v < CLASSIFIER_BRIGHTNESS_SKY_STD_V_MAX  # Near-zero variation = sky or TPO
+    is_neutral_gray = is_low_saturation and not is_dark_surface and not is_bright_surface  # Gray = roof/wall
+
     # ── Condition flags: moss/algae on structure ──
     # Moderate green on structural positions = moss or algae, not a tree
     if green_ratio > CLASSIFIER_GREEN_RATIO_TREE_MODERATE and green_ratio < CLASSIFIER_GREEN_RATIO_TREE:
@@ -742,7 +781,9 @@ def classify_mask_region(
         if 0.3 <= norm_y_center < 0.75 and aspect_ratio > 0.7:
             return "algae"
 
-    # High green content → definitely vegetation, not structure
+    # ── High green + texture = definitely vegetation ──
+    # Green ratio alone can miss dark/old trees (green_ratio < 0.35),
+    # but green_ratio > 0.15 + high texture = vegetation for sure.
     if green_ratio > CLASSIFIER_GREEN_RATIO_TREE and norm_area > 0.005:
         # Ground-level green = grass
         if norm_y_center > CLASSIFIER_GROUND_Y_MIN:
@@ -757,6 +798,13 @@ def classify_mask_region(
         # Tall narrow green = tree
         return "tree"
 
+    # Moderate green + high texture = tree even if green_ratio < 0.35
+    if green_ratio > CLASSIFIER_GREEN_RATIO_TREE_MODERATE and is_textured_surface:
+        if 0.1 < norm_y_center < 0.7 and norm_area > 0.005:
+            if norm_y_center > CLASSIFIER_GROUND_Y_MIN:
+                return "grass"
+            return "tree"
+
     # ── Check if a foreground prompt point falls within this mask bbox ──
     has_fg_point_in_bbox = False
     if prompted_mode and prompt_points:
@@ -770,10 +818,77 @@ def classify_mask_region(
                     has_fg_point_in_bbox = True
                     break
 
-    # ── Sky detection (top of image, large area) ──
+    # ══════════════════════════════════════════════════════════════════════
+    # REORDERED (Tuning Pass 3A): Roof detection BEFORE sky detection
+    # Previously, sky detection ran first and stole flat/white roofs that
+    # were in the upper portion of the image. Now roof-like shapes in the
+    # upper-middle zone are checked for roof first, and only classified as
+    # sky if they fail the roof checks AND match sky-specific brightness.
+    # ══════════════════════════════════════════════════════════════════════
+
+    # ── Roof detection (STANDARD — pitched roofs) ──
+    # Large area, wide aspect ratio, upper-middle position, NOT vegetation
+    if 0.1 < norm_y_center < 0.6 and norm_area > 0.02:
+        if green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX and not is_textured_surface:
+            if aspect_ratio > 1.3:
+                return "roof"
+            if stability_score > 0.95 and aspect_ratio > 1.0:
+                return "roof"
+            if norm_area > 0.05 and is_smooth_surface:
+                return "roof"
+
+    # ── Roof detection (FLAT / low-slope — enhanced with brightness + texture) ──
+    # Flat rubber/membrane roofs viewed from the side appear as thin, wide,
+    # dark horizontal strips at the top of the structure. Enhanced detection:
+    #   - Low green_ratio OR low saturation (dark rubber is nearly gray)
+    #   - Low texture (smooth membrane surface, not rough vegetation)
+    #   - Brightness analysis distinguishes dark rubber from shadow/soil
+    #   - White TPO membranes: very bright, very low saturation, smooth
+    if 0.15 < norm_y_center < 0.55 and norm_area > 0.003:
+        # Roof candidate: low green AND low saturation (not vegetation)
+        roof_color_ok = (green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX and
+                         is_low_saturation and is_smooth_surface)
+        # Also allow moderate green if texture confirms smooth surface (moss on flat roof)
+        roof_texture_override = (green_ratio < 0.35 and is_smooth_surface and
+                                 not is_textured_surface and
+                                 0.15 < norm_y_center < 0.55)
+        if roof_color_ok or roof_texture_override:
+            # Dark rubber roof: wide strip, low saturation, moderate luminance
+            if aspect_ratio > 2.5:
+                return "roof"
+            if aspect_ratio > 1.8 and stability_score > 0.88:
+                return "roof"
+            # Moderate aspect flat roof with texture confirmation
+            if aspect_ratio > 1.5 and is_smooth_surface:
+                return "roof"
+
+    # ── Roof detection (WHITE/LIGHT TPO membranes) ──
+    # White TPO/PVC roof membranes are very bright, nearly uniform, and
+    # have extremely low saturation. They look like sky but are on the
+    # structure. Key differentiator from sky: TPO has detectable texture
+    # (seams, patches, slight soiling) — std_v > 5-8 vs sky std_v < 5.
+    if 0.1 < norm_y_center < 0.55 and norm_area > 0.01:
+        if is_bright_surface and is_low_saturation and is_smooth_surface:
+            # Bright + low saturation + smooth + upper-middle = white roof
+            # Sky would have std_v < 5; TPO roofs have std_v > 8
+            if not is_uniform_surface or std_v > 8:
+                if aspect_ratio > 1.2:
+                    return "roof"
+                if norm_area > 0.03 and is_smooth_surface:
+                    return "roof"
+
+    # ── Sky detection (top of image, large area) — MOVED AFTER ROOF ──
+    # Sky is now only classified if the mask does NOT match roof shape
+    # and DOES match sky brightness (very high V, very low std_v, very low S).
+    # This prevents flat/white roofs from being stolen by the sky check.
     if not (prompted_mode and has_fg_point_in_bbox):
         if norm_y_center < CLASSIFIER_SKY_Y_MAX and norm_area > 0.04:
-            return "sky"
+            # Enhanced sky check: must look like sky (bright + uniform + desaturated)
+            # A flat roof at the top of the image should have been caught above.
+            sky_brightness = is_bright_surface and is_uniform_surface and is_low_saturation
+            # Large area + upper position + sky-like brightness = sky
+            if sky_brightness or (green_ratio < 0.05 and aspect_ratio < 2.0):
+                return "sky"
 
     # ── Ground detection (bottom of image) ──
     if not (prompted_mode and has_fg_point_in_bbox):
@@ -788,39 +903,13 @@ def classify_mask_region(
                 return "sidewalk"
             return "ground"
 
-    # ── Tree detection by shape ──
+    # ── Tree detection by shape (no strong green, but position + shape match) ──
     if 0.15 < norm_y_center < 0.65 and norm_area > 0.02 and aspect_ratio < 1.3:
         if green_ratio > CLASSIFIER_GREEN_RATIO_TREE_MODERATE:
             return "tree"
-
-    # ── Roof detection ──
-    # Standard pitched roofs: large area, wide aspect ratio, upper-middle position
-    if 0.1 < norm_y_center < 0.6 and norm_area > 0.02:
-        if green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
-            if aspect_ratio > 1.3:
-                return "roof"
-            if stability_score > 0.95 and aspect_ratio > 1.0:
-                return "roof"
-            if norm_area > 0.05:
-                return "roof"
-
-    # ── Flat / low-slope roof detection ──
-    # Flat rubber/membrane roofs viewed from the side appear as thin, wide,
-    # dark horizontal strips at the top of the structure. They typically have:
-    #   - Very high aspect ratio (>2.5, often 4-10x wider than tall)
-    #   - Small norm_area (0.005–0.02, thin strip < 2% of image)
-    #   - Low green_ratio (dark gray/black rubber or white TPO)
-    #   - Upper-middle position (norm_y_center 0.15–0.55)
-    # Without this path, SAM2 correctly segments the flat roof region but
-    # the classifier misses it because norm_area < 0.02, and it falls through
-    # to "siding", "gutter", or "unknown".
-    if 0.15 < norm_y_center < 0.55 and norm_area > 0.003:
-        if green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
-            if aspect_ratio > 2.5:
-                return "roof"
-            # Moderate aspect flat roof — stability_score confirms it's a real region
-            if aspect_ratio > 1.8 and stability_score > 0.92:
-                return "roof"
+        # Textured surface in tree position = likely tree even with low green
+        if is_textured_surface and not is_low_saturation:
+            return "tree"
 
     # ── Wall/facade detection ──
     if 0.2 <= norm_y_center < 0.85 and h > w * 0.8 and green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX:
@@ -968,6 +1057,135 @@ def _compute_green_ratio(
 
     except Exception as e:
         logger.warning(f"Green ratio computation failed: {e}")
+        return 0.0
+
+
+def _compute_brightness_stats(
+    mask_binary: np.ndarray,
+    original_image_bgr: np.ndarray,
+    scale: float,
+) -> dict:
+    """
+    Compute brightness and saturation statistics for the mask region.
+
+    Returns a dict with:
+      - mean_v: mean Value (luminance) in HSV, 0-255
+      - std_v:  std dev of Value — sky is near-zero std, roofs have some variation
+      - mean_s: mean Saturation in HSV, 0-255
+      - std_s:  std dev of Saturation
+      - dark_ratio: fraction of pixels with V < 80 (dark surfaces)
+      - bright_ratio: fraction of pixels with V > 200 (bright surfaces)
+      - gray_ratio: fraction of pixels with S < 30 AND 80 < V < 200 (gray/neutral surfaces)
+
+    These stats help distinguish:
+      - Dark rubber roof: low mean_s (<25), moderate mean_v (60-140), low std_v (<35), high gray_ratio
+      - White TPO roof: low mean_s (<20), high mean_v (>180), very low std_v (<15), high bright_ratio
+      - Sky: very low mean_s (<15), very high mean_v (>200), near-zero std_v (<8)
+      - Tree/vegetation: moderate-high mean_s (>40), variable mean_v, high std_v (>30)
+      - Shadow: very low mean_v (<60), variable mean_s
+    """
+    try:
+        if original_image_bgr is None or mask_binary is None:
+            return {"mean_v": 0, "std_v": 0, "mean_s": 0, "std_s": 0,
+                    "dark_ratio": 0, "bright_ratio": 0, "gray_ratio": 0}
+
+        orig_h, orig_w = original_image_bgr.shape[:2]
+
+        if scale != 1.0:
+            mask_full = cv2.resize(
+                mask_binary.astype(np.uint8),
+                (orig_w, orig_h),
+                interpolation=cv2.INTER_NEAREST,
+            )
+        else:
+            mask_full = mask_binary.astype(np.uint8)
+
+        masked_pixels = original_image_bgr[mask_full > 0]
+
+        if len(masked_pixels) < 10:
+            return {"mean_v": 0, "std_v": 0, "mean_s": 0, "std_s": 0,
+                    "dark_ratio": 0, "bright_ratio": 0, "gray_ratio": 0}
+
+        hsv = cv2.cvtColor(masked_pixels.reshape(-1, 1, 3), cv2.COLOR_BGR2HSV)
+        hsv = hsv.reshape(-1, 3)
+        h, s, v = hsv[:, 0], hsv[:, 1], hsv[:, 2]
+
+        total = len(masked_pixels)
+        dark_ratio = float(np.sum(v < 80) / total)
+        bright_ratio = float(np.sum(v > 200) / total)
+        gray_ratio = float(np.sum((s < 30) & (v > 80) & (v < 200)) / total)
+
+        return {
+            "mean_v": float(np.mean(v)),
+            "std_v": float(np.std(v)),
+            "mean_s": float(np.mean(s)),
+            "std_s": float(np.std(s)),
+            "dark_ratio": dark_ratio,
+            "bright_ratio": bright_ratio,
+            "gray_ratio": gray_ratio,
+        }
+
+    except Exception as e:
+        logger.warning(f"Brightness stats computation failed: {e}")
+        return {"mean_v": 0, "std_v": 0, "mean_s": 0, "std_s": 0,
+                "dark_ratio": 0, "bright_ratio": 0, "gray_ratio": 0}
+
+
+def _compute_texture_score(
+    mask_binary: np.ndarray,
+    original_image_bgr: np.ndarray,
+    scale: float,
+) -> float:
+    """
+    Compute a texture complexity score for the mask region.
+
+    Uses the standard deviation of Laplacian (second derivative) on the
+    grayscale image within the mask. This measures how much fine detail
+    is present:
+      - Roofs (smooth surface): LOW texture score (Laplacian std < 10-15)
+      - Trees/vegetation (leaves, branches): HIGH texture score (> 20-30)
+      - Walls/siding (moderate texture): MEDIUM texture score (10-20)
+      - Sky (perfectly smooth): VERY LOW texture score (< 5)
+
+    The texture score combined with green_ratio provides a much stronger
+    vegetation-vs-roof signal than green_ratio alone. A dark tree with
+    green_ratio=0.15 (below the tree threshold) but texture=35 is clearly
+    vegetation. A dark rubber roof with green_ratio=0.05 and texture=8 is
+    clearly a roof surface.
+    """
+    try:
+        if original_image_bgr is None or mask_binary is None:
+            return 0.0
+
+        orig_h, orig_w = original_image_bgr.shape[:2]
+
+        if scale != 1.0:
+            mask_full = cv2.resize(
+                mask_binary.astype(np.uint8),
+                (orig_w, orig_h),
+                interpolation=cv2.INTER_NEAREST,
+            )
+        else:
+            mask_full = mask_binary.astype(np.uint8)
+
+        # Convert to grayscale
+        gray = cv2.cvtColor(original_image_bgr, cv2.COLOR_BGR2GRAY)
+
+        # Compute Laplacian
+        laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+
+        # Get Laplacian values within mask
+        mask_laplacian = laplacian[mask_full > 0]
+
+        if len(mask_laplacian) < 10:
+            return 0.0
+
+        # Standard deviation of Laplacian = texture complexity score
+        texture = float(np.std(mask_laplacian))
+        return texture
+
+    except Exception as e:
+        logger.warning(f"Texture score computation failed: {e}")
         return 0.0
 
 
