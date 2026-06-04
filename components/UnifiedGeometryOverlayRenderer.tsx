@@ -213,6 +213,8 @@ const SEGMENTATION_CLASS_COLORS: Partial<Record<SegmentationClass, { stroke: str
   damaged_siding:  { stroke: '#dc2626', fill: 'rgba(220,38,38,0.12)',  label: 'Damaged Siding' },
   blocked_access:  { stroke: '#b91c1c', fill: 'rgba(185,28,28,0.12)',  label: 'Blocked Access' },
   muddy_work_area: { stroke: '#991b1b', fill: 'rgba(153,27,27,0.12)',  label: 'Muddy Work Area' },
+  // Background (Phase 0 P0-8.4: unclassifiable regions — desaturated, subtle)
+  background:  { stroke: '#d1d5db', fill: 'rgba(209,213,219,0.04)', label: 'Background' },
 };
 
 /**
