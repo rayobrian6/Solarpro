@@ -227,15 +227,24 @@ export async function GET(
         },
       };
 
-      // ── Size warning for overlay/full mode ────────────────────────────
+      // ── Size guard for overlay/full mode ────────────────────────────
+      // If the response would exceed Vercel's 4.5MB serverless function limit,
+      // return a 413 error instead of sending truncated data.
       if (mode !== 'stats') {
         const estimatedSize = estimateJsonByteSize(responsePayload);
         if (estimatedSize > VERCEL_RESPONSE_LIMIT_BYTES) {
           console.warn(
-            `[GET /unified-geometry/bundle] WARNING: Response for survey ${surveyId} ` +
+            `[GET /unified-geometry/bundle] BLOCKED: Response for survey ${surveyId} ` +
             `in mode=${mode} is ~${(estimatedSize / 1024 / 1024).toFixed(1)}MB, ` +
-            `which exceeds Vercel's 4.5MB limit. The response will be truncated. ` +
-            `Use ?mode=stats for the stats panel, or fetch per-photo overlay data.`
+            `which exceeds Vercel's 4.5MB limit. Returning 413 instead of truncated data. ` +
+            `Use ?mode=stats for the stats panel, or fetch per-photo overlay data with ?fileId=.`
+          );
+          return NextResponse.json(
+            {
+              success: false,
+              error: `Response would exceed 4.5MB limit (${(estimatedSize / 1024 / 1024).toFixed(1)}MB). Use ?mode=stats for overview, or add ?fileId= to fetch per-photo overlay data.`,
+            },
+            { status: 413 }
           );
         }
       }
@@ -326,15 +335,22 @@ export async function GET(
       },
     };
 
-    // ── Size warning for overlay/full mode ────────────────────────────
+    // ── Size guard for overlay/full mode (fallback path) ──────────────────
     if (mode !== 'stats') {
       const estimatedSize = estimateJsonByteSize(responsePayload);
       if (estimatedSize > VERCEL_RESPONSE_LIMIT_BYTES) {
         console.warn(
-          `[GET /unified-geometry/bundle] WARNING: Fallback response for survey ${surveyId} ` +
+          `[GET /unified-geometry/bundle] BLOCKED: Fallback response for survey ${surveyId} ` +
           `in mode=${mode} is ~${(estimatedSize / 1024 / 1024).toFixed(1)}MB, ` +
-          `which exceeds Vercel's 4.5MB limit. The response will be truncated. ` +
-          `Use ?mode=stats for the stats panel, or fetch per-photo overlay data.`
+          `which exceeds Vercel's 4.5MB limit. Returning 413 instead of truncated data. ` +
+          `Use ?mode=stats for the stats panel, or fetch per-photo overlay data with ?fileId=.`
+        );
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Response would exceed 4.5MB limit (${(estimatedSize / 1024 / 1024).toFixed(1)}MB). Use ?mode=stats for overview, or add ?fileId= to fetch per-photo overlay data.`,
+          },
+          { status: 413 }
         );
       }
     }

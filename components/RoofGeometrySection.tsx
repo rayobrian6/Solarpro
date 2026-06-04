@@ -13,7 +13,7 @@
  *   4. Collapsible details for advanced users
  */
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef, Component } from 'react';
 import {
   Layers,
   RefreshCw,
@@ -80,6 +80,42 @@ interface RoofGeometrySectionProps {
 
 const EMPTY_ARTIFACTS: UnifiedGeometryArtifact[] = [];
 
+/* ── Error boundary for the overlay renderer ────────────────────────────── */
+interface OverlayErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class OverlayErrorBoundary extends Component<
+  { children: React.ReactNode },
+  OverlayErrorBoundaryState
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): OverlayErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="rounded-xl border border-red-500/30 bg-red-950/20 p-3">
+          <p className="text-[11px] text-red-300 font-medium">
+            Overlay rendering failed
+          </p>
+          <p className="text-[10px] text-red-400/60 mt-1">
+            {this.state.error?.message ?? 'Unknown error'}. Try refreshing the page.
+          </p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /* ── Pipeline B Status Display ──────────────────────────────────────── */
 
 type PipelineStatus = 'idle' | 'running' | 'completed' | 'failed';
@@ -103,6 +139,14 @@ export function RoofGeometrySection({
   const [bundleLoading, setBundleLoading] = useState(true);
   const [bundleMode, setBundleMode] = useState<'stats' | 'overlay'>('stats');
   const [overlayArtifactsByFile, setOverlayArtifactsByFile] = useState<Map<string, UnifiedGeometryArtifact[]>>(new Map());
+  // Ref to access the cache inside callbacks without adding it to dependency arrays
+  const overlayCacheRef = useRef(overlayArtifactsByFile);
+  overlayCacheRef.current = overlayArtifactsByFile;
+
+  // Clear per-photo overlay cache when surveyId changes (prevents stale data)
+  useEffect(() => {
+    setOverlayArtifactsByFile(new Map());
+  }, [surveyId]);
   const [overlayLoading, setOverlayLoading] = useState(false);
   const [pipelineCLoading, setPipelineCLoading] = useState(false);
   const [pipelineCError, setPipelineCError] = useState<string | null>(null);
@@ -125,6 +169,16 @@ export function RoofGeometrySection({
       });
       if (res.status === 401) {
         setAuthRequired(true);
+        return;
+      }
+      if (res.status === 413) {
+        let errorMsg = 'Response too large. Try refreshing — the survey data will load in stats mode by default.';
+        try {
+          const errData = await res.json();
+          if (errData.error) errorMsg = errData.error;
+        } catch { /* use default message */ }
+        setPipelineError(errorMsg);
+        setBundleLoading(false);
         return;
       }
 
@@ -186,7 +240,7 @@ export function RoofGeometrySection({
   const fetchPhotoOverlay = useCallback(async (fileId: string) => {
     if (!surveyId || !fileId) return;
     // Skip if already cached for this file
-    if (overlayArtifactsByFile.has(fileId)) return;
+    if (overlayCacheRef.current.has(fileId)) return;
     // Skip if we already loaded all overlay data (bundleMode === 'overlay' without fileId)
     if (bundleMode === 'overlay') return;
 
@@ -223,7 +277,7 @@ export function RoofGeometrySection({
     } finally {
       setOverlayLoading(false);
     }
-  }, [surveyId, overlayArtifactsByFile, bundleMode]);
+  }, [surveyId, bundleMode]); // overlayCacheRef excluded — ref access avoids re-creation
 
   // ── Auto-load overlay data when a photo is selected ────────────────────────
   // When the user clicks on a photo in the overlay renderer, we automatically
@@ -235,16 +289,11 @@ export function RoofGeometrySection({
     }
   }, [selectedFileId, bundleMode, fetchPhotoOverlay]);
 
-  // ── Load all overlay data (power-user fallback) ───────────────────────────
-  // This loads overlay data for ALL photos at once. For large surveys this may
-  // exceed Vercel's 4.5MB response limit. It's kept as a manual fallback for
-  // users who want all polygons loaded at once.
-  const loadAllOverlayData = useCallback(async () => {
-    if (bundleMode === 'overlay') return; // already loaded everything
-    await fetchBundle('overlay');
-    // Clear the per-photo cache since we now have full data
-    setOverlayArtifactsByFile(new Map());
-  }, [bundleMode, fetchBundle]);
+  // NOTE: loadAllOverlayData callback removed — the "Load All Polygons" button
+  // was removed because it could exceed Vercel's 4.5MB response limit.
+  // Per-photo overlay auto-load (fetchPhotoOverlay) provides the same
+  // functionality safely by loading one photo at a time.
+
 
   // ── Run Pipeline B (Generate Roof Geometry) ──────────────────────────────────────────────
   // Pipeline B is async: POST /start → 202 { jobId } → poll GET /status
@@ -1119,27 +1168,17 @@ export function RoofGeometrySection({
                   All polygon detail loaded
                 </span>
               )}
-              {/* Power-user: Load ALL overlay data at once (may be slow/large) */}
-              {bundleMode === 'stats' && (
-                <button
-                  type="button"
-                  onClick={loadAllOverlayData}
-                  disabled={bundleLoading || overlayLoading}
-                  className="inline-flex items-center gap-1.5 rounded bg-slate-800/50 text-slate-500 border border-slate-700/40 px-2 py-0.5 text-[8px] font-medium transition hover:text-slate-300 hover:border-slate-600/60 disabled:opacity-50"
-                  title="Load polygon detail for ALL photos at once. May be slow for large surveys."
-                >
-                  <Shapes size={8} />
-                  Load All Polygons
-                </button>
-              )}
+              {/* Load All Polygons button removed — per-photo overlay makes it unnecessary and it could exceed Vercel 4.5MB limit */}
             </div>
-            <UnifiedGeometryOverlayRenderer
-              filesWithArtifacts={filesWithArtifacts}
-              selectedFileId={selectedFileId}
-              onSelectFile={setSelectedFileId}
-              showMockArtifacts={true}
-              showDebugRoofLines={showDebugRoofLines}
-            />
+            <OverlayErrorBoundary>
+              <UnifiedGeometryOverlayRenderer
+                filesWithArtifacts={filesWithArtifacts}
+                selectedFileId={selectedFileId}
+                onSelectFile={setSelectedFileId}
+                showMockArtifacts={true}
+                showDebugRoofLines={showDebugRoofLines}
+              />
+            </OverlayErrorBoundary>
           </div>
         )}
 

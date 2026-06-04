@@ -115,8 +115,6 @@ export {
 // ── Unified Artifact Store ─────────────────────────────────────────────────────────
 export {
   getUnifiedArtifactsForSurvey,
-  getUnifiedArtifactsByIds,
-  hasUnifiedArtifactsForSurvey,
   writeObstructionArtifact,
   writeUnifiedArtifact,
   writeUnifiedArtifacts,

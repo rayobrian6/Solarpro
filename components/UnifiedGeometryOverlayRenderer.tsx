@@ -1311,11 +1311,17 @@ export function buildFilesWithUnifiedArtifacts(
   const fileMap = new Map(surveyFiles.map((f) => [f.id, f]));
 
   const grouped = new Map<string, FileWithUnifiedArtifacts>();
+  const surveyLevelArtifacts: UnifiedGeometryArtifact[] = [];
   for (const artifact of artifacts) {
     // An artifact may be associated with one or more source files.
     // Use the first sourceFileId as the primary grouping key.
     const fileId = artifact.provenance?.sourceFileIds?.[0];
-    if (!fileId) continue; // Skip artifacts with no file association
+    if (!fileId) {
+      // Survey-level artifacts (e.g., consensus planes) have no sourceFileIds.
+      // Collect them separately so they can be distributed across all file groups.
+      surveyLevelArtifacts.push(artifact);
+      continue;
+    }
 
     if (!grouped.has(fileId)) {
       const surveyFile = fileMap.get(fileId);
@@ -1327,6 +1333,23 @@ export function buildFilesWithUnifiedArtifacts(
       });
     }
     grouped.get(fileId)!.artifacts.push(artifact);
+  }
+
+  // Distribute survey-level artifacts across all file groups so they appear
+  // in the overlay regardless of which photo is selected. This ensures
+  // consensus planes and other survey-wide geometry are always visible.
+  if (surveyLevelArtifacts.length > 0 && grouped.size > 0) {
+    for (const [, fileGroup] of grouped) {
+      fileGroup.artifacts.push(...surveyLevelArtifacts);
+    }
+  } else if (surveyLevelArtifacts.length > 0 && grouped.size === 0) {
+    // No photo-level artifacts exist — create a synthetic group for survey-level data
+    grouped.set('__survey_level__', {
+      fileId: '__survey_level__',
+      fileUrl: '',
+      filename: 'Survey-level geometry',
+      artifacts: surveyLevelArtifacts,
+    });
   }
 
   return Array.from(grouped.values());
