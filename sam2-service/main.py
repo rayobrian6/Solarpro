@@ -164,7 +164,9 @@ CLASSIFIER_TEXTURE_TREE_MIN = float(os.environ.get("SAM2_CLASSIFIER_TEXTURE_TREE
 CLASSIFIER_BRIGHTNESS_SKY_V_MIN = float(os.environ.get("SAM2_CLASSIFIER_BRIGHTNESS_SKY_V_MIN", "200"))
 CLASSIFIER_BRIGHTNESS_SKY_STD_V_MAX = float(os.environ.get("SAM2_CLASSIFIER_BRIGHTNESS_SKY_STD_V_MAX", "12"))
 CLASSIFIER_BRIGHTNESS_GRAY_S_MAX = float(os.environ.get("SAM2_CLASSIFIER_BRIGHTNESS_GRAY_S_MAX", "30"))
-CLASSIFIER_BRIGHTNESS_DARK_V_MAX = float(os.environ.get("SAM2_CLASSIFIER_BRIGHTNESS_DARK_V_MAX", "80"))
+CLASSIFIER_BRIGHTNESS_DARK_V_MAX = float(os.environ.get("SAM2_CLASSIFIER_BRIGHTNESS_DARK_V_MAX", "100"))
+CLASSIFIER_BRIGHTNESS_BLACK_TPO_V_MAX = float(os.environ.get("SAM2_CLASSIFIER_BRIGHTNESS_BLACK_TPO_V_MAX", "140"))
+CLASSIFIER_BRIGHTNESS_BLACK_TPO_S_MAX = float(os.environ.get("SAM2_CLASSIFIER_BRIGHTNESS_BLACK_TPO_S_MAX", "25"))
 
 # ---------------------------------------------------------------------------\
 # MiDaS / DPT Depth Estimation Configuration
@@ -844,14 +846,14 @@ def classify_mask_region(
     #   - Low texture (smooth membrane surface, not rough vegetation)
     #   - Brightness analysis distinguishes dark rubber from shadow/soil
     #   - White TPO membranes: very bright, very low saturation, smooth
-    if 0.15 < norm_y_center < 0.55 and norm_area > 0.003:
+    if 0.1 < norm_y_center < 0.6 and norm_area > 0.003:
         # Roof candidate: low green AND low saturation (not vegetation)
         roof_color_ok = (green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX and
                          is_low_saturation and is_smooth_surface)
         # Also allow moderate green if texture confirms smooth surface (moss on flat roof)
         roof_texture_override = (green_ratio < 0.35 and is_smooth_surface and
                                  not is_textured_surface and
-                                 0.15 < norm_y_center < 0.55)
+                                 0.1 < norm_y_center < 0.6)
         if roof_color_ok or roof_texture_override:
             # Dark rubber roof: wide strip, low saturation, moderate luminance
             if aspect_ratio > 2.5:
@@ -862,12 +864,41 @@ def classify_mask_region(
             if aspect_ratio > 1.5 and is_smooth_surface:
                 return "roof"
 
+    # ── Roof detection (BLACK TPO / dark membrane roofs) ──
+    # Black TPO/EPDM rubber membranes are the most common flat roof type on
+    # commercial buildings. They are VERY dark (black/charcoal), very low
+    # saturation, very smooth texture, and can occupy large areas of the image.
+    # Key distinctions from other dark surfaces:
+    #   - Shadow: also dark + low-sat, but shadows have high std_v (uneven lighting)
+    #     and are NOT smooth (shadow falls on textured surfaces below)
+    #   - Dark tree: dark but has high saturation and high texture
+    #   - Ground/soil: dark but lower in image, more textured
+    #   - Dark wall/siding: plausible, but walls are typically taller (lower aspect_ratio)
+    #
+    # Black TPO signature: mean_v < 140, mean_s < 25, texture < 15,
+    #                       std_v < 35 (uniform dark surface), large area
+    if 0.05 < norm_y_center < 0.65 and norm_area > 0.01:
+        is_black_tpo = (mean_v < CLASSIFIER_BRIGHTNESS_BLACK_TPO_V_MAX and
+                        mean_s < CLASSIFIER_BRIGHTNESS_BLACK_TPO_S_MAX and
+                        is_smooth_surface and
+                        green_ratio < CLASSIFIER_GREEN_RATIO_ROOF_MAX)
+        if is_black_tpo:
+            # Wide dark strip = flat roof (most common presentation)
+            if aspect_ratio > 1.2 and norm_area > 0.015:
+                return "roof"
+            # Large dark area in upper half = flat roof covering most of view
+            if norm_area > 0.05 and norm_y_center < 0.5:
+                return "roof"
+            # Moderate area dark smooth surface in structure zone = roof patch
+            if norm_area > 0.02 and std_v < 35 and aspect_ratio > 0.8:
+                return "roof"
+
     # ── Roof detection (WHITE/LIGHT TPO membranes) ──
     # White TPO/PVC roof membranes are very bright, nearly uniform, and
     # have extremely low saturation. They look like sky but are on the
     # structure. Key differentiator from sky: TPO has detectable texture
     # (seams, patches, slight soiling) — std_v > 5-8 vs sky std_v < 5.
-    if 0.1 < norm_y_center < 0.55 and norm_area > 0.01:
+    if 0.05 < norm_y_center < 0.6 and norm_area > 0.01:
         if is_bright_surface and is_low_saturation and is_smooth_surface:
             # Bright + low saturation + smooth + upper-middle = white roof
             # Sky would have std_v < 5; TPO roofs have std_v > 8
