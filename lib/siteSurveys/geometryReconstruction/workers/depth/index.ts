@@ -13,6 +13,7 @@ export {
 export type {
   DepthWorkerInput,
   DepthWorkerOutput,
+  DepthFromReconstructionOutput,
 } from './runDepthWorker';
 
 export {

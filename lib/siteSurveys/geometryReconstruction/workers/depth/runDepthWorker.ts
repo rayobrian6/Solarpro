@@ -515,14 +515,25 @@ async function fetchImageBytes(fileUrl: string): Promise<Buffer | null> {
  *
  * Returns DepthMap artifacts.
  */
+/** Extended output of runDepthFromReconstructionInput (Phase 0, P0-2.5).
+ *  Includes contradiction reports collected from all photo-level depth runs. */
+export interface DepthFromReconstructionOutput {
+  artifacts: GeometryReconstructionArtifact[];
+  /** Depth-class contradiction reports from all photos (Phase 0, P0-2.5).
+   *  Populated when PHASE0_DEPTH_CONTRADICTION is active and MiDaS was used.
+   *  Empty array otherwise. */
+  contradictionReports: DepthContradictionReport[];
+}
+
 export async function runDepthFromReconstructionInput(
   input: GeometryReconstructionInput,
   masks: SemanticSegmentationMask[],
   vanishingPoints: VanishingPointArtifact[],
   /** Pre-fetched image bytes from segmentation stage (keyed by fileId). Avoids redundant re-download. */
   preFetchedImageBytes: Record<string, Buffer> = {},
-): Promise<GeometryReconstructionArtifact[]> {
+): Promise<DepthFromReconstructionOutput> {
   const results: GeometryReconstructionArtifact[] = [];
+  const allContradictionReports: DepthContradictionReport[] = [];
   const cache = getGlobalDepthCache();
 
   for (const photo of input.sourcePhotos) {
@@ -589,7 +600,11 @@ export async function runDepthFromReconstructionInput(
     }
 
     results.push(...output.artifacts);
+    allContradictionReports.push(...output.contradictionReports);
   }
 
-  return results;
+  return {
+    artifacts: results,
+    contradictionReports: allContradictionReports,
+  };
 }

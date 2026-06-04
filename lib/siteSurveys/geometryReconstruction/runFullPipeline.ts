@@ -33,6 +33,7 @@ import type {
   RoofPlaneCandidate,
   WallPlaneCandidate,
   DepthMap,
+  DepthContradictionReport,
 } from './types';
 
 import {
@@ -97,6 +98,11 @@ export interface FullPipelineResult {
   photoResults: PhotoSegmentationResult[];
   /** Why SAM2 budget was exhausted (null if not exhausted). */
   budgetExhaustedReason: string | null;
+  /** Depth-class contradiction reports (Phase 0, P0-2.5).
+   *  Populated when PHASE0_DEPTH_CONTRADICTION is active and MiDaS was used.
+   *  Available to downstream plane extraction and WP-4 promotion quality gate.
+   *  Empty array when flag is off or heuristic path was used. */
+  contradictionReports: DepthContradictionReport[];
 }
 
 /** Checkpoint data emitted after each pipeline stage completes. */
@@ -113,6 +119,9 @@ export interface PipelineCheckpoint {
   elapsedMs: number;
   /** Which stage the pipeline will attempt next (null if pipeline is complete). */
   nextStage: string | null;
+  /** Depth-class contradiction reports (Phase 0, P0-2.5).
+   *  Available after depth_estimation stage. Empty before/after. */
+  contradictionReports: DepthContradictionReport[];
 }
 
 /**
@@ -249,6 +258,7 @@ function adaptBatchCallback(
       stageDurations,
       elapsedMs: Date.now() - pipelineStart,
       nextStage: 'line_extraction',
+      contradictionReports: [],
     });
   };
 }
@@ -317,6 +327,7 @@ export async function runFullGeometryReconstructionPipeline(
     stageDurations: { ...stageDurations },
     elapsedMs: Date.now() - pipelineStart,
     nextStage: nextStageAfter('segmentation'),
+    contradictionReports: [],
   });
 
   // Extract typed masks for subsequent stages
@@ -356,7 +367,7 @@ export async function runFullGeometryReconstructionPipeline(
   // Timeout check before Stage 2
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 1 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
-    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, ...segFields };
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, contradictionReports: [] as DepthContradictionReport[], ...segFields };
   }
 
   // ──── Stage 2: Line Extraction ────────────────────────────────────────────
@@ -380,6 +391,7 @@ export async function runFullGeometryReconstructionPipeline(
     stageDurations: { ...stageDurations },
     elapsedMs: Date.now() - pipelineStart,
     nextStage: nextStageAfter('line_extraction'),
+    contradictionReports: [],
   });
 
   // Extract typed structural lines for subsequent stages
@@ -390,7 +402,7 @@ export async function runFullGeometryReconstructionPipeline(
   // Timeout check before Stage 3
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 2 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
-    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, ...segFields };
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, contradictionReports: [] as DepthContradictionReport[], ...segFields };
   }
 
   // ──── Stage 3: Vanishing Points ──────────────────────────────────────────
@@ -413,6 +425,7 @@ export async function runFullGeometryReconstructionPipeline(
     stageDurations: { ...stageDurations },
     elapsedMs: Date.now() - pipelineStart,
     nextStage: nextStageAfter('vanishing_points'),
+    contradictionReports: [],
   });
 
   // Extract typed vanishing points for subsequent stages
@@ -423,7 +436,7 @@ export async function runFullGeometryReconstructionPipeline(
   // Timeout check before Stage 4
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 3 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
-    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, ...segFields };
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, contradictionReports: [] as DepthContradictionReport[], ...segFields };
   }
 
   // ──── Stage 4: Depth Estimation ──────────────────────────────────────────
@@ -431,15 +444,18 @@ export async function runFullGeometryReconstructionPipeline(
   const depthResult = await asyncStageTimer('depth_estimation', () =>
     runDepthFromReconstructionInput(input, masksForDepth, vanishingPoints, segResult.imageBytesMap),
   );
-  const depthArtifacts = depthResult.result;
+  const depthOutput = depthResult.result;
+  const depthArtifacts = depthOutput.artifacts;
+  const depthContradictionReports = depthOutput.contradictionReports;
   allArtifacts.push(...depthArtifacts);
   stageDurations['depth_estimation'] = depthResult.durationMs;
   stages.push({ stage: 'depth_estimation', artifactCount: depthArtifacts.length, durationMs: depthResult.durationMs });
   console.info(
-    `[Pipeline B] Stage 4 (depth_estimation): ${depthArtifacts.length} artifacts in ${depthResult.durationMs}ms`,
+    `[Pipeline B] Stage 4 (depth_estimation): ${depthArtifacts.length} artifacts in ${depthResult.durationMs}ms` +
+    (depthContradictionReports.length > 0 ? `, ${depthContradictionReports.length} contradiction reports` : ''),
   );
 
-  // Checkpoint: persist depth artifacts
+  // Checkpoint: persist depth artifacts + contradiction reports
   await invokeCheckpoint(checkpointCallback, {
     stage: 'depth_estimation',
     stageArtifacts: depthArtifacts,
@@ -447,6 +463,7 @@ export async function runFullGeometryReconstructionPipeline(
     stageDurations: { ...stageDurations },
     elapsedMs: Date.now() - pipelineStart,
     nextStage: nextStageAfter('depth_estimation'),
+    contradictionReports: depthContradictionReports,
   });
 
   // Extract typed depth maps for Stage 5 (depth-augmented plane extraction)
@@ -460,7 +477,7 @@ export async function runFullGeometryReconstructionPipeline(
   // Timeout check before Stage 5
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 4 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
-    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, ...segFields };
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, contradictionReports: [] as DepthContradictionReport[], ...segFields };
   }
 
   // ──── Stage 5: Plane Extraction ──────────────────────────────────────────
@@ -484,12 +501,13 @@ export async function runFullGeometryReconstructionPipeline(
     stageDurations: { ...stageDurations },
     elapsedMs: Date.now() - pipelineStart,
     nextStage: nextStageAfter('plane_extraction'),
+    contradictionReports: [],
   });
 
   // Timeout check before Stage 6
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 5 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
-    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, ...segFields };
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, contradictionReports: [] as DepthContradictionReport[], ...segFields };
   }
 
   // ──── Stage 6: Multi-View Fusion ──────────────────────────────────────────
@@ -512,12 +530,13 @@ export async function runFullGeometryReconstructionPipeline(
     stageDurations: { ...stageDurations },
     elapsedMs: Date.now() - pipelineStart,
     nextStage: nextStageAfter('multi_view_fusion'),
+    contradictionReports: [],
   });
 
   // Timeout check before Stage 7
   if (isPipelineTimedOut(pipelineStart)) {
     console.warn(`[Pipeline B] Timeout after Stage 6 — skipping remaining stages (${Date.now() - pipelineStart}ms elapsed)`);
-    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, ...segFields };
+    return { artifacts: allArtifacts, stages, totalDurationMs: Date.now() - pipelineStart, stageDurations, contradictionReports: [] as DepthContradictionReport[], ...segFields };
   }
 
   // ──── Stage 7: Photogrammetry ────────────────────────────────────────────
@@ -540,6 +559,7 @@ export async function runFullGeometryReconstructionPipeline(
     stageDurations: { ...stageDurations },
     elapsedMs: Date.now() - pipelineStart,
     nextStage: null, // pipeline is complete
+    contradictionReports: depthContradictionReports,
   });
 
   const totalDurationMs = Date.now() - pipelineStart;
@@ -552,6 +572,7 @@ export async function runFullGeometryReconstructionPipeline(
     stages,
     totalDurationMs,
     stageDurations,
+    contradictionReports: depthContradictionReports,
     ...segFields,
   };
 }
@@ -582,6 +603,7 @@ export async function runSegmentationOnlyPipeline(
       stageDurations,
       elapsedMs: durationMs,
       nextStage: null,
+      contradictionReports: [],
     });
   }
 
@@ -590,6 +612,7 @@ export async function runSegmentationOnlyPipeline(
     stages: [{ stage: 'segmentation', artifactCount: segOutput.artifacts.length, durationMs }],
     totalDurationMs: durationMs,
     stageDurations,
+    contradictionReports: [],
     ...segFields,
   };
 }
@@ -633,6 +656,7 @@ export async function runDepthOnlyPipeline(
       stageDurations: { ...stageDurations },
       elapsedMs: Date.now() - start,
       nextStage: 'depth_estimation',
+      contradictionReports: [],
     });
   }
 
@@ -646,7 +670,9 @@ export async function runDepthOnlyPipeline(
     (a): a is VanishingPointArtifact => a.artifactType === 'vanishing_point',
   );
 
-  const depthArtifacts = await runDepthFromReconstructionInput(input, masksForDepth, vanishingPoints, {});
+  const depthOutput = await runDepthFromReconstructionInput(input, masksForDepth, vanishingPoints, {});
+  const depthArtifacts = depthOutput.artifacts;
+  const depthContradictionReports = depthOutput.contradictionReports;
   const allArtifacts = [...segArtifacts, ...lineArtifacts, ...vpArtifacts, ...depthArtifacts];
   const depthDurationMs = Date.now() - start - segDurationMs;
   stageDurations['depth_estimation'] = depthDurationMs;
@@ -660,6 +686,7 @@ export async function runDepthOnlyPipeline(
       stageDurations: { ...stageDurations },
       elapsedMs: Date.now() - start,
       nextStage: null,
+      contradictionReports: depthContradictionReports,
     });
   }
 
@@ -671,6 +698,7 @@ export async function runDepthOnlyPipeline(
     ],
     totalDurationMs: Date.now() - start,
     stageDurations,
+    contradictionReports: depthContradictionReports,
     ...segFields,
   };
 }
