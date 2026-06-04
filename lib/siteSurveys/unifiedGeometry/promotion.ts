@@ -474,6 +474,66 @@ export function assertCanonicalEligible(artifact: UnifiedGeometryArtifact): void
   }
 }
 
+// ---------------------------------------------------------------------------
+// Phase 0 — Contradiction-Aware Promotion Validation (P0-4.2)
+// ---------------------------------------------------------------------------
+
+import type { DepthContradictionReport } from '../geometryReconstruction/types';
+
+/**
+ * Check an artifact against depth-class contradiction reports.
+ *
+ * When the PHASE0_CONTRADICTION_PROMOTION_GATE flag is active, artifacts
+ * that appear in any contradiction report with severity 'moderate' or
+ * 'major' are blocked from canonical promotion. This prevents geometry
+ * derived from contradicted depth estimates from contaminating the
+ * CanonicalBuildingModel and CAD output.
+ *
+ * The function searches the provided contradiction reports for any report
+ * whose maskId matches the artifact's source artifact ID. This linkage
+ * depends on the promotion pipeline preserving the original mask ID
+ * in the artifact's provenance chain.
+ *
+ * Throws CANONICAL_MODEL_VIOLATION if a blocking contradiction is found.
+ * No-op if the flag is not active or no blocking contradictions exist.
+ */
+export function assertNoContradictionBlock(
+  artifact: UnifiedGeometryArtifact,
+  contradictionReports: DepthContradictionReport[],
+): void {
+  if (!isPhase0ContradictionPromotionGateEnabled()) return;
+  if (contradictionReports.length === 0) return;
+
+  // Search for contradiction reports that match this artifact.
+  // The linkage is via the artifact's provenance chain — the original
+  // mask ID is preserved in derivedFromArtifactIds. We also check
+  // the artifact's own ID for direct matches (when the artifact IS
+  // the mask that was contradicted).
+  const artifactIds = new Set([
+    artifact.id,
+    ...artifact.provenance.derivedFromArtifactIds,
+  ]);
+
+  const blockingReports = contradictionReports.filter(
+    r => artifactIds.has(r.maskId) && (r.severity === 'moderate' || r.severity === 'major'),
+  );
+
+  if (blockingReports.length > 0) {
+    const worst = blockingReports.reduce((a, b) =>
+      a.deviation > b.deviation ? a : b,
+    );
+    throw new Error(
+      `[CANONICAL_MODEL_VIOLATION] Artifact '${artifact.id}' has ` +
+      `${blockingReports.length} depth-class contradiction(s) with severity 'moderate' or 'major'. ` +
+      `Worst: class='${worst.segmentationClass}', depth=${worst.actualDepth.toFixed(3)}, ` +
+      `expected=[${worst.expectedRange[0].toFixed(2)},${worst.expectedRange[1].toFixed(2)}], ` +
+      `deviation=${worst.deviation.toFixed(3)}, severity='${worst.severity}'. ` +
+      `Artifacts with significant depth-class contradictions cannot feed the ` +
+      `CanonicalBuildingModel. [Phase 0 contradiction promotion gate active]`,
+    );
+  }
+}
+
 /**
  * Check if an artifact can be promoted (without throwing).
  */
