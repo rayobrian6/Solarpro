@@ -37,30 +37,39 @@ import sharp from 'sharp';
 // Constants
 // ---------------------------------------------------------------------------
 
-export const LINE_EXTRACTION_WORKER_VERSION = '3.0.0-image-based-edge-detection';
+export const LINE_EXTRACTION_WORKER_VERSION = '3.1.0-tuning-pass-3b';
 
 /** Standard limitations for line extraction artifacts. */
 const LINE_EXTRACTION_LIMITATIONS = [
   ...BASE_LIMITATIONS,
-  'Image-based edge detection using Canny + Hough transform',
+  'Image-based edge detection using multi-scale Canny + Hough transform',
   'Line type classification is orientation-based heuristic — may misclassify complex roof geometries',
+  'Valley/hip detection uses multi-mask intersection logic — requires adjacent roof masks',
   'No vanishing-point or perspective correction applied',
   'Lines filtered by overlap with SAM2 segmentation masks',
   'Per-photo cap limits line candidates to prevent edge proliferation',
 ];
 
 /** Minimum line length in normalized units (0-1000). */
-const MIN_LINE_LENGTH = 50;
+const MIN_LINE_LENGTH = 40;
 
 /** Maximum number of lines to extract per photo. */
-const MAX_LINES_PER_PHOTO = 20;
+const MAX_LINES_PER_PHOTO = 30;
 
 /** Minimum confidence threshold for lines (0-100). */
-const MIN_CONFIDENCE = 40;
+const MIN_CONFIDENCE = 35;
 
-/** Canny edge detection threshold range. */
-const CANNY_LOW_THRESHOLD = 50;
-const CANNY_HIGH_THRESHOLD = 150;
+/** Canny edge detection threshold range — multi-scale will use these as base values. */
+const CANNY_LOW_THRESHOLD = 40;
+const CANNY_HIGH_THRESHOLD = 120;
+
+/** Processing image width — increased from 500 to preserve thin edge detail. */
+const PROCESSING_IMAGE_WIDTH = 800;
+
+/** Multi-scale Canny sensitivity levels (low/medium/high). */
+const CANNY_SCALE_LOW = { low: 60, high: 180 };    // Strong edges only — ridges, eaves
+const CANNY_SCALE_MEDIUM = { low: 40, high: 120 }; // Default — most structural lines
+const CANNY_SCALE_HIGH = { low: 20, high: 70 };    // Sensitive — thin/low-contrast edges (flat roofs, rubber)
 
 // ---------------------------------------------------------------------------
 // Structure-qualified classes (for filtering)
@@ -149,7 +158,7 @@ interface LineSegment {
  * Convert image bytes to grayscale and resize for processing.
  * Returns a Buffer containing grayscale pixel values (0-255).
  */
-async function loadGrayscaleImage(imageBytes: Buffer, targetWidth: number = 500): Promise<{
+async function loadGrayscaleImage(imageBytes: Buffer, targetWidth: number = PROCESSING_IMAGE_WIDTH): Promise<{
   grayscale: Uint8Array;
   width: number;
   height: number;
@@ -334,6 +343,101 @@ function cannyEdgeDetection(
 }
 
 /**
+ * Run multi-scale Canny edge detection at low/medium/high sensitivity levels,
+ * then combine the results by OR-ing the edge maps.
+ *
+ * This catches edges at different contrast levels:
+ * - Low sensitivity: strong edges (ridges, eaves, clear roof-wall boundaries)
+ * - Medium sensitivity: standard structural lines
+ * - High sensitivity: thin/low-contrast edges (flat rubber roof boundaries,
+ *   subtle membrane edges, faded lines on white TPO)
+ *
+ * Returns a combined edge map and per-scale edge maps for diagnostic use.
+ */
+function multiScaleCannyEdgeDetection(
+  grayscale: Uint8Array,
+  width: number,
+  height: number,
+): { combined: Uint8Array; low: Uint8Array; medium: Uint8Array; high: Uint8Array } {
+  const low = cannyEdgeDetection(grayscale, width, height, CANNY_SCALE_LOW.low, CANNY_SCALE_LOW.high);
+  const medium = cannyEdgeDetection(grayscale, width, height, CANNY_SCALE_MEDIUM.low, CANNY_SCALE_MEDIUM.high);
+  const high = cannyEdgeDetection(grayscale, width, height, CANNY_SCALE_HIGH.low, CANNY_SCALE_HIGH.high);
+
+  // Combine: a pixel is an edge if detected at ANY scale
+  const combined = new Uint8Array(width * height);
+  for (let i = 0; i < combined.length; i++) {
+    combined[i] = (low[i] | medium[i] | high[i]) & 255;
+  }
+
+  return { combined, low, medium, high };
+}
+
+/**
+ * Strengthen edges within segmentation mask regions by dilating edges that
+ * overlap with roof/wall masks. This helps thin roof boundaries show up
+ * more clearly in the Hough accumulator.
+ *
+ * For flat roofs especially, the edge at the roof boundary may be very faint.
+ * By boosting edge pixels that fall inside or near structure masks, we ensure
+ * the Hough transform picks up these critical lines.
+ */
+function strengthenEdgesInMaskRegions(
+  edges: Uint8Array,
+  width: number,
+  height: number,
+  masks: SemanticSegmentationMask[],
+  boostRadius: number = 2,
+): Uint8Array {
+  const strengthened = new Uint8Array(edges);
+
+  // Build a quick lookup: which pixels are near a structure mask?
+  const structureMask = new Uint8Array(width * height);
+
+  for (const mask of masks) {
+    if (mask.segmentationClass !== 'roof' && mask.segmentationClass !== 'wall' && mask.segmentationClass !== 'siding') continue;
+    if (!mask.maskBounds) continue;
+
+    const mb = mask.maskBounds;
+    // Convert mask bounds from normalized (0-1000) to pixel coordinates
+    const px = Math.round((mb.x / 1000) * width);
+    const py = Math.round((mb.y / 1000) * height);
+    const px2 = Math.round(((mb.x + mb.width) / 1000) * width);
+    const py2 = Math.round(((mb.y + mb.height) / 1000) * height);
+
+    // Mark all pixels within the mask bounding box (expanded by boostRadius)
+    for (let y = Math.max(0, py - boostRadius); y < Math.min(height, py2 + boostRadius); y++) {
+      for (let x = Math.max(0, px - boostRadius); x < Math.min(width, px2 + boostRadius); x++) {
+        structureMask[y * width + x] = 1;
+      }
+    }
+  }
+
+  // For edge pixels that are within or near structure mask regions,
+  // dilate them slightly to strengthen weak edges
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const idx = y * width + x;
+      if (structureMask[idx] && edges[idx] === 255) {
+        // This is an edge pixel in a structure region — boost surrounding pixels
+        for (let dy = -boostRadius; dy <= boostRadius; dy++) {
+          for (let dx = -boostRadius; dx <= boostRadius; dx++) {
+            const ny = y + dy;
+            const nx = x + dx;
+            if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
+              const nidx = ny * width + nx;
+              // Boost nearby pixels that have even weak edge signal (from high-sensitivity Canny)
+              strengthened[nidx] = 255;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return strengthened;
+}
+
+/**
  * Apply probabilistic Hough line transform to detect lines in edge map.
  * Returns array of detected line segments in normalized coordinates.
  */
@@ -366,7 +470,7 @@ function houghLineTransform(
   }
 
   // Find peaks in accumulator
-  const threshold = Math.max(50, Math.floor(width * 0.08)); // Adaptive threshold
+  const threshold = Math.max(30, Math.floor(width * 0.05)); // Adaptive threshold — lowered for thin roof lines
   const peaks: Array<{ rhoIdx: number; thetaIdx: number; votes: number }> = [];
 
   for (let rhoIdx = 1; rhoIdx < rhoBins - 1; rhoIdx++) {
@@ -400,14 +504,14 @@ function houghLineTransform(
   // Convert polar lines to line segments by tracing edge pixels
   const minLineLengthPx = Math.round(minLineLength / 1000 * Math.max(width, height));
 
-  for (const peak of peaks.slice(0, 100)) { // Cap at 100 candidate lines per photo
+  for (const peak of peaks.slice(0, 150)) { // Cap at 150 candidate lines per photo (increased for multi-scale)
     const rho = peak.rhoIdx - rhoMax;
     const thetaRad = (peak.thetaIdx * Math.PI) / 180;
     const cosT = Math.cos(thetaRad);
     const sinT = Math.sin(thetaRad);
 
     // Find the extent of edge pixels along this line
-    const tolerance = 3; // pixels
+    const tolerance = 2; // pixels — tighter for better line precision
     const edgePoints: Array<{ x: number; y: number }> = [];
 
     for (let y = 0; y < height; y++) {
@@ -463,7 +567,17 @@ function houghLineTransform(
 }
 
 /**
- * Merge lines that are nearly collinear and overlapping.
+ * Merge lines that are nearly collinear, overlapping, or have small gaps.
+ *
+ * Uses perpendicular distance between line segments (not just midpoint proximity)
+ * to determine if two collinear lines should be merged. This is critical for
+ * roof lines that get broken by shadows, chimneys, or edge detector gaps.
+ *
+ * Two lines are merged if:
+ * 1. Their angles differ by < 10° (tighter than before)
+ * 2. The maximum perpendicular distance between them is < 15 (in normalized units)
+ * 3. The gap between their closest endpoints is < 100 (allows bridging across
+ *    small breaks from shadows, chimneys, or occlusions)
  */
 function mergeCollinearLines(lines: LineSegment[]): LineSegment[] {
   if (lines.length <= 1) return lines;
@@ -483,21 +597,18 @@ function mergeCollinearLines(lines: LineSegment[]): LineSegment[] {
       const a2 = lines[j].angleDeg % 180;
       const angleDiff = Math.min(Math.abs(a1 - a2), 180 - Math.abs(a1 - a2));
 
-      if (angleDiff < 12) {
-        // Check proximity: are the midpoints close enough?
-        const midA = {
-          x: (currentLine.start.x + currentLine.end.x) / 2,
-          y: (currentLine.start.y + currentLine.end.y) / 2,
-        };
-        const midB = {
-          x: (lines[j].start.x + lines[j].end.x) / 2,
-          y: (lines[j].start.y + lines[j].end.y) / 2,
-        };
-        const midDist = Math.sqrt((midA.x - midB.x) ** 2 + (midA.y - midB.y) ** 2);
+      if (angleDiff < 10) {
+        // Compute perpendicular distance: how far apart are these parallel lines?
+        const perpDist = maxPerpendicularDistance(currentLine, lines[j]);
 
-        if (midDist < 80) { // Close enough to merge
+        // Compute gap between nearest endpoints
+        const gapDist = minEndpointGap(currentLine, lines[j]);
+
+        // Merge if lines are nearly collinear (small perpendicular distance)
+        // OR if they have a small gap that should be bridged
+        if (perpDist < 15 || (perpDist < 25 && gapDist < 100)) {
           const combined = combineLines(currentLine, lines[j]);
-          if (combined.length >= currentLine.length) {
+          if (combined.length >= currentLine.length * 0.8) {
             currentLine = combined;
             used.add(j);
           }
@@ -509,6 +620,47 @@ function mergeCollinearLines(lines: LineSegment[]): LineSegment[] {
   }
 
   return merged;
+}
+
+/**
+ * Compute the maximum perpendicular distance from line2's endpoints to line1.
+ * This measures how far apart two "parallel" lines actually are.
+ */
+function maxPerpendicularDistance(line1: LineSegment, line2: LineSegment): number {
+  // Direction vector of line1
+  const dx = line1.end.x - line1.start.x;
+  const dy = line1.end.y - line1.start.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 0.001) return Infinity;
+
+  // Normal vector (perpendicular to line1 direction)
+  const nx = -dy / len;
+  const ny = dx / len;
+
+  // Project line2's endpoints onto the normal
+  const d1 = Math.abs((line2.start.x - line1.start.x) * nx + (line2.start.y - line1.start.y) * ny);
+  const d2 = Math.abs((line2.end.x - line1.start.x) * nx + (line2.end.y - line1.start.y) * ny);
+
+  return Math.max(d1, d2);
+}
+
+/**
+ * Compute the minimum distance between the closest endpoints of two lines.
+ * This measures the "gap" between two collinear line segments.
+ */
+function minEndpointGap(line1: LineSegment, line2: LineSegment): number {
+  const gaps = [
+    dist(line1.start, line2.start),
+    dist(line1.start, line2.end),
+    dist(line1.end, line2.start),
+    dist(line1.end, line2.end),
+  ];
+  return Math.min(...gaps);
+}
+
+/** Euclidean distance between two points. */
+function dist(a: { x: number; y: number }, b: { x: number; y: number }): number {
+  return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
 }
 
 /**
@@ -639,7 +791,11 @@ function getStructureMasksForFile(fileId: string, masks: SemanticSegmentationMas
 /**
  * Classify a line segment based on its orientation, position, and overlapping masks.
  */
-function classifyLine(line: LineSegment, masks: SemanticSegmentationMask[]): StructuralLineType | null {
+function classifyLine(
+  line: LineSegment,
+  masks: SemanticSegmentationMask[],
+  allRoofMasks?: SemanticSegmentationMask[],
+): StructuralLineType | null {
   const angleDeg = line.angleDeg;
   const normalizedAngle = angleDeg % 180;
   const isHorizontal = normalizedAngle < 20 || normalizedAngle > 160;
@@ -657,13 +813,9 @@ function classifyLine(line: LineSegment, masks: SemanticSegmentationMask[]): Str
   const hasFascia = overlappingClasses.has('fascia') || overlappingClasses.has('soffit') || overlappingClasses.has('gutter');
 
   // Compute relative position within roof masks for ridge/eave disambiguation.
-  // Instead of the old hardcoded avgY < 350 (which is resolution-dependent),
-  // compare the line's Y position to the roof masks' vertical extent.
-  // A line near the TOP of a roof region → ridge; near the BOTTOM → eave.
   const roofMasks = overlappingMasks.filter(m => m.segmentationClass === 'roof');
-  let relativeRoofY = 0.5; // default: middle of roof (safe fallback)
+  let relativeRoofY = 0.5;
   if (roofMasks.length > 0) {
-    // Find the overall roof bounding box from maskBounds
     let roofMinY = Infinity, roofMaxY = -Infinity;
     for (const rm of roofMasks) {
       if (rm.maskBounds) {
@@ -672,9 +824,42 @@ function classifyLine(line: LineSegment, masks: SemanticSegmentationMask[]): Str
       }
     }
     if (roofMinY < Infinity && roofMaxY > roofMinY) {
-      // Normalize: 0 = top of roof, 1 = bottom of roof
       relativeRoofY = (avgY - roofMinY) / (roofMaxY - roofMinY);
       relativeRoofY = Math.max(0, Math.min(1, relativeRoofY));
+    }
+  }
+
+  // ── Valley and hip detection ──
+  // Valleys occur at the intersection of two roof planes (internal corner,
+  // water flows INTO it). Hips occur where two roof planes meet at an external
+  // corner (water flows AWAY). Detection strategy:
+  //
+  // A diagonal line that overlaps with MULTIPLE separate roof masks is likely
+  // a valley or hip — it runs along the seam between two roof planes.
+  // - Valley: line is in the LOWER portion of the roof area (drains downward)
+  // - Hip: line is in the UPPER portion of the roof area (forms a peak)
+  //
+  // We also check if the line runs along the BOUNDARY between two adjacent
+  // roof masks (not just overlapping one mask that happens to be segmented
+  // as a single region).
+  if (hasRoof && isDiagonal) {
+    const roofMaskCount = roofMasks.length;
+    // Use all roof masks (not just overlapping) for boundary detection
+    const allRoof = allRoofMasks ?? roofMasks;
+
+    // Check if the line runs along the boundary between two adjacent roof masks
+    const adjacentRoofCount = countAdjacentRoofMasks(line, allRoof);
+
+    if (adjacentRoofCount >= 2 || roofMaskCount >= 2) {
+      // Line is at the intersection of 2+ roof planes
+      if (relativeRoofY > 0.55) {
+        return 'valley'; // Lower roof area — water drains here
+      } else if (relativeRoofY < 0.45) {
+        return 'hip'; // Upper roof area — forms a peak
+      } else {
+        // Middle of roof — ambiguous. Default to valley (more common, more important)
+        return 'valley';
+      }
     }
   }
 
@@ -687,6 +872,7 @@ function classifyLine(line: LineSegment, masks: SemanticSegmentationMask[]): Str
         return 'eave'; // Lower portion of roof → eave
       }
     } else if (isDiagonal) {
+      // If not caught by valley/hip above, default to rake
       return 'rake'; // Diagonal roof edge
     } else if (isVertical) {
       return 'rake'; // Vertical could be rake in perspective
@@ -720,6 +906,54 @@ function classifyLine(line: LineSegment, masks: SemanticSegmentationMask[]): Str
 }
 
 /**
+ * Count how many roof masks the line runs along the boundary of.
+ * A line that passes near the edges of 2+ separate roof masks is likely
+ * a valley or hip line.
+ *
+ * Strategy: For each roof mask, check if the line's sample points fall
+ * near the mask boundary (within 15% of mask dimension). If the line
+ * is near the boundary of 2+ different roof masks, it's an intersection line.
+ */
+function countAdjacentRoofMasks(line: LineSegment, roofMasks: SemanticSegmentationMask[]): number {
+  let adjacentCount = 0;
+  const samples = 10;
+
+  for (const mask of roofMasks) {
+    if (!mask.maskBounds) continue;
+    const mb = mask.maskBounds;
+
+    // Check if the line passes near the boundary of this mask
+    let boundaryHits = 0;
+    for (let i = 0; i <= samples; i++) {
+      const t = i / samples;
+      const px = line.start.x * (1 - t) + line.end.x * t;
+      const py = line.start.y * (1 - t) + line.end.y * t;
+
+      // Is this point near the mask boundary?
+      const nearLeftEdge = Math.abs(px - mb.x) < mb.width * 0.15;
+      const nearRightEdge = Math.abs(px - (mb.x + mb.width)) < mb.width * 0.15;
+      const nearTopEdge = Math.abs(py - mb.y) < mb.height * 0.15;
+      const nearBottomEdge = Math.abs(py - (mb.y + mb.height)) < mb.height * 0.15;
+
+      // Point must be within the mask bounding box AND near an edge
+      const inBox = px >= mb.x - mb.width * 0.05 && px <= mb.x + mb.width * 1.05 &&
+                     py >= mb.y - mb.height * 0.05 && py <= mb.y + mb.height * 1.05;
+
+      if (inBox && (nearLeftEdge || nearRightEdge || nearTopEdge || nearBottomEdge)) {
+        boundaryHits++;
+      }
+    }
+
+    // If 3+ sample points are near the mask boundary, this line runs along it
+    if (boundaryHits >= 3) {
+      adjacentCount++;
+    }
+  }
+
+  return adjacentCount;
+}
+
+/**
  * Compute confidence score for a classified line.
  */
 function computeLineConfidence(
@@ -738,6 +972,8 @@ function computeLineConfidence(
     ridge: 25,
     eave: 20,
     rake: 15,
+    valley: 20,  // Valleys are critical for roof geometry
+    hip: 18,     // Hips are important for multi-plane roofs
     wall_vertical: 15,
     wall_bottom_edge: 10,
   };
@@ -813,27 +1049,34 @@ export async function runLineExtractionWorker(input: LineExtractionWorkerInput):
     const tPhoto = Date.now();
 
     try {
-      // Step 1: Load grayscale image (async — uses sharp)
-      const { grayscale, width, height } = await loadGrayscaleImage(imageBytes, 500);
+      // Step 1: Load grayscale image (async — uses sharp) at higher resolution
+      const { grayscale, width, height } = await loadGrayscaleImage(imageBytes);
 
-      // Step 2: Canny edge detection
-      const edges = cannyEdgeDetection(grayscale, width, height);
+      // Step 2: Multi-scale Canny edge detection
+      // Run Canny at three sensitivity levels and combine for maximum coverage
+      const { combined: multiEdges } = multiScaleCannyEdgeDetection(grayscale, width, height);
 
-      // Step 3: Hough line transform
+      // Step 2b: Strengthen edges within mask regions
+      // This boosts faint roof boundaries that the multi-scale Canny may detect weakly
+      const structureMasks = getStructureMasksForFile(fileId, fileMasks);
+      const edges = strengthenEdgesInMaskRegions(multiEdges, width, height, structureMasks);
+
+      // Step 3: Hough line transform (with lowered thresholds for thin roof edges)
       const detectedLines = houghLineTransform(edges, width, height, minLineLength);
       filterStats.totalLinesDetected += detectedLines.length;
 
       // Step 4: Filter lines by mask overlap — keep only lines on structure
-      const structureMasks = getStructureMasksForFile(fileId, fileMasks);
       const structureLines = detectedLines.filter(line =>
         structureMasks.some(mask => lineOverlapsMask(line, mask))
       );
       filterStats.linesOnStructure += structureLines.length;
 
-      // Step 5: Classify lines
+      // Step 5: Classify lines (with valley/hip detection)
+      // Pass all roof masks separately for valley/hip boundary analysis
+      const allRoofMasks = fileMasks.filter(m => m.segmentationClass === 'roof');
       const classified: Array<LineSegment & { lineType: StructuralLineType; maskSupport: number }> = [];
       for (const line of structureLines) {
-        const lineType = classifyLine(line, structureMasks);
+        const lineType = classifyLine(line, structureMasks, allRoofMasks);
         if (lineType) {
           const maskSupport = structureMasks.filter(m => lineOverlapsMask(line, m)).length;
           classified.push({ ...line, lineType, maskSupport });
