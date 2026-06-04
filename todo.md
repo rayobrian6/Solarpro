@@ -1,29 +1,25 @@
-# SolarPro — Pass 3C: Geometry Fidelity & Roof Penetrations
+# Pass 3C Fixes — Segmentation Stability / Artifact Validity Patch
 
-## Pass 3A/3A.1/3B — ✅ ALL DEPLOYED
+## Fixes — ALL APPLIED
+- [x] Fix 1: Add angleDeg + coordinateSystem to inferWallBottomEdge
+- [x] Fix 2: Tighten roof penetration classifier (bias toward false negatives)
+- [x] Fix 3: Add polygon topology validation (self-intersection rejection)
+- [x] Fix 4: Raise MIN_MASK_AREA_FRACTION 0.002 → 0.003
+- [x] Fix 5: Remove window/door/garage_door from WALL_FOUNDATION_OCCLUDER_CLASSES
+- [x] Fix 6: Fix snap_tolerance + minimum corner spacing + topology validation
 
-## Pass 3C: Geometry Fidelity & Roof Penetrations
+## Tests — ALL PASSING
+- [x] Unit test: self-intersecting polygon rejection (9 Python tests)
+- [x] Unit test: inferred wall bottom edge has all required fields (3 TS tests)
+- [x] Regression test: tree/noise fragments do not classify as chimney/vent/skylight (5 Python tests)
+- [x] Regression test: windows/doors do not act as foundation occluders (5 TS tests)
+- [x] TypeScript compiles cleanly (tsc --noEmit = 0 errors)
+- [x] Python syntax valid (ast.parse OK)
+- [ ] Before/after artifact count comparison
+- [ ] Before/after screenshot comparison
 
-### Python (sam2-service/main.py) — ✅ DONE
-- [x] Roof penetration classes (chimney, vent_pipe, skylight) added to classifier
-- [x] `mask_to_polygon_v2()` with contour-aware corner snapping added
-- [x] `MIN_MASK_AREA_FRACTION` lowered from 0.005 to 0.002
-- [x] `DOUGLAS_PEUCKER_EPSILON` lowered from 0.7 to 0.5
-- [x] `MAX_POLYGON_EDGE_LENGTH` lowered from 35 to 25
-- [x] Both `mask_to_polygon()` call sites updated to `mask_to_polygon_v2()`
-
-### TypeScript Updates — ✅ DONE
-- [x] Add chimney, vent_pipe, skylight to SegmentationClass in types.ts
-- [x] Add chimney, vent_pipe, skylight to validation in schemas.ts
-- [x] Add chimney, vent_pipe, skylight to sam2Client.ts class maps
-- [x] Add chimney, vent_pipe to STRUCTURE_QUALIFIED_CLASSES in runLineExtractionWorker.ts
-
-### Wall Foundation Line Detection — ✅ DONE
-- [x] Add occluder-aware wall boundary inference to line extraction worker
-
-### Deploy — NOT STARTED
-- [ ] Commit and push Pass 3C to dev branch
-- [ ] Deploy SAM2 service on Render
-- [ ] Deploy geometry worker on Render
-- [ ] Update Render env vars (DOUGLAS_PEUCKER_EPSILON=0.5, MAX_POLYGON_EDGE_LENGTH=25, MIN_MASK_AREA_FRACTION=0.002)
-- [ ] Verify results
+## Deploy — IN PROGRESS
+- [ ] Commit and push to dev
+- [ ] Deploy SAM2 service + geometry worker
+- [ ] Update Render env vars
+- [ ] Verify no CAD/permit/canonical/promotion/worker architecture changes

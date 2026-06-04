@@ -118,7 +118,7 @@ const WALL_CLASSES: ReadonlySet<string> = new Set([
  * and prevent the edge detector from finding the foundation line directly.
  * The inference function must extrapolate the wall bottom edge BEHIND these.
  */
-const WALL_FOUNDATION_OCCLUDER_CLASSES: ReadonlySet<string> = new Set([
+export const WALL_FOUNDATION_OCCLUDER_CLASSES: ReadonlySet<string> = new Set([
   'car',
   'truck',
   'trailer',
@@ -137,9 +137,6 @@ const WALL_FOUNDATION_OCCLUDER_CLASSES: ReadonlySet<string> = new Set([
   'tools',
   'temporary_materials',
   'ac_unit',
-  'window',
-  'door',
-  'garage_door',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -1045,7 +1042,7 @@ function computeLineConfidence(
  * Returns an array of inferred wall_bottom_edge line segments (in normalized
  * 0-1000 coordinate space), or empty array if no wall masks are found.
  */
-function inferWallBottomEdge(
+export function inferWallBottomEdge(
   masks: SemanticSegmentationMask[],
   imageWidth: number,
   imageHeight: number,
@@ -1135,9 +1132,10 @@ function inferWallBottomEdge(
     }).length;
 
     results.push({
-      start: { x: startX, y: medianY },
-      end: { x: endX, y: medianY },
+      start: { x: startX, y: medianY, coordinateSystem: 'normalized_image_0_1000' },
+      end: { x: endX, y: medianY, coordinateSystem: 'normalized_image_0_1000' },
       length: lineLength,
+      angleDeg: 0,  // Horizontal line — angle is always 0°
       lineType: 'wall_bottom_edge',
       maskSupport: maskSupport + occluderBonus,
     });

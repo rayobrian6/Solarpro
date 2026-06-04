@@ -36,7 +36,7 @@ CPU Optimization (Segmentation):
   - Lower pred_iou_thresh (0.5) and stability_score_thresh (0.8) for challenging lighting
   - Rapid-loop decode: pre-computed prompts + in-place feed dict updates = ~0.05-0.1s per point
   - crop_n_layers=0 on CPU to avoid expensive multi-scale cropping
-  - min_area_fraction defaults to SAM2_MIN_MASK_AREA_FRACTION env var (0.02),
+  - min_area_fraction defaults to SAM2_MIN_MASK_AREA_FRACTION env var (0.003),
     not hardcoded 0.05 — the old 0.05 default was the root cause of "0 masks"
   - Memory monitoring via resource.getrusage (RSS logged before/after inference)
   - Model loaded once, reused across requests
@@ -113,7 +113,7 @@ HF_MODEL_ID = os.environ.get("SAM2_HF_MODEL_ID", "facebook/sam2.1-hiera-tiny")
 # 256px on CPU: too small, 8x8 grid misses roofs entirely (0 masks)
 MAX_IMAGE_DIM = int(os.environ.get("SAM2_MAX_IMAGE_DIM", "512" if IS_CPU else "2048"))
 # Minimum mask area as fraction of image — filters noise masks
-MIN_MASK_AREA_FRACTION = float(os.environ.get("SAM2_MIN_MASK_AREA_FRACTION", "0.002"))
+MIN_MASK_AREA_FRACTION = float(os.environ.get("SAM2_MIN_MASK_AREA_FRACTION", "0.003"))
 # Prediction confidence and stability thresholds — lower values catch weaker masks
 PRED_IOU_THRESH = float(os.environ.get("SAM2_PRED_IOU_THRESH", "0.5"))
 STABILITY_SCORE_THRESH = float(os.environ.get("SAM2_STABILITY_SCORE_THRESH", "0.80"))
@@ -678,10 +678,55 @@ def mask_to_polygon(mask_bin: np.ndarray, epsilon: float = DOUGLAS_PEUCKER_EPSIL
     return points
 
 
+def _segments_intersect(
+    p1: dict, p2: dict, p3: dict, p4: dict
+) -> bool:
+    """
+    Check if line segment (p1→p2) intersects with segment (p3→p4),
+    excluding shared endpoints.
+    Used for self-intersection detection in polygons.
+    """
+    def cross(o, a, b):
+        return (a["x"] - o["x"]) * (b["y"] - o["y"]) - (a["y"] - o["y"]) * (b["x"] - o["x"])
+
+    d1 = cross(p3, p4, p1)
+    d2 = cross(p3, p4, p2)
+    d3 = cross(p1, p2, p3)
+    d4 = cross(p1, p2, p4)
+
+    if ((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)) and \
+       ((d3 > 0 and d4 < 0) or (d3 < 0 and d4 > 0)):
+        return True
+
+    return False
+
+
+def _polygon_is_simple(points: list[dict]) -> bool:
+    """
+    Check if a polygon is simple (non-self-intersecting).
+    Tests all pairs of non-adjacent edges for intersection.
+    Returns True if the polygon has no self-intersections.
+    """
+    n = len(points)
+    if n < 4:
+        return True  # Triangle or less cannot self-intersect
+
+    for i in range(n):
+        for j in range(i + 2, n):
+            # Skip adjacent edges (they share a vertex)
+            if i == 0 and j == n - 1:
+                continue
+            if _segments_intersect(points[i], points[(i + 1) % n],
+                                   points[j], points[(j + 1) % n]):
+                return False
+    return True
+
+
 def _refine_polygon_with_contour(
     simplified_points: list[dict],
     original_contour: np.ndarray,
-    snap_tolerance: float = 3.0,
+    snap_tolerance: float = 5.0,
+    min_corner_spacing: float = 8.0,
 ) -> list[dict]:
     """
     Refine a simplified polygon by snapping its vertices to nearby
@@ -691,6 +736,14 @@ def _refine_polygon_with_contour(
     plane meets a wall or where a valley creates a bend. By snapping each
     simplified vertex to the nearest high-curvature contour point, we recover
     these critical geometry points without adding excessive detail.
+
+    SAFEGUARDS (Pass 3C fix):
+    - snap_tolerance raised from 3.0 to 5.0 to avoid snapping to pixel-noise corners
+    - min_corner_spacing enforced: corners closer than 8px are merged to prevent
+      dense clusters of pixel-level "corners" from jagged contours
+    - Self-intersection validation: if snapping creates a self-intersecting polygon,
+      the refinement is REJECTED and the original simplified polygon is returned instead.
+      This prevents surreal rendering artifacts from malformed polygons.
 
     High-curvature points are identified by computing the angle change at each
     contour vertex (angle between incoming and outgoing edge vectors).
@@ -705,7 +758,8 @@ def _refine_polygon_with_contour(
     if n < 5:
         return simplified_points
 
-    corner_indices = set()
+    # Find all candidate corner indices (angle < 150° = curvature > 30°)
+    raw_corner_indices = []
     for i in range(n):
         p_prev = contour_pts[(i - 2) % n]
         p_curr = contour_pts[i]
@@ -725,12 +779,53 @@ def _refine_polygon_with_contour(
 
         # Angle < 150° means curvature > 30° — this is a corner
         if angle_deg < 150:
-            corner_indices.add(i)
+            raw_corner_indices.append(i)
 
-    if not corner_indices:
+    if not raw_corner_indices:
         return simplified_points
 
-    corner_points = contour_pts[list(corner_indices)]
+    # Enforce minimum corner spacing: merge corners closer than min_corner_spacing
+    # This prevents dense clusters of pixel-level "corners" from jagged contours
+    # from producing spurious snap targets. Keep the sharpest corner in each cluster.
+    corner_angles = []
+    for idx in raw_corner_indices:
+        p_prev = contour_pts[(idx - 2) % n]
+        p_curr = contour_pts[idx]
+        p_next = contour_pts[(idx + 2) % n]
+        v1 = p_curr - p_prev
+        v2 = p_next - p_curr
+        len1 = np.sqrt(v1[0]**2 + v1[1]**2)
+        len2 = np.sqrt(v2[0]**2 + v2[1]**2)
+        if len1 < 0.001 or len2 < 0.001:
+            corner_angles.append(180.0)
+        else:
+            cos_a = np.clip((v1[0]*v2[0] + v1[1]*v2[1]) / (len1 * len2), -1.0, 1.0)
+            corner_angles.append(np.degrees(np.arccos(cos_a)))
+
+    filtered_indices = []
+    for k, idx in enumerate(raw_corner_indices):
+        pt = contour_pts[idx]
+        # Check distance to all already-accepted corners
+        too_close = False
+        for accepted_idx in filtered_indices:
+            accepted_pt = contour_pts[accepted_idx]
+            dist = np.sqrt((pt[0] - accepted_pt[0])**2 + (pt[1] - accepted_pt[1])**2)
+            if dist < min_corner_spacing:
+                too_close = True
+                # Keep the sharper corner (lower angle = sharper)
+                accepted_k = raw_corner_indices.index(accepted_idx)
+                if corner_angles[k] < corner_angles[accepted_k]:
+                    # Current is sharper — replace
+                    filtered_indices.remove(accepted_idx)
+                    filtered_indices.append(idx)
+                break
+        if not too_close:
+            filtered_indices.append(idx)
+
+    if not filtered_indices:
+        return simplified_points
+
+    corner_points = contour_pts[filtered_indices]
 
     # Snap each simplified vertex to the nearest corner point (if within tolerance)
     refined = []
@@ -749,6 +844,12 @@ def _refine_polygon_with_contour(
             refined.append({"x": float(best_pt[0]), "y": float(best_pt[1])})
         else:
             refined.append(sp)
+
+    # SAFEGUARD: Validate polygon topology — reject self-intersecting refinement
+    if not _polygon_is_simple(refined):
+        # Refinement created a self-intersecting polygon — reject it
+        # and return the safer original simplified polygon instead
+        return simplified_points
 
     return refined
 
@@ -1126,30 +1227,45 @@ def classify_mask_region(
     # - Chimneys affect setback requirements and shading
     # - Vent pipes/plumbing stacks affect placement and flashing details
     # - Skylights affect both placement and production estimates
-    # These are all small (norm_area < 0.02), low-green (not vegetation),
-    # and in the upper portion of the image (on the roof plane).
-    # Without these specific classes, they fall into generic "obstruction" or
-    # "equipment" which loses the semantic information solar design needs.
-    if norm_y_center < 0.55 and norm_area < 0.02 and green_ratio < 0.15:
-        # Chimney: small-to-tiny, roughly square or slightly tall, on roof
-        # Typically 12"x18" to 24"x36" real-world → small mask on roof
-        if norm_area > 0.001 and 0.6 < aspect_ratio < 2.0:
-            # Use brightness to distinguish from skylight:
-            # Chimney: dark or medium (brick/metal), moderate saturation
-            # Skylight: bright (glass reflecting sky), very low saturation
-            if is_bright_surface and is_low_saturation:
-                return "skylight"
-            # Dark/medium + on roof = chimney (brick, metal cap, stucco)
-            return "chimney"
-        # Vent pipe / plumbing stack: VERY small, very tall thin circle
-        # Usually 2-4" diameter pipe → tiny circular mask, very low area
-        if norm_area < 0.004 and aspect_ratio > 0.5:
-            return "vent_pipe"
+    #
+    # IMPORTANT: Bias toward FALSE NEGATIVES over false positives.
+    # It is far worse to misclassify a tree fragment or shadow patch as
+    # "chimney" than to miss a real chimney. Misclassified penetration masks
+    # pollute downstream geometry and produce surreal rendering artifacts.
+    #
+    # Additional safeguards beyond the original loose conditions:
+    # - Must be smooth surface (not textured like tree/vegetation fragments)
+    # - Must have high stability score (not SAM2 noise/edge artifacts)
+    # - Tighter area and aspect_ratio bounds
+    # - Chimney requires low saturation (not green/mossy fragments)
+    # - Vent pipe requires truly tiny circular shape
+    # - Skylight requires bright + low-sat (glass reflecting sky)
+    if norm_y_center < 0.55 and norm_area < 0.02 and green_ratio < 0.10:
+        # Chimney: small, roughly square or slightly tall, SMOOTH, on roof
+        # Real chimneys: brick/metal cap → smooth mask, high stability,
+        # low saturation (not vegetation), moderate-to-dark brightness
+        if norm_area > 0.002 and 0.7 < aspect_ratio < 1.8:
+            if is_smooth_surface and stability_score > 0.90 and is_low_saturation:
+                # Skylight override: bright + low-sat glass on roof
+                if is_bright_surface:
+                    return "skylight"
+                # Dark/medium + smooth + stable + low-sat = chimney
+                return "chimney"
+
+        # Vent pipe / plumbing stack: VERY tiny, roughly circular
+        # Real vent pipes: 2-4" diameter → tiny circular mask (~3-8px at 512px)
+        # Must be extremely small AND nearly circular (not rectangular fragments)
+        if norm_area < 0.002 and 0.75 < aspect_ratio < 1.4:
+            if is_smooth_surface and stability_score > 0.92:
+                return "vent_pipe"
+
         # Skylight: bright, low-sat, roughly square or slightly wide
-        # (some skylights are wider than tall)
-        if is_bright_surface and is_low_saturation and norm_area > 0.001:
-            if 0.8 < aspect_ratio < 2.5:
-                return "skylight"
+        # Real skylights: glass dome/flat reflecting sky → bright + uniform
+        # Must be clearly bright AND clearly low-saturation (sky reflection)
+        if is_bright_surface and is_low_saturation and is_uniform_surface:
+            if norm_area > 0.002 and 0.8 < aspect_ratio < 2.0:
+                if stability_score > 0.88:
+                    return "skylight"
 
     # ── Occluder detection ──
     # Large objects at ground level that block the view of the structure
