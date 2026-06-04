@@ -305,7 +305,7 @@ export type ConditionSegmentationClass =
  * Legacy segmentation classes — the original 7 classes kept for
  * backward compatibility with existing artifacts and DB data.
  */
-export type LegacySegmentationClass = 'roof' | 'wall' | 'sky' | 'tree' | 'ground' | 'obstruction' | 'equipment';
+export type LegacySegmentationClass = 'roof' | 'wall' | 'sky' | 'tree' | 'ground' | 'obstruction' | 'equipment' | 'background';
 
 /** Semantic class labels for segmentation — expanded from 7 to 33 classes. */
 export type SegmentationClass =
@@ -318,8 +318,8 @@ export type SegmentationClass =
 
 /** All recognized segmentation classes. */
 export const SEGMENTATION_CLASSES: readonly SegmentationClass[] = [
-  // Legacy (original 7)
-  'roof', 'wall', 'sky', 'tree', 'ground', 'obstruction', 'equipment',
+  // Legacy (original 7 + background for unknown/unclassified regions)
+  'roof', 'wall', 'sky', 'tree', 'ground', 'obstruction', 'equipment', 'background',
   // Facade
   'siding', 'window', 'door', 'garage_door', 'fascia', 'soffit',
   'gutter', 'downspout', 'porch', 'deck', 'steps', 'railing',
@@ -526,6 +526,12 @@ export const GEOMETRY_PARTICIPATION_DEFAULTS: Readonly<Record<SegmentationClass,
   // ── Legacy catch-alls ──
   obstruction: { participatesInLines: true,  participatesInPlanes: true,  participatesInDepthFusion: true,  participatesInPhotogrammetry: true },
   equipment:   { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
+
+  // ── Background: unknown/unclassified regions — NO participation in any geometry stage ──
+  // Introduced in Phase 0 (P0-8.1) to replace null-skip behavior for unclassified masks.
+  // Background masks are filtered from Pipeline B by SOLAR_RELEVANT_SEGMENTATION_CLASSES
+  // but remain available for overlay display and manual review.
+  background: { participatesInLines: false, participatesInPlanes: false, participatesInDepthFusion: false, participatesInPhotogrammetry: false },
 };
 
 /**
