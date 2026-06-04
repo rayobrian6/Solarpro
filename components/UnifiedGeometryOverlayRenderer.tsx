@@ -1002,10 +1002,14 @@ function PhotoWithUnifiedOverlays({
               : 0.35;
           const lineStroke = lineStyle?.stroke ?? entry.color.stroke;
           const lineDash = lineStyle?.strokeDasharray ?? 'none';
-          const fillOpacity = isHovered ? 0.2 : undefined;
+          // Pass 3E: Excluded masks get reduced opacity and dashed borders
+          const isExcludedFromGeometry = entry.artifact.excludeFromGeometry === true;
+          const excludedFillOpacity = isExcludedFromGeometry ? 0.04 : undefined;
+          const excludedStrokeDash = isExcludedFromGeometry ? '4,4' : undefined;
+          const fillOpacity = isHovered ? 0.2 : excludedFillOpacity ?? undefined;
           const strokeDash = entry.artifact.authority?.mockArtifact ? '1,1'
             : entry.artifact.isOccluder ? '6,3'  // Dashed lines for occluders
-            : 'none';
+            : excludedStrokeDash ?? 'none';  // Pass 3E: excluded masks get 4,4 dash
           // Condition flag badge: show ⚠ for condition annotations
           const hasConditionFlags = entry.artifact.conditionFlags && entry.artifact.conditionFlags.length > 0;
           const isOccluderMask = entry.artifact.isOccluder === true;
@@ -1148,6 +1152,20 @@ function PhotoWithUnifiedOverlays({
                   OCCLUDER
                 </span>
               )}
+              {/* Pass 3E: Geometry exclusion badge */}
+              {a.excludeFromGeometry && (
+                <span className="text-[9px] text-orange-400 border border-orange-500/30 rounded px-1">
+                  EXCLUDED
+                </span>
+              )}
+              {/* Pass 3E: Partial participation badge (some stages disabled) */}
+              {!a.excludeFromGeometry && a.geometryParticipation && (
+                Object.values(a.geometryParticipation).some(v => v === false) && (
+                  <span className="text-[9px] text-yellow-400 border border-yellow-500/30 rounded px-1">
+                    PARTIAL
+                  </span>
+                )
+              )}
               {/* Condition flag badges */}
               {a.conditionFlags && a.conditionFlags.map((flag, fi) => (
                 <span key={fi} className="text-[9px] text-red-300 border border-red-500/30 rounded px-1">
@@ -1234,6 +1252,20 @@ function PhotoWithUnifiedOverlays({
                 )}
                 {a.isSynthetic && (
                   <span className="text-amber-400">⚠ Synthetic</span>
+                )}
+                {/* Pass 3E: Geometry participation details */}
+                {a.geometryParticipation && (
+                  <span className="text-slate-300">
+                    Participation: {[
+                      a.geometryParticipation.participatesInLines !== false ? 'Lines' : null,
+                      a.geometryParticipation.participatesInPlanes !== false ? 'Planes' : null,
+                      a.geometryParticipation.participatesInDepthFusion !== false ? 'Depth' : null,
+                      a.geometryParticipation.participatesInPhotogrammetry !== false ? 'Photo' : null,
+                    ].filter(Boolean).join(', ') || 'none'}
+                  </span>
+                )}
+                {a.excludeFromGeometry && (
+                  <span className="text-orange-400">⛔ Excluded from geometry</span>
                 )}
               </div>
             )}

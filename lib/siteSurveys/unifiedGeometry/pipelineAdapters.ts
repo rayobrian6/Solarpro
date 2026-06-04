@@ -71,7 +71,9 @@ import {
   ELECTRICAL_SEGMENTATION_CLASSES,
   OCCLUDER_SEGMENTATION_CLASSES,
   CONDITION_SEGMENTATION_CLASSES,
+  VEGETATION_CLASSES,
   type SegmentationClass,
+  type GeometryParticipationFlags,
 } from '../geometryReconstruction/types';
 
 // ─── Pipeline A Candidate Type → Unified Geometry Class Mapping ─────────────
@@ -344,6 +346,8 @@ function makeEmptyArtifact(overrides: Partial<UnifiedGeometryArtifact> & Pick<Un
     isGroundSurface: null,
     cadRelevance: null,
     reviewRequired: null,
+    excludeFromGeometry: null,
+    geometryParticipation: null,
     reviewState: 'review_required',
     reviewNotes: null,
     priority: overrides.confidence !== undefined
@@ -777,7 +781,8 @@ function adaptSemanticSegmentationMask(artifact: SemanticSegmentationMask, surve
 
   const isStructure = segClass === 'roof' || segClass === 'wall';
   const isTemporaryOccluder = OCCLUDER_SEGMENTATION_CLASSES.has(segClass);
-  const isVegetation = segClass === 'tree' || segClass === 'trees' || segClass === 'bushes' || segClass === 'grass' || segClass === 'overgrown_grass' || segClass === 'vegetation_touching_structure';
+  // Pass 3E: Use artifact's isVegetation flag when available, fall back to class-based inference
+  const isVegetation = artifact.isVegetation ?? VEGETATION_CLASSES.has(segClass) ?? (segClass === 'tree' || segClass === 'trees' || segClass === 'bushes' || segClass === 'grass' || segClass === 'overgrown_grass' || segClass === 'vegetation_touching_structure');
   const isGroundSurface = segClass === 'ground' || segClass === 'grass' || segClass === 'overgrown_grass' || segClass === 'gravel' || segClass === 'driveway' || segClass === 'sidewalk';
   const sceneRole = isTemporaryOccluder
     ? 'temporary_occluder'
@@ -840,6 +845,15 @@ function adaptSemanticSegmentationMask(artifact: SemanticSegmentationMask, surve
     isGroundSurface,
     cadRelevance,
     reviewRequired,
+    excludeFromGeometry: artifact.excludeFromGeometry ?? null,
+    geometryParticipation: artifact.participation
+      ? {
+          participatesInLines: artifact.participation.participatesInLines ?? null,
+          participatesInPlanes: artifact.participation.participatesInPlanes ?? null,
+          participatesInDepthFusion: artifact.participation.participatesInDepthFusion ?? null,
+          participatesInPhotogrammetry: artifact.participation.participatesInPhotogrammetry ?? null,
+        }
+      : null,
     stageTimings: artifact.stageTimings ?? null,
     isSynthetic,
   });

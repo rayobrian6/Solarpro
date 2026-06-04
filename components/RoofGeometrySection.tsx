@@ -436,6 +436,14 @@ export function RoofGeometrySection({
   const geometryStats = useMemo(() => {
     const planes = artifacts.filter(a => a.geometryClass === 'roof_plane' || a.geometryClass === 'wall_plane' || a.geometryClass === 'consensus_plane');
     const lines = artifacts.filter(a => a.geometryClass === 'roof_line');
+    const segMasks = artifacts.filter(a => a.geometryClass === 'segmentation_mask');
+
+    // Pass 3E: Participation breakdown for segmentation masks
+    const participatingMasks = segMasks.filter(a => a.excludeFromGeometry !== true);
+    const excludedMasks = segMasks.filter(a => a.excludeFromGeometry === true);
+    const partialMasks = participatingMasks.filter(a =>
+      a.geometryParticipation && Object.values(a.geometryParticipation).some(v => v === false)
+    );
 
     // Confidence stats
     const confidences = artifacts.map(a => a.confidence).filter(c => c != null);
@@ -477,6 +485,10 @@ export function RoofGeometrySection({
     return {
       planeCount: planes.length,
       lineCount: lines.length,
+      segMaskCount: segMasks.length,
+      participatingMaskCount: participatingMasks.length,
+      excludedMaskCount: excludedMasks.length,
+      partialMaskCount: partialMasks.length,
       avgConfidence,
       pitchRange,
       azimuthRange,
@@ -872,6 +884,28 @@ export function RoofGeometrySection({
                     {sub.replace(/_/g, ' ')}: {count}
                   </span>
                 ))}
+              </div>
+            )}
+
+            {/* Pass 3E: Segmentation mask participation breakdown */}
+            {geometryStats.segMaskCount > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-0.5 text-[9px] text-cyan-300">
+                  Masks: {geometryStats.segMaskCount}
+                </span>
+                <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-300">
+                  Geometry: {geometryStats.participatingMaskCount}
+                </span>
+                {geometryStats.excludedMaskCount > 0 && (
+                  <span className="rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 text-[9px] text-orange-300">
+                    Excluded: {geometryStats.excludedMaskCount}
+                  </span>
+                )}
+                {geometryStats.partialMaskCount > 0 && (
+                  <span className="rounded-full border border-yellow-500/20 bg-yellow-500/10 px-2 py-0.5 text-[9px] text-yellow-300">
+                    Partial: {geometryStats.partialMaskCount}
+                  </span>
+                )}
               </div>
             )}
           </div>

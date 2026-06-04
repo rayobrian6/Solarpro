@@ -486,6 +486,28 @@ export interface UnifiedGeometryArtifact {
   /** Whether a human should review the semantic label/mask. */
   reviewRequired?: boolean | null;
 
+  // ── Geometry participation controls (Pass 3E) ──
+
+  /**
+   * Whether this segmentation mask is entirely excluded from geometry
+   * extraction (lines, planes, depth, photogrammetry). When true, the mask
+   * is kept as overlay context but must never feed into downstream geometry
+   * stages. Propagated from SemanticSegmentationMask.excludeFromGeometry.
+   */
+  excludeFromGeometry?: boolean | null;
+
+  /**
+   * Per-stage participation flags controlling which downstream stages this
+   * mask feeds into. Propagated from SemanticSegmentationMask.participation.
+   * Null for non-segmentation artifacts or masks without participation data.
+   */
+  geometryParticipation?: {
+    participatesInLines?: boolean | null;
+    participatesInPlanes?: boolean | null;
+    participatesInDepthFusion?: boolean | null;
+    participatesInPhotogrammetry?: boolean | null;
+  } | null;
+
   // ── Review state ──
 
   /** Current review state */
