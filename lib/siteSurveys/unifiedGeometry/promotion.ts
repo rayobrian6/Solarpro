@@ -472,6 +472,26 @@ export function assertCanonicalEligible(artifact: UnifiedGeometryArtifact): void
       );
     }
   }
+
+  // Phase 0 (P0-4.3): Minimum confidence threshold — block artifacts with
+  // confidence below the configured threshold from entering the canonical model.
+  // Low-confidence artifacts that reach promoted_canonical are typically the
+  // result of degraded paths (Canny fallback, heuristic depth blending) that
+  // produce geometry with confidence 35-45. By requiring a minimum confidence
+  // (default 50), we ensure only artifacts with sufficient signal quality feed
+  // the CanonicalBuildingModel and downstream CAD/permit output.
+  if (isPhase0CanonicalMinConfidenceEnabled()) {
+    const threshold = getCanonicalMinConfidenceThreshold();
+    if (artifact.confidence < threshold) {
+      throw new Error(
+        `[CANONICAL_MODEL_VIOLATION] Artifact '${artifact.id}' (confidence=${artifact.confidence}) ` +
+        `is below the minimum confidence threshold (${threshold}) for canonical promotion. ` +
+        `Artifacts with insufficient confidence cannot feed the CanonicalBuildingModel — ` +
+        `they are likely derived from degraded paths (Canny fallback, heuristic depth). ` +
+        `[Phase 0 min confidence gate active, threshold=${threshold}]`,
+      );
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
