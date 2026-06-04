@@ -38,6 +38,62 @@ import type {
   GeometryPromotionRecord,
 } from './types';
 
+// ---------------------------------------------------------------------------
+// Phase 0 — Canonical Promotion Quality Gate (WP-4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if Phase 0 canonical geometry gate is enabled.
+ * When enabled, artifacts without polygon or bbox geometry are blocked
+ * from canonical promotion — they cannot feed the CanonicalBuildingModel.
+ *
+ * This prevents the degraded path in buildCanonicalRoofPlane() from
+ * creating planes with degradedNoGeometry:true that flow into CAD.
+ *
+ * Controlled by PHASE0_CANONICAL_GEOMETRY_GATE environment variable.
+ */
+export function isPhase0CanonicalGeometryGateEnabled(): boolean {
+  const val = process.env.PHASE0_CANONICAL_GEOMETRY_GATE ?? '';
+  return val === 'true' || val === '1';
+}
+
+/**
+ * Check if Phase 0 contradiction-aware promotion validation is enabled.
+ * When enabled, artifacts with depth-class contradictions of severity
+ * 'moderate' or 'major' are blocked from canonical promotion.
+ *
+ * Controlled by PHASE0_CONTRADICTION_PROMOTION_GATE environment variable.
+ */
+export function isPhase0ContradictionPromotionGateEnabled(): boolean {
+  const val = process.env.PHASE0_CONTRADICTION_PROMOTION_GATE ?? '';
+  return val === 'true' || val === '1';
+}
+
+/**
+ * Check if Phase 0 minimum confidence threshold for canonical promotion is enabled.
+ * When enabled, artifacts with confidence below the minimum threshold
+ * (default 50) are blocked from canonical promotion.
+ *
+ * Controlled by PHASE0_CANONICAL_MIN_CONFIDENCE environment variable.
+ * The threshold value is read from PHASE0_CANONICAL_MIN_CONFIDENCE_THRESHOLD
+ * (default 50 if not set).
+ */
+export function isPhase0CanonicalMinConfidenceEnabled(): boolean {
+  const val = process.env.PHASE0_CANONICAL_MIN_CONFIDENCE ?? '';
+  return val === 'true' || val === '1';
+}
+
+/**
+ * Get the minimum confidence threshold for canonical promotion.
+ * Reads from PHASE0_CANONICAL_MIN_CONFIDENCE_THRESHOLD env var,
+ * defaults to 50 if not set or invalid.
+ */
+export function getCanonicalMinConfidenceThreshold(): number {
+  const val = process.env.PHASE0_CANONICAL_MIN_CONFIDENCE_THRESHOLD ?? '';
+  const parsed = parseInt(val, 10);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : 50;
+}
+
 // ─── Promotion Result ───────────────────────────────────────────────────────
 
 /**
@@ -372,6 +428,49 @@ export function assertCanonicalEligible(artifact: UnifiedGeometryArtifact): void
       `Synthetic artifacts (produced by heuristic implementations) cannot feed the CanonicalBuildingModel. ` +
       `Await real model integration.`,
     );
+  }
+
+  // Phase 0 (P0-4.1): Geometry presence check — block artifacts with no geometry
+  // from entering the canonical model. The canonical builder's degraded path
+  // (degradedNoGeometry:true) creates useless planes that flow into CAD.
+  // When this gate is active, those artifacts are rejected at the eligibility
+  // check, making the degraded path unreachable.
+  if (isPhase0CanonicalGeometryGateEnabled()) {
+    const hasPolygon = artifact.polygon !== null && artifact.polygon !== undefined;
+    const hasBbox = artifact.bbox !== null && artifact.bbox !== undefined;
+    const hasLineSegment = artifact.lineSegment !== null && artifact.lineSegment !== undefined;
+    const hasCenter = artifact.center !== null && artifact.center !== undefined;
+
+    // Planes (roof_plane, wall_plane, consensus_plane) MUST have polygon or bbox
+    if (artifact.geometryClass === 'roof_plane' || artifact.geometryClass === 'wall_plane' || artifact.geometryClass === 'consensus_plane') {
+      if (!hasPolygon && !hasBbox) {
+        throw new Error(
+          `[CANONICAL_MODEL_VIOLATION] Artifact '${artifact.id}' (${artifact.geometryClass}) ` +
+          `has no geometry (neither polygon nor bbox). Artifacts without geometry ` +
+          `cannot feed the CanonicalBuildingModel — they produce degraded planes ` +
+          `with fabricated geometry that contaminates CAD/permit output. ` +
+          `[Phase 0 geometry gate active]`,
+        );
+      }
+    }
+
+    // Lines MUST have a line segment
+    if (artifact.geometryClass === 'roof_line' && !hasLineSegment) {
+      throw new Error(
+        `[CANONICAL_MODEL_VIOLATION] Artifact '${artifact.id}' (roof_line) ` +
+        `has no line segment geometry. Roof line artifacts without geometry ` +
+        `cannot feed the CanonicalBuildingModel. [Phase 0 geometry gate active]`,
+      );
+    }
+
+    // Obstructions and electrical nodes need at least a center point
+    if ((artifact.geometryClass === 'obstruction' || artifact.geometryClass === 'electrical_node') && !hasCenter && !hasBbox) {
+      throw new Error(
+        `[CANONICAL_MODEL_VIOLATION] Artifact '${artifact.id}' (${artifact.geometryClass}) ` +
+        `has no center point or bbox geometry. Point-based artifacts without ` +
+        `geometry cannot feed the CanonicalBuildingModel. [Phase 0 geometry gate active]`,
+      );
+    }
   }
 }
 
