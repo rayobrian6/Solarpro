@@ -73,3 +73,27 @@ export type {
   DepthPlaneOptions,
   DepthPlaneExtractionResult,
 } from './depthPlaneExtraction';
+
+// Phase 0 — Depth-Class Contradiction Detection (WP-2)
+export {
+  isPhase0DepthContradictionEnabled,
+  computeMaskMeanDepth,
+  suggestReclassification,
+  detectDepthContradictions,
+  applyContradictionPenalty,
+} from './depthContradictionDetector';
+
+export type {
+  DepthContradictionDetectorInput,
+  DepthContradictionDetectorOutput,
+} from './depthContradictionDetector';
+
+export {
+  DEPTH_CLASS_RANGES,
+  computeDepthDeviation,
+  classifyDeviation,
+} from './depthContradictionRanges';
+
+export type {
+  DepthClassRange,
+} from './depthContradictionRanges';
