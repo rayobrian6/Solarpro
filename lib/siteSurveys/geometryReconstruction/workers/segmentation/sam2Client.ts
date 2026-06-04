@@ -896,6 +896,8 @@ export const SOLAR_RELEVANT_SEGMENTATION_CLASSES: ReadonlySet<import('../../type
     // Facade
     'siding', 'window', 'door', 'garage_door', 'fascia', 'soffit',
     'gutter', 'downspout', 'porch', 'deck', 'steps', 'railing',
+    // Roof penetrations — critical for solar placement & setback
+    'chimney', 'vent_pipe', 'skylight',
     // Electrical/solar
     'utility_meter', 'main_service_panel', 'disconnect', 'conduit',
     'inverter', 'battery', 'ac_unit', 'existing_solar_panel',
@@ -931,6 +933,10 @@ const SAM2_CLASS_HINT_TO_SEGMENTATION_CLASS: Record<
   deck: 'deck',
   steps: 'steps',
   railing: 'railing',
+  // Roof penetrations
+  chimney: 'chimney',
+  vent_pipe: 'vent_pipe',
+  skylight: 'skylight',
   // Site context
   grass: 'grass',
   overgrown_grass: 'overgrown_grass',

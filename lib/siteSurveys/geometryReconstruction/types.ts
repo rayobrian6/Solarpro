@@ -266,7 +266,8 @@ export type RakeLineCandidate = LineCandidate & { artifactType: 'rake_line_candi
  */
 export type FacadeSegmentationClass =
   | 'siding' | 'window' | 'door' | 'garage_door' | 'fascia' | 'soffit'
-  | 'gutter' | 'downspout' | 'porch' | 'deck' | 'steps' | 'railing';
+  | 'gutter' | 'downspout' | 'porch' | 'deck' | 'steps' | 'railing'
+  | 'chimney' | 'vent_pipe' | 'skylight';
 
 /**
  * Site context segmentation classes — ground-level features that
@@ -322,6 +323,7 @@ export const SEGMENTATION_CLASSES: readonly SegmentationClass[] = [
   // Facade
   'siding', 'window', 'door', 'garage_door', 'fascia', 'soffit',
   'gutter', 'downspout', 'porch', 'deck', 'steps', 'railing',
+  'chimney', 'vent_pipe', 'skylight',
   // Site context
   'grass', 'overgrown_grass', 'sidewalk', 'driveway', 'gravel',
   'fence', 'bushes', 'trees', 'vegetation_touching_structure',
@@ -343,6 +345,7 @@ export const SEGMENTATION_CLASSES: readonly SegmentationClass[] = [
 export const FACADE_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass> = new Set([
   'siding', 'window', 'door', 'garage_door', 'fascia', 'soffit',
   'gutter', 'downspout', 'porch', 'deck', 'steps', 'railing',
+  'chimney', 'vent_pipe', 'skylight',
 ] as const);
 
 /** Site context classes — ground-level features that affect installation planning. */
@@ -390,6 +393,8 @@ export const SOLAR_RELEVANT_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass>
   // Facade — relevant for conduit routing, mounting points, setback
   'siding', 'window', 'door', 'garage_door', 'fascia', 'soffit',
   'gutter', 'downspout', 'porch', 'deck', 'steps', 'railing',
+  // Roof penetrations — critical for solar placement and structural review
+  'chimney', 'vent_pipe', 'skylight',
   // Electrical/solar — critical for system design
   'utility_meter', 'main_service_panel', 'disconnect', 'conduit',
   'inverter', 'battery', 'ac_unit', 'existing_solar_panel',

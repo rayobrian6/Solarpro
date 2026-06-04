@@ -85,6 +85,8 @@ const STRUCTURE_QUALIFIED_CLASSES: ReadonlySet<string> = new Set([
   'gutter',
   'porch',
   'deck',
+  'chimney',
+  'vent_pipe',
 ]);
 
 /** Classes that never produce structural lines. */
@@ -101,6 +103,43 @@ const REJECTED_CLASSES: ReadonlySet<string> = new Set([
   'truck',
   'equipment',
   'unknown',
+]);
+
+/** Classes that represent wall surfaces (for foundation line inference). */
+const WALL_CLASSES: ReadonlySet<string> = new Set([
+  'wall',
+  'siding',
+  'fascia',
+  'soffit',
+]);
+
+/** Classes that commonly occlude the wall foundation line.
+ * These objects sit in front of the wall-ground boundary (cars, bushes, etc.)
+ * and prevent the edge detector from finding the foundation line directly.
+ * The inference function must extrapolate the wall bottom edge BEHIND these.
+ */
+const WALL_FOUNDATION_OCCLUDER_CLASSES: ReadonlySet<string> = new Set([
+  'car',
+  'truck',
+  'trailer',
+  'bushes',
+  'fence',
+  'tree',
+  'trees',
+  'vegetation_touching_structure',
+  'porch',
+  'deck',
+  'steps',
+  'railing',
+  'trash_can',
+  'person',
+  'ladder',
+  'tools',
+  'temporary_materials',
+  'ac_unit',
+  'window',
+  'door',
+  'garage_door',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -975,7 +1014,7 @@ function computeLineConfidence(
     valley: 20,  // Valleys are critical for roof geometry
     hip: 18,     // Hips are important for multi-plane roofs
     wall_vertical: 15,
-    wall_bottom_edge: 10,
+    wall_bottom_edge: 18,  // Foundation line — now actively inferred behind occluders
   };
 
   const confidence = Math.round(
@@ -983,6 +1022,147 @@ function computeLineConfidence(
   );
 
   return Math.max(MIN_CONFIDENCE, confidence);
+}
+
+// ---------------------------------------------------------------------------
+// Wall foundation line inference — detect wall bottom edge behind occluders
+// ---------------------------------------------------------------------------
+
+/**
+ * Infer the wall foundation (bottom edge) line even when occluded by
+ * cars, bushes, decks, windows, doors, etc.
+ *
+ * Strategy:
+ * 1. Find all wall-class masks in the image
+ * 2. For each wall mask, find the bottom-most extent of the polygon
+ *    (the visible wall-ground boundary where the wall mask ends)
+ * 3. Find occluder masks that overlap the wall's bottom region
+ * 4. Extrapolate the wall bottom edge through occluded gaps by:
+ *    a. Finding the leftmost and rightmost visible wall bottom points
+ *    b. Interpolating a horizontal line between them
+ *    c. Extending the line to cover the full horizontal span of the wall
+ *
+ * Returns an array of inferred wall_bottom_edge line segments (in normalized
+ * 0-1000 coordinate space), or empty array if no wall masks are found.
+ */
+function inferWallBottomEdge(
+  masks: SemanticSegmentationMask[],
+  imageWidth: number,
+  imageHeight: number,
+): Array<LineSegment & { lineType: 'wall_bottom_edge'; maskSupport: number }> {
+  const results: Array<LineSegment & { lineType: 'wall_bottom_edge'; maskSupport: number }> = [];
+
+  // Collect wall masks
+  const wallMasks = masks.filter(m => WALL_CLASSES.has(m.segmentationClass));
+  if (wallMasks.length === 0) return results;
+
+  // Collect occluder masks that could block the foundation line
+  const occluderMasks = masks.filter(m => WALL_FOUNDATION_OCCLUDER_CLASSES.has(m.segmentationClass));
+
+  for (const wallMask of wallMasks) {
+    const poly = wallMask.polygon;
+    if (poly.length < 3) continue;
+
+    // Find the bottom-most points of the wall polygon.
+    // We want points along the bottom edge of the polygon — points whose
+    // Y coordinate is in the bottom 20% of the polygon's Y range.
+    const yValues = poly.map(p => p.y);
+    const minY = Math.min(...yValues);
+    const maxY = Math.max(...yValues);
+    const yRange = maxY - minY;
+    if (yRange < 20) continue; // Too flat, not a wall
+
+    const bottomThreshold = maxY - yRange * 0.2;
+
+    // Collect bottom-edge points (points in the bottom 20% of the polygon)
+    const bottomPoints = poly.filter(p => p.y >= bottomThreshold);
+    if (bottomPoints.length < 2) continue;
+
+    // Find the leftmost and rightmost bottom points
+    const leftPoint = bottomPoints.reduce((a, b) => a.x < b.x ? a : b);
+    const rightPoint = bottomPoints.reduce((a, b) => a.x > b.x ? a : b);
+
+    // The wall bottom edge Y should be at the bottom of the visible wall.
+    // Use the median Y of the bottom points for robustness against outliers.
+    const sortedY = bottomPoints.map(p => p.y).sort((a, b) => a - b);
+    const medianY = sortedY[Math.floor(sortedY.length / 2)];
+
+    // Check if occluders overlap the wall's bottom region
+    const wallBottomRegion = {
+      x: leftPoint.x,
+      y: medianY - 20,
+      width: rightPoint.x - leftPoint.x,
+      height: 40,
+    };
+
+    const hasOccluders = occluderMasks.some(occ => {
+      if (!occ.maskBounds) return false;
+      const mb = occ.maskBounds;
+      // Check bounding box overlap with wall bottom region
+      return (
+        mb.x < wallBottomRegion.x + wallBottomRegion.width &&
+        mb.x + mb.width > wallBottomRegion.x &&
+        mb.y < wallBottomRegion.y + wallBottomRegion.height &&
+        mb.y + mb.height > wallBottomRegion.y
+      );
+    });
+
+    // Extend the line slightly beyond the wall mask edges to ensure
+    // coverage of the full foundation line, including occluded portions.
+    // Extension: 5% of the wall width on each side (clamped to image bounds).
+    const wallWidth = rightPoint.x - leftPoint.x;
+    const extension = Math.min(wallWidth * 0.05, 30);
+    const startX = Math.max(0, leftPoint.x - extension);
+    const endX = Math.min(1000, rightPoint.x + extension);
+
+    // Only create a wall_bottom_edge line if:
+    // - The line is long enough (> 50 normalized units ≈ 5% of image width)
+    // - The wall is in the lower half of the image (walls are typically below midpoint)
+    const lineLength = endX - startX;
+    if (lineLength < 50 || minY > 700) continue;
+
+    // Compute confidence bonus for occluder-aware inference
+    // If we found occluders blocking the wall bottom, we get a bonus because
+    // this line is filling in a gap that edge detection alone would miss.
+    const occluderBonus = hasOccluders ? 8 : 0;
+    const maskSupport = wallMasks.length + occluderMasks.filter(occ => {
+      if (!occ.maskBounds) return false;
+      const mb = occ.maskBounds;
+      return (
+        mb.x < wallBottomRegion.x + wallBottomRegion.width &&
+        mb.x + mb.width > wallBottomRegion.x
+      );
+    }).length;
+
+    results.push({
+      start: { x: startX, y: medianY },
+      end: { x: endX, y: medianY },
+      length: lineLength,
+      lineType: 'wall_bottom_edge',
+      maskSupport: maskSupport + occluderBonus,
+    });
+  }
+
+  // Deduplicate overlapping wall_bottom_edge lines
+  // If two wall masks produce lines at similar Y positions, merge them
+  const deduped: typeof results = [];
+  for (const line of results) {
+    const existing = deduped.find(d =>
+      Math.abs(d.start.y - line.start.y) < 30 &&
+      Math.abs(d.end.y - line.end.y) < 30
+    );
+    if (existing) {
+      // Merge: extend to cover both lines' horizontal spans
+      existing.start.x = Math.min(existing.start.x, line.start.x);
+      existing.end.x = Math.max(existing.end.x, line.end.x);
+      existing.length = existing.end.x - existing.start.x;
+      existing.maskSupport = Math.max(existing.maskSupport, line.maskSupport);
+    } else {
+      deduped.push({ ...line });
+    }
+  }
+
+  return deduped;
 }
 
 // ---------------------------------------------------------------------------
@@ -1083,6 +1263,29 @@ export async function runLineExtractionWorker(input: LineExtractionWorkerInput):
         }
       }
       filterStats.linesClassified += classified.length;
+
+      // Step 5b: Infer wall bottom edge (foundation line) behind occluders
+      // The Hough detector rarely finds wall-ground boundaries because cars,
+      // bushes, decks, windows, and doors occlude the foundation line.
+      // This function explicitly infers the wall bottom edge from mask geometry.
+      const inferredWallBottoms = inferWallBottomEdge(fileMasks, width, height);
+      for (const inferred of inferredWallBottoms) {
+        // Check if we already have a Hough-detected wall_bottom_edge near this Y
+        const existingWallBottom = classified.find(c =>
+          c.lineType === 'wall_bottom_edge' &&
+          Math.abs(c.start.y - inferred.start.y) < 25 &&
+          Math.abs(c.end.y - inferred.end.y) < 25
+        );
+        if (!existingWallBottom) {
+          classified.push(inferred);
+        } else {
+          // Merge: extend existing line to cover inferred span
+          existingWallBottom.start.x = Math.min(existingWallBottom.start.x, inferred.start.x);
+          existingWallBottom.end.x = Math.max(existingWallBottom.end.x, inferred.end.x);
+          existingWallBottom.length = existingWallBottom.end.x - existingWallBottom.start.x;
+          existingWallBottom.maskSupport = Math.max(existingWallBottom.maskSupport, inferred.maskSupport);
+        }
+      }
 
       // Step 6: Score, cap, and create artifacts
       const scored = classified.map(c => ({

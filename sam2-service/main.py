@@ -113,7 +113,7 @@ HF_MODEL_ID = os.environ.get("SAM2_HF_MODEL_ID", "facebook/sam2.1-hiera-tiny")
 # 256px on CPU: too small, 8x8 grid misses roofs entirely (0 masks)
 MAX_IMAGE_DIM = int(os.environ.get("SAM2_MAX_IMAGE_DIM", "512" if IS_CPU else "2048"))
 # Minimum mask area as fraction of image — filters noise masks
-MIN_MASK_AREA_FRACTION = float(os.environ.get("SAM2_MIN_MASK_AREA_FRACTION", "0.005"))
+MIN_MASK_AREA_FRACTION = float(os.environ.get("SAM2_MIN_MASK_AREA_FRACTION", "0.002"))
 # Prediction confidence and stability thresholds — lower values catch weaker masks
 PRED_IOU_THRESH = float(os.environ.get("SAM2_PRED_IOU_THRESH", "0.5"))
 STABILITY_SCORE_THRESH = float(os.environ.get("SAM2_STABILITY_SCORE_THRESH", "0.80"))
@@ -137,7 +137,7 @@ MAX_MASKS = int(os.environ.get("SAM2_MAX_MASKS", "30"))
 # Douglas-Peucker simplification epsilon (pixels)
 # Lower = more polygon detail, higher = coarser polygons.
 # At 512px image dim, epsilon=0.7 preserves ~4x more boundary detail than 5.0.
-DOUGLAS_PEUCKER_EPSILON = float(os.environ.get("SAM2_DOUGLAS_PEUCKER_EPSILON", "0.7"))
+DOUGLAS_PEUCKER_EPSILON = float(os.environ.get("SAM2_DOUGLAS_PEUCKER_EPSILON", "0.5"))
 # Minimum polygon points after simplification
 MIN_POLYGON_POINTS = 3
 # Service port — Render injects PORT=10000 for web services
@@ -600,7 +600,7 @@ def np_to_base64(arr: np.ndarray) -> str:
 # will be subdivided to preserve boundary detail for line extraction.
 # Without this, Douglas-Peucker collapses long roof edges into single straight
 # segments (200+ pixels), which produces "sloppy lines" in downstream extraction.
-MAX_POLYGON_EDGE_LENGTH = int(os.environ.get("SAM2_MAX_POLYGON_EDGE_LENGTH", "35"))
+MAX_POLYGON_EDGE_LENGTH = int(os.environ.get("SAM2_MAX_POLYGON_EDGE_LENGTH", "25"))
 
 
 def _subdivide_long_edges(points: list[dict], max_length: float) -> list[dict]:
@@ -673,6 +673,121 @@ def mask_to_polygon(mask_bin: np.ndarray, epsilon: float = DOUGLAS_PEUCKER_EPSIL
         points.append({"x": float(pt[0][0]), "y": float(pt[0][1])})
 
     # Subdivide long edges to preserve boundary detail for line extraction
+    points = _subdivide_long_edges(points, MAX_POLYGON_EDGE_LENGTH)
+
+    return points
+
+
+def _refine_polygon_with_contour(
+    simplified_points: list[dict],
+    original_contour: np.ndarray,
+    snap_tolerance: float = 3.0,
+) -> list[dict]:
+    """
+    Refine a simplified polygon by snapping its vertices to nearby
+    high-curvature points on the original contour.
+
+    Douglas-Peucker simplification often misses subtle corners where a roof
+    plane meets a wall or where a valley creates a bend. By snapping each
+    simplified vertex to the nearest high-curvature contour point, we recover
+    these critical geometry points without adding excessive detail.
+
+    High-curvature points are identified by computing the angle change at each
+    contour vertex (angle between incoming and outgoing edge vectors).
+    Points with angle change > 30° are considered corners.
+    """
+    if len(original_contour) < 10 or len(simplified_points) < 3:
+        return simplified_points
+
+    # Compute curvature at each contour point
+    contour_pts = original_contour.reshape(-1, 2).astype(float)
+    n = len(contour_pts)
+    if n < 5:
+        return simplified_points
+
+    corner_indices = set()
+    for i in range(n):
+        p_prev = contour_pts[(i - 2) % n]
+        p_curr = contour_pts[i]
+        p_next = contour_pts[(i + 2) % n]
+
+        v1 = p_curr - p_prev
+        v2 = p_next - p_curr
+        len1 = np.sqrt(v1[0]**2 + v1[1]**2)
+        len2 = np.sqrt(v2[0]**2 + v2[1]**2)
+
+        if len1 < 0.001 or len2 < 0.001:
+            continue
+
+        cos_angle = (v1[0]*v2[0] + v1[1]*v2[1]) / (len1 * len2)
+        cos_angle = np.clip(cos_angle, -1.0, 1.0)
+        angle_deg = np.degrees(np.arccos(cos_angle))
+
+        # Angle < 150° means curvature > 30° — this is a corner
+        if angle_deg < 150:
+            corner_indices.add(i)
+
+    if not corner_indices:
+        return simplified_points
+
+    corner_points = contour_pts[list(corner_indices)]
+
+    # Snap each simplified vertex to the nearest corner point (if within tolerance)
+    refined = []
+    for sp in simplified_points:
+        sx, sy = sp["x"], sp["y"]
+        best_dist = snap_tolerance
+        best_pt = None
+
+        for cp in corner_points:
+            d = np.sqrt((sx - cp[0])**2 + (sy - cp[1])**2)
+            if d < best_dist:
+                best_dist = d
+                best_pt = cp
+
+        if best_pt is not None:
+            refined.append({"x": float(best_pt[0]), "y": float(best_pt[1])})
+        else:
+            refined.append(sp)
+
+    return refined
+
+
+def mask_to_polygon_v2(mask_bin: np.ndarray, epsilon: float = DOUGLAS_PEUCKER_EPSILON):
+    """
+    Enhanced polygon extraction with contour-aware corner snapping.
+
+    Pipeline:
+      1. findContours with CHAIN_APPROX_NONE (preserve ALL contour points)
+      2. approxPolyDP with epsilon (simplify — but may miss subtle corners)
+      3. _refine_polygon_with_contour (snap simplified vertices to real corners)
+      4. Subdivide edges longer than MAX_POLYGON_EDGE_LENGTH
+
+    This produces polygons that follow the actual mask boundary more closely,
+    especially at roof-wall junctions and valley/hip corners where the
+    simplified polygon drifts away from the true boundary.
+    """
+    mask_uint8 = (mask_bin * 255).astype(np.uint8) if mask_bin.dtype != np.uint8 else mask_bin
+
+    contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+
+    if not contours:
+        return []
+
+    best_contour = max(contours, key=cv2.contourArea)
+    simplified = cv2.approxPolyDP(best_contour, epsilon, closed=True)
+
+    if len(simplified) < MIN_POLYGON_POINTS:
+        return []
+
+    points = []
+    for pt in simplified:
+        points.append({"x": float(pt[0][0]), "y": float(pt[0][1])})
+
+    # Snap simplified vertices to high-curvature contour points
+    points = _refine_polygon_with_contour(points, best_contour)
+
+    # Subdivide long edges to preserve boundary detail
     points = _subdivide_long_edges(points, MAX_POLYGON_EDGE_LENGTH)
 
     return points
@@ -1005,6 +1120,36 @@ def classify_mask_region(
         # Equipment (small, upper portion) — fallback
         if 0.003 < norm_area < 0.03 and norm_y_center < 0.6:
             return "equipment"
+
+    # ── Roof penetration detection (chimney, vent pipe, skylight) ──
+    # Small objects on the roof that are critical for solar design:
+    # - Chimneys affect setback requirements and shading
+    # - Vent pipes/plumbing stacks affect placement and flashing details
+    # - Skylights affect both placement and production estimates
+    # These are all small (norm_area < 0.02), low-green (not vegetation),
+    # and in the upper portion of the image (on the roof plane).
+    # Without these specific classes, they fall into generic "obstruction" or
+    # "equipment" which loses the semantic information solar design needs.
+    if norm_y_center < 0.55 and norm_area < 0.02 and green_ratio < 0.15:
+        # Chimney: small-to-tiny, roughly square or slightly tall, on roof
+        # Typically 12"x18" to 24"x36" real-world → small mask on roof
+        if norm_area > 0.001 and 0.6 < aspect_ratio < 2.0:
+            # Use brightness to distinguish from skylight:
+            # Chimney: dark or medium (brick/metal), moderate saturation
+            # Skylight: bright (glass reflecting sky), very low saturation
+            if is_bright_surface and is_low_saturation:
+                return "skylight"
+            # Dark/medium + on roof = chimney (brick, metal cap, stucco)
+            return "chimney"
+        # Vent pipe / plumbing stack: VERY small, very tall thin circle
+        # Usually 2-4" diameter pipe → tiny circular mask, very low area
+        if norm_area < 0.004 and aspect_ratio > 0.5:
+            return "vent_pipe"
+        # Skylight: bright, low-sat, roughly square or slightly wide
+        # (some skylights are wider than tall)
+        if is_bright_surface and is_low_saturation and norm_area > 0.001:
+            if 0.8 < aspect_ratio < 2.5:
+                return "skylight"
 
     # ── Occluder detection ──
     # Large objects at ground level that block the view of the structure
@@ -1530,7 +1675,7 @@ async def segment_image(
             continue
 
         t_poly = time.time()
-        polygon_points = mask_to_polygon(mask_binary.astype(np.uint8))
+        polygon_points = mask_to_polygon_v2(mask_binary.astype(np.uint8))
         t_polygon_total += (time.time() - t_poly) * 1000
 
         if len(polygon_points) < MIN_POLYGON_POINTS:
@@ -1871,7 +2016,7 @@ async def segment_prompted(
         if area_px < min_area_px:
             continue
 
-        polygon_points = mask_to_polygon(mask_binary.astype(np.uint8))
+        polygon_points = mask_to_polygon_v2(mask_binary.astype(np.uint8))
 
         if len(polygon_points) < MIN_POLYGON_POINTS:
             continue
