@@ -440,6 +440,8 @@ export const SOLAR_RELEVANT_SEGMENTATION_CLASSES: ReadonlySet<SegmentationClass>
   'vegetation_touching_structure',
   // Bushes/fence — may affect access planning
   'fence', 'bushes',
+  // Driveway — site context for SAM2 segmentation filtering
+  'driveway',
 ] as const);
 
 // ---------------------------------------------------------------------------

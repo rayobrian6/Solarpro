@@ -21,6 +21,7 @@ import type {
   GeometryReconstructionJob,
   GeometryReconstructionResult,
   JobStatus,
+  DepthContradictionReport,
 } from '@/lib/siteSurveys/geometryReconstruction/types';
 import { REVIEW_ONLY_AUTHORITY, BASE_LIMITATIONS } from '@/lib/siteSurveys/geometryReconstruction/types';
 
@@ -771,4 +772,209 @@ function parseStringArray(value: unknown): string[] {
     }
   }
   return [];
+}
+
+// ---------------------------------------------------------------------------
+// Depth contradiction report persistence (P0-2.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if Phase 0 depth contradiction DB persistence is enabled.
+ * Controlled by PHASE0_DEPTH_CONTRADICTION_ENABLED environment variable.
+ * When 'true' or '1', contradiction reports are persisted to the
+ * site_survey_depth_contradiction_reports table.
+ */
+export function isPhase0DepthContradictionPersistenceEnabled(): boolean {
+  const val = process.env.PHASE0_DEPTH_CONTRADICTION_ENABLED ?? '';
+  return val === 'true' || val === '1';
+}
+
+/** Row shape returned from the site_survey_depth_contradiction_reports table. */
+export interface ContradictionReportRow {
+  id: string;
+  jobId: string;
+  surveyId: string;
+  segmentationClass: string;
+  maskId: string;
+  expectedRangeMin: number;
+  expectedRangeMax: number;
+  actualDepth: number;
+  deviation: number;
+  severity: string;
+  confidencePenalty: number;
+  description: string;
+  createdAt: string;
+}
+
+/**
+ * Batch-insert depth contradiction reports for a survey.
+ *
+ * Uses UNNEST for efficiency (same pattern as insertReconstructionArtifactsBatch).
+ * Feature-flag controlled: if PHASE0_DEPTH_CONTRADICTION_ENABLED is not active,
+ * returns immediately with { inserted: 0, failed: 0 }.
+ *
+ * Safe failure mode: writes are best-effort. If the insert fails, the error is
+ * logged but NOT thrown — contradiction reports are diagnostic, and pipeline
+ * results must never be lost due to a report persistence failure.
+ *
+ * Idempotency: before inserting, deletes any existing reports for the same
+ * job_id + survey_id, so re-running the pipeline does not accumulate duplicates.
+ */
+export async function insertContradictionReports(
+  jobId: string,
+  surveyId: string,
+  reports: DepthContradictionReport[],
+): Promise<{ inserted: number; failed: number }> {
+  if (!isPhase0DepthContradictionPersistenceEnabled()) {
+    return { inserted: 0, failed: 0 };
+  }
+  if (reports.length === 0) {
+    return { inserted: 0, failed: 0 };
+  }
+
+  const sql = await getDbReady();
+
+  // Idempotency: delete existing reports for this job+survey before inserting
+  try {
+    await sql`
+      DELETE FROM site_survey_depth_contradiction_reports
+      WHERE job_id = ${jobId}::uuid AND survey_id = ${surveyId}::uuid
+    `;
+  } catch (delErr) {
+    console.error(
+      '[geometryReconstruction] Failed to delete existing contradiction reports before insert:',
+      delErr instanceof Error ? delErr.message : String(delErr),
+    );
+    // Continue — the insert may still succeed if the delete failed due to a transient error
+  }
+
+  // Build parallel arrays for UNNEST insertion
+  const jobIds: string[] = [];
+  const surveyIds: string[] = [];
+  const segmentationClasses: string[] = [];
+  const maskIds: string[] = [];
+  const expectedRangeMins: number[] = [];
+  const expectedRangeMaxs: number[] = [];
+  const actualDepths: number[] = [];
+  const deviations: number[] = [];
+  const severities: string[] = [];
+  const confidencePenalties: number[] = [];
+  const descriptions: string[] = [];
+
+  for (const report of reports) {
+    jobIds.push(jobId);
+    surveyIds.push(surveyId);
+    segmentationClasses.push(report.segmentationClass);
+    maskIds.push(report.maskId);
+    expectedRangeMins.push(report.expectedRange[0]);
+    expectedRangeMaxs.push(report.expectedRange[1]);
+    actualDepths.push(report.actualDepth);
+    deviations.push(report.deviation);
+    severities.push(report.severity);
+    confidencePenalties.push(report.confidencePenalty);
+    descriptions.push(report.description);
+  }
+
+  try {
+    const result = await sql`
+      INSERT INTO site_survey_depth_contradiction_reports (
+        job_id, survey_id, segmentation_class, mask_id,
+        expected_range_min, expected_range_max, actual_depth, deviation,
+        severity, confidence_penalty, description
+      )
+      SELECT
+        job_id, survey_id, segmentation_class, mask_id,
+        expected_range_min, expected_range_max, actual_depth, deviation,
+        severity, confidence_penalty, description
+      FROM unnest(
+        ${jobIds}::uuid[],
+        ${surveyIds}::uuid[],
+        ${segmentationClasses}::text[],
+        ${maskIds}::text[],
+        ${expectedRangeMins}::float8[],
+        ${expectedRangeMaxs}::float8[],
+        ${actualDepths}::float8[],
+        ${deviations}::float8[],
+        ${severities}::text[],
+        ${confidencePenalties}::float8[],
+        ${descriptions}::text[]
+      ) AS t(job_id, survey_id, segmentation_class, mask_id,
+             expected_range_min, expected_range_max, actual_depth, deviation,
+             severity, confidence_penalty, description)
+      RETURNING id
+    `;
+
+    return { inserted: result.length, failed: reports.length - result.length };
+  } catch (err) {
+    console.error(
+      '[geometryReconstruction] Contradiction report batch insert failed:',
+      err instanceof Error ? err.message : String(err),
+    );
+    // Safe failure: do NOT throw — reports are diagnostic, pipeline must continue
+    return { inserted: 0, failed: reports.length };
+  }
+}
+
+/**
+ * Query depth contradiction reports by survey ID.
+ * Returns reports ordered by severity DESC (major → moderate → minor → none),
+ * then by deviation DESC (largest deviation first within same severity).
+ */
+export async function getContradictionReportsBySurvey(
+  surveyId: string,
+): Promise<ContradictionReportRow[]> {
+  const sql = await getDbReady();
+
+  try {
+    const rows = await sql`
+      SELECT
+        id,
+        job_id,
+        survey_id,
+        segmentation_class,
+        mask_id,
+        expected_range_min,
+        expected_range_max,
+        actual_depth,
+        deviation,
+        severity,
+        confidence_penalty,
+        description,
+        created_at
+      FROM site_survey_depth_contradiction_reports
+      WHERE survey_id = ${surveyId}::uuid
+      ORDER BY
+        CASE severity
+          WHEN 'major' THEN 0
+          WHEN 'moderate' THEN 1
+          WHEN 'minor' THEN 2
+          WHEN 'none' THEN 3
+          ELSE 4
+        END ASC,
+        deviation DESC
+    `;
+
+    return rows.map((row: Record<string, unknown>) => ({
+      id: String(row.id),
+      jobId: String(row.job_id),
+      surveyId: String(row.survey_id),
+      segmentationClass: String(row.segmentation_class),
+      maskId: String(row.mask_id),
+      expectedRangeMin: Number(row.expected_range_min),
+      expectedRangeMax: Number(row.expected_range_max),
+      actualDepth: Number(row.actual_depth),
+      deviation: Number(row.deviation),
+      severity: String(row.severity),
+      confidencePenalty: Number(row.confidence_penalty),
+      description: String(row.description),
+      createdAt: String(row.created_at),
+    }));
+  } catch (err) {
+    console.error(
+      '[geometryReconstruction] Failed to query contradiction reports for survey:',
+      err instanceof Error ? err.message : String(err),
+    );
+    // Safe failure: return empty — caller should treat absence as "no reports"
+    return [];
+  }
 }

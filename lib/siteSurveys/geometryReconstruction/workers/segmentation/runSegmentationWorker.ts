@@ -874,7 +874,9 @@ export async function runSegmentationWorker(
           // and review but are excluded from Pipeline B geometry processing.
           // When PHASE0_BACKGROUND_CLASS is OFF, unknown hints return null and
           // the mask is skipped entirely (continue above). When ON, they return
-          // 'background' and we create the mask with excludeFromGeometry: true.
+          // 'background' and computeGeometryParticipation() assigns
+          // excludeFromGeometry: true, which the artifact stores via
+          // geoParticipation.excludeFromGeometry || null.
           const isBackground = segmentationClass === 'background';
 
           if (!SOLAR_RELEVANT_SEGMENTATION_CLASSES.has(segmentationClass) && !isBackground) {

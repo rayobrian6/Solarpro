@@ -34,6 +34,8 @@ import {
 } from '@/lib/siteSurveys/unifiedGeometry';
 import type { UnifiedGeometryArtifact } from '@/lib/siteSurveys/unifiedGeometry/types';
 import { getUnifiedArtifactsForSurvey } from '@/lib/siteSurveys/unifiedGeometry/unifiedArtifactStore';
+import { getContradictionReportsBySurvey } from '@/lib/db/geometryReconstruction';
+import type { DepthContradictionReport } from '@/lib/siteSurveys/geometryReconstruction/types';
 
 export async function POST(
   req: NextRequest,
@@ -116,12 +118,37 @@ export async function POST(
       }, { status: 422 });
     }
 
+    // ── Fetch depth contradiction reports (P0-4.2, best-effort) ────────────────
+    let contradictionReports: DepthContradictionReport[] = [];
+    try {
+      const reportRows = await getContradictionReportsBySurvey(surveyId);
+      if (reportRows.length > 0) {
+        // Convert DB rows back to DepthContradictionReport shape
+        contradictionReports = reportRows.map(row => ({
+          segmentationClass: row.segmentationClass as DepthContradictionReport['segmentationClass'],
+          maskId: row.maskId,
+          expectedRange: [row.expectedRangeMin, row.expectedRangeMax] as [number, number],
+          actualDepth: row.actualDepth,
+          deviation: row.deviation,
+          severity: row.severity as DepthContradictionReport['severity'],
+          confidencePenalty: row.confidencePenalty,
+          description: row.description,
+        }));
+      }
+    } catch (reportErr) {
+      // Best-effort: absence of reports means the gate won't block anything
+      console.warn(
+        `[POST /unified-geometry/canonical-model] Failed to fetch contradiction reports for survey ${surveyId}:`,
+        reportErr instanceof Error ? reportErr.message : String(reportErr),
+      );
+    }
+
     // ── Build the CanonicalBuildingModel ─────────────────────────────────
     const model = buildCanonicalModel(
       surveyId,
       eligibleArtifacts,
       [], // promotion record IDs — would need to be fetched from DB
-      body.config,
+      { ...body.config, contradictionReports },
     );
 
     return NextResponse.json({

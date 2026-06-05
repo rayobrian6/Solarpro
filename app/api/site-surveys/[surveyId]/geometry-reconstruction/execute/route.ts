@@ -34,6 +34,7 @@ import {
   updateReconstructionJobStatus,
   updateJobHeartbeatInDb,
   insertReconstructionArtifactsBatch,
+  insertContradictionReports,
   deleteArtifactsByJob,
   updateJobStageDurations,
   updateJobFailureStage,
@@ -210,6 +211,27 @@ export async function POST(
           `[POST geometry-reconstruction/execute] Checkpoint insert failed for stage=${stage}: ${errMsg}`,
         );
         // Best-effort: checkpoint failure must NOT abort the pipeline
+      }
+    }
+
+    // Persist depth contradiction reports (P0-2.3, best-effort, feature-flag controlled)
+    const { contradictionReports } = checkpoint;
+    if (contradictionReports.length > 0) {
+      try {
+        const reportResult = await insertContradictionReports(
+          jobId,
+          surveyId,
+          contradictionReports,
+        );
+        console.info(
+          `[POST geometry-reconstruction/execute] Checkpoint persisted ${reportResult.inserted}/${contradictionReports.length} contradiction reports from stage=${stage}`,
+        );
+      } catch (reportErr) {
+        const errMsg = reportErr instanceof Error ? reportErr.message : String(reportErr);
+        console.error(
+          `[POST geometry-reconstruction/execute] Contradiction report insert failed for stage=${stage}: ${errMsg}`,
+        );
+        // Best-effort: report persistence failure must NOT abort the pipeline
       }
     }
 

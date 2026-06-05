@@ -889,23 +889,7 @@ export async function segmentPromptedWithSAM2(
  * the Python service returns a non-relevant mask (e.g. due to a stale deploy),
  * the worker will drop it here.
  */
-export const SOLAR_RELEVANT_SEGMENTATION_CLASSES: ReadonlySet<import('../../types').SegmentationClass> =
-  new Set([
-    // Legacy roof-critical
-    'roof', 'wall', 'obstruction', 'equipment',
-    // Facade
-    'siding', 'window', 'door', 'garage_door', 'fascia', 'soffit',
-    'gutter', 'downspout', 'porch', 'deck', 'steps', 'railing',
-    // Roof penetrations — critical for solar placement & setback
-    'chimney', 'vent_pipe', 'skylight',
-    // Electrical/solar
-    'utility_meter', 'main_service_panel', 'disconnect', 'conduit',
-    'inverter', 'battery', 'ac_unit', 'existing_solar_panel',
-    // Site context (solar-relevant)
-    'driveway', 'fence', 'bushes', 'vegetation_touching_structure',
-    // Condition flags
-    'moss', 'algae', 'damaged_siding', 'blocked_access', 'muddy_work_area',
-  ] as const);
+export { SOLAR_RELEVANT_SEGMENTATION_CLASSES } from '../../types';
 
 /** Maps SAM 2 heuristic class hints to Pipeline B SegmentationClass. */
 const SAM2_CLASS_HINT_TO_SEGMENTATION_CLASS: Record<
