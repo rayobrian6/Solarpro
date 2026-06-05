@@ -136,6 +136,7 @@ export function RoofGeometrySection({
   const [generationSummary, setGenerationSummary] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [showDebugRoofLines, setShowDebugRoofLines] = useState(false);
+  const [showDebugOverlays, setShowDebugOverlays] = useState(false);
   const [bundleLoading, setBundleLoading] = useState(true);
   const [bundleMode, setBundleMode] = useState<'stats' | 'overlay'>('stats');
   const [overlayArtifactsByFile, setOverlayArtifactsByFile] = useState<Map<string, UnifiedGeometryArtifact[]>>(new Map());
@@ -1143,6 +1144,31 @@ export function RoofGeometrySection({
                   Thick lines visible. Low-confidence & duplicate lines shown.
                 </span>
               )}
+              {/* Debug overlay toggle — show excluded/background/unknown artifacts */}
+              <button
+                type="button"
+                onClick={() => setShowDebugOverlays(!showDebugOverlays)}
+                className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[9px] font-medium transition ${
+                  showDebugOverlays
+                    ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40 hover:bg-violet-500/30'
+                    : 'bg-slate-800/50 text-slate-500 border border-slate-700/40 hover:text-slate-300'
+                }`}
+                title={showDebugOverlays
+                  ? 'Currently showing ALL overlay artifacts including excluded, background, and unidentified. Click to return to clean filtered view.'
+                  : 'Currently hiding excluded and background artifacts, showing unknown with reduced prominence. Click to show ALL raw artifacts.'
+                }
+              >
+                {showDebugOverlays ? (
+                  <>🔍 Debug Overlays: ON (showing all raw artifacts)</>
+                ) : (
+                  <>🛡️ Show Debug Overlays</>
+                )}
+              </button>
+              {showDebugOverlays && (
+                <span className="text-[8px] text-violet-400/60">
+                  Raw overlay mode — excluded, background & unknown artifacts visible.
+                </span>
+              )}
               {/* Per-photo overlay status indicator */}
               {bundleMode === 'stats' && overlayArtifactsByFile.size === 0 && !overlayLoading && selectedFileId && (
                 <span className="inline-flex items-center gap-1 text-[9px] text-slate-500">
@@ -1177,6 +1203,7 @@ export function RoofGeometrySection({
                 onSelectFile={setSelectedFileId}
                 showMockArtifacts={true}
                 showDebugRoofLines={showDebugRoofLines}
+                showDebugOverlays={showDebugOverlays}
               />
             </OverlayErrorBoundary>
           </div>

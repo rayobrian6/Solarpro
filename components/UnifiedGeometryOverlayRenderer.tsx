@@ -123,7 +123,7 @@ const GEOMETRY_CLASS_OVERLAY_COLORS: Record<
   unknown: {
     stroke: '#94a3b8',
     fill: 'rgba(148,163,184,0.06)',
-    label: '?',
+    label: 'Unidentified',
   },
 };
 
@@ -655,6 +655,7 @@ export function UnifiedGeometryOverlayRenderer({
   geometryClassFilter,
   showMockArtifacts = false,
   showDebugRoofLines = false,
+  showDebugOverlays = false,
   maxArtifactsPerFile = 200,
 }: {
   filesWithArtifacts: FileWithUnifiedArtifacts[];
@@ -667,6 +668,11 @@ export function UnifiedGeometryOverlayRenderer({
   /** Whether to show all roof-line candidates with thick debug rendering.
    *  Default false: only high-confidence, deduplicated lines shown thin. */
   showDebugRoofLines?: boolean;
+  /** Whether to show ALL artifacts including excluded/background/unknown.
+   *  Default false: hide excludeFromGeometry, background segmentationClass,
+   *  and render unknown artifacts with reduced prominence.
+   *  When true: show all raw artifacts (debug mode). */
+  showDebugOverlays?: boolean;
   /** Max artifacts to render per file for performance. */
   maxArtifactsPerFile?: number;
 }) {
@@ -694,11 +700,18 @@ export function UnifiedGeometryOverlayRenderer({
         if (a.authority?.mockArtifact && !showMockArtifacts) return false;
         // Skip if no drawable geometry at all
         if (!a.polygon && !a.bbox && !a.lineSegment) return false;
+        // TASK 4: Hide excludeFromGeometry artifacts in normal mode (defense-in-depth
+        // — bundle route already filters these, but renderer should handle them too)
+        if (a.excludeFromGeometry === true && !showDebugOverlays) return false;
+        // TASK 4: Hide background segmentationClass in normal mode
+        if (a.segmentationClass === 'background' && !showDebugOverlays) return false;
         // Apply class filter
         if (geometryClassFilter && geometryClassFilter.size > 0 && !geometryClassFilter.has(a.geometryClass))
           return false;
         // Filter low-confidence roof lines using effective threshold
         if (a.geometryClass === 'roof_line' && (a.confidence ?? 0) < effectiveMinConfidence) return false;
+        // TASK 4: Filter very low confidence unknown artifacts in normal mode
+        if (a.geometryClass === 'unknown' && (a.confidence ?? 0) < 40 && !showDebugOverlays) return false;
         return true;
       });
 
@@ -778,6 +791,7 @@ export function UnifiedGeometryOverlayRenderer({
           filename={activeFile.filename}
           artifacts={activeFile.artifacts}
           showDebugRoofLines={showDebugRoofLines}
+          showDebugOverlays={showDebugOverlays}
         />
       )}
 
@@ -886,8 +900,8 @@ export function UnifiedGeometryOverlayRenderer({
           })}
       </div>
 
-      {/* Debug toggle for roof-line candidates */}
-      <div className="flex items-center gap-2 px-1 mt-1">
+      {/* Debug toggles for roof-line candidates and full overlay */}
+      <div className="flex items-center gap-2 px-1 mt-1 flex-wrap">
         <label className="flex items-center gap-1.5 cursor-pointer group">
           <span
             className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[9px] font-medium transition ${
@@ -900,12 +914,32 @@ export function UnifiedGeometryOverlayRenderer({
               : 'Default mode: only high-confidence, deduplicated roof lines shown thin. Toggle in parent component to see all candidates.'
             }
           >
-            {showDebugRoofLines ? '🔍 Debug: All line candidates' : '📏 Review: Trusted lines only'}
+            {showDebugRoofLines ? '🔍 Debug: All line candidates' : '📋 Review: Trusted lines only'}
           </span>
         </label>
         {showDebugRoofLines && (
           <span className="text-[8px] text-amber-400/60">
             Thick lines = debug mode. Low-conf & duplicates visible.
+          </span>
+        )}
+        <label className="flex items-center gap-1.5 cursor-pointer group">
+          <span
+            className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[9px] font-medium transition ${
+              showDebugOverlays
+                ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40'
+                : 'bg-slate-800/50 text-slate-500 border border-slate-700/40'
+            }`}
+            title={showDebugOverlays
+              ? 'Debug overlays: showing ALL artifacts including excluded, background, and unidentified. For development inspection only.'
+              : 'Default mode: excluded and background artifacts are hidden. Unidentified artifacts are shown with reduced prominence. Toggle to see raw overlay data.'
+            }
+          >
+            {showDebugOverlays ? '🔍 Debug: All overlays' : '🛡️ Clean: Filtered view'}
+          </span>
+        </label>
+        {showDebugOverlays && (
+          <span className="text-[8px] text-violet-400/60">
+            Raw mode — excluded, background & unknown artifacts visible.
           </span>
         )}
       </div>
@@ -920,12 +954,15 @@ function PhotoWithUnifiedOverlays({
   filename,
   artifacts,
   showDebugRoofLines = false,
+  showDebugOverlays = false,
 }: {
   fileUrl: string;
   filename: string | null;
   artifacts: UnifiedGeometryArtifact[];
   /** Whether to use thick debug rendering for roof lines. */
   showDebugRoofLines?: boolean;
+  /** Whether to show ALL artifacts including excluded/background. */
+  showDebugOverlays?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [imgNatural, setImgNatural] = useState<{ w: number; h: number } | null>(null);
@@ -968,7 +1005,13 @@ function PhotoWithUnifiedOverlays({
     const backendColor = isSegMask && artifact.segmentationBackend && SEGMENTATION_BACKEND_COLORS[artifact.segmentationBackend]
       ? SEGMENTATION_BACKEND_COLORS[artifact.segmentationBackend]
       : null;
-    const color = perClassColor ?? backendColor ?? defaultColor;
+    let color = perClassColor ?? backendColor ?? defaultColor;
+    // TASK 4: In normal mode, make unknown artifacts even more subtle — thin stroke,
+    // near-transparent fill — so they don't appear as confident labeled regions.
+    // In debug mode, use the normal unknown styling so they're visible for inspection.
+    if (artifact.geometryClass === 'unknown' && !showDebugOverlays) {
+      color = { stroke: '#94a3b8', fill: 'rgba(148,163,184,0.02)', label: 'Unidentified' };
+    }
     const geometry = extractArtifactGeometry(artifact);
     overlayElements.push({
       artifact,
