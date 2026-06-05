@@ -11,6 +11,15 @@
 import { describe, it, expect } from 'vitest';
 import type { UnifiedGeometryArtifact } from '../types';
 
+function isSegmentationMaskGeometryParticipant(a: UnifiedGeometryArtifact): boolean {
+  if (a.geometryClass !== 'segmentation_mask') return true;
+  if (a.geometryParticipation) {
+    return a.geometryParticipation.participatesInLines !== false
+      || a.geometryParticipation.participatesInPlanes !== false;
+  }
+  return a.segmentationClass === 'roof' || a.segmentationClass === 'wall' || a.segmentationClass === 'siding';
+}
+
 // ── Simulated renderer filter (mirrors the logic in UnifiedGeometryOverlayRenderer.tsx) ──
 
 function applyRendererFilter(
@@ -38,6 +47,7 @@ function applyRendererFilter(
     if (a.excludeFromGeometry === true && !showDebugOverlays) return false;
     // TASK 4: Hide background segmentationClass in normal mode
     if (a.segmentationClass === 'background' && !showDebugOverlays) return false;
+    if (!showDebugOverlays && !isSegmentationMaskGeometryParticipant(a)) return false;
     // Apply class filter
     if (geometryClassFilter && geometryClassFilter.size > 0 && !geometryClassFilter.has(a.geometryClass))
       return false;
@@ -106,6 +116,54 @@ describe('TASK 4 — Renderer Display Hygiene', () => {
       const result = applyRendererFilter(artifacts, { showDebugOverlays: false });
 
       expect(result.map(a => a.id)).toEqual(['roof-1']);
+    });
+
+    it('hides segmentation masks that do not participate in line or plane geometry', () => {
+      const noGeometryParticipation = {
+        participatesInLines: false,
+        participatesInPlanes: false,
+        participatesInDepthFusion: false,
+        participatesInPhotogrammetry: true,
+      };
+      const artifacts = [
+        makeArtifact({
+          id: 'roof-mask',
+          geometryClass: 'segmentation_mask',
+          confidence: 80,
+          segmentationClass: 'roof',
+          geometryParticipation: {
+            participatesInLines: true,
+            participatesInPlanes: true,
+            participatesInDepthFusion: true,
+            participatesInPhotogrammetry: true,
+          },
+        }),
+        makeArtifact({
+          id: 'sky-mask',
+          geometryClass: 'segmentation_mask',
+          confidence: 98,
+          segmentationClass: 'sky',
+          geometryParticipation: noGeometryParticipation,
+        }),
+        makeArtifact({
+          id: 'vegetation-mask',
+          geometryClass: 'segmentation_mask',
+          confidence: 90,
+          segmentationClass: 'vegetation_touching_structure',
+          geometryParticipation: noGeometryParticipation,
+        }),
+        makeArtifact({
+          id: 'equipment-mask',
+          geometryClass: 'segmentation_mask',
+          confidence: 84,
+          segmentationClass: 'equipment',
+          geometryParticipation: noGeometryParticipation,
+        }),
+      ];
+
+      const result = applyRendererFilter(artifacts, { showDebugOverlays: false });
+
+      expect(result.map(a => a.id)).toEqual(['roof-mask']);
     });
 
     it('hides unknown artifacts with confidence below 40', () => {
@@ -184,6 +242,27 @@ describe('TASK 4 — Renderer Display Hygiene', () => {
       const result = applyRendererFilter(artifacts, { showDebugOverlays: true });
 
       expect(result.map(a => a.id)).toEqual(['roof-1', 'bg-1']);
+    });
+
+    it('shows non-geometry segmentation masks in debug overlays', () => {
+      const artifacts = [
+        makeArtifact({
+          id: 'sky-mask',
+          geometryClass: 'segmentation_mask',
+          confidence: 98,
+          segmentationClass: 'sky',
+          geometryParticipation: {
+            participatesInLines: false,
+            participatesInPlanes: false,
+            participatesInDepthFusion: false,
+            participatesInPhotogrammetry: true,
+          },
+        }),
+      ];
+
+      const result = applyRendererFilter(artifacts, { showDebugOverlays: true });
+
+      expect(result.map(a => a.id)).toEqual(['sky-mask']);
     });
 
     it('shows unknown artifacts with any confidence', () => {

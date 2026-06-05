@@ -80,6 +80,17 @@ interface RoofGeometrySectionProps {
 
 const EMPTY_ARTIFACTS: UnifiedGeometryArtifact[] = [];
 
+function isCleanPolygonArtifact(artifact: UnifiedGeometryArtifact): boolean {
+  if (!artifact.polygon?.vertices?.length) return false;
+  if (artifact.excludeFromGeometry === true) return false;
+  if (artifact.segmentationClass === 'background') return false;
+  if (artifact.geometryClass === 'segmentation_mask' && artifact.geometryParticipation) {
+    return artifact.geometryParticipation.participatesInLines !== false
+      || artifact.geometryParticipation.participatesInPlanes !== false;
+  }
+  return true;
+}
+
 /* ── Error boundary for the overlay renderer ────────────────────────────── */
 interface OverlayErrorBoundaryState {
   hasError: boolean;
@@ -604,7 +615,7 @@ export function RoofGeometrySection({
   const hasPipelineAData = pipelineCounts.photoVision > 0;
   const hasPipelineCData = pipelineCounts.googleSolarApi > 0;
   const hasAnyData = artifacts.length > 0;
-  const polygonArtifactCount = artifacts.filter((a) => a.polygon?.vertices?.length).length;
+  const polygonArtifactCount = artifacts.filter(isCleanPolygonArtifact).length;
   const consensusPlaneCount = artifacts.filter((a) => a.geometryClass === 'consensus_plane').length;
 
   // Count by geometry class

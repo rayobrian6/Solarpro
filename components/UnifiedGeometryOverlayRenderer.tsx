@@ -244,6 +244,23 @@ function isStructuralClass(cls: SegmentationClass): boolean {
   return STRUCTURAL_SEGMENTATION_CLASSES.has(cls);
 }
 
+function isSegmentationMaskGeometryParticipant(artifact: UnifiedGeometryArtifact): boolean {
+  if (artifact.geometryClass !== 'segmentation_mask') return true;
+
+  const participation = artifact.geometryParticipation;
+  if (participation) {
+    return participation.participatesInLines !== false || participation.participatesInPlanes !== false;
+  }
+
+  const segClass = artifact.segmentationClass as SegmentationClass | null;
+  if (!segClass) return false;
+  return isStructuralClass(segClass)
+    && !OCCLUDER_SEGMENTATION_CLASSES.has(segClass)
+    && !SITE_CONTEXT_SEGMENTATION_CLASSES.has(segClass)
+    && !ELECTRICAL_SEGMENTATION_CLASSES.has(segClass)
+    && !CONDITION_SEGMENTATION_CLASSES.has(segClass);
+}
+
 
 /**
  * Per-subtype styling for roof_line artifacts — DEFAULT (review-friendly) mode.
@@ -705,6 +722,7 @@ export function UnifiedGeometryOverlayRenderer({
         if (a.excludeFromGeometry === true && !showDebugOverlays) return false;
         // TASK 4: Hide background segmentationClass in normal mode
         if (a.segmentationClass === 'background' && !showDebugOverlays) return false;
+        if (!showDebugOverlays && !isSegmentationMaskGeometryParticipant(a)) return false;
         // Apply class filter
         if (geometryClassFilter && geometryClassFilter.size > 0 && !geometryClassFilter.has(a.geometryClass))
           return false;
