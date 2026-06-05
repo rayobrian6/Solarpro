@@ -53,22 +53,48 @@ import { runPhotogrammetryFromReconstructionInput } from './workers/photogrammet
 
 // ──── Pipeline timeout safeguard ────────────────────────────────────────────
 
+// Inline execution still has a Vercel ceiling; the Render background worker
+// gets a longer timeout through getGeometryPipelineTimeoutMs().
+type EnvRecord = Record<string, string | undefined>;
+
+const DEFAULT_INLINE_PIPELINE_TIMEOUT_MS = 270_000;
+const DEFAULT_BACKGROUND_PIPELINE_TIMEOUT_MS = 900_000;
+
+function parsePositiveDurationMs(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function isGeometryBackgroundWorkerRuntime(env: EnvRecord = process.env): boolean {
+  const workerFlag = env.GEOMETRY_RECONSTRUCTION_WORKER?.toLowerCase();
+  const serviceName = env.RENDER_SERVICE_NAME?.toLowerCase() ?? '';
+  const workerId = env.WORKER_ID?.toLowerCase() ?? '';
+
+  return (
+    workerFlag === 'true' ||
+    workerFlag === '1' ||
+    serviceName === 'geometry-reconstruction-worker' ||
+    workerId.startsWith('render-worker-')
+  );
+}
+
 /**
- * Maximum pipeline duration in milliseconds before skipping remaining stages.
- * Set to 270000ms (4.5 minutes) — this is a soft limit that skips remaining
- * pipeline stages if exceeded. The hard limit is Vercel's maxDuration=300s.
+ * Maximum pipeline duration before skipping remaining stages.
  *
- * With points_per_side=12 on Render Pro, SAM2 inference takes ~19s per photo.
- * 10 photos ÷ 2 concurrency = 5 batches × ~50s ≈ 250s for segmentation.
- * Plus warm-up, depth estimation, downstream stages, and DB writes ≈ ~50s.
- * Total ≈ 300s, which matches Vercel's maxDuration=300s hard limit exactly.
- *
- * The PIPELINE_TIMEOUT_MS is set below the Vercel hard limit so we can
- * gracefully skip remaining stages rather than getting killed mid-write.
- * Updated from 480s (overkill) to 270s — provides buffer for downstream
- * stages while ensuring we return results before Vercel kills the function.
+ * Inline execution keeps the 270s soft limit so the Vercel fallback endpoint
+ * can return before maxDuration=300 kills the process. The Render background
+ * worker has no Vercel ceiling, so it gets a longer default and can be
+ * overridden with GEOMETRY_PIPELINE_TIMEOUT_MS.
  */
-const PIPELINE_TIMEOUT_MS = 270_000;
+export function getGeometryPipelineTimeoutMs(env: EnvRecord = process.env): number {
+  return (
+    parsePositiveDurationMs(env.GEOMETRY_PIPELINE_TIMEOUT_MS) ??
+    (isGeometryBackgroundWorkerRuntime(env)
+      ? DEFAULT_BACKGROUND_PIPELINE_TIMEOUT_MS
+      : DEFAULT_INLINE_PIPELINE_TIMEOUT_MS)
+  );
+}
 
 // ──── Pipeline Stage Result ──────────────────────────────────────────────────
 
@@ -175,7 +201,7 @@ async function asyncStageTimer<T>(stageName: string, fn: () => Promise<T>): Prom
  * Returns true if remaining stages should be skipped to avoid 504 timeout.
  */
 function isPipelineTimedOut(pipelineStart: number): boolean {
-  return (Date.now() - pipelineStart) >= PIPELINE_TIMEOUT_MS;
+  return (Date.now() - pipelineStart) >= getGeometryPipelineTimeoutMs();
 }
 
 /**

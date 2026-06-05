@@ -30,8 +30,27 @@ import {
 } from '@/lib/siteSurveys/geometryReconstruction/types';
 import {
   computeGeometryParticipation,
+  getSegmentationStageTimeoutMs,
   suppressWeakStructureMasks,
 } from '../runSegmentationWorker';
+
+describe('Segmentation timeout configuration', () => {
+  it('keeps Vercel fallback segmentation under the inline timeout by default', () => {
+    expect(getSegmentationStageTimeoutMs({})).toBe(260_000);
+  });
+
+  it('uses the longer Render background worker timeout', () => {
+    expect(getSegmentationStageTimeoutMs({ GEOMETRY_RECONSTRUCTION_WORKER: 'true' })).toBe(600_000);
+    expect(getSegmentationStageTimeoutMs({ RENDER_SERVICE_NAME: 'geometry-reconstruction-worker' })).toBe(600_000);
+  });
+
+  it('allows an explicit segmentation timeout override', () => {
+    expect(getSegmentationStageTimeoutMs({
+      GEOMETRY_RECONSTRUCTION_WORKER: 'true',
+      GEOMETRY_SEGMENTATION_STAGE_TIMEOUT_MS: '720000',
+    })).toBe(720_000);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Helpers

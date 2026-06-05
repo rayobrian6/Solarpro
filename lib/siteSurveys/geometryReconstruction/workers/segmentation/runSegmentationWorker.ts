@@ -435,20 +435,50 @@ const MAX_SAM2_PHOTOS = 15;
  */
 const MAX_TOTAL_MASKS = 300;
 
+// Inline execution still needs a Vercel-safe segmentation cap. The Render
+// background worker gets a longer cap through getSegmentationStageTimeoutMs().
+type EnvRecord = Record<string, string | undefined>;
+
+const DEFAULT_INLINE_SEGMENTATION_STAGE_TIMEOUT_MS = 260_000;
+const DEFAULT_BACKGROUND_SEGMENTATION_STAGE_TIMEOUT_MS = 600_000;
+const MIN_SAM2_PHOTO_REMAINING_MS = 50_000;
+
+function parsePositiveDurationMs(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function isGeometryBackgroundWorkerRuntime(env: EnvRecord = process.env): boolean {
+  const workerFlag = env.GEOMETRY_RECONSTRUCTION_WORKER?.toLowerCase();
+  const serviceName = env.RENDER_SERVICE_NAME?.toLowerCase() ?? '';
+  const workerId = env.WORKER_ID?.toLowerCase() ?? '';
+
+  return (
+    workerFlag === 'true' ||
+    workerFlag === '1' ||
+    serviceName === 'geometry-reconstruction-worker' ||
+    workerId.startsWith('render-worker-')
+  );
+}
+
 /**
- * Maximum wall-clock milliseconds the segmentation stage may consume.
- * The full pipeline has PIPELINE_TIMEOUT_MS = 270_000ms (4.5 minutes).
- * Segmentation is Stage 1, but we must leave time for 6 more stages
- * plus DB writes. With 15 photos x ~22s SAM2 inference on Pro,
- * and 2-batch concurrency, segmentation takes ~172s.
- * Capping at 260s leaves generous buffer for downstream stages and DB writes
- * within Vercel's 300s hard limit.
+ * Maximum wall-clock time for segmentation.
  *
- * NOTE: SAM2 ONNX inference at 384px with tiny+INT8 encoder takes
- * ~22s per batch of 2 photos, so 15 photos = 8 batches x 22s = 172s.
- * The 260s cap gives generous buffer for warm-up + image fetches.
+ * Inline execution keeps the 260s cap so Vercel fallback requests still leave
+ * room for downstream stages. Render background workers get a longer default
+ * because real SAM2 batches can exceed the earlier estimate.
  */
-const SEGMENTATION_STAGE_TIMEOUT_MS = 260_000;
+export function getSegmentationStageTimeoutMs(env: EnvRecord = process.env): number {
+  return (
+    parsePositiveDurationMs(env.GEOMETRY_SEGMENTATION_STAGE_TIMEOUT_MS) ??
+    (isGeometryBackgroundWorkerRuntime(env)
+      ? DEFAULT_BACKGROUND_SEGMENTATION_STAGE_TIMEOUT_MS
+      : DEFAULT_INLINE_SEGMENTATION_STAGE_TIMEOUT_MS)
+  );
+}
+
+const SEGMENTATION_STAGE_TIMEOUT_MS = getSegmentationStageTimeoutMs();
 
 /**
  * Photo labels that get SAM 2 priority. These are roof-domain and
@@ -772,7 +802,7 @@ export async function runSegmentationWorker(
     photo: { fileId: string; fileUrl: string; filename: string | null; label?: string | null },
   ): Promise<PhotoProcessResult> {
     const remainingMs = segmentationDeadline - Date.now();
-    const useSAM2 = sam2Enabled && sam2BudgetRemaining > 0 && remainingMs > 50_000;
+    const useSAM2 = sam2Enabled && sam2BudgetRemaining > 0 && remainingMs > MIN_SAM2_PHOTO_REMAINING_MS;
 
     if (!useSAM2 && sam2Enabled && sam2BudgetRemaining <= 0 && !sam2BudgetExhaustedReason) {
       sam2BudgetExhaustedReason = 'max_photos_reached';
@@ -1054,7 +1084,7 @@ export async function runSegmentationWorker(
 
     // Check segmentation stage deadline
     const remainingMs = segmentationDeadline - Date.now();
-    if (sam2Enabled && remainingMs <= 0 && !sam2BudgetExhaustedReason) {
+    if (sam2Enabled && remainingMs <= MIN_SAM2_PHOTO_REMAINING_MS && !sam2BudgetExhaustedReason) {
       const elapsedMs = Date.now() - t1;
       console.warn(
         `[SAM2] Segmentation stage TIMEOUT after ${elapsedMs}ms — skipping remaining photos`,

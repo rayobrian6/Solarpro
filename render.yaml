@@ -69,6 +69,12 @@ services:
         sync: false
       - key: SAM2_SERVICE_URL
         value: "https://sam2-segmentation.onrender.com"
+      - key: GEOMETRY_RECONSTRUCTION_WORKER
+        value: "true"
+      - key: GEOMETRY_PIPELINE_TIMEOUT_MS
+        value: "900000"
+      - key: GEOMETRY_SEGMENTATION_STAGE_TIMEOUT_MS
+        value: "600000"
       - key: WORKER_POLL_INTERVAL_MS
         value: "5000"
       - key: WORKER_ID
