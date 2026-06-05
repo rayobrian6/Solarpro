@@ -93,6 +93,7 @@ export {
   reviewArtifact,
   assertCadConsumable,
   assertCanonicalEligible,
+  assertNoContradictionBlock,
   canPromote,
   PromotionError,
 } from './promotion';

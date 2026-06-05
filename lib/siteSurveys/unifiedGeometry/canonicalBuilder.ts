@@ -17,7 +17,7 @@
 import { v4 as uuid } from 'uuid';
 import { AUTHORITY_LEVEL } from './authority';
 import type { UnifiedGeometryAuthority, UnifiedGeometryAuthorityState } from './authority';
-import { assertCanonicalEligible } from './promotion';
+import { assertCanonicalEligible, assertNoContradictionBlock } from './promotion';
 import type {
   UnifiedGeometryArtifact,
   CanonicalBuildingModel,
@@ -36,6 +36,7 @@ import type {
   RoofLineSubtype,
   PlaneType,
 } from './types';
+import type { DepthContradictionReport } from '../geometryReconstruction/types';
 
 // ─── Builder Configuration ──────────────────────────────────────────────────
 
@@ -48,6 +49,13 @@ export interface CanonicalBuilderConfig {
   defaultRidgeSetbackM: number;
   /** Default setback for rakes (meters) */
   defaultRakeSetbackM: number;
+  /** Depth-class contradiction reports (Phase 0, P0-4.2).
+   *  When provided, the builder checks each artifact against these reports
+   *  before adding it to the model. Artifacts with blocking contradictions
+   *  (severity 'moderate' or 'major') are rejected when the
+   *  PHASE0_CONTRADICTION_PROMOTION_GATE flag is active.
+   *  Defaults to empty array (no contradiction checks). */
+  contradictionReports?: DepthContradictionReport[];
 }
 
 const DEFAULT_CONFIG: CanonicalBuilderConfig = {
@@ -83,22 +91,37 @@ export class CanonicalModelBuilder {
   private readonly config: CanonicalBuilderConfig;
   private readonly artifacts: UnifiedGeometryArtifact[] = [];
   private readonly promotionRecordIds: string[] = [];
+  private readonly contradictionReports: DepthContradictionReport[];
 
   constructor(config: Partial<CanonicalBuilderConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     if (!this.config.surveyId) {
       throw new CanonicalBuilderError('surveyId is required');
     }
+    this.contradictionReports = config.contradictionReports ?? [];
   }
 
   /**
    * Add a promoted artifact to the model.
    * Only promoted_canonical or cad_safe artifacts are accepted.
    * Mock artifacts are always rejected.
+   *
+   * Phase 0 (P0-4.2): When PHASE0_CONTRADICTION_PROMOTION_GATE is active,
+   * artifacts with blocking depth contradictions (severity 'moderate' or
+   * 'major') are rejected from the canonical model. This prevents geometry
+   * derived from contradicted depth estimates from contaminating the
+   * CanonicalBuildingModel and CAD output.
    */
   addArtifact(artifact: UnifiedGeometryArtifact): this {
     // Validate authority — must be promoted_canonical or cad_safe
     assertCanonicalEligible(artifact);
+
+    // Phase 0 (P0-4.2): Contradiction-aware promotion gate
+    // Check artifact against contradiction reports before adding.
+    // When the flag is OFF, this is a no-op (assertNoContradictionBlock
+    // returns immediately). When the flag is ON, artifacts with blocking
+    // contradictions are rejected with CANONICAL_MODEL_VIOLATION.
+    assertNoContradictionBlock(artifact, this.contradictionReports);
 
     // Validate survey ID consistency
     if (artifact.surveyId !== this.config.surveyId) {
@@ -381,6 +404,10 @@ export class CanonicalModelBuilder {
  *
  * This is the primary entry point for the CAD engine to get building geometry.
  * All artifacts must be at promoted_canonical or cad_safe authority.
+ *
+ * Phase 0 (P0-4.2): When contradiction reports are provided and the
+ * PHASE0_CONTRADICTION_PROMOTION_GATE flag is active, artifacts with
+ * blocking depth contradictions are rejected from the model.
  */
 export function buildCanonicalModel(
   surveyId: string,
