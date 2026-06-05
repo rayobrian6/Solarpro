@@ -23,6 +23,20 @@
 //                  ~33MB for all photos combined. When fileId is specified and
 //                  mode is not explicitly set, mode defaults to 'overlay' (since
 //                  the per-photo response is small enough).
+//   ?debug=true    — Disables overlay-safe filtering. Returns ALL artifacts
+//                  including excludeFromGeometry, background, and very low
+//                  confidence artifacts. For developer/debug use only.
+//                  Without ?debug=true, the bundle applies overlay-safe
+//                  filtering that hides noisy/low-quality artifacts from the
+//                  default view while preserving them in the database.
+//
+// OVERLAY-SAFE FILTERING (normal mode, no ?debug=true):
+//   - Artifacts with excludeFromGeometry === true are hidden
+//   - Artifacts with segmentationClass === 'background' are hidden
+//   - Artifacts with confidence < 15 (very low) are hidden
+//   - Artifacts with geometryClass === 'unknown' AND confidence < 40 are hidden
+//   These artifacts remain in the database untouched — only the bundle
+//   response excludes them from the default overlay view.
 //
 // PRIMARY PATH:  Query `unified_geometry_artifacts` table directly.
 //   This table is populated by Migration 080 backfill and kept current by
@@ -121,6 +135,59 @@ function filterArtifactsByFileId(
 }
 
 /**
+ * Apply overlay-safe filtering to hide noisy/low-quality artifacts from the
+ * default overlay view. This is a PRESENTATION concern only — no data is
+ * removed from the database.
+ *
+ * In normal mode (debug=false), the following artifacts are hidden:
+ *   - excludeFromGeometry === true (suppressed/weak masks)
+ *   - segmentationClass === 'background' (SAM2 background masks)
+ *   - confidence < 15 (very low confidence — likely noise)
+ *   - geometryClass === 'unknown' AND confidence < 40 (unidentified blobs)
+ *
+ * In debug mode (debug=true), ALL artifacts are returned unfiltered.
+ *
+ * Returns a new array; does not mutate the input.
+ */
+function applyOverlaySafeFilter(
+  artifacts: UnifiedGeometryArtifact[],
+  debug: boolean,
+): UnifiedGeometryArtifact[] {
+  if (debug) {
+    // Debug mode: return everything, no filtering
+    return artifacts;
+  }
+
+  const MIN_CONFIDENCE_THRESHOLD = 15;
+  const UNKNOWN_CONFIDENCE_THRESHOLD = 40;
+
+  return artifacts.filter(artifact => {
+    // Hide artifacts flagged for exclusion from geometry
+    if (artifact.excludeFromGeometry === true) {
+      return false;
+    }
+
+    // Hide background segmentation masks
+    if (artifact.segmentationClass === 'background') {
+      return false;
+    }
+
+    // Hide very low confidence artifacts (likely noise)
+    if (artifact.confidence < MIN_CONFIDENCE_THRESHOLD) {
+      return false;
+    }
+
+    // Hide unknown artifacts with low confidence (unidentified blobs that
+    // shouldn't appear as confident labels in the overlay)
+    if (artifact.geometryClass === 'unknown' && artifact.confidence < UNKNOWN_CONFIDENCE_THRESHOLD) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+/**
  * Estimate the JSON byte size of the response payload.
  * Used to log a warning when the response may exceed Vercel's 4.5MB limit.
  */
@@ -152,6 +219,8 @@ export async function GET(
     // ── Parse ?mode= and ?fileId= query parameters ────────────────────────────
     const modeParam = req.nextUrl.searchParams.get('mode');
     const fileIdParam = req.nextUrl.searchParams.get('fileId');
+    const debugParam = req.nextUrl.searchParams.get('debug');
+    const isDebug = debugParam === 'true' || debugParam === '1';
 
     // When fileId is specified without an explicit mode, default to overlay
     // (per-photo overlay responses are small enough to stay under 4.5MB)
@@ -208,10 +277,13 @@ export async function GET(
         ? filterArtifactsByFileId(bundle.artifacts, fileIdParam)
         : bundle.artifacts;
 
-      // ── Apply mode-based vertex stripping ─────────────────────────────
+      // ── Apply overlay-safe filtering (hide excluded/background/low-conf) ──────
+      const overlayFilteredArtifacts = applyOverlaySafeFilter(fileIdFilteredArtifacts, isDebug);
+
+      // ── Apply mode-based vertex stripping ─────────────────────────────────────
       const processedArtifacts = mode === 'stats'
-        ? stripSegmentationMaskVertices(fileIdFilteredArtifacts)
-        : fileIdFilteredArtifacts;
+        ? stripSegmentationMaskVertices(overlayFilteredArtifacts)
+        : overlayFilteredArtifacts;
 
       const responsePayload = {
         success: true,
@@ -220,6 +292,7 @@ export async function GET(
           artifacts: processedArtifacts,
         },
         source: 'unified_table', // informational — tells the caller which path was used
+        debug: isDebug, // echo back debug mode so the frontend knows
         mode, // echo back the mode so the frontend knows
         fileId: fileIdParam ?? null, // echo back the fileId filter (null if not specified)
         pipelineConfig: {
@@ -316,10 +389,14 @@ export async function GET(
       ? filterArtifactsByFileId(bundle.artifacts, fileIdParam)
       : bundle.artifacts;
 
-    // ── Apply mode-based vertex stripping ─────────────────────────────
+    // ── Apply overlay-safe filtering (hide excluded/background/low-conf) ────────
+    const overlayFilteredArtifacts = applyOverlaySafeFilter(fileIdFilteredArtifacts, isDebug);
+
+
+    // ── Apply mode-based vertex stripping ──────────────────────────────────────
     const processedArtifacts = mode === 'stats'
-      ? stripSegmentationMaskVertices(fileIdFilteredArtifacts)
-      : fileIdFilteredArtifacts;
+      ? stripSegmentationMaskVertices(overlayFilteredArtifacts)
+      : overlayFilteredArtifacts;
 
     const responsePayload = {
       success: true,
@@ -328,6 +405,7 @@ export async function GET(
         artifacts: processedArtifacts,
       },
       source: 'fallback_adaptation', // informational — tells the caller backfill hasn't run
+      debug: isDebug, // echo back debug mode so the frontend knows
       mode,
       fileId: fileIdParam ?? null, // echo back the fileId filter (null if not specified)
       pipelineConfig: {
