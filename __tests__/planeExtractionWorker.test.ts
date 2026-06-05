@@ -203,6 +203,35 @@ describe('plane extraction worker', () => {
       });
       expect(result.artifacts).toEqual([]);
     });
+
+    it('ignores roof masks excluded from geometry', () => {
+      const excludedRoof = makeMask({
+        excludeFromGeometry: true,
+        participation: {
+          participatesInLines: false,
+          participatesInPlanes: false,
+          participatesInDepthFusion: false,
+          participatesInPhotogrammetry: false,
+        },
+      });
+
+      const result = runPlaneExtractionWorker(makeInput({ masks: [excludedRoof] }));
+      expect(result.artifacts).toEqual([]);
+    });
+
+    it('ignores roof masks that opt out of plane participation', () => {
+      const reviewOnlyRoof = makeMask({
+        participation: {
+          participatesInLines: true,
+          participatesInPlanes: false,
+          participatesInDepthFusion: true,
+          participatesInPhotogrammetry: true,
+        },
+      });
+
+      const result = runPlaneExtractionWorker(makeInput({ masks: [reviewOnlyRoof] }));
+      expect(result.artifacts).toEqual([]);
+    });
   });
 
   describe('roof plane extraction', () => {

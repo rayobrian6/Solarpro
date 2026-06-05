@@ -312,6 +312,85 @@ def test_real_chimney_passes():
         f"Smooth dark roof patch must not classify as vegetation, got: {result}"
 
 
+def test_obvious_sky_mask_not_roof():
+    """
+    A large, bright, uniform upper-image mask must classify as sky before
+    the loose roof heuristics can accept it as a roof plane.
+    """
+    img = _make_test_image(fill_value=225)
+    mask = _make_test_mask(bbox_xywh=(0, 0, 512, 230))
+
+    result = classify_mask_region(
+        bbox=[0, 0, 512, 230],
+        area=512 * 230,
+        img_w=512, img_h=512,
+        stability_score=0.95,
+        original_image_bgr=img,
+        mask_binary=mask,
+    )
+    assert result == "sky", f"Bright upper mask must classify as sky, got: {result}"
+    print(f"  ✓ test_obvious_sky_mask_not_roof → classified as '{result}'")
+
+
+def test_lower_truck_mask_not_roof():
+    """
+    A broad dark lower-scene mask that looks like a parked truck must not
+    be allowed through as a roof plane candidate.
+    """
+    img = _make_test_image(fill_value=190)
+    mask = _make_test_mask(bbox_xywh=(80, 270, 350, 115))
+    img[mask] = [45, 45, 50]
+
+    result = classify_mask_region(
+        bbox=[80, 270, 350, 115],
+        area=350 * 115,
+        img_w=512, img_h=512,
+        stability_score=0.96,
+        original_image_bgr=img,
+        mask_binary=mask,
+    )
+    assert result in ("car", "truck"), f"Lower vehicle mask must not classify as roof, got: {result}"
+    print(f"  ✓ test_lower_truck_mask_not_roof → classified as '{result}'")
+
+
+def test_garage_door_mask_not_roof():
+    """
+    A wide, smooth, lower facade opening should route to garage_door,
+    which the TypeScript geometry participation defaults keep out of planes.
+    """
+    img = _make_test_image(fill_value=180)
+    mask = _make_test_mask(bbox_xywh=(150, 225, 250, 110))
+
+    result = classify_mask_region(
+        bbox=[150, 225, 250, 110],
+        area=250 * 110,
+        img_w=512, img_h=512,
+        stability_score=0.96,
+        original_image_bgr=img,
+        mask_binary=mask,
+    )
+    assert result == "garage_door", f"Garage door mask must not classify as roof, got: {result}"
+    print(f"  ✓ test_garage_door_mask_not_roof → classified as '{result}'")
+
+
+def test_upper_roof_strip_still_classifies_as_roof():
+    """The hard-negative gates must not suppress a normal upper roof strip."""
+    img = _make_test_image(fill_value=128)
+    mask = _make_test_mask(bbox_xywh=(60, 170, 390, 80))
+    img[mask] = [90, 90, 95]
+
+    result = classify_mask_region(
+        bbox=[60, 170, 390, 80],
+        area=390 * 80,
+        img_w=512, img_h=512,
+        stability_score=0.96,
+        original_image_bgr=img,
+        mask_binary=mask,
+    )
+    assert result == "roof", f"Upper roof strip should still classify as roof, got: {result}"
+    print(f"  ✓ test_upper_roof_strip_still_classifies_as_roof → classified as '{result}'")
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 3. MIN_MASK_AREA_FRACTION DEFAULT
 # ═══════════════════════════════════════════════════════════════════════════
@@ -352,6 +431,10 @@ def main():
         test_low_stability_not_vent_pipe,
         test_green_roof_moss_not_skylight,
         test_real_chimney_passes,
+        test_obvious_sky_mask_not_roof,
+        test_lower_truck_mask_not_roof,
+        test_garage_door_mask_not_roof,
+        test_upper_roof_strip_still_classifies_as_roof,
         # MIN_MASK_AREA_FRACTION default
         test_min_mask_area_fraction_default,
     ]

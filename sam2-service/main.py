@@ -67,10 +67,14 @@ import time
 import gc
 import asyncio
 import logging
-import resource
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
+
+try:
+    import resource
+except ImportError:  # pragma: no cover - Windows local test fallback
+    resource = None
 
 import cv2
 import numpy as np
@@ -347,6 +351,8 @@ _last_inference_end = 0.0
 def _get_memory_mb() -> float:
     """Get current process RSS in MB for memory monitoring."""
     try:
+        if resource is None:
+            return 0.0
         return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
     except Exception:
         return 0.0
@@ -952,6 +958,12 @@ def classify_mask_region(
     norm_x_center = (x + w / 2) / img_w
     norm_area = area / (img_w * img_h)
     aspect_ratio = max(w, h) / max(min(w, h), 1)
+    width_to_height = w / max(h, 1)
+    height_to_width = h / max(w, 1)
+    norm_width = w / img_w
+    norm_height = h / img_h
+    norm_y_top = y / img_h
+    norm_y_bottom = (y + h) / img_h
 
     # ── Vegetation detection ──
     green_ratio = 0.0
@@ -1043,6 +1055,48 @@ def classify_mask_region(
     # upper-middle zone are checked for roof first, and only classified as
     # sky if they fail the roof checks AND match sky-specific brightness.
     # ══════════════════════════════════════════════════════════════════════
+
+    # ── Pre-roof hard negatives ──
+    # SAM2 is class-agnostic, and the roof rules below intentionally accept
+    # broad, smooth, horizontal masks. In overview photos that also matches
+    # sky, garage doors, and parked vehicles. Route those unmistakable cases
+    # before any mask can claim the roof label.
+    if not (prompted_mode and has_fg_point_in_bbox):
+        strong_sky_brightness = (
+            mean_v > CLASSIFIER_BRIGHTNESS_SKY_V_MIN
+            and mean_s < CLASSIFIER_BRIGHTNESS_GRAY_S_MAX
+            and std_v < min(CLASSIFIER_BRIGHTNESS_SKY_STD_V_MAX, 10)
+            and bright_ratio > 0.55
+        )
+        if norm_y_center < CLASSIFIER_SKY_Y_MAX and norm_area > 0.10:
+            if strong_sky_brightness and (norm_y_top < 0.12 or norm_area > 0.22):
+                return "sky"
+
+        lower_scene = norm_y_center > 0.50 and norm_y_bottom > 0.64 and norm_y_top > 0.30
+        wide_lower_mask = width_to_height > 1.30 and norm_width > 0.18 and norm_area > 0.025
+        low_green = green_ratio < CLASSIFIER_GREEN_RATIO_TREE_MODERATE
+
+        if lower_scene and wide_lower_mask and low_green:
+            vehicle_like = (
+                norm_area < 0.24
+                and (dark_ratio > 0.18 or mean_v < CLASSIFIER_BRIGHTNESS_BLACK_TPO_V_MAX or texture_score > 12)
+            )
+            if vehicle_like:
+                return "car" if norm_area < 0.12 else "truck"
+
+            garage_door_like = (
+                0.015 < norm_area < 0.18
+                and norm_height > 0.08
+                and width_to_height > 1.15
+                and is_low_saturation
+                and not is_textured_surface
+            )
+            if garage_door_like:
+                return "garage_door"
+
+        if 0.25 <= norm_y_center < 0.85 and norm_area > 0.02 and low_green:
+            if height_to_width > 1.15 and norm_height > 0.12:
+                return "wall"
 
     # ── Roof detection (STANDARD — pitched roofs) ──
     # Large area, wide aspect ratio, upper-middle position, NOT vegetation
@@ -1169,18 +1223,18 @@ def classify_mask_region(
             if norm_y_center < 0.6:
                 return "window"
         # Doors: small, tall narrow, in lower wall area
-        if 0.005 < norm_area < 0.04 and aspect_ratio < 0.7:
+        if 0.005 < norm_area < 0.04 and height_to_width > 1.5:
             if norm_y_center > 0.5:
                 return "door"
         # Garage door: moderate area, tall wide, in lower-middle wall
-        if 0.02 < norm_area < 0.1 and 0.8 < aspect_ratio < 1.5:
+        if 0.02 < norm_area < 0.12 and width_to_height > 1.15:
             if 0.4 < norm_y_center < 0.75:
                 return "garage_door"
         # Gutter: very thin horizontal strip at top of wall
-        if norm_area < 0.005 and aspect_ratio > 3.0 and norm_y_center < 0.45:
+        if norm_area < 0.005 and width_to_height > 3.0 and norm_y_center < 0.45:
             return "gutter"
         # Downspout: very thin vertical strip along wall edge
-        if norm_area < 0.003 and aspect_ratio < 0.3 and (norm_x_center < 0.15 or norm_x_center > 0.85):
+        if norm_area < 0.003 and height_to_width > 3.0 and (norm_x_center < 0.15 or norm_x_center > 0.85):
             return "downspout"
         # Porch: moderate area, bottom of wall, extends outward
         if 0.03 < norm_area < 0.1 and norm_y_center > 0.6 and aspect_ratio > 1.2:
@@ -1192,7 +1246,7 @@ def classify_mask_region(
         if 0.005 < norm_area < 0.02 and norm_y_center > 0.75 and aspect_ratio > 1.0:
             return "steps"
         # Railing: thin horizontal line in lower-middle
-        if norm_area < 0.003 and aspect_ratio > 4.0 and 0.4 < norm_y_center < 0.7:
+        if norm_area < 0.003 and width_to_height > 4.0 and 0.4 < norm_y_center < 0.7:
             return "railing"
         # Siding: large wall-like region (fallback for wall sub-areas)
         if norm_area > 0.04 and aspect_ratio > 0.8:
@@ -1274,10 +1328,10 @@ def classify_mask_region(
         if 0.04 < norm_area < 0.2 and aspect_ratio > 1.5:
             return "car" if norm_area < 0.12 else "truck"
         # Person: very tall narrow at ground level
-        if 0.003 < norm_area < 0.02 and aspect_ratio < 0.5:
+        if 0.003 < norm_area < 0.02 and height_to_width > 2.2:
             return "person"
         # Ladder: thin tall at ground level
-        if norm_area < 0.003 and aspect_ratio < 0.25:
+        if norm_area < 0.003 and height_to_width > 4.0:
             return "ladder"
         # Trash can: small square at ground level
         if 0.002 < norm_area < 0.008 and 0.6 < aspect_ratio < 1.5:

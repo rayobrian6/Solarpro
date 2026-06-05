@@ -124,6 +124,9 @@ export function computeGeometryParticipation(
  *    area <MIN_WALL_MASK_AREA.
  * 4. Roof fragments merged with vegetation: roof mask whose bounding box
  *    overlaps >MAX_ROOF_VEGETATION_OVERLAP_FRACTION with any vegetation mask.
+ * 5. Lower-scene false roof masks: roof-class masks shaped/positioned like
+ *    vehicles, garage doors, or giant sky regions are kept for review but
+ *    blocked from geometry participation.
  *
  * Suppressed masks are NOT deleted — they get excludeFromGeometry=true and
  * all participation flags set to false, so they remain as viewable overlays
@@ -216,6 +219,47 @@ export function suppressWeakStructureMasks(masks: SemanticSegmentationMask[]): S
           suppress = true;
           reason = `roof-veg overlap ${(overlapFraction * 100).toFixed(1)}% > ${MAX_ROOF_VEGETATION_OVERLAP_FRACTION * 100}%`;
         }
+      }
+    }
+
+    // Rule 5: Roof-shaped false positives from overview photos
+    if (!suppress && mask.segmentationClass === 'roof') {
+      const maskArea = mask.maskBounds.width * mask.maskBounds.height;
+      const centerY = mask.maskBounds.y + mask.maskBounds.height / 2;
+      const bottomY = mask.maskBounds.y + mask.maskBounds.height;
+      const widthToHeight = mask.maskBounds.width / Math.max(mask.maskBounds.height, 1);
+
+      const lowerForegroundLike =
+        centerY > 520
+        && bottomY > 650
+        && mask.maskBounds.y > 300
+        && maskArea > 25_000
+        && maskArea < 260_000
+        && widthToHeight > 1.3;
+
+      const garageDoorLike =
+        centerY > 430
+        && bottomY > 620
+        && mask.maskBounds.y > 300
+        && maskArea > 15_000
+        && maskArea < 180_000
+        && mask.maskBounds.height > 80
+        && widthToHeight > 1.15;
+
+      const skyLikeUpperMass =
+        mask.maskBounds.y < 120
+        && centerY < 360
+        && maskArea > 220_000
+        && mask.maskBounds.height > 250
+        && widthToHeight > 1.2;
+
+      if (lowerForegroundLike || garageDoorLike || skyLikeUpperMass) {
+        suppress = true;
+        reason = lowerForegroundLike
+          ? `lower foreground roof-like mask area=${maskArea.toFixed(0)} centerY=${centerY.toFixed(0)}`
+          : garageDoorLike
+            ? `garage-door-like roof mask area=${maskArea.toFixed(0)} centerY=${centerY.toFixed(0)}`
+            : `upper sky-like roof mask area=${maskArea.toFixed(0)} centerY=${centerY.toFixed(0)}`;
       }
     }
 

@@ -578,14 +578,18 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
 
   // Stage 1: Initialize
   const t0 = Date.now();
-  const roofMasks = input.masks.filter(m => m.segmentationClass === 'roof');
-  const wallMasks = input.masks.filter(m => m.segmentationClass === 'wall');
+  const planeEligibleMasks = input.masks.filter(
+    m => m.excludeFromGeometry !== true && m.participation?.participatesInPlanes !== false,
+  );
+  const roofMasks = planeEligibleMasks.filter(m => m.segmentationClass === 'roof');
+  const wallMasks = planeEligibleMasks.filter(m => m.segmentationClass === 'wall');
   const hasDepthMaps = !!input.depthMaps && input.depthMaps.length > 0;
   const usedMidas = input.usedMidas ?? false;
   timings['initialization'] = Date.now() - t0;
 
   console.info(
     `[PlaneExtraction] Starting: roofMasks=${roofMasks.length}, wallMasks=${wallMasks.length}, ` +
+    `planeEligibleMasks=${planeEligibleMasks.length}/${input.masks.length}, ` +
     `hasDepthMaps=${hasDepthMaps}, depthMapCount=${input.depthMaps?.length ?? 0}, usedMidas=${usedMidas}`,
   );
 
