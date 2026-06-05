@@ -4034,6 +4034,47 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 085 (claimable index): ${(e as Error).message}`);
     }
 
+    // ── Migration 086: Depth contradiction reports table ──────────────────────
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS site_survey_depth_contradiction_reports (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          job_id UUID NOT NULL REFERENCES site_survey_geometry_reconstruction_jobs(id) ON DELETE CASCADE,
+          survey_id UUID NOT NULL REFERENCES site_surveys(id) ON DELETE CASCADE,
+          segmentation_class TEXT NOT NULL,
+          mask_id TEXT NOT NULL,
+          expected_range_min DOUBLE PRECISION NOT NULL,
+          expected_range_max DOUBLE PRECISION NOT NULL,
+          actual_depth DOUBLE PRECISION NOT NULL,
+          deviation DOUBLE PRECISION NOT NULL,
+          severity TEXT NOT NULL CHECK (severity IN ('none', 'minor', 'moderate', 'major')),
+          confidence_penalty DOUBLE PRECISION NOT NULL DEFAULT 0,
+          description TEXT NOT NULL DEFAULT '',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_depth_contradiction_reports_survey
+          ON site_survey_depth_contradiction_reports (survey_id)
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_depth_contradiction_reports_job
+          ON site_survey_depth_contradiction_reports (job_id)
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_depth_contradiction_reports_blocking
+          ON site_survey_depth_contradiction_reports (mask_id, severity)
+          WHERE severity IN ('moderate', 'major')
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_depth_contradiction_reports_class
+          ON site_survey_depth_contradiction_reports (segmentation_class)
+      `;
+      results.push('✅ Migration 086: site_survey_depth_contradiction_reports table + 4 indexes created');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 086 (depth contradiction reports): ${(e as Error).message}`);
+    }
+
     return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);
