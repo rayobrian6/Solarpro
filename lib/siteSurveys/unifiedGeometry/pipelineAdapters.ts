@@ -82,11 +82,18 @@ import {
  * Maps Pipeline A candidate types to canonical unified geometry classes.
  * Some Pipeline A types don't have a direct geometry mapping (e.g., ocr_availability_note)
  * and are mapped to 'unknown' for provenance tracking.
+ *
+ * SAFETY: rectangular_region_candidate is mapped to 'unknown' by default.
+ * A generic rectangle detected by photo vision could be anything (window, door,
+ * solar panel, siding patch, etc.). Mapping it unconditionally to 'roof_plane'
+ * was causing false roof labels in the overlay. Only when the candidate has
+ * explicit roof evidence (candidateCategory === 'roof_context') does
+ * adaptPhotoVisionCandidate promote it to 'roof_plane'.
  */
 const PIPELINE_A_CLASS_MAP: Record<string, UnifiedGeometryClass> = {
   edge_map_summary:           'unknown',
   dominant_line_candidate:    'roof_line',
-  rectangular_region_candidate: 'roof_plane',
+  rectangular_region_candidate: 'unknown',   // was 'roof_plane' — unsafe unconditional mapping
   equipment_anchor_candidate: 'electrical_node',
   roof_edge_candidate:        'roof_line',
   wall_anchor_candidate:      'wall_plane',
@@ -373,7 +380,18 @@ export function adaptPhotoVisionCandidate(
   candidate: OpenSourcePhotoVisionCandidate,
   surveyId: string,
 ): UnifiedGeometryArtifact {
-  const geometryClass = PIPELINE_A_CLASS_MAP[candidate.candidateType] ?? 'unknown';
+  let geometryClass = PIPELINE_A_CLASS_MAP[candidate.candidateType] ?? 'unknown';
+
+  // Safety override: rectangular_region_candidate defaults to 'unknown' in
+  // PIPELINE_A_CLASS_MAP, but if the candidate has explicit roof evidence
+  // (candidateCategory === 'roof_context'), promote to 'roof_plane'.
+  // This prevents generic rectangles (windows, doors, panels, etc.) from
+  // appearing as confident roof planes in the overlay while preserving
+  // genuine roof-context rectangles.
+  if (candidate.candidateType === 'rectangular_region_candidate' && candidate.candidateCategory === 'roof_context') {
+    geometryClass = 'roof_plane';
+  }
+
   const isMock = candidate.toolName.includes('mock') || candidate.toolName.includes('test');
 
   const provenance: GeometryProvenance = {
