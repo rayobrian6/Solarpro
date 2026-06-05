@@ -50,7 +50,7 @@ import {
 } from '@/lib/siteSurveys/geometryReconstruction/runFullPipeline';
 import { warmupSAM2Service, isSAM2Enabled } from '@/lib/siteSurveys/geometryReconstruction/workers/segmentation/sam2Client';
 import { adaptGeometryReconBundle } from '@/lib/siteSurveys/unifiedGeometry/pipelineAdapters';
-import { writeUnifiedArtifacts, deleteUnifiedArtifactsBySurvey } from '@/lib/siteSurveys/unifiedGeometry';
+import { writeUnifiedArtifacts, deleteUnifiedArtifactsByPipeline } from '@/lib/siteSurveys/unifiedGeometry';
 import type { GeometryReconstructionInput } from '@/lib/siteSurveys/geometryReconstruction/types';
 
 // Internal auth token -- must match the token used by /start route
@@ -318,12 +318,15 @@ export async function POST(
     await updateJobStageDurations(jobId, stageDurations);
 
     // Adapt Pipeline B artifacts into unified geometry table
+    // Cleanup: remove stale Pipeline B artifacts BEFORE writing new ones.
+    // Uses pipeline-scoped deletion (not survey-wide) to preserve artifacts
+    // from other pipelines (photo_vision, google_solar_api, manual).
     try {
       const tUnifiedStart = Date.now();
-      const deletedCount = await deleteUnifiedArtifactsBySurvey(surveyId, surveyOwnerUserId!);
+      const deletedCount = await deleteUnifiedArtifactsByPipeline(surveyId, 'geometry_recon');
       if (deletedCount > 0) {
         console.info(
-          `[POST geometry-reconstruction/execute] Deleted ${deletedCount} previous unified artifacts for survey=${surveyId}`,
+          `[POST geometry-reconstruction/execute] Cleaned up ${deletedCount} stale geometry_recon artifacts for survey=${surveyId} (pipeline-scoped, other pipelines preserved)`,
         );
       }
 
