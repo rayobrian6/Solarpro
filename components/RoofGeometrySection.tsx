@@ -351,7 +351,13 @@ export function RoofGeometrySection({
         }
 
         const POLL_INTERVAL_MS = 3000;
-        const POLL_TIMEOUT_MS = 600000;
+        // Priority 2 — the client poll cap must EXCEED the backend worker's
+        // pipeline budget (DEFAULT_BACKGROUND_PIPELINE_TIMEOUT_MS = 900_000 / 15 min),
+        // because the client clock starts at job creation — before the worker
+        // claims the job — and includes queue wait + SAM2 warmup. The previous
+        // 600_000 (10 min) gave up while the backend was still legitimately
+        // running, producing a false "failed". 20 min covers budget + warmup.
+        const POLL_TIMEOUT_MS = 1_200_000;
         const startTime = Date.now();
 
         setGenerationSummary('Pipeline B queued — waiting for execution to start…');
@@ -413,9 +419,43 @@ export function RoofGeometrySection({
           }
         }
 
-        throw new Error(
-          'Pipeline B did not complete within 10 minutes. The job may still be running — refresh the page to check.',
+        // Reached the client poll cap. This is NOT a failure: the backend worker
+        // has its own (longer) budget and the job very likely completes shortly.
+        // Do one final status check; if completed/failed handle it, otherwise
+        // degrade to an informational message instead of throwing a false "failed".
+        try {
+          const finalRes = await fetch(
+            `/api/site-surveys/${surveyId}/geometry-reconstruction/status?jobId=${jobId}`,
+            { credentials: 'include' },
+          );
+          if (finalRes.ok) {
+            const finalJson = await finalRes.json();
+            if (finalJson.status === 'completed') {
+              setPipelineStatus('completed');
+              setGenerationSummary('Pipeline B completed.');
+              await fetchBundle();
+              onGeometryGenerated?.();
+              return;
+            }
+            if (finalJson.status === 'failed') {
+              throw new Error(
+                finalJson.error || 'Pipeline B execution failed. Check the job for partial results.',
+              );
+            }
+          }
+        } catch (finalErr) {
+          // Re-throw a genuine backend failure; swallow transient poll errors.
+          if (finalErr instanceof Error && finalErr.message.includes('execution failed')) {
+            throw finalErr;
+          }
+        }
+        // Still running in the background — inform the user, do not mark failed.
+        setPipelineStatus('running');
+        setGenerationSummary(
+          'Pipeline B is taking longer than expected and is still running in the background. ' +
+          'Refresh the page in a minute to see the results.',
         );
+        return;
       }
 
       // ── Inline completion (200): backward compat for mock pipeline ──────────
