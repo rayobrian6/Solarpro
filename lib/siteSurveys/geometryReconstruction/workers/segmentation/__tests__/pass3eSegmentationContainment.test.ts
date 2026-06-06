@@ -433,6 +433,95 @@ describe('Pass 3E — Task D: Structure Boundary Tightening', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Same-photo overlap scoping — Rules 1 & 4 must compare masks per-photo only.
+//
+// Regression guard for the cross-photo contamination bug: maskBounds are
+// normalized per-image (0–1000 in each photo's own space), so sky/vegetation
+// masks from one photo must NOT suppress structure masks from another photo
+// even when their normalized boxes coincide. Also guards the bounded-union
+// overlap (overlap fraction can never exceed 100%, no double counting).
+// ---------------------------------------------------------------------------
+
+describe('Pass 3E — Same-photo overlap scoping (Rules 1 & 4)', () => {
+  // --- Cross-photo: must NOT suppress ---
+
+  it('does NOT suppress a roof when overlapping vegetation is in a DIFFERENT photo', () => {
+    // Identical normalized boxes, but different photos → must not suppress.
+    const treeOtherPhoto = makeMask('tree', { fileId: 'photo-B', isVegetation: true }, { x: 0, y: 0, width: 500, height: 500 });
+    const roof = makeMask('roof', { fileId: 'photo-A' }, { x: 100, y: 100, width: 200, height: 200 });
+    const result = suppressWeakStructureMasks([treeOtherPhoto, roof]);
+    const roofOut = result.find(m => m.segmentationClass === 'roof')!;
+    expect(roofOut.excludeFromGeometry).toBeFalsy();
+    expect(roofOut.participation?.participatesInPlanes).not.toBe(false);
+  });
+
+  it('does NOT suppress a roof when overlapping sky is in a DIFFERENT photo', () => {
+    const skyOtherPhoto = makeMask('sky', { fileId: 'photo-B' }, { x: 0, y: 0, width: 500, height: 500 });
+    const roof = makeMask('roof', { fileId: 'photo-A' }, { x: 100, y: 100, width: 200, height: 200 });
+    const result = suppressWeakStructureMasks([skyOtherPhoto, roof]);
+    const roofOut = result.find(m => m.segmentationClass === 'roof')!;
+    expect(roofOut.excludeFromGeometry).toBeFalsy();
+  });
+
+  it('does NOT let vegetation from MANY other photos accumulate to suppress a roof', () => {
+    // Reproduces the observed bug: one roof, many veg masks across other photos
+    // that each fully cover its normalized box. Pre-fix, summed overlap hit
+    // hundreds of percent; post-fix none are same-photo so overlap is 0%.
+    const roof = makeMask('roof', { fileId: 'photo-A' }, { x: 100, y: 100, width: 200, height: 200 });
+    const veg = Array.from({ length: 6 }, (_, i) =>
+      makeMask('tree', { fileId: `photo-${i}`, isVegetation: true }, { x: 100, y: 100, width: 200, height: 200 }),
+    );
+    const result = suppressWeakStructureMasks([roof, ...veg]);
+    const roofOut = result.find(m => m.segmentationClass === 'roof')!;
+    expect(roofOut.excludeFromGeometry).toBeFalsy();
+  });
+
+  // --- Same-photo: true overlaps must STILL suppress ---
+
+  it('STILL suppresses a roof with >50% vegetation overlap in the SAME photo', () => {
+    const tree = makeMask('tree', { fileId: 'photo-A', isVegetation: true }, { x: 0, y: 0, width: 500, height: 500 });
+    const roof = makeMask('roof', { fileId: 'photo-A' }, { x: 100, y: 100, width: 200, height: 200 });
+    const result = suppressWeakStructureMasks([tree, roof]);
+    const roofOut = result.find(m => m.segmentationClass === 'roof')!;
+    expect(roofOut.excludeFromGeometry).toBe(true);
+    expect(roofOut.participation?.participatesInPlanes).toBe(false);
+  });
+
+  it('STILL suppresses a structure mask with >40% sky overlap in the SAME photo', () => {
+    const sky = makeMask('sky', { fileId: 'photo-A' }, { x: 0, y: 0, width: 500, height: 500 });
+    const roof = makeMask('roof', { fileId: 'photo-A' }, { x: 100, y: 100, width: 200, height: 200 });
+    const result = suppressWeakStructureMasks([sky, roof]);
+    const roofOut = result.find(m => m.segmentationClass === 'roof')!;
+    expect(roofOut.excludeFromGeometry).toBe(true);
+  });
+
+  it('suppresses a roof when the UNION of multiple same-photo veg masks exceeds 50%', () => {
+    // Roof 100x100 (area 10000). Two non-overlapping veg masks covering
+    // left 50% + a further 20% → union 70% > 50%.
+    const roof = makeMask('roof', { fileId: 'photo-A' }, { x: 0, y: 0, width: 100, height: 100 });
+    const vegLeft = makeMask('tree', { fileId: 'photo-A', isVegetation: true }, { x: 0, y: 0, width: 50, height: 100 });
+    const vegMid = makeMask('bushes', { fileId: 'photo-A', isVegetation: true }, { x: 50, y: 0, width: 20, height: 100 });
+    const result = suppressWeakStructureMasks([roof, vegLeft, vegMid]);
+    const roofOut = result.find(m => m.segmentationClass === 'roof')!;
+    expect(roofOut.excludeFromGeometry).toBe(true);
+  });
+
+  // --- Bounded fraction: overlap cannot exceed 100% / no double counting ---
+
+  it('does NOT suppress when overlapping same-photo veg masks DUPLICATE each other (union <= threshold)', () => {
+    // Roof 100x100 (area 10000). Two IDENTICAL veg masks each covering 40% of
+    // the roof. Summed (old behavior) = 80% > 50% → false suppression.
+    // Bounded union = 40% < 50% → must NOT suppress.
+    const roof = makeMask('roof', { fileId: 'photo-A' }, { x: 0, y: 0, width: 100, height: 100 });
+    const veg1 = makeMask('tree', { fileId: 'photo-A', isVegetation: true }, { x: 0, y: 0, width: 40, height: 100 });
+    const veg2 = makeMask('tree', { fileId: 'photo-A', isVegetation: true }, { x: 0, y: 0, width: 40, height: 100 });
+    const result = suppressWeakStructureMasks([roof, veg1, veg2]);
+    const roofOut = result.find(m => m.segmentationClass === 'roof')!;
+    expect(roofOut.excludeFromGeometry).toBeFalsy();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Backward compatibility: masks without participation flags
 // ---------------------------------------------------------------------------
 

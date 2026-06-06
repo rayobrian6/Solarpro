@@ -109,6 +109,67 @@ export function computeGeometryParticipation(
 }
 
 // ---------------------------------------------------------------------------
+// Same-photo overlap helpers — Pass 3E Task D
+// ---------------------------------------------------------------------------
+
+/** Bounding box in normalized 0–1000 per-image coordinates. */
+type MaskBox = { x: number; y: number; width: number; height: number };
+
+/**
+ * Group masks by their source photo (fileId). Overlap checks MUST be scoped to
+ * a single photo: maskBounds are normalized per-image (0–1000 within each
+ * photo's own coordinate space), so a box from photo A is meaningless when
+ * compared against a box from photo B.
+ */
+function groupMasksByFile(masks: SemanticSegmentationMask[]): Map<string, SemanticSegmentationMask[]> {
+  const byFile = new Map<string, SemanticSegmentationMask[]>();
+  for (const m of masks) {
+    const arr = byFile.get(m.fileId);
+    if (arr) arr.push(m);
+    else byFile.set(m.fileId, [m]);
+  }
+  return byFile;
+}
+
+/**
+ * Fraction of `target` covered by the UNION of `others`, clamped to [0, 1].
+ *
+ * Computed via coordinate-compression over the target box so that multiple
+ * overlapping rectangles are never double-counted. This replaces the previous
+ * approach of summing per-rectangle intersection fractions, which could exceed
+ * 100% and falsely trip suppression thresholds.
+ */
+function unionCoverageFraction(target: MaskBox, others: MaskBox[]): number {
+  const targetArea = target.width * target.height;
+  if (targetArea <= 0 || others.length === 0) return 0;
+
+  // Clip each rectangle to the target box; drop non-overlapping ones.
+  const clipped: { x0: number; y0: number; x1: number; y1: number }[] = [];
+  for (const r of others) {
+    const x0 = Math.max(target.x, r.x);
+    const y0 = Math.max(target.y, r.y);
+    const x1 = Math.min(target.x + target.width, r.x + r.width);
+    const y1 = Math.min(target.y + target.height, r.y + r.height);
+    if (x1 > x0 && y1 > y0) clipped.push({ x0, y0, x1, y1 });
+  }
+  if (clipped.length === 0) return 0;
+
+  // Coordinate compression: union area = sum of covered grid cells.
+  const xs = [...new Set(clipped.flatMap(c => [c.x0, c.x1]))].sort((a, b) => a - b);
+  const ys = [...new Set(clipped.flatMap(c => [c.y0, c.y1]))].sort((a, b) => a - b);
+  let covered = 0;
+  for (let i = 0; i < xs.length - 1; i++) {
+    for (let j = 0; j < ys.length - 1; j++) {
+      const cxMid = (xs[i] + xs[i + 1]) / 2;
+      const cyMid = (ys[j] + ys[j + 1]) / 2;
+      const inside = clipped.some(c => cxMid >= c.x0 && cxMid <= c.x1 && cyMid >= c.y0 && cyMid <= c.y1);
+      if (inside) covered += (xs[i + 1] - xs[i]) * (ys[j + 1] - ys[j]);
+    }
+  }
+  return Math.min(1, covered / targetArea);
+}
+
+// ---------------------------------------------------------------------------
 // Structure boundary tightening — Pass 3E Task D
 // ---------------------------------------------------------------------------
 
@@ -117,13 +178,15 @@ export function computeGeometryParticipation(
  *
  * Four suppression rules (all gating-only, NO new segmentation classes):
  * 1. Sky-overlapping structure masks: structure mask whose bounding box
- *    overlaps >MAX_SKY_OVERLAP_FRACTION with any sky mask's bounding box.
+ *    overlaps >MAX_SKY_OVERLAP_FRACTION with the union of sky masks FROM THE
+ *    SAME PHOTO.
  * 2. Low-confidence structure fragments: structure mask with confidence
  *    <MIN_STRUCTURE_CONFIDENCE.
  * 3. Tiny disconnected wall fragments: wall-class mask with bounding box
  *    area <MIN_WALL_MASK_AREA.
  * 4. Roof fragments merged with vegetation: roof mask whose bounding box
- *    overlaps >MAX_ROOF_VEGETATION_OVERLAP_FRACTION with any vegetation mask.
+ *    overlaps >MAX_ROOF_VEGETATION_OVERLAP_FRACTION with the union of
+ *    vegetation masks FROM THE SAME PHOTO.
  * 5. Lower-scene false roof masks: roof-class masks shaped/positioned like
  *    vehicles, garage doors, or giant sky regions are kept for review but
  *    blocked from geometry participation.
@@ -135,9 +198,14 @@ export function computeGeometryParticipation(
 export function suppressWeakStructureMasks(masks: SemanticSegmentationMask[]): SemanticSegmentationMask[] {
   if (masks.length === 0) return masks;
 
-  // Pre-compute sky masks and vegetation masks for overlap checks
-  const skyMasks = masks.filter(m => m.segmentationClass === 'sky' && m.excludeFromGeometry !== true);
-  const vegetationMasks = masks.filter(m => m.isVegetation === true);
+  // Pre-compute sky/vegetation masks grouped BY PHOTO (fileId). Overlap checks
+  // must compare only masks from the same photo — maskBounds are normalized
+  // per-image, so cross-photo comparisons are meaningless and previously caused
+  // real roof masks to be suppressed by vegetation/sky in unrelated photos.
+  const skyMasksByFile = groupMasksByFile(
+    masks.filter(m => m.segmentationClass === 'sky' && m.excludeFromGeometry !== true),
+  );
+  const vegMasksByFile = groupMasksByFile(masks.filter(m => m.isVegetation === true));
 
   let suppressedCount = 0;
   const result: SemanticSegmentationMask[] = [];
@@ -158,28 +226,16 @@ export function suppressWeakStructureMasks(masks: SemanticSegmentationMask[]): S
     let suppress = false;
     let reason = '';
 
-    // Rule 1: Sky-overlapping structure mask
-    if (skyMasks.length > 0 && !suppress) {
-      const maskArea = mask.maskBounds.width * mask.maskBounds.height;
-      if (maskArea > 0) {
-        let overlapArea = 0;
-        for (const sky of skyMasks) {
-          // Axis-aligned bounding box intersection
-          const xOverlap = Math.max(0,
-            Math.min(mask.maskBounds.x + mask.maskBounds.width, sky.maskBounds.x + sky.maskBounds.width)
-            - Math.max(mask.maskBounds.x, sky.maskBounds.x),
-          );
-          const yOverlap = Math.max(0,
-            Math.min(mask.maskBounds.y + mask.maskBounds.height, sky.maskBounds.y + sky.maskBounds.height)
-            - Math.max(mask.maskBounds.y, sky.maskBounds.y),
-          );
-          overlapArea += xOverlap * yOverlap;
-        }
-        const overlapFraction = overlapArea / maskArea;
-        if (overlapFraction > MAX_SKY_OVERLAP_FRACTION) {
-          suppress = true;
-          reason = `sky overlap ${(overlapFraction * 100).toFixed(1)}% > ${MAX_SKY_OVERLAP_FRACTION * 100}%`;
-        }
+    // Rule 1: Sky-overlapping structure mask (same photo only)
+    const sameFileSky = skyMasksByFile.get(mask.fileId);
+    if (!suppress && sameFileSky && sameFileSky.length > 0) {
+      const overlapFraction = unionCoverageFraction(
+        mask.maskBounds,
+        sameFileSky.map(s => s.maskBounds),
+      );
+      if (overlapFraction > MAX_SKY_OVERLAP_FRACTION) {
+        suppress = true;
+        reason = `sky overlap ${(overlapFraction * 100).toFixed(1)}% > ${MAX_SKY_OVERLAP_FRACTION * 100}% (same-photo)`;
       }
     }
 
@@ -198,26 +254,17 @@ export function suppressWeakStructureMasks(masks: SemanticSegmentationMask[]): S
       }
     }
 
-    // Rule 4: Roof fragment merged with vegetation
-    if (!suppress && mask.segmentationClass === 'roof' && vegetationMasks.length > 0) {
-      const maskArea = mask.maskBounds.width * mask.maskBounds.height;
-      if (maskArea > 0) {
-        let overlapArea = 0;
-        for (const veg of vegetationMasks) {
-          const xOverlap = Math.max(0,
-            Math.min(mask.maskBounds.x + mask.maskBounds.width, veg.maskBounds.x + veg.maskBounds.width)
-            - Math.max(mask.maskBounds.x, veg.maskBounds.x),
-          );
-          const yOverlap = Math.max(0,
-            Math.min(mask.maskBounds.y + mask.maskBounds.height, veg.maskBounds.y + veg.maskBounds.height)
-            - Math.max(mask.maskBounds.y, veg.maskBounds.y),
-          );
-          overlapArea += xOverlap * yOverlap;
-        }
-        const overlapFraction = overlapArea / maskArea;
+    // Rule 4: Roof fragment merged with vegetation (same photo only)
+    if (!suppress && mask.segmentationClass === 'roof') {
+      const sameFileVeg = vegMasksByFile.get(mask.fileId);
+      if (sameFileVeg && sameFileVeg.length > 0) {
+        const overlapFraction = unionCoverageFraction(
+          mask.maskBounds,
+          sameFileVeg.map(v => v.maskBounds),
+        );
         if (overlapFraction > MAX_ROOF_VEGETATION_OVERLAP_FRACTION) {
           suppress = true;
-          reason = `roof-veg overlap ${(overlapFraction * 100).toFixed(1)}% > ${MAX_ROOF_VEGETATION_OVERLAP_FRACTION * 100}%`;
+          reason = `roof-veg overlap ${(overlapFraction * 100).toFixed(1)}% > ${MAX_ROOF_VEGETATION_OVERLAP_FRACTION * 100}% (same-photo)`;
         }
       }
     }
