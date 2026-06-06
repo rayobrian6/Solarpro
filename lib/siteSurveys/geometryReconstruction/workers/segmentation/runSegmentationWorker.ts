@@ -344,7 +344,7 @@ export function suppressWeakStructureMasks(masks: SemanticSegmentationMask[]): S
 // Worker version
 // ---------------------------------------------------------------------------
 
-export const SEGMENTATION_WORKER_VERSION = '5.4.0-pass3e-containment-participation';
+export const SEGMENTATION_WORKER_VERSION = '5.5.0-photo-dedup-selection';
 
 // ---------------------------------------------------------------------------
 // Limitations
@@ -438,6 +438,12 @@ export interface SegmentationWorkerOutput {
   photoResults: PhotoSegmentationResult[];
   /** Why SAM2 budget was exhausted (null if not exhausted). */
   budgetExhaustedReason: string | null;
+  /** Priority 1.1 — total source photos received before dedup. */
+  inputPhotoCount: number;
+  /** Priority 1.1 — distinct photos after defensive dedup. */
+  distinctPhotoCount: number;
+  /** Priority 1.1 — duplicate copies removed by dedup before selection. */
+  skippedDuplicateCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -555,6 +561,53 @@ function sam2PhotoPriority(label: string | null | undefined): number {
   if (!label) return 99;
   const idx = SAM2_PRIORITY_LABELS.indexOf(label);
   return idx >= 0 ? idx : 99;
+}
+
+/** Minimal shape needed for photo dedup/selection. */
+type SelectablePhoto = { fileId: string; filename: string | null; label?: string | null };
+
+/** Accounting for the defensive photo dedup pass (Priority 1.1). */
+export interface PhotoDedupResult<T extends SelectablePhoto> {
+  /** Distinct photos, in original first-occurrence order (deterministic). */
+  deduped: T[];
+  /** Total photos received before dedup. */
+  inputCount: number;
+  /** Distinct photos kept. */
+  distinctCount: number;
+  /** Duplicate copies removed. */
+  skippedDuplicateCount: number;
+}
+
+/**
+ * Defensive dedup of source photos BEFORE any source/budget slicing.
+ *
+ * Re-ingested byte-identical copies share the same `filename` but get distinct
+ * `fileId`s and blob URLs (observed: ~7 copies/photo from one ingestion burst).
+ * Without this, the limited MAX_SOURCE_PHOTOS / SAM2 budget could be spent on
+ * duplicates depending purely on input ordering. Dedup keys on `filename`
+ * (the property duplicates share); photos with no filename are NEVER collapsed
+ * together — they key on their unique `fileId`, so distinct unnamed photos are
+ * preserved. First occurrence wins, original order is preserved → deterministic
+ * regardless of how duplicates are interleaved in the input.
+ *
+ * Selection-only: this does not delete files or touch ingestion.
+ */
+export function dedupSourcePhotos<T extends SelectablePhoto>(photos: T[]): PhotoDedupResult<T> {
+  const seen = new Set<string>();
+  const deduped: T[] = [];
+  for (const p of photos) {
+    const name = p.filename?.trim();
+    const key = name ? `name:${name}` : `id:${p.fileId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(p);
+  }
+  return {
+    deduped,
+    inputCount: photos.length,
+    distinctCount: deduped.length,
+    skippedDuplicateCount: photos.length - deduped.length,
+  };
 }
 
 
@@ -694,7 +747,16 @@ export async function runSegmentationWorker(
 
   // Stage 1: Initialize and validate input
   const t0 = Date.now();
-  const rawPhotos = input.sourcePhotos.slice(0, MAX_SOURCE_PHOTOS);
+  // Priority 1.1 — defensive dedup BEFORE the source/budget slice, so duplicate
+  // re-ingested copies can never consume MAX_SOURCE_PHOTOS / the SAM2 budget
+  // regardless of input ordering. Selection-only; ingestion is untouched.
+  const dedup = dedupSourcePhotos(input.sourcePhotos);
+  if (dedup.skippedDuplicateCount > 0) {
+    console.info(
+      `[SAM2] Photo dedup: input=${dedup.inputCount} distinct=${dedup.distinctCount} skippedDuplicates=${dedup.skippedDuplicateCount}`,
+    );
+  }
+  const rawPhotos = dedup.deduped.slice(0, MAX_SOURCE_PHOTOS);
   if (rawPhotos.length === 0) {
     timings['initialization'] = Date.now() - t0;
     return {
@@ -710,6 +772,9 @@ export async function runSegmentationWorker(
       sam2ModelInfo: null,
       photoResults: [],
       budgetExhaustedReason: null,
+      inputPhotoCount: dedup.inputCount,
+      distinctPhotoCount: dedup.distinctCount,
+      skippedDuplicateCount: dedup.skippedDuplicateCount,
     };
   }
 
@@ -806,6 +871,9 @@ export async function runSegmentationWorker(
       sam2ModelInfo: null,
       photoResults,
       budgetExhaustedReason: sam2BudgetExhaustedReason,
+      inputPhotoCount: dedup.inputCount,
+      distinctPhotoCount: dedup.distinctCount,
+      skippedDuplicateCount: dedup.skippedDuplicateCount,
     };
   }
 
@@ -1291,6 +1359,9 @@ export async function runSegmentationWorker(
     sam2ModelInfo,
     photoResults,
     budgetExhaustedReason: sam2BudgetExhaustedReason,
+    inputPhotoCount: dedup.inputCount,
+    distinctPhotoCount: dedup.distinctCount,
+    skippedDuplicateCount: dedup.skippedDuplicateCount,
   };
 }
 

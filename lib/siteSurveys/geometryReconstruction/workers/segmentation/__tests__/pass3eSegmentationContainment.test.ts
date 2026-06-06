@@ -32,6 +32,7 @@ import {
   computeGeometryParticipation,
   getSegmentationStageTimeoutMs,
   suppressWeakStructureMasks,
+  dedupSourcePhotos,
 } from '../runSegmentationWorker';
 
 describe('Segmentation timeout configuration', () => {
@@ -49,6 +50,82 @@ describe('Segmentation timeout configuration', () => {
       GEOMETRY_RECONSTRUCTION_WORKER: 'true',
       GEOMETRY_SEGMENTATION_STAGE_TIMEOUT_MS: '720000',
     })).toBe(720_000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Priority 1.1 — Defensive photo dedup before the budget slice.
+// Re-ingested byte-identical copies share a filename but get distinct fileIds.
+// Dedup must make selection deterministic and independent of how duplicates
+// are ordered/interleaved in the input.
+// ---------------------------------------------------------------------------
+
+describe('dedupSourcePhotos — defensive selection dedup (Priority 1.1)', () => {
+  const ph = (fileId: string, filename: string | null, label: string | null = null) =>
+    ({ fileId, filename, label });
+
+  it('removes same-filename duplicates, preserving first-occurrence order', () => {
+    const input = [
+      ph('a', 'p1.jpg'), ph('b', 'p2.jpg'), ph('c', 'p3.jpg'),
+      ph('a2', 'p1.jpg'), ph('b2', 'p2.jpg'), ph('a3', 'p1.jpg'),
+    ];
+    const r = dedupSourcePhotos(input);
+    expect(r.deduped.map(p => p.filename)).toEqual(['p1.jpg', 'p2.jpg', 'p3.jpg']);
+    expect(r.deduped.map(p => p.fileId)).toEqual(['a', 'b', 'c']); // first occurrence kept
+    expect(r.inputCount).toBe(6);
+    expect(r.distinctCount).toBe(3);
+    expect(r.skippedDuplicateCount).toBe(3);
+  });
+
+  it('treats same-filename-but-different-fileId/url copies as duplicates (the real case)', () => {
+    // Byte-identical re-ingested copies: same filename, distinct fileIds.
+    const input = [ph('id1', 'photo-123.jpg'), ph('id2', 'photo-123.jpg'), ph('id3', 'photo-123.jpg')];
+    const r = dedupSourcePhotos(input);
+    expect(r.distinctCount).toBe(1);
+    expect(r.skippedDuplicateCount).toBe(2);
+    expect(r.deduped[0].fileId).toBe('id1');
+  });
+
+  it('ORDERING NO LONGER MATTERS: front-loaded duplicates select the same distinct set as a clean ordering', () => {
+    const SELECT = 3; // simulates MAX_SOURCE_PHOTOS / SAM2 budget slice
+    const clean = [ph('a', 'p1.jpg'), ph('b', 'p2.jpg'), ph('c', 'p3.jpg'), ph('d', 'p4.jpg')];
+    // p1 duplicated 3x at the FRONT — pre-fix this would fill the first 3 slots with p1,p1,p1.
+    const frontDup = [
+      ph('a', 'p1.jpg'), ph('a2', 'p1.jpg'), ph('a3', 'p1.jpg'),
+      ph('b', 'p2.jpg'), ph('c', 'p3.jpg'), ph('d', 'p4.jpg'),
+    ];
+    const fromClean = dedupSourcePhotos(clean).deduped.slice(0, SELECT).map(p => p.filename);
+    const fromFront = dedupSourcePhotos(frontDup).deduped.slice(0, SELECT).map(p => p.filename);
+    expect(fromFront).toEqual(fromClean);                 // identical selection
+    expect(fromFront).toEqual(['p1.jpg', 'p2.jpg', 'p3.jpg']);
+    expect(new Set(fromFront).size).toBe(SELECT);          // all distinct, no wasted slot
+  });
+
+  it('ORDERING NO LONGER MATTERS: interleaved duplicates yield the full distinct set', () => {
+    const interleaved = [
+      ph('a', 'p1.jpg'), ph('a2', 'p1.jpg'), ph('b', 'p2.jpg'),
+      ph('b2', 'p2.jpg'), ph('c', 'p3.jpg'), ph('d', 'p4.jpg'),
+    ];
+    const r = dedupSourcePhotos(interleaved);
+    expect(r.deduped.map(p => p.filename)).toEqual(['p1.jpg', 'p2.jpg', 'p3.jpg', 'p4.jpg']);
+    expect(r.skippedDuplicateCount).toBe(2);
+  });
+
+  it('never collapses photos with null/empty filenames together', () => {
+    const input = [ph('x', null), ph('y', null), ph('z', '   '), ph('w', '')];
+    const r = dedupSourcePhotos(input);
+    // distinct fileIds despite missing filenames → all kept
+    expect(r.distinctCount).toBe(4);
+    expect(r.skippedDuplicateCount).toBe(0);
+  });
+
+  it('is a no-op when there are no duplicates', () => {
+    const input = [ph('a', 'p1.jpg'), ph('b', 'p2.jpg'), ph('c', 'p3.jpg')];
+    const r = dedupSourcePhotos(input);
+    expect(r.deduped).toHaveLength(3);
+    expect(r.skippedDuplicateCount).toBe(0);
+    expect(r.inputCount).toBe(3);
+    expect(r.distinctCount).toBe(3);
   });
 });
 

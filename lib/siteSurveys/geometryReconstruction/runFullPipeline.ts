@@ -120,6 +120,12 @@ export interface FullPipelineResult {
   skippedPhotoCount: number;
   /** Number of photos processed with Canny (only when SAM2 not configured). */
   cannyPhotoCount: number;
+  /** Priority 1.1 — source photos received before defensive dedup. */
+  inputPhotoCount: number;
+  /** Priority 1.1 — distinct photos after dedup (what selection operated on). */
+  distinctPhotoCount: number;
+  /** Priority 1.1 — duplicate copies removed before selection. */
+  skippedDuplicateCount: number;
   /** Honest per-photo results — no silent fallbacks. */
   photoResults: PhotoSegmentationResult[];
   /** Why SAM2 budget was exhausted (null if not exhausted). */
@@ -167,7 +173,8 @@ export type CheckpointCallback = (checkpoint: PipelineCheckpoint) => Promise<voi
  */
 function segReportFields(seg: SegmentationWorkerOutput): Pick<FullPipelineResult,
   'segmentationBackend' | 'sam2PhotoCount' | 'failedPhotoCount' |
-  'skippedPhotoCount' | 'cannyPhotoCount' | 'photoResults' | 'budgetExhaustedReason'
+  'skippedPhotoCount' | 'cannyPhotoCount' | 'photoResults' | 'budgetExhaustedReason' |
+  'inputPhotoCount' | 'distinctPhotoCount' | 'skippedDuplicateCount'
 > {
   return {
     segmentationBackend: seg.backend,
@@ -175,6 +182,9 @@ function segReportFields(seg: SegmentationWorkerOutput): Pick<FullPipelineResult
     failedPhotoCount: seg.failedPhotoCount,
     skippedPhotoCount: seg.skippedPhotoCount,
     cannyPhotoCount: seg.cannyPhotoCount,
+    inputPhotoCount: seg.inputPhotoCount,
+    distinctPhotoCount: seg.distinctPhotoCount,
+    skippedDuplicateCount: seg.skippedDuplicateCount,
     photoResults: seg.photoResults,
     budgetExhaustedReason: seg.budgetExhaustedReason,
   };
@@ -342,7 +352,7 @@ export async function runFullGeometryReconstructionPipeline(
   stageDurations['segmentation'] = segFullOutput.durationMs;
   stages.push({ stage: 'segmentation', artifactCount: segmentationArtifacts.length, durationMs: segFullOutput.durationMs });
   console.info(
-    `[Pipeline B] Stage 1 (segmentation): ${segmentationArtifacts.length} artifacts in ${segFullOutput.durationMs}ms [backend=${segFields.segmentationBackend}, sam2=${segFields.sam2PhotoCount} photos, failed=${segFields.failedPhotoCount}, skipped=${segFields.skippedPhotoCount}, canny=${segFields.cannyPhotoCount}]${segFields.budgetExhaustedReason ? ` budget_exhausted=${segFields.budgetExhaustedReason}` : ''}`,
+    `[Pipeline B] Stage 1 (segmentation): ${segmentationArtifacts.length} artifacts in ${segFullOutput.durationMs}ms [input=${segFields.inputPhotoCount}, distinct=${segFields.distinctPhotoCount}, skippedDuplicates=${segFields.skippedDuplicateCount}, backend=${segFields.segmentationBackend}, sam2=${segFields.sam2PhotoCount} photos (processed), failed=${segFields.failedPhotoCount}, skipped=${segFields.skippedPhotoCount}, canny=${segFields.cannyPhotoCount}]${segFields.budgetExhaustedReason ? ` budget_exhausted=${segFields.budgetExhaustedReason}` : ''}`,
   );
 
   // Checkpoint: persist segmentation artifacts immediately
