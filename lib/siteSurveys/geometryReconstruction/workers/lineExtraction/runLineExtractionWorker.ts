@@ -37,7 +37,7 @@ import sharp from 'sharp';
 // Constants
 // ---------------------------------------------------------------------------
 
-export const LINE_EXTRACTION_WORKER_VERSION = '3.3.0-roof-region-containment-exclude-masks-pass-3f';
+export const LINE_EXTRACTION_WORKER_VERSION = '3.4.0-roof-containment-exclude-masks-merge-gap-pass-3f';
 
 /** Standard limitations for line extraction artifacts. */
 const LINE_EXTRACTION_LIMITATIONS = [
@@ -76,6 +76,16 @@ const MIN_CONFIDENCE = 45;
  */
 const ROOF_REGION_MARGIN_FRACTION = 0.15; // 15% of the roof bbox dimension
 const ROOF_REGION_MARGIN_MIN = 40;        // absolute floor in 0-1000 coord space
+
+/**
+ * Pass 3F — Maximum endpoint gap (normalized units) across which two collinear
+ * line fragments may be merged. Without this cap, two short roof-edge fragments
+ * that happen to be collinear but sit at opposite ends of the image were merged
+ * into a single frame-spanning diagonal — the residual "crisscross" valley
+ * lines. Real edges broken by shadows/chimneys/occlusions have small gaps; a
+ * large gap means two distinct edges that must not be bridged.
+ */
+const MAX_MERGE_GAP = 150;
 
 /** Canny edge detection threshold range — multi-scale will use these as base values. */
 const CANNY_LOW_THRESHOLD = 40;
@@ -713,10 +723,11 @@ function houghLineTransform(
  * Two lines are merged if:
  * 1. Their angles differ by < 10° (tighter than before)
  * 2. The maximum perpendicular distance between them is < 15 (in normalized units)
- * 3. The gap between their closest endpoints is < 100 (allows bridging across
- *    small breaks from shadows, chimneys, or occlusions)
+ * 3. The gap between their closest endpoints is within bounds (allows bridging
+ *    across small breaks from shadows, chimneys, or occlusions, but never across
+ *    a large gap that would fuse two distinct edges into a frame-spanning line)
  */
-function mergeCollinearLines(lines: LineSegment[]): LineSegment[] {
+export function mergeCollinearLines(lines: LineSegment[]): LineSegment[] {
   if (lines.length <= 1) return lines;
 
   const merged: LineSegment[] = [];
@@ -742,8 +753,10 @@ function mergeCollinearLines(lines: LineSegment[]): LineSegment[] {
         const gapDist = minEndpointGap(currentLine, lines[j]);
 
         // Merge if lines are nearly collinear (small perpendicular distance)
-        // OR if they have a small gap that should be bridged
-        if (perpDist < 15 || (perpDist < 25 && gapDist < 100)) {
+        // OR if they have a small gap that should be bridged — but NEVER across
+        // a gap larger than MAX_MERGE_GAP, which would fuse two distinct edges
+        // into a single frame-spanning line.
+        if ((perpDist < 15 && gapDist < MAX_MERGE_GAP) || (perpDist < 25 && gapDist < 100)) {
           const combined = combineLines(currentLine, lines[j]);
           if (combined.length >= currentLine.length * 0.8) {
             currentLine = combined;

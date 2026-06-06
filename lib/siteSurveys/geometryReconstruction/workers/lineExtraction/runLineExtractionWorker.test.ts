@@ -36,6 +36,7 @@ import {
   classifyLine,
   deduplicateNearParallelLines,
   isLineEligibleMask,
+  mergeCollinearLines,
   type LineSegment,
 } from './runLineExtractionWorker';
 
@@ -447,6 +448,36 @@ describe('isLineEligibleMask — exclusion filter (Pass 3F)', () => {
       participatesInPhotogrammetry: true,
     };
     expect(isLineEligibleMask(mask)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. PASS 3F: COLLINEAR MERGE GAP CAP
+//    Two collinear fragments far apart must NOT be merged into one
+//    frame-spanning line; close fragments still merge across small breaks.
+// ---------------------------------------------------------------------------
+
+describe('mergeCollinearLines — gap cap (Pass 3F)', () => {
+  it('does NOT merge two collinear fragments separated by a large gap', () => {
+    // Two short collinear 45° fragments at opposite corners (gap ~700).
+    // Pre-fix these fused into one frame-spanning diagonal "valley".
+    const fragA = makeLine(100, 100, 180, 180);
+    const fragC = makeLine(700, 700, 820, 820);
+    const merged = mergeCollinearLines([fragA, fragC]);
+    expect(merged.length).toBe(2); // stayed separate
+    for (const m of merged) {
+      expect(Math.hypot(m.end.x - m.start.x, m.end.y - m.start.y)).toBeLessThan(300);
+    }
+  });
+
+  it('still merges two collinear fragments separated by a small break', () => {
+    // A real edge broken by a shadow/chimney: collinear, gap ~40 → should merge.
+    const fragA = makeLine(100, 100, 300, 100);
+    const fragB = makeLine(340, 100, 540, 100);
+    const merged = mergeCollinearLines([fragA, fragB]);
+    expect(merged.length).toBe(1);
+    expect(Math.hypot(merged[0].end.x - merged[0].start.x, merged[0].end.y - merged[0].start.y))
+      .toBeGreaterThan(400);
   });
 });
 
