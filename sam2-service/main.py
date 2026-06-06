@@ -172,6 +172,28 @@ CLASSIFIER_BRIGHTNESS_DARK_V_MAX = float(os.environ.get("SAM2_CLASSIFIER_BRIGHTN
 CLASSIFIER_BRIGHTNESS_BLACK_TPO_V_MAX = float(os.environ.get("SAM2_CLASSIFIER_BRIGHTNESS_BLACK_TPO_V_MAX", "140"))
 CLASSIFIER_BRIGHTNESS_BLACK_TPO_S_MAX = float(os.environ.get("SAM2_CLASSIFIER_BRIGHTNESS_BLACK_TPO_S_MAX", "25"))
 
+# ---------------------------------------------------------------------------
+# Semantic classifier (ADE20K scene parsing) — model-based mask classification
+# ---------------------------------------------------------------------------
+# The heuristic classify_mask_region() is unreliable on real survey photos
+# (overcast gray sky -> "roof", light vehicles -> "garage_door", close-ups with
+# no sky/ground context -> "roof"). A small pretrained ADE20K semantic
+# segmentation model gives a real per-pixel scene label. Each SAM2 mask takes
+# the majority model label over its pixels; when that label is one the heuristic
+# reliably gets wrong (sky, tree, car, truck, grass, person, road, fence,
+# window, ...) the model OVERRIDES the heuristic. For ADE20K "building"/"wall"
+# (which cannot distinguish roof from wall) we DEFER to the heuristic. Any model
+# failure falls back to the heuristic — fully fail-safe.
+SEMANTIC_CLASSIFIER_ENABLED = os.environ.get("SAM2_SEMANTIC_CLASSIFIER_ENABLED", "true").lower() == "true"
+SEMANTIC_CLASSIFIER_MODEL_ID = os.environ.get("SAM2_SEMANTIC_CLASSIFIER_MODEL_ID", "nvidia/segformer-b0-finetuned-ade-512-512")
+# Minimum fraction of a mask's pixels agreeing on the model label for it to
+# override the heuristic. Below this, the mask is too mixed to trust → heuristic.
+SEMANTIC_CLASSIFIER_MIN_AGREEMENT = float(os.environ.get("SAM2_SEMANTIC_CLASSIFIER_MIN_AGREEMENT", "0.5"))
+
+# ADE20K -> SolarPro class mapping and the pure majority-vote override logic live
+# in classifier_logic.py (no torch/cv2 deps) so they can be unit-tested.
+from classifier_logic import model_override_class_for_mask  # noqa: E402
+
 # ---------------------------------------------------------------------------\
 # MiDaS / DPT Depth Estimation Configuration
 # ---------------------------------------------------------------------------
@@ -328,6 +350,10 @@ _sam2_amg = None
 _model_load_time = None
 _midas_model = None
 _midas_load_time = None
+_semantic_processor = None
+_semantic_seg_model = None
+_semantic_id2label: dict[int, str] = {}
+_semantic_load_time = None
 _start_time = time.time()
 _onnx_amg = None
 _onnx_load_time = None
@@ -898,6 +924,110 @@ def mask_to_polygon_v2(mask_bin: np.ndarray, epsilon: float = DOUGLAS_PEUCKER_EP
     points = _subdivide_long_edges(points, MAX_POLYGON_EDGE_LENGTH)
 
     return points
+
+
+def load_semantic_classifier():
+    """Lazy-load the ADE20K semantic segmentation model (SegFormer-B0 by default).
+
+    Mirrors load_midas_model(): loaded on first /segment request, cached after.
+    Returns the model, or None if disabled / failed to load (caller falls back
+    to the heuristic classifier).
+    """
+    global _semantic_processor, _semantic_seg_model, _semantic_id2label, _semantic_load_time
+
+    if not SEMANTIC_CLASSIFIER_ENABLED:
+        return None
+    if _semantic_seg_model is not None:
+        return _semantic_seg_model
+
+    logger.info(f"Loading semantic classifier: {SEMANTIC_CLASSIFIER_MODEL_ID} on device: {DEVICE}")
+    t0 = time.time()
+    try:
+        from transformers import AutoImageProcessor, AutoModelForSemanticSegmentation
+
+        _semantic_processor = AutoImageProcessor.from_pretrained(SEMANTIC_CLASSIFIER_MODEL_ID)
+        _semantic_seg_model = AutoModelForSemanticSegmentation.from_pretrained(SEMANTIC_CLASSIFIER_MODEL_ID)
+        _semantic_seg_model.eval()
+        _semantic_id2label = {int(k): v for k, v in _semantic_seg_model.config.id2label.items()}
+        _semantic_load_time = time.time() - t0
+        logger.info(
+            f"Semantic classifier loaded in {_semantic_load_time:.1f}s "
+            f"({len(_semantic_id2label)} classes, model={SEMANTIC_CLASSIFIER_MODEL_ID})"
+        )
+    except Exception as e:
+        logger.error(f"Failed to load semantic classifier: {e}")
+        logger.error(traceback.format_exc())
+        _semantic_processor = None
+        _semantic_seg_model = None
+        return None
+
+    return _semantic_seg_model
+
+
+def compute_semantic_label_map(image_bgr: np.ndarray, target_h: int, target_w: int):
+    """Run the semantic model on the (inference-scale) BGR image and return a
+    per-pixel ADE20K label-id map upsampled to (target_h, target_w) — the SAM2
+    mask resolution — so masks can be majority-voted pixel-for-pixel.
+
+    Returns an int32 numpy array, or None on any failure (caller falls back).
+    """
+    if _semantic_seg_model is None or _semantic_processor is None:
+        return None
+    try:
+        import torch
+
+        rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        pil = Image.fromarray(rgb)
+        inputs = _semantic_processor(images=pil, return_tensors="pt")
+        with torch.no_grad():
+            logits = _semantic_seg_model(**inputs).logits  # [1, C, h/4, w/4]
+        upsampled = torch.nn.functional.interpolate(
+            logits, size=(int(target_h), int(target_w)), mode="bilinear", align_corners=False
+        )
+        label_map = upsampled.argmax(dim=1)[0].cpu().numpy().astype(np.int32)
+        return label_map
+    except Exception as e:
+        logger.warning(f"Semantic label map computation failed: {e}")
+        return None
+
+
+def resolve_class_hint(
+    mask_binary: np.ndarray,
+    semantic_label_map: np.ndarray | None,
+    *,
+    bbox: list[float],
+    area: float,
+    img_w: int,
+    img_h: int,
+    stability_score: float,
+    image: np.ndarray | None,
+    scale: float,
+    prompted_mode: bool = False,
+    prompt_points: list[dict] | None = None,
+) -> str:
+    """Combined classification: trust the semantic model for the classes it
+    reliably overrides (sky/vehicle/vegetation/...); otherwise fall back to the
+    geometry heuristic (roof-vs-wall split, facade elements, etc.)."""
+    try:
+        override = model_override_class_for_mask(
+            mask_binary, semantic_label_map, _semantic_id2label, SEMANTIC_CLASSIFIER_MIN_AGREEMENT
+        )
+    except Exception:
+        override = None
+    if override is not None:
+        return override
+    return classify_mask_region(
+        bbox=bbox,
+        area=area,
+        img_w=img_w,
+        img_h=img_h,
+        stability_score=stability_score,
+        original_image_bgr=image,
+        mask_binary=mask_binary,
+        scale=scale,
+        prompted_mode=prompted_mode,
+        prompt_points=prompt_points,
+    )
 
 
 def classify_mask_region(
@@ -1833,6 +1963,21 @@ async def segment_image(
     t_polygon_total = 0.0
     t_classify_total = 0.0
 
+    # Semantic classifier — compute a per-pixel ADE20K label map once for the
+    # whole image; each mask is majority-voted against it so the model can
+    # override the heuristic for sky/vehicle/vegetation/etc. Fully fail-safe.
+    semantic_label_map = None
+    if SEMANTIC_CLASSIFIER_ENABLED and len(sam_masks) > 0:
+        try:
+            if load_semantic_classifier() is not None:
+                _ref = sam_masks[0]["segmentation"]
+                semantic_label_map = compute_semantic_label_map(image, _ref.shape[0], _ref.shape[1])
+                if semantic_label_map is not None:
+                    logger.info(f"[Classifier] semantic label map ready: shape={semantic_label_map.shape}")
+        except Exception as e:
+            logger.warning(f"[Classifier] semantic classifier unavailable, using heuristic: {e}")
+            semantic_label_map = None
+
     for idx, sam_mask in enumerate(sam_masks):
         mask_binary = sam_mask["segmentation"]
         bbox = sam_mask["bbox"]
@@ -1862,14 +2007,15 @@ async def segment_image(
             area_px = int(area_px / (scale * scale))
 
         t_cls = time.time()
-        class_hint = classify_mask_region(
+        class_hint = resolve_class_hint(
+            mask_binary,
+            semantic_label_map,
             bbox=bbox,
             area=float(area_px),
             img_w=orig_w,
             img_h=orig_h,
             stability_score=stability,
-            original_image_bgr=image,
-            mask_binary=mask_binary,
+            image=image,
             scale=scale,
         )
         t_classify_total += (time.time() - t_cls) * 1000
@@ -2176,6 +2322,17 @@ async def segment_prompted(
     # Process masks into polygon-based results (same as /segment)
     result_masks: list[SegmentationMask] = []
 
+    # Semantic classifier label map (once for the image) — see /segment.
+    semantic_label_map = None
+    if SEMANTIC_CLASSIFIER_ENABLED and len(sam_masks) > 0:
+        try:
+            if load_semantic_classifier() is not None:
+                _ref = sam_masks[0]["segmentation"]
+                semantic_label_map = compute_semantic_label_map(image, _ref.shape[0], _ref.shape[1])
+        except Exception as e:
+            logger.warning(f"[Classifier] semantic classifier unavailable, using heuristic: {e}")
+            semantic_label_map = None
+
     for idx, sam_mask in enumerate(sam_masks):
         mask_binary = sam_mask["segmentation"]
         bbox = sam_mask["bbox"]
@@ -2200,14 +2357,15 @@ async def segment_prompted(
             bbox = [v / scale for v in bbox]
             area_px = int(area_px / (scale * scale))
 
-        class_hint = classify_mask_region(
+        class_hint = resolve_class_hint(
+            mask_binary,
+            semantic_label_map,
             bbox=bbox,
             area=float(area_px),
             img_w=orig_w,
             img_h=orig_h,
             stability_score=stability,
-            original_image_bgr=image,
-            mask_binary=mask_binary,
+            image=image,
             scale=scale,
             prompted_mode=True,
             prompt_points=prompt_points,
