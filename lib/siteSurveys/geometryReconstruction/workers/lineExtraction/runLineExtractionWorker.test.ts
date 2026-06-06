@@ -391,6 +391,31 @@ describe('classifyLine — roof region containment (Pass 3F)', () => {
     expect(result).toBeNull();
   });
 
+  it('does NOT classify a horizontal line on a WALL-only mask as eave', () => {
+    // The wall->eave flood: every horizontal siding/trim/shadow line on a wall
+    // used to become an "eave". A wall-only horizontal must NOT be an eave now.
+    const wallMask = makeWallMask(); // (200,300)-(800,600)
+    const wallHorizontal = makeLine(250, 450, 750, 450);
+    const result = classifyLine(wallHorizontal, [wallMask]);
+    expect(result).not.toBe('eave');
+    expect(result).toBeNull();
+  });
+
+  it('still classifies a vertical line on a wall as wall_vertical', () => {
+    const wallMask = makeWallMask();
+    const wallVertical = makeLine(250, 320, 250, 580);
+    expect(classifyLine(wallVertical, [wallMask])).toBe('wall_vertical');
+  });
+
+  it('still classifies a true eave at the wall-roof boundary (overlaps roof)', () => {
+    // A horizontal line overlapping a roof mask is a real eave — caught by the
+    // roof branch, unaffected by the wall-eave change.
+    const roofMask = makeRoofMask(100, 100, 400, 300); // (100,100)-(500,400)
+    const eave = makeLine(140, 380, 460, 380); // low in the roof region
+    const result = classifyLine(eave, [roofMask]);
+    expect(['eave', 'ridge', 'rake']).toContain(result);
+  });
+
   it('keeps a low eave that hugs the roof bottom boundary (within margin)', () => {
     // Horizontal eave near the very bottom of the roof — should survive the
     // containment guard thanks to the tolerance margin.

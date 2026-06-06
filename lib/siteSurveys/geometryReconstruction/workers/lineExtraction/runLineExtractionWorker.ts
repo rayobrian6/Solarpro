@@ -37,7 +37,7 @@ import sharp from 'sharp';
 // Constants
 // ---------------------------------------------------------------------------
 
-export const LINE_EXTRACTION_WORKER_VERSION = '3.4.0-roof-containment-exclude-masks-merge-gap-pass-3f';
+export const LINE_EXTRACTION_WORKER_VERSION = '3.5.0-wall-eave-semantics-pass-3f';
 
 /** Standard limitations for line extraction artifacts. */
 const LINE_EXTRACTION_LIMITATIONS = [
@@ -1096,12 +1096,17 @@ export function classifyLine(
     }
   }
 
-  // Wall lines
+  // Wall lines.
+  // A horizontal line on a wall is NOT automatically an eave. A real eave is the
+  // wall-roof boundary, which overlaps a roof mask and is already classified by
+  // the roof branch above. Wall-ONLY horizontals are siding/trim/shadow lines —
+  // and were the dominant source of overlay clutter (one spurious "eave" per
+  // wall edge × dozens of wall masks). Emit only vertical wall edges here; drop
+  // wall-only horizontals (a missing line beats a rogue line). The wall bottom
+  // (foundation) line is inferred separately by inferWallBottomEdge().
   if (hasWall) {
     if (isVertical) {
       return 'wall_vertical';
-    } else if (isHorizontal) {
-      return 'eave'; // Wall-roof boundary
     }
   }
 
