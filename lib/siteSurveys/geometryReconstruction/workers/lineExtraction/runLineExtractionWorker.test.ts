@@ -35,6 +35,7 @@ import {
   lineOverlapsMask,
   classifyLine,
   deduplicateNearParallelLines,
+  isLineEligibleMask,
   type LineSegment,
 } from './runLineExtractionWorker';
 
@@ -398,6 +399,54 @@ describe('classifyLine — roof region containment (Pass 3F)', () => {
     const result = classifyLine(lowEave, [roofMask]);
     expect(result).not.toBeNull();
     expect(['eave', 'ridge', 'rake']).toContain(result);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. PASS 3F: EXCLUDED MASKS DO NOT FEED LINE EXTRACTION
+//    Masks with excludeFromGeometry=true or participatesInLines=false must be
+//    filtered out before line detection/classification (mirrors plane extraction),
+//    so they neither produce lines nor inflate the roof-region bbox.
+// ---------------------------------------------------------------------------
+
+describe('isLineEligibleMask — exclusion filter (Pass 3F)', () => {
+  it('rejects masks flagged excludeFromGeometry=true', () => {
+    const mask = makeRoofMask(0, 0, 980, 540);
+    mask.excludeFromGeometry = true;
+    expect(isLineEligibleMask(mask)).toBe(false);
+  });
+
+  it('rejects masks with participation.participatesInLines=false', () => {
+    const mask = makeRoofMask(0, 0, 980, 540);
+    mask.participation = {
+      participatesInLines: false,
+      participatesInPlanes: false,
+      participatesInDepthFusion: false,
+      participatesInPhotogrammetry: false,
+    };
+    expect(isLineEligibleMask(mask)).toBe(false);
+  });
+
+  it('accepts a normal roof mask with no exclusion flags', () => {
+    const mask = makeRoofMask(100, 100, 400, 300);
+    expect(isLineEligibleMask(mask)).toBe(true);
+  });
+
+  it('accepts a mask whose participation is undefined (defaults to eligible)', () => {
+    const mask = makeRoofMask(100, 100, 400, 300);
+    expect(mask.participation).toBeUndefined();
+    expect(isLineEligibleMask(mask)).toBe(true);
+  });
+
+  it('accepts a mask that participates in lines even if it does not participate in planes', () => {
+    const mask = makeRoofMask(100, 100, 400, 300);
+    mask.participation = {
+      participatesInLines: true,
+      participatesInPlanes: false,
+      participatesInDepthFusion: true,
+      participatesInPhotogrammetry: true,
+    };
+    expect(isLineEligibleMask(mask)).toBe(true);
   });
 });
 

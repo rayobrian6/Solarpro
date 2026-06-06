@@ -37,7 +37,7 @@ import sharp from 'sharp';
 // Constants
 // ---------------------------------------------------------------------------
 
-export const LINE_EXTRACTION_WORKER_VERSION = '3.2.0-roof-region-containment-pass-3f';
+export const LINE_EXTRACTION_WORKER_VERSION = '3.3.0-roof-region-containment-exclude-masks-pass-3f';
 
 /** Standard limitations for line extraction artifacts. */
 const LINE_EXTRACTION_LIMITATIONS = [
@@ -926,6 +926,19 @@ export function lineOverlapsMask(line: LineSegment, mask: SemanticSegmentationMa
 }
 
 /**
+ * Whether a mask is eligible to produce / support structural lines.
+ *
+ * Pass 3F — Excluded masks (giant sky regions, suppressed false roofs,
+ * vehicles) and masks explicitly flagged participatesInLines=false must not
+ * generate structural lines, and must not inflate the roof bounding box used
+ * for roof-region containment in classifyLine. Mirrors the exclusion filter
+ * already applied in plane extraction (runPlaneExtractionWorker).
+ */
+export function isLineEligibleMask(mask: SemanticSegmentationMask): boolean {
+  return mask.excludeFromGeometry !== true && mask.participation?.participatesInLines !== false;
+}
+
+/**
  * Get all masks for a specific file ID, filtered to structure-qualified classes only.
  */
 function getStructureMasksForFile(fileId: string, masks: SemanticSegmentationMask[]): SemanticSegmentationMask[] {
@@ -1417,13 +1430,24 @@ export async function runLineExtractionWorker(input: LineExtractionWorkerInput):
 
   const t0 = Date.now();
 
+  // Pass 3F — Only line-eligible masks feed line extraction. Excluded masks
+  // (giant sky regions, suppressed false roofs, vehicles) must not produce
+  // structural lines and must not inflate the roof bounding box used for
+  // roof-region containment in classifyLine.
+  const lineEligibleMasks = input.masks.filter(isLineEligibleMask);
+  const droppedMaskCount = input.masks.length - lineEligibleMasks.length;
+  if (droppedMaskCount > 0) {
+    console.info(
+      `[LineExtraction] Excluded ${droppedMaskCount}/${input.masks.length} non-line-participating masks (excludeFromGeometry / participatesInLines=false)`,
+    );
+  }
+
   // Group masks by file ID
   const masksByFile = new Map<string, SemanticSegmentationMask[]>();
-  for (const mask of input.masks) {
-    if (!masksByFile.has(mask.fileId)) {
-      masksByFile.set(mask.fileId, []);
-    }
-    masksByFile.get(mask.fileId)!.push(mask);
+  for (const mask of lineEligibleMasks) {
+    const arr = masksByFile.get(mask.fileId);
+    if (arr) arr.push(mask);
+    else masksByFile.set(mask.fileId, [mask]);
   }
 
   // Process each photo that has both image bytes AND masks
