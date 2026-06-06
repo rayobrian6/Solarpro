@@ -338,6 +338,70 @@ describe('classifyLine — minimum overlap threshold (Pass 3D Fix B)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 5. PASS 3F: ROOF REGION CONTAINMENT
+//    Roof lines whose endpoints fall outside the roof masks' bounding box
+//    (full-frame diagonals merged across gaps) must be rejected, while lines
+//    contained within the roof region are still classified.
+// ---------------------------------------------------------------------------
+
+describe('classifyLine — roof region containment (Pass 3F)', () => {
+  it('rejects a roof-overlapping diagonal whose endpoint extends far outside the roof', () => {
+    // Roof mask spans (100,100)-(500,400). A diagonal starts inside the roof
+    // but runs down to (900,900) — deep in the ground/foreground, well beyond
+    // the roof bbox + margin. This is the full-frame "crisscross" pattern.
+    const roofMask = makeRoofMask(100, 100, 400, 300);
+    const runawayDiagonal = makeLine(200, 200, 900, 900);
+
+    const result = classifyLine(runawayDiagonal, [roofMask]);
+    expect(result).toBeNull();
+  });
+
+  it('still classifies a diagonal roof line contained within the roof region', () => {
+    // Same roof; a diagonal that stays inside the roof bbox → legitimate rake.
+    const roofMask = makeRoofMask(100, 100, 400, 300);
+    const containedDiagonal = makeLine(200, 200, 450, 350);
+
+    const result = classifyLine(containedDiagonal, [roofMask]);
+    expect(result).not.toBeNull();
+    expect(['ridge', 'eave', 'rake', 'valley', 'hip']).toContain(result);
+  });
+
+  it('still classifies a valley running along the seam between two adjacent roofs', () => {
+    // Two roof masks side by side, combined bbox (100,100)-(500,400).
+    // A diagonal near the seam, fully contained, crossing both → valley/hip.
+    const roofA = makeRoofMask(100, 100, 200, 300); // (100,100)-(300,400)
+    const roofB = makeRoofMask(300, 100, 200, 300); // (300,100)-(500,400)
+    const seamLine = makeLine(250, 150, 350, 380);
+
+    const result = classifyLine(seamLine, [roofA, roofB], [roofA, roofB]);
+    expect(result).not.toBeNull();
+    expect(['valley', 'hip']).toContain(result);
+  });
+
+  it('rejects a frame-spanning diagonal across two roofs whose ends land off-roof', () => {
+    // Two roofs in the upper band; a long diagonal grazes them but its endpoints
+    // sit in the sky (top-left) and ground (bottom-right) — must NOT become a valley.
+    const roofA = makeRoofMask(100, 120, 250, 180); // (100,120)-(350,300)
+    const roofB = makeRoofMask(380, 120, 250, 180); // (380,120)-(630,300)
+    const fullFrameDiagonal = makeLine(120, 130, 950, 880);
+
+    const result = classifyLine(fullFrameDiagonal, [roofA, roofB], [roofA, roofB]);
+    expect(result).toBeNull();
+  });
+
+  it('keeps a low eave that hugs the roof bottom boundary (within margin)', () => {
+    // Horizontal eave near the very bottom of the roof — should survive the
+    // containment guard thanks to the tolerance margin.
+    const roofMask = makeRoofMask(100, 100, 400, 300); // (100,100)-(500,400)
+    const lowEave = makeLine(140, 390, 460, 390);
+
+    const result = classifyLine(lowEave, [roofMask]);
+    expect(result).not.toBeNull();
+    expect(['eave', 'ridge', 'rake']).toContain(result);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 5. PASS 3D: REJECTED CLASSES EXPANDED
 //    (Fix C — bushes, fence, vegetation_touching_structure, etc.)
 // ---------------------------------------------------------------------------

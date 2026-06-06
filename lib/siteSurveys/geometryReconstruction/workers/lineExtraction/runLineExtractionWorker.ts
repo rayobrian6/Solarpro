@@ -37,7 +37,7 @@ import sharp from 'sharp';
 // Constants
 // ---------------------------------------------------------------------------
 
-export const LINE_EXTRACTION_WORKER_VERSION = '3.1.0-tuning-pass-3d';
+export const LINE_EXTRACTION_WORKER_VERSION = '3.2.0-roof-region-containment-pass-3f';
 
 /** Standard limitations for line extraction artifacts. */
 const LINE_EXTRACTION_LIMITATIONS = [
@@ -64,6 +64,18 @@ const MAX_LINES_PER_PHOTO = 15;
  * noise or very weak edges that produce rogue structural lines.
  */
 const MIN_CONFIDENCE = 45;
+
+/**
+ * Pass 3F — Roof-region containment margins. A real roof edge (ridge, eave,
+ * rake, valley, hip) cannot extend beyond the roof masks it belongs to. Lines
+ * whose endpoints fall outside the overlapping roof masks' bounding box —
+ * expanded by this tolerance — are rejected. This kills full-frame diagonal
+ * "valley"/"rake" lines (produced when collinear roof-edge fragments are merged
+ * across gaps, with endpoints landing in sky/ground/foreground) that would
+ * otherwise dominate the overlay because line confidence rewards length.
+ */
+const ROOF_REGION_MARGIN_FRACTION = 0.15; // 15% of the roof bbox dimension
+const ROOF_REGION_MARGIN_MIN = 40;        // absolute floor in 0-1000 coord space
 
 /** Canny edge detection threshold range — multi-scale will use these as base values. */
 const CANNY_LOW_THRESHOLD = 40;
@@ -971,20 +983,38 @@ export function classifyLine(
   const hasWall = overlappingClasses.has('wall') || overlappingClasses.has('siding');
   const hasFascia = overlappingClasses.has('fascia') || overlappingClasses.has('soffit') || overlappingClasses.has('gutter');
 
-  // Compute relative position within roof masks for ridge/eave disambiguation.
+  // Compute relative position within roof masks for ridge/eave disambiguation,
+  // and whether the line is geometrically contained within the roof region.
   const roofMasks = overlappingMasks.filter(m => m.segmentationClass === 'roof');
   let relativeRoofY = 0.5;
+  // Pass 3F — Roof region containment. A real roof edge cannot extend beyond the
+  // roof masks it lies on. Reject roof lines whose endpoints fall outside the
+  // overlapping roof masks' bounding box, expanded by a tolerance margin so
+  // edges that hug the boundary survive. See ROOF_REGION_MARGIN_* for rationale.
+  let lineWithinRoofRegion = true;
   if (roofMasks.length > 0) {
-    let roofMinY = Infinity, roofMaxY = -Infinity;
+    let roofMinX = Infinity, roofMinY = Infinity, roofMaxX = -Infinity, roofMaxY = -Infinity;
     for (const rm of roofMasks) {
       if (rm.maskBounds) {
+        roofMinX = Math.min(roofMinX, rm.maskBounds.x);
         roofMinY = Math.min(roofMinY, rm.maskBounds.y);
+        roofMaxX = Math.max(roofMaxX, rm.maskBounds.x + rm.maskBounds.width);
         roofMaxY = Math.max(roofMaxY, rm.maskBounds.y + rm.maskBounds.height);
       }
     }
     if (roofMinY < Infinity && roofMaxY > roofMinY) {
       relativeRoofY = (avgY - roofMinY) / (roofMaxY - roofMinY);
       relativeRoofY = Math.max(0, Math.min(1, relativeRoofY));
+
+      const marginX = Math.max(ROOF_REGION_MARGIN_MIN, (roofMaxX - roofMinX) * ROOF_REGION_MARGIN_FRACTION);
+      const marginY = Math.max(ROOF_REGION_MARGIN_MIN, (roofMaxY - roofMinY) * ROOF_REGION_MARGIN_FRACTION);
+      const withinX = (x: number): boolean => x >= roofMinX - marginX && x <= roofMaxX + marginX;
+      const withinY = (y: number): boolean => y >= roofMinY - marginY && y <= roofMaxY + marginY;
+      // A straight line lies inside a convex (rectangular) region iff both
+      // endpoints do — so endpoint containment is sufficient.
+      lineWithinRoofRegion =
+        withinX(line.start.x) && withinY(line.start.y) &&
+        withinX(line.end.x) && withinY(line.end.y);
     }
   }
 
@@ -1001,7 +1031,7 @@ export function classifyLine(
   // We also check if the line runs along the BOUNDARY between two adjacent
   // roof masks (not just overlapping one mask that happens to be segmented
   // as a single region).
-  if (hasRoof && isDiagonal) {
+  if (hasRoof && isDiagonal && lineWithinRoofRegion) {
     const roofMaskCount = roofMasks.length;
     // Use all roof masks (not just overlapping) for boundary detection
     const allRoof = allRoofMasks ?? roofMasks;
@@ -1022,8 +1052,10 @@ export function classifyLine(
     }
   }
 
-  // Classification logic — roof lines first (most important)
-  if (hasRoof) {
+  // Classification logic — roof lines first (most important).
+  // Gated on roof-region containment: a roof line extending beyond the roof
+  // masks is spurious and falls through (diagonals then resolve to null).
+  if (hasRoof && lineWithinRoofRegion) {
     if (isHorizontal) {
       if (relativeRoofY < 0.4) {
         return 'ridge'; // Upper portion of roof → ridge
