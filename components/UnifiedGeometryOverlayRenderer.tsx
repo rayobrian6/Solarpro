@@ -50,6 +50,7 @@ import {
 } from '@/lib/siteSurveys/geometryReconstruction/types';
 import {
   isCleanVisibleRoofLine,
+  isCleanHiddenMask,
 } from '@/lib/siteSurveys/unifiedGeometry/overlayVisibility';
 
 /* ── Types ────────────────────────────────────────────────────────────── */
@@ -726,6 +727,9 @@ export function UnifiedGeometryOverlayRenderer({
         // TASK 4: Hide background segmentationClass in normal mode
         if (a.segmentationClass === 'background' && !showDebugOverlays) return false;
         if (!showDebugOverlays && !isSegmentationMaskGeometryParticipant(a)) return false;
+        // Priority 4 — Commit B: hide ALL segmentation masks in clean view (they
+        // are raw intermediates; planes represent the geometry). Debug shows all.
+        if (!showDebugOverlays && isCleanHiddenMask(a)) return false;
         // Apply class filter
         if (geometryClassFilter && geometryClassFilter.size > 0 && !geometryClassFilter.has(a.geometryClass))
           return false;
