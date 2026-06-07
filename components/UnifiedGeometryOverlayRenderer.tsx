@@ -1401,26 +1401,30 @@ export function buildFilesWithUnifiedArtifacts(
   const grouped = new Map<string, FileWithUnifiedArtifacts>();
   const surveyLevelArtifacts: UnifiedGeometryArtifact[] = [];
   for (const artifact of artifacts) {
-    // An artifact may be associated with one or more source files.
-    // Use the first sourceFileId as the primary grouping key.
-    const fileId = artifact.provenance?.sourceFileIds?.[0];
-    if (!fileId) {
-      // Survey-level artifacts (e.g., consensus planes) have no sourceFileIds.
-      // Collect them separately so they can be distributed across all file groups.
+    // Priority 4 — Commit D: an artifact may be derived from MULTIPLE source
+    // photos (notably consensus planes). Associate it with EVERY real source
+    // photo, not just sourceFileIds[0], so consensus/multi-source geometry
+    // appears on every photo it was actually derived from — and on none else.
+    const realFileIds = (artifact.provenance?.sourceFileIds ?? []).filter((f) => fileMap.has(f));
+    if (realFileIds.length === 0) {
+      // No identifiable source photo (e.g., truly survey-level) — distribute to
+      // all groups below (fallback preserves prior behavior).
       surveyLevelArtifacts.push(artifact);
       continue;
     }
 
-    if (!grouped.has(fileId)) {
-      const surveyFile = fileMap.get(fileId);
-      grouped.set(fileId, {
-        fileId,
-        fileUrl: surveyFile?.fileUrl ?? '',
-        filename: surveyFile?.filename ?? null,
-        artifacts: [],
-      });
+    for (const fileId of new Set(realFileIds)) {
+      if (!grouped.has(fileId)) {
+        const surveyFile = fileMap.get(fileId);
+        grouped.set(fileId, {
+          fileId,
+          fileUrl: surveyFile?.fileUrl ?? '',
+          filename: surveyFile?.filename ?? null,
+          artifacts: [],
+        });
+      }
+      grouped.get(fileId)!.artifacts.push(artifact);
     }
-    grouped.get(fileId)!.artifacts.push(artifact);
   }
 
   // Distribute survey-level artifacts across all file groups so they appear
