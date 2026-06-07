@@ -48,6 +48,9 @@ import {
   CONDITION_SEGMENTATION_CLASSES,
   type SegmentationClass,
 } from '@/lib/siteSurveys/geometryReconstruction/types';
+import {
+  isCleanVisibleRoofLine,
+} from '@/lib/siteSurveys/unifiedGeometry/overlayVisibility';
 
 /* ── Types ────────────────────────────────────────────────────────────── */
 
@@ -728,6 +731,10 @@ export function UnifiedGeometryOverlayRenderer({
           return false;
         // Filter low-confidence roof lines using effective threshold
         if (a.geometryClass === 'roof_line' && (a.confidence ?? 0) < effectiveMinConfidence) return false;
+        // Priority 4 — Commit A: clean view shows only trusted roof-perimeter
+        // lines (ridge/eave/rake/valley/hip); hide raw wall_bottom_edge /
+        // wall_vertical candidates. Debug roof-lines mode shows all subtypes.
+        if (!showDebugRoofLines && !isCleanVisibleRoofLine(a)) return false;
         // TASK 4: Filter very low confidence unknown artifacts in normal mode
         if (a.geometryClass === 'unknown' && (a.confidence ?? 0) < 40 && !showDebugOverlays) return false;
         return true;
