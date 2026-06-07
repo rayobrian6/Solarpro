@@ -868,6 +868,48 @@ function mapObstructionTypeToSubtype(obstructionType: string | null): string {
  * @param artifact - The fully-populated UnifiedGeometryArtifact to persist
  * @returns true if the row was inserted, false if it already existed or on error
  */
+/**
+ * Upsert a UnifiedGeometryArtifact, UPDATING authority/state/geometry on
+ * conflict (id). Used after promotion so the unified table reflects the new
+ * authority state. worldPolygon and all other fields ride inside geometry_data.
+ */
+export async function upsertUnifiedArtifact(artifact: UnifiedGeometryArtifact): Promise<void> {
+  const sql = await getDbReady();
+  await sql`
+    INSERT INTO unified_geometry_artifacts (
+      id, survey_id, geometry_class, authority_state, authority,
+      provenance, confidence, label, limitations, geometry_data,
+      review_state, review_notes, priority, mock_artifact, created_at, updated_at
+    ) VALUES (
+      ${artifact.id},
+      ${artifact.surveyId},
+      ${artifact.geometryClass},
+      ${artifact.authority.state},
+      ${JSON.stringify(artifact.authority)}::jsonb,
+      ${JSON.stringify(artifact.provenance)}::jsonb,
+      ${artifact.confidence},
+      ${artifact.label},
+      ${artifact.limitations ?? []}::text[],
+      ${JSON.stringify(artifact)}::jsonb,
+      ${artifact.reviewState ?? 'review_required'},
+      ${artifact.reviewNotes ?? null},
+      ${artifact.priority ?? 'medium'},
+      ${artifact.authority.mockArtifact ?? false},
+      NOW()::timestamptz,
+      NOW()::timestamptz
+    )
+    ON CONFLICT (id) DO UPDATE SET
+      authority_state = EXCLUDED.authority_state,
+      authority       = EXCLUDED.authority,
+      provenance      = EXCLUDED.provenance,
+      confidence      = EXCLUDED.confidence,
+      review_state    = EXCLUDED.review_state,
+      mock_artifact   = EXCLUDED.mock_artifact,
+      geometry_data   = EXCLUDED.geometry_data,
+      updated_at      = NOW()::timestamptz
+  `;
+}
+
 export async function writeUnifiedArtifact(
   artifact: UnifiedGeometryArtifact,
 ): Promise<boolean> {
