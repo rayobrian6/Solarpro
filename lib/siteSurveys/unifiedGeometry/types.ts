@@ -61,6 +61,22 @@ export interface GeometryBBox {
 }
 
 /**
+ * A roof plane outline in real-world WGS84 lat/lng — the AUTHORITATIVE geometry
+ * the permit planset consumes (Roadmap Phase 1: survey→canonical→planset spine).
+ *
+ * This is distinct from `GeometryPolygon` (image/local-meters, used for photo
+ * overlays and CAD-local placement). It is populated from aerial/Google Solar
+ * roofSegmentStats (Phase 1) or an operator satellite trace (Phase 2), and is
+ * source-agnostic so both paths converge on the same shape.
+ */
+export interface WorldRoofPolygon {
+  /** Polygon vertices in WGS84 lat/lng. */
+  vertices: { lat: number; lng: number }[];
+  /** Optional per-edge classification (ridge/eave/rake/hip/valley). */
+  edgeTypes?: string[];
+}
+
+/**
  * A 2D line segment in a specific coordinate system.
  */
 export interface GeometryLineSegment {
@@ -344,6 +360,11 @@ export interface UnifiedGeometryArtifact {
 
   /** Polygon outline (planes, segmentation masks, consensus planes) */
   polygon: GeometryPolygon | null;
+
+  /** Authoritative real-world (lat/lng) roof outline, when available — from
+   *  aerial/Google Solar or an operator trace. Consumed by the permit planset;
+   *  independent of the image-space `polygon`. */
+  worldPolygon?: WorldRoofPolygon | null;
 
   /** Line segment (roof lines) */
   lineSegment: GeometryLineSegment | null;
@@ -827,6 +848,9 @@ export interface CanonicalBuildingModel {
 export interface CanonicalRoofPlane {
   id: string;
   polygon?: GeometryPolygon;  // local_meters_xy — undefined when source artifact lacks geometry
+  /** Authoritative real-world (lat/lng) outline — the geometry the permit
+   *  planset consumes. Present for aerial/Solar and operator-trace planes. */
+  worldPolygon?: WorldRoofPolygon;
   /** If true, the source artifact had neither polygon nor bbox.
    *  Downstream consumers (CAD bridge, permit engine) MUST reject or flag
    *  degraded planes — never silently use them for layout generation. */

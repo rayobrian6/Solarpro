@@ -34,6 +34,7 @@ import {
 } from '@/lib/siteSurveys/unifiedGeometry';
 import type { UnifiedGeometryArtifact } from '@/lib/siteSurveys/unifiedGeometry/types';
 import { getUnifiedArtifactsForSurvey } from '@/lib/siteSurveys/unifiedGeometry/unifiedArtifactStore';
+import { writeCanonicalModel } from '@/lib/siteSurveys/unifiedGeometry/canonicalModelStore';
 import { getContradictionReportsBySurvey } from '@/lib/db/geometryReconstruction';
 import type { DepthContradictionReport } from '@/lib/siteSurveys/geometryReconstruction/types';
 
@@ -151,9 +152,26 @@ export async function POST(
       { ...body.config, contradictionReports },
     );
 
+    // ── Persist the canonical model (Roadmap Phase 1 — the spine) ───────────
+    // Previously the model was built and returned but never stored, so nothing
+    // downstream could consume it. Persist it (upsert, one row per survey) so
+    // the permit planset can read authoritative roof geometry. Non-fatal: a
+    // write failure still returns the freshly built model to the caller.
+    let persisted = false;
+    try {
+      await writeCanonicalModel(model);
+      persisted = true;
+    } catch (persistErr) {
+      console.warn(
+        `[POST /unified-geometry/canonical-model] Failed to persist canonical model for survey ${surveyId} (non-fatal):`,
+        persistErr instanceof Error ? persistErr.message : String(persistErr),
+      );
+    }
+
     return NextResponse.json({
       success: true,
       model,
+      persisted,
       summary: {
         surveyId,
         roofPlaneCount: model.roofPlanes.length,

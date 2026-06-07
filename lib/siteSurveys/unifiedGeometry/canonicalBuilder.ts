@@ -221,13 +221,18 @@ export class CanonicalModelBuilder {
     // Use polygon if available; otherwise construct from bbox
     const polygon = artifact.polygon ?? this.inferPolygonFromBBox(artifact);
 
+    // Phase 1: authoritative real-world (lat/lng) outline from aerial/Solar or an
+    // operator trace. This is the geometry the permit planset actually consumes;
+    // a plane that has it is NOT degraded even without an image-space polygon.
+    const worldPolygon = artifact.worldPolygon ?? undefined;
+
     // CRITICAL: Do NOT silently fabricate a 100×100 placeholder polygon.
     // That garbage geometry would flow into CAD without any warning, producing
     // nonsensical panel layouts. Instead, mark the plane as degraded so
     // downstream consumers (CAD bridge, permit engine) can reject or flag it.
-    if (!polygon) {
+    if (!polygon && !worldPolygon) {
       console.error(
-        `[CANONICAL_BUILDER] Roof plane artifact ${artifact.id} has neither polygon nor bbox — ` +
+        `[CANONICAL_BUILDER] Roof plane artifact ${artifact.id} has no polygon, bbox, or worldPolygon — ` +
         'marking as degraded. Downstream consumers MUST NOT use this geometry for CAD/permit output.'
       );
     }
@@ -235,7 +240,8 @@ export class CanonicalModelBuilder {
     return {
       id: uuid(),
       polygon: polygon ?? undefined,
-      degradedNoGeometry: !polygon,
+      worldPolygon,
+      degradedNoGeometry: !polygon && !worldPolygon,
       pitchDegrees: artifact.pitchDegrees ?? 0,
       azimuthDegrees: artifact.azimuthDegrees ?? 0,
       areaSqM: artifact.areaSqM ?? 0,
