@@ -51,6 +51,7 @@ import {
 import {
   isCleanVisibleRoofLine,
   isCleanHiddenMask,
+  isCleanVisiblePlane,
 } from '@/lib/siteSurveys/unifiedGeometry/overlayVisibility';
 
 /* ── Types ────────────────────────────────────────────────────────────── */
@@ -730,6 +731,9 @@ export function UnifiedGeometryOverlayRenderer({
         // Priority 4 — Commit B: hide ALL segmentation masks in clean view (they
         // are raw intermediates; planes represent the geometry). Debug shows all.
         if (!showDebugOverlays && isCleanHiddenMask(a)) return false;
+        // Priority 4 — Commit C: in clean view hide polygon-less / oversized
+        // (full-frame) / low-confidence planes. Debug shows all planes.
+        if (!showDebugOverlays && !isCleanVisiblePlane(a)) return false;
         // Apply class filter
         if (geometryClassFilter && geometryClassFilter.size > 0 && !geometryClassFilter.has(a.geometryClass))
           return false;
@@ -1098,6 +1102,16 @@ function PhotoWithUnifiedOverlays({
           const isStructural = isStructuralClass((entry.artifact.segmentationClass as SegmentationClass | null) ?? 'sky') || entry.artifact.geometryClass === 'wall_plane' || entry.artifact.geometryClass === 'roof_plane';
           const fillOpacity = isHovered ? 0.2 : excludedFillOpacity ?? undefined;
           const structuralFillOpacity = isStructural ? 0.18 : 0.12;
+          // Priority 4 — Commit C: in clean view, foreground planes as outlines
+          // with very low fill so overlapping translucent planes don't stack into
+          // an opaque flood. Debug view keeps the normal fill (unchanged).
+          const isPlaneClass = entry.artifact.geometryClass === 'roof_plane'
+            || entry.artifact.geometryClass === 'wall_plane'
+            || entry.artifact.geometryClass === 'consensus_plane'
+            || entry.artifact.geometryClass === 'ground_plane';
+          const effectiveStructuralFillOpacity = (!showDebugOverlays && isPlaneClass)
+            ? 0.05
+            : structuralFillOpacity;
           const strokeDash = entry.artifact.authority?.mockArtifact ? '1,1'
             : entry.artifact.isOccluder ? '6,3'  // Dashed lines for occluders
             : excludedStrokeDash ?? 'none';  // Pass 3E: excluded masks get 4,4 dash
@@ -1112,7 +1126,7 @@ function PhotoWithUnifiedOverlays({
                 <polygon
                   points={entry.polygonSvg.points}
                   fill={isRoofLine ? 'none' : entry.color.stroke}
-                  fillOpacity={fillOpacity ?? (isRoofLine ? 0 : structuralFillOpacity)}
+                  fillOpacity={fillOpacity ?? (isRoofLine ? 0 : effectiveStructuralFillOpacity)}
                   stroke={lineStroke}
                   strokeWidth={strokeWidth}
                   strokeDasharray={lineDash}
