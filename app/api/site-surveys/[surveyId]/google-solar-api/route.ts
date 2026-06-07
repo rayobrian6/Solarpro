@@ -44,7 +44,8 @@ import { isValidUUID, getSiteSurveyById, GetSiteSurveyByIdOptions } from '@/lib/
 import { getProjectById } from '@/lib/db/projects';
 import { fetchBuildingInsights, isGoogleSolarApiConfigured } from '@/lib/siteSurveys/googleSolarApi/client';
 import type { BuildingInsightsResponse } from '@/lib/siteSurveys/googleSolarApi/types';
-import { adaptBuildingInsightsToUnifiedArtifacts } from '@/lib/siteSurveys/googleSolarApi/adapter';
+import { adaptBuildingInsightsToUnifiedArtifacts, adaptSolarRoofSegmentsToWorldArtifacts } from '@/lib/siteSurveys/googleSolarApi/adapter';
+import type { RoofSegmentStat } from '@/lib/siteSurveys/googleSolarApi/worldRoofPlanes';
 import {
   getCachedBuildingInsights,
   setCachedBuildingInsights,
@@ -237,9 +238,34 @@ export async function POST(
     }
 
     // ─── Adapt the response to unified artifacts ──────────────────────────
-    const artifacts = adaptBuildingInsightsToUnifiedArtifacts(
+    const pixelArtifacts = adaptBuildingInsightsToUnifiedArtifacts(
       buildingInsightsData,
       surveyId,
+    );
+    // Phase 1 spine: AUTHORITATIVE lat/lng roof planes (worldPolygon) from the
+    // raw `solarPotential.roofSegmentStats`. The pixel `roofPlanes` path above is
+    // overlay-only and is empty for real Google responses; the world path is the
+    // authoritative source the canonical model + permit planset consume. We drop
+    // any pixel roof_plane duplicates so the world planes are the single source.
+    const roofSegmentStats =
+      (buildingInsightsData as unknown as {
+        solarPotential?: { roofSegmentStats?: RoofSegmentStat[] };
+      }).solarPotential?.roofSegmentStats ?? [];
+    const worldRoofArtifacts = adaptSolarRoofSegmentsToWorldArtifacts(
+      roofSegmentStats,
+      surveyId,
+      buildingInsightsData.name,
+      buildingInsightsData.imageryDate
+        ? `${buildingInsightsData.imageryDate.year}-${String(buildingInsightsData.imageryDate.month).padStart(2, '0')}`
+        : undefined,
+    );
+    const artifacts = [
+      ...pixelArtifacts.filter((a) => a.geometryClass !== 'roof_plane'),
+      ...worldRoofArtifacts,
+    ];
+    console.info(
+      `[POST google-solar-api] World roof planes from roofSegmentStats: ${worldRoofArtifacts.length} ` +
+      `(raw segments=${roofSegmentStats.length}); pixel non-roof artifacts kept=${pixelArtifacts.filter((a) => a.geometryClass !== 'roof_plane').length}`,
     );
     const roofPlaneCount = artifacts.filter((a) => a.geometryClass === 'roof_plane').length;
     const roofLineCount = artifacts.filter((a) => a.geometryClass === 'roof_line').length;
