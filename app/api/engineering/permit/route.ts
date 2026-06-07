@@ -27,6 +27,10 @@ import { collectEngineeringSurveyEvidence } from '@/lib/engineering/surveyEviden
 import { getProjectSurveyContext } from '@/lib/survey/getProjectSurveyContext';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
+// Phase 1 spine: authoritative roof geometry from the persisted canonical model
+import { getCanonicalModel } from '@/lib/siteSurveys/unifiedGeometry/canonicalModelStore';
+import { canonicalToPermitRoofPlanes, isCanonicalUsableForPlanset } from '@/lib/siteSurveys/unifiedGeometry/canonicalToPermit';
+
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';          // Ensure Node.js runtime (Buffer, child_process)
 export const maxDuration = 60;            // 60s — aerial API calls can take 10-15s total
@@ -653,6 +657,52 @@ export async function POST(req: NextRequest) {
         // Non-critical: permit still generates with design pipeline values
         console.warn('[permit/survey] Survey pipeline error (non-critical):',
           surveyErr instanceof Error ? (surveyErr as Error).message : surveyErr);
+      }
+    }
+
+    // ── Authoritative roof geometry from the persisted CanonicalBuildingModel ──
+    // (Roadmap Phase 1 — survey→canonical→planset spine.) When a survey for this
+    // project has a promoted_canonical / cad_safe model, its roof planes are the
+    // AUTHORITATIVE source and OVERRIDE design-body / placeholder planes (e.g. the
+    // pitch-20/azimuth-360 stubs). If no such model exists — nothing promoted yet,
+    // or migration 087 not applied — getCanonicalModel returns null and this is a
+    // safe no-op, leaving the prior design/survey roof planes untouched.
+    if (projectId && isValidUUID(projectId)) {
+      try {
+        const sqlCanon = await getDbReady();
+        const surveyRows = (await sqlCanon`
+          SELECT id FROM site_surveys
+          WHERE project_id = ${projectId}
+          ORDER BY created_at DESC
+        `) as Array<{ id: string }>;
+
+        let usedModel = false;
+        for (const { id: surveyId } of surveyRows) {
+          const model = await getCanonicalModel(surveyId);
+          if (!isCanonicalUsableForPlanset(model)) continue;
+          const planes = canonicalToPermitRoofPlanes(model);
+          if (planes.length === 0) continue;
+
+          (enrichedBody.project as any).roofPlanes = planes;
+          (enrichedBody.project as any).roofPlanesSource = 'canonical_building_model';
+          console.log(
+            `[permit/canonical] project.roofPlanes set from CanonicalBuildingModel ` +
+            `survey=${surveyId} planes=${planes.length} authority=${model.authority.state} ` +
+            `(authoritative override of design/placeholder geometry)`,
+          );
+          usedModel = true;
+          break;
+        }
+        if (!usedModel) {
+          console.log(
+            '[permit/canonical] No usable CanonicalBuildingModel for project', projectId,
+            '— keeping design/survey roof planes',
+          );
+        }
+      } catch (canonErr: unknown) {
+        // Non-critical: permit still generates with design/survey values
+        console.warn('[permit/canonical] Canonical model lookup error (non-critical):',
+          canonErr instanceof Error ? (canonErr as Error).message : canonErr);
       }
     }
 
