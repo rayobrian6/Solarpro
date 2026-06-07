@@ -22,6 +22,24 @@ const DEFAULT_STALE_THRESHOLD_MINUTES = 10;
  *  with no heartbeat at all are orphans. */
 const DEFAULT_ORPHAN_THRESHOLD_MINUTES = 30;
 
+/**
+ * Emit a structured lifecycle observability record (Priority 3). The daily cron
+ * is a backstop for when no worker is alive to reclaim (the primary path is the
+ * worker's heartbeat-based reclaim — Issue 2). Logged for later debugging.
+ */
+function logStaleCleanupEvent(jobId: string, previousStatus: string, reason: string): void {
+  console.info(
+    `[Lifecycle] ${JSON.stringify({
+      reclaimPath: 'stale_cleanup',
+      jobId,
+      previousStatus,
+      newStatus: 'failed',
+      reason,
+      ts: new Date().toISOString(),
+    })}`,
+  );
+}
+
 export interface StaleJobCleanupResult {
   /** Number of stale jobs marked as failed */
   staleMarkedFailed: number;
@@ -63,37 +81,49 @@ export async function markStaleJobsAsFailed(
   // embed a parameter inside INTERVAL '...' — it becomes INTERVAL '$1 minutes'
   // which is invalid. Instead, multiply INTERVAL '1 minute' by the parameter.
   const staleResult = await sql`
-    UPDATE site_survey_geometry_reconstruction_jobs
-    SET
-      status = 'failed',
-      completed_at = NOW(),
-      updated_at = NOW()
-    WHERE status IN (${ACTIVE_STATUSES[0]}, ${ACTIVE_STATUSES[2]})
-      AND last_heartbeat_at < NOW() - INTERVAL '1 minute' * ${staleThresholdMinutes}
-    RETURNING id
+    WITH stale AS (
+      SELECT id, status FROM site_survey_geometry_reconstruction_jobs
+      WHERE status IN (${ACTIVE_STATUSES[0]}, ${ACTIVE_STATUSES[2]})
+        AND last_heartbeat_at < NOW() - INTERVAL '1 minute' * ${staleThresholdMinutes}
+    )
+    UPDATE site_survey_geometry_reconstruction_jobs j
+    SET status = 'failed',
+        failure_stage = 'worker_lost',
+        completed_at = NOW(),
+        updated_at = NOW()
+    FROM stale
+    WHERE j.id = stale.id
+    RETURNING j.id, stale.status AS previous_status
   `;
 
   staleMarkedFailed = staleResult.length;
-  for (const row of staleResult as { id: string }[]) {
+  for (const row of staleResult as { id: string; previous_status: string }[]) {
     failedJobIds.push(row.id);
+    logStaleCleanupEvent(row.id, row.previous_status, `no heartbeat for > ${staleThresholdMinutes}m`);
   }
 
   // 2. Mark orphan queued jobs as failed
   // Same INTERVAL pattern as above — multiply INTERVAL '1 minute' by parameter
   const orphanResult = await sql`
-    UPDATE site_survey_geometry_reconstruction_jobs
-    SET
-      status = 'failed',
-      completed_at = NOW(),
-      updated_at = NOW()
-    WHERE status = ${ACTIVE_STATUSES[1]}
-      AND created_at < NOW() - INTERVAL '1 minute' * ${orphanThresholdMinutes}
-    RETURNING id
+    WITH orphan AS (
+      SELECT id, status FROM site_survey_geometry_reconstruction_jobs
+      WHERE status = ${ACTIVE_STATUSES[1]}
+        AND created_at < NOW() - INTERVAL '1 minute' * ${orphanThresholdMinutes}
+    )
+    UPDATE site_survey_geometry_reconstruction_jobs j
+    SET status = 'failed',
+        failure_stage = 'orphaned_queued',
+        completed_at = NOW(),
+        updated_at = NOW()
+    FROM orphan
+    WHERE j.id = orphan.id
+    RETURNING j.id, orphan.status AS previous_status
   `;
 
   orphanMarkedFailed = orphanResult.length;
-  for (const row of orphanResult as { id: string }[]) {
+  for (const row of orphanResult as { id: string; previous_status: string }[]) {
     failedJobIds.push(row.id);
+    logStaleCleanupEvent(row.id, row.previous_status, `queued but never claimed for > ${orphanThresholdMinutes}m`);
   }
 
   const result: StaleJobCleanupResult = {
