@@ -568,6 +568,14 @@ export async function getArtifactsBySurvey(
 const LOCK_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
 /**
+ * Heartbeat-staleness window (minutes) before a 'running' job is considered
+ * orphaned. The owning worker beats every 30s, so 5 min = 10 missed beats —
+ * a healthy long-running job is never reclaimed, only one whose worker is gone
+ * (crash / SIGKILL that skipped graceful requeue). Priority 3 — Issue 2.
+ */
+const RECLAIM_STALE_MINUTES = 5;
+
+/**
  * Claim the next available queued job for a worker. Atomic CAS on locked_by IS NULL.
  * Returns the claimed job (with status set to 'running') or null if no job available.
  *
@@ -579,15 +587,53 @@ export async function claimNextQueuedJob(
 ): Promise<GeometryReconstructionJob | null> {
   const sql = await getDbReady();
 
-  // First, reclaim any stale locks (locked_at > 10 min ago, still 'queued' or 'running')
-  await sql`
-    UPDATE site_survey_geometry_reconstruction_jobs
-    SET locked_by = NULL,
+  // Priority 3 — Issue 2: reclaim ORPHANED running jobs. A 'running' job whose
+  // heartbeat has gone stale means the owning worker is gone (crash/SIGKILL that
+  // skipped graceful requeue). Mark it FAILED(worker_lost) — terminal, no auto
+  // retry (deploy interruptions are retried via requeueJobForRetry instead).
+  // Keyed on HEARTBEAT staleness (not lock age), so a healthy long-running job —
+  // which beats every 30s — is never reclaimed. This also fixes the prior
+  // double-execution risk (reclaiming by lock age could free a live job's lock).
+  const reclaimed = await sql`
+    WITH stale AS (
+      SELECT id, status FROM site_survey_geometry_reconstruction_jobs
+      WHERE status IN ('running', 'running_heartbeat')
+        AND last_heartbeat_at IS NOT NULL
+        AND last_heartbeat_at < NOW() - INTERVAL '1 minute' * ${RECLAIM_STALE_MINUTES}
+    )
+    UPDATE site_survey_geometry_reconstruction_jobs j
+    SET status = 'failed',
+        failure_stage = 'worker_lost',
+        completed_at = NOW(),
+        locked_by = NULL,
         locked_at = NULL,
         updated_at = NOW()
-    WHERE locked_by IS NOT NULL
+    FROM stale
+    WHERE j.id = stale.id
+    RETURNING j.id, stale.status AS previous_status
+  `;
+  for (const r of reclaimed as { id: string; previous_status: string }[]) {
+    console.info(
+      `[Lifecycle] ${JSON.stringify({
+        reclaimPath: 'worker_lost',
+        jobId: r.id,
+        previousStatus: r.previous_status,
+        newStatus: 'failed',
+        reason: `heartbeat stale > ${RECLAIM_STALE_MINUTES}m`,
+        worker: workerId,
+        ts: new Date().toISOString(),
+      })}`,
+    );
+  }
+
+  // Defensive (no-regression): clear stale locks left on 'queued' jobs so they
+  // remain claimable. No normal path leaves a queued job locked, but the prior
+  // reclaim cleared these and we preserve that behavior.
+  await sql`
+    UPDATE site_survey_geometry_reconstruction_jobs
+    SET locked_by = NULL, locked_at = NULL, updated_at = NOW()
+    WHERE status = 'queued' AND locked_by IS NOT NULL
       AND locked_at < NOW() - INTERVAL '10 minutes'
-      AND status IN ('queued', 'running')
   `;
 
   // Claim the next available queued job atomically
