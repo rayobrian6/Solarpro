@@ -654,6 +654,41 @@ export async function releaseJobLock(
 }
 
 /**
+ * Requeue an interrupted job for retry (Priority 3 — Issue 1: deploy_retry).
+ *
+ * Used by the worker's graceful-shutdown path: when a deploy (SIGTERM) interrupts
+ * an active job, requeue it instead of orphaning it. Resets status to 'queued',
+ * clears the lock, heartbeat, current/failure stage, and DELETES the job's
+ * partial recon artifacts so the retry starts clean (re-run cleanup happens at
+ * completion otherwise, which a never-completing interrupted run would skip).
+ *
+ * Only acts on 'running'/'running_heartbeat' jobs. Returns the previous status
+ * (for lifecycle observability) or null if no matching row was updated.
+ */
+export async function requeueJobForRetry(jobId: string): Promise<string | null> {
+  const sql = await getDbReady();
+  // Clear partial artifacts before retry (Issue 1 requirement).
+  await deleteArtifactsByJob(jobId);
+  const rows = await sql`
+    WITH prev AS (
+      SELECT id, status FROM site_survey_geometry_reconstruction_jobs WHERE id = ${jobId}::uuid
+    )
+    UPDATE site_survey_geometry_reconstruction_jobs j
+    SET status = 'queued',
+        locked_by = NULL,
+        locked_at = NULL,
+        last_heartbeat_at = NULL,
+        current_stage = NULL,
+        failure_stage = NULL,
+        updated_at = NOW()
+    FROM prev
+    WHERE j.id = prev.id AND j.status IN ('running', 'running_heartbeat')
+    RETURNING prev.status AS previous_status
+  `;
+  return rows.length ? (rows[0] as { previous_status: string }).previous_status : null;
+}
+
+/**
  * Find a specific queued job by ID and claim it for a worker.
  * Used when /start creates a job and wants a specific worker to pick it up.
  * Atomic CAS on locked_by IS NULL + status = 'queued'.

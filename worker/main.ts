@@ -35,6 +35,7 @@
 import {
   claimNextQueuedJob,
   releaseJobLock,
+  requeueJobForRetry,
   updateReconstructionJobStatus,
   updateJobHeartbeatInDb,
   updateJobStageDurations,
@@ -352,20 +353,41 @@ async function gracefulShutdown(signal: string): Promise<void> {
     pollTimer = null;
   }
 
-  // If we're currently executing a job, wait for it to finish (up to SHUTDOWN_TIMEOUT_MS)
+  // If we're currently executing a job, wait briefly for a near-done job to
+  // finish, then REQUEUE it for retry instead of orphaning it (Priority 3 —
+  // Issue 1: deploy_retry). The wait is bounded so the requeue DB write lands
+  // before the platform escalates SIGTERM → SIGKILL (Render grace ~30s).
   if (currentJobId) {
+    const waitMs = Math.max(0, Math.min(SHUTDOWN_TIMEOUT_MS, 25_000) - 5_000);
     console.info(
-      `[Worker ${WORKER_ID}] Waiting for current job=${currentJobId} to finish (timeout=${SHUTDOWN_TIMEOUT_MS}ms)`,
+      `[Worker ${WORKER_ID}] Waiting up to ${waitMs}ms for current job=${currentJobId} to finish before requeue`,
     );
-    const shutdownDeadline = Date.now() + SHUTDOWN_TIMEOUT_MS;
+    const shutdownDeadline = Date.now() + waitMs;
     while (currentJobId && Date.now() < shutdownDeadline) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
     if (currentJobId) {
-      console.warn(
-        `[Worker ${WORKER_ID}] Job=${currentJobId} still running after shutdown timeout — ` +
-        `heartbeat will go stale and job will be marked failed by stale detector`,
-      );
+      // Deploy interrupted an active job — requeue for retry, do not orphan.
+      const jobId = currentJobId;
+      try {
+        const previousStatus = await requeueJobForRetry(jobId);
+        console.info(
+          `[Lifecycle] ${JSON.stringify({
+            reclaimPath: 'deploy_retry',
+            jobId,
+            previousStatus: previousStatus ?? 'unknown',
+            newStatus: 'queued',
+            reason: `${signal} during active job`,
+            worker: WORKER_ID,
+            ts: new Date().toISOString(),
+          })}`,
+        );
+      } catch (requeueErr) {
+        console.error(
+          `[Worker ${WORKER_ID}] Failed to requeue job=${jobId} on shutdown: ` +
+          `${requeueErr instanceof Error ? requeueErr.message : String(requeueErr)}`,
+        );
+      }
     }
   }
 
