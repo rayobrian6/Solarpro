@@ -1,17 +1,27 @@
 /**
  * Plane extraction worker — produces RoofPlaneCandidate and WallPlaneCandidate
- * artifacts from segmentation masks, structural lines, and vanishing points.
+ * artifacts from segmentation masks, structural lines, vanishing points,
+ * and optional depth map data.
  *
- * Approach:
+ * Approach (v1 — heuristic only):
  * 1. Group segmentation masks by class (roof, wall)
  * 2. For each mask, find supporting lines that overlap with the mask region
  * 3. Estimate plane normal from vanishing point directions and line orientations
  * 4. Compute plane parameters (slope, aspect for roofs; height, facing for walls)
  * 5. Assign confidence based on line support, mask quality, and VP consistency
  *
- * When a real plane fitting algorithm (e.g., RANSAC on depth data) is
- * available, this worker will be upgraded. The current heuristic approach
- * ensures the pipeline never breaks when models are unavailable.
+ * Approach (v2 — depth-augmented):
+ * When DepthMap artifacts are available (from Stage 4), the worker runs
+ * extractDepthPlanes() to detect planar regions via flood-fill segmentation
+ * on the depth grid. These depth-derived planes are then:
+ *   - Mapped to RoofPlaneCandidate (orientation='slanted') or
+ *     WallPlaneCandidate (orientation='vertical')
+ *   - Augmented with heuristic line/VP parameters where overlap exists
+ *   - Confidence-blended between depth and heuristic signals
+ *   - Heuristic-only planes that have no depth overlap are kept as fallback
+ *
+ * The heuristic path remains the default when depth data is absent, ensuring
+ * the pipeline never breaks when models are unavailable.
  *
  * REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
  */
@@ -26,14 +36,23 @@ import type {
   GeometryReconstructionArtifact,
   GeometryReconstructionInput,
   NormalizedRegion,
+  DepthMap,
 } from '../../types';
 import { REVIEW_ONLY_AUTHORITY, BASE_LIMITATIONS } from '../../types';
+import {
+  extractDepthPlanes,
+} from '../depth/depthPlaneExtraction';
+import type {
+  DepthPlaneCandidate,
+  DepthPlaneOptions,
+  DepthPlaneExtractionResult,
+} from '../depth/depthPlaneExtraction';
 
 // ---------------------------------------------------------------------------
 // Worker version
 // ---------------------------------------------------------------------------
 
-export const PLANE_EXTRACTION_WORKER_VERSION = '1.0.0-plane-extraction-worker';
+export const PLANE_EXTRACTION_WORKER_VERSION = '2.0.0-plane-extraction-depth';
 
 // ---------------------------------------------------------------------------
 // Limitations
@@ -41,10 +60,20 @@ export const PLANE_EXTRACTION_WORKER_VERSION = '1.0.0-plane-extraction-worker';
 
 const PLANE_EXTRACTION_LIMITATIONS = [
   ...BASE_LIMITATIONS,
-  'Plane extraction is heuristic — not from RANSAC on depth data or model inference.',
-  'When a real plane fitting algorithm is available, this worker will be upgraded.',
-  'Plane normals are estimated from line orientations, not from 3D measurements.',
-  'Slope and aspect are approximations based on heuristic geometry.',
+  'Plane extraction is heuristic when depth data is unavailable — not from RANSAC or model inference.',
+  'When depth maps are available, planes are derived from flood-fill segmentation on depth gradients.',
+  'Depth-derived normals are estimated from depth gradient direction, not from 3D measurements.',
+  'Slope and aspect are approximations based on depth gradient geometry or heuristic line orientations.',
+  'Depth convention: higher values = farther from camera. Orientation depends on gradient magnitude.',
+] as const;
+
+const PLANE_EXTRACTION_LIMITATIONS_DEPTH = [
+  ...BASE_LIMITATIONS,
+  'Plane extracted from depth-aware flood-fill segmentation — not from RANSAC on 3D point clouds.',
+  'Depth is monocular relative (not metric) — plane parameters are approximations, not survey-grade.',
+  'Depth convention: higher values = farther from camera. Orientation classified by gradient magnitude.',
+  'Slope and aspect estimated from depth gradient direction — more reliable than heuristic but not CAD.',
+  'Heuristic line/VP parameters are blended with depth-derived parameters when overlap exists.',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -60,12 +89,19 @@ export interface PlaneExtractionWorkerInput {
   lines: StructuralLineCandidate[];
   /** Vanishing points for perspective estimation. */
   vanishingPoints: VanishingPointArtifact[];
+  /** Optional depth map artifacts (from Stage 4). When provided, depth-aware
+   *  plane extraction runs first and augments/replaces heuristic results. */
+  depthMaps?: DepthMap[];
+  /** Whether MiDaS was used to produce the depth maps (from DepthWorkerOutput). */
+  usedMidas?: boolean;
   /** Optional config overrides. */
   config?: {
     /** Minimum confidence threshold for planes (0-100). Default: 25 */
     minConfidence?: number;
     /** Whether to require supporting lines for plane extraction. Default: false */
     requireSupportingLines?: boolean;
+    /** Options for depth-aware plane extraction (ignored when depthMaps is empty). */
+    depthPlaneOptions?: DepthPlaneOptions;
   };
 }
 
@@ -220,7 +256,148 @@ function onSegment(p1: NormalizedPoint, q: NormalizedPoint, p2: NormalizedPoint)
 }
 
 // ---------------------------------------------------------------------------
-// Plane parameter estimation
+// Depth-to-artifact mapping helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Estimate slope and aspect from a depth plane's gradient magnitude and
+ * bounding box position. This is more reliable than the pure heuristic
+ * because it uses actual depth variation rather than line angles.
+ *
+ * Approach:
+ * - Gradient magnitude maps to slope (steeper gradient = higher slope)
+ * - Position in the image and gradient direction give aspect estimate
+ * - Bounds help determine the plane's spatial context
+ */
+function estimateDepthRoofParameters(
+  plane: DepthPlaneCandidate,
+  imageWidth: number,
+  imageHeight: number,
+): { slope: number; aspect: number; normal: [number, number, number] } {
+  // Gradient magnitude → slope mapping
+  // Low gradient (~0.04) → ~15°, moderate (~0.10) → ~30°, high (~0.20+) → ~45°
+  const gradientScale = 300; // empirical scaling factor
+  const slope = Math.max(5, Math.min(60, plane.gradientMagnitude * gradientScale));
+
+  // Aspect from centroid position: center of image → south-facing (180°),
+  // left → west (270°), right → east (90°). Use bounds center for position.
+  const centerX = (plane.bounds.xMin + plane.bounds.xMax) / 2;
+  // Map [0,1] → [0, 360] for aspect, with 0.5 = south (180°)
+  let aspect = ((1.0 - centerX) * 360 + 180) % 360;
+
+  // Compute normal from slope and aspect
+  const aspectRad = aspect * (Math.PI / 180);
+  const slopeRad = slope * (Math.PI / 180);
+  const normal: [number, number, number] = [
+    Math.sin(slopeRad) * Math.cos(aspectRad),
+    Math.sin(slopeRad) * Math.sin(aspectRad),
+    Math.cos(slopeRad),
+  ];
+
+  // Normalize
+  const len = Math.sqrt(normal[0] ** 2 + normal[1] ** 2 + normal[2] ** 2);
+  if (len > 1e-10) {
+    normal[0] /= len;
+    normal[1] /= len;
+    normal[2] /= len;
+  }
+
+  return { slope, aspect, normal };
+}
+
+/**
+ * Estimate wall height and facing direction from a depth plane's
+ * bounding box and depth statistics.
+ */
+function estimateDepthWallParameters(
+  plane: DepthPlaneCandidate,
+): { height: number; facing: string; normal: [number, number, number] } {
+  // Height from vertical extent: bounds height as fraction of image × 8m typical
+  const verticalExtent = plane.bounds.yMax - plane.bounds.yMin;
+  const rawHeight = verticalExtent * 8;
+  const height = Math.max(1, Math.min(15, Math.round(rawHeight * 10) / 10));
+
+  // Facing from horizontal position
+  const centerX = (plane.bounds.xMin + plane.bounds.xMax) / 2;
+  let facing: string;
+  if (centerX < 0.35) {
+    facing = 'west';
+  } else if (centerX > 0.65) {
+    facing = 'east';
+  } else {
+    facing = 'south';
+  }
+
+  // Normal from facing direction
+  const facingToNormal: Record<string, [number, number, number]> = {
+    north: [0, -1, 0],
+    south: [0, 1, 0],
+    east: [1, 0, 0],
+    west: [-1, 0, 0],
+  };
+  let normal: [number, number, number] = facingToNormal[facing] ?? [0, 1, 0];
+
+  // Add a slight Z component for perspective
+  normal = [normal[0], normal[1], 0.05];
+  const len = Math.sqrt(normal[0] ** 2 + normal[1] ** 2 + normal[2] ** 2);
+  if (len > 1e-10) {
+    normal[0] /= len;
+    normal[1] /= len;
+    normal[2] /= len;
+  }
+
+  return { height, facing, normal };
+}
+
+/**
+ * Check if a depth plane candidate overlaps with a heuristic mask polygon
+ * by testing if the depth plane's bounding box overlaps with the mask's
+ * bounding region.
+ */
+function depthPlaneOverlapsMask(
+  plane: DepthPlaneCandidate,
+  mask: SemanticSegmentationMask,
+): boolean {
+  if (!mask.maskBounds) return false;
+
+  // Convert depth bounds from [0,1] to [0,1000] coordinate system
+  const pXMin = plane.bounds.xMin * 1000;
+  const pYMin = plane.bounds.yMin * 1000;
+  const pXMax = plane.bounds.xMax * 1000;
+  const pYMax = plane.bounds.yMax * 1000;
+
+  const mXMin = mask.maskBounds.x;
+  const mYMin = mask.maskBounds.y;
+  const mXMax = mask.maskBounds.x + mask.maskBounds.width;
+  const mYMax = mask.maskBounds.y + mask.maskBounds.height;
+
+  // Axis-aligned bounding box overlap test
+  return pXMin < mXMax && pXMax > mXMin && pYMin < mYMax && pYMax > mYMin;
+}
+
+/**
+ * Blend depth-derived confidence with heuristic confidence.
+ * Depth signal is weighted more heavily when MiDaS was used.
+ *
+ * @param depthConf - Confidence from depth plane extraction (0-100)
+ * @param heuristicConf - Confidence from heuristic line/mask analysis (0-100)
+ * @param usedMidas - Whether MiDaS was used for depth (gives higher weight)
+ * @returns Blended confidence (0-100)
+ */
+function blendConfidence(
+  depthConf: number,
+  heuristicConf: number,
+  usedMidas: boolean,
+): number {
+  // Weight depth more when MiDaS was used (70/30), less when heuristic (50/50)
+  const depthWeight = usedMidas ? 0.7 : 0.5;
+  const heuristicWeight = 1 - depthWeight;
+  const blended = depthConf * depthWeight + heuristicConf * heuristicWeight;
+  return Math.round(Math.min(100, Math.max(0, blended)));
+}
+
+// ---------------------------------------------------------------------------
+// Plane parameter estimation (heuristic — unchanged from v1)
 // ---------------------------------------------------------------------------
 
 /**
@@ -381,10 +558,16 @@ function estimateWallParameters(
 
 /**
  * Run the plane extraction worker on a set of segmentation masks,
- * structural lines, and vanishing points.
+ * structural lines, vanishing points, and optional depth maps.
  *
- * For each roof/wall mask, finds supporting lines, estimates plane
- * parameters, and produces RoofPlaneCandidate or WallPlaneCandidate artifacts.
+ * When depth maps are available (from Stage 4), the worker uses
+ * extractDepthPlanes() to identify planar regions via flood-fill
+ * segmentation, then maps those regions to RoofPlaneCandidate and
+ * WallPlaneCandidate artifacts. Heuristic-only planes that have no
+ * depth overlap are kept as fallback.
+ *
+ * When depth maps are not available, the worker falls back to the
+ * v1 heuristic approach (lines + VP + mask geometry).
  */
 export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): PlaneExtractionWorkerOutput {
   const timings: Record<string, number> = {};
@@ -395,11 +578,22 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
 
   // Stage 1: Initialize
   const t0 = Date.now();
-  const roofMasks = input.masks.filter(m => m.segmentationClass === 'roof');
-  const wallMasks = input.masks.filter(m => m.segmentationClass === 'wall');
+  const planeEligibleMasks = input.masks.filter(
+    m => m.excludeFromGeometry !== true && m.participation?.participatesInPlanes !== false,
+  );
+  const roofMasks = planeEligibleMasks.filter(m => m.segmentationClass === 'roof');
+  const wallMasks = planeEligibleMasks.filter(m => m.segmentationClass === 'wall');
+  const hasDepthMaps = !!input.depthMaps && input.depthMaps.length > 0;
+  const usedMidas = input.usedMidas ?? false;
   timings['initialization'] = Date.now() - t0;
 
-  // Stage 2: Find associated lines for each mask
+  console.info(
+    `[PlaneExtraction] Starting: roofMasks=${roofMasks.length}, wallMasks=${wallMasks.length}, ` +
+    `planeEligibleMasks=${planeEligibleMasks.length}/${input.masks.length}, ` +
+    `hasDepthMaps=${hasDepthMaps}, depthMapCount=${input.depthMaps?.length ?? 0}, usedMidas=${usedMidas}`,
+  );
+
+  // Stage 2: Find associated lines for each mask (used by both paths)
   const t1 = Date.now();
   const maskLineAssociations = new Map<string, StructuralLineCandidate[]>();
 
@@ -409,15 +603,326 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
   }
   timings['line_association'] = Date.now() - t1;
 
-  // Stage 3: Extract roof planes
-  const t2 = Date.now();
-  let roofIndex = 0;
+  // ── Depth-augmented path ────────────────────────────────────────────
+  if (hasDepthMaps) {
+    const tDepth = Date.now();
+    const depthArtifacts: Array<RoofPlaneCandidate | WallPlaneCandidate> = [];
+    const processedMaskIds = new Set<string>();
+
+    // Safety limit: cap depth maps processed to avoid runaway compute.
+    // With 2 photos this is trivial, but protects against future N-photo runs.
+    const maxDepthMaps = Math.min(input.depthMaps!.length, 10);
+    if (input.depthMaps!.length > maxDepthMaps) {
+      console.warn(
+        `[PlaneExtraction] Capping depth maps from ${input.depthMaps!.length} to ${maxDepthMaps} to avoid timeout`,
+      );
+    }
+
+    for (let dmIdx = 0; dmIdx < maxDepthMaps; dmIdx++) {
+      const depthMap = input.depthMaps![dmIdx];
+
+      console.info(
+        `[PlaneExtraction] Processing depth map ${dmIdx + 1}/${maxDepthMaps}: fileId=${depthMap.fileId}, ` +
+        `${depthMap.width}x${depthMap.height}, confidence=${depthMap.confidence}`,
+      );
+
+      // Run depth-aware plane extraction
+      const depthResult: DepthPlaneExtractionResult = extractDepthPlanes(
+        depthMap,
+        usedMidas,
+        input.config?.depthPlaneOptions,
+      );
+
+      console.info(
+        `[PlaneExtraction] Depth map ${dmIdx + 1}: ${depthResult.planes.length} depth planes extracted ` +
+        `(${depthResult.planes.filter(p => p.orientation === 'slanted').length} slanted, ` +
+        `${depthResult.planes.filter(p => p.orientation === 'vertical').length} vertical, ` +
+        `${depthResult.planes.filter(p => p.orientation === 'far').length} far, ` +
+        `${depthResult.planes.filter(p => p.orientation === 'horizontal').length} horizontal)`,
+      );
+
+      // Map depth planes to RoofPlaneCandidate / WallPlaneCandidate
+      for (const plane of depthResult.planes) {
+        // Skip 'far' (sky) and 'horizontal' (ground) — these are not structural planes
+        if (plane.orientation === 'far' || plane.orientation === 'horizontal') continue;
+
+        // Find overlapping heuristic masks for parameter blending
+        const overlappingRoofMasks = roofMasks.filter(m => depthPlaneOverlapsMask(plane, m));
+        const overlappingWallMasks = wallMasks.filter(m => depthPlaneOverlapsMask(plane, m));
+
+        if (plane.orientation === 'slanted') {
+          // ── Roof plane from depth ──────────────────────────────────
+          const { slope, aspect, normal } = estimateDepthRoofParameters(
+            plane, depthMap.width, depthMap.height,
+          );
+
+          // If overlapping heuristic masks exist, blend their parameters
+          let finalSlope = slope;
+          let finalAspect = aspect;
+          let finalNormal: [number, number, number] = normal;
+          let heuristicConf = 0;
+          let associatedLineIds: string[] = [];
+          let sourceMaskId: string | undefined;
+          let polygon: NormalizedPoint[] | undefined = plane.boundaryPolygon.length >= 3
+            ? plane.boundaryPolygon
+            : undefined;
+
+          if (overlappingRoofMasks.length > 0) {
+            // Use the best overlapping mask for heuristic blending
+            const bestMask = overlappingRoofMasks.reduce((best, m) =>
+              m.confidence > best.confidence ? m : best,
+            );
+            const maskLines = maskLineAssociations.get(bestMask.id) ?? [];
+            const heuristicParams = estimateRoofParameters(bestMask, maskLines, input.vanishingPoints);
+
+            // Blend slope and aspect (depth-weighted)
+            const blendW = usedMidas ? 0.7 : 0.5;
+            finalSlope = Math.round((slope * blendW + heuristicParams.slope * (1 - blendW)) * 10) / 10;
+            finalAspect = Math.round((aspect * blendW + heuristicParams.aspect * (1 - blendW)) * 10) / 10;
+
+            // Blend normal vectors
+            finalNormal = [
+              normal[0] * blendW + heuristicParams.normal[0] * (1 - blendW),
+              normal[1] * blendW + heuristicParams.normal[1] * (1 - blendW),
+              normal[2] * blendW + heuristicParams.normal[2] * (1 - blendW),
+            ];
+            const nLen = Math.sqrt(finalNormal[0] ** 2 + finalNormal[1] ** 2 + finalNormal[2] ** 2);
+            if (nLen > 1e-10) {
+              finalNormal = [finalNormal[0] / nLen, finalNormal[1] / nLen, finalNormal[2] / nLen];
+            }
+
+            // Heuristic confidence from line support
+            const lineSupport = Math.min(20, maskLines.length * 5);
+            heuristicConf = Math.round(Math.min(100, lineSupport + bestMask.confidence * 0.5));
+            associatedLineIds = maskLines.map(l => l.id);
+            sourceMaskId = bestMask.id;
+
+            // Mark this mask as processed (so heuristic path doesn't duplicate it)
+            processedMaskIds.add(bestMask.id);
+
+            // Use heuristic polygon if depth polygon is sparse
+            if (bestMask.polygon.length >= 3 && (!polygon || polygon.length < bestMask.polygon.length)) {
+              polygon = bestMask.polygon;
+            }
+          }
+
+          // Compute final confidence: blend depth and heuristic
+          const depthConf = plane.confidence;
+          const finalConf = overlappingRoofMasks.length > 0
+            ? blendConfidence(depthConf, heuristicConf, usedMidas)
+            : depthConf;
+
+          if (finalConf < minConfidence) continue;
+
+          // Compute region from depth bounds
+          const region: NormalizedRegion = {
+            x: plane.bounds.xMin * 1000,
+            y: plane.bounds.yMin * 1000,
+            width: (plane.bounds.xMax - plane.bounds.xMin) * 1000,
+            height: (plane.bounds.yMax - plane.bounds.yMin) * 1000,
+            coordinateSystem: 'normalized_image_0_1000',
+          };
+
+          const candidate: RoofPlaneCandidate = {
+            artifactType: 'roof_plane_candidate',
+            normal: finalNormal,
+            d: -(plane.meanDepth * 0.5), // distance from origin (depth-based heuristic)
+            inlierCount: plane.pixelIndices.length,
+            totalPoints: depthMap.width * depthMap.height,
+            region,
+            polygon,
+            sourceMaskId,
+            fileId: depthMap.fileId,
+            slopeDegrees: Math.round(finalSlope * 10) / 10,
+            aspectDegrees: Math.round(finalAspect * 10) / 10,
+            associatedLineIds,
+            confidence: finalConf,
+            authority: { ...REVIEW_ONLY_AUTHORITY },
+            limitations: [...PLANE_EXTRACTION_LIMITATIONS_DEPTH],
+          };
+
+          depthArtifacts.push(candidate);
+
+        } else if (plane.orientation === 'vertical') {
+          // ── Wall plane from depth ───────────────────────────────────
+          const { height, facing, normal } = estimateDepthWallParameters(plane);
+
+          // If overlapping heuristic masks exist, blend their parameters
+          let finalHeight = height;
+          let finalFacing = facing;
+          let finalNormal: [number, number, number] = normal;
+          let heuristicConf = 0;
+          let associatedLineIds: string[] = [];
+          let sourceMaskId: string | undefined;
+          let polygon: NormalizedPoint[] | undefined = plane.boundaryPolygon.length >= 3
+            ? plane.boundaryPolygon
+            : undefined;
+
+          if (overlappingWallMasks.length > 0) {
+            const bestMask = overlappingWallMasks.reduce((best, m) =>
+              m.confidence > best.confidence ? m : best,
+            );
+            const maskLines = maskLineAssociations.get(bestMask.id) ?? [];
+            const heuristicParams = estimateWallParameters(bestMask, maskLines);
+
+            // Blend height and facing
+            const blendW = usedMidas ? 0.7 : 0.5;
+            finalHeight = Math.round((height * blendW + heuristicParams.height * (1 - blendW)) * 10) / 10;
+            finalFacing = heuristicParams.facing; // heuristic facing is often more reliable
+
+            // Blend normals
+            finalNormal = [
+              normal[0] * blendW + heuristicParams.normal[0] * (1 - blendW),
+              normal[1] * blendW + heuristicParams.normal[1] * (1 - blendW),
+              normal[2] * blendW + heuristicParams.normal[2] * (1 - blendW),
+            ];
+            const nLen = Math.sqrt(finalNormal[0] ** 2 + finalNormal[1] ** 2 + finalNormal[2] ** 2);
+            if (nLen > 1e-10) {
+              finalNormal = [finalNormal[0] / nLen, finalNormal[1] / nLen, finalNormal[2] / nLen];
+            }
+
+            // Heuristic confidence
+            const lineSupport = Math.min(20, maskLines.length * 5);
+            heuristicConf = Math.round(Math.min(100, lineSupport + bestMask.confidence * 0.5));
+            associatedLineIds = maskLines.map(l => l.id);
+            sourceMaskId = bestMask.id;
+
+            processedMaskIds.add(bestMask.id);
+
+            if (bestMask.polygon.length >= 3 && (!polygon || polygon.length < bestMask.polygon.length)) {
+              polygon = bestMask.polygon;
+            }
+          }
+
+          // Compute final confidence
+          const depthConf = plane.confidence;
+          const finalConf = overlappingWallMasks.length > 0
+            ? blendConfidence(depthConf, heuristicConf, usedMidas)
+            : depthConf;
+
+          if (finalConf < minConfidence) continue;
+
+          const region: NormalizedRegion = {
+            x: plane.bounds.xMin * 1000,
+            y: plane.bounds.yMin * 1000,
+            width: (plane.bounds.xMax - plane.bounds.xMin) * 1000,
+            height: (plane.bounds.yMax - plane.bounds.yMin) * 1000,
+            coordinateSystem: 'normalized_image_0_1000',
+          };
+
+          const candidate: WallPlaneCandidate = {
+            artifactType: 'wall_plane_candidate',
+            normal: finalNormal,
+            d: -(plane.meanDepth * 0.3),
+            inlierCount: plane.pixelIndices.length,
+            totalPoints: depthMap.width * depthMap.height,
+            region,
+            polygon,
+            sourceMaskId,
+            fileId: depthMap.fileId,
+            estimatedHeightM: Math.round(finalHeight * 10) / 10,
+            facingDirection: finalFacing,
+            associatedLineIds,
+            confidence: finalConf,
+            authority: { ...REVIEW_ONLY_AUTHORITY },
+            limitations: [...PLANE_EXTRACTION_LIMITATIONS_DEPTH],
+          };
+
+          depthArtifacts.push(candidate);
+        }
+      }
+    }
+
+    artifacts.push(...depthArtifacts);
+    timings['depth_extraction'] = Date.now() - tDepth;
+
+    console.info(
+      `[PlaneExtraction] Depth-augmented path: ${depthArtifacts.length} depth-derived planes ` +
+      `(${depthArtifacts.filter(a => a.artifactType === 'roof_plane_candidate').length} roof, ` +
+      `${depthArtifacts.filter(a => a.artifactType === 'wall_plane_candidate').length} wall) ` +
+      `in ${timings['depth_extraction']}ms, processedMaskIds=${processedMaskIds.size}`,
+    );
+
+    // ── Heuristic fallback for unprocessed masks ────────────────────────
+    // Any roof/wall mask that wasn't matched to a depth plane still gets
+    // the heuristic treatment. This ensures coverage when depth misses a
+    // region that segmentation clearly identified.
+    const unprocessedRoofMasks = roofMasks.filter(m => !processedMaskIds.has(m.id));
+    const unprocessedWallMasks = wallMasks.filter(m => !processedMaskIds.has(m.id));
+
+    if (unprocessedRoofMasks.length > 0 || unprocessedWallMasks.length > 0) {
+      const tHeuristicFallback = Date.now();
+      const heuristicArtifacts = runHeuristicExtraction(
+        unprocessedRoofMasks,
+        unprocessedWallMasks,
+        input.lines,
+        input.vanishingPoints,
+        maskLineAssociations,
+        minConfidence,
+        requireSupportingLines,
+      );
+      artifacts.push(...heuristicArtifacts);
+      timings['heuristic_fallback'] = Date.now() - tHeuristicFallback;
+    }
+
+  } else {
+    // ── Heuristic-only path (no depth maps available) ──────────────────
+    const tHeuristic = Date.now();
+    const heuristicArtifacts = runHeuristicExtraction(
+      roofMasks,
+      wallMasks,
+      input.lines,
+      input.vanishingPoints,
+      maskLineAssociations,
+      minConfidence,
+      requireSupportingLines,
+    );
+    artifacts.push(...heuristicArtifacts);
+    timings['heuristic_extraction'] = Date.now() - tHeuristic;
+  }
+
+  console.info(
+    `[PlaneExtraction] Complete: ${artifacts.length} total planes ` +
+    `(${artifacts.filter(a => a.artifactType === 'roof_plane_candidate').length} roof, ` +
+    `${artifacts.filter(a => a.artifactType === 'wall_plane_candidate').length} wall) ` +
+    `timings={${Object.entries(timings).map(([k,v]) => `${k}=${v}ms`).join(', ')}}`,
+  );
+
+  return {
+    artifacts,
+    stageTimings: timings,
+    workerVersion: PLANE_EXTRACTION_WORKER_VERSION,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Heuristic extraction (extracted from v1 main function)
+// ---------------------------------------------------------------------------
+
+/**
+ * Run heuristic plane extraction on a set of roof and wall masks.
+ * This is the original v1 logic, extracted into a helper so the main
+ * worker can call it for unprocessed masks when depth is available,
+ * or as the sole path when depth is absent.
+ */
+function runHeuristicExtraction(
+  roofMasks: SemanticSegmentationMask[],
+  wallMasks: SemanticSegmentationMask[],
+  lines: StructuralLineCandidate[],
+  vanishingPoints: VanishingPointArtifact[],
+  maskLineAssociations: Map<string, StructuralLineCandidate[]>,
+  minConfidence: number,
+  requireSupportingLines: boolean,
+): Array<RoofPlaneCandidate | WallPlaneCandidate> {
+  const artifacts: Array<RoofPlaneCandidate | WallPlaneCandidate> = [];
+
+  // Extract roof planes
   for (const mask of roofMasks) {
     const associatedLines = maskLineAssociations.get(mask.id) ?? [];
 
     if (requireSupportingLines && associatedLines.length === 0) continue;
 
-    const { slope, aspect, normal } = estimateRoofParameters(mask, associatedLines, input.vanishingPoints);
+    const { slope, aspect, normal } = estimateRoofParameters(mask, associatedLines, vanishingPoints);
 
     // Compute confidence
     const lineSupport = Math.min(20, associatedLines.length * 5);
@@ -433,7 +938,7 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
       normal,
       d: -0.5, // distance from origin (heuristic)
       inlierCount: associatedLines.length,
-      totalPoints: input.lines.length,
+      totalPoints: lines.length,
       region,
       polygon: mask.polygon.length >= 3 ? mask.polygon : undefined,
       sourceMaskId: mask.id,
@@ -447,13 +952,9 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
     };
 
     artifacts.push(candidate);
-    roofIndex++;
   }
-  timings['roof_extraction'] = Date.now() - t2;
 
-  // Stage 4: Extract wall planes
-  const t3 = Date.now();
-  let wallIndex = 0;
+  // Extract wall planes
   for (const mask of wallMasks) {
     const associatedLines = maskLineAssociations.get(mask.id) ?? [];
 
@@ -475,7 +976,7 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
       normal,
       d: -0.3, // distance from origin (heuristic)
       inlierCount: associatedLines.length,
-      totalPoints: input.lines.length,
+      totalPoints: lines.length,
       region,
       polygon: mask.polygon.length >= 3 ? mask.polygon : undefined,
       sourceMaskId: mask.id,
@@ -489,15 +990,9 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
     };
 
     artifacts.push(candidate);
-    wallIndex++;
   }
-  timings['wall_extraction'] = Date.now() - t3;
 
-  return {
-    artifacts,
-    stageTimings: timings,
-    workerVersion: PLANE_EXTRACTION_WORKER_VERSION,
-  };
+  return artifacts;
 }
 
 // ---------------------------------------------------------------------------
@@ -506,7 +1001,11 @@ export function runPlaneExtractionWorker(input: PlaneExtractionWorkerInput): Pla
 
 /**
  * Run plane extraction from a standard GeometryReconstructionInput
- * and pre-computed segmentation masks, lines, and vanishing points.
+ * and pre-computed segmentation masks, lines, vanishing points,
+ * and optional depth maps.
+ *
+ * When depth maps are provided, uses depth-augmented extraction.
+ * Otherwise falls back to heuristic-only extraction.
  *
  * Returns RoofPlaneCandidate and WallPlaneCandidate artifacts.
  */
@@ -515,12 +1014,16 @@ export function runPlaneExtractionFromReconstructionInput(
   masks: SemanticSegmentationMask[],
   lines: StructuralLineCandidate[],
   vanishingPoints: VanishingPointArtifact[],
+  depthMaps?: DepthMap[],
+  usedMidas?: boolean,
 ): GeometryReconstructionArtifact[] {
   const workerInput: PlaneExtractionWorkerInput = {
     surveyId: input.surveyId,
     masks,
     lines,
     vanishingPoints,
+    depthMaps,
+    usedMidas,
     config: input.config as PlaneExtractionWorkerInput['config'] | undefined,
   };
 

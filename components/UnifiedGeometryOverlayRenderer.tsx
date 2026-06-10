@@ -36,7 +36,23 @@ import type {
   UnifiedGeometryClass,
   GeometryLineSegment,
   SegmentationBackend,
+  FacadeSubtype,
+  SiteContextSubtype,
+  UnifiedConditionFlag,
 } from '@/lib/siteSurveys/unifiedGeometry/types';
+import {
+  FACADE_SEGMENTATION_CLASSES,
+  SITE_CONTEXT_SEGMENTATION_CLASSES,
+  ELECTRICAL_SEGMENTATION_CLASSES,
+  OCCLUDER_SEGMENTATION_CLASSES,
+  CONDITION_SEGMENTATION_CLASSES,
+  type SegmentationClass,
+} from '@/lib/siteSurveys/geometryReconstruction/types';
+import {
+  isCleanVisibleRoofLine,
+  isCleanHiddenMask,
+  isCleanVisiblePlane,
+} from '@/lib/siteSurveys/unifiedGeometry/overlayVisibility';
 
 /* ── Types ────────────────────────────────────────────────────────────── */
 
@@ -56,12 +72,12 @@ const GEOMETRY_CLASS_OVERLAY_COLORS: Record<
 > = {
   roof_plane: {
     stroke: '#34d399',
-    fill: 'rgba(52,211,153,0.12)',
+    fill: 'rgba(52,211,153,0.15)',
     label: 'Roof Plane',
   },
   wall_plane: {
-    stroke: '#60a5fa',
-    fill: 'rgba(96,165,250,0.10)',
+    stroke: '#06b6d4',
+    fill: 'rgba(6,182,212,0.15)',
     label: 'Wall Plane',
   },
   roof_line: {
@@ -112,7 +128,7 @@ const GEOMETRY_CLASS_OVERLAY_COLORS: Record<
   unknown: {
     stroke: '#94a3b8',
     fill: 'rgba(148,163,184,0.06)',
-    label: '?',
+    label: 'Unidentified',
   },
 };
 
@@ -134,67 +150,445 @@ const SEGMENTATION_BACKEND_COLORS: Record<SegmentationBackend, { stroke: string;
   },
 };
 
+/**
+ * Per-segmentationClass color map for fine-grained visual distinction.
+ * Used when geometryClass === 'segmentation_mask' and a segmentationClass is available.
+ * Falls back to SEGMENTATION_BACKEND_COLORS if no per-class entry exists.
+ *
+ * Color scheme:
+ *   Facade:      warm ambers/oranges (building envelope features)
+ *   Site context: greens/browns (ground-level features)
+ *   Electrical:  purples (electrical infrastructure)
+ *   Occluder:    grays, dashed (things blocking the view)
+ *   Condition:   reds (quality/safety issues)
+ *   Legacy:      original colors
+ */
+const SEGMENTATION_CLASS_COLORS: Partial<Record<SegmentationClass, { stroke: string; fill: string; label: string }>> = {
+  // Legacy
+  roof:       { stroke: '#34d399', fill: 'rgba(52,211,153,0.15)',  label: 'Roof' },
+  wall:       { stroke: '#06b6d4', fill: 'rgba(6,182,212,0.15)',   label: 'Wall' },
+  sky:        { stroke: '#38bdf8', fill: 'rgba(56,189,248,0.06)',  label: 'Sky' },
+  tree:       { stroke: '#22c55e', fill: 'rgba(34,197,94,0.14)',   label: 'Tree' },
+  ground:     { stroke: '#a3e635', fill: 'rgba(163,230,53,0.08)',  label: 'Ground' },
+  obstruction:{ stroke: '#f472b6', fill: 'rgba(244,114,182,0.10)', label: 'Obstruction' },
+  equipment:  { stroke: '#c084fc', fill: 'rgba(192,132,252,0.10)', label: 'Equipment' },
+  // Facade
+  siding:      { stroke: '#d97706', fill: 'rgba(217,119,6,0.14)',  label: 'Siding' },
+  window:      { stroke: '#3b82f6', fill: 'rgba(59,130,246,0.18)', label: 'Window' },
+  door:        { stroke: '#eab308', fill: 'rgba(234,179,8,0.15)',  label: 'Door' },
+  garage_door: { stroke: '#f59e0b', fill: 'rgba(245,158,11,0.15)', label: 'Garage Door' },
+  fascia:      { stroke: '#b45309', fill: 'rgba(180,83,9,0.08)',   label: 'Fascia' },
+  soffit:      { stroke: '#92400e', fill: 'rgba(146,64,14,0.08)',  label: 'Soffit' },
+  gutter:      { stroke: '#78716c', fill: 'rgba(120,113,108,0.10)',label: 'Gutter' },
+  downspout:   { stroke: '#57534e', fill: 'rgba(87,83,78,0.10)',   label: 'Downspout' },
+  porch:       { stroke: '#a16207', fill: 'rgba(161,98,7,0.08)',   label: 'Porch' },
+  deck:        { stroke: '#854d0e', fill: 'rgba(133,77,14,0.08)',  label: 'Deck' },
+  steps:       { stroke: '#ca8a04', fill: 'rgba(202,138,4,0.08)',  label: 'Steps' },
+  railing:     { stroke: '#eab308', fill: 'rgba(234,179,8,0.08)',  label: 'Railing' },
+  // Site context
+  grass:                       { stroke: '#4ade80', fill: 'rgba(74,222,128,0.06)', label: 'Grass' },
+  overgrown_grass:             { stroke: '#16a34a', fill: 'rgba(22,163,74,0.08)',  label: 'Overgrown Grass' },
+  sidewalk:                    { stroke: '#9ca3af', fill: 'rgba(156,163,175,0.06)',label: 'Sidewalk' },
+  driveway:                    { stroke: '#78716c', fill: 'rgba(120,113,108,0.06)',label: 'Driveway' },
+  gravel:                      { stroke: '#a8a29e', fill: 'rgba(168,162,158,0.06)',label: 'Gravel' },
+  fence:                       { stroke: '#92400e', fill: 'rgba(146,64,14,0.08)',  label: 'Fence' },
+  bushes:                      { stroke: '#15803d', fill: 'rgba(21,128,61,0.12)',  label: 'Bushes' },
+  vegetation_touching_structure:{ stroke: '#dc2626', fill: 'rgba(220,38,38,0.14)', label: 'Veg. Touching Structure' },
+  // Electrical/solar
+  utility_meter:       { stroke: '#a855f7', fill: 'rgba(168,85,247,0.10)', label: 'Utility Meter' },
+  main_service_panel:  { stroke: '#7c3aed', fill: 'rgba(124,58,237,0.10)', label: 'Main Panel' },
+  disconnect:          { stroke: '#6d28d9', fill: 'rgba(109,40,217,0.10)', label: 'Disconnect' },
+  conduit:             { stroke: '#8b5cf6', fill: 'rgba(139,92,246,0.08)', label: 'Conduit' },
+  inverter:            { stroke: '#c084fc', fill: 'rgba(192,132,252,0.10)',label: 'Inverter' },
+  battery:             { stroke: '#e879f9', fill: 'rgba(232,121,249,0.10)',label: 'Battery' },
+  ac_unit:             { stroke: '#f472b6', fill: 'rgba(244,114,182,0.10)',label: 'AC Unit' },
+  existing_solar_panel:{ stroke: '#fbbf24', fill: 'rgba(251,191,36,0.12)', label: 'Existing Solar' },
+  // Occluder (gray, dashed — blocks view of structure)
+  car:                { stroke: '#6b7280', fill: 'rgba(107,114,128,0.04)',label: 'Car' },
+  truck:              { stroke: '#6b7280', fill: 'rgba(107,114,128,0.04)',label: 'Truck' },
+  trailer:            { stroke: '#6b7280', fill: 'rgba(107,114,128,0.04)',label: 'Trailer' },
+  person:             { stroke: '#6b7280', fill: 'rgba(107,114,128,0.04)',label: 'Person' },
+  ladder:             { stroke: '#6b7280', fill: 'rgba(107,114,128,0.04)',label: 'Ladder' },
+  trash_can:          { stroke: '#6b7280', fill: 'rgba(107,114,128,0.04)',label: 'Trash Can' },
+  tools:              { stroke: '#6b7280', fill: 'rgba(107,114,128,0.04)',label: 'Tools' },
+  temporary_materials:{ stroke: '#6b7280', fill: 'rgba(107,114,128,0.04)',label: 'Temp Materials' },
+  // Condition (red flags — safety/quality issues)
+  moss:            { stroke: '#ef4444', fill: 'rgba(239,68,68,0.10)', label: 'Moss' },
+  algae:           { stroke: '#f87171', fill: 'rgba(248,113,113,0.08)',label: 'Algae' },
+  damaged_siding:  { stroke: '#dc2626', fill: 'rgba(220,38,38,0.12)',  label: 'Damaged Siding' },
+  blocked_access:  { stroke: '#b91c1c', fill: 'rgba(185,28,28,0.12)',  label: 'Blocked Access' },
+  muddy_work_area: { stroke: '#991b1b', fill: 'rgba(153,27,27,0.12)',  label: 'Muddy Work Area' },
+  // Background (Phase 0 P0-8.4: unclassifiable regions — desaturated, subtle)
+  background:  { stroke: '#d1d5db', fill: 'rgba(209,213,219,0.04)', label: 'Background' },
+};
 
 /**
- * Per-subtype styling for roof_line artifacts.
- * Makes ridge/eave/rake/wall_vertical visually distinct and highly visible,
- * matching the expectation of thick colored outlines tracing real roof edges.
+ * Whether a segmentation class should render with dashed lines (occluder styling).
  */
-const ROOF_LINE_SUBTYPE_STYLES: Record<
+function isOccluderClass(cls: SegmentationClass): boolean {
+  return OCCLUDER_SEGMENTATION_CLASSES.has(cls);
+}
+
+/**
+ * Whether a segmentation class is a condition flag (render with warning badge).
+ */
+function isConditionClass(cls: SegmentationClass): boolean {
+  return CONDITION_SEGMENTATION_CLASSES.has(cls);
+}
+
+/**
+ * Structural segmentation classes that represent building envelope features.
+ * These get thicker borders and stronger fill tints for visibility.
+ */
+const STRUCTURAL_SEGMENTATION_CLASSES = new Set<SegmentationClass>([
+  'wall', 'window', 'door', 'garage_door', 'siding', 'fascia', 'soffit',
+  'gutter', 'downspout', 'porch', 'deck', 'steps', 'railing', 'roof',
+]);
+
+function isStructuralClass(cls: SegmentationClass): boolean {
+  return STRUCTURAL_SEGMENTATION_CLASSES.has(cls);
+}
+
+function isSegmentationMaskGeometryParticipant(artifact: UnifiedGeometryArtifact): boolean {
+  if (artifact.geometryClass !== 'segmentation_mask') return true;
+
+  const participation = artifact.geometryParticipation;
+  if (participation) {
+    return participation.participatesInLines !== false || participation.participatesInPlanes !== false;
+  }
+
+  const segClass = artifact.segmentationClass as SegmentationClass | null;
+  if (!segClass) return false;
+  return isStructuralClass(segClass)
+    && !OCCLUDER_SEGMENTATION_CLASSES.has(segClass)
+    && !SITE_CONTEXT_SEGMENTATION_CLASSES.has(segClass)
+    && !ELECTRICAL_SEGMENTATION_CLASSES.has(segClass)
+    && !CONDITION_SEGMENTATION_CLASSES.has(segClass);
+}
+
+
+/**
+ * Per-subtype styling for roof_line artifacts — DEFAULT (review-friendly) mode.
+ * Thin, subtle lines that don't obscure the underlying photo.
+ * Stroke widths are calibrated for SVG viewBox="0 0 100 100" (percentage coords):
+ *   0.3 = 0.3% of image width — thin evidence line, review-friendly
+ */
+const ROOF_LINE_SUBTYPE_STYLES_DEFAULT: Record<
   string,
   { stroke: string; strokeWidth: number; strokeDasharray: string; label: string }
 > = {
   ridge: {
-    stroke: '#fb923c',    // vibrant orange - ridges are the most important line
-    strokeWidth: 2.5,
+    stroke: '#fb923c',    // vibrant orange — ridges are the most important line
+    strokeWidth: 0.4,
     strokeDasharray: 'none',
     label: 'Ridge',
   },
   eave: {
-    stroke: '#fbbf24',    // bright yellow - eaves are second most important
-    strokeWidth: 2.0,
+    stroke: '#fbbf24',    // bright yellow — eaves are second most important
+    strokeWidth: 0.35,
     strokeDasharray: 'none',
     label: 'Eave',
   },
   rake: {
-    stroke: '#f59e0b',    // amber - rakes connect ridge to eave
+    stroke: '#f59e0b',    // amber — rakes connect ridge to eave
+    strokeWidth: 0.3,
+    strokeDasharray: '1.5,0.8',
+    label: 'Rake',
+  },
+  hip: {
+    stroke: '#f97316',    // orange — hip lines
+    strokeWidth: 0.4,
+    strokeDasharray: '2,1',
+    label: 'Hip',
+  },
+  valley: {
+    stroke: '#ef4444',    // red — valleys are critical for drainage
+    strokeWidth: 0.4,
+    strokeDasharray: '1,1',
+    label: 'Valley',
+  },
+  wall_vertical: {
+    stroke: '#06b6d4',    // cyan — wall edges (matches wall_plane/segmentation wall color)
+    strokeWidth: 0.3,
+    strokeDasharray: '0.8,0.8',
+    label: 'Wall Edge',
+  },
+  wall_bottom_edge: {
+    stroke: '#06b6d4',    // cyan — foundation/wall-ground boundary (matches wall color)
+    strokeWidth: 0.35,
+    strokeDasharray: '2,1,0.5,1',
+    label: 'Foundation Edge',
+  },
+};
+
+/**
+ * Per-subtype styling for roof_line artifacts — DEBUG mode.
+ * Thick, highly visible lines for inspecting all raw line candidates.
+ * Only shown when the user explicitly enables "Show debug roof-line candidates".
+ */
+const ROOF_LINE_SUBTYPE_STYLES_DEBUG: Record<
+  string,
+  { stroke: string; strokeWidth: number; strokeDasharray: string; label: string }
+> = {
+  ridge: {
+    stroke: '#fb923c',
     strokeWidth: 1.5,
+    strokeDasharray: 'none',
+    label: 'Ridge',
+  },
+  eave: {
+    stroke: '#fbbf24',
+    strokeWidth: 1.2,
+    strokeDasharray: 'none',
+    label: 'Eave',
+  },
+  rake: {
+    stroke: '#f59e0b',
+    strokeWidth: 1.0,
     strokeDasharray: '4,2',
     label: 'Rake',
   },
   hip: {
-    stroke: '#f97316',    // orange - hip lines
-    strokeWidth: 2.0,
+    stroke: '#f97316',
+    strokeWidth: 1.2,
     strokeDasharray: '6,3',
     label: 'Hip',
   },
   valley: {
-    stroke: '#ef4444',    // red - valleys are critical for drainage
-    strokeWidth: 2.0,
+    stroke: '#ef4444',
+    strokeWidth: 1.2,
     strokeDasharray: '3,3',
     label: 'Valley',
   },
   wall_vertical: {
-    stroke: '#60a5fa',    // blue - wall edges
-    strokeWidth: 1.5,
+    stroke: '#06b6d4',
+    strokeWidth: 1.0,
     strokeDasharray: '2,2',
     label: 'Wall Edge',
   },
+  wall_bottom_edge: {
+    stroke: '#06b6d4',    // cyan — foundation/wall-ground boundary
+    strokeWidth: 1.0,
+    strokeDasharray: '4,2,1,2',
+    label: 'Foundation Edge',
+  },
 };
 
-/** Default roof line style when subtype is unknown */
+/** Default roof line style when subtype is unknown — thin for review mode */
 const DEFAULT_ROOF_LINE_STYLE = {
   stroke: '#fbbf24',
-  strokeWidth: 1.5,
+  strokeWidth: 0.3,
+  strokeDasharray: '0.8,0.8',
+  label: 'Roof Line',
+};
+
+/** Default roof line style for debug mode when subtype is unknown */
+const DEFAULT_ROOF_LINE_STYLE_DEBUG = {
+  stroke: '#fbbf24',
+  strokeWidth: 1.0,
   strokeDasharray: '2,2',
   label: 'Roof Line',
 };
 
-/** Minimum confidence for a roof_line artifact to be rendered in the overlay. */
+/** Minimum confidence for a roof_line artifact to be rendered in the overlay
+ *  when debug mode is active. Lower threshold shows all candidates. */
 const MIN_ROOF_LINE_CONFIDENCE = 40;
 
-/** Maximum number of roof_line artifacts to render per file. */
-const MAX_ROOF_LINES_PER_FILE = 50;
+/** Minimum confidence for a roof_line to be shown in default (non-debug) mode.
+ *  Higher threshold so the default view only shows trusted geometry. */
+const MIN_ROOF_LINE_CONFIDENCE_DEFAULT_MODE = 60;
+
+/** Maximum number of roof_line artifacts to render per file in default mode. */
+const MAX_ROOF_LINES_PER_FILE_DEFAULT = 20;
+
+/** Maximum number of roof_line artifacts to render per file in debug mode. */
+const MAX_ROOF_LINES_PER_FILE_DEBUG = 100;
+
+/** Minimum distance (in normalized 0-1000 units) between line midpoints
+ *  to consider them non-duplicate. Lines closer than this are near-duplicates. */
+const DUPLICATE_LINE_MIN_DISTANCE = 40;
+
+/** Minimum angle difference (degrees) between two lines at similar positions
+ *  to consider them non-duplicate. */
+const DUPLICATE_LINE_MIN_ANGLE_DIFF = 15;
+const NORMALIZED_IMAGE_MAX = 1000;
+const MAX_NON_BACKGROUND_POLYGON_AREA_RATIO = 0.95;
+
+function warnInvalidOverlayGeometry(artifact: UnifiedGeometryArtifact, reason: string): void {
+  if (process.env.NODE_ENV !== 'production') {
+    // eslint-disable-next-line no-console
+    console.warn('[UnifiedGeometryOverlayRenderer] Skipping invalid overlay polygon', {
+      artifactId: artifact.id,
+      geometryClass: artifact.geometryClass,
+      segmentationClass: artifact.segmentationClass,
+      reason,
+    });
+  }
+}
+
+function clampNormalized(value: number): number {
+  return Math.min(NORMALIZED_IMAGE_MAX, Math.max(0, value));
+}
+
+function polygonArea(vertices: Array<{ x: number; y: number }>): number {
+  let sum = 0;
+  for (let i = 0; i < vertices.length; i += 1) {
+    const a = vertices[i];
+    const b = vertices[(i + 1) % vertices.length];
+    sum += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(sum) / 2;
+}
+
+function sanitizePolygonVertices(
+  artifact: UnifiedGeometryArtifact,
+  vertices: Array<{ x: number; y: number; coordinateSystem?: string }>,
+): Array<{ x: number; y: number; coordinateSystem: 'normalized_image_0_1000' }> | null {
+  if (!Array.isArray(vertices) || vertices.length < 3) {
+    warnInvalidOverlayGeometry(artifact, 'polygon has fewer than 3 points');
+    return null;
+  }
+
+  const validVertices: Array<{ x: number; y: number; coordinateSystem: 'normalized_image_0_1000' }> = [];
+  let sawOutOfBounds = false;
+
+  for (const vertex of vertices) {
+    if (!Number.isFinite(vertex.x) || !Number.isFinite(vertex.y)) {
+      warnInvalidOverlayGeometry(artifact, 'polygon contains NaN or Infinity coordinates');
+      return null;
+    }
+
+    if (vertex.x < 0 || vertex.x > NORMALIZED_IMAGE_MAX || vertex.y < 0 || vertex.y > NORMALIZED_IMAGE_MAX) {
+      sawOutOfBounds = true;
+    }
+
+    const clamped = {
+      x: clampNormalized(vertex.x),
+      y: clampNormalized(vertex.y),
+      coordinateSystem: 'normalized_image_0_1000' as const,
+    };
+
+    const previous = validVertices[validVertices.length - 1];
+    if (!previous || previous.x !== clamped.x || previous.y !== clamped.y) {
+      validVertices.push(clamped);
+    }
+  }
+
+  if (validVertices.length > 2) {
+    const first = validVertices[0];
+    const last = validVertices[validVertices.length - 1];
+    if (first.x === last.x && first.y === last.y) validVertices.pop();
+  }
+
+  if (validVertices.length < 3) {
+    warnInvalidOverlayGeometry(artifact, 'polygon collapsed below 3 unique points after clamping');
+    return null;
+  }
+
+  const xs = validVertices.map(v => v.x);
+  const ys = validVertices.map(v => v.y);
+  const width = Math.max(...xs) - Math.min(...xs);
+  const height = Math.max(...ys) - Math.min(...ys);
+  const bboxAreaRatio = (width * height) / (NORMALIZED_IMAGE_MAX * NORMALIZED_IMAGE_MAX);
+  const areaRatio = polygonArea(validVertices) / (NORMALIZED_IMAGE_MAX * NORMALIZED_IMAGE_MAX);
+  const isBackgroundLike = artifact.segmentationClass === 'sky' || artifact.segmentationClass === 'ground' || artifact.geometryClass === 'ground_plane';
+
+  if (!isBackgroundLike && areaRatio > MAX_NON_BACKGROUND_POLYGON_AREA_RATIO) {
+    warnInvalidOverlayGeometry(artifact, `polygon area too large: ${areaRatio.toFixed(3)}`);
+    return null;
+  }
+
+  if (!isBackgroundLike && sawOutOfBounds && bboxAreaRatio > MAX_NON_BACKGROUND_POLYGON_AREA_RATIO) {
+    warnInvalidOverlayGeometry(artifact, 'out-of-bounds polygon spans nearly the full image');
+    return null;
+  }
+
+  return validVertices;
+}
+
+/* ── Near-duplicate roof line detection ────────────────────────────────────── */
+
+/**
+ * Compute the midpoint of a line segment (from artifact.lineSegment).
+ * Returns null if the artifact has no lineSegment.
+ */
+function lineMidpoint(a: UnifiedGeometryArtifact): { x: number; y: number } | null {
+  if (!a.lineSegment) return null;
+  return {
+    x: (a.lineSegment.start.x + a.lineSegment.end.x) / 2,
+    y: (a.lineSegment.start.y + a.lineSegment.end.y) / 2,
+  };
+}
+
+/**
+ * Compute the angle of a line segment in degrees (0-180, undirected).
+ * Returns null if the artifact has no lineSegment.
+ */
+function lineAngleDeg(a: UnifiedGeometryArtifact): number | null {
+  if (!a.lineSegment) return null;
+  const dx = a.lineSegment.end.x - a.lineSegment.start.x;
+  const dy = a.lineSegment.end.y - a.lineSegment.start.y;
+  let angle = Math.atan2(-dy, dx) * (180 / Math.PI);
+  if (angle < 0) angle += 180;
+  return angle % 180;
+}
+
+/**
+ * Euclidean distance between two 2D points.
+ */
+function pointDistance(a: { x: number; y: number }, b: { x: number; y: number }): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
+ * Given an array of roof_line artifacts sorted by confidence (descending),
+ * remove near-duplicate lines. A line is a duplicate if another higher-confidence
+ * line of the same subtype has a midpoint within DUPLICATE_LINE_MIN_DISTANCE
+ * and an angle within DUPLICATE_LINE_MIN_ANGLE_DIFF.
+ *
+ * Returns a new array with duplicates removed.
+ */
+function deduplicateRoofLines(lines: UnifiedGeometryArtifact[]): UnifiedGeometryArtifact[] {
+  if (lines.length <= 1) return lines;
+
+  const kept: UnifiedGeometryArtifact[] = [];
+  const keptMeta: Array<{ mid: { x: number; y: number }; angle: number; subtype: string | null }> = [];
+
+  for (const line of lines) {
+    const mid = lineMidpoint(line);
+    const angle = lineAngleDeg(line);
+    if (!mid || angle === null) {
+      kept.push(line);
+      continue;
+    }
+
+    const subtype = line.lineSubtype ?? null;
+    let isDuplicate = false;
+
+    for (const existing of keptMeta) {
+      if (existing.subtype !== subtype) continue;
+
+      const dist = pointDistance(mid, existing.mid);
+      if (dist > DUPLICATE_LINE_MIN_DISTANCE) continue;
+
+      let angleDiff = Math.abs(angle - existing.angle);
+      if (angleDiff > 90) angleDiff = 180 - angleDiff;
+      if (angleDiff < DUPLICATE_LINE_MIN_ANGLE_DIFF) {
+        isDuplicate = true;
+        break;
+      }
+    }
+
+    if (!isDuplicate) {
+      kept.push(line);
+      keptMeta.push({ mid, angle, subtype });
+    }
+  }
+
+  return kept;
+}
 
 /* ── Geometry extraction helpers ─────────────────────────────────────── */
 
@@ -221,7 +615,8 @@ function extractArtifactGeometry(artifact: UnifiedGeometryArtifact): {
     Array.isArray(artifact.polygon.vertices) &&
     artifact.polygon.vertices.length >= 3
   ) {
-    polygonSvg = normalizedPolygonToSvgPercent(artifact.polygon.vertices);
+    const safeVertices = sanitizePolygonVertices(artifact, artifact.polygon.vertices);
+    polygonSvg = safeVertices ? normalizedPolygonToSvgPercent(safeVertices) : null;
   }
 
   // Bounding box — either as fallback rect, or derive polygon for plane artifacts
@@ -242,7 +637,8 @@ function extractArtifactGeometry(artifact: UnifiedGeometryArtifact): {
         { x: b.x + b.width, y: b.y + b.height },
         { x: b.x, y: b.y + b.height },
       ];
-      polygonSvg = normalizedPolygonToSvgPercent(derivedVertices);
+      const safeVertices = sanitizePolygonVertices(artifact, derivedVertices);
+      polygonSvg = safeVertices ? normalizedPolygonToSvgPercent(safeVertices) : null;
     } else {
       // Non-plane artifacts: render as rect
       rectSvg = normalizedRegionToSvgPercent({
@@ -280,6 +676,8 @@ export function UnifiedGeometryOverlayRenderer({
   onSelectFile,
   geometryClassFilter,
   showMockArtifacts = false,
+  showDebugRoofLines = false,
+  showDebugOverlays = false,
   maxArtifactsPerFile = 200,
 }: {
   filesWithArtifacts: FileWithUnifiedArtifacts[];
@@ -289,9 +687,33 @@ export function UnifiedGeometryOverlayRenderer({
   geometryClassFilter?: Set<UnifiedGeometryClass>;
   /** Whether to show mock artifacts. Default false. */
   showMockArtifacts?: boolean;
+  /** Whether to show all roof-line candidates with thick debug rendering.
+   *  Default false: only high-confidence, deduplicated lines shown thin. */
+  showDebugRoofLines?: boolean;
+  /** Whether to show ALL artifacts including excluded/background/unknown.
+   *  Default false: hide excludeFromGeometry, background segmentationClass,
+   *  and render unknown artifacts with reduced prominence.
+   *  When true: show all raw artifacts (debug mode). */
+  showDebugOverlays?: boolean;
   /** Max artifacts to render per file for performance. */
   maxArtifactsPerFile?: number;
 }) {
+  // Select style tables based on debug mode
+  const ROOF_LINE_SUBTYPE_STYLES = showDebugRoofLines
+    ? ROOF_LINE_SUBTYPE_STYLES_DEBUG
+    : ROOF_LINE_SUBTYPE_STYLES_DEFAULT;
+  const activeDefaultLineStyle = showDebugRoofLines
+    ? DEFAULT_ROOF_LINE_STYLE_DEBUG
+    : DEFAULT_ROOF_LINE_STYLE;
+
+  // Effective confidence threshold and cap based on debug mode
+  const effectiveMinConfidence = showDebugRoofLines
+    ? MIN_ROOF_LINE_CONFIDENCE                    // 40 — show all candidates
+    : MIN_ROOF_LINE_CONFIDENCE_DEFAULT_MODE;      // 60 — only trusted lines
+  const effectiveMaxLines = showDebugRoofLines
+    ? MAX_ROOF_LINES_PER_FILE_DEBUG               // 100
+    : MAX_ROOF_LINES_PER_FILE_DEFAULT;            // 20
+
   // Filter and cap artifacts per file
   const filesWithDrawable = filesWithArtifacts
     .map((fw) => {
@@ -300,23 +722,55 @@ export function UnifiedGeometryOverlayRenderer({
         if (a.authority?.mockArtifact && !showMockArtifacts) return false;
         // Skip if no drawable geometry at all
         if (!a.polygon && !a.bbox && !a.lineSegment) return false;
+        // TASK 4: Hide excludeFromGeometry artifacts in normal mode (defense-in-depth
+        // — bundle route already filters these, but renderer should handle them too)
+        if (a.excludeFromGeometry === true && !showDebugOverlays) return false;
+        // TASK 4: Hide background segmentationClass in normal mode
+        if (a.segmentationClass === 'background' && !showDebugOverlays) return false;
+        if (!showDebugOverlays && !isSegmentationMaskGeometryParticipant(a)) return false;
+        // Priority 4 — Commit B: hide ALL segmentation masks in clean view (they
+        // are raw intermediates; planes represent the geometry). Debug shows all.
+        if (!showDebugOverlays && isCleanHiddenMask(a)) return false;
+        // Priority 4 — Commit C: in clean view hide polygon-less / oversized
+        // (full-frame) / low-confidence planes. Debug shows all planes.
+        if (!showDebugOverlays && !isCleanVisiblePlane(a)) return false;
         // Apply class filter
         if (geometryClassFilter && geometryClassFilter.size > 0 && !geometryClassFilter.has(a.geometryClass))
           return false;
-        // Filter low-confidence roof lines - they clutter the overlay
-        if (a.geometryClass === 'roof_line' && (a.confidence ?? 0) < MIN_ROOF_LINE_CONFIDENCE) return false;
+        // Filter low-confidence roof lines using effective threshold
+        if (a.geometryClass === 'roof_line' && (a.confidence ?? 0) < effectiveMinConfidence) return false;
+        // Priority 4 — Commit A: clean view shows only trusted roof-perimeter
+        // lines (ridge/eave/rake/valley/hip); hide raw wall_bottom_edge /
+        // wall_vertical candidates. Debug roof-lines mode shows all subtypes.
+        if (!showDebugRoofLines && !isCleanVisibleRoofLine(a)) return false;
+        // TASK 4: Filter very low confidence unknown artifacts in normal mode
+        if (a.geometryClass === 'unknown' && (a.confidence ?? 0) < 40 && !showDebugOverlays) return false;
         return true;
       });
-      // Cap roof lines per file to prevent clutter (keep highest confidence first)
-      const roofLinesInFile = filtered.filter(a => a.geometryClass === 'roof_line');
-      if (roofLinesInFile.length > MAX_ROOF_LINES_PER_FILE) {
-        // Sort roof lines by confidence descending, keep top N
+
+      // Deduplicate and cap roof lines per file
+      let roofLinesInFile = filtered.filter(a => a.geometryClass === 'roof_line');
+      const nonLineArtifacts = filtered.filter(a => a.geometryClass !== 'roof_line');
+
+      if (roofLinesInFile.length > 0) {
+        // Sort by confidence descending (highest confidence first)
         roofLinesInFile.sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
-        const keptLineIds = new Set(roofLinesInFile.slice(0, MAX_ROOF_LINES_PER_FILE).map(a => a.id));
-        filtered = filtered.filter(a => a.geometryClass !== 'roof_line' || keptLineIds.has(a.id));
+
+        // Remove near-duplicate lines (same subtype, similar position & angle)
+        if (!showDebugRoofLines) {
+          roofLinesInFile = deduplicateRoofLines(roofLinesInFile);
+        }
+
+        // Cap to max per file (keep highest confidence)
+        if (roofLinesInFile.length > effectiveMaxLines) {
+          roofLinesInFile = roofLinesInFile.slice(0, effectiveMaxLines);
+        }
       }
-      const totalDrawable = filtered.length;
-      const capped = filtered.slice(0, maxArtifactsPerFile);
+
+      // Rebuild filtered list: non-line artifacts first, then capped roof lines
+      const rebuiltFiltered = [...nonLineArtifacts, ...roofLinesInFile];
+      const totalDrawable = rebuiltFiltered.length;
+      const capped = rebuiltFiltered.slice(0, maxArtifactsPerFile);
       return { ...fw, artifacts: capped, totalDrawable, wasCapped: totalDrawable > maxArtifactsPerFile };
     })
     .filter((fw) => fw.artifacts.length > 0);
@@ -369,6 +823,8 @@ export function UnifiedGeometryOverlayRenderer({
           fileUrl={activeFile.fileUrl}
           filename={activeFile.filename}
           artifacts={activeFile.artifacts}
+          showDebugRoofLines={showDebugRoofLines}
+          showDebugOverlays={showDebugOverlays}
         />
       )}
 
@@ -396,7 +852,7 @@ export function UnifiedGeometryOverlayRenderer({
               );
               const entries = subtypes.size > 0
                 ? Array.from(subtypes).map(sub => {
-                    const style = ROOF_LINE_SUBTYPE_STYLES[sub] ?? DEFAULT_ROOF_LINE_STYLE;
+                    const style = ROOF_LINE_SUBTYPE_STYLES[sub] ?? activeDefaultLineStyle;
                     const subCount = filesWithDrawable.reduce(
                       (sum, fw) => sum + fw.artifacts.filter(
                         a => a.geometryClass === 'roof_line' && a.lineSubtype === sub
@@ -476,24 +932,82 @@ export function UnifiedGeometryOverlayRenderer({
             )];
           })}
       </div>
+
+      {/* Debug toggles for roof-line candidates and full overlay */}
+      <div className="flex items-center gap-2 px-1 mt-1 flex-wrap">
+        <label className="flex items-center gap-1.5 cursor-pointer group">
+          <span
+            className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[9px] font-medium transition ${
+              showDebugRoofLines
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                : 'bg-slate-800/50 text-slate-500 border border-slate-700/40'
+            }`}
+            title={showDebugRoofLines
+              ? 'Debug mode: showing all roof-line candidates with thick rendering. Duplicates and low-confidence lines are visible.'
+              : 'Default mode: only high-confidence, deduplicated roof lines shown thin. Toggle in parent component to see all candidates.'
+            }
+          >
+            {showDebugRoofLines ? '🔍 Debug: All line candidates' : '📋 Review: Trusted lines only'}
+          </span>
+        </label>
+        {showDebugRoofLines && (
+          <span className="text-[8px] text-amber-400/60">
+            Thick lines = debug mode. Low-conf & duplicates visible.
+          </span>
+        )}
+        <label className="flex items-center gap-1.5 cursor-pointer group">
+          <span
+            className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[9px] font-medium transition ${
+              showDebugOverlays
+                ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40'
+                : 'bg-slate-800/50 text-slate-500 border border-slate-700/40'
+            }`}
+            title={showDebugOverlays
+              ? 'Debug overlays: showing ALL artifacts including excluded, background, and unidentified. For development inspection only.'
+              : 'Default mode: excluded and background artifacts are hidden. Unidentified artifacts are shown with reduced prominence. Toggle to see raw overlay data.'
+            }
+          >
+            {showDebugOverlays ? '🔍 Debug: All overlays' : '🛡️ Clean: Filtered view'}
+          </span>
+        </label>
+        {showDebugOverlays && (
+          <span className="text-[8px] text-violet-400/60">
+            Raw mode — excluded, background & unknown artifacts visible.
+          </span>
+        )}
+      </div>
     </div>
   );
 }
 
-/* ── Single photo with SVG overlays from unified artifacts ──────────── */
+/* ── Single photo with SVG overlays from unified artifacts ─────────────────────── */
 
 function PhotoWithUnifiedOverlays({
   fileUrl,
   filename,
   artifacts,
+  showDebugRoofLines = false,
+  showDebugOverlays = false,
 }: {
   fileUrl: string;
   filename: string | null;
   artifacts: UnifiedGeometryArtifact[];
+  /** Whether to use thick debug rendering for roof lines. */
+  showDebugRoofLines?: boolean;
+  /** Whether to show ALL artifacts including excluded/background. */
+  showDebugOverlays?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [imgNatural, setImgNatural] = useState<{ w: number; h: number } | null>(null);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+
+  // Select style tables based on debug mode
+  const activeSubtypeStyles = showDebugRoofLines
+    ? ROOF_LINE_SUBTYPE_STYLES_DEBUG
+    : ROOF_LINE_SUBTYPE_STYLES_DEFAULT;
+  const activeDefaultStyle = showDebugRoofLines
+    ? DEFAULT_ROOF_LINE_STYLE_DEBUG
+    : DEFAULT_ROOF_LINE_STYLE;
 
   const handleImgLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
@@ -510,13 +1024,27 @@ function PhotoWithUnifiedOverlays({
   }> = [];
 
   for (const artifact of artifacts) {
-    // For segmentation_mask artifacts, use backend-specific colors to
-    // visually distinguish SAM 2 (emerald green) from Canny (cyan)
+    // Color selection priority:
+    //   1. Per-segmentationClass color (most specific)
+    //   2. Per-backend color (SAM 2 vs Canny)
+    //   3. Per-geometryClass default
     const isSegMask = artifact.geometryClass === 'segmentation_mask';
+    const segClass = artifact.segmentationClass as SegmentationClass | null;
     const defaultColor = GEOMETRY_CLASS_OVERLAY_COLORS[artifact.geometryClass] ?? GEOMETRY_CLASS_OVERLAY_COLORS.unknown;
-    const color = isSegMask && artifact.segmentationBackend && SEGMENTATION_BACKEND_COLORS[artifact.segmentationBackend]
+    // Try per-class color first, then backend color, then geometry class default
+    const perClassColor = isSegMask && segClass && SEGMENTATION_CLASS_COLORS[segClass]
+      ? SEGMENTATION_CLASS_COLORS[segClass]
+      : null;
+    const backendColor = isSegMask && artifact.segmentationBackend && SEGMENTATION_BACKEND_COLORS[artifact.segmentationBackend]
       ? SEGMENTATION_BACKEND_COLORS[artifact.segmentationBackend]
-      : defaultColor;
+      : null;
+    let color = perClassColor ?? backendColor ?? defaultColor;
+    // TASK 4: In normal mode, make unknown artifacts even more subtle — thin stroke,
+    // near-transparent fill — so they don't appear as confident labeled regions.
+    // In debug mode, use the normal unknown styling so they're visible for inspection.
+    if (artifact.geometryClass === 'unknown' && !showDebugOverlays) {
+      color = { stroke: '#94a3b8', fill: 'rgba(148,163,184,0.02)', label: 'Unidentified' };
+    }
     const geometry = extractArtifactGeometry(artifact);
     overlayElements.push({
       artifact,
@@ -549,12 +1077,12 @@ function PhotoWithUnifiedOverlays({
         {overlayElements.map((entry, idx) => {
           const isHovered = hoveredIdx === idx;
           const isRoofLine = entry.artifact.geometryClass === 'roof_line';
-          // Per-subtype roof line styling for thick, visible, color-coded lines
+          // Per-subtype roof line styling — thin in review mode, thick in debug mode
           const lineSubtype = entry.artifact.lineSubtype ?? null;
           const lineStyle = isRoofLine && lineSubtype
-            ? (ROOF_LINE_SUBTYPE_STYLES[lineSubtype] ?? DEFAULT_ROOF_LINE_STYLE)
+            ? (activeSubtypeStyles[lineSubtype] ?? activeDefaultStyle)
             : isRoofLine
-              ? DEFAULT_ROOF_LINE_STYLE
+              ? activeDefaultStyle
               : null;
           const strokeWidth = isHovered
             ? lineStyle
@@ -562,11 +1090,34 @@ function PhotoWithUnifiedOverlays({
               : 0.6
             : lineStyle
               ? lineStyle.strokeWidth
-              : 0.35;
+              : (isStructuralClass((entry.artifact.segmentationClass as SegmentationClass | null) ?? 'sky') || entry.artifact.geometryClass === 'wall_plane' || entry.artifact.geometryClass === 'roof_plane')
+                ? 0.5   // Thicker stroke for structural masks and plane geometry
+                : 0.35;
           const lineStroke = lineStyle?.stroke ?? entry.color.stroke;
           const lineDash = lineStyle?.strokeDasharray ?? 'none';
-          const fillOpacity = isHovered ? 0.2 : undefined;
-          const strokeDash = entry.artifact.authority?.mockArtifact ? '1,1' : 'none';
+          // Pass 3E: Excluded masks get reduced opacity and dashed borders
+          const isExcludedFromGeometry = entry.artifact.excludeFromGeometry === true;
+          const excludedFillOpacity = isExcludedFromGeometry ? 0.04 : undefined;
+          const excludedStrokeDash = isExcludedFromGeometry ? '4,4' : undefined;
+          const isStructural = isStructuralClass((entry.artifact.segmentationClass as SegmentationClass | null) ?? 'sky') || entry.artifact.geometryClass === 'wall_plane' || entry.artifact.geometryClass === 'roof_plane';
+          const fillOpacity = isHovered ? 0.2 : excludedFillOpacity ?? undefined;
+          const structuralFillOpacity = isStructural ? 0.18 : 0.12;
+          // Priority 4 — Commit C: in clean view, foreground planes as outlines
+          // with very low fill so overlapping translucent planes don't stack into
+          // an opaque flood. Debug view keeps the normal fill (unchanged).
+          const isPlaneClass = entry.artifact.geometryClass === 'roof_plane'
+            || entry.artifact.geometryClass === 'wall_plane'
+            || entry.artifact.geometryClass === 'consensus_plane'
+            || entry.artifact.geometryClass === 'ground_plane';
+          const effectiveStructuralFillOpacity = (!showDebugOverlays && isPlaneClass)
+            ? 0.05
+            : structuralFillOpacity;
+          const strokeDash = entry.artifact.authority?.mockArtifact ? '1,1'
+            : entry.artifact.isOccluder ? '6,3'  // Dashed lines for occluders
+            : excludedStrokeDash ?? 'none';  // Pass 3E: excluded masks get 4,4 dash
+          // Condition flag badge: show ⚠ for condition annotations
+          const hasConditionFlags = entry.artifact.conditionFlags && entry.artifact.conditionFlags.length > 0;
+          const isOccluderMask = entry.artifact.isOccluder === true;
 
           return (
             <g key={entry.artifact.id}>
@@ -575,7 +1126,7 @@ function PhotoWithUnifiedOverlays({
                 <polygon
                   points={entry.polygonSvg.points}
                   fill={isRoofLine ? 'none' : entry.color.stroke}
-                  fillOpacity={fillOpacity ?? (isRoofLine ? 0 : 0.12)}
+                  fillOpacity={fillOpacity ?? (isRoofLine ? 0 : effectiveStructuralFillOpacity)}
                   stroke={lineStroke}
                   strokeWidth={strokeWidth}
                   strokeDasharray={lineDash}
@@ -593,7 +1144,7 @@ function PhotoWithUnifiedOverlays({
                   width={entry.rectSvg.width}
                   height={entry.rectSvg.height}
                   fill={isRoofLine ? 'none' : entry.color.stroke}
-                  fillOpacity={fillOpacity ?? (isRoofLine ? 0 : 0.06)}
+                  fillOpacity={fillOpacity ?? (isRoofLine ? 0 : isStructural ? 0.12 : 0.06)}
                   stroke={lineStroke}
                   strokeWidth={strokeWidth}
                   strokeDasharray={lineDash}
@@ -609,9 +1160,9 @@ function PhotoWithUnifiedOverlays({
                 const isRL = entry.artifact.geometryClass === 'roof_line';
                 const lSub = entry.artifact.lineSubtype ?? null;
                 const ls = isRL && lSub
-                  ? (ROOF_LINE_SUBTYPE_STYLES[lSub] ?? DEFAULT_ROOF_LINE_STYLE)
+                  ? (activeSubtypeStyles[lSub] ?? activeDefaultStyle)
                   : isRL
-                    ? DEFAULT_ROOF_LINE_STYLE
+                    ? activeDefaultStyle
                     : null;
                 const lsColor = ls?.stroke ?? entry.color.stroke;
                 const lsWidth = ls
@@ -620,17 +1171,19 @@ function PhotoWithUnifiedOverlays({
                 const lsDash = ls?.strokeDasharray ?? strokeDash;
                 return (
                   <g>
-                    {/* Outer glow / outline for visibility on any background */}
-                    <line
-                      x1={entry.lineSvg.x1}
-                      y1={entry.lineSvg.y1}
-                      x2={entry.lineSvg.x2}
-                      y2={entry.lineSvg.y2}
-                      stroke="rgba(0,0,0,0.6)"
-                      strokeWidth={lsWidth + 1.0}
-                      strokeLinecap="round"
-                      style={{ pointerEvents: 'none' }}
-                    />
+                    {/* Outer glow / outline — only in debug mode for visibility on any background */}
+                    {showDebugRoofLines && (
+                      <line
+                        x1={entry.lineSvg.x1}
+                        y1={entry.lineSvg.y1}
+                        x2={entry.lineSvg.x2}
+                        y2={entry.lineSvg.y2}
+                        stroke="rgba(0,0,0,0.5)"
+                        strokeWidth={lsWidth + 0.5}
+                        strokeLinecap="round"
+                        style={{ pointerEvents: 'none' }}
+                      />
+                    )}
                     {/* Main colored line */}
                     <line
                       x1={entry.lineSvg.x1}
@@ -660,7 +1213,7 @@ function PhotoWithUnifiedOverlays({
         const isRoofPlane = a.geometryClass === 'roof_plane' || a.geometryClass === 'wall_plane' || a.geometryClass === 'consensus_plane';
         const isRoofLine = a.geometryClass === 'roof_line';
         const lineStyle = isRoofLine && a.lineSubtype
-          ? (ROOF_LINE_SUBTYPE_STYLES[a.lineSubtype] ?? DEFAULT_ROOF_LINE_STYLE)
+          ? (activeSubtypeStyles[a.lineSubtype] ?? activeDefaultStyle)
           : null;
 
         return (
@@ -698,6 +1251,49 @@ function PhotoWithUnifiedOverlays({
                   {a.authority?.state?.replace(/_/g, ' ') ?? 'unknown'}
                 </span>
               )}
+              {/* Occluder badge */}
+              {a.isOccluder && (
+                <span className="text-[9px] text-gray-400 border border-gray-500/30 rounded px-1">
+                  OCCLUDER
+                </span>
+              )}
+              {/* Pass 3E: Geometry exclusion badge */}
+              {a.excludeFromGeometry && (
+                <span className="text-[9px] text-orange-400 border border-orange-500/30 rounded px-1">
+                  EXCLUDED
+                </span>
+              )}
+              {/* Pass 3E: Partial participation badge (some stages disabled) */}
+              {!a.excludeFromGeometry && a.geometryParticipation && (
+                Object.values(a.geometryParticipation).some(v => v === false) && (
+                  <span className="text-[9px] text-yellow-400 border border-yellow-500/30 rounded px-1">
+                    PARTIAL
+                  </span>
+                )
+              )}
+              {/* Condition flag badges */}
+              {a.conditionFlags && a.conditionFlags.map((flag, fi) => (
+                <span key={fi} className="text-[9px] text-red-300 border border-red-500/30 rounded px-1">
+                  ⚠ {flag.replace(/_/g, ' ')}
+                </span>
+              ))}
+              {/* Segmentation class badge for segmentation_mask */}
+              {a.geometryClass === 'segmentation_mask' && a.segmentationClass && (
+                <span className="text-[9px] text-cyan-300 border border-cyan-500/30 rounded px-1">
+                  {a.segmentationClass.replace(/_/g, ' ')}
+                </span>
+              )}
+              {/* Facade/site context subtype badges */}
+              {a.facadeSubtype && (
+                <span className="text-[9px] text-amber-300 border border-amber-500/30 rounded px-1">
+                  {a.facadeSubtype.replace(/_/g, ' ')}
+                </span>
+              )}
+              {a.siteContextSubtype && (
+                <span className="text-[9px] text-lime-300 border border-lime-500/30 rounded px-1">
+                  {a.siteContextSubtype.replace(/_/g, ' ')}
+                </span>
+              )}
             </div>
 
             {/* Plane-specific details: pitch, azimuth, area, vertices */}
@@ -712,8 +1308,11 @@ function PhotoWithUnifiedOverlays({
                 {a.areaSqM != null && (
                   <span className="text-slate-300">Area: <span className="text-emerald-300">{a.areaSqM.toFixed(1)} m²</span></span>
                 )}
-                {a.polygon?.vertices != null && (
+                {a.polygon?.vertices != null && a.polygon.vertices.length > 0 && (
                   <span className="text-slate-300">Vertices: <span className="text-slate-200">{a.polygon.vertices.length}</span></span>
+                )}
+                {a.polygon?.vertices != null && a.polygon.vertices.length === 0 && a.geometryClass === 'segmentation_mask' && (
+                  <span className="text-slate-400/60 italic">Vertices: loading polygon detail...</span>
                 )}
                 {a.inlierCount != null && (
                   <span className="text-slate-300">Inliers: <span className="text-slate-200">{a.inlierCount}/{a.totalPoints}</span></span>
@@ -762,6 +1361,20 @@ function PhotoWithUnifiedOverlays({
                 {a.isSynthetic && (
                   <span className="text-amber-400">⚠ Synthetic</span>
                 )}
+                {/* Pass 3E: Geometry participation details */}
+                {a.geometryParticipation && (
+                  <span className="text-slate-300">
+                    Participation: {[
+                      a.geometryParticipation.participatesInLines !== false ? 'Lines' : null,
+                      a.geometryParticipation.participatesInPlanes !== false ? 'Planes' : null,
+                      a.geometryParticipation.participatesInDepthFusion !== false ? 'Depth' : null,
+                      a.geometryParticipation.participatesInPhotogrammetry !== false ? 'Photo' : null,
+                    ].filter(Boolean).join(', ') || 'none'}
+                  </span>
+                )}
+                {a.excludeFromGeometry && (
+                  <span className="text-orange-400">⛔ Excluded from geometry</span>
+                )}
               </div>
             )}
 
@@ -786,22 +1399,49 @@ export function buildFilesWithUnifiedArtifacts(
   const fileMap = new Map(surveyFiles.map((f) => [f.id, f]));
 
   const grouped = new Map<string, FileWithUnifiedArtifacts>();
+  const surveyLevelArtifacts: UnifiedGeometryArtifact[] = [];
   for (const artifact of artifacts) {
-    // An artifact may be associated with one or more source files.
-    // Use the first sourceFileId as the primary grouping key.
-    const fileId = artifact.provenance?.sourceFileIds?.[0];
-    if (!fileId) continue; // Skip artifacts with no file association
-
-    if (!grouped.has(fileId)) {
-      const surveyFile = fileMap.get(fileId);
-      grouped.set(fileId, {
-        fileId,
-        fileUrl: surveyFile?.fileUrl ?? '',
-        filename: surveyFile?.filename ?? null,
-        artifacts: [],
-      });
+    // Priority 4 — Commit D: an artifact may be derived from MULTIPLE source
+    // photos (notably consensus planes). Associate it with EVERY real source
+    // photo, not just sourceFileIds[0], so consensus/multi-source geometry
+    // appears on every photo it was actually derived from — and on none else.
+    const realFileIds = (artifact.provenance?.sourceFileIds ?? []).filter((f) => fileMap.has(f));
+    if (realFileIds.length === 0) {
+      // No identifiable source photo (e.g., truly survey-level) — distribute to
+      // all groups below (fallback preserves prior behavior).
+      surveyLevelArtifacts.push(artifact);
+      continue;
     }
-    grouped.get(fileId)!.artifacts.push(artifact);
+
+    for (const fileId of new Set(realFileIds)) {
+      if (!grouped.has(fileId)) {
+        const surveyFile = fileMap.get(fileId);
+        grouped.set(fileId, {
+          fileId,
+          fileUrl: surveyFile?.fileUrl ?? '',
+          filename: surveyFile?.filename ?? null,
+          artifacts: [],
+        });
+      }
+      grouped.get(fileId)!.artifacts.push(artifact);
+    }
+  }
+
+  // Distribute survey-level artifacts across all file groups so they appear
+  // in the overlay regardless of which photo is selected. This ensures
+  // consensus planes and other survey-wide geometry are always visible.
+  if (surveyLevelArtifacts.length > 0 && grouped.size > 0) {
+    for (const [, fileGroup] of grouped) {
+      fileGroup.artifacts.push(...surveyLevelArtifacts);
+    }
+  } else if (surveyLevelArtifacts.length > 0 && grouped.size === 0) {
+    // No photo-level artifacts exist — create a synthetic group for survey-level data
+    grouped.set('__survey_level__', {
+      fileId: '__survey_level__',
+      fileUrl: '',
+      filename: 'Survey-level geometry',
+      artifacts: surveyLevelArtifacts,
+    });
   }
 
   return Array.from(grouped.values());

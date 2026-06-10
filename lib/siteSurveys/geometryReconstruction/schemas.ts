@@ -23,11 +23,12 @@ import type {
   StructuralLineType,
   VanishingPointArtifact,
   ConsensusPlaneCandidate,
+  MeshArtifact,
   GeometryReconstructionArtifact,
   ArtifactTypeDiscriminator,
   ValidationResult,
 } from './types';
-import { ARTIFACT_TYPE_DISCRIMINATORS, SEGMENTATION_CLASSES } from './types';
+import { ARTIFACT_TYPE_DISCRIMINATORS, SEGMENTATION_CLASSES, CONDITION_FLAGS, type ConditionFlag } from './types';
 
 // ---------------------------------------------------------------------------
 // Authority validation
@@ -239,6 +240,32 @@ export function validateSfMPointCloud(payload: unknown): ValidationResult<SfMPoi
 
   if (errors.length > 0) return { valid: false, errors };
   return { valid: true, data: p as unknown as SfMPointCloud };
+}
+
+/** Validate a MeshArtifact payload. */
+export function validateMeshArtifact(payload: unknown): ValidationResult<MeshArtifact> {
+  const errors: string[] = [];
+  if (!isRecord(payload)) return { valid: false, errors: ['Payload must be a non-null object'] };
+  const p = payload as Record<string, unknown>;
+
+  if (p.artifactType !== 'mesh') {
+    errors.push(`artifactType must be "mesh", got "${String(p.artifactType)}"`);
+  }
+  assertString(p, 'id', errors);
+  assertString(p, 'verticesData', errors);
+  assertString(p, 'trianglesData', errors);
+  assertNumber(p, 'vertexCount', errors);
+  assertNumber(p, 'triangleCount', errors);
+  assertNumber(p, 'estimatedArea', errors);
+  assertNumber(p, 'planeCount', errors);
+  assertStringArray(p, 'sourceFileIds', errors);
+  assertConfidence(p, errors);
+  assertString(p, 'workerVersion', errors);
+  assertAuthority(p, errors);
+  assertLimitations(p, errors);
+
+  if (errors.length > 0) return { valid: false, errors };
+  return { valid: true, data: p as unknown as MeshArtifact };
 }
 
 /** Validate a PlaneCandidate payload. */
@@ -472,6 +499,54 @@ export function validateSemanticSegmentationMask(payload: unknown): ValidationRe
   assertAuthority(p, errors);
   assertLimitations(p, errors);
 
+  // conditionFlags is optional — if present, must be an array of valid ConditionFlag values
+  if ('conditionFlags' in p && p.conditionFlags !== undefined && p.conditionFlags !== null) {
+    if (!Array.isArray(p.conditionFlags)) {
+      errors.push('conditionFlags must be an array if present');
+    } else {
+      for (const flag of p.conditionFlags as unknown[]) {
+        if (!isString(flag) || !CONDITION_FLAGS.includes(flag as ConditionFlag)) {
+          errors.push(`conditionFlags entry must be one of: ${CONDITION_FLAGS.join(', ')}, got "${String(flag)}"`);
+        }
+      }
+    }
+  }
+
+  // isOccluder is optional — if present, must be boolean
+  if ('isOccluder' in p && p.isOccluder !== undefined && p.isOccluder !== null) {
+    if (typeof p.isOccluder !== 'boolean') {
+      errors.push('isOccluder must be a boolean if present');
+    }
+  }
+
+  // excludeFromGeometry is optional — Pass 3E sky containment
+  if ('excludeFromGeometry' in p && p.excludeFromGeometry !== undefined && p.excludeFromGeometry !== null) {
+    if (typeof p.excludeFromGeometry !== 'boolean') {
+      errors.push('excludeFromGeometry must be a boolean if present');
+    }
+  }
+
+  // participation is optional — Pass 3E geometry participation flags
+  if ('participation' in p && p.participation !== undefined && p.participation !== null) {
+    if (!isRecord(p.participation)) {
+      errors.push('participation must be an object if present');
+    } else {
+      const part = p.participation as Record<string, unknown>;
+      for (const key of ['participatesInLines', 'participatesInPlanes', 'participatesInDepthFusion', 'participatesInPhotogrammetry']) {
+        if (key in part && part[key] !== undefined && typeof part[key] !== 'boolean') {
+          errors.push(`participation.${key} must be a boolean if present`);
+        }
+      }
+    }
+  }
+
+  // isVegetation is optional — Pass 3E vegetation containment
+  if ('isVegetation' in p && p.isVegetation !== undefined && p.isVegetation !== null) {
+    if (typeof p.isVegetation !== 'boolean') {
+      errors.push('isVegetation must be a boolean if present');
+    }
+  }
+
   if (errors.length > 0) return { valid: false, errors };
   return { valid: true, data: p as unknown as SemanticSegmentationMask };
 }
@@ -489,7 +564,7 @@ export function validateStructuralLineCandidate(payload: unknown): ValidationRes
   assertString(p, 'fileId', errors);
 
   // Validate lineType
-  const validLineTypes: StructuralLineType[] = ['ridge', 'eave', 'rake', 'wall_vertical'];
+  const validLineTypes: StructuralLineType[] = ['ridge', 'eave', 'rake', 'valley', 'hip', 'wall_vertical', 'wall_bottom_edge'];
   if (!('lineType' in p)) {
     errors.push('Missing required field: lineType');
   } else if (!isString(p.lineType) || !validLineTypes.includes(p.lineType as StructuralLineType)) {
@@ -636,6 +711,10 @@ const VALIDATOR_MAP: Record<ArtifactTypeDiscriminator, (payload: unknown) => Val
   },
   sfm_point_cloud: (p) => {
     const r = validateSfMPointCloud(p);
+    return r.valid ? { valid: true, data: r.data } : r as ValidationResult<GeometryReconstructionArtifact>;
+  },
+  mesh: (p) => {
+    const r = validateMeshArtifact(p);
     return r.valid ? { valid: true, data: r.data } : r as ValidationResult<GeometryReconstructionArtifact>;
   },
   plane_candidate: (p) => {

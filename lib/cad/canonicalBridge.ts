@@ -162,6 +162,20 @@ export function canonicalToCADInputs(
 
   log.push(`${tag} START authority=${model.authority.state} roofPlanes=${model.roofPlanes.length} obstructions=${model.obstructions.length} electricalNodes=${model.electricalNodes.length}`);
 
+  // ── Degraded geometry gate ────────────────────────────────────────
+  // Roof/wall planes missing polygon data MUST NOT flow into CAD.
+  // They carry the degradedNoGeometry flag set by CanonicalModelBuilder.
+  const degradedRoofPlanes = model.roofPlanes.filter(p => p.degradedNoGeometry);
+  const degradedWallPlanes = model.wallPlanes.filter(p => p.degradedNoGeometry);
+  if (degradedRoofPlanes.length > 0 || degradedWallPlanes.length > 0) {
+    throw new CanonicalBridgeError(
+      `CanonicalBuildingModel contains ${degradedRoofPlanes.length} degraded roof plane(s) and ` +
+      `${degradedWallPlanes.length} degraded wall plane(s) with no polygon geometry. ` +
+      `Degraded planes CANNOT enter the CAD pipeline — their geometry is fabricated/missing. ` +
+      `Ensure all source artifacts have polygon or bbox data before promoting to canonical.`,
+    );
+  }
+
   // ── Convert obstructions ────────────────────────────────────────────────
   let obstructionsConverted = 0;
   let obstructionsSkipped = 0;

@@ -61,6 +61,22 @@ export interface GeometryBBox {
 }
 
 /**
+ * A roof plane outline in real-world WGS84 lat/lng — the AUTHORITATIVE geometry
+ * the permit planset consumes (Roadmap Phase 1: survey→canonical→planset spine).
+ *
+ * This is distinct from `GeometryPolygon` (image/local-meters, used for photo
+ * overlays and CAD-local placement). It is populated from aerial/Google Solar
+ * roofSegmentStats (Phase 1) or an operator satellite trace (Phase 2), and is
+ * source-agnostic so both paths converge on the same shape.
+ */
+export interface WorldRoofPolygon {
+  /** Polygon vertices in WGS84 lat/lng. */
+  vertices: { lat: number; lng: number }[];
+  /** Optional per-edge classification (ridge/eave/rake/hip/valley). */
+  edgeTypes?: string[];
+}
+
+/**
  * A 2D line segment in a specific coordinate system.
  */
 export interface GeometryLineSegment {
@@ -107,7 +123,7 @@ export type UnifiedGeometryClass =
 /**
  * Roof line subtypes — the canonical line types for solar CAD.
  */
-export type RoofLineSubtype = 'ridge' | 'eave' | 'rake' | 'hip' | 'valley' | 'wall_vertical';
+export type RoofLineSubtype = 'ridge' | 'eave' | 'rake' | 'hip' | 'valley' | 'wall_vertical' | 'wall_bottom_edge';
 
 /**
  * Obstruction subtypes — canonical classification for solar CAD.
@@ -124,6 +140,8 @@ export type ObstructionSubtype =
   | 'weatherhead'
   | 'solar_tube'
   | 'dormer'
+  | 'ac_unit'
+  | 'existing_solar_panel'
   | 'unknown_obstruction';
 
 /**
@@ -133,11 +151,74 @@ export type ElectricalNodeSubtype =
   | 'main_service_panel'
   | 'subpanel'
   | 'meter'
+  | 'utility_meter'
   | 'disconnect'
   | 'junction_box'
   | 'conduit'
+  | 'conduit_run'
   | 'grounding'
+  | 'inverter'
+  | 'battery'
   | 'unknown_electrical';
+
+/**
+ * Facade subtypes — building envelope features relevant to solar installation.
+ * These are review-only; they do NOT enter the CAD pipeline.
+ */
+export type FacadeSubtype =
+  | 'siding'
+  | 'window'
+  | 'door'
+  | 'garage_door'
+  | 'fascia'
+  | 'soffit'
+  | 'gutter'
+  | 'downspout'
+  | 'porch'
+  | 'deck'
+  | 'steps'
+  | 'railing'
+  | 'unknown_facade';
+
+/**
+ * Site context subtypes — ground-level features relevant to solar site assessment.
+ * These are review-only; they do NOT enter the CAD pipeline.
+ */
+export type SiteContextSubtype =
+  | 'grass'
+  | 'overgrown_grass'
+  | 'sidewalk'
+  | 'driveway'
+  | 'gravel'
+  | 'fence'
+  | 'bushes'
+  | 'vegetation_touching_structure'
+  | 'unknown_site_context';
+
+/** Semantic role assigned to a segmentation mask. Review metadata only. */
+export type SemanticSceneRole =
+  | 'structure'
+  | 'facade'
+  | 'vegetation'
+  | 'ground_surface'
+  | 'temporary_occluder'
+  | 'site_context'
+  | 'electrical_context'
+  | 'unknown';
+
+/** How relevant a semantic mask is to downstream CAD. Metadata only; never promotion authority. */
+export type SemanticCadRelevance = 'none' | 'review_context' | 'existing_pipeline_only';
+
+/**
+ * Condition flags — quality/condition indicators on geometry artifacts.
+ * These are review-only annotations; they do NOT enter the CAD pipeline.
+ */
+export type UnifiedConditionFlag =
+  | 'moss'
+  | 'algae'
+  | 'damaged_siding'
+  | 'blocked_access'
+  | 'muddy_work_area';
 
 /**
  * Plane type discriminator.
@@ -280,6 +361,11 @@ export interface UnifiedGeometryArtifact {
   /** Polygon outline (planes, segmentation masks, consensus planes) */
   polygon: GeometryPolygon | null;
 
+  /** Authoritative real-world (lat/lng) roof outline, when available — from
+   *  aerial/Google Solar or an operator trace. Consumed by the permit planset;
+   *  independent of the image-space `polygon`. */
+  worldPolygon?: WorldRoofPolygon | null;
+
   /** Line segment (roof lines) */
   lineSegment: GeometryLineSegment | null;
 
@@ -376,6 +462,72 @@ export interface UnifiedGeometryArtifact {
 
   /** Segmentation backend that produced this mask ('sam2' or 'canny'). Null for non-segmentation artifacts. */
   segmentationBackend: SegmentationBackend | null;
+
+  // ── Facade-specific fields (review-only, not CAD-safe) ──
+
+  /** Facade subtype for building envelope features */
+  facadeSubtype: FacadeSubtype | null;
+
+  // ── Site context fields (review-only, not CAD-safe) ──
+
+  /** Site context subtype for ground-level features */
+  siteContextSubtype: SiteContextSubtype | null;
+
+  // ── Condition & occluder flags (review-only annotations) ──
+
+  /** Condition flags detected on this artifact (moss, damage, access issues) */
+  conditionFlags: UnifiedConditionFlag[] | null;
+
+  /** Whether this artifact represents an occluder that blocks view of structure */
+  isOccluder: boolean | null;
+
+  // ── Semantic classification metadata (review-only; not CAD/geometry authority) ──
+
+  /** Semantic class attached to a mask. Mirrors segmentationClass for mask artifacts. */
+  semanticClass?: string | null;
+
+  /** Scene role for semantic mask review/display. */
+  sceneRole?: SemanticSceneRole | null;
+
+  /** True only for classes that describe existing structural surfaces. Metadata only. */
+  isStructure?: boolean | null;
+
+  /** True for temporary occluders such as truck/car/trailer/person/ladder. */
+  isTemporaryOccluder?: boolean | null;
+
+  /** True for vegetation classes such as tree/bush/grass. */
+  isVegetation?: boolean | null;
+
+  /** True for ground/site-surface classes such as grass/gravel/driveway. */
+  isGroundSurface?: boolean | null;
+
+  /** CAD relevance hint. Does not create or promote CAD geometry. */
+  cadRelevance?: SemanticCadRelevance | null;
+
+  /** Whether a human should review the semantic label/mask. */
+  reviewRequired?: boolean | null;
+
+  // ── Geometry participation controls (Pass 3E) ──
+
+  /**
+   * Whether this segmentation mask is entirely excluded from geometry
+   * extraction (lines, planes, depth, photogrammetry). When true, the mask
+   * is kept as overlay context but must never feed into downstream geometry
+   * stages. Propagated from SemanticSegmentationMask.excludeFromGeometry.
+   */
+  excludeFromGeometry?: boolean | null;
+
+  /**
+   * Per-stage participation flags controlling which downstream stages this
+   * mask feeds into. Propagated from SemanticSegmentationMask.participation.
+   * Null for non-segmentation artifacts or masks without participation data.
+   */
+  geometryParticipation?: {
+    participatesInLines?: boolean | null;
+    participatesInPlanes?: boolean | null;
+    participatesInDepthFusion?: boolean | null;
+    participatesInPhotogrammetry?: boolean | null;
+  } | null;
 
   // ── Review state ──
 
@@ -695,7 +847,14 @@ export interface CanonicalBuildingModel {
  */
 export interface CanonicalRoofPlane {
   id: string;
-  polygon: GeometryPolygon;  // local_meters_xy
+  polygon?: GeometryPolygon;  // local_meters_xy — undefined when source artifact lacks geometry
+  /** Authoritative real-world (lat/lng) outline — the geometry the permit
+   *  planset consumes. Present for aerial/Solar and operator-trace planes. */
+  worldPolygon?: WorldRoofPolygon;
+  /** If true, the source artifact had neither polygon nor bbox.
+   *  Downstream consumers (CAD bridge, permit engine) MUST reject or flag
+   *  degraded planes — never silently use them for layout generation. */
+  degradedNoGeometry?: boolean;
   pitchDegrees: number;
   azimuthDegrees: number;
   areaSqM: number;
@@ -713,7 +872,10 @@ export interface CanonicalRoofPlane {
  */
 export interface CanonicalWallPlane {
   id: string;
-  polygon: GeometryPolygon;  // local_meters_xy
+  polygon?: GeometryPolygon;  // local_meters_xy — undefined when source artifact lacks geometry
+  /** If true, the source artifact had neither polygon nor bbox.
+   *  Downstream consumers MUST reject or flag degraded planes. */
+  degradedNoGeometry?: boolean;
   estimatedHeightM: number | null;
   facingDirection: string | null;
   sourceArtifactId: string;

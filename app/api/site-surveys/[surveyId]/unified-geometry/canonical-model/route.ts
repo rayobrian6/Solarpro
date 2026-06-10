@@ -34,6 +34,9 @@ import {
 } from '@/lib/siteSurveys/unifiedGeometry';
 import type { UnifiedGeometryArtifact } from '@/lib/siteSurveys/unifiedGeometry/types';
 import { getUnifiedArtifactsForSurvey } from '@/lib/siteSurveys/unifiedGeometry/unifiedArtifactStore';
+import { writeCanonicalModel } from '@/lib/siteSurveys/unifiedGeometry/canonicalModelStore';
+import { getContradictionReportsBySurvey } from '@/lib/db/geometryReconstruction';
+import type { DepthContradictionReport } from '@/lib/siteSurveys/geometryReconstruction/types';
 
 export async function POST(
   req: NextRequest,
@@ -116,17 +119,59 @@ export async function POST(
       }, { status: 422 });
     }
 
+    // ── Fetch depth contradiction reports (P0-4.2, best-effort) ────────────────
+    let contradictionReports: DepthContradictionReport[] = [];
+    try {
+      const reportRows = await getContradictionReportsBySurvey(surveyId);
+      if (reportRows.length > 0) {
+        // Convert DB rows back to DepthContradictionReport shape
+        contradictionReports = reportRows.map(row => ({
+          segmentationClass: row.segmentationClass as DepthContradictionReport['segmentationClass'],
+          maskId: row.maskId,
+          expectedRange: [row.expectedRangeMin, row.expectedRangeMax] as [number, number],
+          actualDepth: row.actualDepth,
+          deviation: row.deviation,
+          severity: row.severity as DepthContradictionReport['severity'],
+          confidencePenalty: row.confidencePenalty,
+          description: row.description,
+        }));
+      }
+    } catch (reportErr) {
+      // Best-effort: absence of reports means the gate won't block anything
+      console.warn(
+        `[POST /unified-geometry/canonical-model] Failed to fetch contradiction reports for survey ${surveyId}:`,
+        reportErr instanceof Error ? reportErr.message : String(reportErr),
+      );
+    }
+
     // ── Build the CanonicalBuildingModel ─────────────────────────────────
     const model = buildCanonicalModel(
       surveyId,
       eligibleArtifacts,
       [], // promotion record IDs — would need to be fetched from DB
-      body.config,
+      { ...body.config, contradictionReports },
     );
+
+    // ── Persist the canonical model (Roadmap Phase 1 — the spine) ───────────
+    // Previously the model was built and returned but never stored, so nothing
+    // downstream could consume it. Persist it (upsert, one row per survey) so
+    // the permit planset can read authoritative roof geometry. Non-fatal: a
+    // write failure still returns the freshly built model to the caller.
+    let persisted = false;
+    try {
+      await writeCanonicalModel(model);
+      persisted = true;
+    } catch (persistErr) {
+      console.warn(
+        `[POST /unified-geometry/canonical-model] Failed to persist canonical model for survey ${surveyId} (non-fatal):`,
+        persistErr instanceof Error ? persistErr.message : String(persistErr),
+      );
+    }
 
     return NextResponse.json({
       success: true,
       model,
+      persisted,
       summary: {
         surveyId,
         roofPlaneCount: model.roofPlanes.length,

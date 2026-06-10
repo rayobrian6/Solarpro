@@ -3969,6 +3969,112 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 082 (obstruction backfill): ${(e as Error).message}`);
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Migration 083: project_physical_data engineering columns
+    // Adds columns referenced by the permit route and fromPhysicalData.ts
+    // bridge that were missing from the actual database schema.
+    // These were the cause of the "phantom column" PostgreSQL errors
+    // in the permit route's survey enrichment block.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    try {
+      await sql`ALTER TABLE project_physical_data ADD COLUMN IF NOT EXISTS roof_pitch_degrees NUMERIC(6,2)`;
+      await sql`ALTER TABLE project_physical_data ADD COLUMN IF NOT EXISTS decking_thickness_in NUMERIC(6,3)`;
+      await sql`ALTER TABLE project_physical_data ADD COLUMN IF NOT EXISTS structural_notes TEXT`;
+      await sql`ALTER TABLE project_physical_data ADD COLUMN IF NOT EXISTS main_panel_rating_amps INTEGER`;
+      await sql`ALTER TABLE project_physical_data ADD COLUMN IF NOT EXISTS busbar_rating_amps INTEGER`;
+      await sql`ALTER TABLE project_physical_data ADD COLUMN IF NOT EXISTS breaker_spaces_available INTEGER`;
+      await sql`ALTER TABLE project_physical_data ADD COLUMN IF NOT EXISTS has_existing_solar BOOLEAN DEFAULT FALSE`;
+      await sql`ALTER TABLE project_physical_data ADD COLUMN IF NOT EXISTS total_roof_area_sqft NUMERIC(12,2)`;
+      await sql`ALTER TABLE project_physical_data ADD COLUMN IF NOT EXISTS usable_area_sqft NUMERIC(12,2)`;
+      await sql`ALTER TABLE project_physical_data ADD COLUMN IF NOT EXISTS site_address TEXT`;
+      await sql`ALTER TABLE project_physical_data ADD COLUMN IF NOT EXISTS lat DOUBLE PRECISION`;
+      await sql`ALTER TABLE project_physical_data ADD COLUMN IF NOT EXISTS lng DOUBLE PRECISION`;
+      results.push('✅ Migration 083: project_physical_data engineering columns — 12 columns added');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 083 (physical_data engineering columns): ${(e as Error).message}`);
+    }
+
+
+    // ──────────────────────────────────────────────────────────────────
+    // Migration 084: geometry reconstruction stage_durations
+    // Adds stage_durations JSONB and failure_stage columns to track pipeline
+    // execution timing and failure points.
+    // ──────────────────────────────────────────────────────────────────
+
+    try {
+      await sql`ALTER TABLE site_survey_geometry_reconstruction_jobs ADD COLUMN IF NOT EXISTS stage_durations JSONB NULL`;
+      await sql`ALTER TABLE site_survey_geometry_reconstruction_jobs ADD COLUMN IF NOT EXISTS failure_stage TEXT NULL`;
+      results.push('✅ Migration 084: geometry reconstruction stage_durations — 2 columns added');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 084 (stage_durations): ${(e as Error).message}`);
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Migration 085: geometry reconstruction worker ownership
+    // Adds locked_by, locked_at columns for atomic job claiming by Render workers.
+    // ──────────────────────────────────────────────────────────────────
+
+    try {
+      await sql`ALTER TABLE site_survey_geometry_reconstruction_jobs ADD COLUMN IF NOT EXISTS locked_by TEXT NULL`;
+      await sql`ALTER TABLE site_survey_geometry_reconstruction_jobs ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ NULL`;
+      results.push('✅ Migration 085: worker ownership columns — 2 columns added');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 085 (worker ownership): ${(e as Error).message}`);
+    }
+
+    try {
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_geom_recon_jobs_claimable
+          ON site_survey_geometry_reconstruction_jobs (status, locked_by)
+          WHERE status = 'queued' AND locked_by IS NULL
+      `;
+      results.push('✅ Migration 085: idx_geom_recon_jobs_claimable — index created');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 085 (claimable index): ${(e as Error).message}`);
+    }
+
+    // ── Migration 086: Depth contradiction reports table ──────────────────────
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS site_survey_depth_contradiction_reports (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          job_id UUID NOT NULL REFERENCES site_survey_geometry_reconstruction_jobs(id) ON DELETE CASCADE,
+          survey_id UUID NOT NULL REFERENCES site_surveys(id) ON DELETE CASCADE,
+          segmentation_class TEXT NOT NULL,
+          mask_id TEXT NOT NULL,
+          expected_range_min DOUBLE PRECISION NOT NULL,
+          expected_range_max DOUBLE PRECISION NOT NULL,
+          actual_depth DOUBLE PRECISION NOT NULL,
+          deviation DOUBLE PRECISION NOT NULL,
+          severity TEXT NOT NULL CHECK (severity IN ('none', 'minor', 'moderate', 'major')),
+          confidence_penalty DOUBLE PRECISION NOT NULL DEFAULT 0,
+          description TEXT NOT NULL DEFAULT '',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_depth_contradiction_reports_survey
+          ON site_survey_depth_contradiction_reports (survey_id)
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_depth_contradiction_reports_job
+          ON site_survey_depth_contradiction_reports (job_id)
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_depth_contradiction_reports_blocking
+          ON site_survey_depth_contradiction_reports (mask_id, severity)
+          WHERE severity IN ('moderate', 'major')
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_depth_contradiction_reports_class
+          ON site_survey_depth_contradiction_reports (segmentation_class)
+      `;
+      results.push('✅ Migration 086: site_survey_depth_contradiction_reports table + 4 indexes created');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 086 (depth contradiction reports): ${(e as Error).message}`);
+    }
+
     return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);

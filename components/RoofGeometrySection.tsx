@@ -13,7 +13,7 @@
  *   4. Collapsible details for advanced users
  */
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef, Component } from 'react';
 import {
   Layers,
   RefreshCw,
@@ -32,6 +32,7 @@ import {
   XCircle,
   Clock,
   SkipForward,
+  Shapes,
 } from 'lucide-react';
 import {
   UnifiedGeometryOverlayRenderer,
@@ -79,6 +80,53 @@ interface RoofGeometrySectionProps {
 
 const EMPTY_ARTIFACTS: UnifiedGeometryArtifact[] = [];
 
+function isCleanPolygonArtifact(artifact: UnifiedGeometryArtifact): boolean {
+  if (!artifact.polygon?.vertices?.length) return false;
+  if (artifact.excludeFromGeometry === true) return false;
+  if (artifact.segmentationClass === 'background') return false;
+  if (artifact.geometryClass === 'segmentation_mask' && artifact.geometryParticipation) {
+    return artifact.geometryParticipation.participatesInLines !== false
+      || artifact.geometryParticipation.participatesInPlanes !== false;
+  }
+  return true;
+}
+
+/* ── Error boundary for the overlay renderer ────────────────────────────── */
+interface OverlayErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class OverlayErrorBoundary extends Component<
+  { children: React.ReactNode },
+  OverlayErrorBoundaryState
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): OverlayErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="rounded-xl border border-red-500/30 bg-red-950/20 p-3">
+          <p className="text-[11px] text-red-300 font-medium">
+            Overlay rendering failed
+          </p>
+          <p className="text-[10px] text-red-400/60 mt-1">
+            {this.state.error?.message ?? 'Unknown error'}. Try refreshing the page.
+          </p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /* ── Pipeline B Status Display ──────────────────────────────────────── */
 
 type PipelineStatus = 'idle' | 'running' | 'completed' | 'failed';
@@ -98,7 +146,20 @@ export function RoofGeometrySection({
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [generationSummary, setGenerationSummary] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [showDebugRoofLines, setShowDebugRoofLines] = useState(false);
+  const [showDebugOverlays, setShowDebugOverlays] = useState(false);
   const [bundleLoading, setBundleLoading] = useState(true);
+  const [bundleMode, setBundleMode] = useState<'stats' | 'overlay'>('stats');
+  const [overlayArtifactsByFile, setOverlayArtifactsByFile] = useState<Map<string, UnifiedGeometryArtifact[]>>(new Map());
+  // Ref to access the cache inside callbacks without adding it to dependency arrays
+  const overlayCacheRef = useRef(overlayArtifactsByFile);
+  overlayCacheRef.current = overlayArtifactsByFile;
+
+  // Clear per-photo overlay cache when surveyId changes (prevents stale data)
+  useEffect(() => {
+    setOverlayArtifactsByFile(new Map());
+  }, [surveyId]);
+  const [overlayLoading, setOverlayLoading] = useState(false);
   const [pipelineCLoading, setPipelineCLoading] = useState(false);
   const [pipelineCError, setPipelineCError] = useState<string | null>(null);
   const [pipelineCNoCoverage, setPipelineCNoCoverage] = useState(false);
@@ -111,19 +172,61 @@ export function RoofGeometrySection({
   // ── Fetch unified geometry bundle ─────────────────────────────────
   const [authRequired, setAuthRequired] = useState(false);
 
-  const fetchBundle = useCallback(async () => {
+  const fetchBundle = useCallback(async (mode: 'stats' | 'overlay' = 'stats') => {
     if (!surveyId) return;
+    setBundleLoading(true);
     try {
-      const res = await fetch(`/api/site-surveys/${surveyId}/unified-geometry/bundle`, {
+      const res = await fetch(`/api/site-surveys/${surveyId}/unified-geometry/bundle?mode=${mode}`, {
         credentials: 'include',
       });
       if (res.status === 401) {
         setAuthRequired(true);
         return;
       }
-      const data = await res.json();
+      if (res.status === 413) {
+        let errorMsg = 'Response too large. Try refreshing — the survey data will load in stats mode by default.';
+        try {
+          const errData = await res.json();
+          if (errData.error) errorMsg = errData.error;
+        } catch { /* use default message */ }
+        setPipelineError(errorMsg);
+        setBundleLoading(false);
+        return;
+      }
+
+      // ── Defensive JSON parsing ──
+      // The bundle response can be very large (~30+ MB with many segmentation
+      // masks). If any geometry_data JSONB value contains an unescaped character
+      // (newline, raw backslash, etc.), res.json() will throw "Unterminated
+      // string" or similar. We catch that, log a helpful diagnostic, and fall
+      // back to showing the error in the UI rather than crashing silently.
+      let data: any;
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        const msg = jsonErr instanceof Error ? jsonErr.message : String(jsonErr);
+        console.error('[RoofGeometrySection] JSON parse error in bundle response:', msg);
+
+        // Attempt to read the raw text to diagnose where the malformed JSON is
+        let rawSnippet = '(could not read body)';
+        try {
+          // res.body was already consumed by the failed res.json(), but we can
+          // try cloning — if the response is too large this may also fail.
+          // We skip this for now since the body is already consumed.
+        } catch { /* ignore */ }
+
+        setPipelineError(
+          `Failed to parse geometry data from server: ${msg}. ` +
+          `This may be caused by corrupted geometry data in the database. ` +
+          `Try refreshing — if the error persists, the survey's geometry data may need to be re-generated.`
+        );
+        setBundleLoading(false);
+        return;
+      }
+
       if (data.success && data.bundle) {
         setUnifiedBundle(data.bundle);
+        setBundleMode(mode);
       }
       // Capture pipeline configuration status (e.g., whether Google Solar API key is set)
       if (data.pipelineConfig) {
@@ -140,13 +243,80 @@ export function RoofGeometrySection({
     fetchBundle();
   }, [fetchBundle]);
 
-  // ── Run Pipeline B (Generate Roof Geometry) ──────────────────────
+  // ── Fetch per-photo overlay data (polygon vertices for one photo) ────────
+  // This is the key mechanism for making polygon rendering the default:
+  // - On mount, we fetch ?mode=stats (fast, small — gives counts/bbox for all photos)
+  // - When a photo is selected, we auto-fetch ?mode=overlay&fileId=... for that photo
+  // - Per-photo responses are ~1-2MB instead of ~33MB for all photos
+  // - Previously loaded photo polygons are cached in overlayArtifactsByFile
+  const fetchPhotoOverlay = useCallback(async (fileId: string) => {
+    if (!surveyId || !fileId) return;
+    // Skip if already cached for this file
+    if (overlayCacheRef.current.has(fileId)) return;
+    // Skip if we already loaded all overlay data (bundleMode === 'overlay' without fileId)
+    if (bundleMode === 'overlay') return;
+
+    setOverlayLoading(true);
+    try {
+      const res = await fetch(
+        `/api/site-surveys/${surveyId}/unified-geometry/bundle?mode=overlay&fileId=${fileId}`,
+        { credentials: 'include' },
+      );
+      if (res.status === 401) {
+        setAuthRequired(true);
+        return;
+      }
+
+      let data: any;
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        const msg = jsonErr instanceof Error ? jsonErr.message : String(jsonErr);
+        console.warn('[RoofGeometrySection] JSON parse error in per-photo overlay response:', msg);
+        return; // silent fail — the stats-mode bbox data is still showing
+      }
+
+      if (data.success && data.bundle?.artifacts) {
+        // Cache the overlay artifacts for this specific file
+        setOverlayArtifactsByFile(prev => {
+          const next = new Map(prev);
+          next.set(fileId, data.bundle.artifacts);
+          return next;
+        });
+      }
+    } catch (err) {
+      console.warn('[RoofGeometrySection] Failed to fetch per-photo overlay:', err);
+    } finally {
+      setOverlayLoading(false);
+    }
+  }, [surveyId, bundleMode]); // overlayCacheRef excluded — ref access avoids re-creation
+
+  // ── Auto-load overlay data when a photo is selected ────────────────────────
+  // When the user clicks on a photo in the overlay renderer, we automatically
+  // fetch the detailed polygon data for that photo. This makes polygon rendering
+  // the default experience without any manual button click.
+  useEffect(() => {
+    if (selectedFileId && bundleMode === 'stats') {
+      fetchPhotoOverlay(selectedFileId);
+    }
+  }, [selectedFileId, bundleMode, fetchPhotoOverlay]);
+
+  // NOTE: loadAllOverlayData callback removed — the "Load All Polygons" button
+  // was removed because it could exceed Vercel's 4.5MB response limit.
+  // Per-photo overlay auto-load (fetchPhotoOverlay) provides the same
+  // functionality safely by loading one photo at a time.
+
+
+  // ── Run Pipeline B (Generate Roof Geometry) ──────────────────────────────────────────────
+  // Pipeline B is async: POST /start → 202 { jobId } → poll GET /status
+  // If the server returns 200 (mock pipeline / backward compat), handle inline completion.
   const runPipelineB = useCallback(async () => {
     setPipelineStatus('running');
     setPipelineError(null);
     setGenerationSummary(null);
     setPhotoResults([]);
     setBudgetExhaustedReason(null);
+
     try {
       const res = await fetch(
         `/api/site-surveys/${surveyId}/geometry-reconstruction/start`,
@@ -157,6 +327,7 @@ export function RoofGeometrySection({
           body: JSON.stringify({ pipeline: 'full' }),
         },
       );
+
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         if (res.status === 401) {
@@ -164,46 +335,172 @@ export function RoofGeometrySection({
         }
         throw new Error(body.error || `Request failed (${res.status})`);
       }
+
       const json = await res.json();
+
       if (json.error) {
         throw new Error(json.error);
       }
-      const artifactCount = typeof json.summary?.rawArtifactCount === 'number'
-        ? json.summary.rawArtifactCount
-        : Array.isArray(json.job?.artifacts)
-          ? json.job.artifacts.length
+
+      // ── Async flow (202): job created, poll /status until completed/failed ──────
+      // This is the primary flow for real pipelines (full, segmentation_only, etc.)
+      if (res.status === 202 || json.status === 'queued') {
+        const jobId = json.jobId;
+        if (!jobId) {
+          throw new Error('Server returned async response but no jobId for polling.');
+        }
+
+        const POLL_INTERVAL_MS = 3000;
+        // Priority 2 — the client poll cap must EXCEED the backend worker's
+        // pipeline budget (DEFAULT_BACKGROUND_PIPELINE_TIMEOUT_MS = 900_000 / 15 min),
+        // because the client clock starts at job creation — before the worker
+        // claims the job — and includes queue wait + SAM2 warmup. The previous
+        // 600_000 (10 min) gave up while the backend was still legitimately
+        // running, producing a false "failed". 20 min covers budget + warmup.
+        const POLL_TIMEOUT_MS = 1_200_000;
+        const startTime = Date.now();
+
+        setGenerationSummary('Pipeline B queued — waiting for execution to start…');
+
+        while (Date.now() - startTime < POLL_TIMEOUT_MS) {
+          await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+
+          const statusRes = await fetch(
+            `/api/site-surveys/${surveyId}/geometry-reconstruction/status?jobId=${jobId}`,
+            { credentials: 'include' },
+          );
+
+          if (!statusRes.ok) {
+            console.warn('[runPipelineB] Status poll failed, retrying…');
+            continue;
+          }
+
+          const statusJson = await statusRes.json();
+
+          const stage = statusJson.currentStage ?? '';
+          const progress = typeof statusJson.progress === 'number' ? statusJson.progress : null;
+          const stageLabel = stage.replace(/_/g, ' ');
+          setGenerationSummary(
+            `Pipeline B running — stage: ${stageLabel}${progress !== null ? ` (${Math.round(progress * 100)}%)` : ''}…`,
+          );
+
+          if (statusJson.status === 'completed') {
+            const artifactCount = typeof statusJson.artifactCount === 'number'
+              ? statusJson.artifactCount
+              : Array.isArray(statusJson.artifacts)
+                ? statusJson.artifacts.length
+                : null;
+            const grouped = statusJson.groupedArtifactCounts as Record<string, number> | undefined;
+            const planeCount = grouped?.consensus_plane_candidate ?? grouped?.consensus_plane ?? 0;
+            const segCount = grouped?.semantic_segmentation_mask ?? 0;
+            const lineCount = grouped?.roof_line_candidate ?? grouped?.roof_line ?? 0;
+
+            setGenerationSummary(
+              `Pipeline B completed with ${artifactCount ?? '?'} artifacts` +
+              (segCount ? `, ${segCount} segmentation masks` : '') +
+              (lineCount ? `, ${lineCount} roof lines` : '') +
+              (planeCount ? `, ${planeCount} consensus planes` : '') +
+              '.',
+            );
+            setPipelineStatus('completed');
+            await fetchBundle();
+            onGeometryGenerated?.();
+            return;
+          }
+
+          if (statusJson.status === 'failed') {
+            throw new Error(
+              statusJson.error || 'Pipeline B execution failed. Check the job for partial results.',
+            );
+          }
+
+          if (statusJson.warning) {
+            console.warn(`[runPipelineB] ${statusJson.warning}`);
+          }
+        }
+
+        // Reached the client poll cap. This is NOT a failure: the backend worker
+        // has its own (longer) budget and the job very likely completes shortly.
+        // Do one final status check; if completed/failed handle it, otherwise
+        // degrade to an informational message instead of throwing a false "failed".
+        try {
+          const finalRes = await fetch(
+            `/api/site-surveys/${surveyId}/geometry-reconstruction/status?jobId=${jobId}`,
+            { credentials: 'include' },
+          );
+          if (finalRes.ok) {
+            const finalJson = await finalRes.json();
+            if (finalJson.status === 'completed') {
+              setPipelineStatus('completed');
+              setGenerationSummary('Pipeline B completed.');
+              await fetchBundle();
+              onGeometryGenerated?.();
+              return;
+            }
+            if (finalJson.status === 'failed') {
+              throw new Error(
+                finalJson.error || 'Pipeline B execution failed. Check the job for partial results.',
+              );
+            }
+          }
+        } catch (finalErr) {
+          // Re-throw a genuine backend failure; swallow transient poll errors.
+          if (finalErr instanceof Error && finalErr.message.includes('execution failed')) {
+            throw finalErr;
+          }
+        }
+        // Still running in the background — inform the user, do not mark failed.
+        setPipelineStatus('running');
+        setGenerationSummary(
+          'Pipeline B is taking longer than expected and is still running in the background. ' +
+          'Refresh the page in a minute to see the results.',
+        );
+        return;
+      }
+
+      // ── Inline completion (200): backward compat for mock pipeline ──────────
+      if (json.status === 'completed' || res.status === 200) {
+        const artifactCount = typeof json.summary?.rawArtifactCount === 'number'
+          ? json.summary.rawArtifactCount
           : null;
-      const stageCount = Array.isArray(json.pipelineStages) ? json.pipelineStages.length : null;
-      const polygonCount = typeof json.summary?.rawPolygonArtifactCount === 'number'
-        ? json.summary.rawPolygonArtifactCount
-        : null;
-      const consensusCount = typeof json.summary?.rawConsensusPlaneCount === 'number'
-        ? json.summary.rawConsensusPlaneCount
-        : null;
-      // Capture SAM 2 backend info if returned by the pipeline
-      if (json.summary?.segmentationBackend === 'sam2' || json.summary?.segmentationBackend === 'canny') {
-        setPipelineBackend(json.summary.segmentationBackend);
+        const stageCount = Array.isArray(json.pipelineStages) ? json.pipelineStages.length : null;
+        const polygonCount = typeof json.summary?.rawPolygonArtifactCount === 'number'
+          ? json.summary.rawPolygonArtifactCount
+          : null;
+        const consensusCount = typeof json.summary?.rawConsensusPlaneCount === 'number'
+          ? json.summary.rawConsensusPlaneCount
+          : null;
+
+        // Capture SAM 2 backend info
+        if (json.summary?.segmentationBackend === 'sam2' || json.summary?.segmentationBackend === 'canny') {
+          setPipelineBackend(json.summary.segmentationBackend);
+        }
+        // Capture per-photo segmentation results
+        if (Array.isArray(json.summary?.photoResults)) {
+          setPhotoResults(json.summary.photoResults);
+        }
+        if (json.summary?.budgetExhaustedReason) {
+          setBudgetExhaustedReason(json.summary.budgetExhaustedReason);
+        }
+
+        setGenerationSummary(
+          `Pipeline B completed${artifactCount != null ? ` with ${artifactCount} artifacts` : ''}${stageCount != null ? ` across ${stageCount} stages` : ''}${polygonCount != null ? `, including ${polygonCount} polygon artifacts` : ''}${consensusCount != null ? ` and ${consensusCount} consensus planes` : ''}.`,
+        );
+        setPipelineStatus('completed');
+        await fetchBundle();
+        onGeometryGenerated?.();
+        return;
       }
-      // Capture per-photo segmentation results for the status panel
-      if (Array.isArray(json.summary?.photoResults)) {
-        setPhotoResults(json.summary.photoResults);
-      }
-      if (json.summary?.budgetExhaustedReason) {
-        setBudgetExhaustedReason(json.summary.budgetExhaustedReason);
-      }
-      setGenerationSummary(
-        `Pipeline B completed${artifactCount != null ? ` with ${artifactCount} artifacts` : ''}${stageCount != null ? ` across ${stageCount} stages` : ''}${polygonCount != null ? `, including ${polygonCount} polygon artifacts` : ''}${consensusCount != null ? ` and ${consensusCount} consensus planes` : ''}.`,
+
+      // ── Unexpected response ──────────────────────────────────────────────
+      throw new Error(
+        `Unexpected response from /start: status=${res.status}, json.status=${json.status}`,
       );
-      setPipelineStatus('completed');
-      // Refresh the unified bundle to pick up new Pipeline B artifacts
-      await fetchBundle();
-      onGeometryGenerated?.();
     } catch (err) {
       setPipelineStatus('failed');
       setPipelineError(err instanceof Error ? err.message : 'Unknown error');
     }
   }, [surveyId, fetchBundle, onGeometryGenerated]);
-
   // ── Also run Pipeline A (Photo Vision) ───────────────────────────
   const runPipelineA = useCallback(async () => {
     setPipelineStatus('running');
@@ -322,14 +619,43 @@ export function RoofGeometrySection({
   }, [surveyId, fetchBundle, onGeometryGenerated]);
 
   // ── Derived data ──────────────────────────────────────────────────
-  const artifacts = unifiedBundle?.artifacts ?? EMPTY_ARTIFACTS;
+  // ── Merge per-photo overlay data into the base bundle ────────────────────
+  // In stats mode, segmentation mask vertices are stripped (empty arrays).
+  // When per-photo overlay data is fetched (?mode=overlay&fileId=...), those
+  // artifacts have full polygon vertices. We merge them by replacing
+  // stats-mode artifacts with their overlay counterparts (matched by ID).
+  const mergedArtifacts = useMemo(() => {
+    const base = unifiedBundle?.artifacts ?? EMPTY_ARTIFACTS;
+
+    // If no per-photo overlay data cached, return base as-is
+    if (overlayArtifactsByFile.size === 0) return base;
+
+    // Build a lookup map of overlay artifacts by ID
+    const overlayById = new Map<string, UnifiedGeometryArtifact>();
+    for (const [, arts] of overlayArtifactsByFile) {
+      for (const a of arts) {
+        if (a.id) overlayById.set(a.id, a);
+      }
+    }
+
+    // If no overlay artifacts found (unlikely), return base
+    if (overlayById.size === 0) return base;
+
+    // Replace stats-mode artifacts with their overlay counterparts
+    return base.map(a => {
+      const overlay = a.id ? overlayById.get(a.id) : undefined;
+      return overlay ?? a;
+    });
+  }, [unifiedBundle?.artifacts, overlayArtifactsByFile]);
+
+  const artifacts = mergedArtifacts;
   const pipelineCounts = unifiedBundle?.pipelineCounts ?? { photoVision: 0, geometryRecon: 0, googleSolarApi: 0, obstructionRegistration: 0, manual: 0, merged: 0, mock: 0 };
 
   const hasPipelineBData = pipelineCounts.geometryRecon > 0;
   const hasPipelineAData = pipelineCounts.photoVision > 0;
   const hasPipelineCData = pipelineCounts.googleSolarApi > 0;
   const hasAnyData = artifacts.length > 0;
-  const polygonArtifactCount = artifacts.filter((a) => a.polygon?.vertices?.length).length;
+  const polygonArtifactCount = artifacts.filter(isCleanPolygonArtifact).length;
   const consensusPlaneCount = artifacts.filter((a) => a.geometryClass === 'consensus_plane').length;
 
   // Count by geometry class
@@ -345,6 +671,14 @@ export function RoofGeometrySection({
   const geometryStats = useMemo(() => {
     const planes = artifacts.filter(a => a.geometryClass === 'roof_plane' || a.geometryClass === 'wall_plane' || a.geometryClass === 'consensus_plane');
     const lines = artifacts.filter(a => a.geometryClass === 'roof_line');
+    const segMasks = artifacts.filter(a => a.geometryClass === 'segmentation_mask');
+
+    // Pass 3E: Participation breakdown for segmentation masks
+    const participatingMasks = segMasks.filter(a => a.excludeFromGeometry !== true);
+    const excludedMasks = segMasks.filter(a => a.excludeFromGeometry === true);
+    const partialMasks = participatingMasks.filter(a =>
+      a.geometryParticipation && Object.values(a.geometryParticipation).some(v => v === false)
+    );
 
     // Confidence stats
     const confidences = artifacts.map(a => a.confidence).filter(c => c != null);
@@ -386,6 +720,10 @@ export function RoofGeometrySection({
     return {
       planeCount: planes.length,
       lineCount: lines.length,
+      segMaskCount: segMasks.length,
+      participatingMaskCount: participatingMasks.length,
+      excludedMaskCount: excludedMasks.length,
+      partialMaskCount: partialMasks.length,
       avgConfidence,
       pitchRange,
       azimuthRange,
@@ -500,7 +838,7 @@ export function RoofGeometrySection({
           </button>
           {hasAnyData && (
             <button
-              onClick={fetchBundle}
+              onClick={() => fetchBundle()}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/60 px-2.5 py-1.5 text-[10px] text-slate-400 transition hover:text-slate-200"
             >
               <RefreshCw size={10} />
@@ -514,7 +852,7 @@ export function RoofGeometrySection({
             <div className="flex items-center gap-2">
               <RefreshCw size={12} className="animate-spin text-blue-400" />
               <span className="text-[11px] font-semibold text-blue-300">
-                Processing… This may take a few minutes.
+                {generationSummary || 'Processing… This may take a few minutes.'}
               </span>
             </div>
           </div>
@@ -783,6 +1121,28 @@ export function RoofGeometrySection({
                 ))}
               </div>
             )}
+
+            {/* Pass 3E: Segmentation mask participation breakdown */}
+            {geometryStats.segMaskCount > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-0.5 text-[9px] text-cyan-300">
+                  Masks: {geometryStats.segMaskCount}
+                </span>
+                <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-300">
+                  Geometry: {geometryStats.participatingMaskCount}
+                </span>
+                {geometryStats.excludedMaskCount > 0 && (
+                  <span className="rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 text-[9px] text-orange-300">
+                    Excluded: {geometryStats.excludedMaskCount}
+                  </span>
+                )}
+                {geometryStats.partialMaskCount > 0 && (
+                  <span className="rounded-full border border-yellow-500/20 bg-yellow-500/10 px-2 py-0.5 text-[9px] text-yellow-300">
+                    Partial: {geometryStats.partialMaskCount}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -809,12 +1169,94 @@ export function RoofGeometrySection({
         {/* ── Photo + Geometry Overlay ── */}
         {hasAnyData && filesWithArtifacts.length > 0 && (
           <div className="rounded-lg border border-slate-700/40 bg-slate-950/30 p-2">
-            <UnifiedGeometryOverlayRenderer
-              filesWithArtifacts={filesWithArtifacts}
-              selectedFileId={selectedFileId}
-              onSelectFile={setSelectedFileId}
-              showMockArtifacts={true}
-            />
+            {/* Debug roof-line toggle & polygon detail toggle */}
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setShowDebugRoofLines(!showDebugRoofLines)}
+                className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[9px] font-medium transition ${
+                  showDebugRoofLines
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30'
+                    : 'bg-slate-800/50 text-slate-500 border border-slate-700/40 hover:text-slate-300'
+                }`}
+                title={showDebugRoofLines
+                  ? 'Currently showing ALL roof-line candidates with thick debug rendering. Click to return to review-friendly thin lines.'
+                  : 'Currently showing only high-confidence, deduplicated roof lines. Click to show ALL candidates with thick debug rendering.'
+                }
+              >
+                {showDebugRoofLines ? (
+                  <>🔍 Debug Lines: ON (showing all candidates)</>
+                ) : (
+                  <>📋 Show Debug Roof-Line Candidates</>
+                )}
+              </button>
+              {showDebugRoofLines && (
+                <span className="text-[8px] text-amber-400/60">
+                  Thick lines visible. Low-confidence & duplicate lines shown.
+                </span>
+              )}
+              {/* Debug overlay toggle — show excluded/background/unknown artifacts */}
+              <button
+                type="button"
+                onClick={() => setShowDebugOverlays(!showDebugOverlays)}
+                className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[9px] font-medium transition ${
+                  showDebugOverlays
+                    ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40 hover:bg-violet-500/30'
+                    : 'bg-slate-800/50 text-slate-500 border border-slate-700/40 hover:text-slate-300'
+                }`}
+                title={showDebugOverlays
+                  ? 'Currently showing ALL overlay artifacts including excluded, background, and unidentified. Click to return to clean filtered view.'
+                  : 'Currently hiding excluded and background artifacts, showing unknown with reduced prominence. Click to show ALL raw artifacts.'
+                }
+              >
+                {showDebugOverlays ? (
+                  <>🔍 Debug Overlays: ON (showing all raw artifacts)</>
+                ) : (
+                  <>🛡️ Show Debug Overlays</>
+                )}
+              </button>
+              {showDebugOverlays && (
+                <span className="text-[8px] text-violet-400/60">
+                  Raw overlay mode — excluded, background & unknown artifacts visible.
+                </span>
+              )}
+              {/* Per-photo overlay status indicator */}
+              {bundleMode === 'stats' && overlayArtifactsByFile.size === 0 && !overlayLoading && selectedFileId && (
+                <span className="inline-flex items-center gap-1 text-[9px] text-slate-500">
+                  <Shapes size={10} />
+                  Click a photo to load polygons
+                </span>
+              )}
+              {bundleMode === 'stats' && overlayLoading && (
+                <span className="inline-flex items-center gap-1 text-[9px] text-cyan-400 animate-pulse">
+                  <Shapes size={10} />
+                  Loading polygons...
+                </span>
+              )}
+              {bundleMode === 'stats' && overlayArtifactsByFile.size > 0 && !overlayLoading && (
+                <span className="inline-flex items-center gap-1 text-[9px] text-cyan-400/60">
+                  <Shapes size={10} />
+                  Polygons loaded for {overlayArtifactsByFile.size} photo{overlayArtifactsByFile.size !== 1 ? 's' : ''}
+                </span>
+              )}
+              {bundleMode === 'overlay' && (
+                <span className="inline-flex items-center gap-1 text-[9px] text-cyan-400/60">
+                  <Shapes size={10} />
+                  All polygon detail loaded
+                </span>
+              )}
+              {/* Load All Polygons button removed — per-photo overlay makes it unnecessary and it could exceed Vercel 4.5MB limit */}
+            </div>
+            <OverlayErrorBoundary>
+              <UnifiedGeometryOverlayRenderer
+                filesWithArtifacts={filesWithArtifacts}
+                selectedFileId={selectedFileId}
+                onSelectFile={setSelectedFileId}
+                showMockArtifacts={true}
+                showDebugRoofLines={showDebugRoofLines}
+                showDebugOverlays={showDebugOverlays}
+              />
+            </OverlayErrorBoundary>
           </div>
         )}
 

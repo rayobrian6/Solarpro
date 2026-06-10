@@ -2,9 +2,23 @@
  * POST /api/site-surveys/[surveyId]/geometry-reconstruction/start
  *
  * Start a new geometry reconstruction job.
- * If pipeline === 'mock', runs the mock adapter immediately.
- * For non-mock pipelines (full, segmentation_only, depth_only, etc.),
- * runs the real Pipeline B orchestration.
+ *
+ * P1 — Execution Architecture: Render Background Worker
+ *   - Creates job record with status='queued'
+ *   - Returns 202 + jobId IMMEDIATELY (no pipeline execution)
+ *   - Render worker polls DB for queued jobs, claims, and executes pipeline
+ *   - Frontend polls GET /status for progress
+ *
+ * Why NOT inline anymore?
+ *   SAM2 on CPU takes ~53-95s per photo → 15 photos ÷ 2 concurrency = ~8 batches
+ *   × ~55s = ~440s → exceeds Vercel's 300s hard limit → pipeline dies during
+ *   segmentation → zero artifacts persisted. The P0 checkpoint design fires
+ *   AFTER each complete stage, but segmentation itself takes >300s, so the
+ *   checkpoint never fires. Moving execution to a Render background worker
+ *   eliminates the Vercel timeout constraint entirely.
+ *
+ * Mock pipeline: runs synchronously for backward compatibility (fast, no SAM2).
+ * All other pipelines: create job → return 202 → worker executes asynchronously.
  *
  * Auth required. Survey ownership enforced.
  * REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
@@ -12,7 +26,6 @@
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
@@ -24,14 +37,6 @@ import {
   insertReconstructionArtifact,
 } from '@/lib/db/geometryReconstruction';
 import { generateMockArtifacts } from '@/lib/siteSurveys/geometryReconstruction/mockAdapter';
-import {
-  runFullGeometryReconstructionPipeline,
-  runSegmentationOnlyPipeline,
-  runDepthOnlyPipeline,
-} from '@/lib/siteSurveys/geometryReconstruction/runFullPipeline';
-import { warmupSAM2Service, waitForSAM2Warm } from '@/lib/siteSurveys/geometryReconstruction/workers/segmentation/sam2Client';
-import { adaptGeometryReconBundle } from '@/lib/siteSurveys/unifiedGeometry/pipelineAdapters';
-import { writeUnifiedArtifacts, deleteUnifiedArtifactsBySurvey } from '@/lib/siteSurveys/unifiedGeometry';
 import type { GeometryReconstructionInput, SourcePhoto } from '@/lib/siteSurveys/geometryReconstruction/types';
 
 export async function POST(
@@ -64,9 +69,6 @@ export async function POST(
     const sourceFileIds: string[] = body.sourceFileIds ?? [];
 
     // Get survey photo files to build source photos.
-    // NOTE: SiteSurveyFile uses `fileUrl`/`filename` (not `url`/`originalName`).
-    // The old mapping produced empty URLs, causing the normal logged-in UI flow
-    // to run Pipeline B without usable source images.
     const files = await getSiteSurveyFiles(surveyId);
     const selectedFiles = sourceFileIds.length > 0
       ? files.filter((f) => sourceFileIds.includes(f.id))
@@ -93,19 +95,21 @@ export async function POST(
       pipeline,
     };
 
-    // Create job row
+    // Create job row — status='queued'
     const job = await insertReconstructionJob(surveyId, user.id, pipeline, input);
 
-    if (pipeline === 'mock') {
-      // Run mock adapter immediately
-      const artifacts = generateMockArtifacts(input);
+    console.info(
+      `[POST geometry-reconstruction/start] Job ${job.id} created for pipeline=${pipeline}, ` +
+      `${sourcePhotos.length} source photos. Status='queued'. Worker will pick up asynchronously.`,
+    );
 
-      // Persist each artifact
+    // ── Mock pipeline: run synchronously for backward compatibility ────────────
+    // Mock is fast (<1s) and doesn't call SAM2, so it's safe to run inline.
+    if (pipeline === 'mock') {
+      const artifacts = generateMockArtifacts(input);
       for (const artifact of artifacts) {
         await insertReconstructionArtifact(job.id, surveyId, user.id, artifact, 'mock');
       }
-
-      // Mark job as completed
       const completedJob = await updateReconstructionJobStatus(job.id, 'completed');
       return NextResponse.json({
         success: true,
@@ -113,113 +117,21 @@ export async function POST(
       });
     }
 
-    // ── Real Pipeline B orchestration ──────────────────────────────────
-    console.info(
-      `[POST geometry-reconstruction/start] Running real pipeline: ${pipeline} for survey=${surveyId}`,
-    );
+    // ── Real Pipeline B: return 202 immediately, worker executes async ────────
+    // The Render background worker polls DB for queued jobs, claims this job,
+    // and runs the full pipeline (segmentation → line extraction → vanishing
+    // points → depth → planes → multi-view fusion → photogrammetry).
+    //
+    // Frontend should poll GET /status?jobId=<jobId> for progress.
+    // The worker updates heartbeat, currentStage, and persists artifacts
+    // incrementally via the P0 checkpoint system.
+    return NextResponse.json({
+      success: true,
+      jobId: job.id,
+      status: 'queued',
+      message: `Job created. Worker will process pipeline='${pipeline}' asynchronously. Poll GET /status?jobId=${job.id} for progress.`,
+    }, { status: 202 });
 
-    // Fire non-blocking SAM 2 warm-up as early as possible.
-    // On Render cold starts, the model takes ~60-100s to download and load.
-    // Firing this now gives the service a head start while we do DB writes.
-    // The actual segmentation call later will either find a warm model
-    // (saving ~60-100s) or proceed normally if still loading.
-    if (pipeline !== 'mock') {
-      warmupSAM2Service();
-    }
-
-    try {
-      // Select the appropriate pipeline runner based on the pipeline mode
-      let pipelineResult;
-      switch (pipeline) {
-        case 'segmentation_only':
-        case 'segmentation':
-          pipelineResult = await runSegmentationOnlyPipeline(input);
-          break;
-        case 'depth_only':
-        case 'depth_estimation':
-          pipelineResult = await runDepthOnlyPipeline(input);
-          break;
-        case 'full':
-        case 'line_extraction':
-        case 'plane_extraction':
-        case 'multi_view_fusion':
-        default:
-          pipelineResult = await runFullGeometryReconstructionPipeline(input);
-          break;
-      }
-
-      const { artifacts, stages, totalDurationMs, segmentationBackend, sam2PhotoCount, failedPhotoCount, skippedPhotoCount, cannyPhotoCount, photoResults, budgetExhaustedReason } = pipelineResult;
-      const rawArtifactCount = artifacts.length;
-      const rawConsensusPlaneCount = artifacts.filter(
-        (artifact) => artifact.artifactType === 'consensus_plane_candidate',
-      ).length;
-      const rawPolygonArtifactCount = artifacts.filter(
-        (artifact) => 'polygon' in artifact && Array.isArray(artifact.polygon) && artifact.polygon.length > 0,
-      ).length;
-
-      // Persist each artifact
-      for (const artifact of artifacts) {
-        await insertReconstructionArtifact(job.id, surveyId, user.id, artifact, pipeline);
-      }
-
-      // Adapt Pipeline B artifacts into unified geometry table
-      try {
-        // Clean up ALL previous unified artifacts for this survey.
-        // This ensures stale Canny masks from Pipeline A (photo_vision)
-        // don't coexist with new SAM2 masks from Pipeline B (geometry_recon).
-        // The overlay renderer shows artifacts from ALL pipelines, so old
-        // photo_vision artifacts must be cleared when Pipeline B re-runs.
-        const deletedCount = await deleteUnifiedArtifactsBySurvey(surveyId);
-        if (deletedCount > 0) {
-          console.info(
-            `[POST geometry-reconstruction/start] Deleted ${deletedCount} previous unified artifacts (all pipelines) for survey=${surveyId}`,
-          );
-        }
-
-        const adaptedArtifacts = adaptGeometryReconBundle(artifacts, surveyId);
-        const writeResult = await writeUnifiedArtifacts(adaptedArtifacts);
-        console.info(
-          `[POST geometry-reconstruction/start] Adapted ${adaptedArtifacts.length} Pipeline B artifacts to unified: inserted=${writeResult.inserted} skipped=${writeResult.skipped} failed=${writeResult.failed}`,
-        );
-      } catch (adaptErr) {
-        // Non-fatal: unified table write failure should not block the pipeline result
-        const errMsg = adaptErr instanceof Error ? adaptErr.message : String(adaptErr);
-        console.error(
-          `[POST geometry-reconstruction/start] Failed to adapt Pipeline B artifacts to unified table (non-fatal): ${errMsg}`,
-        );
-      }
-
-      // Mark job as completed
-      const completedJob = await updateReconstructionJobStatus(job.id, 'completed');
-      return NextResponse.json({
-        success: true,
-        job: completedJob ?? { ...job, status: 'completed', artifacts },
-        pipelineStages: stages,
-        totalDurationMs,
-        summary: {
-          sourcePhotoCount: sourcePhotos.length,
-          rawArtifactCount,
-          rawConsensusPlaneCount,
-          rawPolygonArtifactCount,
-          segmentationBackend,
-          sam2PhotoCount,
-          failedPhotoCount,
-          skippedPhotoCount,
-          cannyPhotoCount,
-          photoResults,
-          budgetExhaustedReason,
-        },
-      });
-    } catch (pipelineErr) {
-      // Pipeline execution failed — mark job as failed
-      const errMsg = pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr);
-      console.error(`[POST geometry-reconstruction/start] Pipeline execution failed: ${errMsg}`);
-      await updateReconstructionJobStatus(job.id, 'failed');
-      return NextResponse.json(
-        { success: false, error: `Pipeline execution failed: ${errMsg}` },
-        { status: 500 },
-      );
-    }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error(`[POST geometry-reconstruction/start] Error:`, message);

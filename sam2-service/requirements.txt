@@ -19,3 +19,8 @@ opencv-python-headless==4.11.0.86
 python-multipart==0.0.20
 httpx==0.28.1
 pydantic==2.10.4
+
+# ONNX Runtime — CPU-optimized inference engine for SAM2
+# Provides 1.5-3x speedup over PyTorch. Only loaded when
+# SAM2_INFERENCE_BACKEND=onnx is set in environment.
+onnxruntime>=1.18.0

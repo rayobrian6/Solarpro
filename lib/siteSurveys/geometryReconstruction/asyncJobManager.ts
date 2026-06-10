@@ -104,6 +104,10 @@ export function buildNewJob(
     currentStage: 'queued',
     lastHeartbeatAt: now,
     workerVersion,
+    stageDurations: null,
+    failureStage: null,
+    lockedBy: null,
+    lockedAt: null,
     authority: { ...REVIEW_ONLY_AUTHORITY },
     limitations: [...BASE_LIMITATIONS],
   };
@@ -113,6 +117,7 @@ export function buildNewJob(
 export function transitionToRunning(
   job: GeometryReconstructionJob,
   initialStage: PipelineStage,
+  workerId?: string,
 ): GeometryReconstructionJob {
   const now = new Date().toISOString();
   return {
@@ -121,6 +126,8 @@ export function transitionToRunning(
     currentStage: initialStage,
     lastHeartbeatAt: now,
     updatedAt: now,
+    lockedBy: workerId ?? job.lockedBy,
+    lockedAt: workerId ? now : job.lockedAt,
   };
 }
 
@@ -150,6 +157,8 @@ export function transitionToCompleted(
     completedAt: now,
     lastHeartbeatAt: now,
     updatedAt: now,
+    lockedBy: null,
+    lockedAt: null,
   };
 }
 
@@ -166,6 +175,8 @@ export function transitionToFailed(
     completedAt: now,
     lastHeartbeatAt: now,
     updatedAt: now,
+    lockedBy: null,
+    lockedAt: null,
   };
 }
 
@@ -180,6 +191,8 @@ export function transitionToCancelled(
     completedAt: now,
     lastHeartbeatAt: now,
     updatedAt: now,
+    lockedBy: null,
+    lockedAt: null,
   };
 }
 
@@ -230,6 +243,57 @@ export async function markJobRunning(
     RETURNING id
   `;
   return result.length > 0;
+}
+
+/**
+ * Claim a queued job for a specific worker. CAS on status='queued' AND locked_by IS NULL.
+ * Sets status='running', locked_by=workerId, locked_at=NOW().
+ * Returns true if the claim was successful (this worker won the race).
+ */
+export async function claimJobForWorker(
+  sql: ReturnType<typeof Function>,
+  jobId: string,
+  workerId: string,
+  workerVersion: string,
+): Promise<boolean> {
+  const result = await sql`
+    UPDATE site_survey_geometry_reconstruction_jobs
+    SET status = 'running',
+        current_stage = 'segmentation',
+        last_heartbeat_at = NOW(),
+        worker_version = ${workerVersion},
+        locked_by = ${workerId},
+        locked_at = NOW(),
+        updated_at = NOW()
+    WHERE id = ${jobId}::uuid
+      AND status = 'queued'
+      AND locked_by IS NULL
+    RETURNING id
+  `;
+  return result.length > 0;
+}
+
+/**
+ * Release a worker's lock on a job. Sets locked_by=NULL, locked_at=NULL.
+ * Should be called after job completion or failure.
+ * Best-effort — does not throw.
+ */
+export async function releaseWorkerLock(
+  sql: ReturnType<typeof Function>,
+  jobId: string,
+): Promise<void> {
+  try {
+    await sql`
+      UPDATE site_survey_geometry_reconstruction_jobs
+      SET locked_by = NULL,
+          locked_at = NULL,
+          updated_at = NOW()
+      WHERE id = ${jobId}::uuid
+      RETURNING id
+    `;
+  } catch {
+    // Best-effort: lock release failure must not affect job completion
+  }
 }
 
 /**

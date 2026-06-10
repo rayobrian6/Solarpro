@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { timingSafeEqual } from 'crypto';
 import { getDbReady } from '@/lib/db-neon';
 import { sendProposalSignedEmail } from '@/lib/email';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+
+/** Constant-time string comparison to prevent timing attacks on share tokens. */
+function safeStrEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
 
 export const dynamic     = 'force-dynamic';
 export const runtime     = 'nodejs';
@@ -129,7 +138,7 @@ export async function POST(
   // If proposal has a share_token, require it (prevents enumeration attacks)
   const shareToken = proposal.share_token as string | null;
   const providedToken = (body.token ?? null) || (req.nextUrl?.searchParams?.get('token') ?? null);
-  if (shareToken && shareToken !== providedToken) {
+  if (shareToken && (!providedToken || !safeStrEqual(shareToken, providedToken))) {
     return NextResponse.json({ success: false, error: 'Invalid access token' }, { status: 403 });
   }
 

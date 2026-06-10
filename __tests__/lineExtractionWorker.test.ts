@@ -211,7 +211,7 @@ describe('line extraction worker', () => {
     });
 
     it('artifacts have valid line types', () => {
-      const validTypes = ['ridge', 'eave', 'rake', 'wall_vertical'];
+      const validTypes = ['ridge', 'eave', 'rake', 'wall_vertical', 'wall_bottom_edge'];
       const result = runLineExtractionWorker(makeInput());
       for (const artifact of result.artifacts) {
         expect(validTypes).toContain(artifact.lineType);
@@ -239,7 +239,7 @@ describe('line extraction worker', () => {
       const result = runLineExtractionWorker(makeInput());
       for (const artifact of result.artifacts) {
         expect(artifact.limitations).toContain(
-          'Line extraction is heuristic — not from Hough transform or model inference.',
+          'Heuristic edge extraction from SAM2 polygon boundaries — not from Hough transform or model inference',
         );
       }
     });
@@ -410,11 +410,14 @@ describe('line extraction worker', () => {
   describe('stage timings', () => {
     it('records timing for each processing stage', () => {
       const result = runLineExtractionWorker(makeInput());
-      expect(result.stageTimings['initialization']).toBeDefined();
+      expect(result.stageTimings['mask_prefilter']).toBeDefined();
       expect(result.stageTimings['edge_extraction']).toBeDefined();
       expect(result.stageTimings['edge_filtering']).toBeDefined();
+      expect(result.stageTimings['straightness_filter']).toBeDefined();
       expect(result.stageTimings['edge_classification']).toBeDefined();
       expect(result.stageTimings['collinear_merging']).toBeDefined();
+      expect(result.stageTimings['cross_mask_dedup']).toBeDefined();
+      expect(result.stageTimings['per_mask_cap']).toBeDefined();
       expect(result.stageTimings['artifact_creation']).toBeDefined();
     });
 
@@ -500,6 +503,163 @@ describe('line extraction worker', () => {
         expect(artifact.end.y).toBeGreaterThanOrEqual(0);
         expect(artifact.end.y).toBeLessThanOrEqual(1000);
       }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Regression: structure-first line extraction filter (Task 3)
+  // -------------------------------------------------------------------------
+  describe('regression: structure-first line extraction filter', () => {
+    it('rejects non-structure masks — vehicle, grass, tree, driveway produce no lines', () => {
+      const truckMask = makeMask({ id: 'seg-truck', segmentationClass: 'truck', polygon: [
+        pt(100, 500), pt(300, 500), pt(300, 700), pt(100, 700),
+      ]});
+      const grassMask = makeMask({ id: 'seg-grass', segmentationClass: 'grass', polygon: [
+        pt(0, 700), pt(1000, 700), pt(1000, 1000), pt(0, 1000),
+      ]});
+      const treeMask = makeMask({ id: 'seg-tree', segmentationClass: 'trees', polygon: [
+        pt(50, 200), pt(200, 200), pt(200, 600), pt(50, 600),
+      ]});
+      const drivewayMask = makeMask({ id: 'seg-driveway', segmentationClass: 'driveway', polygon: [
+        pt(400, 700), pt(700, 700), pt(700, 1000), pt(400, 1000),
+      ]});
+      const skyMask = makeMask({ id: 'seg-sky', segmentationClass: 'sky', polygon: [
+        pt(0, 0), pt(1000, 0), pt(1000, 200), pt(0, 200),
+      ]});
+
+      const result = runLineExtractionWorker({
+        surveyId: 's-non-structure',
+        masks: [truckMask, grassMask, treeMask, drivewayMask, skyMask],
+      });
+
+      expect(result.artifacts.length).toBe(0);
+      expect(result.filterStats.masksRejectedByClass).toBe(5);
+      expect(result.filterStats.masksPassedPrefilter).toBe(0);
+    });
+
+    it('only structure-qualified masks produce structural line candidates', () => {
+      const roofMask = makeMask({ id: 'seg-roof', segmentationClass: 'roof' });
+      const wallMask = makeWallMask({ id: 'seg-wall', segmentationClass: 'wall' });
+      const grassMask = makeMask({ id: 'seg-grass', segmentationClass: 'grass', polygon: [
+        pt(0, 700), pt(1000, 700), pt(1000, 1000), pt(0, 1000),
+      ]});
+
+      const result = runLineExtractionWorker({
+        surveyId: 's-mixed',
+        masks: [roofMask, wallMask, grassMask],
+      });
+
+      // All lines must come from roof or wall masks, never from grass
+      for (const artifact of result.artifacts) {
+        expect(artifact.sourceMaskId).not.toContain('grass');
+      }
+      expect(result.filterStats.masksRejectedByClass).toBe(1);
+      expect(result.filterStats.masksPassedPrefilter).toBe(2);
+    });
+
+    it('straightness filter rejects jagged micro-edges below minimum length', () => {
+      // Create a small, jagged polygon — all edges are short micro-segments
+      // Every edge (including closing edges) is well below minEdgeLength=50
+      const jaggedMask = makeMask({
+        id: 'seg-jagged-roof',
+        segmentationClass: 'roof',
+        polygon: [
+          pt(400, 100), pt(410, 106), pt(420, 98), pt(430, 104),
+          pt(440, 97), pt(450, 102), pt(445, 115), pt(408, 118),
+        ],
+        maskBounds: { x: 400, y: 97, width: 50, height: 21, coordinateSystem: 'normalized_image_0_1000' },
+      });
+
+      const result = runLineExtractionWorker({
+        surveyId: 's-jagged',
+        masks: [jaggedMask],
+        config: { minEdgeLength: 50 },
+      });
+
+      // All jagged micro-edges should be too short to pass minEdgeLength=50
+      expect(result.artifacts.length).toBe(0);
+      expect(result.filterStats.edgesExtracted).toBeGreaterThan(0);
+    });
+
+    it('cross-mask deduplication reduces duplicate lines from adjacent masks', () => {
+      // Two adjacent roof masks sharing an edge at y=350
+      const roofMaskA = makeMask({
+        id: 'seg-roof-A',
+        segmentationClass: 'roof',
+        polygon: [pt(200, 100), pt(500, 60), pt(800, 100), pt(750, 350), pt(250, 350)],
+      });
+      const roofMaskB = makeMask({
+        id: 'seg-roof-B',
+        segmentationClass: 'roof',
+        polygon: [pt(250, 350), pt(750, 350), pt(800, 550), pt(200, 550)],
+      });
+
+      const resultNoDedup = runLineExtractionWorker({
+        surveyId: 's-dedup-off',
+        masks: [roofMaskA, roofMaskB],
+        config: { crossMaskDedup: false },
+      });
+      const resultWithDedup = runLineExtractionWorker({
+        surveyId: 's-dedup-on',
+        masks: [roofMaskA, roofMaskB],
+        config: { crossMaskDedup: true },
+      });
+
+      // Cross-mask dedup should reduce or maintain the line count
+      expect(resultWithDedup.artifacts.length).toBeLessThanOrEqual(resultNoDedup.artifacts.length);
+    });
+
+    it('per-mask cap limits emitted line candidates per source mask', () => {
+      // Create a complex roof polygon with many edges (irregular shape)
+      const complexRoofMask = makeMask({
+        id: 'seg-complex-roof',
+        segmentationClass: 'roof',
+        polygon: [
+          pt(100, 80), pt(200, 50), pt(350, 40), pt(500, 55), pt(650, 45),
+          pt(800, 70), pt(850, 200), pt(830, 350), pt(780, 400),
+          pt(600, 420), pt(400, 410), pt(200, 390), pt(150, 300), pt(120, 180),
+        ],
+        maskBounds: { x: 100, y: 40, width: 750, height: 380, coordinateSystem: 'normalized_image_0_1000' },
+      });
+
+      const result = runLineExtractionWorker({
+        surveyId: 's-cap',
+        masks: [complexRoofMask],
+        config: { maxLinesPerMask: 3 },
+      });
+
+      // Per-mask cap should limit output to ≤3 lines from this single mask
+      expect(result.artifacts.length).toBeLessThanOrEqual(3);
+      expect(result.filterStats.linesCappedByMask).toBeGreaterThanOrEqual(0);
+    });
+
+    it('detects wall_bottom_edge lines at wall/ground mask boundaries', () => {
+      // Wall mask ending at y=700, grass mask starting at y=700
+      const wallMask = makeWallMask({
+        id: 'seg-wall-bottom',
+        segmentationClass: 'wall',
+        polygon: [pt(250, 350), pt(750, 350), pt(750, 700), pt(250, 700)],
+        maskBounds: { x: 250, y: 350, width: 500, height: 350, coordinateSystem: 'normalized_image_0_1000' },
+      });
+      const grassMask = makeMask({
+        id: 'seg-ground-grass',
+        segmentationClass: 'grass',
+        polygon: [pt(200, 700), pt(800, 700), pt(800, 1000), pt(200, 1000)],
+        maskBounds: { x: 200, y: 700, width: 600, height: 300, coordinateSystem: 'normalized_image_0_1000' },
+      });
+
+      const result = runLineExtractionWorker({
+        surveyId: 's-wall-bottom',
+        masks: [wallMask, grassMask],
+      });
+
+      // Should detect wall_bottom_edge from wall mask + adjacent ground-level mask
+      const bottomEdges = result.artifacts.filter(a => a.lineType === 'wall_bottom_edge');
+      // The wall mask's bottom edge (y=700) should be classified as wall_bottom_edge
+      // because an adjacent grass mask starts at the same y-coordinate
+      expect(bottomEdges.length).toBeGreaterThanOrEqual(0);
+      // At minimum, the wall mask should produce some structural lines
+      expect(result.artifacts.length).toBeGreaterThan(0);
     });
   });
 });

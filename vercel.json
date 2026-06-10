@@ -8,6 +8,10 @@
     {
       "path": "/api/cron/proposal-expiry",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/stale-job-cleanup",
+      "schedule": "0 3 * * *"
     }
   ]
 }

@@ -1,0 +1,39 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "lib": ["es2020"],
+    "outDir": "./dist",
+    "rootDir": "..",
+    "strict": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "declaration": false,
+    "sourceMap": true,
+    "types": ["node"],
+    "typeRoots": ["../node_modules/@types"],
+    "paths": {
+      "@/*": ["../*"]
+    },
+    "baseUrl": "."
+  },
+  "include": [
+    "main.ts",
+    "types.d.ts",
+    "../lib/db/geometryReconstruction.ts",
+    "../lib/db/core.ts",
+    "../lib/db-ready.ts",
+    "../lib/auth.ts",
+    "../lib/db-neon.ts",
+    "../lib/siteSurveys/geometryReconstruction/**/*.ts",
+    "../lib/siteSurveys/unifiedGeometry/**/*.ts"
+  ],
+  "exclude": [
+    "../node_modules",
+    "../.next",
+    "../**/__tests__/**",
+    "../dist"
+  ]
+}

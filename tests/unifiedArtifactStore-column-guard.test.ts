@@ -257,52 +257,8 @@ describe('unifiedArtifactStore — migration drift column guard', () => {
     });
   });
 
-  // ── getUnifiedArtifactsByIds ────────────────────────────────────────────
+    // NOTE: getUnifiedArtifactsByIds test block removed — function no longer exists
 
-  describe('getUnifiedArtifactsByIds', () => {
-    it('returns empty array when table does not exist', async () => {
-      mockSchemaState('table-missing');
-
-      const { getUnifiedArtifactsByIds } = await importStore();
-      const result = await getUnifiedArtifactsByIds([ARTIFACT_ID]);
-
-      expect(result).toEqual([]);
-    });
-
-    it('returns empty array for empty input', async () => {
-      const { getUnifiedArtifactsByIds } = await importStore();
-      const result = await getUnifiedArtifactsByIds([]);
-
-      expect(result).toEqual([]);
-      expect(mockSql).not.toHaveBeenCalled();
-    });
-
-    it('returns artifacts with obstructionMetadata=null when column is missing', async () => {
-      mockSchemaState('table-only', [BASE_ROW]);
-
-      const { getUnifiedArtifactsByIds, _resetObstructionMetadataColumnCache } = await importStore();
-      _resetObstructionMetadataColumnCache();
-
-      const result = await getUnifiedArtifactsByIds([ARTIFACT_ID]);
-
-      expect(result).toHaveLength(1);
-      expect(result[0].id).toBe(ARTIFACT_ID);
-      expect(result[0].obstructionMetadata).toBeNull();
-    });
-
-    it('returns artifacts with obstructionMetadata populated when column exists', async () => {
-      mockSchemaState('table-with-column', [FULL_ROW]);
-
-      const { getUnifiedArtifactsByIds, _resetObstructionMetadataColumnCache } = await importStore();
-      _resetObstructionMetadataColumnCache();
-
-      const result = await getUnifiedArtifactsByIds([ARTIFACT_ID]);
-
-      expect(result).toHaveLength(1);
-      expect(result[0].obstructionMetadata).not.toBeNull();
-      expect(result[0].obstructionMetadata?.obstructionType).toBe('chimney');
-    });
-  });
 
   // ── Column cache behavior ──────────────────────────────────────────────
 

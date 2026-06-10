@@ -41,27 +41,51 @@ import type { RawSurveyPayload, SurveyPhotoRef } from './types';
 export interface ProjectPhysicalDataRow {
   id?:                      string;
   project_id?:              string;
+  // ── Structure / Roof (migration 013 base columns) ──
   roof_material?:           string | null;
   roof_age_years?:          number | null;
   roof_condition?:          string | null;
-  roof_pitch_degrees?:      number | null;
+  roof_pitch?:              string | null;    // TEXT enum: flat|low|standard|steep|very_steep
   rafter_spacing_in?:       number | null;
+  obstructions?:            unknown[] | null;  // JSONB array
+  usable_roof_pct?:         number | null;     // 0-100 percent
+  structure_type?:          string | null;
+  stories?:                 string | null;
+  attic_access?:            boolean | null;
+  // ── Structure / Roof (migration 050 engineering additions) ──
+  roof_pitch_degrees?:      number | null;    // numeric degrees, added by 050
   decking_thickness_in?:    number | null;
   structural_notes?:        string | null;
-  main_panel_rating_amps?:  number | null;
-  busbar_rating_amps?:      number | null;
-  breaker_spaces_available?: number | null;
-  interconnection_point?:   string | null;
-  panel_brand?:             string | null;
-  has_existing_solar?:      boolean | null;
-  electrical_notes?:        string | null;
   total_roof_area_sqft?:    number | null;
   usable_area_sqft?:        number | null;
-  access_notes?:            string | null;
-  mounting_notes?:          string | null;
+  // ── Electrical (migration 013 base columns) ──
+  panel_rating_amps?:       number | null;    // INTEGER (mapped from PanelRating enum)
+  available_breaker_slots?: string | null;    // TEXT ('0','1-2','3-4','5+')
+  interconnection_point?:   string | null;
+  panel_brand?:             string | null;
+  has_sub_panel?:           boolean | null;
+  sub_panel_rating_amps?:   number | null;
+  meter_socket_type?:       string | null;
+  service_entrance_type?:   string | null;
+  // ── Electrical (migration 050 engineering additions) ──
+  main_panel_rating_amps?:  number | null;    // INTEGER, added by 050
+  busbar_rating_amps?:      number | null;
+  breaker_spaces_available?: number | null;   // INTEGER, added by 050
+  has_existing_solar?:      boolean | null;
+  electrical_notes?:        string | null;
+  // ── Site / Location (migration 050 additions) ──
   site_address?:            string | null;
   lat?:                     number | null;
   lng?:                     number | null;
+  // ── Survey metadata (migration 013 base) ──
+  inspector_name?:          string | null;
+  surveyed_at?:             string | null;
+  access_notes?:            string | null;
+  mounting_notes?:          string | null;
+  // ── Migration 017 additions ──
+  setback_notes?:           string | null;
+  source_survey_id?:        string | null;
+  // ── Timestamps ──
   updated_at?:              string | null;
 }
 
@@ -165,53 +189,82 @@ export async function fromPhysicalData(
   // All nested objects are optional — null/undefined is safe throughout.
   const pd = physData ?? {};
 
+  // ── Roof pitch enum → degrees conversion ──────────────────────────────────
+  // The DB stores roof_pitch as a TEXT enum (flat|low|standard|steep|very_steep).
+  // The engineering pipeline needs numeric degrees. Use roof_pitch_degrees
+  // (added by migration 050) if available, otherwise convert from the enum.
+  const ROOF_PITCH_ENUM_TO_DEGREES: Record<string, number> = {
+    flat: 0, low: 10, standard: 20, steep: 35, very_steep: 45,
+  };
+  const roofPitchDegrees: number | null =
+    pd.roof_pitch_degrees ??                                      // preferred: numeric column from 050
+    (pd.roof_pitch ? ROOF_PITCH_ENUM_TO_DEGREES[pd.roof_pitch] : null) ??  // fallback: enum → degrees
+    null;
+
+  // ── Panel rating: prefer main_panel_rating_amps (050), fall back to panel_rating_amps (013) ──
+  const panelRatingAmps: number | null =
+    pd.main_panel_rating_amps ?? pd.panel_rating_amps ?? null;
+
+  // ── Breaker spaces: prefer breaker_spaces_available (050 INTEGER), fall back to available_breaker_slots (013 TEXT) ──
+  const breakerSpaces: number | null =
+    pd.breaker_spaces_available ??
+    (pd.available_breaker_slots ? parseInt(pd.available_breaker_slots, 10) : null) ??
+    null;
+
+  // ── Usable area: prefer usable_area_sqft (050), derive from usable_roof_pct (013) ──
+  // Note: usable_roof_pct is a percentage, not sqft — only use if no sqft available
+  const usableAreaSqFt: number | null = pd.usable_area_sqft ?? null;
+
   const payload: RawSurveyPayload = {
     id:        surveyId ?? `fromPhysicalData-${projectId}`,
     projectId,
 
-    // ── Location (nested) ─────────────────────────────────────────────────
+    // ── Location (nested) ──────────────────────────────────────────────────
     location: {
       lat:     pd.lat          ?? null,
       lng:     pd.lng          ?? null,
       address: pd.site_address ?? null,
     },
 
-    // ── Structural (nested) ───────────────────────────────────────────────
+    // ── Structural (nested) ─────────────────────────────────────────────────
     structural: {
       roofMaterial:       pd.roof_material        ?? null,
       roofAgeYears:       pd.roof_age_years        ?? null,
       roofCondition:      pd.roof_condition        ?? null,
+      roofPitch:          pd.roof_pitch            ?? null,   // TEXT enum: flat|low|standard|steep|very_steep
       rafterSpacingIn:    pd.rafter_spacing_in     ?? null,
       deckingThicknessIn: pd.decking_thickness_in  ?? null,
     },
 
-    // ── Electrical (nested) ───────────────────────────────────────────────
+    // ── Electrical (nested) ──────────────────────────────────────────────────
     electrical: {
-      mainPanelRatingAmps:    pd.main_panel_rating_amps    ?? null,
+      mainPanelRatingAmps:    panelRatingAmps,              // merged from 050 + 013
       busbarRatingAmps:       pd.busbar_rating_amps        ?? null,
-      breakerSpacesAvailable: pd.breaker_spaces_available  ?? null,
+      breakerSpacesAvailable: breakerSpaces,                 // merged from 050 + 013
       interconnectionPoint:   pd.interconnection_point     ?? null,
       panelBrand:             pd.panel_brand               ?? null,
+      hasSubPanel:            pd.has_sub_panel             ?? null,
     },
 
-    // ── Geometry (nested) ─────────────────────────────────────────────────
+    // ── Geometry (nested) ────────────────────────────────────────────────────
     geometry: {
-      usableAreaSqFt: pd.usable_area_sqft ?? null,
+      usableAreaSqFt: usableAreaSqFt,
       roofPlanes:     null,
-      obstructions:   null,
+      obstructions:   Array.isArray(pd.obstructions) ? pd.obstructions : null,
       setbacks:       null,
     },
 
-    // ── Photos: attached from project_files ───────────────────────────────
+    // ── Photos: attached from project_files ─────────────────────────────────
     // normalizeSurvey() handles Array<Partial<SurveyPhotoRef>> via normalizePhotos()
     photos: photoRefs.length > 0 ? photoRefs : null,
 
-    // ── Notes ─────────────────────────────────────────────────────────────
+    // ── Notes ────────────────────────────────────────────────────────────────
     installerNotes: [
       pd.structural_notes,
       pd.electrical_notes,
       pd.access_notes,
       pd.mounting_notes,
+      pd.setback_notes,
     ]
       .filter(Boolean)
       .join(' | ') || null,

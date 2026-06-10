@@ -24,28 +24,36 @@ import type { NormalizedPoint } from '../../types';
 // Configuration
 // ---------------------------------------------------------------------------
 
-/** Request timeout in milliseconds. CPU inference can take ~40s on Starter plan, plus cold-start overhead. */
-const SAM2_TIMEOUT_MS = 180_000;
+/** Request timeout in milliseconds. CPU inference takes ~34s on Pro plan (ONNX, 384px, 16pts/side).
+ * With 2x concurrent processing, each request still takes ~34s but two run in parallel.
+ * 120s per request is generous enough for retry overhead while keeping batches moving. */
+const SAM2_TIMEOUT_MS = 120_000;
 
 /**
  * Maximum number of retry attempts for 502/503 responses.
  * Render returns 502 while the SAM2 service is cold-starting (model download + load).
- * With 4 retries and exponential backoff starting at 15s, total wait = 15+30+60+120 = 225s,
- * which fits within the 300s Vercel function maxDuration.
+ * With 2 retries and exponential backoff starting at 5s, total wait = 5+10 = 15s,
+ * which is minimal overhead when processing 15 photos concurrently.
+ * The warm-up phase (waitForSAM2Warm) already handles cold starts, so
+ * retries here are just for edge cases where the service briefly restarts.
  */
-const SAM2_MAX_RETRIES = 4;
+const SAM2_MAX_RETRIES = 2;
 
-/** Initial backoff delay in milliseconds for retry after 502/503. */
-const SAM2_RETRY_BACKOFF_INITIAL_MS = 15_000;
+/** Initial backoff delay in milliseconds for retry after 502/503. Reduced from 15s to 5s
+ * since the warm-up phase already handles cold starts. */
+const SAM2_RETRY_BACKOFF_INITIAL_MS = 5_000;
 
 /** Maximum backoff delay cap in milliseconds. */
 const SAM2_RETRY_BACKOFF_CAP_MS = 120_000;
 
 /**
  * How long to poll /health waiting for model_loaded=true.
- * Set to 180s to allow for full model download + load on Render cold start.
+ * Set to 60s to allow for model load on Render Pro (model is cached after first load).
+ * Previously 180s for cold start with model download, but on Pro the model
+ * is typically already cached. With 15 photos to process, we need the
+ * segmentation stage time budget for actual inference, not warm-up.
  */
-const SAM2_WARMUP_POLL_TIMEOUT_MS = 180_000;
+const SAM2_WARMUP_POLL_TIMEOUT_MS = 60_000;
 
 /** Interval between /health polls while waiting for warm-up. */
 const SAM2_WARMUP_POLL_INTERVAL_MS = 5_000;
@@ -105,6 +113,33 @@ interface SAM2SegmentResponse {
     inference_resolution?: string;
   };
   error?: string;
+  // ── Instrumentation fields (Pass 1 tuning) ──
+  timing_breakdown?: SAM2TimingBreakdown;
+  filtered_masks_metadata?: SAM2FilteredMaskMeta[];
+  filter_impact?: Record<string, number>;
+}
+
+/** Per-stage timing from the SAM2 /segment pipeline. */
+interface SAM2TimingBreakdown {
+  image_decode_ms: number;
+  image_resize_ms: number;
+  encoder_ms: number;
+  decoder_ms: number;
+  classify_ms: number;
+  polygon_ms: number;
+  filter_ms: number;
+  total_ms: number;
+}
+
+/** Metadata for a mask that was filtered out by roof_only or max_masks. */
+interface SAM2FilteredMaskMeta {
+  mask_index: number;
+  class_hint: string;
+  area: number;
+  bbox: number[];
+  confidence: number;
+  stability_score: number;
+  filter_reason: string; // "roof_only" | "max_masks"
 }
 
 interface SAM2HealthResponse {
@@ -165,6 +200,13 @@ export interface SAM2SegmentationResult {
   } | null;
   /** Error message if SAM 2 failed (for logging, not user-facing). */
   error: string | null;
+  // ── Instrumentation fields (Pass 1 tuning) ──
+  /** Per-stage timing breakdown from the Python service. */
+  timingBreakdown?: SAM2TimingBreakdown;
+  /** Metadata for masks removed by roof_only or max_masks filters. */
+  filteredMasksMetadata?: SAM2FilteredMaskMeta[];
+  /** Counts of masks removed at each filter stage. */
+  filterImpact?: Record<string, number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -299,7 +341,7 @@ export async function waitForSAM2Warm(
  *
  * On Render cold starts, the SAM 2 model must be downloaded from HuggingFace
  * and loaded into memory. A health check alone does NOT trigger model loading.
- * By sending a tiny 1x1 white PNG to the /segment endpoint, we force the
+ * By sending a small 8x8 gray PNG to the /segment endpoint, we force the
  * model to start loading immediately.
  *
  * This function is intentionally fire-and-forget (returns void, not Promise).
@@ -316,31 +358,34 @@ export function warmupSAM2Service(): void {
 
   const serviceURL = getSAM2ServiceURL();
 
-  // Send a tiny 1x1 PNG to /segment to trigger model loading.
-  // This is fire-and-forget — the response (or 502) is logged but not awaited.
+  // On Render cold starts, the SAM 2 service must download the model from
+  // HuggingFace and load it into memory. Just hitting /health does NOT
+  // trigger model loading -- it only reports whether the model is loaded.
+  //
+  // Previous approach: send a 1x1 PNG to /segment. This failed with HTTP 400
+  // because cv2.imdecode on a 1x1 image produces a 1x1 array that SAM2
+  // cannot process (no masks found -> 400 or inference error).
+  //
+  // Better approach: send a small but valid 8x8 gray PNG to /segment.
+  // This is large enough for cv2.imdecode to produce a valid numpy array,
+  // and SAM2 can run inference on it (producing 0 masks, which is fine --
+  // the goal is to trigger model loading, not to get results).
+  // The image is tiny enough that inference should be fast even on CPU.
   const t0 = Date.now();
-  console.info(`[SAM2] Warm-up ping: sending tiny image to /segment to trigger model loading`);
+  console.info(`[SAM2] Warm-up ping: sending small image to /segment to trigger model loading`);
 
-  // Minimal 1x1 white PNG (67 bytes) — smallest valid PNG
-  const MINIMAL_PNG = Buffer.from([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
-    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
-    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1x1
-    0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, // 8-bit RGB
-    0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, // IDAT chunk
-    0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00, // compressed data
-    0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc, // 
-    0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, // IEND chunk
-    0x44, 0xae, 0x42, 0x60, 0x82,                    // 
-  ]);
+  // Create a small 8x8 gray PNG (enough for cv2.imdecode to produce a real
+  // numpy array that SAM2 can process, avoiding the HTTP 400 that the
+  // 1x1 PNG caused).
+  const gray8x8 = WARMUP_PNG_8X8;
 
   const formData = new FormData();
-  const imageBlob = new Blob([new Uint8Array(MINIMAL_PNG)]);
+  const imageBlob = new Blob([new Uint8Array(gray8x8)]);
   formData.append('file', imageBlob, 'warmup.png');
 
   const url = new URL(`${serviceURL}/segment`);
-  url.searchParams.set('min_area_fraction', '0.5'); // Max allowed by Pydantic (le=0.5), rejects tiny masks
-  url.searchParams.set('max_masks', '1');            // Minimize processing
+  url.searchParams.set('min_area_fraction', '0.01'); // Low threshold
+  url.searchParams.set('max_masks', '1');             // Minimize processing
 
   // Fire-and-forget: we don't await this, and we handle 502 gracefully
   fetch(url.toString(), {
@@ -351,11 +396,11 @@ export function warmupSAM2Service(): void {
     .then((response) => {
       const elapsedMs = Date.now() - t0;
       if (response.ok) {
-        console.info(`[SAM2] Warm-up ping: complete in ${elapsedMs}ms — model should be loaded now`);
+        console.info(`[SAM2] Warm-up ping: complete in ${elapsedMs}ms -- model should be loaded now`);
       } else {
-        // 502 is expected during cold start — the request still triggered model loading
+        // 502 is expected during cold start -- the request still triggered model loading
         console.info(
-          `[SAM2] Warm-up ping: HTTP ${response.status} in ${elapsedMs}ms — ` +
+          `[SAM2] Warm-up ping: HTTP ${response.status} in ${elapsedMs}ms -- ` +
           (response.status === 502 || response.status === 503
             ? 'expected during cold start, model loading triggered'
             : 'unexpected error'),
@@ -366,11 +411,37 @@ export function warmupSAM2Service(): void {
       const elapsedMs = Date.now() - t0;
       const isTimeout = error instanceof DOMException && error.name === 'TimeoutError';
       console.info(
-        `[SAM2] Warm-up ping: ${isTimeout ? 'TIMEOUT' : 'FAILED'} in ${elapsedMs}ms — ` +
+        `[SAM2] Warm-up ping: ${isTimeout ? 'TIMEOUT' : 'FAILED'} in ${elapsedMs}ms -- ` +
         'model loading may still be in progress on server',
       );
     });
 }
+
+/**
+ * Pre-computed 8x8 grayscale PNG for the SAM2 warm-up ping.
+ *
+ * The previous 1x1 PNG caused HTTP 400 from the Python service because
+ * cv2.imdecode on a 1x1 image produces a 1x1 numpy array, which SAM2
+ * cannot meaningfully process (image too small for mask generation).
+ *
+ * This 8x8 image is large enough for cv2.imdecode to produce a valid
+ * numpy array (8x8x1) and for SAM2 to attempt inference. It will produce
+ * 0 masks, which is fine -- the goal is to trigger model loading, not
+ * to get segmentation results. The image is only 71 bytes.
+ *
+ * Generated programmatically: 8x8 grayscale PNG, 8-bit depth, mid-gray (128).
+ */
+const WARMUP_PNG_8X8 = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
+  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
+  0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x08, // 8x8 dimensions
+  0x08, 0x00, 0x00, 0x00, 0x00, 0xe1, 0x64, 0xe1, // 8-bit grayscale
+  0x57, 0x00, 0x00, 0x00, 0x0e, 0x49, 0x44, 0x41, // IDAT chunk
+  0x54, 0x78, 0x9c, 0x63, 0x68, 0x80, 0x02, 0x06, // zlib-compressed data
+  0xca, 0x18, 0x00, 0x80, 0x84, 0x20, 0x01, 0x0d, // (8 rows of mid-gray)
+  0x80, 0x24, 0x61, 0x00, 0x00, 0x00, 0x00, 0x49, // IEND chunk
+  0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,       //
+]);
 
 // ---------------------------------------------------------------------------
 // Retry helper for 502/503 (Render cold start)
@@ -476,13 +547,13 @@ async function fetchWithRetry(
  * an error — the caller should fall back to Canny edge detection.
  *
  * @param imageBytes - Raw image bytes (JPEG/PNG/WebP)
- * @param minAreaFraction - Minimum mask area as fraction of image (default 0.05)
- * @param maxMasks - Maximum masks to return (default 20)
+ * @param minAreaFraction - Minimum mask area as fraction of image (default 0.02)
+ * @param maxMasks - Maximum masks to return (default 30, matching SAM2 service MAX_MASKS env var)
  */
 export async function segmentWithSAM2(
   imageBytes: Buffer,
-  minAreaFraction: number = 0.05,
-  maxMasks: number = 20,
+  minAreaFraction: number = 0.02,
+  maxMasks: number = 30,
 ): Promise<SAM2SegmentationResult | null> {
   if (!isSAM2Enabled()) return null;
 
@@ -569,6 +640,29 @@ export async function segmentWithSAM2(
       `[SAM2] Service call: OK — ${masks.length} masks in ${totalElapsedMs}ms (service_processing=${data.processing_time_ms}ms) — model=${data.model_info?.model_id ?? 'unknown'} device=${data.model_info?.device ?? 'unknown'} image=${data.image_width}x${data.image_height}`,
     );
 
+    // ── Instrumentation logging (Pass 1 tuning) ──
+    if (data.timing_breakdown) {
+      const tb = data.timing_breakdown;
+      console.info(
+        `[SAM2] Timing breakdown: decode=${tb.image_decode_ms.toFixed(0)}ms resize=${tb.image_resize_ms.toFixed(0)}ms encoder+decoder=${tb.encoder_ms.toFixed(0)}ms classify=${tb.classify_ms.toFixed(0)}ms polygon=${tb.polygon_ms.toFixed(0)}ms filter=${tb.filter_ms.toFixed(0)}ms total=${tb.total_ms.toFixed(0)}ms`,
+      );
+    }
+    if (data.filter_impact) {
+      const fi = data.filter_impact;
+      console.info(
+        `[SAM2] Filter impact: raw=${fi.raw_masks} → removed_by_area=${fi.removed_by_area} polygon_pts=${fi.removed_by_polygon_points} roof_only=${fi.removed_by_roof_only} max_masks=${fi.removed_by_max_masks} → remaining=${fi.remaining}`,
+      );
+    }
+    if (data.filtered_masks_metadata && data.filtered_masks_metadata.length > 0) {
+      const classCounts: Record<string, number> = {};
+      for (const fm of data.filtered_masks_metadata) {
+        classCounts[fm.class_hint] = (classCounts[fm.class_hint] ?? 0) + 1;
+      }
+      console.info(
+        `[SAM2] Filtered masks metadata: ${data.filtered_masks_metadata.length} masks removed — classes: ${JSON.stringify(classCounts)}`,
+      );
+    }
+
     return {
       usedSAM2: true,
       masks,
@@ -584,6 +678,10 @@ export async function segmentWithSAM2(
           }
         : null,
       error: null,
+      // ── Instrumentation fields (Pass 1 tuning) ──
+      timingBreakdown: data.timing_breakdown ?? undefined,
+      filteredMasksMetadata: data.filtered_masks_metadata ?? undefined,
+      filterImpact: data.filter_impact ?? undefined,
     };
   } catch (error) {
     const elapsedMs = Date.now() - t0;
@@ -597,26 +695,208 @@ export async function segmentWithSAM2(
 }
 
 // ---------------------------------------------------------------------------
+// Prompted segmentation — user-provided click points
+// ---------------------------------------------------------------------------
+
+/** A prompt point for SAM 2 prompted segmentation. */
+export interface SAM2PromptPoint {
+  /** X coordinate in original image pixel space. */
+  x: number;
+  /** Y coordinate in original image pixel space. */
+  y: number;
+  /** 1 = foreground (include this region), 0 = background (exclude). */
+  label?: 1 | 0;
+}
+
+/** Result of a SAM 2 prompted segmentation call. */
+export interface SAM2PromptedSegmentationResult {
+  /** Whether the SAM 2 service was used successfully. */
+  usedSAM2: boolean;
+  /** Masks from SAM 2 (empty if service unavailable). */
+  masks: SAM2MaskResult[];
+  /** Image dimensions from the service response. */
+  imageWidth: number;
+  imageHeight: number;
+  /** Processing time reported by the service. */
+  processingTimeMs: number;
+  /** Model info from the service response. */
+  modelInfo: {
+    modelId: string;
+    device: string;
+    cudaAvailable: boolean;
+    inferenceResolution?: string;
+  } | null;
+  /** Number of prompt points sent to the service. */
+  promptPointCount: number;
+  /** Error message if SAM 2 failed (for logging, not user-facing). */
+  error: string | null;
+}
+
+/**
+ * Segment specific regions of an image using user-provided click points.
+ *
+ * This is SAM2's intended use case and produces dramatically better results
+ * than AMG (automatic mask generation). Instead of a dumb grid that can miss
+ * roof planes, the user clicks approximate areas of interest and SAM2 returns
+ * precise masks around those points.
+ *
+ * Usage:
+ * 1. User clicks on roof areas in the frontend (foreground points, label=1)
+ * 2. Optionally clicks on trees/sky to EXCLUDE those areas (background points, label=0)
+ * 3. SAM2 encodes the image once, then decodes precise masks around each click
+ *
+ * Processing is ~9s on CPU (vs ~43s for AMG) because only the encoder + targeted
+ * decoder runs are needed, not the full grid-of-points scan.
+ *
+ * @param imageBytes - Raw image bytes (JPEG/PNG/WebP)
+ * @param points - Array of prompt points with x, y, and label (1=foreground, 0=background)
+ * @param minAreaFraction - Minimum mask area as fraction of image (default 0.005)
+ */
+export async function segmentPromptedWithSAM2(
+  imageBytes: Buffer,
+  points: SAM2PromptPoint[],
+  minAreaFraction: number = 0.005,
+): Promise<SAM2PromptedSegmentationResult | null> {
+  if (!isSAM2Enabled()) return null;
+  if (!points || points.length === 0) {
+    console.warn('[SAM2] Prompted segmentation: no points provided');
+    return null;
+  }
+
+  const t0 = Date.now();
+  const imageBytesSize = imageBytes.length;
+  const serviceURL = getSAM2ServiceURL();
+  console.info(
+    `[SAM2] Prompted call: POST ${serviceURL}/segment-prompted — imageSize=${imageBytesSize} bytes (${(imageBytesSize / 1024).toFixed(1)}KB) points=${points.length} timeout=${SAM2_TIMEOUT_MS}ms`,
+  );
+
+  try {
+    // Create form data with the image
+    const formData = new FormData();
+    const imageBlob = new Blob([new Uint8Array(imageBytes)]);
+    formData.append('file', imageBlob, 'image.jpg');
+
+    const url = new URL(`${serviceURL}/segment-prompted`);
+    url.searchParams.set('points', JSON.stringify(points));
+    url.searchParams.set('min_area_fraction', String(minAreaFraction));
+    // Don't set roof_only for prompted mode — user controls what to segment
+
+    // Use fetchWithRetry to handle 502/503 from Render cold start
+    const response = await fetchWithRetry(url.toString(), {
+      method: 'POST',
+      body: formData,
+      signal: AbortSignal.timeout(SAM2_TIMEOUT_MS),
+    });
+
+    const fetchElapsedMs = Date.now() - t0;
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => 'unknown error');
+      console.warn(
+        `[SAM2] Prompted call: FAILED — HTTP ${response.status} in ${fetchElapsedMs}ms — ${errorBody}`,
+      );
+      return null;
+    }
+
+    const data = (await response.json()) as SAM2SegmentResponse;
+
+    if (!data.success || data.error) {
+      const totalElapsedMs = Date.now() - t0;
+      console.warn(
+        `[SAM2] Prompted call: FAILED — service error in ${totalElapsedMs}ms (service_processing=${data.processing_time_ms}ms) — ${data.error ?? 'unknown'}`,
+      );
+      return null;
+    }
+
+    // Convert SAM 2 masks to Pipeline B normalized format
+    const masks: SAM2MaskResult[] = data.masks.map((mask) => {
+      const imgW = data.image_width;
+      const imgH = data.image_height;
+
+      // Convert polygon from pixel coords to normalized 0-1000
+      const polygon: NormalizedPoint[] = mask.polygon.map((pt) => ({
+        x: Math.round((pt.x / imgW) * 1000),
+        y: Math.round((pt.y / imgH) * 1000),
+        coordinateSystem: 'normalized_image_0_1000' as const,
+      }));
+
+      // Convert bbox from pixel coords to normalized 0-1000
+      const [bx, by, bw, bh] = mask.bbox;
+      const maskBounds = {
+        x: Math.round((bx / imgW) * 1000),
+        y: Math.round((by / imgH) * 1000),
+        width: Math.round((bw / imgW) * 1000),
+        height: Math.round((bh / imgH) * 1000),
+      };
+
+      return {
+        maskIndex: mask.mask_index,
+        polygon,
+        area: mask.area,
+        maskBounds,
+        confidence: mask.confidence,
+        stabilityScore: mask.stability_score,
+        classHint: mask.class_hint,
+        pointCount: mask.point_count,
+      };
+    });
+
+    const totalElapsedMs = Date.now() - t0;
+    console.info(
+      `[SAM2] Prompted call: OK — ${masks.length} masks in ${totalElapsedMs}ms (service_processing=${data.processing_time_ms}ms) — model=${data.model_info?.model_id ?? 'unknown'} points=${points.length}`,
+    );
+
+    return {
+      usedSAM2: true,
+      masks,
+      imageWidth: data.image_width,
+      imageHeight: data.image_height,
+      processingTimeMs: data.processing_time_ms,
+      modelInfo: data.model_info
+        ? {
+            modelId: data.model_info.model_id,
+            device: data.model_info.device,
+            cudaAvailable: data.model_info.cuda_available,
+            inferenceResolution: data.model_info.inference_resolution,
+          }
+        : null,
+      promptPointCount: points.length,
+      error: null,
+    };
+  } catch (error) {
+    const elapsedMs = Date.now() - t0;
+    const message = error instanceof Error ? error.message : String(error);
+    const isTimeout = error instanceof DOMException && error.name === 'TimeoutError';
+    console.warn(
+      `[SAM2] Prompted call: FAILED${isTimeout ? ' (TIMEOUT)' : ''} in ${elapsedMs}ms — ${message}`,
+    );
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Class hint mapping — SAM 2 class_hint → Pipeline B SegmentationClass
 // ---------------------------------------------------------------------------
 
 /**
- * Roof-relevant segmentation classes — masks with these class hints are
- * useful for geometry reconstruction. All other classes (sky, ground, tree)
- * are filtered out when roof_only=true (the default on the Python side).
+ * Classes relevant to solar installation assessment.
+ * Expanded from the original roof-only set to include facade elements,
+ * electrical infrastructure, condition flags, and vegetation that touches
+ * or blocks the structure. Occluders (car, person, etc.) are excluded
+ * because they don't affect solar feasibility — they only block the view.
  *
  * This set is also used on the TypeScript side to double-filter: even if
- * the Python service returns a non-roof mask (e.g. due to a stale deploy),
+ * the Python service returns a non-relevant mask (e.g. due to a stale deploy),
  * the worker will drop it here.
  */
-export const ROOF_RELEVANT_SEGMENTATION_CLASSES: ReadonlySet<import('../../types').SegmentationClass> =
-  new Set(['roof', 'wall', 'obstruction', 'equipment'] as const);
+export { SOLAR_RELEVANT_SEGMENTATION_CLASSES } from '../../types';
 
 /** Maps SAM 2 heuristic class hints to Pipeline B SegmentationClass. */
 const SAM2_CLASS_HINT_TO_SEGMENTATION_CLASS: Record<
   string,
   import('../../types').SegmentationClass | null
 > = {
+  // Legacy
   roof: 'roof',
   wall: 'wall',
   sky: 'sky',
@@ -624,15 +904,88 @@ const SAM2_CLASS_HINT_TO_SEGMENTATION_CLASS: Record<
   obstruction: 'obstruction',
   equipment: 'equipment',
   tree: 'tree', // Vegetation detected by green ratio + position heuristic
+  // Facade
+  siding: 'siding',
+  window: 'window',
+  door: 'door',
+  garage_door: 'garage_door',
+  fascia: 'fascia',
+  soffit: 'soffit',
+  gutter: 'gutter',
+  downspout: 'downspout',
+  porch: 'porch',
+  deck: 'deck',
+  steps: 'steps',
+  railing: 'railing',
+  // Roof penetrations
+  chimney: 'chimney',
+  vent_pipe: 'vent_pipe',
+  skylight: 'skylight',
+  // Site context
+  grass: 'grass',
+  overgrown_grass: 'overgrown_grass',
+  sidewalk: 'sidewalk',
+  driveway: 'driveway',
+  gravel: 'gravel',
+  fence: 'fence',
+  bushes: 'bushes',
+  trees: 'tree', // plural form from Python → map to legacy 'tree'
+  vegetation_touching_structure: 'vegetation_touching_structure',
+  // Electrical/solar
+  utility_meter: 'utility_meter',
+  main_service_panel: 'main_service_panel',
+  disconnect: 'disconnect',
+  conduit: 'conduit',
+  inverter: 'inverter',
+  battery: 'battery',
+  ac_unit: 'ac_unit',
+  existing_solar_panel: 'existing_solar_panel',
+  // Occluder (mapped but filtered out by SOLAR_RELEVANT unless needed for overlay)
+  car: 'car',
+  truck: 'truck',
+  trailer: 'trailer',
+  person: 'person',
+  ladder: 'ladder',
+  trash_can: 'trash_can',
+  tools: 'tools',
+  temporary_materials: 'temporary_materials',
+  // Condition
+  moss: 'moss',
+  algae: 'algae',
+  damaged_siding: 'damaged_siding',
+  blocked_access: 'blocked_access',
+  muddy_work_area: 'muddy_work_area',
+  // Catch-all
   unknown: null,
 };
 
+// ---------------------------------------------------------------------------
+// Phase 0 feature flag — Background / Unknown Class Support (P0-8.2)
+// ---------------------------------------------------------------------------
+
+/** Whether Phase 0 background class routing is enabled. Read at call time. */
+export function isPhase0BackgroundClassEnabled(): boolean {
+  const val = process.env.PHASE0_BACKGROUND_CLASS ?? '';
+  return val === 'true' || val === '1';
+}
+
 /**
  * Map a SAM 2 class_hint to a Pipeline B SegmentationClass.
- * Returns null for unknown/unmapped classes.
+ *
+ * When PHASE0_BACKGROUND_CLASS is enabled, unrecognized class hints (including
+ * 'unknown') are mapped to 'background' instead of null. Background masks are
+ * created and stored but filtered from Pipeline B by SOLAR_RELEVANT_SEGMENTATION_CLASSES.
+ *
+ * When the flag is disabled (default), returns null for unknown/unmapped classes,
+ * which causes the segmentation worker to skip those masks entirely.
  */
 export function mapSAM2ClassHint(
   classHint: string,
 ): import('../../types').SegmentationClass | null {
-  return SAM2_CLASS_HINT_TO_SEGMENTATION_CLASS[classHint] ?? null;
+  const mapped = SAM2_CLASS_HINT_TO_SEGMENTATION_CLASS[classHint] ?? null;
+  if (mapped !== null) return mapped;
+
+  // Flag OFF (default): return null — caller skips the mask
+  // Flag ON: return 'background' — caller creates a background mask
+  return isPhase0BackgroundClassEnabled() ? 'background' : null;
 }

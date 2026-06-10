@@ -1,7 +1,11 @@
 /**
  * GET /api/dev-check
  * LOCAL DEVELOPMENT ONLY — checks env vars are loaded.
- * Returns 404 in production.
+ * Returns 404 in production and preview deployments.
+ *
+ * SECURITY FIX: Uses VERCEL_ENV (not NODE_ENV) for production gate.
+ * NODE_ENV is always 'production' on Vercel, even for preview deployments.
+ * VERCEL_ENV distinguishes 'production', 'preview', and 'development'.
  */
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -12,8 +16,13 @@ import { NextResponse } from 'next/server';
 
 export async function GET() {
   try {
-    // Only available in local dev
-    if (process.env.NODE_ENV === 'production') {
+    // Only available in local dev — use VERCEL_ENV for reliable detection
+    // NODE_ENV is always 'production' on Vercel (even preview), so it can't gate preview deployments.
+    if (process.env.VERCEL_ENV === 'production' || process.env.VERCEL_ENV === 'preview') {
+      return NextResponse.json({ error: 'Not available in production' }, { status: 404 });
+    }
+    // Fallback for non-Vercel hosting: block if NODE_ENV=production and no VERCEL_ENV
+    if (!process.env.VERCEL_ENV && process.env.NODE_ENV === 'production') {
       return NextResponse.json({ error: 'Not available in production' }, { status: 404 });
     }
 
@@ -21,40 +30,40 @@ export async function GET() {
       NODE_ENV: process.env.NODE_ENV || '(not set)',
       DATABASE_URL: (() => {
         const v = process.env.DATABASE_URL;
-        if (!v) return '❌ NOT SET';
-        if (v === 'YOUR_NEON_DATABASE_URL_HERE') return '❌ PLACEHOLDER — fill in .env.local';
-        if (v.startsWith('postgres://') || v.startsWith('postgresql://')) return `✅ SET (starts with: ${v.slice(0, 25)}...)`;
-        return `⚠️  SET but unexpected format (starts with: ${v.slice(0, 20)}...)`;
+        if (!v) return '\u274c NOT SET';
+        if (v === 'YOUR_NEON_DATABASE_URL_HERE') return '\u274c PLACEHOLDER \u2014 fill in .env.local';
+        if (v.startsWith('postgres://') || v.startsWith('postgresql://')) return '\u2705 SET';
+        return '\u26a0\ufe0f  SET but unexpected format';
       })(),
       JWT_SECRET: (() => {
         const v = process.env.JWT_SECRET;
-        if (!v) return '❌ NOT SET';
-        if (v === 'your-super-secret-jwt-key-change-this-in-production') return '⚠️  Default value (OK for local dev)';
-        return `✅ SET (length: ${v.length})`;
+        if (!v) return '\u274c NOT SET';
+        if (v === 'your-super-secret-jwt-key-change-this-in-production') return '\u26a0\ufe0f  Default value (OK for local dev)';
+        return `\u2705 SET (length: ${v.length})`;
       })(),
       NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
-        ? '✅ SET'
-        : '⚠️  NOT SET (maps won\'t work)',
+        ? '\u2705 SET'
+        : '\u26a0\ufe0f  NOT SET (maps won\'t work)',
       OPENAI_API_KEY: process.env.OPENAI_API_KEY
-        ? '✅ SET'
-        : '⚠️  NOT SET (AI features disabled)',
+        ? '\u2705 SET'
+        : '\u26a0\ufe0f  NOT SET (AI features disabled)',
       STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_')
-        ? '✅ SET (test key)'
+        ? '\u2705 SET (test key)'
         : process.env.STRIPE_SECRET_KEY
-          ? '✅ SET'
-          : '⚠️  NOT SET (billing disabled)',
+          ? '\u2705 SET'
+          : '\u26a0\ufe0f  NOT SET (billing disabled)',
     };
 
     const allCriticalOk = 
-      !checks.DATABASE_URL.includes('❌') &&
-      !checks.JWT_SECRET.includes('❌');
+      !checks.DATABASE_URL.includes('\u274c') &&
+      !checks.JWT_SECRET.includes('\u274c');
 
     return NextResponse.json({
-      status: allCriticalOk ? '✅ Ready for local dev' : '❌ Missing critical env vars',
+      status: allCriticalOk ? '\u2705 Ready for local dev' : '\u274c Missing critical env vars',
       checks,
       instructions: allCriticalOk
         ? 'All critical env vars are set. Auth should work.'
-        : 'Fix the ❌ items above in solarpro/.env.local then restart npm run dev',
+        : 'Fix the \u274c items above in solarpro/.env.local then restart npm run dev',
     }, { status: 200 });
   } catch (err: unknown) {
     console.error(`[API_ERROR] /api/dev-check: ${(err as Error).message}`);

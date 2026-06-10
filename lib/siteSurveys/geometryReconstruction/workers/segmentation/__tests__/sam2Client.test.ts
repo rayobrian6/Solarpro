@@ -10,6 +10,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   segmentWithSAM2,
+  segmentPromptedWithSAM2,
   mapSAM2ClassHint,
   checkSAM2Health,
   isSAM2Enabled,
@@ -235,13 +236,13 @@ describe('sam2Client', () => {
       const resultPromise = segmentWithSAM2(imageBuffer);
 
       // Fast-forward through all retry backoffs
-      // Backoffs: 15s, 30s, 60s, 120s = total 225s
-      await vi.advanceTimersByTimeAsync(225_000);
+      // Backoffs: 5s, 10s = total 15s (SAM2_MAX_RETRIES=2, SAM2_RETRY_BACKOFF_INITIAL_MS=5000)
+      await vi.advanceTimersByTimeAsync(15_000);
 
       const result = await resultPromise;
       expect(result).toBeNull();
-      // 1 initial + 4 retries = 5 total fetch calls
-      expect(mockFetch).toHaveBeenCalledTimes(5);
+      // 1 initial + 2 retries = 3 total fetch calls
+      expect(mockFetch).toHaveBeenCalledTimes(3);
 
       vi.useRealTimers();
     });
@@ -487,6 +488,187 @@ describe('sam2Client', () => {
       expect(result!.masks[0].polygon[0].y).toBe(0);
       expect(result!.masks[0].maskBounds.x).toBe(0);
       expect(result!.masks[0].maskBounds.y).toBe(0);
+    });
+  });
+
+  // ── segmentPromptedWithSAM2 ──────────────────────────────────────────
+
+  describe('segmentPromptedWithSAM2', () => {
+    it('returns null when SAM2_SERVICE_URL is not set', async () => {
+      vi.stubEnv('SAM2_SERVICE_URL', '');
+
+      const imageBuffer = Buffer.from('fake-image-bytes');
+      const points = [{ x: 100, y: 200, label: 1 as const }];
+      const result = await segmentPromptedWithSAM2(imageBuffer, points);
+      expect(result).toBeNull();
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('returns null when no points are provided', async () => {
+      const imageBuffer = Buffer.from('fake-image-bytes');
+      const result = await segmentPromptedWithSAM2(imageBuffer, []);
+      expect(result).toBeNull();
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('sends prompt points as JSON query parameter', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ...MOCK_SAM2_RESPONSE,
+          model_info: {
+            ...MOCK_SAM2_RESPONSE.model_info,
+            model_type: 'sam2.1_prompted_segmentation',
+            prompt_points: 2,
+          },
+        }),
+      });
+
+      const imageBuffer = Buffer.from('fake-image-bytes');
+      const points = [
+        { x: 200, y: 150, label: 1 as const },
+        { x: 400, y: 300, label: 0 as const },
+      ];
+      const result = await segmentPromptedWithSAM2(imageBuffer, points);
+
+      expect(result).not.toBeNull();
+      expect(result!.usedSAM2).toBe(true);
+      expect(result!.promptPointCount).toBe(2);
+
+      // Verify the fetch URL contains the points parameter
+      const fetchCall = mockFetch.mock.calls[0];
+      const fetchUrl = fetchCall[0] as string;
+      expect(fetchUrl).toContain('/segment-prompted');
+      expect(fetchUrl).toContain('points=');
+      expect(fetchUrl).toContain('min_area_fraction=0.005');
+    });
+
+    it('defaults foreground points to label=1 when label is omitted', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ...MOCK_SAM2_RESPONSE,
+          masks: [MOCK_SAM2_RESPONSE.masks[0]],
+          mask_count: 1,
+          model_info: {
+            ...MOCK_SAM2_RESPONSE.model_info,
+            model_type: 'sam2.1_prompted_segmentation',
+            prompt_points: 1,
+          },
+        }),
+      });
+
+      const imageBuffer = Buffer.from('fake-image-bytes');
+      // Points without explicit label — should default to foreground
+      const points = [{ x: 250, y: 100 }];
+      const result = await segmentPromptedWithSAM2(imageBuffer, points as any);
+
+      expect(result).not.toBeNull();
+      expect(result!.promptPointCount).toBe(1);
+    });
+
+    it('handles 502 with retry (cold start)', async () => {
+      vi.useFakeTimers();
+
+      // First call: 502 (cold start)
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+      });
+      // Second call: success
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ...MOCK_SAM2_RESPONSE,
+          model_info: {
+            ...MOCK_SAM2_RESPONSE.model_info,
+            model_type: 'sam2.1_prompted_segmentation',
+            prompt_points: 1,
+          },
+        }),
+      });
+
+      const imageBuffer = Buffer.from('fake-image-bytes');
+      const points = [{ x: 300, y: 200, label: 1 as const }];
+      const resultPromise = segmentPromptedWithSAM2(imageBuffer, points);
+
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      const result = await resultPromise;
+      expect(result).not.toBeNull();
+      expect(result!.usedSAM2).toBe(true);
+
+      vi.useRealTimers();
+    });
+
+    it('returns null on service error (success=false)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          success: false,
+          error: 'Prompted segmentation requires ONNX backend',
+          masks: [],
+          mask_count: 0,
+        }),
+      });
+
+      const imageBuffer = Buffer.from('fake-image-bytes');
+      const points = [{ x: 300, y: 200, label: 1 as const }];
+      const result = await segmentPromptedWithSAM2(imageBuffer, points);
+      expect(result).toBeNull();
+    });
+
+    it('normalizes mask polygons to 0-1000 coordinates', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          success: true,
+          masks: [
+            {
+              mask_index: 0,
+              polygon: [
+                { x: 70, y: 214 },
+                { x: 896, y: 214 },
+                { x: 896, y: 566 },
+                { x: 70, y: 566 },
+              ],
+              area: 146724,
+              bbox: [70, 214, 826, 352],
+              confidence: 96,
+              stability_score: 0.9775,
+              class_hint: 'roof',
+              point_count: 4,
+            },
+          ],
+          mask_count: 1,
+          image_width: 1024,
+          image_height: 768,
+          processing_time_ms: 8818,
+          model_info: {
+            model_id: 'facebook/sam2.1-hiera-tiny',
+            device: 'cpu',
+            cuda_available: false,
+            model_type: 'sam2.1_prompted_segmentation',
+            inference_resolution: '512x512',
+            prompt_points: 1,
+          },
+        }),
+      });
+
+      const imageBuffer = Buffer.from('fake-image-bytes');
+      const points = [{ x: 512, y: 300, label: 1 as const }];
+      const result = await segmentPromptedWithSAM2(imageBuffer, points);
+
+      expect(result).not.toBeNull();
+      expect(result!.masks.length).toBe(1);
+      expect(result!.masks[0].classHint).toBe('roof');
+      // x=70/1024*1000 ≈ 68, y=214/768*1000 ≈ 279
+      expect(result!.masks[0].polygon[0].x).toBe(68);
+      expect(result!.masks[0].polygon[0].y).toBe(279);
+      // maskBounds: x=70/1024*1000≈68, y=214/768*1000≈279
+      expect(result!.maskBounds).toBeUndefined(); // maskBounds is on individual masks
+      expect(result!.masks[0].maskBounds.x).toBe(68);
+      expect(result!.masks[0].maskBounds.y).toBe(279);
     });
   });
 });

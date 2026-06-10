@@ -346,7 +346,7 @@ export function initClientMonitoring(): void {
   window.onerror = function(message, source, lineno, colno, error) {
     captureError(error || new Error(String(message)), {
       code:  '[BROWSER_UNHANDLED_ERROR]',
-      route: source || window.location.pathname,
+      route: String(source || window.location.pathname),
       extra: { source, lineno, colno },
       level: 'error',
     });
@@ -356,8 +356,9 @@ export function initClientMonitoring(): void {
   };
 
   // Unhandled promise rejections
-  window.addEventListener('unhandledrejection', (event) => {
-    captureError(event.reason || new Error('Unhandled promise rejection'), {
+  window.addEventListener('unhandledrejection', (event: { reason: unknown }) => {
+    const reason = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
+    captureError(reason, {
       code:  '[BROWSER_UNHANDLED_REJECTION]',
       route: window.location.pathname,
       level: 'error',

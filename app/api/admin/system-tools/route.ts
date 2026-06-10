@@ -3,6 +3,7 @@ import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady , handleRouteDbError, createClient, createProject, upsertLayout } from '@/lib/db-neon';
 import { logAdminAction } from '@/lib/adminActivityLog';
 import { neon } from '@neondatabase/serverless';
+import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
@@ -48,16 +49,43 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ success: false, error: `Migration file not found: ${migrationFile}` }, { status: 404 });
         }
 
+        // SECURITY: SHA-256 checksum verification before executing SQL.
+        // If a .sha256 checksum file exists alongside the migration, verify it.
+        // This detects tampered or corrupted migration files before execution.
+        const checksumPath = filePath.replace(/\.sql$/, '.sha256');
+        if (fs.existsSync(checksumPath)) {
+          const expectedChecksum = fs.readFileSync(checksumPath, 'utf-8').trim().split(/\s+/)[0];
+          const actualChecksum = createHash('sha256').update(sqlContent, 'utf8').digest('hex');
+          if (expectedChecksum !== actualChecksum) {
+            return NextResponse.json({
+              success: false,
+              error: `Migration checksum mismatch for ${migrationFile}. File may be corrupted or tampered. Expected: ${expectedChecksum}, Got: ${actualChecksum}`,
+            }, { status: 400 });
+          }
+        }
+
         // Execute the migration SQL by splitting into individual statements
         // neon tagged template does not support .unsafe(); use neon().query() directly
         const rawSql = neon(process.env.DATABASE_URL!);
-        const statements = sqlContent
-          .split(';')
-          .map((s: string) => {
-            // Strip comment lines from each statement block, then trim
-            const lines = s.split('\n').filter((l: string) => !l.trim().startsWith('--'));
-            return lines.join('\n').trim();
+
+        // Strip ALL SQL comments BEFORE splitting to prevent multi-line comments
+        // from leaving residue text when a -- comment spans a semicolon boundary.
+        // Regex removes: (1) full-line comments, (2) trailing inline -- comments,
+        // while preserving string literals (rare in migration DDL).
+        const commentStripped = sqlContent
+          .split('\n')
+          .map((line: string) => {
+            const idx = line.indexOf('--');
+            if (idx === -1) return line;
+            // Naive: strip from first -- to end. DDL migrations rarely have
+            // string literals containing --, so this is safe for migration files.
+            return line.substring(0, idx);
           })
+          .join('\n');
+
+        const statements = commentStripped
+          .split(';')
+          .map((s: string) => s.trim())
           .filter((s: string) => s.length > 0);
 
         const errors: string[] = [];
@@ -863,9 +891,20 @@ export async function POST(req: NextRequest) {
       case 'set_user_password': {
         const { email: targetEmail, new_password, migrate_secret } = params || {};
 
-        // Second factor: MIGRATE_SECRET header or param must match env var
+        // Second factor: MIGRATE_SECRET param must match env var
+        // SECURITY FIX: Use timingSafeEqual to prevent timing attacks on secret comparison
         const expectedSecret = process.env.MIGRATE_SECRET;
-        if (!expectedSecret || migrate_secret !== expectedSecret) {
+        if (!expectedSecret || !migrate_secret || typeof migrate_secret !== 'string') {
+          return NextResponse.json(
+            { success: false, error: 'Invalid MIGRATE_SECRET — this tool requires a second-factor secret.' },
+            { status: 403 }
+          );
+        }
+        const { timingSafeEqual: tse } = await import('crypto');
+        const expBuf = Buffer.from(expectedSecret, 'utf8');
+        const actBuf = Buffer.from(migrate_secret as string, 'utf8');
+        const secretOk = expBuf.length === actBuf.length && tse(expBuf, actBuf);
+        if (!secretOk) {
           return NextResponse.json(
             { success: false, error: 'Invalid MIGRATE_SECRET — this tool requires a second-factor secret.' },
             { status: 403 }

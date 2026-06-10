@@ -63,6 +63,7 @@ import {
   RAW_EVIDENCE_AUTHORITY,
 } from '@/lib/siteSurveys/unifiedGeometry/authority';
 import type { UnifiedGeometryAuthority } from '@/lib/siteSurveys/unifiedGeometry/authority';
+import { buildWorldRoofPlanes, type RoofSegmentStat } from './worldRoofPlanes';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -291,6 +292,10 @@ function makeEmptyArtifact(
     consensusPhotoCount: null,
     segmentationClass: null,
     segmentationBackend: null,
+    facadeSubtype: null,
+    siteContextSubtype: null,
+    conditionFlags: null,
+    isOccluder: null,
     reviewState: 'review_required',
     reviewNotes: null,
     priority: overrides.confidence >= 80 ? 'high' : overrides.confidence >= 50 ? 'medium' : 'low',
@@ -381,6 +386,48 @@ export function adaptBuildingInsightsToUnifiedArtifacts(
   artifacts.push(...lineArtifacts);
 
   return artifacts;
+}
+
+/**
+ * Build AUTHORITATIVE world-space roof-plane artifacts from the raw Google Solar
+ * API `solarPotential.roofSegmentStats` (lat/lng). Roadmap Phase 1 — the
+ * survey→canonical→planset spine.
+ *
+ * Unlike adaptBuildingInsightsToUnifiedArtifacts (which builds PIXEL-space
+ * overlay geometry from `response.roofPlanes` and is empty for real API
+ * responses), this carries `worldPolygon` (lat/lng) + pitch/azimuth/area, so the
+ * geometry can be promoted into the CanonicalBuildingModel and drive the permit
+ * planset. RAW_EVIDENCE authority (operator promotes before CAD use);
+ * non-synthetic (real aerial/ML data). Returns [] for an empty segment list.
+ */
+export function adaptSolarRoofSegmentsToWorldArtifacts(
+  roofSegmentStats: RoofSegmentStat[],
+  surveyId: string,
+  buildingName?: string,
+  imageryDate?: string,
+): UnifiedGeometryArtifact[] {
+  if (!Array.isArray(roofSegmentStats) || roofSegmentStats.length === 0) return [];
+
+  const worldPlanes = buildWorldRoofPlanes(roofSegmentStats);
+  const provenance = makeSolarApiProvenance(buildingName, imageryDate);
+  const authority: UnifiedGeometryAuthority = { ...RAW_EVIDENCE_AUTHORITY };
+
+  return worldPlanes.map((wp) =>
+    makeEmptyArtifact({
+      id: uuid(),
+      surveyId,
+      geometryClass: 'roof_plane',
+      authority,
+      provenance,
+      confidence: GOOGLE_SOLAR_PLANE_CONFIDENCE,
+      label: `Aerial roof plane — ${wp.pitchDegrees}° pitch / ${wp.azimuthDegrees}° azimuth`,
+      limitations: [],
+      pitchDegrees: wp.pitchDegrees,
+      azimuthDegrees: wp.azimuthDegrees,
+      areaSqM: wp.areaSqM,
+      worldPolygon: { vertices: wp.vertices, edgeTypes: wp.edgeTypes },
+    }),
+  );
 }
 
 // ─── Roof Plane Adapter ──────────────────────────────────────────────────────

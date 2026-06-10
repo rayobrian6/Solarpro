@@ -77,6 +77,13 @@ export async function insertPromotionRecord(
 
 /**
  * Persist multiple promotion records in a single transaction.
+ * All inserts succeed or all roll back — no partial writes.
+ *
+ * NEON TRANSACTION API:
+ *   sql.transaction(txn => [ ...queries ]) submits all queries as a single
+ *   non-interactive HTTP transaction. The callback must be SYNCHRONOUS —
+ *   it returns an array of query promises; no await inside.
+ *   All queries are batched into one Postgres transaction behind the scenes.
  */
 export async function insertPromotionRecords(
   records: GeometryPromotionRecord[],
@@ -84,33 +91,35 @@ export async function insertPromotionRecords(
 ): Promise<void> {
   const sql = await getDbReady();
 
-  for (const record of records) {
-    await sql`
-      INSERT INTO geometry_promotion_records (
-        id,
-        artifact_id,
-        survey_id,
-        from_state,
-        to_state,
-        promoted_by,
-        promoted_at,
-        notes,
-        intelligence_validated,
-        intelligence_warnings
-      ) VALUES (
-        ${record.id},
-        ${record.artifactId},
-        ${surveyId},
-        ${record.fromState},
-        ${record.toState},
-        ${record.promotedBy},
-        ${record.promotedAt},
-        ${record.notes},
-        ${record.intelligenceValidated},
-        ${record.intelligenceWarnings}
-      )
-    `;
-  }
+  await sql.transaction(txn => {
+    return records.map(record =>
+      txn`
+        INSERT INTO geometry_promotion_records (
+          id,
+          artifact_id,
+          survey_id,
+          from_state,
+          to_state,
+          promoted_by,
+          promoted_at,
+          notes,
+          intelligence_validated,
+          intelligence_warnings
+        ) VALUES (
+          ${record.id},
+          ${record.artifactId},
+          ${surveyId},
+          ${record.fromState},
+          ${record.toState},
+          ${record.promotedBy},
+          ${record.promotedAt},
+          ${record.notes},
+          ${record.intelligenceValidated},
+          ${record.intelligenceWarnings}
+        )
+      `
+    );
+  });
 }
 
 // ─── Query Functions ────────────────────────────────────────────────────────

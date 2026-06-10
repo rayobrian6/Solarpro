@@ -1,4 +1,5 @@
 services:
+  # ── OpenCV Photo Vision Service ──────────────────────────────────────────
   - type: web
     name: solarpro
     runtime: docker
@@ -46,3 +47,37 @@ services:
         value: "true"
       - key: DATABASE_URL
         sync: false
+
+  # ── Geometry Reconstruction Worker ───────────────────────────────────────
+  # P1 — Execution Architecture: Render Background Worker
+  # Polls Neon DB for queued Pipeline B jobs, claims atomically, and
+  # executes the full reconstruction pipeline. This is the primary
+  # execution path — Vercel only creates/queues jobs and returns 202.
+  # Runs alongside the SAM2 segmentation service on the same Render
+  # instance for low-latency SAM2 calls (no HTTP, same network).
+  - type: worker
+    name: geometry-reconstruction-worker
+    runtime: docker
+    rootDir: .
+    plan: starter
+    region: oregon
+    branch: dev
+    dockerContext: .
+    dockerfilePath: ./worker/Dockerfile
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SAM2_SERVICE_URL
+        value: "https://sam2-segmentation.onrender.com"
+      - key: GEOMETRY_RECONSTRUCTION_WORKER
+        value: "true"
+      - key: GEOMETRY_PIPELINE_TIMEOUT_MS
+        value: "900000"
+      - key: GEOMETRY_SEGMENTATION_STAGE_TIMEOUT_MS
+        value: "600000"
+      - key: WORKER_POLL_INTERVAL_MS
+        value: "5000"
+      - key: WORKER_ID
+        sync: false
+      - key: SHUTDOWN_TIMEOUT_MS
+        value: "30000"

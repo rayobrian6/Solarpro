@@ -85,3 +85,9 @@ build-output.log
 .env*.local
 .browser_data/
 .psiphon_data/
+__pycache__/
+*.pyc
+
+# Worker build output
+worker/dist/
+.env*

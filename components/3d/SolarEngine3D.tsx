@@ -1317,9 +1317,12 @@ function SolarEngine3D({
             const panScale = orbit.radius * PAN_SCALE;
             const hSin = Math.sin(orbit.heading);
             const hCos = Math.cos(orbit.heading);
-            // screen-right maps to camera-right; screen-down maps to camera-back
-            const eastPan  = -dx * panScale * hCos + dy * panScale * hSin;
-            const northPan =  dx * panScale * hSin + dy * panScale * hCos;
+            // Google-Maps "grab the map" semantics: the scene follows the cursor,
+            // so the orbit TARGET moves opposite the drag (drag right → content
+            // moves right → target shifts camera-left). Camera looks toward
+            // heading+π, so camera-right = -(east·hCos) + ... with these signs:
+            const eastPan  =  dx * panScale * hCos - dy * panScale * hSin;
+            const northPan = -dx * panScale * hSin - dy * panScale * hCos;
             const mPerDegLat = 111320;
             const mPerDegLng = 111320 * Math.cos(orbit.targetLat * Math.PI / 180);
             orbit.targetLat = orbit.dragStartTLat + northPan / mPerDegLat;

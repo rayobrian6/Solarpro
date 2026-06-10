@@ -42,6 +42,16 @@ import type { NormalizedRegion, NormalizedLine } from './overlayCoordinateConver
 /** Processing resolution — much higher than the old 96×96. */
 export const EXTRACTION_SIZE = 512;
 
+// ---------------------------------------------------------------------------
+// Phase 0 feature flag — Canny Background Fix (P0-8.3)
+// ---------------------------------------------------------------------------
+
+/** Whether Phase 0 Canny background fix is enabled. Read at call time. */
+export function isPhase0CannyBackgroundFixEnabled(): boolean {
+  const val = process.env.PHASE0_CANNY_BACKGROUND_FIX ?? '';
+  return val === 'true' || val === '1';
+}
+
 /**
  * Color quantization levels per channel.
  * 3 = 27 total colors — COARSE on purpose.
@@ -123,13 +133,40 @@ export interface ExtractedContour {
 
 /** Classification of an extracted contour. */
 export type ContourClassification =
+  // ── Legacy ──
   | 'probable_roof_plane'
   | 'probable_wall_plane'
   | 'probable_obstruction'
   | 'probable_equipment'
   | 'probable_ground_noise'
   | 'probable_sky_region'
-  | 'unknown';
+  // ── Facade ──
+  | 'probable_siding'
+  | 'probable_window'
+  | 'probable_door'
+  | 'probable_garage_door'
+  | 'probable_gutter'
+  | 'probable_downspout'
+  | 'probable_porch'
+  | 'probable_deck'
+  // ── Site context ──
+  | 'probable_driveway'
+  | 'probable_fence'
+  | 'probable_bushes'
+  // ── Electrical/solar ──
+  | 'probable_ac_unit'
+  | 'probable_utility_meter'
+  | 'probable_existing_solar'
+  // ── Occluder ──
+  | 'probable_vehicle'
+  | 'probable_person'
+  // ── Condition ──
+  | 'probable_moss'
+  | 'probable_damaged_area'
+  // ── Catch-all ──
+  | 'unknown'
+  // ── Phase 0 (P0-8.3): unclassifiable regions routed to background ──
+  | 'background';
 
 /** A line detected in the image via Hough-like projection. */
 export interface ExtractedLine {
@@ -1029,8 +1066,21 @@ function classifyAndScoreContour(
   }
   // ── Fallback ──
   else if (normArea > 0.01 && normYCenter < 0.5) {
-    classification = 'probable_roof_plane';
-    confidence = 35;
+    // Phase 0 (P0-8.3): When PHASE0_CANNY_BACKGROUND_FIX is enabled, route
+    // unclassifiable upper-half contours to 'background' instead of the false
+    // positive 'probable_roof_plane'. This is the single largest source of
+    // artifact contamination — unknown contours in the upper image half were
+    // assumed to be roof, creating fake roof planes at confidence 35.
+    // Background classification uses confidence 20 (well below the 55 canonical
+    // promotion threshold introduced in P0-4.3) as a conservative false-negative
+    // bias: if we can't classify it, assume it's NOT a roof.
+    if (isPhase0CannyBackgroundFixEnabled()) {
+      classification = 'background';
+      confidence = 20;
+    } else {
+      classification = 'probable_roof_plane';
+      confidence = 35;
+    }
   }
   else {
     classification = 'unknown';

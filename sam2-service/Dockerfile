@@ -54,22 +54,48 @@ RUN pip install --no-cache-dir \
 # 7. HuggingFace Hub — needed by build_sam2_hf() to download checkpoints
 RUN pip install --no-cache-dir huggingface_hub>=0.30.2
 
-# 8. Remaining app deps (fastapi, uvicorn, opencv, etc.)
+# 8. Transformers — needed by MiDaS/DPT depth estimation pipeline
+RUN pip install --no-cache-dir transformers>=4.37.0
+
+# 9. ONNX Runtime — CPU-optimized inference engine for SAM2
+# Provides 1.5-3x speedup over PyTorch through graph fusion and
+# optimized memory planning. Only loaded when SAM2_INFERENCE_BACKEND=onnx.
+RUN pip install --no-cache-dir onnxruntime>=1.18.0
+
+# 9b. ONNX model manipulation library — needed for INT8 dynamic quantization
+# of the SAM2 encoder at startup. The quantized model is ~4x smaller and
+# ~16% faster on CPU with minimal quality loss (cosine sim > 0.985).
+RUN pip install --no-cache-dir onnx>=1.16.0
+
+# 10. Remaining app deps (fastapi, uvicorn, opencv, etc.)
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Copy app code
 WORKDIR /app
 COPY main.py /app/main.py
+COPY classifier_logic.py /app/classifier_logic.py
+COPY onnx_sam2_amg.py /app/onnx_sam2_amg.py
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Model cache directory — HF downloads checkpoints here
 ENV SAM2_CACHE_DIR=/app/.cache
 RUN mkdir -p /app/.cache
 
+# NOTE: ONNX model pre-download REMOVED — was suspected of producing corrupt
+# models when running on "starter" build plan (0.5GB RAM). The ONNX download
+# step loads both torch (to import sam2 for model shapes) and onnxruntime,
+# which can OOM on the limited build instance. Models are now downloaded
+# at runtime during startup_event() instead.
+#
+# If you want to re-enable pre-download, ensure buildPlan is "standard" (4GB)
+# via the Render dashboard (API PATCH does not support buildPlan changes).
+
 # Render injects PORT env var (default 10000 for web services)
 EXPOSE 10000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \
-    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-10000}/health')" || exit 1
+HEALTHCHECK --interval=60s --timeout=30s --start-period=600s --retries=3 \
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-10000}/health', timeout=10)" || exit 1
 
-CMD ["python3", "main.py"]
+CMD ["/app/entrypoint.sh"]

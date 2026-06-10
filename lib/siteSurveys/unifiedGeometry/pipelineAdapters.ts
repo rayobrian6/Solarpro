@@ -60,7 +60,21 @@ import type {
   PlaneType,
   ObstructionCadImpact,
   SegmentationBackend,
+  FacadeSubtype,
+  SiteContextSubtype,
+  ElectricalNodeSubtype,
+  UnifiedConditionFlag,
 } from './types';
+import {
+  FACADE_SEGMENTATION_CLASSES,
+  SITE_CONTEXT_SEGMENTATION_CLASSES,
+  ELECTRICAL_SEGMENTATION_CLASSES,
+  OCCLUDER_SEGMENTATION_CLASSES,
+  CONDITION_SEGMENTATION_CLASSES,
+  VEGETATION_CLASSES,
+  type SegmentationClass,
+  type GeometryParticipationFlags,
+} from '../geometryReconstruction/types';
 
 // ─── Pipeline A Candidate Type → Unified Geometry Class Mapping ─────────────
 
@@ -68,11 +82,18 @@ import type {
  * Maps Pipeline A candidate types to canonical unified geometry classes.
  * Some Pipeline A types don't have a direct geometry mapping (e.g., ocr_availability_note)
  * and are mapped to 'unknown' for provenance tracking.
+ *
+ * SAFETY: rectangular_region_candidate is mapped to 'unknown' by default.
+ * A generic rectangle detected by photo vision could be anything (window, door,
+ * solar panel, siding patch, etc.). Mapping it unconditionally to 'roof_plane'
+ * was causing false roof labels in the overlay. Only when the candidate has
+ * explicit roof evidence (candidateCategory === 'roof_context') does
+ * adaptPhotoVisionCandidate promote it to 'roof_plane'.
  */
 const PIPELINE_A_CLASS_MAP: Record<string, UnifiedGeometryClass> = {
   edge_map_summary:           'unknown',
   dominant_line_candidate:    'roof_line',
-  rectangular_region_candidate: 'roof_plane',
+  rectangular_region_candidate: 'unknown',   // was 'roof_plane' — unsafe unconditional mapping
   equipment_anchor_candidate: 'electrical_node',
   roof_edge_candidate:        'roof_line',
   wall_anchor_candidate:      'wall_plane',
@@ -191,6 +212,7 @@ function structuralLineTypeToSubtype(lineType: string): RoofLineSubtype | null {
     hip: 'hip',
     valley: 'valley',
     wall_vertical: 'wall_vertical',
+    wall_bottom_edge: 'wall_bottom_edge',
   };
   return map[lineType] ?? null;
 }
@@ -319,6 +341,20 @@ function makeEmptyArtifact(overrides: Partial<UnifiedGeometryArtifact> & Pick<Un
     consensusPhotoCount: null,
     segmentationClass: null,
     segmentationBackend: null,
+    facadeSubtype: null,
+    siteContextSubtype: null,
+    conditionFlags: null,
+    isOccluder: null,
+    semanticClass: null,
+    sceneRole: null,
+    isStructure: null,
+    isTemporaryOccluder: null,
+    isVegetation: null,
+    isGroundSurface: null,
+    cadRelevance: null,
+    reviewRequired: null,
+    excludeFromGeometry: null,
+    geometryParticipation: null,
     reviewState: 'review_required',
     reviewNotes: null,
     priority: overrides.confidence !== undefined
@@ -344,7 +380,18 @@ export function adaptPhotoVisionCandidate(
   candidate: OpenSourcePhotoVisionCandidate,
   surveyId: string,
 ): UnifiedGeometryArtifact {
-  const geometryClass = PIPELINE_A_CLASS_MAP[candidate.candidateType] ?? 'unknown';
+  let geometryClass = PIPELINE_A_CLASS_MAP[candidate.candidateType] ?? 'unknown';
+
+  // Safety override: rectangular_region_candidate defaults to 'unknown' in
+  // PIPELINE_A_CLASS_MAP, but if the candidate has explicit roof evidence
+  // (candidateCategory === 'roof_context'), promote to 'roof_plane'.
+  // This prevents generic rectangles (windows, doors, panels, etc.) from
+  // appearing as confident roof planes in the overlay while preserving
+  // genuine roof-context rectangles.
+  if (candidate.candidateType === 'rectangular_region_candidate' && candidate.candidateCategory === 'roof_context') {
+    geometryClass = 'roof_plane';
+  }
+
   const isMock = candidate.toolName.includes('mock') || candidate.toolName.includes('test');
 
   const provenance: GeometryProvenance = {
@@ -688,21 +735,113 @@ function adaptSemanticSegmentationMask(artifact: SemanticSegmentationMask, surve
     : { ...RAW_EVIDENCE_AUTHORITY };
 
   const segmentationBackend = detectSegmentationBackend(artifact.rawMask);
+  const segClass = artifact.segmentationClass as SegmentationClass;
+
+  // Semantic segmentation masks are metadata-only review artifacts.
+  // Do not promote any semantic class into structural geometry here. Roof/wall
+  // geometry may only come from the existing roof_plane/wall_plane candidate paths.
+  const geometryClass: UnifiedGeometryClass = 'segmentation_mask';
+  let electricalSubtype: ElectricalNodeSubtype | null = null;
+  let facadeSubtype: FacadeSubtype | null = null;
+  let siteContextSubtype: SiteContextSubtype | null = null;
+
+  if (ELECTRICAL_SEGMENTATION_CLASSES.has(segClass)) {
+    // Preserve electrical identity as review metadata on the mask only.
+    const electricalMap: Partial<Record<SegmentationClass, ElectricalNodeSubtype>> = {
+      utility_meter: 'utility_meter',
+      main_service_panel: 'main_service_panel',
+      disconnect: 'disconnect',
+      conduit: 'conduit_run',
+      inverter: 'inverter',
+      battery: 'battery',
+    };
+    electricalSubtype = electricalMap[segClass] ?? 'unknown_electrical';
+  } else if (FACADE_SEGMENTATION_CLASSES.has(segClass)) {
+    // Facade classes stay as segmentation_mask but get a facadeSubtype
+    const facadeMap: Partial<Record<SegmentationClass, FacadeSubtype>> = {
+      siding: 'siding',
+      window: 'window',
+      door: 'door',
+      garage_door: 'garage_door',
+      fascia: 'fascia',
+      soffit: 'soffit',
+      gutter: 'gutter',
+      downspout: 'downspout',
+      porch: 'porch',
+      deck: 'deck',
+      steps: 'steps',
+      railing: 'railing',
+    };
+    facadeSubtype = facadeMap[segClass] ?? 'unknown_facade';
+  } else if (SITE_CONTEXT_SEGMENTATION_CLASSES.has(segClass)) {
+    // Site context classes stay as segmentation_mask but get a siteContextSubtype
+    const siteMap: Partial<Record<SegmentationClass, SiteContextSubtype>> = {
+      grass: 'grass',
+      overgrown_grass: 'overgrown_grass',
+      sidewalk: 'sidewalk',
+      driveway: 'driveway',
+      gravel: 'gravel',
+      fence: 'fence',
+      bushes: 'bushes',
+      vegetation_touching_structure: 'vegetation_touching_structure',
+    };
+    siteContextSubtype = siteMap[segClass] ?? 'unknown_site_context';
+  }
+
+  // Condition flags: propagate from artifact if present, or infer from condition classes
+  let conditionFlags: UnifiedConditionFlag[] | null = artifact.conditionFlags ?? null;
+  if (conditionFlags === null && CONDITION_SEGMENTATION_CLASSES.has(segClass)) {
+    conditionFlags = [segClass as UnifiedConditionFlag];
+  }
+
+  // Occluder flag: propagate from artifact. Trucks/cars/trailers remain masks, never geometry.
+  const isOccluder = artifact.isOccluder ?? (OCCLUDER_SEGMENTATION_CLASSES.has(segClass) || null);
+
+  const isStructure = segClass === 'roof' || segClass === 'wall';
+  const isTemporaryOccluder = OCCLUDER_SEGMENTATION_CLASSES.has(segClass);
+  // Pass 3E: Use artifact's isVegetation flag when available, fall back to class-based inference
+  const isVegetation = artifact.isVegetation ?? VEGETATION_CLASSES.has(segClass) ?? (segClass === 'tree' || segClass === 'trees' || segClass === 'bushes' || segClass === 'grass' || segClass === 'overgrown_grass' || segClass === 'vegetation_touching_structure');
+  const isGroundSurface = segClass === 'ground' || segClass === 'grass' || segClass === 'overgrown_grass' || segClass === 'gravel' || segClass === 'driveway' || segClass === 'sidewalk';
+  const sceneRole = isTemporaryOccluder
+    ? 'temporary_occluder'
+    : isVegetation
+      ? 'vegetation'
+      : isGroundSurface
+        ? 'ground_surface'
+        : facadeSubtype
+          ? 'facade'
+          : ELECTRICAL_SEGMENTATION_CLASSES.has(segClass)
+            ? 'electrical_context'
+            : isStructure
+              ? 'structure'
+              : siteContextSubtype
+                ? 'site_context'
+                : 'unknown';
+  const cadRelevance = isStructure ? 'existing_pipeline_only' : sceneRole === 'unknown' ? 'none' : 'review_context';
+  const reviewRequired = true;
+
+  // Build label with class context
+  const backendLabel = segmentationBackend === 'sam2' ? 'SAM 2' : segmentationBackend === 'canny' ? 'Canny' : 'Segmentation';
+  const classLabel = electricalSubtype
+    ? `Electrical context: ${segClass}`
+    : isTemporaryOccluder
+      ? `Occluder: ${segClass}`
+      : facadeSubtype
+        ? `Facade: ${segClass}`
+        : siteContextSubtype || isGroundSurface
+          ? `Site: ${segClass}`
+          : segClass;
 
   return makeEmptyArtifact({
     id: artifact.id,
     surveyId,
-    geometryClass: 'segmentation_mask',
+    geometryClass,
     authority,
     provenance,
     confidence: artifact.confidence,
     label: isSynthetic
-      ? `⚠️ Synthetic: Semantic segmentation (${artifact.segmentationClass})`
-      : segmentationBackend === 'sam2'
-        ? `SAM 2 Segmentation (${artifact.segmentationClass})`
-        : segmentationBackend === 'canny'
-          ? `Canny Segmentation (${artifact.segmentationClass})`
-          : `Semantic segmentation (${artifact.segmentationClass})`,
+      ? `⚠️ Synthetic: ${classLabel}`
+      : `${backendLabel} ${classLabel}`,
     limitations: [...artifact.limitations],
     bbox: regionToBBox(artifact.maskBounds),
     polygon: reconPointsToPolygon(artifact.polygon),
@@ -711,6 +850,28 @@ function adaptSemanticSegmentationMask(artifact: SemanticSegmentationMask, surve
       : null,
     segmentationClass: artifact.segmentationClass,
     segmentationBackend,
+    electricalSubtype,
+    facadeSubtype,
+    siteContextSubtype,
+    conditionFlags,
+    isOccluder,
+    semanticClass: artifact.segmentationClass,
+    sceneRole,
+    isStructure,
+    isTemporaryOccluder,
+    isVegetation,
+    isGroundSurface,
+    cadRelevance,
+    reviewRequired,
+    excludeFromGeometry: artifact.excludeFromGeometry ?? null,
+    geometryParticipation: artifact.participation
+      ? {
+          participatesInLines: artifact.participation.participatesInLines ?? null,
+          participatesInPlanes: artifact.participation.participatesInPlanes ?? null,
+          participatesInDepthFusion: artifact.participation.participatesInDepthFusion ?? null,
+          participatesInPhotogrammetry: artifact.participation.participatesInPhotogrammetry ?? null,
+        }
+      : null,
     stageTimings: artifact.stageTimings ?? null,
     isSynthetic,
   });
@@ -723,6 +884,7 @@ function adaptStructuralLineCandidate(artifact: StructuralLineCandidate, surveyI
     'geometry_recon', 'line_extraction_worker', artifact.fileId, [], artifact.workerVersion, artifact.id,
     isSynth, isSynth ? 'SYNTHETIC: Structural line produced by heuristic extraction, not real Hough/model inference' : undefined,
   );
+  const isWallBottomEdge = artifact.lineType === 'wall_bottom_edge';
   return makeEmptyArtifact({
     id: artifact.id,
     surveyId,
@@ -730,7 +892,9 @@ function adaptStructuralLineCandidate(artifact: StructuralLineCandidate, surveyI
     authority: isSynth ? { ...SYNTHETIC_ARTIFACT_AUTHORITY } : { ...RAW_EVIDENCE_AUTHORITY },
     provenance,
     confidence: artifact.confidence,
-    label: isSynth ? `⚠️ Synthetic: Structural ${artifact.lineType} line` : `Structural ${artifact.lineType} line`,
+    label: isSynth
+      ? `⚠️ Synthetic: Structural ${artifact.lineType} line${isWallBottomEdge ? ' (foundation edge — review required)' : ''}`
+      : `Structural ${artifact.lineType} line${isWallBottomEdge ? ' (foundation edge — review required)' : ''}`,
     limitations: [...artifact.limitations],
     lineSegment: {
       start: reconPointToGeometryPoint(artifact.start),
@@ -738,6 +902,7 @@ function adaptStructuralLineCandidate(artifact: StructuralLineCandidate, surveyI
       coordinateSystem: 'normalized_image_0_1000',
     },
     lineSubtype,
+    reviewRequired: true,
     stageTimings: artifact.stageTimings ?? null,
     isSynthetic: isSynth,
   });

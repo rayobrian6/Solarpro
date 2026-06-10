@@ -13,6 +13,7 @@ import {
   runSegmentationFromReconstructionInput,
   SEGMENTATION_WORKER_VERSION,
 } from '@/lib/siteSurveys/geometryReconstruction/workers/segmentation';
+import { suppressWeakStructureMasks } from '@/lib/siteSurveys/geometryReconstruction/workers/segmentation/runSegmentationWorker';
 import type { SegmentationWorkerInput } from '@/lib/siteSurveys/geometryReconstruction/workers/segmentation';
 import type {
   SemanticSegmentationMask,
@@ -75,6 +76,37 @@ function makeReconstructionInput(): GeometryReconstructionInput {
       { fileId: 'file-001', fileUrl: 'https://cdn.example.test/photo1.jpg', filename: 'photo1.jpg' },
     ],
     pipeline: 'segmentation',
+  };
+}
+
+function makePoint(x: number, y: number): SemanticSegmentationMask['polygon'][number] {
+  return { x, y, coordinateSystem: 'normalized_image_0_1000' };
+}
+
+function makeSemanticMask(overrides?: Partial<SemanticSegmentationMask>): SemanticSegmentationMask {
+  return {
+    artifactType: 'semantic_segmentation_mask',
+    id: 'seg-file-001-roof-test',
+    fileId: 'file-001',
+    segmentationClass: 'roof',
+    polygon: [
+      makePoint(100, 100),
+      makePoint(900, 100),
+      makePoint(900, 300),
+      makePoint(100, 300),
+    ],
+    confidence: 80,
+    maskBounds: { x: 100, y: 100, width: 800, height: 200, coordinateSystem: 'normalized_image_0_1000' },
+    workerVersion: 'test',
+    authority: REVIEW_ONLY_AUTHORITY,
+    limitations: ['test'],
+    participation: {
+      participatesInLines: true,
+      participatesInPlanes: true,
+      participatesInDepthFusion: true,
+      participatesInPhotogrammetry: true,
+    },
+    ...overrides,
   };
 }
 
@@ -530,6 +562,45 @@ describe('segmentation worker', () => {
 
       const result = await runSegmentationWorker(makeInput());
       expect(result.artifacts).toEqual([]);
+    });
+  });
+
+  describe('structure boundary tightening', () => {
+    it('excludes lower truck-shaped roof masks from geometry', () => {
+      const [result] = suppressWeakStructureMasks([
+        makeSemanticMask({
+          id: 'seg-truck-shaped-roof',
+          maskBounds: { x: 180, y: 610, width: 620, height: 180, coordinateSystem: 'normalized_image_0_1000' },
+        }),
+      ]);
+
+      expect(result.excludeFromGeometry).toBe(true);
+      expect(result.participation?.participatesInPlanes).toBe(false);
+      expect(result.participation?.participatesInLines).toBe(false);
+    });
+
+    it('excludes garage-door-shaped roof masks from geometry', () => {
+      const [result] = suppressWeakStructureMasks([
+        makeSemanticMask({
+          id: 'seg-garage-door-shaped-roof',
+          maskBounds: { x: 260, y: 380, width: 420, height: 260, coordinateSystem: 'normalized_image_0_1000' },
+        }),
+      ]);
+
+      expect(result.excludeFromGeometry).toBe(true);
+      expect(result.participation?.participatesInPlanes).toBe(false);
+    });
+
+    it('keeps normal upper roof strips eligible for geometry', () => {
+      const [result] = suppressWeakStructureMasks([
+        makeSemanticMask({
+          id: 'seg-upper-roof-strip',
+          maskBounds: { x: 120, y: 280, width: 760, height: 140, coordinateSystem: 'normalized_image_0_1000' },
+        }),
+      ]);
+
+      expect(result.excludeFromGeometry).not.toBe(true);
+      expect(result.participation?.participatesInPlanes).toBe(true);
     });
   });
 

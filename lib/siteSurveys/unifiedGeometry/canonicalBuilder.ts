@@ -17,7 +17,7 @@
 import { v4 as uuid } from 'uuid';
 import { AUTHORITY_LEVEL } from './authority';
 import type { UnifiedGeometryAuthority, UnifiedGeometryAuthorityState } from './authority';
-import { assertCanonicalEligible } from './promotion';
+import { assertCanonicalEligible, assertNoContradictionBlock } from './promotion';
 import type {
   UnifiedGeometryArtifact,
   CanonicalBuildingModel,
@@ -36,6 +36,7 @@ import type {
   RoofLineSubtype,
   PlaneType,
 } from './types';
+import type { DepthContradictionReport } from '../geometryReconstruction/types';
 
 // ─── Builder Configuration ──────────────────────────────────────────────────
 
@@ -48,6 +49,13 @@ export interface CanonicalBuilderConfig {
   defaultRidgeSetbackM: number;
   /** Default setback for rakes (meters) */
   defaultRakeSetbackM: number;
+  /** Depth-class contradiction reports (Phase 0, P0-4.2).
+   *  When provided, the builder checks each artifact against these reports
+   *  before adding it to the model. Artifacts with blocking contradictions
+   *  (severity 'moderate' or 'major') are rejected when the
+   *  PHASE0_CONTRADICTION_PROMOTION_GATE flag is active.
+   *  Defaults to empty array (no contradiction checks). */
+  contradictionReports?: DepthContradictionReport[];
 }
 
 const DEFAULT_CONFIG: CanonicalBuilderConfig = {
@@ -83,22 +91,37 @@ export class CanonicalModelBuilder {
   private readonly config: CanonicalBuilderConfig;
   private readonly artifacts: UnifiedGeometryArtifact[] = [];
   private readonly promotionRecordIds: string[] = [];
+  private readonly contradictionReports: DepthContradictionReport[];
 
   constructor(config: Partial<CanonicalBuilderConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     if (!this.config.surveyId) {
       throw new CanonicalBuilderError('surveyId is required');
     }
+    this.contradictionReports = config.contradictionReports ?? [];
   }
 
   /**
    * Add a promoted artifact to the model.
    * Only promoted_canonical or cad_safe artifacts are accepted.
    * Mock artifacts are always rejected.
+   *
+   * Phase 0 (P0-4.2): When PHASE0_CONTRADICTION_PROMOTION_GATE is active,
+   * artifacts with blocking depth contradictions (severity 'moderate' or
+   * 'major') are rejected from the canonical model. This prevents geometry
+   * derived from contradicted depth estimates from contaminating the
+   * CanonicalBuildingModel and CAD output.
    */
   addArtifact(artifact: UnifiedGeometryArtifact): this {
     // Validate authority — must be promoted_canonical or cad_safe
     assertCanonicalEligible(artifact);
+
+    // Phase 0 (P0-4.2): Contradiction-aware promotion gate
+    // Check artifact against contradiction reports before adding.
+    // When the flag is OFF, this is a no-op (assertNoContradictionBlock
+    // returns immediately). When the flag is ON, artifacts with blocking
+    // contradictions are rejected with CANONICAL_MODEL_VIOLATION.
+    assertNoContradictionBlock(artifact, this.contradictionReports);
 
     // Validate survey ID consistency
     if (artifact.surveyId !== this.config.surveyId) {
@@ -195,20 +218,30 @@ export class CanonicalModelBuilder {
   // ─── Private Builders ────────────────────────────────────────────────────
 
   private buildCanonicalRoofPlane(artifact: UnifiedGeometryArtifact): CanonicalRoofPlane {
-    // Use polygon if available; otherwise construct from center + bbox
+    // Use polygon if available; otherwise construct from bbox
     const polygon = artifact.polygon ?? this.inferPolygonFromBBox(artifact);
+
+    // Phase 1: authoritative real-world (lat/lng) outline from aerial/Solar or an
+    // operator trace. This is the geometry the permit planset actually consumes;
+    // a plane that has it is NOT degraded even without an image-space polygon.
+    const worldPolygon = artifact.worldPolygon ?? undefined;
+
+    // CRITICAL: Do NOT silently fabricate a 100×100 placeholder polygon.
+    // That garbage geometry would flow into CAD without any warning, producing
+    // nonsensical panel layouts. Instead, mark the plane as degraded so
+    // downstream consumers (CAD bridge, permit engine) can reject or flag it.
+    if (!polygon && !worldPolygon) {
+      console.error(
+        `[CANONICAL_BUILDER] Roof plane artifact ${artifact.id} has no polygon, bbox, or worldPolygon — ` +
+        'marking as degraded. Downstream consumers MUST NOT use this geometry for CAD/permit output.'
+      );
+    }
 
     return {
       id: uuid(),
-      polygon: polygon ?? {
-        vertices: [
-          { x: 0, y: 0, coordinateSystem: 'normalized_image_0_1000' },
-          { x: 100, y: 0, coordinateSystem: 'normalized_image_0_1000' },
-          { x: 100, y: 100, coordinateSystem: 'normalized_image_0_1000' },
-          { x: 0, y: 100, coordinateSystem: 'normalized_image_0_1000' },
-        ],
-        coordinateSystem: 'normalized_image_0_1000',
-      },
+      polygon: polygon ?? undefined,
+      worldPolygon,
+      degradedNoGeometry: !polygon && !worldPolygon,
       pitchDegrees: artifact.pitchDegrees ?? 0,
       azimuthDegrees: artifact.azimuthDegrees ?? 0,
       areaSqM: artifact.areaSqM ?? 0,
@@ -223,17 +256,20 @@ export class CanonicalModelBuilder {
   }
 
   private buildCanonicalWallPlane(artifact: UnifiedGeometryArtifact): CanonicalWallPlane {
+    const polygon = artifact.polygon ?? this.inferPolygonFromBBox(artifact);
+
+    // Same as roof planes: do NOT silently fabricate placeholder geometry.
+    if (!polygon) {
+      console.error(
+        `[CANONICAL_BUILDER] Wall plane artifact ${artifact.id} has neither polygon nor bbox — ` +
+        'marking as degraded. Downstream consumers MUST NOT use this geometry for CAD/permit output.'
+      );
+    }
+
     return {
       id: uuid(),
-      polygon: artifact.polygon ?? this.inferPolygonFromBBox(artifact) ?? {
-        vertices: [
-          { x: 0, y: 0, coordinateSystem: 'normalized_image_0_1000' },
-          { x: 100, y: 0, coordinateSystem: 'normalized_image_0_1000' },
-          { x: 100, y: 100, coordinateSystem: 'normalized_image_0_1000' },
-          { x: 0, y: 100, coordinateSystem: 'normalized_image_0_1000' },
-        ],
-        coordinateSystem: 'normalized_image_0_1000',
-      },
+      polygon: polygon ?? undefined,
+      degradedNoGeometry: !polygon,
       estimatedHeightM: null,
       facingDirection: null,
       sourceArtifactId: artifact.id,
@@ -374,6 +410,10 @@ export class CanonicalModelBuilder {
  *
  * This is the primary entry point for the CAD engine to get building geometry.
  * All artifacts must be at promoted_canonical or cad_safe authority.
+ *
+ * Phase 0 (P0-4.2): When contradiction reports are provided and the
+ * PHASE0_CONTRADICTION_PROMOTION_GATE flag is active, artifacts with
+ * blocking depth contradictions are rejected from the model.
  */
 export function buildCanonicalModel(
   surveyId: string,

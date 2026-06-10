@@ -93,6 +93,7 @@ export {
   reviewArtifact,
   assertCadConsumable,
   assertCanonicalEligible,
+  assertNoContradictionBlock,
   canPromote,
   PromotionError,
 } from './promotion';
@@ -115,8 +116,6 @@ export {
 // ── Unified Artifact Store ─────────────────────────────────────────────────────────
 export {
   getUnifiedArtifactsForSurvey,
-  getUnifiedArtifactsByIds,
-  hasUnifiedArtifactsForSurvey,
   writeObstructionArtifact,
   writeUnifiedArtifact,
   writeUnifiedArtifacts,
