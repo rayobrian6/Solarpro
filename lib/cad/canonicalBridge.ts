@@ -10,7 +10,7 @@
 //     → generateCADLayout()     → CADModel
 //
 // NON-NEGOTIABLE:
-//   1. Only CanonicalBuildingModel with cad_safe authority can feed CAD
+//   1. Only CanonicalBuildingModel with promoted_canonical or cad_safe authority can feed CAD
 //   2. All obstructions pass through with source='promoted_canonical'
 //   3. Raw vision artifacts are NEVER accepted — they must be promoted first
 //   4. Mock artifacts are BLOCKED — they cannot enter the CAD pipeline
@@ -24,7 +24,8 @@
 // ============================================================================
 
 import type { CanonicalBuildingModel, CanonicalRoofPlane, CanonicalObstruction, CanonicalElectricalNode } from '@/lib/siteSurveys/unifiedGeometry/types';
-import { isCadConsumable, assertNoCadMutation, isSyntheticArtifact } from '@/lib/siteSurveys/unifiedGeometry/authority';
+import { assertNoCadMutation, isSyntheticArtifact } from '@/lib/siteSurveys/unifiedGeometry/authority';
+import type { UnifiedGeometryAuthorityState } from '@/lib/siteSurveys/unifiedGeometry/authority';
 import type { CADObstruction, CADElectricalNode } from './types';
 import type { Point2D } from './geometry';
 
@@ -145,11 +146,18 @@ export function canonicalToCADInputs(
   const log: string[] = [];
   const tag = `[CANONICAL_BRIDGE] surveyId=${model.surveyId}`;
 
-  // ── Authority gate ──────────────────────────────────────────────────────
-  if (!isCadConsumable(model.authority)) {
+  // ── Authority gate ──────────────────────────────────────────────────────────
+  // The bridge accepts both 'promoted_canonical' and 'cad_safe' authority states.
+  // 'promoted_canonical' is the canonical source of truth with permitGenerationAllowed=true;
+  // it may feed the CAD pipeline for permit generation even though cadConsumable is false
+  // (cadConsumable=true is reserved for the terminal cad_safe state which also allows
+  // direct CAD mutation). The strict isCadConsumable() check is too narrow here —
+  // the bridge's own policy is: promoted_canonical + no mock artifacts = allowed.
+  const allowedBridgeStates: UnifiedGeometryAuthorityState[] = ['promoted_canonical', 'cad_safe'];
+  if (!allowedBridgeStates.includes(model.authority.state) || model.authority.mockArtifact) {
     throw new CanonicalBridgeError(
       `CanonicalBuildingModel authority state='${model.authority.state}' is not CAD-consumable. ` +
-      `Only '${'cad_safe' as const}' or '${'promoted_canonical' as const}' authority models may feed the CAD engine. ` +
+      `Only 'cad_safe' or 'promoted_canonical' authority models may feed the CAD engine. ` +
       `Promote artifacts through the review workflow first.`,
     );
   }
