@@ -23,9 +23,10 @@
 //   - patchSystemDefinitionFromVision() has been removed — this is the sole legal path
 // ============================================================================
 
-import type { CanonicalBuildingModel, CanonicalObstruction, CanonicalElectricalNode } from '@/lib/siteSurveys/unifiedGeometry/types';
+import type { CanonicalBuildingModel, CanonicalRoofPlane, CanonicalObstruction, CanonicalElectricalNode } from '@/lib/siteSurveys/unifiedGeometry/types';
 import { isCadConsumable, assertNoCadMutation, isSyntheticArtifact } from '@/lib/siteSurveys/unifiedGeometry/authority';
 import type { CADObstruction, CADElectricalNode } from './types';
+import type { Point2D } from './geometry';
 
 // ── Bridge Types ─────────────────────────────────────────────────────────────
 
@@ -36,13 +37,40 @@ import type { CADObstruction, CADElectricalNode } from './types';
  * CADModel.electricalNodes — they are the ONLY legal source of vision-derived
  * geometry in the CAD engine.
  */
+export interface CADCanonicalRoofPlaneInput {
+  /** Canonical roof plane id */
+  id: string;
+  /** CAD local XY meters — raw plane boundary from CanonicalBuildingModel */
+  polygon: Point2D[];
+  /** Pitch in degrees */
+  pitch: number;
+  /** Azimuth in degrees */
+  azimuth: number;
+  /** Canonical area in square meters */
+  areaSqM: number;
+  /** Canonical setback defaults in meters */
+  setbacks: {
+    eaveM: number;
+    ridgeM: number;
+    rakeM: number;
+  };
+  /** Provenance back to the promoted source artifact */
+  sourceArtifactId: string;
+}
+
 export interface CanonicalBridgeResult {
+  /** CAD-ready roof planes from the canonical model */
+  roofPlanes: CADCanonicalRoofPlaneInput[];
   /** CAD-ready obstructions from the canonical model */
   obstructions: CADObstruction[];
   /** CAD-ready electrical nodes from the canonical model */
   electricalNodes: CADElectricalNode[];
   /** Bridge audit log — every conversion step */
   log: string[];
+  /** Number of roof planes that were converted */
+  roofPlanesConverted: number;
+  /** Number of roof planes skipped */
+  roofPlanesSkipped: number;
   /** Number of obstructions that were converted */
   obstructionsConverted: number;
   /** Number of electrical nodes that were converted */
@@ -176,6 +204,28 @@ export function canonicalToCADInputs(
     );
   }
 
+  // ── Convert roof planes ─────────────────────────────────────────────────
+  let roofPlanesConverted = 0;
+  let roofPlanesSkipped = 0;
+  const roofPlanes: CADCanonicalRoofPlaneInput[] = [];
+
+  for (const canonicalRoofPlane of model.roofPlanes) {
+    const converted = convertRoofPlane(canonicalRoofPlane, log, tag);
+    if (converted) {
+      roofPlanes.push(converted);
+      roofPlanesConverted++;
+    } else {
+      roofPlanesSkipped++;
+    }
+  }
+
+  if (model.roofPlanes.length > 0 && roofPlanesConverted === 0) {
+    throw new CanonicalBridgeError(
+      'CanonicalBuildingModel contains roof planes, but none are CAD-safe. ' +
+      'Permit/CAD generation requires at least one local_meters_xy roof polygon with 3+ finite vertices.',
+    );
+  }
+
   // ── Convert obstructions ────────────────────────────────────────────────
   let obstructionsConverted = 0;
   let obstructionsSkipped = 0;
@@ -207,18 +257,99 @@ export function canonicalToCADInputs(
   }
 
   log.push(
-    `${tag} DONE obstructions=${obstructionsConverted} (skipped=${obstructionsSkipped}) ` +
+    `${tag} DONE roofPlanes=${roofPlanesConverted} (skipped=${roofPlanesSkipped}) ` +
+    `obstructions=${obstructionsConverted} (skipped=${obstructionsSkipped}) ` +
     `electricalNodes=${electricalNodesConverted} (skipped=${electricalNodesSkipped})`,
   );
 
   return {
+    roofPlanes,
     obstructions,
     electricalNodes,
     log,
+    roofPlanesConverted,
+    roofPlanesSkipped,
     obstructionsConverted,
     electricalNodesConverted,
     obstructionsSkipped,
     electricalNodesSkipped,
+  };
+}
+
+// ── Roof Plane Converter ───────────────────────────────────────────────────
+
+function convertRoofPlane(
+  plane: CanonicalRoofPlane,
+  log: string[],
+  tag: string,
+): CADCanonicalRoofPlaneInput | null {
+  if (!plane.polygon) {
+    log.push(`${tag} SKIP roofPlane id=${plane.id} — missing polygon`);
+    return null;
+  }
+
+  if (plane.polygon.coordinateSystem !== 'local_meters_xy') {
+    throw new CanonicalBridgeError(
+      `Roof plane id=${plane.id} uses coordinateSystem='${plane.polygon.coordinateSystem}'. ` +
+      `CAD requires local_meters_xy canonical roof polygons.`,
+    );
+  }
+
+  const vertices = plane.polygon.vertices ?? [];
+  if (vertices.length < 3) {
+    throw new CanonicalBridgeError(
+      `Roof plane id=${plane.id} has ${vertices.length} polygon vertices. CAD requires at least 3 vertices.`,
+    );
+  }
+
+  const polygon: Point2D[] = vertices.map((v, idx) => {
+    if (v.coordinateSystem !== 'local_meters_xy') {
+      throw new CanonicalBridgeError(
+        `Roof plane id=${plane.id} vertex[${idx}] uses coordinateSystem='${v.coordinateSystem}'. ` +
+        `CAD requires local_meters_xy vertices.`,
+      );
+    }
+    if (!Number.isFinite(v.x) || !Number.isFinite(v.y)) {
+      throw new CanonicalBridgeError(
+        `Roof plane id=${plane.id} vertex[${idx}] has non-finite coordinates x=${v.x} y=${v.y}.`,
+      );
+    }
+    return { x: v.x, y: v.y };
+  });
+
+  const setbacks = plane.setbackDefaults;
+  for (const [name, value] of Object.entries(setbacks)) {
+    if (!Number.isFinite(value) || value < 0) {
+      throw new CanonicalBridgeError(
+        `Roof plane id=${plane.id} has invalid setback ${name}=${value}.`,
+      );
+    }
+  }
+
+  if (!Number.isFinite(plane.pitchDegrees) || !Number.isFinite(plane.azimuthDegrees) || !Number.isFinite(plane.areaSqM)) {
+    throw new CanonicalBridgeError(
+      `Roof plane id=${plane.id} has non-finite pitch/azimuth/area values.`,
+    );
+  }
+
+  log.push(
+    `${tag} CONVERT roofPlane id=${plane.id} vertices=${polygon.length} ` +
+    `pitch=${plane.pitchDegrees.toFixed(1)} azimuth=${plane.azimuthDegrees.toFixed(1)} ` +
+    `areaSqM=${plane.areaSqM.toFixed(2)} sourceArtifactId=${plane.sourceArtifactId}`,
+  );
+
+  return {
+    id: plane.id,
+    polygon,
+    pitch: plane.pitchDegrees,
+    azimuth: plane.azimuthDegrees,
+    areaSqM: plane.areaSqM,
+    setbacks: {
+      eaveM: setbacks.eaveM,
+      ridgeM: setbacks.ridgeM,
+      rakeM: setbacks.rakeM,
+    },
+    sourceArtifactId: plane.sourceArtifactId,
   };
 }
 
@@ -337,12 +468,18 @@ function resolveWorldPosition(
 ): { x: number; y: number } | null {
   if (!center) return null;
 
-  // If a world projection function is provided, use it
+  // CanonicalBuildingModel centers are already local CAD meters once promoted.
+  if (center.coordinateSystem === 'local_meters_xy') {
+    if (!Number.isFinite(center.x) || !Number.isFinite(center.y)) return null;
+    return { x: center.x, y: center.y };
+  }
+
+  // If a world projection function is provided, use it for non-local/image-space data.
   if (config.worldProjection) {
     return config.worldProjection(center.x, center.y, roofPlaneId);
   }
 
-  // Without a projection function, we can't convert image-space to world-space
+  // Without a projection function, we can't convert image-space to world-space.
   return null;
 }
 

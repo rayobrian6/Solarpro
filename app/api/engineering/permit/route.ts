@@ -26,6 +26,8 @@ import { permitIntegration } from '@/lib/siteSurvey/permitIntegration';
 import { collectEngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
 import { getProjectSurveyContext } from '@/lib/survey/getProjectSurveyContext';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { canonicalToCADInputs, CanonicalBridgeError } from '@/lib/cad/canonicalBridge';
+import type { CanonicalBuildingModel } from '@/lib/siteSurveys/unifiedGeometry/types';
 
 // Phase 1 spine: authoritative roof geometry from the persisted canonical model
 import { getCanonicalModel } from '@/lib/siteSurveys/unifiedGeometry/canonicalModelStore';
@@ -34,6 +36,45 @@ import { canonicalToPermitRoofPlanes, isCanonicalUsableForPlanset } from '@/lib/
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';          // Ensure Node.js runtime (Buffer, child_process)
 export const maxDuration = 60;            // 60s — aerial API calls can take 10-15s total
+
+function isRoofPermitRequest(input: PermitInput): boolean {
+  const layoutType = String((input.layout as any)?.type ?? '').toLowerCase().trim();
+  if (layoutType === 'roof') return true;
+  if (layoutType === 'ground_mount' || layoutType === 'ground' || layoutType === 'solar_fence' || layoutType === 'fence') return false;
+
+  const projectType = String((input.project as any)?.systemType ?? '').toLowerCase().trim();
+  if (projectType === 'roof') return true;
+  if (projectType === 'ground_mount' || projectType === 'ground' || projectType === 'solar_fence' || projectType === 'fence') return false;
+
+  const hasGround = ((input.layout as any)?.groundArrays?.length ?? 0) > 0;
+  const hasFence = ((input.layout as any)?.fenceSegments?.length ?? 0) > 0;
+  return !hasGround && !hasFence;
+}
+
+function isExplicitDraftOrLegacyPermit(req: NextRequest, input: PermitInput): boolean {
+  const qs = req.nextUrl.searchParams;
+  const queryMode = String(qs.get('mode') ?? qs.get('permitMode') ?? '').toLowerCase().trim();
+  const queryDraft = qs.get('draft') === 'true' || qs.get('legacy') === 'true' || qs.get('allowLegacyRoofGeometry') === 'true';
+  const bodyAny = input as any;
+  const bodyMode = String(bodyAny.mode ?? bodyAny.permitMode ?? bodyAny.intent ?? '').toLowerCase().trim();
+  return queryDraft || queryMode === 'draft' || queryMode === 'legacy' || bodyMode === 'draft' || bodyMode === 'legacy' || bodyAny.draft === true || bodyAny.allowLegacyRoofGeometry === true;
+}
+
+function extractCanonicalBuildingModel(input: PermitInput): CanonicalBuildingModel | null {
+  const bodyAny = input as any;
+  const projectAny = input.project as any;
+  const candidate =
+    bodyAny.canonicalBuildingModel ??
+    bodyAny.canonical_building_model ??
+    bodyAny._canonicalBuildingModel ??
+    projectAny?.canonicalBuildingModel ??
+    projectAny?.canonical_building_model ??
+    null;
+
+  if (!candidate || typeof candidate !== 'object') return null;
+  if ((candidate as any).schemaVersion !== 'canonical_building_model_v1') return null;
+  return candidate as CanonicalBuildingModel;
+}
 
 
 // ─── Route Handler ────────────────────────────────────────────────────────────
@@ -690,6 +731,8 @@ export async function POST(req: NextRequest) {
             `survey=${surveyId} planes=${planes.length} authority=${model.authority.state} ` +
             `(authoritative override of design/placeholder geometry)`,
           );
+          // Also attach the model for the CAD bridge gate below
+          (enrichedBody as any).canonicalBuildingModel = model;
           usedModel = true;
           break;
         }
@@ -703,6 +746,69 @@ export async function POST(req: NextRequest) {
         // Non-critical: permit still generates with design/survey values
         console.warn('[permit/canonical] Canonical model lookup error (non-critical):',
           canonErr instanceof Error ? (canonErr as Error).message : canonErr);
+      }
+    }
+
+    // ── Canonical roof geometry gate ────────────────────────────────────────
+    // Submission-ready roof plansets must use reviewed/cad-safe CanonicalBuildingModel
+    // roof geometry. Legacy project.roofPlanes remain available only for explicit
+    // draft/legacy generation so old previews do not silently masquerade as permit-ready.
+    // The DB lookup above may have attached a canonicalBuildingModel to enrichedBody;
+    // alternatively the caller may supply one in the request body.
+    const isRoofPermit = isRoofPermitRequest(enrichedBody);
+    const allowDraftLegacyRoofGeometry = isExplicitDraftOrLegacyPermit(req, enrichedBody);
+    const canonicalBuildingModel = extractCanonicalBuildingModel(enrichedBody);
+
+    if (isRoofPermit) {
+      if (!canonicalBuildingModel) {
+        if (!allowDraftLegacyRoofGeometry) {
+          console.error('[PERMIT BLOCKED] CANONICAL_ROOF_GEOMETRY_REQUIRED', { projectId });
+          return NextResponse.json({
+            success: false,
+            error: 'CANONICAL_ROOF_GEOMETRY_REQUIRED',
+            code: 'CANONICAL_ROOF_GEOMETRY_REQUIRED',
+            message: 'Submission-ready roof permit generation requires a cad-safe CanonicalBuildingModel with local-meter roof plane polygons. Regenerate/promote the site-survey geometry, or explicitly request draft/legacy mode for a non-submission preview.',
+            projectId,
+          }, { status: 422 });
+        }
+        console.warn('[PERMIT DRAFT/LEGACY] Proceeding without CanonicalBuildingModel roof geometry by explicit request', { projectId });
+      } else {
+        try {
+          const bridge = canonicalToCADInputs(canonicalBuildingModel);
+          if (bridge.roofPlanes.length === 0 && !allowDraftLegacyRoofGeometry) {
+            console.error('[PERMIT BLOCKED] CANONICAL_ROOF_PLANES_MISSING', { projectId, surveyId: canonicalBuildingModel.surveyId });
+            return NextResponse.json({
+              success: false,
+              error: 'CANONICAL_ROOF_PLANES_MISSING',
+              code: 'CANONICAL_ROOF_PLANES_MISSING',
+              message: 'Submission-ready roof permit generation requires at least one CAD-safe canonical roof plane polygon.',
+              projectId,
+              surveyId: canonicalBuildingModel.surveyId,
+            }, { status: 422 });
+          }
+          (enrichedBody as any)._canonicalBuildingModel = canonicalBuildingModel;
+          (enrichedBody as any)._canonicalCADBridge = bridge;
+          console.log('[PERMIT CANONICAL ROOF]', {
+            projectId,
+            surveyId: canonicalBuildingModel.surveyId,
+            roofPlanes: bridge.roofPlanesConverted,
+            obstructions: bridge.obstructionsConverted,
+            electricalNodes: bridge.electricalNodesConverted,
+          });
+        } catch (bridgeErr: unknown) {
+          const message = bridgeErr instanceof Error ? bridgeErr.message : String(bridgeErr);
+          if (!allowDraftLegacyRoofGeometry) {
+            console.error('[PERMIT BLOCKED] CANONICAL_ROOF_GEOMETRY_INVALID', { projectId, message });
+            return NextResponse.json({
+              success: false,
+              error: 'CANONICAL_ROOF_GEOMETRY_INVALID',
+              code: 'CANONICAL_ROOF_GEOMETRY_INVALID',
+              message,
+              projectId,
+            }, { status: bridgeErr instanceof CanonicalBridgeError ? 422 : 500 });
+          }
+          console.warn('[PERMIT DRAFT/LEGACY] Canonical roof geometry invalid; proceeding by explicit request', { projectId, message });
+        }
       }
     }
 
