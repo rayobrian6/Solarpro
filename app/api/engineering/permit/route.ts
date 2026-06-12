@@ -774,7 +774,10 @@ export async function POST(req: NextRequest) {
         console.warn('[PERMIT DRAFT/LEGACY] Proceeding without CanonicalBuildingModel roof geometry by explicit request', { projectId });
       } else {
         try {
-          const bridge = canonicalToCADInputs(canonicalBuildingModel);
+          const bridge = canonicalToCADInputs(canonicalBuildingModel, {
+            originLat: (project as any).lat ?? undefined,
+            originLng: (project as any).lng ?? undefined,
+          });
           if (bridge.roofPlanes.length === 0 && !allowDraftLegacyRoofGeometry) {
             console.error('[PERMIT BLOCKED] CANONICAL_ROOF_PLANES_MISSING', { projectId, surveyId: canonicalBuildingModel.surveyId });
             return NextResponse.json({

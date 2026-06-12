@@ -102,12 +102,22 @@ export function roofCAD(input: PermitInputShape): CADModel {
   const allLatLngs: Array<{ lat: number; lng: number }> = rawPlanes.flatMap(
     (rp: any) => rp.vertices
   );
-  const originLat = allLatLngs.length > 0
-    ? allLatLngs.reduce((s, v) => s + v.lat, 0) / allLatLngs.length
-    : (rawPanels[0]?.lat ?? 37.0);
-  const originLng = allLatLngs.length > 0
-    ? allLatLngs.reduce((s, v) => s + v.lng, 0) / allLatLngs.length
-    : (rawPanels[0]?.lng ?? -122.0);
+  // When using canonical roof planes, the bridge already derived originLat/originLng
+  // from the worldPolygon vertices (lat/lng → local-meters projection). Use those
+  // so that GPS panel positions and other lat/lng-based computations share the same
+  // coordinate origin as the canonical roof plane polygons.
+  // Without this, origin defaults to (37.0, -122.0) because rawPlanes is empty,
+  // placing all GPS-derived points far from the canonical plane polygons.
+  const originLat = usingCanonicalRoofPlanes && canonicalBridge?.originLat != null
+    ? canonicalBridge.originLat
+    : allLatLngs.length > 0
+      ? allLatLngs.reduce((s, v) => s + v.lat, 0) / allLatLngs.length
+      : (rawPanels[0]?.lat ?? 37.0);
+  const originLng = usingCanonicalRoofPlanes && canonicalBridge?.originLng != null
+    ? canonicalBridge.originLng
+    : allLatLngs.length > 0
+      ? allLatLngs.reduce((s, v) => s + v.lng, 0) / allLatLngs.length
+      : (rawPanels[0]?.lng ?? -122.0);
 
   // ── GPS panel lookup map ──────────────────────────────────────
   // Map each GPS panel to local XY

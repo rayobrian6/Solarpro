@@ -28,6 +28,7 @@ import { assertNoCadMutation, isSyntheticArtifact } from '@/lib/siteSurveys/unif
 import type { UnifiedGeometryAuthorityState } from '@/lib/siteSurveys/unifiedGeometry/authority';
 import type { CADObstruction, CADElectricalNode } from './types';
 import type { Point2D } from './geometry';
+import { latLngToXY } from './geometry';
 
 // ── Bridge Types ─────────────────────────────────────────────────────────────
 
@@ -80,6 +81,11 @@ export interface CanonicalBridgeResult {
   obstructionsSkipped: number;
   /** Number of electrical nodes skipped */
   electricalNodesSkipped: number;
+  /** Origin latitude used for lat/lng → local-meters projection of worldPolygon roof planes.
+   *  Null if no world-to-local projection was needed (all planes had local_meters_xy polygons). */
+  originLat: number | null;
+  /** Origin longitude used for lat/lng → local-meters projection. Null if not needed. */
+  originLng: number | null;
 }
 
 /**
@@ -111,6 +117,22 @@ export interface CanonicalBridgeConfig {
    * If false, items without projection get x=0, y=0 (DANGEROUS — for testing only).
    */
   skipWithoutProjection?: boolean;
+
+  /**
+   * Origin latitude for lat/lng → local-meters projection.
+   * Used when converting worldPolygon (lat/lng) roof planes to local meters.
+   * If not provided, the origin is derived from the first world polygon vertex
+   * across all roof planes in the model.
+   */
+  originLat?: number;
+
+  /**
+   * Origin longitude for lat/lng → local-meters projection.
+   * Used when converting worldPolygon (lat/lng) roof planes to local meters.
+   * If not provided, the origin is derived from the first world polygon vertex
+   * across all roof planes in the model.
+   */
+  originLng?: number;
 }
 
 // ── Bridge Error ──────────────────────────────────────────────────────────────
@@ -217,8 +239,31 @@ export function canonicalToCADInputs(
   let roofPlanesSkipped = 0;
   const roofPlanes: CADCanonicalRoofPlaneInput[] = [];
 
+  // ── Derive lat/lng origin for worldPolygon → local-meters projection ──────
+  // If config supplies originLat/originLng, use those. Otherwise scan all roof
+  // planes' worldPolygon vertices and use the first vertex as origin (same
+  // strategy as the legacy roofCAD lat/lng path).
+  let originLat = config.originLat;
+  let originLng = config.originLng;
+  if (originLat == null || originLng == null) {
+    // Try model metadata first
+    if (model.metadata?.latitude != null && model.metadata?.longitude != null) {
+      originLat = model.metadata.latitude;
+      originLng = model.metadata.longitude;
+    } else {
+      // Derive from first world polygon vertex
+      for (const rp of model.roofPlanes) {
+        if (rp.worldPolygon?.vertices?.length) {
+          originLat = rp.worldPolygon.vertices[0].lat;
+          originLng = rp.worldPolygon.vertices[0].lng;
+          break;
+        }
+      }
+    }
+  }
+
   for (const canonicalRoofPlane of model.roofPlanes) {
-    const converted = convertRoofPlane(canonicalRoofPlane, log, tag);
+    const converted = convertRoofPlane(canonicalRoofPlane, log, tag, originLat, originLng);
     if (converted) {
       roofPlanes.push(converted);
       roofPlanesConverted++;
@@ -281,6 +326,8 @@ export function canonicalToCADInputs(
     electricalNodesConverted,
     obstructionsSkipped,
     electricalNodesSkipped,
+    originLat: originLat ?? null,
+    originLng: originLng ?? null,
   };
 }
 
@@ -290,40 +337,68 @@ function convertRoofPlane(
   plane: CanonicalRoofPlane,
   log: string[],
   tag: string,
+  originLat?: number,
+  originLng?: number,
 ): CADCanonicalRoofPlaneInput | null {
-  if (!plane.polygon) {
-    log.push(`${tag} SKIP roofPlane id=${plane.id} — missing polygon`);
+  // ── Determine polygon source: prefer local_meters_xy polygon, fall back to
+  //    worldPolygon (lat/lng) projected to local meters. ────────────────────
+  let polygon: Point2D[];
+
+  if (plane.polygon && plane.polygon.coordinateSystem === 'local_meters_xy') {
+    // Primary path: canonical local-meter polygon is available
+    const vertices = plane.polygon.vertices ?? [];
+    if (vertices.length < 3) {
+      log.push(`${tag} SKIP roofPlane id=${plane.id} — polygon has ${vertices.length} vertices (need 3+)`);
+      return null;
+    }
+    polygon = vertices.map((v, idx) => {
+      if (v.coordinateSystem !== 'local_meters_xy') {
+        throw new CanonicalBridgeError(
+          `Roof plane id=${plane.id} vertex[${idx}] uses coordinateSystem='${v.coordinateSystem}'. ` +
+          `CAD requires local_meters_xy vertices.`,
+        );
+      }
+      if (!Number.isFinite(v.x) || !Number.isFinite(v.y)) {
+        throw new CanonicalBridgeError(
+          `Roof plane id=${plane.id} vertex[${idx}] has non-finite coordinates x=${v.x} y=${v.y}.`,
+        );
+      }
+      return { x: v.x, y: v.y };
+    });
+  } else if (plane.worldPolygon?.vertices && plane.worldPolygon.vertices.length >= 3) {
+    // Fallback path: worldPolygon (lat/lng) → project to local meters.
+    // This handles Phase 1 models built from Google Solar API roofSegmentStats
+    // which provide world-space outlines but no local-meter polygon.
+    if (originLat == null || originLng == null) {
+      log.push(`${tag} SKIP roofPlane id=${plane.id} — has worldPolygon but no lat/lng origin available for projection`);
+      return null;
+    }
+    const wv = plane.worldPolygon.vertices;
+    if (wv.some(v => !Number.isFinite(v.lat) || !Number.isFinite(v.lng))) {
+      log.push(`${tag} SKIP roofPlane id=${plane.id} — worldPolygon has non-finite lat/lng vertex`);
+      return null;
+    }
+    polygon = wv.map(v => latLngToXY(v.lat, v.lng, originLat!, originLng!));
+    log.push(
+      `${tag} CONVERT roofPlane id=${plane.id} via worldPolygon (${wv.length} lat/lng vertices, ` +
+      `origin=${originLat.toFixed(6)},${originLng.toFixed(6)})`,
+    );
+  } else if (plane.polygon && plane.polygon.coordinateSystem !== 'local_meters_xy') {
+    // Has a polygon but in the wrong coordinate system (normalized_image_0_1000)
+    log.push(
+      `${tag} SKIP roofPlane id=${plane.id} — polygon uses coordinateSystem='${plane.polygon.coordinateSystem}', ` +
+      `need local_meters_xy or worldPolygon`,
+    );
+    return null;
+  } else {
+    // No polygon and no worldPolygon — genuinely missing geometry
+    if (plane.degradedNoGeometry) {
+      log.push(`${tag} SKIP roofPlane id=${plane.id} — degraded (no geometry)`);
+    } else {
+      log.push(`${tag} SKIP roofPlane id=${plane.id} — missing polygon and worldPolygon`);
+    }
     return null;
   }
-
-  if (plane.polygon.coordinateSystem !== 'local_meters_xy') {
-    throw new CanonicalBridgeError(
-      `Roof plane id=${plane.id} uses coordinateSystem='${plane.polygon.coordinateSystem}'. ` +
-      `CAD requires local_meters_xy canonical roof polygons.`,
-    );
-  }
-
-  const vertices = plane.polygon.vertices ?? [];
-  if (vertices.length < 3) {
-    throw new CanonicalBridgeError(
-      `Roof plane id=${plane.id} has ${vertices.length} polygon vertices. CAD requires at least 3 vertices.`,
-    );
-  }
-
-  const polygon: Point2D[] = vertices.map((v, idx) => {
-    if (v.coordinateSystem !== 'local_meters_xy') {
-      throw new CanonicalBridgeError(
-        `Roof plane id=${plane.id} vertex[${idx}] uses coordinateSystem='${v.coordinateSystem}'. ` +
-        `CAD requires local_meters_xy vertices.`,
-      );
-    }
-    if (!Number.isFinite(v.x) || !Number.isFinite(v.y)) {
-      throw new CanonicalBridgeError(
-        `Roof plane id=${plane.id} vertex[${idx}] has non-finite coordinates x=${v.x} y=${v.y}.`,
-      );
-    }
-    return { x: v.x, y: v.y };
-  });
 
   const setbacks = plane.setbackDefaults;
   for (const [name, value] of Object.entries(setbacks)) {
