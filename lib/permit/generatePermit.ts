@@ -180,6 +180,92 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // ── HARD VALIDATION GATE — throws on any missing engineering field ─────────────
   validateCanonicalStrict(canonical);
 
+  // ── Server-side structural calculation (Error 3d fix) ──────────────
+  // When compliance.structural.rafter has zero/missing bending moment, the
+  // frontend's structural V4 API was never called before permit generation.
+  // Run the V4 engine server-side so the structural page always shows real
+  // calculated values instead of "0 ft-lbs".
+  try {
+    const existingRafter = input.compliance?.structural?.rafter;
+    const needsCalc = !existingRafter
+      || (existingRafter.bendingMoment == null || existingRafter.bendingMoment === 0);
+    if (needsCalc && sysType === 'roof') {
+      const { runStructuralCalcV4 } = require('@/lib/structural-engine-v4');
+      const roofPitchDeg = cad.roof?.planes?.[0]?.pitch ?? (input.project as any).roofPitch ?? 20;
+      const windSpeed    = canonical.site.windSpeed || 115;
+      const groundSnow   = canonical.site.groundSnowLoad || 0;
+      const rafterSize   = (input.project as any).rafterSize || '2x6';
+      const rafterSpIn   = (input.project as any).rafterSpacing || 24;
+      const rafterSpFt   = (input.project as any).rafterSpan || 12;
+      const framingType  = (input.project as any).framingType || 'rafter';
+      const totalPanels  = input.system?.totalPanels || cad.totalPanels || 1;
+      const structInput = {
+        installationType: 'residential_pitched',
+        windSpeed,
+        windExposure: canonical.site.exposureCategory || 'C',
+        groundSnowLoad: groundSnow,
+        meanRoofHeight: 15,
+        roofPitch: roofPitchDeg,
+        framingType: framingType === 'truss' ? 'truss' : 'rafter',
+        rafterSize,
+        rafterSpacingIn: rafterSpIn,
+        rafterSpanFt: rafterSpFt,
+        woodSpecies: (input.project as any).rafterSpecies || 'douglas_fir_larch',
+        panelCount: totalPanels,
+        panelLengthIn: 65,
+        panelWidthIn: 40,
+        panelWeightLbs: 50,
+        panelOrientation: 'portrait' as const,
+        mountingSystemId: 'ironridge-xr100',
+        rackingWeightPerPanelLbs: 4,
+      };
+      const structResult = runStructuralCalcV4(structInput);
+      const ra = structResult.rafterAnalysis;
+      const wa = structResult.windAnalysis;
+      const sa = structResult.snowAnalysis;
+      const ml = structResult.mountLayout;
+      // Map V4 result → compliance.structural (same shape as frontend mapping in page.tsx)
+      if (!input.compliance) (input as any).compliance = {};
+      const s = input.compliance.structural || {};
+      s.wind = s.wind || {};
+      if (!s.wind.windSpeed)            s.wind.windSpeed = wa.designWindSpeedMph;
+      if (!s.wind.exposureCategory)     s.wind.exposureCategory = structInput.windExposure;
+      if (!s.wind.velocityPressure)     s.wind.velocityPressure = wa.velocityPressurePsf;
+      if (!s.wind.netUpliftPressure)    s.wind.netUpliftPressure = wa.netUpliftPressurePsf;
+      if (!s.wind.upliftPerAttachment)  s.wind.upliftPerAttachment = ml?.upliftPerMountLbs;
+      s.snow = s.snow || {};
+      if (!s.snow.groundSnowLoad)       s.snow.groundSnowLoad = sa.groundSnowLoadPsf;
+      if (!s.snow.roofSnowLoad)         s.snow.roofSnowLoad = sa.roofSnowLoadPsf;
+      s.rafter = {
+        rafterSize:             ra.size,
+        rafterSpacing:          ra.spacingIn,
+        rafterSpan:             ra.spanFt,
+        bendingMoment:          ra.bendingMomentDemandFtLbs,
+        allowableBendingMoment: ra.bendingMomentCapacityFtLbs,
+        utilizationRatio:       ra.overallUtilization,
+        deflection:             ra.deflectionIn,
+        allowableDeflection:    ra.allowableDeflectionIn,
+        Fb_base:                1150,
+        Cd: 1.15, Cr: 1.15,
+        Fb_prime:               1150 * 1.15 * 1.15,
+        totalLoadPsf:           ra.totalLoadPsf,
+        lineLoad:               ra.totalLoadPsf * (ra.spacingIn / 12),
+      };
+      s.attachment = s.attachment || {};
+      if (!s.attachment.safetyFactor)         s.attachment.safetyFactor = ml?.safetyFactor;
+      if (!s.attachment.lagBoltCapacity)       s.attachment.lagBoltCapacity = ml?.upliftPerMountLbs ? ml.upliftPerMountLbs * (ml.safetyFactor || 2) : undefined;
+      if (!s.attachment.maxAllowedSpacing)     s.attachment.maxAllowedSpacing = ml?.mountSpacingIn;
+      if (!s.attachment.totalUpliftPerAttachment) s.attachment.totalUpliftPerAttachment = ml?.upliftPerMountLbs;
+      if (!s.totalDeadLoadPsf)   s.totalDeadLoadPsf = ra.pvDeadLoadPsf + ra.roofDeadLoadPsf;
+      if (!s.moduleLoadPsf)      s.moduleLoadPsf = ra.pvDeadLoadPsf;
+      if (!s.rackingLoadPsf)     s.rackingLoadPsf = ra.pvDeadLoadPsf > 0 ? ra.pvDeadLoadPsf * 0.15 : 0.5;
+      (input.compliance as any).structural = s;
+      console.log('[PLANSET] Server-side structural V4 computed rafter bending:', ra.bendingMomentDemandFtLbs?.toFixed(0), 'ft-lbs / capacity:', ra.bendingMomentCapacityFtLbs?.toFixed(0), 'ft-lbs');
+    }
+  } catch (structErr: unknown) {
+    // Non-critical: permit still generates, structural page will show defaults
+    console.warn('[PLANSET] Server-side structural V4 failed (non-critical):', (structErr as Error)?.message ?? structErr);
+  }
 
   console.log('[PLANSET] CAD engine resolved systemType:', sysType, {
     totalPanels:  cad.totalPanels,

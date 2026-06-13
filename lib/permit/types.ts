@@ -88,6 +88,11 @@ export interface PermitInput {
     county?: string;
     atsBrand?: string;
     atsAmpRating?: number;
+    // ── Error 3e fix: APN was accessed via (project as any).apn in 5+ template ──
+    // files but never declared on the type, so it was never passed from the ──
+    // frontend or populated server-side. Adding it here so it can flow through ──
+    // the PermitInput pipeline and reach coverSheet, sitePlan, titleBlock, etc.
+    apn?: string;
   };
   system: {
     totalDcKw: number;

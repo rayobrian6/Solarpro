@@ -20,7 +20,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
   const ahj     = compliance.jurisdiction?.ahj || '—';
   // FIX v47.341: Convert utility slug to display name
   const utility = utilityDisplayName((project as any).utilityName || project.utilityMeter || '') || '—';
-  const apn     = (project as any).apn || '—';
+  const apn     = project.apn || '—';
   const city    = (project.city || '').toUpperCase();
 
   const firstInv  = system.inverters?.[0];

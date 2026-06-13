@@ -28,7 +28,7 @@ import { assertNoCadMutation, isSyntheticArtifact } from '@/lib/siteSurveys/unif
 import type { UnifiedGeometryAuthorityState } from '@/lib/siteSurveys/unifiedGeometry/authority';
 import type { CADObstruction, CADElectricalNode } from './types';
 import type { Point2D } from './geometry';
-import { latLngToXY } from './geometry';
+import { latLngToXY, polygonArea, centroid } from './geometry';
 
 // ── Bridge Types ─────────────────────────────────────────────────────────────
 
@@ -379,6 +379,41 @@ function convertRoofPlane(
       return null;
     }
     polygon = wv.map(v => latLngToXY(v.lat, v.lng, originLat!, originLng!));
+
+    // ── Error 3g fix: rescale projected polygon to match areaSqM ──────
+    // The Google Solar API's reconstructPolygon() builds lat/lng vertices
+    // using offsetLatLng(), which encodes meter offsets as degree deltas
+    // (dxE / 111320). When latLngToXY() later converts those degree deltas
+    // back to meters (dLng * cosLat * EARTH_RADIUS_M), the round-trip
+    // introduces a scaling distortion of cosLat * EARTH_RADIUS_M / 111320
+    // ≈ 4.5× per axis (≈ 20-130× in area depending on orientation). This
+    // causes the projected polygon to have hundreds-of-meters extents
+    // instead of the actual 5-15m roof dimensions, allowing gridInsidePolygon()
+    // to place far too many panels (84+ instead of ~17).
+    //
+    // Fix: use the canonical areaSqM (from the Solar API's areaMeters2)
+    // as the ground truth. Compute the area of the projected polygon
+    // (shoelace formula), derive a uniform scale factor, and rescale all
+    // vertices around the polygon centroid so the projected area matches
+    // areaSqM. This preserves the polygon shape (aspect ratio, orientation)
+    // while eliminating the projection distortion.
+    if (plane.areaSqM > 0) {
+      const projectedArea = polygonArea(polygon);
+      if (projectedArea > 0) {
+        const scaleFactor = Math.sqrt(plane.areaSqM / projectedArea);
+        if (Number.isFinite(scaleFactor) && scaleFactor > 0) {
+          const c = centroid(polygon);
+          polygon = polygon.map(p => ({
+            x: c.x + (p.x - c.x) * scaleFactor,
+            y: c.y + (p.y - c.y) * scaleFactor,
+          }));
+          log.push(
+            `${tag} RESCALE roofPlane id=${plane.id} projectedArea=${projectedArea.toFixed(1)}m² → targetArea=${plane.areaSqM.toFixed(1)}m² scaleFactor=${scaleFactor.toFixed(4)}`,
+          );
+        }
+      }
+    }
+
     log.push(
       `${tag} CONVERT roofPlane id=${plane.id} via worldPolygon (${wv.length} lat/lng vertices, ` +
       `origin=${originLat.toFixed(6)},${originLng.toFixed(6)})`,

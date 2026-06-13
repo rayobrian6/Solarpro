@@ -49,7 +49,7 @@ export function _peProjectInfo(input: PermitInput): string {
     <tr><td class=\\"il\\">Client / Owner</td><td class=\\"iv\\">${project.clientName || '—'}</td><td class=\\"il\\">Date</td><td class=\\"iv\\">${project.date}</td></tr>
     <tr><td class=\\"il\\">Installation Address</td><td class=\\"iv\\" colspan=\\"3\\">${project.address || '—'}</td></tr>
     <tr><td class=\\"il\\">AHJ</td><td class=\\"iv\\">${ahj}</td><td class=\\"il\\">State</td><td class=\\"iv\\">${state}</td></tr>
-    <tr><td class=\\"il\\">Permit No.</td><td class=\\"iv\\">___________________</td><td class=\\"il\\">APN</td><td class=\\"iv\\">${(project as any).apn || '___________________'}</td></tr>
+    <tr><td class=\\"il\\">Permit No.</td><td class=\\"iv\\">___________________</td><td class=\\"il\\">APN</td><td class=\\"iv\\">${project.apn || '___________________'}</td></tr>
   </table>`;
 }
 

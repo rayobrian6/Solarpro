@@ -29,7 +29,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const ahj     = compliance.jurisdiction?.ahj   || '';
   // FIX v47.341: Convert utility slug to display name
   const utility = utilityDisplayName((project as any).utilityName || (project as any).utilityMeter || '');
-  const apn     = (project as any).apn || '';
+  const apn     = project.apn || '';
 
   // ── Equipment (4-source resolver) ─────────────────────────────────────────
   const eq = getEquipmentContext(input, cad);

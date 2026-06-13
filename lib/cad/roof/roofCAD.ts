@@ -366,11 +366,21 @@ export function roofCAD(input: PermitInputShape): CADModel {
 
   // ── Aggregate totals ──────────────────────────────────────────
   const allPanels = cadPlanes.flatMap(p => p.panels);
-  const totalPanels = allPanels.length || input.system?.totalPanels || 0;
+  // When a project-specified system size exists (e.g. 34 panels / 13.60 kW),
+  // the CAD layout may place far more panels than specified because worldPolygon
+  // projections can produce oversized roof areas.  Honour the project spec as
+  // the authoritative system size; fall back to the CAD-placed count only when
+  // no project spec exists.
+  const projectTotalPanels = input.system?.totalPanels;
+  const totalPanels = projectTotalPanels && projectTotalPanels > 0
+    ? projectTotalPanels
+    : (allPanels.length || input.system?.totalPanels || 0);
   const panelWatts  = (input.system?.inverters?.[0]?.strings?.[0] as any)?.panelWatts
     ?? input.project?.['panelWatts']
     ?? 400;
-  const totalDcKw   = totalPanels * panelWatts / 1000;
+  const totalDcKw   = projectTotalPanels && projectTotalPanels > 0
+    ? (input.system?.totalDcKw ?? (totalPanels * panelWatts / 1000))
+    : totalPanels * panelWatts / 1000;
 
   // ── Global bounds ──────────────────────────────────────────────
   const allPoints = cadPlanes.flatMap(p => p.polygon);

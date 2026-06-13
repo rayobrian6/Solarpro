@@ -281,6 +281,7 @@ interface ProjectConfig {
   ownerPhone?: string;           // owner contact phone
   ownerEmail?: string;           // owner contact email
   zip?: string;                  // ZIP code — used for AHJ lookup
+  apn?: string;                  // Assessor Parcel Number — Error 3e fix
   // Phase 13 — Smart Defaults sentinel + seed brand.
   // `defaultsApplied` is set exactly ONCE by applySmartDefaultsOnce() and
   // must remain true until the user explicitly resets the system (via the
@@ -469,7 +470,7 @@ function newInverter(type: InverterType, sysType?: string): InverterConfig {
 }
 
 const defaultProject: ProjectConfig = {
-  projectName: 'Solar Installation', clientName: '', address: '', state: '', city: '', county: '', designer: '',
+  projectName: 'Solar Installation', clientName: '', address: '', state: '', city: '', county: '', designer: '', apn: '',
   date: new Date().toISOString().split('T')[0], systemType: 'roof',
   inverters: [newInverter('string')],
   batteryBrand: '', batteryModel: '', batteryCount: 0, batteryKwh: 0,
@@ -6131,6 +6132,7 @@ function EngineeringPageInner() {
           state: config.state || '',
           zip: config.zip || '',
           county: config.county || '',
+          apn: config.apn || undefined,    // Error 3e fix: pass APN from config
           panelVoc: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.voc : undefined; })(),
           panelIsc: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.isc : undefined; })(),
           panelWeightLbs: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.weightLbs : undefined; })(),
@@ -12896,6 +12898,7 @@ function EngineeringPageInner() {
                                 atsBrand: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.manufacturer ?? ''; })() : undefined,
                                 atsAmpRating: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? 0; })() : undefined,
                                 city: config.city || '', state: config.state || '', zip: config.zip || '', county: config.county || '',
+                                apn: config.apn || undefined,    // Error 3e fix
                                 panelVoc: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.voc : undefined; })(),
                                 panelIsc: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.isc : undefined; })(),
                                 panelWeightLbs: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.weightLbs : undefined; })(),

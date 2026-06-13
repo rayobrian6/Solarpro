@@ -26,7 +26,7 @@ export function titleBlock(
   const ahj     = compliance.jurisdiction?.ahj   || (project as any).ahj || '—';
   // FIX v47.341: Convert utility slug to display name in title block
   const utility = utilityDisplayName((project as any).utilityName || (project as any).utilityMeter || '') || '—';
-  const apn     = (project as any).apn || '—';
+  const apn     = project.apn || '—';
 
   // Resolve module and inverter models for title block
   const firstInv = system?.inverters?.[0];

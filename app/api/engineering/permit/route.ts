@@ -255,8 +255,13 @@ export async function POST(req: NextRequest) {
           if (!p.state        && hub.state)            p.state        = hub.state;
           if (!p.zip          && hub.zip)              p.zip          = hub.zip;
           if (!p.utilityName  && hub.utilityProvider)  p.utilityName  = hub.utilityProvider;
+          // ── Error 3e fix: backfill APN from Client_Profile if available ──
+          if (!p.apn && hub.apn)             p.apn = hub.apn;
+          if (!p.apn && hub.parcelNumber)    p.apn = hub.parcelNumber;
+          if (!p.apn && hub.parcel_id)       p.apn = hub.parcel_id;
           console.log('[permit/hub] Backfilled from Client_Profile.json:', {
             projectId, clientName: p.clientName, address: p.address,
+            apn: p.apn || '(not found)',
           });
         }
       } catch (hubErr: unknown) {
@@ -825,6 +830,56 @@ export async function POST(req: NextRequest) {
     // Explicit opt-in for the non-authoritative CAD preview appendix in generated permit packages.
     // The appendix is additive only: it does not replace PV-2/PV-3 and does not mutate CAD, engineering, NEC, BOM, routing, workflow, recommendations, or permit authority.
     (enrichedBody as any).cadAppendixPreviewV1 = true;
+
+    // ── Error 3e fix: APN server-side enrichment ──────────────────────────
+    // APN is needed on every permit page (coverSheet, sitePlan, titleBlock,
+    // certPages, peLetter) but was never passed from the frontend and never
+    // populated server-side. The hub backfill above covers Client_Profile.json,
+    // but the APN may also live in the property enrichment data (ATTOM API)
+    // stored in network_opportunities.parcel_id. Try to fetch it from there.
+    {
+      const p = enrichedBody.project as any;
+      if (!p.apn && projectId && isValidUUID(projectId)) {
+        try {
+          const apnSql = await getDbReady();
+          // Try network_opportunities (property enrichment pipeline)
+          const apnRows = await apnSql`
+            SELECT parcel_id FROM network_opportunities
+            WHERE project_id = ${projectId}
+            LIMIT 1
+          `;
+          if (apnRows.length > 0 && apnRows[0].parcel_id) {
+            p.apn = apnRows[0].parcel_id;
+            console.log('[permit/APN] Backfilled from network_opportunities.parcel_id:', p.apn);
+          }
+        } catch (apnErr: unknown) {
+          // Non-critical — APN will show placeholder
+          console.warn('[permit/APN] Lookup error (non-critical):', (apnErr as Error)?.message);
+        }
+      }
+      // Final fallback: if we still have no APN, leave as placeholder logic
+      // in the template files to show "—" or "___________________"
+      if (!p.apn) {
+        console.log('[permit/APN] No APN found in any source — templates will show placeholder');
+      }
+    }
+
+    // ── Error 3f fix: Designer server-side fallback ──────────────────────
+    // project.designer is a required PermitInput field but defaults to empty
+    // string on the frontend (page.tsx line 472: designer: ''). The smart
+    // defaults (line 5361) only patch it client-side, so if the user hasn't
+    // filled the field AND hasn't clicked auto-fill, designer arrives as ''.
+    // All permit templates fall back to '—' or '________________________________'
+    // which looks broken on a professional permit document. Fix: if designer
+    // is empty after all enrichment, default to 'SolarPro Engineering'.
+    {
+      const p = enrichedBody.project as any;
+      if (!p.designer || p.designer.trim() === '') {
+        p.designer = 'SolarPro Engineering';
+        console.log('[permit/DESIGNER] Empty designer — defaulted to "SolarPro Engineering"');
+      }
+    }
+
     const html = generatePermitHTML(enrichedBody, storedSldSvg);
     console.log('[PLANSET GENERATED]', { systemType: enrichedBody.project?.systemType, panels: (enrichedBody as any).system?.totalPanels, version: PLANSET_ENGINE_VERSION });
 
