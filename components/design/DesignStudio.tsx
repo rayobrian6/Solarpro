@@ -26,6 +26,9 @@ import {
   calcMinRowSpacing,
 } from '@/lib/placementEngine';
 import { getAhjByAddress } from '@/lib/jurisdictions/ahj-national';
+// Phase 2: Compute & Recommend — provenance-aware form fields
+import { ComputedField, type ComputedFieldValue } from '@/components/recommend/ComputedField';
+import type { ConfidenceSource } from '@/components/recommend/ConfidenceBadge';
 import { v4 as uuidv4 } from 'uuid';
 import SolarEngine3D, { type PlacementMode } from '../3d/SolarEngine3D';
 import { useToast } from '@/components/ui/Toast';
@@ -169,21 +172,135 @@ function BillCalculator({ onAnalysis, project }: {
   onAnalysis: (analysis: BillAnalysis) => void;
   project: Project;
 }) {
-  // QW-4: Auto-compute annual kWh from client data when available.
-  // Priority: client.monthlyKwh (12 months) > client.annualKwh > bill-derived > state avg fallback
-  const clientAnnualKwh = project.client?.monthlyKwh?.length === 12
-    ? project.client.monthlyKwh.reduce((a, b) => a + b, 0)
-    : project.client?.annualKwh
-      || Math.round((project.client?.averageMonthlyBill || 180) / (project.client?.utilityRate || 0.15) * 12)
-      || 12000;
+  // ── Phase 2B: Determine annual kWh source + confidence ──
+  // Priority: bill OCR (12-mo history) > bill OCR (annual) > client data > bill-derived > estimate
+  const kwhSource = useMemo<{ value: number; source: ConfidenceSource; confidence: 'high' | 'medium' | 'low'; derivation: string }>(() => {
+    const bd = project.billData as Record<string, unknown> | undefined;
+    const monthlyHistory = bd?.monthlyUsageHistory as number[] | undefined;
+    const billAnnualKwh = bd?.estimatedAnnualKwh as number | undefined;
+    const billMonthlyKwh = bd?.monthlyKwh as number | undefined;
+    const clientMonthly = project.client?.monthlyKwh;
 
-  const [annualKwh, setAnnualKwh] = useState(clientAnnualKwh);
-  const [utilityRate, setUtilityRate] = useState(project.client?.utilityRate || 0.15);
+    // Best: 12+ months of actual bill history from OCR
+    if (monthlyHistory && monthlyHistory.length >= 12) {
+      return {
+        value: monthlyHistory.reduce((a, b) => a + b, 0),
+        source: 'bill-ocr',
+        confidence: 'high',
+        derivation: `${monthlyHistory.length} months of usage history from bill OCR`,
+      };
+    }
+    // Good: bill OCR annual kWh (may be from fewer months, extrapolated)
+    if (billAnnualKwh && billAnnualKwh > 0) {
+      const months = monthlyHistory?.length ?? 1;
+      return {
+        value: billAnnualKwh,
+        source: 'bill-ocr',
+        confidence: monthlyHistory && monthlyHistory.length >= 6 ? 'medium' : 'low',
+        derivation: `Annual kWh from bill OCR${months > 1 ? ` (${months} months extrapolated)` : ''}`,
+      };
+    }
+    // Good: client monthly data (12 months = high, else medium)
+    if (clientMonthly && clientMonthly.length === 12) {
+      return {
+        value: clientMonthly.reduce((a, b) => a + b, 0),
+        source: 'user',
+        confidence: 'high',
+        derivation: '12 months of client consumption data',
+      };
+    }
+    // Medium: client annual kWh or bill-derived estimate
+    const clientAnnual = project.client?.annualKwh;
+    if (clientAnnual && clientAnnual > 0) {
+      return {
+        value: clientAnnual,
+        source: 'user',
+        confidence: 'medium',
+        derivation: 'Annual kWh from client profile',
+      };
+    }
+    // Low: bill monthly × 12
+    if (billMonthlyKwh && billMonthlyKwh > 0) {
+      return {
+        value: billMonthlyKwh * 12,
+        source: 'bill-ocr',
+        confidence: 'low',
+        derivation: 'Single monthly reading × 12 (consider uploading full bill history)',
+      };
+    }
+    // Fallback: estimate from average bill
+    const avgBill = project.client?.averageMonthlyBill || 180;
+    return {
+      value: Math.round(avgBill / 0.15 * 12),
+      source: 'state-avg',
+      confidence: 'low',
+      derivation: 'Estimated from average monthly bill / state rate. Upload a bill for accuracy.',
+    };
+  }, [project.billData, project.client?.monthlyKwh, project.client?.annualKwh, project.client?.averageMonthlyBill]);
+
+  // ── Phase 2C: Determine utility rate source + confidence ──
+  const rateSource = useMemo<{ value: number; source: ConfidenceSource; confidence: 'high' | 'medium' | 'low'; derivation: string }>(() => {
+    const bd = project.billData as Record<string, unknown> | undefined;
+    const billRate = bd?.electricityRate as number | undefined;
+    const dbRate = project.utilityRatePerKwh;
+
+    // Best: extracted from bill OCR
+    if (billRate && billRate > 0 && billRate !== 0.13) {
+      return {
+        value: billRate,
+        source: 'bill-ocr',
+        confidence: 'high',
+        derivation: 'Rate extracted from uploaded utility bill',
+      };
+    }
+    // Good: from utility DB (detected from address)
+    if (dbRate && dbRate > 0) {
+      return {
+        value: dbRate,
+        source: 'utility-db',
+        confidence: 'medium',
+        derivation: `Average rate for ${project.utilityName || 'detected utility'}`,
+      };
+    }
+    // Low: client-entered rate
+    const clientRate = project.client?.utilityRate;
+    if (clientRate && clientRate > 0) {
+      return {
+        value: clientRate,
+        source: 'user',
+        confidence: 'medium',
+        derivation: 'Rate from client profile',
+      };
+    }
+    // Fallback: state average
+    return {
+      value: 0.15,
+      source: 'state-avg',
+      confidence: 'low',
+      derivation: 'National average rate. Upload a bill or set utility for accuracy.',
+    };
+  }, [project.billData, project.utilityRatePerKwh, project.utilityName, project.client?.utilityRate]);
+
+  const [annualKwh, setAnnualKwh] = useState(kwhSource.value);
+  const [utilityRate, setUtilityRate] = useState(rateSource.value);
   const [offsetTarget, setOffsetTarget] = useState(100); // QW-5: default 100%
   const [wantBattery, setWantBattery] = useState(false);
 
-  // Track whether user has manually overridden the annual kWh
-  const [kwhManuallySet, setKwhManuallySet] = useState(false);
+  // Phase 2B: ComputedFieldValue descriptors for ComputedField rendering
+  const annualKwhComputed: ComputedFieldValue = {
+    value: kwhSource.value,
+    confidence: kwhSource.confidence,
+    source: kwhSource.source,
+    derivation: kwhSource.derivation,
+    unit: 'kWh/yr',
+  };
+  const utilityRateComputed: ComputedFieldValue = {
+    value: rateSource.value,
+    confidence: rateSource.confidence,
+    source: rateSource.source,
+    derivation: rateSource.derivation,
+    unit: '$/kWh',
+  };
 
   // QW-4: Auto-compute whenever inputs change (reactive, no button needed)
   const calculate = useCallback(() => {
@@ -240,45 +357,27 @@ function BillCalculator({ onAnalysis, project }: {
 
   return (
     <div className="space-y-3">
-      {/* QW-4: Single auto-computed annual kWh input (no mode selector) */}
-      <div>
-        <div className="flex items-center justify-between">
-          <label className="text-xs text-slate-400">Annual kWh Usage</label>
-          {kwhManuallySet && (
-            <button
-              onClick={() => { setAnnualKwh(clientAnnualKwh); setKwhManuallySet(false); }}
-              className="text-xs text-cyan-400 hover:text-cyan-300"
-            >
-              Reset to computed
-            </button>
-          )}
-        </div>
-        <input
-          type="number"
-          value={annualKwh}
-          onChange={e => {
-            setAnnualKwh(parseInt(e.target.value) || 0);
-            setKwhManuallySet(true);
-          }}
-          className="w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
-        />
-        {!kwhManuallySet && (
-          <p className="text-xs text-slate-500 mt-1">
-            Auto-computed from client data. Edit to override.
-          </p>
-        )}
-      </div>
+      {/* Phase 2B: Annual kWh with provenance — ComputedField replaces plain input */}
+      <ComputedField
+        label="Annual kWh Usage"
+        computed={annualKwhComputed}
+        value={annualKwh}
+        onChange={v => setAnnualKwh(parseInt(v) || 0)}
+        placeholder="12000"
+        data-testid="bill-annual-kwh"
+      />
 
-      <div>
-        <label className="text-xs text-slate-400">Utility Rate ($/kWh)</label>
-        <input
-          type="number"
-          step="0.01"
-          value={utilityRate}
-          onChange={e => setUtilityRate(parseFloat(e.target.value) || 0)}
-          className="w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
-        />
-      </div>
+      {/* Phase 2C: Utility Rate with provenance — ComputedField replaces plain input */}
+      <ComputedField
+        label="Utility Rate"
+        computed={utilityRateComputed}
+        value={utilityRate}
+        onChange={v => setUtilityRate(parseFloat(v) || 0)}
+        type="number"
+        step={0.001}
+        placeholder="0.15"
+        data-testid="bill-utility-rate"
+      />
 
       <SliderRow
         label="Offset Target"
