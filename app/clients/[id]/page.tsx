@@ -11,12 +11,25 @@ import {
   User, CheckCircle, AlertCircle, Clock, Camera,
   RefreshCw, AlertTriangle, Eye,
   StickyNote, Send, MessageSquare, Trash2, ExternalLink, TrendingUp,
+  LayoutGrid, Activity, Sparkles,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 import type { SiteSurvey } from '@/lib/db-neon';
+import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
+import type { ConfidenceSource, ConfidenceLevel } from '@/components/recommend/ConfidenceBadge';
+
+// ── Client Detail Tab IDs ────────────────────────────────────────
+type ClientTab = 'overview' | 'energy' | 'projects' | 'documents';
+
+const CLIENT_TABS: { id: ClientTab; label: string; icon: React.ReactNode }[] = [
+  { id: 'overview',  label: 'Overview',  icon: <LayoutGrid size={14} /> },
+  { id: 'energy',    label: 'Energy',     icon: <Activity size={14} /> },
+  { id: 'projects',  label: 'Projects',   icon: <FolderOpen size={14} /> },
+  { id: 'documents', label: 'Documents',  icon: <FileText size={14} /> },
+];
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -416,6 +429,7 @@ export default function ClientDetailPage() {
 
   const [client, setClient] = useState<Client | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<ClientTab>('overview');
 
   useEffect(() => {
     // Load projects if needed
@@ -471,215 +485,294 @@ export default function ClientDetailPage() {
   const totalClientKw = clientProjects.reduce((s, p) => s + (p.layout?.systemSizeKw || 0), 0);
   const totalClientRevenue = clientProjects.reduce((s, p) => s + (p.costEstimate?.netCost || 0), 0);
 
+  // ── Confidence helpers for client data provenance ──
+  const dataConfidence = (field: string): { confidence: ConfidenceLevel; source: ConfidenceSource; detail?: string } => {
+    // Utility rate from bill OCR is high confidence; from state avg is medium; default is low
+    if (field === 'utilityRate') {
+      if (client.utilityRate > 0 && client.utilityRate !== 0.13) return { confidence: 'high', source: 'bill-ocr', detail: 'From utility bill' };
+      return { confidence: 'medium', source: 'state-avg', detail: 'State average' };
+    }
+    if (field === 'annualKwh') {
+      if (client.annualKwh > 0) return { confidence: 'high', source: 'bill-ocr', detail: '12-month history' };
+      return { confidence: 'low', source: 'fallback' };
+    }
+    if (field === 'address') {
+      if (client.address && client.city) return { confidence: 'high', source: 'address-lookup', detail: 'Verified' };
+      return { confidence: 'low', source: 'manual' };
+    }
+    if (field === 'utilityProvider') {
+      if (client.utilityProvider) return { confidence: 'high', source: 'utility-db', detail: 'Matched' };
+      return { confidence: 'low', source: 'fallback' };
+    }
+    return { confidence: 'medium', source: 'manual' };
+  };
+
   return (
     <AppShell>
-      <div className="p-6 space-y-6 animate-fade-in">
-        {/* Header */}
-        <div className="flex items-center gap-3">
-          <Link href="/clients" className="btn-ghost p-2 rounded-lg"><ArrowLeft size={18} /></Link>
-          <div className="flex-1">
-            <h1 className="text-xl font-bold text-white">{client.name}</h1>
-            <p className="text-slate-400 text-sm">{client.city}, {client.state}</p>
-          </div>
-          <Link href={`/clients/${id}/edit`} className="btn-secondary btn-sm"><Edit size={14} /> Edit</Link>
-          <Link href={`/projects/new?clientId=${id}`} className="btn-primary btn-sm"><Plus size={14} /> New Project</Link>
-        </div>
-
-        {/* Top 3-column grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Contact Card */}
-          <div className="card p-5 space-y-4">
-            <h3 className="font-semibold text-white text-sm">Contact Information</h3>
-            <div className="space-y-3">
-              {[
-                { icon: <Mail size={14} />, value: client.email },
-                { icon: <Phone size={14} />, value: client.phone },
-                { icon: <MapPin size={14} />, value: `${client.address}, ${client.city}, ${client.state} ${client.zip}` },
-                { icon: <Building2 size={14} />, value: client.utilityProvider || 'Not specified' },
-              ].map((item, i) => (
-                <div key={i} className="flex items-start gap-3 text-sm">
-                  <span className="text-slate-500 mt-0.5 flex-shrink-0">{item.icon}</span>
-                  <span className="text-slate-300">{item.value}</span>
-                </div>
-              ))}
+      <div className="p-6 space-y-5 animate-fade-in">
+        {/* ── Client Hero Header ── */}
+        <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-indigo-900/40 via-slate-900/80 to-purple-900/30 border border-indigo-500/15">
+          {/* Accent stripe */}
+          <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-60" />
+          <div className="px-6 py-5 flex items-start gap-4 flex-wrap">
+            <Link href="/clients" className="btn-ghost p-2 rounded-lg mt-1"><ArrowLeft size={18} /></Link>
+            {/* Avatar */}
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-black text-xl flex-shrink-0 shadow-lg shadow-indigo-500/20">
+              {client.name?.split(' ').map(p => p[0]).join('').toUpperCase().slice(0, 2) || '?'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-3 flex-wrap">
+                <h1 className="text-2xl font-black text-white">{client.name}</h1>
+                {client.utilityProvider && (
+                  <ConfidenceBadge confidence={dataConfidence('utilityProvider').confidence} source={dataConfidence('utilityProvider').source} size="xs" detail={dataConfidence('utilityProvider').detail} />
+                )}
+              </div>
+              <div className="flex items-center gap-4 mt-1 text-sm text-slate-400 flex-wrap">
+                <span className="flex items-center gap-1"><MapPin size={13} className="text-indigo-400" />{client.city}, {client.state}</span>
+                {client.email && <span className="flex items-center gap-1"><Mail size={13} />{client.email}</span>}
+                {client.phone && <span className="flex items-center gap-1"><Phone size={13} />{client.phone}</span>}
+              </div>
+              {/* Quick metric pills */}
+              <div className="flex items-center gap-2 mt-3 flex-wrap">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs font-semibold text-amber-300">
+                  <Zap size={11} />{client.annualKwh.toLocaleString()} kWh/yr
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs font-semibold text-emerald-300">
+                  <DollarSign size={11} />${client.annualBill.toLocaleString()}/yr
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20 text-xs font-semibold text-purple-300">
+                  <Sparkles size={11} />{recommendedKw} kW recommended
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <Link href={`/clients/${id}/edit`} className="btn-secondary btn-sm"><Edit size={14} /> Edit</Link>
+              <Link href={`/projects/new?clientId=${id}`} className="btn-primary btn-sm"><Plus size={14} /> New Project</Link>
             </div>
           </div>
+        </div>
 
-          {/* Energy Stats */}
-          <div className="card p-5 space-y-4">
-            <h3 className="font-semibold text-white text-sm">Energy Profile</h3>
-            <div className="grid grid-cols-2 gap-3">
+        {/* ── Tab Navigation ── */}
+        <div className="flex gap-0.5 border-b border-slate-700/50 overflow-x-auto">
+          {CLIENT_TABS.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap relative flex-shrink-0 ${
+                activeTab === tab.id
+                  ? 'bg-slate-800 text-white border border-slate-700/50 border-b-slate-800'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <span className={activeTab === tab.id ? 'text-indigo-400' : 'text-slate-500'}>{tab.icon}</span>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Tab Content ── */}
+        {activeTab === 'overview' && (
+          <div className="space-y-5">
+            {/* Contact + Recommendation side-by-side */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {/* Contact Card */}
+              <div className="card p-5 space-y-4">
+                <h3 className="font-semibold text-white text-sm flex items-center gap-2">
+                  <User size={14} className="text-indigo-400" /> Contact Information
+                </h3>
+                <div className="space-y-3">
+                  {[
+                    { icon: <Mail size={14} />, value: client.email, field: null },
+                    { icon: <Phone size={14} />, value: client.phone, field: null },
+                    { icon: <MapPin size={14} />, value: `${client.address}, ${client.city}, ${client.state} ${client.zip}`, field: 'address' as const },
+                    { icon: <Building2 size={14} />, value: client.utilityProvider || 'Not specified', field: 'utilityProvider' as const },
+                  ].map((item, i) => (
+                    <div key={i} className="flex items-start gap-3 text-sm">
+                      <span className="text-slate-500 mt-0.5 flex-shrink-0">{item.icon}</span>
+                      <span className="text-slate-300 flex-1">{item.value}</span>
+                      {item.field && <ConfidenceBadge confidence={dataConfidence(item.field).confidence} source={dataConfidence(item.field).source} size="xs" detail={dataConfidence(item.field).detail} />}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Recommendation */}
+              <div className="card p-5 bg-gradient-to-br from-indigo-500/10 to-purple-500/5 border-indigo-500/20">
+                <div className="flex items-center gap-2 mb-3">
+                  <Sun size={16} className="text-indigo-400" />
+                  <h3 className="font-semibold text-white text-sm">Solar Recommendation</h3>
+                </div>
+                <div className="text-3xl font-bold text-indigo-400 mb-1">{recommendedKw} kW</div>
+                <div className="text-xs text-slate-400 mb-4">Recommended system size</div>
+                <div className="space-y-2 text-xs">
+                  <div className="flex justify-between"><span className="text-slate-400">Est. Annual Production</span><span className="text-white">{Math.round(recommendedKw * 1400).toLocaleString()} kWh</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400">Est. Offset</span><span className="text-emerald-400">~100%</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400">Est. Annual Savings</span><span className="text-emerald-400">${Math.round(client.annualBill * 0.9).toLocaleString()}</span></div>
+                </div>
+                <Link href={`/projects/new?clientId=${id}`} className="btn-primary w-full mt-4 text-xs justify-center">
+                  Start Design →
+                </Link>
+              </div>
+            </div>
+
+            {/* Site Surveys + Proposals */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <SiteSurveysSection clientId={id} />
+              <ProposalsSection clientId={id} />
+            </div>
+
+            {/* Notes */}
+            <NotesSection clientId={id} />
+          </div>
+        )}
+
+        {activeTab === 'energy' && (
+          <div className="space-y-5">
+            {/* Energy Stats with ConfidenceBadge */}
+            <div className="card p-5 space-y-4">
+              <h3 className="font-semibold text-white text-sm flex items-center gap-2">
+                <Activity size={14} className="text-indigo-400" /> Energy Profile
+              </h3>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: 'Annual Usage', value: `${client.annualKwh.toLocaleString()} kWh`, icon: <Zap size={14} />, color: 'text-amber-400', field: 'annualKwh' as const },
+                  { label: 'Annual Bill',  value: `$${client.annualBill.toLocaleString()}`,   icon: <DollarSign size={14} />, color: 'text-emerald-400', field: null },
+                  { label: 'Avg Monthly',  value: `${client.averageMonthlyKwh.toLocaleString()} kWh`, icon: <BarChart2 size={14} />, color: 'text-blue-400', field: null },
+                  { label: 'Utility Rate', value: `$${client.utilityRate}/kWh`,                icon: <DollarSign size={14} />, color: 'text-purple-400', field: 'utilityRate' as const },
+                ].map(item => (
+                  <div key={item.label} className="bg-slate-800/60 rounded-xl p-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className={`flex items-center gap-1.5 ${item.color}`}>{item.icon}<span className="text-xs">{item.label}</span></div>
+                      {item.field && <ConfidenceBadge confidence={dataConfidence(item.field).confidence} source={dataConfidence(item.field).source} size="xs" detail={dataConfidence(item.field).detail} />}
+                    </div>
+                    <div className="font-bold text-white text-sm">{item.value}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Monthly Usage Chart */}
+            <div className="card p-5">
+              <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
+                <BarChart2 size={14} className="text-indigo-400" /> Monthly Energy Usage & Cost
+              </h3>
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={chartData} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                  <XAxis dataKey="month" tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis yAxisId="kwh" tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis yAxisId="bill" orientation="right" tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} />
+                  <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '12px' }} />
+                  <Bar yAxisId="kwh" dataKey="kwh" fill="#818cf8" radius={[4, 4, 0, 0]} name="kWh" opacity={0.8} />
+                  <Bar yAxisId="bill" dataKey="bill" fill="#a78bfa" radius={[4, 4, 0, 0]} name="Bill ($)" opacity={0.6} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'projects' && (
+          <div className="space-y-5">
+            {/* Pipeline Summary */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
-                { label: 'Annual Usage', value: `${client.annualKwh.toLocaleString()} kWh`, icon: <Zap size={14} />, color: 'text-amber-400' },
-                { label: 'Annual Bill',  value: `$${client.annualBill.toLocaleString()}`,   icon: <DollarSign size={14} />, color: 'text-emerald-400' },
-                { label: 'Avg Monthly',  value: `${client.averageMonthlyKwh.toLocaleString()} kWh`, icon: <BarChart2 size={14} />, color: 'text-blue-400' },
-                { label: 'Utility Rate', value: `$${client.utilityRate}/kWh`,                icon: <DollarSign size={14} />, color: 'text-purple-400' },
+                { label: 'Total Projects', value: String(clientProjects.length), icon: <FolderOpen size={14} />, color: 'text-indigo-400' },
+                { label: 'Total kW', value: totalClientKw > 0 ? `${totalClientKw.toFixed(1)} kW` : '—', icon: <Zap size={14} />, color: 'text-amber-400' },
+                { label: 'Pipeline Value', value: totalClientRevenue > 0 ? `$${totalClientRevenue.toLocaleString()}` : '—', icon: <DollarSign size={14} />, color: 'text-emerald-400' },
+                { label: 'Active', value: String(clientProjects.filter(p => p.status !== 'installed').length), icon: <Activity size={14} />, color: 'text-blue-400' },
               ].map(item => (
-                <div key={item.label} className="bg-slate-800/60 rounded-xl p-3">
+                <div key={item.label} className="bg-slate-800/60 rounded-xl p-3 border border-slate-700/30">
                   <div className={`flex items-center gap-1.5 mb-1 ${item.color}`}>{item.icon}<span className="text-xs">{item.label}</span></div>
                   <div className="font-bold text-white text-sm">{item.value}</div>
                 </div>
               ))}
             </div>
-          </div>
 
-          {/* Recommendation */}
-          <div className="card p-5 bg-gradient-to-br from-amber-500/10 to-orange-500/5 border-amber-500/20">
-            <div className="flex items-center gap-2 mb-3">
-              <Sun size={16} className="text-amber-400" />
-              <h3 className="font-semibold text-white text-sm">Solar Recommendation</h3>
-            </div>
-            <div className="text-3xl font-bold text-amber-400 mb-1">{recommendedKw} kW</div>
-            <div className="text-xs text-slate-400 mb-4">Recommended system size</div>
-            <div className="space-y-2 text-xs">
-              <div className="flex justify-between"><span className="text-slate-400">Est. Annual Production</span><span className="text-white">{Math.round(recommendedKw * 1400).toLocaleString()} kWh</span></div>
-              <div className="flex justify-between"><span className="text-slate-400">Est. Offset</span><span className="text-emerald-400">~100%</span></div>
-              <div className="flex justify-between"><span className="text-slate-400">Est. Annual Savings</span><span className="text-emerald-400">${Math.round(client.annualBill * 0.9).toLocaleString()}</span></div>
-            </div>
-            <Link href={`/projects/new?clientId=${id}`} className="btn-primary w-full mt-4 text-xs justify-center">
-              Start Design →
-            </Link>
-          </div>
-        </div>
+            {/* Projects List */}
+            <div className="card overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700/50">
+                <div className="flex items-center gap-2">
+                  <FolderOpen size={16} className="text-indigo-400" />
+                  <h3 className="font-semibold text-white text-sm">Projects</h3>
+                  <span className="text-xs text-slate-500 bg-slate-700/50 px-2 py-0.5 rounded-full">
+                    {clientProjects.length}
+                  </span>
+                </div>
+                <Link href={`/projects/new?clientId=${id}`} className="btn-primary btn-sm">
+                  <Plus size={13} /> New Project
+                </Link>
+              </div>
 
-        {/* ── Projects Section ── */}
-        <div className="card overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700/50">
-            <div className="flex items-center gap-2">
-              <FolderOpen size={16} className="text-amber-400" />
-              <h3 className="font-semibold text-white text-sm">Projects</h3>
-              <span className="text-xs text-slate-500 bg-slate-700/50 px-2 py-0.5 rounded-full">
-                {clientProjects.length}
-              </span>
-            </div>
-            <div className="flex items-center gap-4">
-              {clientProjects.length > 0 && (
-                <div className="hidden sm:flex items-center gap-4 text-xs text-slate-500">
-                  {totalClientKw > 0 && (
-                    <span className="flex items-center gap-1 text-amber-400/80">
-                      <Zap size={11} />{totalClientKw.toFixed(1)} kW total
-                    </span>
-                  )}
-                  {totalClientRevenue > 0 && (
-                    <span className="flex items-center gap-1 text-emerald-400/80">
-                      <DollarSign size={11} />${totalClientRevenue.toLocaleString()} pipeline
-                    </span>
-                  )}
+              {clientProjects.length === 0 ? (
+                <div className="p-10 text-center">
+                  <FolderOpen size={32} className="text-slate-600 mx-auto mb-3" />
+                  <p className="text-slate-400 font-medium text-sm">No projects yet</p>
+                  <p className="text-slate-500 text-xs mt-1 mb-4">Create a project to start designing a solar system for {client.name}</p>
+                  <Link href={`/projects/new?clientId=${id}`} className="btn-primary btn-sm inline-flex">
+                    <Plus size={14} /> Create First Project
+                  </Link>
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-700/30">
+                  {clientProjects.map(project => {
+                    const daysSince = Math.floor((Date.now() - new Date(project.updatedAt || project.createdAt).getTime()) / 86400000);
+                    const isStale = daysSince > 7 && project.status !== 'installed';
+                    return (
+                      <div key={project.id} className="flex items-center gap-3 px-5 py-3.5 group hover:bg-slate-700/20 transition-colors">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 ${TYPE_BG[project.systemType] || 'bg-slate-700/40'}`}>
+                          {TYPE_ICONS[project.systemType] || '📁'}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Link href={`/projects/${project.id}`} className="font-semibold text-white text-sm hover:text-indigo-300 transition-colors truncate">
+                              {project.name}
+                            </Link>
+                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium border flex items-center gap-1 ${STATUS_BADGE[project.status] || ''}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[project.status] || 'bg-slate-400'}`} />
+                              {STATUS_LABEL[project.status] || project.status}
+                            </span>
+                            {isStale && (
+                              <span className="flex items-center gap-1 text-xs text-amber-400/70 bg-amber-500/5 border border-amber-500/15 px-1.5 py-0.5 rounded">
+                                <Clock size={9} /> {daysSince}d ago
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 mt-1 text-xs text-slate-500 flex-wrap">
+                            <span className="flex items-center gap-1"><Calendar size={10} />{new Date(project.createdAt).toLocaleDateString()}</span>
+                            {project.layout?.systemSizeKw && (<span className="flex items-center gap-1 text-amber-400/70"><Zap size={10} />{project.layout.systemSizeKw.toFixed(1)} kW</span>)}
+                            {project.production?.annualProductionKwh && (<span>{project.production.annualProductionKwh.toLocaleString()} kWh/yr</span>)}
+                            {project.costEstimate?.netCost && (<span className="text-emerald-400/70">${project.costEstimate.netCost.toLocaleString()}</span>)}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Link href={`/design?projectId=${project.id}`} className="btn-ghost p-1.5 rounded-lg" title="Design Studio"><Map size={13} /></Link>
+                          <Link href={`/projects/${project.id}`} className="btn-ghost p-1.5 rounded-lg" title="Proposal"><FileText size={13} /></Link>
+                          <Link href={`/projects/${project.id}`} className="btn-ghost p-1.5 rounded-lg"><ChevronRight size={14} /></Link>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
-              <Link href={`/projects/new?clientId=${id}`} className="btn-primary btn-sm">
-                <Plus size={13} /> New Project
-              </Link>
+
+              {clientProjects.length > 0 && (
+                <div className="px-5 py-2.5 border-t border-slate-700/50 bg-slate-800/20">
+                  <Link href={`/projects?clientId=${id}`} className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 w-fit">
+                    View all projects <ChevronRight size={11} />
+                  </Link>
+                </div>
+              )}
             </div>
           </div>
+        )}
 
-          {clientProjects.length === 0 ? (
-            <div className="p-10 text-center">
-              <FolderOpen size={32} className="text-slate-600 mx-auto mb-3" />
-              <p className="text-slate-400 font-medium text-sm">No projects yet</p>
-              <p className="text-slate-500 text-xs mt-1 mb-4">Create a project to start designing a solar system for {client.name}</p>
-              <Link href={`/projects/new?clientId=${id}`} className="btn-primary btn-sm inline-flex">
-                <Plus size={14} /> Create First Project
-              </Link>
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-700/30">
-              {clientProjects.map(project => {
-                const daysSince = Math.floor((Date.now() - new Date(project.updatedAt || project.createdAt).getTime()) / 86400000);
-                const isStale = daysSince > 7 && project.status !== 'installed';
-                return (
-                  <div key={project.id} className="flex items-center gap-3 px-5 py-3.5 group hover:bg-slate-700/20 transition-colors">
-                    {/* Type icon */}
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 ${TYPE_BG[project.systemType] || 'bg-slate-700/40'}`}>
-                      {TYPE_ICONS[project.systemType] || '📁'}
-                    </div>
-
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Link href={`/projects/${project.id}`} className="font-semibold text-white text-sm hover:text-amber-300 transition-colors truncate">
-                          {project.name}
-                        </Link>
-                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium border flex items-center gap-1 ${STATUS_BADGE[project.status] || ''}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[project.status] || 'bg-slate-400'}`} />
-                          {STATUS_LABEL[project.status] || project.status}
-                        </span>
-                        {isStale && (
-                          <span className="flex items-center gap-1 text-xs text-amber-400/70 bg-amber-500/5 border border-amber-500/15 px-1.5 py-0.5 rounded">
-                            <Clock size={9} /> {daysSince}d ago
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 mt-1 text-xs text-slate-500 flex-wrap">
-                        <span className="flex items-center gap-1">
-                          <Calendar size={10} />
-                          {new Date(project.createdAt).toLocaleDateString()}
-                        </span>
-                        {project.layout?.systemSizeKw && (
-                          <span className="flex items-center gap-1 text-amber-400/70">
-                            <Zap size={10} />{project.layout.systemSizeKw.toFixed(1)} kW
-                          </span>
-                        )}
-                        {project.production?.annualProductionKwh && (
-                          <span>{project.production.annualProductionKwh.toLocaleString()} kWh/yr</span>
-                        )}
-                        {project.costEstimate?.netCost && (
-                          <span className="text-emerald-400/70">${project.costEstimate.netCost.toLocaleString()}</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Quick actions */}
-                    <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Link href={`/design?projectId=${project.id}`} className="btn-ghost p-1.5 rounded-lg" title="Design Studio">
-                        <Map size={13} />
-                      </Link>
-                      <Link href={`/projects/${project.id}`} className="btn-ghost p-1.5 rounded-lg" title="Create Proposal (Proposal tab)">
-                        <FileText size={13} />
-                      </Link>
-                      <Link href={`/projects/${project.id}`} className="btn-ghost p-1.5 rounded-lg">
-                        <ChevronRight size={14} />
-                      </Link>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {clientProjects.length > 0 && (
-            <div className="px-5 py-2.5 border-t border-slate-700/50 bg-slate-800/20">
-              <Link href={`/projects?clientId=${id}`} className="text-xs text-amber-400 hover:text-amber-300 transition-colors flex items-center gap-1 w-fit">
-                View all projects <ChevronRight size={11} />
-              </Link>
-            </div>
-          )}
-        </div>
-
-        {/* Site Surveys */}
-        <SiteSurveysSection clientId={id} />
-
-        {/* Proposals */}
-        <ProposalsSection clientId={id} />
-
-        {/* Notes */}
-        <NotesSection clientId={id} />
-
-        {/* Monthly Usage Chart */}
-        <div className="card p-5">
-          <h3 className="font-semibold text-white mb-4">Monthly Energy Usage & Cost</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={chartData} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-              <XAxis dataKey="month" tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis yAxisId="kwh" tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis yAxisId="bill" orientation="right" tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} />
-              <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '12px' }} />
-              <Bar yAxisId="kwh" dataKey="kwh" fill="#f59e0b" radius={[4, 4, 0, 0]} name="kWh" opacity={0.8} />
-              <Bar yAxisId="bill" dataKey="bill" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Bill ($)" opacity={0.6} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        {activeTab === 'documents' && (
+          <div className="space-y-5">
+            <SiteSurveysSection clientId={id} />
+            <ProposalsSection clientId={id} />
+            <NotesSection clientId={id} />
+          </div>
+        )}
       </div>
     </AppShell>
   );
