@@ -117,6 +117,14 @@ export interface EngineeringReport {
   generatedBy: string;   // 'auto' | 'manual'
   version: string;       // report version
 
+  // ── Error 4e fix: Fields accessed via (report as any) in buildPermitCoverSheet.ts ──
+  // but never declared on EngineeringReport, so data silently falls back to defaults.  ──
+  // Same pattern as the APN bug on PermitInput.project.                                ──
+  battery?: { count: number; model: string; kwh: number; brand: string } | null;
+  clientName?: string;
+  apn?: string;
+  designer?: string;
+
   /**
    * Site Photos Available — optional section populated when project_files
    * contains photos from the survey ingest pipeline. Read-only, informational.
@@ -264,6 +272,13 @@ export interface StructuralEngineering {
   roofPitchCategory?: string | null;
   roofAgeYears?:      number | null;
   soilType?:          string | null;
+  // ── Error 4e fix: Fields accessed via (stru as any) in buildPermitCoverSheet.ts ──
+  // but never declared on StructuralEngineering. Same silent-missing-data pattern.   ──
+  stories?:              string | null;    // 'ONE STORY' | 'TWO STORY'
+  roofLayers?:           number | null;    // number of roofing material layers
+  roofLoadPsf?:          number | null;    // existing roof dead load (psf)
+  windExposure?:         string | null;    // wind exposure category (B/C/D)
+  exposureCategory?:     string | null;    // ASCE 7 risk category / exposure (I/II/III/IV)
 }
 
 // ── Equipment Schedule ────────────────────────────────────────────────────────

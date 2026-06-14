@@ -136,7 +136,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // CAD-sourced: use cad.totalPanels as authoritative count
   const cadTotalPanels = cad.totalPanels;
   const cadSystemType = cad.systemType;
-  const panels = (project as any).panelPositions as Array<{
+  const panels = project.panelPositions as Array<{
     id: string; lat: number; lng: number; row: number; col: number;
     tilt?: number; azimuth?: number; wattage?: number; orientation?: string; systemType?: string;
   }> || [];

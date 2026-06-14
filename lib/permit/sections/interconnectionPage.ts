@@ -44,7 +44,7 @@ function esc(s: string | null | undefined): string {
 // We match it against PROPOSAL_UTILITY_PROFILES using regex patterns (same
 // bridge pattern used in the engineering panel).
 function resolveUtilityId(input: PermitInput): string | null {
-  const utilityName = (input.project as any)?.utilityName ?? (input as any)?.utility?.utilityName;
+  const utilityName = input.project.utilityName ?? input.utility?.utilityName;
   if (!utilityName) return null;
   const nameLower = utilityName.toLowerCase();
   const state = ((input.compliance?.jurisdiction?.state) || '').toUpperCase();
@@ -244,7 +244,7 @@ export function pageInterconnection(
   totalPages: number
 ): string {
   const { project, compliance } = input;
-  const utilityNameRaw = (project as any)?.utilityName ?? (input as any)?.utility?.utilityName ?? 'Unknown Utility';
+  const utilityNameRaw = project.utilityName ?? input.utility?.utilityName ?? 'Unknown Utility';
   const stateCode = (compliance?.jurisdiction?.state ?? '').toUpperCase();
 
   // Resolve utility profile from registry

@@ -23,18 +23,18 @@ export function titleBlock(
   const ircVer  = '2021';
   const ifcVer  = necVer === '2023' ? '2024' : '2021';
   const state   = compliance.jurisdiction?.state || '—';
-  const ahj     = compliance.jurisdiction?.ahj   || (project as any).ahj || '—';
+  const ahj     = compliance.jurisdiction?.ahj   || project.ahj || '—';
   // FIX v47.341: Convert utility slug to display name in title block
-  const utility = utilityDisplayName((project as any).utilityName || (project as any).utilityMeter || '') || '—';
+  const utility = utilityDisplayName(project.utilityName || project.utilityMeter || '') || '—';
   const apn     = project.apn || '—';
 
   // Resolve module and inverter models for title block
   const firstInv = system?.inverters?.[0];
   const firstStr = firstInv?.strings?.[0];
-  const moduleModel   = firstStr?.panelModel    || (project as any).moduleModel    || (project as any).panelModel    || '—';
-  const moduleMfr     = firstStr?.panelManufacturer || (project as any).moduleMfr  || '';
-  const inverterModel = firstInv?.model          || (project as any).inverterModel || '—';
-  const inverterMfr   = firstInv?.manufacturer   || (project as any).inverterMfr  || '';
+  const moduleModel   = firstStr?.panelModel    || project.moduleModel    || project.panelModel    || '—';
+  const moduleMfr     = firstStr?.panelManufacturer || project.moduleMfr  || '';
+  const inverterModel = firstInv?.model          || project.inverterModel || '—';
+  const inverterMfr   = firstInv?.manufacturer   || project.inverterMfr  || '';
   const moduleDisplay   = [moduleMfr, moduleModel].filter(Boolean).join(' ') || '—';
   const inverterDisplay = [inverterMfr, inverterModel].filter(Boolean).join(' ') || '—';
   const systemSizeKw    = system?.totalDcKw ? `${system.totalDcKw.toFixed(2)} kW DC` : '—';
@@ -98,12 +98,12 @@ export function buildConstructionNotes(input: PermitInput): string[] {
     `GFDI (Ground Fault Detection and Interruption) shall be provided as integrated in the listed inverter(s) per NEC 690.41. DC arc-fault circuit interrupter (AFCI) shall be provided per NEC 690.11.`,
     `Warning labels and placards shall be installed per NEC 690.54, NEC 690.56(C), NEC 705.12(B)(2)(3)(e), and IFC ${ifcVer} \u00a7605.11.6. See sheet PV-5 for complete label schedule and placement diagram.`,
     // FIX v47.295: Only include roof attachment / flashing notes for roof systems
-    ...((input.project as any)?.systemType === 'fence' || (input.project as any)?.systemType === 'solar_fence'
+    ...((input.project)?.systemType === 'fence' || input.project?.systemType === 'solar_fence'
       ? [
           `Solar fence post foundations shall be installed per structural engineer specifications and attachment detail on sheet PV-3. Minimum embedment depth 3.5 ft below finish grade. Concrete footing min. 3,000 psi, 12" diameter min.`,
           `All metallic fence posts and frames shall be bonded to the equipment grounding conductor (EGC) per NEC 250.169 and NEC 690.43. Minimum #6 AWG copper bonding conductor required throughout fence structure.`,
         ]
-      : (input.project as any)?.systemType === 'ground' || (input.project as any)?.systemType === 'ground_mount'
+      : input.project?.systemType === 'ground' || input.project?.systemType === 'ground_mount'
       ? [
           `Ground mount pile/pier foundations shall be installed per structural engineer specifications and attachment detail on sheet PV-3. Embedment depth per geotechnical requirements and ASCE 7-22.`,
           `All metallic racking, module frames, and enclosures shall be bonded per NEC 690.43. DC EGC minimum: #10 AWG per NEC 690.45. Ground array grounding per NEC 690.47 and 250.166.`,

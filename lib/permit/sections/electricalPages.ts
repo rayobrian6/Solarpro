@@ -784,9 +784,9 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     const acWireGauge  = (compliance as any)?.electrical?.acConductorCallout ?? '#10 AWG';
     const acConduit    = '3/4"';
     const acCondType   = 'EMT';
-    const acOCPD       = (project as any).backfeedBreakerA ?? (project as any).pvBackfeedA ?? 40;
+    const acOCPD       = project.backfeedBreakerA ?? project.pvBackfeedA ?? 40;
     const mainAmps     = project.mainPanelAmps ?? 200;
-    const backfeedAmps = (project as any).backfeedBreakerA ?? 46;
+    const backfeedAmps = project.backfeedBreakerA ?? 46;
     const pvBreakerAmps = backfeedAmps;
     // FIX v47.341: Convert utility slug to display name in SLD
     const utilityName  = utilityDisplayName(project.utilityName ?? '') || 'Utility';

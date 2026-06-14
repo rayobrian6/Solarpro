@@ -367,10 +367,10 @@ export function generateBOMForPermit(
   const elec = compliance.electrical as any;
   const dcWireGauge   = (firstStr as any)?.wireGauge || elec?.dcConductorCallout || '#10 AWG';
   const acWireGauge   = elec?.acConductorCallout || '#8 AWG';
-  const dcWireLength  = (firstStr as any)?.wireLength || (project as any).wireLength || 50;
-  const acWireLength  = (project as any).wireLength || 60;
-  const conduitType   = ((project as any).conduitType || 'EMT').toUpperCase() as 'EMT' | 'PVC' | 'RMC' | 'LFMC';
-  const conduitSize   = (project as any).conduitSize || '3/4';
+  const dcWireLength  = (firstStr as any)?.wireLength || project.wireLength || 50;
+  const acWireLength  = project.wireLength || 60;
+  const conduitType   = (project.conduitType || 'EMT').toUpperCase() as 'EMT' | 'PVC' | 'RMC' | 'LFMC';
+  const conduitSize   = project.conduitSize || '3/4';
 
   // ── 3. Structural ─────────────────────────────────────────
   const bomSystemType = cadTypeToBOMType(cad.systemType);
@@ -389,8 +389,8 @@ export function generateBOMForPermit(
       const v4Input: BOMGenerationInputV4 = {
         inverterId,
         panelId,
-        rackingId:           (project as any).rackingId,
-        batteryId:           (project as any).batteryId,
+        rackingId:           project.rackingId,
+        batteryId:           project.batteryId,
         moduleCount:         totalPanels,
         deviceCount,
         stringCount,
@@ -402,9 +402,9 @@ export function generateBOMForPermit(
         acWireLength,
         conduitType,
         conduitSizeInch:     conduitSize,
-        roofType:            (project as any).roofType || 'shingle',
-        attachmentCount:     (project as any).attachmentCount || Math.ceil(totalPanels * 1.2),
-        railSections:        (project as any).railSections   || Math.ceil(totalPanels / 2),
+        roofType:            project.roofType || 'shingle',
+        attachmentCount:     project.attachmentCount || Math.ceil(totalPanels * 1.2),
+        railSections:        project.railSections   || Math.ceil(totalPanels / 2),
         mainPanelAmps:       mainPanelA,
         backfeedAmps,
         acOCPD:              backfeedAmps,
@@ -415,10 +415,10 @@ export function generateBOMForPermit(
         requiresRapidShutdown:   true,
         requiresWarningLabels:   true,
         requiresProductionMeter: false,
-        interconnectionMethod:   (project as any).interconnectionMethod || 'LOAD_SIDE',
-        panelBusRating:          (project as any).panelBusRating || mainPanelA,
+        interconnectionMethod:   project.interconnectionMethod || 'LOAD_SIDE',
+        panelBusRating:          project.panelBusRating || mainPanelA,
         systemType:              bomSystemType,
-        generatorKw:             (project as any).generatorKw,
+        generatorKw:             project.generatorKw,
         batteryCount:            project.batteryCount,
       };
 

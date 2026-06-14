@@ -45,9 +45,9 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
   // This catches projects where bill-upload hardcoded system_type='roof' in the DB.
   const layoutTypeRaw  = (layout.type     || '').toLowerCase().trim();
   const layoutSysRaw   = ((layout as any).systemType || '').toLowerCase().trim();
-  const projectSysRaw  = ((input.project as any)?.systemType || '').toLowerCase().trim();
-  const mountingId     = ((input.project as any)?.mountingSystemId || '').toLowerCase().trim();
-  const projectName    = ((input.project as any)?.projectName || (input.project as any)?.name || '').toLowerCase();
+  const projectSysRaw  = (input.project.systemType || '').toLowerCase().trim();
+  const mountingId     = (input.project.mountingSystemId || '').toLowerCase().trim();
+  const projectName    = input.project.projectName.toLowerCase();
 
   // Normalise any source to a canonical type
   function toCanonical(s: string): CanonicalSysType | null {
@@ -175,9 +175,9 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
   const struct = input.compliance?.structural;
   const jx     = input.compliance?.jurisdiction;
   const canonicalSite: CanonicalSite = {
-    windSpeed:        Number(struct?.wind?.windSpeed) || Number((input.project as any).ahjWindSpeedMph) || Number((input.project as any).windSpeedMph) || 0,
+    windSpeed:        Number(struct?.wind?.windSpeed) || Number(input.project.ahjWindSpeedMph) || Number(input.project.windSpeedMph) || 0,
     groundSnowLoad:   Number(struct?.snow?.groundSnowLoad) || 0,
-    exposureCategory: struct?.wind?.exposureCategory       || (input.project as any).exposureCategory || 'C',
+    exposureCategory: struct?.wind?.exposureCategory       || input.project.exposureCategory || 'C',
     seismicSDC:       (struct as any)?.seismic?.sdc        || 'D',
     state:            jx?.state                            || '—',
     ahj:              jx?.ahj                              || '—',
@@ -190,19 +190,19 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
   const firstGnd  = layout.geometry?.groundArrays?.[0];
   const canonicalStructure: CanonicalStructure = {
     // Fence defaults (patched with CAD values post-build)
-    postEmbedFt:     (input.project as any).postEmbedFt    || 3.5,
-    postSpacingFt:   (input.project as any).postSpacingFt  || 8.0,
-    panelHeightFt:   (input.project as any).panelHeightFt  || 6.0,
-    soilResistance:  (input.project as any).soilResistance || 200,
+    postEmbedFt:     input.project.postEmbedFt    || 3.5,
+    postSpacingFt:   input.project.postSpacingFt  || 8.0,
+    panelHeightFt:   input.project.panelHeightFt  || 6.0,
+    soilResistance:  input.project.soilResistance || 200,
     // Ground defaults
-    pileDepthFt:     (input.project as any).pileDepthFt    || 5.0,
-    pileSpacingFt:   (input.project as any).pileSpacingFt  || 8.0,
-    groundClearIn:   (input.project as any).groundClearIn  || 12,
-    tiltDeg:         firstGnd?.tiltDeg                     || (input.project as any).tiltDeg || 20,
+    pileDepthFt:     input.project.pileDepthFt    || 5.0,
+    pileSpacingFt:   input.project.pileSpacingFt  || 8.0,
+    groundClearIn:   input.project.groundClearIn  || 12,
+    tiltDeg:         firstGnd?.tiltDeg                     || input.project.tiltDeg || 20,
     // Roof
-    rafterSize:      (input.project as any).rafterSize     || '2×6',
-    rafterSpacingIn: Number((input.project as any).rafterSpacing)   || 24,
-    attachSpacingIn: Number((input.project as any).attachmentSpacing) || 48,
+    rafterSize:      input.project.rafterSize     || '2×6',
+    rafterSpacingIn: Number(input.project.rafterSpacing)   || 24,
+    attachSpacingIn: Number(input.project.attachmentSpacing) || 48,
   };
 
   // ── Populate electrical sub-object ───────────────────────────────────────
@@ -224,7 +224,7 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
     panels,
     geometry:         layout.geometry ?? undefined,
     layout,
-    engineering:      (input as any).engineering ?? null,
+    engineering:      input.engineering ?? null,
     module:           canonicalModule,
     mountSystem,
     site:             canonicalSite,

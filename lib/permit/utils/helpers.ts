@@ -256,7 +256,7 @@ export function resolveEquipment(input: PermitInput): ResolvedEquipment {
   }
 
   // ── 3. Legacy / manual payload: project-level fields ────────────────────
-  const p = project as any;
+  const p = project;
   if (p?.panelModel) {
     return {
       panelManufacturer: p.panelManufacturer || p.panelBrand || '—',

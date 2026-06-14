@@ -42,8 +42,8 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // CAD engine (which reads input.project.systemType) always gets the right type.
   const canonical = buildCanonical(input);
   // Inject canonical fields into input so CAD engine + sheet renderers read correctly
-  (input.project as any).systemType   = canonical.systemType;
-  (input.project as any)._canonical   = canonical;  // Step 2: sheet renderers read canonical.* via input.project._canonical
+  input.project.systemType   = canonical.systemType;
+  input.project._canonical   = canonical;  // Step 2: sheet renderers read canonical.* via input.project._canonical
   if (input.layout) (input.layout as any).systemType = canonical.systemType;
 
   // Step 6: Panel consistency — canonical.panels vs CAD totalPanels
@@ -127,8 +127,8 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     const { runLengths, derivationNotes } = deriveRunLengths(cad);
     // AC run: DISCO_TO_METER_RUN → project.wireLength
     const acRunFt = runLengths.DISCO_TO_METER_RUN;
-    if (acRunFt && acRunFt > 0 && !(input.project as any).wireLength) {
-      (input.project as any).wireLength = acRunFt;
+    if (acRunFt && acRunFt > 0 && !input.project.wireLength) {
+      input.project.wireLength = acRunFt;
       console.log('[CAD-RUN] Derived AC wire run:', acRunFt, 'ft —', derivationNotes.DISCO_TO_METER_RUN);
     }
     // DC run: DC_STRING_RUN → each string's wireLength (if not already set)
@@ -152,7 +152,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
 
   // ── Wind speed: apply project fallback if compliance not yet run ─────────────────
   if (!canonical.site.windSpeed || canonical.site.windSpeed <= 0) {
-    const projV = Number((input.project as any).ahjWindSpeedMph) || Number((input.project as any).windSpeedMph) || 0;
+    const projV = Number(input.project.ahjWindSpeedMph) || Number(input.project.windSpeedMph) || 0;
     if (projV > 0) {
       (canonical.site as any).windSpeed = projV;
       console.log('[CANONICAL] Wind speed from project fields:', projV, 'mph');
@@ -191,13 +191,13 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       || (existingRafter.bendingMoment == null || existingRafter.bendingMoment === 0);
     if (needsCalc && sysType === 'roof') {
       const { runStructuralCalcV4 } = require('@/lib/structural-engine-v4');
-      const roofPitchDeg = cad.roof?.planes?.[0]?.pitch ?? (input.project as any).roofPitch ?? 20;
+      const roofPitchDeg = cad.roof?.planes?.[0]?.pitch ?? input.project.roofPitch ?? 20;
       const windSpeed    = canonical.site.windSpeed || 115;
       const groundSnow   = canonical.site.groundSnowLoad || 0;
-      const rafterSize   = (input.project as any).rafterSize || '2x6';
-      const rafterSpIn   = (input.project as any).rafterSpacing || 24;
-      const rafterSpFt   = (input.project as any).rafterSpan || 12;
-      const framingType  = (input.project as any).framingType || 'rafter';
+      const rafterSize   = input.project.rafterSize || '2x6';
+      const rafterSpIn   = input.project.rafterSpacing || 24;
+      const rafterSpFt   = input.project.rafterSpan || 12;
+      const framingType  = input.project.framingType || 'rafter';
       const totalPanels  = input.system?.totalPanels || cad.totalPanels || 1;
       const structInput = {
         installationType: 'residential_pitched',
@@ -210,13 +210,13 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         rafterSize,
         rafterSpacingIn: rafterSpIn,
         rafterSpanFt: rafterSpFt,
-        woodSpecies: (input.project as any).rafterSpecies || 'douglas_fir_larch',
+        woodSpecies: input.project.rafterSpecies || 'douglas_fir_larch',
         panelCount: totalPanels,
-        panelLengthIn: 65,
-        panelWidthIn: 40,
-        panelWeightLbs: 50,
+        panelLengthIn: input.project.panelLengthIn || 65,
+        panelWidthIn: input.project.panelWidthIn || 40,
+        panelWeightLbs: input.project.panelWeightLbs || 50,
         panelOrientation: 'portrait' as const,
-        mountingSystemId: 'ironridge-xr100',
+        mountingSystemId: input.project.mountingSystemId || 'ironridge-xr100',
         rackingWeightPerPanelLbs: 4,
       };
       const structResult = runStructuralCalcV4(structInput);
@@ -279,8 +279,8 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // ── STEP 1: Build RenderContext (Unified Rendering Pipeline) ────────────
   // Assembles systemType + CAD + billInsights + engineering into one object.
   // ctx is optional — all templates render normally when ctx is null/absent.
-  const utilityOpts = (input as any).utility;
-  const provenanceDocumentId = `permit:${(project as any).projectId ?? (project as any).id ?? project.projectName ?? 'unknown'}`;
+  const utilityOpts = input.utility;
+  const provenanceDocumentId = `permit:${project.projectId ?? project.projectName ?? 'unknown'}`;
   const decisionProvenance = buildEngineeringDecisionProvenanceBundle({
     bundleId: `${provenanceDocumentId}.decision-provenance`,
     generatedAt: input.surveyEvidence?.source.normalizedAt,
@@ -291,8 +291,8 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     renderContextIds: ['renderContext:primary'],
     includeDocumentMetadataDecisions: true,
   });
-  (input as any).decisionProvenance = decisionProvenance;
-  (input as any).decisionAwareReadinessSummary = buildDecisionAwareReadinessSummary(decisionProvenance);
+  input.decisionProvenance = decisionProvenance;
+  input.decisionAwareReadinessSummary = buildDecisionAwareReadinessSummary(decisionProvenance);
 
   const documentProvenance = input.surveyEvidence
     ? buildDocumentProvenanceBundle({
@@ -312,7 +312,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       })
     : undefined;
   if (documentProvenance) {
-    (input as any).documentProvenance = documentProvenance;
+    input.documentProvenance = documentProvenance;
   }
 
 
@@ -324,23 +324,23 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   try {
     const generatedBOM = generateBOMForPermit(input, cad);
     if (generatedBOM.length > 0) {
-      (input as any).bom = generatedBOM;
+      input.bom = generatedBOM;
     }
-    (input as any).decisionAwareBOMMetadata = buildDecisionAwareBOMMetadata({
-      bomItems: (input as any).bom ?? generatedBOM,
+    input.decisionAwareBOMMetadata = buildDecisionAwareBOMMetadata({
+      bomItems: input.bom ?? generatedBOM,
       decisionBundle: decisionProvenance,
     });
   } catch (bomErr: unknown) {
     console.warn('[generatePermitHTML] BOM generation failed (non-critical):', (bomErr as Error)?.message ?? bomErr);
   }
-  if (!(input as any).decisionAwareBOMMetadata) {
-    (input as any).decisionAwareBOMMetadata = buildDecisionAwareBOMMetadata({
-      bomItems: (input as any).bom ?? [],
+  if (!input.decisionAwareBOMMetadata) {
+    input.decisionAwareBOMMetadata = buildDecisionAwareBOMMetadata({
+      bomItems: input.bom ?? [],
       decisionBundle: decisionProvenance,
     });
   }
 
-  (input as any).decisionAwareSLDMetadata = buildDecisionAwareSLDMetadata({ decisionBundle: decisionProvenance });
+  input.decisionAwareSLDMetadata = buildDecisionAwareSLDMetadata({ decisionBundle: decisionProvenance });
 
   const engineeringStateRegistry = buildEngineeringStateRegistry({
     registryId: `${provenanceDocumentId}.engineering-state`,
@@ -349,12 +349,12 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     decisionProvenance,
     dependencyGraph: documentProvenance?.dependencyGraph ?? null,
     renderContextIds: ['renderContext:primary'],
-    bomMetadata: (input as any).decisionAwareBOMMetadata ?? [],
-    sldMetadata: (input as any).decisionAwareSLDMetadata ?? null,
+    bomMetadata: input.decisionAwareBOMMetadata ?? [],
+    sldMetadata: input.decisionAwareSLDMetadata ?? null,
   });
   const invalidationLineage = buildInvalidationLineageMetadata({ registry: engineeringStateRegistry });
-  (input as any).engineeringStateRegistry = engineeringStateRegistry;
-  (input as any).invalidationLineage = invalidationLineage;
+  input.engineeringStateRegistry = engineeringStateRegistry;
+  input.invalidationLineage = invalidationLineage;
   if (documentProvenance) {
     (documentProvenance as any).engineeringStateRegistry = engineeringStateRegistry;
     (documentProvenance as any).invalidationLineage = invalidationLineage;
@@ -363,7 +363,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   const renderCtx = buildRenderContext(cad, {
     electricityRate: utilityOpts?.electricityRate,
     rateSource:      utilityOpts?.rateSource,
-    utilityName:     utilityOpts?.utilityName ?? (input as any).project?.utilityName ?? null,
+    utilityName:     utilityOpts?.utilityName ?? input.project.utilityName ?? null,
     monthlyKwh:      utilityOpts?.monthlyKwh,
     annualKwh:       utilityOpts?.annualKwh,
     billInsights:    utilityOpts?.billInsights ?? null,
@@ -374,9 +374,9 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     staleStateMetadata: staleMetadataForState(engineeringStateRegistry.stateRecords.find((record: any) => record.stateId === 'state:renderContext:renderContext:primary') ?? engineeringStateRegistry.stateRecords[0]),
   });
 
-  const includeCADAppendixPreview = (input as any).cadAppendixPreviewV1 === true
-    || (input as any).planSetOptions?.cadAppendixPreviewV1 === true
-    || (input as any).permitOptions?.cadAppendixPreviewV1 === true;
+  const includeCADAppendixPreview = input.cadAppendixPreviewV1 === true
+    || input.planSetOptions?.cadAppendixPreviewV1 === true
+    || input.permitOptions?.cadAppendixPreviewV1 === true;
   const TOTAL = includeCADAppendixPreview ? 16 : 15;
 
   // Dynamic page assembly — CADModel + RenderContext passed to ALL page functions

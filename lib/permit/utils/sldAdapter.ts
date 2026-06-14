@@ -43,8 +43,8 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   // ── Electrical values from compliance/project ──
   const acWireGauge  = (compliance as any)?.electrical?.acConductorCallout ?? project.wireGauge ?? '#10 AWG';
   const dcWireGauge  = (compliance as any)?.electrical?.dcConductorCallout ?? '#10 AWG';
-  const acOCPD       = (project as any).backfeedBreakerA ?? (project as any).pvBackfeedA ?? (Math.ceil(acOutputAmps * 1.25 / 5) * 5 || 40);
-  const backfeedAmps = (project as any).backfeedBreakerA ?? acOCPD;
+  const acOCPD       = project.backfeedBreakerA ?? project.pvBackfeedA ?? (Math.ceil(acOutputAmps * 1.25 / 5) * 5 || 40);
+  const backfeedAmps = project.backfeedBreakerA ?? acOCPD;
   const mainAmps     = project.mainPanelAmps ?? 200;
   const acWireLength = project.wireLength || 60;
 
@@ -136,7 +136,7 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     dcAcRatio:               totalAcKw > 0 ? calcDcAcRatio(totalDcKw, totalAcKw) : undefined,
 
     // Design temperature (if available from AHJ data)
-    designTempMin:           (project as any).designTempMin ?? -10,
+    designTempMin:           project.designTempMin ?? -10,
   };
 }
 

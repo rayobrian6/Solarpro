@@ -72,18 +72,18 @@ export function mapReportToPermitCover(
     conduitType:       elec?.dcConduitSize?.split('"')[0]?.trim() ?? 'EMT',
     wireGauge:         elec?.dcWireGauge ?? '#10 AWG',
     utilityName:       sys.utilityName ?? 'the serving utility',
-    hasBattery:        !!(report as any).battery,
+    hasBattery:        !!report.battery,
     acKw:              sys.systemSizeAcKw ?? 0,
   });
 
   const prepared: PermitCoverData = {
     projectName:          perm?.projectAddress ? `Solar PV System — ${perm.projectAddress}` : `${sys.panelCount ?? 0}x${sys.panelWattage ?? 400}W Solar PV System`,
-    clientName:           (report as any).clientName ?? 'Client',
+    clientName:           report.clientName ?? 'Client',
     address,
     city,
     state,
     zip,
-    apn:                  (report as any).apn ?? '—',
+    apn:                  report.apn ?? '—',
 
     ahj:                  sys.ahj ?? '—',
     utility:              sys.utilityName ?? '—',
@@ -112,12 +112,12 @@ export function mapReportToPermitCover(
     roofType:             stru?.roofType        ?? 'COMP. SHINGLE ROOF',
     roofPitch:            pitchStr,
     roofFraming:          stru?.rafterSize      ? `${stru.rafterSize} @ ${stru.rafterSpacingIn ?? 24}" O.C.` : '2"x4" TRUSSES @ 24" O.C.',
-    stories:              (stru as any)?.stories ?? 'ONE STORY',
-    roofLayers:           (stru as any)?.roofLayers ?? 1,
-    roofLoadPsf:          (stru as any)?.roofLoadPsf ?? 20,
+    stories:              stru?.stories ?? 'ONE STORY',
+    roofLayers:           stru?.roofLayers ?? 1,
+    roofLoadPsf:          stru?.roofLoadPsf ?? 20,
     windSpeedMph:         stru?.windSpeedMph    ?? 115,
-    windExposure:         (stru as any)?.windExposure ?? 'C',
-    exposureCategory:     (stru as any)?.exposureCategory ?? 'II',
+    windExposure:         stru?.windExposure ?? 'C',
+    exposureCategory:     stru?.exposureCategory ?? 'II',
     groundSnowPsf:        stru?.groundSnowLoadPsf ?? 0,
 
     satelliteImageBase64: satBase64,
@@ -130,7 +130,7 @@ export function mapReportToPermitCover(
     engineerPhone:    undefined,
 
     preparedDate:     report.generatedAt ?? new Date().toISOString(),
-    designer:         (report as any).designer ?? 'SolarPro Engineering Engine',
+    designer:         report.designer ?? 'SolarPro Engineering Engine',
     revision:         'A',
 
     sheets:            PERMIT_SHEET_INDEX,

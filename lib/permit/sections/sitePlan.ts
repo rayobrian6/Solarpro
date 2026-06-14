@@ -19,7 +19,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
   const addr    = project.address || '—';
   const ahj     = compliance.jurisdiction?.ahj || '—';
   // FIX v47.341: Convert utility slug to display name
-  const utility = utilityDisplayName((project as any).utilityName || project.utilityMeter || '') || '—';
+  const utility = utilityDisplayName(project.utilityName || project.utilityMeter || '') || '—';
   const apn     = project.apn || '—';
   const city    = (project.city || '').toUpperCase();
 
@@ -44,10 +44,10 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
   ];
 
   const totalPanels  = system.totalPanels || 0;
-  const panelPos     = (project as any).panelPositions as Array<{lat:number;lng:number;orientation?:string;row?:number;col?:number;arrayId?:string}> | undefined;
-  const roofPlanes   = (project as any).roofPlanes as Array<{id?:string;vertices?:Array<{lat:number;lng:number}>;pitch?:number;azimuth?:number;area?:number;edgeTypes?:string[];source?:string;confirmed?:boolean}> | undefined;
-  const panelLenIn   = (project as any).panelLengthIn || 66;
-  const panelWidIn   = (project as any).panelWidthIn  || 40;
+  const panelPos     = project.panelPositions as Array<{lat:number;lng:number;orientation?:string;row?:number;col?:number;arrayId?:string}> | undefined;
+  const roofPlanes   = project.roofPlanes as Array<{id?:string;vertices?:Array<{lat:number;lng:number}>;pitch?:number;azimuth?:number;area?:number;edgeTypes?:string[];source?:string;confirmed?:boolean}> | undefined;
+  const panelLenIn   = project.panelLengthIn || 66;
+  const panelWidIn   = project.panelWidthIn  || 40;
 
   // SVG canvas dimensions
   const svgW = 900, svgH = 620;

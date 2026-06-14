@@ -65,7 +65,7 @@ export interface PermitInput {
       id: string; lat: number; lng: number;
       x?: number; y?: number; tilt?: number; azimuth?: number;
       wattage?: number; row?: number; col?: number;
-      systemType?: string; orientation?: string;
+      systemType?: string; orientation?: string; arrayId?: string;
     }>;
     roofPlanes?: Array<{
       id: string; vertices: Array<{ lat: number; lng: number }>;
@@ -93,7 +93,64 @@ export interface PermitInput {
     // frontend or populated server-side. Adding it here so it can flow through ──
     // the PermitInput pipeline and reach coverSheet, sitePlan, titleBlock, etc.
     apn?: string;
+    // ── Error 4a fix: Fields accessed via (project as any) but never declared ──
+    // on the type — same silent-missing-data pattern as the APN bug.          ──
+    // Adding them here so they can flow through the PermitInput pipeline and    ──
+    // reach the permit pages that depend on them.                              ──
+    projectId?: string;           // generatePermit.ts provenance doc ID
+    backfeedBreakerA?: number;    // electricalPages.ts, sldAdapter.ts — PV backfeed breaker rating
+    pvBackfeedA?: number;         // electricalPages.ts, sldAdapter.ts — fallback backfeed amps
+    exposureCategory?: string;    // structuralPages.ts, certPages.ts — ASCE 7 Exposure Cat (A/B/C/D)
+    designTempMin?: number;       // sldAdapter.ts — minimum design temperature (°C)
+    conduitSize?: string;         // bomForPermit.ts — conduit trade size (e.g. '3/4', '1')
+    panelModel?: string;          // titleBlock.ts — module model name
+    moduleModel?: string;         // titleBlock.ts — alias for panelModel
+    moduleMfr?: string;           // titleBlock.ts — module manufacturer
+    inverterModel?: string;       // titleBlock.ts — inverter model (project-level override)
+    inverterMfr?: string;         // titleBlock.ts — inverter manufacturer
+    roofLayers?: number;          // coverSheet.ts — number of roofing material layers
+    stories?: string;             // coverSheet.ts — building stories (e.g. '1', '2')
+    roofLoadPsf?: number;         // coverSheet.ts — existing roof dead load (psf)
+    windSpeedMph?: number;        // coverSheet.ts — wind speed (mph) from AHJ or ASCE map
+    windExposure?: string;        // coverSheet.ts — wind exposure category letter
+    groundSnowPsf?: number;       // coverSheet.ts — ground snow load (psf)
+    seismicCategory?: string;     // coverSheet.ts — seismic design category (A-F)
+    ahj?: string;                 // titleBlock.ts — Authority Having Jurisdiction name
+    attachmentCount?: number;     // bomForPermit.ts — total roof attachments
+    railSections?: number;        // bomForPermit.ts — rail sections count
+    rackingId?: string;           // bomForPermit.ts — racking system identifier
+    batteryId?: string;           // bomForPermit.ts — battery system identifier
+    framingType?: string;         // generatePermit.ts — 'rafter' | 'truss' | 'stick'
+    rafterSpan?: number;          // generatePermit.ts — rafter span (ft)
+    rafterSpecies?: string;       // generatePermit.ts — wood species for structural calc
+    // ── Fence / Ground structural overrides (read by canonical.ts from project level) ──
+    postEmbedFt?: number;         // fence post embedment depth (ft)
+    postSpacingFt?: number;       // fence post spacing O.C. (ft)
+    panelHeightFt?: number;       // fence panel height (ft)
+    soilResistance?: number;      // soil passive resistance (lbs/ft²)
+    pileDepthFt?: number;         // ground mount pile depth (ft)
+    pileSpacingFt?: number;       // ground mount pile spacing (ft)
+    groundClearIn?: number;       // ground clearance (inches)
+    tiltDeg?: number;             // array tilt override (degrees)
+    // ── Equipment overrides (read by helpers.ts resolveEquipment() as fallback) ──
+    panelManufacturer?: string;   // module manufacturer override
+    panelBrand?: string;          // alias for panelManufacturer
+    panelWatts?: number;          // module wattage override
+    inverterBrand?: string;       // inverter manufacturer alias
+    inverterManufacturer?: string;// inverter manufacturer override (project-level)
+    inverterType?: string;        // inverter type override (project-level)
+    inverterAcOutputKw?: number;  // inverter AC output override (project-level)
+    // ── Server-injected canonical (set by generatePermit.ts, read by sheet renderers) ──
+    _canonical?: CanonicalInput;  // authoritative canonical model injected at permit-gen time
   };
+  // ── Server-injected plan set ID (set by generatePermit.ts, read by CAD appendix) ──
+  planSetId?: string;
+  // ── Plan set generation options (set by caller, read by sheet renderers) ──
+  cadAppendixPreviewV1?: boolean;
+  planSetOptions?: { cadAppendixPreviewV1?: boolean };
+  permitOptions?: { cadAppendixPreviewV1?: boolean };
+  // ── Engineering data (read by canonical.ts for structural calc) ──
+  engineering?: unknown | null;
   system: {
     totalDcKw: number;
     totalAcKw: number;
