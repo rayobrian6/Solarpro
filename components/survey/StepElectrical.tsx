@@ -19,7 +19,7 @@
 // ============================================================================
 
 import React, { useMemo } from 'react';
-import type { SurveyElectricalService, SurveySiteOverview } from '../../lib/survey/v2/types';
+import type { SurveyElectricalService, SurveySiteOverview, SurveyPhoto } from '../../lib/survey/v2/types';
 import { StepCard, StepField, StepTextArea, StepToggle } from './ui/StepCard';
 import {
   ChipGroup,
@@ -34,7 +34,9 @@ import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
 import { RecommendationCard, type RecommendationValue } from '@/components/recommend/RecommendationCard';
 import { computeDefaultPanelRating, computeInterconnection } from '@/lib/survey/prefillComputations';
 import { useSatelliteAnalysis } from '@/hooks/useSatelliteAnalysis';
+import { usePhotoExtraction } from '@/hooks/usePhotoExtraction';
 import { mapConfidence } from '@/lib/satellite/types';
+import { breakerCountToChipValue } from '@/lib/satellite/photoExtractor';
 
 interface StepElectricalProps {
   data: SurveyElectricalService;
@@ -42,9 +44,15 @@ interface StepElectricalProps {
   disabled?: boolean;
   /** Site overview for structure type (residential vs commercial) + satellite analysis */
   siteOverview?: SurveySiteOverview;
+  /** Uploaded photos for photo-based extraction */
+  photos?: SurveyPhoto[];
+  /** Roof age for heuristic breaker slot estimation */
+  roofAgeYears?: number | null;
+  /** Roof material for heuristic roof condition */
+  roofMaterial?: string;
 }
 
-export function StepElectrical({ data, onChange, disabled, siteOverview }: StepElectricalProps) {
+export function StepElectrical({ data, onChange, disabled, siteOverview, photos = [], roofAgeYears, roofMaterial }: StepElectricalProps) {
   function set<K extends keyof SurveyElectricalService>(
     key: K,
     value: SurveyElectricalService[K],
@@ -67,6 +75,25 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
   // Phase 4D: Satellite service entrance suggestion
   const satelliteServiceEntrance = satelliteResult?.serviceEntrance ?? null;
 
+  // Phase 4E: Photo extraction for panel brand + breaker slots
+  const {
+    result: photoResult,
+    loading: photoLoading,
+  } = usePhotoExtraction({
+    photos,
+    structureType: siteOverview?.structureType || undefined,
+    latitude: siteOverview?.latitude ?? null,
+    longitude: siteOverview?.longitude ?? null,
+    panelRating: data.panelRating || undefined,
+    roofAgeYears,
+    roofMaterial,
+    enabled: !disabled,
+  });
+
+  // Extracted data from photos
+  const photoPanelBrand = photoResult?.panelBrand ?? null;
+  const photoBreakerSlots = photoResult?.breakerSlots ?? null;
+
   // Whether satellite suggestion matches current selection
   const serviceEntranceMatchesSatellite = satelliteServiceEntrance != null &&
     data.serviceEntrance === satelliteServiceEntrance.entrance;
@@ -79,6 +106,23 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
     // Only run as satellite result first arrives and entrance is empty
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [satelliteServiceEntrance?.entrance]);
+
+  // Phase 4E: Auto-apply photo-extracted panel brand if no user selection yet
+  React.useEffect(() => {
+    if (photoPanelBrand && !data.panelBrand && !disabled) {
+      set('panelBrand', photoPanelBrand.brand as SurveyElectricalService['panelBrand']);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photoPanelBrand?.brand]);
+
+  // Phase 4E: Auto-apply photo-extracted breaker slots if no user selection yet
+  React.useEffect(() => {
+    if (photoBreakerSlots && !data.availableBreakerSlots && !disabled) {
+      const chipValue = breakerCountToChipValue(photoBreakerSlots.availableSlots);
+      set('availableBreakerSlots', chipValue);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photoBreakerSlots?.availableSlots]);
 
   // G2: Default panel rating suggestion based on structure type
   const panelRatingPrefill = useMemo(() => {
@@ -135,13 +179,17 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
 
   return (
     <div className="space-y-4">
-      {/* ---- Satellite detection banner ---- */}
-      {satelliteLoading && (
+      {/* ---- Satellite + Photo detection banner ---- */}
+      {(satelliteLoading || photoLoading) && (
         <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3">
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
             <p className="text-xs font-medium text-cyan-700">
-              Analyzing satellite and street-level imagery for service entrance...
+              {satelliteLoading && photoLoading
+                ? 'Analyzing satellite imagery and panel photos...'
+                : satelliteLoading
+                  ? 'Analyzing satellite and street-level imagery for service entrance...'
+                  : 'Analyzing panel photos for brand and breaker slots...'}
             </p>
           </div>
         </div>
@@ -162,6 +210,39 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
             columns={3}
             disabled={disabled}
           />
+          {/* Phase 4E: Photo-extracted panel brand suggestion */}
+          {photoPanelBrand && !photoLoading && (
+            <div className="mt-1.5 flex items-center gap-2 text-xs">
+              {data.panelBrand === photoPanelBrand.brand ? (
+                <>
+                  <span className="text-cyan-600">Detected from panel photo:</span>
+                  <span className="font-semibold text-cyan-800">
+                    {PANEL_BRAND_OPTIONS.find(o => o.value === photoPanelBrand.brand)?.label ?? photoPanelBrand.brand}
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(photoPanelBrand.confidence)}
+                    source="satellite"
+                    detail={photoPanelBrand.derivation}
+                    size="xs"
+                  />
+                </>
+              ) : (
+                <>
+                  <span className="text-slate-400">Photo suggested:</span>
+                  <span className="text-slate-500 line-through">
+                    {PANEL_BRAND_OPTIONS.find(o => o.value === photoPanelBrand.brand)?.label ?? photoPanelBrand.brand}
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(photoPanelBrand.confidence)}
+                    source="satellite"
+                    detail={photoPanelBrand.derivation}
+                    size="xs"
+                    overridden={data.panelBrand !== photoPanelBrand.brand && !!data.panelBrand}
+                  />
+                </>
+              )}
+            </div>
+          )}
         </StepField>
 
         {/* Dangerous panel warning -- actionable guidance */}
@@ -225,6 +306,39 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
             columns={4}
             disabled={disabled}
           />
+          {/* Phase 4E: Photo-extracted breaker slot suggestion */}
+          {photoBreakerSlots && !photoLoading && (
+            <div className="mt-1.5 flex items-center gap-2 text-xs">
+              {data.availableBreakerSlots === breakerCountToChipValue(photoBreakerSlots.availableSlots) ? (
+                <>
+                  <span className="text-cyan-600">Detected from panel photo:</span>
+                  <span className="font-semibold text-cyan-800">
+                    ~{photoBreakerSlots.availableSlots} available ({photoBreakerSlots.totalSlots} total)
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(photoBreakerSlots.confidence)}
+                    source="satellite"
+                    detail={photoBreakerSlots.derivation}
+                    size="xs"
+                  />
+                </>
+              ) : (
+                <>
+                  <span className="text-slate-400">Photo suggested:</span>
+                  <span className="text-slate-500 line-through">
+                    ~{photoBreakerSlots.availableSlots} available
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(photoBreakerSlots.confidence)}
+                    source="satellite"
+                    detail={photoBreakerSlots.derivation}
+                    size="xs"
+                    overridden={data.availableBreakerSlots !== breakerCountToChipValue(photoBreakerSlots.availableSlots) && !!data.availableBreakerSlots}
+                  />
+                </>
+              )}
+            </div>
+          )}
         </StepField>
 
         {/* 120% rule warning -- plain language */}

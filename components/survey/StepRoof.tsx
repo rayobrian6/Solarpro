@@ -15,7 +15,7 @@
 // ============================================================================
 
 import React, { useMemo } from 'react';
-import type { SurveyRoofConditions, SurveySiteOverview } from '../../lib/survey/v2/types';
+import type { SurveyRoofConditions, SurveySiteOverview, SurveyPhoto } from '../../lib/survey/v2/types';
 import { StepCard, StepField, StepInput, StepTextArea, StepToggle } from './ui/StepCard';
 import {
   ChipGroup,
@@ -27,6 +27,7 @@ import {
 import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
 import { computeTilt } from '@/lib/survey/prefillComputations';
 import { useSatelliteAnalysis } from '@/hooks/useSatelliteAnalysis';
+import { usePhotoExtraction } from '@/hooks/usePhotoExtraction';
 import { mapConfidence } from '@/lib/satellite/types';
 
 interface StepRoofProps {
@@ -35,9 +36,11 @@ interface StepRoofProps {
   disabled?: boolean;
   /** Site overview for latitude-based tilt fallback + satellite analysis */
   siteOverview?: SurveySiteOverview;
+  /** Uploaded photos for photo-based extraction */
+  photos?: SurveyPhoto[];
 }
 
-export function StepRoof({ data, onChange, disabled, siteOverview }: StepRoofProps) {
+export function StepRoof({ data, onChange, disabled, siteOverview, photos = [] }: StepRoofProps) {
   function set<K extends keyof SurveyRoofConditions>(
     key: K,
     value: SurveyRoofConditions[K],
@@ -90,15 +93,43 @@ export function StepRoof({ data, onChange, disabled, siteOverview }: StepRoofPro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [satellitePitch?.pitch]);
 
+  // Phase 4E: Photo extraction for roof condition
+  const {
+    result: photoResult,
+    loading: photoLoading,
+  } = usePhotoExtraction({
+    photos,
+    structureType: siteOverview?.structureType || undefined,
+    latitude: siteOverview?.latitude ?? null,
+    longitude: siteOverview?.longitude ?? null,
+    roofAgeYears: data.roofAgeYears,
+    roofMaterial: data.roofMaterial || undefined,
+    enabled: !disabled,
+  });
+
+  const photoRoofCondition = photoResult?.roofCondition ?? null;
+
+  // Phase 4E: Auto-apply photo-extracted roof condition if no user selection yet
+  React.useEffect(() => {
+    if (photoRoofCondition && !data.roofCondition && !disabled) {
+      set('roofCondition', photoRoofCondition.condition);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photoRoofCondition?.condition]);
+
   return (
     <div className="space-y-4">
-      {/* ---- Satellite detection banner ---- */}
-      {satelliteLoading && (
+      {/* ---- Satellite + Photo detection banner ---- */}
+      {(satelliteLoading || photoLoading) && (
         <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3">
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
             <p className="text-xs font-medium text-cyan-700">
-              Analyzing satellite imagery for roof conditions...
+              {satelliteLoading && photoLoading
+                ? 'Analyzing satellite imagery and roof photos...'
+                : satelliteLoading
+                  ? 'Analyzing satellite imagery for roof conditions...'
+                  : 'Analyzing roof photos for condition assessment...'}
             </p>
           </div>
         </div>
@@ -254,6 +285,39 @@ export function StepRoof({ data, onChange, disabled, siteOverview }: StepRoofPro
             columns={3}
             disabled={disabled}
           />
+          {/* Phase 4E: Photo-extracted roof condition suggestion */}
+          {photoRoofCondition && !photoLoading && (
+            <div className="mt-1.5 flex items-center gap-2 text-xs">
+              {data.roofCondition === photoRoofCondition.condition ? (
+                <>
+                  <span className="text-cyan-600">Detected from roof photo:</span>
+                  <span className="font-semibold text-cyan-800">
+                    {ROOF_CONDITION_OPTIONS.find(o => o.value === photoRoofCondition.condition)?.label ?? photoRoofCondition.condition}
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(photoRoofCondition.confidence)}
+                    source="satellite"
+                    detail={photoRoofCondition.derivation}
+                    size="xs"
+                  />
+                </>
+              ) : (
+                <>
+                  <span className="text-slate-400">Photo suggested:</span>
+                  <span className="text-slate-500 line-through">
+                    {ROOF_CONDITION_OPTIONS.find(o => o.value === photoRoofCondition.condition)?.label ?? photoRoofCondition.condition}
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(photoRoofCondition.confidence)}
+                    source="satellite"
+                    detail={photoRoofCondition.derivation}
+                    size="xs"
+                    overridden={data.roofCondition !== photoRoofCondition.condition && !!data.roofCondition}
+                  />
+                </>
+              )}
+            </div>
+          )}
         </StepField>
 
         <StepField

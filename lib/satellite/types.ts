@@ -137,6 +137,62 @@ export interface DetectedServiceEntrance {
 }
 
 // ---------------------------------------------------------------------------
+// PhotoExtractionResult - extracted data from uploaded survey photos
+// ---------------------------------------------------------------------------
+
+/** Panel brand detected from panel photo (nameplate OCR / visual match) */
+export interface DetectedPanelBrand {
+  /** Detected brand (maps to PanelBrand enum) */
+  brand: string;
+  /** Detection confidence 0-1 */
+  confidence: number;
+  /** Source of the detection */
+  source: 'photo-ocr' | 'photo-ml' | 'heuristic';
+  /** Human-readable derivation */
+  derivation: string;
+}
+
+/** Breaker slot count from open panel photo */
+export interface DetectedBreakerSlots {
+  /** Total visible breaker slots */
+  totalSlots: number;
+  /** Estimated empty/available slots */
+  availableSlots: number;
+  /** Detection confidence 0-1 */
+  confidence: number;
+  /** Source */
+  source: 'photo-ocr' | 'photo-ml' | 'heuristic';
+  /** Derivation */
+  derivation: string;
+}
+
+/** Roof condition from roof photo */
+export interface DetectedRoofCondition {
+  /** Detected condition */
+  condition: 'good' | 'fair' | 'poor';
+  /** Confidence 0-1 */
+  confidence: number;
+  /** Source */
+  source: 'photo-ocr' | 'photo-ml' | 'heuristic';
+  /** Derivation */
+  derivation: string;
+}
+
+/** Combined photo extraction result */
+export interface PhotoExtractionResult {
+  /** Panel brand extraction from main panel photos */
+  panelBrand: DetectedPanelBrand | null;
+  /** Breaker slot extraction from open panel photo */
+  breakerSlots: DetectedBreakerSlots | null;
+  /** Roof condition extraction from roof photos */
+  roofCondition: DetectedRoofCondition | null;
+  /** Photo categories that were analyzed */
+  analyzedCategories: string[];
+  /** Timestamp */
+  analyzedAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // SatelliteAnalysisResult - combined output from full satellite analysis
 // ---------------------------------------------------------------------------
 export interface SatelliteAnalysisResult {

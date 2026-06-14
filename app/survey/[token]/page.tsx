@@ -484,6 +484,7 @@ export default function SurveyPage() {
           onChange={handleRoof}
           disabled={submitting}
           siteOverview={draft.siteOverview}
+          photos={draft.photos.photos}
         />
       )}
       {draft.currentStep === 3 && (
@@ -492,6 +493,9 @@ export default function SurveyPage() {
           onChange={handleElectrical}
           disabled={submitting}
           siteOverview={draft.siteOverview}
+          photos={draft.photos.photos}
+          roofAgeYears={draft.roofConditions.roofAgeYears}
+          roofMaterial={draft.roofConditions.roofMaterial || undefined}
         />
       )}
       {draft.currentStep === 4 && (
