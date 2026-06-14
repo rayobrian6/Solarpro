@@ -1299,7 +1299,7 @@ function OpportunityCard({
                 onClick={() => onClaim(opp.id)}
                 className="px-4 py-2 text-xs font-black text-slate-950 bg-emerald-300 hover:bg-emerald-200 rounded-xl transition-colors flex items-center gap-1.5 shadow-lg shadow-emerald-950/30"
               >
-                Claim <ArrowRight size={12} />
+                Pay &amp; claim <ArrowRight size={12} />
               </button>
             ) : (
               <span className="px-3 py-2 text-xs font-black text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center gap-1.5">
@@ -1423,7 +1423,7 @@ function ClaimModal({
               ) : (
                 <CheckCircle size={15} />
               )}
-              {loading ? "Claiming…" : "Confirm Claim"}
+              {loading ? "Starting checkout…" : "Pay & claim"}
             </button>
           </div>
         </div>
@@ -2281,10 +2281,10 @@ function DetailModal({
               >
                 <CheckCircle size={15} />{" "}
                 {opp.claim_mode === "shared"
-                  ? "Claim Shared Lead"
+                  ? "Pay & Claim Shared Lead"
                   : opp.claim_mode === "exclusive"
-                    ? "Claim Exclusively"
-                    : "Claim Lead"}
+                    ? "Pay & Claim Exclusively"
+                    : "Pay & Claim Lead"}
               </button>
             ) : (
               <span className="flex-1 py-2.5 text-sm font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center justify-center gap-2">
@@ -2595,31 +2595,36 @@ export default function NetworkPage() {
     if (!loading) loadDiscover();
   }, [filterState, filterBattery]); // eslint-disable-line
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("purchased")) {
+      showToast(
+        "Payment received — lead unlocked. See My Claims for the full address.",
+      );
+      window.history.replaceState({}, "", "/network");
+    } else if (params.get("canceled")) {
+      showToast("Checkout canceled — you were not charged.", "error");
+      window.history.replaceState({}, "", "/network");
+    }
+  }, []); // eslint-disable-line
+
   const confirmClaim = async () => {
     if (!claimTarget) return;
     setClaimLoading(true);
     try {
+      // Pay-to-claim: start a Stripe checkout for this lead. The claim is
+      // finalized by the Stripe webhook once payment completes, and the
+      // homeowner's address unlocks on return (?purchased=<id>).
       const res = await fetch(
-        `/api/network/opportunities/${claimTarget}/claim`,
+        `/api/network/opportunities/${claimTarget}/checkout`,
         { method: "POST" },
       );
       const data = await res.json();
-      if (res.ok) {
-        setClaimedIds((prev) => new Set([...prev, claimTarget]));
-        setOpportunities((prev) => prev.filter((o) => o.id !== claimTarget));
-        setTotal((prev) => Math.max(0, prev - 1));
-        if (data.opportunity)
-          setMyClaims((prev) => [
-            data.opportunity,
-            ...prev.filter((o) => o.id !== claimTarget),
-          ]);
-        await Promise.all([loadDiscover(), loadMyClaims()]);
-        showToast(
-          "Opportunity claimed! Full address is now visible in My Claims.",
-        );
-      } else {
-        showToast(data.error || "Failed to claim opportunity.", "error");
+      if (res.ok && data.url) {
+        window.location.href = data.url as string;
+        return;
       }
+      showToast(data.error || "Could not start checkout.", "error");
     } finally {
       setClaimLoading(false);
       setClaimTarget(null);
