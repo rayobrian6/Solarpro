@@ -1784,6 +1784,15 @@ type OperatorActionKey =
   | "update_financing_stage"
   | "update_proposal_stage";
 
+type OperatorActionGroup =
+  | "contact"
+  | "qualify"
+  | "marketplace"
+  | "notes"
+  | "ownership"
+  | "danger"
+  | "rare";
+
 interface OperatorActionDefinition {
   action: OperatorActionKey;
   label: string;
@@ -1792,6 +1801,63 @@ interface OperatorActionDefinition {
 }
 
 type ActionFormState = Record<string, string | boolean>;
+
+// Grouped clusters for the operator controls (Miller's-law chunking).
+const ACTION_GROUPS: { key: OperatorActionGroup; label: string }[] = [
+  { key: "contact", label: "Contact" },
+  { key: "qualify", label: "Qualify & finance" },
+  { key: "marketplace", label: "Marketplace · money step" },
+  { key: "notes", label: "Notes & tasks" },
+  { key: "ownership", label: "Ownership" },
+];
+
+// The single recommended "Next step" for a lead, derived from its queue.
+// Unknown queues simply show no primary (graceful degrade).
+const NEXT_STEP_BY_QUEUE: Partial<Record<string, OperatorActionKey>> = {
+  new_intake: "mark_contacted",
+  needs_first_contact: "mark_contacted",
+  no_answer_retry: "mark_contacted",
+  needs_callback: "mark_contacted",
+  callbacks_today: "mark_contacted",
+  callbacks_tomorrow: "mark_contacted",
+  overdue_callbacks: "mark_contacted",
+  waiting_on_homeowner: "mark_contacted",
+  qualification_review: "mark_qualified",
+  financing_review: "mark_financing_ready",
+  urgent_financing_follow_up: "mark_financing_ready",
+  missing_documents: "reopen_documents",
+  waiting_on_documents: "reopen_documents",
+  proposal_follow_up: "update_proposal_stage",
+  marketplace_ready: "approve_for_marketplace",
+};
+
+// Which cluster each action belongs to (used only for layout/color).
+const ACTION_GROUP_OF: Record<string, OperatorActionGroup> = {
+  assign_operator: "ownership",
+  transfer_operator: "ownership",
+  return_to_queue: "ownership",
+  reopen_qualification: "rare",
+  reopen_financing: "rare",
+  reopen_callback: "contact",
+  reopen_documents: "rare",
+  mark_dormant: "rare",
+  reactivate_lead: "rare",
+  add_internal_note: "notes",
+  log_contact_attempt: "contact",
+  create_follow_up_task: "notes",
+  complete_follow_up_task: "notes",
+  update_financing_stage: "qualify",
+  update_proposal_stage: "qualify",
+  mark_contacted: "contact",
+  mark_no_answer: "contact",
+  mark_needs_follow_up: "contact",
+  mark_financing_ready: "qualify",
+  mark_qualified: "qualify",
+  approve_for_marketplace: "marketplace",
+  release_to_marketplace: "marketplace",
+  reject_lead: "danger",
+  archive_lead: "danger",
+};
 
 const LEAD_QUEUE_DEFINITIONS = [
   { key: "all", label: "All Active" },
@@ -1836,6 +1902,7 @@ function IntakeFeedSection() {
   const [expandedLeadId, setExpandedLeadId] = useState<string | null>(null);
   const [debugLeadId, setDebugLeadId] = useState<string | null>(null);
   const [historyLeadId, setHistoryLeadId] = useState<string | null>(null);
+  const [moreActionsId, setMoreActionsId] = useState<string | null>(null);
   const [modalLead, setModalLead] = useState<IntakeLead | null>(null);
   const [modalAction, setModalAction] =
     useState<OperatorActionDefinition | null>(null);
@@ -3103,6 +3170,70 @@ function IntakeFeedSection() {
                       item.action !== "release_to_marketplace" ||
                       canReleaseToMarketplace,
                   );
+                  const groupOf = (a: string): OperatorActionGroup =>
+                    ACTION_GROUP_OF[a] ?? "ownership";
+                  const nextStepKey = terminalLead
+                    ? null
+                    : (NEXT_STEP_BY_QUEUE[lead.current_queue ?? ""] ?? null);
+                  const nextStepItem = nextStepKey
+                    ? (visibleOperatorActions.find(
+                        (a) => a.action === nextStepKey,
+                      ) ?? null)
+                    : null;
+                  const actionsByGroup = (g: OperatorActionGroup) =>
+                    visibleOperatorActions.filter(
+                      (a) =>
+                        groupOf(a.action) === g &&
+                        a.action !== nextStepItem?.action,
+                    );
+                  const renderActionBtn = (
+                    item: OperatorActionDefinition,
+                    variant?: "primary",
+                  ) => {
+                    const busy =
+                      actionBusyId === `${eventId}:${item.action}`;
+                    const disabled =
+                      !!actionBusyId ||
+                      (terminalLead &&
+                        ![
+                          "archive_lead",
+                          "add_internal_note",
+                          "reactivate_lead",
+                        ].includes(item.action));
+                    const grp = groupOf(item.action);
+                    const cls =
+                      variant === "primary"
+                        ? "w-full justify-center border-orange-500 bg-orange-950/40 text-orange-100 hover:bg-orange-900/50"
+                        : grp === "marketplace"
+                          ? "border-emerald-700 bg-emerald-950/30 text-emerald-200 hover:bg-emerald-900/40"
+                          : grp === "danger"
+                            ? "border-red-900 text-red-300 hover:bg-red-950/40"
+                            : "border-zinc-700 text-zinc-300 hover:bg-zinc-800/70";
+                    return (
+                      <button
+                        key={item.action}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => openActionModal(lead, item)}
+                        className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${cls}`}
+                      >
+                        {busy ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : item.action === "approve_for_marketplace" ? (
+                          <CheckCheck className="h-3 w-3" />
+                        ) : item.action === "release_to_marketplace" ? (
+                          <ExternalLink className="h-3 w-3" />
+                        ) : item.action === "reject_lead" ? (
+                          <XCircle className="h-3 w-3" />
+                        ) : item.action === "archive_lead" ? (
+                          <Ban className="h-3 w-3" />
+                        ) : (
+                          <Clock className="h-3 w-3" />
+                        )}
+                        {item.label}
+                      </button>
+                    );
+                  };
                   return (
                     <Fragment key={lead.id}>
                       <tr className="hover:bg-zinc-800/30 transition-colors">
@@ -3784,48 +3915,64 @@ function IntakeFeedSection() {
                                     </span>
                                   )}
                                 </div>
-                                <div className="flex flex-wrap gap-2">
-                                  {visibleOperatorActions.map((item) => {
-                                    const busy =
-                                      actionBusyId ===
-                                      `${eventId}:${item.action}`;
-                                    const disabled =
-                                      !!actionBusyId ||
-                                      (terminalLead &&
-                                        ![
-                                          "archive_lead",
-                                          "add_internal_note",
-                                          "reactivate_lead",
-                                        ].includes(item.action));
+                                <div className="flex flex-col gap-3">
+                                  {nextStepItem && (
+                                    <div>
+                                      <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
+                                        Next step
+                                      </div>
+                                      {renderActionBtn(nextStepItem, "primary")}
+                                    </div>
+                                  )}
+                                  {ACTION_GROUPS.map((grp) => {
+                                    const items = actionsByGroup(grp.key);
+                                    if (items.length === 0) return null;
                                     return (
-                                      <button
-                                        key={item.action}
-                                        type="button"
-                                        disabled={disabled}
-                                        onClick={() =>
-                                          openActionModal(lead, item)
-                                        }
-                                        className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${item.tone}`}
-                                      >
-                                        {busy ? (
-                                          <Loader2 className="h-3 w-3 animate-spin" />
-                                        ) : item.action ===
-                                          "approve_for_marketplace" ? (
-                                          <CheckCheck className="h-3 w-3" />
-                                        ) : item.action ===
-                                          "release_to_marketplace" ? (
-                                          <ExternalLink className="h-3 w-3" />
-                                        ) : item.action === "reject_lead" ? (
-                                          <XCircle className="h-3 w-3" />
-                                        ) : item.action === "archive_lead" ? (
-                                          <Ban className="h-3 w-3" />
-                                        ) : (
-                                          <Clock className="h-3 w-3" />
-                                        )}
-                                        {item.label}
-                                      </button>
+                                      <div key={grp.key}>
+                                        <div className="mb-1.5 text-[10px] uppercase tracking-wider text-zinc-500">
+                                          {grp.label}
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                          {items.map((item) =>
+                                            renderActionBtn(item),
+                                          )}
+                                        </div>
+                                      </div>
                                     );
                                   })}
+                                  {actionsByGroup("rare").length > 0 && (
+                                    <div>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setMoreActionsId(
+                                            moreActionsId === lead.id
+                                              ? null
+                                              : lead.id,
+                                          )
+                                        }
+                                        className="text-[11px] text-zinc-400 transition hover:text-zinc-200"
+                                      >
+                                        {moreActionsId === lead.id
+                                          ? "Hide extra actions"
+                                          : "More — reopen, dormant, reactivate"}
+                                      </button>
+                                      {moreActionsId === lead.id && (
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                          {actionsByGroup("rare").map((item) =>
+                                            renderActionBtn(item),
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                  {actionsByGroup("danger").length > 0 && (
+                                    <div className="flex flex-wrap gap-2 border-t border-zinc-800 pt-2.5">
+                                      {actionsByGroup("danger").map((item) =>
+                                        renderActionBtn(item),
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             )}
