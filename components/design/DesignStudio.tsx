@@ -3970,6 +3970,18 @@ export default function DesignStudio({ project, onSave }: Props) {
                         </button>
                       ))}
                     </div>
+
+                    {/* Phase 2F: System type inference hint */}
+                    {(() => {
+                      const sunbeltStates = ['AZ', 'NM', 'NV', 'TX', 'CA', 'FL', 'CO', 'UT'];
+                      const isSunbelt = sunbeltStates.includes(project.stateCode || '');
+                      return isSunbelt && project.systemType === 'roof' ? (
+                        <div className="mt-1.5 px-2 py-1 rounded border border-amber-500/20 bg-amber-500/5 text-[10px] text-amber-300 flex items-center gap-1.5">
+                          <ConfidenceBadge confidence="medium" source="address-lookup" size="xs" />
+                          <span>Ground mount viable in your state — high irradiance. Switch if roof space is limited.</span>
+                        </div>
+                      ) : null;
+                    })()}
                   </div>
 
                   {activeZoneType !== 'fence' && (
