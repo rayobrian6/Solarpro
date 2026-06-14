@@ -119,11 +119,31 @@ export interface SatelliteAnalysisRequest {
 }
 
 // ---------------------------------------------------------------------------
+// DetectedServiceEntrance - overhead vs underground from street view / OSM
+// ---------------------------------------------------------------------------
+export type ServiceEntranceType = 'overhead' | 'underground';
+
+export interface DetectedServiceEntrance {
+  /** Detected service entrance type */
+  entrance: ServiceEntranceType;
+  /** Detection confidence 0-1 */
+  confidence: number;
+  /** Source of the detection */
+  source: SatelliteSource;
+  /** Human-readable derivation */
+  derivation: string;
+  /** Which detection method was actually used */
+  method: 'google_street_view' | 'overpass_api' | 'heuristic' | 'none';
+}
+
+// ---------------------------------------------------------------------------
 // SatelliteAnalysisResult - combined output from full satellite analysis
 // ---------------------------------------------------------------------------
 export interface SatelliteAnalysisResult {
   obstructions: ObstructionDetectionResult;
   roof: RoofAnalysisResult;
+  /** Service entrance detection from street view / OSM power lines */
+  serviceEntrance: DetectedServiceEntrance | null;
   /** Whether any real API was called (vs heuristic fallback) */
   liveApiUsed: boolean;
 }

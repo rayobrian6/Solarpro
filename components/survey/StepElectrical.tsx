@@ -1,5 +1,5 @@
 // ============================================================================
-// v47.437 - Survey V2: Step 3 - Electrical Service
+// v47.439 - Survey V2: Step 3 - Electrical Service
 //
 // Captures main panel brand, rating, available breaker slots, meter socket
 // type, interconnection point, service entrance type, sub-panel info,
@@ -9,6 +9,11 @@
 //   - Interconnection breaker sizing (120% rule)
 //   - Load calculations and permit plan sets
 //   - Sub-panel and supply-side tap assessments
+//
+// Phase 4D: Satellite/street-view service entrance detection pre-fill.
+// When lat/lng are available, satellite analysis suggests overhead vs
+// underground service entrance with ConfidenceBadge. User can accept or
+// override.
 //
 // Pure ASCII, no Unicode.
 // ============================================================================
@@ -28,12 +33,14 @@ import {
 import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
 import { RecommendationCard, type RecommendationValue } from '@/components/recommend/RecommendationCard';
 import { computeDefaultPanelRating, computeInterconnection } from '@/lib/survey/prefillComputations';
+import { useSatelliteAnalysis } from '@/hooks/useSatelliteAnalysis';
+import { mapConfidence } from '@/lib/satellite/types';
 
 interface StepElectricalProps {
   data: SurveyElectricalService;
   onChange: (data: SurveyElectricalService) => void;
   disabled?: boolean;
-  /** Site overview for structure type (residential vs commercial) */
+  /** Site overview for structure type (residential vs commercial) + satellite analysis */
   siteOverview?: SurveySiteOverview;
 }
 
@@ -44,6 +51,34 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
   ) {
     onChange({ ...data, [key]: value });
   }
+
+  // Phase 4D: Satellite analysis for service entrance detection
+  const {
+    result: satelliteResult,
+    loading: satelliteLoading,
+  } = useSatelliteAnalysis({
+    latitude: siteOverview?.latitude ?? null,
+    longitude: siteOverview?.longitude ?? null,
+    structureType: siteOverview?.structureType || undefined,
+    address: siteOverview?.siteAddress || undefined,
+    enabled: !disabled,
+  });
+
+  // Phase 4D: Satellite service entrance suggestion
+  const satelliteServiceEntrance = satelliteResult?.serviceEntrance ?? null;
+
+  // Whether satellite suggestion matches current selection
+  const serviceEntranceMatchesSatellite = satelliteServiceEntrance != null &&
+    data.serviceEntrance === satelliteServiceEntrance.entrance;
+
+  // Phase 4D: Auto-apply satellite service entrance if no user selection yet
+  React.useEffect(() => {
+    if (satelliteServiceEntrance && !data.serviceEntrance && !disabled) {
+      set('serviceEntrance', satelliteServiceEntrance.entrance);
+    }
+    // Only run as satellite result first arrives and entrance is empty
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [satelliteServiceEntrance?.entrance]);
 
   // G2: Default panel rating suggestion based on structure type
   const panelRatingPrefill = useMemo(() => {
@@ -100,6 +135,18 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
 
   return (
     <div className="space-y-4">
+      {/* ---- Satellite detection banner ---- */}
+      {satelliteLoading && (
+        <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+            <p className="text-xs font-medium text-cyan-700">
+              Analyzing satellite and street-level imagery for service entrance...
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ---- Main Panel ---- */}
       <StepCard
         title="Main Panel"
@@ -117,11 +164,11 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
           />
         </StepField>
 
-        {/* Dangerous panel warning — actionable guidance */}
+        {/* Dangerous panel warning -- actionable guidance */}
         {isDangerousPanel && (
           <div className="mt-1 rounded-lg bg-red-50 border border-red-200 px-3 py-2">
             <p className="text-xs font-semibold text-red-700">
-              Known hazard panel — must be replaced before solar
+              Known hazard panel -- must be replaced before solar
             </p>
             <p className="text-xs text-red-500 mt-0.5">
               {data.panelBrand === 'federal_pacific'
@@ -135,7 +182,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
         <StepField
           label="Panel Rating (Amps)"
           required
-          hint="Estimated from building age — confirm at the panel"
+          hint="Estimated from building age -- confirm at the panel"
         >
           <ChipGroup
             options={PANEL_RATING_OPTIONS}
@@ -180,7 +227,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
           />
         </StepField>
 
-        {/* 120% rule warning — plain language */}
+        {/* 120% rule warning -- plain language */}
         {needsUpgradeFlag && (
           <div className="mt-1 rounded-lg bg-orange-50 border border-orange-200 px-3 py-2">
             <p className="text-xs font-semibold text-orange-700">
@@ -228,6 +275,39 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
             columns={2}
             disabled={disabled}
           />
+          {/* Phase 4D: Satellite/street-view service entrance suggestion */}
+          {satelliteServiceEntrance && !satelliteLoading && (
+            <div className="mt-1.5 flex items-center gap-2 text-xs">
+              {serviceEntranceMatchesSatellite ? (
+                <>
+                  <span className="text-cyan-600">Detected from satellite:</span>
+                  <span className="font-semibold text-cyan-800">
+                    {SERVICE_ENTRANCE_OPTIONS.find(o => o.value === satelliteServiceEntrance.entrance)?.label ?? satelliteServiceEntrance.entrance}
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(satelliteServiceEntrance.confidence)}
+                    source="satellite"
+                    detail={satelliteServiceEntrance.derivation}
+                    size="xs"
+                  />
+                </>
+              ) : (
+                <>
+                  <span className="text-slate-400">Satellite suggested:</span>
+                  <span className="text-slate-500 line-through">
+                    {SERVICE_ENTRANCE_OPTIONS.find(o => o.value === satelliteServiceEntrance.entrance)?.label ?? satelliteServiceEntrance.entrance}
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(satelliteServiceEntrance.confidence)}
+                    source="satellite"
+                    detail={satelliteServiceEntrance.derivation}
+                    size="xs"
+                    overridden={!serviceEntranceMatchesSatellite && !!data.serviceEntrance}
+                  />
+                </>
+              )}
+            </div>
+          )}
         </StepField>
 
         <StepField label="Planned Interconnection Point" required>

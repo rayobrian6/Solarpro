@@ -19,6 +19,7 @@ import { requireAuth } from '@/lib/security';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { detectObstructions } from '@/lib/satellite/obstructionDetector';
 import { analyzeRoof } from '@/lib/satellite/roofAnalyzer';
+import { detectServiceEntrance } from '@/lib/satellite/streetViewDetector';
 import type { SatelliteAnalysisResult } from '@/lib/satellite/types';
 
 export async function POST(req: NextRequest) {
@@ -60,8 +61,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Run obstruction detection + roof analysis in parallel
-    const [obstructionResult, roofResult] = await Promise.all([
+    // Run obstruction detection + roof analysis + service entrance detection in parallel
+    const [obstructionResult, roofResult, serviceEntranceResult] = await Promise.all([
       detectObstructions({
         lat: latitude,
         lng: longitude,
@@ -74,12 +75,19 @@ export async function POST(req: NextRequest) {
         address,
         structureType: structureType || undefined,
       }),
+      detectServiceEntrance({
+        lat: latitude,
+        lng: longitude,
+        address,
+        structureType: structureType || undefined,
+      }),
     ]);
 
     const result: SatelliteAnalysisResult = {
       obstructions: obstructionResult,
       roof: roofResult,
-      liveApiUsed: obstructionResult.method !== 'heuristic' || roofResult.method !== 'heuristic',
+      serviceEntrance: serviceEntranceResult,
+      liveApiUsed: obstructionResult.method !== 'heuristic' || roofResult.method !== 'heuristic' || serviceEntranceResult.method !== 'heuristic',
     };
 
     return NextResponse.json({
