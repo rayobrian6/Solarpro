@@ -229,6 +229,77 @@ export interface BusinessRegistryResult {
 }
 
 // ---------------------------------------------------------------------------
+// DatasheetIngestionResult - extracted hardware specs from manufacturer datasheet
+// ---------------------------------------------------------------------------
+
+/** Individual spec extracted from a datasheet URL */
+export interface DetectedSpec<T> {
+  /** The detected/suggested value */
+  value: T;
+  /** Confidence 0-1 */
+  confidence: number;
+  /** Source of the extraction */
+  source: 'pdf-ocr' | 'html-scrape' | 'regex-parse' | 'heuristic' | 'none';
+  /** Human-readable derivation */
+  derivation: string;
+}
+
+/** Panel specs that can be extracted from a datasheet */
+export interface DatasheetPanelSpecs {
+  wattage: DetectedSpec<number> | null;
+  efficiency: DetectedSpec<number> | null;
+  voc: DetectedSpec<number> | null;
+  vmp: DetectedSpec<number> | null;
+  isc: DetectedSpec<number> | null;
+  imp: DetectedSpec<number> | null;
+  tempCoeffVoc: DetectedSpec<number> | null;
+  tempCoeffPmax: DetectedSpec<number> | null;
+  maxSystemVoltage: DetectedSpec<number> | null;
+  weight: DetectedSpec<number> | null;
+  length: DetectedSpec<number> | null;
+  width: DetectedSpec<number> | null;
+  thickness: DetectedSpec<number> | null;
+  cellType: DetectedSpec<string> | null;
+  bifacial: DetectedSpec<boolean> | null;
+  warranty: DetectedSpec<string> | null;
+  ulListing: DetectedSpec<string> | null;
+}
+
+/** Inverter specs that can be extracted from a datasheet */
+export interface DatasheetInverterSpecs {
+  acOutputW: DetectedSpec<number> | null;
+  dcInputWMax: DetectedSpec<number> | null;
+  maxDcVoltage: DetectedSpec<number> | null;
+  mpptVoltageMin: DetectedSpec<number> | null;
+  mpptVoltageMax: DetectedSpec<number> | null;
+  efficiency: DetectedSpec<number> | null;
+  cecEfficiency: DetectedSpec<number> | null;
+  weight: DetectedSpec<number> | null;
+  warranty: DetectedSpec<string> | null;
+  ulListing: DetectedSpec<string> | null;
+}
+
+/** Combined datasheet ingestion result */
+export interface DatasheetIngestionResult {
+  /** Equipment type detected from the datasheet */
+  equipmentType: DetectedSpec<'panel' | 'string_inverter' | 'microinverter' | 'optimizer'> | null;
+  /** Manufacturer name extracted from datasheet */
+  manufacturer: DetectedSpec<string> | null;
+  /** Model name/number extracted from datasheet */
+  model: DetectedSpec<string> | null;
+  /** Panel-specific specs (null if not a panel datasheet) */
+  panelSpecs: DatasheetPanelSpecs | null;
+  /** Inverter-specific specs (null if not an inverter datasheet) */
+  inverterSpecs: DatasheetInverterSpecs | null;
+  /** Which extraction method was actually used */
+  method: 'pdf-ocr' | 'html-scrape' | 'regex-parse' | 'heuristic' | 'none';
+  /** URL that was ingested */
+  sourceUrl: string;
+  /** Timestamp */
+  ingestedAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // SatelliteAnalysisResult - combined output from full satellite analysis
 // ---------------------------------------------------------------------------
 export interface SatelliteAnalysisResult {

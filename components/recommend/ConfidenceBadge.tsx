@@ -51,6 +51,7 @@ export type ConfidenceSource =
   | 'ecosystem'       // Ecosystem catalog default
   | 'satellite'       // Satellite imagery analysis
   | 'registry'        // Business registry lookup (OpenCorporates, etc.)
+  | 'datasheet'       // Manufacturer datasheet extraction
   | 'survey'          // Field survey observation
   | 'fallback'        // Rough fallback when computation fails
   | 'user'            // User-entered (overrides computation)
@@ -84,6 +85,7 @@ const SOURCE_LABELS: Record<ConfidenceSource, string> = {
   'ecosystem':      'Ecosystem',
   'satellite':      'Satellite',
   'registry':       'Registry',
+  'datasheet':      'Datasheet',
   'survey':         'Survey',
   'fallback':       'Fallback',
   'user':           'User',
@@ -102,6 +104,7 @@ const SOURCE_ICONS: Record<ConfidenceSource, React.ElementType> = {
   'ecosystem':      Cpu,
   'satellite':      MapPin,
   'registry':       Database,
+  'datasheet':      FileText,
   'survey':         ClipboardList,
   'fallback':       HelpCircle,
   'user':           CheckCircle2,
