@@ -165,7 +165,7 @@ function _peSiteLoading(input: PermitInput): string {
   const windSpeed  = structural?.wind?.windSpeed || '—';
   const snowLoad   = structural?.snow?.groundSnowLoad || '—';
   const exposure   = structural?.wind?.exposureCategory || '—';
-  const sdc        = (compliance as any).structural?.seismic?.sdc || 'D';
+  const sdc        = compliance.structural?.seismic?.sdc || 'D';
   return `
   <tr class=\\"bg-lt\\"><td class=\\"il\\" colspan=\\"4\\" style=\\"font-weight:bold;text-align:center;\\">Site Loading Parameters</td></tr>
   <tr><td class=\\"il\\">Design Wind Speed (Vult)</td><td class=\\"iv\\">${windSpeed} mph</td><td class=\\"il\\">Exposure Category</td><td class=\\"iv\\">Cat. ${exposure}</td></tr>

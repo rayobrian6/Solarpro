@@ -264,6 +264,13 @@ export interface CADModel {
 
   /** Planned conduit routes (from conduitRouting.ts) */
   conduitRoutes?: CADConduitRoute[];
+
+  /** Merge audit metadata (populated by mergeCADModels) */
+  _surveyMeta?: {
+    applied: string[];
+    skipped: string[];
+    mergedAt: string;
+  };
 }
 
 // ── System-specific model wrappers ───────────────────────────

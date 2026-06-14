@@ -85,11 +85,12 @@ export function adaptCADToDrafting(
     totalPanels:  cad.totalPanels || original.system?.totalPanels || 0,
     windSpeedMph:  original.project?.ahjWindSpeedMph,
     groundSnowPsf: original.project?.ahjGroundSnowPsf,
-    panelWatts:   (original.system?.inverters?.[0]?.strings?.[0] as any)?.panelWatts
+    // Error 5ab fix: panelWatts/Voc/Isc ARE on PermitInputShape.system.inverters[].strings[]
+    panelWatts:   original.system?.inverters?.[0]?.strings?.[0]?.panelWatts
                   ?? original.project?.['panelWatts'],
-    panelVoc:     (original.system?.inverters?.[0]?.strings?.[0] as any)?.panelVoc
+    panelVoc:     original.system?.inverters?.[0]?.strings?.[0]?.panelVoc
                   ?? original.project?.panelVoc,
-    panelIsc:     (original.system?.inverters?.[0]?.strings?.[0] as any)?.panelIsc
+    panelIsc:     original.system?.inverters?.[0]?.strings?.[0]?.panelIsc
                   ?? original.project?.panelIsc,
   };
 
@@ -102,7 +103,7 @@ export function adaptCADToDrafting(
     case 'solar_fence':
       return adaptFence(cad, original, engineering);
     default:
-      throw new Error(`[CAD Adapter] Unknown systemType: ${(cad as any).systemType}`);
+      throw new Error(`[CAD Adapter] Unknown systemType: ${cad.systemType}`);
   }
 }
 
@@ -160,7 +161,7 @@ function adaptRoof(
 
   const project: DraftingProject = {
     ...originalProject(original),
-    roofPlanes:     adaptedRoofPlanes as any,
+    roofPlanes:     adaptedRoofPlanes,
     panelPositions: adaptedPanelPositions,
   };
 
@@ -206,7 +207,7 @@ function adaptGround(
 
   const layout: DraftingLayout = {
     ...originalLayout(original),
-    groundArrays:   adaptedGroundArrays as any,
+    groundArrays:   adaptedGroundArrays,
     groundSetbackFt: ground.setbackFt,
   };
 
@@ -260,7 +261,7 @@ function adaptFence(
 
   const layout: DraftingLayout = {
     ...originalLayout(original),
-    fenceSegments:        adaptedSegments as any,
+    fenceSegments:        adaptedSegments,
     fenceTotalLengthFt:   metersToFt(fence.totalLengthM),
     fencePostSpacingFt:   metersToFt(fence.postSpacingM),
     fencePostEmbedmentFt: metersToFt(fence.postEmbedM),
@@ -299,14 +300,14 @@ function originalProject(original: PermitInputShape): DraftingProject {
 
 function originalLayout(original: PermitInputShape): DraftingLayout {
   return {
-    fenceSegments:        original.layout?.fenceSegments       as any,
+    fenceSegments:        original.layout?.fenceSegments,
     fenceTotalLengthFt:   original.layout?.fenceTotalLengthFt,
-    fenceGateOpenings:    original.layout?.fenceGateOpenings   as any,
+    fenceGateOpenings:    original.layout?.fenceGateOpenings,
     fencePostSpacingFt:   original.layout?.fencePostSpacingFt,
     fencePostEmbedmentFt: original.layout?.fencePostEmbedmentFt,
     fenceRailCount:       original.layout?.fenceRailCount,
     fencePanelHeightFt:   original.layout?.fencePanelHeightFt,
-    groundArrays:         original.layout?.groundArrays        as any,
+    groundArrays:         original.layout?.groundArrays,
     groundSetbackFt:      original.layout?.groundSetbackFt,
   };
 }

@@ -34,7 +34,8 @@ import { buildSystemDefinition } from '@/lib/system';
 //   4. Default: 'roof'
 function resolveCADSystemType(input: PermitInputShape): CADSystemType {
   // Priority 1: layout.type — the canonical value set by buildCanonical()
-  const layoutType = (((input.layout as any)?.type) || '').toLowerCase().trim();
+  // Error 5v fix: type is now on PermitInputShape.layout — no `as any` needed
+  const layoutType = (input.layout?.type || '').toLowerCase().trim();
   if (layoutType === 'solar_fence' || layoutType === 'fence')  return 'solar_fence';
   if (layoutType === 'ground_mount' || layoutType === 'ground') return 'ground_mount';
   if (layoutType === 'roof')                                     return 'roof';

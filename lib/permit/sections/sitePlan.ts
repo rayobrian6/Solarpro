@@ -38,7 +38,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     { label: `(N) ${hasAcDisc ? '100A' : '60A'} NON-FUSED AC DISCONNECT`, desc: 'WITHIN SIGHT — NEC 690.15' },
     { label: '(N) ENPHASE COMBINER BOX',                        desc: 'EXTERIOR WALL' },
     ...(hasBatt ? [
-      { label: `(N) ${(project.batteryBrand || 'ENPHASE').toUpperCase()} BATTERY`, desc: `${project.batteryModel || 'IQ BATTERY'}${(project.batteryKwh ?? 0) > 0 ? ' — ' + (project.batteryKwh!.toFixed(1)) + ' kWh' : ''}` },
+      { label: `(N) ${(project.batteryBrand || 'ENPHASE').toUpperCase()} BATTERY`, desc: `${project.batteryModel || 'IQ BATTERY'}${(project.batteryKwh ?? 5.0) > 0 ? ' — ' + (project.batteryKwh ?? 5.0).toFixed(1) + ' kWh' : ''}` },
       { label: '(N) 60A NON-FUSED AC DISCONNECT',               desc: 'ADJACENT TO UTILITY METER' },
     ] : []),
   ];
@@ -279,7 +279,7 @@ export function buildPv1Page(
 
 // ─── AerialRoofData interface & fetchAerialRoofData ─────────────────────────
 
-interface AerialRoofData {
+export interface AerialRoofData {
   imageBase64?: string;
   imageWidth?: number;
   imageHeight?: number;
@@ -387,7 +387,7 @@ export async function fetchAerialRoofData(
           console.log(`[permit/aerial] Static Maps zoom=${tryZoom} non-image response:`, errBody.substring(0, 300));
         }
       } catch (imgErr: unknown) {
-        console.log(`[permit/aerial] Static Maps zoom=${tryZoom} EXCEPTION:`, (imgErr as any)?.message);
+        console.log(`[permit/aerial] Static Maps zoom=${tryZoom} EXCEPTION:`, (imgErr as Error)?.message);
       }
     }
 
@@ -414,7 +414,7 @@ export async function fetchAerialRoofData(
           }
         }
       } catch (hybridErr: unknown) {
-        console.log('[permit/aerial] Hybrid fallback EXCEPTION:', (hybridErr as any)?.message);
+        console.log('[permit/aerial] Hybrid fallback EXCEPTION:', (hybridErr as Error)?.message);
       }
     }
 

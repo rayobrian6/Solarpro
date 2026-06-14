@@ -156,7 +156,7 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
         `Manufacturer: ${project.batteryBrand || '—'}`,
         `Model: ${project.batteryModel || '—'}`,
         'Nominal Voltage: 48V DC',
-        `Capacity: ${((project.batteryCount || 0) * (project.batteryKwh || 0)).toFixed(1)} kWh TOTAL`,
+        `Capacity: ${hasBattery ? ((project.batteryCount || 1) * (project.batteryKwh ?? 5.0)).toFixed(1) : '0.0'} kWh TOTAL`,
       ],
       bg: '#000',
       fg: '#ffffff',

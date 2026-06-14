@@ -13,6 +13,7 @@
 //   - app/api/engineering/permit-preview/route.ts  (preview endpoint)
 // ============================================================
 
+import { necNextStandardOcpd } from './utils/helpers';
 import type { EngineeringReport } from '@/lib/engineering/types';
 import type { DesignSnapshot } from '@/lib/engineering/types';
 import type { PermitCoverData, PermitArtifact } from './types';
@@ -43,10 +44,13 @@ export function mapReportToPermitCover(
   const inverterModel = sys.inverterModel ?? '—';
 
   // Interconnection / 120% rule
-  const backfeedA  = elec?.backfeedBreakerAmps ?? Math.ceil((sys.systemSizeAcKw ?? 0) * 1000 / 240 * 1.25);
-  const svcAmps    = elec?.mainPanelBusAmps ?? 200;
-  const busLimit   = Math.round(svcAmps * 1.2);
-  const rulePass   = (svcAmps + backfeedA) <= busLimit;
+  // Error 6d fix: 120% rule is mainBreaker + pvBackfeed <= busRating * 1.2, NOT svcAmps + backfeedA <= busLimit
+  const busRating   = elec?.mainPanelBusAmps ?? sys.mainPanelAmps ?? 200;
+  const mainBreaker = elec?.mainBreakerAmps ?? sys.mainPanelAmps ?? busRating;
+  const backfeedA   = elec?.backfeedBreakerAmps ?? necNextStandardOcpd((sys.systemSizeAcKw ?? 0) * 1000 / 240 * 1.25);
+  const busLimit    = Math.round(busRating * 1.2);
+  const maxPvBreaker = busLimit - mainBreaker;
+  const rulePass    = backfeedA <= maxPvBreaker;
 
   // Roof pitch from structural
   const pitchRaw = stru?.roofPitch;

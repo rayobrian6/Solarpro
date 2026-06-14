@@ -313,7 +313,7 @@ export function drawGroundArray(
     }
 
     // L2 — Row spacing (first array, first two rows)
-    if (arrays.length > 0 && (arrays[0] as any).rowSpacingM) {
+    if (arrays.length > 0 && arrays[0]?.rowSpacingM) {
       const arr0: any  = arrays[0];
       const ox0 = arr0._cadOriginX ?? arr0.originX ?? 0;
       const oy0 = arr0._cadOriginY ?? arr0.originY ?? 0;
@@ -381,9 +381,9 @@ export function drawGroundArray(
   schedY += 16;
 
   // Ground-specific summary
-  const firstTilt = (arrays[0] as any)?.tiltDeg ?? 20;
+  const firstTilt = arrays[0]?.tiltDeg ?? 20;
   els.push(drawText(dZone.x + 2, schedY,
-    `TILT: ${firstTilt}° — AZ: ${compassDir((arrays[0] as any)?.azimuth ?? 180)}`, {
+    `TILT: ${firstTilt}° — AZ: ${compassDir(arrays[0]?.azimuth ?? 180)}`, {
       anchor: 'start', fontSize: 7, fill: '#333',
     }));
   schedY += 11;
@@ -726,7 +726,7 @@ export function drawGroundStructural(
     els.push(drawText(dZone.x + 4, ry + ni * 10, note.text, {
       anchor: 'start',
       fontSize: 6.5,
-      fill: (note as any).red ? '#cc0000' : '#333',
+      fill: note.red ? '#cc0000' : '#333',
       fontWeight: note.bold ? 'bold' : 'normal',
     }));
   });

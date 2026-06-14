@@ -21,6 +21,9 @@ export interface PermitInputShape {
     ahjRidgeSetbackIn?: number;
     panelPositions?: any[];
     roofPlanes?: any[];
+    // Error 5u fix: lat/lng accessed in groundCAD.ts via `as any` — declare explicitly
+    lat?: number;
+    lng?: number;
     [key: string]: any;
   };
   system: {
@@ -37,6 +40,9 @@ export interface PermitInputShape {
     [key: string]: any;
   };
   layout?: {
+    // Error 5v fix: type accessed in cadEngine.ts via `as any` — declare explicitly
+    type?: string;
+    systemType?: string;
     fenceSegments?: any[];
     fenceTotalLengthFt?: number;
     fenceGateOpenings?: any[];
@@ -47,5 +53,9 @@ export interface PermitInputShape {
     groundArrays?: any[];
     groundSetbackFt?: number;
   };
+  // Error 5q fix: explicit typed field instead of relying on [key: string]: any
+  _canonicalCADBridge?: import('@/lib/cad/canonicalBridge').CanonicalBridgeResult;
+  // Error 5w fix: _systemDefinition accessed in roofCAD.ts via `as any` — declare explicitly
+  _systemDefinition?: import('@/lib/system/systemDefinition').SystemDefinition;
   [key: string]: any;
 }

@@ -224,7 +224,7 @@ function selectedValueForDecision(decisionType: EngineeringDecisionType, input: 
     case 'conductor_sizing':
       return selected(firstString?.wireGauge ?? project?.wireGauge ?? '#10 AWG', firstString?.wireGauge == null && project?.wireGauge == null, 'Existing conductor gauge metadata selected from string or project input.');
     case 'breaker_sizing': {
-      const fallback = Math.ceil((((system?.totalAcKw ?? 0) * 1000 / 240) || 32) * 1.25 / 5) * 5;
+      const fallback = necNextStandardOcpd(((system?.totalAcKw ?? 0) * 1000 / 240 || 32) * 1.25);
       return selected(project?.backfeedBreakerA ?? project?.pvBackfeedA ?? fallback, project?.backfeedBreakerA == null && project?.pvBackfeedA == null, 'Existing breaker value selected from project input or documented deterministic fallback.');
     }
     case 'ocpd_selection':
@@ -281,7 +281,7 @@ function alternativesForDecision(
       if (value !== selectedValue) alternatives.push({ value, rejectedReason: 'Existing project interconnection method selected a different deterministic value.' });
     }
   } else if (decisionType === 'breaker_sizing') {
-    for (const value of [project?.backfeedBreakerA, project?.pvBackfeedA, system?.totalAcKw ? Math.ceil((system.totalAcKw * 1000 / 240) * 1.25 / 5) * 5 : null].filter(v => v != null)) {
+    for (const value of [project?.backfeedBreakerA, project?.pvBackfeedA, system?.totalAcKw ? necNextStandardOcpd((system.totalAcKw * 1000 / 240) * 1.25) : null].filter(v => v != null)) {
       if (value !== selectedValue) alternatives.push({ value, rejectedReason: 'Higher-priority existing breaker input or fallback policy selected another value.' });
     }
   }

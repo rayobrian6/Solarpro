@@ -116,6 +116,9 @@ export interface BOMGenerationInputV4 {
   // System type — enables fence/ground structural BOM via bom-system-profiles
   systemType?: BOMSystemType;
 
+  // Error 7b fix: topologyType accessed via `(input as any).topologyType` in debug log
+  topologyType?: TopologyType;
+
   // Fence structural input (from CADFenceModel)
   fenceData?: {
     totalPosts: number;
@@ -225,7 +228,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     attachmentCount: input.attachmentCount,
     railSections: input.railSections,
     moduleCount: input.moduleCount,
-    topologyType: (input as any).topologyType,
+    topologyType: input.topologyType,
   });
   _idCounter = 0;
   const items: BOMLineItemV4[] = [];
@@ -553,14 +556,16 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
 
   if (input.runs && input.runs.length > 0) {
     // ── All customer-owned runs (exclude utility-owned service conductors) ──
-    const allBomRuns = input.runs.filter((r: any) => !r.isUtilityOwned);
+    // Error 7b fix: RunSegment already declares wireGauge, egcGauge, conductorCount,
+    // onewayLengthFt, conduitType, conduitSize, isUtilityOwned, id — no `as any` needed.
+    const allBomRuns = input.runs.filter(r => !r.isUtilityOwned);
 
     // ── DC wire runs (ROOF_RUN for micro, DC_STRING_RUN / DC_DISCO_TO_INV_RUN for string) ──
     // For string topology, DC wire is already added in Stage 2 (USE-2 PV wire).
     // For micro topology, ROOF_RUN is open-air DC wiring — add as separate BOM line item.
     const dcRunIds = new Set(['ROOF_RUN', 'DC_STRING_RUN', 'DC_DISCO_TO_INV_RUN']);
-    const dcBomRuns = allBomRuns.filter((r: any) => dcRunIds.has(r.id));
-    const acBomRuns = allBomRuns.filter((r: any) => !dcRunIds.has(r.id));
+    const dcBomRuns = allBomRuns.filter(r => dcRunIds.has(r.id));
+    const acBomRuns = allBomRuns.filter(r => !dcRunIds.has(r.id));
 
     // ── Group DC runs by wire gauge → one line item per gauge (micro only, matches calcBOMFromSegments) ──
     // Key insight: EGC can be a DIFFERENT gauge than DC conductors
@@ -568,19 +573,19 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       const dcGaugeMap = new Map<string, { qty: number; runIds: string[] }>();
       
       for (const r of dcBomRuns) {
-        const gauge: string = (r as any).wireGauge ?? '#10 AWG';
-        const egcGauge: string = (r as any).egcGauge ?? '#10 AWG';
-        const conductors: number = (r as any).conductorCount ?? 2;
-        const length: number = (r as any).onewayLengthFt ?? 30;
+        const gauge: string = r.wireGauge ?? '#10 AWG';
+        const egcGauge: string = r.egcGauge ?? '#10 AWG';
+        const conductors: number = r.conductorCount ?? 2;
+        const length: number = r.onewayLengthFt ?? 30;
         
         // Add DC conductor quantity (gauge = wireGauge)
         const dcQty = Math.ceil(length * conductors * 1.15);
         const dcExisting = dcGaugeMap.get(gauge);
         if (dcExisting) {
           dcExisting.qty += dcQty;
-          dcExisting.runIds.push((r as any).id);
+          dcExisting.runIds.push(r.id);
         } else {
-          dcGaugeMap.set(gauge, { qty: dcQty, runIds: [(r as any).id] });
+          dcGaugeMap.set(gauge, { qty: dcQty, runIds: [r.id] });
         }
         
         // Add EGC quantity (gauge = egcGauge, may differ from wireGauge)
@@ -588,11 +593,11 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
         const egcExisting = dcGaugeMap.get(egcGauge);
         if (egcExisting) {
           egcExisting.qty += egcQty;
-          if (!egcExisting.runIds.includes((r as any).id)) {
-            egcExisting.runIds.push((r as any).id);
+          if (!egcExisting.runIds.includes(r.id)) {
+            egcExisting.runIds.push(r.id);
           }
         } else {
-          dcGaugeMap.set(egcGauge, { qty: egcQty, runIds: [(r as any).id] });
+          dcGaugeMap.set(egcGauge, { qty: egcQty, runIds: [r.id] });
         }
       }
       
@@ -618,19 +623,19 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     const wireGaugeMap = new Map<string, { qty: number; runIds: string[] }>();
     
     for (const r of acBomRuns) {
-      const gauge: string = (r as any).wireGauge ?? input.acWireGauge ?? '#8 AWG';
-      const egcGauge: string = (r as any).egcGauge ?? '#10 AWG';
-      const conductors: number = (r as any).conductorCount ?? 3;
-      const length: number = (r as any).onewayLengthFt ?? 50;
+      const gauge: string = r.wireGauge ?? input.acWireGauge ?? '#8 AWG';
+      const egcGauge: string = r.egcGauge ?? '#10 AWG';
+      const conductors: number = r.conductorCount ?? 3;
+      const length: number = r.onewayLengthFt ?? 50;
       
       // Add hot/neutral conductor quantity (gauge = wireGauge)
       const hotQty = Math.ceil(length * conductors * 1.15);
       const hotExisting = wireGaugeMap.get(gauge);
       if (hotExisting) {
         hotExisting.qty += hotQty;
-        hotExisting.runIds.push((r as any).id);
+        hotExisting.runIds.push(r.id);
       } else {
-        wireGaugeMap.set(gauge, { qty: hotQty, runIds: [(r as any).id] });
+        wireGaugeMap.set(gauge, { qty: hotQty, runIds: [r.id] });
       }
       
       // Add EGC quantity (gauge = egcGauge, may differ from wireGauge)
@@ -639,11 +644,11 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       const egcExisting = wireGaugeMap.get(egcGauge);
       if (egcExisting) {
         egcExisting.qty += egcQty;
-        if (!egcExisting.runIds.includes((r as any).id)) {
-          egcExisting.runIds.push((r as any).id);
+        if (!egcExisting.runIds.includes(r.id)) {
+          egcExisting.runIds.push(r.id);
         }
       } else {
-        wireGaugeMap.set(egcGauge, { qty: egcQty, runIds: [(r as any).id] });
+        wireGaugeMap.set(egcGauge, { qty: egcQty, runIds: [r.id] });
       }
     }
 
@@ -671,10 +676,10 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // ── Group ALL runs by conduit type+size → one conduit line item per type/size ──
     const conduitMap = new Map<string, { qty: number; type: string; size: string }>();
     for (const r of allBomRuns) {
-      const cType: string = (r as any).conduitType ?? input.conduitType ?? 'EMT';
-      const cSize: string = ((r as any).conduitSize ?? `${input.conduitSizeInch ?? '3/4'}"`).replace('"', '');
+      const cType: string = r.conduitType ?? input.conduitType ?? 'EMT';
+      const cSize: string = (r.conduitSize ?? `${input.conduitSizeInch ?? '3/4'}"`).replace('"', '');
       const key = `${cType}-${cSize}`;
-      const qty = Math.ceil(((r as any).onewayLengthFt ?? (r as any).lengthFt ?? 30) * 1.15);
+      const qty = Math.ceil((r.onewayLengthFt ?? 30) * 1.15);
       const existing = conduitMap.get(key);
       if (existing) {
         existing.qty += qty;
@@ -723,9 +728,9 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     const totalConduitFt = (() => {
       if (input.runs && input.runs.length > 0) {
         return input.runs
-          .filter((r: any) => !r.isUtilityOwned)
-          .reduce((sum: number, r: any) =>
-            sum + Math.ceil(((r as any).onewayLengthFt ?? (r as any).lengthFt ?? 30) * 1.15), 0);
+          .filter(r => !r.isUtilityOwned)
+          .reduce((sum: number, r) =>
+            sum + Math.ceil((r.onewayLengthFt ?? 30) * 1.15), 0);
       }
       return conduitLength(input.acWireLength);
     })();
@@ -895,7 +900,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // NEC 705.12(B): continuous AC output current × 1.25 → next standard breaker
     const derivedBackfeedAmps = (input.backfeedAmps ?? 0) > 0
       ? input.backfeedAmps
-      : Math.ceil((input.systemKw * 1000 / (input.acVoltage ?? 240)) * 1.25 / 5) * 5;
+      : (input.systemKw * 1000 / (input.acVoltage ?? 240)) * 1.25;
     const requestedBreaker = nextStandardBreaker(derivedBackfeedAmps);
     const backfeedAmps = Math.min(requestedBreaker, maxPVBreaker);
     if (requestedBreaker > maxPVBreaker) {
@@ -1006,7 +1011,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     const egcLength = conduitLength(input.acWireLength);
     // EGC gauge: NEC 250.122 — based on OCPD size
     const ocpdForEgc = input.acOCPD > 0 ? input.acOCPD : nextStandardBreaker(
-      Math.ceil((input.systemKw * 1000) / (input.acVoltage ?? 240) * 1.25 / 5) * 5
+      (input.systemKw * 1000) / (input.acVoltage ?? 240) * 1.25
     );
     const egcGauge = ocpdForEgc <= 60 ? '#10 AWG' : ocpdForEgc <= 100 ? '#8 AWG' : '#6 AWG';
     items.push(addItem('structural', 'wire', 'Southwire', `${egcGauge} THWN-2 Green EGC`,
@@ -1036,7 +1041,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // GEC: Grounding Electrode Conductor — NEC 250.66
     // Sized by largest service conductor or 6 AWG minimum for PV systems ≤ 200A
     const gecOcpd = input.acOCPD > 0 ? input.acOCPD
-      : nextStandardBreaker(Math.ceil((input.systemKw * 1000) / (input.acVoltage ?? 240) * 1.25 / 5) * 5);
+      : nextStandardBreaker((input.systemKw * 1000) / (input.acVoltage ?? 240) * 1.25);
     const gecGauge = gecOcpd <= 60 ? '#6 AWG' : gecOcpd <= 100 ? '#4 AWG' : '#2 AWG';
     const gecLength = 50; // standard 50-ft run from inverter to grounding electrode
     items.push(addItem('structural', 'wire', 'Southwire', `${gecGauge} Bare Copper GEC`,

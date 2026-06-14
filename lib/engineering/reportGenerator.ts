@@ -186,10 +186,11 @@ function generateElectricalEngineering(snap: DesignSnapshot, pd: ProjectPhysical
   const isOptimizer = inverter?.type === 'optimizer';
 
   // Panel electrical specs (use typical values if not in panel spec)
-  const panelVoc = (panel as any).voc || panel.wattage / 8.5;  // typical Voc
-  const panelVmp = (panel as any).vmp || panel.wattage / 9.5;  // typical Vmp
-  const panelIsc = (panel as any).isc || panel.wattage / panelVoc * 1.1;
-  const panelImp = (panel as any).imp || panel.wattage / panelVmp;
+  // Error 5g fix: voc/vmp/isc/imp now on SolarPanel type — remove `as any` casts
+  const panelVoc = panel.voc || panel.wattage / 8.5;  // typical Voc
+  const panelVmp = panel.vmp || panel.wattage / 9.5;  // typical Vmp
+  const panelIsc = panel.isc || panel.wattage / panelVoc * 1.1;
+  const panelImp = panel.imp || panel.wattage / panelVmp;
 
   // String sizing
   let panelsPerString = 1;
@@ -200,8 +201,9 @@ function generateElectricalEngineering(snap: DesignSnapshot, pd: ProjectPhysical
 
   if (!isMicro) {
     // String inverter: calculate optimal string length
-    const maxDcVoltage = (inverter as any)?.maxDcVoltage || 600;
-    const mpptVoltageMax = (inverter as any)?.mpptVoltageMax || 550;
+    // Error 5h fix: maxDcVoltage/mpptVoltageMax now on Inverter type — remove `as any` casts
+    const maxDcVoltage = inverter?.maxDcVoltage || 600;
+    const mpptVoltageMax = inverter?.mpptVoltageMax || 550;
     const mpptChannels = inverter?.mpptChannels || 2;
 
     // Max panels per string (NEC 690.7: Voc × 1.25 ≤ maxDcVoltage)
@@ -280,8 +282,8 @@ function generateElectricalEngineering(snap: DesignSnapshot, pd: ProjectPhysical
     acWireGauge: acWire.gauge,
     acConduitSize: acWire.conduit,
     groundWireGauge: '#8 AWG',
-    stringFuseAmps: Math.ceil(panelIsc * 1.56 / 5) * 5,
-    dcDisconnectAmps: Math.ceil(dcDesignAmps / 5) * 5,
+    stringFuseAmps: necNextStandardOcpd(panelIsc * 1.56),
+    dcDisconnectAmps: necNextStandardOcpd(dcDesignAmps),
     acBreakerAmps,
     mainPanelBusAmps,
     backfeedBreakerAmps,
@@ -307,7 +309,10 @@ function generateStructuralEngineering(snap: DesignSnapshot, pd: ProjectPhysical
   const snowLoad = getSnowLoad(snap.stateCode);
 
   // Panel weight (typical 40-50 lbs per panel)
-  const panelWeightLbs = (snap.panel as any).weight || 44;
+  // Error 5f fix: SolarPanel.weight is in kg — convert to lbs (1 kg = 2.20462 lbs).
+  // Remove `as any` cast that masked both the type-safety and unit-conversion issue.
+  const panelWeightKg  = snap.panel.weight || 0;
+  const panelWeightLbs = panelWeightKg > 0 ? panelWeightKg * 2.20462 : 44;
   const totalArrayWeightLbs = snap.panelCount * panelWeightLbs;
 
   // Dead load (panel + racking, typical 4-5 psf)

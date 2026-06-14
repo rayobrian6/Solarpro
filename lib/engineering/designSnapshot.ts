@@ -3,12 +3,12 @@
 // Extracts all engineering-relevant data from the design engine
 // ============================================================
 
-import type { Project, PlacedPanel, Layout } from '@/types';
+import type { Project, PlacedPanel, Layout, SolarPanel } from '@/types';
 import type { DesignSnapshot, RoofSegmentSummary, GroundArraySummary, FenceArraySummary } from './types';
 
 
 // Default panel specs (400W monocrystalline) used when no panel selected
-const DEFAULT_PANEL = {
+const DEFAULT_PANEL: SolarPanel = {
   id: 'default-400w',
   manufacturer: 'Generic',
   model: '400W Monocrystalline',
@@ -68,7 +68,8 @@ export function buildDesignSnapshot(project: Project, layout: Layout): DesignSna
     panelCount,
     systemSizeKw,
 
-    panel: project.selectedPanel || DEFAULT_PANEL as any,
+    // Error 5i fix: DEFAULT_PANEL is now typed as SolarPanel — no `as any` needed
+    panel: project.selectedPanel || DEFAULT_PANEL,
     inverter: project.selectedInverter || null,
     mounting: project.selectedMounting || null,
     batteries: project.selectedBatteries || [],

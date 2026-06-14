@@ -44,7 +44,8 @@ const DEFAULT_RAKE_SETBACK_IN  = 36;  // 3 ft (sides)
 
 export function roofCAD(input: PermitInputShape): CADModel {
   const t0 = Date.now();
-  const canonicalBridge = (input as any)._canonicalCADBridge as CanonicalBridgeResult | undefined;
+  // Error 5q fix: _canonicalCADBridge is now on PermitInputShape — no `as any` needed
+  const canonicalBridge = input._canonicalCADBridge;
   const canonicalRoofPlanes = canonicalBridge?.roofPlanes ?? [];
   const usingCanonicalRoofPlanes = canonicalRoofPlanes.length > 0;
 
@@ -63,10 +64,11 @@ export function roofCAD(input: PermitInputShape): CADModel {
   // contains world-projected obstructions. We project them to CAD space and
   // filter panels that fall within (radiusM + setbackM) of each obstruction.
   // This is NON-BREAKING: if obstructions is undefined/empty, nothing changes.
+  // Error 5w fix: _systemDefinition now declared on PermitInputShape — no `as any` needed
   const sysDefObstructions: SysDefObstruction[] =
-    (input as any)._systemDefinition?.obstructions ?? [];
+    input._systemDefinition?.obstructions ?? [];
   const sysDefElecNodes: SysDefElectricalNode[] =
-    (input as any)._systemDefinition?.electricalNodes ?? [];
+    input._systemDefinition?.electricalNodes ?? [];
   const canonicalCADObstructions: CADObstruction[] = canonicalBridge?.obstructions ?? [];
   const canonicalCADElecNodes: CADElectricalNode[] = canonicalBridge?.electricalNodes ?? [];
 
@@ -133,7 +135,8 @@ export function roofCAD(input: PermitInputShape): CADModel {
       orientation: (p.orientation || 'portrait').toLowerCase(),
       row:         p.row,
       col:         p.col,
-      planeId:     (p as any).planeId || (p as any).arrayId,
+      // Error 5x fix: planeId now on panelPositions type; arrayId was already there
+      planeId:     p.planeId || p.arrayId,
     };
   });
 
@@ -155,7 +158,7 @@ export function roofCAD(input: PermitInputShape): CADModel {
       });
     }
   } else if (rawPlanes.length > 0) {
-    for (const rp of rawPlanes as any[]) {
+    for (const rp of rawPlanes) {
       // Convert plane vertices to local XY
       const polyXY: Point2D[] = rp.vertices.map((v: any) =>
         latLngToXY(v.lat, v.lng, originLat, originLng)
@@ -375,7 +378,8 @@ export function roofCAD(input: PermitInputShape): CADModel {
   const totalPanels = projectTotalPanels && projectTotalPanels > 0
     ? projectTotalPanels
     : (allPanels.length || input.system?.totalPanels || 0);
-  const panelWatts  = (input.system?.inverters?.[0]?.strings?.[0] as any)?.panelWatts
+  // Error 5ab fix: panelWatts IS on PermitInputShape.system.inverters[].strings[] — no `as any` needed
+  const panelWatts  = input.system?.inverters?.[0]?.strings?.[0]?.panelWatts
     ?? input.project?.['panelWatts']
     ?? 400;
   const totalDcKw   = projectTotalPanels && projectTotalPanels > 0

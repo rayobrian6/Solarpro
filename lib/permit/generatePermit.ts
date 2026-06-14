@@ -8,6 +8,7 @@ import type { CADModel } from '@/lib/cad/types';
 import { PLANSET_ENGINE_VERSION } from './constants';
 import { buildCanonical, validateCanonicalStrict, buildLayoutDimensions } from './utils/canonical';
 import { generateCADLayout } from '@/lib/cad/cadEngine';
+import type { PermitInputShape } from '@/lib/drafting/permitInputShape';
 import { buildRenderContext, type RenderContext } from '@/lib/drafting/renderContext';
 import { buildDocumentProvenanceBundle } from '@/lib/documentProvenance';
 import { buildEngineeringStateRegistry, buildInvalidationLineageMetadata, staleMetadataForState } from '@/lib/engineeringStateInvalidation';
@@ -18,6 +19,7 @@ import {
   buildEngineeringDecisionProvenanceBundle,
 } from '@/lib/engineeringDecisionProvenance';
 import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
+import { necNextStandardOcpd } from './utils/helpers';
 
 // Section imports
 import { pageCoverSheet } from './sections/coverSheet';
@@ -44,7 +46,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // Inject canonical fields into input so CAD engine + sheet renderers read correctly
   input.project.systemType   = canonical.systemType;
   input.project._canonical   = canonical;  // Step 2: sheet renderers read canonical.* via input.project._canonical
-  if (input.layout) (input.layout as any).systemType = canonical.systemType;
+  if (input.layout) input.layout.systemType = canonical.systemType;
 
   // Step 6: Panel consistency — canonical.panels vs CAD totalPanels
   // (checked after CAD runs below)
@@ -52,7 +54,8 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // ── CAD ENGINE: Single source of truth ────────────────────────────────
   // Generate CADModel ONCE here. All page functions receive cad directly.
   // cad.systemType is authoritative — never use resolveSystemType() in pages.
-  const cad = generateCADLayout(input as any);
+  // Error 5s fix: use PermitInputShape (with index signatures) instead of `any`
+  const cad = generateCADLayout(input as PermitInputShape);
 
   // Post-CAD sanitization: strip empty planes/rows/segments
   // The CAD solvers can emit empty geometry when setback-cleared or
@@ -61,7 +64,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // nothing to render and would only produce blank sheets.
   if (cad.roof?.planes) {
     const before = cad.roof.planes.length;
-    (cad.roof as any).planes = cad.roof.planes.filter(
+    cad.roof.planes = cad.roof.planes.filter(
       (p: any) => p.panels && p.panels.length > 0
     );
     const removed = before - cad.roof.planes.length;
@@ -70,13 +73,13 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     }
   }
   if (cad.ground?.arrays) {
-    (cad.ground as any).arrays = cad.ground.arrays.map((arr: any) => ({
+    cad.ground.arrays = cad.ground.arrays.map((arr: any) => ({
       ...arr,
       rows: (arr.rows || []).filter((r: any) => r.panels && r.panels.length > 0),
     })).filter((arr: any) => arr.rows.length > 0);
   }
   if (cad.fence?.segments) {
-    (cad.fence as any).segments = cad.fence.segments.filter(
+    cad.fence.segments = cad.fence.segments.filter(
       (s: any) => isFinite(s.panelCount) && s.panelCount >= 1
     );
   }
@@ -84,14 +87,14 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   // The CAD engine may leave residual roof/ground/fence sub-models when
   // systemType changes between runs. validatePlanSet() (locked) throws on these.
   if (cad.systemType === 'solar_fence') {
-    delete (cad as any).roof;
-    delete (cad as any).ground;
+    delete cad.roof;
+    delete cad.ground;
   } else if (cad.systemType === 'ground_mount') {
-    delete (cad as any).roof;
-    delete (cad as any).fence;
+    delete cad.roof;
+    delete cad.fence;
   } else if (cad.systemType === 'roof') {
-    delete (cad as any).ground;
-    delete (cad as any).fence;
+    delete cad.ground;
+    delete cad.fence;
   }
 
   const sysType = cad.systemType;
@@ -103,21 +106,91 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
 
   // ── CAD patch: update canonical.structure with authoritative CAD geometry ──
   // buildCanonical() runs before CAD, so CAD values are patched in here.
+  // Error 5e fix: all these fields exist on CanonicalStructure/CanonicalElectrical — no `as any` needed.
   if (cad.fence) {
-    (canonical.structure as any).postEmbedFt   = cad.fence.postEmbedM  ? cad.fence.postEmbedM  * 3.28084 : canonical.structure.postEmbedFt;
-    (canonical.structure as any).postSpacingFt = cad.fence.postSpacingM ? cad.fence.postSpacingM * 3.28084 : canonical.structure.postSpacingFt;
-    (canonical.structure as any).panelHeightFt = cad.fence.panelHeightM ? cad.fence.panelHeightM * 3.28084 : canonical.structure.panelHeightFt;
+    canonical.structure.postEmbedFt   = cad.fence.postEmbedM  ? cad.fence.postEmbedM  * 3.28084 : canonical.structure.postEmbedFt;
+    canonical.structure.postSpacingFt = cad.fence.postSpacingM ? cad.fence.postSpacingM * 3.28084 : canonical.structure.postSpacingFt;
+    canonical.structure.panelHeightFt = cad.fence.panelHeightM ? cad.fence.panelHeightM * 3.28084 : canonical.structure.panelHeightFt;
   }
   if (cad.ground?.arrays?.[0]) {
     const gArr = cad.ground.arrays[0];
-    (canonical.structure as any).pileDepthFt   = gArr.pileDepthM    ? gArr.pileDepthM    * 3.28084 : canonical.structure.pileDepthFt;
-    (canonical.structure as any).pileSpacingFt = gArr.pileSpacingM  ? gArr.pileSpacingM  * 3.28084 : canonical.structure.pileSpacingFt;
-    (canonical.structure as any).groundClearIn = gArr.groundClearanceM ? gArr.groundClearanceM * 39.3701 : canonical.structure.groundClearIn;
-    (canonical.structure as any).tiltDeg       = gArr.tiltDeg ?? canonical.structure.tiltDeg;
+    canonical.structure.pileDepthFt   = gArr.pileDepthM    ? gArr.pileDepthM    * 3.28084 : canonical.structure.pileDepthFt;
+    canonical.structure.pileSpacingFt = gArr.pileSpacingM  ? gArr.pileSpacingM  * 3.28084 : canonical.structure.pileSpacingFt;
+    canonical.structure.groundClearIn = gArr.groundClearanceM ? gArr.groundClearanceM * 39.3701 : canonical.structure.groundClearIn;
+    canonical.structure.tiltDeg       = gArr.tiltDeg ?? canonical.structure.tiltDeg;
   }
   // electrical.totalPanels / totalDcKw from CAD (authoritative)
-  (canonical.electrical as any).totalPanels = cad.totalPanels || canonical.electrical.totalPanels;
-  (canonical.electrical as any).totalDcKw   = cad.totalDcKw   || canonical.electrical.totalDcKw;
+  canonical.electrical.totalPanels = cad.totalPanels || canonical.electrical.totalPanels;
+  canonical.electrical.totalDcKw   = cad.totalDcKw   || canonical.electrical.totalDcKw;
+
+  // ── Error 5aa fix: Propagate CAD-derived system values to input.system & input.project ──
+  // Before this fix, the permit route initialized system.totalAcKw/totalDcKw to 0 and
+  // never updated them after CAD computation. electricalPages.ts and sldAdapter.ts read
+  // system.totalAcKw (always 0) and project.backfeedBreakerA (never set), falling back
+  // to hardcoded defaults (acOCPD=40, backfeedAmps=46, batteryKwh=0).
+  // Now: propagate authoritative CAD + equipment values to system/project level.
+  {
+    // totalPanels and totalDcKw from CAD (authoritative source)
+    if (cad.totalPanels > 0) {
+      input.system.totalPanels = cad.totalPanels;
+    }
+    if (cad.totalDcKw > 0) {
+      input.system.totalDcKw = cad.totalDcKw;
+    }
+
+    // totalAcKw: compute from inverter specs (micro: panels * per-micro kW; string: inverter kW)
+    // Prefer explicit inverter data from system.inverters[], fall back to equipment context.
+    const inv0 = input.system.inverters?.[0];
+    const isMicro = (input.system.topology || '').toLowerCase().includes('micro')
+      || (inv0?.type || '').toLowerCase().includes('micro');
+    if (isMicro && inv0?.acOutputKw && cad.totalPanels > 0) {
+      // Microinverter: totalAcKw = panels * per-micro AC output
+      input.system.totalAcKw = cad.totalPanels * inv0.acOutputKw;
+    } else if (inv0?.acOutputKw && input.system.totalAcKw === 0) {
+      // String inverter: totalAcKw = inverter AC output (may be multi-inverter)
+      const invCount = input.system.inverters.length || 1;
+      input.system.totalAcKw = inv0.acOutputKw * invCount;
+    } else if (input.system.totalAcKw === 0 && cad.totalDcKw > 0) {
+      // Last resort: estimate AC from DC with typical 1.2 DC/AC ratio
+      input.system.totalAcKw = cad.totalDcKw / 1.2;
+    }
+
+    // DC/AC ratio
+    if (input.system.totalAcKw > 0) {
+      input.system.dcAcRatio = input.system.totalDcKw / input.system.totalAcKw;
+    }
+
+    // backfeedBreakerA / pvBackfeedA: NEC 690.8 sizing
+    // acOCPD = next standard breaker >= (acOutputAmps * 1.25)
+    // acOutputAmps = totalAcKw * 1000 / 240
+    if (!project.backfeedBreakerA && input.system.totalAcKw > 0) {
+      const acOutputAmps = (input.system.totalAcKw * 1000) / 240;
+      const continuousA = acOutputAmps * 1.25; // NEC 690.8
+      const ocpd = necNextStandardOcpd(continuousA);
+      project.backfeedBreakerA = ocpd;
+      if (!project.pvBackfeedA) {
+        project.pvBackfeedA = ocpd;
+      }
+    }
+
+    // Battery fields: propagate batteryKwh and batteryBackfeedA if battery info exists
+    // in project (set by the route from frontend data). Do NOT fabricate battery data.
+    // The electrical pages compute batteryKwh = batteryCount * batteryKwh per unit,
+    // so both fields must be populated together if battery is present.
+    if (project.batteryCount && project.batteryCount > 0 && project.batteryKwh && project.batteryKwh > 0) {
+      // Already populated — nothing to do
+    } else if (project.batteryCount && project.batteryCount > 0 && !project.batteryKwh) {
+      // batteryCount is set but batteryKwh per unit is missing — default per unit
+      // Most common residential battery (e.g. Enphase IQ Battery 5P) is ~5 kWh
+      project.batteryKwh = 5.0;
+    }
+    // batteryBackfeedA: if battery exists but backfeed not set, compute from battery spec
+    // Typical Enphase IQ Battery 5P backfeed: 20A per unit
+    if (project.batteryCount && project.batteryCount > 0 && !project.batteryBackfeedA) {
+      const backfeedPerUnit = 20; // A — typical for residential AC-coupled battery
+      project.batteryBackfeedA = backfeedPerUnit * project.batteryCount;
+    }
+  }
 
   // ── Derive wire run lengths from CAD geometry ─────────────────────────────────
   // Inject into input.project.wireLength (AC run) and per-string wireLength (DC run)
@@ -136,7 +209,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     if (dcRunFt && dcRunFt > 0 && input.system?.inverters) {
       for (const inv of input.system.inverters) {
         if (inv.strings) {
-          for (const str of inv.strings as any[]) {
+          for (const str of inv.strings) {
             if (!str.wireLength) {
               str.wireLength = dcRunFt;
             }
@@ -151,20 +224,34 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   }
 
   // ── Wind speed: apply project fallback if compliance not yet run ─────────────────
+  // Error 5t fix: propagate seismicCategory from canonical.site to project level
+  // so coverSheet.ts can read project.seismicCategory
+  if (canonical.site.seismicSDC && !input.project.seismicCategory) {
+    input.project.seismicCategory = canonical.site.seismicSDC;
+  }
+  // Error 5t fix: propagate wind speed + ground snow to project bare fields
+  // as fallbacks for coverSheet.ts which reads project.windSpeedMph / project.groundSnowPsf
+  if (canonical.site.windSpeed > 0 && !input.project.windSpeedMph && !input.project.ahjWindSpeedMph) {
+    input.project.windSpeedMph = canonical.site.windSpeed;
+  }
+  if (canonical.site.groundSnowLoad > 0 && !input.project.groundSnowPsf && !input.project.ahjGroundSnowPsf) {
+    input.project.groundSnowPsf = canonical.site.groundSnowLoad;
+  }
+
   if (!canonical.site.windSpeed || canonical.site.windSpeed <= 0) {
     const projV = Number(input.project.ahjWindSpeedMph) || Number(input.project.windSpeedMph) || 0;
     if (projV > 0) {
-      (canonical.site as any).windSpeed = projV;
+      canonical.site.windSpeed = projV;
       console.log('[CANONICAL] Wind speed from project fields:', projV, 'mph');
     } else {
-      (canonical.site as any).windSpeed = 115;  // ASCE 7-22 code minimum
+      canonical.site.windSpeed = 115;  // ASCE 7-22 code minimum
       console.warn('[CANONICAL] Wind speed defaulted to 115 mph — run Compliance Check for AHJ value');
     }
   }
 
   // ── Build layout dimensions from CAD (REQUIRED before validation gate) ──────────
   try {
-    (canonical as any).layoutDimensions = buildLayoutDimensions(canonical, cad);
+    canonical.layoutDimensions = buildLayoutDimensions(canonical, cad, input.project);
     console.log('[CANONICAL] Layout dimensions resolved:', {
       system:        canonical.systemType,
       totalLengthFt: canonical.layoutDimensions!.totalLengthFt.toFixed(1),
@@ -225,11 +312,13 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       const sa = structResult.snowAnalysis;
       const ml = structResult.mountLayout;
       // Map V4 result → compliance.structural (same shape as frontend mapping in page.tsx)
-      if (!input.compliance) (input as any).compliance = {};
+      if (!input.compliance) input.compliance = { overallStatus: '' } as PermitInput['compliance'];
       const s = input.compliance.structural || {};
       s.wind = s.wind || {};
       if (!s.wind.windSpeed)            s.wind.windSpeed = wa.designWindSpeedMph;
       if (!s.wind.exposureCategory)     s.wind.exposureCategory = structInput.windExposure;
+      // Error 5t fix: propagate exposure category to project level for coverSheet.ts
+      if (!input.project.windExposure)   input.project.windExposure = structInput.windExposure;
       if (!s.wind.velocityPressure)     s.wind.velocityPressure = wa.velocityPressurePsf;
       if (!s.wind.netUpliftPressure)    s.wind.netUpliftPressure = wa.netUpliftPressurePsf;
       if (!s.wind.upliftPerAttachment)  s.wind.upliftPerAttachment = ml?.upliftPerMountLbs;
@@ -259,7 +348,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       if (!s.totalDeadLoadPsf)   s.totalDeadLoadPsf = ra.pvDeadLoadPsf + ra.roofDeadLoadPsf;
       if (!s.moduleLoadPsf)      s.moduleLoadPsf = ra.pvDeadLoadPsf;
       if (!s.rackingLoadPsf)     s.rackingLoadPsf = ra.pvDeadLoadPsf > 0 ? ra.pvDeadLoadPsf * 0.15 : 0.5;
-      (input.compliance as any).structural = s;
+      input.compliance.structural = s;
       console.log('[PLANSET] Server-side structural V4 computed rafter bending:', ra.bendingMomentDemandFtLbs?.toFixed(0), 'ft-lbs / capacity:', ra.bendingMomentCapacityFtLbs?.toFixed(0), 'ft-lbs');
     }
   } catch (structErr: unknown) {
@@ -356,8 +445,8 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   input.engineeringStateRegistry = engineeringStateRegistry;
   input.invalidationLineage = invalidationLineage;
   if (documentProvenance) {
-    (documentProvenance as any).engineeringStateRegistry = engineeringStateRegistry;
-    (documentProvenance as any).invalidationLineage = invalidationLineage;
+    documentProvenance.engineeringStateRegistry = engineeringStateRegistry;
+    documentProvenance.invalidationLineage = invalidationLineage;
   }
 
   const renderCtx = buildRenderContext(cad, {

@@ -935,7 +935,10 @@ function renderHardwareSchedule(input: PermitInput, cad: CADModel): string {
     const structType    = firstArray?.structureType || 'driven_pile';
     const pileSpacingFt = firstArray?.pileSpacingFt   ?? 8;
     const pileEmbedFt   = firstArray?.pileDepthFt ?? 4;
-    const arrayWidthFt  = (cad as any).arrayWidthFt   ?? Math.ceil(totalPanels * 1.1);
+    // Error 5a fix: cad.arrayWidthFt doesn't exist on CADModel — read from
+    // cad.ground.arrays[0].dimensions.arrayWidthM (meters → ft) instead.
+    const cadArrWidthM  = cad.ground?.arrays?.[0]?.dimensions?.arrayWidthM;
+    const arrayWidthFt  = cadArrWidthM ? cadArrWidthM * 3.28084 : Math.ceil(totalPanels * 1.1);
     const conduitFt     = Math.ceil(arrayWidthFt + 20); // array width + 20ft run to inverter
 
     const pileLabel = structType === 'concrete_pier' ? 'Concrete Piers' : 'Driven Piles';

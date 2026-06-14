@@ -238,7 +238,8 @@ export function resolveEquipment(input: PermitInput): ResolvedEquipment {
   }
 
   // ── 2. Alternative payload: system.modules[] ────────────────────────────
-  const modules = (system as any)?.modules;
+  // Error 5l fix: modules[] now on PermitInput.system type — no `as any` needed
+  const modules = system?.modules;
   if (Array.isArray(modules) && modules.length > 0) {
     const m = modules[0];
     const inv0 = system?.inverters?.[0];
@@ -292,3 +293,13 @@ export function resolveEquipment(input: PermitInput): ResolvedEquipment {
 
 
 export type { ResolvedEquipment } from '../types';
+
+
+// Error 5bb fix: NEC 240.6(A) standard OCPD ampere ratings
+// DO NOT use Math.ceil(x/5)*5 — it can produce 55, 65, 75, 85, 95A which are NOT standard.
+export const NEC_STANDARD_OCPD = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200] as const;
+
+/** Return the next standard NEC OCPD rating ≥ the given ampere value. */
+export function necNextStandardOcpd(amps: number): number {
+  return NEC_STANDARD_OCPD.find(s => s >= amps) ?? 200;
+}

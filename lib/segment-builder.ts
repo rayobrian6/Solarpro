@@ -34,7 +34,7 @@ const AMPACITY_TABLE_75C: Record<string, number> = {
 };
 
 // Standard OCPD ratings
-const STANDARD_OCPD: number[] = [15, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 225, 250, 300, 350, 400];
+const STANDARD_OCPD: number[] = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 225, 250, 300, 350, 400];
 
 // Conductor area in square inches (NEC Ch.9 Table 5)
 const CONDUCTOR_AREA_IN2: Record<string, number> = {

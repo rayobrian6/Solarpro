@@ -137,8 +137,8 @@ export function buildDesignIntent(input: DraftingInput): DesignIntent {
 
   // ── Electrical parameters ──────────────────────────────────
   let electrical: DesignIntent['electrical'] | undefined;
-  const invs = input.engineering ? (input as any).engineering?.inverters : undefined;
-  const invType = input.project ? (input.project as any).inverterType : undefined;
+  const invs = input.engineering ? input.engineering?.inverters : undefined;
+  const invType = input.project ? input.project?.inverterType : undefined;
   if (invType || invs) {
     electrical = {
       inverterType: invType,

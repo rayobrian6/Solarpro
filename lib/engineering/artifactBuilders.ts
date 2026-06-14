@@ -109,13 +109,13 @@ export function buildBomCsvFromReport(input: ArtifactBuildInput): string {
       ...(sched.batteries  ?? []),
     ];
     for (const item of allItems) {
-      const tag   = String((item as any).tag          ?? '').replace(/,/g, ';');
+      const tag   = String(item.tag                 ?? '').replace(/,/g, ';');
       const desc  = String(item.description           ?? '').replace(/,/g, ';');
       const mfr   = String(item.manufacturer          ?? '').replace(/,/g, ';');
       const model = String(item.model                 ?? '').replace(/,/g, ';');
-      const qty   = (item as any).quantity            ?? '';
-      const unit  = String((item as any).unit         ?? 'EA').replace(/,/g, ';');
-      const notes = String((item as any).notes ?? (item as any).specs ?? '').replace(/,/g, ';');
+      const qty   = item.quantity                     ?? '';
+      const unit  = String(item.unit                  ?? 'EA').replace(/,/g, ';');
+      const notes = String(item.notes ?? item.specs   ?? '').replace(/,/g, ';');
       rows.push(`${tag},${desc},${mfr},${model},${qty},${unit},${notes}`);
     }
   } else {

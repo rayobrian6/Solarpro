@@ -30,6 +30,8 @@ export interface DraftingProject {
   ahjGroundSnowPsf?: number;
   ahjRoofSetbackIn?: number;
   ahjRidgeSetbackIn?: number;
+  // Electrical
+  inverterType?: string;
   // Panel GPS positions from 3D engine
   panelPositions?: Array<{
     id: string;
@@ -50,6 +52,9 @@ export interface DraftingProject {
     azimuth?: number;
     area?: number;
     edgeTypes?: string[];
+    // CAD-solved extras (populated by adapter)
+    _usablePolygon?: Array<{ x: number; y: number }>;
+    _cadSolved?: boolean;
   }>;
 }
 
@@ -65,6 +70,10 @@ export interface DraftingLayout {
     tilt?:      number;
     bifacial?:  boolean;
     label?:     string;
+    // CAD-solved extras (populated by adapter)
+    _cadPanels?: any[];
+    _cadPosts?:  any[];
+    _cadSolved?: boolean;
   }>;
   fenceTotalLengthFt?:   number;
   fenceGateOpenings?:    Array<{ positionFt: number; widthFt: number }>;
@@ -85,6 +94,14 @@ export interface DraftingLayout {
     structureType:      string; // 'driven_pile' | 'concrete_pier' | 'ballast'
     pileDepthFt?:       number;
     pileSpacingFt?:     number;
+    // GPS center (from input data, e.g. Google Solar API)
+    center?:            { lat: number; lng: number };
+    // CAD-solved extras (populated by adapter)
+    _cadOriginX?: number;
+    _cadOriginY?: number;
+    _cadPanels?:   any[];
+    _cadRows?:     any[];
+    _cadSolved?:   boolean;
   }>;
   groundSetbackFt?: number;
 }
@@ -104,6 +121,12 @@ export interface DraftingEngineering {
   upliftForceLbs?:       number;
   shearForceLbs?:        number;
   momentFtLbs?:          number;
+  // Electrical details (if available)
+  inverters?: Array<{
+    type?:     string;
+    acOutputKw?: number;
+    count?:    number;
+  }>;
 }
 
 // ── Full Engine Input ─────────────────────────────────────────

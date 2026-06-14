@@ -66,6 +66,9 @@ export interface PermitInput {
       x?: number; y?: number; tilt?: number; azimuth?: number;
       wattage?: number; row?: number; col?: number;
       systemType?: string; orientation?: string; arrayId?: string;
+      // Error 5x fix: planeId is on PlacedPanel in types/index.ts and accessed
+      // via `(p as any).planeId` in roofCAD.ts — must be declared here
+      planeId?: string;
     }>;
     roofPlanes?: Array<{
       id: string; vertices: Array<{ lat: number; lng: number }>;
@@ -75,6 +78,8 @@ export interface PermitInput {
       confirmed?: boolean;
       planeHeightAtCenterMeters?: number;
     }>;
+    // Error 5q fix: set by route.ts when roofPlanes come from CanonicalBuildingModel
+    roofPlanesSource?: 'canonical_building_model' | 'survey' | 'design' | 'aerial';
     // Panel physical specs
     panelVoc?: number;
     panelIsc?: number;
@@ -151,6 +156,19 @@ export interface PermitInput {
   permitOptions?: { cadAppendixPreviewV1?: boolean };
   // ── Engineering data (read by canonical.ts for structural calc) ──
   engineering?: unknown | null;
+  // Error 5q fix: canonical model + bridge — set by permit route, read by roofCAD.ts
+  _canonicalBuildingModel?: import('@/lib/siteSurveys/unifiedGeometry/types').CanonicalBuildingModel;
+  _canonicalCADBridge?: import('@/lib/cad/canonicalBridge').CanonicalBridgeResult;
+  canonicalBuildingModel?: import('@/lib/siteSurveys/unifiedGeometry/types').CanonicalBuildingModel;
+  // Error 5q fix: top-level projectId (read by route.ts hub lookup)
+  projectId?: string;
+  // Request mode fields (sent by frontend, used by route.ts)
+  mode?: string;
+  permitMode?: string;
+  intent?: string;
+  draft?: boolean;
+  allowLegacyRoofGeometry?: boolean;
+  canonical_building_model?: import('@/lib/siteSurveys/unifiedGeometry/types').CanonicalBuildingModel;
   system: {
     totalDcKw: number;
     totalAcKw: number;
@@ -165,6 +183,8 @@ export interface PermitInput {
       maxDcVoltage: number;
       efficiency: number;
       ulListing: string;
+      // Error 5c fix: mpptChannels accessed via (inv0 as any)?.mpptChannels in sldAdapter.ts
+      mpptChannels?: number;
       strings: Array<{
         label: string;
         panelCount: number;
@@ -181,6 +201,20 @@ export interface PermitInput {
         ocpd?: number;
         voltageDrop?: number;
       }>;
+    }>;
+    // Error 5l fix: modules[] is an alternative payload shape accessed via (system as any)?.modules
+    // in helpers.ts resolveEquipment(). Some API routes send panel data in this format.
+    modules?: Array<{
+      manufacturer?: string;
+      panelManufacturer?: string;
+      model?: string;
+      panelModel?: string;
+      watts?: number;
+      panelWatts?: number;
+      voc?: number;
+      panelVoc?: number;
+      isc?: number;
+      panelIsc?: number;
     }>;
   };
   compliance: {
@@ -346,6 +380,8 @@ export interface PermitInput {
       x?: number; y?: number; tilt?: number; azimuth?: number;
       wattage?: number; row?: number; col?: number;
       systemType?: string; orientation?: string;
+      // Error 5k fix: placementType is read by buildCanonical() for system type detection
+      placementType?: 'ROOF' | 'GROUND' | 'FENCE';
     }>;
     geometry?: {
       roofPlanes?:     Array<{ id: string; vertices: Array<{ lat: number; lng: number }>; pitch?: number; azimuth?: number; area?: number; edgeTypes?: string[] }>;

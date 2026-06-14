@@ -6,7 +6,7 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock, buildConstructionNotes } from '../utils/titleBlock';
-import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, utilityDisplayName, interconnectionLabel, roofTypeLabel, pv2Title, pv3Title, type SysType } from '../utils/helpers';
+import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, utilityDisplayName, interconnectionLabel, roofTypeLabel, pv2Title, pv3Title, necNextStandardOcpd, type SysType } from '../utils/helpers';
 import {  getSystemType, getInverterTopology, getEquipmentContext, topologyToLegacy, isFence, isGround, isRoof, displaySystemTypeShort } from '@/lib/system';
 import type { CanonicalInput } from '../types';
 import { BUILD_VERSION } from '@/lib/version';
@@ -52,13 +52,17 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     ? `${Math.round(Math.tan(project.roofPitch * Math.PI / 180) * 12)}:12`
     : '';
 
-  // ── Derived electrical values ─────────────────────────────────────────────
-  const backfeedA = (acKw !== null && acKw > 0)
-    ? Math.ceil(acKw * 1000 / 240 * 1.25)
-    : null;
-  const busLimit  = svcAmps ? Math.round(svcAmps * 1.2) : null;
-  const rulePass  = (svcAmps && backfeedA && busLimit)
-    ? (svcAmps + backfeedA) <= busLimit
+  // ── Derived electrical values ──────────────────────────────────────
+  // Error 6d fix: Prefer project.backfeedBreakerA (already NEC-computed by generatePermit.ts)
+  // over recomputing from acKw. Also fix 120% rule to use separate bus rating and main breaker.
+  const busRating   = project.panelBusRating || project.mainPanelAmps || 200;
+  const mainBreaker = project.mainPanelAmps || 200;
+  const backfeedA = project.backfeedBreakerA ?? project.pvBackfeedA
+    ?? ((acKw !== null && acKw > 0) ? necNextStandardOcpd(acKw * 1000 / 240 * 1.25) : null);
+  const busLimit     = busRating ? Math.round(busRating * 1.2) : null;
+  const maxPvBreaker = busLimit !== null ? busLimit - mainBreaker : null;
+  const rulePass     = (backfeedA !== null && maxPvBreaker !== null)
+    ? backfeedA <= maxPvBreaker
     : null;
 
   // ── Interconnection ───────────────────────────────────────────────────────
