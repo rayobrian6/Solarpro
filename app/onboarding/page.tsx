@@ -19,14 +19,17 @@
  * Guard: if user is not authenticated, redirects to /auth/login.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Sun, ArrowRight, ArrowLeft, CheckCircle, Building2,
   Phone, Globe, MapPin, Palette, Image, FileText,
-  Zap, BarChart3, FileSignature, Sparkles,
+  Zap, BarChart3, FileSignature, Sparkles, Loader2,
 } from 'lucide-react';
 import Link from 'next/link';
+import { useBusinessLookup } from '@/hooks/useBusinessLookup';
+import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
+import { mapConfidence } from '@/lib/satellite/types';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -101,6 +104,20 @@ export default function OnboardingPage() {
     proposalFooterText:  '',
   });
 
+  // ── Business registry auto-fill (Phase 4F) ──────────────────────────────
+  // Track which fields were auto-filled from registry so we can show
+  // ConfidenceBadge and detect user overrides
+  const [registryFields, setRegistryFields] = useState<Record<string, boolean>>({});
+  const [userOverrides, setUserOverrides] = useState<Record<string, boolean>>({});
+  const userEmailRef = useRef<string>('');
+
+  const { result: bizResult, loading: bizLoading } = useBusinessLookup({
+    email: userEmailRef.current,
+    companyName: company.companyName,
+    phone: company.companyPhone,
+    enabled: step === 2,
+  });
+
   // Load current user to pre-fill fields and check auth
   useEffect(() => {
     fetch('/api/auth/me').then(r => r.json()).then(d => {
@@ -110,6 +127,8 @@ export default function OnboardingPage() {
       }
       const u = d.data;
       setUserName(u.name || '');
+      // Capture email for business lookup
+      userEmailRef.current = u.email || '';
       setCompany({
         companyName:    u.company      || u.name || '',
         companyPhone:   u.companyPhone || '',
@@ -124,6 +143,38 @@ export default function OnboardingPage() {
       });
     }).catch(() => router.replace('/auth/login'));
   }, [router]);
+
+  // Auto-fill company fields from business registry lookup
+  useEffect(() => {
+    if (!bizResult || step !== 2) return;
+
+    const updates: Partial<CompanyForm> = {};
+    const newRegistryFields: Record<string, boolean> = {};
+
+    if (bizResult.companyName && !company.companyName.trim()) {
+      updates.companyName = bizResult.companyName.value;
+      newRegistryFields.companyName = true;
+    }
+    if (bizResult.companyPhone && !company.companyPhone.trim()) {
+      updates.companyPhone = bizResult.companyPhone.value;
+      newRegistryFields.companyPhone = true;
+    }
+    if (bizResult.companyAddress && !company.companyAddress.trim()) {
+      updates.companyAddress = bizResult.companyAddress.value;
+      newRegistryFields.companyAddress = true;
+    }
+    if (bizResult.companyWebsite && !company.companyWebsite.trim()) {
+      updates.companyWebsite = bizResult.companyWebsite.value;
+      newRegistryFields.companyWebsite = true;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      setCompany(p => ({ ...p, ...updates }));
+      setRegistryFields(p => ({ ...p, ...newRegistryFields }));
+    }
+  // Only re-run when bizResult changes (not on every company state change)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bizResult, step]);
 
   // ── Step 2: Save company info ──────────────────────────────────────────
   const saveCompanyInfo = async (): Promise<boolean> => {
@@ -309,17 +360,45 @@ export default function OnboardingPage() {
                 This appears on all your proposals and client communications.
               </p>
 
+              {/* Registry lookup loading banner */}
+              {bizLoading && (
+                <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs">
+                  <Loader2 size={12} className="animate-spin" />
+                  Looking up your business info from public registries…
+                </div>
+              )}
+
+              {/* Registry suggestion banner (shown once when results arrive) */}
+              {bizResult && !bizLoading && Object.keys(registryFields).length > 0 && (
+                <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400 text-xs">
+                  <Sparkles size={12} />
+                  Auto-filled some fields from {bizResult.method === 'opencorporates_api' ? 'OpenCorporates registry' : bizResult.method === 'email_domain' ? 'your email domain' : 'business lookup'}. Review and edit as needed.
+                </div>
+              )}
+
               <div className="space-y-4 mb-6">
                 <div>
                   <label className="block text-xs font-medium text-slate-400 mb-1.5">
                     Company name <span className="text-red-400">*</span>
+                    {registryFields.companyName && bizResult?.companyName && (
+                      <ConfidenceBadge
+                        confidence={mapConfidence(bizResult.companyName.confidence)}
+                        source="registry"
+                        detail={bizResult.companyName.derivation}
+                        size="xs"
+                        overridden={userOverrides.companyName}
+                      />
+                    )}
                   </label>
                   <div className="relative">
                     <Building2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                     <input
                       type="text"
                       value={company.companyName}
-                      onChange={e => setCompany(p => ({ ...p, companyName: e.target.value }))}
+                      onChange={e => {
+                        setCompany(p => ({ ...p, companyName: e.target.value }));
+                        if (registryFields.companyName) setUserOverrides(p => ({ ...p, companyName: true }));
+                      }}
                       placeholder="Sunshine Solar Co."
                       className="w-full bg-slate-800 border border-slate-600 rounded-lg pl-9 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50"
                     />
@@ -329,13 +408,25 @@ export default function OnboardingPage() {
                 <div>
                   <label className="block text-xs font-medium text-slate-400 mb-1.5">
                     Phone number
+                    {registryFields.companyPhone && bizResult?.companyPhone && (
+                      <ConfidenceBadge
+                        confidence={mapConfidence(bizResult.companyPhone.confidence)}
+                        source="registry"
+                        detail={bizResult.companyPhone.derivation}
+                        size="xs"
+                        overridden={userOverrides.companyPhone}
+                      />
+                    )}
                   </label>
                   <div className="relative">
                     <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                     <input
                       type="tel"
                       value={company.companyPhone}
-                      onChange={e => setCompany(p => ({ ...p, companyPhone: e.target.value }))}
+                      onChange={e => {
+                        setCompany(p => ({ ...p, companyPhone: e.target.value }));
+                        if (registryFields.companyPhone) setUserOverrides(p => ({ ...p, companyPhone: true }));
+                      }}
                       placeholder="(555) 123-4567"
                       className="w-full bg-slate-800 border border-slate-600 rounded-lg pl-9 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50"
                     />
@@ -345,13 +436,25 @@ export default function OnboardingPage() {
                 <div>
                   <label className="block text-xs font-medium text-slate-400 mb-1.5">
                     Website
+                    {registryFields.companyWebsite && bizResult?.companyWebsite && (
+                      <ConfidenceBadge
+                        confidence={mapConfidence(bizResult.companyWebsite.confidence)}
+                        source="registry"
+                        detail={bizResult.companyWebsite.derivation}
+                        size="xs"
+                        overridden={userOverrides.companyWebsite}
+                      />
+                    )}
                   </label>
                   <div className="relative">
                     <Globe size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                     <input
                       type="url"
                       value={company.companyWebsite}
-                      onChange={e => setCompany(p => ({ ...p, companyWebsite: e.target.value }))}
+                      onChange={e => {
+                        setCompany(p => ({ ...p, companyWebsite: e.target.value }));
+                        if (registryFields.companyWebsite) setUserOverrides(p => ({ ...p, companyWebsite: true }));
+                      }}
                       placeholder="https://yourcompany.com"
                       className="w-full bg-slate-800 border border-slate-600 rounded-lg pl-9 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50"
                     />
@@ -361,13 +464,25 @@ export default function OnboardingPage() {
                 <div>
                   <label className="block text-xs font-medium text-slate-400 mb-1.5">
                     Business address
+                    {registryFields.companyAddress && bizResult?.companyAddress && (
+                      <ConfidenceBadge
+                        confidence={mapConfidence(bizResult.companyAddress.confidence)}
+                        source="registry"
+                        detail={bizResult.companyAddress.derivation}
+                        size="xs"
+                        overridden={userOverrides.companyAddress}
+                      />
+                    )}
                   </label>
                   <div className="relative">
                     <MapPin size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                     <input
                       type="text"
                       value={company.companyAddress}
-                      onChange={e => setCompany(p => ({ ...p, companyAddress: e.target.value }))}
+                      onChange={e => {
+                        setCompany(p => ({ ...p, companyAddress: e.target.value }));
+                        if (registryFields.companyAddress) setUserOverrides(p => ({ ...p, companyAddress: true }));
+                      }}
                       placeholder="123 Main St, Phoenix, AZ 85001"
                       className="w-full bg-slate-800 border border-slate-600 rounded-lg pl-9 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50"
                     />

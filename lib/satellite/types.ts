@@ -193,6 +193,42 @@ export interface PhotoExtractionResult {
 }
 
 // ---------------------------------------------------------------------------
+// BusinessRegistryResult - auto-filled company info from public registries
+// ---------------------------------------------------------------------------
+
+/** Individual field extracted from a business registry lookup */
+export interface DetectedBusinessField<T> {
+  /** The detected/suggested value */
+  value: T;
+  /** Confidence 0-1 */
+  confidence: number;
+  /** Source of the detection */
+  source: 'opencorporates' | 'email-domain' | 'company-name-heuristic' | 'none';
+  /** Human-readable derivation */
+  derivation: string;
+}
+
+/** Combined result from business registry lookup */
+export interface BusinessRegistryResult {
+  /** Company name from registry (may be normalized/expanded) */
+  companyName: DetectedBusinessField<string> | null;
+  /** Phone number from registry */
+  companyPhone: DetectedBusinessField<string> | null;
+  /** Business address from registry */
+  companyAddress: DetectedBusinessField<string> | null;
+  /** Website from registry */
+  companyWebsite: DetectedBusinessField<string> | null;
+  /** Registry entity ID (e.g. OpenCorporates company number) */
+  registryId: string | null;
+  /** Registry jurisdiction (e.g. "US_AZ", "US_CA") */
+  jurisdiction: string | null;
+  /** Which lookup method was actually used */
+  method: 'opencorporates_api' | 'email_domain' | 'company_name_heuristic' | 'none';
+  /** Timestamp */
+  lookedUpAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // SatelliteAnalysisResult - combined output from full satellite analysis
 // ---------------------------------------------------------------------------
 export interface SatelliteAnalysisResult {

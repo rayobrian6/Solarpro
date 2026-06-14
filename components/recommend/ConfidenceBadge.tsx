@@ -50,6 +50,7 @@ export type ConfidenceSource =
   | 'address-lookup'  // Geocoded from address
   | 'ecosystem'       // Ecosystem catalog default
   | 'satellite'       // Satellite imagery analysis
+  | 'registry'        // Business registry lookup (OpenCorporates, etc.)
   | 'survey'          // Field survey observation
   | 'fallback'        // Rough fallback when computation fails
   | 'user'            // User-entered (overrides computation)
@@ -82,6 +83,7 @@ const SOURCE_LABELS: Record<ConfidenceSource, string> = {
   'address-lookup': 'Address',
   'ecosystem':      'Ecosystem',
   'satellite':      'Satellite',
+  'registry':       'Registry',
   'survey':         'Survey',
   'fallback':       'Fallback',
   'user':           'User',
@@ -99,6 +101,7 @@ const SOURCE_ICONS: Record<ConfidenceSource, React.ElementType> = {
   'address-lookup': MapPin,
   'ecosystem':      Cpu,
   'satellite':      MapPin,
+  'registry':       Database,
   'survey':         ClipboardList,
   'fallback':       HelpCircle,
   'user':           CheckCircle2,
