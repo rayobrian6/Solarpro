@@ -19,7 +19,7 @@
  * Guard: if user is not authenticated, redirects to /auth/login.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Sun, ArrowRight, ArrowLeft, CheckCircle, Building2,
@@ -109,10 +109,10 @@ export default function OnboardingPage() {
   // ConfidenceBadge and detect user overrides
   const [registryFields, setRegistryFields] = useState<Record<string, boolean>>({});
   const [userOverrides, setUserOverrides] = useState<Record<string, boolean>>({});
-  const userEmailRef = useRef<string>('');
+  const [userEmail, setUserEmail] = useState('');
 
   const { result: bizResult, loading: bizLoading } = useBusinessLookup({
-    email: userEmailRef.current,
+    email: userEmail,
     companyName: company.companyName,
     phone: company.companyPhone,
     enabled: step === 2,
@@ -127,8 +127,7 @@ export default function OnboardingPage() {
       }
       const u = d.data;
       setUserName(u.name || '');
-      // Capture email for business lookup
-      userEmailRef.current = u.email || '';
+      setUserEmail(u.email || '');
       setCompany({
         companyName:    u.company      || u.name || '',
         companyPhone:   u.companyPhone || '',
