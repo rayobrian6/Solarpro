@@ -397,6 +397,32 @@ function BillCalculator({ onAnalysis, project }: {
           <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${wantBattery ? 'translate-x-5' : 'translate-x-0.5'}`} />
         </button>
       </div>
+
+      {/* Phase 3D: Monthly usage distribution — sparkline instead of 12 blank fields */}
+      {annualKwh > 0 && (
+        <div>
+          <div className="text-xs text-slate-500 mb-1">Seasonal Usage Pattern</div>
+          <div className="flex items-end gap-0.5 h-8">
+            {(() => {
+              const avg = annualKwh / 12;
+              const seasonal = [0.85, 0.80, 0.90, 0.95, 1.05, 1.15, 1.25, 1.20, 1.10, 1.00, 0.88, 0.87];
+              const kwh12 = seasonal.map(s => Math.round(avg * s));
+              const max = Math.max(...kwh12);
+              const labels = ['J','F','M','A','M','J','J','A','S','O','N','D'];
+              return kwh12.map((kwh, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-0.5">
+                  <div
+                    className="w-full bg-blue-500/50 rounded-sm"
+                    style={{ height: `${(kwh / max) * 28}px` }}
+                    title={`${labels[i]}: ${kwh.toLocaleString()} kWh`}
+                  />
+                  <span className="text-slate-600" style={{ fontSize: '6px' }}>{labels[i]}</span>
+                </div>
+              ));
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

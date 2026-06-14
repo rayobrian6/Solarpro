@@ -138,7 +138,7 @@ export default function DesignSidebar({
         {/* System Configuration */}
         <Section title="Configuration" icon={<Settings size={12} />}>
           {systemType !== 'fence' && (
-            <SliderRow label="Tilt Angle" value={tilt} min={0} max={45} step={1} unit="°" onChange={setTilt} />
+            <SliderRow label="Panel Angle" value={tilt} min={0} max={45} step={1} unit={`° (matches roof pitch)`} onChange={setTilt} />
           )}
           {systemType === 'fence' && (
             <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-2 text-xs text-purple-300">
@@ -147,7 +147,7 @@ export default function DesignSidebar({
           )}
           <div>
             <div className="flex justify-between items-center mb-1">
-              <label className="text-xs text-slate-400">Azimuth</label>
+              <label className="text-xs text-slate-400">Roof Direction</label>
               <span className="text-xs font-semibold text-white">{azimuth}° ({azimuthLabel(azimuth)})</span>
             </div>
             <input
@@ -162,12 +162,12 @@ export default function DesignSidebar({
           </div>
 
           {systemType === 'roof' && (
-            <SliderRow label="Setback" value={setback} min={0.3} max={2.0} step={0.1} unit="m" onChange={setSetback} />
+            <SliderRow label="Fire Code Clearance" value={setback} min={0.3} max={2.0} step={0.1} unit="m" onChange={setSetback} />
           )}
           {(systemType === 'roof' || systemType === 'ground') && (
-            <SliderRow label="Row Spacing" value={rowSpacing} min={0.5} max={5.0} step={0.1} unit="m" onChange={setRowSpacing} />
+            <SliderRow label="Row Spacing (winter shadow clearance)" value={rowSpacing} min={0.5} max={5.0} step={0.1} unit="m" onChange={setRowSpacing} />
           )}
-          <SliderRow label="Panel Spacing" value={panelSpacing} min={0.01} max={0.1} step={0.01} unit="m" onChange={setPanelSpacing} />
+          <SliderRow label="Panel Gap (manufacturer spec)" value={panelSpacing} min={0.01} max={0.1} step={0.01} unit="m" onChange={setPanelSpacing} />
 
           {systemType === 'ground' && (
             <>
@@ -178,9 +178,9 @@ export default function DesignSidebar({
 
           {systemType === 'fence' && (
             <>
-              <SliderRow label="Fence Height" value={fenceHeight} min={1.0} max={4.0} step={0.1} unit="m" onChange={setFenceHeight} />
+              <SliderRow label="Fence Height (code standard)" value={fenceHeight} min={1.0} max={4.0} step={0.1} unit="m" onChange={setFenceHeight} />
               <div className="flex items-center justify-between">
-                <label className="text-xs text-slate-400">Bifacial E-W Optimization</label>
+                <label className="text-xs text-slate-400">Double-Sided Panels</label>
                 <button
                   onClick={() => setBifacialOptimized(!bifacialOptimized)}
                   className={`w-10 h-5 rounded-full transition-colors relative ${bifacialOptimized ? 'bg-amber-500' : 'bg-slate-600'}`}
@@ -190,7 +190,7 @@ export default function DesignSidebar({
               </div>
               {bifacialOptimized && (
                 <div className="text-xs text-amber-400 bg-amber-500/10 rounded-lg p-2">
-                  +20% bifacial gain applied for E-W facing panels
+                  +20% production gain for double-sided east-west facing panels
                 </div>
               )}
             </>
@@ -205,7 +205,7 @@ export default function DesignSidebar({
                 { label: 'Panels', value: panels.length.toString(), color: 'text-white' },
                 { label: 'System Size', value: `${systemSizeKw.toFixed(2)} kW`, color: 'text-amber-400' },
                 { label: 'Panel Wattage', value: `${selectedPanel.wattage}W`, color: 'text-white' },
-                { label: 'Array Area', value: `${(panels.length * selectedPanel.width * selectedPanel.height).toFixed(0)} m²`, color: 'text-white' },
+                { label: 'Array Area', value: `${(panels.length * selectedPanel.width * selectedPanel.height).toFixed(0)} m\u00b2`, color: 'text-white' },
               ].map(item => (
                 <div key={item.label} className="bg-slate-800/60 rounded-lg p-2">
                   <div className="text-slate-400">{item.label}</div>
@@ -230,8 +230,8 @@ export default function DesignSidebar({
             <div className="grid grid-cols-2 gap-2 text-xs">
               {[
                 { label: 'Annual Production', value: `${production.annualProductionKwh.toLocaleString()} kWh`, color: 'text-amber-400' },
-                { label: 'Offset', value: `${production.offsetPercentage}%`, color: production.offsetPercentage >= 100 ? 'text-emerald-400' : 'text-blue-400' },
-                { label: 'Specific Yield', value: `${production.specificYield} kWh/kWp`, color: 'text-white' },
+                { label: 'Energy Offset', value: `${production.offsetPercentage}%`, color: production.offsetPercentage >= 100 ? 'text-emerald-400' : 'text-blue-400' },
+                { label: 'Production Efficiency', value: `${production.specificYield} kWh/kWp`, color: 'text-white' },
                 { label: 'CO₂ Offset', value: `${production.co2OffsetTons} tons/yr`, color: 'text-emerald-400' },
               ].map(item => (
                 <div key={item.label} className="bg-slate-800/60 rounded-lg p-2">
@@ -283,7 +283,7 @@ export default function DesignSidebar({
             <div className="space-y-2 text-xs">
               {[
                 { label: 'Gross System Cost', value: `$${costEstimate.grossCost.toLocaleString()}` },
-                { label: 'Est. Incentives / ITC*', value: costEstimate.taxCredit > 0 ? `-$${costEstimate.taxCredit.toLocaleString()}` : 'See proposal', color: 'text-emerald-400' },
+                { label: 'Est. Incentives / 30% Tax Credit*', value: costEstimate.taxCredit > 0 ? `-$${costEstimate.taxCredit.toLocaleString()}` : 'See proposal', color: 'text-emerald-400' },
               ].map(item => (
                 <div key={item.label} className="flex justify-between">
                   <span className="text-slate-400">{item.label}</span>

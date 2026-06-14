@@ -103,7 +103,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
       {/* ---- Main Panel ---- */}
       <StepCard
         title="Main Panel"
-        subtitle="Identify the main electrical service panel"
+        subtitle="Identify the main electrical service panel for solar connection"
       >
         <StepField label="Panel Brand" required>
           <ChipGroup
@@ -117,17 +117,17 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
           />
         </StepField>
 
-        {/* Dangerous panel warning */}
+        {/* Dangerous panel warning — actionable guidance */}
         {isDangerousPanel && (
           <div className="mt-1 rounded-lg bg-red-50 border border-red-200 px-3 py-2">
             <p className="text-xs font-semibold text-red-700">
-              Flagged: Known problematic panel brand
+              Known hazard panel — must be replaced before solar
             </p>
             <p className="text-xs text-red-500 mt-0.5">
               {data.panelBrand === 'federal_pacific'
-                ? 'Federal Pacific (Stab-Lok) panels have known fire hazard issues.'
-                : 'Zinsco panels have known fire hazard issues.'}
-              {' '}Panel replacement may be required. Discuss with the customer.
+                ? 'Federal Pacific (Stab-Lok) panels have documented fire hazard failures and fail to trip breakers properly.'
+                : 'Zinsco panels have documented fire hazard failures and aluminum bus bars that corrode and overheat.'}
+              {' '}This panel must be replaced before solar can be installed. Homes built before 1990: check for Federal Pacific or Zinsco label on your panel. Discuss replacement with the customer.
             </p>
           </div>
         )}
@@ -135,7 +135,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
         <StepField
           label="Panel Rating (Amps)"
           required
-          hint="Locate on the main breaker label inside the panel"
+          hint="Estimated from building age — confirm at the panel"
         >
           <ChipGroup
             options={PANEL_RATING_OPTIONS}
@@ -149,7 +149,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
           {/* G2: Default panel rating suggestion from ecosystem */}
           {!data.panelRating && (
             <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500">
-              <span>Suggested:</span>
+              <span>Estimated:</span>
               <span className="font-semibold text-slate-700">{panelRatingPrefill.rating}A</span>
               <ConfidenceBadge
                 confidence={panelRatingPrefill.confidence}
@@ -180,16 +180,16 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
           />
         </StepField>
 
-        {/* 120% rule warning */}
+        {/* 120% rule warning — plain language */}
         {needsUpgradeFlag && (
           <div className="mt-1 rounded-lg bg-orange-50 border border-orange-200 px-3 py-2">
             <p className="text-xs font-semibold text-orange-700">
-              Flagged: May need panel upgrade
+              Panel may need upgrade for solar
             </p>
             <p className="text-xs text-orange-500 mt-0.5">
-              100A panel with no available slots - interconnection may require
-              a load-side tap, supply-side connection, or panel upgrade.
-              Confirm with engineering.
+              A 100A panel with no open breaker slots may not have enough room for the solar breaker
+              under the 120% safety rule. Options include a load-side tap, supply-side connection,
+              or upgrading to a 200A panel. Confirm with engineering.
             </p>
           </div>
         )}
@@ -198,7 +198,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
       {/* ---- Meter + Service ---- */}
       <StepCard
         title="Meter & Service Entrance"
-        subtitle="Used for NEM/interconnection permit plan set"
+        subtitle="Used for utility interconnection and permit plan set"
       >
         <StepField label="Meter Socket Type" required>
           <ChipGroup
@@ -253,7 +253,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview }: StepE
                   : 'Not selected'}
                 currentRaw={data.interconnectionPoint || ''}
                 recommended={interconnectionRecommendation}
-                reason={`Based on panel data, ${interconnectionPrefill.methodLabel} is the recommended method per NEC 705.12`}
+                reason={`Based on your panel data, ${interconnectionPrefill.methodLabel} is the recommended connection method per electrical code (NEC 705.12)`}
                 onApply={() => {
                   const mapped = necToSurveyMap[interconnectionPrefill.method];
                   if (mapped) {

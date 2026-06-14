@@ -958,7 +958,7 @@ function PublicProposalView({
                   className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${purchaseMode === mode ? 'text-slate-900' : 'text-slate-400 hover:text-white'}`}
                   style={purchaseMode === mode ? { background: primaryColor } : {}}
                 >
-                  {mode === 'finance' ? '\u26a1 Finance' : '\ud83d\udcb5 Cash'}
+                  {mode === 'finance' ? '\u26a1 Finance (recommended)' : '\ud83d\udcb5 Cash'}
                 </button>
               ))}
             </div>
@@ -1196,7 +1196,7 @@ function PublicProposalView({
                 </h3>
                 <p className="text-xs text-slate-300 leading-relaxed mb-3">
                   Under federal §48E, solar companies that own the system can still claim
-                  a <span className="text-amber-400 font-bold">{getSection48eRate()}% federal tax credit</span> and
+                  a <span className="text-amber-400 font-bold">{getSection48eRate()}% federal tax credit (through 2032)</span> and
                   pass those savings directly to you through a lease or power purchase agreement (PPA).
                   This means lower monthly payments — sometimes $0 upfront.
                 </p>

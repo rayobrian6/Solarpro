@@ -69,13 +69,13 @@ export function StepRoof({ data, onChange, disabled, siteOverview }: StepRoofPro
 
       {/* ---- Pitch + Rafter ---- */}
       <StepCard
-        title="Pitch & Framing"
-        subtitle="Used by CAD engine for tilt, ballast, and hardware selection"
+        title="Roof Pitch & Framing"
+        subtitle="Pitch determines panel angle; framing determines mounting hardware"
       >
         <StepField
           label="Roof Pitch"
           required
-          hint="Estimate if unknown - steeper = more mounting hardware"
+          hint="Estimate if unknown — steeper pitch needs more mounting hardware"
         >
           <ChipGroup
             options={ROOF_PITCH_OPTIONS}
@@ -104,7 +104,7 @@ export function StepRoof({ data, onChange, disabled, siteOverview }: StepRoofPro
         <StepField
           label="Rafter Spacing"
           required
-          hint="Standard is 24 OC for most residential"
+          hint={'Standard is 24" apart for most residential roofs'}
         >
           <ChipGroup
             options={RAFTER_SPACING_OPTIONS}
