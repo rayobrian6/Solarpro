@@ -1859,6 +1859,18 @@ const ACTION_GROUP_OF: Record<string, OperatorActionGroup> = {
   archive_lead: "danger",
 };
 
+// Canonical release-gate stages, shown as a checklist. A stage is "done" when
+// it is NOT in release_readiness.missing; any other missing key is appended.
+const RELEASE_STAGES: { key: string; label: string }[] = [
+  { key: "operator_reviewed", label: "Operator reviewed" },
+  { key: "qualification_checked", label: "Qualified" },
+  { key: "financing_readiness_reviewed", label: "Financing reviewed" },
+  { key: "approved_for_marketplace", label: "Approved for marketplace" },
+];
+
+const humanizeGap = (k: string) =>
+  k.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+
 const LEAD_QUEUE_DEFINITIONS = [
   { key: "all", label: "All Active" },
   ...LEAD_OPS_QUEUE_DEFINITIONS,
@@ -3896,6 +3908,86 @@ function IntakeFeedSection() {
                                 )}
                               </div>
                             )}
+                            {lead.release_readiness &&
+                              (() => {
+                                const missing =
+                                  lead.release_readiness?.missing ?? [];
+                                const ready =
+                                  lead.release_readiness?.ready === true;
+                                const items = [
+                                  ...RELEASE_STAGES.map((s) => ({
+                                    label: s.label,
+                                    done: !missing.includes(s.key),
+                                  })),
+                                  ...missing
+                                    .filter(
+                                      (g) =>
+                                        !RELEASE_STAGES.some(
+                                          (s) => s.key === g,
+                                        ),
+                                    )
+                                    .map((g) => ({
+                                      label: humanizeGap(g),
+                                      done: false,
+                                    })),
+                                ];
+                                const doneCount = items.filter(
+                                  (i) => i.done,
+                                ).length;
+                                const firstBlocked = items.findIndex(
+                                  (i) => !i.done,
+                                );
+                                return (
+                                  <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                                    <div className="mb-2 flex items-center justify-between">
+                                      <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+                                        Release readiness
+                                      </div>
+                                      {ready ? (
+                                        <span className="rounded-full border border-emerald-700 bg-emerald-950/40 px-2 py-0.5 text-[10px] uppercase tracking-wider text-emerald-300">
+                                          Ready to release
+                                        </span>
+                                      ) : (
+                                        <span className="text-[10px] text-zinc-500">
+                                          {doneCount} of {items.length} done
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex flex-col gap-1.5">
+                                      {items.map((it, idx) => (
+                                        <div
+                                          key={it.label}
+                                          className={`flex items-center gap-2 rounded-md px-2 py-1 text-xs ${idx === firstBlocked ? "border border-orange-600/60 bg-orange-950/30" : ""}`}
+                                        >
+                                          {it.done ? (
+                                            <CheckCheck className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+                                          ) : idx === firstBlocked ? (
+                                            <Clock className="h-3.5 w-3.5 shrink-0 text-orange-400" />
+                                          ) : (
+                                            <span className="h-2 w-2 shrink-0 rounded-full border border-zinc-600" />
+                                          )}
+                                          <span
+                                            className={
+                                              it.done
+                                                ? "text-zinc-400"
+                                                : idx === firstBlocked
+                                                  ? "font-medium text-orange-100"
+                                                  : "text-zinc-500"
+                                            }
+                                          >
+                                            {it.label}
+                                          </span>
+                                          {idx === firstBlocked && !ready && (
+                                            <span className="ml-auto text-[10px] uppercase tracking-wider text-orange-300">
+                                              next
+                                            </span>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                             {lead.intake_record_type === "intake_event" && (
                               <div className="mt-3 rounded-lg border border-purple-900/50 bg-purple-950/20 p-3">
                                 <div className="mb-2 flex items-center justify-between gap-3">
