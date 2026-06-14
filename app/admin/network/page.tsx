@@ -6099,6 +6099,7 @@ function MarketplaceWorkbenchSection() {
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [priceDraft, setPriceDraft] = useState<Record<string, string>>({});
 
   const loadMarketplace = useCallback(
     async (options?: { preserveResult?: boolean }) => {
@@ -6131,6 +6132,40 @@ function MarketplaceWorkbenchSection() {
   useEffect(() => {
     loadMarketplace();
   }, [loadMarketplace]);
+
+  async function setLeadPrice(opportunityId: string) {
+    const price = Number(priceDraft[opportunityId]);
+    if (!Number.isFinite(price) || price <= 0) {
+      setResult({
+        error: "Enter a price greater than 0.",
+        action: "update_price",
+      });
+      return;
+    }
+    setBusy(`${opportunityId}:update_price`);
+    setResult(null);
+    try {
+      const res = await fetch("/api/admin/network/marketplace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          opportunity_id: opportunityId,
+          action: "update_price",
+          asking_price: price,
+        }),
+      });
+      const data = await parseAdminJsonResponse(res, "Set price failed");
+      setResult(data);
+      if (data.success !== false) {
+        setPriceDraft((prev) => ({ ...prev, [opportunityId]: "" }));
+        await loadMarketplace({ preserveResult: true });
+      }
+    } catch (e) {
+      setResult({ error: String(e) });
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function runWorkbenchAction(
     opportunityId: string,
@@ -6353,6 +6388,35 @@ function MarketplaceWorkbenchSection() {
                       <div className="mt-1 text-xs text-zinc-500">
                         Value {formatCurrency(opp.estimated_project_value)} ·
                         Price {formatCurrency(price)}
+                      </div>
+                      <div className="mt-1.5 flex items-center gap-1.5">
+                        <span className="text-[11px] text-zinc-500">$</span>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={priceDraft[opp.id] ?? ""}
+                          onChange={(e) =>
+                            setPriceDraft((prev) => ({
+                              ...prev,
+                              [opp.id]: e.target.value,
+                            }))
+                          }
+                          placeholder={
+                            price != null ? String(price) : "set price"
+                          }
+                          className="w-20 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-white placeholder-zinc-600 focus:border-emerald-600 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          disabled={busy === `${opp.id}:update_price`}
+                          onClick={() => setLeadPrice(opp.id)}
+                          className="rounded-md border border-emerald-700 bg-emerald-950/40 px-2 py-1 text-[11px] font-medium text-emerald-200 hover:bg-emerald-900/40 disabled:opacity-40"
+                        >
+                          {busy === `${opp.id}:update_price`
+                            ? "Saving…"
+                            : "Set price"}
+                        </button>
                       </div>
                       <div className="mt-1 text-[11px] text-zinc-500">
                         Marketplace {formatDisplayValue(marketplacePriority)} ·
