@@ -1,11 +1,15 @@
 // ============================================================================
-// v47.437 - Survey V2: Step 2 - Roof & Mounting Conditions
+// v47.438 - Survey V2: Step 2 - Roof & Mounting Conditions
 //
 // Captures roof material, pitch, rafter spacing, condition, age,
 // attic access, and mounting notes.
 //
 // All fields map directly to CAD engine inputs for panel layout and
 // mounting hardware selection.
+//
+// Phase 4A/4C: Satellite roof material + pitch detection pre-fill.
+// When lat/lng are available, satellite analysis suggests roof material
+// and pitch with ConfidenceBadge. User can accept or override.
 //
 // Pure ASCII, no Unicode.
 // ============================================================================
@@ -22,12 +26,14 @@ import {
 } from './ui/ChipGroup';
 import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
 import { computeTilt } from '@/lib/survey/prefillComputations';
+import { useSatelliteAnalysis } from '@/hooks/useSatelliteAnalysis';
+import { mapConfidence } from '@/lib/satellite/types';
 
 interface StepRoofProps {
   data: SurveyRoofConditions;
   onChange: (data: SurveyRoofConditions) => void;
   disabled?: boolean;
-  /** Site overview for latitude-based tilt fallback */
+  /** Site overview for latitude-based tilt fallback + satellite analysis */
   siteOverview?: SurveySiteOverview;
 }
 
@@ -39,6 +45,17 @@ export function StepRoof({ data, onChange, disabled, siteOverview }: StepRoofPro
     onChange({ ...data, [key]: value });
   }
 
+  // Phase 4A/4C: Satellite roof analysis
+  const {
+    result: satelliteResult,
+    loading: satelliteLoading,
+  } = useSatelliteAnalysis({
+    latitude: siteOverview?.latitude ?? null,
+    longitude: siteOverview?.longitude ?? null,
+    structureType: siteOverview?.structureType || undefined,
+    enabled: !disabled,
+  });
+
   // G1: Compute tilt prefill from roof pitch + latitude fallback
   const tiltPrefill = useMemo(() => {
     return computeTilt({
@@ -47,8 +64,46 @@ export function StepRoof({ data, onChange, disabled, siteOverview }: StepRoofPro
     });
   }, [data.roofPitch, siteOverview?.latitude]);
 
+  // Phase 4C: Satellite material suggestion
+  const satelliteMaterial = satelliteResult?.roof?.material ?? null;
+  const satellitePitch = satelliteResult?.roof?.pitch ?? null;
+
+  // Whether satellite suggestion matches current selection
+  const materialMatchesSatellite = satelliteMaterial != null &&
+    data.roofMaterial === satelliteMaterial.material;
+  const pitchMatchesSatellite = satellitePitch != null &&
+    data.roofPitch === satellitePitch.pitch;
+
+  // Phase 4C: Auto-apply satellite material if no user selection yet
+  React.useEffect(() => {
+    if (satelliteMaterial && !data.roofMaterial && !disabled) {
+      set('roofMaterial', satelliteMaterial.material);
+    }
+    // Only run as satellite result first arrives and material is empty
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [satelliteMaterial?.material]);
+
+  React.useEffect(() => {
+    if (satellitePitch && !data.roofPitch && !disabled) {
+      set('roofPitch', satellitePitch.pitch);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [satellitePitch?.pitch]);
+
   return (
     <div className="space-y-4">
+      {/* ---- Satellite detection banner ---- */}
+      {satelliteLoading && (
+        <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+            <p className="text-xs font-medium text-cyan-700">
+              Analyzing satellite imagery for roof conditions...
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ---- Material ---- */}
       <StepCard
         title="Roof Material"
@@ -64,6 +119,39 @@ export function StepRoof({ data, onChange, disabled, siteOverview }: StepRoofPro
             columns={3}
             disabled={disabled}
           />
+          {/* Phase 4C: Satellite material suggestion */}
+          {satelliteMaterial && !satelliteLoading && (
+            <div className="mt-1.5 flex items-center gap-2 text-xs">
+              {materialMatchesSatellite ? (
+                <>
+                  <span className="text-cyan-600">Detected from satellite:</span>
+                  <span className="font-semibold text-cyan-800">
+                    {ROOF_MATERIAL_OPTIONS.find(o => o.value === satelliteMaterial.material)?.label ?? satelliteMaterial.material}
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(satelliteMaterial.confidence)}
+                    source="satellite"
+                    detail={satelliteMaterial.derivation}
+                    size="xs"
+                  />
+                </>
+              ) : (
+                <>
+                  <span className="text-slate-400">Satellite suggested:</span>
+                  <span className="text-slate-500 line-through">
+                    {ROOF_MATERIAL_OPTIONS.find(o => o.value === satelliteMaterial.material)?.label ?? satelliteMaterial.material}
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(satelliteMaterial.confidence)}
+                    source="satellite"
+                    detail={satelliteMaterial.derivation}
+                    size="xs"
+                    overridden={!materialMatchesSatellite && !!data.roofMaterial}
+                  />
+                </>
+              )}
+            </div>
+          )}
         </StepField>
       </StepCard>
 
@@ -75,7 +163,7 @@ export function StepRoof({ data, onChange, disabled, siteOverview }: StepRoofPro
         <StepField
           label="Roof Pitch"
           required
-          hint="Estimate if unknown — steeper pitch needs more mounting hardware"
+          hint="Estimate if unknown -- steeper pitch needs more mounting hardware"
         >
           <ChipGroup
             options={ROOF_PITCH_OPTIONS}
@@ -86,6 +174,39 @@ export function StepRoof({ data, onChange, disabled, siteOverview }: StepRoofPro
             columns={3}
             disabled={disabled}
           />
+          {/* Phase 4C: Satellite pitch suggestion */}
+          {satellitePitch && !satelliteLoading && (
+            <div className="mt-1.5 flex items-center gap-2 text-xs">
+              {pitchMatchesSatellite ? (
+                <>
+                  <span className="text-cyan-600">Detected from satellite:</span>
+                  <span className="font-semibold text-cyan-800">
+                    {ROOF_PITCH_OPTIONS.find(o => o.value === satellitePitch.pitch)?.label ?? satellitePitch.pitch}
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(satellitePitch.confidence)}
+                    source="satellite"
+                    detail={satellitePitch.derivation}
+                    size="xs"
+                  />
+                </>
+              ) : (
+                <>
+                  <span className="text-slate-400">Satellite suggested:</span>
+                  <span className="text-slate-500 line-through">
+                    {ROOF_PITCH_OPTIONS.find(o => o.value === satellitePitch.pitch)?.label ?? satellitePitch.pitch}
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(satellitePitch.confidence)}
+                    source="satellite"
+                    detail={satellitePitch.derivation}
+                    size="xs"
+                    overridden={!pitchMatchesSatellite && !!data.roofPitch}
+                  />
+                </>
+              )}
+            </div>
+          )}
           {/* G1: Tilt angle prefill from roof pitch + latitude fallback */}
           {tiltPrefill && (
             <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500">

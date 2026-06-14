@@ -499,6 +499,7 @@ export default function SurveyPage() {
           data={draft.obstructions}
           onChange={handleObstructions}
           disabled={submitting}
+          siteOverview={draft.siteOverview}
         />
       )}
       {draft.currentStep === 5 && (

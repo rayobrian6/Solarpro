@@ -59,6 +59,7 @@ const _systemCapabilitiesLimiter = makeLimiter(20, '60 s');
 
 // External API proxies
 const _solarApiLimiter       = makeLimiter(20, '60 s');  // Google Solar API proxy
+const _satelliteLimiter      = makeLimiter(10, '60 s');  // satellite imagery analysis (Phase 4)
 const _geoLimiter            = makeLimiter(30, '60 s');  // geocode/elevation/dsm
 const _utilityDetectLimiter  = makeLimiter(20, '60 s');  // utility detection
 const _utilityRatesLimiter   = makeLimiter(20, '60 s');  // utility rates lookup
@@ -101,6 +102,7 @@ export type LimiterKey =
   | 'system-capabilities'
   // External APIs
   | 'solar-api'
+  | 'satellite'
   | 'geo'
   | 'utility-detect'
   | 'utility-rates'
@@ -148,6 +150,7 @@ const LIMITERS: Record<LimiterKey, Ratelimit | null> = {
   'system-capabilities':    _systemCapabilitiesLimiter,
   // External APIs
   'solar-api':              _solarApiLimiter,
+  'satellite':              _satelliteLimiter,
   'geo':                    _geoLimiter,
   'utility-detect':         _utilityDetectLimiter,
   'utility-rates':          _utilityRatesLimiter,
