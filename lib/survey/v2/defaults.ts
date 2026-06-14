@@ -43,6 +43,9 @@ export interface HandoffClaims {
   category_name?: string;
   notes?: string;
   metadata?: Record<string, unknown>;
+  // QW-2: Pre-fill structure type and stories from project data
+  structure_type?: string;
+  stories?: string;
   iat: number;
   exp: number;
 }
@@ -51,13 +54,24 @@ export interface HandoffClaims {
 // blankSiteOverview
 // ---------------------------------------------------------------------------
 function blankSiteOverview(claims: HandoffClaims): SurveySiteOverview {
+  // QW-2: Pre-fill structureType and stories from JWT claims when available.
+  // These come from the project record and save the field worker from re-entering.
+  const validStructureTypes = ['residential', 'commercial', 'industrial'] as const;
+  const validStories = ['1', '2', '3+'] as const;
+  const prefillStructureType = claims.structure_type && validStructureTypes.includes(claims.structure_type as any)
+    ? (claims.structure_type as SurveySiteOverview['structureType'])
+    : '';
+  const prefillStories = claims.stories && validStories.includes(claims.stories as any)
+    ? (claims.stories as SurveySiteOverview['stories'])
+    : '';
+
   return {
     projectName: claims.project_name ?? claims.site_name ?? '',
     siteAddress: claims.site_address ?? '',
     latitude: claims.latitude ?? null,
     longitude: claims.longitude ?? null,
-    structureType: '',
-    stories: '',
+    structureType: prefillStructureType,
+    stories: prefillStories,
     inspectorName: claims.inspector_name ?? '',
     accessNotes: '',
   };

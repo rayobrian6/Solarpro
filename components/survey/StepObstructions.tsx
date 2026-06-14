@@ -69,7 +69,7 @@ export function StepObstructions({ data, onChange, disabled }: StepObstructionsP
                 min="0"
                 max="100"
                 step="5"
-                value={data.estimatedUsableRoofPct ?? 70}
+                value={data.estimatedUsableRoofPct ?? 80}
                 onChange={(e) => handleUsablePct(e.target.value)}
                 disabled={disabled}
                 className="w-full accent-cyan-500 disabled:opacity-50"
@@ -86,7 +86,7 @@ export function StepObstructions({ data, onChange, disabled }: StepObstructionsP
                     : ''
                 }
                 onChange={(e) => handleUsablePct(e.target.value)}
-                placeholder="70"
+                placeholder="auto"
                 disabled={disabled}
                 className="w-full text-center rounded-lg border border-gray-300 px-2 py-1.5
                   text-sm font-semibold text-gray-800 focus:outline-none focus:ring-2
@@ -95,6 +95,12 @@ export function StepObstructions({ data, onChange, disabled }: StepObstructionsP
             </div>
             <span className="text-sm font-semibold text-gray-500 shrink-0">%</span>
           </div>
+          {/* QW-1c: Show contextual note when no value set yet */}
+          {data.estimatedUsableRoofPct == null && (
+            <p className="mt-1 text-xs text-slate-400 italic">
+              Not yet estimated -- will default to ~80% (typical after standard fire setbacks). Adjust after mapping obstructions.
+            </p>
+          )}
 
           {/* Color-coded area label */}
           {data.estimatedUsableRoofPct != null && (

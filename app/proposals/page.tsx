@@ -1074,9 +1074,18 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
 
   // v47.245: ITC toggle — lives in the toolbar so it works from any navigation path
   const [noItc, setNoItc] = useState<boolean>((proposal.project as any)?.noItc ?? false);
+  // QW-8: Confirmation state for ITC toggle
+  const [showItcConfirm, setShowItcConfirm] = useState(false);
+  const [pendingItcValue, setPendingItcValue] = useState(false);
   // Sync if proposal prop changes (e.g. parent re-fetches live project)
   useEffect(() => { setNoItc((proposal.project as any)?.noItc ?? false); }, [proposal.project]);
   const handleToggleNoItc = async (val: boolean) => {
+    // QW-8: When turning ITC OFF (val=true), show confirmation dialog first
+    if (val && !noItc) {
+      setPendingItcValue(val);
+      setShowItcConfirm(true);
+      return;
+    }
     setNoItc(val);
     if (proposal.projectId) {
       try {
@@ -1084,6 +1093,20 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ noItc: val }),
+        });
+      } catch {}
+    }
+  };
+  // QW-8: Confirm ITC toggle after warning
+  const confirmItcToggle = async () => {
+    setShowItcConfirm(false);
+    setNoItc(pendingItcValue);
+    if (proposal.projectId) {
+      try {
+        await fetch(`/api/projects/${proposal.projectId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ noItc: pendingItcValue }),
         });
       } catch {}
     }
@@ -1601,6 +1624,35 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
       </div>
 
 
+      {/* QW-8: ITC Toggle Confirmation Modal */}
+      {showItcConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-slate-800 border border-slate-600 rounded-2xl p-6 max-w-md mx-4 shadow-2xl">
+            <h3 className="text-lg font-bold text-white mb-2">Remove Federal ITC?</h3>
+            <p className="text-sm text-slate-300 mb-1">
+              The 30% Investment Tax Credit is a significant financial benefit for the homeowner.
+            </p>
+            <p className="text-sm text-red-400 font-medium mb-4">
+              Removing ITC will increase the net cost by ~30% and may reduce close rate.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowItcConfirm(false)}
+                className="px-4 py-2 rounded-lg bg-slate-700 text-slate-300 text-sm font-medium hover:bg-slate-600"
+              >
+                Keep ITC
+              </button>
+              <button
+                onClick={confirmItcToggle}
+                className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-500"
+              >
+                Remove ITC
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Main Content ── */}
       <div id="proposal-document" className="max-w-5xl mx-auto px-4 py-4 space-y-4 print-content">
 
@@ -1836,6 +1888,10 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                   style={purchaseMode === mode ? { background: primaryColor } : {}}
                 >
                   {mode === 'finance' ? '\u26a1 Finance' : '\ud83d\udcb5 Cash'}
+                  {/* QW-9: Show recommended label on Finance option */}
+                  {mode === 'finance' && (
+                    <span className="ml-1.5 text-[10px] font-normal opacity-70">(recommended)</span>
+                  )}
                 </button>
               ))}
             </div>

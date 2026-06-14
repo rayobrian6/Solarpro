@@ -75,6 +75,9 @@ export interface HandoffTokenPayload {
   longitude?: number;
   gps_accuracy?: number;
   metadata?: Record<string, unknown>;
+  // QW-2: Pre-fill structure type and stories from project data
+  structure_type?: string;
+  stories?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +157,8 @@ export function mintHandoffToken(
     'longitude',
     'gps_accuracy',
     'metadata',
+    'structure_type',  // QW-2: pre-fill from project data
+    'stories',         // QW-2: pre-fill from project data
   ];
 
   for (const field of optionalFields) {

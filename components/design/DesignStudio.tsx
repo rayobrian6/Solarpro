@@ -25,6 +25,7 @@ import {
   generateMultipleRows,
   calcMinRowSpacing,
 } from '@/lib/placementEngine';
+import { getAhjByAddress } from '@/lib/jurisdictions/ahj-national';
 import { v4 as uuidv4 } from 'uuid';
 import SolarEngine3D, { type PlacementMode } from '../3d/SolarEngine3D';
 import { useToast } from '@/components/ui/Toast';
@@ -160,43 +161,36 @@ function azimuthLabel(az: number) {
   return AZIMUTH_LABELS[nearest];
 }
 
-// ─── Bill Analysis Calculator ─────────────────────────────────
+// ── Bill Analysis Calculator ────────────────────────────────────────────
+// QW-4/QW-6: Simplified — no mode selector. Annual kWh is auto-computed
+// from client data (bill OCR or entered consumption). The user sees the
+// computed value and can override it. Offset defaults to 100% (QW-5).
 function BillCalculator({ onAnalysis, project }: {
   onAnalysis: (analysis: BillAnalysis) => void;
   project: Project;
 }) {
-  const [mode, setMode] = useState<'monthly' | 'annual' | 'bill'>('monthly');
-  const [annualKwh, setAnnualKwh] = useState(project.client?.annualKwh || 12000);
-  const [avgMonthlyBill, setAvgMonthlyBill] = useState(project.client?.averageMonthlyBill || 180);
+  // QW-4: Auto-compute annual kWh from client data when available.
+  // Priority: client.monthlyKwh (12 months) > client.annualKwh > bill-derived > state avg fallback
+  const clientAnnualKwh = project.client?.monthlyKwh?.length === 12
+    ? project.client.monthlyKwh.reduce((a, b) => a + b, 0)
+    : project.client?.annualKwh
+      || Math.round((project.client?.averageMonthlyBill || 180) / (project.client?.utilityRate || 0.15) * 12)
+      || 12000;
+
+  const [annualKwh, setAnnualKwh] = useState(clientAnnualKwh);
   const [utilityRate, setUtilityRate] = useState(project.client?.utilityRate || 0.15);
-  const [offsetTarget, setOffsetTarget] = useState(100);
-  const [monthlyKwh, setMonthlyKwh] = useState<number[]>(
-    project.client?.monthlyKwh || Array(12).fill(1000)
-  );
+  const [offsetTarget, setOffsetTarget] = useState(100); // QW-5: default 100%
   const [wantBattery, setWantBattery] = useState(false);
-  const [peakDemandHours, setPeakDemandHours] = useState(6);
 
-  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  // Track whether user has manually overridden the annual kWh
+  const [kwhManuallySet, setKwhManuallySet] = useState(false);
 
-  const calculate = () => {
-    let kwh12: number[];
-    let rate = utilityRate;
-
-    if (mode === 'annual') {
-      const avg = annualKwh / 12;
-      kwh12 = Array(12).fill(0).map((_, i) => {
-        const seasonal = [0.85, 0.80, 0.90, 0.95, 1.05, 1.15, 1.25, 1.20, 1.10, 1.00, 0.88, 0.87];
-        return Math.round(avg * seasonal[i]);
-      });
-    } else if (mode === 'bill') {
-      const estKwh = avgMonthlyBill / rate;
-      kwh12 = Array(12).fill(0).map((_, i) => {
-        const seasonal = [0.85, 0.80, 0.90, 0.95, 1.05, 1.15, 1.25, 1.20, 1.10, 1.00, 0.88, 0.87];
-        return Math.round(estKwh * seasonal[i]);
-      });
-    } else {
-      kwh12 = monthlyKwh;
-    }
+  // QW-4: Auto-compute whenever inputs change (reactive, no button needed)
+  const calculate = useCallback(() => {
+    const rate = utilityRate;
+    const avg = annualKwh / 12;
+    const seasonal = [0.85, 0.80, 0.90, 0.95, 1.05, 1.15, 1.25, 1.20, 1.10, 1.00, 0.88, 0.87];
+    const kwh12 = Array(12).fill(0).map((_, i) => Math.round(avg * seasonal[i]));
 
     const totalKwh = kwh12.reduce((a, b) => a + b, 0);
     const avgMonthly = totalKwh / 12;
@@ -204,14 +198,14 @@ function BillCalculator({ onAnalysis, project }: {
     const peakKwh = kwh12[peakMonth];
 
     // System size: account for losses (~14%), offset target
-    const systemKw = (totalKwh * (offsetTarget / 100)) / (1400); // ~1400 kWh/kW/yr avg
-    const panelCount = Math.ceil((systemKw * 1000) / 400); // assume 400W panels
+    const systemKw = (totalKwh * (offsetTarget / 100)) / (1400);
+    const panelCount = Math.ceil((systemKw * 1000) / 400);
 
     let batteryRec: BatteryRecommendation | undefined;
     if (wantBattery) {
       const dailyKwh = totalKwh / 365;
-      const nighttimeKwh = dailyKwh * 0.4; // ~40% used at night
-      const recCapacity = Math.ceil(nighttimeKwh * 1.2); // 20% buffer
+      const nighttimeKwh = dailyKwh * 0.4;
+      const recCapacity = Math.ceil(nighttimeKwh * 1.2);
       batteryRec = {
         recommended: true,
         reason: 'Based on your usage pattern, battery storage will cover nighttime usage and provide backup power.',
@@ -239,83 +233,52 @@ function BillCalculator({ onAnalysis, project }: {
       offsetTarget,
       batteryRecommendation: batteryRec,
     });
-  };
+  }, [annualKwh, utilityRate, offsetTarget, wantBattery, onAnalysis]);
+
+  // QW-4: Reactive computation — auto-calculate whenever inputs change
+  useEffect(() => { calculate(); }, [calculate]);
 
   return (
     <div className="space-y-3">
-      {/* Mode selector */}
-      <div className="flex gap-1 bg-slate-800/60 rounded-lg p-1">
-        {(['monthly', 'annual', 'bill'] as const).map(m => (
-          <button
-            key={m}
-            onClick={() => setMode(m)}
-            className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${
-              mode === m ? 'bg-amber-500 text-black font-semibold' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            {m === 'monthly' ? 'Monthly' : m === 'annual' ? 'Annual kWh' : 'Avg Bill'}
-          </button>
-        ))}
+      {/* QW-4: Single auto-computed annual kWh input (no mode selector) */}
+      <div>
+        <div className="flex items-center justify-between">
+          <label className="text-xs text-slate-400">Annual kWh Usage</label>
+          {kwhManuallySet && (
+            <button
+              onClick={() => { setAnnualKwh(clientAnnualKwh); setKwhManuallySet(false); }}
+              className="text-xs text-cyan-400 hover:text-cyan-300"
+            >
+              Reset to computed
+            </button>
+          )}
+        </div>
+        <input
+          type="number"
+          value={annualKwh}
+          onChange={e => {
+            setAnnualKwh(parseInt(e.target.value) || 0);
+            setKwhManuallySet(true);
+          }}
+          className="w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
+        />
+        {!kwhManuallySet && (
+          <p className="text-xs text-slate-500 mt-1">
+            Auto-computed from client data. Edit to override.
+          </p>
+        )}
       </div>
 
-      {mode === 'monthly' && (
-        <div>
-          <div className="text-xs text-slate-400 mb-2">Enter monthly kWh usage:</div>
-          <div className="grid grid-cols-3 gap-1">
-            {MONTHS.map((month, i) => (
-              <div key={i}>
-                <div className="text-xs text-slate-500 mb-0.5">{month}</div>
-                <input
-                  type="number"
-                  value={monthlyKwh[i]}
-                  onChange={e => {
-                    const v = [...monthlyKwh];
-                    v[i] = parseInt(e.target.value) || 0;
-                    setMonthlyKwh(v);
-                  }}
-                  className="w-full bg-slate-800 border border-slate-600 rounded px-1.5 py-1 text-xs text-white"
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {mode === 'annual' && (
-        <div>
-          <label className="text-xs text-slate-400">Annual kWh Usage</label>
-          <input
-            type="number"
-            value={annualKwh}
-            onChange={e => setAnnualKwh(parseInt(e.target.value) || 0)}
-            className="w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
-          />
-        </div>
-      )}
-
-      {mode === 'bill' && (
-        <div className="space-y-2">
-          <div>
-            <label className="text-xs text-slate-400">Average Monthly Bill ($)</label>
-            <input
-              type="number"
-              value={avgMonthlyBill}
-              onChange={e => setAvgMonthlyBill(parseInt(e.target.value) || 0)}
-              className="w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
-            />
-          </div>
-          <div>
-            <label className="text-xs text-slate-400">Utility Rate ($/kWh)</label>
-            <input
-              type="number"
-              step="0.01"
-              value={utilityRate}
-              onChange={e => setUtilityRate(parseFloat(e.target.value) || 0)}
-              className="w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
-            />
-          </div>
-        </div>
-      )}
+      <div>
+        <label className="text-xs text-slate-400">Utility Rate ($/kWh)</label>
+        <input
+          type="number"
+          step="0.01"
+          value={utilityRate}
+          onChange={e => setUtilityRate(parseFloat(e.target.value) || 0)}
+          className="w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
+        />
+      </div>
 
       <SliderRow
         label="Offset Target"
@@ -332,13 +295,6 @@ function BillCalculator({ onAnalysis, project }: {
           <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${wantBattery ? 'translate-x-5' : 'translate-x-0.5'}`} />
         </button>
       </div>
-
-      <button
-        onClick={calculate}
-        className="btn-primary w-full text-sm"
-      >
-        <Calculator size={14} /> Calculate System Size
-      </button>
     </div>
   );
 }
@@ -475,12 +431,43 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [panelFilter, setPanelFilter] = useState('');
   const [inverterFilter, setInverterFilter] = useState('');
 
+  // ── AHJ-derived initial values (Phase 1 QW-1a/QW-1b) ──────────────────
+  // Look up AHJ jurisdiction from project address to get fire setback defaults
+  // instead of dangerous zero values. Falls back to national defaults if no match.
+  const ahjRecord = project.address ? getAhjByAddress(project.address) : null;
+  const INCHES_TO_METERS = 0.0254;
+
+  // QW-1a: Compute initial fire setbacks from AHJ jurisdiction data
+  const initialFireSetbacks: FireSetbackConfig = ahjRecord ? {
+    edgeSetbackM:  (ahjRecord.ridgeSetbackInches ?? 18) * INCHES_TO_METERS,  // ridge=18" → 0.457m
+    pathwayWidthM: (ahjRecord.pathwayWidthInches ?? 36) * INCHES_TO_METERS,   // pathway=36" → 0.914m
+    ridgeSetbackM: (ahjRecord.ridgeSetbackInches ?? 18) * INCHES_TO_METERS,   // ridge=18" → 0.457m
+    eaveSetbackM:  (ahjRecord.eaveSetbackInches ?? 0) * INCHES_TO_METERS,     // eave=0" (no IRC requirement)
+    enforcePathway: true,
+  } : DEFAULT_FIRE_SETBACKS;
+
+  // QW-1a: Compute initial setback from AHJ roofSetbackInches (the "setback" slider
+  // represents the general roof setback used in layout calculations).
+  // Default AHJ value is 36" (0.914m) — NOT zero, which produces non-compliant designs.
+  const initialSetbackM = ahjRecord
+    ? (ahjRecord.roofSetbackInches ?? 36) * INCHES_TO_METERS
+    : calcEffectiveSetback(DEFAULT_FIRE_SETBACKS);  // fallback: ~0.457m
+
+  // QW-1b: Compute initial row spacing from latitude-based shadow formula
+  // For roof mounts: 0.02m (clip gap only, panels are flush to roof)
+  // For ground mounts: calcMinRowSpacing using latitude-derived solar altitude
+  const initialPanelHeight = project.selectedPanel?.height ?? 1.7; // default panel ~1.7m tall
+  const initialTilt = project.systemType === 'fence' ? 90 : Math.round(Math.abs(initialLat));
+  const initialRowSpacing = project.systemType === 'ground'
+    ? calcMinRowSpacing(initialTilt, initialPanelHeight, initialLat)
+    : 0.02; // roof/fence: flush mount clip gap
+
   // Config state
-  const [tilt, setTilt] = useState(project.systemType === 'fence' ? 90 : 20);
+  const [tilt, setTilt] = useState(initialTilt);
   const [azimuth, setAzimuth] = useState(180);
-  const [rowSpacing, setRowSpacing] = useState(0.02); // v47.96: flush roof mount -- clip gap only (was 1.5m ground-mount)
+  const [rowSpacing, setRowSpacing] = useState(initialRowSpacing);
   const [panelSpacing, setPanelSpacing] = useState(0.006); // v47.98: 0.006m = ¼" clamp gap (was 0.02m)
-  const [setback, setSetback] = useState(0);    // v47.95: fire setbacks handle clearances
+  const [setback, setSetback] = useState(initialSetbackM);
   const [bifacialOptimized, setBifacialOptimized] = useState(true);
   const [fenceHeight, setFenceHeight] = useState(2.0);
   const [groundHeight, setGroundHeight] = useState(0.6);
@@ -492,7 +479,8 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [orientation, setOrientation] = useState<PanelOrientation>('portrait');
 
   // v30.9: Fire setback configuration (AHJ-configurable)
-  const [fireSetbacks, setFireSetbacks] = useState<FireSetbackConfig>(DEFAULT_FIRE_SETBACKS);
+  // QW-1a: Initialize from AHJ jurisdiction data instead of generic defaults
+  const [fireSetbacks, setFireSetbacks] = useState<FireSetbackConfig>(initialFireSetbacks);
   const [showSetbackZones, setShowSetbackZones] = useState(false);
   const [showCADDebug, setShowCADDebug] = useState(false); // CAD debug overlay: usable polygon + row lines
   // v47.118: Align panel grid to longest roof edge (instead of pure azimuth)
@@ -517,6 +505,9 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [calcMessage, setCalcMessage] = useState<string>('');
+  // QW-10: Reactive production calculation — auto-compute when layout changes
+  // with 3-second debounce. Replaces the manual "Calculate Production" button.
+  const autoCalcTimerRef = useRef<NodeJS.Timeout | null>(null);
   // Restore indicators — show what was loaded from DB on mount
   const [restoredPanelCount, setRestoredPanelCount] = useState<number>(0);
   const [restoredRoofPlaneCount, setRestoredRoofPlaneCount] = useState<number>(0);
@@ -569,6 +560,23 @@ export default function DesignStudio({ project, onSave }: Props) {
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { panelsRef2.current = panels; }, [panels]);
   useEffect(() => { roofPlanesRef.current = roofPlanes; }, [roofPlanes]);
+
+  // QW-10: Reactive production calculation — auto-compute with 3s debounce
+  // whenever panels change significantly. Replaces the manual button click.
+  useEffect(() => {
+    // Don't auto-calc if no panels or already calculating
+    if (panels.length === 0 || calculating) return;
+    // Clear any pending timer
+    if (autoCalcTimerRef.current) clearTimeout(autoCalcTimerRef.current);
+    // Debounce: wait 3 seconds after the last panel change before calculating
+    autoCalcTimerRef.current = setTimeout(() => {
+      calculateProduction();
+    }, 3000);
+    return () => {
+      if (autoCalcTimerRef.current) clearTimeout(autoCalcTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panels.length, systemSizeKw, tilt, azimuth]);
 
   // ── Auto-save layout to DB (3-second debounce after panel changes) ──────────
   const saveLayoutToDB = useCallback(async (panelList: PlacedPanel[]) => {
@@ -3641,13 +3649,24 @@ export default function DesignStudio({ project, onSave }: Props) {
                       <div className="text-xs text-slate-600 mt-1.5 text-center">Run PVWatts for precise results</div>
                     </div>
                   )}
+                  {/* QW-10: Production auto-calculates with 3s debounce.
+                      This button allows immediate re-calculation if needed. */}
                   <button
                     onClick={calculateProduction}
                     disabled={calculating || panels.length === 0}
-                    className="btn-primary w-full mt-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className={`w-full mt-1 text-sm font-medium rounded-lg px-3 py-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                      calculating
+                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                        : 'bg-slate-700/50 text-slate-300 border border-slate-600 hover:bg-slate-600/50'
+                    }`}
                   >
-                    {calculating ? <><Loader size={14} className="animate-spin" /> Calculating...</> : <><Play size={14} /> Calculate Production</>}
+                    {calculating ? <><Loader size={14} className="animate-spin" /> Calculating...</> : <><Play size={14} /> Recalculate</>}
                   </button>
+                  {!calculating && panels.length > 0 && !production && (
+                    <div className="text-xs text-slate-500 text-center mt-0.5">
+                      Auto-calculating in 3s...
+                    </div>
+                  )}
                   {calcMessage && (
                     <div className={`text-xs mt-1 px-2 py-1.5 rounded-lg ${
                       calcMessage.startsWith('✅')
