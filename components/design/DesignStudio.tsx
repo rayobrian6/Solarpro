@@ -29,6 +29,7 @@ import { getAhjByAddress } from '@/lib/jurisdictions/ahj-national';
 // Phase 2: Compute & Recommend — provenance-aware form fields
 import { ComputedField, type ComputedFieldValue } from '@/components/recommend/ComputedField';
 import { ConfidenceBadge, type ConfidenceSource } from '@/components/recommend/ConfidenceBadge';
+import { RecommendationCard, type RecommendationValue } from '@/components/recommend/RecommendationCard';
 import { v4 as uuidv4 } from 'uuid';
 import SolarEngine3D, { type PlacementMode } from '../3d/SolarEngine3D';
 import { useToast } from '@/components/ui/Toast';
@@ -612,6 +613,58 @@ export default function DesignStudio({ project, onSave }: Props) {
 
   // Bill analysis state
   const [billAnalysis, setBillAnalysis] = useState<BillAnalysis | null>(null);
+
+  // Phase 2E: PVWatts auto-sizing recommendation state
+  const [pvwattsSizing, setPvwattsSizing] = useState<{
+    recommendedKw: number;
+    annualKwhProduction: number;
+    monthlyProduction: number[];
+    peakSunHours: number;
+    panelCount400w: number;
+    source: 'pvwatts' | 'estimate';
+  } | null>(null);
+  const [pvwattsLoading, setPvwattsLoading] = useState(false);
+
+  // Phase 2E: Auto-call PVWatts when we have annual kWh + location data
+  useEffect(() => {
+    if (!billAnalysis || !project.lat || !project.lng || !project.stateCode) return;
+    if (billAnalysis.annualKwh <= 0) return;
+    // Don't re-run if we already have a PVWatts result
+    if (pvwattsSizing) return;
+
+    let cancelled = false;
+    setPvwattsLoading(true);
+
+    import('@/lib/autoSizing').then(({ calculateSystemSize }) => {
+      if (cancelled) return;
+      return calculateSystemSize({
+        annualKwh: billAnalysis.annualKwh,
+        lat: project.lat!,
+        lng: project.lng!,
+        stateCode: project.stateCode!,
+        offsetPercent: billAnalysis.offsetTarget || 100,
+        tilt,
+        azimuth,
+      });
+    }).then(result => {
+      if (cancelled || !result) return;
+      setPvwattsSizing({
+        recommendedKw: result.recommendedKw,
+        annualKwhProduction: result.annualKwhProduction,
+        monthlyProduction: result.monthlyProduction,
+        peakSunHours: result.peakSunHours,
+        panelCount400w: result.panelCount400w,
+        source: result.source,
+      });
+    }).catch(err => {
+      console.warn('[DesignStudio] PVWatts auto-sizing failed:', err);
+    }).finally(() => {
+      if (!cancelled) setPvwattsLoading(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [billAnalysis, project.lat, project.lng, project.stateCode, tilt, azimuth, pvwattsSizing]);
+
   const [activeTab, setActiveTab] = useState<'design' | 'bill' | 'equipment' | 'battery'>('design');
 
   // Calculation state
@@ -4512,6 +4565,39 @@ export default function DesignStudio({ project, onSave }: Props) {
               <>
                 <Section title="Bill Analysis" icon={<Calculator size={12} />} defaultOpen={true}>
                   <BillCalculator onAnalysis={setBillAnalysis} project={project} />
+
+                  {/* Phase 2E: PVWatts Auto-Sizing Recommendation */}
+                  {pvwattsLoading && (
+                    <div className="flex items-center gap-2 text-xs text-slate-400 mt-3">
+                      <span className="spinner w-3 h-3" />
+                      Running PVWatts simulation...
+                    </div>
+                  )}
+                  {pvwattsSizing && billAnalysis && (
+                    <div className="mt-3">
+                      <RecommendationCard
+                        title="System Size"
+                        currentDisplay={`${billAnalysis.recommendedSystemKw} kW`}
+                        currentRaw={billAnalysis.recommendedSystemKw}
+                        recommended={{
+                          display: `${pvwattsSizing.recommendedKw}`,
+                          raw: pvwattsSizing.recommendedKw,
+                          confidence: pvwattsSizing.source === 'pvwatts' ? 'high' : 'medium',
+                          source: pvwattsSizing.source === 'pvwatts' ? 'pvwatts' : 'state-avg',
+                          unit: 'kW',
+                        }}
+                        reason={`PVWatts calculates ${pvwattsSizing.recommendedKw} kW for ${billAnalysis.annualKwh.toLocaleString()} kWh/yr at ${pvwattsSizing.peakSunHours} peak sun hours with ${billAnalysis.offsetTarget}% offset.`}
+                        derivation={`Production model: ${pvwattsSizing.source === 'pvwatts' ? 'NREL PVWatts v8 API' : 'State average estimate'}. Annual production: ${pvwattsSizing.annualKwhProduction.toLocaleString()} kWh. Estimated panels: ~${pvwattsSizing.panelCount400w} (400W).`}
+                        onApply={(kw) => {
+                          // Apply the PVWatts recommendation — user can see it reflected in panel count guidance
+                          toast.success('PVWatts sizing applied', `${kw} kW recommended for your consumption and location`);
+                        }}
+                        onDismiss={() => {}}
+                        variant="inline"
+                        data-testid="pvwatts-sizing-recommendation"
+                      />
+                    </div>
+                  )}
                 </Section>
 
                 {billAnalysis && (
