@@ -13,8 +13,8 @@
 // Pure ASCII, no Unicode.
 // ============================================================================
 
-import React from 'react';
-import type { SurveyElectricalService } from '../../lib/survey/v2/types';
+import React, { useMemo } from 'react';
+import type { SurveyElectricalService, SurveySiteOverview } from '../../lib/survey/v2/types';
 import { StepCard, StepField, StepTextArea, StepToggle } from './ui/StepCard';
 import {
   ChipGroup,
@@ -25,20 +25,70 @@ import {
   INTERCONNECTION_OPTIONS,
   SERVICE_ENTRANCE_OPTIONS,
 } from './ui/ChipGroup';
+import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
+import { RecommendationCard, type RecommendationValue } from '@/components/recommend/RecommendationCard';
+import { computeDefaultPanelRating, computeInterconnection } from '@/lib/survey/prefillComputations';
 
 interface StepElectricalProps {
   data: SurveyElectricalService;
   onChange: (data: SurveyElectricalService) => void;
   disabled?: boolean;
+  /** Site overview for structure type (residential vs commercial) */
+  siteOverview?: SurveySiteOverview;
 }
 
-export function StepElectrical({ data, onChange, disabled }: StepElectricalProps) {
+export function StepElectrical({ data, onChange, disabled, siteOverview }: StepElectricalProps) {
   function set<K extends keyof SurveyElectricalService>(
     key: K,
     value: SurveyElectricalService[K],
   ) {
     onChange({ ...data, [key]: value });
   }
+
+  // G2: Default panel rating suggestion based on structure type
+  const panelRatingPrefill = useMemo(() => {
+    const systemType = siteOverview?.structureType || undefined;
+    return computeDefaultPanelRating(systemType);
+  }, [siteOverview?.structureType]);
+
+  // G3: Interconnection point auto-computation from NEC 705.12
+  const interconnectionPrefill = useMemo(() => {
+    // Parse panel rating to numeric bus rating
+    const ratingStr = data.panelRating as string;
+    const busRating = ratingStr && ratingStr !== 'other' && ratingStr !== ''
+      ? parseInt(ratingStr, 10)
+      : undefined;
+    // Main breaker is typically same as panel rating for residential
+    const mainBreaker = busRating;
+    // Parse available slots
+    let availableSlots: number | undefined;
+    if (data.availableBreakerSlots === '0') availableSlots = 0;
+    else if (data.availableBreakerSlots === '1-2') availableSlots = 2;
+    else if (data.availableBreakerSlots === '3-4') availableSlots = 4;
+    else if (data.availableBreakerSlots === '5+') availableSlots = 6;
+
+    return computeInterconnection({ busRating, mainBreaker, availableSlots });
+  }, [data.panelRating, data.availableBreakerSlots]);
+
+  // Map InterconnectionMethod to survey InterconnectionPoint chip value
+  const necToSurveyMap: Record<string, string> = {
+    'LOAD_SIDE': 'load_side',
+    'SUPPLY_SIDE_TAP': 'supply_side',
+    'MAIN_BREAKER_DERATE': 'main_panel',
+    'PANEL_UPGRADE': 'main_panel',
+  };
+
+  // Build RecommendationValue for interconnection
+  const interconnectionRecommendation: RecommendationValue | null = useMemo(() => {
+    if (!interconnectionPrefill) return null;
+    return {
+      display: interconnectionPrefill.methodLabel,
+      raw: necToSurveyMap[interconnectionPrefill.method] || interconnectionPrefill.method,
+      confidence: interconnectionPrefill.confidence,
+      source: interconnectionPrefill.source,
+      unit: interconnectionPrefill.necReference,
+    };
+  }, [interconnectionPrefill]);
 
   // Flag dangerous panels
   const isDangerousPanel =
@@ -96,6 +146,19 @@ export function StepElectrical({ data, onChange, disabled }: StepElectricalProps
             columns={4}
             disabled={disabled}
           />
+          {/* G2: Default panel rating suggestion from ecosystem */}
+          {!data.panelRating && (
+            <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500">
+              <span>Suggested:</span>
+              <span className="font-semibold text-slate-700">{panelRatingPrefill.rating}A</span>
+              <ConfidenceBadge
+                confidence={panelRatingPrefill.confidence}
+                source={panelRatingPrefill.source}
+                size="xs"
+              />
+              <span className="text-slate-400">-- {panelRatingPrefill.derivation}</span>
+            </div>
+          )}
         </StepField>
 
         <StepField
@@ -180,6 +243,30 @@ export function StepElectrical({ data, onChange, disabled }: StepElectricalProps
             columns={2}
             disabled={disabled}
           />
+          {/* G3: NEC 705.12 interconnection auto-computation recommendation */}
+          {interconnectionRecommendation && (
+            <div className="mt-2">
+              <RecommendationCard
+                title="NEC 705.12 Recommendation"
+                currentDisplay={data.interconnectionPoint
+                  ? INTERCONNECTION_OPTIONS.find(o => o.value === data.interconnectionPoint)?.label || data.interconnectionPoint
+                  : 'Not selected'}
+                currentRaw={data.interconnectionPoint || ''}
+                recommended={interconnectionRecommendation}
+                reason={`Based on panel data, ${interconnectionPrefill.methodLabel} is the recommended method per NEC 705.12`}
+                onApply={() => {
+                  const mapped = necToSurveyMap[interconnectionPrefill.method];
+                  if (mapped) {
+                    set('interconnectionPoint', mapped as SurveyElectricalService['interconnectionPoint']);
+                  }
+                }}
+                onDismiss={() => {}}
+                derivation={interconnectionPrefill.derivation}
+                necReference={interconnectionPrefill.necReference}
+                variant="inline"
+              />
+            </div>
+          )}
         </StepField>
       </StepCard>
 

@@ -483,6 +483,7 @@ export default function SurveyPage() {
           data={draft.roofConditions}
           onChange={handleRoof}
           disabled={submitting}
+          siteOverview={draft.siteOverview}
         />
       )}
       {draft.currentStep === 3 && (
@@ -490,6 +491,7 @@ export default function SurveyPage() {
           data={draft.electricalService}
           onChange={handleElectrical}
           disabled={submitting}
+          siteOverview={draft.siteOverview}
         />
       )}
       {draft.currentStep === 4 && (

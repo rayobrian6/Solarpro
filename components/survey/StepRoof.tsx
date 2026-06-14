@@ -10,8 +10,8 @@
 // Pure ASCII, no Unicode.
 // ============================================================================
 
-import React from 'react';
-import type { SurveyRoofConditions } from '../../lib/survey/v2/types';
+import React, { useMemo } from 'react';
+import type { SurveyRoofConditions, SurveySiteOverview } from '../../lib/survey/v2/types';
 import { StepCard, StepField, StepInput, StepTextArea, StepToggle } from './ui/StepCard';
 import {
   ChipGroup,
@@ -20,20 +20,32 @@ import {
   RAFTER_SPACING_OPTIONS,
   ROOF_CONDITION_OPTIONS,
 } from './ui/ChipGroup';
+import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
+import { computeTilt } from '@/lib/survey/prefillComputations';
 
 interface StepRoofProps {
   data: SurveyRoofConditions;
   onChange: (data: SurveyRoofConditions) => void;
   disabled?: boolean;
+  /** Site overview for latitude-based tilt fallback */
+  siteOverview?: SurveySiteOverview;
 }
 
-export function StepRoof({ data, onChange, disabled }: StepRoofProps) {
+export function StepRoof({ data, onChange, disabled, siteOverview }: StepRoofProps) {
   function set<K extends keyof SurveyRoofConditions>(
     key: K,
     value: SurveyRoofConditions[K],
   ) {
     onChange({ ...data, [key]: value });
   }
+
+  // G1: Compute tilt prefill from roof pitch + latitude fallback
+  const tiltPrefill = useMemo(() => {
+    return computeTilt({
+      roofPitch: data.roofPitch || undefined,
+      lat: siteOverview?.latitude ?? undefined,
+    });
+  }, [data.roofPitch, siteOverview?.latitude]);
 
   return (
     <div className="space-y-4">
@@ -74,6 +86,19 @@ export function StepRoof({ data, onChange, disabled }: StepRoofProps) {
             columns={3}
             disabled={disabled}
           />
+          {/* G1: Tilt angle prefill from roof pitch + latitude fallback */}
+          {tiltPrefill && (
+            <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500">
+              <span>Computed tilt:</span>
+              <span className="font-semibold text-slate-700">{tiltPrefill.tilt}deg</span>
+              <ConfidenceBadge
+                confidence={tiltPrefill.confidence}
+                source={tiltPrefill.source}
+                size="xs"
+              />
+              <span className="text-slate-400">-- {tiltPrefill.derivation}</span>
+            </div>
+          )}
         </StepField>
 
         <StepField

@@ -32,6 +32,7 @@ import {
   Sun,
   Zap,
   Database,
+  ClipboardList,
 } from 'lucide-react';
 
 // ── Types ────────────────────────────────────────────────────
@@ -47,6 +48,7 @@ export type ConfidenceSource =
   | 'address-lookup'  // Geocoded from address
   | 'ecosystem'       // Ecosystem catalog default
   | 'satellite'       // Satellite imagery analysis
+  | 'survey'          // Field survey observation
   | 'user'            // User-entered (overrides computation)
   | 'manual';         // Manual entry (no computation)
 
@@ -76,6 +78,7 @@ const SOURCE_LABELS: Record<ConfidenceSource, string> = {
   'address-lookup': 'Address',
   'ecosystem':      'Ecosystem',
   'satellite':      'Satellite',
+  'survey':         'Survey',
   'user':           'User',
   'manual':         'Manual',
 };
@@ -90,6 +93,7 @@ const SOURCE_ICONS: Record<ConfidenceSource, React.ElementType> = {
   'address-lookup': MapPin,
   'ecosystem':      Cpu,
   'satellite':      MapPin,
+  'survey':         ClipboardList,
   'user':           CheckCircle2,
   'manual':         HelpCircle,
 };
