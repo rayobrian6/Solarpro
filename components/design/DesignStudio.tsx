@@ -28,7 +28,7 @@ import {
 import { getAhjByAddress } from '@/lib/jurisdictions/ahj-national';
 // Phase 2: Compute & Recommend — provenance-aware form fields
 import { ComputedField, type ComputedFieldValue } from '@/components/recommend/ComputedField';
-import type { ConfidenceSource } from '@/components/recommend/ConfidenceBadge';
+import { ConfidenceBadge, type ConfidenceSource } from '@/components/recommend/ConfidenceBadge';
 import { v4 as uuidv4 } from 'uuid';
 import SolarEngine3D, { type PlacementMode } from '../3d/SolarEngine3D';
 import { useToast } from '@/components/ui/Toast';
@@ -568,6 +568,23 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [panelSpacing, setPanelSpacing] = useState(0.006); // v47.98: 0.006m = ¼" clamp gap (was 0.02m)
   const [setback, setSetback] = useState(initialSetbackM);
   const [bifacialOptimized, setBifacialOptimized] = useState(true);
+
+  // Phase 2D: ComputedField descriptors for tilt and azimuth with provenance
+  const tiltComputed: ComputedFieldValue = useMemo(() => ({
+    value: initialTilt,
+    confidence: initialLat !== 0 ? 'high' as const : 'medium' as const,
+    source: 'address-lookup' as ConfidenceSource,
+    derivation: `Optimal tilt = |latitude| (${Math.abs(initialLat).toFixed(1)}°) for maximum annual production`,
+    unit: '°',
+  }), [initialTilt, initialLat]);
+
+  const azimuthComputed: ComputedFieldValue = useMemo(() => ({
+    value: 180,
+    confidence: 'high' as const,
+    source: 'ecosystem' as ConfidenceSource,
+    derivation: 'South-facing (180°) is optimal in the Northern Hemisphere for maximum annual solar gain',
+    unit: '°',
+  }), []);
   const [fenceHeight, setFenceHeight] = useState(2.0);
   const [groundHeight, setGroundHeight] = useState(0.6);
   const [panelsPerRow, setPanelsPerRow] = useState(10);
@@ -3903,7 +3920,23 @@ export default function DesignStudio({ project, onSave }: Props) {
                   </div>
 
                   {activeZoneType !== 'fence' && (
-                    <SliderRow label="Tilt Angle" value={tilt} min={0} max={45} step={1} unit="°" onChange={setTilt} />
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs text-slate-400 flex items-center gap-1.5">
+                          Tilt Angle
+                          <ConfidenceBadge confidence={tiltComputed.confidence} source={tiltComputed.source} size="xs" />
+                        </label>
+                        <span className="text-xs font-semibold text-white">{tilt}°</span>
+                      </div>
+                      <input
+                        type="range" min={0} max={45} step={1} value={tilt}
+                        onChange={e => setTilt(parseInt(e.target.value))}
+                        className="w-full h-1.5 bg-slate-700 rounded-full appearance-none cursor-pointer accent-amber-500"
+                      />
+                      <p className="text-[10px] text-slate-500 mt-0.5">
+                        Optimal: |lat| = {Math.abs(initialLat).toFixed(0)}° for max annual production
+                      </p>
+                    </div>
                   )}
                   {activeZoneType === 'fence' && (
                     <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-2 text-xs text-purple-300">
@@ -3912,7 +3945,10 @@ export default function DesignStudio({ project, onSave }: Props) {
                   )}
                   <div>
                     <div className="flex justify-between items-center mb-1">
-                      <label className="text-xs text-slate-400">Azimuth</label>
+                      <label className="text-xs text-slate-400 flex items-center gap-1.5">
+                        Azimuth
+                        <ConfidenceBadge confidence={azimuthComputed.confidence} source={azimuthComputed.source} size="xs" />
+                      </label>
                       <span className="text-xs font-semibold text-white">{azimuth}° ({azimuthLabel(azimuth)})</span>
                     </div>
                     <input
