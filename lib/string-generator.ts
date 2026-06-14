@@ -16,6 +16,7 @@ import {
   findCompatiblePanels,
   formatCompatiblePanelClause,
 } from './panel-compatibility';
+import { necNextStandardOcpd } from '@/lib/permit/utils/helpers';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 

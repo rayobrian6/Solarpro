@@ -12,6 +12,141 @@ import type { EngineeringStateRegistry, EngineeringInvalidationLineageMetadata, 
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
+// ── Compliance Sub-Interfaces (Error 7e fix) ─────────────────────────────────
+// Replace `electrical?: any` and `structural?: any` with proper interfaces
+// so the compiler catches typos and missing fields on every
+// compliance.electrical.* and compliance.structural.* access site.
+
+export interface ElectricalCompliance {
+  acConductorCallout?: string;     // e.g. "#10 AWG" — AC wire gauge callout
+  dcConductorCallout?: string;     // e.g. "#10 AWG" — DC wire gauge callout
+  acWireAmpacity?: number;         // AC wire ampacity rating (derated)
+  acVoltageDrop?: number;          // AC voltage drop percentage
+  groundingConductor?: string;     // e.g. "#10 Copper"
+  acWireGauge?: string;            // e.g. "#10 AWG" — raw gauge for SLD
+  busbar?: {
+    backfeedBreakerRequired?: number;  // backfeed breaker amps
+    passes?: boolean;                   // 120% rule pass/fail
+    busbarRule?: '120%' | 'supply-side';
+    busRating?: number;
+    mainBreaker?: number;
+    solarBreakerRequired?: number;
+    maxAllowedSolarBreaker?: number;
+    method?: string;
+    message?: string;
+    necReference?: string;
+  };
+  conduitFill?: {
+    conduitType?: string;
+    conduitSize?: string;
+    fillPercent?: number;
+    passes?: boolean;
+  };
+  summary?: {
+    totalDcKw?: number;
+    totalAcKw?: number;
+    dcAcRatio?: number;
+  };
+  // Full ElectricalCalcResult fields for advanced pages / BOM / SLD
+  interconnection?: {
+    method?: string;
+    methodLabel?: string;
+    busRating?: number;
+    mainBreaker?: number;
+    solarBreakerRequired?: number;
+    maxAllowedSolarBreaker?: number;
+    passes?: boolean;
+    necReference?: string;
+    message?: string;
+  };
+  acSizing?: {
+    ocpdAmps?: number;
+    disconnectAmps?: number;
+    disconnectType?: string;
+    conductorGauge?: string;
+    conductorAmpacity?: number;
+    conduitSize?: string;
+    conduitFillPct?: number;
+    groundingConductor?: string;
+  };
+  inverters?: Array<{
+    inverterId?: number;
+    type?: string;
+    acOutputKw?: number;
+    acOutputCurrentMax?: number;
+    strings?: Array<{
+      stringId?: number;
+      panelCount?: number;
+      vocSTC?: number;
+      vocCorrected?: number;
+      iscSTC?: number;
+      iscCorrected?: number;
+      maxCurrentNEC?: number;
+      ocpdRating?: number;
+      wireGauge?: string;
+      wireAmpacity?: number;
+      voltageDrop?: number;
+    }>;
+    acWireResult?: {
+      selectedGauge?: string;
+      effectiveAmpacity?: number;
+      voltageDrop?: number;
+      conductorCallout?: string;
+      wasAutoSized?: boolean;
+      overallPass?: boolean;
+    };
+  }>;
+  rapidShutdownCompliant?: boolean;
+  status?: 'PASS' | 'WARNING' | 'FAIL';
+  // Survey integration notes (set by permitIntegration.ts from site survey data)
+  surveyNotes?: string[];
+}
+
+export interface StructuralCompliance {
+  wind?: {
+    windSpeed?: number;
+    exposureCategory?: string;
+    velocityPressure?: number;
+    netUpliftPressure?: number;
+    upliftPerAttachment?: number;
+  };
+  snow?: {
+    groundSnowLoad?: number;
+    roofSnowLoad?: number;
+    snowLoadPerAttachment?: number;   // lbs per attachment point from snow loading
+  };
+  rafter?: {
+    rafterSize?: string;
+    rafterSpacing?: number;
+    rafterSpan?: number;
+    bendingMoment?: number;
+    allowableBendingMoment?: number;
+    utilizationRatio?: number;
+    deflection?: number;
+    allowableDeflection?: number;
+    Fb_base?: number;
+    Cd?: number;
+    Cr?: number;
+    Fb_prime?: number;
+    totalLoadPsf?: number;
+    lineLoad?: number;
+  };
+  attachment?: {
+    safetyFactor?: number;
+    lagBoltCapacity?: number;
+    maxAllowedSpacing?: number;
+    totalUpliftPerAttachment?: number;
+  };
+  seismic?: {
+    sdc?: string;  // Seismic Design Category
+  };
+  totalDeadLoadPsf?: number;
+  moduleLoadPsf?: number;
+  rackingLoadPsf?: number;
+  // Survey integration notes (set by permitIntegration.ts from site survey data)
+  surveyNotes?: string[];
+}
+
 export interface PermitInput {
   project: {
     projectName: string;
@@ -225,8 +360,8 @@ export interface PermitInput {
       ahj: string;
       permitNotes?: string;
     };
-    electrical?: any;
-    structural?: any;
+    electrical?: ElectricalCompliance;
+    structural?: StructuralCompliance;
   };
   rulesResult?: {
     overallStatus: string;

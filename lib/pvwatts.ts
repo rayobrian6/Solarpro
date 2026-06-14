@@ -389,7 +389,7 @@ export async function calculateProductionFromDefinition(
 
   // ── Resolve system size ──────────────────────────────────────────────────
   const panelWatts = panels.length > 0
-    ? (panels[0] as any)?.wattage ?? 400
+    ? panels[0]?.wattage ?? 400
     : 400;
   const systemSizeKw = systemDef.systemSizeKw && systemDef.systemSizeKw > 0
     ? systemDef.systemSizeKw

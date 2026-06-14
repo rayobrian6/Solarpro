@@ -167,7 +167,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
                   <td>Inverter ${invIdx + 1}</td>
                   <td>${str.wireGauge} USE-2/PV Wire</td>
                   <td>${str.isc ? (Math.ceil(str.isc * 1.25 * 100) / 100).toFixed(2) + 'A' : (str.ampacity ? str.ampacity + 'A' : '—')}</td>
-                  <td>${str.isc ? Math.ceil(str.isc * 1.25 * 1.25) + 'A' : (str.ocpd ? str.ocpd + 'A' : '—')}</td>
+                  <td>${str.isc ? necNextStandardOcpd(str.isc * 1.56) + 'A' : (str.ocpd ? str.ocpd + 'A' : '—')}</td>
                   <td>${str.voltageDrop != null ? str.voltageDrop.toFixed(2) + '%' : '—'}</td>
                   <td>${project.conduitType}</td>
                   <td>${str.wireLength} ft</td>

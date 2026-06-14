@@ -6,6 +6,7 @@ import type { EngineeringRequirementEvaluation, EngineeringRequirementId } from 
 import { getEngineeringDecisionDefinition, listEngineeringDecisionDefinitions } from './decisionRegistry';
 import { runEngineeringDecisionAuditGuards } from './guards';
 import { stableEngineeringStateHash } from '@/lib/engineeringStateInvalidation/hash';
+import { necNextStandardOcpd } from '@/lib/permit/utils/helpers';
 import type {
   BuildEngineeringDecisionProvenanceInput,
   DecisionAwareBOMMetadata,

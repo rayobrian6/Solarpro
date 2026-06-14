@@ -322,14 +322,13 @@ export async function createProject(data: {
   }
 
   const project = rowToProject(rows[0]);
-  // Store extended location fields in notes metadata (JSON suffix) if DB columns not yet migrated
-  // These are passed through to the returned project object for immediate use
-  if (data.stateCode) (project as any).stateCode = data.stateCode;
-  if (data.city) (project as any).city = data.city;
-  if (data.county) (project as any).county = data.county;
-  if (data.zip) (project as any).zip = data.zip;
-  if (data.utilityName) (project as any).utilityName = data.utilityName;
-  if (data.utilityRatePerKwh) (project as any).utilityRatePerKwh = data.utilityRatePerKwh;
+  // Store extended location fields — Project type already declares these
+  if (data.stateCode) project.stateCode = data.stateCode;
+  if (data.city) project.city = data.city;
+  if (data.county) project.county = data.county;
+  if (data.zip) project.zip = data.zip;
+  if (data.utilityName) project.utilityName = data.utilityName;
+  if (data.utilityRatePerKwh) project.utilityRatePerKwh = data.utilityRatePerKwh;
   return project;
 }
 

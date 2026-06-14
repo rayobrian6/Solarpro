@@ -20,6 +20,9 @@ import {
 } from '@/lib/engineeringDecisionProvenance';
 import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
 import { necNextStandardOcpd } from './utils/helpers';
+import { runElectricalCalc, type ElectricalCalcInput, type InverterInput, type StringInput, type InterconnectionMethod } from '@/lib/electrical-calc';
+import { getPanelById, getInverterById, getMicroinverterById } from '@/lib/equipment-db';
+import type { ElectricalCompliance } from './types';
 
 // Section imports
 import { pageCoverSheet } from './sections/coverSheet';
@@ -354,6 +357,288 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   } catch (structErr: unknown) {
     // Non-critical: permit still generates, structural page will show defaults
     console.warn('[PLANSET] Server-side structural V4 failed (non-critical):', (structErr as Error)?.message ?? structErr);
+  }
+
+
+  // ── Server-side electrical calculation (Error 7d fix) ────────────────────────
+  // When compliance.electrical is empty or missing key computed fields, the
+  // frontend's electrical calculation API was never called before permit generation.
+  // Run the electrical engine server-side so permit pages always show real
+  // calculated values (busbar rule, conduit fill, wire sizing, OCPD, etc.)
+  // instead of "—" placeholders.
+  try {
+    const existingElec = input.compliance?.electrical;
+    const needsElecCalc = !existingElec
+      || (existingElec.busbar == null && existingElec.acConductorCallout == null);
+    if (needsElecCalc && input.system?.inverters?.length) {
+      const { runElectricalCalc: _runElec } = require('@/lib/electrical-calc');
+      const { getPanelById: _getPanelById } = require('@/lib/equipment-db');
+      const { getInverterById: _getInvById } = require('@/lib/equipment-db');
+      const { getMicroinverterById: _getMicroById } = require('@/lib/equipment-db');
+
+      // ── Build InverterInput[] from system.inverters + equipment-db backfill ──
+      const invInputs: InverterInput[] = input.system.inverters.map((inv, invIdx) => {
+        // Resolve full inverter spec from equipment DB if model matches
+        let invSpec: any = null;
+        if (inv.type === 'micro') {
+          invSpec = _getMicroById(inv.model) || _getMicroById(inv.model?.toLowerCase());
+        } else {
+          invSpec = _getInvById(inv.model) || _getInvById(inv.model?.toLowerCase());
+        }
+
+        // Determine inverter type for electrical-calc
+        const invType: 'string' | 'micro' | 'optimizer' =
+          inv.type === 'micro' ? 'micro'
+            : inv.type === 'optimizer' ? 'optimizer'
+            : 'string';
+
+        // Build StringInput[] — backfill missing panel specs from equipment DB
+        const stringInputs: StringInput[] = (inv.strings || []).map((str) => {
+          // Try to resolve panel spec from equipment DB
+          const panelSpec = _getPanelById(str.panelModel)
+            || _getPanelById(str.panelModel?.toLowerCase().replace(/\s+/g, '-'));
+
+          // Fallback: try project-level panel model/manufacturer fields
+          const projPanelModel = input.project.panelModel || input.project.moduleModel;
+          const projPanel = projPanelModel
+            ? (_getPanelById(projPanelModel) || _getPanelById(projPanelModel.toLowerCase().replace(/\s+/g, '-')))
+            : null;
+
+          const db = panelSpec || projPanel;
+
+          return {
+            panelCount:   str.panelCount || 0,
+            panelVoc:     str.panelVoc   || db?.voc   || 0,
+            panelIsc:     str.panelIsc   || db?.isc   || str.isc || 0,
+            panelImp:     db?.imp        || 0,
+            panelVmp:     db?.vmp        || 0,
+            panelWatts:   str.panelWatts || db?.watts || 0,
+            tempCoeffVoc: db?.tempCoeffVoc  ?? -0.27,   // %/°C — common default for silicon
+            tempCoeffIsc: db?.tempCoeffIsc  ?? 0.05,     // %/°C — common default
+            maxSeriesFuseRating: db?.maxSeriesFuseRating ?? 20, // A — common default
+            wireGauge:    str.wireGauge  || input.project.wireGauge || '#12 AWG',
+            wireLength:   str.wireLength || input.project.wireLength || 50,
+            conduitType:  input.project.conduitType || 'EMT',
+          };
+        });
+
+        // For microinverters: create a synthetic single "string" per device
+        // if no strings are provided (typical for micro topology)
+        if (invType === 'micro' && stringInputs.length === 0) {
+          const panelSpec = _getPanelById(
+            input.system.modules?.[0]?.panelModel || input.system.modules?.[0]?.model || ''
+          );
+          const microSpec = invSpec;
+          stringInputs.push({
+            panelCount:   microSpec?.modulesPerDevice || 1,
+            panelVoc:     panelSpec?.voc  || input.project.panelVoc || 0,
+            panelIsc:     panelSpec?.isc  || input.project.panelIsc || 0,
+            panelImp:     panelSpec?.imp  || 0,
+            panelVmp:     panelSpec?.vmp  || 0,
+            panelWatts:   panelSpec?.watts || input.system.modules?.[0]?.panelWatts || 0,
+            tempCoeffVoc: panelSpec?.tempCoeffVoc ?? -0.27,
+            tempCoeffIsc: panelSpec?.tempCoeffIsc ?? 0.05,
+            maxSeriesFuseRating: panelSpec?.maxSeriesFuseRating ?? 20,
+            wireGauge:    input.project.wireGauge || '#12 AWG',
+            wireLength:   input.project.wireLength || 50,
+            conduitType:  input.project.conduitType || 'EMT',
+          });
+        }
+
+        return {
+          type:              invType,
+          acOutputKw:        inv.acOutputKw || invSpec?.acOutputKw || 0,
+          maxDcVoltage:      inv.maxDcVoltage || invSpec?.maxDcVoltage || 600,
+          mpptVoltageMin:    invSpec?.mpptVoltageMin || 0,
+          mpptVoltageMax:    invSpec?.mpptVoltageMax || invSpec?.mpptVoltageMax || 0,
+          maxInputCurrentPerMppt: invSpec?.maxInputCurrentPerMppt || invSpec?.maxInputCurrent || 0,
+          acOutputCurrentMax: invSpec?.acOutputCurrentMax || 0,
+          strings:           stringInputs,
+          modulesPerDevice:  invSpec?.modulesPerDevice,
+          deviceCount:       inv.type === 'micro'
+            ? Math.ceil((input.system.totalPanels || 1) / (invSpec?.modulesPerDevice || 1))
+            : undefined,
+          integratedDcDisconnect: invSpec?.integratedDcDisconnect,
+        } as InverterInput;
+      });
+
+      // ── Determine NEC version from jurisdiction or AHJ ──
+      const _rawNec = input.compliance?.jurisdiction?.necVersion ?? '';
+      const necVersion: '2017' | '2020' | '2023' =
+        _rawNec === '2017' ? '2017'
+          : _rawNec === '2023' ? '2023'
+          : '2020';
+
+      // ── Determine interconnection method ──
+      const interconnMethod = input.project.interconnectionMethod || 'LOAD_SIDE';
+      const panelBusRating = input.project.panelBusRating || input.project.mainPanelAmps || 200;
+
+      // ── Build the full ElectricalCalcInput ──
+      const electricalInput: ElectricalCalcInput = {
+        inverters:          invInputs,
+        mainPanelAmps:      input.project.mainPanelAmps || 200,
+        systemVoltage:      240,
+        designTempMin:      input.project.designTempMin ?? -10,
+        designTempMax:      35,   // °C — typical ASHRAE 2% design temp
+        rooftopTempAdder:   35,   // °C — NEC 310.15(A)(3) rooftop adder
+        wireGauge:          input.project.wireGauge || '#10 AWG',
+        wireLength:         input.project.wireLength || 50,
+        conduitType:        input.project.conduitType || 'EMT',
+        rapidShutdown:      input.project.rapidShutdown ?? false,
+        acDisconnect:       input.project.acDisconnect ?? false,
+        dcDisconnect:       input.project.dcDisconnect ?? false,
+        necVersion,
+        interconnection: {
+          method: (interconnMethod === 'SUPPLY_SIDE_TAP' ? 'SUPPLY_SIDE_TAP'
+                  : interconnMethod === 'MAIN_BREAKER_DERATE' ? 'MAIN_BREAKER_DERATE'
+                  : interconnMethod === 'PANEL_UPGRADE' ? 'PANEL_UPGRADE'
+                  : 'LOAD_SIDE') as InterconnectionMethod,
+          busRating:   panelBusRating,
+          mainBreaker: input.project.mainPanelAmps || panelBusRating,
+        },
+        // Battery fields
+        batteryBackfeedA:        input.project.batteryBackfeedA ?? 0,
+        batteryCount:            input.project.batteryCount ?? 0,
+        batteryContinuousOutputA: 0,
+        batteryModel:            input.project.batteryModel,
+        batteryManufacturer:     input.project.batteryBrand,
+        // Generator fields
+        generatorKw:             input.project.generatorKw,
+      };
+
+      const elecResult = _runElec(electricalInput);
+
+      // ── Map ElectricalCalcResult → ElectricalCompliance ──
+      if (!input.compliance) input.compliance = { overallStatus: '' } as PermitInput['compliance'];
+      const e: ElectricalCompliance = {};
+      e.status = elecResult.status;
+      e.acConductorCallout = elecResult.acConductorCallout || elecResult.acWireGauge;
+      e.acWireGauge = elecResult.acWireGauge;
+      e.acWireAmpacity = elecResult.acWireAmpacity;
+      e.acVoltageDrop = elecResult.acVoltageDrop;
+      e.groundingConductor = elecResult.groundingConductor;
+      e.rapidShutdownCompliant = elecResult.rapidShutdownCompliant;
+
+      // Busbar
+      if (elecResult.busbar) {
+        e.busbar = {
+          backfeedBreakerRequired: elecResult.busbar.backfeedBreakerRequired,
+          passes:                  elecResult.busbar.passes,
+          busbarRule:              elecResult.busbar.busbarRule,
+          busRating:               elecResult.busbar.mainPanelAmps,
+          mainBreaker:             electricalInput.interconnection?.mainBreaker,
+          solarBreakerRequired:    elecResult.busbar.backfeedBreakerRequired,
+          maxAllowedSolarBreaker:  elecResult.busbar.maxAllowedBackfeed,
+          method:                  elecResult.busbar.busbarRule === 'supply-side' ? 'Supply-Side Tap (NEC 705.11)' : 'Load-Side Connection (NEC 705.12(B))',
+          necReference:            elecResult.busbar.busbarRule === 'supply-side' ? 'NEC 705.11' : 'NEC 705.12(B)',
+          message:                 elecResult.busbar.passes ? 'Busbar rule satisfied' : 'Busbar rule NOT satisfied — review required',
+        };
+      }
+
+      // Conduit fill
+      if (elecResult.conduitFill) {
+        e.conduitFill = {
+          conduitType:  elecResult.conduitFill.conduitType,
+          conduitSize:  elecResult.conduitFill.conduitSize,
+          fillPercent:   elecResult.conduitFill.fillPercent,
+          passes:       elecResult.conduitFill.passes,
+        };
+      }
+
+      // Interconnection
+      if (elecResult.interconnection) {
+        e.interconnection = {
+          method:                 elecResult.interconnection.method,
+          methodLabel:            elecResult.interconnection.methodLabel,
+          busRating:              elecResult.interconnection.busRating,
+          mainBreaker:            elecResult.interconnection.mainBreaker,
+          solarBreakerRequired:   elecResult.interconnection.solarBreakerRequired,
+          maxAllowedSolarBreaker: elecResult.interconnection.maxAllowedSolarBreaker,
+          passes:                 elecResult.interconnection.passes,
+          necReference:           elecResult.interconnection.necReference,
+          message:                elecResult.interconnection.message,
+        };
+      }
+
+      // AC Sizing
+      if (elecResult.acSizing) {
+        e.acSizing = {
+          ocpdAmps:          elecResult.acSizing.ocpdAmps,
+          disconnectAmps:    elecResult.acSizing.disconnectAmps,
+          disconnectType:    elecResult.acSizing.disconnectType,
+          conductorGauge:    elecResult.acSizing.conductorGauge,
+          conductorAmpacity: elecResult.acSizing.conductorAmpacity,
+          conduitSize:       elecResult.acSizing.conduitSize,
+          conduitFillPct:    elecResult.acSizing.conduitFillPct,
+          groundingConductor: elecResult.acSizing.groundingConductor,
+        };
+      }
+
+      // Inverters (per-inverter results with string details)
+      if (elecResult.inverters?.length) {
+        e.inverters = elecResult.inverters.map((invR: any, idx: number) => ({
+          inverterId:         invR.inverterId ?? idx,
+          type:               invR.type,
+          acOutputKw:         invR.acOutputKw,
+          acOutputCurrentMax: invR.acOutputCurrentMax,
+          strings: (invR.strings || []).map((strR: any) => ({
+            stringId:      strR.stringId,
+            panelCount:    strR.panelCount,
+            vocSTC:        strR.vocSTC,
+            vocCorrected:  strR.vocCorrected,
+            iscSTC:        strR.iscSTC,
+            iscCorrected:  strR.iscCorrected,
+            maxCurrentNEC: strR.maxCurrentNEC,
+            ocpdRating:    strR.ocpdRating,
+            wireGauge:     strR.wireGauge,
+            wireAmpacity:  strR.wireAmpacity,
+            voltageDrop:   strR.voltageDrop,
+          })),
+          acWireResult: invR.acWireResult ? {
+            selectedGauge:    invR.acWireResult.selectedGauge,
+            effectiveAmpacity: invR.acWireResult.effectiveAmpacity,
+            voltageDrop:      invR.acWireResult.voltageDrop,
+            conductorCallout: invR.acWireResult.conductorCallout,
+            wasAutoSized:     invR.acWireResult.wasAutoSized,
+            overallPass:      invR.acWireResult.overallPass,
+          } : undefined,
+        }));
+        // DC conductor callout: use first string's wire gauge
+        const firstStr = elecResult.inverters[0]?.strings?.[0];
+        if (firstStr?.wireGauge) {
+          e.dcConductorCallout = firstStr.wireGauge;
+        }
+      }
+
+      // Summary
+      if (elecResult.summary) {
+        e.summary = {
+          totalDcKw:  elecResult.summary.totalDcKw,
+          totalAcKw:  elecResult.summary.totalAcKw,
+          dcAcRatio:  elecResult.summary.dcAcRatio,
+        };
+      }
+
+      input.compliance.electrical = e;
+
+      // ── Propagate key values to project level for downstream consumers ──
+      if (e.busbar?.backfeedBreakerRequired && !input.project.backfeedBreakerA) {
+        input.project.backfeedBreakerA = e.busbar.backfeedBreakerRequired;
+      }
+      if (e.busbar?.backfeedBreakerRequired && !input.project.pvBackfeedA) {
+        input.project.pvBackfeedA = e.busbar.backfeedBreakerRequired;
+      }
+
+      console.log('[PLANSET] Server-side electrical calc completed:',
+        'status=', elecResult.status,
+        '| busbar=', elecResult.busbar?.passes ? 'PASS' : 'FAIL',
+        '| backfeedA=', elecResult.busbar?.backfeedBreakerRequired,
+        '| acWire=', elecResult.acConductorCallout,
+        '| vDrop=', elecResult.acVoltageDrop?.toFixed(2) + '%');
+    }
+  } catch (elecErr: unknown) {
+    // Non-critical: permit still generates, electrical pages will show defaults
+    console.warn('[PLANSET] Server-side electrical calc failed (non-critical):', (elecErr as Error)?.message ?? elecErr);
   }
 
   console.log('[PLANSET] CAD engine resolved systemType:', sysType, {

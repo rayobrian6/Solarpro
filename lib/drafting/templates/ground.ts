@@ -69,7 +69,7 @@ export function drawGroundArray(
 
   // ── STEP 4: CAD is the ONLY source of truth ──
   const cadGround = cad?.ground;
-  const arrays    = cadGround?.arrays ?? (layout.groundArrays as any[]) ?? [];
+  const arrays: any[] = cadGround?.arrays ?? layout.groundArrays ?? [];
 
   if (!arrays || arrays.length === 0) {
     throw new Error(
@@ -425,7 +425,7 @@ export function drawGroundStructural(
 
   // ── STEP 4: CAD is the ONLY source of truth ──
   const cadGround = cad?.ground;
-  const arrays    = cadGround?.arrays ?? (layout.groundArrays as any[]) ?? [];
+  const arrays: any[] = cadGround?.arrays ?? layout.groundArrays ?? [];
 
   if (!arrays || arrays.length === 0) {
     throw new Error(

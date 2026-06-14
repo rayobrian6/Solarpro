@@ -562,8 +562,8 @@ export function generatePanelGridCAD(params: CADPanelGridParams): PlacedPanel[] 
 
   // ── DIMENSION AUDIT LOG (v47.110) ───────────────────────────────────────────
   console.log('[CAD_DIMS]', {
-    module:      `${(panel as any).manufacturer ?? ''} ${(panel as any).model ?? ''} (${panel.wattage ?? '?'}W)`,
-    moduleId:    (panel as any).id ?? 'unknown',
+    module:      `${panel.manufacturer ?? ''} ${panel.model ?? ''} (${panel.wattage ?? '?'}W)`,
+    moduleId:    panel.id ?? 'unknown',
     rawWidthM:   panel.width,
     rawHeightM:  panel.height,
     rawWidthIn:  (panel.width  * 39.3701).toFixed(1) + '"',

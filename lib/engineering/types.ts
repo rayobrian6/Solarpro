@@ -181,6 +181,9 @@ export interface SystemSummary {
   groundArrayCount: number;
   fenceArrayCount: number;
 
+  // Main panel rating (amps) — for 120% busbar rule in buildPermitCoverSheet.ts
+  mainPanelAmps?: number;
+
   // Satellite / vicinity map — populated by syncProjectPipeline load_project stage
   satelliteImageBase64?: string;   // data:image/jpeg;base64,... from Google Maps Static API
   satelliteImageUrl?: string;      // static maps URL (for cache invalidation / regen)
@@ -229,6 +232,9 @@ export interface ElectricalEngineering {
   // NEC Compliance
   necVersion: string;
   complianceNotes: string[];
+
+  // Main breaker rating (amps) — for 120% busbar rule in buildPermitCoverSheet.ts
+  mainBreakerAmps?: number;
 
   // Survey-sourced fields (Phase 4 — optional, informational only)
   availableBreakerSlots?: string | null;

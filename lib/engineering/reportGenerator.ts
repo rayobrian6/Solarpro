@@ -11,6 +11,7 @@ import type {
   ProjectPhysicalData, SitePhotosSection,
 } from './types';
 import type { EnrichedSiteSurvey } from '@/lib/siteSurvey/types';
+import { necNextStandardOcpd } from '@/lib/permit/utils/helpers';
 
 // NEC wire sizing tables (simplified)
 const DC_WIRE_SIZING: { maxAmps: number; gauge: string; conduit: string }[] = [
@@ -232,7 +233,7 @@ function generateElectricalEngineering(snap: DesignSnapshot, pd: ProjectPhysical
   const acWire = selectWire(acAmps, AC_WIRE_SIZING);
 
   // Breaker sizing (NEC 705.12: 125% of inverter output)
-  const acBreakerAmps = Math.ceil(acAmps * 1.25 / 5) * 5; // round up to nearest 5A
+  const acBreakerAmps = necNextStandardOcpd(acAmps * 1.25);
   const backfeedBreakerAmps = acBreakerAmps;
 
   // Main panel bus check (NEC 705.12(B))

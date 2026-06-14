@@ -90,7 +90,7 @@ export interface MountLayout {
   upliftPerMount: number;      // lbs
   shearPerMount: number;       // lbs
   downwardPerMount: number;    // lbs
-  positions: { row: number; x: number; y: number }[];
+  positions: { row: number; x: number; y: number; rail?: number }[];
 }
 
 export interface RailSystem {
@@ -488,7 +488,7 @@ function generateRackingBOM(
     // Staggered rafter placement: Rail A starts on rafter 1, then every 4ft;
     //   Rail B starts offset (first foot at 2ft), then every 4ft — different rafters for load distribution
     const railRows = mountLayout.positions.length > 0
-      ? Math.max(...mountLayout.positions.map(p => (p as any).rail ?? p.row ?? 0)) + 1
+      ? Math.max(...mountLayout.positions.map(p => p.rail ?? p.row ?? 0)) + 1
       : 2; // default 2 rails per module row
     const totalRailLengthFt = Math.ceil((railRows * (mountLayout.mountSpacing * (mountLayout.mountsPerRow - 1) + 24)) / 12);
     return {

@@ -110,7 +110,7 @@ export function mapReportToPermitCover(
 
     interconnectionMethod: elec?.interconnectionMethod ?? 'PV BACKFEED BREAKER',
     backfeedAmps:          backfeedA,
-    mainPanelAmps:         svcAmps,
+    mainPanelAmps:         busRating,
     mainBreakerDeRatePass: rulePass,
 
     roofType:             stru?.roofType        ?? 'COMP. SHINGLE ROOF',

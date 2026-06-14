@@ -68,7 +68,7 @@ export function drawFencePlan(
 
   // ── CAD segments (STEP 4: CAD is the ONLY source of truth) ──
   const cadFence = cad?.fence;
-  const segments: any[] = (cadFence?.segments as any[] | undefined) ?? (layout.fenceSegments as any[] | undefined) ?? [];
+  const segments: any[] = cadFence?.segments ?? layout.fenceSegments ?? [];
 
   if (!segments || segments.length === 0) {
     throw new Error(
@@ -355,7 +355,7 @@ export function drawFenceElevation(
   const mountSys       = (project?.mountingSystem   || 'SOLAR FENCE SYSTEM').toUpperCase();
 
   // First segment for display (show 2 full bays)
-  const segments = cadFence?.segments ?? layout.fenceSegments ?? [];
+  const segments: any[] = cadFence?.segments ?? layout.fenceSegments ?? [];
   const firstSeg = segments[0];
   const firstSegLabel = firstSeg?.label ?? firstSeg?.id ?? 'SEG-1';
 
