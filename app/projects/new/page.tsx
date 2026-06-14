@@ -73,6 +73,13 @@ function NewProjectContent() {
     loadClients(true);
   }, [loadClients]);
 
+  // QW-7: Auto-select client when only 1 exists and none is pre-selected
+  useEffect(() => {
+    if (!selectedClient && clients.length === 1) {
+      setSelectedClient(clients[0].id);
+    }
+  }, [clients, selectedClient]);
+
   // Auto-generate project name when client + type are selected
   useEffect(() => {
     const client = clients.find(c => c.id === selectedClient);
