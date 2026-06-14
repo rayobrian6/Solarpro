@@ -26,6 +26,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   HelpCircle,
+  Calculator,
   Cpu,
   FileText,
   MapPin,
@@ -35,12 +36,13 @@ import {
   ClipboardList,
 } from 'lucide-react';
 
-// ── Types ────────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
 
 export type ConfidenceSource =
   | 'bill-ocr'        // Extracted from uploaded utility bill
   | 'pvwatts'         // NREL PVWatts API computation
+  | 'local_calc'      // Local PVWatts-method calculation (no API call)
   | 'state-avg'       // State-level average/fallback
   | 'ahj'             // Authority Having Jurisdiction database
   | 'nec'             // NEC code calculation
@@ -49,6 +51,7 @@ export type ConfidenceSource =
   | 'ecosystem'       // Ecosystem catalog default
   | 'satellite'       // Satellite imagery analysis
   | 'survey'          // Field survey observation
+  | 'fallback'        // Rough fallback when computation fails
   | 'user'            // User-entered (overrides computation)
   | 'manual';         // Manual entry (no computation)
 
@@ -67,10 +70,11 @@ export interface ConfidenceBadgeProps {
   className?: string;
 }
 
-// ── Source Labels & Icons ────────────────────────────────────
+// ── Source Labels & Icons ──────────────────────────────────────
 const SOURCE_LABELS: Record<ConfidenceSource, string> = {
   'bill-ocr':       'Bill OCR',
   'pvwatts':        'PVWatts',
+  'local_calc':     'Local Calc',
   'state-avg':      'State Avg',
   'ahj':            'AHJ',
   'nec':            'NEC Calc',
@@ -79,6 +83,7 @@ const SOURCE_LABELS: Record<ConfidenceSource, string> = {
   'ecosystem':      'Ecosystem',
   'satellite':      'Satellite',
   'survey':         'Survey',
+  'fallback':       'Fallback',
   'user':           'User',
   'manual':         'Manual',
 };
@@ -86,6 +91,7 @@ const SOURCE_LABELS: Record<ConfidenceSource, string> = {
 const SOURCE_ICONS: Record<ConfidenceSource, React.ElementType> = {
   'bill-ocr':       FileText,
   'pvwatts':        Sun,
+  'local_calc':     Calculator,
   'state-avg':      MapPin,
   'ahj':            Database,
   'nec':            Zap,
@@ -94,11 +100,12 @@ const SOURCE_ICONS: Record<ConfidenceSource, React.ElementType> = {
   'ecosystem':      Cpu,
   'satellite':      MapPin,
   'survey':         ClipboardList,
+  'fallback':       HelpCircle,
   'user':           CheckCircle2,
   'manual':         HelpCircle,
 };
 
-// ── Confidence Visual Mapping ────────────────────────────────
+// ── Confidence Visual Mapping ──────────────────────────────────
 const CONFIDENCE_VARIANT: Record<ConfidenceLevel, 'success' | 'warning' | 'danger'> = {
   high:   'success',
   medium: 'warning',
@@ -117,7 +124,7 @@ const CONFIDENCE_LABEL: Record<ConfidenceLevel, string> = {
   low:    'Low',
 };
 
-// ── Component ────────────────────────────────────────────────
+// ── Component ──────────────────────────────────────────────────
 export function ConfidenceBadge({
   confidence,
   source,

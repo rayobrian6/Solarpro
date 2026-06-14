@@ -30,6 +30,8 @@ import { getAhjByAddress } from '@/lib/jurisdictions/ahj-national';
 import { ComputedField, type ComputedFieldValue } from '@/components/recommend/ComputedField';
 import { ConfidenceBadge, type ConfidenceSource } from '@/components/recommend/ConfidenceBadge';
 import { RecommendationCard, type RecommendationValue } from '@/components/recommend/RecommendationCard';
+// Phase 2I: PVWatts-quality local production calc for reactive quick estimate
+import { calculateProductionLocal } from '@/lib/pvwatts';
 import { v4 as uuidv4 } from 'uuid';
 import SolarEngine3D, { type PlacementMode } from '../3d/SolarEngine3D';
 import { useToast } from '@/components/ui/Toast';
@@ -696,33 +698,61 @@ export default function DesignStudio({ project, onSave }: Props) {
 
   const systemSizeKw = calculateSystemSize(panels);
 
-  // Quick production estimate (shown before full PVWatts calculation)
+  // Phase 2I: PVWatts-quality production estimate (shown before full API calculation)
+  // Uses calculateProductionLocal() which applies climate-zone multipliers,
+  // azimuth/tilt correction, bifacial gain, and system losses — matching PVWatts
+  // methodology locally without an API call. Much more accurate than the old
+  // rough peakSunHours * 365 formula.
   const quickEstimate = useMemo(() => {
     if (panels.length === 0 || systemSizeKw === 0) return null;
-    // Regional sun-hours lookup by latitude (rough estimate)
     const lat = mapCenter.lat;
-    let peakSunHours = 4.5; // national average
-    if (lat >= 25 && lat <= 35) peakSunHours = 5.8;       // Southwest (AZ, NM, TX, FL)
-    else if (lat > 35 && lat <= 40) peakSunHours = 5.2;   // Mid-South (CA, CO, NC)
-    else if (lat > 40 && lat <= 45) peakSunHours = 4.8;   // Mid-North (OH, PA, OR)
-    else if (lat > 45) peakSunHours = 4.2;                 // Northwest/Northeast
-    else if (lat < 25) peakSunHours = 5.5;                 // Hawaii/Puerto Rico
+    const lng = mapCenter.lng;
+    const effectiveTilt = project.systemType === 'fence' ? 90 : tilt;
+    const effectiveAzimuth = azimuth;
+    const bifacialFactor = project.systemType === 'fence'
+      ? (bifacialOptimized ? 1.20 : 1.10)
+      : 1.0;
 
-    // Tilt adjustment factor (optimal ~latitude angle)
-    const tiltDiff = Math.abs(tilt - lat);
-    const tiltFactor = 1 - (tiltDiff / 180) * 0.15;
+    try {
+      const pvData = calculateProductionLocal({
+        lat, lng, systemSizeKw,
+        tilt: effectiveTilt,
+        azimuth: effectiveAzimuth,
+        losses: 14,
+        bifacialFactor,
+      });
 
-    // System losses: ~14% (wiring, inverter, soiling, temp)
-    const systemLoss = 0.86;
-    const annualKwh = Math.round(systemSizeKw * peakSunHours * 365 * tiltFactor * systemLoss);
-    const monthlyAvg = Math.round(annualKwh / 12);
+      const annualKwh = pvData.ac_annual;
+      const monthlyProduction = pvData.ac_monthly.map(Math.round);
+      const peakSunHours = pvData.solrad_annual;
+      const utilityRate = project.utilityRatePerKwh || 0.15;
+      const annualSavings = Math.round(annualKwh * utilityRate);
+      const capacityFactor = pvData.capacity_factor;
 
-    // Savings estimate at $0.15/kWh average
-    const utilityRate = 0.15;
-    const annualSavings = Math.round(annualKwh * utilityRate);
-
-    return { annualKwh, monthlyAvg, annualSavings, peakSunHours };
-  }, [panels.length, systemSizeKw, mapCenter.lat, tilt]);
+      return {
+        annualKwh,
+        monthlyProduction,
+        peakSunHours,
+        annualSavings,
+        capacityFactor,
+        source: 'local' as const,
+      };
+    } catch {
+      // Fallback to simple estimate if local calc fails
+      const annualKwh = Math.round(systemSizeKw * 4.5 * 365 * 0.86);
+      const monthlyProduction = Array(12).fill(Math.round(annualKwh / 12));
+      const utilityRate = project.utilityRatePerKwh || 0.15;
+      const annualSavings = Math.round(annualKwh * utilityRate);
+      return {
+        annualKwh,
+        monthlyProduction,
+        peakSunHours: 4.5,
+        annualSavings,
+        capacityFactor: 0,
+        source: 'fallback' as const,
+      };
+    }
+  }, [panels.length, systemSizeKw, mapCenter.lat, mapCenter.lng, tilt, azimuth, project.systemType, bifacialOptimized, project.utilityRatePerKwh]);
 
   // Keep refs in sync with state
   useEffect(() => { mapCenterRef.current = mapCenter; }, [mapCenter]);
@@ -3793,13 +3823,20 @@ export default function DesignStudio({ project, onSave }: Props) {
                       Place panels on the roof to see system summary
                     </div>
                   )}
-                  {/* Quick production estimate preview */}
+                  {/* Phase 2I: PVWatts-quality production estimate with monthly breakdown */}
                   {quickEstimate && !production && (
                     <div className="bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/50">
                       <div className="flex items-center gap-1.5 mb-2">
                         <Sun size={11} className="text-amber-400" />
-                        <span className="text-xs text-slate-400 font-medium">Quick Estimate</span>
-                        <span className="text-xs text-slate-600 ml-auto">(pre-calculation)</span>
+                        <span className="text-xs text-slate-400 font-medium">Production Estimate</span>
+                        <ConfidenceBadge
+                          confidence={quickEstimate.source === 'local' ? 'medium' : 'low'}
+                          source={quickEstimate.source === 'local' ? 'local_calc' : 'fallback'}
+                          size="xs"
+                        />
+                        <span className="text-xs text-slate-600 ml-auto">
+                          {quickEstimate.source === 'local' ? 'PVWatts method' : 'rough estimate'}
+                        </span>
                       </div>
                       <div className="grid grid-cols-3 gap-1.5 text-xs">
                         <div className="text-center">
@@ -3815,7 +3852,31 @@ export default function DesignStudio({ project, onSave }: Props) {
                           <div className="text-slate-500">sun hrs/day</div>
                         </div>
                       </div>
-                      <div className="text-xs text-slate-600 mt-1.5 text-center">Run PVWatts for precise results</div>
+                      {/* Monthly production sparkline */}
+                      {quickEstimate.monthlyProduction && (
+                        <div className="mt-2">
+                          <div className="text-xs text-slate-500 mb-1">Monthly</div>
+                          <div className="flex items-end gap-px h-8">
+                            {quickEstimate.monthlyProduction.map((kwh: number, i: number) => {
+                              const max = Math.max(...quickEstimate.monthlyProduction);
+                              return (
+                                <div key={i} className="flex-1 flex flex-col items-center">
+                                  <div
+                                    className="w-full bg-amber-500/50 rounded-sm"
+                                    style={{ height: `${(kwh / max) * 28}px` }}
+                                    title={`${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][i]}: ${kwh.toLocaleString()} kWh`}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div className="flex justify-between text-slate-600 mt-0.5" style={{ fontSize: '6px' }}>
+                            <span>J</span><span>F</span><span>M</span><span>A</span><span>M</span><span>J</span>
+                            <span>J</span><span>A</span><span>S</span><span>O</span><span>N</span><span>D</span>
+                          </div>
+                        </div>
+                      )}
+                      <div className="text-xs text-slate-600 mt-1.5 text-center">API calculation pending...</div>
                     </div>
                   )}
                   {/* QW-10: Production auto-calculates with 3s debounce.
@@ -3861,6 +3922,14 @@ export default function DesignStudio({ project, onSave }: Props) {
                 {/* Production Results */}
                 {production && (
                   <Section title="Production Results" icon={<BarChart2 size={12} />}>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <ConfidenceBadge
+                        confidence={production.pvWattsData ? 'high' : 'medium'}
+                        source={production.pvWattsData ? 'pvwatts' : 'local_calc'}
+                        detail={production.pvWattsData ? 'NREL API' : 'local calc'}
+                        size="xs"
+                      />
+                    </div>
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       {[
                         { label: 'Annual Production', value: `${production.annualProductionKwh.toLocaleString()} kWh`, color: 'text-amber-400' },
