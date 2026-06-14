@@ -510,42 +510,40 @@ export default function ClientDetailPage() {
   return (
     <AppShell>
       <div className="p-6 space-y-5 animate-fade-in">
-        {/* ── Client Hero Header ── */}
-        <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-indigo-900/40 via-slate-900/80 to-purple-900/30 border border-indigo-500/15">
-          {/* Accent stripe */}
-          <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-60" />
-          <div className="px-6 py-5 flex items-start gap-4 flex-wrap">
-            <Link href="/clients" className="btn-ghost p-2 rounded-lg mt-1"><ArrowLeft size={18} /></Link>
-            {/* Avatar */}
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-black text-xl flex-shrink-0 shadow-lg shadow-indigo-500/20">
+        {/* ── Client Header ── */}
+        <div className="card overflow-hidden">
+          <div className="border-l-4 border-indigo-500/60 px-5 py-4 flex items-start gap-4 flex-wrap">
+            <Link href="/clients" className="btn-ghost p-2 rounded-lg mt-0.5"><ArrowLeft size={18} /></Link>
+            {/* Avatar — simple circle, no gradient */}
+            <div className="w-12 h-12 rounded-xl bg-slate-700 flex items-center justify-center text-slate-300 font-bold text-base flex-shrink-0">
               {client.name?.split(' ').map(p => p[0]).join('').toUpperCase().slice(0, 2) || '?'}
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="text-2xl font-black text-white">{client.name}</h1>
+                <h1 className="text-lg font-bold text-white">{client.name}</h1>
                 {client.utilityProvider && (
                   <ConfidenceBadge confidence={dataConfidence('utilityProvider').confidence} source={dataConfidence('utilityProvider').source} size="xs" detail={dataConfidence('utilityProvider').detail} />
                 )}
               </div>
-              <div className="flex items-center gap-4 mt-1 text-sm text-slate-400 flex-wrap">
-                <span className="flex items-center gap-1"><MapPin size={13} className="text-indigo-400" />{client.city}, {client.state}</span>
-                {client.email && <span className="flex items-center gap-1"><Mail size={13} />{client.email}</span>}
-                {client.phone && <span className="flex items-center gap-1"><Phone size={13} />{client.phone}</span>}
+              <div className="flex items-center gap-4 mt-1 text-xs text-slate-400 flex-wrap">
+                <span className="flex items-center gap-1"><MapPin size={12} />{client.city}, {client.state}</span>
+                {client.email && <span className="flex items-center gap-1"><Mail size={12} />{client.email}</span>}
+                {client.phone && <span className="flex items-center gap-1"><Phone size={12} />{client.phone}</span>}
               </div>
-              {/* Quick metric pills */}
+              {/* Metric pills — muted, no colored borders */}
               <div className="flex items-center gap-2 mt-3 flex-wrap">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs font-semibold text-amber-300">
-                  <Zap size={11} />{client.annualKwh.toLocaleString()} kWh/yr
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800 text-xs font-medium text-slate-300">
+                  <Zap size={11} className="text-amber-400/60" />{client.annualKwh.toLocaleString()} kWh/yr
                 </span>
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs font-semibold text-emerald-300">
-                  <DollarSign size={11} />${client.annualBill.toLocaleString()}/yr
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800 text-xs font-medium text-slate-300">
+                  <DollarSign size={11} className="text-emerald-400/60" />${client.annualBill.toLocaleString()}/yr
                 </span>
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20 text-xs font-semibold text-purple-300">
-                  <Sparkles size={11} />{recommendedKw} kW recommended
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800 text-xs font-medium text-slate-300">
+                  <Sparkles size={11} className="text-indigo-400/60" />{recommendedKw} kW recommended
                 </span>
               </div>
             </div>
-            <div className="flex items-center gap-2 mt-1">
+            <div className="flex items-center gap-2 mt-0.5">
               <Link href={`/clients/${id}/edit`} className="btn-secondary btn-sm"><Edit size={14} /> Edit</Link>
               <Link href={`/projects/new?clientId=${id}`} className="btn-primary btn-sm"><Plus size={14} /> New Project</Link>
             </div>
@@ -597,12 +595,12 @@ export default function ClientDetailPage() {
               </div>
 
               {/* Recommendation */}
-              <div className="card p-5 bg-gradient-to-br from-indigo-500/10 to-purple-500/5 border-indigo-500/20">
+              <div className="card p-5">
                 <div className="flex items-center gap-2 mb-3">
-                  <Sun size={16} className="text-indigo-400" />
+                  <Sun size={16} className="text-amber-400" />
                   <h3 className="font-semibold text-white text-sm">Solar Recommendation</h3>
                 </div>
-                <div className="text-3xl font-bold text-indigo-400 mb-1">{recommendedKw} kW</div>
+                <div className="text-3xl font-bold text-white mb-1">{recommendedKw} kW</div>
                 <div className="text-xs text-slate-400 mb-4">Recommended system size</div>
                 <div className="space-y-2 text-xs">
                   <div className="flex justify-between"><span className="text-slate-400">Est. Annual Production</span><span className="text-white">{Math.round(recommendedKw * 1400).toLocaleString()} kWh</span></div>

@@ -10,7 +10,7 @@ import {
   Cpu, BarChart3, Map, Home, Sprout, Fence,
   LogOut, HelpCircle, ExternalLink, Wrench,
   CreditCard, ArrowRight, AlertTriangle, Star, ChevronDown,
-  Shield, MessageCircle, Bug, Network, Building2
+  Shield, MessageCircle, Bug, Network, Building2, Sparkles
 } from 'lucide-react';
 import SubscriptionBanner from './SubscriptionBanner';
 import { hasPlatformAccess } from '@/lib/permissions';
@@ -44,7 +44,6 @@ const navItems: NavItem[] = [
   { label: 'Network',       href: '/network',    icon: <Network size={17} />, color: 'text-emerald-400' },
   { label: 'Analytics',     href: '/analytics',  icon: <BarChart3 size={17} /> },
   { label: 'Settings',      href: '/settings',   icon: <Settings size={17} /> },
-  { label: 'Company Setup', href: '/onboarding', icon: <Building2 size={17} /> },
   { label: 'Equipment Library', href: '/hardware', icon: <Cpu size={17} /> },
   { label: 'Pricing',           href: '/pricing',  icon: <DollarSign size={17} /> },
 ];
@@ -153,8 +152,8 @@ function UserDropdown({ onLogout }: { onLogout: () => void }) {
                 <Settings size={14} className="text-slate-500" /> Settings
               </Link>
               <Link href="/onboarding" onClick={() => { logNavigation('/onboarding'); setOpen(false); }}
-                className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors">
-                <Building2 size={14} className="text-slate-500" /> Company Setup
+                className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors">
+                <Sparkles size={14} className="text-amber-500/60" /> Getting Started
               </Link>
             </div>
 
@@ -232,8 +231,8 @@ function HeaderUserDropdown({ initials, displayName, loading, onLogout }: {
             <Settings size={14} className="text-slate-500" /> Settings
           </Link>
           <Link href="/onboarding" onClick={() => { logNavigation('/onboarding'); setOpen(false); }}
-            className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors">
-            <Building2 size={14} className="text-slate-500" /> Company Setup
+            className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors">
+            <Sparkles size={14} className="text-amber-500/60" /> Getting Started
           </Link>
         </div>
         <div className="border-t border-slate-700/50 py-1">

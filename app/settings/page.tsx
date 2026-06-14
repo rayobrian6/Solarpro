@@ -6,8 +6,9 @@ import {
   Settings, Upload, Save, CheckCircle, AlertCircle,
   Building2, Phone, Mail, Globe, Palette, Image,
   User, Lock, Bell, CreditCard, Trash2, Eye, EyeOff,
-  Sun, RefreshCw, X, Users
+  Sun, RefreshCw, X, Users, Sparkles
 } from 'lucide-react';
+import Link from 'next/link';
 import { useUser, isAdminRole } from '@/contexts/UserContext';
 import { hasPlatformAccess } from '@/lib/permissions';
 import OrganizationPanel from '@/components/settings/OrganizationPanel';
@@ -386,6 +387,12 @@ export default function SettingsPage() {
         {/* ── BRANDING TAB ── */}
         {activeTab === 'branding' && (
           <div className="space-y-5">
+
+            {/* Cross-link to onboarding */}
+            <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-800/40 border border-slate-700/30 text-xs text-slate-400">
+              <Sparkles size={13} className="text-amber-400/50" />
+              <span>First time here? <Link href="/onboarding" className="text-amber-400 hover:text-amber-300 underline underline-offset-2">Run the Getting Started wizard</Link> for a guided setup. You can edit anytime here.</span>
+            </div>
 
             {/* Plan gate notice — hidden for admin/free_pass users */}
             {currentPlan === 'starter' && !isFreePass && !isAdmin && (

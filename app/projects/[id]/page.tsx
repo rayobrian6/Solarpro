@@ -784,13 +784,9 @@ function ProjectDetailInner() {
           </div>
         )}
 
-        {/* ── Hero Header (amber/orange gradient — distinct from client page indigo/purple) ── */}
-        <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-amber-950/80 via-orange-950/60 to-slate-900 border border-amber-700/20">
-          {/* Decorative glow */}
-          <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/8 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute bottom-0 left-0 w-48 h-48 bg-orange-500/6 rounded-full blur-3xl pointer-events-none" />
-
-          <div className="relative p-5 md:p-6">
+        {/* ── Project Header ── */}
+        <div className="card overflow-hidden">
+          <div className="border-l-4 border-amber-500/60 px-5 py-4">
             {/* Top row: back + title + badges */}
             <div className="flex items-start gap-3">
               <Link href="/projects" className="btn-ghost p-2 rounded-lg mt-0.5 hover:bg-white/5">
@@ -798,7 +794,7 @@ function ProjectDetailInner() {
               </Link>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2.5 flex-wrap">
-                  <h1 className="text-xl font-black text-white tracking-tight">{project.name}</h1>
+                  <h1 className="text-lg font-bold text-white">{project.name}</h1>
                   <span className={`badge ${statusColors[project.status]}`}>{project.status}</span>
                   <button
                     onClick={() => setShowChangeTypeModal(true)}
@@ -810,9 +806,9 @@ function ProjectDetailInner() {
                   </button>
                 </div>
                 {/* Context row */}
-                <div className="flex items-center gap-3 mt-2 text-xs text-slate-400 flex-wrap">
+                <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-400 flex-wrap">
                   {project.client?.name && (
-                    <Link href={`/clients/${project.client.id}`} className="flex items-center gap-1 text-amber-300/80 hover:text-amber-200 transition-colors">
+                    <Link href={`/clients/${project.client.id}`} className="flex items-center gap-1 text-slate-300 hover:text-white transition-colors">
                       <User size={10} />{project.client.name}
                     </Link>
                   )}
@@ -829,20 +825,20 @@ function ProjectDetailInner() {
                   })()}
                 </div>
                 {/* Engineering Intelligence link */}
-                <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                  <Link href={`/admin/engineering-intelligence/project/${id}`} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/25 bg-sky-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-sky-300 transition hover:bg-sky-500/20">
-                    <Network size={12} /> Engineering Intelligence
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Link href={`/admin/engineering-intelligence/project/${id}`} className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] font-medium text-slate-400 hover:text-white hover:border-slate-600 transition">
+                    <Network size={11} /> Engineering Intelligence
                   </Link>
                 </div>
               </div>
             </div>
 
-            {/* Metric pills with ConfidenceBadge */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
-              {/* System Size pill */}
-              <div className="rounded-xl bg-white/[0.04] border border-amber-500/10 px-3.5 py-3">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400/60">System Size</span>
+            {/* Metric pills with ConfidenceBadge — clean, no gradients */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 ml-11">
+              {/* System Size */}
+              <div className="px-3 py-2.5 rounded-lg bg-slate-800/60">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">System Size</span>
                   <ConfidenceBadge
                     confidence={projectConfidence('systemSize', project).confidence}
                     source={projectConfidence('systemSize', project).source}
@@ -850,14 +846,14 @@ function ProjectDetailInner() {
                     detail={projectConfidence('systemSize', project).detail}
                   />
                 </div>
-                <div className="text-lg font-black text-white">
+                <div className="text-base font-bold text-white">
                   {project.systemSizeKw ? `${project.systemSizeKw.toFixed(1)} kW` : '\u2014'}
                 </div>
               </div>
-              {/* Utility Rate pill */}
-              <div className="rounded-xl bg-white/[0.04] border border-amber-500/10 px-3.5 py-3">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400/60">Utility Rate</span>
+              {/* Utility Rate */}
+              <div className="px-3 py-2.5 rounded-lg bg-slate-800/60">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">Utility Rate</span>
                   <ConfidenceBadge
                     confidence={projectConfidence('utilityRate', project).confidence}
                     source={projectConfidence('utilityRate', project).source}
@@ -865,16 +861,16 @@ function ProjectDetailInner() {
                     detail={projectConfidence('utilityRate', project).detail}
                   />
                 </div>
-                <div className="text-lg font-black text-white">
+                <div className="text-base font-bold text-white">
                   {(project.utilityRatePerKwh ?? project.billAnalysis?.utilityRate)
                     ? `$${(project.utilityRatePerKwh ?? project.billAnalysis?.utilityRate ?? 0).toFixed(3)}/kWh`
                     : '\u2014'}
                 </div>
               </div>
-              {/* Annual Usage pill */}
-              <div className="rounded-xl bg-white/[0.04] border border-amber-500/10 px-3.5 py-3">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400/60">Annual Usage</span>
+              {/* Annual Usage */}
+              <div className="px-3 py-2.5 rounded-lg bg-slate-800/60">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">Annual Usage</span>
                   <ConfidenceBadge
                     confidence={projectConfidence('annualKwh', project).confidence}
                     source={projectConfidence('annualKwh', project).source}
@@ -882,16 +878,16 @@ function ProjectDetailInner() {
                     detail={projectConfidence('annualKwh', project).detail}
                   />
                 </div>
-                <div className="text-lg font-black text-white">
+                <div className="text-base font-bold text-white">
                   {project.billAnalysis?.annualKwh
                     ? `${(project.billAnalysis.annualKwh / 1000).toFixed(1)} MWh`
                     : '\u2014'}
                 </div>
               </div>
-              {/* Production pill */}
-              <div className="rounded-xl bg-white/[0.04] border border-amber-500/10 px-3.5 py-3">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400/60">Production</span>
+              {/* Production */}
+              <div className="px-3 py-2.5 rounded-lg bg-slate-800/60">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">Production</span>
                   <ConfidenceBadge
                     confidence={projectConfidence('production', project).confidence}
                     source={projectConfidence('production', project).source}
@@ -899,7 +895,7 @@ function ProjectDetailInner() {
                     detail={projectConfidence('production', project).detail}
                   />
                 </div>
-                <div className="text-lg font-black text-white">
+                <div className="text-base font-bold text-white">
                   {project.production?.annualProductionKwh
                     ? `${(project.production.annualProductionKwh / 1000).toFixed(1)} MWh/yr`
                     : '\u2014'}
