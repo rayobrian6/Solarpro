@@ -1144,7 +1144,7 @@ export default function CommandCenter() {
           {/* ═══ TODAY'S COMMANDS ═══ */}
         {!dashLoading && (
           <div className="rounded-2xl overflow-hidden"
-            style={{ background: 'var(--bg-card)', border: '1px solid rgba(245,158,11,0.2)', boxShadow: '0 0 20px rgba(245,158,11,0.04)' }}>
+            style={{ background: 'var(--bg-card)', border: '1px solid rgba(245,158,11,0.2)' }}>
             <div className="px-5 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border-color)' }}>
               <div className="flex items-center gap-2">
                 <Zap size={15} className="text-amber-400" />

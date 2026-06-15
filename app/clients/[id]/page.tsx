@@ -507,6 +507,9 @@ export default function ClientDetailPage() {
     return { confidence: 'medium', source: 'manual' };
   };
 
+  // Pre-compute confidence for header metrics (avoids 3× redundant calls per pill)
+  const annualKwhConf = dataConfidence('annualKwh');
+
   return (
     <AppShell>
       <div className="p-6 space-y-5 animate-fade-in">
@@ -534,6 +537,7 @@ export default function ClientDetailPage() {
               <div className="flex items-center gap-2 mt-3 flex-wrap">
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800 text-xs font-medium text-slate-300">
                   <Zap size={11} className="text-amber-400/60" />{client.annualKwh.toLocaleString()} kWh/yr
+                  <ConfidenceBadge confidence={annualKwhConf.confidence} source={annualKwhConf.source} size="xs" detail={annualKwhConf.detail} />
                 </span>
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800 text-xs font-medium text-slate-300">
                   <DollarSign size={11} className="text-emerald-400/60" />${client.annualBill.toLocaleString()}/yr

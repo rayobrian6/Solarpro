@@ -7,7 +7,7 @@ import {
   Sun, LayoutDashboard, Users, FolderOpen, Zap,
   FileText, Settings, ChevronLeft, ChevronRight, DollarSign,
   Bell, Search, Menu, X,
-  Cpu, BarChart3, Map, Home, Sprout, Fence,
+  Cpu, BarChart3, Map, Home,
   LogOut, HelpCircle, ExternalLink, Wrench,
   CreditCard, ArrowRight, AlertTriangle, Star, ChevronDown,
   Shield, MessageCircle, Bug, Network, Building2, Sparkles
@@ -41,17 +41,11 @@ const navItems: NavItem[] = [
   { label: 'Design Studio', href: '/design',     icon: <Map size={17} />,    color: 'text-amber-400' },
   { label: 'Engineering',   href: '/engineering',icon: <Wrench size={17} />, color: 'text-blue-400' },
   { label: 'Proposals',     href: '/proposals',  icon: <FileText size={17} /> },
-  { label: 'Network',       href: '/network',    icon: <Network size={17} />, color: 'text-emerald-400' },
+  { label: 'Marketplace',    href: '/network',    icon: <Network size={17} />, color: 'text-emerald-400' },
   { label: 'Analytics',     href: '/analytics',  icon: <BarChart3 size={17} /> },
   { label: 'Settings',      href: '/settings',   icon: <Settings size={17} /> },
   { label: 'Equipment Library', href: '/hardware', icon: <Cpu size={17} /> },
   { label: 'Pricing',           href: '/pricing',  icon: <DollarSign size={17} /> },
-];
-
-const systemTypes = [
-  { label: 'Roof',   icon: <Home size={11} />,   color: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
-  { label: 'Ground', icon: <Sprout size={11} />, color: 'text-teal-400 bg-teal-500/10 border-teal-500/20' },
-  { label: 'Fence',  icon: <Fence size={11} />,  color: 'text-purple-400 bg-purple-500/10 border-purple-500/20' },
 ];
 
 function getInitials(name: string): string {
@@ -731,20 +725,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </>
         )}
       </nav>
-
-      {/* System Type Legend */}
-      {!collapsed && (
-        <div className="px-3 py-3 border-t border-slate-700/50">
-          <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2 px-1">System Types</div>
-          <div className="flex gap-1.5">
-            {systemTypes.map(t => (
-              <div key={t.label} className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-xs font-medium ${t.color}`}>
-                {t.icon} {t.label}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Subscription CTA — hidden for admins and free pass users */}
       {!collapsed && showSubscriptionCTA && user && (
