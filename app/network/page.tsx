@@ -343,6 +343,9 @@ interface Opportunity extends EnrichmentCarrier {
   address?: string;
   claim_id?: string;
   claim_status?: string;
+  homeowner_name?: string | null;
+  homeowner_email?: string | null;
+  homeowner_phone?: string | null;
   claimed_by_user_id?: string;
   marketplace_status?: string;
   claim_mode?: "exclusive" | "shared" | string;
@@ -2516,6 +2519,7 @@ export default function NetworkPage() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [myShared, setMyShared] = useState<Opportunity[]>([]);
   const [myClaims, setMyClaims] = useState<Opportunity[]>([]);
+  const [expandedClaim, setExpandedClaim] = useState<string | null>(null);
   const [profile, setProfile] = useState<ContractorProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [claimTarget, setClaimTarget] = useState<string | null>(null);
@@ -2971,45 +2975,144 @@ export default function NetworkPage() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {myClaims.map((opp) => (
-                        <div
-                          key={opp.id}
-                          className="bg-[#0f1623] border border-slate-700/60 rounded-xl p-4 hover:border-slate-600 transition-colors"
-                        >
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1 min-w-0">
-                              <div className="text-white font-medium text-sm">
-                                {opp.site_name || "Unnamed Project"}
-                              </div>
-                              {opp.address && (
-                                <div className="flex items-center gap-1.5 mt-1 text-emerald-400 text-xs">
-                                  <MapPin size={11} />
-                                  {opp.address}
+                      {myClaims.map((opp) => {
+                        const isOpen = expandedClaim === opp.id;
+                        const rec = opp as unknown as Record<
+                          string,
+                          unknown
+                        >;
+                        const detail: [string, string | null][] = [
+                          [
+                            "Annual usage",
+                            rec.annual_kwh
+                              ? `${Math.round(Number(rec.annual_kwh)).toLocaleString()} kWh`
+                              : null,
+                          ],
+                          [
+                            "Utility rate",
+                            rec.utility_rate_per_kwh
+                              ? `${(Number(rec.utility_rate_per_kwh) * 100).toFixed(1)}¢/kWh`
+                              : null,
+                          ],
+                          [
+                            "Est. project value",
+                            rec.estimated_system_cost
+                              ? fmtCurrency(Number(rec.estimated_system_cost))
+                              : null,
+                          ],
+                          [
+                            "Payback",
+                            rec.estimated_payback_yrs
+                              ? `${rec.estimated_payback_yrs} yrs`
+                              : null,
+                          ],
+                          [
+                            "Roof",
+                            [
+                              rec.roof_material,
+                              rec.roof_age_years
+                                ? `${rec.roof_age_years} yr`
+                                : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ") || null,
+                          ],
+                          [
+                            "You paid",
+                            rec.price_paid != null
+                              ? fmtCurrency(Number(rec.price_paid))
+                              : null,
+                          ],
+                        ];
+                        return (
+                          <div
+                            key={opp.id}
+                            onClick={() =>
+                              setExpandedClaim(isOpen ? null : opp.id)
+                            }
+                            className="cursor-pointer bg-[#0f1623] border border-slate-700/60 rounded-xl p-4 hover:border-slate-600 transition-colors"
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1 min-w-0">
+                                <div className="text-white font-medium text-sm">
+                                  {opp.homeowner_name ||
+                                    opp.site_name ||
+                                    "Unnamed Project"}
                                 </div>
-                              )}
-                              <div className="flex items-center gap-3 mt-2">
-                                <span className="text-slate-500 text-xs">
-                                  {fmtKw(opp.system_size_kw)}
-                                </span>
-                                {opp.utility_name && (
+                                {opp.address && (
+                                  <div className="flex items-center gap-1.5 mt-1 text-emerald-400 text-xs">
+                                    <MapPin size={11} />
+                                    {opp.address}
+                                  </div>
+                                )}
+                                {(opp.homeowner_phone ||
+                                  opp.homeowner_email) && (
+                                  <div className="flex flex-wrap items-center gap-3 mt-1.5">
+                                    {opp.homeowner_phone && (
+                                      <a
+                                        href={`tel:${opp.homeowner_phone}`}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="text-sky-300 text-xs hover:underline"
+                                      >
+                                        {opp.homeowner_phone}
+                                      </a>
+                                    )}
+                                    {opp.homeowner_email && (
+                                      <a
+                                        href={`mailto:${opp.homeowner_email}`}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="text-sky-300 text-xs hover:underline"
+                                      >
+                                        {opp.homeowner_email}
+                                      </a>
+                                    )}
+                                  </div>
+                                )}
+                                <div className="flex items-center gap-3 mt-2">
                                   <span className="text-slate-500 text-xs">
-                                    {opp.utility_name}
+                                    {fmtKw(opp.system_size_kw)}
                                   </span>
-                                )}
-                                {opp.battery_candidate && (
-                                  <span className="text-amber-400 text-xs flex items-center gap-1">
-                                    <Battery size={10} /> Battery
-                                  </span>
-                                )}
+                                  {opp.utility_name && (
+                                    <span className="text-slate-500 text-xs">
+                                      {opp.utility_name}
+                                    </span>
+                                  )}
+                                  {opp.battery_candidate && (
+                                    <span className="text-amber-400 text-xs flex items-center gap-1">
+                                      <Battery size={10} /> Battery
+                                    </span>
+                                  )}
+                                </div>
                               </div>
+                              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-500/15 text-amber-400 ml-3 flex-shrink-0">
+                                {(rec.claim_status as string) || "active"}
+                              </span>
                             </div>
-                            <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-500/15 text-amber-400 ml-3 flex-shrink-0">
-                              {((opp as unknown as Record<string, unknown>)
-                                .claim_status as string) || "active"}
-                            </span>
+                            {isOpen && (
+                              <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 border-t border-slate-700/60 pt-3">
+                                {detail
+                                  .filter(([, v]) => v)
+                                  .map(([label, v]) => (
+                                    <div key={label} className="text-xs">
+                                      <span className="text-slate-500">
+                                        {label}:{" "}
+                                      </span>
+                                      <span className="text-slate-300">
+                                        {v}
+                                      </span>
+                                    </div>
+                                  ))}
+                                {!opp.homeowner_phone &&
+                                  !opp.homeowner_email && (
+                                    <div className="col-span-2 text-xs text-amber-400">
+                                      No contact info stored on this lead yet.
+                                    </div>
+                                  )}
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
