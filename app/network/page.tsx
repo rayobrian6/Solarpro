@@ -1,6 +1,7 @@
 "use client";
 import React, { useEffect, useState, useCallback } from "react";
 import AppShell from "@/components/ui/AppShell";
+import dynamic from "next/dynamic";
 import {
   Network,
   Zap,
@@ -2514,9 +2515,19 @@ function ProfileTab({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+const UsLeadMap = dynamic(() => import("./UsLeadMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-[200px] items-center justify-center text-sm text-slate-500">
+      Loading territory map…
+    </div>
+  ),
+});
+
 export default function NetworkPage() {
   const [tab, setTab] = useState<Tab>("discover");
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [mapCounts, setMapCounts] = useState<Record<string, number>>({});
   const [myShared, setMyShared] = useState<Opportunity[]>([]);
   const [myClaims, setMyClaims] = useState<Opportunity[]>([]);
   const [expandedClaim, setExpandedClaim] = useState<string | null>(null);
@@ -2582,6 +2593,21 @@ export default function NetworkPage() {
     }
   }, []);
 
+  // Unfiltered eligible feed, grouped by state, to drive the map heat counts.
+  const loadMapCounts = useCallback(async () => {
+    const res = await fetch("/api/network/opportunities?limit=50");
+    if (res.ok) {
+      const d = await res.json();
+      const counts: Record<string, number> = {};
+      for (const o of (d.opportunities || []) as Opportunity[]) {
+        const rec = o as unknown as Record<string, unknown>;
+        const s = String(rec.state_code ?? rec.state ?? "").toUpperCase();
+        if (s) counts[s] = (counts[s] ?? 0) + 1;
+      }
+      setMapCounts(counts);
+    }
+  }, []);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -2590,10 +2616,11 @@ export default function NetworkPage() {
         loadDiscover(),
         loadMyShared(),
         loadMyClaims(),
+        loadMapCounts(),
       ]);
       setLoading(false);
     })();
-  }, [loadProfile, loadDiscover, loadMyShared, loadMyClaims]);
+  }, [loadProfile, loadDiscover, loadMyShared, loadMyClaims, loadMapCounts]);
 
   useEffect(() => {
     if (!loading) loadDiscover();
@@ -2810,6 +2837,22 @@ export default function NetworkPage() {
               {/* DISCOVER */}
               {tab === "discover" && (
                 <div>
+                  {/* Territory map */}
+                  <div className="mb-6 rounded-2xl border border-slate-700/60 bg-[#0b111d] p-3">
+                    <div className="mb-2 flex items-center justify-between px-1">
+                      <div className="text-sm font-medium text-white">
+                        Your territory
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        Hover a state for your lead count · click to filter
+                      </div>
+                    </div>
+                    <UsLeadMap
+                      counts={mapCounts}
+                      selected={filterState}
+                      onSelect={(c) => setFilterState(c)}
+                    />
+                  </div>
                   {/* Filter bar */}
                   <div className="flex items-center gap-3 mb-6 flex-wrap">
                     <select
