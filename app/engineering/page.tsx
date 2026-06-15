@@ -7497,11 +7497,8 @@ function EngineeringPageInner() {
               <div className="space-y-5 max-w-none">
 
                 {/* ══ SYSTEM FLOW BAR ══════════════════════════════════════════ */}
-                <div className="relative overflow-hidden rounded-2xl border border-slate-700/60 bg-gradient-to-br from-slate-800/80 via-slate-800/60 to-slate-900/80 p-5 shadow-xl">
-                  <div className="absolute -top-12 -right-12 w-48 h-48 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
-                  <div className="absolute -bottom-8 -left-8 w-32 h-32 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
-
-                  {/* Header */}
+                <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5">
+{/* Header */}
                   <div className="flex items-center justify-between gap-4 mb-4">
                     <div>
                       <h2 className="text-base font-black text-white flex items-center gap-2">
@@ -9341,12 +9338,8 @@ function EngineeringPageInner() {
               <div className="space-y-5 max-w-none">
 
                 {/* ══ COMPLIANCE HERO ══════════════════════════════════════════ */}
-                <div className="relative overflow-hidden rounded-2xl border border-slate-700/60 bg-gradient-to-br from-slate-800/80 via-slate-800/60 to-slate-900/80 p-5 shadow-xl">
-                  <div className="absolute -top-12 -right-12 w-48 h-48 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
-                  <div className="absolute -bottom-8 -left-8 w-32 h-32 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
-                  <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-emerald-500/20 to-transparent" />
-
-                  <div className="flex items-center justify-between gap-4 mb-4">
+                <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5">
+<div className="flex items-center justify-between gap-4 mb-4">
                     <div>
                       <h2 className="text-base font-black text-white flex items-center gap-2">
                         <ClipboardCheck size={16} className="text-emerald-400" />
@@ -9828,11 +9821,8 @@ function EngineeringPageInner() {
               <div className="space-y-5 max-w-none">
 
                 {/* ══ ELECTRICAL HERO ══════════════════════════════════════════ */}
-                <div className="relative overflow-hidden rounded-2xl border border-slate-700/60 bg-gradient-to-br from-slate-800/80 via-slate-800/60 to-slate-900/80 p-5 shadow-xl">
-                  <div className="absolute -top-12 -right-12 w-48 h-48 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
-                  <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-blue-500/20 to-transparent" />
-
-                  <div className="flex items-center justify-between gap-4 mb-4">
+                <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5">
+<div className="flex items-center justify-between gap-4 mb-4">
                     <div>
                       <h2 className="text-base font-black text-white flex items-center gap-2">
                         <Zap size={16} className="text-blue-400" />
@@ -10162,10 +10152,8 @@ function EngineeringPageInner() {
           {activeTab === 'structural' && (
             <div className="max-w-none space-y-5">
               {/* ══════════ STRUCTURAL INTEGRITY HERO ══════════ */}
-              <div className="relative overflow-hidden rounded-2xl border border-slate-700/60 bg-gradient-to-br from-slate-800/80 via-slate-800/60 to-slate-900/80 p-5 shadow-xl mb-5">
-                <div className="absolute -top-8 -right-8 w-36 h-36 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
-                <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
-                <div className="flex items-center gap-2 mb-4">
+              <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5 mb-5">
+<div className="flex items-center gap-2 mb-4">
                   <Wind size={14} className="text-amber-400" />
                   <span className="text-sm font-bold text-white">Structural Analysis</span>
                   <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 font-mono ml-auto">
@@ -10934,11 +10922,8 @@ function EngineeringPageInner() {
             ) : (
               <div className="max-w-none space-y-4">
                 {/* ══ SLD HERO ══════════════════════════════════════════════════ */}
-                <div className="relative overflow-hidden rounded-2xl border border-slate-700/60 bg-gradient-to-br from-slate-800/80 via-slate-800/60 to-slate-900/80 p-5 shadow-xl">
-                  <div className="absolute -top-8 -right-8 w-36 h-36 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
-                  <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-blue-500/20 to-transparent" />
-
-                  <div className="flex items-center justify-between gap-4 mb-4">
+                <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5">
+<div className="flex items-center justify-between gap-4 mb-4">
                     <div>
                       <h2 className="text-base font-black text-white flex items-center gap-2">
                         <Zap size={16} className="text-blue-400" />
@@ -11255,10 +11240,8 @@ function EngineeringPageInner() {
           {activeTab === 'schedule' && (
             <div className="max-w-none">
               {/* ═══════════ EQUIPMENT SCHEDULE HERO ═══════════ */}
-              <div className="relative overflow-hidden rounded-2xl border border-slate-700/60 bg-gradient-to-br from-slate-800/80 via-slate-800/60 to-slate-900/80 p-5 shadow-xl mb-5">
-                <div className="absolute -top-8 -right-8 w-36 h-36 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
-
-                <div className="flex items-center justify-between gap-4 mb-4">
+              <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5 mb-5">
+<div className="flex items-center justify-between gap-4 mb-4">
                   <div className="flex items-center gap-2">
                     <FileText size={14} className="text-emerald-400" />
                     <span className="text-sm font-bold text-white">Equipment Schedule</span>
@@ -12709,11 +12692,8 @@ function EngineeringPageInner() {
                 <div className="max-w-none space-y-5">
 
                   {/* ══ PERMIT HERO ══════════════════════════════════════════════ */}
-                  <div className="relative overflow-hidden rounded-2xl border border-slate-700/60 bg-gradient-to-br from-slate-800/80 via-slate-800/60 to-slate-900/80 p-5 shadow-xl">
-                    <div className="absolute -top-8 -right-8 w-36 h-36 bg-purple-500/5 rounded-full blur-3xl pointer-events-none" />
-                    <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-purple-500/20 to-transparent" />
-
-                    <div className="flex items-center justify-between gap-4 mb-4">
+                  <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5">
+<div className="flex items-center justify-between gap-4 mb-4">
                       <div>
                         <h2 className="text-base font-black text-white flex items-center gap-2">
                           <Stamp size={16} className="text-purple-400" />
@@ -13627,10 +13607,8 @@ function EngineeringPageInner() {
           {activeTab === 'files' && (
             <div className="max-w-none space-y-4">
               {/* ══════════ CLIENT FILES HERO ══════════ */}
-              <div className="relative overflow-hidden rounded-2xl border border-slate-700/60 bg-gradient-to-br from-slate-800/80 via-slate-800/60 to-slate-900/80 p-5 shadow-xl mb-4">
-                <div className="absolute -top-8 -right-8 w-36 h-36 bg-teal-500/5 rounded-full blur-3xl pointer-events-none" />
-                <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-teal-500/20 to-transparent" />
-                <div className="flex items-center gap-2 mb-4">
+              <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5 mb-4">
+<div className="flex items-center gap-2 mb-4">
                   <FolderOpen size={14} className="text-teal-400" />
                   <span className="text-sm font-bold text-white">Client Engineering Workspace</span>
                   <span className="text-xs px-2 py-0.5 rounded-full bg-teal-500/15 text-teal-400 border border-teal-500/30 font-mono ml-auto">

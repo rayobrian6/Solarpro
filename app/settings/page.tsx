@@ -252,9 +252,7 @@ export default function SettingsPage() {
       <div className="p-6 max-w-3xl mx-auto space-y-6 animate-fade-in">
 
         {/* ══════════ SETTINGS COMMAND HEADER ══════════ */}
-          <div className="relative overflow-hidden rounded-2xl border border-slate-700/60 bg-gradient-to-br from-slate-800/80 via-slate-800/60 to-slate-900/80 p-5 shadow-xl">
-            <div className="absolute -top-10 -right-10 w-48 h-48 bg-slate-500/5 rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-slate-500/20 to-transparent" />
+          <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-slate-700/60 border border-slate-600/40 flex items-center justify-center flex-shrink-0">
                 <Settings size={18} className="text-slate-300" />

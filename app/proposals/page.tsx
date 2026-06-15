@@ -613,9 +613,7 @@ function ProposalContent() {
       )}
 
       {/* ══════════ PROPOSALS COMMAND HEADER ══════════ */}
-      <div className="relative overflow-hidden rounded-2xl border border-slate-700/60 bg-gradient-to-br from-slate-800/80 via-slate-800/60 to-slate-900/80 p-5 shadow-xl">
-        <div className="absolute -top-10 -right-10 w-48 h-48 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+      <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div
             className="cursor-default select-none"

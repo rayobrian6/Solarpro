@@ -1009,7 +1009,7 @@ function OpportunityCard({
               {experience?.liquidity_label ?? "Marketplace claim signal"}
             </div>
           </div>
-          <div className="text-4xl font-black leading-none tracking-tight text-white tabular-nums drop-shadow-[0_0_18px_rgba(16,185,129,0.2)]">
+          <div className="text-4xl font-black leading-none tracking-tight text-white tabular-nums">
             {projectHero?.value ??
               projectIntelligence?.value_label ??
               compactRange(
@@ -2681,10 +2681,7 @@ export default function NetworkPage() {
         style={{ background: "var(--bg-base, #0b1120)" }}
       >
         {/* ── Hero Header ─────────────────────────────────────────────────── */}
-        <div className="relative overflow-hidden border-b border-slate-800">
-          {/* Subtle gradient glow */}
-          <div className="absolute inset-0 bg-gradient-to-br from-emerald-950/40 via-transparent to-transparent pointer-events-none" />
-          <div className="absolute top-0 left-1/4 w-96 h-32 bg-emerald-500/5 blur-3xl pointer-events-none" />
+        <div className="relative border-b border-slate-800">
 
           <div className="relative max-w-6xl mx-auto px-6 py-8">
             <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
