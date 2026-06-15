@@ -169,6 +169,8 @@ export async function GET(req: NextRequest) {
         no.ahj_name,
         NULL::text AS equipment_ecosystem,
         no.asking_price,
+        no.lat,
+        no.lng,
         COALESCE(no.listing_notes, no.screening_notes) AS listing_notes,
         no.expires_at,
         no.created_at,

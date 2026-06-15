@@ -2528,6 +2528,7 @@ export default function NetworkPage() {
   const [tab, setTab] = useState<Tab>("discover");
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [mapCounts, setMapCounts] = useState<Record<string, number>>({});
+  const [mapOpps, setMapOpps] = useState<Opportunity[]>([]);
   const [myShared, setMyShared] = useState<Opportunity[]>([]);
   const [myClaims, setMyClaims] = useState<Opportunity[]>([]);
   const [expandedClaim, setExpandedClaim] = useState<string | null>(null);
@@ -2605,6 +2606,7 @@ export default function NetworkPage() {
         if (s) counts[s] = (counts[s] ?? 0) + 1;
       }
       setMapCounts(counts);
+      setMapOpps((d.opportunities || []) as Opportunity[]);
     }
   }, []);
 
@@ -2675,7 +2677,9 @@ export default function NetworkPage() {
   };
 
   const claimOppForModal = claimTarget
-    ? opportunities.find((o) => o.id === claimTarget)
+    ? (opportunities.find((o) => o.id === claimTarget) ??
+      mapOpps.find((o) => o.id === claimTarget) ??
+      null)
     : null;
 
   const TABS: {
@@ -2849,8 +2853,32 @@ export default function NetworkPage() {
                     </div>
                     <UsLeadMap
                       counts={mapCounts}
+                      leads={mapOpps.map((o) => {
+                        const r = o as unknown as Record<string, unknown>;
+                        return {
+                          id: String(r.id ?? ""),
+                          state: String(
+                            r.state_code ?? r.state ?? "",
+                          ).toUpperCase(),
+                          lat:
+                            r.lat != null && r.lat !== ""
+                              ? Number(r.lat)
+                              : null,
+                          lng:
+                            r.lng != null && r.lng !== ""
+                              ? Number(r.lng)
+                              : null,
+                          city: r.city ? String(r.city) : "",
+                          grade: r.lead_grade ? String(r.lead_grade) : "",
+                          kw:
+                            r.system_size_kw != null
+                              ? Number(r.system_size_kw)
+                              : null,
+                        };
+                      })}
                       selected={filterState}
                       onSelect={(c) => setFilterState(c)}
+                      onSelectLead={(id) => setClaimTarget(id)}
                     />
                   </div>
                   {/* Filter bar */}
