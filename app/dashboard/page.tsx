@@ -703,6 +703,10 @@ export default function CommandCenter() {
       return raw ? new Set<string>(JSON.parse(raw) as string[]) : new Set<string>();
     } catch { return new Set<string>(); }
   });
+  const restoreAllDismissed = () => {
+    setDismissedQueueIds(new Set());
+    try { localStorage.removeItem('solarpro:dismissedQueueIds'); } catch { /* ignore */ }
+  };
 
   // Workflow banner — snoozable for 7 days, NOT permanently dismissed
   // Reads a timestamp; if it's older than 7 days (or absent), shows the banner
@@ -726,6 +730,12 @@ export default function CommandCenter() {
     setShowWorkflowBanner(true);
     try { localStorage.removeItem('solarpro:workflowBannerSnoozedUntil'); } catch { /* ignore */ }
   };
+
+  // ── Priority Surface: Miller's Law compliant dashboard view ──
+  // Default 'priority' shows only Command Header + Today's Commands + Work Queue
+  // 'full' shows all sections — toggled by user
+  const [viewMode, setViewMode] = useState<'priority' | 'full'>('priority');
+
   const [activeModal, setActiveModal] = useState<{
     type: 'follow_up' | 'schedule_install' | 'engineering_review';
     commandId?: string;
@@ -1040,10 +1050,24 @@ export default function CommandCenter() {
                 <Link href="/projects/new" className="btn-primary btn-sm flex items-center gap-1.5">
                   <Plus size={14} /> New Project
                 </Link>
+                {/* Priority Surface toggle — Miller's Law: show only essentials by default */}
+                <button
+                  onClick={() => setViewMode(viewMode === 'priority' ? 'full' : 'priority')}
+                  title={viewMode === 'priority' ? 'Show full dashboard' : 'Focus view — show only essentials'}
+                  className={`btn-sm flex items-center gap-1.5 transition-all ${
+                    viewMode === 'full'
+                      ? 'border border-slate-600 bg-slate-700/50 text-slate-300 hover:bg-slate-700 hover:text-white'
+                      : 'border border-slate-700/60 bg-slate-800/40 text-slate-400 hover:bg-slate-700/60 hover:text-slate-200'
+                  } rounded-lg px-3 py-1.5`}
+                >
+                  {viewMode === 'priority' ? <Eye size={13} /> : <EyeOff size={13} />}
+                  <span className="text-xs font-semibold">{viewMode === 'priority' ? 'Full View' : 'Focus'}</span>
+                </button>
               </div>
             </div>
           </div>
 
+        {viewMode === 'full' ? (<>
           {/* ══════════ WORKFLOW PROCESS BANNER ══════════ */}
           {showWorkflowBanner && (
             <div className="relative rounded-xl border border-amber-500/20 bg-slate-800/60 px-4 py-3 overflow-hidden">
@@ -1107,7 +1131,9 @@ export default function CommandCenter() {
               </div>
             </div>
           )}
+        </>) : null}
 
+        {viewMode === 'full' ? (<>
           {/* ══════════ FINANCIAL PRESSURE BAR ══════════ */}
           {!dashLoading && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1141,6 +1167,7 @@ export default function CommandCenter() {
             </div>
           )}
 
+        </>) : null}
           {/* ═══ TODAY'S COMMANDS ═══ */}
         {!dashLoading && (
           <div className="rounded-2xl overflow-hidden"
@@ -1218,6 +1245,7 @@ export default function CommandCenter() {
           </div>
         )}
 
+        {viewMode === 'full' ? (<>
         {/* ═══ COMMAND BAR (5 Cards) ═══ */}
         {/* ═══ COMMAND BAR (5 Cards) ═══
             PHASE 3: onCtaClick fires real API mutations (touch updatedAt) so
@@ -1267,7 +1295,9 @@ export default function CommandCenter() {
               else touchProjects('approved');
             }} />
         </div>
+        </>) : null}
 
+        {viewMode === 'full' ? (<>
         {/* ═══ UPCOMING SCHEDULE ═══ */}
         {schedule.length > 0 && (
           <div className="card p-4">
@@ -1300,7 +1330,9 @@ export default function CommandCenter() {
             </div>
           </div>
         )}
+        </>) : null}
 
+        {viewMode === 'full' ? (<>
         {/* ═══ PIPELINE CONTROL ═══ */}
         <div className="card p-4">
           <div className="flex items-center justify-between mb-3">
@@ -1340,6 +1372,7 @@ export default function CommandCenter() {
             </div>
           )}
         </div>
+        </>) : null}
 
         {/* ═══ WORK QUEUE + HIGH VALUE DEALS ═══ */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -1349,6 +1382,16 @@ export default function CommandCenter() {
                 <div className="w-6 h-6 rounded-lg bg-amber-500/15 flex items-center justify-center"><Zap size={13} className="text-amber-400" /></div>
                 <span className="text-sm font-bold text-white">Active Work Queue</span>
                 <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--accent-amber)' }}>{workQueue.length}</span>
+                {dismissedQueueIds.size > 0 && (
+                  <button
+                    onClick={restoreAllDismissed}
+                    title={`Restore ${dismissedQueueIds.size} dismissed item${dismissedQueueIds.size !== 1 ? 's' : ''}`}
+                    className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors hover:bg-slate-700/60"
+                    style={{ background: 'rgba(100,116,139,0.1)', color: 'var(--text-muted)', border: '1px solid rgba(100,116,139,0.2)' }}
+                  >
+                    <EyeOff size={9} /> {dismissedQueueIds.size} hidden
+                  </button>
+                )}
               </div>
               <Link href="/projects" className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1">All <ChevronRight size={12} /></Link>
             </div>
@@ -1406,6 +1449,8 @@ export default function CommandCenter() {
           </div>
         </div>
 
+        {/* ═══════ SECONDARY: Quick Intel + Actions (Focus view hidden) ═══════ */}
+        {viewMode === 'full' ? (<>
         {/* ═══ QUICK INTEL STRIP ═══ */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
@@ -1453,7 +1498,10 @@ export default function CommandCenter() {
             </Link>
           ))}
         </div>
+        </>) : null}
 
+        {/* ═══════ SECONDARY: Crew + Ops Board (Focus view hidden) ═══════ */}
+        {viewMode === 'full' ? (<>
         {/* ═══ CREW CALENDAR ═══ */}
         <div className="card p-4">
           <CrewCalendar />
@@ -1594,6 +1642,7 @@ export default function CommandCenter() {
           </div>
         )}
 
+        </>) : null}
       </div>
 
       {/* ═══ DEAL DECISION ENGINE ═══ */}

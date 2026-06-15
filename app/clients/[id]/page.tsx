@@ -538,6 +538,7 @@ export default function ClientDetailPage() {
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800 text-xs font-medium text-slate-300">
                   <Zap size={11} className="text-amber-400/60" />{client.annualKwh.toLocaleString()} kWh/yr
                   <ConfidenceBadge confidence={annualKwhConf.confidence} source={annualKwhConf.source} size="xs" detail={annualKwhConf.detail} />
+
                 </span>
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800 text-xs font-medium text-slate-300">
                   <DollarSign size={11} className="text-emerald-400/60" />${client.annualBill.toLocaleString()}/yr
