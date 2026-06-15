@@ -3018,12 +3018,69 @@ export default function NetworkPage() {
                               .join(" · ") || null,
                           ],
                           [
+                            "Monthly bill",
+                            rec.monthly_bill_amount != null
+                              ? `${fmtCurrency(Number(rec.monthly_bill_amount))}/mo`
+                              : null,
+                          ],
+                          [
+                            "Timeline",
+                            rec.homeowner_timeline
+                              ? String(rec.homeowner_timeline).replace(
+                                  /_/g,
+                                  " ",
+                                )
+                              : null,
+                          ],
+                          [
+                            "Battery interest",
+                            rec.battery_candidate
+                              ? rec.battery_reason
+                                ? String(rec.battery_reason)
+                                : "Yes"
+                              : null,
+                          ],
+                          [
+                            "Wants financing",
+                            rec.homeowner_financing_interest ? "Yes" : null,
+                          ],
+                          [
                             "You paid",
                             rec.price_paid != null
                               ? fmtCurrency(Number(rec.price_paid))
                               : null,
                           ],
                         ];
+                        const qualMeta =
+                          rec.intake_metadata &&
+                          typeof rec.intake_metadata === "object"
+                            ? ((
+                                rec.intake_metadata as Record<string, unknown>
+                              ).qualification as
+                                | Record<string, unknown>
+                                | undefined)
+                            : undefined;
+                        const qualFacts = qualMeta
+                          ? Object.entries(qualMeta)
+                              .filter(
+                                ([k, v]) =>
+                                  (typeof v === "string" ||
+                                    typeof v === "number" ||
+                                    typeof v === "boolean") &&
+                                  v !== "" &&
+                                  v !== "unknown" &&
+                                  !/_id$|_at$|^id$|timestamp|event|score$/i.test(
+                                    k,
+                                  ),
+                              )
+                              .slice(0, 8)
+                          : [];
+                        const operatorNotes = [
+                          rec.listing_notes,
+                          rec.routing_notes,
+                        ].filter(
+                          (n) => typeof n === "string" && n.trim(),
+                        ) as string[];
                         return (
                           <div
                             key={opp.id}
@@ -3108,6 +3165,45 @@ export default function NetworkPage() {
                                       No contact info stored on this lead yet.
                                     </div>
                                   )}
+                                {(qualFacts.length > 0 ||
+                                  operatorNotes.length > 0) && (
+                                  <div className="col-span-2 mt-2 border-t border-slate-700/60 pt-2">
+                                    <div className="text-[10px] uppercase tracking-wider text-emerald-400 mb-1.5">
+                                      Vetting — already done for you
+                                    </div>
+                                    {qualFacts.length > 0 && (
+                                      <div className="flex flex-wrap gap-x-4 gap-y-1">
+                                        {qualFacts.map(([k, v]) => (
+                                          <span
+                                            key={k}
+                                            className="text-xs text-slate-300"
+                                          >
+                                            <span className="text-slate-500">
+                                              {k
+                                                .replace(/_/g, " ")
+                                                .replace(/^\w/, (c) =>
+                                                  c.toUpperCase(),
+                                                )}
+                                              :{" "}
+                                            </span>
+                                            {String(v)}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                    {operatorNotes.map((n, i) => (
+                                      <div
+                                        key={i}
+                                        className="mt-1.5 text-xs text-slate-300 whitespace-pre-wrap"
+                                      >
+                                        <span className="text-slate-500">
+                                          Operator note:{" "}
+                                        </span>
+                                        {n}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
