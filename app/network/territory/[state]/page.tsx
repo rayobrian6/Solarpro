@@ -17,6 +17,8 @@ import {
   Building2,
   ChevronRight,
   Lock,
+  ShieldCheck,
+  Sparkles,
 } from "lucide-react";
 
 const STATE_NAMES: Record<string, string> = {
@@ -184,7 +186,147 @@ function Category({
   );
 }
 
-// One gated lead — full quality, location only as far as the county.
+// ── Value formatting — turn raw band strings into human copy ────────────────
+const isEmpty = (v?: string | null) =>
+  !v || v === "—" || /^unknown$/i.test(v);
+
+function rangeFmt(v: string, money = false): string {
+  if (isEmpty(v)) return "";
+  const toks = v.replace(/[_–-]/g, " ").split(/\s+/).filter(Boolean);
+  if (toks.length >= 2) {
+    const a = money ? `$${toks[0]}` : toks[0];
+    const b = money ? `$${toks[1]}` : toks[1];
+    return `${a}–${b}`;
+  }
+  return money ? `$${v}` : v;
+}
+function yesish(v: string): string {
+  if (isEmpty(v)) return "";
+  if (/^(true|yes|interested|ready)$/i.test(v)) return "Interested";
+  if (/^(false|no)$/i.test(v)) return "Not yet";
+  return v;
+}
+function timelineFmt(v: string): string {
+  if (isEmpty(v)) return "";
+  if (/asap|immediate|now/i.test(v)) return "ASAP";
+  return v;
+}
+
+function leadScore(l: CountyLead): number {
+  const base: Record<string, number> = {
+    "Grade A": 90,
+    "Grade B": 76,
+    "Grade C": 60,
+    "Grade D": 44,
+  };
+  let sc = base[l.grade] ?? 55;
+  if (l.battery) sc += 3;
+  if (/interest|ready|yes|true/i.test(l.financing)) sc += 2;
+  if (/full|high|good/i.test(l.sunlight)) sc += 2;
+  if (/asap|immediate|now/i.test(l.timeline)) sc += 3;
+  if (/own/i.test(l.ownership)) sc += 1;
+  return Math.max(20, Math.min(99, sc));
+}
+
+function ScoreRing({ score }: { score: number }) {
+  const r = 26;
+  const c = 2 * Math.PI * r;
+  const off = c * (1 - score / 100);
+  const col =
+    score >= 85 ? "#34d399" : score >= 70 ? "#fbbf24" : score >= 55 ? "#fb923c" : "#f87171";
+  return (
+    <div className="flex flex-col items-center">
+      <svg width="66" height="66" viewBox="0 0 66 66">
+        <circle cx="33" cy="33" r={r} fill="none" stroke="#1e293b" strokeWidth="6" />
+        <circle
+          cx="33"
+          cy="33"
+          r={r}
+          fill="none"
+          stroke={col}
+          strokeWidth="6"
+          strokeLinecap="round"
+          strokeDasharray={c}
+          strokeDashoffset={off}
+          transform="rotate(-90 33 33)"
+        />
+        <text
+          x="33"
+          y="38"
+          textAnchor="middle"
+          fontSize="18"
+          fontWeight="700"
+          fill="#fff"
+        >
+          {score}
+        </text>
+      </svg>
+      <span className="mt-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">
+        Lead score
+      </span>
+    </div>
+  );
+}
+
+const TONE: Record<string, string> = {
+  emerald: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+  amber: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+  violet: "border-violet-500/30 bg-violet-500/10 text-violet-300",
+  blue: "border-blue-500/30 bg-blue-500/10 text-blue-300",
+  orange: "border-orange-500/30 bg-orange-500/10 text-orange-300",
+};
+
+const GRADE_TONE: Record<string, string> = {
+  "Grade A": "bg-emerald-400 text-slate-900",
+  "Grade B": "bg-amber-400 text-slate-900",
+  "Grade C": "bg-orange-400 text-slate-900",
+  "Grade D": "bg-slate-500 text-white",
+};
+
+function Stat({ label, value }: { label: string; value: string }) {
+  const empty = isEmpty(value);
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-slate-500">
+        {label}
+      </div>
+      <div
+        className={`text-[13px] font-semibold ${empty ? "text-slate-600" : "text-slate-100"}`}
+      >
+        {empty ? "Pending" : value}
+      </div>
+    </div>
+  );
+}
+
+function Panel({
+  icon,
+  title,
+  stats,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  stats: { label: string; value: string }[];
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+      <div className="mb-3 flex items-center gap-1.5 text-emerald-400">
+        {icon}
+        <span className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-300">
+          {title}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+        {stats.map((st) => (
+          <Stat key={st.label} label={st.label} value={st.value} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// One gated lead — a premium product card. Full quality, location only to the
+// county; contact + exact address stay locked until claim.
 function LeadCard({
   lead,
   onClaim,
@@ -194,86 +336,136 @@ function LeadCard({
   onClaim: (id: string) => void;
   claiming: boolean;
 }) {
-  const facts: { k: string; v: string }[] = [
-    { k: "System", v: lead.systemKw != null ? `${lead.systemKw} kW` : "Pending" },
-    {
-      k: "Project value",
-      v: lead.projectValue != null ? usdFull(lead.projectValue) : "Pending",
-    },
-    {
-      k: "Monthly bill",
-      v: lead.monthlyBill != null ? `$${lead.monthlyBill}/mo` : "—",
-    },
-    {
-      k: "Annual savings",
-      v: lead.annualSavings != null ? usdFull(lead.annualSavings) : "—",
-    },
-    {
-      k: "Payback",
-      v: lead.paybackYrs != null ? `${lead.paybackYrs} yrs` : "—",
-    },
-    { k: "Ownership", v: lead.ownership },
-    { k: "Financing", v: lead.financing },
-    { k: "Purchase intent", v: lead.intent },
-    { k: "Income band", v: lead.incomeBand },
-    { k: "Credit band", v: lead.creditBand },
-    { k: "Sunlight", v: lead.sunlight },
-    { k: "Roof", v: lead.roof },
-    { k: "Timeline", v: lead.timeline },
-    { k: "Utility", v: lead.utility || "—" },
+  const score = leadScore(lead);
+  const tags: { label: string; tone: keyof typeof TONE }[] = [
+    { label: "Exclusive", tone: "emerald" },
   ];
+  if (lead.battery) tags.push({ label: "Battery upsell", tone: "violet" });
+  if (/interest|ready|yes|true/i.test(lead.financing))
+    tags.push({ label: "Finance-ready", tone: "emerald" });
+  if (/asap|immediate|now/i.test(lead.timeline))
+    tags.push({ label: "Ready now", tone: "amber" });
+  if (/own/i.test(lead.ownership)) tags.push({ label: "Homeowner", tone: "blue" });
+  if (/full|high|good/i.test(lead.sunlight))
+    tags.push({ label: "Strong sun", tone: "amber" });
+
+  const gradeTone = GRADE_TONE[lead.grade] ?? "bg-slate-500 text-white";
+
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-700/60 bg-[#0f1623]">
-      <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="rounded-md bg-amber-500/15 px-2 py-0.5 text-[11px] font-black uppercase text-amber-300">
-            {lead.grade}
-          </span>
-          <span className="text-sm font-semibold text-white">
-            {lead.county} County
-          </span>
-          {lead.battery && (
-            <span className="rounded-md bg-violet-500/15 px-2 py-0.5 text-[10px] font-bold uppercase text-violet-300">
-              Battery
+    <div className="overflow-hidden rounded-3xl border border-slate-700/60 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.12),transparent_36%),#0f1623] shadow-xl shadow-black/20">
+      <div
+        className={`h-1.5 w-full ${
+          score >= 85
+            ? "bg-gradient-to-r from-emerald-400 to-emerald-500"
+            : score >= 70
+              ? "bg-gradient-to-r from-amber-400 to-emerald-500"
+              : "bg-gradient-to-r from-orange-400 to-amber-400"
+        }`}
+      />
+
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3 px-5 pt-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <span
+              className={`rounded-lg px-2 py-0.5 text-[11px] font-black uppercase ${gradeTone}`}
+            >
+              {lead.grade}
             </span>
-          )}
-          {lead.complexAhj && (
-            <span className="rounded-md bg-orange-500/15 px-2 py-0.5 text-[10px] font-bold uppercase text-orange-300">
-              Complex AHJ
+            <span className="flex items-center gap-1 text-base font-bold text-white">
+              <MapPin size={14} className="text-emerald-400" />
+              {lead.county} County
             </span>
-          )}
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2 p-4 sm:grid-cols-3">
-        {facts.map((f) => (
-          <div key={f.k}>
-            <div className="text-[10px] uppercase tracking-wider text-slate-500">
-              {f.k}
-            </div>
-            <div className="text-[13px] font-semibold text-slate-100">
-              {f.v || "—"}
-            </div>
           </div>
-        ))}
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {tags.map((t) => (
+              <span
+                key={t.label}
+                className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${TONE[t.tone]}`}
+              >
+                {t.label}
+              </span>
+            ))}
+          </div>
+        </div>
+        <ScoreRing score={score} />
       </div>
-      <div className="flex items-center justify-between gap-3 border-t border-slate-800 px-4 py-3">
+
+      {/* Quality panels */}
+      <div className="grid grid-cols-1 gap-3 p-5 lg:grid-cols-3">
+        <Panel
+          icon={<Users size={13} />}
+          title="Homeowner"
+          stats={[
+            { label: "Ownership", value: lead.ownership },
+            { label: "Income", value: rangeFmt(lead.incomeBand, true) },
+            { label: "Credit", value: rangeFmt(lead.creditBand) },
+            { label: "Intent", value: lead.intent },
+            { label: "Financing", value: yesish(lead.financing) },
+          ]}
+        />
+        <Panel
+          icon={<Zap size={13} />}
+          title="System & Savings"
+          stats={[
+            {
+              label: "System",
+              value: lead.systemKw != null ? `${lead.systemKw} kW` : "",
+            },
+            {
+              label: "Project value",
+              value: lead.projectValue != null ? usdFull(lead.projectValue) : "",
+            },
+            {
+              label: "Monthly bill",
+              value: lead.monthlyBill != null ? `$${lead.monthlyBill}/mo` : "",
+            },
+            {
+              label: "Annual savings",
+              value: lead.annualSavings != null ? usdFull(lead.annualSavings) : "",
+            },
+            {
+              label: "Payback",
+              value: lead.paybackYrs != null ? `${lead.paybackYrs} yrs` : "",
+            },
+          ]}
+        />
+        <Panel
+          icon={<Building2 size={13} />}
+          title="Site & Permitting"
+          stats={[
+            { label: "Sunlight", value: lead.sunlight },
+            { label: "Roof", value: lead.roof },
+            { label: "Utility", value: lead.utility },
+            { label: "Timeline", value: timelineFmt(lead.timeline) },
+            {
+              label: "Permitting",
+              value: lead.complexAhj ? "Complex AHJ" : "Standard",
+            },
+          ]}
+        />
+      </div>
+
+      {/* Claim footer */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 bg-slate-950/40 px-5 py-4">
         <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-          <Lock size={12} /> Contact &amp; exact address unlock after claim
+          <Lock size={12} /> Homeowner contact &amp; exact address unlock the
+          instant you claim
         </div>
         <button
           type="button"
           disabled={claiming}
           onClick={() => onClaim(lead.id)}
-          className="flex items-center gap-1.5 rounded-xl bg-emerald-400 px-4 py-2 text-sm font-bold text-slate-900 transition-colors hover:bg-emerald-300 disabled:opacity-60"
+          className="flex items-center gap-2 rounded-xl bg-emerald-400 px-5 py-2.5 text-sm font-black text-slate-900 shadow-lg shadow-emerald-950/30 transition-colors hover:bg-emerald-300 disabled:opacity-60"
         >
           {claiming ? (
-            <Loader2 size={14} className="animate-spin" />
+            <Loader2 size={15} className="animate-spin" />
           ) : (
-            <DollarSign size={14} />
+            <ShieldCheck size={15} />
           )}
           {lead.askingPrice != null
-            ? `Claim — ${usdFull(lead.askingPrice)}`
-            : "Claim lead"}
+            ? `Claim exclusively — ${usdFull(lead.askingPrice)}`
+            : "Claim this lead"}
         </button>
       </div>
     </div>
@@ -404,12 +596,19 @@ function TerritoryView() {
                 accent="text-emerald-400"
               />
               <Kpi
-                icon={<DollarSign size={16} />}
-                label="Pipeline value"
-                value={usdShort(
-                  data.countyLeads.reduce((s, l) => s + (l.projectValue ?? 0), 0),
-                )}
-                accent="text-amber-400"
+                icon={<Sparkles size={16} />}
+                label="Avg lead score"
+                value={
+                  data.countyLeads.length
+                    ? String(
+                        Math.round(
+                          data.countyLeads.reduce((s, l) => s + leadScore(l), 0) /
+                            data.countyLeads.length,
+                        ),
+                      )
+                    : "—"
+                }
+                accent="text-emerald-400"
               />
               <Kpi
                 icon={<Award size={16} />}
