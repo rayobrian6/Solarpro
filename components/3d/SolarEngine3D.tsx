@@ -1140,7 +1140,10 @@ function SolarEngine3D({
         targetAlt: 0 as number,   // filled in after terrain sampling completes
 
         // Spherical camera pose
-        heading: 0.0,             // radians, 0 = north, CW positive
+        // heading = bearing from target to camera; look dir = heading + π.
+        // π puts the camera SOUTH of the target so the fly-in looks NORTH
+        // (was 0.0, which sat north of target and looked south).
+        heading: Math.PI,         // radians; fly-in looks NORTH
         pitch:   -1.134,          // radians, -65° (initial boot angle)
         radius:  150.0,           // metres from target
 
@@ -6987,7 +6990,7 @@ function SolarEngine3D({
                 {([
                   { icon: '\u26F6',        tip: 'Fit View: zoom to placed panels',   action: () => { const v = viewerRef.current; const C = (window as any).Cesium; if (v&&C) fitCameraToRoofPlanes(v,C); } },
                   { icon: '\u{1F3E0}',     tip: 'Fly Home: return to property',      action: flyToProperty },
-                  { icon: '\u{1F9ED}',     tip: 'Orient North: reset heading',       action: () => { const o=orbitRef.current; o.heading=0; o.pitch=-0.785; applyOrbitRef.current?.(); setStatusMsg('\u{1F9ED} North up'); } },
+                  { icon: '\u{1F9ED}',     tip: 'Orient North: reset heading',       action: () => { const o=orbitRef.current; o.heading=Math.PI; o.pitch=-0.785; applyOrbitRef.current?.(); setStatusMsg('\u{1F9ED} North up'); } },
                   { icon: '\u{1F4D0}',     tip: 'Tilt: 3D angled perspective view', action: () => { const o=orbitRef.current; o.heading=5.76; o.pitch=-0.524; o.radius=280; applyOrbitRef.current?.(); setStatusMsg('\u{1F4D0} Perspective'); } },
                   { icon: '\u{1F52D}',     tip: "Top-Down: bird's eye view",        action: () => { const o=orbitRef.current; o.heading=0; o.pitch=-1.553; o.radius=150; applyOrbitRef.current?.(); setStatusMsg('\u{1F52D} Top-down'); } },
                   { icon: '\u{1F5D1}',     tip: 'Clear All: remove all panels',     action: clearPanels, danger: true },
