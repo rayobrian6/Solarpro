@@ -540,7 +540,6 @@ function PublicProposalView({
   const avgMonthlyAfter            = monthlyBillData.length
     ? Math.round(monthlyBillData.reduce((s, m) => s + (m.after || 0), 0) / monthlyBillData.length)
     : 0;
-  const billEliminated             = monthlyBillData.length > 0 && avgMonthlyAfter <= 3;
 
   // Policy / utility
   const failsafeMessage            = cp.policy.failsafeMessage;
@@ -1493,21 +1492,21 @@ function PublicProposalView({
               <h3 className="font-semibold text-white text-sm mb-3 flex items-center gap-2">
                 <DollarSign size={15} className="text-emerald-400" /> Monthly Bill: Before vs After Solar
               </h3>
-              {/* Bold before→after framing so the win reads even when the green
-                  bars are ~$0 (full-offset systems). */}
+              {/* Honest before→after: solar cuts the energy bill, but the fixed
+                  grid/meter charge survives — there is always a utility bill. */}
               <div className="mb-3 flex items-center gap-3">
                 <div>
                   <div className="text-[9px] uppercase tracking-wider text-slate-500">Utility bill now</div>
-                  <div className="text-xl font-black text-red-400 line-through decoration-red-500/50">${avgMonthlyBefore}/mo</div>
+                  <div className="text-xl font-black text-red-400">${avgMonthlyBefore}/mo</div>
                 </div>
                 <span className="text-slate-600 text-lg font-bold">→</span>
                 <div>
                   <div className="text-[9px] uppercase tracking-wider text-slate-500">With solar</div>
                   <div className="text-xl font-black text-emerald-400">${avgMonthlyAfter}/mo</div>
                 </div>
-                {billEliminated && (
+                {avgMonthlyBefore - avgMonthlyAfter > 0 && (
                   <span className="ml-auto rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-300">
-                    ⚡ Bill eliminated
+                    −${avgMonthlyBefore - avgMonthlyAfter}/mo
                   </span>
                 )}
               </div>

@@ -197,6 +197,42 @@ function mapEnergyFlowYear(y: EnergyFlowYear): CanonicalEnergyFlowYear {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Inject fixed / non-energy utility charges (delivery, meter/connection fee,
+// taxes) into a 25-yr projection. Solar does NOT offset these — the customer
+// stays grid-connected and keeps paying them — so they're added to BOTH the
+// without-solar and with-solar streams each year (escalating with rates). Net
+// savings (the difference) is unchanged; only the absolute displayed costs
+// become honest, and "after solar" is never falsely shown as $0.
+// ─────────────────────────────────────────────────────────────────────────────
+function applyFixedCharges(
+  proj: ReturnType<typeof calculate25yrProjection>,
+  fixedAnnualBase: number,
+  escalation: number,
+): ReturnType<typeof calculate25yrProjection> {
+  if (fixedAnnualBase <= 0) return proj;
+  let cumAdd = 0;
+  let sumFixed = 0;
+  const yearlyFlow = proj.yearlyFlow.map((y, i) => {
+    const fixedY = Math.round(fixedAnnualBase * Math.pow(1 + escalation, i));
+    cumAdd += fixedY;
+    sumFixed += fixedY;
+    return {
+      ...y,
+      utility_cost_without_solar: y.utility_cost_without_solar + fixedY,
+      utility_cost_with_solar:    y.utility_cost_with_solar + fixedY,
+      cumulative_without_solar:   y.cumulative_without_solar + cumAdd,
+      cumulative_with_solar:      y.cumulative_with_solar + cumAdd,
+    };
+  });
+  return {
+    ...proj,
+    yearlyFlow,
+    utility_cost_without_solar_25yr: proj.utility_cost_without_solar_25yr + sumFixed,
+    remaining_utility_cost_total:    proj.remaining_utility_cost_total + sumFixed,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // v48.3: Async DB rate fetcher (mirrors fetchRateFromDb in billEnrichment.ts)
 // Call this BEFORE buildCanonicalProposal() from server-side callers and pass
 // the result as input.dbUtilityRate.  No-ops gracefully if DB is unavailable.
@@ -461,11 +497,19 @@ export function buildCanonicalProposal(
   const utilityProfile   = builtProfile.profile;
   const resolvedRate     = builtProfile.resolved_rate;
   const escalationRate   = utilityProfile.escalation_rate || 0.03;
-  // NOTE: input.actualAnnualBill is intentionally NOT used to anchor the rate.
-  // Doing so inflated the displayed $/kWh (e.g. $0.155 → $0.26) AND overstated
-  // savings by treating solar as offsetting fixed/delivery charges it can't.
-  // The correct model (energy at the real rate + a separate fixed-charge adder
-  // that survives on the "after solar" side) is pending — see proposal notes.
+
+  // ── Fixed / non-energy charges (delivery, meter/connection fee, taxes) ──────
+  // A utility bill is NOT just energy. When we have the homeowner's ACTUAL bill,
+  // anything above the energy cost (usage × rate) is the fixed/delivery/meter
+  // charge. Solar does NOT remove it — they stay grid-connected and keep paying
+  // it — so it appears on BOTH the "before" and "after solar" side. This makes
+  // the current bill match the real bill AND kills the "$0/mo, bill eliminated"
+  // lie (there is always a utility bill). Energy-only rate is kept for display.
+  const energyAnnualCost   = input.annualUsageKwh * resolvedRate;
+  const fixedMonthlyCharge =
+    input.actualAnnualBill && input.actualAnnualBill > energyAnnualCost && input.annualUsageKwh > 0
+      ? Math.max(0, Math.round((input.actualAnnualBill - energyAnnualCost) / 12))
+      : 0;
   const exportRate       = builtProfile.financial_rules.export_rate;
   const netMeteringType  = utilityProfile.net_metering_type;
 
@@ -559,13 +603,14 @@ export function buildCanonicalProposal(
   const avgMonthlyUsageKwh      = input.annualUsageKwh > 0 ? input.annualUsageKwh / 12 : 0;
   const avgMonthlyProductionKwh = annualKwh > 0 ? annualKwh / 12 : 0;
 
-  // Profile-driven remaining utility monthly cost
+  // Profile-driven remaining utility monthly cost (residual energy + the fixed
+  // charge that survives solar — the customer always has SOME utility bill).
   const remaining_utility_monthly = Math.max(0, calculateRemainingUtility({
     monthlyUsageKwh:      avgMonthlyUsageKwh,
     monthlyProductionKwh: avgMonthlyProductionKwh,
     profile:              utilityProfile,
     retailRate:           resolvedRate,
-  }));
+  })) + fixedMonthlyCharge;
 
   const solar_payment_monthly   = financeMonthlyPayment;
   const total_energy_cost_monthly = solar_payment_monthly + remaining_utility_monthly;
@@ -576,14 +621,15 @@ export function buildCanonicalProposal(
       ? avgMonthlyUsageKwh * SEASONAL_FACTORS[i]
       : ((input.annualUsageKwh > 0 ? input.annualUsageKwh : 12000) / 12) * SEASONAL_FACTORS[i];
     const monthlyProduced = monthlyKwh[i] ?? 0;
-    const before = Math.round(monthlyUsage * resolvedRate);
+    // Both before and after carry the fixed charge — solar offsets energy only.
+    const before = Math.round(monthlyUsage * resolvedRate) + fixedMonthlyCharge;
     // v47.253: NEM-aware monthly bill — uses calculateRemainingUtility, not (usage-production)*rate
     const after  = Math.max(0, calculateRemainingUtility({
       monthlyUsageKwh:      monthlyUsage,
       monthlyProductionKwh: monthlyProduced,
       profile:              utilityProfile,
       retailRate:           resolvedRate,
-    }));
+    })) + fixedMonthlyCharge;
     return { month, before, after, savings: before - after };
   });
 
@@ -592,8 +638,8 @@ export function buildCanonicalProposal(
   );
   const ownershipDeltaMonthly = total_energy_cost_monthly - avgMonthlyBillBefore;
 
-  // Year 1 bill WITHOUT solar — correct: annual usage × retail rate
-  const year1BillWithoutSolar = Math.round(input.annualUsageKwh * resolvedRate);
+  // Year 1 bill WITHOUT solar — energy (usage × rate) + fixed/delivery charges
+  const year1BillWithoutSolar = Math.round(input.annualUsageKwh * resolvedRate) + fixedMonthlyCharge * 12;
   // annualEnergyValue and year1BillWithSolar derived AFTER proj25 (see STEP 5 below)
 
   // ── ITC — v47.251 Global Incentives Truth Rule ──────────────────────────────
@@ -650,7 +696,9 @@ export function buildCanonicalProposal(
   const loanYears            = financeTermYears;
 
   // Cash-basis projection (canonical savings display — always uses cash price, not loan total)
-  const proj25 = calculate25yrProjection({
+  // Fixed/delivery charges are injected onto BOTH sides so the displayed totals
+  // are honest while net savings stay correct (the fixed charge cancels).
+  const proj25 = applyFixedCharges(calculate25yrProjection({
     annualProductionKwh:  annualKwh,
     annualUsageKwh:       input.annualUsageKwh,
     retailRate:           resolvedRate,
@@ -660,10 +708,10 @@ export function buildCanonicalProposal(
     solarAnnualPayment,
     loanYears,
     panelDegradation:     PANEL_DEGRADATION,
-  });
+  }), fixedMonthlyCharge * 12, escalationRate);
 
   // Finance-basis projection (for financing cost comparison only)
-  const proj25Finance = input.purchaseMode === 'finance' ? calculate25yrProjection({
+  const proj25Finance = input.purchaseMode === 'finance' ? applyFixedCharges(calculate25yrProjection({
     annualProductionKwh:  annualKwh,
     annualUsageKwh:       input.annualUsageKwh,
     retailRate:           resolvedRate,
@@ -673,7 +721,7 @@ export function buildCanonicalProposal(
     solarAnnualPayment,
     loanYears,
     panelDegradation:     PANEL_DEGRADATION,
-  }) : proj25;
+  }), fixedMonthlyCharge * 12, escalationRate) : proj25;
 
   // CANONICAL SAVINGS DEFINITION — cash basis, enforced here, used everywhere:
   const netDifference = proj25.utility_cost_without_solar_25yr
