@@ -6,9 +6,8 @@ import {
   Geographies,
   Geography,
   Marker,
-  ZoomableGroup,
 } from "react-simple-maps";
-import { geoBounds, geoCentroid, geoContains } from "d3-geo";
+import { geoCentroid, geoContains, geoMercator } from "d3-geo";
 import { feature } from "topojson-client";
 import statesTopo from "us-atlas/states-10m.json";
 
@@ -174,20 +173,27 @@ export default function UsLeadMap({
     return { countyCounts, countyLeadIds, unlocated };
   }, [drilled, leads, selected, stateCounties]);
 
-  // Frame the camera on the drilled-in state from its counties' bounds.
-  const view = useMemo(() => {
+  // Frame the drilled-in state with its own upright Mercator projection — the
+  // national Albers projection leaves edge states visibly tilted when zoomed.
+  // Fit the state's counties to the viewport, then read back the scale and the
+  // geographic point that lands at screen-center.
+  const drilledProj = useMemo(() => {
     if (!drilled) return null;
     const fc = {
       type: "FeatureCollection",
       features: stateCounties,
     } as never;
-    const center = geoCentroid(fc) as [number, number];
-    const [[w, s], [e, n]] = geoBounds(fc);
-    // Weight latitude span slightly (map is wider than tall) and floor the
-    // span so tiny states (DC, RI) don't zoom past the max.
-    const span = Math.max(e - w, (n - s) * 1.4, 0.4);
-    const zoom = Math.max(2.5, Math.min(14, 48 / span));
-    return { center, zoom };
+    const proj = geoMercator().fitExtent(
+      [
+        [40, 30],
+        [860, 470],
+      ],
+      fc,
+    );
+    const center =
+      (proj.invert?.([450, 250]) as [number, number] | undefined) ??
+      (geoCentroid(fc) as [number, number]);
+    return { scale: proj.scale(), center };
   }, [drilled, stateCounties]);
 
   const max = Math.max(1, ...Object.values(counts));
@@ -208,35 +214,36 @@ export default function UsLeadMap({
   };
 
   // Which leads get a pin. National view: every lead (Phase B). Drilled view:
-  // zones carry the density, so pins appear only for the county the operator
-  // clicked — few enough to click through to claim.
+  // located leads appear only for the county the operator clicked — but leads
+  // with no precise geocode are ALWAYS shown as an approximate state-level pin
+  // so a lead can never become invisible behind the zones.
   const pinLeads = useMemo(() => {
     if (!drilled) return leads;
-    if (!selectedCounty) return [];
-    const ids = new Set(countyLeadIds[selectedCounty] ?? []);
-    return leads.filter((l) => ids.has(l.id));
-  }, [drilled, selectedCounty, leads, countyLeadIds]);
-
-  const center: [number, number] =
-    drilled && view ? view.center : [-97, 40];
-  const zoom = drilled && view ? view.zoom : 1;
+    const located = selectedCounty
+      ? leads.filter((l) =>
+          (countyLeadIds[selectedCounty] ?? []).includes(l.id),
+        )
+      : [];
+    const unlocatedPins = leads.filter(
+      (l) => l.state === selected && (l.lat == null || l.lng == null),
+    );
+    return [...located, ...unlocatedPins];
+  }, [drilled, selectedCounty, selected, leads, countyLeadIds]);
 
   return (
     <div style={{ position: "relative" }}>
       <ComposableMap
-        projection="geoAlbersUsa"
+        projection={drilled ? "geoMercator" : "geoAlbersUsa"}
         width={900}
         height={500}
-        projectionConfig={{ scale: 1000 }}
+        projectionConfig={
+          drilled && drilledProj
+            ? { scale: drilledProj.scale, center: drilledProj.center }
+            : { scale: 1000 }
+        }
         style={{ width: "100%", height: "auto" }}
       >
-        {/* Controlled zoom — we drive center/zoom from clicks; block user pan
-            so the click-to-filter UX stays intact. */}
-        <ZoomableGroup
-          center={center}
-          zoom={zoom}
-          filterZoomEvent={() => false}
-        >
+        <>
           {drilled ? (
             <>
               {/* Faint neighboring states underneath, for orientation. */}
@@ -381,10 +388,10 @@ export default function UsLeadMap({
                 coordinates={[base[0] + jx, base[1] + jy]}
               >
                 <circle
-                  r={drilled ? 5.5 / Math.sqrt(zoom) : 5.5}
+                  r={5.5}
                   fill={dimmed ? "#475569" : "#fbbf24"}
                   stroke="#0b1220"
-                  strokeWidth={drilled ? 1.2 / Math.sqrt(zoom) : 1.2}
+                  strokeWidth={1.2}
                   style={{ cursor: "pointer" }}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -396,7 +403,7 @@ export default function UsLeadMap({
               </Marker>
             );
           })}
-        </ZoomableGroup>
+        </>
       </ComposableMap>
 
       {hover && (
@@ -469,7 +476,7 @@ export default function UsLeadMap({
             ? "Pins are approximate — exact address unlocks after you claim the lead."
             : `County shading shows lead density — click a county to view its leads.${
                 unlocated > 0
-                  ? ` (${unlocated} lead${unlocated === 1 ? "" : "s"} without precise location not shown.)`
+                  ? ` (${unlocated} lead${unlocated === 1 ? "" : "s"} shown at state level — no precise location yet.)`
                   : ""
               }`
           : "Pins are approximate — exact address unlocks after you claim the lead."}
