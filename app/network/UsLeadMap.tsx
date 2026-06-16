@@ -1,12 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ComposableMap,
   Geographies,
   Geography,
   Marker,
+  ZoomableGroup,
 } from "react-simple-maps";
+import { geoBounds, geoCentroid, geoContains } from "d3-geo";
+import { feature } from "topojson-client";
 import statesTopo from "us-atlas/states-10m.json";
 
 // US Census FIPS id → USPS 2-letter code, to match opportunity.state_code.
@@ -21,6 +24,12 @@ const FIPS_TO_USPS: Record<string, string> = {
   "47": "TN", "48": "TX", "49": "UT", "50": "VT", "51": "VA", "53": "WA",
   "54": "WV", "55": "WI", "56": "WY",
 };
+
+// Inverse lookup: USPS code → 2-digit state FIPS, used to filter counties
+// (county FIPS = state FIPS + 3-digit county) when drilling into a state.
+const USPS_TO_FIPS: Record<string, string> = Object.fromEntries(
+  Object.entries(FIPS_TO_USPS).map(([fips, code]) => [code, fips]),
+);
 
 // Approximate state centers [lng, lat] — fallback pin when a lead has no
 // geocode. Used only to scatter pins regionally; never an exact location.
@@ -50,6 +59,38 @@ function jitter(id: string): [number, number] {
   return [dx, dy];
 }
 
+// One GeoJSON county polygon. Loaded lazily — see loadCountyFeatures.
+interface CountyFeature {
+  id?: string | number;
+  rsmKey?: string;
+  properties?: Record<string, unknown>;
+  geometry: unknown;
+}
+
+// counties-10m.json is ~1MB, so it's only pulled the first time anyone drills
+// into a state, then cached at module scope across mounts.
+let COUNTY_FEATURES: CountyFeature[] | null = null;
+let countyLoadPromise: Promise<CountyFeature[]> | null = null;
+
+function loadCountyFeatures(): Promise<CountyFeature[]> {
+  if (COUNTY_FEATURES) return Promise.resolve(COUNTY_FEATURES);
+  if (!countyLoadPromise) {
+    countyLoadPromise = import("us-atlas/counties-10m.json").then((mod) => {
+      const topo = (mod as { default?: unknown }).default ?? mod;
+      const fc = feature(
+        topo as never,
+        (topo as { objects: { counties: never } }).objects.counties,
+      ) as unknown as { features: CountyFeature[] };
+      COUNTY_FEATURES = fc.features;
+      return COUNTY_FEATURES;
+    });
+  }
+  return countyLoadPromise;
+}
+
+const fips5 = (id: string | number | undefined) =>
+  String(id ?? "").padStart(5, "0");
+
 export interface MapLead {
   id: string;
   state: string;
@@ -74,14 +115,111 @@ export default function UsLeadMap({
   onSelectLead: (id: string) => void;
 }) {
   const [hover, setHover] = useState<{ name: string; n: number } | null>(null);
-  const max = Math.max(1, ...Object.values(counts));
+  const [countyFeatures, setCountyFeatures] = useState<CountyFeature[] | null>(
+    COUNTY_FEATURES,
+  );
+  const [selectedCounty, setSelectedCounty] = useState<string>("");
 
-  const fillFor = (n: number, isSel: boolean) => {
+  const stateFips = selected ? USPS_TO_FIPS[selected] ?? "" : "";
+
+  // Lazy-load county geometry the first time the user drills into any state.
+  useEffect(() => {
+    if (!selected) return;
+    let alive = true;
+    loadCountyFeatures().then((f) => {
+      if (alive) setCountyFeatures(f);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [selected]);
+
+  // Reset the county pick whenever the active state changes (or clears).
+  useEffect(() => {
+    setSelectedCounty("");
+  }, [selected]);
+
+  // Counties belonging to the drilled-in state.
+  const stateCounties = useMemo(() => {
+    if (!stateFips || !countyFeatures) return [];
+    return countyFeatures.filter((f) => fips5(f.id).slice(0, 2) === stateFips);
+  }, [stateFips, countyFeatures]);
+
+  const drilled = !!selected && stateCounties.length > 0;
+
+  // Bucket each geocoded lead in this state into its county (point-in-polygon).
+  // Leads without coordinates (or that fall outside every polygon) are tallied
+  // as "unlocated" so the operator knows the zone counts aren't the whole story.
+  const { countyCounts, countyLeadIds, unlocated } = useMemo(() => {
+    const countyCounts: Record<string, number> = {};
+    const countyLeadIds: Record<string, string[]> = {};
+    let unlocated = 0;
+    if (!drilled) return { countyCounts, countyLeadIds, unlocated };
+    for (const lead of leads) {
+      if (lead.state !== selected) continue;
+      if (lead.lat == null || lead.lng == null) {
+        unlocated++;
+        continue;
+      }
+      const pt: [number, number] = [lead.lng, lead.lat];
+      const county = stateCounties.find((f) => geoContains(f as never, pt));
+      if (!county) {
+        unlocated++;
+        continue;
+      }
+      const code = fips5(county.id);
+      countyCounts[code] = (countyCounts[code] ?? 0) + 1;
+      (countyLeadIds[code] ??= []).push(lead.id);
+    }
+    return { countyCounts, countyLeadIds, unlocated };
+  }, [drilled, leads, selected, stateCounties]);
+
+  // Frame the camera on the drilled-in state from its counties' bounds.
+  const view = useMemo(() => {
+    if (!drilled) return null;
+    const fc = {
+      type: "FeatureCollection",
+      features: stateCounties,
+    } as never;
+    const center = geoCentroid(fc) as [number, number];
+    const [[w, s], [e, n]] = geoBounds(fc);
+    // Weight latitude span slightly (map is wider than tall) and floor the
+    // span so tiny states (DC, RI) don't zoom past the max.
+    const span = Math.max(e - w, (n - s) * 1.4, 0.4);
+    const zoom = Math.max(2.5, Math.min(14, 48 / span));
+    return { center, zoom };
+  }, [drilled, stateCounties]);
+
+  const max = Math.max(1, ...Object.values(counts));
+  const countyMax = Math.max(1, ...Object.values(countyCounts));
+
+  const stateFill = (n: number, isSel: boolean) => {
     if (isSel) return "#f59e0b";
     if (n <= 0) return "#1b2433";
     const t = (0.4 + 0.55 * (n / max)).toFixed(2);
     return `rgba(16,185,129,${t})`;
   };
+
+  const countyFill = (n: number, isSel: boolean) => {
+    if (isSel) return "#f59e0b";
+    if (n <= 0) return "#162033";
+    const t = (0.35 + 0.55 * (n / countyMax)).toFixed(2);
+    return `rgba(16,185,129,${t})`;
+  };
+
+  // Which leads get a pin. National view: every lead (Phase B). Drilled view:
+  // zones carry the density, so pins appear only for the county the operator
+  // clicked — few enough to click through to claim.
+  const pinLeads = useMemo(() => {
+    if (!drilled) return leads;
+    if (!selectedCounty) return [];
+    const ids = new Set(countyLeadIds[selectedCounty] ?? []);
+    return leads.filter((l) => ids.has(l.id));
+  }, [drilled, selectedCounty, leads, countyLeadIds]);
+
+  const center: [number, number] =
+    drilled && view ? view.center : [-97, 40];
+  const zoom = drilled && view ? view.zoom : 1;
 
   return (
     <div style={{ position: "relative" }}>
@@ -92,85 +230,173 @@ export default function UsLeadMap({
         projectionConfig={{ scale: 1000 }}
         style={{ width: "100%", height: "auto" }}
       >
-        <Geographies geography={statesTopo as unknown as Record<string, unknown>}>
-          {({ geographies }) =>
-            geographies.map((geo) => {
-              const fips = String(geo.id ?? "").padStart(2, "0");
-              const code = FIPS_TO_USPS[fips] ?? "";
-              const n = code ? (counts[code] ?? 0) : 0;
-              const isSel = !!code && code === selected;
-              const name = String(
-                (geo.properties as Record<string, unknown>)?.name ?? "",
-              );
-              return (
-                <Geography
-                  key={geo.rsmKey}
-                  geography={geo}
-                  onMouseEnter={() => setHover({ name, n })}
-                  onMouseLeave={() => setHover(null)}
-                  onClick={() => {
-                    if (code) onSelect(isSel ? "" : code);
-                  }}
-                  style={{
-                    default: {
-                      fill: fillFor(n, isSel),
-                      stroke: "#0b1220",
-                      strokeWidth: 0.6,
-                      outline: "none",
-                      cursor: n > 0 ? "pointer" : "default",
-                    },
-                    hover: {
-                      fill: n > 0 ? "#34d399" : "#2a3346",
-                      stroke: "#0b1220",
-                      strokeWidth: 0.9,
-                      outline: "none",
-                      cursor: n > 0 ? "pointer" : "default",
-                    },
-                    pressed: {
-                      fill: "#f59e0b",
-                      stroke: "#0b1220",
-                      outline: "none",
-                    },
-                  }}
-                />
-              );
-            })
-          }
-        </Geographies>
-
-        {leads.map((lead) => {
-          const base: [number, number] | undefined =
-            lead.lat != null && lead.lng != null
-              ? [lead.lng, lead.lat]
-              : STATE_CENTROID[lead.state];
-          if (!base) return null;
-          const [jx, jy] = jitter(lead.id);
-          const dimmed = !!selected && selected !== lead.state;
-          const label = [
-            lead.city,
-            lead.grade ? `Grade ${lead.grade}` : "",
-            lead.kw != null ? `${lead.kw} kW` : "",
-          ]
-            .filter(Boolean)
-            .join(" · ");
-          return (
-            <Marker key={lead.id} coordinates={[base[0] + jx, base[1] + jy]}>
-              <circle
-                r={5.5}
-                fill={dimmed ? "#475569" : "#fbbf24"}
-                stroke="#0b1220"
-                strokeWidth={1.2}
-                style={{ cursor: "pointer" }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSelectLead(lead.id);
-                }}
+        {/* Controlled zoom — we drive center/zoom from clicks; block user pan
+            so the click-to-filter UX stays intact. */}
+        <ZoomableGroup
+          center={center}
+          zoom={zoom}
+          filterZoomEvent={() => false}
+        >
+          {drilled ? (
+            <>
+              {/* Faint neighboring states underneath, for orientation. */}
+              <Geographies
+                geography={statesTopo as unknown as Record<string, unknown>}
               >
-                <title>{label || "Solar lead"}</title>
-              </circle>
-            </Marker>
-          );
-        })}
+                {({ geographies }) =>
+                  geographies.map((geo) => (
+                    <Geography
+                      key={`bg-${geo.rsmKey}`}
+                      geography={geo}
+                      style={{
+                        default: {
+                          fill: "#101826",
+                          stroke: "#1f2a3d",
+                          strokeWidth: 0.5,
+                          outline: "none",
+                          pointerEvents: "none",
+                        },
+                        hover: { fill: "#101826", outline: "none" },
+                        pressed: { fill: "#101826", outline: "none" },
+                      }}
+                    />
+                  ))
+                }
+              </Geographies>
+
+              {/* County zones for the drilled-in state. */}
+              <Geographies geography={stateCounties as never}>
+                {({ geographies }) =>
+                  geographies.map((geo) => {
+                    const code = fips5(geo.id);
+                    const n = countyCounts[code] ?? 0;
+                    const isSel = code === selectedCounty;
+                    const name = String(
+                      (geo.properties as Record<string, unknown>)?.name ?? "",
+                    );
+                    return (
+                      <Geography
+                        key={geo.rsmKey}
+                        geography={geo}
+                        onMouseEnter={() => setHover({ name, n })}
+                        onMouseLeave={() => setHover(null)}
+                        onClick={() => {
+                          if (n > 0) setSelectedCounty(isSel ? "" : code);
+                        }}
+                        style={{
+                          default: {
+                            fill: countyFill(n, isSel),
+                            stroke: "#0b1220",
+                            strokeWidth: 0.4,
+                            outline: "none",
+                            cursor: n > 0 ? "pointer" : "default",
+                          },
+                          hover: {
+                            fill: n > 0 ? "#34d399" : "#1e2a3d",
+                            stroke: "#0b1220",
+                            strokeWidth: 0.6,
+                            outline: "none",
+                            cursor: n > 0 ? "pointer" : "default",
+                          },
+                          pressed: {
+                            fill: "#f59e0b",
+                            stroke: "#0b1220",
+                            outline: "none",
+                          },
+                        }}
+                      />
+                    );
+                  })
+                }
+              </Geographies>
+            </>
+          ) : (
+            <Geographies
+              geography={statesTopo as unknown as Record<string, unknown>}
+            >
+              {({ geographies }) =>
+                geographies.map((geo) => {
+                  const fips = String(geo.id ?? "").padStart(2, "0");
+                  const code = FIPS_TO_USPS[fips] ?? "";
+                  const n = code ? (counts[code] ?? 0) : 0;
+                  const isSel = !!code && code === selected;
+                  const name = String(
+                    (geo.properties as Record<string, unknown>)?.name ?? "",
+                  );
+                  return (
+                    <Geography
+                      key={geo.rsmKey}
+                      geography={geo}
+                      onMouseEnter={() => setHover({ name, n })}
+                      onMouseLeave={() => setHover(null)}
+                      onClick={() => {
+                        if (code) onSelect(isSel ? "" : code);
+                      }}
+                      style={{
+                        default: {
+                          fill: stateFill(n, isSel),
+                          stroke: "#0b1220",
+                          strokeWidth: 0.6,
+                          outline: "none",
+                          cursor: n > 0 ? "pointer" : "default",
+                        },
+                        hover: {
+                          fill: n > 0 ? "#34d399" : "#2a3346",
+                          stroke: "#0b1220",
+                          strokeWidth: 0.9,
+                          outline: "none",
+                          cursor: n > 0 ? "pointer" : "default",
+                        },
+                        pressed: {
+                          fill: "#f59e0b",
+                          stroke: "#0b1220",
+                          outline: "none",
+                        },
+                      }}
+                    />
+                  );
+                })
+              }
+            </Geographies>
+          )}
+
+          {pinLeads.map((lead) => {
+            const base: [number, number] | undefined =
+              lead.lat != null && lead.lng != null
+                ? [lead.lng, lead.lat]
+                : STATE_CENTROID[lead.state];
+            if (!base) return null;
+            const [jx, jy] = jitter(lead.id);
+            const dimmed = !drilled && !!selected && selected !== lead.state;
+            const label = [
+              lead.city,
+              lead.grade ? `Grade ${lead.grade}` : "",
+              lead.kw != null ? `${lead.kw} kW` : "",
+            ]
+              .filter(Boolean)
+              .join(" · ");
+            return (
+              <Marker
+                key={lead.id}
+                coordinates={[base[0] + jx, base[1] + jy]}
+              >
+                <circle
+                  r={drilled ? 5.5 / Math.sqrt(zoom) : 5.5}
+                  fill={dimmed ? "#475569" : "#fbbf24"}
+                  stroke="#0b1220"
+                  strokeWidth={drilled ? 1.2 / Math.sqrt(zoom) : 1.2}
+                  style={{ cursor: "pointer" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectLead(lead.id);
+                  }}
+                >
+                  <title>{label || "Solar lead"}</title>
+                </circle>
+              </Marker>
+            );
+          })}
+        </ZoomableGroup>
       </ComposableMap>
 
       {hover && (
@@ -197,16 +423,22 @@ export default function UsLeadMap({
             }}
           >
             {hover.n > 0
-              ? `${hover.n} lead${hover.n === 1 ? "" : "s"} you qualify for`
-              : "No leads here yet"}
+              ? drilled
+                ? `${hover.n} lead${hover.n === 1 ? "" : "s"} — click to view`
+                : `${hover.n} lead${hover.n === 1 ? "" : "s"} you qualify for`
+              : drilled
+                ? "No leads in this county"
+                : "No leads here yet"}
           </div>
         </div>
       )}
 
-      {selected && (
+      {(selected || selectedCounty) && (
         <button
           type="button"
-          onClick={() => onSelect("")}
+          onClick={() =>
+            selectedCounty ? setSelectedCounty("") : onSelect("")
+          }
           style={{
             position: "absolute",
             top: 10,
@@ -220,7 +452,7 @@ export default function UsLeadMap({
             cursor: "pointer",
           }}
         >
-          Clear {selected}
+          {selectedCounty ? `← Back to ${selected}` : `Clear ${selected}`}
         </button>
       )}
 
@@ -232,7 +464,15 @@ export default function UsLeadMap({
           color: "#64748b",
         }}
       >
-        Pins are approximate — exact address unlocks after you claim the lead.
+        {drilled
+          ? selectedCounty
+            ? "Pins are approximate — exact address unlocks after you claim the lead."
+            : `County shading shows lead density — click a county to view its leads.${
+                unlocated > 0
+                  ? ` (${unlocated} lead${unlocated === 1 ? "" : "s"} without precise location not shown.)`
+                  : ""
+              }`
+          : "Pins are approximate — exact address unlocks after you claim the lead."}
       </div>
     </div>
   );
