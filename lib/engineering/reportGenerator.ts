@@ -170,11 +170,14 @@ function generateSystemSummary(snap: DesignSnapshot): SystemSummary {
 }
 
 function getPeakSunHours(lat: number, stateCode: string): number {
-  // Simplified peak sun hours by latitude band
-  if (lat >= 45) return 4.0;
-  if (lat >= 40) return 4.5;
-  if (lat >= 35) return 5.0;
-  if (lat >= 30) return 5.5;
+  // Simplified peak sun hours by latitude band — use the MAGNITUDE so Southern
+  // Hemisphere sites (negative lat, e.g. Australia) map to the correct band
+  // instead of always falling through to the max 5.8 and overstating production.
+  const absLat = Math.abs(lat);
+  if (absLat >= 45) return 4.0;
+  if (absLat >= 40) return 4.5;
+  if (absLat >= 35) return 5.0;
+  if (absLat >= 30) return 5.5;
   return 5.8;
 }
 
@@ -208,13 +211,22 @@ function generateElectricalEngineering(snap: DesignSnapshot, pd: ProjectPhysical
     const mpptChannels = inverter?.mpptChannels || 2;
 
     // Max panels per string (NEC 690.7: Voc × 1.25 ≤ maxDcVoltage)
-    panelsPerString = Math.floor(maxDcVoltage / (panelVoc * 1.25));
-    panelsPerString = Math.max(1, Math.min(panelsPerString, 20));
+    const necMaxPerString = Math.max(1, Math.min(Math.floor(maxDcVoltage / (panelVoc * 1.25)), 20));
+    panelsPerString = necMaxPerString;
 
     // Optimal: target Vmp in MPPT range
     const targetPanels = Math.floor(mpptVoltageMax / panelVmp);
     panelsPerString = Math.min(panelsPerString, targetPanels);
-    panelsPerString = Math.max(8, panelsPerString); // minimum 8 panels/string
+
+    // Prefer a minimum string length of 8, but NEVER exceed the actual panel
+    // count or the NEC 690.7 maximum — otherwise small systems report a string
+    // longer than the array (overstating Voc/Vmp) and high-Voc panels defeat
+    // the safety clamp.
+    panelsPerString = Math.min(panelsPerString, snap.panelCount || panelsPerString, necMaxPerString);
+    if ((snap.panelCount || 0) >= 8) {
+      panelsPerString = Math.min(Math.max(panelsPerString, 8), necMaxPerString, snap.panelCount);
+    }
+    panelsPerString = Math.max(1, panelsPerString);
 
     stringCount = Math.ceil(snap.panelCount / panelsPerString);
     stringVoc = panelVoc * panelsPerString;

@@ -150,9 +150,13 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       // Microinverter: totalAcKw = panels * per-micro AC output
       input.system.totalAcKw = cad.totalPanels * inv0.acOutputKw;
     } else if (inv0?.acOutputKw && input.system.totalAcKw === 0) {
-      // String inverter: totalAcKw = inverter AC output (may be multi-inverter)
-      const invCount = input.system.inverters.length || 1;
-      input.system.totalAcKw = inv0.acOutputKw * invCount;
+      // String inverter(s): SUM each inverter's own AC output — do not scale
+      // inverters[0] by the count (wrong for a mixed-size inverter array, e.g.
+      // 7.6kW + 3.8kW = 11.4kW, not 7.6×2).
+      const summed = input.system.inverters.reduce(
+        (sum, inv) => sum + (inv?.acOutputKw || 0), 0,
+      );
+      input.system.totalAcKw = summed > 0 ? summed : inv0.acOutputKw;
     } else if (input.system.totalAcKw === 0 && cad.totalDcKw > 0) {
       // Last resort: estimate AC from DC with typical 1.2 DC/AC ratio
       input.system.totalAcKw = cad.totalDcKw / 1.2;

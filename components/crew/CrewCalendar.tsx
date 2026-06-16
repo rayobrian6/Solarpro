@@ -65,9 +65,14 @@ export function weekDays(baseDate: Date): Date[] {
   });
 }
 
-/** YYYY-MM-DD from a Date */
+/** YYYY-MM-DD from a Date — LOCAL time, not UTC. toISOString() converts to UTC,
+ *  which shifts the day backward in positive-UTC timezones (e.g. Australia), so
+ *  events render on the wrong day or disappear. */
 export function toIso(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 /** Format a Date as "Mon 14" */

@@ -297,9 +297,11 @@ export type { ResolvedEquipment } from '../types';
 
 // Error 5bb fix: NEC 240.6(A) standard OCPD ampere ratings
 // DO NOT use Math.ceil(x/5)*5 — it can produce 55, 65, 75, 85, 95A which are NOT standard.
-export const NEC_STANDARD_OCPD = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200] as const;
+export const NEC_STANDARD_OCPD = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 225, 250, 300, 350, 400, 450, 500, 600, 700, 800, 1000, 1200] as const;
 
-/** Return the next standard NEC OCPD rating ≥ the given ampere value. */
+/** Return the next standard NEC OCPD rating ≥ the given ampere value.
+ *  Must NEVER return below the requested ampacity (NEC 240.4) — if it exceeds
+ *  the largest standard rating, round up to the next 100A. */
 export function necNextStandardOcpd(amps: number): number {
-  return NEC_STANDARD_OCPD.find(s => s >= amps) ?? 200;
+  return NEC_STANDARD_OCPD.find(s => s >= amps) ?? Math.ceil(amps / 100) * 100;
 }

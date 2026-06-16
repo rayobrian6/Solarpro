@@ -413,7 +413,7 @@ function buildSheetData(
 
   // PV-1: GPS coordinates
   const coords = (survey.location.lat !== null && survey.location.lng !== null)
-    ? `${survey.location.lat.toFixed(6)}°N, ${Math.abs(survey.location.lng).toFixed(6)}°${survey.location.lng < 0 ? 'W' : 'E'}`
+    ? `${Math.abs(survey.location.lat).toFixed(6)}°${survey.location.lat < 0 ? 'S' : 'N'}, ${Math.abs(survey.location.lng).toFixed(6)}°${survey.location.lng < 0 ? 'W' : 'E'}`
     : null;
 
   // PV-2: Panel description
@@ -442,10 +442,13 @@ function buildSheetData(
     interconnectionNote = `Panel data not captured — NEC 705.12 compliance requires field verification.`;
   }
 
-  // PV-2: NEC note
-  const necNote = nec120.likelyPasses
+  // PV-2: NEC note — only assert COMPLIANT when we actually have a backfeed
+  // amperage. Otherwise we'd print "COMPLIANT ≤ nullA" for an un-surveyed panel.
+  const necNote = (nec120.likelyPasses && nec120.maxBackfeedAmps != null && nec120.maxBackfeedAmps > 0)
     ? `NEC 705.12(B)(2) COMPLIANT — backfeed breaker ≤ ${nec120.maxBackfeedAmps}A`
-    : `NEC 705.12(B)(2) NON-COMPLIANT — see interconnection plan for resolution`;
+    : (nec120.maxBackfeedAmps == null
+        ? `NEC 705.12(B)(2) — panel data not captured; field verification required`
+        : `NEC 705.12(B)(2) NON-COMPLIANT — see interconnection plan for resolution`);
 
   // PV-3: Structural notes
   const structuralNotes: string[] = [
