@@ -78,15 +78,15 @@ export async function GET(req: NextRequest) {
       WHERE
         (${status ?? null} IS NULL OR no.status = ${status ?? ""})
         AND (${source ?? null} IS NULL OR no.source_type = ${source ?? ""})
-        AND (${state ?? null} IS NULL OR no.state = ${state ?? ""})
+        AND (${state ?? null} IS NULL OR no.location_state = ${state ?? ""})
         AND (${grade ?? null} IS NULL OR oi.overall_grade = ${grade ?? ""})
         AND (
           ${search ?? null} IS NULL
-          OR no.homeowner_first_name ILIKE ${"%" + (search ?? "") + "%"}
-          OR no.homeowner_last_name  ILIKE ${"%" + (search ?? "") + "%"}
-          OR no.homeowner_phone      ILIKE ${"%" + (search ?? "") + "%"}
-          OR no.address              ILIKE ${"%" + (search ?? "") + "%"}
-          OR no.city                 ILIKE ${"%" + (search ?? "") + "%"}
+          OR no.first_name     ILIKE ${"%" + (search ?? "") + "%"}
+          OR no.last_name      ILIKE ${"%" + (search ?? "") + "%"}
+          OR no.homeowner_phone ILIKE ${"%" + (search ?? "") + "%"}
+          OR no.address        ILIKE ${"%" + (search ?? "") + "%"}
+          OR no.location_city  ILIKE ${"%" + (search ?? "") + "%"}
         )
       ORDER BY no.created_at DESC
       LIMIT ${limit} OFFSET ${offset}
@@ -99,7 +99,7 @@ export async function GET(req: NextRequest) {
       WHERE
         (${status ?? null} IS NULL OR no.status = ${status ?? ""})
         AND (${source ?? null} IS NULL OR no.source_type = ${source ?? ""})
-        AND (${state ?? null} IS NULL OR no.state = ${state ?? ""})
+        AND (${state ?? null} IS NULL OR no.location_state = ${state ?? ""})
         AND (${grade ?? null} IS NULL OR oi.overall_grade = ${grade ?? ""})
     `;
 
@@ -174,12 +174,12 @@ export async function POST(req: NextRequest) {
     const [created] = await sql`
       INSERT INTO network_opportunities (
         source_type, status,
-        homeowner_first_name, homeowner_last_name,
+        first_name, last_name,
         homeowner_email, homeowner_phone,
-        address, city, state, zip,
-        monthly_bill, utility_name,
+        address, location_city, location_state, location_zip,
+        monthly_bill_amount, utility_provider,
         roof_age_years, structure_type, stories,
-        intake_notes
+        listing_notes
       ) VALUES (
         ${source_type}, 'intake',
         ${homeowner_first_name ?? null}, ${homeowner_last_name ?? null},
@@ -277,7 +277,6 @@ export async function PATCH(req: NextRequest) {
           UPDATE network_opportunities SET
             status = 'live',
             marketplace_status = 'live',
-            published_at = NOW(),
             live_at = COALESCE(live_at, NOW()),
             released_at = COALESCE(released_at, NOW()),
             released_by = COALESCE(released_by, ${admin.id}),
@@ -298,11 +297,11 @@ export async function PATCH(req: NextRequest) {
         const opp = rows[0] as Record<string, unknown> | undefined;
         if (opp) {
           const scored = scoreOpportunity({
-            monthly_bill: opp.monthly_bill as number,
-            state: opp.state as string,
+            monthly_bill: opp.monthly_bill_amount as number,
+            state: opp.location_state as string,
             roof_age_years: opp.roof_age_years as number,
             structure_type: opp.structure_type as string,
-            usable_roof_pct: opp.usable_roof_pct as number,
+            usable_roof_pct: opp.roof_usable_pct as number,
             stories: opp.stories as number,
             source_type: opp.source_type as string,
           });
@@ -315,8 +314,7 @@ export async function PATCH(req: NextRequest) {
           await sql`
             UPDATE network_opportunities SET
               opportunity_score = ${networkScore},
-              listing_price = ${pricing.price},
-              scoring_data = ${JSON.stringify(scored)},
+              asking_price = ${pricing.price},
               updated_at = NOW()
             WHERE id = ${id}
           `;

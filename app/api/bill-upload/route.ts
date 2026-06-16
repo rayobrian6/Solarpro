@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { parseBillText, validateBillData, extractBillDataWithAI } from '@/lib/billOcr';
 import type { BillExtractResult } from '@/lib/billOcr';
 import { getUserFromRequest } from '@/lib/auth';
+import { getPortalSession } from '@/lib/portalAuth';
 import { extractPdfTextPure } from '@/lib/pdfExtract';
 import { logEnvStatus } from '@/lib/env-check';
 // v47.213: Universal bill parsing pipeline (Layer 1 + 2 + 3)
@@ -144,8 +145,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Accept either a contractor user session OR a homeowner portal session —
+    // the portal bill-upload route forwards its 'solarpro_portal_session' cookie,
+    // which getUserFromRequest does not recognize (previously every homeowner
+    // upload 401'd here). This route only parses + returns billData; the caller
+    // persists it, so no user id is needed past this gate.
     const user = await getUserFromRequest(req);
-    if (!user) {
+    if (!user && !getPortalSession(req)) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 

@@ -141,6 +141,11 @@ export async function PATCH(req: NextRequest) {
       const { name, company, role, plan } = body;
       if (role && !['user', 'admin', 'super_admin'].includes(role))
         return NextResponse.json({ success: false, error: 'Invalid role' }, { status: 400 });
+      // SECURITY: a role change here must obey the same gate as 'set_role' —
+      // only a super_admin may change roles. Without this, a plain admin could
+      // PATCH {action:'update', role:'super_admin'} and escalate themselves.
+      if (role && role !== targetUser?.role && admin.role !== 'super_admin')
+        return NextResponse.json({ success: false, error: 'Only super_admin can change roles' }, { status: 403 });
       const VALID_PLANS = ['starter', 'professional', 'contractor', 'free_pass'];
       if (plan && !VALID_PLANS.includes(plan))
         return NextResponse.json({ success: false, error: `Invalid plan. Must be one of: ${VALID_PLANS.join(', ')}` }, { status: 400 });

@@ -140,7 +140,9 @@ async function enrichFromNREL(input: UtilityEnrichmentInput): Promise<UtilityEnr
       provider_used: 'nrel_utility_rates',
       utility_name: outputs.utility_name || null,
       utility_eiaid: String(outputs.eiaid || ''),
-      electricity_rate_kwh: outputs.residential ? parseFloat(outputs.residential) / 100 : statPolicy.avg_rate_kwh,
+      // NREL Utility Rates v3 returns `residential` already in $/kWh (e.g. 0.1369),
+      // NOT cents — do not divide by 100 (matches lib/utilityDetector.ts).
+      electricity_rate_kwh: outputs.residential ? parseFloat(outputs.residential) : statPolicy.avg_rate_kwh,
       net_metering_available: statPolicy.net_metering,
       net_metering_policy: statPolicy.net_metering_policy,
       ahj_name: null,

@@ -207,11 +207,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     losses: parseFloat(searchParams.get('losses') ?? '14.08'),
   };
 
-  // Reuse POST handler
+  // Reuse POST handler — forward the caller's auth headers (cookie/authorization),
+  // otherwise the POST handler's auth check always 401s.
   const mockReq = new NextRequest(req.url, {
     method: 'POST',
     body: JSON.stringify(body),
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      cookie: req.headers.get('cookie') || '',
+      authorization: req.headers.get('authorization') || '',
+    },
   });
 
   return POST(mockReq);

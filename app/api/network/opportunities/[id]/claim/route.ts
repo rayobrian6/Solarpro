@@ -92,6 +92,22 @@ export async function POST(req: NextRequest, { params }: Params) {
       const claimMode = typeof networkOpportunity.claim_mode === "string" && networkOpportunity.claim_mode === "shared" ? "shared" : "exclusive";
       const maxClaims = Math.max(1, Math.floor(Number(networkOpportunity.max_claims ?? 1)));
 
+      // MONETIZATION GUARD: marketplace pay-to-claim is finalized by the Stripe
+      // webhook (finalizeLeadClaim), never here. This free claim path must NOT
+      // hand out a paid lead's contact + exact address without payment. Only
+      // leads explicitly priced at $0 may be claimed for free; anything else
+      // must go through POST .../checkout.
+      const askingPrice = Number(networkOpportunity.asking_price ?? NaN);
+      if (askingPrice !== 0) {
+        return NextResponse.json(
+          {
+            error: "This lead requires payment — claim it through checkout.",
+            code: "PAYMENT_REQUIRED",
+          },
+          { status: 402 },
+        );
+      }
+
       let updated = await sql`
         UPDATE opportunity_assignments
            SET status = 'claimed',

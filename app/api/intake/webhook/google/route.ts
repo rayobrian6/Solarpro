@@ -47,6 +47,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     signatureVerified = verResult.verified;
     if (!signatureVerified) {
       console.warn('[POST /api/intake/webhook/google] Key verification failed');
+      // A key IS configured, so an unverified payload is untrusted — reject it
+      // (200 so the sender doesn't retry-storm) WITHOUT ingesting any lead.
+      return NextResponse.json(
+        { received: true, error: 'key_verification_failed' },
+        { status: 200 },
+      );
     }
   } else {
     console.warn('[POST /api/intake/webhook/google] GOOGLE_WEBHOOK_KEY not set — skipping verification');
