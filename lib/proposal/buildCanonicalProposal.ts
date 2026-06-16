@@ -92,6 +92,15 @@ export interface BuildCanonicalProposalInput {
   parsedBillRate?: number;        // v48.3: rate extracted from uploaded utility bill (highest priority)
   dbUtilityRate?: number;         // v48.3: rate fetched from utility_policies DB (second priority)
   annualUsageKwh: number;         // from client.annualKwh
+  /**
+   * v48.x: the homeowner's ACTUAL total annual utility bill in dollars (from
+   * their real bill — includes delivery, fixed charges, and taxes, not just
+   * energy). When present and plausible, the model anchors the effective
+   * $/kWh to (actualAnnualBill ÷ annualUsageKwh) so the proposal's current
+   * bill, 25-yr projection, and savings all reconcile with the real bill
+   * instead of an energy-only estimate.
+   */
+  actualAnnualBill?: number;      // from client.annualBill
 
   // Pricing
   systemType: 'roof' | 'ground' | 'fence' | 'carport' | string;
@@ -450,7 +459,23 @@ export function buildCanonicalProposal(
   });
 
   const utilityProfile   = builtProfile.profile;
-  const resolvedRate     = builtProfile.resolved_rate;
+  let resolvedRate       = builtProfile.resolved_rate;
+  // ── Anchor to the homeowner's ACTUAL bill when on file ──────────────────
+  // The profile rate is energy-only (~$0.155); a real bill also carries
+  // delivery + fixed charges + taxes, so the energy-only estimate understates
+  // what the customer actually pays. When we have their real annual bill, use
+  // their true all-in $/kWh so the whole model (current bill, 25-yr no-solar
+  // cost, savings) reconciles with the bill they actually see. Clamped to a
+  // sane range so a bad/low usage figure can't produce an absurd rate.
+  if (
+    input.actualAnnualBill && input.actualAnnualBill > 0 &&
+    input.annualUsageKwh > 0
+  ) {
+    const effectiveRate = input.actualAnnualBill / input.annualUsageKwh;
+    if (effectiveRate >= 0.08 && effectiveRate <= 0.60) {
+      resolvedRate = effectiveRate;
+    }
+  }
   const escalationRate   = utilityProfile.escalation_rate || 0.03;
   const exportRate       = builtProfile.financial_rules.export_rate;
   const netMeteringType  = utilityProfile.net_metering_type;

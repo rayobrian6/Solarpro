@@ -403,6 +403,7 @@ function PublicProposalView({
     clientUtilityRate:   client?.utilityRate,
     dbUtilityRate:       proposal.dbUtilityRate ?? undefined,
     annualUsageKwh:      client?.annualKwh ?? 0,
+    actualAnnualBill:    client?.annualBill ?? undefined,  // anchor to the real bill
 
     // Pricing
     systemType,
