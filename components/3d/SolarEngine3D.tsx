@@ -952,7 +952,7 @@ function SolarEngine3D({
     o.targetLat = lat;
     o.targetLng = lng;
     o.targetAlt = elev;
-    o.heading   = 0;
+    o.heading   = Math.PI;  // π → fly-in looks NORTH (look dir = heading + π)
     o.pitch     = -1.134;  // -65° — top-down-ish view
     o.radius    = Math.max(150, elev > 0 ? 150 : 300);
     o.dragging  = false;
@@ -6703,7 +6703,7 @@ function SolarEngine3D({
     const elev = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : (twinRef.current?.elevation ?? 0);
     const o = orbitRef.current;
     o.targetLat = lat; o.targetLng = lng; o.targetAlt = elev;
-    o.heading = 0; o.pitch = -0.785; o.radius = 200;  // -45° pitch
+    o.heading = Math.PI; o.pitch = -0.785; o.radius = 200;  // -45° pitch, look NORTH
     applyOrbitRef.current?.();
   }
 
