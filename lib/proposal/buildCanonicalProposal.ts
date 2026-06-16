@@ -459,24 +459,13 @@ export function buildCanonicalProposal(
   });
 
   const utilityProfile   = builtProfile.profile;
-  let resolvedRate       = builtProfile.resolved_rate;
-  // ── Anchor to the homeowner's ACTUAL bill when on file ──────────────────
-  // The profile rate is energy-only (~$0.155); a real bill also carries
-  // delivery + fixed charges + taxes, so the energy-only estimate understates
-  // what the customer actually pays. When we have their real annual bill, use
-  // their true all-in $/kWh so the whole model (current bill, 25-yr no-solar
-  // cost, savings) reconciles with the bill they actually see. Clamped to a
-  // sane range so a bad/low usage figure can't produce an absurd rate.
-  if (
-    input.actualAnnualBill && input.actualAnnualBill > 0 &&
-    input.annualUsageKwh > 0
-  ) {
-    const effectiveRate = input.actualAnnualBill / input.annualUsageKwh;
-    if (effectiveRate >= 0.08 && effectiveRate <= 0.60) {
-      resolvedRate = effectiveRate;
-    }
-  }
+  const resolvedRate     = builtProfile.resolved_rate;
   const escalationRate   = utilityProfile.escalation_rate || 0.03;
+  // NOTE: input.actualAnnualBill is intentionally NOT used to anchor the rate.
+  // Doing so inflated the displayed $/kWh (e.g. $0.155 → $0.26) AND overstated
+  // savings by treating solar as offsetting fixed/delivery charges it can't.
+  // The correct model (energy at the real rate + a separate fixed-charge adder
+  // that survives on the "after solar" side) is pending — see proposal notes.
   const exportRate       = builtProfile.financial_rules.export_rate;
   const netMeteringType  = utilityProfile.net_metering_type;
 
