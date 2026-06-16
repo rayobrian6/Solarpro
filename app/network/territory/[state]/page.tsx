@@ -352,7 +352,10 @@ function LeadCard({
   const gradeTone = GRADE_TONE[lead.grade] ?? "bg-slate-500 text-white";
 
   return (
-    <div className="overflow-hidden rounded-3xl border border-slate-700/60 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.12),transparent_36%),#0f1623] shadow-xl shadow-black/20">
+    <Link
+      href={`/network/lead/${lead.id}`}
+      className="block overflow-hidden rounded-3xl border border-slate-700/60 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.12),transparent_36%),#0f1623] shadow-xl shadow-black/20 transition-colors hover:border-emerald-400/40"
+    >
       <div
         className={`h-1.5 w-full ${
           score >= 85
@@ -455,7 +458,11 @@ function LeadCard({
         <button
           type="button"
           disabled={claiming}
-          onClick={() => onClaim(lead.id)}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onClaim(lead.id);
+          }}
           className="flex items-center gap-2 rounded-xl bg-emerald-400 px-5 py-2.5 text-sm font-black text-slate-900 shadow-lg shadow-emerald-950/30 transition-colors hover:bg-emerald-300 disabled:opacity-60"
         >
           {claiming ? (
@@ -468,7 +475,7 @@ function LeadCard({
             : "Claim this lead"}
         </button>
       </div>
-    </div>
+    </Link>
   );
 }
 
