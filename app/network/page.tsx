@@ -2,8 +2,10 @@
 import React, { useEffect, useState, useCallback } from "react";
 import AppShell from "@/components/ui/AppShell";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import {
   Network,
+  Lock,
   Zap,
   Battery,
   Home,
@@ -2941,16 +2943,33 @@ export default function NetworkPage() {
                       )}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                      {opportunities.map((opp) => (
-                        <OpportunityCard
-                          key={opp.id}
-                          opp={opp}
-                          onClaim={setClaimTarget}
-                          onViewDetail={setDetailOpp}
-                          claimed={claimedIds.has(opp.id)}
-                        />
-                      ))}
+                    /* Leads are gated behind territory — drill state → county
+                       to reveal them. Keeps individual leads off this surface. */
+                    <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-10 text-center">
+                      <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-700 bg-slate-800">
+                        <Lock size={24} className="text-slate-500" />
+                      </div>
+                      <h3 className="text-lg font-semibold text-white">
+                        {total} {total === 1 ? "lead" : "leads"} in your territory
+                      </h3>
+                      <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
+                        Leads are revealed by area. Click a state on the map, then
+                        a county, to see its leads and full quality — grade,
+                        battery, financing, intent and more. Contact and address
+                        unlock when you claim.
+                      </p>
+                      {filterState ? (
+                        <Link
+                          href={`/network/territory/${filterState}`}
+                          className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-emerald-400 px-4 py-2 text-sm font-bold text-slate-900 transition-colors hover:bg-emerald-300"
+                        >
+                          Explore {filterState} territory →
+                        </Link>
+                      ) : (
+                        <p className="mt-4 text-xs text-slate-600">
+                          Tip: click your state on the map above to drill in.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>

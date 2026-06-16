@@ -2,8 +2,8 @@
 
 import AppShell from "@/components/ui/AppShell";
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Zap,
@@ -12,6 +12,11 @@ import {
   Award,
   Loader2,
   MapPin,
+  TrendingUp,
+  Users,
+  Building2,
+  ChevronRight,
+  Lock,
 } from "lucide-react";
 
 const STATE_NAMES: Record<string, string> = {
@@ -29,14 +34,46 @@ const STATE_NAMES: Record<string, string> = {
   WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
 };
 
-type Lead = Record<string, unknown>;
-
-const num = (v: unknown): number | null => {
-  if (v == null || v === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+type Bar = { label: string; count: number; value: number };
+type County = {
+  fips: string;
+  name: string;
+  count: number;
+  value: number;
+  gradeA: number;
 };
-const str = (v: unknown): string => (v == null ? "" : String(v));
+type CountyLead = {
+  id: string;
+  city: string;
+  county: string;
+  grade: string;
+  systemKw: number | null;
+  projectValue: number | null;
+  askingPrice: number | null;
+  monthlyBill: number | null;
+  annualSavings: number | null;
+  paybackYrs: number | null;
+  utility: string;
+  ownership: string;
+  financing: string;
+  intent: string;
+  incomeBand: string;
+  creditBand: string;
+  sunlight: string;
+  roof: string;
+  timeline: string;
+  battery: boolean;
+  complexAhj: boolean;
+};
+type Territory = {
+  state: string;
+  total: number;
+  economics: Record<string, number>;
+  distributions: Record<string, Bar[]>;
+  counties: County[];
+  county?: { fips: string; name: string };
+  countyLeads?: CountyLead[];
+};
 
 const usdShort = (n: number) =>
   n >= 1_000_000
@@ -45,102 +82,6 @@ const usdShort = (n: number) =>
       ? `$${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k`
       : `$${Math.round(n)}`;
 const usdFull = (n: number) => `$${Math.round(n).toLocaleString()}`;
-
-// Bucket a set of leads by a key function into ordered {label, count, value}.
-function bucket(
-  leads: Lead[],
-  keyOf: (l: Lead) => string,
-  order?: string[],
-  valueOf?: (l: Lead) => number | null,
-) {
-  const map = new Map<string, { count: number; value: number }>();
-  for (const l of leads) {
-    const k = keyOf(l) || "Unknown";
-    const cur = map.get(k) ?? { count: 0, value: 0 };
-    cur.count += 1;
-    if (valueOf) cur.value += valueOf(l) ?? 0;
-    map.set(k, cur);
-  }
-  let entries = [...map.entries()].map(([label, v]) => ({ label, ...v }));
-  if (order) {
-    entries.sort((a, b) => {
-      const ia = order.indexOf(a.label);
-      const ib = order.indexOf(b.label);
-      if (ia === -1 && ib === -1) return b.count - a.count;
-      if (ia === -1) return 1;
-      if (ib === -1) return -1;
-      return ia - ib;
-    });
-  } else {
-    entries.sort((a, b) => b.count - a.count);
-  }
-  return entries;
-}
-
-function gradeOf(l: Lead): string {
-  const g = str(l.lead_grade).toUpperCase().trim();
-  return g && "ABCDEF".includes(g[0]) ? `Grade ${g[0]}` : "Ungraded";
-}
-function valueBandOf(l: Lead): string {
-  const v = num(l.estimated_system_cost);
-  if (v == null) return "Unknown";
-  if (v < 15_000) return "Under $15k";
-  if (v < 25_000) return "$15k–25k";
-  if (v < 40_000) return "$25k–40k";
-  if (v < 60_000) return "$40k–60k";
-  return "$60k+";
-}
-function sizeBandOf(l: Lead): string {
-  const v = num(l.system_size_kw);
-  if (v == null) return "Unknown";
-  if (v < 5) return "Under 5 kW";
-  if (v < 8) return "5–8 kW";
-  if (v < 12) return "8–12 kW";
-  if (v < 20) return "12–20 kW";
-  return "20 kW+";
-}
-function roofOf(l: Lead): string {
-  const r = str(l.roof_material).trim();
-  if (!r) return "Unknown";
-  return r.charAt(0).toUpperCase() + r.slice(1).replace(/_/g, " ");
-}
-function timelineOf(l: Lead): string {
-  const t = str(l.timeline).trim();
-  if (!t) return "Unknown";
-  return t.charAt(0).toUpperCase() + t.slice(1).replace(/_/g, " ");
-}
-function batteryOf(l: Lead): string {
-  const bi = str(l.battery_interest).toLowerCase();
-  if (l.battery_candidate === true || bi === "yes" || bi === "true")
-    return "Battery interested";
-  return "Solar only";
-}
-
-const VALUE_ORDER = [
-  "Under $15k",
-  "$15k–25k",
-  "$25k–40k",
-  "$40k–60k",
-  "$60k+",
-  "Unknown",
-];
-const SIZE_ORDER = [
-  "Under 5 kW",
-  "5–8 kW",
-  "8–12 kW",
-  "12–20 kW",
-  "20 kW+",
-  "Unknown",
-];
-const GRADE_ORDER = [
-  "Grade A",
-  "Grade B",
-  "Grade C",
-  "Grade D",
-  "Grade E",
-  "Grade F",
-  "Ungraded",
-];
 
 function Kpi({
   icon,
@@ -172,25 +113,26 @@ function Breakdown({
   subtitle,
   rows,
   total,
+  showValue,
 }: {
   title: string;
-  subtitle: string;
-  rows: { label: string; count: number; value: number }[];
+  subtitle?: string;
+  rows: Bar[];
   total: number;
+  showValue?: boolean;
 }) {
+  if (!rows || rows.length === 0) return null;
   const max = Math.max(1, ...rows.map((r) => r.count));
   return (
-    <section className="rounded-2xl border border-slate-800 bg-slate-950/25 p-4">
-      <div className="mb-3">
-        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
-          {title}
-        </p>
-        <p className="mt-0.5 text-[11px] text-slate-600">{subtitle}</p>
-      </div>
-      <div className="space-y-2.5">
-        {rows.map((r) => (
+    <div className="rounded-2xl border border-slate-800 bg-slate-950/25 p-4">
+      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-300">
+        {title}
+      </p>
+      {subtitle && <p className="mt-0.5 text-[11px] text-slate-600">{subtitle}</p>}
+      <div className="mt-3 space-y-2">
+        {rows.slice(0, 8).map((r) => (
           <div key={r.label} className="flex items-center gap-3">
-            <span className="w-28 shrink-0 text-[11px] text-slate-400">
+            <span className="w-28 shrink-0 truncate text-[11px] text-slate-400">
               {r.label}
             </span>
             <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-800/70">
@@ -199,41 +141,165 @@ function Breakdown({
                 style={{ width: `${(r.count / max) * 100}%` }}
               />
             </div>
-            <span className="w-10 shrink-0 text-right text-[11px] font-semibold tabular-nums text-slate-200">
+            <span className="w-8 shrink-0 text-right text-[11px] font-semibold tabular-nums text-slate-200">
               {r.count}
             </span>
-            <span className="w-12 shrink-0 text-right text-[10px] tabular-nums text-slate-500">
+            <span className="w-10 shrink-0 text-right text-[10px] tabular-nums text-slate-500">
               {Math.round((r.count / total) * 100)}%
             </span>
-            {r.value > 0 && (
-              <span className="hidden w-14 shrink-0 text-right text-[10px] tabular-nums text-emerald-400/80 sm:inline">
+            {showValue && r.value > 0 && (
+              <span className="hidden w-12 shrink-0 text-right text-[10px] tabular-nums text-emerald-400/80 sm:inline">
                 {usdShort(r.value)}
               </span>
             )}
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function Category({
+  icon,
+  title,
+  blurb,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  blurb: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mt-6">
+      <div className="mb-3 flex items-center gap-2">
+        <span className="text-emerald-400">{icon}</span>
+        <h2 className="text-sm font-black uppercase tracking-[0.18em] text-white">
+          {title}
+        </h2>
+        <span className="text-[11px] text-slate-600">— {blurb}</span>
+      </div>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">{children}</div>
     </section>
+  );
+}
+
+// One gated lead — full quality, location only as far as the county.
+function LeadCard({
+  lead,
+  onClaim,
+  claiming,
+}: {
+  lead: CountyLead;
+  onClaim: (id: string) => void;
+  claiming: boolean;
+}) {
+  const facts: { k: string; v: string }[] = [
+    { k: "System", v: lead.systemKw != null ? `${lead.systemKw} kW` : "Pending" },
+    {
+      k: "Project value",
+      v: lead.projectValue != null ? usdFull(lead.projectValue) : "Pending",
+    },
+    {
+      k: "Monthly bill",
+      v: lead.monthlyBill != null ? `$${lead.monthlyBill}/mo` : "—",
+    },
+    {
+      k: "Annual savings",
+      v: lead.annualSavings != null ? usdFull(lead.annualSavings) : "—",
+    },
+    {
+      k: "Payback",
+      v: lead.paybackYrs != null ? `${lead.paybackYrs} yrs` : "—",
+    },
+    { k: "Ownership", v: lead.ownership },
+    { k: "Financing", v: lead.financing },
+    { k: "Purchase intent", v: lead.intent },
+    { k: "Income band", v: lead.incomeBand },
+    { k: "Credit band", v: lead.creditBand },
+    { k: "Sunlight", v: lead.sunlight },
+    { k: "Roof", v: lead.roof },
+    { k: "Timeline", v: lead.timeline },
+    { k: "Utility", v: lead.utility || "—" },
+  ];
+  return (
+    <div className="overflow-hidden rounded-2xl border border-slate-700/60 bg-[#0f1623]">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <span className="rounded-md bg-amber-500/15 px-2 py-0.5 text-[11px] font-black uppercase text-amber-300">
+            {lead.grade}
+          </span>
+          <span className="text-sm font-semibold text-white">
+            {lead.county} County
+          </span>
+          {lead.battery && (
+            <span className="rounded-md bg-violet-500/15 px-2 py-0.5 text-[10px] font-bold uppercase text-violet-300">
+              Battery
+            </span>
+          )}
+          {lead.complexAhj && (
+            <span className="rounded-md bg-orange-500/15 px-2 py-0.5 text-[10px] font-bold uppercase text-orange-300">
+              Complex AHJ
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 p-4 sm:grid-cols-3">
+        {facts.map((f) => (
+          <div key={f.k}>
+            <div className="text-[10px] uppercase tracking-wider text-slate-500">
+              {f.k}
+            </div>
+            <div className="text-[13px] font-semibold text-slate-100">
+              {f.v || "—"}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-between gap-3 border-t border-slate-800 px-4 py-3">
+        <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+          <Lock size={12} /> Contact &amp; exact address unlock after claim
+        </div>
+        <button
+          type="button"
+          disabled={claiming}
+          onClick={() => onClaim(lead.id)}
+          className="flex items-center gap-1.5 rounded-xl bg-emerald-400 px-4 py-2 text-sm font-bold text-slate-900 transition-colors hover:bg-emerald-300 disabled:opacity-60"
+        >
+          {claiming ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <DollarSign size={14} />
+          )}
+          {lead.askingPrice != null
+            ? `Claim — ${usdFull(lead.askingPrice)}`
+            : "Claim lead"}
+        </button>
+      </div>
+    </div>
   );
 }
 
 function TerritoryView() {
   const params = useParams();
   const search = useSearchParams();
+  const router = useRouter();
   const state = String(params.state ?? "").toUpperCase();
   const countyParam = search.get("county") ?? "";
   const stateName = STATE_NAMES[state] ?? state;
 
-  const [leads, setLeads] = useState<Lead[]>([]);
+  const [data, setData] = useState<Territory | null>(null);
   const [loading, setLoading] = useState(true);
+  const [claimingId, setClaimingId] = useState<string>("");
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    fetch(`/api/network/opportunities?state=${state}&limit=50`)
-      .then((r) => (r.ok ? r.json() : { opportunities: [] }))
+    const qs = countyParam ? `?county=${countyParam}` : "";
+    fetch(`/api/network/territory/${state}${qs}`)
+      .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (alive) setLeads((d.opportunities || []) as Lead[]);
+        if (alive) setData(d);
       })
       .catch(() => {})
       .finally(() => {
@@ -242,246 +308,343 @@ function TerritoryView() {
     return () => {
       alive = false;
     };
-  }, [state]);
+  }, [state, countyParam]);
 
-  const stats = useMemo(() => {
-    const pipeline = leads.reduce(
-      (s, l) => s + (num(l.estimated_system_cost) ?? 0),
-      0,
-    );
-    const revenue = leads.reduce((s, l) => s + (num(l.asking_price) ?? 0), 0);
-    const kwVals = leads.map((l) => num(l.system_size_kw)).filter((v): v is number => v != null);
-    const avgKw =
-      kwVals.length > 0 ? kwVals.reduce((s, v) => s + v, 0) / kwVals.length : 0;
-    const battery = leads.filter((l) => batteryOf(l) === "Battery interested").length;
-    const ab = leads.filter((l) => {
-      const g = str(l.lead_grade).toUpperCase();
-      return g.startsWith("A") || g.startsWith("B");
-    }).length;
-    return { pipeline, revenue, avgKw, battery, ab };
-  }, [leads]);
+  const claim = useCallback(async (id: string) => {
+    setClaimingId(id);
+    try {
+      const res = await fetch(`/api/network/opportunities/${id}/checkout`, {
+        method: "POST",
+      });
+      const d = await res.json();
+      if (res.ok && d.url) {
+        window.location.href = d.url as string;
+        return;
+      }
+      alert(d.error || "Could not start checkout.");
+    } finally {
+      setClaimingId("");
+    }
+  }, []);
+
+  const econ = data?.economics ?? {};
+  const dists = data?.distributions ?? {};
+  const total = data?.total ?? 0;
+
+  const topCountyValue = useMemo(
+    () => Math.max(1, ...(data?.counties ?? []).map((c) => c.value)),
+    [data],
+  );
 
   return (
-    <AppShell>
-      <div className="min-h-screen" style={{ background: "var(--bg-base, #0b1120)" }}>
-        <div className="mx-auto max-w-6xl px-6 py-6">
-          {/* Header */}
-          <Link
-            href="/network"
-            className="inline-flex items-center gap-1.5 text-sm text-slate-400 transition-colors hover:text-white"
-          >
-            <ArrowLeft size={15} /> Back to marketplace
-          </Link>
+    <div className="min-h-screen" style={{ background: "var(--bg-base, #0b1120)" }}>
+      <div className="mx-auto max-w-6xl px-6 py-6">
+        <Link
+          href="/network"
+          className="inline-flex items-center gap-1.5 text-sm text-slate-400 transition-colors hover:text-white"
+        >
+          <ArrowLeft size={15} /> Back to marketplace
+        </Link>
 
-          <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <div className="mb-1 flex items-center gap-2">
-                <MapPin size={15} className="text-emerald-400" />
-                <span className="text-xs font-semibold uppercase tracking-widest text-emerald-400">
-                  Territory Intelligence
-                </span>
-              </div>
-              <h1 className="text-3xl font-bold tracking-tight text-white lg:text-4xl">
-                {stateName}
-              </h1>
-              <p className="mt-1 text-sm text-slate-400">
-                Every available opportunity in {stateName}, broken down by job
-                type, size and value.
-                {countyParam && (
-                  <span className="ml-1 text-slate-500">
-                    (entered from a county on the map)
-                  </span>
-                )}
-              </p>
+        <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <div className="mb-1 flex items-center gap-2">
+              <MapPin size={15} className="text-emerald-400" />
+              <span className="text-xs font-semibold uppercase tracking-widest text-emerald-400">
+                Territory Intelligence
+              </span>
             </div>
+            <h1 className="text-3xl font-bold tracking-tight text-white lg:text-4xl">
+              {data?.county ? `${data.county.name} County` : stateName}
+            </h1>
+            <p className="mt-1 text-sm text-slate-400">
+              {data?.county
+                ? `Available opportunities in ${data.county.name} County, ${stateName} — full quality, claim to unlock contact.`
+                : `Market intelligence for ${stateName} — every signal that moves a sale.`}
+            </p>
+          </div>
+          {data?.county ? (
+            <Link
+              href={`/network/territory/${state}`}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm font-medium text-slate-200 transition-colors hover:border-slate-500"
+            >
+              <ArrowLeft size={14} /> {stateName} overview
+            </Link>
+          ) : (
             <Link
               href={`/network?state=${state}`}
               className="rounded-xl bg-emerald-400 px-4 py-2 text-sm font-bold text-slate-900 transition-colors hover:bg-emerald-300"
             >
               Browse &amp; claim {state} leads →
             </Link>
-          </div>
-
-          {loading ? (
-            <div className="flex items-center justify-center py-32">
-              <Loader2 size={30} className="animate-spin text-emerald-500" />
-            </div>
-          ) : leads.length === 0 ? (
-            <div className="mt-10 rounded-2xl border border-slate-800 bg-slate-950/30 p-10 text-center">
-              <p className="text-slate-300">
-                No available opportunities in {stateName} right now.
-              </p>
-              <p className="mt-1 text-sm text-slate-500">
-                Check back soon — new leads land here as homeowners qualify.
-              </p>
-            </div>
-          ) : (
-            <>
-              {/* KPI strip */}
-              <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-6">
-                <Kpi
-                  icon={<MapPin size={16} />}
-                  label="Available leads"
-                  value={String(leads.length)}
-                  accent="text-emerald-400"
-                />
-                <Kpi
-                  icon={<DollarSign size={16} />}
-                  label="Pipeline value"
-                  value={usdShort(stats.pipeline)}
-                  sub="installed system $"
-                  accent="text-amber-400"
-                />
-                <Kpi
-                  icon={<DollarSign size={16} />}
-                  label="Lead revenue"
-                  value={usdFull(stats.revenue)}
-                  sub="if all claimed"
-                  accent="text-emerald-400"
-                />
-                <Kpi
-                  icon={<Zap size={16} />}
-                  label="Avg system"
-                  value={`${stats.avgKw.toFixed(1)} kW`}
-                  accent="text-blue-400"
-                />
-                <Kpi
-                  icon={<Battery size={16} />}
-                  label="Battery interest"
-                  value={`${Math.round((stats.battery / leads.length) * 100)}%`}
-                  sub={`${stats.battery} of ${leads.length}`}
-                  accent="text-violet-400"
-                />
-                <Kpi
-                  icon={<Award size={16} />}
-                  label="Grade A / B"
-                  value={`${Math.round((stats.ab / leads.length) * 100)}%`}
-                  sub={`${stats.ab} top-tier`}
-                  accent="text-amber-400"
-                />
-              </div>
-
-              {/* Breakdowns */}
-              <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
-                <Breakdown
-                  title="Jobs by quality grade"
-                  subtitle="Higher grades = more qualified, higher-intent homeowners"
-                  total={leads.length}
-                  rows={bucket(leads, gradeOf, GRADE_ORDER, (l) =>
-                    num(l.asking_price),
-                  )}
-                />
-                <Breakdown
-                  title="Jobs by project value"
-                  subtitle="Estimated installed system cost"
-                  total={leads.length}
-                  rows={bucket(leads, valueBandOf, VALUE_ORDER, (l) =>
-                    num(l.estimated_system_cost),
-                  )}
-                />
-                <Breakdown
-                  title="Jobs by system size"
-                  subtitle="Estimated array size in kW"
-                  total={leads.length}
-                  rows={bucket(leads, sizeBandOf, SIZE_ORDER)}
-                />
-                <Breakdown
-                  title="Jobs by roof type"
-                  subtitle="Primary roof material"
-                  total={leads.length}
-                  rows={bucket(leads, roofOf)}
-                />
-                <Breakdown
-                  title="Jobs by timeline"
-                  subtitle="How soon the homeowner wants to move"
-                  total={leads.length}
-                  rows={bucket(leads, timelineOf)}
-                />
-                <Breakdown
-                  title="Battery attach"
-                  subtitle="Storage interest signals upsell"
-                  total={leads.length}
-                  rows={bucket(leads, batteryOf)}
-                />
-              </div>
-
-              {/* Lead list */}
-              <section className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/25 p-4">
-                <p className="mb-3 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
-                  Available opportunities
-                </p>
-                <div className="space-y-2">
-                  {leads.map((l) => (
-                    <Link
-                      key={str(l.id)}
-                      href={`/network?state=${state}`}
-                      className="flex items-center justify-between gap-3 rounded-xl border border-slate-800/80 bg-slate-900/40 px-4 py-3 transition-colors hover:border-emerald-500/40"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate text-sm font-semibold text-white">
-                            {str(l.city) || stateName}
-                          </span>
-                          {str(l.lead_grade) && (
-                            <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-amber-300">
-                              {gradeOf(l)}
-                            </span>
-                          )}
-                        </div>
-                        <div className="mt-0.5 text-[11px] text-slate-500">
-                          {[
-                            num(l.system_size_kw) != null
-                              ? `${num(l.system_size_kw)} kW`
-                              : "",
-                            roofOf(l) !== "Unknown" ? roofOf(l) : "",
-                            batteryOf(l) === "Battery interested"
-                              ? "Battery"
-                              : "",
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </div>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        {num(l.asking_price) != null && (
-                          <div className="text-sm font-bold text-emerald-300">
-                            {usdFull(num(l.asking_price) as number)}
-                          </div>
-                        )}
-                        {num(l.estimated_system_cost) != null && (
-                          <div className="text-[10px] text-slate-500">
-                            {usdShort(num(l.estimated_system_cost) as number)}{" "}
-                            system
-                          </div>
-                        )}
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              </section>
-            </>
           )}
         </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-32">
+            <Loader2 size={30} className="animate-spin text-emerald-500" />
+          </div>
+        ) : !data || total === 0 ? (
+          <div className="mt-10 rounded-2xl border border-slate-800 bg-slate-950/30 p-10 text-center">
+            <p className="text-slate-300">
+              No available opportunities in {stateName} right now.
+            </p>
+            <p className="mt-1 text-sm text-slate-500">
+              New leads land here as homeowners qualify.
+            </p>
+          </div>
+        ) : data.county && data.countyLeads ? (
+          /* ---------------- COUNTY VIEW (gated leads) ---------------- */
+          <div className="mt-6 space-y-3">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Kpi
+                icon={<MapPin size={16} />}
+                label="Leads in county"
+                value={String(data.countyLeads.length)}
+                accent="text-emerald-400"
+              />
+              <Kpi
+                icon={<DollarSign size={16} />}
+                label="Pipeline value"
+                value={usdShort(
+                  data.countyLeads.reduce((s, l) => s + (l.projectValue ?? 0), 0),
+                )}
+                accent="text-amber-400"
+              />
+              <Kpi
+                icon={<Award size={16} />}
+                label="Grade A / B"
+                value={String(
+                  data.countyLeads.filter((l) => /A|B/.test(l.grade)).length,
+                )}
+                accent="text-amber-400"
+              />
+              <Kpi
+                icon={<Battery size={16} />}
+                label="Battery interest"
+                value={String(data.countyLeads.filter((l) => l.battery).length)}
+                accent="text-violet-400"
+              />
+            </div>
+            {data.countyLeads.map((l) => (
+              <LeadCard
+                key={l.id}
+                lead={l}
+                onClaim={claim}
+                claiming={claimingId === l.id}
+              />
+            ))}
+          </div>
+        ) : (
+          /* ---------------- STATE INTELLIGENCE ---------------- */
+          <>
+            <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-7">
+              <Kpi
+                icon={<MapPin size={16} />}
+                label="Available leads"
+                value={String(total)}
+                accent="text-emerald-400"
+              />
+              <Kpi
+                icon={<TrendingUp size={16} />}
+                label="Pipeline value"
+                value={usdShort(econ.pipelineValue ?? 0)}
+                sub="installed $"
+                accent="text-amber-400"
+              />
+              <Kpi
+                icon={<DollarSign size={16} />}
+                label="Lead revenue"
+                value={usdShort(econ.leadRevenue ?? 0)}
+                sub="if all claimed"
+                accent="text-emerald-400"
+              />
+              <Kpi
+                icon={<DollarSign size={16} />}
+                label="Avg bill"
+                value={econ.avgMonthlyBill ? `$${econ.avgMonthlyBill}/mo` : "—"}
+                accent="text-rose-400"
+              />
+              <Kpi
+                icon={<TrendingUp size={16} />}
+                label="Avg savings"
+                value={econ.avgAnnualSavings ? usdShort(econ.avgAnnualSavings) : "—"}
+                sub="per year"
+                accent="text-emerald-400"
+              />
+              <Kpi
+                icon={<Zap size={16} />}
+                label="Avg payback"
+                value={econ.avgPaybackYrs ? `${econ.avgPaybackYrs} yr` : "—"}
+                accent="text-blue-400"
+              />
+              <Kpi
+                icon={<Zap size={16} />}
+                label="Avg system"
+                value={econ.avgSystemKw ? `${econ.avgSystemKw} kW` : "—"}
+                accent="text-blue-400"
+              />
+            </div>
+
+            <Category
+              icon={<TrendingUp size={16} />}
+              title="Market Economics"
+              blurb="the money picture of the territory"
+            >
+              <Breakdown
+                title="Jobs by project value"
+                subtitle="Estimated installed system cost"
+                rows={dists.projectValue ?? []}
+                total={total}
+                showValue
+              />
+              <Breakdown
+                title="Jobs by system size"
+                rows={dists.systemSize ?? []}
+                total={total}
+              />
+            </Category>
+
+            <Category
+              icon={<Users size={16} />}
+              title="Homeowner Quality"
+              blurb="how closeable the leads are"
+            >
+              <Breakdown
+                title="Quality grade"
+                rows={dists.grade ?? []}
+                total={total}
+                showValue
+              />
+              <Breakdown title="Purchase intent" rows={dists.intent ?? []} total={total} />
+              <Breakdown title="Income band" rows={dists.incomeBand ?? []} total={total} />
+              <Breakdown title="Credit band" rows={dists.creditBand ?? []} total={total} />
+              <Breakdown
+                title="Ownership"
+                subtitle="Own vs PPA / lease"
+                rows={dists.ownership ?? []}
+                total={total}
+              />
+              <Breakdown
+                title="Financing readiness"
+                rows={dists.financing ?? []}
+                total={total}
+              />
+            </Category>
+
+            <Category
+              icon={<Building2 size={16} />}
+              title="Utilities & Permitting"
+              blurb="operational difficulty"
+            >
+              <Breakdown title="Utility provider" rows={dists.utility ?? []} total={total} />
+              <Breakdown
+                title="Permitting (AHJ)"
+                subtitle="Complex jurisdictions cost time"
+                rows={dists.ahj ?? []}
+                total={total}
+              />
+              <Breakdown title="Roof type" rows={dists.roof ?? []} total={total} />
+              <Breakdown title="Timeline" rows={dists.timeline ?? []} total={total} />
+              <Breakdown
+                title="Battery attach"
+                subtitle="Storage interest = upsell"
+                rows={dists.battery ?? []}
+                total={total}
+              />
+              <Breakdown
+                title="Sunlight confidence"
+                rows={dists.sunlight ?? []}
+                total={total}
+              />
+            </Category>
+
+            {/* County rollups — click to drill into gated leads */}
+            <section className="mt-6">
+              <div className="mb-3 flex items-center gap-2">
+                <span className="text-emerald-400">
+                  <MapPin size={16} />
+                </span>
+                <h2 className="text-sm font-black uppercase tracking-[0.18em] text-white">
+                  County Rollups
+                </h2>
+                <span className="text-[11px] text-slate-600">
+                  — click a county to reveal its leads
+                </span>
+              </div>
+              {data.counties.length === 0 ? (
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/25 p-6 text-sm text-slate-500">
+                  Leads here aren&apos;t mapped to a county yet.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {data.counties.map((c) => (
+                    <button
+                      key={c.fips}
+                      type="button"
+                      onClick={() =>
+                        router.push(
+                          `/network/territory/${state}?county=${c.fips}`,
+                        )
+                      }
+                      className="group flex items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-950/30 p-4 text-left transition-colors hover:border-emerald-500/40"
+                    >
+                      <div>
+                        <div className="text-sm font-semibold text-white">
+                          {c.name} County
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-slate-500">
+                          {usdShort(c.value)} pipeline
+                          {c.gradeA > 0 && ` · ${c.gradeA} grade A`}
+                        </div>
+                        <div className="mt-2 h-1.5 w-32 overflow-hidden rounded-full bg-slate-800">
+                          <div
+                            className="h-full rounded-full bg-emerald-400"
+                            style={{ width: `${(c.value / topCountyValue) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-right">
+                          <div className="text-xl font-bold tabular-nums text-emerald-400">
+                            {c.count}
+                          </div>
+                          <div className="text-[10px] uppercase text-slate-600">
+                            leads
+                          </div>
+                        </div>
+                        <ChevronRight
+                          size={16}
+                          className="text-slate-600 transition-colors group-hover:text-emerald-400"
+                        />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+          </>
+        )}
       </div>
-    </AppShell>
+    </div>
   );
 }
 
 export default function TerritoryPage() {
   return (
-    <Suspense
-      fallback={
-        <AppShell>
+    <AppShell>
+      <Suspense
+        fallback={
           <div
             className="flex min-h-screen items-center justify-center"
             style={{ background: "var(--bg-base, #0b1120)" }}
           >
             <Loader2 size={30} className="animate-spin text-emerald-500" />
           </div>
-        </AppShell>
-      }
-    >
-      <TerritoryView />
-    </Suspense>
+        }
+      >
+        <TerritoryView />
+      </Suspense>
+    </AppShell>
   );
 }
