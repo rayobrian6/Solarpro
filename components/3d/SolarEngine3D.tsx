@@ -410,7 +410,7 @@ function SolarEngine3D({
   // Read by applyOrbitRef.current() to reposition the Cesium camera.
   const orbitRef = useRef({
     targetLat: lat, targetLng: lng, targetAlt: 0,
-    heading: 0.0, pitch: -1.134, radius: 150.0,
+    heading: Math.PI, pitch: -1.134, radius: 150.0,
     dragging: false, dragButton: -1,
     dragStartX: 0, dragStartY: 0,
     dragStartH: 0.0, dragStartP: 0.0,
@@ -1565,7 +1565,7 @@ function SolarEngine3D({
       oo.targetLat = lat;
       oo.targetLng = lng;
       oo.targetAlt = cesiumGroundElev;
-      oo.heading   = 0;
+      oo.heading   = Math.PI;  // π → fly-in looks NORTH (look dir = heading + π)
       oo.pitch     = -1.134;   // -65° top-down-ish
       oo.radius    = 150;
       applyOrbitRef.current?.();
@@ -1795,7 +1795,7 @@ function SolarEngine3D({
       // No panels — reset to site at default pose
       o.targetLat = lat; o.targetLng = lng;
       o.targetAlt = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
-      o.heading = 0; o.pitch = -1.134; o.radius = 150;
+      o.heading = Math.PI; o.pitch = -1.134; o.radius = 150;  // look NORTH
     } else {
       const lats = panels.map((p: PlacedPanel) => p.lat);
       const lngs = panels.map((p: PlacedPanel) => p.lng);
@@ -1807,7 +1807,7 @@ function SolarEngine3D({
       const radius   = Math.max(50, spanM * 1.4);
       o.targetLat = centLat; o.targetLng = centLng;
       o.targetAlt = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
-      o.heading = 0; o.pitch = -1.222;  // -70°
+      o.heading = Math.PI; o.pitch = -1.222;  // -70°, look NORTH
       o.radius  = radius;
       addLog('FIT', `Fit view: ${panels.length} panels, span=${spanM.toFixed(0)}m, radius=${radius.toFixed(0)}m`);
     }
@@ -6178,7 +6178,7 @@ function SolarEngine3D({
         const o = orbitRef.current;
         o.targetLat = centLat; o.targetLng = centLng;
         o.targetAlt = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
-        o.heading = 0; o.pitch = -1.222; o.radius = radius;  // -70° pitch
+        o.heading = Math.PI; o.pitch = -1.222; o.radius = radius;  // -70° pitch, look NORTH
         applyOrbitRef.current?.();
       } catch {}
     }
@@ -6992,7 +6992,7 @@ function SolarEngine3D({
                   { icon: '\u{1F3E0}',     tip: 'Fly Home: return to property',      action: flyToProperty },
                   { icon: '\u{1F9ED}',     tip: 'Orient North: reset heading',       action: () => { const o=orbitRef.current; o.heading=Math.PI; o.pitch=-0.785; applyOrbitRef.current?.(); setStatusMsg('\u{1F9ED} North up'); } },
                   { icon: '\u{1F4D0}',     tip: 'Tilt: 3D angled perspective view', action: () => { const o=orbitRef.current; o.heading=5.76; o.pitch=-0.524; o.radius=280; applyOrbitRef.current?.(); setStatusMsg('\u{1F4D0} Perspective'); } },
-                  { icon: '\u{1F52D}',     tip: "Top-Down: bird's eye view",        action: () => { const o=orbitRef.current; o.heading=0; o.pitch=-1.553; o.radius=150; applyOrbitRef.current?.(); setStatusMsg('\u{1F52D} Top-down'); } },
+                  { icon: '\u{1F52D}',     tip: "Top-Down: bird's eye view",        action: () => { const o=orbitRef.current; o.heading=Math.PI; o.pitch=-1.553; o.radius=150; applyOrbitRef.current?.(); setStatusMsg('\u{1F52D} Top-down'); } },
                   { icon: '\u{1F5D1}',     tip: 'Clear All: remove all panels',     action: clearPanels, danger: true },
                 ] as { icon: string; tip: string; action: () => void; danger?: boolean }[]).map(({ icon, tip, action, danger }) => (
                   <button key={tip}
