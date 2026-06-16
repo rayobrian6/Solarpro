@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest } from '@/lib/auth';
+import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady, isValidUUID } from '@/lib/db-neon';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -53,9 +53,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const user = getUserFromRequest(req);
-    if (!user) {
-      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    // Admin-only — this writes photo rows into an arbitrary survey_id, so it
+    // must not be reachable by a normal authenticated user (matches the doc).
+    const admin = await requireAdminApi(req);
+    if (!admin) {
+      return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
     }
 
     const body = await req.json();

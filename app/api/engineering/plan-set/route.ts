@@ -72,12 +72,15 @@ export async function GET(req: NextRequest) {
     if (!projectId) return NextResponse.json({ success: false, error: 'projectId required' }, { status: 400 });
 
     const sql = await getDbReady();
+    // Ownership-scoped: only list plan-set files for a project the caller owns.
     const rows = await sql`
-      SELECT id, file_name, file_size, upload_date
-      FROM project_files
-      WHERE project_id = ${projectId}
-        AND file_type = 'plan_set'
-      ORDER BY upload_date DESC
+      SELECT pf.id, pf.file_name, pf.file_size, pf.upload_date
+      FROM project_files pf
+      JOIN projects pr ON pr.id = pf.project_id
+      WHERE pf.project_id = ${projectId}
+        AND pr.user_id = ${user.id}
+        AND pf.file_type = 'plan_set'
+      ORDER BY pf.upload_date DESC
       LIMIT 5
     `;
 

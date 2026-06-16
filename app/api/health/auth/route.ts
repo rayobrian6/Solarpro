@@ -49,14 +49,11 @@ export async function GET(req: NextRequest) {
   if (hasDb) {
     try {
       const sql = neon(dbUrl!);
-      const rows = await sql`SELECT 1 AS ping, NOW() AS ts, current_database() AS db`;
+      await sql`SELECT 1 AS ping`;
       result.database = 'ok';
-      result.database_ts = rows[0]?.ts;
-      result.database_name = rows[0]?.db;
-      console.log(`[AUTH_HEALTH] DB connected: ${rows[0]?.db} at ${rows[0]?.ts}`);
     } catch (e: unknown) {
       result.database = 'error';
-      result.database_error = (e as Error).message;
+      // Do NOT leak the raw DB error to unauthenticated callers — log only.
       console.error('[AUTH_HEALTH] DB connection failed:', (e as Error).message);
     }
   } else {
@@ -74,12 +71,11 @@ export async function GET(req: NextRequest) {
   if (result.database === 'ok') {
     try {
       const sql = neon(dbUrl!);
-      const rows = await sql`SELECT COUNT(*) AS user_count FROM users LIMIT 1`;
+      // Existence/access check only — do NOT return the user count to callers.
+      await sql`SELECT 1 FROM users LIMIT 1`;
       result.users_table = 'ok';
-      result.user_count = Number(rows[0]?.user_count ?? 0);
     } catch (e: unknown) {
       result.users_table = 'error';
-      result.users_table_error = (e as Error).message;
       console.error('[AUTH_HEALTH] Users table query failed:', (e as Error).message);
     }
   }

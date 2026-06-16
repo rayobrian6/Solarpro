@@ -15,12 +15,58 @@
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
+import dns from 'node:dns/promises';
+import net from 'node:net';
 import { requireAuth } from '@/lib/security';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { ingestDatasheet } from '@/lib/satellite/datasheetIngestion';
 import type { DatasheetIngestionResult } from '@/lib/satellite/types';
+
+// ── SSRF guard ──────────────────────────────────────────────────────────────
+// This endpoint fetches a user-supplied URL server-side, so without a guard an
+// attacker could point it at internal/cloud-metadata addresses. Require https
+// and reject any host that IS, or RESOLVES TO, a private/loopback/link-local IP.
+function isPrivateIp(ip: string): boolean {
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split('.').map(Number);
+    if (a === 10 || a === 127 || a === 0) return true;
+    if (a === 169 && b === 254) return true;               // link-local / metadata
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;     // CGNAT
+    return false;
+  }
+  const lower = ip.toLowerCase();
+  if (lower === '::1' || lower === '::') return true;
+  if (lower.startsWith('fe80') || lower.startsWith('fc') || lower.startsWith('fd')) return true;
+  const mapped = lower.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return isPrivateIp(mapped[1]);
+  return false;
+}
+
+async function publicUrlError(raw: string): Promise<string | null> {
+  let u: URL;
+  try { u = new URL(raw); } catch { return 'Invalid URL format'; }
+  if (u.protocol !== 'https:') return 'Only https:// URLs are allowed';
+  const host = u.hostname.toLowerCase();
+  if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) {
+    return 'URL host is not allowed';
+  }
+  if (net.isIP(host)) {
+    return isPrivateIp(host) ? 'URL points to a private address' : null;
+  }
+  try {
+    const addrs = await dns.lookup(host, { all: true });
+    if (!addrs.length) return 'URL host could not be resolved';
+    if (addrs.some((a) => isPrivateIp(a.address))) return 'URL resolves to a private address';
+  } catch {
+    return 'URL host could not be resolved';
+  }
+  return null;
+}
 
 export async function POST(req: NextRequest) {
   // SECURITY: Require authenticated user
@@ -53,12 +99,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Basic URL validation
-    try {
-      new URL(url);
-    } catch {
+    // SSRF-safe URL validation (https only; no private/loopback/link-local hosts)
+    const urlError = await publicUrlError(url);
+    if (urlError) {
       return NextResponse.json(
-        { success: false, error: 'Invalid URL format' },
+        { success: false, error: urlError },
         { status: 400 },
       );
     }

@@ -16,14 +16,14 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // ── Rate limiting (applies to all callers, not just unauthenticated) ──
+    const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests' }, { status: 429 });
+    }
+
     const user = await getUserFromRequest(req);
     if (!user) {
-
-  // ── Rate limiting ──────────────────────────────────────────────────────────
-  const rl = await checkRateLimit('standard', getClientIp(req));
-  if (!rl.allowed) {
-    return NextResponse.json({ success: false, error: 'Too many requests' }, { status: 429 });
-  }
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -146,13 +146,9 @@ export async function POST(
       expiresAt: expiresAt.toISOString(),
     });
   } catch (err: unknown) {
-    console.error('[share proposal]', err);
-    // Generate a fallback token so the share URL is still usable
-    const fallbackToken = uuidv4().replace(/-/g, '').substring(0, 16);
-    const { id: proposalId } = await params;
-    const baseUrl = getBaseUrl();
-    const shareUrl = `${baseUrl}/proposals/view/${proposalId}?token=${fallbackToken}`;
-    return NextResponse.json({ success: true, shareUrl, shareToken: fallbackToken });
+    // Previously this fabricated a fallback token that was never persisted —
+    // the share URL would 404 while the UI reported success. Surface a real error.
+    return handleRouteDbError('[share proposal]', err);
   }
 }
 
