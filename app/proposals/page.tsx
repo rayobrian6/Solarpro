@@ -1351,6 +1351,13 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
   const utilityInflation     = cp.utility.escalationRate;
   const panelDegradation     = 0.005; // display constant — actual degradation lives in pipeline
   const monthlyBillData      = cp.truth25yr.monthlyBillChart;
+  // Psychological framing for the before/after chart (mirrors the proposal view
+  // page): surface the bill collapsing to ~$0 even when the green bars are
+  // zero-height on a full-offset system.
+  const avgMonthlyAfter      = monthlyBillData.length
+    ? Math.round(monthlyBillData.reduce((s, m) => s + (m.after || 0), 0) / monthlyBillData.length)
+    : 0;
+  const billEliminated       = monthlyBillData.length > 0 && avgMonthlyAfter <= 3;
   const projectionData       = cp.truth25yr.projectionChart;
   const totalLifetimeSavings = cp.truth25yr.projectionChart[24]?.cumulative ?? 0;
   // Net 25-yr savings = utility cost avoided minus total system cost (cash basis)
@@ -2373,9 +2380,25 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
 
             {/* Monthly Bill Before/After */}
             <div className="card p-5">
-              <h3 className="font-semibold text-white text-sm mb-4 flex items-center gap-2">
+              <h3 className="font-semibold text-white text-sm mb-3 flex items-center gap-2">
                 <DollarSign size={15} className="text-emerald-400" /> Monthly Bill: Before vs After Solar
               </h3>
+              <div className="mb-3 flex items-center gap-3">
+                <div>
+                  <div className="text-[9px] uppercase tracking-wider text-slate-500">Utility bill now</div>
+                  <div className="text-xl font-black text-red-400 line-through decoration-red-500/50">${avgMonthlyBillBefore}/mo</div>
+                </div>
+                <span className="text-slate-600 text-lg font-bold">→</span>
+                <div>
+                  <div className="text-[9px] uppercase tracking-wider text-slate-500">With solar</div>
+                  <div className="text-xl font-black text-emerald-400">${avgMonthlyAfter}/mo</div>
+                </div>
+                {billEliminated && (
+                  <span className="ml-auto rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-300">
+                    ⚡ Bill eliminated
+                  </span>
+                )}
+              </div>
               <ResponsiveContainer width="100%" height={130}>
                 <BarChart data={monthlyBillData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
