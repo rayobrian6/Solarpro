@@ -369,8 +369,9 @@ function mapToAiBillData(parsed: Record<string, any>): AiBillData {
   const bpStart = parseBillingDate(parsed.billing_period_start ?? parsed.billingPeriods?.[0]?.start ?? null);
   const bpEnd = parseBillingDate(parsed.billing_period_end ?? parsed.billingPeriods?.[0]?.end ?? null);
 
-  // Current month kWh — try both field names
-  const totalKwh = safePositiveNumber(parsed.total_kwh ?? parsed.annualUsage ?? null);
+  // Current month kWh — do NOT fall back to annualUsage: storing an annual
+  // figure as the current-month total causes ~12x system oversizing downstream.
+  const totalKwh = safePositiveNumber(parsed.total_kwh ?? null);
 
   // Monthly usage array — try both field names, validate each value
   const monthlyRaw = parsed.monthly_kwh ?? parsed.monthlyUsage ?? null;

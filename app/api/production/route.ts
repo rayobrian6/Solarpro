@@ -51,7 +51,11 @@ function buildCostEstimate(params: {
 
   const itemized  = calculateItemizedPrice(panels, layoutType, pricingCfg);
   const cashPrice = itemized.totalCashPrice;
-  const itcAmount = Math.round(cashPrice * (pricingCfg.taxCreditRate / 100));
+  // taxCreditRate is a legacy field hard-coded to 0 — use the real ITC config
+  // (matches calculateFinalPrice): commercial §48E = itcRateCommercial (30%),
+  // residential §25D = itcRateResidential (0 after the P.L.119-21 repeal).
+  const itcPercent = pricingCfg.isCommercial ? pricingCfg.itcRateCommercial : pricingCfg.itcRateResidential;
+  const itcAmount = Math.round(cashPrice * ((itcPercent ?? 0) / 100));
   const netCost   = cashPrice - itcAmount;
   const rate      = utilityRate || 0.13;
   const annualSavings  = Math.round(annualProductionKwh * rate);

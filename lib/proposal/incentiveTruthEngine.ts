@@ -230,12 +230,14 @@ export function resolveIncentiveTruth(input: IncentiveTruthInput): IncentiveTrut
     }));
 
     stateIncentives = {
-      available: mapped.length > 0 && calc.cashTotal > 0,
-      totalEstimatedValue: calc.cashTotal,
+      // Use STATE-only cash — calc.cashTotal includes the federal ITC, which is
+      // already reported separately, so using it here double-counts federal.
+      available: mapped.length > 0 && calc.cashStateTotal > 0,
+      totalEstimatedValue: calc.cashStateTotal,
       incentives: mapped,
       displayNote: mapped.length > 0
         ? `${mapped.length} state incentive(s) available in ${stateCode}. ` +
-          `Estimated cash value: $${calc.cashTotal.toLocaleString()}. ` +
+          `Estimated cash value: $${calc.cashStateTotal.toLocaleString()}. ` +
           `Verify eligibility with your tax advisor.`
         : stateProfile
           ? `No additional state incentives found for ${stateCode} beyond federal programs.`

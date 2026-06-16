@@ -230,12 +230,14 @@ export async function checkForDuplicates(
       }
     }
   } catch (err) {
-    // DB errors: log but don't block intake
-    console.error('[duplicateDetector] DB error:', err)
+    // Fail SAFE, not open: a transient DB error during dedup must not silently
+    // treat a possible duplicate as brand-new. Don't block (that would lose
+    // legitimate leads), but FLAG the lead for manual review.
+    console.error('[duplicateDetector] DB error — flagging lead for review:', err)
     return {
       is_duplicate: false,
       is_blocked: false,
-      is_flagged: false,
+      is_flagged: true,
       score: 0,
       best_match: null,
       all_matches: [],

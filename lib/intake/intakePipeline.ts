@@ -171,6 +171,37 @@ export async function runIntakePipeline(
     }
   }
 
+  // ── Step 2.5: Idempotency pre-check — if this exact delivery was already
+  // processed (same idempotency key, e.g. a webhook the provider retried),
+  // return the existing lead instead of creating a duplicate. Best-effort:
+  // degrades silently if the intake_idempotency_key column isn't present yet
+  // (migration 089 pending), so it can never break lead intake.
+  if (options.idempotency_key) {
+    try {
+      const prior = await sql`
+        SELECT id FROM network_opportunities
+        WHERE intake_idempotency_key = ${options.idempotency_key}
+        LIMIT 1
+      `
+      const priorId = (prior[0]?.id as string) || null
+      if (priorId) {
+        return {
+          action: 'duplicate_blocked',
+          opportunity_id: priorId,
+          idempotency_key: options.idempotency_key,
+          duplicate_score: 100,
+          duplicate_match_id: priorId,
+          validation_errors: [],
+          validation_warnings: validationResult.warnings,
+          event_id: makeEventId(),
+          duration_ms: Date.now() - startedAt,
+        }
+      }
+    } catch (e) {
+      console.warn('[intakePipeline] idempotency pre-check skipped:', (e as Error).message)
+    }
+  }
+
   // ── Step 3: Create opportunity
   let opportunityId: string | null = null
   try {
@@ -215,6 +246,21 @@ export async function runIntakePipeline(
       RETURNING id
     `
     opportunityId = rows[0]?.id as string || null
+
+    // Persist the idempotency key so retries / concurrent re-deliveries are
+    // caught by the pre-check (and the unique index). Best-effort — degrades
+    // silently if the column isn't present yet (migration 089 pending).
+    if (opportunityId && options.idempotency_key) {
+      try {
+        await sql`
+          UPDATE network_opportunities
+          SET intake_idempotency_key = ${options.idempotency_key}
+          WHERE id = ${opportunityId}
+        `
+      } catch (e) {
+        console.warn('[intakePipeline] idempotency persist skipped:', (e as Error).message)
+      }
+    }
   } catch (err) {
     console.error('[intakePipeline] Failed to create opportunity:', err)
     const eventId = makeEventId()
