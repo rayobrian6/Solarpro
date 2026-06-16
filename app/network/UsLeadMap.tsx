@@ -73,12 +73,31 @@ function loadCountyFeatures(): Promise<CountyFeature[]> {
 const fips5 = (id: string | number | undefined) =>
   String(id ?? "").padStart(5, "0");
 
+// ZIP → county FIPS crosswalk (~41k ZIPs). Lazy-loaded the first time anyone
+// drills in, so a lead's county comes straight from its ZIP — no coordinates
+// or geocoding required.
+let ZIP2FIPS: Record<string, string> | null = null;
+let zipLoadPromise: Promise<Record<string, string>> | null = null;
+
+function loadZip2Fips(): Promise<Record<string, string>> {
+  if (ZIP2FIPS) return Promise.resolve(ZIP2FIPS);
+  if (!zipLoadPromise) {
+    zipLoadPromise = import("@/lib/geo/zip2fips.json").then((mod) => {
+      ZIP2FIPS = ((mod as { default?: Record<string, string> }).default ??
+        mod) as Record<string, string>;
+      return ZIP2FIPS;
+    });
+  }
+  return zipLoadPromise;
+}
+
 export interface MapLead {
   id: string;
   state: string;
   lat: number | null;
   lng: number | null;
   city: string;
+  zip: string;
   grade: string;
   kw: number | null;
 }
@@ -100,15 +119,22 @@ export default function UsLeadMap({
   const [countyFeatures, setCountyFeatures] = useState<CountyFeature[] | null>(
     COUNTY_FEATURES,
   );
+  const [zip2fips, setZip2fips] = useState<Record<string, string> | null>(
+    ZIP2FIPS,
+  );
 
   const stateFips = selected ? USPS_TO_FIPS[selected] ?? "" : "";
 
-  // Lazy-load county geometry the first time the user drills into any state.
+  // Lazy-load county geometry + the ZIP→county crosswalk the first time the
+  // user drills into any state.
   useEffect(() => {
     if (!selected) return;
     let alive = true;
     loadCountyFeatures().then((f) => {
       if (alive) setCountyFeatures(f);
+    });
+    loadZip2Fips().then((z) => {
+      if (alive) setZip2fips(z);
     });
     return () => {
       alive = false;
@@ -123,31 +149,34 @@ export default function UsLeadMap({
 
   const drilled = !!selected && stateCounties.length > 0;
 
-  // Light each county by how many geocoded leads fall inside it. Leads without
-  // coordinates can't be placed yet — tallied as "unlocated" so the operator
-  // knows the zone counts aren't the whole story (they still appear in the
-  // state breakdown page).
+  // Light each county by how many leads it holds. County comes from the lead's
+  // ZIP (deterministic), falling back to point-in-polygon when coordinates
+  // exist but ZIP doesn't resolve. Leads we can't place are tallied as
+  // "unlocated" (they still appear in the state breakdown page).
   const { countyCounts, unlocated } = useMemo(() => {
     const countyCounts: Record<string, number> = {};
     let unlocated = 0;
     if (!drilled) return { countyCounts, unlocated };
     for (const lead of leads) {
       if (lead.state !== selected) continue;
-      if (lead.lat == null || lead.lng == null) {
-        unlocated++;
-        continue;
+      let code = "";
+      const zip = (lead.zip || "").trim().slice(0, 5);
+      if (zip && zip2fips?.[zip]) code = fips5(zip2fips[zip]);
+      if (!code && lead.lat != null && lead.lng != null) {
+        const county = stateCounties.find((f) =>
+          geoContains(f as never, [lead.lng as number, lead.lat as number]),
+        );
+        if (county) code = fips5(county.id);
       }
-      const pt: [number, number] = [lead.lng, lead.lat];
-      const county = stateCounties.find((f) => geoContains(f as never, pt));
-      if (!county) {
+      // Only count counties that actually belong to the drilled-in state.
+      if (code && code.slice(0, 2) === stateFips) {
+        countyCounts[code] = (countyCounts[code] ?? 0) + 1;
+      } else {
         unlocated++;
-        continue;
       }
-      const code = fips5(county.id);
-      countyCounts[code] = (countyCounts[code] ?? 0) + 1;
     }
     return { countyCounts, unlocated };
-  }, [drilled, leads, selected, stateCounties]);
+  }, [drilled, leads, selected, stateCounties, zip2fips, stateFips]);
 
   // Frame the drilled-in state with its own upright Mercator projection — the
   // national Albers projection leaves edge states visibly tilted when zoomed.

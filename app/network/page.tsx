@@ -2869,6 +2869,7 @@ export default function NetworkPage() {
                               ? Number(r.lng)
                               : null,
                           city: r.city ? String(r.city) : "",
+                          zip: r.zip ? String(r.zip) : "",
                           grade: r.lead_grade ? String(r.lead_grade) : "",
                           kw:
                             r.system_size_kw != null
