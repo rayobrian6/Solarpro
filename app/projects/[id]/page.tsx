@@ -54,7 +54,6 @@ import {
 import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
 import type { ConfidenceSource, ConfidenceLevel } from '@/components/recommend/ConfidenceBadge';
 import Link from 'next/link';
-import { useUser, isAdminRole } from '@/contexts/UserContext';
 import EngineeringTab from '@/components/engineering/EngineeringTab';
 import BillTab from '@/components/project/BillTab';
 import BillUploadFlow from '@/components/onboarding/BillUploadFlow';
@@ -320,8 +319,6 @@ function ProjectDetailInner() {
   // FIX v47.8: sync updated project to store cache after bill save
   const syncProjectToStore = useAppStore(s => s.syncProjectToStore);
 
-  const { user } = useUser();
-  const isAdmin = isAdminRole(user?.role);
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>('bill');
@@ -827,15 +824,6 @@ function ProjectDetailInner() {
                     );
                   })()}
                 </div>
-                {/* Engineering Intelligence link — admin-only (deep link into
-                    the admin portal; hidden from contractors). */}
-                {isAdmin && (
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <Link href={`/admin/engineering-intelligence/project/${id}`} className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] font-medium text-slate-400 hover:text-white hover:border-slate-600 transition">
-                      <Network size={11} /> Engineering Intelligence
-                    </Link>
-                  </div>
-                )}
               </div>
             </div>
 

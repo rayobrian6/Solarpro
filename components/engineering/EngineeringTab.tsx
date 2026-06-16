@@ -4,16 +4,14 @@
 // Shows auto-generated engineering report derived from design engine
 // ============================================================
 
-import Link from 'next/link';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Zap, FileText, Download, RefreshCw, CheckCircle, AlertTriangle,
   Clock, ChevronDown, ChevronRight, Shield, Wind, Snowflake,
   Cpu, Package, Ruler, Home, Sun, Activity, ClipboardList,
-  ExternalLink, Info, BarChart2, Layers, Grid, FolderOpen, Eye, Network
+  ExternalLink, Info, BarChart2, Layers, Grid, FolderOpen, Eye
 } from 'lucide-react';
 import type { EngineeringReport } from '@/lib/engineering/types';
-import { useUser, isAdminRole } from '@/contexts/UserContext';
 
 interface ProjectFile {
   id: string;
@@ -34,8 +32,6 @@ interface EngineeringTabProps {
 type SectionKey = 'summary' | 'electrical' | 'structural' | 'equipment' | 'permit';
 
 export default function EngineeringTab({ projectId, projectName }: EngineeringTabProps) {
-  const { user } = useUser();
-  const isAdmin = isAdminRole(user?.role);
   const [report, setReport] = useState<EngineeringReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -336,25 +332,9 @@ ${(pp?.specialConditions?.length) ? `
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   };
 
-  // ── Admin-only deep link — hidden for everyone else so contractors are
-  // never bounced into the admin portal. ──────────────────────────────────
-  const intelligenceLink = isAdmin ? (
-    <div className="border-b border-slate-700/60 bg-sky-500/5 px-5 py-3">
-      <Link
-        href={`/admin/engineering-intelligence/project/${projectId}`}
-        className="inline-flex items-center gap-2 rounded-lg border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/20"
-      >
-        <Network size={13} />
-        Open deterministic Engineering Intelligence for this project
-      </Link>
-      <span className="ml-3 text-[11px] text-slate-500">Admin workspace; view-only lineage, requirements, snapshots, graph, stale-state and audit metadata.</span>
-    </div>
-  ) : null;
-
   if (loading) {
     return (
       <>
-        {intelligenceLink}
         <div className="flex items-center justify-center py-16">
           <div className="text-center">
             <div className="w-10 h-10 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
@@ -369,7 +349,6 @@ ${(pp?.specialConditions?.length) ? `
   if (error) {
     return (
       <div>
-        {intelligenceLink}
         <div className="p-6 space-y-4">
         {/* Client Engineering Workspace — shown when no full design exists yet */}
         {needsDesign && preliminaryFiles.length > 0 && (
@@ -485,7 +464,6 @@ ${(pp?.specialConditions?.length) ? `
   // ── Main Report View ───────────────────────────────────────────────────────
   return (
     <div>
-      {intelligenceLink}
       <div className="space-y-4 p-4">
         {/* Header */}
       <div className="flex items-center justify-between">
