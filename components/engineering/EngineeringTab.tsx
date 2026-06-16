@@ -13,6 +13,7 @@ import {
   ExternalLink, Info, BarChart2, Layers, Grid, FolderOpen, Eye, Network
 } from 'lucide-react';
 import type { EngineeringReport } from '@/lib/engineering/types';
+import { useUser, isAdminRole } from '@/contexts/UserContext';
 
 interface ProjectFile {
   id: string;
@@ -33,6 +34,8 @@ interface EngineeringTabProps {
 type SectionKey = 'summary' | 'electrical' | 'structural' | 'equipment' | 'permit';
 
 export default function EngineeringTab({ projectId, projectName }: EngineeringTabProps) {
+  const { user } = useUser();
+  const isAdmin = isAdminRole(user?.role);
   const [report, setReport] = useState<EngineeringReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -333,8 +336,9 @@ ${(pp?.specialConditions?.length) ? `
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   };
 
-  // ── Loading State ──────────────────────────────────────────────────────────
-  const intelligenceLink = (
+  // ── Admin-only deep link — hidden for everyone else so contractors are
+  // never bounced into the admin portal. ──────────────────────────────────
+  const intelligenceLink = isAdmin ? (
     <div className="border-b border-slate-700/60 bg-sky-500/5 px-5 py-3">
       <Link
         href={`/admin/engineering-intelligence/project/${projectId}`}
@@ -345,7 +349,7 @@ ${(pp?.specialConditions?.length) ? `
       </Link>
       <span className="ml-3 text-[11px] text-slate-500">Admin workspace; view-only lineage, requirements, snapshots, graph, stale-state and audit metadata.</span>
     </div>
-  );
+  ) : null;
 
   if (loading) {
     return (
