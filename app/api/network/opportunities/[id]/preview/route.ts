@@ -5,6 +5,7 @@ export const revalidate = 0;
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { getDbReady, handleRouteDbError } from "@/lib/db-neon";
+import { gradeDefaultPrice } from "@/lib/network/leadPurchase";
 import zip2fips from "@/lib/geo/zip2fips.json";
 import countyNames from "@/lib/geo/countyNames.json";
 
@@ -143,7 +144,7 @@ export async function GET(
       grade: g && "ABCDEF".includes(g[0]) ? `Grade ${g[0]}` : "Ungraded",
       systemKw: num(r.system_kw),
       projectValue: num(r.project_value),
-      askingPrice: num(r.asking_price),
+      askingPrice: num(r.asking_price) ?? gradeDefaultPrice(r.grade),
       monthlyBill: num(r.monthly_bill_raw),
       annualSavings: num(r.annual_savings),
       paybackYrs: num(r.payback_yrs),

@@ -25,6 +25,27 @@ export interface LeadCheckoutResult {
   status?: number;
 }
 
+/**
+ * Starter price by lead grade (SolarPro's pricing model). Used when a lead has
+ * no explicit `asking_price` set, so every graded lead is sellable without
+ * manual pricing — and the displayed price always matches what we charge.
+ */
+export function gradeDefaultPrice(grade: unknown): number {
+  const g = String(grade ?? "").trim().toUpperCase().charAt(0);
+  switch (g) {
+    case "A":
+      return 75;
+    case "B":
+      return 45;
+    case "C":
+      return 25;
+    case "D":
+      return 15;
+    default:
+      return 25;
+  }
+}
+
 export async function createLeadCheckoutSession(params: {
   opportunityId: string;
   contractorId: string;
@@ -68,12 +89,15 @@ export async function createLeadCheckoutSession(params: {
     return { error: "This lead is no longer available.", status: 409 };
   }
 
-  // ── Price guard — never charge $0 ──
-  const price = Number(opp.asking_price ?? 0);
+  // ── Price: explicit asking_price, else the grade's starter price ──
+  const explicitPrice = Number(opp.asking_price ?? 0);
+  const price =
+    Number.isFinite(explicitPrice) && explicitPrice > 0
+      ? explicitPrice
+      : gradeDefaultPrice(opp.opportunity_grade);
   if (!Number.isFinite(price) || price <= 0) {
     return {
-      error:
-        "This lead has no price set yet. An admin needs to price it before it can be sold.",
+      error: "This lead has no price set yet.",
       status: 409,
     };
   }
