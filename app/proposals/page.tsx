@@ -26,6 +26,7 @@ import { useSubscription } from '@/hooks/useSubscription';
 import UpgradeModal from '@/components/ui/UpgradeModal';
 import { resolveProposalSystemType, getPanelTypeCounts } from '@/lib/proposalSystemType';
 import { buildCanonicalProposal } from '@/lib/proposal/buildCanonicalProposal';
+import { resolveActualAnnualBill } from '@/lib/proposal/resolveActualBill';
 import { deriveEcosystemSummary } from '@/lib/proposal/deriveEcosystemSummary';
 import {
   buildUtilityProfile,
@@ -1309,7 +1310,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
     clientUtilityRate:     client?.utilityRate,
     dbUtilityRate:         proposal.dbUtilityRate ?? undefined,
     annualUsageKwh:        client?.annualKwh ?? 0,
-    actualAnnualBill:      client?.annualBill ?? undefined,  // anchor to the real bill
+    actualAnnualBill:      resolveActualAnnualBill(client),  // real bill (same source as Bill tab)
     systemType,
     storedCashPrice:       storedCashPrice,
     roofPricePerWatt:      pricingCfg?.roofPricePerWatt,

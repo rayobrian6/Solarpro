@@ -21,6 +21,7 @@ import { timingSafeEqual } from 'crypto';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, isValidUUID, handleRouteDbError } from '@/lib/db-neon';
 import { buildCanonicalProposal } from '@/lib/proposal/buildCanonicalProposal';
+import { resolveActualAnnualBill } from '@/lib/proposal/resolveActualBill';
 import { renderProposalHTML, ProposalBranding } from '@/lib/proposal/renderProposalHTML';
 import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
 import type { Proposal } from '@/types';
@@ -212,7 +213,7 @@ async function handleRequest(req: NextRequest, context: RouteContext): Promise<N
         clientUtilityRate:   client?.utilityRate,
         dbUtilityRate:       proposal.dbUtilityRate ?? undefined,
         annualUsageKwh:      client?.annualKwh ?? 0,
-        actualAnnualBill:    client?.annualBill ?? undefined,  // anchor to the real bill
+        actualAnnualBill:    resolveActualAnnualBill(client),  // real bill (same source as Bill tab)
 
         // Pricing
         systemType,

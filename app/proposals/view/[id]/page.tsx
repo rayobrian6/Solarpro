@@ -34,6 +34,7 @@ import {
   getStateIcaFallback,
 } from '@/lib/utilityInterconnection';
 import { buildCanonicalProposal } from '@/lib/proposal/buildCanonicalProposal';
+import { resolveActualAnnualBill } from '@/lib/proposal/resolveActualBill';
 import { deriveEcosystemSummary } from '@/lib/proposal/deriveEcosystemSummary';
 import {
   GLOBAL_INCENTIVES_CONFIG,
@@ -403,7 +404,7 @@ function PublicProposalView({
     clientUtilityRate:   client?.utilityRate,
     dbUtilityRate:       proposal.dbUtilityRate ?? undefined,
     annualUsageKwh:      client?.annualKwh ?? 0,
-    actualAnnualBill:    client?.annualBill ?? undefined,  // anchor to the real bill
+    actualAnnualBill:    resolveActualAnnualBill(client),  // real bill (same source as Bill tab)
 
     // Pricing
     systemType,
@@ -425,6 +426,19 @@ function PublicProposalView({
     // Shade analysis (v1.shade)
     panelsShadeDerateComputedPct,
   });
+
+  // TEMP DIAGNOSTIC: surface exactly what bill value the proposal resolves, so a
+  // $82-vs-$138 mismatch can be traced to the real field without guessing.
+  if (typeof window !== 'undefined') {
+    console.log('[PROPOSAL BILL DEBUG]', {
+      resolvedActualAnnualBill: resolveActualAnnualBill(client),
+      client_annualBill:        (client as any)?.annualBill,
+      client_avgMonthlyBill:    (client as any)?.averageMonthlyBill,
+      client_hasBillData:       !!(client as any)?.billData,
+      client_billDataKeys:      (client as any)?.billData ? Object.keys((client as any).billData) : null,
+      cp_currentMonthlyBill:    cp.financial.currentMonthlyBill,
+    });
+  }
 
   // ── ICA / PTO Profile Lookup (Tier 1 → Tier 2 → null) ────────────────────
   // Derive real utility_id from buildUtilityProfile (same inputs as canonical pipeline).
