@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ComposableMap,
   Geographies,
@@ -29,24 +30,6 @@ const FIPS_TO_USPS: Record<string, string> = {
 const USPS_TO_FIPS: Record<string, string> = Object.fromEntries(
   Object.entries(FIPS_TO_USPS).map(([fips, code]) => [code, fips]),
 );
-
-// Approximate state centers [lng, lat] — fallback pin when a lead has no
-// geocode. Used only to scatter pins regionally; never an exact location.
-const STATE_CENTROID: Record<string, [number, number]> = {
-  AL: [-86.8, 32.8], AK: [-152.0, 64.0], AZ: [-111.7, 34.3], AR: [-92.4, 34.8],
-  CA: [-119.5, 37.2], CO: [-105.5, 39.0], CT: [-72.7, 41.6], DE: [-75.5, 39.0],
-  DC: [-77.0, 38.9], FL: [-81.5, 28.6], GA: [-83.4, 32.6], HI: [-156.4, 20.3],
-  ID: [-114.6, 44.4], IL: [-89.2, 40.0], IN: [-86.3, 39.9], IA: [-93.5, 42.0],
-  KS: [-98.4, 38.5], KY: [-85.3, 37.5], LA: [-92.0, 31.0], ME: [-69.2, 45.4],
-  MD: [-76.8, 39.0], MA: [-71.8, 42.3], MI: [-85.4, 44.3], MN: [-94.3, 46.3],
-  MS: [-89.7, 32.7], MO: [-92.5, 38.4], MT: [-109.6, 47.0], NE: [-99.8, 41.5],
-  NV: [-116.6, 39.3], NH: [-71.6, 43.7], NJ: [-74.7, 40.2], NM: [-106.1, 34.4],
-  NY: [-75.5, 42.9], NC: [-79.4, 35.5], ND: [-100.5, 47.5], OH: [-82.8, 40.3],
-  OK: [-97.5, 35.6], OR: [-120.5, 44.0], PA: [-77.8, 40.9], RI: [-71.5, 41.7],
-  SC: [-80.9, 33.9], SD: [-100.2, 44.4], TN: [-86.4, 35.9], TX: [-99.3, 31.5],
-  UT: [-111.7, 39.3], VT: [-72.7, 44.1], VA: [-78.9, 37.5], WA: [-120.4, 47.4],
-  WV: [-80.6, 38.6], WI: [-89.9, 44.6], WY: [-107.5, 43.0],
-};
 
 // Deterministic ±0.2° jitter from a lead id — fuzzes the exact house while
 // keeping the pin regionally honest, and stays stable across renders.
@@ -105,19 +88,18 @@ export default function UsLeadMap({
   leads,
   selected,
   onSelect,
-  onSelectLead,
 }: {
   counts: Record<string, number>;
   leads: MapLead[];
   selected: string;
   onSelect: (code: string) => void;
-  onSelectLead: (id: string) => void;
 }) {
+  const router = useRouter();
   const [hover, setHover] = useState<{ name: string; n: number } | null>(null);
+  const [stateName, setStateName] = useState<string>("");
   const [countyFeatures, setCountyFeatures] = useState<CountyFeature[] | null>(
     COUNTY_FEATURES,
   );
-  const [selectedCounty, setSelectedCounty] = useState<string>("");
 
   const stateFips = selected ? USPS_TO_FIPS[selected] ?? "" : "";
 
@@ -133,11 +115,6 @@ export default function UsLeadMap({
     };
   }, [selected]);
 
-  // Reset the county pick whenever the active state changes (or clears).
-  useEffect(() => {
-    setSelectedCounty("");
-  }, [selected]);
-
   // Counties belonging to the drilled-in state.
   const stateCounties = useMemo(() => {
     if (!stateFips || !countyFeatures) return [];
@@ -146,14 +123,14 @@ export default function UsLeadMap({
 
   const drilled = !!selected && stateCounties.length > 0;
 
-  // Bucket each geocoded lead in this state into its county (point-in-polygon).
-  // Leads without coordinates (or that fall outside every polygon) are tallied
-  // as "unlocated" so the operator knows the zone counts aren't the whole story.
-  const { countyCounts, countyLeadIds, unlocated } = useMemo(() => {
+  // Light each county by how many geocoded leads fall inside it. Leads without
+  // coordinates can't be placed yet — tallied as "unlocated" so the operator
+  // knows the zone counts aren't the whole story (they still appear in the
+  // state breakdown page).
+  const { countyCounts, unlocated } = useMemo(() => {
     const countyCounts: Record<string, number> = {};
-    const countyLeadIds: Record<string, string[]> = {};
     let unlocated = 0;
-    if (!drilled) return { countyCounts, countyLeadIds, unlocated };
+    if (!drilled) return { countyCounts, unlocated };
     for (const lead of leads) {
       if (lead.state !== selected) continue;
       if (lead.lat == null || lead.lng == null) {
@@ -168,15 +145,12 @@ export default function UsLeadMap({
       }
       const code = fips5(county.id);
       countyCounts[code] = (countyCounts[code] ?? 0) + 1;
-      (countyLeadIds[code] ??= []).push(lead.id);
     }
-    return { countyCounts, countyLeadIds, unlocated };
+    return { countyCounts, unlocated };
   }, [drilled, leads, selected, stateCounties]);
 
   // Frame the drilled-in state with its own upright Mercator projection — the
   // national Albers projection leaves edge states visibly tilted when zoomed.
-  // Fit the state's counties to the viewport, then read back the scale and the
-  // geographic point that lands at screen-center.
   const drilledProj = useMemo(() => {
     if (!drilled) return null;
     const fc = {
@@ -206,29 +180,26 @@ export default function UsLeadMap({
     return `rgba(16,185,129,${t})`;
   };
 
-  const countyFill = (n: number, isSel: boolean) => {
-    if (isSel) return "#f59e0b";
+  const countyFill = (n: number) => {
     if (n <= 0) return "#162033";
     const t = (0.35 + 0.55 * (n / countyMax)).toFixed(2);
     return `rgba(16,185,129,${t})`;
   };
 
-  // Which leads get a pin. National view: every lead (Phase B). Drilled view:
-  // located leads appear only for the county the operator clicked — but leads
-  // with no precise geocode are ALWAYS shown as an approximate state-level pin
-  // so a lead can never become invisible behind the zones.
-  const pinLeads = useMemo(() => {
-    if (!drilled) return leads;
-    const located = selectedCounty
-      ? leads.filter((l) =>
-          (countyLeadIds[selectedCounty] ?? []).includes(l.id),
-        )
-      : [];
-    const unlocatedPins = leads.filter(
-      (l) => l.state === selected && (l.lat == null || l.lng == null),
+  // National view marks every real geocoded lead. The drilled view is purely
+  // county-driven (no pins) — counties carry the density and link to the
+  // breakdown page.
+  const pinLeads = useMemo(
+    () => (drilled ? [] : leads.filter((l) => l.lat != null && l.lng != null)),
+    [drilled, leads],
+  );
+
+  const openBreakdown = (county?: string) =>
+    router.push(
+      `/network/territory/${selected}${county ? `?county=${county}` : ""}`,
     );
-    return [...located, ...unlocatedPins];
-  }, [drilled, selectedCounty, selected, leads, countyLeadIds]);
+
+  const stateTotal = selected ? (counts[selected] ?? 0) : 0;
 
   return (
     <div style={{ position: "relative" }}>
@@ -271,13 +242,12 @@ export default function UsLeadMap({
                 }
               </Geographies>
 
-              {/* County zones for the drilled-in state. */}
+              {/* County zones — lit by lead count, click → breakdown page. */}
               <Geographies geography={stateCounties as never}>
                 {({ geographies }) =>
                   geographies.map((geo) => {
                     const code = fips5(geo.id);
                     const n = countyCounts[code] ?? 0;
-                    const isSel = code === selectedCounty;
                     const name = String(
                       (geo.properties as Record<string, unknown>)?.name ?? "",
                     );
@@ -288,11 +258,11 @@ export default function UsLeadMap({
                         onMouseEnter={() => setHover({ name, n })}
                         onMouseLeave={() => setHover(null)}
                         onClick={() => {
-                          if (n > 0) setSelectedCounty(isSel ? "" : code);
+                          if (n > 0) openBreakdown(code);
                         }}
                         style={{
                           default: {
-                            fill: countyFill(n, isSel),
+                            fill: countyFill(n),
                             stroke: "#0b1220",
                             strokeWidth: 0.4,
                             outline: "none",
@@ -337,7 +307,10 @@ export default function UsLeadMap({
                       onMouseEnter={() => setHover({ name, n })}
                       onMouseLeave={() => setHover(null)}
                       onClick={() => {
-                        if (code) onSelect(isSel ? "" : code);
+                        if (code) {
+                          setStateName(name);
+                          onSelect(isSel ? "" : code);
+                        }
                       }}
                       style={{
                         default: {
@@ -368,13 +341,8 @@ export default function UsLeadMap({
           )}
 
           {pinLeads.map((lead) => {
-            const base: [number, number] | undefined =
-              lead.lat != null && lead.lng != null
-                ? [lead.lng, lead.lat]
-                : STATE_CENTROID[lead.state];
-            if (!base) return null;
+            if (lead.lat == null || lead.lng == null) return null;
             const [jx, jy] = jitter(lead.id);
-            const dimmed = !drilled && !!selected && selected !== lead.state;
             const label = [
               lead.city,
               lead.grade ? `Grade ${lead.grade}` : "",
@@ -385,17 +353,17 @@ export default function UsLeadMap({
             return (
               <Marker
                 key={lead.id}
-                coordinates={[base[0] + jx, base[1] + jy]}
+                coordinates={[lead.lng + jx, lead.lat + jy]}
               >
                 <circle
                   r={5.5}
-                  fill={dimmed ? "#475569" : "#fbbf24"}
+                  fill="#fbbf24"
                   stroke="#0b1220"
                   strokeWidth={1.2}
                   style={{ cursor: "pointer" }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onSelectLead(lead.id);
+                    if (selected) openBreakdown();
                   }}
                 >
                   <title>{label || "Solar lead"}</title>
@@ -406,11 +374,43 @@ export default function UsLeadMap({
         </>
       </ComposableMap>
 
+      {/* Breakdown entry bar — always available once drilled, so the deep
+          state page is reachable even before any county is lit. */}
+      {drilled && (
+        <button
+          type="button"
+          onClick={() => openBreakdown()}
+          style={{
+            position: "absolute",
+            top: 10,
+            left: 10,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            background: "#0f1623",
+            border: "1px solid #334155",
+            borderRadius: 8,
+            padding: "7px 12px",
+            cursor: "pointer",
+          }}
+        >
+          <span style={{ color: "#e2e8f0", fontSize: 13, fontWeight: 600 }}>
+            {stateName || selected}
+          </span>
+          <span style={{ color: "#64748b", fontSize: 12 }}>
+            {stateTotal} lead{stateTotal === 1 ? "" : "s"}
+          </span>
+          <span style={{ color: "#34d399", fontSize: 12, fontWeight: 600 }}>
+            View full breakdown →
+          </span>
+        </button>
+      )}
+
       {hover && (
         <div
           style={{
             position: "absolute",
-            top: 10,
+            top: drilled ? 52 : 10,
             left: 10,
             background: "#0f1623",
             border: "1px solid #334155",
@@ -421,6 +421,7 @@ export default function UsLeadMap({
         >
           <div style={{ color: "#e2e8f0", fontSize: 13, fontWeight: 500 }}>
             {hover.name}
+            {drilled ? " County" : ""}
           </div>
           <div
             style={{
@@ -431,7 +432,7 @@ export default function UsLeadMap({
           >
             {hover.n > 0
               ? drilled
-                ? `${hover.n} lead${hover.n === 1 ? "" : "s"} — click to view`
+                ? `${hover.n} lead${hover.n === 1 ? "" : "s"} — click for breakdown`
                 : `${hover.n} lead${hover.n === 1 ? "" : "s"} you qualify for`
               : drilled
                 ? "No leads in this county"
@@ -440,12 +441,10 @@ export default function UsLeadMap({
         </div>
       )}
 
-      {(selected || selectedCounty) && (
+      {selected && (
         <button
           type="button"
-          onClick={() =>
-            selectedCounty ? setSelectedCounty("") : onSelect("")
-          }
+          onClick={() => onSelect("")}
           style={{
             position: "absolute",
             top: 10,
@@ -459,7 +458,7 @@ export default function UsLeadMap({
             cursor: "pointer",
           }}
         >
-          {selectedCounty ? `← Back to ${selected}` : `Clear ${selected}`}
+          Clear {selected}
         </button>
       )}
 
@@ -472,14 +471,12 @@ export default function UsLeadMap({
         }}
       >
         {drilled
-          ? selectedCounty
-            ? "Pins are approximate — exact address unlocks after you claim the lead."
-            : `County shading shows lead density — click a county to view its leads.${
-                unlocated > 0
-                  ? ` (${unlocated} lead${unlocated === 1 ? "" : "s"} shown at state level — no precise location yet.)`
-                  : ""
-              }`
-          : "Pins are approximate — exact address unlocks after you claim the lead."}
+          ? `Counties are shaded by lead density — click one to open its full breakdown.${
+              unlocated > 0
+                ? ` (${unlocated} lead${unlocated === 1 ? "" : "s"} not yet pinned to a county — still in the breakdown.)`
+                : ""
+            }`
+          : "Click a state to drill into county-level lead density."}
       </div>
     </div>
   );

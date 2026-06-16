@@ -2878,7 +2878,6 @@ export default function NetworkPage() {
                       })}
                       selected={filterState}
                       onSelect={(c) => setFilterState(c)}
-                      onSelectLead={(id) => setClaimTarget(id)}
                     />
                   </div>
                   {/* Filter bar */}
