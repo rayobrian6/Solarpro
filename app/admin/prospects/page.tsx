@@ -218,6 +218,7 @@ export default function ProspectsPage() {
           byStage={stats?.byStage ?? {}}
           total={stats?.total ?? 0}
           onEnterRoom={(stage) => { setStageFilter(stage); setViewMode('list'); }}
+          onDispatched={load}
         />
       )}
 
