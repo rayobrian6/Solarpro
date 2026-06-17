@@ -7,6 +7,7 @@ import {
   Info, Zap, Download
 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { useToast } from '@/components/ui/Toast';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -167,13 +168,13 @@ export default function DistributorPricesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [activeSection, setActiveSection] = useState<'overrides' | 'catalog' | 'fallbacks'>('overrides');
   const [showModal, setShowModal] = useState(false);
   const [editEntry, setEditEntry] = useState<PriceEntry | undefined>();
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
+  const toast = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -192,10 +193,6 @@ export default function DistributorPricesPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const flash = (msg: string, type: 'success' | 'error' = 'success') => {
-    if (type === 'success') { setSuccess(msg); setTimeout(() => setSuccess(null), 3000); }
-    else { setError(msg); setTimeout(() => setError(null), 5000); }
-  };
 
   const handleSave = async (form: Partial<PriceEntry>) => {
     setSaving(true);
@@ -216,12 +213,12 @@ export default function DistributorPricesPage() {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error || `HTTP ${res.status}`);
       }
-      flash(`Override saved for ${form.partNumber}`);
+      toast.success(`Override saved for ${form.partNumber}`);
       setShowModal(false);
       setEditEntry(undefined);
       await load();
     } catch (e: any) {
-      flash(e.message, 'error');
+      toast.error(e.message);
     } finally {
       setSaving(false);
     }
@@ -234,10 +231,10 @@ export default function DistributorPricesPage() {
         try {
           const res = await fetch(`/api/admin/distributor-prices?id=${id}`, { method: 'DELETE' });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          flash(`Override deleted`);
+          toast.success(`Override deleted`);
           await load();
         } catch (e: any) {
-          flash(e.message, 'error');
+          toast.error(e.message);
         }
       },
     });
@@ -309,17 +306,11 @@ export default function DistributorPricesPage() {
         </div>
       </div>
 
-      {/* ── Flash banners ── */}
-      {success && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-sm">
-          <CheckCircle size={14} /> {success}
-        </div>
-      )}
-      {error && (
+      {error ? (
         <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-red-500/30 bg-red-500/10 text-red-400 text-sm">
           <AlertCircle size={14} /> {error}
         </div>
-      )}
+      ) : null}
 
       {/* ── Stats cards ── */}
       {stats && (
