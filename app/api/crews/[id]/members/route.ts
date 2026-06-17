@@ -43,7 +43,7 @@ export async function GET(
     const members = await sql`
       SELECT
         id, crew_id, user_id,
-        name, role,
+        name, role, member_type, company, trade,
         phone, email, certifications,
         is_lead, notes,
         created_at, updated_at
@@ -120,12 +120,12 @@ export async function POST(
 
     const [member] = await sql`
       INSERT INTO crew_members (
-        crew_id, user_id, name, role,
+        crew_id, user_id, name, role, member_type, company, trade,
         phone, email, certifications,
         is_lead, notes
       )
       VALUES (
-        ${crewId}, ${user.id}, ${s.name}, ${s.role},
+        ${crewId}, ${user.id}, ${s.name}, ${s.role}, ${s.member_type}, ${s.company}, ${s.trade},
         ${s.phone}, ${s.email}, ${s.certifications},
         ${s.is_lead}, ${s.notes}
       )

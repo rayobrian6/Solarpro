@@ -104,6 +104,9 @@ export async function PATCH(
       UPDATE crew_members SET
         name             = CASE WHEN ${updates.name         !== undefined}::bool THEN ${updates.name         ?? null} ELSE name             END,
         role             = CASE WHEN ${updates.role         !== undefined}::bool THEN ${updates.role         ?? null} ELSE role             END,
+        member_type      = CASE WHEN ${updates.member_type  !== undefined}::bool THEN ${updates.member_type  ?? 'employee'} ELSE member_type END,
+        company          = CASE WHEN ${updates.company      !== undefined}::bool THEN ${updates.company      ?? null} ELSE company          END,
+        trade            = CASE WHEN ${updates.trade        !== undefined}::bool THEN ${updates.trade        ?? null} ELSE trade            END,
         phone            = CASE WHEN ${updates.phone        !== undefined}::bool THEN ${updates.phone        ?? null} ELSE phone            END,
         email            = CASE WHEN ${updates.email        !== undefined}::bool THEN ${updates.email        ?? null} ELSE email            END,
         certifications   = CASE WHEN ${updates.certifications !== undefined}::bool THEN ${updates.certifications ?? null} ELSE certifications END,
