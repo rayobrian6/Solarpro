@@ -7,7 +7,7 @@ import {
   Cpu, Zap, Database, HardDrive, Activity,
   Shield, ChevronRight, LogOut, Sun, Wrench,
   ScrollText, Terminal, MessageSquare, Rocket, Layers, DollarSign, PenTool,
-  UserPlus, LayoutTemplate, Network, GitBranch, History, Share2,
+  UserPlus, LayoutTemplate, Network, GitBranch, History, Share2, Factory,
 } from 'lucide-react';
 
 const NAV_SECTIONS = [
@@ -33,6 +33,7 @@ const NAV_SECTIONS = [
     label: 'Network Intelligence',
     items: [
       { href: '/admin/network', label: 'Control Center', icon: Network },
+      { href: '/admin/prospects', label: 'Contractor Acquisition', icon: Factory },
     ],
   },  {
     label: 'Configuration',
