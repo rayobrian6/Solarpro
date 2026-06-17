@@ -468,6 +468,18 @@ export default function AcquisitionFloor({
     finally { setDispatching(false); setTimeout(() => setDispatchMsg(''), 8000); }
   }
 
+  // Generic one-shot job runner (dossier, cleanup, …)
+  async function runJob(ep: string, bark: string, fmt: (d: Record<string, number>) => string) {
+    if (dispatching) return;
+    setDispatching(true); setSupLine(bark); setDispatchMsg('At work…');
+    try {
+      const data = await fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json());
+      if (data.success) { setDispatchMsg(fmt(data)); onDispatched(); }
+      else setDispatchMsg(data.error || data.message || 'The work faltered.');
+    } catch (e) { setDispatchMsg('The work faltered. ' + (e as Error).message); }
+    finally { setDispatching(false); setTimeout(() => setDispatchMsg(''), 8000); }
+  }
+
   // Run the whole house: enrich → vet, one click.
   async function runHouse() {
     if (dispatching) return;
@@ -531,10 +543,16 @@ export default function AcquisitionFloor({
                 {dispatching ? '🐎 Scouting…' : '🐎 Dispatch the scouts'}
               </button>
             </div>
-            <button onClick={runHouse} disabled={dispatching}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-100 border border-emerald-600/50 bg-emerald-900/40 hover:bg-emerald-800/50 disabled:opacity-60 transition-all">
-              ⚙ Run the whole house (enrich → vet)
-            </button>
+            <div className="flex items-center gap-2 justify-end">
+              <button onClick={runHouse} disabled={dispatching}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-100 border border-emerald-600/50 bg-emerald-900/40 hover:bg-emerald-800/50 disabled:opacity-60 transition-all">
+                ⚙ Run the whole house
+              </button>
+              <button onClick={() => runJob('/api/admin/prospects/work/cleanup', 'TIDY the ledgers, vermin!', (d) => `Tidied ${d.fixed} of ${d.scanned} records.`)} disabled={dispatching}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold text-sky-100 border border-sky-600/50 bg-sky-900/40 hover:bg-sky-800/50 disabled:opacity-60 transition-all">
+                🧹 Tidy records
+              </button>
+            </div>
             <button onClick={summonBatch} disabled={dispatching} className="text-[11px] text-amber-600/70 hover:text-amber-300 underline disabled:opacity-50 text-right">
               or summon the 84-installer starter batch
             </button>
@@ -651,6 +669,14 @@ export default function AcquisitionFloor({
                     className="absolute top-14 right-2 z-40 px-2.5 py-1 rounded-md text-[11px] font-bold text-amber-50 bg-amber-800/80 hover:bg-amber-700 border border-amber-500/50 shadow cursor-pointer transition-colors"
                     style={{ pointerEvents: dispatching ? 'none' : 'auto', opacity: dispatching ? 0.5 : 1 }}>
                     {WORK_LABEL[room.stage]}
+                  </div>
+                )}
+                {room.stage === 'qualified' && (
+                  <div role="button" tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); runJob('/api/admin/prospects/work/dossier', 'To the READING ROOM, scribble!', (d) => `Drafted ${d.written} dossiers (${d.processed} read).`); }}
+                    className="absolute top-[5.5rem] right-2 z-40 px-2.5 py-1 rounded-md text-[11px] font-bold text-violet-50 bg-violet-800/80 hover:bg-violet-700 border border-violet-400/50 shadow cursor-pointer transition-colors"
+                    style={{ pointerEvents: dispatching ? 'none' : 'auto', opacity: dispatching ? 0.5 : 1 }}>
+                    📖 Write dossiers
                   </div>
                 )}
               </button>

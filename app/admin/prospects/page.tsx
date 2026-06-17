@@ -30,7 +30,15 @@ type Prospect = {
   stage: Stage;
   quality_score: number | null;
   notes: string | null;
+  metadata?: { dossier?: { whyCall?: string; opener?: string; facts?: string[] } } | null;
 };
+
+function tierOf(score: number | null): { word: string; label: string; cls: string } {
+  const s = score ?? 0;
+  if (s >= 70) return { word: 'Hot', label: '🔥 Hot', cls: 'text-rose-300 bg-rose-500/15 border-rose-500/30' };
+  if (s >= 40) return { word: 'Warm', label: 'Warm', cls: 'text-amber-300 bg-amber-500/15 border-amber-500/30' };
+  return { word: 'Cold', label: 'Cold', cls: 'text-sky-300 bg-sky-500/15 border-sky-500/30' };
+}
 
 type Stats = {
   total: number;
@@ -137,10 +145,14 @@ export default function ProspectsPage() {
   useEffect(() => { load(); }, [stageFilter, stateFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function exportCsv() {
-    const cols: (keyof Prospect)[] = ['company_name', 'contact_name', 'email', 'phone', 'website', 'city', 'state', 'rating', 'review_count', 'quality_score', 'stage', 'source', 'notes'];
+    const header = ['company', 'contact', 'email', 'phone', 'website', 'city', 'state', 'rating', 'reviews', 'score', 'tier', 'stage', 'why_call', 'opener', 'source', 'notes'];
     const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const rows = prospects.map((p) => cols.map((c) => esc((p as Record<string, unknown>)[c])).join(','));
-    const csv = [cols.join(','), ...rows].join('\n');
+    const rows = prospects.map((p) => {
+      const d = p.metadata?.dossier;
+      return [p.company_name, p.contact_name, p.email, p.phone, p.website, p.city, p.state, p.rating, p.review_count,
+        p.quality_score, tierOf(p.quality_score).word, p.stage, d?.whyCall, d?.opener, p.source, p.notes].map(esc).join(',');
+    });
+    const csv = [header.join(','), ...rows].join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
@@ -333,6 +345,7 @@ export default function ProspectsPage() {
 
                 {/* Signals */}
                 <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full border font-semibold ${tierOf(p.quality_score).cls}`}>{tierOf(p.quality_score).label}</span>
                   {p.rating != null && (
                     <span className="flex items-center gap-1">
                       <Star size={11} className="text-amber-400 fill-amber-400" />
@@ -377,6 +390,13 @@ export default function ProspectsPage() {
                 </div>
 
                 {p.notes && <p className="text-xs text-slate-500 line-clamp-2">{p.notes}</p>}
+
+                {p.metadata?.dossier && (
+                  <div className="rounded-md bg-violet-500/10 border border-violet-500/20 p-2 text-[11px] space-y-1">
+                    {p.metadata.dossier.whyCall && <div className="text-violet-300 font-semibold">📖 {p.metadata.dossier.whyCall}</div>}
+                    {p.metadata.dossier.opener && <div className="text-slate-400 italic">&ldquo;{p.metadata.dossier.opener}&rdquo;</div>}
+                  </div>
+                )}
 
                 {/* Actions */}
                 <div className="flex items-center gap-2 mt-auto pt-1">

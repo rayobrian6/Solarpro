@@ -278,6 +278,21 @@ export function scoreRow(p: InstallerProspect): number {
   });
 }
 
+export type LeadTier = 'hot' | 'warm' | 'cold';
+/** Sales-priority tier derived from quality_score. */
+export function prospectTier(score: number | null): LeadTier {
+  const s = score ?? 0;
+  return s >= 70 ? 'hot' : s >= 40 ? 'warm' : 'cold';
+}
+
+export interface Dossier { whyCall: string; opener: string; facts: string[] }
+/** Merge a generated dossier into the prospect's metadata jsonb. */
+export async function setDossier(id: string, currentMeta: Record<string, unknown> | null, dossier: Dossier): Promise<void> {
+  const sql = await getDbReady();
+  const merged = { ...(currentMeta ?? {}), dossier };
+  await sql`UPDATE installer_prospects SET metadata = ${JSON.stringify(merged)}, updated_at = NOW() WHERE id = ${id}`;
+}
+
 export interface WorkUpdate {
   email?: string | null;
   phone?: string | null;
