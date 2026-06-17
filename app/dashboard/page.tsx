@@ -1382,12 +1382,14 @@ export default function CommandCenter() {
         </>) : null}
 
         {viewMode === 'full' ? (<>
-        {/* ═══ PIPELINE CONTROL ═══ */}
+        {/* ═══════ PIPELINE & OPERATIONS ═══════
+            Unified section: Pipeline Control (always visible) +
+            Crew Calendar & Operations Board (collapsed by default). */}
         <div className="card p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <Activity size={14} className="text-amber-400" />
-              <span className="text-sm font-bold text-white">Pipeline Control</span>
+              <span className="text-sm font-bold text-white">Pipeline & Operations</span>
               {pipelineFilter !== 'all' && (
                 <button onClick={() => setPipelineFilter('all')} className="text-xs text-slate-400 hover:text-white transition-colors">(clear filter ×)</button>
               )}
@@ -1420,6 +1422,143 @@ export default function CommandCenter() {
               })}
             </div>
           )}
+
+          {/* Crew Calendar */}
+          <div className="mt-3 rounded-xl p-3" style={{ background: 'var(--bg-muted)', border: '1px solid var(--border-color)' }}>
+            <CrewCalendar />
+          </div>
+
+          {/* Crew & Operations — collapsed by default, expand to see board */}
+          <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--border-color)' }}>
+            <button onClick={() => { setOpsView(!opsView); if (!opsView && opsProjects.length === 0) fetchOpsProjects(); }}
+              className="w-full flex items-center justify-between py-2 transition-all hover:brightness-95 cursor-pointer rounded-lg px-2 -mx-2"
+              style={{ background: opsView ? 'rgba(34,197,94,0.06)' : 'transparent' }}>
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: opsView ? 'rgba(34,197,94,0.15)' : 'var(--bg-muted)' }}>
+                  <ClipboardList size={12} style={{ color: opsView ? '#4ADE80' : 'var(--text-muted)' }} />
+                </div>
+                <div className="text-left">
+                  <span className="text-xs font-bold" style={{ color: 'var(--text-primary)' }}>Crew & Operations</span>
+                  <span className="text-[10px] ml-2" style={{ color: 'var(--text-muted)' }}>
+                    {opsView ? 'Calendar, assignments, and project tracking' : 'Expand to manage crews and schedules'}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {opsProjects.length > 0 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                    style={{ background: 'rgba(34,197,94,0.15)', color: '#4ADE80' }}>
+                    {opsProjects.length} projects
+                  </span>
+                )}
+                {opsView ? <ChevronUp size={14} style={{ color: 'var(--text-muted)' }} /> : <ChevronDown size={14} style={{ color: 'var(--text-muted)' }} />}
+              </div>
+            </button>
+          </div>
+
+          {/* Expanded Operations Board */}
+          {opsView ? (
+            <div className="mt-3 space-y-4">
+            {!opsLoading && opsProjects.length > 0 && (
+              <ActionRequiredStrip items={opsActionItems}
+                onAction={(projectId, projectName, clientName) =>
+                  openDecisionModal(projectId, projectName, clientName)
+                } />
+            )}
+
+            {/* Search */}
+            {!opsLoading && opsProjects.length > 3 && (
+              <div className="relative">
+                <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+                <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="Search projects, clients, crews..."
+                  className="w-full text-sm rounded-xl pl-10 pr-4 py-2.5 transition-all focus:ring-2"
+                  style={{ background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', outline: 'none' }} />
+                {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }}><X size={14} /></button>}
+              </div>
+            )}
+
+            {/* Kanban */}
+            {opsLoading ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[1,2,3,4].map(i => <div key={i} className="rounded-2xl p-4 space-y-3 animate-pulse" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+                  <div className="h-3 rounded w-1/3" style={{ background: 'var(--border-color)' }} />
+                  <div className="h-4 rounded w-3/4" style={{ background: 'var(--border-color)' }} />
+                  <div className="h-3 rounded w-1/2" style={{ background: 'var(--border-color)' }} />
+                </div>)}
+              </div>
+            ) : opsError ? (
+              <div className="card p-8 text-center space-y-3">
+                <AlertTriangle size={28} className="text-red-400 mx-auto" />
+                <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Failed to load operations</div>
+                <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{opsError}</div>
+                <button onClick={fetchOpsProjects} className="btn-primary btn-sm mx-auto">Try Again</button>
+              </div>
+            ) : opsProjects.length === 0 ? (
+              <div className="card p-8 text-center space-y-3">
+                <Inbox size={28} style={{ color: 'var(--text-muted)', opacity: 0.3 }} className="mx-auto" />
+                <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>No projects in pipeline yet</div>
+                <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Upload a bill or create a project to get started. Projects flow through stages automatically.</div>
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {STAGE_PHASES.map(phase => {
+                  const phaseProjects = opsFiltered.filter(p => phase.stages.includes(p.project_status));
+                  const isCollapsed = collapsedPhases.has(phase.label);
+                  const stalledInPhase = phaseProjects.filter(p => p.is_stalled).length;
+                  return (
+                    <div key={phase.label}>
+                      <button onClick={() => togglePhase(phase.label)} className="flex items-center gap-3 mb-3 w-full text-left group">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1 rounded-md" style={{ background: `${phase.color}15` }}>
+                            <span style={{ color: phase.color }}>{PHASE_ICONS[phase.label] || <Activity size={15} />}</span>
+                          </div>
+                          <span className="text-sm font-bold uppercase tracking-wider" style={{ color: phase.color }}>{phase.label}</span>
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full tabular-nums"
+                          style={{ background: phaseProjects.length > 0 ? phase.color : 'var(--bg-muted)', color: phaseProjects.length > 0 ? '#fff' : 'var(--text-muted)' }}>{phaseProjects.length}</span>
+                        {stalledInPhase > 0 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#EF4444' }}>{stalledInPhase} stalled</span>}
+                        <div className="flex-1 h-px" style={{ background: 'var(--border-color)' }} />
+                        {isCollapsed ? <ChevronDown size={14} style={{ color: 'var(--text-muted)' }} /> : <ChevronUp size={14} style={{ color: 'var(--text-muted)' }} />}
+                      </button>
+                      {!isCollapsed && (
+                        <div className="overflow-x-auto pb-2 -mx-1 px-1" style={{ scrollBehavior: 'smooth', scrollbarWidth: 'thin', scrollbarColor: 'var(--border-color) transparent' }}>
+                          <div className="flex gap-3" style={{ minWidth: `${phase.stages.length * 250}px` }}>
+                            {phase.stages.map(stage => {
+                              const sp = opsByStage(stage);
+                              const empty = sp.length === 0;
+                              return (
+                                <div key={stage} className="flex-1 min-w-[230px] max-w-[300px]" style={{ opacity: empty ? 0.5 : 1 }}>
+                                  <div className="flex items-center gap-1.5 mb-2 px-1">
+                                    <span style={{ color: 'var(--text-muted)' }}>{STAGE_ICONS[stage]}</span>
+                                    <span className="text-[11px] font-bold uppercase tracking-wider truncate" style={{ color: 'var(--text-secondary)' }}>{STAGE_LABELS[stage] || stage}</span>
+                                    <span className="text-[10px] font-bold font-mono ml-auto px-1.5 py-0.5 rounded-full flex-shrink-0 tabular-nums"
+                                      style={{ background: sp.length > 0 ? `${phase.color}20` : 'var(--bg-muted)', color: sp.length > 0 ? phase.color : 'var(--text-muted)' }}>{sp.length}</span>
+                                  </div>
+                                  <div className="space-y-2.5 rounded-2xl p-2.5 min-h-[120px] transition-colors"
+                                    style={{ background: 'var(--bg-secondary)', border: empty ? '1px dashed var(--border-color)' : '1px solid var(--border-color)', borderRadius: 'var(--radius-card)' }}>
+                                    {empty ? (
+                                      <div className="flex flex-col items-center justify-center py-8 gap-2">
+                                        <Inbox size={18} style={{ color: 'var(--text-muted)', opacity: 0.2 }} />
+                                        <span className="text-[10px] font-medium" style={{ color: 'var(--text-muted)', opacity: 0.3 }}>No projects</span>
+                                      </div>
+                                    ) : sp.map(proj => (
+                                      <OpsProjectCard key={proj.id} proj={proj} onAdvance={(id) => openDecisionModal(id, opsProjects.find(p => p.id === id)?.name || '', opsProjects.find(p => p.id === id)?.client_name)} onSaveField={handleSaveField} busy={busyProject} />
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            </div>
+          ) : null}
         </div>
         </>) : null}
 
@@ -1522,149 +1661,6 @@ export default function CommandCenter() {
 
         </>) : null}
 
-        {/* ═══════ SECONDARY: Crew + Ops Board (Focus view hidden) ═══════ */}
-        {viewMode === 'full' ? (<>
-        {/* ═══ CREW CALENDAR ═══ */}
-        <div className="card p-4">
-          <CrewCalendar />
-        </div>
-
-        {/* ═══ OPERATIONS BOARD TOGGLE ═══ */}
-        <div className="pt-2">
-          <button onClick={() => { setOpsView(!opsView); if (!opsView && opsProjects.length === 0) fetchOpsProjects(); }}
-            className="w-full card p-4 flex items-center justify-between transition-all hover:brightness-95 cursor-pointer"
-            style={{ border: opsView ? '1px solid rgba(34,197,94,0.3)' : '1px solid var(--border-color)' }}>
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-xl" style={{ background: opsView ? 'rgba(34,197,94,0.15)' : 'var(--bg-muted)' }}>
-                <ClipboardList size={18} style={{ color: opsView ? '#4ADE80' : 'var(--text-muted)' }} />
-              </div>
-              <div className="text-left">
-                <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
-                  Operations Board
-                </div>
-                <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                  {opsView ? 'Kanban pipeline with crew assignments, scheduling, and project tracking' : 'Expand to manage crews, schedules, and project execution'}
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {opsProjects.length > 0 && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                  style={{ background: 'rgba(34,197,94,0.15)', color: '#4ADE80' }}>
-                  {opsProjects.length} projects
-                </span>
-              )}
-              {opsView ? <ChevronUp size={16} style={{ color: 'var(--text-muted)' }} /> : <ChevronDown size={16} style={{ color: 'var(--text-muted)' }} />}
-            </div>
-          </button>
-        </div>
-
-        {/* ═══ OPERATIONS BOARD (expandable) ═══ */}
-        {opsView && (
-          <div className="space-y-5">
-            {/* Action Required */}
-            {!opsLoading && opsProjects.length > 0 && (
-              <ActionRequiredStrip items={opsActionItems}
-                onAction={(projectId, projectName, clientName) =>
-                  openDecisionModal(projectId, projectName, clientName)
-                } />
-            )}
-
-            {/* Search */}
-            {!opsLoading && opsProjects.length > 3 && (
-              <div className="relative">
-                <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
-                <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Search projects, clients, crews..."
-                  className="w-full text-sm rounded-xl pl-10 pr-4 py-2.5 transition-all focus:ring-2"
-                  style={{ background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', outline: 'none' }} />
-                {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }}><X size={14} /></button>}
-              </div>
-            )}
-
-            {/* Kanban */}
-            {opsLoading ? (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {[1,2,3,4].map(i => <div key={i} className="rounded-2xl p-4 space-y-3 animate-pulse" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
-                  <div className="h-3 rounded w-1/3" style={{ background: 'var(--border-color)' }} />
-                  <div className="h-4 rounded w-3/4" style={{ background: 'var(--border-color)' }} />
-                  <div className="h-3 rounded w-1/2" style={{ background: 'var(--border-color)' }} />
-                </div>)}
-              </div>
-            ) : opsError ? (
-              <div className="card p-8 text-center space-y-3">
-                <AlertTriangle size={28} className="text-red-400 mx-auto" />
-                <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Failed to load operations</div>
-                <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{opsError}</div>
-                <button onClick={fetchOpsProjects} className="btn-primary btn-sm mx-auto">Try Again</button>
-              </div>
-            ) : opsProjects.length === 0 ? (
-              <div className="card p-8 text-center space-y-3">
-                <Inbox size={28} style={{ color: 'var(--text-muted)', opacity: 0.3 }} className="mx-auto" />
-                <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>No projects in pipeline yet</div>
-                <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Upload a bill or create a project to get started. Projects flow through stages automatically.</div>
-              </div>
-            ) : (
-              <div className="space-y-5">
-                {STAGE_PHASES.map(phase => {
-                  const phaseProjects = opsFiltered.filter(p => phase.stages.includes(p.project_status));
-                  const isCollapsed = collapsedPhases.has(phase.label);
-                  const stalledInPhase = phaseProjects.filter(p => p.is_stalled).length;
-                  return (
-                    <div key={phase.label}>
-                      <button onClick={() => togglePhase(phase.label)} className="flex items-center gap-3 mb-3 w-full text-left group">
-                        <div className="flex items-center gap-2">
-                          <div className="p-1 rounded-md" style={{ background: `${phase.color}15` }}>
-                            <span style={{ color: phase.color }}>{PHASE_ICONS[phase.label] || <Activity size={15} />}</span>
-                          </div>
-                          <span className="text-sm font-bold uppercase tracking-wider" style={{ color: phase.color }}>{phase.label}</span>
-                        </div>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full tabular-nums"
-                          style={{ background: phaseProjects.length > 0 ? phase.color : 'var(--bg-muted)', color: phaseProjects.length > 0 ? '#fff' : 'var(--text-muted)' }}>{phaseProjects.length}</span>
-                        {stalledInPhase > 0 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#EF4444' }}>{stalledInPhase} stalled</span>}
-                        <div className="flex-1 h-px" style={{ background: 'var(--border-color)' }} />
-                        {isCollapsed ? <ChevronDown size={14} style={{ color: 'var(--text-muted)' }} /> : <ChevronUp size={14} style={{ color: 'var(--text-muted)' }} />}
-                      </button>
-                      {!isCollapsed && (
-                        <div className="overflow-x-auto pb-2 -mx-1 px-1" style={{ scrollBehavior: 'smooth', scrollbarWidth: 'thin', scrollbarColor: 'var(--border-color) transparent' }}>
-                          <div className="flex gap-3" style={{ minWidth: `${phase.stages.length * 250}px` }}>
-                            {phase.stages.map(stage => {
-                              const sp = opsByStage(stage);
-                              const empty = sp.length === 0;
-                              return (
-                                <div key={stage} className="flex-1 min-w-[230px] max-w-[300px]" style={{ opacity: empty ? 0.5 : 1 }}>
-                                  <div className="flex items-center gap-1.5 mb-2 px-1">
-                                    <span style={{ color: 'var(--text-muted)' }}>{STAGE_ICONS[stage]}</span>
-                                    <span className="text-[11px] font-bold uppercase tracking-wider truncate" style={{ color: 'var(--text-secondary)' }}>{STAGE_LABELS[stage] || stage}</span>
-                                    <span className="text-[10px] font-bold font-mono ml-auto px-1.5 py-0.5 rounded-full flex-shrink-0 tabular-nums"
-                                      style={{ background: sp.length > 0 ? `${phase.color}20` : 'var(--bg-muted)', color: sp.length > 0 ? phase.color : 'var(--text-muted)' }}>{sp.length}</span>
-                                  </div>
-                                  <div className="space-y-2.5 rounded-2xl p-2.5 min-h-[120px] transition-colors"
-                                    style={{ background: 'var(--bg-secondary)', border: empty ? '1px dashed var(--border-color)' : '1px solid var(--border-color)', borderRadius: 'var(--radius-card)' }}>
-                                    {empty ? (
-                                      <div className="flex flex-col items-center justify-center py-8 gap-2">
-                                        <Inbox size={18} style={{ color: 'var(--text-muted)', opacity: 0.2 }} />
-                                        <span className="text-[10px] font-medium" style={{ color: 'var(--text-muted)', opacity: 0.3 }}>No projects</span>
-                                      </div>
-                                    ) : sp.map(proj => (
-                                      <OpsProjectCard key={proj.id} proj={proj} onAdvance={(id) => openDecisionModal(id, opsProjects.find(p => p.id === id)?.name || '', opsProjects.find(p => p.id === id)?.client_name)} onSaveField={handleSaveField} busy={busyProject} />
-                                    ))}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        </>) : null}
       </div>
 
       {/* ═══ DEAL DECISION ENGINE ═══ */}
