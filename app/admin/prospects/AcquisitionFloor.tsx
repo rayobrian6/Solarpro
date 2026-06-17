@@ -267,6 +267,37 @@ function Cobweb() {
   );
 }
 
+function Rat() {
+  return (
+    <svg width="22" height="12" viewBox="0 0 22 12" style={{ display: 'block' }}>
+      <ellipse cx="9" cy="8" rx="7" ry="3.5" fill="#2a2a30" />
+      <circle cx="15" cy="6" r="3" fill="#2a2a30" />
+      <circle cx="14" cy="3.5" r="1.4" fill="#3a3a44" /><circle cx="17" cy="3.5" r="1.4" fill="#3a3a44" />
+      <circle cx="16.5" cy="6" r="0.6" fill="#ff6b6b" />
+      <path d="M2 8 Q-4 8 -2 11" stroke="#3a3a44" strokeWidth="1.2" fill="none" />
+      <rect x="6" y="10" width="1" height="2" fill="#1a1a22" /><rect x="11" y="10" width="1" height="2" fill="#1a1a22" />
+    </svg>
+  );
+}
+function TeaCart() {
+  return (
+    <svg width="34" height="30" viewBox="0 0 34 30" style={{ display: 'block', filter: 'drop-shadow(0 3px 2px rgba(0,0,0,0.5))' }}>
+      <rect x="4" y="10" width="26" height="3" rx="1" fill="#5b4636" />
+      <rect x="4" y="20" width="26" height="3" rx="1" fill="#5b4636" />
+      <rect x="5" y="13" width="2" height="7" fill="#3a2c19" /><rect x="27" y="13" width="2" height="7" fill="#3a2c19" />
+      <circle cx="8" cy="26" r="3" fill="#1c1206" stroke="#3a2c19" strokeWidth="1" />
+      <circle cx="26" cy="26" r="3" fill="#1c1206" stroke="#3a2c19" strokeWidth="1" />
+      {/* teapot */}
+      <ellipse cx="14" cy="7" rx="5" ry="4" fill="#d4af37" />
+      <path d="M19 6 q4 0 3 4" stroke="#d4af37" strokeWidth="1.6" fill="none" />
+      <rect x="13" y="2" width="2" height="2" fill="#d4af37" />
+      <circle cx="14" cy="4" r="1" fill="#fff4cc" style={{ animation: 'smoke 2s ease-in-out infinite' }} />
+      {/* cup */}
+      <rect x="22" y="6" width="5" height="4" rx="1" fill="#e8e0d2" />
+    </svg>
+  );
+}
+
 type Pos = { x: number; y: number; tx: number; ty: number; speed: number; dir: number };
 
 export default function AcquisitionFloor({
@@ -294,6 +325,9 @@ export default function AcquisitionFloor({
   const [blitzState, setBlitzState] = useState('TX');
   const [whipTarget, setWhipTarget] = useState<string | null>(null);
   const [raging, setRaging] = useState(false);
+  const [productivity, setProductivity] = useState(42);
+  const [faintTarget, setFaintTarget] = useState<string | null>(null);
+  const whippedStage = whipTarget ? (whipTarget.split('-')[0] as Stage) : null;
 
   const rooms = useMemo(() => ROOMS.map((r) => {
     const count = byStage[r.stage] ?? 0;
@@ -386,7 +420,8 @@ export default function AcquisitionFloor({
       const pick = allWorkerIds[Math.floor(Math.random() * allWorkerIds.length)];
       if ((byStage[pick.stage] ?? 0) === 0 && Math.random() > 0.25) return;
       const room = ROOMS.find((r) => r.stage === pick.stage)!;
-      setBubbles((b) => ({ ...b, [pick.id]: room.lines[Math.floor(Math.random() * room.lines.length)] }));
+      const line = Math.random() < 0.18 ? 'zzz 💤' : room.lines[Math.floor(Math.random() * room.lines.length)];
+      setBubbles((b) => ({ ...b, [pick.id]: line }));
       setTimeout(() => setBubbles((b) => { const n = { ...b }; delete n[pick.id]; return n; }), 2200);
     }, 1200);
     return () => clearInterval(iv);
@@ -409,6 +444,27 @@ export default function AcquisitionFloor({
     }, 8500);
     return () => clearInterval(iv);
   }, [allWorkerIds]);
+
+  // productivity meter — spikes during work, drifts otherwise
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const base = dispatching ? 90 : 36 + Math.min(42, Math.round(total / 4));
+      setProductivity(Math.max(8, Math.min(99, base + Math.round(rand(-8, 8)))));
+    }, 1600);
+    return () => clearInterval(iv);
+  }, [dispatching, total]);
+
+  // a clerk faints from exhaustion now and then
+  useEffect(() => {
+    if (wanderers.length === 0) return;
+    const iv = setInterval(() => {
+      const w = wanderers[Math.floor(Math.random() * wanderers.length)];
+      setFaintTarget(w.id);
+      setBubbles((b) => ({ ...b, [w.id]: '💫' }));
+      setTimeout(() => { setFaintTarget(null); setBubbles((b) => { const n = { ...b }; delete n[w.id]; return n; }); }, 2600);
+    }, 11000);
+    return () => clearInterval(iv);
+  }, [wanderers]);
 
   async function runBlitz() {
     setDispatching(true);
@@ -512,7 +568,24 @@ export default function AcquisitionFloor({
         @keyframes ravenBob { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-2px) } }
         @keyframes whipShake { 0%,100%{ transform: translateX(0) rotate(0deg) } 25%{ transform: translateX(-2.5px) rotate(-7deg) } 75%{ transform: translateX(2.5px) rotate(7deg) } }
         @keyframes crackPop { 0%{ opacity:0; transform: scale(.5) rotate(-12deg) } 25%{ opacity:1; transform: scale(1.25) rotate(6deg) } 100%{ opacity:0; transform: scale(1) rotate(0) } }
+        @keyframes dust { 0%{ transform: translate(0,0); opacity:0 } 15%{ opacity:.5 } 100%{ transform: translate(40px,-120px); opacity:0 } }
+        @keyframes pendulum { 0%,100%{ transform: rotate(16deg) } 50%{ transform: rotate(-16deg) } }
+        @keyframes rollAcross { from{ left:-12% } to{ left:108% } }
+        @keyframes ratRun { from{ left:-8% } to{ left:106% } }
+        @keyframes faint { 0%{ transform: rotate(0) } 100%{ transform: rotate(82deg) translateY(6px) } }
+        @keyframes marquee { 0%,100%{ text-shadow: 0 0 8px rgba(251,191,36,0.7), 0 0 2px #fff } 50%{ text-shadow: 0 0 14px rgba(251,191,36,0.95), 0 0 4px #fff } }
+        @keyframes roomFlash { 0%,100%{ box-shadow: 0 10px 28px rgba(0,0,0,0.7) } 50%{ box-shadow: 0 0 26px rgba(239,68,68,0.7), inset 0 0 30px rgba(239,68,68,0.25) } }
       `}</style>
+
+      {/* ── Gaslit marquee ── */}
+      <div className="text-center mb-3">
+        <div className="inline-block px-6 py-2 rounded-md border-2 border-amber-600/60 bg-gradient-to-b from-[#241808] to-[#0c0905] shadow-[0_0_20px_rgba(251,191,36,0.2)]">
+          <div className="text-amber-300 font-extrabold tracking-[0.18em] text-sm md:text-lg" style={{ fontFamily: 'Georgia, serif', animation: 'marquee 2.5s ease-in-out infinite' }}>
+            ✦ O&apos;BRIAN &amp; SONS ✦ PURVEYORS OF LEADS ✦
+          </div>
+          <div className="text-[9px] text-amber-700/80 tracking-[0.35em] uppercase mt-0.5">Established 1849 · Lead Works &amp; Counting House</div>
+        </div>
+      </div>
 
       {/* ── Catwalk: the Overseer + controls ── */}
       <div className="rounded-xl border border-amber-900/50 bg-gradient-to-b from-[#1d1409] to-[#0c0905] p-3 mb-4">
@@ -520,6 +593,17 @@ export default function AcquisitionFloor({
           <div ref={supLaneRef} className="relative flex-1 min-w-[280px] h-24 overflow-hidden rounded-lg bg-[#0a0705]"
             style={{ boxShadow: 'inset 0 0 40px rgba(0,0,0,0.7)' }}>
             <div className="absolute top-1 left-3 text-[10px] uppercase tracking-[0.3em] text-amber-600/80 font-bold">The Overseer&apos;s Catwalk</div>
+            {/* pendulum clock */}
+            <div className="absolute top-2 right-3 flex flex-col items-center">
+              <div className="w-8 h-8 rounded-full border-2 border-amber-700/70 bg-[#0c0905] relative">
+                <div className="absolute left-1/2 top-1/2 w-[1px] h-3 bg-amber-500" style={{ transform: 'translate(-50%,-100%) rotate(35deg)', transformOrigin: 'bottom' }} />
+                <div className="absolute left-1/2 top-1/2 w-[1px] h-2 bg-amber-500" style={{ transform: 'translate(-50%,-100%) rotate(-70deg)', transformOrigin: 'bottom' }} />
+              </div>
+              <div className="flex flex-col items-center" style={{ transformOrigin: 'top center', animation: 'pendulum 1.6s ease-in-out infinite' }}>
+                <div className="w-[1.5px] h-5 bg-amber-700/80" />
+                <div className="w-2.5 h-2.5 rounded-full bg-amber-600 -mt-0.5" />
+              </div>
+            </div>
             <div ref={supRef} className="absolute bottom-0 left-0 will-change-transform" style={{ transform: 'translateX(20px)' }}>
               {supLine && (
                 <div className={`absolute -top-3 left-16 whitespace-nowrap px-2.5 py-1 rounded-lg text-[12px] font-bold shadow-lg ${raging ? 'text-red-100 bg-red-950 border border-red-500/70' : 'text-amber-100 bg-amber-950 border border-amber-600/60'}`} style={{ animation: 'bubblePop 3s ease-in-out forwards' }}>
@@ -558,13 +642,23 @@ export default function AcquisitionFloor({
             </button>
           </div>
         </div>
+        <div className="mt-2 flex items-center gap-2">
+          <span className="text-[9px] uppercase tracking-widest text-amber-600/80 font-bold whitespace-nowrap">⚡ Productivity</span>
+          <div className="flex-1 h-2.5 rounded-full bg-black/50 overflow-hidden border border-amber-900/50">
+            <div className="h-full rounded-full transition-all duration-700" style={{ width: `${productivity}%`, background: productivity > 70 ? 'linear-gradient(90deg,#16a34a,#4ade80)' : productivity > 40 ? 'linear-gradient(90deg,#ca8a04,#fbbf24)' : 'linear-gradient(90deg,#b91c1c,#f87171)' }} />
+          </div>
+          <span className="text-[11px] font-bold text-amber-200 w-10 text-right">{productivity}%</span>
+        </div>
         {dispatchMsg && <div className="mt-2 text-center text-sm text-amber-300 italic">{dispatchMsg}</div>}
       </div>
 
       {/* ── The workshop bays ── */}
       <div className="relative rounded-2xl border border-amber-950/60 bg-[#070504] p-4 md:p-6 overflow-hidden" style={{ boxShadow: 'inset 0 0 120px rgba(0,0,0,0.9)' }}>
         {[...Array(8)].map((_, i) => (
-          <div key={i} className="pointer-events-none absolute rounded-full" style={{ left: `${8 + i * 11}%`, bottom: '3%', width: 3, height: 3, background: '#f59e0b', filter: 'blur(0.5px)', animation: `ember ${6 + i}s linear ${i * 1.1}s infinite` }} />
+          <div key={`e${i}`} className="pointer-events-none absolute rounded-full z-10" style={{ left: `${8 + i * 11}%`, bottom: '3%', width: 3, height: 3, background: '#f59e0b', filter: 'blur(0.5px)', animation: `ember ${6 + i}s linear ${i * 1.1}s infinite` }} />
+        ))}
+        {[...Array(10)].map((_, i) => (
+          <div key={`d${i}`} className="pointer-events-none absolute rounded-full z-10" style={{ left: `${5 + i * 9}%`, bottom: `${10 + (i % 4) * 18}%`, width: 2, height: 2, background: 'rgba(220,220,210,0.5)', animation: `dust ${9 + i}s linear ${i * 0.9}s infinite` }} />
         ))}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -575,11 +669,13 @@ export default function AcquisitionFloor({
             return (
               <button key={room.stage} onClick={() => onEnterRoom(room.stage)}
                 className="group relative text-left rounded-xl overflow-hidden focus:outline-none transition-transform hover:-translate-y-0.5"
-                style={{ height: 240, border: `2px solid ${room.accent}55`, boxShadow: `0 10px 28px rgba(0,0,0,0.7), 0 0 22px ${room.glow}` }}>
+                style={{ height: 240, border: `2px solid ${whippedStage === room.stage ? '#ef4444' : `${room.accent}55`}`, boxShadow: `0 10px 28px rgba(0,0,0,0.7), 0 0 22px ${room.glow}`, animation: whippedStage === room.stage ? 'roomFlash 0.8s ease-in-out' : undefined }}>
 
                 {/* BACK WALL (brick) */}
                 <div className="absolute inset-x-0 top-0 h-[52%]" style={{ background: `linear-gradient(180deg, ${room.wall}, #0a0705)` }}>
                   <div className="absolute inset-0 opacity-50" style={{ backgroundImage: 'repeating-linear-gradient(0deg, rgba(90,60,40,0.18) 0 13px, rgba(0,0,0,0.55) 13px 14px), repeating-linear-gradient(90deg, transparent 0 30px, rgba(0,0,0,0.5) 30px 31px)' }} />
+                  {/* doorway to the next chamber */}
+                  <div className="absolute left-1/2 -translate-x-1/2 bottom-0 w-12 h-14" style={{ background: 'linear-gradient(180deg,#0a0604,#000)', borderRadius: '24px 24px 0 0', boxShadow: 'inset 0 0 14px #000', border: '1px solid rgba(120,90,60,0.35)', borderBottom: 'none' }} />
                   {/* hanging bulbs */}
                   {[28, 60].map((lx) => (
                     <div key={lx} className="absolute" style={{ left: `${lx}%`, top: 0 }}>
@@ -615,6 +711,11 @@ export default function AcquisitionFloor({
                   style={{ background: 'linear-gradient(180deg, #1a120a 0%, #2a1d10 55%, #3a2a16 100%)', backgroundImage: 'repeating-linear-gradient(90deg, rgba(0,0,0,0.32) 0 1px, transparent 1px 30px)', boxShadow: 'inset 0 14px 22px rgba(0,0,0,0.7), inset 26px 0 28px rgba(0,0,0,0.5), inset -26px 0 28px rgba(0,0,0,0.5)' }}>
                   <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(ellipse at 50% 0%, ${room.glow}, transparent 60%)` }} />
 
+                  {/* a rat scurries the baseboards */}
+                  <div className="absolute bottom-0 pointer-events-none" style={{ left: 0, zIndex: 2, animation: 'ratRun 9s linear infinite', animationDelay: `${ROOMS.findIndex((r) => r.stage === room.stage) * 1.6}s` }}><Rat /></div>
+                  {/* the tea cart rolls through the busy Copying Room */}
+                  {room.stage === 'enriched' && <div className="absolute bottom-1 pointer-events-none" style={{ left: 0, zIndex: 3, animation: 'rollAcross 24s linear infinite' }}><TeaCart /></div>}
+
                   {/* filing cabinet in the corner */}
                   <div className="absolute right-2 bottom-1" style={{ zIndex: 60 }}><FilingCabinet accent={room.accent} /></div>
 
@@ -639,7 +740,7 @@ export default function AcquisitionFloor({
                     <div key={w.id} ref={(el) => { wanderEls.current.set(w.id, el); }} className="absolute top-0 left-0 will-change-transform" style={{ transform: 'translate(20px,20px)' }}>
                       {bubbles[w.id] && <div className={bubble} style={{ animation: 'bubblePop 2.2s ease-in-out forwards' }}>{bubbles[w.id]}</div>}
                       <div ref={(el) => { spriteEls.current.set(w.id, el); }} style={{ transformOrigin: 'center bottom' }}>
-                        <div style={{ animation: whipTarget === w.id ? 'whipShake 0.4s ease-in-out infinite' : 'floorBob 1.3s ease-in-out infinite' }}>
+                        <div style={{ transformOrigin: 'bottom center', animation: faintTarget === w.id ? 'faint 0.5s ease-in forwards' : whipTarget === w.id ? 'whipShake 0.4s ease-in-out infinite' : 'floorBob 1.3s ease-in-out infinite' }}>
                           <Clerk c={room.accent} variant={w.variant} />
                         </div>
                       </div>
