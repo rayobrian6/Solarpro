@@ -14,7 +14,7 @@ import {
   Inbox, Search, PenTool, Eye, EyeOff, UserCheck,
   ChevronDown, ChevronUp, X,
   ClipboardList, Phone, Play,
-} from 'lucide-react';
+  Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import BillUploadModal from '@/components/onboarding/BillUploadModal';
@@ -731,6 +731,23 @@ export default function CommandCenter() {
     try { localStorage.removeItem('solarpro:workflowBannerSnoozedUntil'); } catch { /* ignore */ }
   };
 
+  // Onboarding banner — shown for users who haven't completed company setup
+  const [dismissedOnboardBanner, setDismissedOnboardBanner] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const snoozedUntil = localStorage.getItem('solarpro:onboardBannerSnoozedUntil');
+      if (snoozedUntil && Number(snoozedUntil) > Date.now()) return true;
+      localStorage.removeItem('solarpro:onboardBannerSnoozedUntil');
+      return false;
+    } catch { return false; }
+  });
+  const dismissOnboardBanner = () => {
+    setDismissedOnboardBanner(true);
+    try {
+      const until = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30 days
+      localStorage.setItem('solarpro:onboardBannerSnoozedUntil', String(until));
+    } catch { /* ignore */ }
+  };
   // ── Priority Surface: Miller's Law compliant dashboard view ──
   // Default 'priority' shows only Command Header + Today's Commands + Work Queue
   // 'full' shows all sections — toggled by user
@@ -1133,6 +1150,39 @@ export default function CommandCenter() {
           )}
         </>) : null}
 
+
+        {/* Onboarding Banner — users who haven't completed company setup */}
+        {currentUser && !dismissedOnboardBanner && (!currentUser.company || !currentUser.hasSeenTour) ? (
+          <div className="rounded-xl border-l-4 border-l-amber-400 border border-slate-700/60 bg-slate-800/60 px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/15 flex items-center justify-center flex-shrink-0">
+                  <Sparkles size={16} className="text-amber-400" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-white">Complete your setup</div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    {!currentUser.company
+                      ? 'Add your company info to unlock branded proposals and client-facing tools.'
+                      : 'Take the quick tour to learn how SolarPro works.'}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Link href="/onboarding"
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 hover:text-amber-300 transition-all flex items-center gap-1.5">
+                  <ArrowRight size={12} /> {!currentUser.company ? 'Complete Setup' : 'Start Tour'}
+                </Link>
+                <button onClick={dismissOnboardBanner}
+                  title="Dismiss for 30 days"
+                  className="text-slate-500 hover:text-slate-300 transition-colors p-1 rounded"
+                  aria-label="Dismiss onboarding banner">
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {viewMode === 'full' ? (<>
           {/* ══════════ FINANCIAL PRESSURE BAR ══════════ */}
           {!dashLoading && (
