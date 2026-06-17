@@ -1,7 +1,10 @@
 'use client';
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import type { SolarPanel, Inverter, MountingSystem, Battery } from '@/types';
-import { Cpu, Plus, Edit, Trash2, Save, X, Zap, Settings, Sun, Battery as BatteryIcon, Copy, FileText, ToggleLeft, ToggleRight, Database, User } from 'lucide-react';
+import { Cpu, Plus, Edit, Trash2, Save, X, Zap, Settings, Sun, Battery as BatteryIcon, Copy, FileText, ToggleLeft, ToggleRight, Database, User, Loader2, Sparkles } from 'lucide-react';
+import { useDatasheetIngestion } from '@/hooks/useDatasheetIngestion';
+import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
+import { mapConfidence } from '@/lib/satellite/types';
 
 // Debounce utility for autosave
 function debounce<T extends (...args: any[]) => any>(fn: T, delay: number): T {
@@ -34,21 +37,145 @@ function PanelForm({ panel, onSave, onCancel }: {
   });
   const set = (k: string, v: any) => setForm(prev => ({ ...prev, [k]: v }));
 
+  // ── Datasheet ingestion (Phase 4G) ──────────────────────────────────────
+  const { result: dsResult, loading: dsLoading, ingest: dsIngest } = useDatasheetIngestion();
+  const [dsAutoFields, setDsAutoFields] = useState<Record<string, boolean>>({});
+  const [dsOverrides, setDsOverrides] = useState<Record<string, boolean>>({});
+  const prevDsResultRef = useRef<string>('');
+
+  // Auto-fill form fields from datasheet ingestion result
+  useEffect(() => {
+    if (!dsResult?.panelSpecs) return;
+
+    // Prevent re-running on same result
+    const resultKey = `${dsResult.sourceUrl}-${dsResult.ingestedAt}`;
+    if (resultKey === prevDsResultRef.current) return;
+    prevDsResultRef.current = resultKey;
+
+    const ps = dsResult.panelSpecs;
+    const updates: Record<string, any> = {};
+    const autoFields: Record<string, boolean> = {};
+
+    // Auto-fill from datasheet manufacturer / model
+    if (dsResult.manufacturer?.value && !form.manufacturer) {
+      updates.manufacturer = dsResult.manufacturer.value;
+      autoFields.manufacturer = true;
+    }
+    if (dsResult.model?.value && !form.model) {
+      updates.model = dsResult.model.value;
+      autoFields.model = true;
+    }
+
+    // Auto-fill panel specs
+    if (ps.wattage?.value) { updates.wattage = ps.wattage.value; autoFields.wattage = true; }
+    if (ps.efficiency?.value) { updates.efficiency = ps.efficiency.value; autoFields.efficiency = true; }
+    if (ps.bifacial?.value !== undefined && ps.bifacial !== null) { updates.bifacial = ps.bifacial.value; autoFields.bifacial = true; }
+    if (ps.weight?.value) { updates.weight = ps.weight.value; autoFields.weight = true; }
+    if (ps.warranty?.value) { updates.warranty = ps.warranty.value; autoFields.warranty = true; }
+    if (ps.cellType?.value) { updates.cellType = ps.cellType.value; autoFields.cellType = true; }
+
+    if (Object.keys(updates).length > 0) {
+      setForm(prev => ({ ...prev, ...updates }));
+      setDsAutoFields(prev => ({ ...prev, ...autoFields }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dsResult]);
+
   return (
     <div className="card p-5 border-amber-500/30 animate-fade-in">
       <h3 className="font-semibold text-white mb-4">{panel?.id ? 'Edit Panel' : 'Add New Panel'}</h3>
+
+      {/* Datasheet suggestion banner */}
+      {dsResult?.panelSpecs && !dsLoading && Object.keys(dsAutoFields).length > 0 && (
+        <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400 text-xs">
+          <Sparkles size={12} />
+          Auto-filled specs from datasheet. Review and edit as needed.
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3">
-        <div><label className="input-label">Manufacturer</label><input className="input" value={form.manufacturer} onChange={e => set('manufacturer', e.target.value)} /></div>
-        <div><label className="input-label">Model</label><input className="input" value={form.model} onChange={e => set('model', e.target.value)} /></div>
-        <div><label className="input-label">Wattage (W)</label><input className="input" type="number" value={form.wattage} onChange={e => set('wattage', +e.target.value)} /></div>
-        <div><label className="input-label">Efficiency (%)</label><input className="input" type="number" step="0.1" value={form.efficiency} onChange={e => set('efficiency', +e.target.value)} /></div>
+        <div>
+          <label className="input-label">
+            Manufacturer
+            {dsAutoFields.manufacturer && dsResult?.manufacturer && (
+              <ConfidenceBadge confidence={mapConfidence(dsResult.manufacturer.confidence)} source="datasheet" size="xs" overridden={dsOverrides.manufacturer} />
+            )}
+          </label>
+          <input className="input" value={form.manufacturer} onChange={e => { set('manufacturer', e.target.value); if (dsAutoFields.manufacturer) setDsOverrides(p => ({ ...p, manufacturer: true })); }} />
+        </div>
+        <div>
+          <label className="input-label">
+            Model
+            {dsAutoFields.model && dsResult?.model && (
+              <ConfidenceBadge confidence={mapConfidence(dsResult.model.confidence)} source="datasheet" size="xs" overridden={dsOverrides.model} />
+            )}
+          </label>
+          <input className="input" value={form.model} onChange={e => { set('model', e.target.value); if (dsAutoFields.model) setDsOverrides(p => ({ ...p, model: true })); }} />
+        </div>
+        <div>
+          <label className="input-label">
+            Wattage (W)
+            {dsAutoFields.wattage && dsResult?.panelSpecs?.wattage && (
+              <ConfidenceBadge confidence={mapConfidence(dsResult.panelSpecs.wattage.confidence)} source="datasheet" detail={dsResult.panelSpecs.wattage.derivation} size="xs" overridden={dsOverrides.wattage} />
+            )}
+          </label>
+          <input className="input" type="number" value={form.wattage} onChange={e => { set('wattage', +e.target.value); if (dsAutoFields.wattage) setDsOverrides(p => ({ ...p, wattage: true })); }} />
+        </div>
+        <div>
+          <label className="input-label">
+            Efficiency (%)
+            {dsAutoFields.efficiency && dsResult?.panelSpecs?.efficiency && (
+              <ConfidenceBadge confidence={mapConfidence(dsResult.panelSpecs.efficiency.confidence)} source="datasheet" detail={dsResult.panelSpecs.efficiency.derivation} size="xs" overridden={dsOverrides.efficiency} />
+            )}
+          </label>
+          <input className="input" type="number" step="0.1" value={form.efficiency} onChange={e => { set('efficiency', +e.target.value); if (dsAutoFields.efficiency) setDsOverrides(p => ({ ...p, efficiency: true })); }} />
+        </div>
         <div><label className="input-label">Width (m)</label><input className="input" type="number" step="0.001" value={form.width} onChange={e => set('width', +e.target.value)} /></div>
         <div><label className="input-label">Height (m)</label><input className="input" type="number" step="0.001" value={form.height} onChange={e => set('height', +e.target.value)} /></div>
         <div><label className="input-label">Price/Watt ($)</label><input className="input" type="number" step="0.01" value={form.pricePerWatt} onChange={e => set('pricePerWatt', +e.target.value)} /></div>
-        <div><label className="input-label">Temp Coeff (%/°C)</label><input className="input" type="number" step="0.01" value={form.temperatureCoeff} onChange={e => set('temperatureCoeff', +e.target.value)} /></div>
-        <div><label className="input-label">Warranty (yrs)</label><input className="input" type="number" value={form.warranty} onChange={e => set('warranty', +e.target.value)} /></div>
-        <div><label className="input-label">Weight (kg)</label><input className="input" type="number" step="0.1" value={form.weight} onChange={e => set('weight', +e.target.value)} /></div>
-        <div className="col-span-2"><label className="input-label">Datasheet URL</label><input className="input" type="url" placeholder="https://..." value={form.datasheetUrl} onChange={e => set('datasheetUrl', e.target.value)} /></div>
+        <div>
+          <label className="input-label">
+            Temp Coeff (%/°C)
+            {dsAutoFields.temperatureCoeff && dsResult?.panelSpecs?.tempCoeffPmax && (
+              <ConfidenceBadge confidence={mapConfidence(dsResult.panelSpecs.tempCoeffPmax.confidence)} source="datasheet" size="xs" overridden={dsOverrides.temperatureCoeff} />
+            )}
+          </label>
+          <input className="input" type="number" step="0.01" value={form.temperatureCoeff} onChange={e => set('temperatureCoeff', +e.target.value)} />
+        </div>
+        <div>
+          <label className="input-label">
+            Warranty (yrs)
+            {dsAutoFields.warranty && dsResult?.panelSpecs?.warranty && (
+              <ConfidenceBadge confidence={mapConfidence(dsResult.panelSpecs.warranty.confidence)} source="datasheet" size="xs" overridden={dsOverrides.warranty} />
+            )}
+          </label>
+          <input className="input" type="number" value={form.warranty} onChange={e => { set('warranty', +e.target.value); if (dsAutoFields.warranty) setDsOverrides(p => ({ ...p, warranty: true })); }} />
+        </div>
+        <div>
+          <label className="input-label">
+            Weight (kg)
+            {dsAutoFields.weight && dsResult?.panelSpecs?.weight && (
+              <ConfidenceBadge confidence={mapConfidence(dsResult.panelSpecs.weight.confidence)} source="datasheet" size="xs" overridden={dsOverrides.weight} />
+            )}
+          </label>
+          <input className="input" type="number" step="0.1" value={form.weight} onChange={e => { set('weight', +e.target.value); if (dsAutoFields.weight) setDsOverrides(p => ({ ...p, weight: true })); }} />
+        </div>
+        <div className="col-span-2">
+          <label className="input-label">Datasheet URL</label>
+          <div className="flex gap-2">
+            <input className="input flex-1" type="url" placeholder="https://..." value={form.datasheetUrl} onChange={e => set('datasheetUrl', e.target.value)} />
+            <button
+              type="button"
+              onClick={() => { if (form.datasheetUrl.trim()) dsIngest({ url: form.datasheetUrl.trim(), equipmentTypeHint: 'panel', manufacturerHint: form.manufacturer || undefined, modelHint: form.model || undefined }); }}
+              disabled={dsLoading || !form.datasheetUrl.trim()}
+              className="btn-secondary btn-sm flex items-center gap-1.5 whitespace-nowrap disabled:opacity-40"
+              title="Fetch specs from datasheet URL"
+            >
+              {dsLoading ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
+              {dsLoading ? 'Fetching…' : 'Fetch Specs'}
+            </button>
+          </div>
+        </div>
         <div className="flex items-center gap-3 col-span-2">
           <label className="input-label mb-0">Bifacial Panel</label>
           <button onClick={() => set('bifacial', !form.bifacial)} className={`w-10 h-5 rounded-full transition-colors relative ${form.bifacial ? 'bg-amber-500' : 'bg-slate-600'}`}>
@@ -59,6 +186,9 @@ function PanelForm({ panel, onSave, onCancel }: {
               <label className="input-label mb-0">Bifacial Factor</label>
               <input className="input w-24" type="number" step="0.01" min="1.0" max="1.5" value={form.bifacialFactor} onChange={e => set('bifacialFactor', +e.target.value)} />
             </div>
+          )}
+          {dsAutoFields.bifacial && dsResult?.panelSpecs?.bifacial && (
+            <ConfidenceBadge confidence={mapConfidence(dsResult.panelSpecs.bifacial.confidence)} source="datasheet" size="xs" overridden={dsOverrides.bifacial} />
           )}
         </div>
       </div>
@@ -82,30 +212,178 @@ function InverterForm({ inverter, onSave, onCancel }: {
     efficiency: inverter?.efficiency || 97.0,
     pricePerUnit: inverter?.pricePerUnit || 0,
     warranty: inverter?.warranty || 10,
+    maxDcVoltage: inverter?.maxDcVoltage || 0,
+    mpptVoltageMax: inverter?.mpptVoltageMax || 0,
     datasheetUrl: inverter?.datasheetUrl || '',
   });
   const set = (k: string, v: any) => setForm(prev => ({ ...prev, [k]: v }));
 
+  // ── Datasheet ingestion (Phase 4G) ──────────────────────────────────
+  const { result: dsResult, loading: dsLoading, ingest: dsIngest } = useDatasheetIngestion();
+  const [dsAutoFields, setDsAutoFields] = useState<Record<string, boolean>>({});
+  const [dsOverrides, setDsOverrides] = useState<Record<string, boolean>>({});
+  const prevDsResultRef = useRef<string>('');
+
+  // Map detected equipment type to Inverter type enum
+  const mapEquipmentType = (et: string): string => {
+    switch (et) {
+      case 'string_inverter': return 'string';
+      case 'microinverter': return 'micro';
+      case 'optimizer': return 'optimizer';
+      default: return 'string';
+    }
+  };
+
+  // Auto-fill form fields from datasheet ingestion result
+  useEffect(() => {
+    if (!dsResult?.inverterSpecs) return;
+
+    // Prevent re-running on same result
+    const resultKey = `${dsResult.sourceUrl}-${dsResult.ingestedAt}`;
+    if (resultKey === prevDsResultRef.current) return;
+    prevDsResultRef.current = resultKey;
+
+    const is = dsResult.inverterSpecs;
+    const updates: Record<string, any> = {};
+    const autoFields: Record<string, boolean> = {};
+
+    // Auto-fill from datasheet manufacturer / model
+    if (dsResult.manufacturer?.value && !form.manufacturer) {
+      updates.manufacturer = dsResult.manufacturer.value;
+      autoFields.manufacturer = true;
+    }
+    if (dsResult.model?.value && !form.model) {
+      updates.model = dsResult.model.value;
+      autoFields.model = true;
+    }
+
+    // Auto-fill equipment type
+    if (dsResult.equipmentType?.value) {
+      updates.type = mapEquipmentType(dsResult.equipmentType.value);
+      autoFields.type = true;
+    }
+
+    // Auto-fill inverter specs (acOutputW is in watts, capacity is in kW)
+    if (is.acOutputW?.value) { updates.capacity = Math.round(is.acOutputW.value / 10) / 100; autoFields.capacity = true; }
+    if (is.efficiency?.value) { updates.efficiency = is.efficiency.value; autoFields.efficiency = true; }
+    if (is.warranty?.value) { updates.warranty = parseInt(is.warranty.value, 10) || 10; autoFields.warranty = true; }
+    if (is.maxDcVoltage?.value) { updates.maxDcVoltage = is.maxDcVoltage.value; autoFields.maxDcVoltage = true; }
+    if (is.mpptVoltageMax?.value) { updates.mpptVoltageMax = is.mpptVoltageMax.value; autoFields.mpptVoltageMax = true; }
+
+    if (Object.keys(updates).length > 0) {
+      setForm(prev => ({ ...prev, ...updates }));
+      setDsAutoFields(prev => ({ ...prev, ...autoFields }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dsResult]);
+
   return (
     <div className="card p-5 border-amber-500/30 animate-fade-in">
       <h3 className="font-semibold text-white mb-4">{inverter?.id ? 'Edit Inverter' : 'Add New Inverter'}</h3>
+
+      {/* Datasheet suggestion banner */}
+      {dsResult?.inverterSpecs && !dsLoading && Object.keys(dsAutoFields).length > 0 && (
+        <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400 text-xs">
+          <Sparkles size={12} />
+          Auto-filled specs from datasheet. Review and edit as needed.
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3">
-        <div><label className="input-label">Manufacturer</label><input className="input" value={form.manufacturer} onChange={e => set('manufacturer', e.target.value)} /></div>
-        <div><label className="input-label">Model</label><input className="input" value={form.model} onChange={e => set('model', e.target.value)} /></div>
         <div>
-          <label className="input-label">Type</label>
-          <select className="input" value={form.type} onChange={e => set('type', e.target.value)}>
+          <label className="input-label">
+            Manufacturer
+            {dsAutoFields.manufacturer && dsResult?.manufacturer && (
+              <ConfidenceBadge confidence={mapConfidence(dsResult.manufacturer.confidence)} source="datasheet" size="xs" overridden={dsOverrides.manufacturer} />
+            )}
+          </label>
+          <input className="input" value={form.manufacturer} onChange={e => { set('manufacturer', e.target.value); if (dsAutoFields.manufacturer) setDsOverrides(p => ({ ...p, manufacturer: true })); }} />
+        </div>
+        <div>
+          <label className="input-label">
+            Model
+            {dsAutoFields.model && dsResult?.model && (
+              <ConfidenceBadge confidence={mapConfidence(dsResult.model.confidence)} source="datasheet" size="xs" overridden={dsOverrides.model} />
+            )}
+          </label>
+          <input className="input" value={form.model} onChange={e => { set('model', e.target.value); if (dsAutoFields.model) setDsOverrides(p => ({ ...p, model: true })); }} />
+        </div>
+        <div>
+          <label className="input-label">
+            Type
+            {dsAutoFields.type && dsResult?.equipmentType && (
+              <ConfidenceBadge confidence={mapConfidence(dsResult.equipmentType.confidence)} source="datasheet" size="xs" overridden={dsOverrides.type} />
+            )}
+          </label>
+          <select className="input" value={form.type} onChange={e => { set('type', e.target.value); if (dsAutoFields.type) setDsOverrides(p => ({ ...p, type: true })); }}>
             <option value="string">String Inverter</option>
             <option value="micro">Microinverter</option>
             <option value="hybrid">Hybrid Inverter</option>
             <option value="optimizer">Power Optimizer</option>
           </select>
         </div>
-        <div><label className="input-label">Capacity (kW)</label><input className="input" type="number" step="0.1" value={form.capacity} onChange={e => set('capacity', +e.target.value)} /></div>
-        <div><label className="input-label">Efficiency (%)</label><input className="input" type="number" step="0.1" value={form.efficiency} onChange={e => set('efficiency', +e.target.value)} /></div>
+        <div>
+          <label className="input-label">
+            Capacity (kW)
+            {dsAutoFields.capacity && dsResult?.inverterSpecs?.acOutputW && (
+              <ConfidenceBadge confidence={mapConfidence(dsResult.inverterSpecs.acOutputW.confidence)} source="datasheet" detail={dsResult.inverterSpecs.acOutputW.derivation} size="xs" overridden={dsOverrides.capacity} />
+            )}
+          </label>
+          <input className="input" type="number" step="0.1" value={form.capacity} onChange={e => { set('capacity', +e.target.value); if (dsAutoFields.capacity) setDsOverrides(p => ({ ...p, capacity: true })); }} />
+        </div>
+        <div>
+          <label className="input-label">
+            Efficiency (%)
+            {dsAutoFields.efficiency && dsResult?.inverterSpecs?.efficiency && (
+              <ConfidenceBadge confidence={mapConfidence(dsResult.inverterSpecs.efficiency.confidence)} source="datasheet" detail={dsResult.inverterSpecs.efficiency.derivation} size="xs" overridden={dsOverrides.efficiency} />
+            )}
+          </label>
+          <input className="input" type="number" step="0.1" value={form.efficiency} onChange={e => { set('efficiency', +e.target.value); if (dsAutoFields.efficiency) setDsOverrides(p => ({ ...p, efficiency: true })); }} />
+        </div>
         <div><label className="input-label">Price ($)</label><input className="input" type="number" step="1" value={form.pricePerUnit} onChange={e => set('pricePerUnit', +e.target.value)} /></div>
-        <div><label className="input-label">Warranty (yrs)</label><input className="input" type="number" value={form.warranty} onChange={e => set('warranty', +e.target.value)} /></div>
-        <div className="col-span-2"><label className="input-label">Datasheet URL</label><input className="input" type="url" placeholder="https://..." value={form.datasheetUrl} onChange={e => set('datasheetUrl', e.target.value)} /></div>
+        <div>
+          <label className="input-label">
+            Warranty (yrs)
+            {dsAutoFields.warranty && dsResult?.inverterSpecs?.warranty && (
+              <ConfidenceBadge confidence={mapConfidence(dsResult.inverterSpecs.warranty.confidence)} source="datasheet" size="xs" overridden={dsOverrides.warranty} />
+            )}
+          </label>
+          <input className="input" type="number" value={form.warranty} onChange={e => { set('warranty', +e.target.value); if (dsAutoFields.warranty) setDsOverrides(p => ({ ...p, warranty: true })); }} />
+        </div>
+        <div>
+          <label className="input-label">
+            Max DC Voltage (V)
+            {dsAutoFields.maxDcVoltage && dsResult?.inverterSpecs?.maxDcVoltage && (
+              <ConfidenceBadge confidence={mapConfidence(dsResult.inverterSpecs.maxDcVoltage.confidence)} source="datasheet" detail={dsResult.inverterSpecs.maxDcVoltage.derivation} size="xs" overridden={dsOverrides.maxDcVoltage} />
+            )}
+          </label>
+          <input className="input" type="number" step="1" value={form.maxDcVoltage} onChange={e => { set('maxDcVoltage', +e.target.value); if (dsAutoFields.maxDcVoltage) setDsOverrides(p => ({ ...p, maxDcVoltage: true })); }} />
+        </div>
+        <div>
+          <label className="input-label">
+            MPPT Vmax (V)
+            {dsAutoFields.mpptVoltageMax && dsResult?.inverterSpecs?.mpptVoltageMax && (
+              <ConfidenceBadge confidence={mapConfidence(dsResult.inverterSpecs.mpptVoltageMax.confidence)} source="datasheet" detail={dsResult.inverterSpecs.mpptVoltageMax.derivation} size="xs" overridden={dsOverrides.mpptVoltageMax} />
+            )}
+          </label>
+          <input className="input" type="number" step="1" value={form.mpptVoltageMax} onChange={e => { set('mpptVoltageMax', +e.target.value); if (dsAutoFields.mpptVoltageMax) setDsOverrides(p => ({ ...p, mpptVoltageMax: true })); }} />
+        </div>
+        <div className="col-span-2">
+          <label className="input-label">Datasheet URL</label>
+          <div className="flex gap-2">
+            <input className="input flex-1" type="url" placeholder="https://..." value={form.datasheetUrl} onChange={e => set('datasheetUrl', e.target.value)} />
+            <button
+              type="button"
+              onClick={() => { if (form.datasheetUrl.trim()) dsIngest({ url: form.datasheetUrl.trim(), equipmentTypeHint: form.type === 'micro' ? 'microinverter' : form.type === 'optimizer' ? 'optimizer' : 'string_inverter', manufacturerHint: form.manufacturer || undefined, modelHint: form.model || undefined }); }}
+              disabled={dsLoading || !form.datasheetUrl.trim()}
+              className="btn-secondary btn-sm flex items-center gap-1.5 whitespace-nowrap disabled:opacity-40"
+              title="Fetch specs from datasheet URL"
+            >
+              {dsLoading ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
+              {dsLoading ? 'Fetching…' : 'Fetch Specs'}
+            </button>
+          </div>
+        </div>
       </div>
       <div className="flex gap-2 mt-4">
         <button onClick={() => onSave(form)} className="btn-primary btn-sm"><Save size={13} /> Save Inverter</button>

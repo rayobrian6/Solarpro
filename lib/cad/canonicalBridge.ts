@@ -10,7 +10,7 @@
 //     → generateCADLayout()     → CADModel
 //
 // NON-NEGOTIABLE:
-//   1. Only CanonicalBuildingModel with cad_safe authority can feed CAD
+//   1. Only CanonicalBuildingModel with promoted_canonical or cad_safe authority can feed CAD
 //   2. All obstructions pass through with source='promoted_canonical'
 //   3. Raw vision artifacts are NEVER accepted — they must be promoted first
 //   4. Mock artifacts are BLOCKED — they cannot enter the CAD pipeline
@@ -23,9 +23,12 @@
 //   - patchSystemDefinitionFromVision() has been removed — this is the sole legal path
 // ============================================================================
 
-import type { CanonicalBuildingModel, CanonicalObstruction, CanonicalElectricalNode } from '@/lib/siteSurveys/unifiedGeometry/types';
-import { isCadConsumable, assertNoCadMutation, isSyntheticArtifact } from '@/lib/siteSurveys/unifiedGeometry/authority';
+import type { CanonicalBuildingModel, CanonicalRoofPlane, CanonicalObstruction, CanonicalElectricalNode } from '@/lib/siteSurveys/unifiedGeometry/types';
+import { assertNoCadMutation, isSyntheticArtifact } from '@/lib/siteSurveys/unifiedGeometry/authority';
+import type { UnifiedGeometryAuthorityState } from '@/lib/siteSurveys/unifiedGeometry/authority';
 import type { CADObstruction, CADElectricalNode } from './types';
+import type { Point2D } from './geometry';
+import { latLngToXY, polygonArea, centroid } from './geometry';
 
 // ── Bridge Types ─────────────────────────────────────────────────────────────
 
@@ -36,13 +39,40 @@ import type { CADObstruction, CADElectricalNode } from './types';
  * CADModel.electricalNodes — they are the ONLY legal source of vision-derived
  * geometry in the CAD engine.
  */
+export interface CADCanonicalRoofPlaneInput {
+  /** Canonical roof plane id */
+  id: string;
+  /** CAD local XY meters — raw plane boundary from CanonicalBuildingModel */
+  polygon: Point2D[];
+  /** Pitch in degrees */
+  pitch: number;
+  /** Azimuth in degrees */
+  azimuth: number;
+  /** Canonical area in square meters */
+  areaSqM: number;
+  /** Canonical setback defaults in meters */
+  setbacks: {
+    eaveM: number;
+    ridgeM: number;
+    rakeM: number;
+  };
+  /** Provenance back to the promoted source artifact */
+  sourceArtifactId: string;
+}
+
 export interface CanonicalBridgeResult {
+  /** CAD-ready roof planes from the canonical model */
+  roofPlanes: CADCanonicalRoofPlaneInput[];
   /** CAD-ready obstructions from the canonical model */
   obstructions: CADObstruction[];
   /** CAD-ready electrical nodes from the canonical model */
   electricalNodes: CADElectricalNode[];
   /** Bridge audit log — every conversion step */
   log: string[];
+  /** Number of roof planes that were converted */
+  roofPlanesConverted: number;
+  /** Number of roof planes skipped */
+  roofPlanesSkipped: number;
   /** Number of obstructions that were converted */
   obstructionsConverted: number;
   /** Number of electrical nodes that were converted */
@@ -51,6 +81,11 @@ export interface CanonicalBridgeResult {
   obstructionsSkipped: number;
   /** Number of electrical nodes skipped */
   electricalNodesSkipped: number;
+  /** Origin latitude used for lat/lng → local-meters projection of worldPolygon roof planes.
+   *  Null if no world-to-local projection was needed (all planes had local_meters_xy polygons). */
+  originLat: number | null;
+  /** Origin longitude used for lat/lng → local-meters projection. Null if not needed. */
+  originLng: number | null;
 }
 
 /**
@@ -82,6 +117,22 @@ export interface CanonicalBridgeConfig {
    * If false, items without projection get x=0, y=0 (DANGEROUS — for testing only).
    */
   skipWithoutProjection?: boolean;
+
+  /**
+   * Origin latitude for lat/lng → local-meters projection.
+   * Used when converting worldPolygon (lat/lng) roof planes to local meters.
+   * If not provided, the origin is derived from the first world polygon vertex
+   * across all roof planes in the model.
+   */
+  originLat?: number;
+
+  /**
+   * Origin longitude for lat/lng → local-meters projection.
+   * Used when converting worldPolygon (lat/lng) roof planes to local meters.
+   * If not provided, the origin is derived from the first world polygon vertex
+   * across all roof planes in the model.
+   */
+  originLng?: number;
 }
 
 // ── Bridge Error ──────────────────────────────────────────────────────────────
@@ -117,11 +168,18 @@ export function canonicalToCADInputs(
   const log: string[] = [];
   const tag = `[CANONICAL_BRIDGE] surveyId=${model.surveyId}`;
 
-  // ── Authority gate ──────────────────────────────────────────────────────
-  if (!isCadConsumable(model.authority)) {
+  // ── Authority gate ──────────────────────────────────────────────────────────
+  // The bridge accepts both 'promoted_canonical' and 'cad_safe' authority states.
+  // 'promoted_canonical' is the canonical source of truth with permitGenerationAllowed=true;
+  // it may feed the CAD pipeline for permit generation even though cadConsumable is false
+  // (cadConsumable=true is reserved for the terminal cad_safe state which also allows
+  // direct CAD mutation). The strict isCadConsumable() check is too narrow here —
+  // the bridge's own policy is: promoted_canonical + no mock artifacts = allowed.
+  const allowedBridgeStates: UnifiedGeometryAuthorityState[] = ['promoted_canonical', 'cad_safe'];
+  if (!allowedBridgeStates.includes(model.authority.state) || model.authority.mockArtifact) {
     throw new CanonicalBridgeError(
       `CanonicalBuildingModel authority state='${model.authority.state}' is not CAD-consumable. ` +
-      `Only '${'cad_safe' as const}' or '${'promoted_canonical' as const}' authority models may feed the CAD engine. ` +
+      `Only 'cad_safe' or 'promoted_canonical' authority models may feed the CAD engine. ` +
       `Promote artifacts through the review workflow first.`,
     );
   }
@@ -176,6 +234,51 @@ export function canonicalToCADInputs(
     );
   }
 
+  // ── Convert roof planes ─────────────────────────────────────────────────
+  let roofPlanesConverted = 0;
+  let roofPlanesSkipped = 0;
+  const roofPlanes: CADCanonicalRoofPlaneInput[] = [];
+
+  // ── Derive lat/lng origin for worldPolygon → local-meters projection ──────
+  // If config supplies originLat/originLng, use those. Otherwise scan all roof
+  // planes' worldPolygon vertices and use the first vertex as origin (same
+  // strategy as the legacy roofCAD lat/lng path).
+  let originLat = config.originLat;
+  let originLng = config.originLng;
+  if (originLat == null || originLng == null) {
+    // Try model metadata first
+    if (model.metadata?.latitude != null && model.metadata?.longitude != null) {
+      originLat = model.metadata.latitude;
+      originLng = model.metadata.longitude;
+    } else {
+      // Derive from first world polygon vertex
+      for (const rp of model.roofPlanes) {
+        if (rp.worldPolygon?.vertices?.length) {
+          originLat = rp.worldPolygon.vertices[0].lat;
+          originLng = rp.worldPolygon.vertices[0].lng;
+          break;
+        }
+      }
+    }
+  }
+
+  for (const canonicalRoofPlane of model.roofPlanes) {
+    const converted = convertRoofPlane(canonicalRoofPlane, log, tag, originLat, originLng);
+    if (converted) {
+      roofPlanes.push(converted);
+      roofPlanesConverted++;
+    } else {
+      roofPlanesSkipped++;
+    }
+  }
+
+  if (model.roofPlanes.length > 0 && roofPlanesConverted === 0) {
+    throw new CanonicalBridgeError(
+      'CanonicalBuildingModel contains roof planes, but none are CAD-safe. ' +
+      'Permit/CAD generation requires at least one local_meters_xy roof polygon with 3+ finite vertices.',
+    );
+  }
+
   // ── Convert obstructions ────────────────────────────────────────────────
   let obstructionsConverted = 0;
   let obstructionsSkipped = 0;
@@ -207,18 +310,164 @@ export function canonicalToCADInputs(
   }
 
   log.push(
-    `${tag} DONE obstructions=${obstructionsConverted} (skipped=${obstructionsSkipped}) ` +
+    `${tag} DONE roofPlanes=${roofPlanesConverted} (skipped=${roofPlanesSkipped}) ` +
+    `obstructions=${obstructionsConverted} (skipped=${obstructionsSkipped}) ` +
     `electricalNodes=${electricalNodesConverted} (skipped=${electricalNodesSkipped})`,
   );
 
   return {
+    roofPlanes,
     obstructions,
     electricalNodes,
     log,
+    roofPlanesConverted,
+    roofPlanesSkipped,
     obstructionsConverted,
     electricalNodesConverted,
     obstructionsSkipped,
     electricalNodesSkipped,
+    originLat: originLat ?? null,
+    originLng: originLng ?? null,
+  };
+}
+
+// ── Roof Plane Converter ───────────────────────────────────────────────────
+
+function convertRoofPlane(
+  plane: CanonicalRoofPlane,
+  log: string[],
+  tag: string,
+  originLat?: number,
+  originLng?: number,
+): CADCanonicalRoofPlaneInput | null {
+  // ── Determine polygon source: prefer local_meters_xy polygon, fall back to
+  //    worldPolygon (lat/lng) projected to local meters. ────────────────────
+  let polygon: Point2D[];
+
+  if (plane.polygon && plane.polygon.coordinateSystem === 'local_meters_xy') {
+    // Primary path: canonical local-meter polygon is available
+    const vertices = plane.polygon.vertices ?? [];
+    if (vertices.length < 3) {
+      log.push(`${tag} SKIP roofPlane id=${plane.id} — polygon has ${vertices.length} vertices (need 3+)`);
+      return null;
+    }
+    polygon = vertices.map((v, idx) => {
+      if (v.coordinateSystem !== 'local_meters_xy') {
+        throw new CanonicalBridgeError(
+          `Roof plane id=${plane.id} vertex[${idx}] uses coordinateSystem='${v.coordinateSystem}'. ` +
+          `CAD requires local_meters_xy vertices.`,
+        );
+      }
+      if (!Number.isFinite(v.x) || !Number.isFinite(v.y)) {
+        throw new CanonicalBridgeError(
+          `Roof plane id=${plane.id} vertex[${idx}] has non-finite coordinates x=${v.x} y=${v.y}.`,
+        );
+      }
+      return { x: v.x, y: v.y };
+    });
+  } else if (plane.worldPolygon?.vertices && plane.worldPolygon.vertices.length >= 3) {
+    // Fallback path: worldPolygon (lat/lng) → project to local meters.
+    // This handles Phase 1 models built from Google Solar API roofSegmentStats
+    // which provide world-space outlines but no local-meter polygon.
+    if (originLat == null || originLng == null) {
+      log.push(`${tag} SKIP roofPlane id=${plane.id} — has worldPolygon but no lat/lng origin available for projection`);
+      return null;
+    }
+    const wv = plane.worldPolygon.vertices;
+    if (wv.some(v => !Number.isFinite(v.lat) || !Number.isFinite(v.lng))) {
+      log.push(`${tag} SKIP roofPlane id=${plane.id} — worldPolygon has non-finite lat/lng vertex`);
+      return null;
+    }
+    polygon = wv.map(v => latLngToXY(v.lat, v.lng, originLat!, originLng!));
+
+    // ── Error 3g fix: rescale projected polygon to match areaSqM ──────
+    // The Google Solar API's reconstructPolygon() builds lat/lng vertices
+    // using offsetLatLng(), which encodes meter offsets as degree deltas
+    // (dxE / 111320). When latLngToXY() later converts those degree deltas
+    // back to meters (dLng * cosLat * EARTH_RADIUS_M), the round-trip
+    // introduces a scaling distortion of cosLat * EARTH_RADIUS_M / 111320
+    // ≈ 4.5× per axis (≈ 20-130× in area depending on orientation). This
+    // causes the projected polygon to have hundreds-of-meters extents
+    // instead of the actual 5-15m roof dimensions, allowing gridInsidePolygon()
+    // to place far too many panels (84+ instead of ~17).
+    //
+    // Fix: use the canonical areaSqM (from the Solar API's areaMeters2)
+    // as the ground truth. Compute the area of the projected polygon
+    // (shoelace formula), derive a uniform scale factor, and rescale all
+    // vertices around the polygon centroid so the projected area matches
+    // areaSqM. This preserves the polygon shape (aspect ratio, orientation)
+    // while eliminating the projection distortion.
+    if (plane.areaSqM > 0) {
+      const projectedArea = polygonArea(polygon);
+      if (projectedArea > 0) {
+        const scaleFactor = Math.sqrt(plane.areaSqM / projectedArea);
+        if (Number.isFinite(scaleFactor) && scaleFactor > 0) {
+          const c = centroid(polygon);
+          polygon = polygon.map(p => ({
+            x: c.x + (p.x - c.x) * scaleFactor,
+            y: c.y + (p.y - c.y) * scaleFactor,
+          }));
+          log.push(
+            `${tag} RESCALE roofPlane id=${plane.id} projectedArea=${projectedArea.toFixed(1)}m² → targetArea=${plane.areaSqM.toFixed(1)}m² scaleFactor=${scaleFactor.toFixed(4)}`,
+          );
+        }
+      }
+    }
+
+    log.push(
+      `${tag} CONVERT roofPlane id=${plane.id} via worldPolygon (${wv.length} lat/lng vertices, ` +
+      `origin=${originLat.toFixed(6)},${originLng.toFixed(6)})`,
+    );
+  } else if (plane.polygon && plane.polygon.coordinateSystem !== 'local_meters_xy') {
+    // Has a polygon but in the wrong coordinate system (normalized_image_0_1000)
+    log.push(
+      `${tag} SKIP roofPlane id=${plane.id} — polygon uses coordinateSystem='${plane.polygon.coordinateSystem}', ` +
+      `need local_meters_xy or worldPolygon`,
+    );
+    return null;
+  } else {
+    // No polygon and no worldPolygon — genuinely missing geometry
+    if (plane.degradedNoGeometry) {
+      log.push(`${tag} SKIP roofPlane id=${plane.id} — degraded (no geometry)`);
+    } else {
+      log.push(`${tag} SKIP roofPlane id=${plane.id} — missing polygon and worldPolygon`);
+    }
+    return null;
+  }
+
+  const setbacks = plane.setbackDefaults;
+  for (const [name, value] of Object.entries(setbacks)) {
+    if (!Number.isFinite(value) || value < 0) {
+      throw new CanonicalBridgeError(
+        `Roof plane id=${plane.id} has invalid setback ${name}=${value}.`,
+      );
+    }
+  }
+
+  if (!Number.isFinite(plane.pitchDegrees) || !Number.isFinite(plane.azimuthDegrees) || !Number.isFinite(plane.areaSqM)) {
+    throw new CanonicalBridgeError(
+      `Roof plane id=${plane.id} has non-finite pitch/azimuth/area values.`,
+    );
+  }
+
+  log.push(
+    `${tag} CONVERT roofPlane id=${plane.id} vertices=${polygon.length} ` +
+    `pitch=${plane.pitchDegrees.toFixed(1)} azimuth=${plane.azimuthDegrees.toFixed(1)} ` +
+    `areaSqM=${plane.areaSqM.toFixed(2)} sourceArtifactId=${plane.sourceArtifactId}`,
+  );
+
+  return {
+    id: plane.id,
+    polygon,
+    pitch: plane.pitchDegrees,
+    azimuth: plane.azimuthDegrees,
+    areaSqM: plane.areaSqM,
+    setbacks: {
+      eaveM: setbacks.eaveM,
+      ridgeM: setbacks.ridgeM,
+      rakeM: setbacks.rakeM,
+    },
+    sourceArtifactId: plane.sourceArtifactId,
   };
 }
 
@@ -337,12 +586,18 @@ function resolveWorldPosition(
 ): { x: number; y: number } | null {
   if (!center) return null;
 
-  // If a world projection function is provided, use it
+  // CanonicalBuildingModel centers are already local CAD meters once promoted.
+  if (center.coordinateSystem === 'local_meters_xy') {
+    if (!Number.isFinite(center.x) || !Number.isFinite(center.y)) return null;
+    return { x: center.x, y: center.y };
+  }
+
+  // If a world projection function is provided, use it for non-local/image-space data.
   if (config.worldProjection) {
     return config.worldProjection(center.x, center.y, roofPlaneId);
   }
 
-  // Without a projection function, we can't convert image-space to world-space
+  // Without a projection function, we can't convert image-space to world-space.
   return null;
 }
 

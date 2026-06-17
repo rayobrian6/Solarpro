@@ -27,6 +27,7 @@ import {
   getConductorArea,
 } from './manufacturer-specs';
 import { Conductor } from './equipment-db';
+import { necNextStandardOcpd } from './permit/utils/helpers';
 
 export interface WireAutoSizerInput {
   // Inverter parameters
@@ -549,7 +550,7 @@ export function calcSegment(
   seg.effectiveAmpacity = wiresizer.effectiveAmpacity;
   seg.tempDeratingFactor = wiresizer.tempDeratingFactor;
   seg.conduitFillDeratingFactor = wiresizer.conduitFillDeratingFactor;
-  seg.ocpdAmps = Math.ceil(wiresizer.requiredAmpacity / 5) * 5; // round up to next 5A
+  seg.ocpdAmps = necNextStandardOcpd(wiresizer.requiredAmpacity);
   seg.voltageDropPct = wiresizer.voltageDrop;
   seg.voltageDropVolts = wiresizer.voltageDropVolts;
   seg.ampacityPass = wiresizer.ampacityPass;

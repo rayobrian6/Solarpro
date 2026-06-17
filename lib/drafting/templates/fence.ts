@@ -68,7 +68,7 @@ export function drawFencePlan(
 
   // ── CAD segments (STEP 4: CAD is the ONLY source of truth) ──
   const cadFence = cad?.fence;
-  const segments: any[] = (cadFence?.segments as any[] | undefined) ?? (layout.fenceSegments as any[] | undefined) ?? [];
+  const segments: any[] = cadFence?.segments ?? layout.fenceSegments ?? [];
 
   if (!segments || segments.length === 0) {
     throw new Error(
@@ -102,10 +102,10 @@ export function drawFencePlan(
 
   segments.forEach((seg: any) => {
     // Support both CADFenceSegment (startX/Y in meters) and adapted (startPoint.x/y in meters)
-    const sx: number = (seg as any).startX ?? (seg as any).startPoint?.x ?? 0;
-    const sy: number = (seg as any).startY ?? (seg as any).startPoint?.y ?? 0;
-    const ex: number = (seg as any).endX   ?? (seg as any).endPoint?.x   ?? 0;
-    const ey: number = (seg as any).endY   ?? (seg as any).endPoint?.y   ?? 0;
+    const sx: number = seg.startX ?? seg.startPoint?.x ?? 0;
+    const sy: number = seg.startY ?? seg.startPoint?.y ?? 0;
+    const ex: number = seg.endX   ?? seg.endPoint?.x   ?? 0;
+    const ey: number = seg.endY   ?? seg.endPoint?.y   ?? 0;
     allX.push(sx, ex);
     allY.push(sy, ey);
   });
@@ -355,8 +355,8 @@ export function drawFenceElevation(
   const mountSys       = (project?.mountingSystem   || 'SOLAR FENCE SYSTEM').toUpperCase();
 
   // First segment for display (show 2 full bays)
-  const segments = cadFence?.segments ?? layout.fenceSegments ?? [];
-  const firstSeg = segments[0] as any;
+  const segments: any[] = cadFence?.segments ?? layout.fenceSegments ?? [];
+  const firstSeg = segments[0];
   const firstSegLabel = firstSeg?.label ?? firstSeg?.id ?? 'SEG-1';
 
   // Panel dimensions from project or defaults (66" x 40" standard)
@@ -663,7 +663,7 @@ export function drawFenceElevation(
     els.push(drawText(dZone.x + 4, ry + ni * 10, note.text, {
       anchor: 'start',
       fontSize: 6.5,
-      fill: (note as any).red ? '#cc0000' : '#333',
+      fill: note.red ? '#cc0000' : '#333',
       fontWeight: note.bold ? 'bold' : 'normal',
     }));
   });

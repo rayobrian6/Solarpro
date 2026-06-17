@@ -380,7 +380,8 @@ export async function syncProjectPipeline(
   if (!isSatelliteImageValid(snapshot.satelliteImageBase64)) {
     stageStart('fetch_satellite', projectId);
     try {
-      const address = (project as any).address ?? (project as any).siteAddress ?? project.name ?? '';
+      // Error 5j fix: address is on Project type; siteAddress is on SiteOverview, not Project
+      const address = project.address ?? project.name ?? '';
       const satResult = await fetchSatelliteImage({ address });
       if (!satResult.error) {
         snapshot.satelliteImageBase64 = satResult.imageBase64;
@@ -511,8 +512,9 @@ export async function syncProjectPipeline(
 
   try {
     const sql       = await getDbReady();
-    const clientId  = (project as any).clientId ?? null;
-    const clientName = (project as any).clientName ?? project.name ?? 'Client';
+    // Error 5j fix: clientId is on Project type; clientName should use project.client?.name
+    const clientId  = project.clientId ?? null;
+    const clientName = project.client?.name ?? project.name ?? 'Client';
 
     // Sanitize client name for filenames
     const clientSlug = clientName

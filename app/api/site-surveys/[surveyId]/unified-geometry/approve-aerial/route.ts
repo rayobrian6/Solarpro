@@ -16,7 +16,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { isValidUUID } from '@/lib/db-neon';
+import { isValidUUID, getSiteSurveyById } from '@/lib/db-neon';
 import {
   getUnifiedArtifactsForSurvey,
   upsertUnifiedArtifact,
@@ -46,6 +46,12 @@ export async function POST(
     const { surveyId } = params;
     if (!isValidUUID(surveyId)) {
       return NextResponse.json({ success: false, error: 'Invalid survey ID' }, { status: 400 });
+    }
+
+    // ── Ownership gate — only the survey's owner may promote/persist geometry ──
+    const survey = await getSiteSurveyById(surveyId, user.id);
+    if (!survey) {
+      return NextResponse.json({ success: false, error: 'Survey not found' }, { status: 404 });
     }
 
     const all = await getUnifiedArtifactsForSurvey(surveyId);

@@ -520,11 +520,17 @@ function page25YrProjection(cp: CanonicalProposal): string {
   const projData = cp.truth25yr.projectionChart;
   const yearlyFlow = cp.truth25yr.yearlyFlow;
 
-  // Build two line series: cumulative solar value vs cumulative utility cost
-  const cumulativeSolar = yearlyFlow.map(y => y.total_energy_value);
+  // Build two line series: cumulative solar value vs cumulative utility cost.
+  // BOTH must be running totals — total_energy_value is a PER-YEAR figure, so
+  // accumulate it the same way as the utility line (previously it was plotted
+  // un-accumulated, making solar look flat/catastrophic vs the climbing cost).
+  const cumulativeSolar: number[] = [];
   const cumulativeUtility: number[] = [];
+  let solarRunning = 0;
   let utilRunning = 0;
   for (const y of yearlyFlow) {
+    solarRunning += y.total_energy_value ?? 0;
+    cumulativeSolar.push(solarRunning);
     utilRunning += y.utility_cost_without_solar ?? 0;
     cumulativeUtility.push(utilRunning);
   }

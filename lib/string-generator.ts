@@ -16,6 +16,7 @@ import {
   findCompatiblePanels,
   formatCompatiblePanelClause,
 } from './panel-compatibility';
+import { necNextStandardOcpd } from '@/lib/permit/utils/helpers';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -174,7 +175,7 @@ export interface StringGeneratorResult {
 const STANDARD_OCPD = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200];
 
 function nextStandardOCPD(amps: number): number {
-  return STANDARD_OCPD.find(s => s >= amps) ?? Math.ceil(amps / 5) * 5;
+  return STANDARD_OCPD.find(s => s >= amps) ?? necNextStandardOcpd(amps);
 }
 
 // ─── Main generator ──────────────────────────────────────────────────────────

@@ -72,6 +72,7 @@ import type {
   Obstruction,
   PhotoCategory,
 } from "@/lib/survey/v2/types";
+import { ConfidenceBadge } from "@/components/recommend/ConfidenceBadge";
 
 // ---------------------------------------------------------------------------
 // V1 partner payload type (Render / site-survey-api)
@@ -447,11 +448,13 @@ function SectionCard({
   icon,
   title,
   iconColor = "text-cyan-400",
+  badge,
   children,
 }: {
   icon: React.ReactNode;
   title: string;
   iconColor?: string;
+  badge?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -459,6 +462,7 @@ function SectionCard({
       <div className="flex items-center gap-2 px-5 py-3.5 border-b border-slate-700/50">
         <span className={iconColor}>{icon}</span>
         <h2 className="text-sm font-bold text-white">{title}</h2>
+        {badge && <span className="ml-auto">{badge}</span>}
       </div>
       <div className="px-5 py-3">{children}</div>
     </div>
@@ -2184,6 +2188,7 @@ function ElectricalSection({ elec }: { elec: SurveyElectricalService }) {
       icon={<Zap size={14} />}
       title="Electrical Service"
       iconColor="text-yellow-400"
+      badge={<ConfidenceBadge confidence="high" source="survey" size="xs" detail="Field verified" />}
     >
       <div className="grid grid-cols-1 md:grid-cols-2">
         <FieldRow
@@ -2231,6 +2236,7 @@ function RoofSection({ roof }: { roof: SurveyRoofConditions }) {
       icon={<Home size={14} />}
       title="Roof & Mounting"
       iconColor="text-amber-400"
+      badge={<ConfidenceBadge confidence="high" source="survey" size="xs" detail="Field verified" />}
     >
       <div className="grid grid-cols-1 md:grid-cols-2">
         <FieldRow
@@ -2269,6 +2275,7 @@ function ObstructionsSection({ obs }: { obs: SurveyObstructions }) {
       icon={<Shield size={14} />}
       title="Obstructions & Layout"
       iconColor="text-red-400"
+      badge={<ConfidenceBadge confidence="high" source="survey" size="xs" detail="Field verified" />}
     >
       <div className="space-y-3">
         {/* Summary row */}

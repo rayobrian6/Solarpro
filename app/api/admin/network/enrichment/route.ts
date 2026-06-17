@@ -71,9 +71,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         -- Join opportunity display info
         no.first_name,
         no.last_name,
-        no.city,
-        no.state,
-        no.zip
+        no.location_city AS city,
+        no.location_state AS state,
+        no.location_zip AS zip
       FROM enrichment_queue eq
       LEFT JOIN network_opportunities no ON no.id = eq.opportunity_id
       ORDER BY eq.created_at DESC

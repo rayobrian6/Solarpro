@@ -58,7 +58,7 @@ export interface ProjectInputs {
   dcDisconnect: boolean;
   productionMeter: boolean;
   // Electrical calc input (full)
-  electricalCalcInput: ElectricalCalcInput;
+  electricalCalcInput?: ElectricalCalcInput;
 }
 
 export interface ExternalData {
@@ -521,7 +521,7 @@ function deriveBomItems(
   // Previously missing — now always included unless site has existing rod
   // ═══════════════════════════════════════════════════════════════════════════
   const hasExistingRod = opts.hasExistingGroundRod === true;
-  const totalAcKwForGec = em.totalAcKw ?? (sizing.acCurrentAmps * inputs.electricalCalcInput.systemVoltage / 1000);
+  const totalAcKwForGec = em.totalAcKw ?? (sizing.acCurrentAmps * (inputs.electricalCalcInput?.systemVoltage ?? 240) / 1000);
   const gecSize = gecSizeForOcpd(sizing.ocpdAmps);
   const rodQty  = (!hasExistingRod) ? (totalAcKwForGec > 10 ? 2 : 1) : 0;
 
@@ -910,7 +910,43 @@ export function computePlan(opts: ComputePlanOptions): ComputedPlan {
   devLog('AHJ', 'getAhjById', ahjEntry.name);
 
   // ── 2. Run electrical calc ────────────────────────────────────────────────
-  const rawResult = runElectricalCalc(inputs.electricalCalcInput);
+  const rawResult = inputs.electricalCalcInput
+    ? runElectricalCalc(inputs.electricalCalcInput)
+    : null;
+  if (!rawResult) {
+    // Return a minimal ComputedPlan with failure status when electricalCalcInput is missing
+    return {
+      computedAt: new Date().toISOString(),
+      projectName: inputs.projectName,
+      state: inputs.state,
+      utilityId: inputs.utilityId,
+      ahjId: inputs.ahjId,
+      ahjName: '',
+      jurisdiction: null,
+      utility: null,
+      electricalSizing: {} as ElectricalSizing,
+      interconnection: {} as InterconnectionSummary,
+      bomItems: [],
+      equipmentSchedule: {} as EquipmentScheduleData,
+      sldInputs: {} as SldModelInputs,
+      complianceIssues: [{
+        id: 'missing-electrical-input',
+        category: 'electrical',
+        severity: 'error',
+        title: 'Missing electrical input',
+        message: 'Missing electricalCalcInput — cannot compute plan',
+        autoFixed: false,
+        overridable: false,
+      }],
+      overallStatus: 'FAIL',
+      errorCount: 1,
+      warningCount: 0,
+      autoFixCount: 0,
+      rawElectricalResult: {} as ElectricalCalcResult,
+      isValid: false,
+      validationErrors: ['Missing electricalCalcInput — cannot compute plan'],
+    } as ComputedPlan;
+  }
   devLog('ElectricalCalc', 'runElectricalCalc', { status: rawResult.status, acKw: rawResult.summary?.totalAcKw });
 
   // ── 3. Extract ElectricalSizing from rawResult.acSizing ──────────────────
@@ -1036,7 +1072,7 @@ export function deriveBomItemsForTest(sizing: Partial<ElectricalSizing> & {
     systemVoltage: 240,
     wireGauge: '#10 AWG THWN-2', wireLength: 50, conduitType: 'EMT',
     rapidShutdown: true, acDisconnect: true, dcDisconnect: true, productionMeter: true,
-    electricalCalcInput: {} as any,
+    electricalCalcInput: undefined,
   };
   const minimalOpts: ComputePlanOptions = { inputs: minimalInputs };
   return deriveBomItems(fullSizing, minimalInputs, minimalOpts);

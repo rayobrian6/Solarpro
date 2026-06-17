@@ -64,7 +64,7 @@ export async function POST(
   // Public endpoint — no auth. 5 signature attempts per IP per 15 min prevents
   // replay spam and enumeration attacks without blocking legitimate homeowners.
   const ip = getClientIp(req);
-  const allowed = await checkRateLimit('proposal-sign', ip);
+  const { allowed } = await checkRateLimit('proposal-sign', ip);
   if (!allowed) {
     return NextResponse.json(
       { success: false, error: 'Too many requests. Please wait a moment and try again.' },

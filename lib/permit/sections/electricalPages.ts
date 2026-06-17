@@ -6,7 +6,7 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
-import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, statusColor, statusBg, statusBorder, statusLabel, interconnectionLabel, utilityDisplayName, type SysType } from '../utils/helpers';
+import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, statusColor, statusBg, statusBorder, statusLabel, interconnectionLabel, utilityDisplayName, necNextStandardOcpd, type SysType } from '../utils/helpers';
 import { getEquipmentContext, getInverterTopology, isFence, isGround, isRoof, topologyToLegacy } from '@/lib/system';
 import { generateLiveSLD } from '../utils/sldAdapter';
 
@@ -142,7 +142,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
               const eq_cs = getEquipmentContext(input, cad);
               const _csIsc = eq_cs.panelIsc || 0;
               const _csBranchAmps = (_csIsc * 1.25);
-              const _csBranchOcpd = Math.ceil(_csBranchAmps * 1.25 / 5) * 5;
+              const _csBranchOcpd = necNextStandardOcpd(_csBranchAmps * 1.25);
               const _csModules = system.totalPanels || 0;
               const _csBranches = Math.ceil(_csModules / 16) || 1;  // NEC 690.8 max 16 micros per branch
               return Array.from({length: _csBranches}, (_, i) => `
@@ -167,7 +167,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
                   <td>Inverter ${invIdx + 1}</td>
                   <td>${str.wireGauge} USE-2/PV Wire</td>
                   <td>${str.isc ? (Math.ceil(str.isc * 1.25 * 100) / 100).toFixed(2) + 'A' : (str.ampacity ? str.ampacity + 'A' : '—')}</td>
-                  <td>${str.isc ? Math.ceil(str.isc * 1.25 * 1.25) + 'A' : (str.ocpd ? str.ocpd + 'A' : '—')}</td>
+                  <td>${str.isc ? necNextStandardOcpd(str.isc * 1.56) + 'A' : (str.ocpd ? str.ocpd + 'A' : '—')}</td>
                   <td>${str.voltageDrop != null ? str.voltageDrop.toFixed(2) + '%' : '—'}</td>
                   <td>${project.conduitType}</td>
                   <td>${str.wireLength} ft</td>
@@ -198,12 +198,12 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
                 // Micro: EGC sized per branch circuit OCPD
                 const _egcEq = getEquipmentContext(input, cad);
                 const _egcIsc = _egcEq.panelIsc || 0;
-                _egcOcpd = _egcIsc > 0 ? Math.ceil(_egcIsc * 1.25 * 1.25 / 5) * 5 : 20;
+                _egcOcpd = _egcIsc > 0 ? necNextStandardOcpd(_egcIsc * 1.25 * 1.25) : 20;
               } else {
                 // String/Optimizer: EGC sized per largest string OCPD
                 const _egcStr0 = system.inverters?.[0]?.strings?.[0];
                 const _egcIscStr = _egcStr0?.isc || 0;
-                _egcOcpd = _egcIscStr > 0 ? Math.ceil(_egcIscStr * 1.25 * 1.25 / 5) * 5 : 20;
+                _egcOcpd = _egcIscStr > 0 ? necNextStandardOcpd(_egcIscStr * 1.25 * 1.25) : 20;
               }
               if (_egcOcpd <= 15)  return '#14 AWG';
               if (_egcOcpd <= 20)  return '#12 AWG';
@@ -338,7 +338,9 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         const mainA = project.mainPanelAmps || 200;
         const acKw = system.totalAcKw || 0;
         const acAmps = (acKw * 1000 / 240);
-        const bfAmps = Math.ceil(acAmps * 1.25 / 5) * 5;
+        // Error 5bb fix: Use NEC standard OCPD sizes, not round-to-5
+        const continuousA = acAmps * 1.25;  // NEC 690.8(A)(1)
+        const bfAmps = necNextStandardOcpd(continuousA);
         const busLimit = busA * 1.2;
         const maxBfAllowed = busLimit - mainA;
         const passes120 = bfAmps <= maxBfAllowed;
@@ -368,7 +370,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <tr style="background:#fff;border-top:2px solid #000;"><td class="fw9 mono">5</td><td style="font-weight:700;">Total Calculated Load</td><td>Steps 1–4 ÷ 240V service</td><td class="tr fw9">${Math.round(totalLoad).toLocaleString()} VA = ${loadAmps}A</td></tr>
             <tr class="bg-lt"><td class="fw9 mono">6</td><td>Service Ampacity</td><td>${mainA}A panel × 240V</td><td class="tr fw9">${mainA}A available</td></tr>
             <tr ><td class="fw9 mono">7</td><td>PV AC Output</td><td>${acKw.toFixed(2)} kW AC ÷ 240V</td><td class="tr fw9">${acAmps.toFixed(1)}A PV</td></tr>
-            <tr class="bg-lt"><td class="fw9 mono">8</td><td>PV Backfeed Breaker — NEC 690.8(A)(1)</td><td>${acAmps.toFixed(1)}A × 125% → rounded up to next 5A step</td><td class="tr fw9">${bfAmps}A breaker required</td></tr>
+            <tr class="bg-lt"><td class="fw9 mono">8</td><td>PV Backfeed Breaker — NEC 690.8(A)(1)</td><td>${acAmps.toFixed(1)}A × 125% → next standard OCPD per NEC 240.6(A)</td><td class="tr fw9">${bfAmps}A breaker required</td></tr>
             <tr style="background:#fff;border:2px solid #000;"><td class="fw9 mono">9</td><td style="font-weight:900;">120% Busbar Rule — NEC 705.12(B)</td><td>${busA}A bus × 120% = ${busLimit.toFixed(0)}A max; minus ${mainA}A main = ${maxBfAllowed.toFixed(0)}A for PV</td><td style="font-weight:900;text-align:right;font-size:11px;">${passes120 ? 'PASS' : 'FAIL — UPGRADE PANEL'}</td></tr>
           </tbody>
         </table>
@@ -438,8 +440,8 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
           <div style="margin-bottom:3px;">2. Equipment grounding conductor (EGC): ${(() => {
             const _egcT = topologyToLegacy(getInverterTopology(input, cad));
             let _oc = 20;
-            if (_egcT === 'MICRO') { const _eq = getEquipmentContext(input, cad); _oc = _eq.panelIsc > 0 ? Math.ceil(_eq.panelIsc * 1.25 * 1.25 / 5) * 5 : 20; }
-            else { const _s0 = input.system?.inverters?.[0]?.strings?.[0]; _oc = _s0?.isc ? Math.ceil(_s0.isc * 1.25 * 1.25 / 5) * 5 : 20; }
+            if (_egcT === 'MICRO') { const _eq = getEquipmentContext(input, cad); _oc = _eq.panelIsc > 0 ? necNextStandardOcpd(_eq.panelIsc * 1.25 * 1.25) : 20; }
+            else { const _s0 = input.system?.inverters?.[0]?.strings?.[0]; _oc = _s0?.isc ? necNextStandardOcpd(_s0.isc * 1.25 * 1.25) : 20; }
             if (_oc <= 15) return '#14 AWG'; if (_oc <= 20) return '#12 AWG'; if (_oc <= 30) return '#10 AWG';
             if (_oc <= 60) return '#10 AWG'; if (_oc <= 100) return '#8 AWG'; if (_oc <= 200) return '#6 AWG'; return '#4 AWG';
           })()} bare Cu min. per NEC 250.122 and 690.45.</div>
@@ -781,19 +783,21 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     const inverterMfr   = eq_sld.inverterManufacturer !== '—' ? eq_sld.inverterManufacturer : '';
     const acOutputKw  = totalAcKw;
     const acOutputAmps = (totalAcKw * 1000 / 240);
-    const acWireGauge  = (compliance as any)?.electrical?.acConductorCallout ?? '#10 AWG';
+    const acWireGauge  = compliance.electrical?.acConductorCallout ?? '#10 AWG';
     const acConduit    = '3/4"';
     const acCondType   = 'EMT';
-    const acOCPD       = (project as any).backfeedBreakerA ?? (project as any).pvBackfeedA ?? 40;
+    const acOCPD       = project.backfeedBreakerA ?? project.pvBackfeedA ?? 40;
     const mainAmps     = project.mainPanelAmps ?? 200;
-    const backfeedAmps = (project as any).backfeedBreakerA ?? 46;
+    // Error 5ba fix: backfeedAmps should fall back to acOCPD (computed above), not hardcoded 46
+    const backfeedAmps = project.backfeedBreakerA ?? project.pvBackfeedA ?? acOCPD;
     const pvBreakerAmps = backfeedAmps;
     // FIX v47.341: Convert utility slug to display name in SLD
     const utilityName  = utilityDisplayName(project.utilityName ?? '') || 'Utility';
     const hasBattery   = !!(project.batteryCount && project.batteryCount > 0);
     const batteryModel = project.batteryModel ?? 'IQ Battery 5P';
-    const batteryKwh   = (project.batteryCount ?? 2) * (project.batteryKwh ?? 5.0);
-    const batteryBackfeedA = project.batteryBackfeedA ?? 46;
+    const batteryKwh   = hasBattery ? (project.batteryCount! * (project.batteryKwh ?? 5.0)) : 0;
+    // Error 5ba fix: battery backfeed fallback — 20A per unit (typical residential), not 46
+    const batteryBackfeedA = project.batteryBackfeedA ?? (hasBattery ? project.batteryCount * 20 : 0);
     const egcNum = '10';
     const branchOcpd = 20;
     const nBranches = Math.ceil(totalPanels / 16);

@@ -99,7 +99,7 @@ export function fenceCAD(input: PermitInputShape): CADModel {
       tilt:       90,
       bifacial:   false,
       label:      'SEG-1',
-    } as any);
+    });
   }
 
   // ── Global origin — first segment start ──────────────────────
@@ -247,7 +247,8 @@ export function fenceCAD(input: PermitInputShape): CADModel {
   // ── Aggregates ────────────────────────────────────────────────
   const allPanels   = cadSegments.flatMap(s => s.panels);
   const totalPanels = allPanels.length || input.system?.totalPanels || 0;
-  const panelWatts  = (input.system?.inverters?.[0]?.strings?.[0] as any)?.panelWatts ?? 400;
+  // Error 5ab fix: panelWatts IS on PermitInputShape.system.inverters[].strings[] — no `as any` needed
+  const panelWatts  = input.system?.inverters?.[0]?.strings?.[0]?.panelWatts ?? 400;
   const totalDcKw   = totalPanels * panelWatts / 1000;
 
   // ── Bounds ────────────────────────────────────────────────────

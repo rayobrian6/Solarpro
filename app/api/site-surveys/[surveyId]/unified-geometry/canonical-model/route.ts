@@ -27,7 +27,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { isValidUUID } from '@/lib/db-neon';
+import { isValidUUID, getSiteSurveyById } from '@/lib/db-neon';
 import {
   buildCanonicalModel,
   CanonicalBuilderError,
@@ -51,6 +51,12 @@ export async function POST(
     const { surveyId } = params;
     if (!isValidUUID(surveyId)) {
       return NextResponse.json({ success: false, error: 'Invalid survey ID' }, { status: 400 });
+    }
+
+    // ── Ownership gate — only the survey's owner may build/persist its model ──
+    const survey = await getSiteSurveyById(surveyId, user.id);
+    if (!survey) {
+      return NextResponse.json({ success: false, error: 'Survey not found' }, { status: 404 });
     }
 
     // ── Parse request body ──────────────────────────────────────────────

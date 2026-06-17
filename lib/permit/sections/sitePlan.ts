@@ -19,8 +19,8 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
   const addr    = project.address || '—';
   const ahj     = compliance.jurisdiction?.ahj || '—';
   // FIX v47.341: Convert utility slug to display name
-  const utility = utilityDisplayName((project as any).utilityName || project.utilityMeter || '') || '—';
-  const apn     = (project as any).apn || '—';
+  const utility = utilityDisplayName(project.utilityName || project.utilityMeter || '') || '—';
+  const apn     = project.apn || '—';
   const city    = (project.city || '').toUpperCase();
 
   const firstInv  = system.inverters?.[0];
@@ -38,16 +38,16 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     { label: `(N) ${hasAcDisc ? '100A' : '60A'} NON-FUSED AC DISCONNECT`, desc: 'WITHIN SIGHT — NEC 690.15' },
     { label: '(N) ENPHASE COMBINER BOX',                        desc: 'EXTERIOR WALL' },
     ...(hasBatt ? [
-      { label: `(N) ${(project.batteryBrand || 'ENPHASE').toUpperCase()} BATTERY`, desc: `${project.batteryModel || 'IQ BATTERY'}${(project.batteryKwh ?? 0) > 0 ? ' — ' + (project.batteryKwh!.toFixed(1)) + ' kWh' : ''}` },
+      { label: `(N) ${(project.batteryBrand || 'ENPHASE').toUpperCase()} BATTERY`, desc: `${project.batteryModel || 'IQ BATTERY'}${(project.batteryKwh ?? 5.0) > 0 ? ' — ' + (project.batteryKwh ?? 5.0).toFixed(1) + ' kWh' : ''}` },
       { label: '(N) 60A NON-FUSED AC DISCONNECT',               desc: 'ADJACENT TO UTILITY METER' },
     ] : []),
   ];
 
   const totalPanels  = system.totalPanels || 0;
-  const panelPos     = (project as any).panelPositions as Array<{lat:number;lng:number;orientation?:string;row?:number;col?:number;arrayId?:string}> | undefined;
-  const roofPlanes   = (project as any).roofPlanes as Array<{id?:string;vertices?:Array<{lat:number;lng:number}>;pitch?:number;azimuth?:number;area?:number;edgeTypes?:string[];source?:string;confirmed?:boolean}> | undefined;
-  const panelLenIn   = (project as any).panelLengthIn || 66;
-  const panelWidIn   = (project as any).panelWidthIn  || 40;
+  const panelPos     = project.panelPositions as Array<{lat:number;lng:number;orientation?:string;row?:number;col?:number;arrayId?:string}> | undefined;
+  const roofPlanes   = project.roofPlanes as Array<{id?:string;vertices?:Array<{lat:number;lng:number}>;pitch?:number;azimuth?:number;area?:number;edgeTypes?:string[];source?:string;confirmed?:boolean}> | undefined;
+  const panelLenIn   = project.panelLengthIn || 66;
+  const panelWidIn   = project.panelWidthIn  || 40;
 
   // SVG canvas dimensions
   const svgW = 900, svgH = 620;
@@ -279,7 +279,7 @@ export function buildPv1Page(
 
 // ─── AerialRoofData interface & fetchAerialRoofData ─────────────────────────
 
-interface AerialRoofData {
+export interface AerialRoofData {
   imageBase64?: string;
   imageWidth?: number;
   imageHeight?: number;
@@ -387,7 +387,7 @@ export async function fetchAerialRoofData(
           console.log(`[permit/aerial] Static Maps zoom=${tryZoom} non-image response:`, errBody.substring(0, 300));
         }
       } catch (imgErr: unknown) {
-        console.log(`[permit/aerial] Static Maps zoom=${tryZoom} EXCEPTION:`, (imgErr as any)?.message);
+        console.log(`[permit/aerial] Static Maps zoom=${tryZoom} EXCEPTION:`, (imgErr as Error)?.message);
       }
     }
 
@@ -414,7 +414,7 @@ export async function fetchAerialRoofData(
           }
         }
       } catch (hybridErr: unknown) {
-        console.log('[permit/aerial] Hybrid fallback EXCEPTION:', (hybridErr as any)?.message);
+        console.log('[permit/aerial] Hybrid fallback EXCEPTION:', (hybridErr as Error)?.message);
       }
     }
 

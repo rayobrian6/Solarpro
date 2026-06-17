@@ -16,9 +16,9 @@ export function pageCADAppendixPreview(input: PermitInput, cad: CADModel, pageNu
     exportedAt: '1970-01-01T00:00:00.000Z',
     exportedBy: 'generatePermitHTML.cadAppendixPreviewV1',
     exportReason: 'permit-package-cad-appendix-preview-v1',
-    sourceProjectId: normalizeSourceId((input.project as any).projectId ?? (input.project as any).id ?? surveyEvidence?.projectId),
+    sourceProjectId: normalizeSourceId(input.project.projectId ?? surveyEvidence?.projectId),
     sourceSurveyId: normalizeSourceId(surveyEvidence?.surveyId),
-    sourcePlanSetId: normalizeSourceId((input as any).planSetId),
+    sourcePlanSetId: normalizeSourceId(input.planSetId),
   });
   const svgArtifact = buildCADSvgArtifactPreview(exportBundle);
   const appendixSheet = buildPlanSetCADAppendixPreviewSheetV1({
@@ -52,7 +52,7 @@ function buildSurveyDerivedCadBridgeSvg(input: PermitInput, cad: CADModel, surve
   const tx = (x: number) => Math.round(38 + (x - bounds.minX) * bounds.scale);
   const ty = (y: number) => Math.round(350 - (y - bounds.minY) * bounds.scale);
   const sourceSurveyId = normalizeSourceId(surveyEvidence.surveyId) ?? 'SURVEY-ID-PENDING';
-  const sourceProjectId = normalizeSourceId(surveyEvidence.projectId) ?? normalizeSourceId((input.project as any).projectId ?? (input.project as any).id) ?? 'PROJECT-ID-PENDING';
+  const sourceProjectId = normalizeSourceId(surveyEvidence.projectId) ?? normalizeSourceId(input.project.projectId) ?? 'PROJECT-ID-PENDING';
   const readiness = surveyEvidence.manifestV1?.engineeringBridge.readiness ?? (surveyEvidence.completeness === 'sufficient' ? 'ready_for_engineering' : surveyEvidence.completeness === 'partial' ? 'needs_review' : 'blocked');
   const field = surveyEvidence.fieldEvidence;
   const roofGeometryLine = field.hasRoofGeometry

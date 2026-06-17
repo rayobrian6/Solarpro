@@ -96,7 +96,7 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
   const structuralRules = (rulesResult?.rules || []).filter(r => r.category === 'structural');
 
   // ── Read from canonical (authoritative) ───────────────────────────────────
-  const _c = (project as any)._canonical as CanonicalInput | undefined;
+  const _c = project._canonical as CanonicalInput | undefined;
   const cSite = _c?.site;
   const cStr  = _c?.structure;
 
@@ -395,7 +395,7 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
   const structuralRules = (rulesResult?.rules || []).filter(r => r.category === 'structural');
 
   const windSpeed   = structural?.wind?.windSpeed || '—';
-  const exposure    = structural?.wind?.exposureCategory || (project as any).exposureCategory || 'C';
+  const exposure    = structural?.wind?.exposureCategory || project.exposureCategory || 'C';
   const velPressure = structural?.wind?.velocityPressure?.toFixed(2) || '—';
   const upliftPsf   = structural?.wind?.netUpliftPressure?.toFixed(2) || '—';
   const upliftPile  = structural?.wind?.upliftPerAttachment?.toFixed(0) || '—';
@@ -629,9 +629,9 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   const rafterAD    = structural?.rafter?.allowableDeflection?.toFixed(3) || '—';
   const totalUplift = structural?.attachment?.totalUpliftPerAttachment?.toFixed(0) || '—';
 
-  const rafterSize  = (project as any).rafterSize || '2×6';
-  const rafterSpace = (project as any).rafterSpacing || 24;
-  const attachSpace = (project as any).attachmentSpacing || 48;
+  const rafterSize  = project.rafterSize || '2×6';
+  const rafterSpace = project.rafterSpacing || 24;
+  const attachSpace = project.attachmentSpacing || 48;
 
   return `
   <div class="page">
@@ -930,12 +930,15 @@ function renderHardwareSchedule(input: PermitInput, cad: CADModel): string {
       return item ? item.unit.toUpperCase() : fallback;
     };
 
-    const arrays        = (input.layout as any)?.groundArrays || [];
+    const arrays        = input.layout?.groundArrays || [];
     const firstArray    = arrays[0];
     const structType    = firstArray?.structureType || 'driven_pile';
     const pileSpacingFt = firstArray?.pileSpacingFt   ?? 8;
-    const pileEmbedFt   = firstArray?.pileEmbedmentFt ?? 4;
-    const arrayWidthFt  = (cad as any).arrayWidthFt   ?? Math.ceil(totalPanels * 1.1);
+    const pileEmbedFt   = firstArray?.pileDepthFt ?? 4;
+    // Error 5a fix: cad.arrayWidthFt doesn't exist on CADModel — read from
+    // cad.ground.arrays[0].dimensions.arrayWidthM (meters → ft) instead.
+    const cadArrWidthM  = cad.ground?.arrays?.[0]?.dimensions?.arrayWidthM;
+    const arrayWidthFt  = cadArrWidthM ? cadArrWidthM * 3.28084 : Math.ceil(totalPanels * 1.1);
     const conduitFt     = Math.ceil(arrayWidthFt + 20); // array width + 20ft run to inverter
 
     const pileLabel = structType === 'concrete_pier' ? 'Concrete Piers' : 'Driven Piles';
@@ -1012,7 +1015,7 @@ function renderBOMTable(bom: PermitInput['bom']): string {
 
   const grouped: Record<string, typeof bomItems> = {};
   for (const item of bomItems) {
-    const s = (item as any).stageId ?? 'other';
+    const s = item.stageId ?? 'other';
     if (!grouped[s]) grouped[s] = [];
     grouped[s].push(item);
   }
@@ -1037,7 +1040,7 @@ function renderBOMTable(bom: PermitInput['bom']): string {
   for (const stageKey of stages) {
     const items = grouped[stageKey];
     if (!items || items.length === 0) continue;
-    const stageLabel = (items[0] as any).stageLabel || stageLabels[stageKey] || stageKey;
+    const stageLabel = items[0].stageLabel || stageLabels[stageKey] || stageKey;
 
     for (const item of items) {
       rowNum++;
@@ -1045,20 +1048,20 @@ function renderBOMTable(bom: PermitInput['bom']): string {
       const reqBadge = item.required !== false
         ? ''
         : ' <span style="font-size:7px;background:#eee;padding:1px 3px;">OPT</span>';
-      const descExtra = (item as any).description && (item as any).description !== item.model
-        ? '<br/><span style="color:#555;font-size:7px;">' + (item as any).description + '</span>'
+      const descExtra = item.description && item.description !== item.model
+        ? '<br/><span style="color:#555;font-size:7px;">' + item.description + '</span>'
         : '';
       html += '<tr style="' + bg + '">';
       html += '<td class="mono f-lg" style="color:#888;text-align:center">' + rowNum + '</td>';
-      html += '<td style="font-size:7.5px;color:#555">' + ((item as any).stageLabel || stageLabel) + '</td>';
+      html += '<td style="font-size:7.5px;color:#555">' + (item.stageLabel || stageLabel) + '</td>';
       html += '<td style="text-transform:capitalize;font-weight:600">' + item.category.replace(/_/g, ' ') + '</td>';
       html += '<td>' + (item.manufacturer || '—') + '</td>';
       html += '<td style="font-size:8px;">' + (item.model || '—') + descExtra + reqBadge + '</td>';
       html += '<td class="mono f-lg">' + (item.partNumber || '—') + '</td>';
       html += '<td class="tr fw7">' + item.quantity + '</td>';
       html += '<td>' + item.unit + '</td>';
-      html += '<td class="mono f-lg" style="font-size:7px;color:#2255aa;">' + ((item as any).necReference || '—') + '</td>';
-      html += '<td style="font-size:7px;color:#666;">' + ((item as any).derivedFrom || '—') + '</td>';
+      html += '<td class="mono f-lg" style="font-size:7px;color:#2255aa;">' + (item.necReference || '—') + '</td>';
+      html += '<td style="font-size:7px;color:#666;">' + (item.derivedFrom || '—') + '</td>';
       html += '</tr>';
     }
   }

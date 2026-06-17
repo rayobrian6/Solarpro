@@ -22,6 +22,7 @@ import type {
   CADObstruction, CADElectricalNode,
 } from '../types';
 import type { SysDefObstruction, SysDefElectricalNode } from '@/lib/system/systemDefinition';
+import type { CanonicalBridgeResult, CADCanonicalRoofPlaneInput } from '../canonicalBridge';
 import {
   Point2D, BBox,
   latLngToXY, latlngArrayToXY, bbox,
@@ -43,9 +44,15 @@ const DEFAULT_RAKE_SETBACK_IN  = 36;  // 3 ft (sides)
 
 export function roofCAD(input: PermitInputShape): CADModel {
   const t0 = Date.now();
+  // Error 5q fix: _canonicalCADBridge is now on PermitInputShape — no `as any` needed
+  const canonicalBridge = input._canonicalCADBridge;
+  const canonicalRoofPlanes = canonicalBridge?.roofPlanes ?? [];
+  const usingCanonicalRoofPlanes = canonicalRoofPlanes.length > 0;
+
   console.log('[CAD ENGINE INIT] roofCAD', {
     panelPositions: input.project?.panelPositions?.length ?? 0,
     roofPlanes:     input.project?.roofPlanes?.length ?? 0,
+    canonicalRoofPlanes: canonicalRoofPlanes.length,
     totalPanels:    input.system?.totalPanels,
     systemKw:       input.system?.totalDcKw,
   });
@@ -57,10 +64,13 @@ export function roofCAD(input: PermitInputShape): CADModel {
   // contains world-projected obstructions. We project them to CAD space and
   // filter panels that fall within (radiusM + setbackM) of each obstruction.
   // This is NON-BREAKING: if obstructions is undefined/empty, nothing changes.
+  // Error 5w fix: _systemDefinition now declared on PermitInputShape — no `as any` needed
   const sysDefObstructions: SysDefObstruction[] =
-    (input as any)._systemDefinition?.obstructions ?? [];
+    input._systemDefinition?.obstructions ?? [];
   const sysDefElecNodes: SysDefElectricalNode[] =
-    (input as any)._systemDefinition?.electricalNodes ?? [];
+    input._systemDefinition?.electricalNodes ?? [];
+  const canonicalCADObstructions: CADObstruction[] = canonicalBridge?.obstructions ?? [];
+  const canonicalCADElecNodes: CADElectricalNode[] = canonicalBridge?.electricalNodes ?? [];
 
   // ── Panel dimensions ─────────────────────────────────────────
   const panelLenIn = input.project?.panelLengthIn ?? DEFAULT_PANEL_LENGTH_IN;
@@ -78,7 +88,7 @@ export function roofCAD(input: PermitInputShape): CADModel {
   const rakeM  = rakeSetIn  * INCHES_TO_METERS;
 
   // ── Raw input data ────────────────────────────────────────────
-  const rawPlanes  = (input.project?.roofPlanes     || []).filter(
+  const rawPlanes  = usingCanonicalRoofPlanes ? [] : (input.project?.roofPlanes     || []).filter(
     rp => rp.vertices && rp.vertices.length >= 3 &&
           rp.vertices.every((v: any) => isFinite(v.lat) && isFinite(v.lng) && Math.abs(v.lat) > 0.001)
   );
@@ -87,15 +97,29 @@ export function roofCAD(input: PermitInputShape): CADModel {
   );
 
   // ── Global origin — centroid of all plane vertices ────────────
+  if (usingCanonicalRoofPlanes) {
+    warnings.push('roofCAD: using cad-safe canonical roof geometry from CanonicalBuildingModel');
+  }
+
   const allLatLngs: Array<{ lat: number; lng: number }> = rawPlanes.flatMap(
     (rp: any) => rp.vertices
   );
-  const originLat = allLatLngs.length > 0
-    ? allLatLngs.reduce((s, v) => s + v.lat, 0) / allLatLngs.length
-    : (rawPanels[0]?.lat ?? 37.0);
-  const originLng = allLatLngs.length > 0
-    ? allLatLngs.reduce((s, v) => s + v.lng, 0) / allLatLngs.length
-    : (rawPanels[0]?.lng ?? -122.0);
+  // When using canonical roof planes, the bridge already derived originLat/originLng
+  // from the worldPolygon vertices (lat/lng → local-meters projection). Use those
+  // so that GPS panel positions and other lat/lng-based computations share the same
+  // coordinate origin as the canonical roof plane polygons.
+  // Without this, origin defaults to (37.0, -122.0) because rawPlanes is empty,
+  // placing all GPS-derived points far from the canonical plane polygons.
+  const originLat = usingCanonicalRoofPlanes && canonicalBridge?.originLat != null
+    ? canonicalBridge.originLat
+    : allLatLngs.length > 0
+      ? allLatLngs.reduce((s, v) => s + v.lat, 0) / allLatLngs.length
+      : (rawPanels[0]?.lat ?? 37.0);
+  const originLng = usingCanonicalRoofPlanes && canonicalBridge?.originLng != null
+    ? canonicalBridge.originLng
+    : allLatLngs.length > 0
+      ? allLatLngs.reduce((s, v) => s + v.lng, 0) / allLatLngs.length
+      : (rawPanels[0]?.lng ?? -122.0);
 
   // ── GPS panel lookup map ──────────────────────────────────────
   // Map each GPS panel to local XY
@@ -111,24 +135,41 @@ export function roofCAD(input: PermitInputShape): CADModel {
       orientation: (p.orientation || 'portrait').toLowerCase(),
       row:         p.row,
       col:         p.col,
-      planeId:     (p as any).planeId || (p as any).arrayId,
+      // Error 5x fix: planeId now on panelPositions type; arrayId was already there
+      planeId:     p.planeId || p.arrayId,
     };
   });
 
   // ── Build planes ──────────────────────────────────────────────
   const cadPlanes: CADRoofPlane[] = [];
 
-  if (rawPlanes.length > 0) {
-    for (const rp of rawPlanes as any[]) {
+  if (usingCanonicalRoofPlanes) {
+    for (const rp of canonicalRoofPlanes) {
+      appendCADRoofPlaneFromLocal({
+        rp,
+        polyXY: rp.polygon,
+        setbacks: rp.setbacks,
+        panelPortraitW,
+        panelPortraitH,
+        warnings,
+        cadPlanes,
+        sysDefObstructions,
+        canonicalCADObstructions,
+      });
+    }
+  } else if (rawPlanes.length > 0) {
+    for (const rp of rawPlanes) {
       // Convert plane vertices to local XY
       const polyXY: Point2D[] = rp.vertices.map((v: any) =>
         latLngToXY(v.lat, v.lng, originLat, originLng)
       );
 
+      const planeSetbacks = { eaveM, ridgeM, rakeM };
+
       // Apply uniform setback (use full inset for simplicity — all sides equal)
       // For a true AHJ permit: eave at bottom, ridge at top, rake on sides.
       // We use a conservative uniform inset of min(eave, ridge, rake).
-      const conservativeInset = Math.min(eaveM, ridgeM, rakeM);
+      const conservativeInset = Math.min(planeSetbacks.eaveM, planeSetbacks.ridgeM, planeSetbacks.rakeM);
       const usablePolygon = insetPolygon(polyXY, conservativeInset);
 
       const planeBB = bbox(usablePolygon.length >= 3 ? usablePolygon : polyXY);
@@ -217,9 +258,9 @@ export function roofCAD(input: PermitInputShape): CADModel {
 
       console.log('[SETBACK APPLIED] roofCAD', {
         planeId:       rp.id,
-        eaveM:         eaveM.toFixed(3),
-        ridgeM:        ridgeM.toFixed(3),
-        rakeM:         rakeM.toFixed(3),
+        eaveM:         planeSetbacks.eaveM.toFixed(3),
+        ridgeM:        planeSetbacks.ridgeM.toFixed(3),
+        rakeM:         planeSetbacks.rakeM.toFixed(3),
         insetM:        conservativeInset.toFixed(3),
         polyPts:       polyXY.length,
         usablePts:     usablePolygon.length,
@@ -230,7 +271,10 @@ export function roofCAD(input: PermitInputShape): CADModel {
       // ── Obstruction collision filtering ──────────────────────────────────
       // Remove panels whose center falls within any obstruction exclusion zone.
       // Exclusion zone = radiusM + setbackIn * INCHES_TO_METERS.
-      const planeObstructions = buildCADObstructions(sysDefObstructions, rp.id);
+      const planeObstructions = [
+        ...buildCADObstructions(sysDefObstructions, rp.id),
+        ...canonicalCADObstructions.filter(o => o.roofPlaneId === rp.id),
+      ];
       const filteredPanels = filterPanelsByObstructions(planePanels, planeObstructions, warnings);
       const removedCount = planePanels.length - filteredPanels.length;
       if (removedCount > 0) {
@@ -255,7 +299,7 @@ export function roofCAD(input: PermitInputShape): CADModel {
         pitch:         rp.pitch  ?? 5,
         azimuth:       rp.azimuth ?? 180,
         areaSqM,
-        setbacks:      { eaveM, ridgeM, rakeM },
+        setbacks:      planeSetbacks,
         panels:        filteredPanels,
         obstructions:  planeObstructions,
         dimensions: {
@@ -325,11 +369,22 @@ export function roofCAD(input: PermitInputShape): CADModel {
 
   // ── Aggregate totals ──────────────────────────────────────────
   const allPanels = cadPlanes.flatMap(p => p.panels);
-  const totalPanels = allPanels.length || input.system?.totalPanels || 0;
-  const panelWatts  = (input.system?.inverters?.[0]?.strings?.[0] as any)?.panelWatts
+  // When a project-specified system size exists (e.g. 34 panels / 13.60 kW),
+  // the CAD layout may place far more panels than specified because worldPolygon
+  // projections can produce oversized roof areas.  Honour the project spec as
+  // the authoritative system size; fall back to the CAD-placed count only when
+  // no project spec exists.
+  const projectTotalPanels = input.system?.totalPanels;
+  const totalPanels = projectTotalPanels && projectTotalPanels > 0
+    ? projectTotalPanels
+    : (allPanels.length || input.system?.totalPanels || 0);
+  // Error 5ab fix: panelWatts IS on PermitInputShape.system.inverters[].strings[] — no `as any` needed
+  const panelWatts  = input.system?.inverters?.[0]?.strings?.[0]?.panelWatts
     ?? input.project?.['panelWatts']
     ?? 400;
-  const totalDcKw   = totalPanels * panelWatts / 1000;
+  const totalDcKw   = projectTotalPanels && projectTotalPanels > 0
+    ? (input.system?.totalDcKw ?? (totalPanels * panelWatts / 1000))
+    : totalPanels * panelWatts / 1000;
 
   // ── Global bounds ──────────────────────────────────────────────
   const allPoints = cadPlanes.flatMap(p => p.polygon);
@@ -354,8 +409,14 @@ export function roofCAD(input: PermitInputShape): CADModel {
   });
 
   // Build top-level CAD obstruction and electrical node arrays
-  const allCADObstructions = buildCADObstructions(sysDefObstructions, null);
-  const allCADElecNodes = buildCADElectricalNodes(sysDefElecNodes);
+  const allCADObstructions = [
+    ...buildCADObstructions(sysDefObstructions, null),
+    ...canonicalCADObstructions,
+  ];
+  const allCADElecNodes = [
+    ...buildCADElectricalNodes(sysDefElecNodes),
+    ...canonicalCADElecNodes,
+  ];
 
   return {
     systemType:      'roof',
@@ -374,6 +435,120 @@ export function roofCAD(input: PermitInputShape): CADModel {
     obstructions:    allCADObstructions.length > 0 ? allCADObstructions : undefined,
     electricalNodes: allCADElecNodes.length > 0 ? allCADElecNodes : undefined,
   };
+}
+
+
+function appendCADRoofPlaneFromLocal(args: {
+  rp: CADCanonicalRoofPlaneInput;
+  polyXY: Point2D[];
+  setbacks: { eaveM: number; ridgeM: number; rakeM: number };
+  panelPortraitW: number;
+  panelPortraitH: number;
+  warnings: string[];
+  cadPlanes: CADRoofPlane[];
+  sysDefObstructions: SysDefObstruction[];
+  canonicalCADObstructions: CADObstruction[];
+}): void {
+  const {
+    rp,
+    polyXY,
+    setbacks,
+    panelPortraitW,
+    panelPortraitH,
+    warnings,
+    cadPlanes,
+    sysDefObstructions,
+    canonicalCADObstructions,
+  } = args;
+
+  const conservativeInset = Math.min(setbacks.eaveM, setbacks.ridgeM, setbacks.rakeM);
+  const usablePolygon = insetPolygon(polyXY, conservativeInset);
+  const planeBB = bbox(usablePolygon.length >= 3 ? usablePolygon : polyXY);
+  const gridPoly = usablePolygon.length >= 3 ? usablePolygon : polyXY;
+  const gridBB = bbox(gridPoly);
+
+  const cells = gridInsidePolygon(
+    gridPoly,
+    panelPortraitW,
+    panelPortraitH,
+    DEFAULT_GAP_M,
+    DEFAULT_GAP_M,
+    gridBB,
+  );
+
+  const useCells = cells.length > 0 ? cells : (() => {
+    warnings.push(`plane ${rp.id}: canonical portrait grid=0, trying landscape`);
+    return gridInsidePolygon(
+      gridPoly,
+      panelPortraitH,
+      panelPortraitW,
+      DEFAULT_GAP_M,
+      DEFAULT_GAP_M,
+      gridBB,
+    );
+  })();
+
+  const planePanels: CADPanel[] = useCells.map(cell => ({
+    id:          `${rp.id}-r${cell.row}-c${cell.col}`,
+    x:           cell.x,
+    y:           cell.y,
+    widthM:      panelPortraitW,
+    heightM:     panelPortraitH,
+    orientation: 'portrait',
+    row:         cell.row,
+    col:         cell.col,
+    planeId:     rp.id,
+  }));
+
+  const planeObstructions = [
+    ...buildCADObstructions(sysDefObstructions, rp.id),
+    ...canonicalCADObstructions.filter(o => o.roofPlaneId === rp.id),
+  ];
+  const filteredPanels = filterPanelsByObstructions(planePanels, planeObstructions, warnings);
+  const removedCount = planePanels.length - filteredPanels.length;
+  if (removedCount > 0) {
+    warnings.push(`[OBSTRUCTION] plane ${rp.id}: removed ${removedCount} canonical panel(s) blocked by obstructions`);
+  }
+
+  const filteredBB = filteredPanels.length > 0
+    ? bbox(filteredPanels.flatMap(p => [
+        { x: p.x, y: p.y },
+        { x: p.x + p.widthM, y: p.y + p.heightM },
+      ]))
+    : planeBB;
+  const filteredRows = new Set(filteredPanels.map(p => p.row)).size;
+  const filteredCols = new Set(filteredPanels.map(p => p.col)).size;
+
+  console.log('[SETBACK APPLIED] roofCAD canonical', {
+    planeId:       rp.id,
+    eaveM:         setbacks.eaveM.toFixed(3),
+    ridgeM:        setbacks.ridgeM.toFixed(3),
+    rakeM:         setbacks.rakeM.toFixed(3),
+    insetM:        conservativeInset.toFixed(3),
+    polyPts:       polyXY.length,
+    usablePts:     usablePolygon.length,
+    areaSqM:       rp.areaSqM.toFixed(1),
+    planePanels:   filteredPanels.length,
+    sourceArtifactId: rp.sourceArtifactId,
+  });
+
+  cadPlanes.push({
+    id:            rp.id,
+    polygon:       polyXY,
+    usablePolygon: usablePolygon.length >= 3 ? usablePolygon : polyXY,
+    pitch:         rp.pitch,
+    azimuth:       rp.azimuth,
+    areaSqM:       rp.areaSqM,
+    setbacks,
+    panels:        filteredPanels,
+    obstructions:  planeObstructions,
+    dimensions: {
+      widthM:      filteredBB.width,
+      heightM:     filteredBB.height,
+      panelCountX: filteredCols,
+      panelCountY: filteredRows,
+    },
+  });
 }
 
 // ── Dimension builder ─────────────────────────────────────────

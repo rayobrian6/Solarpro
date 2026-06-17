@@ -429,7 +429,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const mockReq = new NextRequest(req.url, {
     method: 'POST',
     body: JSON.stringify(body),
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      cookie: req.headers.get('cookie') || '',
+      authorization: req.headers.get('authorization') || '',
+    },
   });
 
   return POST(mockReq);

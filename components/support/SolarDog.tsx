@@ -859,11 +859,11 @@ export default function SolarDog({ autoStartTour = false, onTourComplete }: Sola
       }
 
     } catch {
-      setMessages(prev => [{
+      setMessages(prev => [...prev, {
         role: 'assistant',
         content: "Network error — I'm temporarily offline 🐾",
         severity: 'warning',
-      }, ...messagesRef.current.slice(0, -1)]);
+      }]);
       setIsLoading(false);
       setDogPose('idle');
     }

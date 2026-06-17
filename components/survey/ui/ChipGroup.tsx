@@ -177,17 +177,17 @@ export const ROOF_MATERIAL_OPTIONS: ChipOption[] = [
 ];
 
 export const ROOF_PITCH_OPTIONS: ChipOption[] = [
-  { value: 'flat',       label: 'Flat (<2)', },
-  { value: 'low',        label: 'Low (2-4)', },
-  { value: 'standard',   label: 'Std (5-9)', color: 'green' },
-  { value: 'steep',      label: 'Steep (10-14)', color: 'yellow' },
-  { value: 'very_steep', label: 'V. Steep (15+)', color: 'red' },
+  { value: 'flat',       label: 'Flat',           icon: '<2/12' },
+  { value: 'low',        label: 'Low slope',      icon: '2-4/12' },
+  { value: 'standard',   label: 'Medium slope',   icon: '5-9/12', color: 'green' },
+  { value: 'steep',      label: 'Steep',          icon: '10-14/12', color: 'yellow' },
+  { value: 'very_steep', label: 'Very steep',     icon: '15+/12', color: 'red' },
 ];
 
 export const RAFTER_SPACING_OPTIONS: ChipOption[] = [
-  { value: '16',    label: '16" OC',   color: 'green' },
-  { value: '24',    label: '24" OC',   color: 'cyan' },
-  { value: 'other', label: 'Other',    },
+  { value: '16',    label: 'Close (16" apart)',  color: 'green' },
+  { value: '24',    label: 'Standard (24" apart)', color: 'cyan' },
+  { value: 'other', label: 'Other',              },
 ];
 
 export const ROOF_CONDITION_OPTIONS: ChipOption[] = [
@@ -235,8 +235,8 @@ export const METER_SOCKET_OPTIONS: ChipOption[] = [
 export const INTERCONNECTION_OPTIONS: ChipOption[] = [
   { value: 'main_panel',  label: 'Main Panel' },
   { value: 'sub_panel',   label: 'Sub Panel' },
-  { value: 'load_side',   label: 'Load Side' },
-  { value: 'supply_side', label: 'Supply Side' },
+  { value: 'load_side',   label: 'Load Side Tap' },
+  { value: 'supply_side', label: 'Supply Side Tap' },
 ];
 
 export const SERVICE_ENTRANCE_OPTIONS: ChipOption[] = [

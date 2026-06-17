@@ -6,7 +6,7 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { renderSLDProfessional, type SLDProfessionalInput } from '@/lib/sld-professional-renderer';
-import { utilityDisplayName, interconnectionLabel } from './helpers';
+import { utilityDisplayName, interconnectionLabel, necNextStandardOcpd } from './helpers';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
 
@@ -41,10 +41,10 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   const inverterMfr   = eq.inverterManufacturer !== '—' ? eq.inverterManufacturer : '';
 
   // ── Electrical values from compliance/project ──
-  const acWireGauge  = (compliance as any)?.electrical?.acConductorCallout ?? project.wireGauge ?? '#10 AWG';
-  const dcWireGauge  = (compliance as any)?.electrical?.dcConductorCallout ?? '#10 AWG';
-  const acOCPD       = (project as any).backfeedBreakerA ?? (project as any).pvBackfeedA ?? (Math.ceil(acOutputAmps * 1.25 / 5) * 5 || 40);
-  const backfeedAmps = (project as any).backfeedBreakerA ?? acOCPD;
+  const acWireGauge  = compliance.electrical?.acConductorCallout ?? project.wireGauge ?? '#10 AWG';
+  const dcWireGauge  = compliance.electrical?.dcConductorCallout ?? '#10 AWG';
+  const acOCPD       = project.backfeedBreakerA ?? project.pvBackfeedA ?? (necNextStandardOcpd(acOutputAmps * 1.25) || 40);
+  const backfeedAmps = project.backfeedBreakerA ?? acOCPD;
   const mainAmps     = project.mainPanelAmps ?? 200;
   const acWireLength = project.wireLength || 60;
 
@@ -69,14 +69,15 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
 
   // ── Battery / Generator / ATS ──
   const hasBattery = !!(project.batteryCount && project.batteryCount > 0) || !!(project.batteryModel);
-  const batteryKwh = (project.batteryCount ?? 1) * (project.batteryKwh ?? 0);
+  const batteryKwh = hasBattery ? ((project.batteryCount || 1) * (project.batteryKwh ?? 5.0)) : 0;
 
   // ── Micro-specific ──
   const deviceCount = isMicro ? totalPanels : undefined;
   const nBranches = isMicro ? Math.ceil(totalPanels / 16) : undefined;
 
   // ── DC OCPD (string topology only) ──
-  const dcOCPD = isMicro ? 0 : (strings[0] as any)?.ocpd ?? 20;
+  // Error 5b fix: ocpd IS declared on string type — no need for `as any`
+  const dcOCPD = isMicro ? 0 : strings[0]?.ocpd ?? 20;
 
   return {
     projectName:             project.projectName ?? 'Solar PV System',
@@ -112,7 +113,8 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     hasBattery,
     batteryModel:            project.batteryModel ?? '',
     batteryKwh,
-    batteryBackfeedA:        project.batteryBackfeedA ?? undefined,
+    // Error 5ba fix: compute battery backfeed fallback (20A per unit typical residential)
+    batteryBackfeedA:        project.batteryBackfeedA ?? (hasBattery ? (project.batteryCount ?? 1) * 20 : undefined),
     generatorBrand:          project.generatorBrand ?? undefined,
     generatorKw:             project.generatorKw ?? undefined,
     atsBrand:                project.atsBrand ?? undefined,
@@ -128,7 +130,7 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     deviceCount,
 
     // Topology / MPPT
-    mpptChannels:            isMicro ? totalPanels : (inv0 as any)?.mpptChannels ?? 2,
+    mpptChannels:            isMicro ? totalPanels : inv0?.mpptChannels ?? 2,
     mpptAllocation:          isMicro ? `${totalPanels} microinverters` : undefined,
     combinerType:            isMicro ? 'DIRECT' : undefined,
     combinerLabel:           isMicro ? 'AC Trunk Cable' : undefined,
@@ -136,7 +138,7 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     dcAcRatio:               totalAcKw > 0 ? calcDcAcRatio(totalDcKw, totalAcKw) : undefined,
 
     // Design temperature (if available from AHJ data)
-    designTempMin:           (project as any).designTempMin ?? -10,
+    designTempMin:           project.designTempMin ?? -10,
   };
 }
 

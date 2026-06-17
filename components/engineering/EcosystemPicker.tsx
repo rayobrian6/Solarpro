@@ -71,11 +71,36 @@ export default function EcosystemPicker({
   const [selectedBattery, setSelectedBattery] = useState<string>('');
   const [selectedGateway, setSelectedGateway] = useState<string>('');
   const [selectedEvCharger, setSelectedEvCharger] = useState<string>('');
+  const [includeBattery, setIncludeBattery] = useState(true);
+  const [expertMode, setExpertMode] = useState(false);
 
   const kit: ResolvedBrandEquipment | null = useMemo(() => {
     if (!expandedBrand) return null;
     return resolveBrandEquipment(expandedBrand);
   }, [expandedBrand]);
+
+  // Auto-select defaults whenever brand or includeBattery changes
+  const autoSelections = useMemo(() => {
+    if (!expandedBrand || !kit) return { inverter: '', battery: '', gateway: '', evCharger: '' };
+    const firstInv =
+      kit.microinverters[0]?.id ||
+      kit.stringInverters[0]?.id ||
+      kit.optimizers[0]?.id ||
+      '';
+    const firstBattery = includeBattery ? (kit.batteries[0]?.id || '') : '';
+    const firstGateway = kit.monitoringGateways[0]?.id || '';
+    return { inverter: firstInv, battery: firstBattery, gateway: firstGateway, evCharger: '' };
+  }, [expandedBrand, kit, includeBattery]);
+
+  // Sync selections from auto-selection when not in expert mode
+  useMemo(() => {
+    if (!expertMode) {
+      setSelectedInverter(autoSelections.inverter);
+      setSelectedBattery(autoSelections.battery);
+      setSelectedGateway(autoSelections.gateway);
+      setSelectedEvCharger(autoSelections.evCharger);
+    }
+  }, [autoSelections, expertMode]);
 
   // Reset sub-selections whenever brand changes
   const handleBrandToggle = (brandId: string) => {
@@ -88,17 +113,7 @@ export default function EcosystemPicker({
       return;
     }
     setExpandedBrand(brandId);
-    // Pre-fill sensible defaults (first item in each category)
-    const k = resolveBrandEquipment(brandId);
-    const firstInv =
-      k.microinverters[0]?.id ||
-      k.stringInverters[0]?.id ||
-      k.optimizers[0]?.id ||
-      '';
-    setSelectedInverter(firstInv);
-    setSelectedBattery(k.batteries[0]?.id || '');
-    setSelectedGateway(k.monitoringGateways[0]?.id || '');
-    setSelectedEvCharger('');
+    setExpertMode(false);
   };
 
   const handleApply = () => {
@@ -177,23 +192,230 @@ export default function EcosystemPicker({
         })}
       </div>
 
-      {/* Expanded kit preview */}
+      {/* Expanded kit preview — simplified or expert mode */}
       {expandedBrand && kit && (
-        <EcosystemKitPanel
-          brandId={expandedBrand}
-          kit={kit}
-          selectedInverter={selectedInverter}
-          setSelectedInverter={setSelectedInverter}
-          selectedBattery={selectedBattery}
-          setSelectedBattery={setSelectedBattery}
-          selectedGateway={selectedGateway}
-          setSelectedGateway={setSelectedGateway}
-          selectedEvCharger={selectedEvCharger}
-          setSelectedEvCharger={setSelectedEvCharger}
-          onApply={handleApply}
-          canApply={Boolean(onApply)}
-        />
+        expertMode ? (
+          <EcosystemKitPanel
+            brandId={expandedBrand}
+            kit={kit}
+            selectedInverter={selectedInverter}
+            setSelectedInverter={setSelectedInverter}
+            selectedBattery={selectedBattery}
+            setSelectedBattery={setSelectedBattery}
+            selectedGateway={selectedGateway}
+            setSelectedGateway={setSelectedGateway}
+            selectedEvCharger={selectedEvCharger}
+            setSelectedEvCharger={setSelectedEvCharger}
+            onApply={handleApply}
+            canApply={Boolean(onApply)}
+          />
+        ) : (
+          <SimplifiedKitPanel
+            brandId={expandedBrand}
+            kit={kit}
+            includeBattery={includeBattery}
+            setIncludeBattery={setIncludeBattery}
+            autoSelections={autoSelections}
+            onApply={handleApply}
+            onExpertMode={() => setExpertMode(true)}
+            canApply={Boolean(onApply)}
+          />
+        )
       )}
+    </div>
+  );
+}
+
+// ─── Sub-component: Simplified kit confirmation (Phase 3E) ──────────────────
+
+interface SimplifiedKitPanelProps {
+  brandId: string;
+  kit: ResolvedBrandEquipment;
+  includeBattery: boolean;
+  setIncludeBattery: (v: boolean) => void;
+  autoSelections: { inverter: string; battery: string; gateway: string; evCharger: string };
+  onApply: () => void;
+  onExpertMode: () => void;
+  canApply: boolean;
+}
+
+function SimplifiedKitPanel(props: SimplifiedKitPanelProps) {
+  const {
+    brandId,
+    kit,
+    includeBattery,
+    setIncludeBattery,
+    autoSelections,
+    onApply,
+    onExpertMode,
+    canApply,
+  } = props;
+
+  const brandName = ECOSYSTEM_BRANDS.find((b) => b.id === brandId)?.displayName ?? brandId;
+
+  // Resolve display names for auto-selected equipment
+  const allInverters = [
+    ...kit.microinverters,
+    ...kit.stringInverters,
+    ...kit.optimizers,
+  ];
+  const selectedInv = allInverters.find((i) => i.id === autoSelections.inverter);
+  const selectedBat = kit.batteries.find((b) => b.id === autoSelections.battery);
+  const selectedGw = kit.monitoringGateways.find((g) => g.id === autoSelections.gateway);
+
+  const isBatteryOnlyEcosystem = allInverters.length === 0;
+  const hasNonInverterSelection = Boolean(
+    autoSelections.battery || autoSelections.gateway || autoSelections.evCharger
+  );
+  const canActuallyApply = isBatteryOnlyEcosystem
+    ? canApply && hasNonInverterSelection
+    : canApply && Boolean(autoSelections.inverter);
+
+  return (
+    <div className="rounded-xl bg-slate-900/60 border border-indigo-500/20 p-4 space-y-3">
+      {/* Brand header */}
+      <div className="flex items-center gap-2 text-xs text-indigo-300/80 font-semibold uppercase tracking-wide">
+        <Sparkles size={12} />
+        Your {brandName} System
+      </div>
+
+      {/* Battery toggle — the only user decision besides brand */}
+      {kit.batteries.length > 0 && (
+        <label className="flex items-center gap-3 cursor-pointer group">
+          <div className={`
+            relative w-10 h-5 rounded-full transition-colors
+            ${includeBattery ? 'bg-emerald-500' : 'bg-slate-700'}
+          `}>
+            <div className={`
+              absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform
+              ${includeBattery ? 'translate-x-5' : 'translate-x-0'}
+            `} />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm text-white group-hover:text-indigo-200 transition-colors">
+              Include battery storage
+            </span>
+            <span className="text-[11px] text-slate-400">
+              {includeBattery
+                ? `${selectedBat?.manufacturer ?? brandName} ${selectedBat?.model ?? 'battery'} included`
+                : 'No battery — solar only'}
+            </span>
+          </div>
+          <input
+            type="checkbox"
+            checked={includeBattery}
+            onChange={(e) => setIncludeBattery(e.target.checked)}
+            className="sr-only"
+          />
+        </label>
+      )}
+
+      {/* Auto-selected equipment confirmation list */}
+      <div className="space-y-2">
+        {/* Inverter */}
+        {selectedInv && (
+          <div className="flex items-center gap-2 text-sm text-slate-200">
+            <Cpu size={14} className="text-blue-300 flex-shrink-0" />
+            <span className="flex-1">
+              {selectedInv.manufacturer} {selectedInv.model}
+            </span>
+            <span className="text-[11px] text-emerald-400/80 flex items-center gap-1">
+              <CheckCircle2 size={10} /> Auto-selected
+            </span>
+          </div>
+        )}
+
+        {/* Battery */}
+        {includeBattery && selectedBat && (
+          <div className="flex items-center gap-2 text-sm text-slate-200">
+            <Battery size={14} className="text-emerald-300 flex-shrink-0" />
+            <span className="flex-1">
+              {selectedBat.manufacturer} {selectedBat.model} — {selectedBat.usableCapacityKwh ?? '?'} kWh
+            </span>
+            <span className="text-[11px] text-emerald-400/80 flex items-center gap-1">
+              <CheckCircle2 size={10} /> Auto-selected
+            </span>
+          </div>
+        )}
+
+        {/* Gateway */}
+        {selectedGw && (
+          <div className="flex items-center gap-2 text-sm text-slate-200">
+            <Wifi size={14} className="text-cyan-300 flex-shrink-0" />
+            <span className="flex-1">
+              {selectedGw.manufacturer} {selectedGw.model}
+            </span>
+            <span className="text-[11px] text-emerald-400/80 flex items-center gap-1">
+              <CheckCircle2 size={10} /> Auto-selected
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Compatible racking (read-only, same as expert mode) */}
+      <div className="rounded-lg bg-slate-800/40 border border-slate-700/50 p-3">
+        <div className="flex items-center gap-2 text-xs text-slate-400 font-semibold uppercase tracking-wide mb-1.5">
+          <Layers size={11} className="text-violet-300" /> Compatible Racking
+        </div>
+        {kit.compatibleRacking.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {Array.from(
+              kit.compatibleRacking.reduce((map, sys) => {
+                map.set(sys.manufacturer, (map.get(sys.manufacturer) || 0) + 1);
+                return map;
+              }, new Map<string, number>()),
+            ).map(([mfg, count]) => (
+              <Chip
+                key={mfg}
+                text={count > 1 ? `${mfg} (${count})` : mfg}
+                tone="slate"
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="text-[11px] text-slate-400 italic">
+            Compatible with major racking systems (IronRidge, Unirac, SnapNrack, etc.).
+          </div>
+        )}
+      </div>
+
+      {/* Battery-only ecosystem hint (same as expert mode) */}
+      {isBatteryOnlyEcosystem && (
+        <div className="flex items-start gap-2 text-xs text-cyan-200/90 bg-cyan-500/5 border border-cyan-500/20 rounded-lg p-3">
+          <Info size={14} className="text-cyan-300 flex-shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <div className="font-semibold text-cyan-200">AC-coupled battery ecosystem</div>
+            <div className="text-slate-300/90">
+              {brandName} does not provide a solar inverter — it's battery + gateway only.
+              Your existing solar inverter selection will be preserved.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Apply + Expert mode toggle */}
+      <div className="flex flex-col gap-2 pt-1">
+        <button
+          type="button"
+          onClick={onApply}
+          disabled={!canActuallyApply}
+          className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+            !canActuallyApply
+              ? 'bg-slate-700/50 text-slate-500 cursor-not-allowed'
+              : 'bg-indigo-500 hover:bg-indigo-400 text-white shadow-lg shadow-indigo-500/20'
+          }`}
+        >
+          <Package size={14} />
+          Apply {brandName} System
+        </button>
+        <button
+          type="button"
+          onClick={onExpertMode}
+          className="text-xs text-indigo-300/60 hover:text-indigo-200 transition-colors text-center underline underline-offset-2"
+        >
+          Customize individually
+        </button>
+      </div>
     </div>
   );
 }

@@ -49,8 +49,10 @@ import {
   ArrowLeft, Upload, Map, FileText, Zap, DollarSign,
   User, Calendar, AlertTriangle, CheckCircle, ChevronRight,
   Settings, BarChart2, Shield, Sun, Wrench, Send, Package, Camera,
-  Pencil, X, Network, Loader2
+  Pencil, X, Network, Loader2, Sparkles, Activity, LayoutGrid, TrendingUp, MapPin
 } from 'lucide-react';
+import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
+import type { ConfidenceSource, ConfidenceLevel } from '@/components/recommend/ConfidenceBadge';
 import Link from 'next/link';
 import EngineeringTab from '@/components/engineering/EngineeringTab';
 import BillTab from '@/components/project/BillTab';
@@ -222,6 +224,46 @@ const TUTORIAL_CONFIG: Partial<Record<TabId, {
     videoId:     'PLACEHOLDER_OPERATIONS',
     duration:    '1:10',
   },
+};
+
+// ─── Data Confidence Mapper ──────────────────────────────────────────────
+// Maps project fields to confidence level + source + detail for ConfidenceBadge
+const projectConfidence = (
+  field: string,
+  project: Project
+): { confidence: ConfidenceLevel; source: ConfidenceSource; detail?: string } => {
+  if (field === 'systemSize') {
+    if (project.systemSizeKw && project.systemSizeKw > 0 && project.billAnalysis?.recommendedSystemKw) {
+      return { confidence: 'high', source: 'pvwatts', detail: 'Bill + irradiance' };
+    }
+    if (project.systemSizeKw && project.systemSizeKw > 0) return { confidence: 'medium', source: 'manual', detail: 'Manual override' };
+    return { confidence: 'low', source: 'fallback' };
+  }
+  if (field === 'utilityRate') {
+    const rate = project.utilityRatePerKwh ?? project.billAnalysis?.utilityRate;
+    if (rate && rate > 0 && rate !== 0.13) return { confidence: 'high', source: 'bill-ocr', detail: 'From utility bill' };
+    if (rate && rate > 0) return { confidence: 'medium', source: 'state-avg', detail: 'State average' };
+    return { confidence: 'low', source: 'fallback' };
+  }
+  if (field === 'annualKwh') {
+    if (project.billAnalysis?.annualKwh && project.billAnalysis.annualKwh > 0) {
+      const months = project.billAnalysis.monthlyKwh?.length || 0;
+      return { confidence: months >= 12 ? 'high' : 'medium', source: 'bill-ocr', detail: months >= 12 ? '12-month history' : `${months}-month partial` };
+    }
+    return { confidence: 'low', source: 'fallback' };
+  }
+  if (field === 'production') {
+    if (project.production?.annualProductionKwh && project.production.annualProductionKwh > 0) {
+      return { confidence: 'high', source: 'pvwatts', detail: 'Modeled' };
+    }
+    return { confidence: 'low', source: 'fallback' };
+  }
+  if (field === 'address') {
+    if (project.lat && project.lng) return { confidence: 'high', source: 'address-lookup', detail: 'Geocoded' };
+    if (project.address) return { confidence: 'medium', source: 'manual', detail: 'Not geocoded' };
+    return { confidence: 'low', source: 'fallback' };
+  }
+  return { confidence: 'medium', source: 'manual' };
 };
 
 function getMissingWarnings(project: Project): { label: string; action: string; tab: TabId }[] {
@@ -742,38 +784,117 @@ function ProjectDetailInner() {
           </div>
         )}
 
-        {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div className="flex items-start gap-3 flex-wrap">
-          <Link href="/projects" className="btn-ghost p-2 rounded-lg mt-0.5">
-            <ArrowLeft size={18} />
-          </Link>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl font-black text-white">{project.name}</h1>
-              <span className={`badge ${statusColors[project.status]}`}>{project.status}</span>
-              {/* System type badge — click pencil to change type */}
-              <button
-                onClick={() => setShowChangeTypeModal(true)}
-                title="Change system type"
-                className={`badge ${project.systemType === 'roof' ? 'badge-roof' : project.systemType === 'ground' ? 'badge-ground' : 'badge-fence'} inline-flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity`}
-              >
-                {typeLabel}
-                <Pencil size={10} className="opacity-60" />
-              </button>
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Link href={`/admin/engineering-intelligence/project/${id}`} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/25 bg-sky-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-sky-300 transition hover:bg-sky-500/20">
-                <Network size={12} /> Engineering Intelligence
+        {/* ── Project Header ── */}
+        <div className="card overflow-hidden">
+          <div className="border-l-4 border-amber-500/60 px-5 py-4">
+            {/* Top row: back + title + badges */}
+            <div className="flex items-start gap-3">
+              <Link href="/projects" className="btn-ghost p-2 rounded-lg mt-0.5 hover:bg-white/5">
+                <ArrowLeft size={18} />
               </Link>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h1 className="text-lg font-bold text-white">{project.name}</h1>
+                  <span className={`badge ${statusColors[project.status]}`}>{project.status}</span>
+                  <button
+                    onClick={() => setShowChangeTypeModal(true)}
+                    title="Change system type"
+                    className={`badge ${project.systemType === 'roof' ? 'badge-roof' : project.systemType === 'ground' ? 'badge-ground' : 'badge-fence'} inline-flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity`}
+                  >
+                    {typeLabel}
+                    <Pencil size={10} className="opacity-60" />
+                  </button>
+                </div>
+                {/* Context row */}
+                <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-400 flex-wrap">
+                  {project.client?.name && (
+                    <Link href={`/clients/${project.client.id}`} className="flex items-center gap-1 text-slate-300 hover:text-white transition-colors">
+                      <User size={10} />{project.client.name}
+                    </Link>
+                  )}
+                  <span className="flex items-center gap-1"><Calendar size={10} />{new Date(project.createdAt).toLocaleDateString()}</span>
+                  {project.address && (() => {
+                    const ac = projectConfidence('address', project);
+                    return (
+                      <span className="flex items-center gap-1.5">
+                        <MapPin size={10} className="text-slate-500" />
+                        <span className="truncate max-w-[200px]">{project.address}</span>
+                        <ConfidenceBadge confidence={ac.confidence} source={ac.source} size="xs" detail={ac.detail} />
+                      </span>
+                    );
+                  })()}
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-3 mt-1 text-xs text-slate-400 flex-wrap">
-              {project.client?.name && (
-                <span className="flex items-center gap-1"><User size={10} />{project.client.name}</span>
-              )}
-              <span className="flex items-center gap-1"><Calendar size={10} />{new Date(project.createdAt).toLocaleDateString()}</span>
-              {project.address && (
-                <span className="text-slate-500 truncate max-w-xs">{project.address}</span>
-              )}
+
+            {/* Metric pills with ConfidenceBadge — clean, no gradients */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 ml-11">
+              {/* System Size */}
+              <div className="px-3 py-2.5 rounded-lg bg-slate-800/60">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">System Size</span>
+                  <ConfidenceBadge
+                    confidence={projectConfidence('systemSize', project).confidence}
+                    source={projectConfidence('systemSize', project).source}
+                    size="xs"
+                    detail={projectConfidence('systemSize', project).detail}
+                  />
+                </div>
+                <div className="text-base font-bold text-white">
+                  {project.systemSizeKw ? `${project.systemSizeKw.toFixed(1)} kW` : '\u2014'}
+                </div>
+              </div>
+              {/* Utility Rate */}
+              <div className="px-3 py-2.5 rounded-lg bg-slate-800/60">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">Utility Rate</span>
+                  <ConfidenceBadge
+                    confidence={projectConfidence('utilityRate', project).confidence}
+                    source={projectConfidence('utilityRate', project).source}
+                    size="xs"
+                    detail={projectConfidence('utilityRate', project).detail}
+                  />
+                </div>
+                <div className="text-base font-bold text-white">
+                  {(project.utilityRatePerKwh ?? project.billAnalysis?.utilityRate)
+                    ? `$${(project.utilityRatePerKwh ?? project.billAnalysis?.utilityRate ?? 0).toFixed(3)}/kWh`
+                    : '\u2014'}
+                </div>
+              </div>
+              {/* Annual Usage */}
+              <div className="px-3 py-2.5 rounded-lg bg-slate-800/60">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">Annual Usage</span>
+                  <ConfidenceBadge
+                    confidence={projectConfidence('annualKwh', project).confidence}
+                    source={projectConfidence('annualKwh', project).source}
+                    size="xs"
+                    detail={projectConfidence('annualKwh', project).detail}
+                  />
+                </div>
+                <div className="text-base font-bold text-white">
+                  {project.billAnalysis?.annualKwh
+                    ? `${(project.billAnalysis.annualKwh / 1000).toFixed(1)} MWh`
+                    : '\u2014'}
+                </div>
+              </div>
+              {/* Production */}
+              <div className="px-3 py-2.5 rounded-lg bg-slate-800/60">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">Production</span>
+                  <ConfidenceBadge
+                    confidence={projectConfidence('production', project).confidence}
+                    source={projectConfidence('production', project).source}
+                    size="xs"
+                    detail={projectConfidence('production', project).detail}
+                  />
+                </div>
+                <div className="text-base font-bold text-white">
+                  {project.production?.annualProductionKwh
+                    ? `${(project.production.annualProductionKwh / 1000).toFixed(1)} MWh/yr`
+                    : '\u2014'}
+                </div>
+              </div>
             </div>
           </div>
         </div>

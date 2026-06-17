@@ -1,5 +1,5 @@
 // ============================================================================
-// v47.437 - Survey V2: Step 3 - Electrical Service
+// v47.439 - Survey V2: Step 3 - Electrical Service
 //
 // Captures main panel brand, rating, available breaker slots, meter socket
 // type, interconnection point, service entrance type, sub-panel info,
@@ -10,11 +10,16 @@
 //   - Load calculations and permit plan sets
 //   - Sub-panel and supply-side tap assessments
 //
+// Phase 4D: Satellite/street-view service entrance detection pre-fill.
+// When lat/lng are available, satellite analysis suggests overhead vs
+// underground service entrance with ConfidenceBadge. User can accept or
+// override.
+//
 // Pure ASCII, no Unicode.
 // ============================================================================
 
-import React from 'react';
-import type { SurveyElectricalService } from '../../lib/survey/v2/types';
+import React, { useMemo } from 'react';
+import type { SurveyElectricalService, SurveySiteOverview, SurveyPhoto } from '../../lib/survey/v2/types';
 import { StepCard, StepField, StepTextArea, StepToggle } from './ui/StepCard';
 import {
   ChipGroup,
@@ -25,20 +30,144 @@ import {
   INTERCONNECTION_OPTIONS,
   SERVICE_ENTRANCE_OPTIONS,
 } from './ui/ChipGroup';
+import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
+import { RecommendationCard, type RecommendationValue } from '@/components/recommend/RecommendationCard';
+import { computeDefaultPanelRating, computeInterconnection } from '@/lib/survey/prefillComputations';
+import { useSatelliteAnalysis } from '@/hooks/useSatelliteAnalysis';
+import { usePhotoExtraction } from '@/hooks/usePhotoExtraction';
+import { mapConfidence } from '@/lib/satellite/types';
+import { breakerCountToChipValue } from '@/lib/satellite/photoExtractor';
 
 interface StepElectricalProps {
   data: SurveyElectricalService;
   onChange: (data: SurveyElectricalService) => void;
   disabled?: boolean;
+  /** Site overview for structure type (residential vs commercial) + satellite analysis */
+  siteOverview?: SurveySiteOverview;
+  /** Uploaded photos for photo-based extraction */
+  photos?: SurveyPhoto[];
+  /** Roof age for heuristic breaker slot estimation */
+  roofAgeYears?: number | null;
+  /** Roof material for heuristic roof condition */
+  roofMaterial?: string;
 }
 
-export function StepElectrical({ data, onChange, disabled }: StepElectricalProps) {
+export function StepElectrical({ data, onChange, disabled, siteOverview, photos = [], roofAgeYears, roofMaterial }: StepElectricalProps) {
   function set<K extends keyof SurveyElectricalService>(
     key: K,
     value: SurveyElectricalService[K],
   ) {
     onChange({ ...data, [key]: value });
   }
+
+  // Phase 4D: Satellite analysis for service entrance detection
+  const {
+    result: satelliteResult,
+    loading: satelliteLoading,
+  } = useSatelliteAnalysis({
+    latitude: siteOverview?.latitude ?? null,
+    longitude: siteOverview?.longitude ?? null,
+    structureType: siteOverview?.structureType || undefined,
+    address: siteOverview?.siteAddress || undefined,
+    enabled: !disabled,
+  });
+
+  // Phase 4D: Satellite service entrance suggestion
+  const satelliteServiceEntrance = satelliteResult?.serviceEntrance ?? null;
+
+  // Phase 4E: Photo extraction for panel brand + breaker slots
+  const {
+    result: photoResult,
+    loading: photoLoading,
+  } = usePhotoExtraction({
+    photos,
+    structureType: siteOverview?.structureType || undefined,
+    latitude: siteOverview?.latitude ?? null,
+    longitude: siteOverview?.longitude ?? null,
+    panelRating: data.panelRating || undefined,
+    roofAgeYears,
+    roofMaterial,
+    enabled: !disabled,
+  });
+
+  // Extracted data from photos
+  const photoPanelBrand = photoResult?.panelBrand ?? null;
+  const photoBreakerSlots = photoResult?.breakerSlots ?? null;
+
+  // Whether satellite suggestion matches current selection
+  const serviceEntranceMatchesSatellite = satelliteServiceEntrance != null &&
+    data.serviceEntrance === satelliteServiceEntrance.entrance;
+
+  // Phase 4D: Auto-apply satellite service entrance if no user selection yet
+  React.useEffect(() => {
+    if (satelliteServiceEntrance && !data.serviceEntrance && !disabled) {
+      set('serviceEntrance', satelliteServiceEntrance.entrance);
+    }
+    // Only run as satellite result first arrives and entrance is empty
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [satelliteServiceEntrance?.entrance]);
+
+  // Phase 4E: Auto-apply photo-extracted panel brand if no user selection yet
+  React.useEffect(() => {
+    if (photoPanelBrand && !data.panelBrand && !disabled) {
+      set('panelBrand', photoPanelBrand.brand as SurveyElectricalService['panelBrand']);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photoPanelBrand?.brand]);
+
+  // Phase 4E: Auto-apply photo-extracted breaker slots if no user selection yet
+  React.useEffect(() => {
+    if (photoBreakerSlots && !data.availableBreakerSlots && !disabled) {
+      const chipValue = breakerCountToChipValue(photoBreakerSlots.availableSlots);
+      set('availableBreakerSlots', chipValue);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photoBreakerSlots?.availableSlots]);
+
+  // G2: Default panel rating suggestion based on structure type
+  const panelRatingPrefill = useMemo(() => {
+    const systemType = siteOverview?.structureType || undefined;
+    return computeDefaultPanelRating(systemType);
+  }, [siteOverview?.structureType]);
+
+  // G3: Interconnection point auto-computation from NEC 705.12
+  const interconnectionPrefill = useMemo(() => {
+    // Parse panel rating to numeric bus rating
+    const ratingStr = data.panelRating as string;
+    const busRating = ratingStr && ratingStr !== 'other' && ratingStr !== ''
+      ? parseInt(ratingStr, 10)
+      : undefined;
+    // Main breaker is typically same as panel rating for residential
+    const mainBreaker = busRating;
+    // Parse available slots
+    let availableSlots: number | undefined;
+    if (data.availableBreakerSlots === '0') availableSlots = 0;
+    else if (data.availableBreakerSlots === '1-2') availableSlots = 2;
+    else if (data.availableBreakerSlots === '3-4') availableSlots = 4;
+    else if (data.availableBreakerSlots === '5+') availableSlots = 6;
+
+    return computeInterconnection({ busRating, mainBreaker, availableSlots });
+  }, [data.panelRating, data.availableBreakerSlots]);
+
+  // Map InterconnectionMethod to survey InterconnectionPoint chip value
+  const necToSurveyMap: Record<string, string> = {
+    'LOAD_SIDE': 'load_side',
+    'SUPPLY_SIDE_TAP': 'supply_side',
+    'MAIN_BREAKER_DERATE': 'main_panel',
+    'PANEL_UPGRADE': 'main_panel',
+  };
+
+  // Build RecommendationValue for interconnection
+  const interconnectionRecommendation: RecommendationValue | null = useMemo(() => {
+    if (!interconnectionPrefill) return null;
+    return {
+      display: interconnectionPrefill.methodLabel,
+      raw: necToSurveyMap[interconnectionPrefill.method] || interconnectionPrefill.method,
+      confidence: interconnectionPrefill.confidence,
+      source: interconnectionPrefill.source,
+      unit: interconnectionPrefill.necReference,
+    };
+  }, [interconnectionPrefill]);
 
   // Flag dangerous panels
   const isDangerousPanel =
@@ -50,10 +179,26 @@ export function StepElectrical({ data, onChange, disabled }: StepElectricalProps
 
   return (
     <div className="space-y-4">
+      {/* ---- Satellite + Photo detection banner ---- */}
+      {(satelliteLoading || photoLoading) && (
+        <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+            <p className="text-xs font-medium text-cyan-700">
+              {satelliteLoading && photoLoading
+                ? 'Analyzing satellite imagery and panel photos...'
+                : satelliteLoading
+                  ? 'Analyzing satellite and street-level imagery for service entrance...'
+                  : 'Analyzing panel photos for brand and breaker slots...'}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ---- Main Panel ---- */}
       <StepCard
         title="Main Panel"
-        subtitle="Identify the main electrical service panel"
+        subtitle="Identify the main electrical service panel for solar connection"
       >
         <StepField label="Panel Brand" required>
           <ChipGroup
@@ -65,19 +210,52 @@ export function StepElectrical({ data, onChange, disabled }: StepElectricalProps
             columns={3}
             disabled={disabled}
           />
+          {/* Phase 4E: Photo-extracted panel brand suggestion */}
+          {photoPanelBrand && !photoLoading && (
+            <div className="mt-1.5 flex items-center gap-2 text-xs">
+              {data.panelBrand === photoPanelBrand.brand ? (
+                <>
+                  <span className="text-cyan-600">Detected from panel photo:</span>
+                  <span className="font-semibold text-cyan-800">
+                    {PANEL_BRAND_OPTIONS.find(o => o.value === photoPanelBrand.brand)?.label ?? photoPanelBrand.brand}
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(photoPanelBrand.confidence)}
+                    source="satellite"
+                    detail={photoPanelBrand.derivation}
+                    size="xs"
+                  />
+                </>
+              ) : (
+                <>
+                  <span className="text-slate-400">Photo suggested:</span>
+                  <span className="text-slate-500 line-through">
+                    {PANEL_BRAND_OPTIONS.find(o => o.value === photoPanelBrand.brand)?.label ?? photoPanelBrand.brand}
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(photoPanelBrand.confidence)}
+                    source="satellite"
+                    detail={photoPanelBrand.derivation}
+                    size="xs"
+                    overridden={data.panelBrand !== photoPanelBrand.brand && !!data.panelBrand}
+                  />
+                </>
+              )}
+            </div>
+          )}
         </StepField>
 
-        {/* Dangerous panel warning */}
+        {/* Dangerous panel warning -- actionable guidance */}
         {isDangerousPanel && (
           <div className="mt-1 rounded-lg bg-red-50 border border-red-200 px-3 py-2">
             <p className="text-xs font-semibold text-red-700">
-              Flagged: Known problematic panel brand
+              Known hazard panel -- must be replaced before solar
             </p>
             <p className="text-xs text-red-500 mt-0.5">
               {data.panelBrand === 'federal_pacific'
-                ? 'Federal Pacific (Stab-Lok) panels have known fire hazard issues.'
-                : 'Zinsco panels have known fire hazard issues.'}
-              {' '}Panel replacement may be required. Discuss with the customer.
+                ? 'Federal Pacific (Stab-Lok) panels have documented fire hazard failures and fail to trip breakers properly.'
+                : 'Zinsco panels have documented fire hazard failures and aluminum bus bars that corrode and overheat.'}
+              {' '}This panel must be replaced before solar can be installed. Homes built before 1990: check for Federal Pacific or Zinsco label on your panel. Discuss replacement with the customer.
             </p>
           </div>
         )}
@@ -85,7 +263,7 @@ export function StepElectrical({ data, onChange, disabled }: StepElectricalProps
         <StepField
           label="Panel Rating (Amps)"
           required
-          hint="Locate on the main breaker label inside the panel"
+          hint="Estimated from building age -- confirm at the panel"
         >
           <ChipGroup
             options={PANEL_RATING_OPTIONS}
@@ -96,6 +274,19 @@ export function StepElectrical({ data, onChange, disabled }: StepElectricalProps
             columns={4}
             disabled={disabled}
           />
+          {/* G2: Default panel rating suggestion from ecosystem */}
+          {!data.panelRating && (
+            <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500">
+              <span>Estimated:</span>
+              <span className="font-semibold text-slate-700">{panelRatingPrefill.rating}A</span>
+              <ConfidenceBadge
+                confidence={panelRatingPrefill.confidence}
+                source={panelRatingPrefill.source}
+                size="xs"
+              />
+              <span className="text-slate-400">-- {panelRatingPrefill.derivation}</span>
+            </div>
+          )}
         </StepField>
 
         <StepField
@@ -115,18 +306,51 @@ export function StepElectrical({ data, onChange, disabled }: StepElectricalProps
             columns={4}
             disabled={disabled}
           />
+          {/* Phase 4E: Photo-extracted breaker slot suggestion */}
+          {photoBreakerSlots && !photoLoading && (
+            <div className="mt-1.5 flex items-center gap-2 text-xs">
+              {data.availableBreakerSlots === breakerCountToChipValue(photoBreakerSlots.availableSlots) ? (
+                <>
+                  <span className="text-cyan-600">Detected from panel photo:</span>
+                  <span className="font-semibold text-cyan-800">
+                    ~{photoBreakerSlots.availableSlots} available ({photoBreakerSlots.totalSlots} total)
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(photoBreakerSlots.confidence)}
+                    source="satellite"
+                    detail={photoBreakerSlots.derivation}
+                    size="xs"
+                  />
+                </>
+              ) : (
+                <>
+                  <span className="text-slate-400">Photo suggested:</span>
+                  <span className="text-slate-500 line-through">
+                    ~{photoBreakerSlots.availableSlots} available
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(photoBreakerSlots.confidence)}
+                    source="satellite"
+                    detail={photoBreakerSlots.derivation}
+                    size="xs"
+                    overridden={data.availableBreakerSlots !== breakerCountToChipValue(photoBreakerSlots.availableSlots) && !!data.availableBreakerSlots}
+                  />
+                </>
+              )}
+            </div>
+          )}
         </StepField>
 
-        {/* 120% rule warning */}
+        {/* 120% rule warning -- plain language */}
         {needsUpgradeFlag && (
           <div className="mt-1 rounded-lg bg-orange-50 border border-orange-200 px-3 py-2">
             <p className="text-xs font-semibold text-orange-700">
-              Flagged: May need panel upgrade
+              Panel may need upgrade for solar
             </p>
             <p className="text-xs text-orange-500 mt-0.5">
-              100A panel with no available slots - interconnection may require
-              a load-side tap, supply-side connection, or panel upgrade.
-              Confirm with engineering.
+              A 100A panel with no open breaker slots may not have enough room for the solar breaker
+              under the 120% safety rule. Options include a load-side tap, supply-side connection,
+              or upgrading to a 200A panel. Confirm with engineering.
             </p>
           </div>
         )}
@@ -135,7 +359,7 @@ export function StepElectrical({ data, onChange, disabled }: StepElectricalProps
       {/* ---- Meter + Service ---- */}
       <StepCard
         title="Meter & Service Entrance"
-        subtitle="Used for NEM/interconnection permit plan set"
+        subtitle="Used for utility interconnection and permit plan set"
       >
         <StepField label="Meter Socket Type" required>
           <ChipGroup
@@ -165,6 +389,39 @@ export function StepElectrical({ data, onChange, disabled }: StepElectricalProps
             columns={2}
             disabled={disabled}
           />
+          {/* Phase 4D: Satellite/street-view service entrance suggestion */}
+          {satelliteServiceEntrance && !satelliteLoading && (
+            <div className="mt-1.5 flex items-center gap-2 text-xs">
+              {serviceEntranceMatchesSatellite ? (
+                <>
+                  <span className="text-cyan-600">Detected from satellite:</span>
+                  <span className="font-semibold text-cyan-800">
+                    {SERVICE_ENTRANCE_OPTIONS.find(o => o.value === satelliteServiceEntrance.entrance)?.label ?? satelliteServiceEntrance.entrance}
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(satelliteServiceEntrance.confidence)}
+                    source="satellite"
+                    detail={satelliteServiceEntrance.derivation}
+                    size="xs"
+                  />
+                </>
+              ) : (
+                <>
+                  <span className="text-slate-400">Satellite suggested:</span>
+                  <span className="text-slate-500 line-through">
+                    {SERVICE_ENTRANCE_OPTIONS.find(o => o.value === satelliteServiceEntrance.entrance)?.label ?? satelliteServiceEntrance.entrance}
+                  </span>
+                  <ConfidenceBadge
+                    confidence={mapConfidence(satelliteServiceEntrance.confidence)}
+                    source="satellite"
+                    detail={satelliteServiceEntrance.derivation}
+                    size="xs"
+                    overridden={!serviceEntranceMatchesSatellite && !!data.serviceEntrance}
+                  />
+                </>
+              )}
+            </div>
+          )}
         </StepField>
 
         <StepField label="Planned Interconnection Point" required>
@@ -180,6 +437,30 @@ export function StepElectrical({ data, onChange, disabled }: StepElectricalProps
             columns={2}
             disabled={disabled}
           />
+          {/* G3: NEC 705.12 interconnection auto-computation recommendation */}
+          {interconnectionRecommendation && (
+            <div className="mt-2">
+              <RecommendationCard
+                title="NEC 705.12 Recommendation"
+                currentDisplay={data.interconnectionPoint
+                  ? INTERCONNECTION_OPTIONS.find(o => o.value === data.interconnectionPoint)?.label || data.interconnectionPoint
+                  : 'Not selected'}
+                currentRaw={data.interconnectionPoint || ''}
+                recommended={interconnectionRecommendation}
+                reason={`Based on your panel data, ${interconnectionPrefill.methodLabel} is the recommended connection method per electrical code (NEC 705.12)`}
+                onApply={() => {
+                  const mapped = necToSurveyMap[interconnectionPrefill.method];
+                  if (mapped) {
+                    set('interconnectionPoint', mapped as SurveyElectricalService['interconnectionPoint']);
+                  }
+                }}
+                onDismiss={() => {}}
+                derivation={interconnectionPrefill.derivation}
+                necReference={interconnectionPrefill.necReference}
+                variant="inline"
+              />
+            </div>
+          )}
         </StepField>
       </StepCard>
 

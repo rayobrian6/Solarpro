@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { handleRouteDbError } from '@/lib/db-neon';
 import Stripe from 'stripe';
 import { stripe, handleWebhookEvent } from '@/lib/stripe';
+import { finalizeLeadClaim } from '@/lib/network/leadPurchase';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -35,6 +36,17 @@ export async function POST(req: NextRequest) {
     } catch (err: unknown) {
       console.error('Webhook signature verification failed:', (err as Error).message);
       return NextResponse.json({ error: 'Webhook signature verification failed' }, { status: 400 });
+    }
+
+    // Lead-marketplace one-time purchases finalize here, separate from the
+    // subscription billing handler. Everything else falls through unchanged.
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object as Stripe.Checkout.Session;
+      if (session.metadata?.kind === 'lead_claim') {
+        const leadResult = await finalizeLeadClaim(session);
+        console.log(`[Stripe Webhook] lead_claim: ${leadResult.message}`);
+        return NextResponse.json({ received: true, ...leadResult });
+      }
     }
 
     // Handle the event

@@ -156,7 +156,7 @@ export function pageWarningLabels(input: PermitInput, cad: CADModel, pageNum: nu
         `Manufacturer: ${project.batteryBrand || '—'}`,
         `Model: ${project.batteryModel || '—'}`,
         'Nominal Voltage: 48V DC',
-        `Capacity: ${((project.batteryCount || 0) * (project.batteryKwh || 0)).toFixed(1)} kWh TOTAL`,
+        `Capacity: ${hasBattery ? ((project.batteryCount || 1) * (project.batteryKwh ?? 5.0)).toFixed(1) : '0.0'} kWh TOTAL`,
       ],
       bg: '#000',
       fg: '#ffffff',
@@ -354,15 +354,15 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
   const invModel = system.inverters?.[0]?.model || '—';
 
   // Get specs from the spec sheet DB
-  const voc = panels?.panelVoc || (project as any).panelVoc || 41.6;
-  const isc = panels?.panelIsc || (project as any).panelIsc || 12.26;
+  const voc = panels?.panelVoc || project.panelVoc || 41.6;
+  const isc = panels?.panelIsc || project.panelIsc || 12.26;
   const pmax = modWatts;
   const vmp = parseFloat((voc * 0.83).toFixed(1));
   const imp = parseFloat((isc * 0.94).toFixed(2));
   const tempCoeff = -0.35;
-  const panelLen = (project as any).panelLengthIn || 79.9;
-  const panelWid = (project as any).panelWidthIn || 40.9;
-  const panelWt = (project as any).panelWeightLbs || 44;
+  const panelLen = project.panelLengthIn || 79.9;
+  const panelWid = project.panelWidthIn || 40.9;
+  const panelWt = project.panelWeightLbs || 44;
 
   // NEC 690.8 calculations
   const TEMP_CORR_FACTOR = 1.25; // for -13°F (worst case cold)
@@ -443,7 +443,7 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
           <!-- Racking System Summary -->
           <div class=\"section-title\">Racking System</div>
           <table class="info-table">
-            <tr><td class="il">System</td><td class="iv">${(project as any)._canonical?.mountSystem || project.mountingSystem || MOUNT_SYSTEM_MAP[cad.systemType as CanonicalSysType] || 'IronRidge XR100'}</td></tr>
+            <tr><td class="il">System</td><td class="iv">${project._canonical?.mountSystem || project.mountingSystem || MOUNT_SYSTEM_MAP[cad.systemType as CanonicalSysType] || 'IronRidge XR100'}</td></tr>
             <tr><td class="il">Material</td><td class="iv">6105-T5 Anodized Aluminum</td></tr>
             <tr><td class="il">Rail Profile</td><td class="iv">2.25" × 1.50" Heavy Duty</td></tr>
             <tr><td class="il">Max Span</td><td class="iv">72" (1829mm)</td></tr>
@@ -460,7 +460,7 @@ export function pageSpecSheetReference(input: PermitInput, cad: CADModel, pageNu
             Full manufacturer specification sheets and installation manuals are available at:<br>
             • <strong>Module:</strong> ${modMfr} — see manufacturer website<br>
             • <strong>Inverter:</strong> ${invMfr} — see manufacturer website<br>
-            • <strong>Racking:</strong> ${(project as any)._canonical?.mountSystem || MOUNT_SYSTEM_MAP[cad.systemType as CanonicalSysType] || 'IronRidge XR100'} — STRUCTURAL CALCULATIONS — SEE PV-4C<br><br>
+            • <strong>Racking:</strong> ${project._canonical?.mountSystem || MOUNT_SYSTEM_MAP[cad.systemType as CanonicalSysType] || 'IronRidge XR100'} — STRUCTURAL CALCULATIONS — SEE PV-4C<br><br>
             All equipment is CEC Listed, UL Listed, and approved for grid interconnection.
             Copies available upon AHJ request.
           </div>

@@ -70,7 +70,10 @@ export interface RoofSegment {
   panelHeightMeters: number;
 }
 
-const GOOGLE_API_KEY = 'AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE';
+// Server-only key (the direct Google calls below run server-side; the browser
+// path goes through the /api/elevation proxy). Not NEXT_PUBLIC_, so it is never
+// inlined into the client bundle. Rotate the previously-hardcoded key.
+const GOOGLE_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
 
 // Standard panel dimensions (400W)
 const PANEL_W = 1.134; // meters

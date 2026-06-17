@@ -44,10 +44,10 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
   //   4. mountingSystemId category lookup
   // This catches projects where bill-upload hardcoded system_type='roof' in the DB.
   const layoutTypeRaw  = (layout.type     || '').toLowerCase().trim();
-  const layoutSysRaw   = ((layout as any).systemType || '').toLowerCase().trim();
-  const projectSysRaw  = ((input.project as any)?.systemType || '').toLowerCase().trim();
-  const mountingId     = ((input.project as any)?.mountingSystemId || '').toLowerCase().trim();
-  const projectName    = ((input.project as any)?.projectName || (input.project as any)?.name || '').toLowerCase();
+  const layoutSysRaw   = (layout.systemType || '').toLowerCase().trim();
+  const projectSysRaw  = (input.project.systemType || '').toLowerCase().trim();
+  const mountingId     = (input.project.mountingSystemId || '').toLowerCase().trim();
+  const projectName    = input.project.projectName.toLowerCase();
 
   // Normalise any source to a canonical type
   function toCanonical(s: string): CanonicalSysType | null {
@@ -62,8 +62,8 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
   const panels_raw = layout.panels || [];
   let fenceCount = 0, groundCount = 0;
   for (const p of panels_raw) {
-    const pt = ((p as any).placementType || '').toUpperCase();
-    const st = ((p as any).systemType   || '').toLowerCase();
+    const pt = (p.placementType || '').toUpperCase();
+    const st = (p.systemType   || '').toLowerCase();
     if (pt === 'FENCE'  || st === 'fence'  || st === 'solar_fence')  fenceCount++;
     if (pt === 'GROUND' || st === 'ground' || st === 'ground_mount') groundCount++;
   }
@@ -122,7 +122,8 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
   if (layout.type !== rawType) {
     console.warn('[CANONICAL] FIX v47.318: layout.type corrected from', layout.type,
       '->', rawType, '| layoutSys:', layoutSysRaw, '| projectSys:', projectSysRaw);
-    (layout as any).type = rawType;
+    // Error 5k fix: `type` is now on Layout interface — no `as any` needed
+    layout.type = rawType;
   }
 
   const panels = layout.panels;
@@ -175,10 +176,10 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
   const struct = input.compliance?.structural;
   const jx     = input.compliance?.jurisdiction;
   const canonicalSite: CanonicalSite = {
-    windSpeed:        Number(struct?.wind?.windSpeed) || Number((input.project as any).ahjWindSpeedMph) || Number((input.project as any).windSpeedMph) || 0,
+    windSpeed:        Number(struct?.wind?.windSpeed) || Number(input.project.ahjWindSpeedMph) || Number(input.project.windSpeedMph) || 0,
     groundSnowLoad:   Number(struct?.snow?.groundSnowLoad) || 0,
-    exposureCategory: struct?.wind?.exposureCategory       || (input.project as any).exposureCategory || 'C',
-    seismicSDC:       (struct as any)?.seismic?.sdc        || 'D',
+    exposureCategory: struct?.wind?.exposureCategory       || input.project.exposureCategory || 'C',
+    seismicSDC:       struct?.seismic?.sdc              || 'D',
     state:            jx?.state                            || '—',
     ahj:              jx?.ahj                              || '—',
   };
@@ -190,19 +191,19 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
   const firstGnd  = layout.geometry?.groundArrays?.[0];
   const canonicalStructure: CanonicalStructure = {
     // Fence defaults (patched with CAD values post-build)
-    postEmbedFt:     (input.project as any).postEmbedFt    || 3.5,
-    postSpacingFt:   (input.project as any).postSpacingFt  || 8.0,
-    panelHeightFt:   (input.project as any).panelHeightFt  || 6.0,
-    soilResistance:  (input.project as any).soilResistance || 200,
+    postEmbedFt:     input.project.postEmbedFt    || 3.5,
+    postSpacingFt:   input.project.postSpacingFt  || 8.0,
+    panelHeightFt:   input.project.panelHeightFt  || 6.0,
+    soilResistance:  input.project.soilResistance || 200,
     // Ground defaults
-    pileDepthFt:     (input.project as any).pileDepthFt    || 5.0,
-    pileSpacingFt:   (input.project as any).pileSpacingFt  || 8.0,
-    groundClearIn:   (input.project as any).groundClearIn  || 12,
-    tiltDeg:         firstGnd?.tiltDeg                     || (input.project as any).tiltDeg || 20,
+    pileDepthFt:     input.project.pileDepthFt    || 5.0,
+    pileSpacingFt:   input.project.pileSpacingFt  || 8.0,
+    groundClearIn:   input.project.groundClearIn  || 12,
+    tiltDeg:         firstGnd?.tiltDeg                     || input.project.tiltDeg || 20,
     // Roof
-    rafterSize:      (input.project as any).rafterSize     || '2×6',
-    rafterSpacingIn: Number((input.project as any).rafterSpacing)   || 24,
-    attachSpacingIn: Number((input.project as any).attachmentSpacing) || 48,
+    rafterSize:      input.project.rafterSize     || '2×6',
+    rafterSpacingIn: Number(input.project.rafterSpacing)   || 24,
+    attachSpacingIn: Number(input.project.attachmentSpacing) || 48,
   };
 
   // ── Populate electrical sub-object ───────────────────────────────────────
@@ -224,7 +225,7 @@ export function buildCanonical(input: PermitInput): CanonicalInput {
     panels,
     geometry:         layout.geometry ?? undefined,
     layout,
-    engineering:      (input as any).engineering ?? null,
+    engineering:      input.engineering ?? null,
     module:           canonicalModule,
     mountSystem,
     site:             canonicalSite,
@@ -304,12 +305,14 @@ export function validateCanonical(canonical: CanonicalInput): void {
 // Called AFTER CAD engine runs and BEFORE validateCanonicalStrict().
 // Throws if dimensions cannot be computed — no planset without dimensions.
 // ══════════════════════════════════════════════════════════════════════════════
-export function buildLayoutDimensions(canonical: CanonicalInput, cad: CADModel): CanonicalLayoutDimensions {
+export function buildLayoutDimensions(canonical: CanonicalInput, cad: CADModel, project?: { panelWidthIn?: number; panelLengthIn?: number }): CanonicalLayoutDimensions {
   const sys = canonical.systemType;
 
   // Panel dimensions — top-level on CADModel (authoritative)
-  const panelWidthIn  = cad.panelWidthM  > 0 ? cad.panelWidthM  * 39.3701 : (canonical.layout as any)?.panelWidthIn  || 40.9;
-  const panelHeightIn = cad.panelHeightM > 0 ? cad.panelHeightM * 39.3701 : (canonical.layout as any)?.panelHeightIn || 66.9;
+  // Error 5m fix: canonical.layout has no panelWidthIn/panelHeightIn fields.
+  // Use project.panelWidthIn/panelLengthIn as fallback (from PermitInput.project).
+  const panelWidthIn  = cad.panelWidthM  > 0 ? cad.panelWidthM  * 39.3701 : project?.panelWidthIn  || 40.9;
+  const panelHeightIn = cad.panelHeightM > 0 ? cad.panelHeightM * 39.3701 : project?.panelLengthIn || 66.9;
 
   let totalLengthFt   = 0;
   let totalHeightFt   = 0;

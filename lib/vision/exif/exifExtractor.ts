@@ -555,8 +555,11 @@ function readString(
       }
       return String.fromCharCode(...bytes).replace(/\0/g, '').trim() || null;
     }
-    // Otherwise, valueOffset contains a pointer
-    const ptr = dataView.getUint32(valueOffset - tiffOffset, littleEndian);
+    // Otherwise, valueOffset contains a pointer. dataView is already based at
+    // tiffOffset and valueOffset (tagOffset+8) is TIFF-relative, so read it
+    // directly — subtracting tiffOffset again pointed at the wrong location and
+    // garbled Make/Model on the manual-parse fallback path.
+    const ptr = dataView.getUint32(valueOffset, littleEndian);
     const bytes: number[] = [];
     for (let i = 0; i < count && ptr + i < dataView.byteLength; i++) {
       bytes.push(dataView.getUint8(ptr + i));

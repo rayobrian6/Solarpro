@@ -199,9 +199,13 @@ export function runIncentiveEngine(input: IncentiveEngineInput): IncentiveEngine
 
   // Cash flows for IRR/NPV (cash purchase)
   const cashFlows = [-netSystemCost, ...yearlyProjection.map(y => y.annualSavings)];
-  const irr = calculateIrr(cashFlows);
+  // Guard against netSystemCost === 0 (cash incentives ≥ system cost) — would
+  // otherwise produce Infinity (roi) and a meaningless IRR from a -0 outlay.
+  const irr = netSystemCost > 0 ? calculateIrr(cashFlows) : 0;
   const npv25Year = Math.round(calculateNpv(cashFlows));
-  const roi25Year = Math.round(((lifetimeSavings - netSystemCost) / netSystemCost) * 100);
+  const roi25Year = netSystemCost > 0
+    ? Math.round(((lifetimeSavings - netSystemCost) / netSystemCost) * 100)
+    : 0;
 
   return {
     grossSystemCost: systemCostBeforeIncentives,

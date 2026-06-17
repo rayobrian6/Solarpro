@@ -11,6 +11,7 @@ import type {
   ProjectPhysicalData, SitePhotosSection,
 } from './types';
 import type { EnrichedSiteSurvey } from '@/lib/siteSurvey/types';
+import { necNextStandardOcpd } from '@/lib/permit/utils/helpers';
 
 // NEC wire sizing tables (simplified)
 const DC_WIRE_SIZING: { maxAmps: number; gauge: string; conduit: string }[] = [
@@ -169,11 +170,14 @@ function generateSystemSummary(snap: DesignSnapshot): SystemSummary {
 }
 
 function getPeakSunHours(lat: number, stateCode: string): number {
-  // Simplified peak sun hours by latitude band
-  if (lat >= 45) return 4.0;
-  if (lat >= 40) return 4.5;
-  if (lat >= 35) return 5.0;
-  if (lat >= 30) return 5.5;
+  // Simplified peak sun hours by latitude band — use the MAGNITUDE so Southern
+  // Hemisphere sites (negative lat, e.g. Australia) map to the correct band
+  // instead of always falling through to the max 5.8 and overstating production.
+  const absLat = Math.abs(lat);
+  if (absLat >= 45) return 4.0;
+  if (absLat >= 40) return 4.5;
+  if (absLat >= 35) return 5.0;
+  if (absLat >= 30) return 5.5;
   return 5.8;
 }
 
@@ -186,10 +190,11 @@ function generateElectricalEngineering(snap: DesignSnapshot, pd: ProjectPhysical
   const isOptimizer = inverter?.type === 'optimizer';
 
   // Panel electrical specs (use typical values if not in panel spec)
-  const panelVoc = (panel as any).voc || panel.wattage / 8.5;  // typical Voc
-  const panelVmp = (panel as any).vmp || panel.wattage / 9.5;  // typical Vmp
-  const panelIsc = (panel as any).isc || panel.wattage / panelVoc * 1.1;
-  const panelImp = (panel as any).imp || panel.wattage / panelVmp;
+  // Error 5g fix: voc/vmp/isc/imp now on SolarPanel type — remove `as any` casts
+  const panelVoc = panel.voc || panel.wattage / 8.5;  // typical Voc
+  const panelVmp = panel.vmp || panel.wattage / 9.5;  // typical Vmp
+  const panelIsc = panel.isc || panel.wattage / panelVoc * 1.1;
+  const panelImp = panel.imp || panel.wattage / panelVmp;
 
   // String sizing
   let panelsPerString = 1;
@@ -200,18 +205,28 @@ function generateElectricalEngineering(snap: DesignSnapshot, pd: ProjectPhysical
 
   if (!isMicro) {
     // String inverter: calculate optimal string length
-    const maxDcVoltage = (inverter as any)?.maxDcVoltage || 600;
-    const mpptVoltageMax = (inverter as any)?.mpptVoltageMax || 550;
+    // Error 5h fix: maxDcVoltage/mpptVoltageMax now on Inverter type — remove `as any` casts
+    const maxDcVoltage = inverter?.maxDcVoltage || 600;
+    const mpptVoltageMax = inverter?.mpptVoltageMax || 550;
     const mpptChannels = inverter?.mpptChannels || 2;
 
     // Max panels per string (NEC 690.7: Voc × 1.25 ≤ maxDcVoltage)
-    panelsPerString = Math.floor(maxDcVoltage / (panelVoc * 1.25));
-    panelsPerString = Math.max(1, Math.min(panelsPerString, 20));
+    const necMaxPerString = Math.max(1, Math.min(Math.floor(maxDcVoltage / (panelVoc * 1.25)), 20));
+    panelsPerString = necMaxPerString;
 
     // Optimal: target Vmp in MPPT range
     const targetPanels = Math.floor(mpptVoltageMax / panelVmp);
     panelsPerString = Math.min(panelsPerString, targetPanels);
-    panelsPerString = Math.max(8, panelsPerString); // minimum 8 panels/string
+
+    // Prefer a minimum string length of 8, but NEVER exceed the actual panel
+    // count or the NEC 690.7 maximum — otherwise small systems report a string
+    // longer than the array (overstating Voc/Vmp) and high-Voc panels defeat
+    // the safety clamp.
+    panelsPerString = Math.min(panelsPerString, snap.panelCount || panelsPerString, necMaxPerString);
+    if ((snap.panelCount || 0) >= 8) {
+      panelsPerString = Math.min(Math.max(panelsPerString, 8), necMaxPerString, snap.panelCount);
+    }
+    panelsPerString = Math.max(1, panelsPerString);
 
     stringCount = Math.ceil(snap.panelCount / panelsPerString);
     stringVoc = panelVoc * panelsPerString;
@@ -230,7 +245,7 @@ function generateElectricalEngineering(snap: DesignSnapshot, pd: ProjectPhysical
   const acWire = selectWire(acAmps, AC_WIRE_SIZING);
 
   // Breaker sizing (NEC 705.12: 125% of inverter output)
-  const acBreakerAmps = Math.ceil(acAmps * 1.25 / 5) * 5; // round up to nearest 5A
+  const acBreakerAmps = necNextStandardOcpd(acAmps * 1.25);
   const backfeedBreakerAmps = acBreakerAmps;
 
   // Main panel bus check (NEC 705.12(B))
@@ -280,8 +295,8 @@ function generateElectricalEngineering(snap: DesignSnapshot, pd: ProjectPhysical
     acWireGauge: acWire.gauge,
     acConduitSize: acWire.conduit,
     groundWireGauge: '#8 AWG',
-    stringFuseAmps: Math.ceil(panelIsc * 1.56 / 5) * 5,
-    dcDisconnectAmps: Math.ceil(dcDesignAmps / 5) * 5,
+    stringFuseAmps: necNextStandardOcpd(panelIsc * 1.56),
+    dcDisconnectAmps: necNextStandardOcpd(dcDesignAmps),
     acBreakerAmps,
     mainPanelBusAmps,
     backfeedBreakerAmps,
@@ -307,7 +322,10 @@ function generateStructuralEngineering(snap: DesignSnapshot, pd: ProjectPhysical
   const snowLoad = getSnowLoad(snap.stateCode);
 
   // Panel weight (typical 40-50 lbs per panel)
-  const panelWeightLbs = (snap.panel as any).weight || 44;
+  // Error 5f fix: SolarPanel.weight is in kg — convert to lbs (1 kg = 2.20462 lbs).
+  // Remove `as any` cast that masked both the type-safety and unit-conversion issue.
+  const panelWeightKg  = snap.panel.weight || 0;
+  const panelWeightLbs = panelWeightKg > 0 ? panelWeightKg * 2.20462 : 44;
   const totalArrayWeightLbs = snap.panelCount * panelWeightLbs;
 
   // Dead load (panel + racking, typical 4-5 psf)

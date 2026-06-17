@@ -26,6 +26,7 @@ import { useSubscription } from '@/hooks/useSubscription';
 import UpgradeModal from '@/components/ui/UpgradeModal';
 import { resolveProposalSystemType, getPanelTypeCounts } from '@/lib/proposalSystemType';
 import { buildCanonicalProposal } from '@/lib/proposal/buildCanonicalProposal';
+import { resolveActualAnnualBill } from '@/lib/proposal/resolveActualBill';
 import { deriveEcosystemSummary } from '@/lib/proposal/deriveEcosystemSummary';
 import {
   buildUtilityProfile,
@@ -613,9 +614,7 @@ function ProposalContent() {
       )}
 
       {/* ══════════ PROPOSALS COMMAND HEADER ══════════ */}
-      <div className="relative overflow-hidden rounded-2xl border border-slate-700/60 bg-gradient-to-br from-slate-800/80 via-slate-800/60 to-slate-900/80 p-5 shadow-xl">
-        <div className="absolute -top-10 -right-10 w-48 h-48 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+      <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div
             className="cursor-default select-none"
@@ -1074,9 +1073,18 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
 
   // v47.245: ITC toggle — lives in the toolbar so it works from any navigation path
   const [noItc, setNoItc] = useState<boolean>((proposal.project as any)?.noItc ?? false);
+  // QW-8: Confirmation state for ITC toggle
+  const [showItcConfirm, setShowItcConfirm] = useState(false);
+  const [pendingItcValue, setPendingItcValue] = useState(false);
   // Sync if proposal prop changes (e.g. parent re-fetches live project)
   useEffect(() => { setNoItc((proposal.project as any)?.noItc ?? false); }, [proposal.project]);
   const handleToggleNoItc = async (val: boolean) => {
+    // QW-8: When turning ITC OFF (val=true), show confirmation dialog first
+    if (val && !noItc) {
+      setPendingItcValue(val);
+      setShowItcConfirm(true);
+      return;
+    }
     setNoItc(val);
     if (proposal.projectId) {
       try {
@@ -1084,6 +1092,20 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ noItc: val }),
+        });
+      } catch {}
+    }
+  };
+  // QW-8: Confirm ITC toggle after warning
+  const confirmItcToggle = async () => {
+    setShowItcConfirm(false);
+    setNoItc(pendingItcValue);
+    if (proposal.projectId) {
+      try {
+        await fetch(`/api/projects/${proposal.projectId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ noItc: pendingItcValue }),
         });
       } catch {}
     }
@@ -1288,6 +1310,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
     clientUtilityRate:     client?.utilityRate,
     dbUtilityRate:         proposal.dbUtilityRate ?? undefined,
     annualUsageKwh:        client?.annualKwh ?? 0,
+    actualAnnualBill:      resolveActualAnnualBill(client),  // real bill (same source as Bill tab)
     systemType,
     storedCashPrice:       storedCashPrice,
     roofPricePerWatt:      pricingCfg?.roofPricePerWatt,
@@ -1330,6 +1353,12 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
   const utilityInflation     = cp.utility.escalationRate;
   const panelDegradation     = 0.005; // display constant — actual degradation lives in pipeline
   const monthlyBillData      = cp.truth25yr.monthlyBillChart;
+  // Psychological framing for the before/after chart (mirrors the proposal view
+  // page): surface the bill collapsing to ~$0 even when the green bars are
+  // zero-height on a full-offset system.
+  const avgMonthlyAfter      = monthlyBillData.length
+    ? Math.round(monthlyBillData.reduce((s, m) => s + (m.after || 0), 0) / monthlyBillData.length)
+    : 0;
   const projectionData       = cp.truth25yr.projectionChart;
   const totalLifetimeSavings = cp.truth25yr.projectionChart[24]?.cumulative ?? 0;
   // Net 25-yr savings = utility cost avoided minus total system cost (cash basis)
@@ -1601,6 +1630,35 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
       </div>
 
 
+      {/* QW-8: ITC Toggle Confirmation Modal */}
+      {showItcConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-slate-800 border border-slate-600 rounded-2xl p-6 max-w-md mx-4 shadow-2xl">
+            <h3 className="text-lg font-bold text-white mb-2">Remove Federal ITC?</h3>
+            <p className="text-sm text-slate-300 mb-1">
+              The 30% Investment Tax Credit is a significant financial benefit for the homeowner.
+            </p>
+            <p className="text-sm text-red-400 font-medium mb-4">
+              Removing ITC will increase the net cost by ~30% and may reduce close rate.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowItcConfirm(false)}
+                className="px-4 py-2 rounded-lg bg-slate-700 text-slate-300 text-sm font-medium hover:bg-slate-600"
+              >
+                Keep ITC
+              </button>
+              <button
+                onClick={confirmItcToggle}
+                className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-500"
+              >
+                Remove ITC
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Main Content ── */}
       <div id="proposal-document" className="max-w-5xl mx-auto px-4 py-4 space-y-4 print-content">
 
@@ -1836,6 +1894,10 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                   style={purchaseMode === mode ? { background: primaryColor } : {}}
                 >
                   {mode === 'finance' ? '\u26a1 Finance' : '\ud83d\udcb5 Cash'}
+                  {/* QW-9: Show recommended label on Finance option */}
+                  {mode === 'finance' && (
+                    <span className="ml-1.5 text-[10px] font-normal opacity-70">(recommended)</span>
+                  )}
                 </button>
               ))}
             </div>
@@ -2319,9 +2381,27 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
 
             {/* Monthly Bill Before/After */}
             <div className="card p-5">
-              <h3 className="font-semibold text-white text-sm mb-4 flex items-center gap-2">
+              <h3 className="font-semibold text-white text-sm mb-3 flex items-center gap-2">
                 <DollarSign size={15} className="text-emerald-400" /> Monthly Bill: Before vs After Solar
               </h3>
+              {/* Honest before→after: solar cuts the energy bill, but the fixed
+                  grid/meter charge survives — there is always a utility bill. */}
+              <div className="mb-3 flex items-center gap-3">
+                <div>
+                  <div className="text-[9px] uppercase tracking-wider text-slate-500">Utility bill now</div>
+                  <div className="text-xl font-black text-red-400">${avgMonthlyBillBefore}/mo</div>
+                </div>
+                <span className="text-slate-600 text-lg font-bold">→</span>
+                <div>
+                  <div className="text-[9px] uppercase tracking-wider text-slate-500">With solar</div>
+                  <div className="text-xl font-black text-emerald-400">${avgMonthlyAfter}/mo</div>
+                </div>
+                {avgMonthlyBillBefore - avgMonthlyAfter > 0 && (
+                  <span className="ml-auto rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-300">
+                    −${avgMonthlyBillBefore - avgMonthlyAfter}/mo
+                  </span>
+                )}
+              </div>
               <ResponsiveContainer width="100%" height={130}>
                 <BarChart data={monthlyBillData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />

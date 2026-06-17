@@ -6,7 +6,7 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock, buildConstructionNotes } from '../utils/titleBlock';
-import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, utilityDisplayName, interconnectionLabel, roofTypeLabel, pv2Title, pv3Title, type SysType } from '../utils/helpers';
+import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, utilityDisplayName, interconnectionLabel, roofTypeLabel, pv2Title, pv3Title, necNextStandardOcpd, type SysType } from '../utils/helpers';
 import {  getSystemType, getInverterTopology, getEquipmentContext, topologyToLegacy, isFence, isGround, isRoof, displaySystemTypeShort } from '@/lib/system';
 import type { CanonicalInput } from '../types';
 import { BUILD_VERSION } from '@/lib/version';
@@ -28,8 +28,8 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const state   = compliance.jurisdiction?.state || '';
   const ahj     = compliance.jurisdiction?.ahj   || '';
   // FIX v47.341: Convert utility slug to display name
-  const utility = utilityDisplayName((project as any).utilityName || (project as any).utilityMeter || '');
-  const apn     = (project as any).apn || '';
+  const utility = utilityDisplayName(project.utilityName || project.utilityMeter || '');
+  const apn     = project.apn || '';
 
   // ── Equipment (4-source resolver) ─────────────────────────────────────────
   const eq = getEquipmentContext(input, cad);
@@ -45,20 +45,24 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   const _resolvedTopo = topologyToLegacy(_topoCanonical);
   const topology    = _resolvedTopo;
   const svcAmps     = project.mainPanelAmps || null;
-  const _c          = (project as any)._canonical as CanonicalInput | undefined;
+  const _c          = project._canonical as CanonicalInput | undefined;
   const mountSys    = _c?.mountSystem || project.mountingSystem || '';
   const roofType    = roofTypeLabel(project.roofType);
   const pitch       = project.roofPitch
     ? `${Math.round(Math.tan(project.roofPitch * Math.PI / 180) * 12)}:12`
     : '';
 
-  // ── Derived electrical values ─────────────────────────────────────────────
-  const backfeedA = (acKw !== null && acKw > 0)
-    ? Math.ceil(acKw * 1000 / 240 * 1.25)
-    : null;
-  const busLimit  = svcAmps ? Math.round(svcAmps * 1.2) : null;
-  const rulePass  = (svcAmps && backfeedA && busLimit)
-    ? (svcAmps + backfeedA) <= busLimit
+  // ── Derived electrical values ──────────────────────────────────────
+  // Error 6d fix: Prefer project.backfeedBreakerA (already NEC-computed by generatePermit.ts)
+  // over recomputing from acKw. Also fix 120% rule to use separate bus rating and main breaker.
+  const busRating   = project.panelBusRating || project.mainPanelAmps || 200;
+  const mainBreaker = project.mainPanelAmps || 200;
+  const backfeedA = project.backfeedBreakerA ?? project.pvBackfeedA
+    ?? ((acKw !== null && acKw > 0) ? necNextStandardOcpd(acKw * 1000 / 240 * 1.25) : null);
+  const busLimit     = busRating ? Math.round(busRating * 1.2) : null;
+  const maxPvBreaker = busLimit !== null ? busLimit - mainBreaker : null;
+  const rulePass     = (backfeedA !== null && maxPvBreaker !== null)
+    ? backfeedA <= maxPvBreaker
     : null;
 
   // ── Interconnection ───────────────────────────────────────────────────────
@@ -127,9 +131,9 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   }
 
   // ── Sheet index ───────────────────────────────────────────────────────────
-  const includeCADAppendixPreview = (input as any).cadAppendixPreviewV1 === true
-    || (input as any).planSetOptions?.cadAppendixPreviewV1 === true
-    || (input as any).permitOptions?.cadAppendixPreviewV1 === true;
+  const includeCADAppendixPreview = input.cadAppendixPreviewV1 === true
+    || input.planSetOptions?.cadAppendixPreviewV1 === true
+    || input.permitOptions?.cadAppendixPreviewV1 === true;
   const sheets = [
     { id: 'PV-0',  title: 'COVER SHEET — PROJECT OVERVIEW & GENERAL NOTES' },
     { id: 'PV-1',  title: 'SITE PLAN — EQUIPMENT LAYOUT & VICINITY' },
@@ -204,15 +208,15 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
   ].filter(Boolean).join('');
 
   // ── Design Criteria ───────────────────────────────────────────────────────
-  const rafterSize    = (project as any).rafterSize    || '';
-  const rafterSpacing = (project as any).rafterSpacing || '';
-  const roofLayers    = (project as any).roofLayers    || '';
-  const stories       = (project as any).stories       || '';
-  const roofLoadPsf   = (project as any).roofLoadPsf   || '';
-  const windSpeedMph  = (project as any).ahjWindSpeedMph || (project as any).windSpeedMph || '';
-  const windExposure  = (project as any).windExposure   || '';
-  const snowPsf       = (project as any).ahjGroundSnowPsf ?? (project as any).groundSnowPsf ?? '';
-  const seismic       = (project as any).seismicCategory || '';
+  const rafterSize    = project.rafterSize    || '';
+  const rafterSpacing = project.rafterSpacing || '';
+  const roofLayers    = project.roofLayers    || '';
+  const stories       = project.stories       || '';
+  const roofLoadPsf   = project.roofLoadPsf   || '';
+  const windSpeedMph  = project.ahjWindSpeedMph || project.windSpeedMph || '';
+  const windExposure  = project.windExposure   || '';
+  const snowPsf       = project.ahjGroundSnowPsf ?? project.groundSnowPsf ?? '';
+  const seismic       = project.seismicCategory || '';
 
   // FIX v47.295: Roof-specific design criteria only shown for roof systems
   const _coverSysTypeCheck = (cad.systemType as string);
@@ -276,7 +280,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
     infoRow('PROJECT',     project.projectName || ''),
     infoRow('CLIENT',      project.clientName  || ''),
     infoRow('ADDRESS',     project.address     || ''),
-    infoRow('CITY/STATE',  [project.city || (project as any).city || '', state].filter(Boolean).join(', ')),
+    infoRow('CITY/STATE',  [project.city || '', state].filter(Boolean).join(', ')),
     infoRow('APN',         apn),
     infoRow('AHJ',         ahj),
     infoRow('UTILITY',     utility),
@@ -513,7 +517,7 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
             ${vicinityMapHtml}
         <div class=\"df aic bt-1\" style=\"padding:2px var(--xs);gap:var(--xs);\">
               <span class="f-sm fw7 f1">
-                ${project.address || ''}${project.city || (project as any).city ? ` — ${project.city || (project as any).city}` : ''}${state ? `, ${state}` : ''}
+                ${project.address || ''}${project.city ? ` — ${project.city}` : ''}${state ? `, ${state}` : ''}
               </span>
               <svg viewBox="0 0 40 40" width="28" height="28" xmlns="http://www.w3.org/2000/svg">
                 <circle cx="20" cy="20" r="18" fill="#fff" stroke="#000" stroke-width="1.5"/>

@@ -355,10 +355,20 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   const cs  = ((c?.structural ?? {}) as Record<string, unknown>);
   const cw  = ((cs?.wind ?? {}) as Record<string, unknown>);
 
-  const pitchNum = (pl?.pitch ?? (p?.roofPitch as number) ?? 5);
+  // pl?.pitch comes from canonicalBridge which stores pitchDegrees (e.g., 22°).
+  // The permit format requires rise-per-12-inches (e.g., 5:12), so we must convert
+  // degrees → ratio using tan(degrees) * 12.  A value already in rise-per-12
+  // (e.g., 5) would yield tan(5°)*12 ≈ 1.05 which is clearly wrong as a degree
+  // value, so we can detect the mismatch: if pitchNum ≤ 12 it is almost certainly
+  // already in degrees (roof pitches above 12:12 = 45° are extremely rare).
+  const rawPitch = (pl?.pitch ?? (p?.roofPitch as number) ?? 5);
+  const isDegrees = rawPitch > 0 && rawPitch <= 90;
+  const pitchRatio = isDegrees
+    ? Math.round(Math.tan(rawPitch * Math.PI / 180) * 12 * 10) / 10
+    : rawPitch;
 
   return {
-    pitchStr:      `${pitchNum}:12`,
+    pitchStr:      `${pitchRatio}:12`,
     azimuthDeg:    pl?.azimuth   ?? (p?.roofAzimuth as number)    ?? 180,
     setbackFt:     pl?.setbacks?.eaveM ? mToFt(pl.setbacks.eaveM) : ((p?.fireSetbackFt as number) ?? 3),
     roofType:      ((p?.roofType as string) || 'SHINGLE').toUpperCase(),

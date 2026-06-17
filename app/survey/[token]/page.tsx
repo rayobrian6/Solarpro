@@ -483,6 +483,8 @@ export default function SurveyPage() {
           data={draft.roofConditions}
           onChange={handleRoof}
           disabled={submitting}
+          siteOverview={draft.siteOverview}
+          photos={draft.photos.photos}
         />
       )}
       {draft.currentStep === 3 && (
@@ -490,6 +492,10 @@ export default function SurveyPage() {
           data={draft.electricalService}
           onChange={handleElectrical}
           disabled={submitting}
+          siteOverview={draft.siteOverview}
+          photos={draft.photos.photos}
+          roofAgeYears={draft.roofConditions.roofAgeYears}
+          roofMaterial={draft.roofConditions.roofMaterial || undefined}
         />
       )}
       {draft.currentStep === 4 && (
@@ -497,6 +503,7 @@ export default function SurveyPage() {
           data={draft.obstructions}
           onChange={handleObstructions}
           disabled={submitting}
+          siteOverview={draft.siteOverview}
         />
       )}
       {draft.currentStep === 5 && (

@@ -16,7 +16,7 @@ import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
 // Permit engine imports (modularized)
 import { generatePermitHTML, PLANSET_ENGINE_VERSION, PDF_PAGE_CONFIG } from '@/lib/permit';
 import type { PermitInput } from '@/lib/permit';
-import { fetchAerialRoofData } from '@/lib/permit/sections/sitePlan';
+import { fetchAerialRoofData, type AerialRoofData } from '@/lib/permit/sections/sitePlan';
 
 // Site Survey pipeline imports — survey data enriches the permit plan set
 import { fromPhysicalData, type ProjectPhysicalDataRow } from '@/lib/siteSurvey/fromPhysicalData';
@@ -26,6 +26,8 @@ import { permitIntegration } from '@/lib/siteSurvey/permitIntegration';
 import { collectEngineeringSurveyEvidence } from '@/lib/engineering/surveyEvidence';
 import { getProjectSurveyContext } from '@/lib/survey/getProjectSurveyContext';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { canonicalToCADInputs, CanonicalBridgeError } from '@/lib/cad/canonicalBridge';
+import type { CanonicalBuildingModel } from '@/lib/siteSurveys/unifiedGeometry/types';
 
 // Phase 1 spine: authoritative roof geometry from the persisted canonical model
 import { getCanonicalModel } from '@/lib/siteSurveys/unifiedGeometry/canonicalModelStore';
@@ -34,6 +36,43 @@ import { canonicalToPermitRoofPlanes, isCanonicalUsableForPlanset } from '@/lib/
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';          // Ensure Node.js runtime (Buffer, child_process)
 export const maxDuration = 60;            // 60s — aerial API calls can take 10-15s total
+
+function isRoofPermitRequest(input: PermitInput): boolean {
+  // Error 5n fix: layout.type, layout.groundArrays, layout.fenceSegments, and
+  // project.systemType are all on their respective PermitInput types — no `as any` needed.
+  const layoutType = String(input.layout?.type ?? '').toLowerCase().trim();
+  if (layoutType === 'roof') return true;
+  if (layoutType === 'ground_mount' || layoutType === 'ground' || layoutType === 'solar_fence' || layoutType === 'fence') return false;
+
+  const projectType = String(input.project?.systemType ?? '').toLowerCase().trim();
+  if (projectType === 'roof') return true;
+  // Bug fix: original had `layoutType === 'ground'` instead of `projectType === 'ground'`
+  if (projectType === 'ground_mount' || projectType === 'ground' || projectType === 'solar_fence' || projectType === 'fence') return false;
+
+  const hasGround = (input.layout?.groundArrays?.length ?? 0) > 0;
+  const hasFence = (input.layout?.fenceSegments?.length ?? 0) > 0;
+  return !hasGround && !hasFence;
+}
+
+function isExplicitDraftOrLegacyPermit(req: NextRequest, input: PermitInput): boolean {
+  const qs = req.nextUrl.searchParams;
+  const queryMode = String(qs.get('mode') ?? qs.get('permitMode') ?? '').toLowerCase().trim();
+  const queryDraft = qs.get('draft') === 'true' || qs.get('legacy') === 'true' || qs.get('allowLegacyRoofGeometry') === 'true';
+  const bodyMode = String(input.mode ?? input.permitMode ?? input.intent ?? '').toLowerCase().trim();
+  return queryDraft || queryMode === 'draft' || queryMode === 'legacy' || bodyMode === 'draft' || bodyMode === 'legacy' || input.draft === true || input.allowLegacyRoofGeometry === true;
+}
+
+function extractCanonicalBuildingModel(input: PermitInput): CanonicalBuildingModel | null {
+  const candidate =
+    input.canonicalBuildingModel ??
+    input.canonical_building_model ??
+    input._canonicalBuildingModel ??
+    null;
+
+  if (!candidate || typeof candidate !== 'object') return null;
+  if (candidate.schemaVersion !== 'canonical_building_model_v1') return null;
+  return candidate as CanonicalBuildingModel;
+}
 
 
 // ─── Route Handler ────────────────────────────────────────────────────────────
@@ -187,7 +226,7 @@ export async function POST(req: NextRequest) {
     // ── Hub read: backfill missing fields from Client_Profile.json ────────────
     // If the caller passes a projectId we read the hub file and fill any gaps.
     // This means the permit route works even if the UI didn't send every field.
-    const projectId = (body as any).projectId || (project as any).projectId;
+    const projectId = body.projectId || project.projectId;
     if (projectId && isValidUUID(projectId)) {
       try {
         const sql = await getDbReady();
@@ -204,18 +243,23 @@ export async function POST(req: NextRequest) {
               ? rows[0].file_data.toString('utf8')
               : String(rows[0].file_data)
           ) as Record<string, unknown>;
-          const p = project as any;
-          // Backfill only if field is missing/empty
-          if (!p.clientName   && hub.clientName)       p.clientName   = hub.clientName;
-          if (!p.address      && hub.serviceAddress)   p.address      = hub.serviceAddress;
-          if (!p.lat          && hub.lat)              p.lat          = hub.lat;
-          if (!p.lng          && hub.lng)              p.lng          = hub.lng;
-          if (!p.city         && hub.city)             p.city         = hub.city;
-          if (!p.state        && hub.state)            p.state        = hub.state;
-          if (!p.zip          && hub.zip)              p.zip          = hub.zip;
-          if (!p.utilityName  && hub.utilityProvider)  p.utilityName  = hub.utilityProvider;
+          // Error 5p fix: all fields accessed on project are on PermitInput.project type
+          // Hub values are unknown (Record<string, unknown>) so cast those instead
+          if (!project.clientName   && hub.clientName)       project.clientName   = String(hub.clientName);
+          if (!project.address      && hub.serviceAddress)   project.address      = String(hub.serviceAddress);
+          if (!project.lat          && hub.lat)              project.lat          = Number(hub.lat);
+          if (!project.lng          && hub.lng)              project.lng          = Number(hub.lng);
+          if (!project.city         && hub.city)             project.city         = String(hub.city);
+          if (!project.state        && hub.state)            project.state        = String(hub.state);
+          if (!project.zip          && hub.zip)              project.zip          = String(hub.zip);
+          if (!project.utilityName  && hub.utilityProvider)  project.utilityName  = String(hub.utilityProvider);
+          // ── Error 3e fix: backfill APN from Client_Profile if available ──
+          if (!project.apn && hub.apn)             project.apn = String(hub.apn);
+          if (!project.apn && hub.parcelNumber)    project.apn = String(hub.parcelNumber);
+          if (!project.apn && hub.parcel_id)       project.apn = String(hub.parcel_id);
           console.log('[permit/hub] Backfilled from Client_Profile.json:', {
-            projectId, clientName: p.clientName, address: p.address,
+            projectId, clientName: project.clientName, address: project.address,
+            apn: project.apn || '(not found)',
           });
         }
       } catch (hubErr: unknown) {
@@ -296,7 +340,7 @@ export async function POST(req: NextRequest) {
           // Correct project.systemType if DB differs from what was sent
           if (dbSysType !== sentSysType) {
             console.log('[permit/POST] FIX v47.293: system_type mismatch — DB:', dbSysType, 'sent:', sentSysType, '— using DB value');
-            (project as any).systemType = dbSysType;
+            project.systemType = dbSysType;
           } else {
             console.log('[permit/POST] system_type OK — DB:', dbSysType, 'matches sent:', sentSysType);
           }
@@ -305,17 +349,17 @@ export async function POST(req: NextRequest) {
           // This fixes the case where rowToLayout defaulted layout.systemType to 'roof' when
           // layouts.system_type was NULL, causing the frontend to send layout.type='roof'.
           const canonicalType = dbToCanonicalType(dbSysType);
-          const sentLayoutType = ((body.layout as any)?.type || '').toLowerCase().trim();
+          const sentLayoutType = (body.layout?.type || '').toLowerCase().trim();
           if (body.layout && sentLayoutType !== canonicalType) {
             console.warn('[permit/POST] FIX v47.318: layout.type mismatch — DB canonical:', canonicalType,
               'sent:', sentLayoutType, '| DB layout row type:', dbLayoutType, '— correcting layout.type');
-            (body.layout as any).type = canonicalType;
+            body.layout.type = canonicalType;
           }
           // Also correct layout.systemType (the legacy field on the layout object)
           if (body.layout) {
-            const sentLayoutSys = ((body.layout as any)?.systemType || '').toLowerCase().trim();
+            const sentLayoutSys = (body.layout?.systemType || '').toLowerCase().trim();
             if (sentLayoutSys !== dbSysType) {
-              (body.layout as any).systemType = dbSysType;
+              body.layout.systemType = dbSysType;
             }
           }
         }
@@ -336,19 +380,19 @@ export async function POST(req: NextRequest) {
         error: 'ENGINEERING_MODEL_STALE',
         message: 'Permit generation blocked: panel count is 0. The design layout has not been propagated to the engineering model. Please open the Engineering page, wait for the pipeline sync to complete, then try again.',
         code: 'ENGINEERING_MODEL_STALE',
-        layoutPanels: (project as any).panelPositions?.length ?? 0,
+        layoutPanels: project.panelPositions?.length ?? 0,
         engineeringPanels: 0,
       }, { status: 422 });
     }
 
     // STEP 5 -- PERMIT INPUT LOGGING
-    const _pAny           = project as any;
-    const _panelPositions = _pAny.panelPositions as Array<unknown> | undefined;
-    const _roofPlanes     = _pAny.roofPlanes     as Array<unknown> | undefined;
+    // Error 5p fix: panelPositions and roofPlanes are on PermitInput.project type
+    const _panelPositions = project.panelPositions as Array<unknown> | undefined;
+    const _roofPlanes     = project.roofPlanes     as Array<unknown> | undefined;
     console.log('[PERMIT INPUT]', {
       projectName:        project.projectName,
       address:            project.address,
-      panelCount:         _pAny.panelCount ?? _pAny.totalModules,
+      panelCount:         body.system?.totalPanels ?? 0,
       panelPositionCount: Array.isArray(_panelPositions) ? _panelPositions.length : 'MISSING',
       roofPlaneCount:     Array.isArray(_roofPlanes) ? _roofPlanes.length : 'MISSING',
       hasPanelPositions:  Array.isArray(_panelPositions) && _panelPositions.length > 0,
@@ -359,12 +403,12 @@ export async function POST(req: NextRequest) {
     //    page functions never crash on compliance.jurisdiction?.xxx access
     //    when the frontend omits or sends null/undefined compliance.
     if (!body.compliance) {
-      (body as any).compliance = {
+      body.compliance = {
         overallStatus: 'PASS',
         jurisdiction: {
           state:      project.address?.match(/,\s*([A-Z]{2})\s+\d{5}/)?.[1] || '—',
           necVersion: '2020',
-          ahj:        (project as any).ahj || '—',
+          ahj:        project.ahj || '—',
           permitNotes: undefined,
         },
       };
@@ -372,13 +416,13 @@ export async function POST(req: NextRequest) {
       body.compliance.jurisdiction = {
         state:      project.address?.match(/,\s*([A-Z]{2})\s+\d{5}/)?.[1] || '—',
         necVersion: '2020',
-        ahj:        (project as any).ahj || '—',
+        ahj:        project.ahj || '—',
       };
     }
 
     // ── Normalize system: ensure inverters array exists
     if (!body.system) {
-      (body as any).system = {
+      body.system = {
         totalDcKw:   0,
         totalAcKw:   0,
         totalPanels: 0,
@@ -387,35 +431,37 @@ export async function POST(req: NextRequest) {
         inverters:   [],
       };
     } else if (!body.system.inverters) {
-      (body.system as any).inverters = [];
+      body.system.inverters = [];
     }
 
     // ─── Auto-populate AHJ data from national database ──────────────────────
     {
       const stateFromAddr = (body.project?.address || '').match(/,\s*([A-Z]{2})\s+\d{5}/)?.[1] || '';
-      const sc = (body.project as any).state || stateFromAddr;
-      const ct = (body.project as any).city || '';
-      const cn = (body.project as any).county || '';
+      const sc = body.project.state || stateFromAddr;
+      const ct = body.project.city || '';
+      const cn = body.project.county || '';
       if (sc) {
         try {
           // Dynamic import to avoid build-time issues
           const ahjModule = await import('@/lib/jurisdictions/ahj-national').catch(() => null);
-          const searchAhjFn = (ahjModule as any)?.searchAhj || (ahjModule as any)?.default?.searchAhj;
+          const searchAhjFn = ahjModule?.searchAhj || ahjModule?.default?.searchAhj;
           if (typeof searchAhjFn === 'function') {
             const ahjResults = searchAhjFn({ stateCode: sc, city: ct, county: cn });
             if (Array.isArray(ahjResults) && ahjResults.length > 0) {
-              const ar = ahjResults[0] as any;
+              const ar = ahjResults[0];
               console.log('[permit/AHJ] Found:', ar.ahjName, '| wind:', ar.windSpeedMph, 'mph | snow:', ar.groundSnowLoadPsf, 'psf');
-              if (!(body.project as any).ahjName) (body.project as any).ahjName = ar.ahjName;
-              if (!(body.project as any).ahjWindSpeedMph) (body.project as any).ahjWindSpeedMph = ar.windSpeedMph;
-              if (!(body.project as any).ahjGroundSnowPsf) (body.project as any).ahjGroundSnowPsf = ar.groundSnowLoadPsf;
-              if (!(body.project as any).ahjRoofSetbackIn) (body.project as any).ahjRoofSetbackIn = ar.roofSetbackInches;
-              if (!(body.project as any).ahjRidgeSetbackIn) (body.project as any).ahjRidgeSetbackIn = ar.ridgeSetbackInches;
-              if (!(body.project as any).ahjNecVersion) (body.project as any).ahjNecVersion = ar.necVersion;
-              if (!(body.project as any).ahjPermitFee) (body.project as any).ahjPermitFee = ar.typicalPermitFee;
-              if (!(body.project as any).ahjPlanCheckDays) (body.project as any).ahjPlanCheckDays = ar.typicalPlanCheckDays;
-              if (!(body.project as any).ahjSpecialRequirements || (body.project as any).ahjSpecialRequirements.length === 0) {
-                (body.project as any).ahjSpecialRequirements = [
+              if (!body.project.ahjName) body.project.ahjName = ar.ahjName;
+              if (!body.project.ahjWindSpeedMph) body.project.ahjWindSpeedMph = ar.windSpeedMph;
+              if (!body.project.ahjGroundSnowPsf) body.project.ahjGroundSnowPsf = ar.groundSnowLoadPsf;
+              if (!body.project.ahjRoofSetbackIn) body.project.ahjRoofSetbackIn = ar.roofSetbackInches;
+              if (!body.project.ahjRidgeSetbackIn) body.project.ahjRidgeSetbackIn = ar.ridgeSetbackInches;
+              if (!body.project.ahjNecVersion) body.project.ahjNecVersion = ar.necVersion;
+              if (!body.project.ahjPermitFee) body.project.ahjPermitFee = ar.typicalPermitFee;
+              if (!body.project.ahjPlanCheckDays) body.project.ahjPlanCheckDays = ar.typicalPlanCheckDays;
+              // Error 5t fix: propagate seismic design category from AHJ to project.seismicCategory
+              if (!project.seismicCategory && ar.seismicDesignCategory) project.seismicCategory = ar.seismicDesignCategory;
+              if (!body.project.ahjSpecialRequirements || body.project.ahjSpecialRequirements.length === 0) {
+                body.project.ahjSpecialRequirements = [
                   ...(ar.specialRequirements || []),
                   ...(ar.planSetRequirements || []).slice(0, 4),
                 ];
@@ -442,12 +488,12 @@ export async function POST(req: NextRequest) {
     console.log('[permit/POST] lat/lng: [redacted]');
     const aerialStart = Date.now();
     const aerialData = await fetchAerialRoofData(
-      (body.project as any).lat,
-      (body.project as any).lng,
+      body.project.lat,
+      body.project.lng,
       body.project?.address || ''
     ).catch((aerialErr: any) => {
       console.log('[permit/POST] fetchAerialRoofData THREW:', aerialErr?.message);
-      return { error: 'Aerial fetch threw: ' + aerialErr?.message } as any;
+      return { error: 'Aerial fetch threw: ' + aerialErr?.message } as AerialRoofData;
     });
     const aerialMs = Date.now() - aerialStart;
     console.log('[permit/POST] Aerial fetch completed in', aerialMs, 'ms');
@@ -601,8 +647,9 @@ export async function POST(req: NextRequest) {
                 }
               }
               // roofPlanes: add survey planes if none exist in design body
-              if (pp.roofPlanes != null && !(enrichedBody.project as any).roofPlanes?.length) {
-                (enrichedBody.project as any).roofPlanes = pp.roofPlanes;
+              if (pp.roofPlanes != null && !enrichedBody.project.roofPlanes?.length) {
+                // pp is Record<string, unknown>; cast roofPlanes to the correct PermitInput type
+                enrichedBody.project.roofPlanes = pp.roofPlanes as typeof enrichedBody.project.roofPlanes;
                 console.log('[permit/survey] project.roofPlanes set from survey');
               }
               // lat/lng: backfill if missing from design body
@@ -612,20 +659,21 @@ export async function POST(req: NextRequest) {
 
             // compliance.*: append survey notes; preserve existing overallStatus unless survey is worse
             if (patch.compliance) {
-              const existingCompliance = enrichedBody.compliance as any;
+              // Error 5r fix: compliance structural/electrical are `any` — no `as any` needed for access
+              const existingCompliance = enrichedBody.compliance;
               if (patch.compliance.overallStatus === 'warning' && existingCompliance?.overallStatus === 'pass') {
                 existingCompliance.overallStatus = 'warning';
               }
               if (patch.compliance.structural) {
                 existingCompliance.structural = {
                   ...existingCompliance.structural,
-                  ...(patch.compliance.structural as any),
+                  ...(patch.compliance.structural),
                 };
               }
               if (patch.compliance.electrical) {
                 existingCompliance.electrical = {
                   ...existingCompliance.electrical,
-                  ...(patch.compliance.electrical as any),
+                  ...(patch.compliance.electrical),
                 };
               }
             }
@@ -633,9 +681,9 @@ export async function POST(req: NextRequest) {
             // aerialData.*: use survey roof segments only if aerial fetch returned none
             if (
               patch.aerialData?.roofSegments?.length &&
-              !(enrichedBody.aerialData as any)?.roofSegments?.length
+              !enrichedBody.aerialData?.roofSegments?.length
             ) {
-              (enrichedBody as any).aerialData = {
+              enrichedBody.aerialData = {
                 ...(enrichedBody.aerialData ?? {}),
                 roofSegments: patch.aerialData.roofSegments,
               };
@@ -644,8 +692,8 @@ export async function POST(req: NextRequest) {
 
             // overrides: append survey overrides (never replace design overrides)
             if (patch.overrides?.length) {
-              const existingOverrides = (enrichedBody as any).overrides ?? [];
-              (enrichedBody as any).overrides = [...existingOverrides, ...patch.overrides];
+              const existingOverrides = enrichedBody.overrides ?? [];
+              enrichedBody.overrides = [...existingOverrides, ...patch.overrides];
               console.log('[permit/survey] appended', patch.overrides.length, 'survey override(s)');
             }
 
@@ -683,13 +731,15 @@ export async function POST(req: NextRequest) {
           const planes = canonicalToPermitRoofPlanes(model);
           if (planes.length === 0) continue;
 
-          (enrichedBody.project as any).roofPlanes = planes;
-          (enrichedBody.project as any).roofPlanesSource = 'canonical_building_model';
+          enrichedBody.project.roofPlanes = planes;
+          enrichedBody.project.roofPlanesSource = 'canonical_building_model';
           console.log(
             `[permit/canonical] project.roofPlanes set from CanonicalBuildingModel ` +
             `survey=${surveyId} planes=${planes.length} authority=${model.authority.state} ` +
             `(authoritative override of design/placeholder geometry)`,
           );
+          // Also attach the model for the CAD bridge gate below
+          enrichedBody.canonicalBuildingModel = model;
           usedModel = true;
           break;
         }
@@ -706,6 +756,72 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Canonical roof geometry gate ────────────────────────────────────────
+    // Submission-ready roof plansets must use reviewed/cad-safe CanonicalBuildingModel
+    // roof geometry. Legacy project.roofPlanes remain available only for explicit
+    // draft/legacy generation so old previews do not silently masquerade as permit-ready.
+    // The DB lookup above may have attached a canonicalBuildingModel to enrichedBody;
+    // alternatively the caller may supply one in the request body.
+    const isRoofPermit = isRoofPermitRequest(enrichedBody);
+    const allowDraftLegacyRoofGeometry = isExplicitDraftOrLegacyPermit(req, enrichedBody);
+    const canonicalBuildingModel = extractCanonicalBuildingModel(enrichedBody);
+
+    if (isRoofPermit) {
+      if (!canonicalBuildingModel) {
+        if (!allowDraftLegacyRoofGeometry) {
+          console.error('[PERMIT BLOCKED] CANONICAL_ROOF_GEOMETRY_REQUIRED', { projectId });
+          return NextResponse.json({
+            success: false,
+            error: 'CANONICAL_ROOF_GEOMETRY_REQUIRED',
+            code: 'CANONICAL_ROOF_GEOMETRY_REQUIRED',
+            message: 'Submission-ready roof permit generation requires a cad-safe CanonicalBuildingModel with local-meter roof plane polygons. Regenerate/promote the site-survey geometry, or explicitly request draft/legacy mode for a non-submission preview.',
+            projectId,
+          }, { status: 422 });
+        }
+        console.warn('[PERMIT DRAFT/LEGACY] Proceeding without CanonicalBuildingModel roof geometry by explicit request', { projectId });
+      } else {
+        try {
+          const bridge = canonicalToCADInputs(canonicalBuildingModel, {
+            originLat: project.lat ?? undefined,
+            originLng: project.lng ?? undefined,
+          });
+          if (bridge.roofPlanes.length === 0 && !allowDraftLegacyRoofGeometry) {
+            console.error('[PERMIT BLOCKED] CANONICAL_ROOF_PLANES_MISSING', { projectId, surveyId: canonicalBuildingModel.surveyId });
+            return NextResponse.json({
+              success: false,
+              error: 'CANONICAL_ROOF_PLANES_MISSING',
+              code: 'CANONICAL_ROOF_PLANES_MISSING',
+              message: 'Submission-ready roof permit generation requires at least one CAD-safe canonical roof plane polygon.',
+              projectId,
+              surveyId: canonicalBuildingModel.surveyId,
+            }, { status: 422 });
+          }
+          enrichedBody._canonicalBuildingModel = canonicalBuildingModel;
+          enrichedBody._canonicalCADBridge = bridge;
+          console.log('[PERMIT CANONICAL ROOF]', {
+            projectId,
+            surveyId: canonicalBuildingModel.surveyId,
+            roofPlanes: bridge.roofPlanesConverted,
+            obstructions: bridge.obstructionsConverted,
+            electricalNodes: bridge.electricalNodesConverted,
+          });
+        } catch (bridgeErr: unknown) {
+          const message = bridgeErr instanceof Error ? bridgeErr.message : String(bridgeErr);
+          if (!allowDraftLegacyRoofGeometry) {
+            console.error('[PERMIT BLOCKED] CANONICAL_ROOF_GEOMETRY_INVALID', { projectId, message });
+            return NextResponse.json({
+              success: false,
+              error: 'CANONICAL_ROOF_GEOMETRY_INVALID',
+              code: 'CANONICAL_ROOF_GEOMETRY_INVALID',
+              message,
+              projectId,
+            }, { status: bridgeErr instanceof CanonicalBridgeError ? 422 : 500 });
+          }
+          console.warn('[PERMIT DRAFT/LEGACY] Canonical roof geometry invalid; proceeding by explicit request', { projectId, message });
+        }
+      }
+    }
+
     // ── v47.314 Canonical Pipeline ──────────────────────────────────────────
     // systemType / panels / geometry are resolved exclusively by buildCanonical()
     // inside generatePermitHTML(). layout.type is the ONLY source of truth.
@@ -715,9 +831,59 @@ export async function POST(req: NextRequest) {
     console.log('[PLANSET VERSION]', PLANSET_ENGINE_VERSION);
     // Explicit opt-in for the non-authoritative CAD preview appendix in generated permit packages.
     // The appendix is additive only: it does not replace PV-2/PV-3 and does not mutate CAD, engineering, NEC, BOM, routing, workflow, recommendations, or permit authority.
-    (enrichedBody as any).cadAppendixPreviewV1 = true;
+    enrichedBody.cadAppendixPreviewV1 = true;
+
+    // ── Error 3e fix: APN server-side enrichment ──────────────────────────
+    // APN is needed on every permit page (coverSheet, sitePlan, titleBlock,
+    // certPages, peLetter) but was never passed from the frontend and never
+    // populated server-side. The hub backfill above covers Client_Profile.json,
+    // but the APN may also live in the property enrichment data (ATTOM API)
+    // stored in network_opportunities.parcel_id. Try to fetch it from there.
+    // Error 5p fix: apn is on PermitInput.project type — no `as any` needed
+    {
+      if (!enrichedBody.project.apn && projectId && isValidUUID(projectId)) {
+        try {
+          const apnSql = await getDbReady();
+          // Try network_opportunities (property enrichment pipeline)
+          const apnRows = await apnSql`
+            SELECT parcel_id FROM network_opportunities
+            WHERE project_id = ${projectId}
+            LIMIT 1
+          `;
+          if (apnRows.length > 0 && apnRows[0].parcel_id) {
+            enrichedBody.project.apn = apnRows[0].parcel_id;
+            console.log('[permit/APN] Backfilled from network_opportunities.parcel_id:', enrichedBody.project.apn);
+          }
+        } catch (apnErr: unknown) {
+          // Non-critical — APN will show placeholder
+          console.warn('[permit/APN] Lookup error (non-critical):', (apnErr as Error)?.message);
+        }
+      }
+      // Final fallback: if we still have no APN, leave as placeholder logic
+      // in the template files to show "—" or "___________________"
+      if (!enrichedBody.project.apn) {
+        console.log('[permit/APN] No APN found in any source — templates will show placeholder');
+      }
+    }
+
+    // ── Error 3f fix: Designer server-side fallback ──────────────────────
+    // project.designer is a required PermitInput field but defaults to empty
+    // string on the frontend (page.tsx line 472: designer: ''). The smart
+    // defaults (line 5361) only patch it client-side, so if the user hasn't
+    // filled the field AND hasn't clicked auto-fill, designer arrives as ''.
+    // All permit templates fall back to '—' or '________________________________'
+    // which looks broken on a professional permit document. Fix: if designer
+    // is empty after all enrichment, default to 'SolarPro Engineering'.
+    // Error 5p fix: designer is on PermitInput.project type — no `as any` needed
+    {
+      if (!enrichedBody.project.designer || enrichedBody.project.designer.trim() === '') {
+        enrichedBody.project.designer = 'SolarPro Engineering';
+        console.log('[permit/DESIGNER] Empty designer — defaulted to "SolarPro Engineering"');
+      }
+    }
+
     const html = generatePermitHTML(enrichedBody, storedSldSvg);
-    console.log('[PLANSET GENERATED]', { systemType: enrichedBody.project?.systemType, panels: (enrichedBody as any).system?.totalPanels, version: PLANSET_ENGINE_VERSION });
+    console.log('[PLANSET GENERATED]', { systemType: enrichedBody.project?.systemType, panels: enrichedBody.system?.totalPanels, version: PLANSET_ENGINE_VERSION });
 
     // ── Save permit HTML to project_files for permit-preview GET endpoint ──────
     // Stored under file_name 'permit_planset.html' so the preview route can

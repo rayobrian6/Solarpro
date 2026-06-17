@@ -91,7 +91,6 @@ const FAQS = [
 export default function SubscribePage() {
   const router = useRouter();
   const [selectedPlan, setSelectedPlan] = useState('contractor');
-  const [billing, setBilling] = useState<'monthly' | 'annual'>('monthly');
   const [loading, setLoading] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
 
@@ -112,19 +111,28 @@ export default function SubscribePage() {
       });
       const data = await res.json();
       setLoading(false);
-      if (data.success && data.url) {
+      if (res.ok && data.success && data.url) {
         window.location.href = data.url;
+        return;
+      }
+      // A failed checkout must NEVER grant dashboard access. If the user isn't
+      // authenticated yet, send them to register with the chosen plan; otherwise
+      // surface the error.
+      if (res.status === 401) {
+        router.push(`/auth/register?plan=${planId}`);
       } else {
-        router.push('/dashboard?subscription=trial');
+        alert(data.error || 'Could not start checkout. Please try again.');
       }
     } catch {
       setLoading(false);
-      router.push('/dashboard?subscription=error');
+      alert('Could not start checkout. Please check your connection and try again.');
     }
   };
 
-  const getPrice = (base: number) =>
-    billing === 'annual' ? Math.round(base * 0.8) : base;
+  // Annual billing is NOT supported by /api/stripe/checkout (it charges the
+  // monthly price regardless), so the displayed price must always be the monthly
+  // price that is actually charged — no phantom 20% discount.
+  const getPrice = (base: number) => base;
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -159,29 +167,6 @@ export default function SubscribePage() {
             Unlock professional proposals, engineering automation, and the full platform.
           </p>
           <p className="text-slate-500 text-sm">Additional users can be added as your team grows</p>
-
-          {/* Billing toggle */}
-          <div className="inline-flex items-center gap-1 bg-slate-800/60 border border-slate-700 rounded-xl p-1 mt-6">
-            <button
-              onClick={() => setBilling('monthly')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                billing === 'monthly' ? 'bg-amber-500 text-slate-900' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Monthly
-            </button>
-            <button
-              onClick={() => setBilling('annual')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
-                billing === 'annual' ? 'bg-amber-500 text-slate-900' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Annual
-              <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${
-                billing === 'annual' ? 'bg-slate-900/30 text-slate-900' : 'bg-emerald-500/20 text-emerald-400'
-              }`}>Save 20%</span>
-            </button>
-          </div>
         </div>
 
         {/* Plan cards */}
@@ -207,15 +192,8 @@ export default function SubscribePage() {
                 <p className="text-slate-400 text-sm mb-4">{plan.description}</p>
                 <div className="flex items-baseline gap-1 mb-3">
                   <span className="text-4xl font-black text-white">${getPrice(plan.price)}</span>
-                  <span className="text-slate-400 text-sm mb-1.5">
-                    /month{billing === 'annual' ? ' (billed annually)' : ''}
-                  </span>
+                  <span className="text-slate-400 text-sm mb-1.5">/month</span>
                 </div>
-                {billing === 'annual' && (
-                  <p className="text-xs text-emerald-400 mb-2">
-                    Save ${(plan.price - getPrice(plan.price)) * 12}/year
-                  </p>
-                )}
 
                 {/* Seat info */}
                 <div className="flex items-center gap-1.5 mb-1">

@@ -201,29 +201,24 @@ function WorkQueueRow({ project, onAction, onDismiss }: {
     }
   };
 
-  // Status-keyed glow for elevated work queue cards
-  const statusGlow: Record<string, string> = {
-    lead:      'shadow-[0_2px_16px_rgba(148,163,184,0.08)] border-slate-600/50',
-    design:    'shadow-[0_2px_16px_rgba(59,130,246,0.10)] border-blue-700/40',
-    proposal:  'shadow-[0_2px_16px_rgba(245,158,11,0.12)] border-amber-700/35',
-    approved:  'shadow-[0_2px_16px_rgba(16,185,129,0.12)] border-emerald-700/35',
-    installed: 'shadow-[0_2px_16px_rgba(34,197,94,0.10)] border-green-700/35',
+  // Status-keyed border accent for work queue cards
+  const statusAccent: Record<string, string> = {
+    lead:      'border-slate-600/50',
+    design:    'border-blue-700/40',
+    proposal:  'border-amber-700/35',
+    approved:  'border-emerald-700/35',
+    installed: 'border-green-700/35',
   };
   const canonStatus = normalizeStatus(project.status);
-  const glowCls = statusGlow[canonStatus] || statusGlow.lead;
+  const accentCls = statusAccent[canonStatus] || statusAccent.lead;
 
   return (
     <div
-      className={`group relative flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 cursor-pointer hover:scale-[1.005] hover:brightness-105 overflow-hidden border ${glowCls}`}
+      className={`group relative flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 cursor-pointer hover:brightness-105 border ${accentCls}`}
       style={{ background: 'rgba(15,23,42,0.70)' }}
     >
       {/* Status accent stripe */}
       <div className={`absolute left-0 top-0 bottom-0 w-0.5 rounded-l-xl ${stage.bar}`} />
-
-      {/* Urgency radial glow */}
-      {urgency === 'high' && (
-        <div className="absolute -top-3 -right-3 w-16 h-16 bg-amber-500/8 rounded-full blur-xl pointer-events-none" />
-      )}
 
       {/* System type icon */}
       <div className={`w-9 h-9 rounded-xl border flex items-center justify-center flex-shrink-0 ${
@@ -708,6 +703,10 @@ export default function CommandCenter() {
       return raw ? new Set<string>(JSON.parse(raw) as string[]) : new Set<string>();
     } catch { return new Set<string>(); }
   });
+  const restoreAllDismissed = () => {
+    setDismissedQueueIds(new Set());
+    try { localStorage.removeItem('solarpro:dismissedQueueIds'); } catch { /* ignore */ }
+  };
 
   // Workflow banner — snoozable for 7 days, NOT permanently dismissed
   // Reads a timestamp; if it's older than 7 days (or absent), shows the banner
@@ -731,6 +730,12 @@ export default function CommandCenter() {
     setShowWorkflowBanner(true);
     try { localStorage.removeItem('solarpro:workflowBannerSnoozedUntil'); } catch { /* ignore */ }
   };
+
+  // ── Priority Surface: Miller's Law compliant dashboard view ──
+  // Default 'priority' shows only Command Header + Today's Commands + Work Queue
+  // 'full' shows all sections — toggled by user
+  const [viewMode, setViewMode] = useState<'priority' | 'full'>('priority');
+
   const [activeModal, setActiveModal] = useState<{
     type: 'follow_up' | 'schedule_install' | 'engineering_review';
     commandId?: string;
@@ -993,9 +998,7 @@ export default function CommandCenter() {
       <div className="p-4 sm:p-6 space-y-6 animate-fade-in" style={{ maxWidth: '1800px' }}>
 
         {/* ══════════ DASHBOARD COMMAND HEADER ══════════ */}
-          <div className="relative overflow-hidden rounded-2xl border border-slate-700/60 bg-gradient-to-br from-slate-800/80 via-slate-800/60 to-slate-900/80 p-5 shadow-xl">
-            <div className="absolute -top-10 -right-10 w-56 h-56 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+          <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5">
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
                 <div className="flex items-center gap-2 mb-2">
@@ -1047,13 +1050,27 @@ export default function CommandCenter() {
                 <Link href="/projects/new" className="btn-primary btn-sm flex items-center gap-1.5">
                   <Plus size={14} /> New Project
                 </Link>
+                {/* Priority Surface toggle — Miller's Law: show only essentials by default */}
+                <button
+                  onClick={() => setViewMode(viewMode === 'priority' ? 'full' : 'priority')}
+                  title={viewMode === 'priority' ? 'Show full dashboard' : 'Focus view — show only essentials'}
+                  className={`btn-sm flex items-center gap-1.5 transition-all ${
+                    viewMode === 'full'
+                      ? 'border border-slate-600 bg-slate-700/50 text-slate-300 hover:bg-slate-700 hover:text-white'
+                      : 'border border-slate-700/60 bg-slate-800/40 text-slate-400 hover:bg-slate-700/60 hover:text-slate-200'
+                  } rounded-lg px-3 py-1.5`}
+                >
+                  {viewMode === 'priority' ? <Eye size={13} /> : <EyeOff size={13} />}
+                  <span className="text-xs font-semibold">{viewMode === 'priority' ? 'Full View' : 'Focus'}</span>
+                </button>
               </div>
             </div>
           </div>
 
+        {viewMode === 'full' ? (<>
           {/* ══════════ WORKFLOW PROCESS BANNER ══════════ */}
           {showWorkflowBanner && (
-            <div className="relative rounded-xl border border-amber-500/20 bg-gradient-to-r from-slate-800/60 via-slate-800/40 to-slate-800/60 px-4 py-3 overflow-hidden">
+            <div className="relative rounded-xl border border-amber-500/20 bg-slate-800/60 px-4 py-3 overflow-hidden">
               <div className="absolute inset-0 bg-amber-500/3 pointer-events-none" />
               {/* Dismiss button — snoozes for 7 days */}
               <button
@@ -1114,12 +1131,13 @@ export default function CommandCenter() {
               </div>
             </div>
           )}
+        </>) : null}
 
+        {viewMode === 'full' ? (<>
           {/* ══════════ FINANCIAL PRESSURE BAR ══════════ */}
           {!dashLoading && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="relative overflow-hidden rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 flex items-center gap-3">
-                <div className="absolute -top-4 -right-4 w-16 h-16 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
+              <div className="relative rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
                   <DollarSign size={15} className="text-emerald-400" />
                 </div>
@@ -1128,8 +1146,7 @@ export default function CommandCenter() {
                   <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Active Pipeline</div>
                 </div>
               </div>
-              <div className={`relative overflow-hidden rounded-xl border px-4 py-3 flex items-center gap-3 ${awaitingRevenue > 0 ? 'border-amber-500/20 bg-amber-500/5' : 'border-slate-700/40 bg-slate-800/40'}`}>
-                {awaitingRevenue > 0 && <div className="absolute -top-4 -right-4 w-16 h-16 bg-amber-500/10 rounded-full blur-xl pointer-events-none" />}
+              <div className={`relative rounded-xl border px-4 py-3 flex items-center gap-3 ${awaitingRevenue > 0 ? 'border-amber-500/20 bg-amber-500/5' : 'border-slate-700/40 bg-slate-800/40'}`}>
                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${awaitingRevenue > 0 ? 'bg-amber-500/15' : 'bg-slate-700/40'}`}>
                   <Clock size={15} className={awaitingRevenue > 0 ? 'text-amber-400' : 'text-slate-500'} />
                 </div>
@@ -1138,8 +1155,7 @@ export default function CommandCenter() {
                   <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Awaiting Close</div>
                 </div>
               </div>
-              <div className={`relative overflow-hidden rounded-xl border px-4 py-3 flex items-center gap-3 ${stalledRevenue > 0 ? 'border-red-500/20 bg-red-500/5' : 'border-slate-700/40 bg-slate-800/40'}`}>
-                {stalledRevenue > 0 && <div className="absolute -top-4 -right-4 w-16 h-16 bg-red-500/10 rounded-full blur-xl pointer-events-none" />}
+              <div className={`relative rounded-xl border px-4 py-3 flex items-center gap-3 ${stalledRevenue > 0 ? 'border-red-500/20 bg-red-500/5' : 'border-slate-700/40 bg-slate-800/40'}`}>
                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${stalledRevenue > 0 ? 'bg-red-500/15' : 'bg-slate-700/40'}`}>
                   <AlertTriangle size={15} className={stalledRevenue > 0 ? 'text-red-400' : 'text-slate-500'} />
                 </div>
@@ -1151,10 +1167,11 @@ export default function CommandCenter() {
             </div>
           )}
 
+        </>) : null}
           {/* ═══ TODAY'S COMMANDS ═══ */}
         {!dashLoading && (
           <div className="rounded-2xl overflow-hidden"
-            style={{ background: 'var(--bg-card)', border: '1px solid rgba(245,158,11,0.2)', boxShadow: '0 0 20px rgba(245,158,11,0.04)' }}>
+            style={{ background: 'var(--bg-card)', border: '1px solid rgba(245,158,11,0.2)' }}>
             <div className="px-5 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border-color)' }}>
               <div className="flex items-center gap-2">
                 <Zap size={15} className="text-amber-400" />
@@ -1228,6 +1245,7 @@ export default function CommandCenter() {
           </div>
         )}
 
+        {viewMode === 'full' ? (<>
         {/* ═══ COMMAND BAR (5 Cards) ═══ */}
         {/* ═══ COMMAND BAR (5 Cards) ═══
             PHASE 3: onCtaClick fires real API mutations (touch updatedAt) so
@@ -1277,7 +1295,9 @@ export default function CommandCenter() {
               else touchProjects('approved');
             }} />
         </div>
+        </>) : null}
 
+        {viewMode === 'full' ? (<>
         {/* ═══ UPCOMING SCHEDULE ═══ */}
         {schedule.length > 0 && (
           <div className="card p-4">
@@ -1310,7 +1330,9 @@ export default function CommandCenter() {
             </div>
           </div>
         )}
+        </>) : null}
 
+        {viewMode === 'full' ? (<>
         {/* ═══ PIPELINE CONTROL ═══ */}
         <div className="card p-4">
           <div className="flex items-center justify-between mb-3">
@@ -1350,6 +1372,7 @@ export default function CommandCenter() {
             </div>
           )}
         </div>
+        </>) : null}
 
         {/* ═══ WORK QUEUE + HIGH VALUE DEALS ═══ */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -1359,6 +1382,16 @@ export default function CommandCenter() {
                 <div className="w-6 h-6 rounded-lg bg-amber-500/15 flex items-center justify-center"><Zap size={13} className="text-amber-400" /></div>
                 <span className="text-sm font-bold text-white">Active Work Queue</span>
                 <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--accent-amber)' }}>{workQueue.length}</span>
+                {dismissedQueueIds.size > 0 && (
+                  <button
+                    onClick={restoreAllDismissed}
+                    title={`Restore ${dismissedQueueIds.size} dismissed item${dismissedQueueIds.size !== 1 ? 's' : ''}`}
+                    className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors hover:bg-slate-700/60"
+                    style={{ background: 'rgba(100,116,139,0.1)', color: 'var(--text-muted)', border: '1px solid rgba(100,116,139,0.2)' }}
+                  >
+                    <EyeOff size={9} /> {dismissedQueueIds.size} hidden
+                  </button>
+                )}
               </div>
               <Link href="/projects" className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1">All <ChevronRight size={12} /></Link>
             </div>
@@ -1416,6 +1449,8 @@ export default function CommandCenter() {
           </div>
         </div>
 
+        {/* ═══════ SECONDARY: Quick Intel + Actions (Focus view hidden) ═══════ */}
+        {viewMode === 'full' ? (<>
         {/* ═══ QUICK INTEL STRIP ═══ */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
@@ -1463,7 +1498,10 @@ export default function CommandCenter() {
             </Link>
           ))}
         </div>
+        </>) : null}
 
+        {/* ═══════ SECONDARY: Crew + Ops Board (Focus view hidden) ═══════ */}
+        {viewMode === 'full' ? (<>
         {/* ═══ CREW CALENDAR ═══ */}
         <div className="card p-4">
           <CrewCalendar />
@@ -1604,6 +1642,7 @@ export default function CommandCenter() {
           </div>
         )}
 
+        </>) : null}
       </div>
 
       {/* ═══ DEAL DECISION ENGINE ═══ */}

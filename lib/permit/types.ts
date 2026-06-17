@@ -12,6 +12,141 @@ import type { EngineeringStateRegistry, EngineeringInvalidationLineageMetadata, 
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
+// ── Compliance Sub-Interfaces (Error 7e fix) ─────────────────────────────────
+// Replace `electrical?: any` and `structural?: any` with proper interfaces
+// so the compiler catches typos and missing fields on every
+// compliance.electrical.* and compliance.structural.* access site.
+
+export interface ElectricalCompliance {
+  acConductorCallout?: string;     // e.g. "#10 AWG" — AC wire gauge callout
+  dcConductorCallout?: string;     // e.g. "#10 AWG" — DC wire gauge callout
+  acWireAmpacity?: number;         // AC wire ampacity rating (derated)
+  acVoltageDrop?: number;          // AC voltage drop percentage
+  groundingConductor?: string;     // e.g. "#10 Copper"
+  acWireGauge?: string;            // e.g. "#10 AWG" — raw gauge for SLD
+  busbar?: {
+    backfeedBreakerRequired?: number;  // backfeed breaker amps
+    passes?: boolean;                   // 120% rule pass/fail
+    busbarRule?: '120%' | 'supply-side';
+    busRating?: number;
+    mainBreaker?: number;
+    solarBreakerRequired?: number;
+    maxAllowedSolarBreaker?: number;
+    method?: string;
+    message?: string;
+    necReference?: string;
+  };
+  conduitFill?: {
+    conduitType?: string;
+    conduitSize?: string;
+    fillPercent?: number;
+    passes?: boolean;
+  };
+  summary?: {
+    totalDcKw?: number;
+    totalAcKw?: number;
+    dcAcRatio?: number;
+  };
+  // Full ElectricalCalcResult fields for advanced pages / BOM / SLD
+  interconnection?: {
+    method?: string;
+    methodLabel?: string;
+    busRating?: number;
+    mainBreaker?: number;
+    solarBreakerRequired?: number;
+    maxAllowedSolarBreaker?: number;
+    passes?: boolean;
+    necReference?: string;
+    message?: string;
+  };
+  acSizing?: {
+    ocpdAmps?: number;
+    disconnectAmps?: number;
+    disconnectType?: string;
+    conductorGauge?: string;
+    conductorAmpacity?: number;
+    conduitSize?: string;
+    conduitFillPct?: number;
+    groundingConductor?: string;
+  };
+  inverters?: Array<{
+    inverterId?: number;
+    type?: string;
+    acOutputKw?: number;
+    acOutputCurrentMax?: number;
+    strings?: Array<{
+      stringId?: number;
+      panelCount?: number;
+      vocSTC?: number;
+      vocCorrected?: number;
+      iscSTC?: number;
+      iscCorrected?: number;
+      maxCurrentNEC?: number;
+      ocpdRating?: number;
+      wireGauge?: string;
+      wireAmpacity?: number;
+      voltageDrop?: number;
+    }>;
+    acWireResult?: {
+      selectedGauge?: string;
+      effectiveAmpacity?: number;
+      voltageDrop?: number;
+      conductorCallout?: string;
+      wasAutoSized?: boolean;
+      overallPass?: boolean;
+    };
+  }>;
+  rapidShutdownCompliant?: boolean;
+  status?: 'PASS' | 'WARNING' | 'FAIL';
+  // Survey integration notes (set by permitIntegration.ts from site survey data)
+  surveyNotes?: string[];
+}
+
+export interface StructuralCompliance {
+  wind?: {
+    windSpeed?: number;
+    exposureCategory?: string;
+    velocityPressure?: number;
+    netUpliftPressure?: number;
+    upliftPerAttachment?: number;
+  };
+  snow?: {
+    groundSnowLoad?: number;
+    roofSnowLoad?: number;
+    snowLoadPerAttachment?: number;   // lbs per attachment point from snow loading
+  };
+  rafter?: {
+    rafterSize?: string;
+    rafterSpacing?: number;
+    rafterSpan?: number;
+    bendingMoment?: number;
+    allowableBendingMoment?: number;
+    utilizationRatio?: number;
+    deflection?: number;
+    allowableDeflection?: number;
+    Fb_base?: number;
+    Cd?: number;
+    Cr?: number;
+    Fb_prime?: number;
+    totalLoadPsf?: number;
+    lineLoad?: number;
+  };
+  attachment?: {
+    safetyFactor?: number;
+    lagBoltCapacity?: number;
+    maxAllowedSpacing?: number;
+    totalUpliftPerAttachment?: number;
+  };
+  seismic?: {
+    sdc?: string;  // Seismic Design Category
+  };
+  totalDeadLoadPsf?: number;
+  moduleLoadPsf?: number;
+  rackingLoadPsf?: number;
+  // Survey integration notes (set by permitIntegration.ts from site survey data)
+  surveyNotes?: string[];
+}
+
 export interface PermitInput {
   project: {
     projectName: string;
@@ -65,7 +200,10 @@ export interface PermitInput {
       id: string; lat: number; lng: number;
       x?: number; y?: number; tilt?: number; azimuth?: number;
       wattage?: number; row?: number; col?: number;
-      systemType?: string; orientation?: string;
+      systemType?: string; orientation?: string; arrayId?: string;
+      // Error 5x fix: planeId is on PlacedPanel in types/index.ts and accessed
+      // via `(p as any).planeId` in roofCAD.ts — must be declared here
+      planeId?: string;
     }>;
     roofPlanes?: Array<{
       id: string; vertices: Array<{ lat: number; lng: number }>;
@@ -75,6 +213,8 @@ export interface PermitInput {
       confirmed?: boolean;
       planeHeightAtCenterMeters?: number;
     }>;
+    // Error 5q fix: set by route.ts when roofPlanes come from CanonicalBuildingModel
+    roofPlanesSource?: 'canonical_building_model' | 'survey' | 'design' | 'aerial';
     // Panel physical specs
     panelVoc?: number;
     panelIsc?: number;
@@ -88,7 +228,82 @@ export interface PermitInput {
     county?: string;
     atsBrand?: string;
     atsAmpRating?: number;
+    // ── Error 3e fix: APN was accessed via (project as any).apn in 5+ template ──
+    // files but never declared on the type, so it was never passed from the ──
+    // frontend or populated server-side. Adding it here so it can flow through ──
+    // the PermitInput pipeline and reach coverSheet, sitePlan, titleBlock, etc.
+    apn?: string;
+    // ── Error 4a fix: Fields accessed via (project as any) but never declared ──
+    // on the type — same silent-missing-data pattern as the APN bug.          ──
+    // Adding them here so they can flow through the PermitInput pipeline and    ──
+    // reach the permit pages that depend on them.                              ──
+    projectId?: string;           // generatePermit.ts provenance doc ID
+    backfeedBreakerA?: number;    // electricalPages.ts, sldAdapter.ts — PV backfeed breaker rating
+    pvBackfeedA?: number;         // electricalPages.ts, sldAdapter.ts — fallback backfeed amps
+    exposureCategory?: string;    // structuralPages.ts, certPages.ts — ASCE 7 Exposure Cat (A/B/C/D)
+    designTempMin?: number;       // sldAdapter.ts — minimum design temperature (°C)
+    conduitSize?: string;         // bomForPermit.ts — conduit trade size (e.g. '3/4', '1')
+    panelModel?: string;          // titleBlock.ts — module model name
+    moduleModel?: string;         // titleBlock.ts — alias for panelModel
+    moduleMfr?: string;           // titleBlock.ts — module manufacturer
+    inverterModel?: string;       // titleBlock.ts — inverter model (project-level override)
+    inverterMfr?: string;         // titleBlock.ts — inverter manufacturer
+    roofLayers?: number;          // coverSheet.ts — number of roofing material layers
+    stories?: string;             // coverSheet.ts — building stories (e.g. '1', '2')
+    roofLoadPsf?: number;         // coverSheet.ts — existing roof dead load (psf)
+    windSpeedMph?: number;        // coverSheet.ts — wind speed (mph) from AHJ or ASCE map
+    windExposure?: string;        // coverSheet.ts — wind exposure category letter
+    groundSnowPsf?: number;       // coverSheet.ts — ground snow load (psf)
+    seismicCategory?: string;     // coverSheet.ts — seismic design category (A-F)
+    ahj?: string;                 // titleBlock.ts — Authority Having Jurisdiction name
+    attachmentCount?: number;     // bomForPermit.ts — total roof attachments
+    railSections?: number;        // bomForPermit.ts — rail sections count
+    rackingId?: string;           // bomForPermit.ts — racking system identifier
+    batteryId?: string;           // bomForPermit.ts — battery system identifier
+    framingType?: string;         // generatePermit.ts — 'rafter' | 'truss' | 'stick'
+    rafterSpan?: number;          // generatePermit.ts — rafter span (ft)
+    rafterSpecies?: string;       // generatePermit.ts — wood species for structural calc
+    // ── Fence / Ground structural overrides (read by canonical.ts from project level) ──
+    postEmbedFt?: number;         // fence post embedment depth (ft)
+    postSpacingFt?: number;       // fence post spacing O.C. (ft)
+    panelHeightFt?: number;       // fence panel height (ft)
+    soilResistance?: number;      // soil passive resistance (lbs/ft²)
+    pileDepthFt?: number;         // ground mount pile depth (ft)
+    pileSpacingFt?: number;       // ground mount pile spacing (ft)
+    groundClearIn?: number;       // ground clearance (inches)
+    tiltDeg?: number;             // array tilt override (degrees)
+    // ── Equipment overrides (read by helpers.ts resolveEquipment() as fallback) ──
+    panelManufacturer?: string;   // module manufacturer override
+    panelBrand?: string;          // alias for panelManufacturer
+    panelWatts?: number;          // module wattage override
+    inverterBrand?: string;       // inverter manufacturer alias
+    inverterManufacturer?: string;// inverter manufacturer override (project-level)
+    inverterType?: string;        // inverter type override (project-level)
+    inverterAcOutputKw?: number;  // inverter AC output override (project-level)
+    // ── Server-injected canonical (set by generatePermit.ts, read by sheet renderers) ──
+    _canonical?: CanonicalInput;  // authoritative canonical model injected at permit-gen time
   };
+  // ── Server-injected plan set ID (set by generatePermit.ts, read by CAD appendix) ──
+  planSetId?: string;
+  // ── Plan set generation options (set by caller, read by sheet renderers) ──
+  cadAppendixPreviewV1?: boolean;
+  planSetOptions?: { cadAppendixPreviewV1?: boolean };
+  permitOptions?: { cadAppendixPreviewV1?: boolean };
+  // ── Engineering data (read by canonical.ts for structural calc) ──
+  engineering?: unknown | null;
+  // Error 5q fix: canonical model + bridge — set by permit route, read by roofCAD.ts
+  _canonicalBuildingModel?: import('@/lib/siteSurveys/unifiedGeometry/types').CanonicalBuildingModel;
+  _canonicalCADBridge?: import('@/lib/cad/canonicalBridge').CanonicalBridgeResult;
+  canonicalBuildingModel?: import('@/lib/siteSurveys/unifiedGeometry/types').CanonicalBuildingModel;
+  // Error 5q fix: top-level projectId (read by route.ts hub lookup)
+  projectId?: string;
+  // Request mode fields (sent by frontend, used by route.ts)
+  mode?: string;
+  permitMode?: string;
+  intent?: string;
+  draft?: boolean;
+  allowLegacyRoofGeometry?: boolean;
+  canonical_building_model?: import('@/lib/siteSurveys/unifiedGeometry/types').CanonicalBuildingModel;
   system: {
     totalDcKw: number;
     totalAcKw: number;
@@ -103,6 +318,8 @@ export interface PermitInput {
       maxDcVoltage: number;
       efficiency: number;
       ulListing: string;
+      // Error 5c fix: mpptChannels accessed via (inv0 as any)?.mpptChannels in sldAdapter.ts
+      mpptChannels?: number;
       strings: Array<{
         label: string;
         panelCount: number;
@@ -120,6 +337,20 @@ export interface PermitInput {
         voltageDrop?: number;
       }>;
     }>;
+    // Error 5l fix: modules[] is an alternative payload shape accessed via (system as any)?.modules
+    // in helpers.ts resolveEquipment(). Some API routes send panel data in this format.
+    modules?: Array<{
+      manufacturer?: string;
+      panelManufacturer?: string;
+      model?: string;
+      panelModel?: string;
+      watts?: number;
+      panelWatts?: number;
+      voc?: number;
+      panelVoc?: number;
+      isc?: number;
+      panelIsc?: number;
+    }>;
   };
   compliance: {
     overallStatus: string;
@@ -129,8 +360,8 @@ export interface PermitInput {
       ahj: string;
       permitNotes?: string;
     };
-    electrical?: any;
-    structural?: any;
+    electrical?: ElectricalCompliance;
+    structural?: StructuralCompliance;
   };
   rulesResult?: {
     overallStatus: string;
@@ -284,6 +515,8 @@ export interface PermitInput {
       x?: number; y?: number; tilt?: number; azimuth?: number;
       wattage?: number; row?: number; col?: number;
       systemType?: string; orientation?: string;
+      // Error 5k fix: placementType is read by buildCanonical() for system type detection
+      placementType?: 'ROOF' | 'GROUND' | 'FENCE';
     }>;
     geometry?: {
       roofPlanes?:     Array<{ id: string; vertices: Array<{ lat: number; lng: number }>; pitch?: number; azimuth?: number; area?: number; edgeTypes?: string[] }>;

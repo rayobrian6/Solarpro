@@ -18,6 +18,7 @@
 // ============================================================
 
 import type { RunSegment, MicroBranch } from './computed-system';
+import { necNextStandardOcpd } from '@/lib/permit/utils/helpers';
 import { getBuildBadge } from './version';
 import type { ConductorBundle } from './segment-schedule';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
@@ -2321,7 +2322,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   if (isMicro) {
     const md = input.deviceCount ?? input.totalModules;
     const ab = Math.ceil(md/16);
-    const ba = branchRun?.ocpdAmps ?? Math.ceil((input.acOutputKw*1000/240)*1.25/5)*5;
+    const ba = branchRun?.ocpdAmps ?? necNextStandardOcpd((input.acOutputKw*1000/240)*1.25);
     parts.push(txt(p1x+cW/2, CALC_Y+10, 'AC BRANCH CIRCUIT INFO', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
     const rows: [string,string][] = [
       ['Topology','MICROINVERTER'],

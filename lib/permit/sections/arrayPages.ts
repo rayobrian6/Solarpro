@@ -136,7 +136,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   // CAD-sourced: use cad.totalPanels as authoritative count
   const cadTotalPanels = cad.totalPanels;
   const cadSystemType = cad.systemType;
-  const panels = (project as any).panelPositions as Array<{
+  const panels = project.panelPositions as Array<{
     id: string; lat: number; lng: number; row: number; col: number;
     tilt?: number; azimuth?: number; wattage?: number; orientation?: string; systemType?: string;
   }> || [];
@@ -154,13 +154,21 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   const rowNums = Array.from(rows.keys()).sort((a, b) => a - b);
 
   // Compute dominant tilt/azimuth from panel data
+  // For roof systems, prefer the CAD roof plane azimuth/tilt as the authoritative
+  // source (from canonical model), since panelPositions may contain stale or
+  // averaged values that disagree with the actual roof face direction.
+  const roofPlane0 = cad.roof?.planes?.[0];
   let sumTilt = 0, sumAz = 0, count = 0;
   panels.forEach(p => {
     if (p.tilt != null) { sumTilt += p.tilt; count++; }
     if (p.azimuth != null) sumAz += p.azimuth;
   });
-  const avgTilt = count > 0 ? (sumTilt / count).toFixed(1) : (project.roofPitch || 20).toString();
-  const avgAz = count > 0 ? (sumAz / count).toFixed(0) : '180';
+  const avgTilt = isRoof(cadSystemType) && roofPlane0?.pitch != null
+    ? roofPlane0.pitch.toFixed(1)  // pitch is already in degrees from canonical model
+    : (count > 0 ? (sumTilt / count).toFixed(1) : (project.roofPitch || 20).toString());
+  const avgAz = isRoof(cadSystemType) && roofPlane0?.azimuth != null
+    ? roofPlane0.azimuth.toFixed(0)
+    : (count > 0 ? (sumAz / count).toFixed(0) : '180');
 
   // Determine compass direction from azimuth
   const azNum = parseFloat(avgAz);

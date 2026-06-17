@@ -1,8 +1,11 @@
 "use client";
 import React, { useEffect, useState, useCallback } from "react";
 import AppShell from "@/components/ui/AppShell";
+import dynamic from "next/dynamic";
+import Link from "next/link";
 import {
   Network,
+  Lock,
   Zap,
   Battery,
   Home,
@@ -343,6 +346,9 @@ interface Opportunity extends EnrichmentCarrier {
   address?: string;
   claim_id?: string;
   claim_status?: string;
+  homeowner_name?: string | null;
+  homeowner_email?: string | null;
+  homeowner_phone?: string | null;
   claimed_by_user_id?: string;
   marketplace_status?: string;
   claim_mode?: "exclusive" | "shared" | string;
@@ -1009,7 +1015,7 @@ function OpportunityCard({
               {experience?.liquidity_label ?? "Marketplace claim signal"}
             </div>
           </div>
-          <div className="text-4xl font-black leading-none tracking-tight text-white tabular-nums drop-shadow-[0_0_18px_rgba(16,185,129,0.2)]">
+          <div className="text-4xl font-black leading-none tracking-tight text-white tabular-nums">
             {projectHero?.value ??
               projectIntelligence?.value_label ??
               compactRange(
@@ -1299,7 +1305,7 @@ function OpportunityCard({
                 onClick={() => onClaim(opp.id)}
                 className="px-4 py-2 text-xs font-black text-slate-950 bg-emerald-300 hover:bg-emerald-200 rounded-xl transition-colors flex items-center gap-1.5 shadow-lg shadow-emerald-950/30"
               >
-                Claim <ArrowRight size={12} />
+                Pay &amp; claim <ArrowRight size={12} />
               </button>
             ) : (
               <span className="px-3 py-2 text-xs font-black text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center gap-1.5">
@@ -1423,7 +1429,7 @@ function ClaimModal({
               ) : (
                 <CheckCircle size={15} />
               )}
-              {loading ? "Claiming…" : "Confirm Claim"}
+              {loading ? "Starting checkout…" : "Pay & claim"}
             </button>
           </div>
         </div>
@@ -2281,10 +2287,10 @@ function DetailModal({
               >
                 <CheckCircle size={15} />{" "}
                 {opp.claim_mode === "shared"
-                  ? "Claim Shared Lead"
+                  ? "Pay & Claim Shared Lead"
                   : opp.claim_mode === "exclusive"
-                    ? "Claim Exclusively"
-                    : "Claim Lead"}
+                    ? "Pay & Claim Exclusively"
+                    : "Pay & Claim Lead"}
               </button>
             ) : (
               <span className="flex-1 py-2.5 text-sm font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center justify-center gap-2">
@@ -2511,11 +2517,23 @@ function ProfileTab({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+const UsLeadMap = dynamic(() => import("./UsLeadMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-[200px] items-center justify-center text-sm text-slate-500">
+      Loading territory map…
+    </div>
+  ),
+});
+
 export default function NetworkPage() {
   const [tab, setTab] = useState<Tab>("discover");
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [mapCounts, setMapCounts] = useState<Record<string, number>>({});
+  const [mapOpps, setMapOpps] = useState<Opportunity[]>([]);
   const [myShared, setMyShared] = useState<Opportunity[]>([]);
   const [myClaims, setMyClaims] = useState<Opportunity[]>([]);
+  const [expandedClaim, setExpandedClaim] = useState<string | null>(null);
   const [profile, setProfile] = useState<ContractorProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [claimTarget, setClaimTarget] = useState<string | null>(null);
@@ -2578,6 +2596,22 @@ export default function NetworkPage() {
     }
   }, []);
 
+  // Unfiltered eligible feed, grouped by state, to drive the map heat counts.
+  const loadMapCounts = useCallback(async () => {
+    const res = await fetch("/api/network/opportunities?limit=50");
+    if (res.ok) {
+      const d = await res.json();
+      const counts: Record<string, number> = {};
+      for (const o of (d.opportunities || []) as Opportunity[]) {
+        const rec = o as unknown as Record<string, unknown>;
+        const s = String(rec.state_code ?? rec.state ?? "").toUpperCase();
+        if (s) counts[s] = (counts[s] ?? 0) + 1;
+      }
+      setMapCounts(counts);
+      setMapOpps((d.opportunities || []) as Opportunity[]);
+    }
+  }, []);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -2586,40 +2620,46 @@ export default function NetworkPage() {
         loadDiscover(),
         loadMyShared(),
         loadMyClaims(),
+        loadMapCounts(),
       ]);
       setLoading(false);
     })();
-  }, [loadProfile, loadDiscover, loadMyShared, loadMyClaims]);
+  }, [loadProfile, loadDiscover, loadMyShared, loadMyClaims, loadMapCounts]);
 
   useEffect(() => {
     if (!loading) loadDiscover();
   }, [filterState, filterBattery]); // eslint-disable-line
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("purchased")) {
+      showToast(
+        "Payment received — lead unlocked. See My Claims for the full address.",
+      );
+      window.history.replaceState({}, "", "/network");
+    } else if (params.get("canceled")) {
+      showToast("Checkout canceled — you were not charged.", "error");
+      window.history.replaceState({}, "", "/network");
+    }
+  }, []); // eslint-disable-line
+
   const confirmClaim = async () => {
     if (!claimTarget) return;
     setClaimLoading(true);
     try {
+      // Pay-to-claim: start a Stripe checkout for this lead. The claim is
+      // finalized by the Stripe webhook once payment completes, and the
+      // homeowner's address unlocks on return (?purchased=<id>).
       const res = await fetch(
-        `/api/network/opportunities/${claimTarget}/claim`,
+        `/api/network/opportunities/${claimTarget}/checkout`,
         { method: "POST" },
       );
       const data = await res.json();
-      if (res.ok) {
-        setClaimedIds((prev) => new Set([...prev, claimTarget]));
-        setOpportunities((prev) => prev.filter((o) => o.id !== claimTarget));
-        setTotal((prev) => Math.max(0, prev - 1));
-        if (data.opportunity)
-          setMyClaims((prev) => [
-            data.opportunity,
-            ...prev.filter((o) => o.id !== claimTarget),
-          ]);
-        await Promise.all([loadDiscover(), loadMyClaims()]);
-        showToast(
-          "Opportunity claimed! Full address is now visible in My Claims.",
-        );
-      } else {
-        showToast(data.error || "Failed to claim opportunity.", "error");
+      if (res.ok && data.url) {
+        window.location.href = data.url as string;
+        return;
       }
+      showToast(data.error || "Could not start checkout.", "error");
     } finally {
       setClaimLoading(false);
       setClaimTarget(null);
@@ -2639,7 +2679,9 @@ export default function NetworkPage() {
   };
 
   const claimOppForModal = claimTarget
-    ? opportunities.find((o) => o.id === claimTarget)
+    ? (opportunities.find((o) => o.id === claimTarget) ??
+      mapOpps.find((o) => o.id === claimTarget) ??
+      null)
     : null;
 
   const TABS: {
@@ -2676,10 +2718,7 @@ export default function NetworkPage() {
         style={{ background: "var(--bg-base, #0b1120)" }}
       >
         {/* ── Hero Header ─────────────────────────────────────────────────── */}
-        <div className="relative overflow-hidden border-b border-slate-800">
-          {/* Subtle gradient glow */}
-          <div className="absolute inset-0 bg-gradient-to-br from-emerald-950/40 via-transparent to-transparent pointer-events-none" />
-          <div className="absolute top-0 left-1/4 w-96 h-32 bg-emerald-500/5 blur-3xl pointer-events-none" />
+        <div className="relative border-b border-slate-800">
 
           <div className="relative max-w-6xl mx-auto px-6 py-8">
             <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
@@ -2804,6 +2843,46 @@ export default function NetworkPage() {
               {/* DISCOVER */}
               {tab === "discover" && (
                 <div>
+                  {/* Territory map */}
+                  <div className="mb-6 rounded-2xl border border-slate-700/60 bg-[#0b111d] p-3">
+                    <div className="mb-2 flex items-center justify-between px-1">
+                      <div className="text-sm font-medium text-white">
+                        Your territory
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        Hover a state for your lead count · click to filter
+                      </div>
+                    </div>
+                    <UsLeadMap
+                      counts={mapCounts}
+                      leads={mapOpps.map((o) => {
+                        const r = o as unknown as Record<string, unknown>;
+                        return {
+                          id: String(r.id ?? ""),
+                          state: String(
+                            r.state_code ?? r.state ?? "",
+                          ).toUpperCase(),
+                          lat:
+                            r.lat != null && r.lat !== ""
+                              ? Number(r.lat)
+                              : null,
+                          lng:
+                            r.lng != null && r.lng !== ""
+                              ? Number(r.lng)
+                              : null,
+                          city: r.city ? String(r.city) : "",
+                          zip: r.zip ? String(r.zip) : "",
+                          grade: r.lead_grade ? String(r.lead_grade) : "",
+                          kw:
+                            r.system_size_kw != null
+                              ? Number(r.system_size_kw)
+                              : null,
+                        };
+                      })}
+                      selected={filterState}
+                      onSelect={(c) => setFilterState(c)}
+                    />
+                  </div>
                   {/* Filter bar */}
                   <div className="flex items-center gap-3 mb-6 flex-wrap">
                     <select
@@ -2864,16 +2943,33 @@ export default function NetworkPage() {
                       )}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                      {opportunities.map((opp) => (
-                        <OpportunityCard
-                          key={opp.id}
-                          opp={opp}
-                          onClaim={setClaimTarget}
-                          onViewDetail={setDetailOpp}
-                          claimed={claimedIds.has(opp.id)}
-                        />
-                      ))}
+                    /* Leads are gated behind territory — drill state → county
+                       to reveal them. Keeps individual leads off this surface. */
+                    <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-10 text-center">
+                      <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-700 bg-slate-800">
+                        <Lock size={24} className="text-slate-500" />
+                      </div>
+                      <h3 className="text-lg font-semibold text-white">
+                        {total} {total === 1 ? "lead" : "leads"} in your territory
+                      </h3>
+                      <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
+                        Leads are revealed by area. Click a state on the map, then
+                        a county, to see its leads and full quality — grade,
+                        battery, financing, intent and more. Contact and address
+                        unlock when you claim.
+                      </p>
+                      {filterState ? (
+                        <Link
+                          href={`/network/territory/${filterState}`}
+                          className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-emerald-400 px-4 py-2 text-sm font-bold text-slate-900 transition-colors hover:bg-emerald-300"
+                        >
+                          Explore {filterState} territory →
+                        </Link>
+                      ) : (
+                        <p className="mt-4 text-xs text-slate-600">
+                          Tip: click your state on the map above to drill in.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2969,45 +3065,240 @@ export default function NetworkPage() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {myClaims.map((opp) => (
-                        <div
-                          key={opp.id}
-                          className="bg-[#0f1623] border border-slate-700/60 rounded-xl p-4 hover:border-slate-600 transition-colors"
-                        >
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1 min-w-0">
-                              <div className="text-white font-medium text-sm">
-                                {opp.site_name || "Unnamed Project"}
-                              </div>
-                              {opp.address && (
-                                <div className="flex items-center gap-1.5 mt-1 text-emerald-400 text-xs">
-                                  <MapPin size={11} />
-                                  {opp.address}
+                      {myClaims.map((opp) => {
+                        const isOpen = expandedClaim === opp.id;
+                        const rec = opp as unknown as Record<
+                          string,
+                          unknown
+                        >;
+                        const detail: [string, string | null][] = [
+                          [
+                            "Annual usage",
+                            rec.annual_kwh
+                              ? `${Math.round(Number(rec.annual_kwh)).toLocaleString()} kWh`
+                              : null,
+                          ],
+                          [
+                            "Utility rate",
+                            rec.utility_rate_per_kwh
+                              ? `${(Number(rec.utility_rate_per_kwh) * 100).toFixed(1)}¢/kWh`
+                              : null,
+                          ],
+                          [
+                            "Est. project value",
+                            rec.estimated_system_cost
+                              ? fmtCurrency(Number(rec.estimated_system_cost))
+                              : null,
+                          ],
+                          [
+                            "Payback",
+                            rec.estimated_payback_yrs
+                              ? `${rec.estimated_payback_yrs} yrs`
+                              : null,
+                          ],
+                          [
+                            "Roof",
+                            [
+                              rec.roof_material,
+                              rec.roof_age_years
+                                ? `${rec.roof_age_years} yr`
+                                : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ") || null,
+                          ],
+                          [
+                            "Monthly bill",
+                            rec.monthly_bill_amount != null
+                              ? `${fmtCurrency(Number(rec.monthly_bill_amount))}/mo`
+                              : null,
+                          ],
+                          [
+                            "Timeline",
+                            rec.homeowner_timeline
+                              ? String(rec.homeowner_timeline).replace(
+                                  /_/g,
+                                  " ",
+                                )
+                              : null,
+                          ],
+                          [
+                            "Battery interest",
+                            rec.battery_candidate
+                              ? rec.battery_reason
+                                ? String(rec.battery_reason)
+                                : "Yes"
+                              : null,
+                          ],
+                          [
+                            "Wants financing",
+                            rec.homeowner_financing_interest ? "Yes" : null,
+                          ],
+                          [
+                            "You paid",
+                            rec.price_paid != null
+                              ? fmtCurrency(Number(rec.price_paid))
+                              : null,
+                          ],
+                        ];
+                        const qualMeta =
+                          rec.intake_metadata &&
+                          typeof rec.intake_metadata === "object"
+                            ? ((
+                                rec.intake_metadata as Record<string, unknown>
+                              ).qualification as
+                                | Record<string, unknown>
+                                | undefined)
+                            : undefined;
+                        const qualFacts = qualMeta
+                          ? Object.entries(qualMeta)
+                              .filter(
+                                ([k, v]) =>
+                                  (typeof v === "string" ||
+                                    typeof v === "number" ||
+                                    typeof v === "boolean") &&
+                                  v !== "" &&
+                                  v !== "unknown" &&
+                                  !/_id$|_at$|^id$|timestamp|event|score$/i.test(
+                                    k,
+                                  ),
+                              )
+                              .slice(0, 8)
+                          : [];
+                        const operatorNotes = [
+                          rec.listing_notes,
+                          rec.routing_notes,
+                        ].filter(
+                          (n) => typeof n === "string" && n.trim(),
+                        ) as string[];
+                        return (
+                          <div
+                            key={opp.id}
+                            onClick={() =>
+                              setExpandedClaim(isOpen ? null : opp.id)
+                            }
+                            className="cursor-pointer bg-[#0f1623] border border-slate-700/60 rounded-xl p-4 hover:border-slate-600 transition-colors"
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1 min-w-0">
+                                <div className="text-white font-medium text-sm">
+                                  {opp.homeowner_name ||
+                                    opp.site_name ||
+                                    "Unnamed Project"}
                                 </div>
-                              )}
-                              <div className="flex items-center gap-3 mt-2">
-                                <span className="text-slate-500 text-xs">
-                                  {fmtKw(opp.system_size_kw)}
-                                </span>
-                                {opp.utility_name && (
-                                  <span className="text-slate-500 text-xs">
-                                    {opp.utility_name}
-                                  </span>
+                                {opp.address && (
+                                  <div className="flex items-center gap-1.5 mt-1 text-emerald-400 text-xs">
+                                    <MapPin size={11} />
+                                    {opp.address}
+                                  </div>
                                 )}
-                                {opp.battery_candidate && (
-                                  <span className="text-amber-400 text-xs flex items-center gap-1">
-                                    <Battery size={10} /> Battery
+                                {(opp.homeowner_phone ||
+                                  opp.homeowner_email) && (
+                                  <div className="flex flex-wrap items-center gap-3 mt-1.5">
+                                    {opp.homeowner_phone && (
+                                      <a
+                                        href={`tel:${opp.homeowner_phone}`}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="text-sky-300 text-xs hover:underline"
+                                      >
+                                        {opp.homeowner_phone}
+                                      </a>
+                                    )}
+                                    {opp.homeowner_email && (
+                                      <a
+                                        href={`mailto:${opp.homeowner_email}`}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="text-sky-300 text-xs hover:underline"
+                                      >
+                                        {opp.homeowner_email}
+                                      </a>
+                                    )}
+                                  </div>
+                                )}
+                                <div className="flex items-center gap-3 mt-2">
+                                  <span className="text-slate-500 text-xs">
+                                    {fmtKw(opp.system_size_kw)}
                                   </span>
+                                  {opp.utility_name && (
+                                    <span className="text-slate-500 text-xs">
+                                      {opp.utility_name}
+                                    </span>
+                                  )}
+                                  {opp.battery_candidate && (
+                                    <span className="text-amber-400 text-xs flex items-center gap-1">
+                                      <Battery size={10} /> Battery
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-500/15 text-amber-400 ml-3 flex-shrink-0">
+                                {(rec.claim_status as string) || "active"}
+                              </span>
+                            </div>
+                            {isOpen && (
+                              <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 border-t border-slate-700/60 pt-3">
+                                {detail
+                                  .filter(([, v]) => v)
+                                  .map(([label, v]) => (
+                                    <div key={label} className="text-xs">
+                                      <span className="text-slate-500">
+                                        {label}:{" "}
+                                      </span>
+                                      <span className="text-slate-300">
+                                        {v}
+                                      </span>
+                                    </div>
+                                  ))}
+                                {!opp.homeowner_phone &&
+                                  !opp.homeowner_email && (
+                                    <div className="col-span-2 text-xs text-amber-400">
+                                      No contact info stored on this lead yet.
+                                    </div>
+                                  )}
+                                {(qualFacts.length > 0 ||
+                                  operatorNotes.length > 0) && (
+                                  <div className="col-span-2 mt-2 border-t border-slate-700/60 pt-2">
+                                    <div className="text-[10px] uppercase tracking-wider text-emerald-400 mb-1.5">
+                                      Vetting — already done for you
+                                    </div>
+                                    {qualFacts.length > 0 && (
+                                      <div className="flex flex-wrap gap-x-4 gap-y-1">
+                                        {qualFacts.map(([k, v]) => (
+                                          <span
+                                            key={k}
+                                            className="text-xs text-slate-300"
+                                          >
+                                            <span className="text-slate-500">
+                                              {k
+                                                .replace(/_/g, " ")
+                                                .replace(/^\w/, (c) =>
+                                                  c.toUpperCase(),
+                                                )}
+                                              :{" "}
+                                            </span>
+                                            {String(v)}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                    {operatorNotes.map((n, i) => (
+                                      <div
+                                        key={i}
+                                        className="mt-1.5 text-xs text-slate-300 whitespace-pre-wrap"
+                                      >
+                                        <span className="text-slate-500">
+                                          Operator note:{" "}
+                                        </span>
+                                        {n}
+                                      </div>
+                                    ))}
+                                  </div>
                                 )}
                               </div>
-                            </div>
-                            <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-500/15 text-amber-400 ml-3 flex-shrink-0">
-                              {((opp as unknown as Record<string, unknown>)
-                                .claim_status as string) || "active"}
-                            </span>
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

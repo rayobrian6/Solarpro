@@ -1784,6 +1784,15 @@ type OperatorActionKey =
   | "update_financing_stage"
   | "update_proposal_stage";
 
+type OperatorActionGroup =
+  | "contact"
+  | "qualify"
+  | "marketplace"
+  | "notes"
+  | "ownership"
+  | "danger"
+  | "rare";
+
 interface OperatorActionDefinition {
   action: OperatorActionKey;
   label: string;
@@ -1792,6 +1801,75 @@ interface OperatorActionDefinition {
 }
 
 type ActionFormState = Record<string, string | boolean>;
+
+// Grouped clusters for the operator controls (Miller's-law chunking).
+const ACTION_GROUPS: { key: OperatorActionGroup; label: string }[] = [
+  { key: "contact", label: "Contact" },
+  { key: "qualify", label: "Qualify & finance" },
+  { key: "marketplace", label: "Marketplace · money step" },
+  { key: "notes", label: "Notes & tasks" },
+  { key: "ownership", label: "Ownership" },
+];
+
+// The single recommended "Next step" for a lead, derived from its queue.
+// Unknown queues simply show no primary (graceful degrade).
+const NEXT_STEP_BY_QUEUE: Partial<Record<string, OperatorActionKey>> = {
+  new_intake: "mark_contacted",
+  needs_first_contact: "mark_contacted",
+  no_answer_retry: "mark_contacted",
+  needs_callback: "mark_contacted",
+  callbacks_today: "mark_contacted",
+  callbacks_tomorrow: "mark_contacted",
+  overdue_callbacks: "mark_contacted",
+  waiting_on_homeowner: "mark_contacted",
+  qualification_review: "mark_qualified",
+  financing_review: "mark_financing_ready",
+  urgent_financing_follow_up: "mark_financing_ready",
+  missing_documents: "reopen_documents",
+  waiting_on_documents: "reopen_documents",
+  proposal_follow_up: "update_proposal_stage",
+  marketplace_ready: "approve_for_marketplace",
+};
+
+// Which cluster each action belongs to (used only for layout/color).
+const ACTION_GROUP_OF: Record<string, OperatorActionGroup> = {
+  assign_operator: "ownership",
+  transfer_operator: "ownership",
+  return_to_queue: "ownership",
+  reopen_qualification: "rare",
+  reopen_financing: "rare",
+  reopen_callback: "contact",
+  reopen_documents: "rare",
+  mark_dormant: "rare",
+  reactivate_lead: "rare",
+  add_internal_note: "notes",
+  log_contact_attempt: "contact",
+  create_follow_up_task: "notes",
+  complete_follow_up_task: "notes",
+  update_financing_stage: "qualify",
+  update_proposal_stage: "qualify",
+  mark_contacted: "contact",
+  mark_no_answer: "contact",
+  mark_needs_follow_up: "contact",
+  mark_financing_ready: "qualify",
+  mark_qualified: "qualify",
+  approve_for_marketplace: "marketplace",
+  release_to_marketplace: "marketplace",
+  reject_lead: "danger",
+  archive_lead: "danger",
+};
+
+// Canonical release-gate stages, shown as a checklist. A stage is "done" when
+// it is NOT in release_readiness.missing; any other missing key is appended.
+const RELEASE_STAGES: { key: string; label: string }[] = [
+  { key: "operator_reviewed", label: "Operator reviewed" },
+  { key: "qualification_checked", label: "Qualified" },
+  { key: "financing_readiness_reviewed", label: "Financing reviewed" },
+  { key: "approved_for_marketplace", label: "Approved for marketplace" },
+];
+
+const humanizeGap = (k: string) =>
+  k.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 
 const LEAD_QUEUE_DEFINITIONS = [
   { key: "all", label: "All Active" },
@@ -1836,6 +1914,7 @@ function IntakeFeedSection() {
   const [expandedLeadId, setExpandedLeadId] = useState<string | null>(null);
   const [debugLeadId, setDebugLeadId] = useState<string | null>(null);
   const [historyLeadId, setHistoryLeadId] = useState<string | null>(null);
+  const [moreActionsId, setMoreActionsId] = useState<string | null>(null);
   const [modalLead, setModalLead] = useState<IntakeLead | null>(null);
   const [modalAction, setModalAction] =
     useState<OperatorActionDefinition | null>(null);
@@ -3103,6 +3182,70 @@ function IntakeFeedSection() {
                       item.action !== "release_to_marketplace" ||
                       canReleaseToMarketplace,
                   );
+                  const groupOf = (a: string): OperatorActionGroup =>
+                    ACTION_GROUP_OF[a] ?? "ownership";
+                  const nextStepKey = terminalLead
+                    ? null
+                    : (NEXT_STEP_BY_QUEUE[lead.current_queue ?? ""] ?? null);
+                  const nextStepItem = nextStepKey
+                    ? (visibleOperatorActions.find(
+                        (a) => a.action === nextStepKey,
+                      ) ?? null)
+                    : null;
+                  const actionsByGroup = (g: OperatorActionGroup) =>
+                    visibleOperatorActions.filter(
+                      (a) =>
+                        groupOf(a.action) === g &&
+                        a.action !== nextStepItem?.action,
+                    );
+                  const renderActionBtn = (
+                    item: OperatorActionDefinition,
+                    variant?: "primary",
+                  ) => {
+                    const busy =
+                      actionBusyId === `${eventId}:${item.action}`;
+                    const disabled =
+                      !!actionBusyId ||
+                      (terminalLead &&
+                        ![
+                          "archive_lead",
+                          "add_internal_note",
+                          "reactivate_lead",
+                        ].includes(item.action));
+                    const grp = groupOf(item.action);
+                    const cls =
+                      variant === "primary"
+                        ? "w-full justify-center border-orange-500 bg-orange-950/40 text-orange-100 hover:bg-orange-900/50"
+                        : grp === "marketplace"
+                          ? "border-emerald-700 bg-emerald-950/30 text-emerald-200 hover:bg-emerald-900/40"
+                          : grp === "danger"
+                            ? "border-red-900 text-red-300 hover:bg-red-950/40"
+                            : "border-zinc-700 text-zinc-300 hover:bg-zinc-800/70";
+                    return (
+                      <button
+                        key={item.action}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => openActionModal(lead, item)}
+                        className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${cls}`}
+                      >
+                        {busy ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : item.action === "approve_for_marketplace" ? (
+                          <CheckCheck className="h-3 w-3" />
+                        ) : item.action === "release_to_marketplace" ? (
+                          <ExternalLink className="h-3 w-3" />
+                        ) : item.action === "reject_lead" ? (
+                          <XCircle className="h-3 w-3" />
+                        ) : item.action === "archive_lead" ? (
+                          <Ban className="h-3 w-3" />
+                        ) : (
+                          <Clock className="h-3 w-3" />
+                        )}
+                        {item.label}
+                      </button>
+                    );
+                  };
                   return (
                     <Fragment key={lead.id}>
                       <tr className="hover:bg-zinc-800/30 transition-colors">
@@ -3765,6 +3908,86 @@ function IntakeFeedSection() {
                                 )}
                               </div>
                             )}
+                            {lead.release_readiness &&
+                              (() => {
+                                const missing =
+                                  lead.release_readiness?.missing ?? [];
+                                const ready =
+                                  lead.release_readiness?.ready === true;
+                                const items = [
+                                  ...RELEASE_STAGES.map((s) => ({
+                                    label: s.label,
+                                    done: !missing.includes(s.key),
+                                  })),
+                                  ...missing
+                                    .filter(
+                                      (g) =>
+                                        !RELEASE_STAGES.some(
+                                          (s) => s.key === g,
+                                        ),
+                                    )
+                                    .map((g) => ({
+                                      label: humanizeGap(g),
+                                      done: false,
+                                    })),
+                                ];
+                                const doneCount = items.filter(
+                                  (i) => i.done,
+                                ).length;
+                                const firstBlocked = items.findIndex(
+                                  (i) => !i.done,
+                                );
+                                return (
+                                  <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                                    <div className="mb-2 flex items-center justify-between">
+                                      <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+                                        Release readiness
+                                      </div>
+                                      {ready ? (
+                                        <span className="rounded-full border border-emerald-700 bg-emerald-950/40 px-2 py-0.5 text-[10px] uppercase tracking-wider text-emerald-300">
+                                          Ready to release
+                                        </span>
+                                      ) : (
+                                        <span className="text-[10px] text-zinc-500">
+                                          {doneCount} of {items.length} done
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex flex-col gap-1.5">
+                                      {items.map((it, idx) => (
+                                        <div
+                                          key={it.label}
+                                          className={`flex items-center gap-2 rounded-md px-2 py-1 text-xs ${idx === firstBlocked ? "border border-orange-600/60 bg-orange-950/30" : ""}`}
+                                        >
+                                          {it.done ? (
+                                            <CheckCheck className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+                                          ) : idx === firstBlocked ? (
+                                            <Clock className="h-3.5 w-3.5 shrink-0 text-orange-400" />
+                                          ) : (
+                                            <span className="h-2 w-2 shrink-0 rounded-full border border-zinc-600" />
+                                          )}
+                                          <span
+                                            className={
+                                              it.done
+                                                ? "text-zinc-400"
+                                                : idx === firstBlocked
+                                                  ? "font-medium text-orange-100"
+                                                  : "text-zinc-500"
+                                            }
+                                          >
+                                            {it.label}
+                                          </span>
+                                          {idx === firstBlocked && !ready && (
+                                            <span className="ml-auto text-[10px] uppercase tracking-wider text-orange-300">
+                                              next
+                                            </span>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                             {lead.intake_record_type === "intake_event" && (
                               <div className="mt-3 rounded-lg border border-purple-900/50 bg-purple-950/20 p-3">
                                 <div className="mb-2 flex items-center justify-between gap-3">
@@ -3784,48 +4007,64 @@ function IntakeFeedSection() {
                                     </span>
                                   )}
                                 </div>
-                                <div className="flex flex-wrap gap-2">
-                                  {visibleOperatorActions.map((item) => {
-                                    const busy =
-                                      actionBusyId ===
-                                      `${eventId}:${item.action}`;
-                                    const disabled =
-                                      !!actionBusyId ||
-                                      (terminalLead &&
-                                        ![
-                                          "archive_lead",
-                                          "add_internal_note",
-                                          "reactivate_lead",
-                                        ].includes(item.action));
+                                <div className="flex flex-col gap-3">
+                                  {nextStepItem && (
+                                    <div>
+                                      <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
+                                        Next step
+                                      </div>
+                                      {renderActionBtn(nextStepItem, "primary")}
+                                    </div>
+                                  )}
+                                  {ACTION_GROUPS.map((grp) => {
+                                    const items = actionsByGroup(grp.key);
+                                    if (items.length === 0) return null;
                                     return (
-                                      <button
-                                        key={item.action}
-                                        type="button"
-                                        disabled={disabled}
-                                        onClick={() =>
-                                          openActionModal(lead, item)
-                                        }
-                                        className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${item.tone}`}
-                                      >
-                                        {busy ? (
-                                          <Loader2 className="h-3 w-3 animate-spin" />
-                                        ) : item.action ===
-                                          "approve_for_marketplace" ? (
-                                          <CheckCheck className="h-3 w-3" />
-                                        ) : item.action ===
-                                          "release_to_marketplace" ? (
-                                          <ExternalLink className="h-3 w-3" />
-                                        ) : item.action === "reject_lead" ? (
-                                          <XCircle className="h-3 w-3" />
-                                        ) : item.action === "archive_lead" ? (
-                                          <Ban className="h-3 w-3" />
-                                        ) : (
-                                          <Clock className="h-3 w-3" />
-                                        )}
-                                        {item.label}
-                                      </button>
+                                      <div key={grp.key}>
+                                        <div className="mb-1.5 text-[10px] uppercase tracking-wider text-zinc-500">
+                                          {grp.label}
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                          {items.map((item) =>
+                                            renderActionBtn(item),
+                                          )}
+                                        </div>
+                                      </div>
                                     );
                                   })}
+                                  {actionsByGroup("rare").length > 0 && (
+                                    <div>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setMoreActionsId(
+                                            moreActionsId === lead.id
+                                              ? null
+                                              : lead.id,
+                                          )
+                                        }
+                                        className="text-[11px] text-zinc-400 transition hover:text-zinc-200"
+                                      >
+                                        {moreActionsId === lead.id
+                                          ? "Hide extra actions"
+                                          : "More — reopen, dormant, reactivate"}
+                                      </button>
+                                      {moreActionsId === lead.id && (
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                          {actionsByGroup("rare").map((item) =>
+                                            renderActionBtn(item),
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                  {actionsByGroup("danger").length > 0 && (
+                                    <div className="flex flex-wrap gap-2 border-t border-zinc-800 pt-2.5">
+                                      {actionsByGroup("danger").map((item) =>
+                                        renderActionBtn(item),
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             )}
@@ -5860,6 +6099,7 @@ function MarketplaceWorkbenchSection() {
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [priceDraft, setPriceDraft] = useState<Record<string, string>>({});
 
   const loadMarketplace = useCallback(
     async (options?: { preserveResult?: boolean }) => {
@@ -5892,6 +6132,40 @@ function MarketplaceWorkbenchSection() {
   useEffect(() => {
     loadMarketplace();
   }, [loadMarketplace]);
+
+  async function setLeadPrice(opportunityId: string) {
+    const price = Number(priceDraft[opportunityId]);
+    if (!Number.isFinite(price) || price <= 0) {
+      setResult({
+        error: "Enter a price greater than 0.",
+        action: "update_price",
+      });
+      return;
+    }
+    setBusy(`${opportunityId}:update_price`);
+    setResult(null);
+    try {
+      const res = await fetch("/api/admin/network/marketplace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          opportunity_id: opportunityId,
+          action: "update_price",
+          asking_price: price,
+        }),
+      });
+      const data = await parseAdminJsonResponse(res, "Set price failed");
+      setResult(data);
+      if (data.success !== false) {
+        setPriceDraft((prev) => ({ ...prev, [opportunityId]: "" }));
+        await loadMarketplace({ preserveResult: true });
+      }
+    } catch (e) {
+      setResult({ error: String(e) });
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function runWorkbenchAction(
     opportunityId: string,
@@ -6114,6 +6388,35 @@ function MarketplaceWorkbenchSection() {
                       <div className="mt-1 text-xs text-zinc-500">
                         Value {formatCurrency(opp.estimated_project_value)} ·
                         Price {formatCurrency(price)}
+                      </div>
+                      <div className="mt-1.5 flex items-center gap-1.5">
+                        <span className="text-[11px] text-zinc-500">$</span>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={priceDraft[opp.id] ?? ""}
+                          onChange={(e) =>
+                            setPriceDraft((prev) => ({
+                              ...prev,
+                              [opp.id]: e.target.value,
+                            }))
+                          }
+                          placeholder={
+                            price != null ? String(price) : "set price"
+                          }
+                          className="w-20 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-white placeholder-zinc-600 focus:border-emerald-600 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          disabled={busy === `${opp.id}:update_price`}
+                          onClick={() => setLeadPrice(opp.id)}
+                          className="rounded-md border border-emerald-700 bg-emerald-950/40 px-2 py-1 text-[11px] font-medium text-emerald-200 hover:bg-emerald-900/40 disabled:opacity-40"
+                        >
+                          {busy === `${opp.id}:update_price`
+                            ? "Saving…"
+                            : "Set price"}
+                        </button>
                       </div>
                       <div className="mt-1 text-[11px] text-zinc-500">
                         Marketplace {formatDisplayValue(marketplacePriority)} ·

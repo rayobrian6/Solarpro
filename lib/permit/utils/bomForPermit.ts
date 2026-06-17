@@ -38,6 +38,7 @@ import {
   EQUIPMENT_REGISTRY_V4,
   type EquipmentRegistryEntry,
 } from '@/lib/equipment-registry-v4';
+import { necNextStandardOcpd } from './helpers';
 
 // ── PermitBOMItem ────────────────────────────────────────────
 // Superset type: always safe to render in pageEquipmentSchedule.
@@ -225,7 +226,7 @@ function buildFallbackBOM(input: PermitInput, cad: CADModel): PermitBOMItem[] {
   const hasDisc = project.acDisconnect !== false;
   if (hasDisc) {
     const mainA  = project.mainPanelAmps || 200;
-    const ocpd   = acKw > 0 ? Math.ceil(acKw * 1000 / 240 * 1.25 / 5) * 5 : 40;
+    const ocpd   = acKw > 0 ? necNextStandardOcpd(acKw * 1000 / 240 * 1.25) : 40;
     items.push({
       stageId:      'ac',
       stageLabel:   STAGE_LABELS['ac'],
@@ -244,7 +245,7 @@ function buildFallbackBOM(input: PermitInput, cad: CADModel): PermitBOMItem[] {
 
   // Backfeed breaker
   if (acKw > 0) {
-    const bfA = Math.ceil(acKw * 1000 / 240 * 1.25 / 5) * 5;
+    const bfA = necNextStandardOcpd(acKw * 1000 / 240 * 1.25);
     items.push({
       stageId:      'ac',
       stageLabel:   STAGE_LABELS['ac'],
@@ -356,7 +357,7 @@ export function generateBOMForPermit(
   const mainPanelA   = project.mainPanelAmps || 200;
   const acKw         = totalAcKw;
   const acOutputAmps = acKw * 1000 / 240;
-  const backfeedAmps = Math.ceil(acOutputAmps * 1.25 / 5) * 5;
+  const backfeedAmps = necNextStandardOcpd(acOutputAmps * 1.25);
   const isMicro      = (system.topology || '').toLowerCase() === 'micro' ||
                        firstInv?.type === 'micro';
 
@@ -364,13 +365,13 @@ export function generateBOMForPermit(
   const inverterCount = isMicro ? totalPanels : (system.inverters?.length || 1);
   const deviceCount   = isMicro ? totalPanels : undefined;
 
-  const elec = compliance.electrical as any;
-  const dcWireGauge   = (firstStr as any)?.wireGauge || elec?.dcConductorCallout || '#10 AWG';
+  const elec = compliance.electrical;
+  const dcWireGauge   = firstStr?.wireGauge || elec?.dcConductorCallout || '#10 AWG';
   const acWireGauge   = elec?.acConductorCallout || '#8 AWG';
-  const dcWireLength  = (firstStr as any)?.wireLength || (project as any).wireLength || 50;
-  const acWireLength  = (project as any).wireLength || 60;
-  const conduitType   = ((project as any).conduitType || 'EMT').toUpperCase() as 'EMT' | 'PVC' | 'RMC' | 'LFMC';
-  const conduitSize   = (project as any).conduitSize || '3/4';
+  const dcWireLength  = firstStr?.wireLength || project.wireLength || 50;
+  const acWireLength  = project.wireLength || 60;
+  const conduitType   = (project.conduitType || 'EMT').toUpperCase() as 'EMT' | 'PVC' | 'RMC' | 'LFMC';
+  const conduitSize   = project.conduitSize || '3/4';
 
   // ── 3. Structural ─────────────────────────────────────────
   const bomSystemType = cadTypeToBOMType(cad.systemType);
@@ -389,8 +390,8 @@ export function generateBOMForPermit(
       const v4Input: BOMGenerationInputV4 = {
         inverterId,
         panelId,
-        rackingId:           (project as any).rackingId,
-        batteryId:           (project as any).batteryId,
+        rackingId:           project.rackingId,
+        batteryId:           project.batteryId,
         moduleCount:         totalPanels,
         deviceCount,
         stringCount,
@@ -402,23 +403,23 @@ export function generateBOMForPermit(
         acWireLength,
         conduitType,
         conduitSizeInch:     conduitSize,
-        roofType:            (project as any).roofType || 'shingle',
-        attachmentCount:     (project as any).attachmentCount || Math.ceil(totalPanels * 1.2),
-        railSections:        (project as any).railSections   || Math.ceil(totalPanels / 2),
+        roofType:            project.roofType || 'shingle',
+        attachmentCount:     project.attachmentCount || Math.ceil(totalPanels * 1.2),
+        railSections:        project.railSections   || Math.ceil(totalPanels / 2),
         mainPanelAmps:       mainPanelA,
         backfeedAmps,
         acOCPD:              backfeedAmps,
-        dcOCPD:              Math.ceil((firstStr?.panelIsc || 10) * 1.25 * 1.25 / 5) * 5,
+        dcOCPD:              necNextStandardOcpd((firstStr?.panelIsc || 10) * 1.25 * 1.25),
         jurisdiction:        compliance.jurisdiction?.ahj,
         requiresACDisconnect:    project.acDisconnect !== false,
         requiresDCDisconnect:    true,
         requiresRapidShutdown:   true,
         requiresWarningLabels:   true,
         requiresProductionMeter: false,
-        interconnectionMethod:   (project as any).interconnectionMethod || 'LOAD_SIDE',
-        panelBusRating:          (project as any).panelBusRating || mainPanelA,
+        interconnectionMethod:   project.interconnectionMethod || 'LOAD_SIDE',
+        panelBusRating:          project.panelBusRating || mainPanelA,
         systemType:              bomSystemType,
-        generatorKw:             (project as any).generatorKw,
+        generatorKw:             project.generatorKw,
         batteryCount:            project.batteryCount,
       };
 

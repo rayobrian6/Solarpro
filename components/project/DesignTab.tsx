@@ -1,11 +1,13 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Map, Zap, Sun, BarChart2, ArrowRight, CheckCircle, AlertTriangle, Package, Save, RefreshCw } from 'lucide-react';
 import type { Project, SolarPanel, Inverter } from '@/types';
 import Link from 'next/link';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
+import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
+import { recommendDefaultPanel, getPanelLabel } from '@/lib/survey/defaultPanelSelection';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -31,6 +33,12 @@ export default function DesignTab({ project, onEquipmentUpdate }: DesignTabProps
   const [eqSaveMsg, setEqSaveMsg] = useState<string | null>(null);
   const [eqSaveError, setEqSaveError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+
+  // H1: Default panel recommendation from ecosystem catalog
+  const panelRecommendation = useMemo(() => {
+    if (project.selectedPanel) return null; // already selected
+    return recommendDefaultPanel(project.systemType);
+  }, [project.selectedPanel, project.systemType]);
 
   const loadHardware = async () => {
     if (hwLoaded) return;
@@ -279,12 +287,42 @@ export default function DesignTab({ project, onEquipmentUpdate }: DesignTabProps
                 </div>
               </div>
             ) : (
-              <div className="flex items-center gap-3 p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl">
-                <AlertTriangle size={14} className="text-amber-400 flex-shrink-0" />
-                <div>
-                  <div className="text-xs text-amber-300 font-medium">No panel selected</div>
-                  <div className="text-xs text-slate-500">Required for accurate production estimates</div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-3 p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl">
+                  <AlertTriangle size={14} className="text-amber-400 flex-shrink-0" />
+                  <div>
+                    <div className="text-xs text-amber-300 font-medium">No panel selected</div>
+                    <div className="text-xs text-slate-500">Required for accurate production estimates</div>
+                  </div>
                 </div>
+                {/* H1: Default panel recommendation from ecosystem catalog */}
+                {panelRecommendation && (
+                  <div className="flex items-center gap-2 p-2.5 bg-blue-500/5 border border-blue-500/15 rounded-lg">
+                    <Zap size={12} className="text-blue-400 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-medium text-blue-300">Suggested:</span>
+                        <span className="text-xs font-semibold text-white">{getPanelLabel(panelRecommendation.panel)}</span>
+                        <ConfidenceBadge
+                          confidence={panelRecommendation.confidence}
+                          source={panelRecommendation.source}
+                          size="xs"
+                        />
+                      </div>
+                      <div className="text-xs text-slate-500 mt-0.5">{panelRecommendation.reason}</div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        openPicker();
+                        // Pre-select the recommended panel in the picker
+                        setTimeout(() => setSelectedPanelId(panelRecommendation.panelId), 100);
+                      }}
+                      className="text-xs text-blue-400 hover:text-blue-300 font-medium whitespace-nowrap transition-colors"
+                    >
+                      Use This
+                    </button>
+                  </div>
+                )}
               </div>
             )}
             {project.selectedInverter ? (

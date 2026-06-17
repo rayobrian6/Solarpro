@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
           AND expires_at < NOW() + INTERVAL '3 days')  AS expiring_soon,
         COUNT(*) FILTER (WHERE status = 'live'
           AND claim_count = 0
-          AND published_at < NOW() - INTERVAL '48 hours') AS stale_unclaimed,
+          AND live_at < NOW() - INTERVAL '48 hours') AS stale_unclaimed,
         AVG(opportunity_score) FILTER (
           WHERE status = 'live' AND opportunity_score IS NOT NULL
         )                                              AS avg_live_score
@@ -124,9 +124,9 @@ export async function GET(req: NextRequest) {
         ne.occurred_at,
         ne.triggered_by,
         ne.is_error,
-        no.homeowner_first_name,
-        no.homeowner_last_name,
-        no.state,
+        no.first_name AS homeowner_first_name,
+        no.last_name  AS homeowner_last_name,
+        no.location_state AS state,
         no.opportunity_grade
       FROM network_events ne
       LEFT JOIN network_opportunities no ON no.id = ne.opportunity_id

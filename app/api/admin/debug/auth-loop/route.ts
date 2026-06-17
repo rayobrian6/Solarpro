@@ -26,14 +26,17 @@ export const maxDuration = 30;
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { signToken, verifyToken } from '@/lib/auth';
+import { productionGuard } from '@/lib/security';
 
+// Report ONLY the secret length — never head/tail/charsum, which leak material
+// that narrows a brute-force search.
 function fingerprint(secret: string): string {
   if (!secret) return 'EMPTY';
-  const sum = secret.split('').reduce((s, c) => s + c.charCodeAt(0), 0) % 9999;
-  return `len=${secret.length}_head=${secret.slice(0, 4)}_tail=${secret.slice(-4)}_sum=${sum}`;
+  return `len=${secret.length}`;
 }
 
 export async function GET(req: NextRequest) {
+  const _blocked = productionGuard(); if (_blocked) return _blocked;
   const admin = await requireAdminApi(req);
   if (!admin) {
     return NextResponse.json(

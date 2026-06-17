@@ -26,18 +26,18 @@ const STATUS_STEPS: ProjectStatus[] = ['lead', 'design', 'proposal', 'approved',
 
 const STATUS_CONFIG: Record<ProjectStatus, {
   label: string; dot: string; badge: string; next?: ProjectStatus;
-  glow: string; ringColor: string; cardBorder: string; cardBg: string; iconColor: string; barColor: string;
+  ringColor: string; cardBorder: string; iconColor: string; barColor: string;
 }> = {
   lead:      { label: 'Lead',      dot: 'bg-slate-400',   badge: 'bg-slate-700/60 text-slate-300 border-slate-600/40',   next: 'design',
-    glow: 'shadow-[0_0_20px_rgba(148,163,184,0.12)]',    ringColor: 'ring-slate-500/30',   cardBorder: 'border-slate-600/50',  cardBg: 'from-slate-800/90 to-slate-900/90',  iconColor: 'text-slate-400', barColor: 'bg-slate-500' },
+    ringColor: 'ring-slate-500/30',   cardBorder: 'border-slate-600/50',  iconColor: 'text-slate-400', barColor: 'bg-slate-500' },
   design:    { label: 'Design',    dot: 'bg-blue-500',    badge: 'bg-blue-900/60 text-blue-300 border-blue-700/40',       next: 'proposal',
-    glow: 'shadow-[0_0_24px_rgba(59,130,246,0.15)]',     ringColor: 'ring-blue-500/30',    cardBorder: 'border-blue-700/40',   cardBg: 'from-slate-800/90 to-blue-950/40',   iconColor: 'text-blue-400',  barColor: 'bg-blue-500' },
+    ringColor: 'ring-blue-500/30',    cardBorder: 'border-blue-700/40',   iconColor: 'text-blue-400',  barColor: 'bg-blue-500' },
   proposal:  { label: 'Proposal',  dot: 'bg-amber-500',   badge: 'bg-amber-900/60 text-amber-300 border-amber-700/40',   next: 'approved',
-    glow: 'shadow-[0_0_24px_rgba(245,158,11,0.18)]',     ringColor: 'ring-amber-500/30',   cardBorder: 'border-amber-700/40',  cardBg: 'from-slate-800/90 to-amber-950/30',  iconColor: 'text-amber-400', barColor: 'bg-amber-500' },
+    ringColor: 'ring-amber-500/30',   cardBorder: 'border-amber-700/40',  iconColor: 'text-amber-400', barColor: 'bg-amber-500' },
   approved:  { label: 'Approved',  dot: 'bg-emerald-500', badge: 'bg-emerald-900/60 text-emerald-300 border-emerald-700/40', next: 'installed',
-    glow: 'shadow-[0_0_24px_rgba(16,185,129,0.18)]',     ringColor: 'ring-emerald-500/30', cardBorder: 'border-emerald-700/40', cardBg: 'from-slate-800/90 to-emerald-950/30', iconColor: 'text-emerald-400', barColor: 'bg-emerald-500' },
+    ringColor: 'ring-emerald-500/30', cardBorder: 'border-emerald-700/40', iconColor: 'text-emerald-400', barColor: 'bg-emerald-500' },
   installed: { label: 'Installed', dot: 'bg-green-500',   badge: 'bg-green-900/60 text-green-300 border-green-700/40',
-    glow: 'shadow-[0_0_24px_rgba(34,197,94,0.15)]',      ringColor: 'ring-green-500/30',   cardBorder: 'border-green-700/40',  cardBg: 'from-slate-800/90 to-green-950/30',  iconColor: 'text-green-400', barColor: 'bg-green-500' },
+    ringColor: 'ring-green-500/30',   cardBorder: 'border-green-700/40',  iconColor: 'text-green-400', barColor: 'bg-green-500' },
 };
 
 const TYPE_ICONS_JSX: Record<string, React.ReactNode> = {
@@ -242,22 +242,16 @@ function ProjectCard({
   return (
     <div
       className={`
-        relative group overflow-hidden rounded-2xl border transition-all duration-300
-        bg-gradient-to-br ${cfg.cardBg}
+        relative group rounded-xl border transition-all duration-200
+        bg-slate-800/60
         ${cfg.cardBorder}
-        ${cfg.glow}
-        hover:scale-[1.01] hover:shadow-2xl
+        hover:border-slate-600/80
         ${isSelected ? 'ring-2 ring-amber-500/60 border-amber-500/50' : ''}
         ${urgency === 'high' ? 'ring-1 ring-red-500/20' : ''}
       `}
     >
-      {/* Decorative radial glow top-right */}
-      <div className={`absolute -top-6 -right-6 w-28 h-28 rounded-full blur-2xl opacity-40 pointer-events-none ${
-        project.status === 'approved'  ? 'bg-emerald-500/20' :
-        project.status === 'proposal'  ? 'bg-amber-500/20'   :
-        project.status === 'design'    ? 'bg-blue-500/20'    :
-        project.status === 'installed' ? 'bg-green-500/20'   : 'bg-slate-500/10'
-      }`} />
+      {/* Top accent stripe */}
+      <div className={`absolute top-0 left-0 right-0 h-0.5 rounded-t-xl ${cfg.barColor} opacity-60`} />
 
       {/* Top accent stripe */}
       <div className={`absolute top-0 left-0 right-0 h-0.5 ${cfg.barColor} opacity-80`} />
@@ -681,11 +675,8 @@ export default function ProjectsPage() {
         />
 
         {/* ══════════ COMMAND HEADER ══════════ */}
-        <div className="relative overflow-hidden rounded-2xl border border-slate-700/60 bg-gradient-to-br from-slate-800/80 via-slate-800/60 to-slate-900/90 shadow-2xl">
-          <div className="absolute -top-12 -right-12 w-56 h-56 bg-blue-500/8 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute -bottom-8 -left-8 w-40 h-40 bg-amber-500/6 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-blue-500/30 to-transparent" />
-          <div className="relative p-5">
+        <div className="rounded-xl border border-slate-700/60 bg-slate-800/60">
+          <div className="p-5">
             <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
               <div>
                 <div className="flex items-center gap-2 mb-1">
@@ -733,7 +724,7 @@ export default function ProjectsPage() {
                       className={`
                         relative rounded-xl border px-3 py-2.5 text-center transition-all cursor-pointer
                         ${isActive
-                          ? `${cfg.cardBorder} ${cfg.glow} bg-slate-800/80`
+                          ? `${cfg.cardBorder} bg-slate-800/80`
                           : 'border-slate-700/50 bg-slate-800/40 hover:border-slate-600/70 hover:bg-slate-800/70'}
                       `}
                     >

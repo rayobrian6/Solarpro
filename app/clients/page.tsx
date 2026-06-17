@@ -70,11 +70,7 @@ export default function ClientsPage() {
       <div className="p-6 space-y-5 animate-fade-in">
 
         {/* ══════════ COMMAND HEADER ══════════ */}
-        <div className="relative overflow-hidden rounded-2xl border border-slate-700/60 bg-gradient-to-br from-slate-800/80 via-slate-800/60 to-slate-900/90 shadow-2xl">
-          {/* decorative blobs */}
-          <div className="absolute -top-10 -right-10 w-52 h-52 bg-teal-500/8 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute -bottom-8 -left-6 w-36 h-36 bg-emerald-500/6 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-teal-500/30 to-transparent" />
+        <div className="rounded-xl border border-slate-700/60 bg-slate-800/60">
 
           <div className="relative p-5">
             <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
@@ -249,33 +245,31 @@ function ClientCard({ client, onDelete }: { client: Client; onDelete: () => void
   const hues = ['amber', 'teal', 'blue', 'purple', 'emerald', 'orange', 'rose'];
   const hue  = hues[(initials.charCodeAt(0) || 0) % hues.length];
 
-  const hueCfg: Record<string, { avatar: string; glow: string; border: string; bar: string }> = {
-    amber:   { avatar: 'from-amber-400/30 to-orange-500/20 border-amber-500/30 text-amber-300',  glow: 'shadow-[0_0_20px_rgba(245,158,11,0.10)]',  border: 'border-amber-700/30',   bar: 'bg-amber-500' },
-    teal:    { avatar: 'from-teal-400/30 to-emerald-500/20 border-teal-500/30 text-teal-300',    glow: 'shadow-[0_0_20px_rgba(20,184,166,0.10)]',  border: 'border-teal-700/30',    bar: 'bg-teal-500'  },
-    blue:    { avatar: 'from-blue-400/30 to-indigo-500/20 border-blue-500/30 text-blue-300',     glow: 'shadow-[0_0_20px_rgba(59,130,246,0.10)]',  border: 'border-blue-700/30',    bar: 'bg-blue-500'  },
-    purple:  { avatar: 'from-purple-400/30 to-violet-500/20 border-purple-500/30 text-purple-300', glow: 'shadow-[0_0_20px_rgba(168,85,247,0.10)]', border: 'border-purple-700/30', bar: 'bg-purple-500' },
-    emerald: { avatar: 'from-emerald-400/30 to-green-500/20 border-emerald-500/30 text-emerald-300', glow: 'shadow-[0_0_20px_rgba(16,185,129,0.10)]', border: 'border-emerald-700/30', bar: 'bg-emerald-500' },
-    orange:  { avatar: 'from-orange-400/30 to-red-500/20 border-orange-500/30 text-orange-300',   glow: 'shadow-[0_0_20px_rgba(249,115,22,0.10)]', border: 'border-orange-700/30',  bar: 'bg-orange-500' },
-    rose:    { avatar: 'from-rose-400/30 to-pink-500/20 border-rose-500/30 text-rose-300',        glow: 'shadow-[0_0_20px_rgba(244,63,94,0.10)]',  border: 'border-rose-700/30',    bar: 'bg-rose-500'  },
+  const hueCfg: Record<string, { avatar: string; border: string; bar: string }> = {
+    amber:   { avatar: 'border-amber-500/30 text-amber-300 bg-amber-500/15',   border: 'border-amber-700/30',   bar: 'bg-amber-500' },
+    teal:    { avatar: 'border-teal-500/30 text-teal-300 bg-teal-500/15',       border: 'border-teal-700/30',    bar: 'bg-teal-500'  },
+    blue:    { avatar: 'border-blue-500/30 text-blue-300 bg-blue-500/15',       border: 'border-blue-700/30',    bar: 'bg-blue-500'  },
+    purple:  { avatar: 'border-purple-500/30 text-purple-300 bg-purple-500/15', border: 'border-purple-700/30', bar: 'bg-purple-500' },
+    emerald: { avatar: 'border-emerald-500/30 text-emerald-300 bg-emerald-500/15', border: 'border-emerald-700/30', bar: 'bg-emerald-500' },
+    orange:  { avatar: 'border-orange-500/30 text-orange-300 bg-orange-500/15', border: 'border-orange-700/30',  bar: 'bg-orange-500' },
+    rose:    { avatar: 'border-rose-500/30 text-rose-300 bg-rose-500/15',       border: 'border-rose-700/30',    bar: 'bg-rose-500'  },
   };
   const hc = hueCfg[hue];
 
   return (
     <div className={`
-      relative group overflow-hidden rounded-2xl border border-slate-700/60 bg-gradient-to-br from-slate-800/90 to-slate-900/90
-      transition-all duration-300 hover:scale-[1.01] hover:shadow-2xl ${hc.glow}
+      relative group rounded-xl border border-slate-700/60 bg-slate-800/60
+      transition-all duration-200 hover:border-slate-600/80
     `}>
       {/* Top accent stripe */}
-      <div className={`absolute top-0 left-0 right-0 h-0.5 ${hc.bar} opacity-70`} />
-      {/* Decorative glow blob */}
-      <div className="absolute -top-4 -right-4 w-24 h-24 rounded-full blur-2xl opacity-30 pointer-events-none bg-current" style={{ color: 'rgba(148,163,184,0.1)' }} />
+      <div className={`absolute top-0 left-0 right-0 h-0.5 rounded-t-xl ${hc.bar} opacity-60`} />
 
       <div className="relative p-5">
         {/* Header row: avatar + name + edit/delete */}
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-3">
             {/* Avatar */}
-            <div className={`w-11 h-11 rounded-2xl bg-gradient-to-br border flex items-center justify-center font-black text-sm flex-shrink-0 ${hc.avatar}`}>
+            <div className={`w-11 h-11 rounded-xl border flex items-center justify-center font-black text-sm flex-shrink-0 ${hc.avatar}`}>
               {initials}
             </div>
             <div>

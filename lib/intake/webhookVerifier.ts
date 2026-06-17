@@ -179,10 +179,24 @@ export function generateIdempotencyKey(parts: (string | null | undefined)[]): st
 }
 
 /**
+ * Recursively serialize a value with object keys sorted at every level, so the
+ * output is deterministic regardless of property insertion order. Unlike passing
+ * an array as JSON.stringify's 2nd arg (a REPLACER ALLOWLIST applied recursively,
+ * which collapsed nested objects to `{}`), this preserves all content.
+ */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']'
+  const obj = value as Record<string, unknown>
+  const keys = Object.keys(obj).sort()
+  return '{' + keys.map((k) => JSON.stringify(k) + ':' + stableStringify(obj[k])).join(',') + '}'
+}
+
+/**
  * Generates a deterministic idempotency key from payload content.
  * Falls back when no platform-provided ID is available.
  */
 export function generatePayloadIdempotencyKey(payload: unknown): string {
-  const json = JSON.stringify(payload, Object.keys(payload as object).sort())
+  const json = stableStringify(payload)
   return createHash('sha256').update(json).digest('hex').slice(0, 64)
 }

@@ -1291,6 +1291,7 @@ export function calculateIncentives(
   state: IncentiveCalculation[];
   total: number;
   cashTotal: number;
+  cashStateTotal: number;   // STATE-only cash (excludes federal ITC) — for state-incentive displays
   nonCashStateTotal: number;
   netSystemCost: number;
   summary: string;
@@ -1401,6 +1402,7 @@ export function calculateIncentives(
     state: stateCalcs,
     total,
     cashTotal,
+    cashStateTotal,
     nonCashStateTotal,
     netSystemCost,
     summary: `Federal ITC: $${federalValue.toLocaleString()} + Cash Rebates/Credits: $${cashStateTotal.toLocaleString()} = Net Cost: $${netSystemCost.toLocaleString()} (+ $${nonCashStateTotal.toLocaleString()} in non-cash benefits)`,

@@ -34,6 +34,7 @@ import {
   getStateIcaFallback,
 } from '@/lib/utilityInterconnection';
 import { buildCanonicalProposal } from '@/lib/proposal/buildCanonicalProposal';
+import { resolveActualAnnualBill } from '@/lib/proposal/resolveActualBill';
 import { deriveEcosystemSummary } from '@/lib/proposal/deriveEcosystemSummary';
 import {
   GLOBAL_INCENTIVES_CONFIG,
@@ -403,6 +404,7 @@ function PublicProposalView({
     clientUtilityRate:   client?.utilityRate,
     dbUtilityRate:       proposal.dbUtilityRate ?? undefined,
     annualUsageKwh:      client?.annualKwh ?? 0,
+    actualAnnualBill:    resolveActualAnnualBill(client),  // real bill (same source as Bill tab)
 
     // Pricing
     systemType,
@@ -424,6 +426,19 @@ function PublicProposalView({
     // Shade analysis (v1.shade)
     panelsShadeDerateComputedPct,
   });
+
+  // TEMP DIAGNOSTIC: surface exactly what bill value the proposal resolves, so a
+  // $82-vs-$138 mismatch can be traced to the real field without guessing.
+  if (typeof window !== 'undefined') {
+    console.log('[PROPOSAL BILL DEBUG]', {
+      resolvedActualAnnualBill: resolveActualAnnualBill(client),
+      client_annualBill:        (client as any)?.annualBill,
+      client_avgMonthlyBill:    (client as any)?.averageMonthlyBill,
+      client_hasBillData:       !!(client as any)?.billData,
+      client_billDataKeys:      (client as any)?.billData ? Object.keys((client as any).billData) : null,
+      cp_currentMonthlyBill:    cp.financial.currentMonthlyBill,
+    });
+  }
 
   // ── ICA / PTO Profile Lookup (Tier 1 → Tier 2 → null) ────────────────────
   // Derive real utility_id from buildUtilityProfile (same inputs as canonical pipeline).
@@ -530,6 +545,15 @@ function PublicProposalView({
   // Charts
   const projectionData             = cp.truth25yr.projectionChart;
   const monthlyBillData            = cp.truth25yr.monthlyBillChart;
+  // Psychological framing for the before/after bar chart: surface the average
+  // utility bill collapsing toward $0 as bold numbers, so the win still lands
+  // even when a ~100%-offset system makes the green "after" bars zero-height.
+  const avgMonthlyBefore           = monthlyBillData.length
+    ? Math.round(monthlyBillData.reduce((s, m) => s + (m.before || 0), 0) / monthlyBillData.length)
+    : 0;
+  const avgMonthlyAfter            = monthlyBillData.length
+    ? Math.round(monthlyBillData.reduce((s, m) => s + (m.after || 0), 0) / monthlyBillData.length)
+    : 0;
 
   // Policy / utility
   const failsafeMessage            = cp.policy.failsafeMessage;
@@ -958,7 +982,7 @@ function PublicProposalView({
                   className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${purchaseMode === mode ? 'text-slate-900' : 'text-slate-400 hover:text-white'}`}
                   style={purchaseMode === mode ? { background: primaryColor } : {}}
                 >
-                  {mode === 'finance' ? '\u26a1 Finance' : '\ud83d\udcb5 Cash'}
+                  {mode === 'finance' ? '\u26a1 Finance (recommended)' : '\ud83d\udcb5 Cash'}
                 </button>
               ))}
             </div>
@@ -1196,7 +1220,7 @@ function PublicProposalView({
                 </h3>
                 <p className="text-xs text-slate-300 leading-relaxed mb-3">
                   Under federal §48E, solar companies that own the system can still claim
-                  a <span className="text-amber-400 font-bold">{getSection48eRate()}% federal tax credit</span> and
+                  a <span className="text-amber-400 font-bold">{getSection48eRate()}% federal tax credit (through 2032)</span> and
                   pass those savings directly to you through a lease or power purchase agreement (PPA).
                   This means lower monthly payments — sometimes $0 upfront.
                 </p>
@@ -1479,9 +1503,27 @@ function PublicProposalView({
 
             {/* Monthly Bill Before/After */}
             <div className="card p-5">
-              <h3 className="font-semibold text-white text-sm mb-4 flex items-center gap-2">
+              <h3 className="font-semibold text-white text-sm mb-3 flex items-center gap-2">
                 <DollarSign size={15} className="text-emerald-400" /> Monthly Bill: Before vs After Solar
               </h3>
+              {/* Honest before→after: solar cuts the energy bill, but the fixed
+                  grid/meter charge survives — there is always a utility bill. */}
+              <div className="mb-3 flex items-center gap-3">
+                <div>
+                  <div className="text-[9px] uppercase tracking-wider text-slate-500">Utility bill now</div>
+                  <div className="text-xl font-black text-red-400">${avgMonthlyBefore}/mo</div>
+                </div>
+                <span className="text-slate-600 text-lg font-bold">→</span>
+                <div>
+                  <div className="text-[9px] uppercase tracking-wider text-slate-500">With solar</div>
+                  <div className="text-xl font-black text-emerald-400">${avgMonthlyAfter}/mo</div>
+                </div>
+                {avgMonthlyBefore - avgMonthlyAfter > 0 && (
+                  <span className="ml-auto rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-300">
+                    −${avgMonthlyBefore - avgMonthlyAfter}/mo
+                  </span>
+                )}
+              </div>
               <ResponsiveContainer width="100%" height={130}>
                 <BarChart data={monthlyBillData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />

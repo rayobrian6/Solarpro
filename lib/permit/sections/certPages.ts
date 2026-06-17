@@ -155,7 +155,7 @@ function _peProjectInfo(input: PermitInput): string {
     <tr><td class=\\"il\\">Client / Owner</td><td class=\\"iv\\">${project.clientName || '—'}</td><td class=\\"il\\">Date</td><td class=\\"iv\\">${project.date}</td></tr>
     <tr><td class=\\"il\\">Installation Address</td><td class=\\"iv\\" colspan=\\"3\\">${project.address || '—'}</td></tr>
     <tr><td class=\\"il\\">AHJ</td><td class=\\"iv\\">${ahj}</td><td class=\\"il\\">State</td><td class=\\"iv\\">${state}</td></tr>
-    <tr><td class=\\"il\\">Permit No.</td><td class=\\"iv\\">___________________</td><td class=\\"il\\">APN</td><td class=\\"iv\\">${(project as any).apn || '___________________'}</td></tr>
+    <tr><td class=\\"il\\">Permit No.</td><td class=\\"iv\\">___________________</td><td class=\\"il\\">APN</td><td class=\\"iv\\">${project.apn || '___________________'}</td></tr>
   </table>`;
 }
 
@@ -165,7 +165,7 @@ function _peSiteLoading(input: PermitInput): string {
   const windSpeed  = structural?.wind?.windSpeed || '—';
   const snowLoad   = structural?.snow?.groundSnowLoad || '—';
   const exposure   = structural?.wind?.exposureCategory || '—';
-  const sdc        = (compliance as any).structural?.seismic?.sdc || 'D';
+  const sdc        = compliance.structural?.seismic?.sdc || 'D';
   return `
   <tr class=\\"bg-lt\\"><td class=\\"il\\" colspan=\\"4\\" style=\\"font-weight:bold;text-align:center;\\">Site Loading Parameters</td></tr>
   <tr><td class=\\"il\\">Design Wind Speed (Vult)</td><td class=\\"iv\\">${windSpeed} mph</td><td class=\\"il\\">Exposure Category</td><td class=\\"iv\\">Cat. ${exposure}</td></tr>
@@ -189,8 +189,8 @@ export function pagePELetterFence(input: PermitInput, cad: CADModel, pageNum: nu
   const postEmbed   = cad.fence?.postEmbedM  ? (cad.fence.postEmbedM  * 3.281).toFixed(1) : '3.5';
   const postSpacing = cad.fence?.postSpacingM ? (cad.fence.postSpacingM * 3.281).toFixed(1) : '8.0';
   const panelHIn    = cad.fence?.panelHeightM ? (cad.fence.panelHeightM * 39.37).toFixed(0) + '"' : '72"';
-  const exposure    = structural?.wind?.exposureCategory || (project as any).exposureCategory || 'C';
-  const mountSys    = (project as any)._canonical?.mountSystem || project.mountingSystem || 'Solar Fence Rail System';
+  const exposure    = structural?.wind?.exposureCategory || project.exposureCategory || 'C';
+  const mountSys    = project._canonical?.mountSystem || project.mountingSystem || 'Solar Fence Rail System';
 
   return `
   <div class=\\"page\\">
@@ -284,8 +284,8 @@ export function pagePELetterGround(input: PermitInput, cad: CADModel, pageNum: n
   const groundClr   = arr0 ? (arr0.groundClearanceM * 39.37).toFixed(0) : '12';
   const tiltDeg     = arr0?.tiltDeg || 20;
   const structType  = arr0?.structureType || 'driven steel pipe pile';
-  const exposure    = structural?.wind?.exposureCategory || (project as any).exposureCategory || 'C';
-  const mountSys    = (project as any)._canonical?.mountSystem || project.mountingSystem || 'Ground Mount Racking System';
+  const exposure    = structural?.wind?.exposureCategory || project.exposureCategory || 'C';
+  const mountSys    = project._canonical?.mountSystem || project.mountingSystem || 'Ground Mount Racking System';
 
   return `
   <div class=\\"page\\">
@@ -374,13 +374,13 @@ export function pagePELetterRoof(input: PermitInput, cad: CADModel, pageNum: num
   const lagCap      = structural?.attachment?.lagBoltCapacity?.toFixed(0) || '—';
   const safetyFact  = structural?.attachment?.safetyFactor?.toFixed(2) || '—';
   const utilization = ((structural?.rafter?.utilizationRatio || 0) * 100).toFixed(0);
-  const rafterSize  = (project as any).rafterSize  || '2×6';
-  const rafterSpace = (project as any).rafterSpacing || 24;
-  const attachSpace = (project as any).attachmentSpacing || 48;
+  const rafterSize  = project.rafterSize  || '2×6';
+  const rafterSpace = project.rafterSpacing || 24;
+  const attachSpace = project.attachmentSpacing || 48;
   const roofPitch   = project.roofPitch ? `${Math.round(Math.tan(project.roofPitch * Math.PI / 180) * 12)}/12 (${project.roofPitch.toFixed(1)}°)` : '—';
   const roofType    = roofTypeLabel(project.roofType);
   const exposure    = structural?.wind?.exposureCategory || '—';
-  const mountSys    = (project as any)._canonical?.mountSystem || project.mountingSystem || 'IronRidge XR100';
+  const mountSys    = project._canonical?.mountSystem || project.mountingSystem || 'IronRidge XR100';
 
   return `
   <div class=\\"page\\">

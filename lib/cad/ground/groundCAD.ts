@@ -62,6 +62,7 @@ export function groundCAD(input: PermitInputShape): CADModel {
     const panelsPerRow = Math.ceil(Math.sqrt(totalPanels));
     const rowCount     = Math.ceil(totalPanels / panelsPerRow);
 
+    // Error 5s fix: rawArrays is any[] — no `as any` needed on push
     rawArrays.push({
       id:                'default',
       rowCount,
@@ -73,11 +74,12 @@ export function groundCAD(input: PermitInputShape): CADModel {
       structureType:     'driven_pile',
       pileDepthFt:       5,
       pileSpacingFt:     8,
-    } as any);
+    });
   }
 
   for (let ai = 0; ai < rawArrays.length; ai++) {
-    const arr = rawArrays[ai] as any;
+    // Error 5s fix: rawArrays elements are already `any` from PermitInputShape
+    const arr = rawArrays[ai];
     const rowCount     = arr.rowCount     || 4;
     const panelsPerRow = arr.panelsPerRow || 5;
     const tiltDeg      = arr.tiltDeg      || 20;
@@ -174,7 +176,8 @@ export function groundCAD(input: PermitInputShape): CADModel {
   // ── Aggregates ────────────────────────────────────────────────
   const allPanels   = cadArrays.flatMap(a => a.panels);
   const totalPanels = allPanels.length || input.system?.totalPanels || 0;
-  const panelWatts  = (input.system?.inverters?.[0]?.strings?.[0] as any)?.panelWatts ?? 400;
+  // Error 5s fix: panelWatts is on PermitInputShape string type — no `as any` needed
+  const panelWatts  = input.system?.inverters?.[0]?.strings?.[0]?.panelWatts ?? 400;
   const totalDcKw   = totalPanels * panelWatts / 1000;
 
   // ── Bounds ────────────────────────────────────────────────────
@@ -206,12 +209,13 @@ export function groundCAD(input: PermitInputShape): CADModel {
   // GPS origin for adapter inverse conversion
   // Ground mount: use project lat/lng, or first groundArray center, or fallback
   const originLat: number =
-    (input.project as any)?.lat ??
-    (input.layout?.groundArrays?.[0] as any)?.center?.lat ??
+    // Error 5u fix: lat/lng now declared on PermitInputShape.project — no `as any` needed
+    input.project?.lat ??
+    input.layout?.groundArrays?.[0]?.center?.lat ??
     37.0;
   const originLng: number =
-    (input.project as any)?.lng ??
-    (input.layout?.groundArrays?.[0] as any)?.center?.lng ??
+    input.project?.lng ??
+    input.layout?.groundArrays?.[0]?.center?.lng ??
     -122.0;
 
   return {

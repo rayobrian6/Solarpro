@@ -84,12 +84,15 @@ export function buildComplianceItems(inp: ComplianceSheetInput): ComplianceItem[
   const items: ComplianceItem[] = [];
 
   // ── NEC 690.7 — Maximum PV System Voltage ────────────────────────────────
-  const voltOk = inp.stringVoc <= inp.maxSystemVoltage;
+  // Default to the residential 600V limit when not supplied — comparing against
+  // undefined yields NaN, silently failing/garbling the check.
+  const maxV = inp.maxSystemVoltage ?? 600;
+  const voltOk = inp.stringVoc <= maxV;
   items.push({
     id: '1', section: 'NEC 690.7', code: 'NEC 690.7',
     item: 'Maximum PV system voltage ≤ 600V (residential) or ≤ 1000V (commercial)',
     status: voltOk ? 'PASS' : 'WARNING',
-    value: `String Voc = ${inp.stringVoc}V, Limit = ${inp.maxSystemVoltage}V`,
+    value: `String Voc = ${inp.stringVoc}V, Limit = ${maxV}V`,
     note: voltOk ? undefined : 'String Voc exceeds residential limit. Verify system is listed for higher voltage or reduce string length. AHJ approval required.',
   });
 

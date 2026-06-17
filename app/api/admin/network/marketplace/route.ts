@@ -206,6 +206,7 @@ export async function POST(req: NextRequest) {
     } = body as {
       action:
         | "release_from_intake"
+        | "update_price"
         | MarketplaceInventoryAction
         | "match_contractors"
         | "create_assignments";
@@ -221,6 +222,28 @@ export async function POST(req: NextRequest) {
       min_score?: number;
     };
     if (!action) return jsonError("action is required", 400);
+
+    // Set / change a lead's price after it is already live. Fills the gap
+    // where price could only be set once, at release time.
+    if (action === "update_price") {
+      if (!opportunity_id)
+        return jsonError("opportunity_id is required for update_price", 400);
+      const price = Number(asking_price);
+      if (!Number.isFinite(price) || price <= 0)
+        return jsonError("asking_price must be a positive number", 400);
+      const [updated] = await sql`
+        UPDATE network_opportunities
+           SET asking_price = ${price}, updated_at = NOW()
+         WHERE id = ${opportunity_id}
+         RETURNING id, asking_price
+      `;
+      if (!updated) return jsonError("Opportunity not found", 404);
+      return NextResponse.json({
+        success: true,
+        opportunity_id,
+        asking_price: (updated as Record<string, unknown>).asking_price,
+      });
+    }
 
     if (action === "release_from_intake") {
       if (!intake_event_id)

@@ -49,7 +49,7 @@ export function _peProjectInfo(input: PermitInput): string {
     <tr><td class=\\"il\\">Client / Owner</td><td class=\\"iv\\">${project.clientName || '—'}</td><td class=\\"il\\">Date</td><td class=\\"iv\\">${project.date}</td></tr>
     <tr><td class=\\"il\\">Installation Address</td><td class=\\"iv\\" colspan=\\"3\\">${project.address || '—'}</td></tr>
     <tr><td class=\\"il\\">AHJ</td><td class=\\"iv\\">${ahj}</td><td class=\\"il\\">State</td><td class=\\"iv\\">${state}</td></tr>
-    <tr><td class=\\"il\\">Permit No.</td><td class=\\"iv\\">___________________</td><td class=\\"il\\">APN</td><td class=\\"iv\\">${(project as any).apn || '___________________'}</td></tr>
+    <tr><td class=\\"il\\">Permit No.</td><td class=\\"iv\\">___________________</td><td class=\\"il\\">APN</td><td class=\\"iv\\">${project.apn || '___________________'}</td></tr>
   </table>`;
 }
 
@@ -59,7 +59,7 @@ export function _peSiteLoading(input: PermitInput): string {
   const windSpeed  = structural?.wind?.windSpeed || '—';
   const snowLoad   = structural?.snow?.groundSnowLoad || '—';
   const exposure   = structural?.wind?.exposureCategory || '—';
-  const sdc        = (compliance as any).structural?.seismic?.sdc || 'D';
+  const sdc        = compliance.structural?.seismic?.sdc || 'D';
   return `
   <tr class=\\"bg-lt\\"><td class=\\"il\\" colspan=\\"4\\" style=\\"font-weight:bold;text-align:center;\\">Site Loading Parameters</td></tr>
   <tr><td class=\\"il\\">Design Wind Speed (Vult)</td><td class=\\"iv\\">${windSpeed} mph</td><td class=\\"il\\">Exposure Category</td><td class=\\"iv\\">Cat. ${exposure}</td></tr>

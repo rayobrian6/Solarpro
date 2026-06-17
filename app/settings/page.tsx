@@ -6,8 +6,9 @@ import {
   Settings, Upload, Save, CheckCircle, AlertCircle,
   Building2, Phone, Mail, Globe, Palette, Image,
   User, Lock, Bell, CreditCard, Trash2, Eye, EyeOff,
-  Sun, RefreshCw, X, Users
+  Sun, RefreshCw, X, Users, Sparkles
 } from 'lucide-react';
+import Link from 'next/link';
 import { useUser, isAdminRole } from '@/contexts/UserContext';
 import { hasPlatformAccess } from '@/lib/permissions';
 import OrganizationPanel from '@/components/settings/OrganizationPanel';
@@ -251,9 +252,7 @@ export default function SettingsPage() {
       <div className="p-6 max-w-3xl mx-auto space-y-6 animate-fade-in">
 
         {/* ══════════ SETTINGS COMMAND HEADER ══════════ */}
-          <div className="relative overflow-hidden rounded-2xl border border-slate-700/60 bg-gradient-to-br from-slate-800/80 via-slate-800/60 to-slate-900/80 p-5 shadow-xl">
-            <div className="absolute -top-10 -right-10 w-48 h-48 bg-slate-500/5 rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-slate-500/20 to-transparent" />
+          <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-slate-700/60 border border-slate-600/40 flex items-center justify-center flex-shrink-0">
                 <Settings size={18} className="text-slate-300" />
@@ -386,6 +385,12 @@ export default function SettingsPage() {
         {/* ── BRANDING TAB ── */}
         {activeTab === 'branding' && (
           <div className="space-y-5">
+
+            {/* Cross-link to onboarding */}
+            <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-800/40 border border-slate-700/30 text-xs text-slate-400">
+              <Sparkles size={13} className="text-amber-400/50" />
+              <span>First time here? <Link href="/onboarding" className="text-amber-400 hover:text-amber-300 underline underline-offset-2">Run the Getting Started wizard</Link> for a guided setup. You can edit anytime here.</span>
+            </div>
 
             {/* Plan gate notice — hidden for admin/free_pass users */}
             {currentPlan === 'starter' && !isFreePass && !isAdmin && (

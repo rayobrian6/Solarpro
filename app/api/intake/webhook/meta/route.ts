@@ -70,7 +70,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     signatureVerified = verResult.verified;
     if (!signatureVerified) {
       console.warn('[POST /api/intake/webhook/meta] Signature verification failed:', verResult.reason);
-      // Still process but log the failure — Meta sometimes sends unsigned test events
+      // A secret IS configured, so an unverified payload is untrusted — reject
+      // it (200 so Meta doesn't retry-storm) WITHOUT ingesting any lead.
+      return NextResponse.json(
+        { received: true, error: 'signature_verification_failed' },
+        { status: 200 },
+      );
     }
   } else {
     console.warn('[POST /api/intake/webhook/meta] META_APP_SECRET not set — skipping verification');

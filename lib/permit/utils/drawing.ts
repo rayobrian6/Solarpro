@@ -322,7 +322,7 @@ export function buildSchemSVG(
   // ── Panels ────────────────────────────────────────────────────────────────
   const arrayGroups = new Map<string, typeof validPanels>();
   validPanels.forEach(p => {
-    const key = (p as any).arrayId || 'A1';
+    const key = p.arrayId || 'A1';
     if (!arrayGroups.has(key)) arrayGroups.set(key, []);
     arrayGroups.get(key)!.push(p);
   });
@@ -348,7 +348,7 @@ export function buildSchemSVG(
   arrayGroups.forEach((panels, _key) => {
     if (panels.length === 0) return;
     const svgPts = panels.map(p => toSVG(p.lat, p.lng));
-    const orient = (panels[0] as any).orientation || 'landscape';
+    const orient = panels[0].orientation || 'landscape';
     const pw = orient === 'portrait' ? pWpx : pLpx;
     const ph = orient === 'portrait' ? pLpx : pWpx;
     const xs  = svgPts.map(p => p.x), ys = svgPts.map(p => p.y);

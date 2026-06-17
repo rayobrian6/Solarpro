@@ -147,6 +147,12 @@ export interface SolarPanel {
   datasheet?: string;
   datasheetUrl?: string;       // URL to manufacturer datasheet
   weight?: number;             // kg
+  // Error 5g fix: electrical spec fields accessed via (panel as any) in reportGenerator.ts
+  // but never declared on SolarPanel type — same silent-data-loss pattern as APN bug.
+  voc?: number;                // open-circuit voltage (V)
+  vmp?: number;                // voltage at max power (V)
+  isc?: number;                // short-circuit current (A)
+  imp?: number;                // current at max power (A)
   isActive?: boolean;          // for user equipment library
   isCustom?: boolean;          // true if user-created
 }
@@ -162,6 +168,10 @@ export interface Inverter {
   warranty?: number;
   mpptChannels?: number;
   batteryCompatible?: boolean;
+  // Error 5h fix: fields accessed via (inverter as any) in reportGenerator.ts
+  // but never declared on Inverter type — same silent-data-loss pattern.
+  maxDcVoltage?: number;        // max DC input voltage (V) — critical for string sizing
+  mpptVoltageMax?: number;     // max MPPT operating voltage (V) — for optimal string length
   datasheetUrl?: string;       // URL to manufacturer datasheet
   isActive?: boolean;          // for user equipment library
   isCustom?: boolean;          // true if user-created
@@ -458,6 +468,10 @@ export interface Layout {
   id: string;
   projectId: string;
   systemType: SystemType;
+  // Error 5k fix: `type` is the canonical system type set by the permit API route
+  // after DB correction. Distinct from `systemType` which may be the raw/uncorrected value.
+  // Used by buildCanonical() as the primary source of truth for system type detection.
+  type?: string;
   panels: PlacedPanel[];
   roofPlanes?: RoofPlane[];
   

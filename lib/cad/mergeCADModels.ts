@@ -216,7 +216,7 @@ export function mergeCADModels(
 
     // ── Attach _surveyMeta audit field ───────────────────────────────────────
     // Uses index signature (CADModel allows [key: string]: any via spread)
-    (model as any)._surveyMeta = {
+    model._surveyMeta = {
       applied,
       skipped,
       mergedAt: new Date().toISOString(),
