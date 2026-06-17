@@ -1246,55 +1246,103 @@ export default function CommandCenter() {
         )}
 
         {viewMode === 'full' ? (<>
-        {/* ═══ COMMAND BAR (5 Cards) ═══ */}
-        {/* ═══ COMMAND BAR (5 Cards) ═══
-            PHASE 3: onCtaClick fires real API mutations (touch updatedAt) so
-            urgency counters update after the user acts. Cards still navigate. */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          <CommandCard accentColor="#EF4444" icon={<AlertTriangle size={18} />}
-            count={dashLoading ? '—' : criticalCount} label="Critical Actions" sub="Needs attention now"
-            cta="Resolve Now" href="/projects?status=proposal" pulse={criticalCount > 0}
-            onCtaClick={() => {
-              // Open Decision Engine for most-stale proposal project
-              const target = [...projects].filter(p => normalizeStatus(p.status) === 'proposal')
-                .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
-              if (target) openDecisionModal(target.id, target.name, target.client?.name);
-              else touchProjects('proposal');
-            }} />
-          <CommandCard accentColor="#F59E0B" icon={<Clock size={18} />}
-            count={dashLoading ? '—' : awaitingCount} label="Awaiting Design" sub="Follow-up required"
-            cta="Follow Up" href="/projects?status=design"
-            onCtaClick={() => {
-              // Open Decision Engine for most-stale design project
-              const target = [...projects].filter(p => normalizeStatus(p.status) === 'design')
-                .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
-              if (target) openDecisionModal(target.id, target.name, target.client?.name);
-              else touchProjects('design');
-            }} />
-          <CommandCard accentColor="#22C55E" icon={<CheckCircle size={18} />}
-            count={dashLoading ? '—' : readyToAdvance} label="Ready to Advance" sub="Move forward"
-            cta="Advance" href="/projects?status=design"
-            onCtaClick={() => {
-              // Target the SAME set the card counts (design-ready = design + layout),
-              // not 'approved' — the count and the action were decoupled.
-              const target = [...projects].filter(p => normalizeStatus(p.status) === 'design' && !!p.layout)
-                .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
-              if (target) openDecisionModal(target.id, target.name, target.client?.name);
-              else touchProjects('design');
-            }} />
-          <CommandCard accentColor="#3B82F6" icon={<DollarSign size={18} />}
-            count={dashLoading ? '—' : `$${(activeRevenue / 1000).toFixed(0)}k`} label="Pipeline Value" sub="Active revenue"
-            cta="View Deals" href="/projects" />
-          <CommandCard accentColor="#A855F7" icon={<TrendingUp size={18} />}
-            count={dashLoading ? '—' : `${conversionRate}%`} label="Conversion Rate" sub="Proposal-to-close ratio"
-            cta="Optimize" href="/projects?status=approved"
-            onCtaClick={() => {
-              // Open Decision Engine for most-stale approved project
-              const target = [...projects].filter(p => normalizeStatus(p.status) === 'approved')
-                .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
-              if (target) openDecisionModal(target.id, target.name, target.client?.name);
-              else touchProjects('approved');
-            }} />
+        {/* ═══ ACTION PRIORITY ═══
+            Merged Command Bar + Action Bar into one prioritized action list.
+            Urgent items first, then quick-action shortcuts, then metrics. */}
+        <div className="card p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Target size={14} className="text-amber-400" />
+            <span className="text-sm font-bold text-white">Action Priority</span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+              style={{ background: 'rgba(245,158,11,0.15)', color: '#F59E0B' }}>
+              {(criticalCount || 0) + (awaitingCount || 0) + (readyToAdvance || 0)} actions
+            </span>
+          </div>
+
+          {/* Urgent Command Cards — 3-column grid */}
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <CommandCard accentColor="#EF4444" icon={<AlertTriangle size={18} />}
+              count={dashLoading ? '—' : criticalCount} label="Critical Actions" sub="Needs attention now"
+              cta="Resolve Now" href="/projects?status=proposal" pulse={criticalCount > 0}
+              onCtaClick={() => {
+                const target = [...projects].filter(p => normalizeStatus(p.status) === 'proposal')
+                  .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
+                if (target) openDecisionModal(target.id, target.name, target.client?.name);
+                else touchProjects('proposal');
+              }} />
+            <CommandCard accentColor="#F59E0B" icon={<Clock size={18} />}
+              count={dashLoading ? '—' : awaitingCount} label="Awaiting Design" sub="Follow-up required"
+              cta="Follow Up" href="/projects?status=design"
+              onCtaClick={() => {
+                const target = [...projects].filter(p => normalizeStatus(p.status) === 'design')
+                  .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
+                if (target) openDecisionModal(target.id, target.name, target.client?.name);
+                else touchProjects('design');
+              }} />
+            <CommandCard accentColor="#22C55E" icon={<CheckCircle size={18} />}
+              count={dashLoading ? '—' : readyToAdvance} label="Ready to Advance" sub="Move forward"
+              cta="Advance" href="/projects?status=design"
+              onCtaClick={() => {
+                const target = [...projects].filter(p => normalizeStatus(p.status) === 'design' && !!p.layout)
+                  .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
+                if (target) openDecisionModal(target.id, target.name, target.client?.name);
+                else touchProjects('design');
+              }} />
+          </div>
+
+          {/* Quick Action Shortcuts — 4-column row (formerly Action Bar) */}
+          <div className="grid grid-cols-4 gap-2">
+            <button onClick={() => setShowBillUpload(true)}
+              className="flex items-center gap-2 p-3 rounded-xl border transition-all hover:-translate-y-0.5 text-left"
+              style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(245,158,11,0.15)' }}>
+                <Flame size={13} className="text-amber-400" />
+              </div>
+              <div><div className="text-xs font-bold text-white">Upload Bill</div><div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Auto-create</div></div>
+            </button>
+            {[
+              { label: 'Add Contact', sub: 'New client', href: '/clients/new', icon: <Users size={13} />, accent: 'var(--accent-blue)', bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.25)' },
+              { label: 'Build System', sub: 'Design studio', href: '/design', icon: <Map size={13} />, accent: 'var(--accent-teal)', bg: 'rgba(20,184,166,0.08)', border: 'rgba(20,184,166,0.25)' },
+              { label: 'Close Deals', sub: 'Proposals', href: '/proposals', icon: <FileText size={13} />, accent: 'var(--accent-purple)', bg: 'rgba(168,85,247,0.08)', border: 'rgba(168,85,247,0.25)' },
+            ].map(a => (
+              <Link key={a.label} href={a.href}
+                className="flex items-center gap-2 p-3 rounded-xl border transition-all hover:-translate-y-0.5"
+                style={{ background: a.bg, border: `1px solid ${a.border}` }}>
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${a.accent}22` }}>
+                  <span style={{ color: a.accent }}>{a.icon}</span>
+                </div>
+                <div><div className="text-xs font-bold text-white">{a.label}</div><div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{a.sub}</div></div>
+              </Link>
+            ))}
+          </div>
+
+          {/* Contextual Metrics — Pipeline Value + Conversion Rate */}
+          <div className="grid grid-cols-2 gap-3 mt-4 pt-3" style={{ borderTop: '1px solid var(--border-color)' }}>
+            <Link href="/projects"
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all hover:brightness-110"
+              style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}>
+              <DollarSign size={15} className="text-blue-400" />
+              <div>
+                <div className="text-sm font-black text-blue-400 tabular-nums">{dashLoading ? '—' : `$${(activeRevenue / 1000).toFixed(0)}k`}</div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Pipeline Value</div>
+              </div>
+            </Link>
+            <Link href="/projects?status=approved"
+              onClick={() => {
+                const target = [...projects].filter(p => normalizeStatus(p.status) === 'approved')
+                  .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
+                if (target) openDecisionModal(target.id, target.name, target.client?.name);
+                else touchProjects('approved');
+              }}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all hover:brightness-110"
+              style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)' }}>
+              <TrendingUp size={15} className="text-purple-400" />
+              <div>
+                <div className="text-sm font-black text-purple-400 tabular-nums">{dashLoading ? '—' : `${conversionRate}%`}</div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Conversion Rate</div>
+              </div>
+            </Link>
+          </div>
         </div>
         </>) : null}
 
@@ -1450,7 +1498,7 @@ export default function CommandCenter() {
           </div>
         </div>
 
-        {/* ═══════ SECONDARY: Quick Intel + Actions (Focus view hidden) ═══════ */}
+        {/* ═══════ SECONDARY: Quick Intel Strip (Focus view hidden) ═══════ */}
         {viewMode === 'full' ? (<>
         {/* ═══ QUICK INTEL STRIP ═══ */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -1472,33 +1520,6 @@ export default function CommandCenter() {
           ))}
         </div>
 
-        {/* ═══ ACTION BAR ═══ */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <button onClick={() => setShowBillUpload(true)}
-            className="flex items-center gap-3 p-4 rounded-xl border transition-all hover:-translate-y-0.5 hover:shadow-lg text-left"
-            style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(245,158,11,0.15)' }}>
-              <Flame size={16} className="text-amber-400" />
-            </div>
-            <div><div className="text-sm font-bold text-white">Upload Bill</div><div className="text-xs" style={{ color: 'var(--text-muted)' }}>Auto-create client & project</div></div>
-            <ArrowRight size={13} className="ml-auto text-amber-400 opacity-60" />
-          </button>
-          {[
-            { label: 'Add Contact', sub: 'New client', href: '/clients/new', icon: <Users size={16} />, accent: 'var(--accent-blue)', bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.25)' },
-            { label: 'Build System', sub: 'Design studio', href: '/design', icon: <Map size={16} />, accent: 'var(--accent-teal)', bg: 'rgba(20,184,166,0.08)', border: 'rgba(20,184,166,0.25)' },
-            { label: 'Close Deals', sub: 'View proposals', href: '/proposals', icon: <FileText size={16} />, accent: 'var(--accent-purple)', bg: 'rgba(168,85,247,0.08)', border: 'rgba(168,85,247,0.25)' },
-          ].map(a => (
-            <Link key={a.label} href={a.href}
-              className="flex items-center gap-3 p-4 rounded-xl border transition-all hover:-translate-y-0.5 hover:shadow-lg"
-              style={{ background: a.bg, border: `1px solid ${a.border}` }}>
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${a.accent}22` }}>
-                <span style={{ color: a.accent }}>{a.icon}</span>
-              </div>
-              <div><div className="text-sm font-bold text-white">{a.label}</div><div className="text-xs" style={{ color: 'var(--text-muted)' }}>{a.sub}</div></div>
-              <ArrowRight size={13} className="ml-auto opacity-40 text-white" />
-            </Link>
-          ))}
-        </div>
         </>) : null}
 
         {/* ═══════ SECONDARY: Crew + Ops Board (Focus view hidden) ═══════ */}
