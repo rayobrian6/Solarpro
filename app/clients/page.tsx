@@ -10,7 +10,8 @@ import {
   Zap, DollarSign, ChevronRight, Edit, Trash2,
   Building2, RefreshCw, AlertCircle, Lock,
   TrendingUp, BarChart2, ArrowRight, Sparkles,
-  User2
+  User2,
+  Grid3x3, List, FolderOpen
 } from 'lucide-react';
 import type { Client } from '@/types';
 import { useSubscription } from '@/hooks/useSubscription';
@@ -23,11 +24,20 @@ export default function ClientsPage() {
   const clientsState = useAppStore(s => s.clientsState);
   const clientsError = useAppStore(s => s.clientsError);
   const loadClients  = useAppStore(s => s.loadClients);
+  const projects     = useAppStore(s => s.projects);
   const removeClient = useAppStore(s => s.removeClient);
   const toast        = useToast();
 
   const [search, setSearch]         = useState('');
   const [sortBy, setSortBy]         = useState<'name' | 'annualKwh' | 'annualBill'>('name');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
+    if (typeof window === 'undefined') return 'grid';
+    try {
+      const saved = localStorage.getItem('solarpro:clientsViewMode');
+      if (saved === 'list' || saved === 'grid') return saved;
+    } catch { /* ignore */ }
+    return 'grid';
+  });
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   const { plan, loading: subLoading } = useSubscription();
@@ -186,6 +196,23 @@ export default function ClientsPage() {
             <option value="annualKwh">Sort by Usage</option>
             <option value="annualBill">Sort by Bill</option>
           </select>
+          {/* View toggle — grid/list */}
+          <div className="flex items-center gap-1 bg-slate-800/60 border border-slate-700/60 rounded-xl p-1 flex-shrink-0">
+            <button
+              onClick={() => { setViewMode('grid'); try { localStorage.setItem('solarpro:clientsViewMode', 'grid'); } catch {} }}
+              className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}
+              title="Card Grid"
+            >
+              <Grid3x3 size={14} />
+            </button>
+            <button
+              onClick={() => { setViewMode('list'); try { localStorage.setItem('solarpro:clientsViewMode', 'list'); } catch {} }}
+              className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}
+              title="List View"
+            >
+              <List size={14} />
+            </button>
+          </div>
         </div>
 
         {/* Client Grid */}
@@ -224,11 +251,41 @@ export default function ClientsPage() {
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {filtered.map(client => (
-              <ClientCard key={client.id} client={client} onDelete={() => handleDelete(client.id, client.name)} />
-            ))}
-          </div>
+          viewMode === 'grid' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {filtered.map(client => (
+                <ClientCard key={client.id} client={client} onDelete={() => handleDelete(client.id, client.name)} />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 overflow-hidden">
+              {/* List header */}
+              <div className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-700/50 bg-slate-800/50 text-[10px] text-slate-500 uppercase tracking-wide font-semibold">
+                <span className="w-9"></span>
+                <span className="flex-1">Client</span>
+                <span className="hidden lg:block min-w-[140px] text-right">Contact</span>
+                <span className="hidden md:block text-right">Usage</span>
+                <span className="hidden md:block text-right">Bill</span>
+                <span>Actions</span>
+              </div>
+              {filtered.map(client => {
+                const projectCount = projects.filter(p => p.clientId === client.id).length;
+                return (
+                  <ClientRow
+                    key={client.id}
+                    client={client}
+                    projectCount={projectCount}
+                    onDelete={() => handleDelete(client.id, client.name)}
+                  />
+                );
+              })}
+              <div className="px-4 py-2.5 border-t border-slate-700/40 bg-slate-800/20 flex items-center justify-between">
+                <span className="text-xs text-slate-500">
+                  {filtered.length} client{filtered.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+            </div>
+          )
         )}
       </div>
     </AppShell>
@@ -236,6 +293,105 @@ export default function ClientsPage() {
 }
 
 // ── Client Card — premium elevation ──────────────────────────────────────────
+// ── Client Row (compact list view) ──────────────────────────────────────────
+function ClientRow({ client, projectCount, onDelete }: { client: Client; projectCount: number; onDelete: () => void }) {
+  const hasUsage = client.annualKwh > 0;
+  const initials = client.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+
+  const hues = ['amber', 'teal', 'blue', 'purple', 'emerald', 'orange', 'rose'];
+  const hue  = hues[(initials.charCodeAt(0) || 0) % hues.length];
+  const hueText: Record<string, string> = {
+    amber: 'text-amber-300', teal: 'text-teal-300', blue: 'text-blue-300',
+    purple: 'text-purple-300', emerald: 'text-emerald-300', orange: 'text-orange-300', rose: 'text-rose-300',
+  };
+
+  return (
+    <div className="
+      relative flex items-center gap-3 px-4 py-3 group transition-all
+      hover:bg-slate-800/60 border-b border-slate-700/30 last:border-b-0
+    ">
+      {/* Avatar */}
+      <div className={`w-9 h-9 rounded-lg border flex items-center justify-center font-black text-xs flex-shrink-0 bg-slate-700/40 border-slate-600/40 ${hueText[hue]}`}>
+        {initials}
+      </div>
+
+      {/* Name + location */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <Link href={`/clients/${client.id}`}
+            className="font-semibold text-white text-sm hover:text-amber-300 transition-colors truncate">
+            {client.name}
+          </Link>
+          {projectCount > 0 ? (
+            <Link href={`/projects?client=${client.id}`}
+              className="flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors">
+              <FolderOpen size={8} /> {projectCount} project{projectCount !== 1 ? 's' : ''}
+            </Link>
+          ) : (
+            <span className="text-[10px] text-slate-600 px-1.5 py-0.5 rounded-full border border-slate-700/40">No projects</span>
+          )}
+        </div>
+        <div className="flex items-center gap-3 mt-0.5 text-xs text-slate-500">
+          <span className="flex items-center gap-1 truncate">
+            <MapPin size={9} className="flex-shrink-0" />
+            {client.city}{client.state ? `, ${client.state}` : ''}
+          </span>
+        </div>
+      </div>
+
+      {/* Contact info — hidden on small screens */}
+      <div className="hidden lg:flex flex-col items-end gap-0.5 flex-shrink-0 min-w-[140px]">
+        <a href={`mailto:${client.email}`} className="text-xs text-slate-400 hover:text-slate-200 transition-colors truncate w-full text-right">
+          {client.email}
+        </a>
+        <a href={`tel:${client.phone}`} className="text-xs text-slate-500 hover:text-slate-300 transition-colors">
+          {client.phone}
+        </a>
+      </div>
+
+      {/* KPI tiles */}
+      <div className="hidden md:flex items-center gap-3 flex-shrink-0">
+        <div className="text-right">
+          <div className="text-xs font-bold text-white tabular-nums">
+            {hasUsage ? `${(client.annualKwh / 1000).toFixed(0)}k` : '\u2014'}
+          </div>
+          <div className="text-[9px] text-slate-500 uppercase">kWh/yr</div>
+        </div>
+        <div className="text-right">
+          <div className="text-xs font-bold text-white tabular-nums">
+            {client.annualBill ? `$${client.annualBill.toLocaleString()}` : '\u2014'}
+          </div>
+          <div className="text-[9px] text-slate-500 uppercase">bill/yr</div>
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-1 flex-shrink-0">
+        <Link href={`/projects/new?clientId=${client.id}`}
+          className="btn-ghost p-1.5 rounded-lg text-slate-500 hover:text-amber-400 transition-colors"
+          title="New Project">
+          <Plus size={13} />
+        </Link>
+        <Link href={`/clients/${client.id}`}
+          className="btn-ghost p-1.5 rounded-lg text-slate-500 hover:text-slate-300 transition-colors"
+          title="View Details">
+          <ArrowRight size={13} />
+        </Link>
+        <div className="relative flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <Link href={`/clients/${client.id}/edit`}
+            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-700/60 transition-all">
+            <Edit size={13} />
+          </Link>
+          <button onClick={onDelete}
+            className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all">
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ClientCard({ client, onDelete }: { client: Client; onDelete: () => void }) {
   const initials   = client.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
   const hasUsage   = client.annualKwh > 0;
