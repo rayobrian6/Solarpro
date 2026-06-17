@@ -99,20 +99,25 @@ function GasLamp({ glow }: { glow: string }) {
   );
 }
 
-function ClerkBot({ accent, seated }: { accent: string; seated?: boolean }) {
+function ClerkBot({ accent, seated, papers, gold }: { accent: string; seated?: boolean; papers?: boolean; gold?: boolean }) {
+  const c = gold ? '#fbbf24' : accent;
   return (
-    <svg width="22" height="24" viewBox="0 0 24 26" style={{ display: 'block' }}>
+    <svg width="22" height="24" viewBox="0 0 24 26" style={{ display: 'block', filter: gold ? 'drop-shadow(0 0 3px rgba(251,191,36,0.8))' : undefined }}>
       <line x1="12" y1="2" x2="12" y2="6" stroke="#7c6a52" strokeWidth="1.4" />
-      <circle cx="12" cy="2" r="1.4" fill={accent} />
-      <rect x="5" y="5" width="14" height="10" rx="2.5" fill="#1a130c" stroke={accent} strokeWidth="1.4" />
-      <circle cx="9.5" cy="10" r="1.5" fill={accent} />
-      <circle cx="14.5" cy="10" r="1.5" fill={accent} />
-      <rect x="6" y="15" width="12" height="8" rx="2" fill="#120c06" stroke={accent} strokeWidth="1.2" />
-      <rect x="9" y="17" width="6" height="2" rx="1" fill={accent} opacity="0.7" />
+      <circle cx="12" cy="2" r="1.4" fill={c} />
+      {gold && <text x="12" y="3.6" fontSize="4" textAnchor="middle" fill="#fff7d6">★</text>}
+      <rect x="5" y="5" width="14" height="10" rx="2.5" fill="#1a130c" stroke={c} strokeWidth="1.4" />
+      <circle cx="9.5" cy="10" r="1.5" fill={c} />
+      <circle cx="14.5" cy="10" r="1.5" fill={c} />
+      <rect x="6" y="15" width="12" height="8" rx="2" fill="#120c06" stroke={c} strokeWidth="1.2" />
+      <rect x="9" y="17" width="6" height="2" rx="1" fill={c} opacity="0.7" />
+      {papers && <rect x="18" y="14" width="5" height="6" rx="0.5" fill="#e8dcc0" stroke="#9c8a66" strokeWidth="0.6" transform="rotate(8 20 17)" />}
       {!seated && <><rect x="8" y="23" width="2.5" height="2.5" fill="#5b4636" /><rect x="13.5" y="23" width="2.5" height="2.5" fill="#5b4636" /></>}
     </svg>
   );
 }
+
+const US_STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
 
 function Desk({ accent, delay }: { accent: string; delay: number }) {
   return (
@@ -172,6 +177,7 @@ export default function AcquisitionFloor({
 
   const [dispatching, setDispatching] = useState(false);
   const [dispatchMsg, setDispatchMsg] = useState<string>('');
+  const [blitzState, setBlitzState] = useState('TX');
 
   const rooms = useMemo(() => ROOMS.map((r) => {
     const count = byStage[r.stage] ?? 0;
@@ -270,20 +276,47 @@ export default function AcquisitionFloor({
     return () => clearInterval(iv);
   }, [rooms, byStage]);
 
-  async function dispatch() {
+  // LIVE scouting run — real agents hit the web for installers in the chosen state.
+  async function runBlitz() {
     setDispatching(true);
-    setDispatchMsg('The scouts ride out into the night…');
+    setSupLine('MOVE, you tin cans! Scour every street!');
+    setDispatchMsg(`The scouts ride out across ${blitzState} into the night…`);
     try {
-      const res = await fetch('/api/admin/prospects/seed', { method: 'POST' });
+      const res = await fetch('/api/admin/prospects/blitz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: blitzState }),
+      });
       const data = await res.json();
-      if (data.success || typeof data.total === 'number') {
-        setDispatchMsg(`${data.total} installers rounded up and marched in!`);
+      if (data.success) {
+        setDispatchMsg(`The scouts returned from ${data.stateName || blitzState}: ${data.inserted} new, ${data.updated} already known — marched into Scouting!`);
         onDispatched();
       } else {
         setDispatchMsg(data.error || data.message || 'The scouts returned empty-handed.');
       }
     } catch (e) {
       setDispatchMsg('The scouts were lost to the fog. ' + (e as Error).message);
+    } finally {
+      setDispatching(false);
+      setTimeout(() => setDispatchMsg(''), 9000);
+    }
+  }
+
+  // Instant starter batch — loads the pre-found 84 without a live run.
+  async function summonBatch() {
+    setDispatching(true);
+    setDispatchMsg('Summoning the starter batch…');
+    try {
+      const res = await fetch('/api/admin/prospects/seed', { method: 'POST' });
+      const data = await res.json();
+      if (data.success || typeof data.total === 'number') {
+        setDispatchMsg(`${data.total} installers on the books!`);
+        onDispatched();
+      } else {
+        setDispatchMsg(data.error || data.message || 'Could not summon the batch.');
+      }
+    } catch (e) {
+      setDispatchMsg('Summon failed. ' + (e as Error).message);
     } finally {
       setDispatching(false);
       setTimeout(() => setDispatchMsg(''), 6000);
@@ -316,13 +349,32 @@ export default function AcquisitionFloor({
             <Supervisor />
           </div>
         </div>
-        <button
-          onClick={dispatch}
-          disabled={dispatching}
-          className="flex-shrink-0 px-5 py-3 rounded-lg font-semibold text-sm text-amber-100 border border-amber-600/60 bg-gradient-to-b from-amber-800/40 to-amber-950/60 hover:from-amber-700/50 hover:to-amber-900/70 disabled:opacity-60 transition-all shadow-[0_0_18px_rgba(251,191,36,0.25)]"
-        >
-          {dispatching ? '🐎 The scouts ride out…' : '🐎 Dispatch the scouts'}
-        </button>
+        <div className="flex-shrink-0 flex flex-col items-end gap-1">
+          <div className="flex items-center gap-2">
+            <select
+              value={blitzState}
+              onChange={(e) => setBlitzState(e.target.value)}
+              disabled={dispatching}
+              className="px-2 py-3 rounded-lg bg-[#1a1208] border border-amber-700/50 text-amber-100 text-sm focus:outline-none focus:border-amber-500 disabled:opacity-60"
+            >
+              {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <button
+              onClick={runBlitz}
+              disabled={dispatching}
+              className="px-5 py-3 rounded-lg font-semibold text-sm text-amber-100 border border-amber-600/60 bg-gradient-to-b from-amber-800/40 to-amber-950/60 hover:from-amber-700/50 hover:to-amber-900/70 disabled:opacity-60 transition-all shadow-[0_0_18px_rgba(251,191,36,0.25)]"
+            >
+              {dispatching ? '🐎 The scouts ride out…' : '🐎 Dispatch the scouts'}
+            </button>
+          </div>
+          <button
+            onClick={summonBatch}
+            disabled={dispatching}
+            className="text-[10px] text-amber-600/70 hover:text-amber-300 underline disabled:opacity-50"
+          >
+            or summon the 84-installer starter batch
+          </button>
+        </div>
       </div>
       {dispatchMsg && <div className="mb-3 text-center text-xs text-amber-300/90 italic">{dispatchMsg}</div>}
 
@@ -392,7 +444,7 @@ export default function AcquisitionFloor({
                             {bubbles[`${room.stage}-seat-${i}`] && (
                               <div className={bubbleCls} style={{ animation: 'bubblePop 2s ease-in-out forwards' }}>{bubbles[`${room.stage}-seat-${i}`]}</div>
                             )}
-                            <div style={{ animation: 'typeBob 0.5s ease-in-out infinite' }}><ClerkBot accent={room.accent} seated /></div>
+                            <div style={{ animation: 'typeBob 0.5s ease-in-out infinite' }}><ClerkBot accent={room.accent} seated papers gold={room.stage === 'signed_up' && i === 0} /></div>
                           </div>
                         )}
                       </div>
