@@ -16,6 +16,8 @@ import {
   FolderOpen, Upload, File, Image, FileBadge, ExternalLink,
   DollarSign, Power, Battery, GitBranch
 } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById, getMonitoringGatewayById, getEVChargerById, getOptimizerById, getMicroinverterById, getInverterById } from '@/lib/equipment-db';
 import { getAllMountingSystems, getMountingSystemsByCategory, getMountingSystemsByRoofType, type MountingSystemSpec, type SystemCategory as MountingCategory } from '@/lib/mounting-hardware-db';
 
@@ -988,6 +990,8 @@ function EngineeringPageInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [config, setConfig] = useState<ProjectConfig>(defaultProject);
+  const toast = useToast();
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
   // CAD/layout from 3D design engine (panels[], roofPlanes[]) — AUTHORITATIVE
   // source of truth for panel count (see resolveSystemPanelCount).
   // Hoisted here from its original (~line 3130) location so the panel count
@@ -4881,15 +4885,19 @@ function EngineeringPageInner() {
     }
   }, [currentProjectId, fetchProjectFiles]);
 
-  const handleFileDelete = useCallback(async (fileId: string) => {
-    if (!confirm('Delete this file?')) return;
-    try {
-      const res = await fetch(`/api/project-files?id=${fileId}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) {
-        setProjectFiles(prev => prev.filter(f => f.id !== fileId));
-      }
-    } catch { /* ignore */ }
+  const handleFileDelete = useCallback((fileId: string) => {
+    setConfirmDialog({
+      message: 'Delete this file?',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/project-files?id=${fileId}`, { method: 'DELETE' });
+          const data = await res.json();
+          if (data.success) {
+            setProjectFiles(prev => prev.filter(f => f.id !== fileId));
+          }
+        } catch { /* ignore */ }
+      },
+    });
   }, []);
 
   // Load files when switching to files tab
@@ -6078,7 +6086,7 @@ function EngineeringPageInner() {
   const handleGeneratePermitPackage = async () => {
     // GUARD: if layout is missing entirely, block and warn
     if (!projectLayout || !projectLayout.panels || projectLayout.panels.length === 0) {
-      alert('No layout found. Please open Design Studio, place panels, and save your layout before generating a permit.');
+      toast.warning('No layout found. Please open Design Studio, place panels, and save your layout before generating a permit.');
       return;
     }
     setPermitLoading(true);
@@ -6245,17 +6253,17 @@ function EngineeringPageInner() {
       } else if (res.status === 422) {
         const errData = await res.json().catch(() => ({}));
         if (errData.code === 'ENGINEERING_MODEL_STALE') {
-          alert(`⚠️ Permit Blocked — Stale Engineering Model\n\n${errData.message ?? 'Panel count is 0. Please open the Engineering page, wait for the pipeline sync to complete, then try again.'}`);
+          toast.error(`Permit Blocked — Stale Engineering Model\n\n${errData.message ?? 'Panel count is 0. Please open the Engineering page, wait for the pipeline sync to complete, then try again.'}`);
         } else {
-          alert(`Permit generation failed (422): ${errData.message ?? 'Unknown error'}`);
+          toast.error(`Permit generation failed (422): ${errData.message ?? 'Unknown error'}`);
         }
       } else {
         const errText = await res.text().catch(() => '');
-        alert(`Permit generation failed (${res.status}). Please check the console for details.\n\n${errText.slice(0, 200)}`);
+        toast.error(`Permit generation failed (${res.status}). Please check the console for details.\n\n${errText.slice(0, 200)}`);
       }
     } catch (e: unknown) {
       logDecision('Permit Package', `Error: ${(e as Error).message}`, 'manual');
-      alert(`Permit generation error: ${(e as Error).message}`);
+      toast.error(`Permit generation error: ${(e as Error).message}`);
     } finally {
       setPermitLoading(false);
     }
@@ -6995,7 +7003,7 @@ function EngineeringPageInner() {
                 title="Save engineering config to database"
                 onClick={async () => {
                   if (!currentProjectId || !config || Object.keys(config).length === 0) {
-                    alert('No project loaded.');
+                    toast.error('No project loaded.');
                     return;
                   }
                   setSaveState('saving');
@@ -7013,12 +7021,12 @@ function EngineeringPageInner() {
                     } else {
                       console.error('[MANUAL SAVE] failed:', body);
                       setSaveState('error');
-                      alert('Save failed: ' + (body.error || res.status));
+                      toast.error('Save failed: ' + (body.error || res.status));
                     }
                   } catch (err) {
                     console.error('[MANUAL SAVE] network error:', err);
                     setSaveState('error');
-                    alert('Save failed: ' + String(err));
+                    toast.error('Save failed: ' + String(err));
                   }
                 }}
               >
@@ -7115,7 +7123,7 @@ function EngineeringPageInner() {
             disabled={saveState === 'saving'}
             onClick={async () => {
               if (!currentProjectId || !config || Object.keys(config).length === 0) {
-                alert('No project loaded.');
+                toast.error('No project loaded.');
                 return;
               }
               setSaveState('saving');
@@ -7133,12 +7141,12 @@ function EngineeringPageInner() {
                 } else {
                   console.error('[MANUAL SAVE] failed:', body);
                   setSaveState('error');
-                  alert('Save failed: ' + (body.error || res.status));
+                  toast.error('Save failed: ' + (body.error || res.status));
                 }
               } catch (err) {
                 console.error('[MANUAL SAVE] network error:', err);
                 setSaveState('error');
-                alert('Save failed: ' + String(err));
+                toast.error('Save failed: ' + String(err));
               }
             }}
           >
@@ -8225,19 +8233,20 @@ function EngineeringPageInner() {
                                      transition-colors focus:outline-none focus:ring-2 focus:ring-amber-400/50"
                           onClick={() => {
                             const brand = String((config as any).ecosystemBrand ?? '').toUpperCase();
-                            const ok = window.confirm(
-                              `Change ecosystem?\n\n` +
+                            setConfirmDialog({
+                              message: `Change ecosystem?\n\n` +
                               `This will clear the applied ${brand} ecosystem and let you pick a new one ` +
                               `(SolarEdge, Enphase, Tesla, Generac, APsystems, Hoymiles).\n\n` +
                               `Your current inverter/battery selections stay as-is until you Apply a new ` +
-                              `ecosystem — nothing is auto-deleted. Click OK to continue.`
-                            );
-                            if (!ok) return;
-                            // Clear ecosystem brand so picker reappears, and unlock
-                            // userHasEditedInverters so auto-sizing can run fresh recommendations
-                            updateConfig({ ecosystemBrand: undefined, userHasEditedInverters: false, isUserControlled: false } as any);
-                            setAutoLoadBanner(`Ecosystem cleared — pick a new brand below.`);
-                            setTimeout(() => setAutoLoadBanner(null), 5000);
+                              `ecosystem — nothing is auto-deleted. Click OK to continue.`,
+                              onConfirm: () => {
+                                // Clear ecosystem brand so picker reappears, and unlock
+                                // userHasEditedInverters so auto-sizing can run fresh recommendations
+                                updateConfig({ ecosystemBrand: undefined, userHasEditedInverters: false, isUserControlled: false } as any);
+                                setAutoLoadBanner(`Ecosystem cleared — pick a new brand below.`);
+                                setTimeout(() => setAutoLoadBanner(null), 5000);
+                              },
+                            });
                           }}
                           title="Clear current ecosystem to pick a different brand"
                           aria-label="Change ecosystem"
@@ -8326,51 +8335,55 @@ function EngineeringPageInner() {
                             config.batteryId !== payload.selections.batteryId) {
                           wouldClobber.push(`battery (currently: ${config.batteryId})`);
                         }
-                        if (wouldClobber.length > 0) {
-                          const ok = window.confirm(
-                            `Apply ${payload.brand.toUpperCase()} ecosystem?\n\n` +
-                            `This will replace:\n\u2022 ${wouldClobber.join('\n\u2022 ')}\n\n` +
-                            `Click OK to apply, Cancel to keep existing selections.`
-                          );
-                          if (!ok) return;
-                        }
-                        // Lock to prevent auto-sizing engine from overwriting ecosystem selection
-                        updates.userHasEditedInverters = true;
-                        // v61.6 Phase 5: After ecosystem apply changes inverterId, the existing
-                        // strings[] may be electrically invalid for the new inverter model.
-                        // Normalize before committing so we never write 1×N violations.
-                        if (updates.inverters && Array.isArray(updates.inverters)) {
-                          const _ecoNorm = electricallyNormalizeInverterConfig(
-                            { ...config, ...updates } as any
-                          );
-                          if (_ecoNorm.rebuiltCount > 0) {
-                            console.log('[ECOSYSTEM APPLY] electrical normalization repaired', _ecoNorm.rebuiltCount, 'inverter(s)');
-                            updates.inverters = _ecoNorm.config.inverters;
-                          }
-                        }
-                        updateConfig(updates);
-                        const appliedCount = Object.values(payload.selections).filter(Boolean).length;
-                        setAutoLoadBanner(
-                          `\u2713 Applied ${payload.brand.toUpperCase()} ecosystem \u2014 ` +
-                          `${appliedCount} component${appliedCount !== 1 ? 's' : ''} configured. ` +
-                          `Manual dropdowns remain editable below.`
-                        );
-                        setTimeout(() => setAutoLoadBanner(null), 6000);
-                        // v61.3 P-09 FIX: ecosystem apply changes inverterId/type but leaves
-                        // strings[] stale. In auto/free control mode, immediately rebuild strings
-                        // via the sizing recommendation so the STRINGS/ARRAYS section is never stale.
-                        if (controlMode !== 'manual' && sizingAutoApply) {
-                          setTimeout(() => {
-                            if (sizingRecommendation) {
-                              setConfig(prev => ({ ...prev, userHasEditedInverters: false }));
-                              setTimeout(() => {
-                                if (sizingRecommendation) {
-                                  applySizingRecommendation(sizingRecommendation);
-                                }
-                              }, 50);
+                        const applyEcosystemAfterConfirm = () => {
+                          // Lock to prevent auto-sizing engine from overwriting ecosystem selection
+                          updates.userHasEditedInverters = true;
+                          // v61.6 Phase 5: After ecosystem apply changes inverterId, the existing
+                          // strings[] may be electrically invalid for the new inverter model.
+                          // Normalize before committing so we never write 1×N violations.
+                          if (updates.inverters && Array.isArray(updates.inverters)) {
+                            const _ecoNorm = electricallyNormalizeInverterConfig(
+                              { ...config, ...updates } as any
+                            );
+                            if (_ecoNorm.rebuiltCount > 0) {
+                              console.log('[ECOSYSTEM APPLY] electrical normalization repaired', _ecoNorm.rebuiltCount, 'inverter(s)');
+                              updates.inverters = _ecoNorm.config.inverters;
                             }
-                          }, 150);
+                          }
+                          updateConfig(updates);
+                          const appliedCount = Object.values(payload.selections).filter(Boolean).length;
+                          setAutoLoadBanner(
+                            `\u2713 Applied ${payload.brand.toUpperCase()} ecosystem \u2014 ` +
+                            `${appliedCount} component${appliedCount !== 1 ? 's' : ''} configured. ` +
+                            `Manual dropdowns remain editable below.`
+                          );
+                          setTimeout(() => setAutoLoadBanner(null), 6000);
+                          // v61.3 P-09 FIX: ecosystem apply changes inverterId/type but leaves
+                          // strings[] stale. In auto/free control mode, immediately rebuild strings
+                          // via the sizing recommendation so the STRINGS/ARRAYS section is never stale.
+                          if (controlMode !== 'manual' && sizingAutoApply) {
+                            setTimeout(() => {
+                              if (sizingRecommendation) {
+                                setConfig(prev => ({ ...prev, userHasEditedInverters: false }));
+                                setTimeout(() => {
+                                  if (sizingRecommendation) {
+                                    applySizingRecommendation(sizingRecommendation);
+                                  }
+                                }, 50);
+                              }
+                            }, 150);
+                          }
+                        };
+                        if (wouldClobber.length > 0) {
+                          setConfirmDialog({
+                            message: `Apply ${payload.brand.toUpperCase()} ecosystem?\n\n` +
+                            `This will replace:\n\u2022 ${wouldClobber.join('\n\u2022 ')}\n\n` +
+                            `Click OK to apply, Cancel to keep existing selections.`,
+                            onConfirm: applyEcosystemAfterConfirm,
+                          });
+                          return;
                         }
+                        applyEcosystemAfterConfirm();
                       }}
                     />
                     )}
@@ -12956,13 +12969,13 @@ function EngineeringPageInner() {
                             } else if (res.status === 422) {
                               const errData = await res.json().catch(() => ({}));
                               if (errData.code === 'ENGINEERING_MODEL_STALE') {
-                                alert(`⚠️ Permit Blocked — Stale Engineering Model\n\n${errData.message ?? 'Panel count is 0. Please open the Engineering page, wait for the pipeline sync to complete, then try again.'}`);
+                                toast.error(`Permit Blocked — Stale Engineering Model\n\n${errData.message ?? 'Panel count is 0. Please open the Engineering page, wait for the pipeline sync to complete, then try again.'}`);
                               } else {
-                                alert(`Permit preview failed (422): ${errData.message ?? 'Unknown error'}`);
+                                toast.error(`Permit preview failed (422): ${errData.message ?? 'Unknown error'}`);
                               }
                             } else {
                               const errText = await res.text().catch(() => '');
-                              alert(`Permit preview failed (${res.status}). Please check the console for details.\n\n${errText.slice(0, 200)}`);
+                              toast.error(`Permit preview failed (${res.status}). Please check the console for details.\n\n${errText.slice(0, 200)}`);
                             }
                           }}
                           className="btn-secondary w-full flex items-center justify-center gap-2 mt-2"
@@ -14273,7 +14286,7 @@ function EngineeringPageInner() {
                                     // instead of downloading the potentially-stale cached copy
                                     <button
                                       onClick={() => {
-                                        alert('⚠️ Permit Package\n\nTo get the latest permit package, click "Generate & Download Permit Package (PDF)" on the Permit tab.\n\nDownloading permit_planset.html directly may give you an outdated version.');
+                                        toast.info('Permit Package\n\nTo get the latest permit package, click "Generate & Download Permit Package (PDF)" on the Permit tab.\n\nDownloading permit_planset.html directly may give you an outdated version.');
                                       }}
                                       className={`p-1.5 rounded-lg text-amber-400 hover:bg-amber-500/10 transition-colors`}
                                       title="Use Generate & Download button for latest version"
@@ -14630,6 +14643,14 @@ function EngineeringPageInner() {
         </div>{/* end content + panel row */}
       </div>
       </PlanGate>
+      {confirmDialog ? (
+        <ConfirmDialog
+          message={confirmDialog.message}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+          variant="warning"
+        />
+      ) : null}
 
     </AppShell>
   );
