@@ -57,6 +57,9 @@ const SUPERVISOR_LINES = [
   'CHOP CHOP, the sun is selling!',
 ];
 
+const RAGE_LINES = ['SLACKER! Back to WORK!', "I'll have your HIDE!", 'WORK, you dog!', 'NO dawdling!', 'I SAW that yawn!', 'FASTER, blast you!', 'You call THAT toil?!'];
+const PAIN_LINES = ['OW!', 'EEK!', 'YES SIR!', 'SORRY SIR!', 'AAH!', 'NOT THE WHIP!', 'RIGHT AWAY!'];
+
 const US_STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
 
 // desk anchors as % of the floor strip; top = depth (smaller toward the back)
@@ -66,7 +69,7 @@ const DESKS = [
 
 function workersFor(count: number): number {
   if (count <= 0) return 1;
-  return Math.min(5, Math.max(1, Math.round(count / 14)));
+  return Math.min(6, Math.max(2, Math.round(count / 10)));
 }
 function rand(min: number, max: number) { return min + Math.random() * (max - min); }
 function depthScale(yFrac: number) { return 0.78 + 0.32 * yFrac; }
@@ -193,6 +196,77 @@ function FilingCabinet({ accent }: { accent: string }) {
   );
 }
 
+/* ── Gothic / Poe set dressing ────────────────────────────────────────────── */
+function Fireplace() {
+  return (
+    <svg width="66" height="56" viewBox="0 0 66 56" style={{ display: 'block' }}>
+      {/* stone surround */}
+      <rect x="2" y="6" width="62" height="50" rx="2" fill="#241c14" stroke="#15100a" strokeWidth="1.5" />
+      <rect x="2" y="2" width="62" height="6" rx="1" fill="#322619" stroke="#15100a" strokeWidth="1" />
+      {/* arched firebox */}
+      <path d="M14 56 V28 a19 19 0 0 1 38 0 V56 Z" fill="#0a0603" />
+      {/* logs */}
+      <rect x="20" y="46" width="26" height="4" rx="2" fill="#3a2a1a" transform="rotate(-6 33 48)" />
+      <rect x="20" y="49" width="26" height="4" rx="2" fill="#2e2114" transform="rotate(5 33 51)" />
+      {/* fire */}
+      <path d="M33 50 q-7 -8 -3 -16 q2 5 5 4 q-3 -8 2 -13 q1 9 6 12 q3 4 1 9 q-2 4 -11 4 z" fill="#f59e0b" style={{ animation: 'flame 0.5s ease-in-out infinite alternate', transformOrigin: '33px 50px' }} />
+      <path d="M33 50 q-4 -6 -1 -12 q2 4 4 3 q-2 -5 2 -9 q1 7 4 9 q2 3 0 6 q-2 3 -9 3 z" fill="#fde68a" style={{ animation: 'flame 0.4s ease-in-out 0.1s infinite alternate', transformOrigin: '33px 50px' }} />
+      {/* glow */}
+      <ellipse cx="33" cy="46" rx="22" ry="12" fill="#f59e0b" opacity="0.18" style={{ animation: 'bulb 1.2s ease-in-out infinite' }} />
+      {/* mantel goblet */}
+      <path d="M52 -1 h4 l-0.6 3 q-1.4 1 -2.8 0 z" fill="#d4af37" transform="translate(0,2)" />
+    </svg>
+  );
+}
+function Candelabra() {
+  return (
+    <svg width="30" height="34" viewBox="0 0 30 34" style={{ display: 'block' }}>
+      <rect x="14" y="14" width="2" height="16" fill="#7c6a52" />
+      <ellipse cx="15" cy="31" rx="6" ry="2" fill="#5b4636" />
+      <path d="M4 18 q0 -6 5 -6 M26 18 q0 -6 -5 -6 M15 14 v-3" stroke="#7c6a52" strokeWidth="2" fill="none" />
+      {[4, 15, 26].map((x, i) => (
+        <g key={x}>
+          <rect x={x - 1} y={x === 15 ? 7 : 12} width="2" height="5" fill="#e8d8b0" />
+          <ellipse cx={x} cy={x === 15 ? 5.5 : 10.5} rx="1.8" ry="3" fill="#fff4cc" style={{ animation: `flame 0.5s ease-in-out ${i * 0.2}s infinite alternate`, transformOrigin: `${x}px ${x === 15 ? 7 : 12}px` }} />
+          <ellipse cx={x} cy={x === 15 ? 5.5 : 10.5} rx="0.8" ry="1.6" fill="#f59e0b" />
+        </g>
+      ))}
+    </svg>
+  );
+}
+function Raven() {
+  return (
+    <svg width="26" height="20" viewBox="0 0 26 20" style={{ display: 'block', animation: 'ravenBob 3s ease-in-out infinite' }}>
+      <ellipse cx="12" cy="11" rx="8" ry="4.5" fill="#0b0b10" />
+      <circle cx="19" cy="7" r="3.5" fill="#0b0b10" />
+      <path d="M22 7 l4 -1 -3 2 z" fill="#3a3a44" />
+      <circle cx="20" cy="6.5" r="0.7" fill="#fbbf24" />
+      <path d="M5 9 l-4 -3 3 5 z" fill="#070709" />
+      <rect x="10" y="15" width="1.2" height="4" fill="#1a1a22" /><rect x="14" y="15" width="1.2" height="4" fill="#1a1a22" />
+    </svg>
+  );
+}
+function Portrait({ accent }: { accent: string }) {
+  return (
+    <svg width="30" height="38" viewBox="0 0 30 38" style={{ display: 'block' }}>
+      <rect x="1" y="1" width="28" height="36" rx="2" fill="#1a1206" stroke="#b8860b" strokeWidth="2" />
+      <rect x="4" y="4" width="22" height="30" rx="1" fill="#0d0a06" />
+      <ellipse cx="15" cy="16" rx="6" ry="7" fill="#2a2436" />
+      <ellipse cx="15" cy="13" rx="4.5" ry="5" fill="#46415a" />
+      <rect x="9" y="22" width="12" height="10" rx="3" fill="#1c1830" />
+      <circle cx="13" cy="13" r="0.8" fill={accent} /><circle cx="17" cy="13" r="0.8" fill={accent} />
+    </svg>
+  );
+}
+function Cobweb() {
+  return (
+    <svg width="34" height="34" viewBox="0 0 34 34" style={{ display: 'block', opacity: 0.4 }}>
+      <path d="M0 0 L34 0 M0 0 L0 34 M0 0 L24 24 M0 0 L34 14 M0 0 L14 34" stroke="#cbd5e1" strokeWidth="0.5" fill="none" opacity="0.5" />
+      <path d="M0 8 Q8 6 8 0 M0 16 Q16 14 16 0 M0 26 Q26 22 26 0" stroke="#cbd5e1" strokeWidth="0.5" fill="none" opacity="0.5" />
+    </svg>
+  );
+}
+
 type Pos = { x: number; y: number; tx: number; ty: number; speed: number; dir: number };
 
 export default function AcquisitionFloor({
@@ -218,11 +292,14 @@ export default function AcquisitionFloor({
   const [dispatching, setDispatching] = useState(false);
   const [dispatchMsg, setDispatchMsg] = useState<string>('');
   const [blitzState, setBlitzState] = useState('TX');
+  const [whipTarget, setWhipTarget] = useState<string | null>(null);
+  const [raging, setRaging] = useState(false);
 
   const rooms = useMemo(() => ROOMS.map((r) => {
     const count = byStage[r.stage] ?? 0;
     const n = workersFor(count);
-    const seated = Math.min(n, DESKS.length);
+    // always leave at least one clerk roaming when there are 2+ so the room feels alive
+    const seated = n >= 2 ? Math.min(n - 1, DESKS.length) : n;
     return { ...r, count, total: n, seated, wanderers: Math.max(0, n - seated) };
   }), [byStage]);
 
@@ -293,22 +370,45 @@ export default function AcquisitionFloor({
     return () => clearInterval(iv);
   }, []);
 
-  useEffect(() => {
+  const allWorkerIds = useMemo(() => {
     const ids: { id: string; stage: Stage }[] = [];
     for (const r of rooms) {
       for (let i = 0; i < r.seated; i++) ids.push({ id: `${r.stage}-seat-${i}`, stage: r.stage });
       for (let i = 0; i < r.wanderers; i++) ids.push({ id: `${r.stage}-wander-${i}`, stage: r.stage });
     }
-    if (ids.length === 0) return;
+    return ids;
+  }, [rooms]);
+
+  // chatter
+  useEffect(() => {
+    if (allWorkerIds.length === 0) return;
     const iv = setInterval(() => {
-      const pick = ids[Math.floor(Math.random() * ids.length)];
+      const pick = allWorkerIds[Math.floor(Math.random() * allWorkerIds.length)];
       if ((byStage[pick.stage] ?? 0) === 0 && Math.random() > 0.25) return;
       const room = ROOMS.find((r) => r.stage === pick.stage)!;
       setBubbles((b) => ({ ...b, [pick.id]: room.lines[Math.floor(Math.random() * room.lines.length)] }));
       setTimeout(() => setBubbles((b) => { const n = { ...b }; delete n[pick.id]; return n; }), 2200);
     }, 1200);
     return () => clearInterval(iv);
-  }, [rooms, byStage]);
+  }, [allWorkerIds, byStage]);
+
+  // THE OVERSEER FREAKS OUT — cracks his whip, a random clerk yelps and scrambles
+  useEffect(() => {
+    if (allWorkerIds.length === 0) return;
+    const iv = setInterval(() => {
+      setRaging(true);
+      setSupLine(RAGE_LINES[Math.floor(Math.random() * RAGE_LINES.length)]);
+      const victim = allWorkerIds[Math.floor(Math.random() * allWorkerIds.length)];
+      setWhipTarget(victim.id);
+      setBubbles((b) => ({ ...b, [victim.id]: PAIN_LINES[Math.floor(Math.random() * PAIN_LINES.length)] }));
+      setTimeout(() => setRaging(false), 800);
+      setTimeout(() => {
+        setWhipTarget(null);
+        setBubbles((b) => { const n = { ...b }; delete n[victim.id]; return n; });
+      }, 1500);
+    }, 8500);
+    return () => clearInterval(iv);
+  }, [allWorkerIds]);
 
   async function runBlitz() {
     setDispatching(true);
@@ -349,6 +449,10 @@ export default function AcquisitionFloor({
         @keyframes bulb { 0%,100%{ opacity:.9 } 50%{ opacity:1 } }
         @keyframes smoke { 0%{ opacity:.5; transform: translateY(0) } 100%{ opacity:0; transform: translateY(-10px) } }
         @keyframes ember { 0%{ transform: translateY(0); opacity:0 } 10%{opacity:.7} 100%{ transform: translateY(-280px); opacity:0 } }
+        @keyframes flame { 0%{ transform: scaleY(1) scaleX(1) } 100%{ transform: scaleY(1.18) scaleX(0.92) } }
+        @keyframes ravenBob { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-2px) } }
+        @keyframes whipShake { 0%,100%{ transform: translateX(0) rotate(0deg) } 25%{ transform: translateX(-2.5px) rotate(-7deg) } 75%{ transform: translateX(2.5px) rotate(7deg) } }
+        @keyframes crackPop { 0%{ opacity:0; transform: scale(.5) rotate(-12deg) } 25%{ opacity:1; transform: scale(1.25) rotate(6deg) } 100%{ opacity:0; transform: scale(1) rotate(0) } }
       `}</style>
 
       {/* ── Catwalk: the Overseer + controls ── */}
@@ -359,10 +463,11 @@ export default function AcquisitionFloor({
             <div className="absolute top-1 left-3 text-[10px] uppercase tracking-[0.3em] text-amber-600/80 font-bold">The Overseer&apos;s Catwalk</div>
             <div ref={supRef} className="absolute bottom-0 left-0 will-change-transform" style={{ transform: 'translateX(20px)' }}>
               {supLine && (
-                <div className="absolute -top-3 left-16 whitespace-nowrap px-2.5 py-1 rounded-lg text-[12px] font-bold text-amber-100 bg-amber-950 border border-amber-600/60 shadow-lg" style={{ animation: 'bubblePop 3s ease-in-out forwards' }}>
+                <div className={`absolute -top-3 left-16 whitespace-nowrap px-2.5 py-1 rounded-lg text-[12px] font-bold shadow-lg ${raging ? 'text-red-100 bg-red-950 border border-red-500/70' : 'text-amber-100 bg-amber-950 border border-amber-600/60'}`} style={{ animation: 'bubblePop 3s ease-in-out forwards' }}>
                   {supLine}
                 </div>
               )}
+              {raging && <div className="absolute top-3 left-[4.5rem] text-lg font-black text-amber-300 pointer-events-none z-50" style={{ animation: 'crackPop 0.8s ease-out forwards', textShadow: '0 0 10px #f59e0b, 0 0 4px #fff' }}>💥 CRACK!</div>}
               <div ref={supSpriteRef} style={{ transformOrigin: 'center bottom' }}><Overseer /></div>
             </div>
           </div>
@@ -405,7 +510,7 @@ export default function AcquisitionFloor({
 
                 {/* BACK WALL (brick) */}
                 <div className="absolute inset-x-0 top-0 h-[52%]" style={{ background: `linear-gradient(180deg, ${room.wall}, #0a0705)` }}>
-                  <div className="absolute inset-0 opacity-25" style={{ backgroundImage: 'repeating-linear-gradient(0deg, transparent 0 13px, rgba(0,0,0,0.5) 13px 14px), repeating-linear-gradient(90deg, transparent 0 30px, rgba(0,0,0,0.45) 30px 31px)' }} />
+                  <div className="absolute inset-0 opacity-50" style={{ backgroundImage: 'repeating-linear-gradient(0deg, rgba(90,60,40,0.18) 0 13px, rgba(0,0,0,0.55) 13px 14px), repeating-linear-gradient(90deg, transparent 0 30px, rgba(0,0,0,0.5) 30px 31px)' }} />
                   {/* hanging bulbs */}
                   {[28, 60].map((lx) => (
                     <div key={lx} className="absolute" style={{ left: `${lx}%`, top: 0 }}>
@@ -423,6 +528,17 @@ export default function AcquisitionFloor({
                     <div className="absolute w-2 h-[1.5px]" style={{ background: room.accent, transform: 'rotate(40deg)' }} />
                     <div className="absolute w-[1.5px] h-2.5" style={{ background: room.accent, transform: 'rotate(10deg)' }} />
                   </div>
+                  {/* cobwebs in the corners */}
+                  <div className="absolute top-0 left-0"><Cobweb /></div>
+                  <div className="absolute top-0 right-0" style={{ transform: 'scaleX(-1)' }}><Cobweb /></div>
+                  {/* roaring fireplace */}
+                  <div className="absolute left-2 bottom-0" style={{ zIndex: 6 }}><Fireplace /></div>
+                  {/* framed portrait of the founder */}
+                  <div className="absolute right-20 bottom-2 hidden md:block"><Portrait accent={room.accent} /></div>
+                  {/* candelabra on a ledge */}
+                  <div className="absolute right-4 bottom-1"><Candelabra /></div>
+                  {/* a raven, perched */}
+                  <div className="absolute right-12 top-7"><Raven /></div>
                 </div>
 
                 {/* FLOOR */}
@@ -442,7 +558,7 @@ export default function AcquisitionFloor({
                         {seatList.includes(i) && (
                           <div className="absolute" style={{ left: 16, top: 2 }}>
                             {bubbles[`${room.stage}-seat-${i}`] && <div className={bubble} style={{ animation: 'bubblePop 2.2s ease-in-out forwards' }}>{bubbles[`${room.stage}-seat-${i}`]}</div>}
-                            <div style={{ animation: 'typeBob 0.5s ease-in-out infinite' }}><Clerk c={room.accent} variant={i % 3} seated gold={room.stage === 'signed_up' && i === 0} /></div>
+                            <div style={{ animation: whipTarget === `${room.stage}-seat-${i}` ? 'whipShake 0.4s ease-in-out infinite' : 'typeBob 0.5s ease-in-out infinite' }}><Clerk c={room.accent} variant={i % 3} seated gold={room.stage === 'signed_up' && i === 0} /></div>
                           </div>
                         )}
                       </div>
@@ -453,7 +569,11 @@ export default function AcquisitionFloor({
                   {wlist.map((w) => (
                     <div key={w.id} ref={(el) => { wanderEls.current.set(w.id, el); }} className="absolute top-0 left-0 will-change-transform" style={{ transform: 'translate(20px,20px)' }}>
                       {bubbles[w.id] && <div className={bubble} style={{ animation: 'bubblePop 2.2s ease-in-out forwards' }}>{bubbles[w.id]}</div>}
-                      <div ref={(el) => { spriteEls.current.set(w.id, el); }} style={{ transformOrigin: 'center bottom' }}><Clerk c={room.accent} variant={w.variant} /></div>
+                      <div ref={(el) => { spriteEls.current.set(w.id, el); }} style={{ transformOrigin: 'center bottom' }}>
+                        <div style={{ animation: whipTarget === w.id ? 'whipShake 0.4s ease-in-out infinite' : 'floorBob 1.3s ease-in-out infinite' }}>
+                          <Clerk c={room.accent} variant={w.variant} />
+                        </div>
+                      </div>
                     </div>
                   ))}
 
