@@ -1559,7 +1559,7 @@ export default function LandingPage() {
           <div className="border-t border-slate-800 pt-6 flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-slate-600 text-xs">© 2025 SolarPro Design Platform. All rights reserved.</p>
             <div className="flex gap-4 text-xs text-slate-600">
-              <a href="#" className="hover:text-slate-400 transition-colors">Privacy Policy</a>
+              <Link href="/privacy" className="hover:text-slate-400 transition-colors">Privacy Policy</Link>
               <Link href="/terms" className="hover:text-slate-400 transition-colors">Terms of Service</Link>
             </div>
           </div>
