@@ -6,6 +6,8 @@ import {
   AlertCircle, Crown, UserX, Key, Eye, ChevronDown,
   UserCheck, Star, XCircle,
 } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useUser } from '@/contexts/UserContext';
 
 const PLAN_COLORS: Record<string, string> = {
@@ -27,8 +29,6 @@ const ROLE_COLORS: Record<string, string> = {
   user:        'bg-slate-500/20 text-slate-400',
 };
 
-type ToastState = { msg: string; ok: boolean } | null;
-
 export default function AdminUsers() {
   const { refreshUser, user: currentAdmin } = useUser();
   const isSuperAdmin = currentAdmin?.role === 'super_admin';
@@ -39,17 +39,13 @@ export default function AdminUsers() {
   const [search, setSearch]       = useState('');
   const [loading, setLoading]     = useState(true);
   const [acting, setActing]       = useState<string | null>(null);
-  const [toast, setToast]         = useState<ToastState>(null);
+  const toast = useToast();
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
   const [editUser, setEditUser]   = useState<any | null>(null);
   const [openMenu, setOpenMenu]   = useState<string | null>(null);
   const [confirmModal, setConfirmModal] = useState<{ userId: string; action: string; label: string; extra?: any } | null>(null);
   const [tempPasswordModal, setTempPasswordModal] = useState<{ password: string; email: string } | null>(null);
   const LIMIT = 50;
-
-  const showToast = (msg: string, ok = true) => {
-    setToast({ msg, ok });
-    setTimeout(() => setToast(null), 4000);
-  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -96,27 +92,31 @@ export default function AdminUsers() {
           const impData = await impRes.json();
           if (impRes.ok && impData.success && impData.redirectTo) {
             window.open(impData.redirectTo, '_blank');
-            showToast(`✓ Impersonating ${d.targetUser?.name || 'user'} — check new tab`);
+            toast.success(`Impersonating ${d.targetUser?.name || 'user'} — check new tab`);
           } else {
-            showToast(impData.error || 'Impersonation failed', false);
+            toast.error(impData.error || 'Impersonation failed');
           }
         } else {
-          showToast(`✓ ${actionName.replace(/_/g, ' ')} applied`);
+          toast.success(`✓ ${actionName.replace(/_/g, ' ')} applied`);
         }
         load();
         setTimeout(() => refreshUser(), 100);
       } else {
-        showToast(d.error || 'Failed', false);
+        toast.error(d.error || 'Failed');
       }
     } finally { setActing(null); }
   };
 
-  const deleteUser = async (userId: string, email: string) => {
-    if (!confirm(`Delete user ${email}? This cannot be undone.`)) return;
-    const res = await fetch(`/api/admin/users?id=${userId}`, { method: 'DELETE' });
-    const d = await res.json();
-    if (d.success) { showToast('User deleted'); load(); }
-    else showToast(d.error || 'Failed', false);
+  const deleteUser = (userId: string, email: string) => {
+    setConfirmDialog({
+      message: `Delete user ${email}? This cannot be undone.`,
+      onConfirm: async () => {
+        const res = await fetch(`/api/admin/users?id=${userId}`, { method: 'DELETE' });
+        const d = await res.json();
+        if (d.success) { toast.success('User deleted'); load(); }
+        else toast.error(d.error || 'Failed');
+      },
+    });
   };
 
   const handleConfirm = () => {
@@ -440,7 +440,7 @@ export default function AdminUsers() {
             </div>
             <p className="text-xs text-slate-500">Share this with the user. They should change it immediately after logging in.</p>
             <button
-              onClick={() => { navigator.clipboard.writeText(tempPasswordModal.password); showToast('Copied to clipboard'); setTempPasswordModal(null); }}
+              onClick={() => { navigator.clipboard.writeText(tempPasswordModal.password); toast.success('Copied to clipboard'); setTempPasswordModal(null); }}
               className="w-full py-2 rounded-lg bg-amber-500 text-black text-sm font-semibold hover:bg-amber-400 transition-colors"
             >
               Copy & Close
@@ -449,15 +449,14 @@ export default function AdminUsers() {
         </div>
       )}
 
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium shadow-xl ${
-          toast.ok ? 'bg-green-500/20 border border-green-500/30 text-green-400' : 'bg-red-500/20 border border-red-500/30 text-red-400'
-        }`}>
-          {toast.ok ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-          {toast.msg}
-        </div>
-      )}
+      {confirmDialog ? (
+        <ConfirmDialog
+          message={confirmDialog.message}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+          variant="danger"
+        />
+      ) : null}
     </div>
   );
 }
