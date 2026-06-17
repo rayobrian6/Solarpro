@@ -21,6 +21,7 @@ import {
   Sparkles,
   Flame,
 } from "lucide-react";
+import { useToast } from "@/components/ui/Toast";
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
@@ -391,6 +392,7 @@ function TerritoryView() {
   const stateName = STATE_NAMES[state] ?? state;
 
   const [data, setData] = useState<Territory | null>(null);
+  const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [claimingId, setClaimingId] = useState<string>("");
 
@@ -423,7 +425,7 @@ function TerritoryView() {
         window.location.href = d.url as string;
         return;
       }
-      alert(d.error || "Could not start checkout.");
+      toast.error(d.error || "Could not start checkout.");
     } finally {
       setClaimingId("");
     }

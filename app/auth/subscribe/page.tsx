@@ -13,6 +13,7 @@ import {
   formatSeatLimit,
   formatExtraSeatMsg,
 } from '@/lib/pricing.config';
+import { useToast } from "@/components/ui/Toast";
 
 // ─── Plans derived from the single source of truth ──────────────────────────
 
@@ -90,6 +91,7 @@ const FAQS = [
 
 export default function SubscribePage() {
   const router = useRouter();
+  const toast = useToast();
   const [selectedPlan, setSelectedPlan] = useState('contractor');
   const [loading, setLoading] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
@@ -121,11 +123,11 @@ export default function SubscribePage() {
       if (res.status === 401) {
         router.push(`/auth/register?plan=${planId}`);
       } else {
-        alert(data.error || 'Could not start checkout. Please try again.');
+        toast.error(data.error || 'Could not start checkout. Please try again.');
       }
     } catch {
       setLoading(false);
-      alert('Could not start checkout. Please check your connection and try again.');
+      toast.error('Could not start checkout. Please check your connection and try again.');
     }
   };
 

@@ -23,6 +23,7 @@ import {
   Building2,
   TrendingUp,
 } from "lucide-react";
+import { useToast } from "@/components/ui/Toast";
 
 type Lead = {
   id: string;
@@ -338,6 +339,7 @@ export default function LeadProductPage() {
   const params = useParams();
   const id = String(params.id ?? "");
   const [lead, setLead] = useState<Lead | null>(null);
+  const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [claiming, setClaiming] = useState(false);
 
@@ -369,7 +371,7 @@ export default function LeadProductPage() {
         window.location.href = d.url as string;
         return;
       }
-      alert(d.error || "Could not start checkout.");
+      toast.error(d.error || "Could not start checkout.");
     } finally {
       setClaiming(false);
     }

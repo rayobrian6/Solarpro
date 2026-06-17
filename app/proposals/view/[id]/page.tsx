@@ -45,6 +45,7 @@ import {
   getSection48eRate,
   getSection48eSafeHarborDeadline,
 } from '@/lib/incentivesConfig';
+import { useToast } from "@/components/ui/Toast";
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -58,6 +59,7 @@ function ProposalViewInner() {
   const token = searchParams.get('token');
 
   const [proposal, setProposal] = useState<Proposal | null>(null);
+  const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [branding, setBranding] = useState<{
@@ -200,7 +202,7 @@ function ProposalViewInner() {
       const { generateProposalPDF } = await import('@/lib/proposalPDF');
       await generateProposalPDF(proposal);
     } catch {
-      alert('PDF generation failed. Please try again.');
+      toast.error('PDF generation failed. Please try again.');
     } finally {
       setDownloadingPdf(false);
     }
