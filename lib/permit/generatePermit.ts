@@ -1659,7 +1659,10 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
   .note-txt { display: table-cell; font-size: var(--f-md); line-height: 1.5; color: #000; font-family: var(--sans); }
 
   /* ── Print ──────────────────────────────────────────────────────────────── */
-  @page { size: 17in 11in landscape; margin: 0; }
+  /* size with explicit dims = ANSI B landscape; do NOT add the `landscape`
+     keyword — mixing it with explicit lengths is invalid CSS and the browser
+     silently falls back to Letter portrait, clipping the right ~8in on print/PDF. */
+  @page { size: 17in 11in; margin: 0; }
   @media print { .page { page-break-after: always; } }
 </style>
 </head>
