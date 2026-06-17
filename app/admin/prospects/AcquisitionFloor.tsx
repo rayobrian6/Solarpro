@@ -437,6 +437,28 @@ export default function AcquisitionFloor({
     finally { setDispatching(false); setTimeout(() => setDispatchMsg(''), 6000); }
   }
 
+  // A room actually does its job: the Copying Room enriches raw leads; the Assay Room vets.
+  async function workRoom(stage: Stage) {
+    const ep = stage === 'enriched' ? '/api/admin/prospects/work/enrich'
+      : stage === 'qualified' ? '/api/admin/prospects/work/qualify' : null;
+    if (!ep || dispatching) return;
+    setDispatching(true);
+    setSupLine(stage === 'enriched' ? 'COPY faster, you wretches!' : 'VET them — only the worthy!');
+    setDispatchMsg(stage === 'enriched' ? 'The clerks comb the wires for contacts…' : 'The assayers weigh each firm…');
+    try {
+      const res = await fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      const data = await res.json();
+      if (data.success) {
+        setDispatchMsg(stage === 'enriched'
+          ? `Enriched ${data.enriched} of ${data.processed} raw leads — off to the Assay Room.`
+          : `Vetted ${data.processed}: ${data.qualified} qualified, ${data.rejected} to the Catacombs.`);
+        onDispatched();
+      } else setDispatchMsg(data.error || data.message || 'The work faltered.');
+    } catch (e) { setDispatchMsg('The work faltered. ' + (e as Error).message); }
+    finally { setDispatching(false); setTimeout(() => setDispatchMsg(''), 8000); }
+  }
+  const WORK_LABEL: Partial<Record<Stage, string>> = { enriched: '⚙ Enrich raw leads', qualified: '⚙ Vet the enriched' };
+
   const bubble = 'absolute left-1/2 -translate-x-1/2 -top-7 whitespace-nowrap px-2 py-0.5 rounded-md text-[11px] font-semibold text-amber-950 bg-amber-100 shadow z-50';
 
   return (
@@ -593,6 +615,15 @@ export default function AcquisitionFloor({
                 </div>
 
                 <div className="absolute bottom-2 left-3 z-40 text-[12px] font-semibold text-amber-200/80 group-hover:text-amber-300 transition-colors" style={{ fontFamily: 'Georgia, serif' }}>enter the chamber →</div>
+
+                {WORK_LABEL[room.stage] && (
+                  <div role="button" tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); workRoom(room.stage); }}
+                    className="absolute top-14 right-2 z-40 px-2.5 py-1 rounded-md text-[11px] font-bold text-amber-50 bg-amber-800/80 hover:bg-amber-700 border border-amber-500/50 shadow cursor-pointer transition-colors"
+                    style={{ pointerEvents: dispatching ? 'none' : 'auto', opacity: dispatching ? 0.5 : 1 }}>
+                    {WORK_LABEL[room.stage]}
+                  </div>
+                )}
               </button>
             );
           })}

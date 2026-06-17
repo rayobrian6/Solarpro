@@ -264,6 +264,54 @@ export async function getProspectStats(): Promise<ProspectStats> {
   };
 }
 
+/** Score an existing DB row (maps row → input shape, reuses scoreProspect). */
+export function scoreRow(p: InstallerProspect): number {
+  return scoreProspect({
+    companyName: p.company_name,
+    contactName: p.contact_name,
+    email: p.email,
+    phone: p.phone,
+    website: p.website,
+    licenseNumber: p.license_number,
+    rating: p.rating,
+    reviewCount: p.review_count,
+  });
+}
+
+export interface WorkUpdate {
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  licenseNumber?: string | null;
+  rating?: number | null;
+  reviewCount?: number | null;
+  stage?: ProspectStage;
+  qualityScore?: number;
+  notes?: string | null;
+}
+
+/**
+ * Apply a pipeline-work update: COALESCE-fills contact/vetting fields (never
+ * clobbers existing data with null) and sets stage / quality_score outright.
+ */
+export async function applyWorkUpdate(id: string, p: WorkUpdate): Promise<void> {
+  const sql = await getDbReady();
+  await sql`
+    UPDATE installer_prospects SET
+      email          = COALESCE(${p.email ?? null}, email),
+      phone          = COALESCE(${p.phone ?? null}, phone),
+      website        = COALESCE(${p.website ?? null}, website),
+      license_number = COALESCE(${p.licenseNumber ?? null}, license_number),
+      rating         = COALESCE(${p.rating ?? null}, rating),
+      review_count   = COALESCE(${p.reviewCount ?? null}, review_count),
+      stage          = COALESCE(${p.stage ?? null}, stage),
+      quality_score  = COALESCE(${p.qualityScore ?? null}, quality_score),
+      notes          = COALESCE(${p.notes ?? null}, notes),
+      updated_at     = NOW()
+    WHERE id = ${id}
+  `;
+}
+
 export interface UpdateProspectPatch {
   stage?: ProspectStage;
   notes?: string;
