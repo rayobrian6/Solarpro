@@ -21,6 +21,7 @@ import { useSubscription } from '@/hooks/useSubscription';
 import { useUser } from '@/contexts/UserContext';
 import { hasPlatformAccess } from '@/lib/permissions';
 import UpgradeModal from '@/components/ui/UpgradeModal';
+import { useToast } from '@/components/ui/Toast';
 
 // ── Status config ─────────────────────────────────────────────────────────────
 const STATUS_STEPS: ProjectStatus[] = ['lead', 'design', 'proposal', 'approved', 'installed'];
@@ -548,6 +549,7 @@ export default function ProjectsPage() {
 
   const { plan, loading: subLoading } = useSubscription();
   const { user }       = useUser();
+  const toast          = useToast();
   const isUnlimited    = hasPlatformAccess(user);
   const maxProjects    = (!subLoading && plan === 'starter' && !isUnlimited) ? 2 : null;
   const atProjectLimit = maxProjects !== null && projects.length >= maxProjects;
@@ -599,7 +601,7 @@ export default function ProjectsPage() {
         body: JSON.stringify({ status }),
       });
       await loadProjects(true);
-    } catch { alert('Failed to update status'); }
+    } catch { toast.error('Status update failed', 'Could not update project status. Please try again.'); }
     finally { setUpdatingStatus(null); }
   };
 
@@ -616,7 +618,7 @@ export default function ProjectsPage() {
         }),
       });
       if (res.ok) await loadProjects(true);
-    } catch { alert('Failed to duplicate project'); }
+    } catch { toast.error('Duplicate failed', 'Could not duplicate project. Please try again.'); }
   };
 
   const handleDeleteSingle   = (id: string) => setConfirmDelete({ ids: [id] });
@@ -642,13 +644,13 @@ export default function ProjectsPage() {
         // Reload projects to reflect server state
         await loadProjects(true);
         if (json.skipped?.length > 0) {
-          alert(`${json.deleted.length} project(s) deleted. ${json.skipped.length} could not be deleted (not found or not owned by you).`);
+          toast.warning('Some projects skipped', `${json.deleted.length} deleted, ${json.skipped.length} could not be deleted (not found or not owned by you).`);
         }
       }
       setSelectedIds(new Set());
       setConfirmDelete(null);
     } catch (e: unknown) {
-      alert(`Delete failed: ${(e as Error)?.message || 'Unknown error'}`);
+      toast.error('Delete failed', (e as Error)?.message || 'Unknown error');
     } finally { setDeleteLoading(false); }
   };
 

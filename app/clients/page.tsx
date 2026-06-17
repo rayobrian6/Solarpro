@@ -8,6 +8,7 @@ import Link from 'next/link';
 import {
   Users, Plus, Search, Phone, Mail, MapPin,
   Zap, DollarSign, ChevronRight, Edit, Trash2,
+  AlertTriangle,
   Building2, RefreshCw, AlertCircle, Lock,
   TrendingUp, BarChart2, ArrowRight, Sparkles,
   User2,
@@ -39,6 +40,7 @@ export default function ClientsPage() {
     return 'grid';
   });
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
 
   const { plan, loading: subLoading } = useSubscription();
   const { user }      = useUser();
@@ -63,12 +65,18 @@ export default function ClientsPage() {
     });
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Delete client "${name}"? This cannot be undone.`)) return;
+    setConfirmDelete({ id, name });
+  };
+
+  const executeDelete = async () => {
+    if (!confirmDelete) return;
     try {
-      await removeClient(id);
-      toast.success('Client deleted', `"${name}" has been removed`);
+      await removeClient(confirmDelete.id);
+      toast.success('Client deleted', `"${confirmDelete.name}" has been removed`);
+      setConfirmDelete(null);
     } catch (err) {
       toast.error('Delete failed', err instanceof Error ? err.message : 'Please try again');
+      setConfirmDelete(null);
     }
   };
 
@@ -157,6 +165,34 @@ export default function ClientsPage() {
           description={`Starter plan is limited to ${maxClients} clients. Upgrade to Professional for unlimited clients.`}
           requiredPlan="Professional"
         />
+
+        {/* Confirm Delete Modal */}
+        {confirmDelete ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-red-500/15 border border-red-500/30 flex items-center justify-center flex-shrink-0">
+                  <AlertTriangle size={18} className="text-red-400" />
+                </div>
+                <div>
+                  <div className="font-black text-white text-base">Delete Client?</div>
+                  <div className="text-slate-400 text-xs mt-0.5">This action cannot be undone.</div>
+                </div>
+              </div>
+              <p className="text-sm text-slate-400 mb-5 leading-relaxed">
+                Are you sure you want to delete <span className="text-white font-semibold">{confirmDelete.name}</span>? All associated data will be permanently removed.
+              </p>
+              <div className="flex gap-3">
+                <button onClick={() => setConfirmDelete(null)} className="flex-1 btn-secondary py-2.5 text-sm">
+                  Cancel
+                </button>
+                <button onClick={executeDelete} className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-2.5 px-4 rounded-xl text-sm transition-colors flex items-center justify-center gap-2">
+                  <Trash2 size={14} /> Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {/* Starter limit banner */}
         {atClientLimit && (

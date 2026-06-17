@@ -10,6 +10,7 @@ import {
   Shield, AlertTriangle, Target, Clock,
   Activity, BarChart3, Map, Flame, Radio,
   ArrowUpRight, Send, Wrench, Star,
+  HardHat,
   Truck, Calendar, MapPin, Sun, Loader2,
   Inbox, Search, PenTool, Eye, EyeOff, UserCheck,
   ChevronDown, ChevronUp, X,
@@ -235,7 +236,7 @@ function WorkQueueRow({ project, onAction, onDismiss }: {
             onClick={e => e.stopPropagation()}>{project.name}</Link>
           {urgency === 'high' && (
             <span className="flex items-center gap-0.5 text-[10px] text-amber-300 bg-amber-500/12 border border-amber-500/25 px-1.5 py-0.5 rounded-full font-bold">
-              ⚡ Hot
+              <Zap size={8} /> Hot
             </span>
           )}
           {project.client?.name && project.clientId && (
@@ -1420,7 +1421,7 @@ export default function CommandCenter() {
                     </div>
                     <div className="text-[11px] truncate" style={{ color: 'var(--text-muted)' }}>
                       {item.client_name || item.project_name}
-                      {item.crew_name && <span style={{ color: item.crew_color || '#4ade80' }}> · 👷 {item.crew_name}</span>}
+                      {item.crew_name && <span style={{ color: item.crew_color || '#4ade80' }}> · <HardHat size={9} className="inline -mt-px" /> {item.crew_name}</span>}
                     </div>
                   </div>
                   <ChevronRight size={12} className="opacity-0 group-hover:opacity-50 transition-opacity" style={{ color: 'var(--text-muted)' }} />

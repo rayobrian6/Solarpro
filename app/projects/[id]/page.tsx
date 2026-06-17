@@ -53,6 +53,7 @@ import {
 } from 'lucide-react';
 import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
 import type { ConfidenceSource, ConfidenceLevel } from '@/components/recommend/ConfidenceBadge';
+import { useToast } from '@/components/ui/Toast';
 import Link from 'next/link';
 import EngineeringTab from '@/components/engineering/EngineeringTab';
 import BillTab from '@/components/project/BillTab';
@@ -320,6 +321,7 @@ function ProjectDetailInner() {
   const projects = useAppStore(s => s.projects);
   // FIX v47.8: sync updated project to store cache after bill save
   const syncProjectToStore = useAppStore(s => s.syncProjectToStore);
+  const toast = useToast();
 
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
@@ -413,7 +415,7 @@ function ProjectDetailInner() {
       setShowChangeTypeModal(false);
     } catch (e: unknown) {
       console.error('[ChangeSystemType]', e);
-      alert((e as Error)?.message || 'Failed to change system type. Please try again.');
+      toast.error('System type change failed', (e as Error)?.message || 'Please try again.');
     } finally {
       setChangingType(false);
     }
@@ -735,7 +737,7 @@ function ProjectDetailInner() {
                   <p className="text-slate-400 text-xs mt-0.5">
                     Currently: <span className="text-white font-medium">{typeLabel}</span>
                     {project.layout && (
-                      <span className="ml-2 text-amber-400">⚠ Existing design will be cleared</span>
+                      <span className="ml-2 text-amber-400"><AlertTriangle size={11} className="inline -mt-px mr-1" />Existing design will be cleared</span>
                     )}
                   </p>
                 </div>
@@ -1289,7 +1291,7 @@ function ProjectDetailInner() {
                             setShareNetworkSuccess(true);
                           } else {
                             const data = await res.json();
-                            alert(data.error || 'Failed to share opportunity.');
+                            toast.error('Share failed', data.error || 'Could not share opportunity.');
                           }
                         } finally {
                           setShareNetworkLoading(false);

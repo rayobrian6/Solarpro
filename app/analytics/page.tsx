@@ -10,7 +10,7 @@ import {
   TrendingUp, Zap, DollarSign, Leaf, Sun, BarChart2, BarChart3,
   Users, Home, Sprout, Fence, ArrowUpRight,
   ArrowDownRight, Target, Clock,
-  ChevronRight, RefreshCcw,
+  ChevronRight, RefreshCcw, AlertTriangle,
 } from 'lucide-react';
 import type { Project, Client } from '@/types';
 import Link from 'next/link';
@@ -368,7 +368,7 @@ export default function AnalyticsPage() {
           {!loading && projects.length > 0 && revenueDataQuality < 80 && (
             <div className="flex items-start gap-3 rounded-xl px-4 py-3 text-xs"
               style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.18)' }}>
-              <span style={{ color: '#f59e0b', fontSize: 16, lineHeight: 1, marginTop: 1 }}>⚠</span>
+              <AlertTriangle size={14} style={{ color: '#f59e0b', flexShrink: 0, marginTop: 1 }} />
               <span style={{ color: '#94a3b8' }}>
                 Revenue figures only include projects with completed proposals
                 ({pricedProjectCount} of {projects.length} projects have pricing data).

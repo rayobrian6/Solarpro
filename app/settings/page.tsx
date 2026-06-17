@@ -6,7 +6,8 @@ import {
   Settings, Upload, Save, CheckCircle, AlertCircle,
   Building2, Phone, Mail, Globe, Palette, Image,
   User, Lock, Bell, CreditCard, Trash2, Eye, EyeOff,
-  Sun, RefreshCw, X, Users, Sparkles
+  Sun, RefreshCw, X, Users, Sparkles,
+  Rocket, Loader2
 } from 'lucide-react';
 import Link from 'next/link';
 import { useUser, isAdminRole } from '@/contexts/UserContext';
@@ -1008,7 +1009,7 @@ function MigrateButton() {
         disabled={status === 'running'}
         className={`btn-sm flex items-center gap-2 ${status === 'running' ? 'opacity-60 cursor-not-allowed btn-secondary' : status === 'done' ? 'btn-secondary' : 'btn-primary'}`}
       >
-        {status === 'running' ? '⏳ Running…' : status === 'done' ? '✅ Done' : '🚀 Run Database Migration'}
+        {status === 'running' ? <><Loader2 size={12} className="animate-spin" /> Running...</> : status === 'done' ? <><CheckCircle size={12} /> Done</> : <><Rocket size={12} /> Run Database Migration</>}
       </button>
       {results.length > 0 && (
         <div className="mt-3 bg-slate-900 rounded-xl p-3 max-h-48 overflow-y-auto">

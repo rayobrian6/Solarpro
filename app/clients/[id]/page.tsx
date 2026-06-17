@@ -21,6 +21,7 @@ import {
 } from 'recharts';
 import type { SiteSurvey } from '@/lib/db-neon';
 import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
+import { useToast } from '@/components/ui/Toast';
 import type { ConfidenceSource, ConfidenceLevel } from '@/components/recommend/ConfidenceBadge';
 
 // ── Client Detail Tab IDs ────────────────────────────────────────
@@ -531,12 +532,14 @@ function ClientDetailContent() {
   const projects = useAppStore(s => s.projects);
   const loadProjects = useAppStore(s => s.loadProjects);
   const updateProjectInStore = useAppStore(s => s.updateProjectInStore);
+  const toast = useToast();
 
   const handleStatusChange = async (id: string, status: ProjectStatus) => {
     try {
       await updateProjectInStore(id, { status });
+      toast.success('Status updated', `Project moved to ${STATUS_CONFIG[status].label}`);
     } catch {
-      alert('Failed to update status');
+      toast.error('Status update failed', 'Could not update project status. Please try again.');
     }
   };
 

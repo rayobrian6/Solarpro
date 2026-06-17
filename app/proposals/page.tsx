@@ -24,6 +24,7 @@ import { calculateIncentives } from '@/lib/incentives/stateIncentives';
 import { buildArraysFromLayout, buildSystemConfig, getArrayProposalText } from '@/lib/multiArrayEngine';
 import { useSubscription } from '@/hooks/useSubscription';
 import UpgradeModal from '@/components/ui/UpgradeModal';
+import { useToast } from '@/components/ui/Toast';
 import { resolveProposalSystemType, getPanelTypeCounts } from '@/lib/proposalSystemType';
 import { buildCanonicalProposal } from '@/lib/proposal/buildCanonicalProposal';
 import { resolveActualAnnualBill } from '@/lib/proposal/resolveActualBill';
@@ -223,6 +224,7 @@ function ProposalContent() {
     }
   }, [activeProposal?.projectId, projectId]);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const toast = useToast();
 
   // Plan gating — Starter = preview only (no generate, no download, no e-sign)
   const { can, loading: subLoading, isFreePass, role } = useSubscription();
@@ -289,6 +291,7 @@ function ProposalContent() {
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
   const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
   const [clearTestLoading, setClearTestLoading] = useState(false);
+  const [confirmClearTest, setConfirmClearTest] = useState(false);
   const [adminClickCount, setAdminClickCount] = useState(0);
   const showAdminTools = isAdmin && adminClickCount >= 3; // v47.258: only admins can unlock clear test data
 
@@ -436,12 +439,12 @@ function ProposalContent() {
         setConfirmDelete(null);
       } else {
         setConfirmDelete(null);
-        alert('Delete failed. Please try again.');
+        toast.error('Delete failed', 'Could not delete proposals. Please try again.');
       }
     } catch (err) {
       setConfirmDelete(null);
       if ((err as Error).name !== 'AbortError') {
-        alert('Delete failed. Please check your connection and try again.');
+        toast.error('Delete failed', 'Please check your connection and try again.');
       }
     } finally {
       clearTimeout(timeout);
@@ -464,7 +467,7 @@ function ProposalContent() {
       setProposals(prev => prev.map(p => ids.includes(p.id) ? { ...p, status: 'archived' as ProposalStatus } : p));
       setSelectedIds(new Set());
     } catch {
-      alert('Archive failed. Please try again.');
+      toast.error('Archive failed', 'Could not archive proposals. Please try again.');
     }
   };
 
@@ -484,12 +487,13 @@ function ProposalContent() {
       setSelectedIds(new Set());
       setBulkStatusOpen(false);
     } catch {
-      alert('Status update failed. Please try again.');
+      toast.error('Status update failed', 'Could not update proposal status. Please try again.');
     }
   };
 
-  const clearTestData = async () => {
-    if (!window.confirm('Delete all proposals with 0 views? This cannot be undone.')) return;
+  const clearTestData = () => setConfirmClearTest(true);
+
+  const executeClearTest = async () => {
     setClearTestLoading(true);
     try {
       const res = await fetch('/api/proposals/bulk', {
@@ -500,10 +504,11 @@ function ProposalContent() {
       const data = await res.json();
       if (data.success) {
         setProposals(prev => prev.filter(p => p.viewCount > 0));
-        alert(`Cleared ${data.deleted} test proposals.`);
+        toast.success('Test data cleared', `Removed ${data.deleted} test proposals.`);
       }
     } finally {
       setClearTestLoading(false);
+      setConfirmClearTest(false);
     }
   };
 
@@ -612,6 +617,34 @@ function ProposalContent() {
           loading={deleteLoading}
         />
       )}
+
+      {/* Confirm Clear Test Data Modal */}
+      {confirmClearTest ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle size={18} className="text-amber-400" />
+              </div>
+              <div>
+                <div className="font-black text-white text-base">Clear Test Proposals?</div>
+                <div className="text-slate-400 text-xs mt-0.5">This action cannot be undone.</div>
+              </div>
+            </div>
+            <p className="text-sm text-slate-400 mb-5 leading-relaxed">
+              All proposals with 0 views will be permanently deleted. This is useful for cleaning up test data before going live.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmClearTest(false)} disabled={clearTestLoading} className="flex-1 btn-secondary py-2.5 text-sm">
+                Cancel
+              </button>
+              <button onClick={executeClearTest} disabled={clearTestLoading} className="flex-1 bg-amber-600 hover:bg-amber-500 text-white font-bold py-2.5 px-4 rounded-xl text-sm transition-colors flex items-center justify-center gap-2">
+                {clearTestLoading ? <><span className="spinner w-4 h-4" /> Clearing...</> : <><Trash2 size={14} /> Clear Test Data</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* ══════════ PROPOSALS COMMAND HEADER ══════════ */}
       <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5">
@@ -1621,7 +1654,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
             title={noItc ? 'ITC hidden — click to show' : 'ITC shown — click to hide'}
             className={`btn-sm hidden md:flex items-center gap-1.5 font-medium transition-all ${noItc ? 'btn-ghost text-red-400 hover:text-red-300' : 'btn-ghost text-emerald-400 hover:text-emerald-300'}`}
           >
-            <span className="text-xs">{noItc ? '⛔ ITC: Off' : '✅ ITC: On'}</span>
+            <span className="text-xs">{noItc ? <><XCircle size={11} className="inline -mt-px mr-0.5" /> ITC: Off</> : <><CheckCircle size={11} className="inline -mt-px mr-0.5" /> ITC: On</>}</span>
           </button>
           <button onClick={() => setShowOverrides((v: boolean) => !v)} className="btn-ghost btn-sm hidden md:flex text-slate-500 hover:text-slate-300" title="Sales Rep Controls">
             <Settings size={13} />
@@ -2120,7 +2153,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                   </div>
                 </div>
                 <div className="flex items-center gap-2 p-2 rounded-lg bg-red-500/10 border border-red-500/20">
-                  <span className="text-xs font-black text-red-400">⚡ Deadline:</span>
+                  <span className="text-xs font-black text-red-400"><Zap size={11} className="inline -mt-px mr-0.5" /> Deadline:</span>
                   <span className="text-xs text-slate-300">
                     Construction must begin by <span className="font-bold text-white">July 4, 2026</span> for full {getSection48eRate()}% §48E credit.
                   </span>
