@@ -500,7 +500,7 @@ export default function AcquisitionFloor({
     qualified: '/api/admin/prospects/work/qualify',
   };
   const WORK_LABEL: Partial<Record<Stage, string>> = {
-    enriched: '⚙ Enrich raw leads', qualified: '⚙ Vet the enriched',
+    enriched: '⚙ Enrich raw leads (AI $)', qualified: '⚙ Vet the enriched',
   };
   const WORK_BARK: Partial<Record<Stage, string>> = {
     enriched: 'COPY faster, you wretches!', qualified: 'VET them — only the worthy!',
@@ -534,8 +534,7 @@ export default function AcquisitionFloor({
       if (d?.success) {
         onDispatched();
         if ((d.moved ?? 0) > 0) {
-          const bits = [d.enriched && `${d.enriched} enriched`, d.qualified && `${d.qualified} vetted`, d.dossiers && `${d.dossiers} briefed`].filter(Boolean);
-          if (announce || bits.length) setDispatchMsg(`The house worked: ${bits.join(', ') || 'nothing new'}.`);
+          setDispatchMsg(`Vetted ${d.qualified} into the Assay Room${d.rejected ? `, ${d.rejected} binned` : ''}.`);
           setSupLine('Down the line they go!');
         }
       }
@@ -656,9 +655,9 @@ export default function AcquisitionFloor({
               </button>
             </div>
             <div className="flex items-center gap-2 justify-end">
-              <button onClick={runHouse} disabled={dispatching}
+              <button onClick={runHouse} disabled={dispatching} title="Enrich raw leads then vet — uses AI on the raw ones"
                 className="px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-100 border border-emerald-600/50 bg-emerald-900/40 hover:bg-emerald-800/50 disabled:opacity-60 transition-all">
-                ⚙ Run the whole house
+                ⚙ Run full pass (AI $)
               </button>
               <button onClick={() => runJob('/api/admin/prospects/work/cleanup', 'TIDY the ledgers, vermin!', (d) => `Tidied ${d.fixed} of ${d.scanned} records.`)} disabled={dispatching}
                 className="px-3 py-1.5 rounded-lg text-xs font-bold text-sky-100 border border-sky-600/50 bg-sky-900/40 hover:bg-sky-800/50 disabled:opacity-60 transition-all">
@@ -676,9 +675,9 @@ export default function AcquisitionFloor({
             <div className="h-full rounded-full transition-all duration-700" style={{ width: `${productivity}%`, background: productivity > 70 ? 'linear-gradient(90deg,#16a34a,#4ade80)' : productivity > 40 ? 'linear-gradient(90deg,#ca8a04,#fbbf24)' : 'linear-gradient(90deg,#b91c1c,#f87171)' }} />
           </div>
           <span className="text-[11px] font-bold text-amber-200 w-10 text-right">{productivity}%</span>
-          <button onClick={() => setAuto((a) => !a)}
+          <button onClick={() => setAuto((a) => !a)} title="Auto-vets enriched leads into Qualified — FREE, no AI. Scouting, enriching and dossiers stay manual (they cost money)."
             className={`ml-2 text-[10px] px-2.5 py-1 rounded-md border font-bold whitespace-nowrap transition-colors ${auto ? 'bg-emerald-900/60 text-emerald-200 border-emerald-600/50' : 'bg-black/30 text-slate-400 border-white/10 hover:text-white'}`}>
-            {auto ? (autoWorking ? '⚙ Auto-run: WORKING…' : '⚙ Auto-run: ON') : '▶ Auto-run: OFF'}
+            {auto ? (autoWorking ? '⚙ Auto-vet: WORKING…' : '⚙ Auto-vet: ON (free)') : '▶ Auto-vet: OFF'}
           </button>
         </div>
         {dispatchMsg && <div className="mt-2 text-center text-sm text-amber-300 italic">{dispatchMsg}</div>}
@@ -809,7 +808,7 @@ export default function AcquisitionFloor({
                     onClick={(e) => { e.stopPropagation(); runJob('/api/admin/prospects/work/dossier', 'To the READING ROOM, scribble!', (d) => `Drafted ${d.written} dossiers (${d.processed} read).`); }}
                     className="absolute top-[5.5rem] right-2 z-40 px-2.5 py-1 rounded-md text-[11px] font-bold text-violet-50 bg-violet-800/80 hover:bg-violet-700 border border-violet-400/50 shadow cursor-pointer transition-colors"
                     style={{ pointerEvents: dispatching ? 'none' : 'auto', opacity: dispatching ? 0.5 : 1 }}>
-                    📖 Write dossiers
+                    📖 Write dossiers (AI $)
                   </div>
                 )}
               </button>

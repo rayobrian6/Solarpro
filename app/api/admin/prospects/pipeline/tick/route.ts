@@ -1,20 +1,21 @@
 /**
  * POST /api/admin/prospects/pipeline/tick
  *
- * One automatic pass of the whole pipeline: enrich a few raw leads, vet every
- * enriched lead, draft dossiers for a few qualified leads. Bounded per tick so
- * cost stays in check; once the backlog drains, ticks become cheap no-ops.
+ * The automatic heartbeat — runs ONLY the FREE deterministic work (vetting),
+ * so it can tick forever at $0. The paid AI jobs (scout, enrich, dossier) are
+ * deliberate, user-triggered actions, never auto-fired. This is the cost-safe
+ * auto-pipeline: enriched leads flow to qualified on their own, no spend.
  *
  * Auth: admin session, OR a scheduler via `authorization: Bearer ${CRON_SECRET}`
- * / `x-pipeline-key: ${PROSPECT_INGEST_KEY}`. Lead-prep only — no contact, no accounts.
+ * / `x-pipeline-key: ${PROSPECT_INGEST_KEY}`.
  */
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApi } from "@/lib/adminAuth";
-import { enrichBatch, qualifyAll, dossierBatch } from "@/lib/network/prospectWork";
+import { qualifyAll } from "@/lib/network/prospectWork";
 
 export async function POST(req: NextRequest) {
   const admin = await requireAdminApi(req);
@@ -24,18 +25,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
   try {
-    const enriched = apiKey ? await enrichBatch(apiKey, 3) : { processed: 0, enriched: 0 };
-    const vetted = await qualifyAll();
-    const dossiers = apiKey ? await dossierBatch(apiKey, 4) : { processed: 0, written: 0 };
+    const vetted = await qualifyAll(); // free, deterministic — no LLM
     return NextResponse.json({
       success: true,
-      enriched: enriched.enriched,
       qualified: vetted.qualified,
       rejected: vetted.rejected,
-      dossiers: dossiers.written,
-      moved: enriched.enriched + vetted.qualified + vetted.rejected + dossiers.written,
+      moved: vetted.qualified + vetted.rejected,
     });
   } catch (e) {
     return NextResponse.json({ success: false, error: "Tick failed", message: (e as Error).message }, { status: 500 });

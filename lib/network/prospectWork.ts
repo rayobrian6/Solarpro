@@ -86,7 +86,9 @@ async function draftDossier(p: InstallerProspect, apiKey: string): Promise<Dossi
   const system = `You are a sales-prep clerk for SolarPro, a lead marketplace + SaaS for solar contractors. A salesperson is about to cold-call this solar installer to pitch them on buying exclusive homeowner leads. Using ONLY the facts provided (do not invent specifics like owner names or numbers you weren't given), return JSON: {"whyCall": one sentence on why they're a strong prospect, "opener": a warm 1-2 sentence phone opener the rep can say, "facts": [3 short bullet talking points]}. Return ONLY the JSON object.`;
   const r = await fetch(ANTHROPIC, {
     method: "POST", headers: headers(apiKey),
-    body: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 700, system, messages: [{ role: "user", content: facts }] }),
+    // Haiku — dossiers are templated talking points from data we already hold,
+    // so the cheap model is plenty (~5x cheaper than Opus). Quality stays in scouting.
+    body: JSON.stringify({ model: "claude-haiku-4-5", max_tokens: 700, system, messages: [{ role: "user", content: facts }] }),
   });
   const j = (await r.json()) as { content?: Block[] };
   if (!r.ok) return null;
