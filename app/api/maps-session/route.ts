@@ -4,7 +4,7 @@ export const revalidate = 0;
 export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
-import { handleRouteDbError } from '@/lib/db-neon';
+import { routeError } from '@/lib/api/routeError';
 import { requireAuth } from '@/lib/security';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
     // Return session only — do NOT expose key in response body
     return NextResponse.json({ session });
   } catch (e: unknown) {
-    return handleRouteDbError('[app/api/maps-session/route.ts]', e);
+    return routeError('[app/api/maps-session]', e, { status: 502, clientMessage: 'Map tile service unavailable.' });
   }
 }
 
@@ -91,6 +91,6 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (e: unknown) {
-    return handleRouteDbError('[app/api/maps-session/route.ts]', e);
+    return routeError('[app/api/maps-session]', e, { status: 502, clientMessage: 'Map tile service unavailable.' });
   }
 }

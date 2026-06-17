@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getStateIncentives, calculateIncentives } from '@/lib/incentives/stateIncentives';
 import { runIncentiveEngine } from '@/lib/incentives/incentiveEngine';
 import { getUserFromRequest } from '@/lib/auth';
-import { handleRouteDbError } from '@/lib/db-neon';
+import { routeError } from '@/lib/api/routeError';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // GET /api/incentives?state=CA — get incentives for a state
@@ -74,6 +74,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, ...result });
   } catch (err: unknown) {
-    return handleRouteDbError('[incen', err);
+    return routeError('[POST /api/incentives]', err, { clientMessage: 'Failed to compute incentives.' });
   }
 }
