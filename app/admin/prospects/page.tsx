@@ -3,8 +3,9 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   Search, RefreshCw, Mail, Phone, Globe, MapPin, Star,
   Building2, ChevronRight, Check, X, Users, Mailbox, Map as MapIcon,
-  Sparkles, BadgeCheck, ArrowRight,
+  Sparkles, BadgeCheck, ArrowRight, Factory, List as ListIcon,
 } from 'lucide-react';
+import AcquisitionFloor from './AcquisitionFloor';
 
 type Stage =
   | 'discovered' | 'enriched' | 'qualified' | 'contacted' | 'signed_up' | 'rejected';
@@ -113,6 +114,7 @@ export default function ProspectsPage() {
   const [stateFilter, setStateFilter] = useState('');
   const [search, setSearch] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'floor' | 'list'>('floor');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -168,13 +170,34 @@ export default function ProspectsPage() {
             work each prospect down the pipeline until they sign up and start buying leads.
           </p>
         </div>
-        <button
-          onClick={load}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-sm text-white transition-colors"
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {/* View toggle */}
+          <div className="flex items-center rounded-lg bg-white/5 p-0.5">
+            <button
+              onClick={() => setViewMode('floor')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                viewMode === 'floor' ? 'bg-amber-500/20 text-amber-300' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Factory size={13} /> Floor
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                viewMode === 'list' ? 'bg-amber-500/20 text-amber-300' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <ListIcon size={13} /> List
+            </button>
+          </div>
+          <button
+            onClick={load}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-sm text-white transition-colors"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* KPIs */}
@@ -189,6 +212,17 @@ export default function ProspectsPage() {
           label="Signed up" value={stats?.byStage?.signed_up ?? 0} />
       </div>
 
+      {/* The sweatshop floor */}
+      {viewMode === 'floor' && (
+        <AcquisitionFloor
+          byStage={stats?.byStage ?? {}}
+          total={stats?.total ?? 0}
+          onEnterRoom={(stage) => { setStageFilter(stage); setViewMode('list'); }}
+        />
+      )}
+
+      {viewMode === 'list' && (
+      <>
       {/* Stage pipeline tabs */}
       <div className="flex items-center gap-2 flex-wrap">
         <button
@@ -361,6 +395,8 @@ export default function ProspectsPage() {
             );
           })}
         </div>
+      )}
+      </>
       )}
     </div>
   );
