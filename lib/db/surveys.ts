@@ -263,6 +263,9 @@ export async function createSiteSurvey(data: {
       WHERE project_id = ${data.projectId ?? ''}
       LIMIT 1
     `;
+    if (!byProject.length) {
+      throw new Error('createSiteSurvey: could not locate or create survey');
+    }
     return rowToSiteSurvey(byProject[0] as Record<string, unknown>);
   }
   return rowToSiteSurvey(rows[0] as Record<string, unknown>);
@@ -358,7 +361,7 @@ export async function bulkAddSiteSurveyFiles(
   const sql = await getDbReady();
   let inserted = 0;
   for (const f of files) {
-    await sql`
+    const rows = await sql`
       INSERT INTO site_survey_files (survey_id, file_url, file_type, label, filename, mime_type)
       VALUES (
         ${f.surveyId}, ${f.fileUrl},
@@ -366,8 +369,11 @@ export async function bulkAddSiteSurveyFiles(
         ${f.label ?? null}, ${f.filename ?? null}, ${f.mimeType ?? null}
       )
       ON CONFLICT DO NOTHING
+      RETURNING id
     `;
-    inserted++;
+    // Count only rows actually inserted — ON CONFLICT skips were being counted,
+    // so re-deliveries reported files as newly added when zero were.
+    inserted += rows.length;
   }
   return inserted;
 }

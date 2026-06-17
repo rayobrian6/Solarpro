@@ -92,7 +92,11 @@ export function decodeDepthMap(depthMap: DepthMap): Float32Array {
   const float32 = new Float32Array(expectedLength);
   const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 
-  for (let i = 0; i < expectedLength; i++) {
+  // Clamp to what the buffer actually holds — a truncated/corrupt payload (or
+  // width/height not matching the data) would otherwise read past the DataView
+  // and throw a RangeError. Unread entries stay 0 (Float32Array is zero-filled).
+  const usable = Math.min(expectedLength, Math.floor(buffer.byteLength / 4));
+  for (let i = 0; i < usable; i++) {
     float32[i] = view.getFloat32(i * 4, true); // little-endian
   }
 

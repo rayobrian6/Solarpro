@@ -377,7 +377,7 @@ export async function markStaleJobsFailed(): Promise<number> {
   const sql = await getDbReady();
   const result = await sql`
     UPDATE photo_vision_jobs
-    SET status = 'failed', error = 'Job timed out (running > 30 minutes)', completed_at = NOW(), updated_at = NOW()
+    SET status = 'failed', error = 'Job timed out (running > 60 minutes)', completed_at = NOW(), updated_at = NOW()
     WHERE status = 'running' AND updated_at < NOW() - INTERVAL '60 minutes'
     RETURNING job_id
   `;
