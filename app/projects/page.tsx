@@ -12,7 +12,8 @@ import {
   CheckSquare, Square, X, Check, AlertTriangle,
   TrendingUp, Clock, Flame, Layers, Home, Trees,
   Shield, Activity, ArrowRight, Sparkles, Grid3x3,
-  List, Filter, SortAsc
+  List, Filter, SortAsc,
+  ArrowUpDown
 } from 'lucide-react';
 import type { Project, ProjectStatus } from '@/types';
 import { useAppStore } from '@/store/appStore';
@@ -530,7 +531,14 @@ export default function ProjectsPage() {
   const [filterType, setFilterType]       = useState('all');
   const [filterStatus, setFilterStatus]   = useState('all');
   const [sortBy, setSortBy]               = useState<'updated' | 'created' | 'name' | 'size'>('updated');
-  const [viewMode, setViewMode]           = useState<'grid' | 'list'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
+    if (typeof window === 'undefined') return 'grid';
+    try {
+      const saved = localStorage.getItem('solarpro:projectsViewMode');
+      if (saved === 'list' || saved === 'grid') return saved;
+    } catch { /* ignore */ }
+    return 'grid';
+  });
   const [upgradeOpen, setUpgradeOpen]     = useState(false);
   const [actionMenuId, setActionMenuId]   = useState<string | null>(null);
   const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set());
@@ -789,14 +797,14 @@ export default function ProjectsPage() {
           {/* View toggle */}
           <div className="flex items-center gap-1 bg-slate-800/60 border border-slate-700/60 rounded-xl p-1 flex-shrink-0">
             <button
-              onClick={() => setViewMode('grid')}
+              onClick={() => { setViewMode('grid'); try { localStorage.setItem('solarpro:projectsViewMode', 'grid'); } catch {} }}
               className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}
               title="Card Grid"
             >
               <Grid3x3 size={14} />
             </button>
             <button
-              onClick={() => setViewMode('list')}
+              onClick={() => { setViewMode('list'); try { localStorage.setItem('solarpro:projectsViewMode', 'list'); } catch {} }}
               className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}
               title="List View"
             >
@@ -896,16 +904,26 @@ export default function ProjectsPage() {
           </div>
         ) : (
           <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 overflow-hidden">
-            <div className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-700/50 bg-slate-800/50">
+            <div className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-700/50 bg-slate-800/50 text-[10px] text-slate-500 uppercase tracking-wide font-semibold">
               <button onClick={toggleSelectAll} className="text-slate-500 hover:text-slate-300 transition-colors flex-shrink-0">
                 {allFilteredSelected ? <CheckSquare size={14} className="text-amber-400" /> : <Square size={14} />}
               </button>
-              <span className="text-xs text-slate-500 font-semibold">{filtered.length} project{filtered.length !== 1 ? 's' : ''}</span>
-              {filtered.some(p => getUrgency(p) === 'high') && (
-                <span className="flex items-center gap-1 text-xs text-red-400 ml-auto">
+              <span className="w-8"></span>
+              <button onClick={() => setSortBy('name')} className={`flex items-center gap-1 flex-1 text-left hover:text-slate-300 transition-colors ${sortBy === 'name' ? 'text-slate-300' : ''}`}>
+                Project {sortBy === 'name' ? <ArrowUpDown size={8} /> : null}
+              </button>
+              <span className="hidden lg:block min-w-[80px] text-right">Cost</span>
+              <span className="hidden md:block min-w-[80px]">Next Step</span>
+              <button onClick={() => setSortBy('size')} className={`hidden md:flex items-center gap-1 min-w-[60px] hover:text-slate-300 transition-colors ${sortBy === 'size' ? 'text-slate-300' : ''}`}>
+                Size {sortBy === 'size' ? <ArrowUpDown size={8} /> : null}
+              </button>
+              <span>Status</span>
+              <span>Actions</span>
+              {filtered.some(p => getUrgency(p) === 'high') ? (
+                <span className="flex items-center gap-1 text-red-400 ml-auto">
                   <Flame size={11} /> {filtered.filter(p => getUrgency(p) === 'high').length} need attention
                 </span>
-              )}
+              ) : null}
             </div>
             {filtered.map(project => (
               <ProjectRow
