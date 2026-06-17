@@ -5,6 +5,7 @@ import {
   Shield, Crown, Ban, CheckCircle, AlertCircle, ChevronRight,
   X, ArrowLeftRight, UserPlus, CreditCard, Settings,
 } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
 import { useUser } from '@/contexts/UserContext';
 
 const PLAN_COLORS: Record<string, string> = {
@@ -21,8 +22,6 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: 'bg-slate-500/20 text-slate-400',
 };
 
-type ToastState = { msg: string; ok: boolean } | null;
-
 export default function AdminCompanies() {
   const { user: currentAdmin } = useUser();
   const isSuperAdmin = currentAdmin?.role === 'super_admin';
@@ -33,17 +32,14 @@ export default function AdminCompanies() {
   const [companyDetail, setDetail]      = useState<any | null>(null);
   const [detailLoading, setDetailLoad]  = useState(false);
   const [acting, setActing]             = useState(false);
-  const [toast, setToast]               = useState<ToastState>(null);
+  const toast = useToast();
   const [planModal, setPlanModal]       = useState(false);
   const [newPlan, setNewPlan]           = useState('contractor');
   const [transferModal, setTransferModal] = useState(false);
   const [newOwnerId, setNewOwnerId]     = useState('');
   const [confirmModal, setConfirmModal] = useState<{ action: string; label: string; extra?: any } | null>(null);
 
-  const showToast = (msg: string, ok = true) => {
-    setToast({ msg, ok });
-    setTimeout(() => setToast(null), 4000);
-  };
+  
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -98,11 +94,11 @@ export default function AdminCompanies() {
       });
       const d = await res.json();
       if (d.success) {
-        showToast(`✓ ${d.message || action + ' applied'}`);
+        toast.error(`✓ ${d.message || action + ' applied'}`);
         load();
         loadDetail(selectedCompany.company || selectedCompany.name);
       } else {
-        showToast(d.error || 'Failed', false);
+        toast.success(d.error || 'Failed');
       }
     } finally { setActing(false); setConfirmModal(null); }
   };
@@ -405,16 +401,6 @@ export default function AdminCompanies() {
               <button onClick={() => companyAction(confirmModal.action, confirmModal.extra)} className="flex-1 py-2 rounded-lg bg-red-500 text-white text-sm font-semibold hover:bg-red-400 transition-colors">Confirm</button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium shadow-xl ${
-          toast.ok ? 'bg-green-500/20 border border-green-500/30 text-green-400' : 'bg-red-500/20 border border-red-500/30 text-red-400'
-        }`}>
-          {toast.ok ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-          {toast.msg}
         </div>
       )}
     </div>

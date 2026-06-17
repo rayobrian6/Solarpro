@@ -5,8 +5,8 @@ import {
   CheckCircle, AlertCircle, Play, ChevronRight, Server,
   Clock, Users, FolderOpen, FileText, Shield,
 } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
 
-type ToastState = { msg: string; ok: boolean } | null;
 type ToolResult = { tool: string; result: any; ok: boolean; ts: string } | null;
 
 const TOOLS = [
@@ -94,16 +94,13 @@ const TOOLS = [
 
 export default function SystemToolsPage() {
   const [running, setRunning]         = useState<string | null>(null);
-  const [toast, setToast]             = useState<ToastState>(null);
+  const toast = useToast();
   const [lastResult, setLastResult]   = useState<ToolResult>(null);
   const [migrations, setMigrations]   = useState<string[]>([]);
   const [selectedMig, setSelectedMig] = useState('');
   const [confirmTool, setConfirmTool] = useState<string | null>(null);
 
-  const showToast = (msg: string, ok = true) => {
-    setToast({ msg, ok });
-    setTimeout(() => setToast(null), 5000);
-  };
+  
 
   const runTool = async (toolId: string, params: any = {}) => {
     setRunning(toolId);
@@ -116,17 +113,17 @@ export default function SystemToolsPage() {
       });
       const d = await res.json();
       if (d.success) {
-        showToast(`✓ ${d.message || toolId + ' completed'}`);
+        toast.success(`${d.message || toolId + ' completed'}`);
         setLastResult({ tool: toolId, result: d, ok: true, ts: new Date().toLocaleTimeString() });
         if (toolId === 'list_migrations' && d.migrations) {
           setMigrations(d.migrations);
         }
       } else {
-        showToast(d.error || 'Tool failed', false);
+        toast.error(d.error || 'Tool failed');
         setLastResult({ tool: toolId, result: d, ok: false, ts: new Date().toLocaleTimeString() });
       }
     } catch (e: unknown) {
-      showToast((e as Error).message || 'Network error', false);
+      toast.error((e as Error).message || 'Network error');
     } finally {
       setRunning(null);
     }
@@ -287,16 +284,6 @@ export default function SystemToolsPage() {
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium shadow-xl ${
-          toast.ok ? 'bg-green-500/20 border border-green-500/30 text-green-400' : 'bg-red-500/20 border border-red-500/30 text-red-400'
-        }`}>
-          {toast.ok ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-          {toast.msg}
         </div>
       )}
     </div>

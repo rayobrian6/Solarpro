@@ -7,6 +7,7 @@ import {
   Globe, Users, DoorOpen, PhoneCall, Share2, Megaphone,
   Handshake, Calendar, HelpCircle,
 } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
 
 type Lead = {
   id: string;
@@ -73,7 +74,7 @@ export default function AdminLeads() {
   const [search, setSearch]     = useState('');
   const [status, setStatus]     = useState<typeof STATUSES[number]>('all');
   const [loading, setLoading]   = useState(true);
-  const [toast, setToast]       = useState<{ msg: string; ok: boolean } | null>(null);
+  const toast = useToast();
 
   // Modal state
   const [showModal, setShowModal]         = useState(false);
@@ -86,10 +87,7 @@ export default function AdminLeads() {
   const [formSource, setFormSource]       = useState<string>('');
   const LIMIT = 50;
 
-  const showToast = (msg: string, ok = true) => {
-    setToast({ msg, ok });
-    setTimeout(() => setToast(null), 3000);
-  };
+  
 
   const resetForm = () => {
     setFormName('');
@@ -102,7 +100,7 @@ export default function AdminLeads() {
 
   const handleCreate = async () => {
     if (!formName.trim() || !formEmail.trim()) {
-      showToast('Name and email are required', false);
+      toast.error('Name and email are required');
       return;
     }
     setSaving(true);
@@ -123,13 +121,13 @@ export default function AdminLeads() {
       if (d.success) {
         setShowModal(false);
         resetForm();
-        showToast('✓ Lead created');
+        toast.error('✓ Lead created');
         load();
       } else {
-        showToast(d.error || 'Failed to create lead', false);
+        toast.success(d.error || 'Failed to create lead');
       }
     } catch {
-      showToast('Connection error', false);
+      toast.error('Connection error');
     } finally {
       setSaving(false);
     }
@@ -474,15 +472,6 @@ export default function AdminLeads() {
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl text-sm font-medium shadow-lg z-50 ${
-          toast.ok ? 'bg-green-500/90 text-white' : 'bg-red-500/90 text-white'
-        }`}>
-          {toast.msg}
         </div>
       )}
     </div>

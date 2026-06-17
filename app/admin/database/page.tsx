@@ -1,15 +1,16 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Database, RefreshCw, Play, CheckCircle, AlertCircle, Clock } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
 
 export default function AdminDatabase() {
   const [health, setHealth]     = useState<any>(null);
   const [loading, setLoading]   = useState(true);
   const [migrating, setMigrating] = useState(false);
   const [migrateLog, setMigrateLog] = useState<string[]>([]);
-  const [toast, setToast]       = useState<{ msg: string; ok: boolean } | null>(null);
+  const toast = useToast();
 
-  const showToast = (msg: string, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 4000); };
+  
 
   const loadHealth = async () => {
     setLoading(true);
@@ -41,15 +42,15 @@ export default function AdminDatabase() {
           `Free passes applied: ${d.freePassesApplied ?? 0}`,
           `Timestamp: ${new Date().toISOString()}`,
         ]);
-        showToast('✓ Migration successful');
+        toast.error('✓ Migration successful');
         loadHealth();
       } else {
         setMigrateLog([`❌ Migration failed: ${d.error || 'Unknown error'}`]);
-        showToast(d.error || 'Migration failed', false);
+        toast.success(d.error || 'Migration failed');
       }
     } catch (e: unknown) {
       setMigrateLog([`❌ Error: ${(e as Error).message}`]);
-      showToast((e as Error).message, false);
+      toast.error((e as Error).message);
     } finally {
       setMigrating(false);
     }
@@ -155,13 +156,6 @@ export default function AdminDatabase() {
           </div>
         )}
       </div>
-
-      {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium shadow-xl ${toast.ok ? 'bg-green-500/20 border border-green-500/30 text-green-400' : 'bg-red-500/20 border border-red-500/30 text-red-400'}`}>
-          {toast.ok ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-          {toast.msg}
-        </div>
-      )}
     </div>
   );
 }

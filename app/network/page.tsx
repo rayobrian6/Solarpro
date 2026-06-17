@@ -24,6 +24,7 @@ import {
   Star,
   Sparkles,
 } from "lucide-react";
+import { useToast } from "@/components/ui/Toast";
 import {
   buildEnrichmentChips,
   buildEnrichmentDetailGroups,
@@ -2540,10 +2541,7 @@ export default function NetworkPage() {
   const [claimLoading, setClaimLoading] = useState(false);
   const [detailOpp, setDetailOpp] = useState<Opportunity | null>(null);
   const [claimedIds, setClaimedIds] = useState<Set<string>>(new Set());
-  const [toast, setToast] = useState<{
-    msg: string;
-    type: "success" | "error";
-  } | null>(null);
+  const toast = useToast();
   const [filterState, setFilterState] = useState("");
   const [filterBattery, setFilterBattery] = useState(false);
   const [total, setTotal] = useState(0);
@@ -2553,11 +2551,6 @@ export default function NetworkPage() {
       `MARKETPLACE_CARD_INTELLIGENCE_BUILD=${MARKETPLACE_CARD_INTELLIGENCE_BUILD}`,
     );
   }, []);
-
-  const showToast = (msg: string, type: "success" | "error" = "success") => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3500);
-  };
 
   const loadProfile = useCallback(async () => {
     const res = await fetch("/api/network/contractor-profile");
@@ -2633,12 +2626,12 @@ export default function NetworkPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("purchased")) {
-      showToast(
+      toast.success(
         "Payment received — lead unlocked. See My Claims for the full address.",
       );
       window.history.replaceState({}, "", "/network");
     } else if (params.get("canceled")) {
-      showToast("Checkout canceled — you were not charged.", "error");
+      toast.error("Checkout canceled — you were not charged.");
       window.history.replaceState({}, "", "/network");
     }
   }, []); // eslint-disable-line
@@ -2659,7 +2652,7 @@ export default function NetworkPage() {
         window.location.href = data.url as string;
         return;
       }
-      showToast(data.error || "Could not start checkout.", "error");
+      toast.error(data.error || "Could not start checkout.");
     } finally {
       setClaimLoading(false);
       setClaimTarget(null);
@@ -3311,24 +3304,6 @@ export default function NetworkPage() {
             </>
           )}
         </div>
-
-        {/* ── Toast ────────────────────────────────────────────────────────── */}
-        {toast && (
-          <div
-            className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl text-sm font-medium border ${
-              toast.type === "success"
-                ? "bg-slate-900 border-emerald-500/40 text-emerald-400"
-                : "bg-slate-900 border-rose-500/40 text-rose-400"
-            }`}
-          >
-            {toast.type === "success" ? (
-              <CheckCircle size={16} />
-            ) : (
-              <AlertTriangle size={16} />
-            )}
-            {toast.msg}
-          </div>
-        )}
 
         {/* ── Modals ───────────────────────────────────────────────────────── */}
         {claimOppForModal && (
