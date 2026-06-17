@@ -123,16 +123,34 @@ export async function POST(req: NextRequest, { params }: Params) {
     `;
     const projectId = String(projectRows[0].id);
 
-    // 4. Update lead
-    await sql`
+    // 4. Atomically flip the lead — the conditional UPDATE is the race gate, so
+    // only the first of two concurrent converts (e.g. a double-click) wins.
+    const converted = await sql`
       UPDATE leads SET
         status                = 'converted',
         converted_client_id   = ${clientId}::uuid,
         converted_project_id  = ${projectId}::uuid,
         converted_at          = now(),
         updated_at            = now()
-      WHERE id = ${id}
+      WHERE id = ${id} AND status <> 'converted'
+      RETURNING id
     `;
+
+    if (!converted.length) {
+      // Lost the race — another request already converted this lead. Roll back the
+      // project (and the client, if we created it) so we don't leave orphans.
+      await sql`DELETE FROM projects WHERE id = ${projectId}::uuid`.catch(() => {});
+      if (existingClient.length === 0) {
+        await sql`DELETE FROM clients WHERE id = ${clientId}::uuid`.catch(() => {});
+      }
+      const cur = await sql`SELECT converted_client_id, converted_project_id FROM leads WHERE id = ${id} LIMIT 1`;
+      return NextResponse.json({
+        success: false,
+        error: 'Lead is already converted',
+        clientId: cur[0]?.converted_client_id ?? null,
+        projectId: cur[0]?.converted_project_id ?? null,
+      }, { status: 409 });
+    }
 
     return NextResponse.json({ success: true, clientId, projectId });
   } catch (err: unknown) {
