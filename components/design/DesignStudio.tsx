@@ -470,6 +470,10 @@ export default function DesignStudio({ project, onSave }: Props) {
   // 'google' forces Google only. 'esri' forces ESRI only (caps at zoom 19).
   // 'auto' is the default — Google primary for zoom 20+, ESRI for zoom <=19 if Google fails.
   const [tileProvider, setTileProvider] = useState<'auto' | 'google' | 'esri'>('auto');
+  // High-res Google Solar RGB backdrop (~10 cm, covered addresses) — sharp enough to tag vents/obstructions
+  const [hdImagery, setHdImagery] = useState(false);
+  const [hdStatus, setHdStatus]   = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
+  const hdImageRef = useRef<{ img: HTMLImageElement; bounds: { north: number; south: number; east: number; west: number } } | null>(null);
   // Track which zoom levels ESRI has run out of imagery (variance too low)
   const esriBlankZoomsRef = React.useRef<Set<number>>(new Set());
   // Current active provider per tile batch (for the badge)
@@ -1421,6 +1425,32 @@ export default function DesignStudio({ project, onSave }: Props) {
     scheduleTileRedraw();
   }, [mapCenter, zoom, tileProvider, scheduleTileRedraw]);
 
+  // Fetch high-res Google Solar RGB imagery when HD is on (covered addresses).
+  // 404 = no coverage (rural) → keep base tiles. Loaded image drawn georeferenced in the redraw.
+  useEffect(() => {
+    if (!hdImagery || show3D) { hdImageRef.current = null; return; }
+    let cancelled = false;
+    setHdStatus('loading');
+    (async () => {
+      try {
+        const res = await fetch(`/api/solar-rgb?lat=${mapCenter.lat}&lng=${mapCenter.lng}`);
+        if (!res.ok) { if (!cancelled) { hdImageRef.current = null; setHdStatus('unavailable'); } return; }
+        const data = await res.json();
+        if (cancelled || !data?.imageDataUrl || !data?.bounds) { if (!cancelled) setHdStatus('unavailable'); return; }
+        const img = new Image();
+        img.onload = () => {
+          if (cancelled) return;
+          hdImageRef.current = { img, bounds: data.bounds };
+          setHdStatus('ready');
+          scheduleTileRedraw();
+        };
+        img.onerror = () => { if (!cancelled) { hdImageRef.current = null; setHdStatus('unavailable'); } };
+        img.src = data.imageDataUrl;
+      } catch { if (!cancelled) { hdImageRef.current = null; setHdStatus('unavailable'); } }
+    })();
+    return () => { cancelled = true; };
+  }, [hdImagery, show3D, mapCenter.lat, mapCenter.lng, scheduleTileRedraw]);
+
   // Debounced loadTiles — 80ms debounce prevents firing on every pixel of pan/zoom
   useEffect(() => {
     if (show3D) return;
@@ -1470,6 +1500,15 @@ export default function DesignStudio({ project, onSave }: Props) {
 
       ctx.drawImage(img, cx, cy, displayTileSize, displayTileSize);
     });
+
+    // High-res Solar RGB backdrop — overlays base tiles where available (covered addresses).
+    // Gated on the ref (nulled when HD is off/unavailable) so this stays out of the redraw deps.
+    const _hd = hdImageRef.current;
+    if (_hd && _hd.img.naturalWidth > 0) {
+      const nw = latLngToCanvas(_hd.bounds.north, _hd.bounds.west, mapCenter, zoom, W, H);
+      const se = latLngToCanvas(_hd.bounds.south, _hd.bounds.east, mapCenter, zoom, W, H);
+      ctx.drawImage(_hd.img, nw.x, nw.y, se.x - nw.x, se.y - nw.y);
+    }
 
     const mpp = metersPerPixel(mapCenter.lat, zoom);
     const pxPerM = 1 / mpp;
@@ -3336,6 +3375,24 @@ export default function DesignStudio({ project, onSave }: Props) {
                 {activeTileSource === 'google' ? '✓G' : '✓E'}
               </span>
             </div>
+          )}
+          {/* HD imagery — Google Solar RGB (~10cm) for tagging vents/obstructions; covered addresses only */}
+          {!show3D && (
+            <button
+              onClick={() => setHdImagery(v => !v)}
+              className={`px-2 py-1 text-[10px] font-semibold rounded-lg border transition-colors ${
+                hdImagery
+                  ? (hdStatus === 'unavailable'
+                      ? 'bg-slate-800 text-amber-400 border-amber-500/40'
+                      : 'bg-emerald-600 text-white border-emerald-500')
+                  : 'bg-slate-800 text-slate-400 border-slate-600 hover:text-white'
+              }`}
+              title="High-res Solar aerial (~10cm) — sharp enough to tag vents/obstructions. Covered addresses only."
+            >
+              {hdImagery && hdStatus === 'loading' ? '⏳ HD'
+                : hdImagery && hdStatus === 'unavailable' ? '🛰 HD n/a here'
+                : '🛰 HD'}
+            </button>
           )}
           <button onClick={clearAll} className="btn-secondary btn-sm">
             <RotateCcw size={13} /> Clear
