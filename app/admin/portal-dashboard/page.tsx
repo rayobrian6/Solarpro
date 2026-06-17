@@ -1,11 +1,14 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   Sun, RefreshCw, Search, ChevronDown,
   MapPin, Clock, CheckCircle2, Circle,
   AlertCircle, Zap, TrendingUp, Home, Phone, Mail,
-  FileCheck, Activity,
+  FileCheck, Activity, ClipboardList, Building2, FileText,
+  Calculator, CheckCircle, Calendar, Car, Camera, Upload,
+  Ruler, Settings, FileOutput, FileCheck2, Mail as MailIcon,
+  Send, Eye, PenLine, Wrench, Star, Radio,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -67,48 +70,48 @@ function normalizeLabel(raw: string): string {
 
 // ─── Micro stage display config ───────────────────────────────────────────────
 
-const MICRO_STAGE_META: Record<string, { label: string; icon: string; color: string }> = {
+const MICRO_STAGE_META: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
   // lead_submitted
-  lead_created:           { label: 'Lead Created',            icon: '📋', color: 'text-slate-400' },
-  project_created:        { label: 'Project Created',         icon: '🏗️', color: 'text-slate-400' },
+  lead_created:           { label: 'Lead Created',            icon: <ClipboardList size={14} />, color: 'text-slate-400' },
+  project_created:        { label: 'Project Created',         icon: <Building2 size={14} />, color: 'text-slate-400' },
   // under_review
-  bill_uploaded:          { label: 'Utility Bill Uploaded',   icon: '📄', color: 'text-blue-400' },
-  bill_parsed:            { label: 'Bill Analyzed',           icon: '🔬', color: 'text-blue-400' },
-  usage_calculated:       { label: 'Usage Calculated',        icon: '📊', color: 'text-blue-400' },
-  pre_design_complete:    { label: 'Pre-Design Complete',     icon: '✅', color: 'text-blue-400' },
+  bill_uploaded:          { label: 'Utility Bill Uploaded',   icon: <FileText size={14} />, color: 'text-blue-400' },
+  bill_parsed:            { label: 'Bill Analyzed',           icon: <Search size={14} />, color: 'text-blue-400' },
+  usage_calculated:       { label: 'Usage Calculated',        icon: <Calculator size={14} />, color: 'text-blue-400' },
+  pre_design_complete:    { label: 'Pre-Design Complete',     icon: <CheckCircle size={14} />, color: 'text-blue-400' },
   // site_survey
-  survey_scheduled:       { label: 'Survey Scheduled',        icon: '📅', color: 'text-cyan-400' },
-  survey_started:         { label: 'Survey Started',          icon: '🚗', color: 'text-cyan-400' },
-  survey_photos_uploaded: { label: 'Photos Uploaded',         icon: '📸', color: 'text-cyan-400' },
-  survey_submitted:       { label: 'Survey Submitted',        icon: '📤', color: 'text-cyan-400' },
-  survey_reviewed:        { label: 'Survey Reviewed',         icon: '✅', color: 'text-cyan-400' },
+  survey_scheduled:       { label: 'Survey Scheduled',        icon: <Calendar size={14} />, color: 'text-cyan-400' },
+  survey_started:         { label: 'Survey Started',          icon: <Car size={14} />, color: 'text-cyan-400' },
+  survey_photos_uploaded: { label: 'Photos Uploaded',         icon: <Camera size={14} />, color: 'text-cyan-400' },
+  survey_submitted:       { label: 'Survey Submitted',        icon: <Upload size={14} />, color: 'text-cyan-400' },
+  survey_reviewed:        { label: 'Survey Reviewed',         icon: <CheckCircle size={14} />, color: 'text-cyan-400' },
   // design
-  layout_started:         { label: 'Layout Started',          icon: '📐', color: 'text-violet-400' },
-  layout_completed:       { label: 'Layout Completed',        icon: '✅', color: 'text-violet-400' },
-  engineering_started:    { label: 'Engineering Started',     icon: '⚙️', color: 'text-violet-400' },
-  engineering_completed:  { label: 'Engineering Completed',   icon: '✅', color: 'text-violet-400' },
-  sld_generated:          { label: 'SLD Generated',           icon: '🗂️', color: 'text-violet-400' },
-  planset_generated:      { label: 'Plan Set Generated',      icon: '📑', color: 'text-violet-400' },
+  layout_started:         { label: 'Layout Started',          icon: <Ruler size={14} />, color: 'text-violet-400' },
+  layout_completed:       { label: 'Layout Completed',        icon: <CheckCircle size={14} />, color: 'text-violet-400' },
+  engineering_started:    { label: 'Engineering Started',     icon: <Settings size={14} />, color: 'text-violet-400' },
+  engineering_completed:  { label: 'Engineering Completed',   icon: <CheckCircle size={14} />, color: 'text-violet-400' },
+  sld_generated:          { label: 'SLD Generated',           icon: <FileCheck2 size={14} />, color: 'text-violet-400' },
+  planset_generated:      { label: 'Plan Set Generated',      icon: <FileCheck size={14} />, color: 'text-violet-400' },
   // proposal
-  final_proposal_generated: { label: 'Proposal Generated',   icon: '📄', color: 'text-amber-400' },
-  proposal_sent:          { label: 'Proposal Sent',           icon: '📨', color: 'text-amber-400' },
-  proposal_viewed:        { label: 'Proposal Viewed',         icon: '👁️', color: 'text-amber-400' },
-  proposal_approved:      { label: 'Proposal Approved',       icon: '✅', color: 'text-amber-400' },
-  contract_sent:          { label: 'Contract Sent',           icon: '📬', color: 'text-amber-400' },
-  contract_viewed:        { label: 'Contract Viewed',         icon: '👁️', color: 'text-amber-400' },
-  contract_signed:        { label: 'Contract Signed',         icon: '✍️', color: 'text-emerald-400' },
+  final_proposal_generated: { label: 'Proposal Generated',   icon: <FileText size={14} />, color: 'text-amber-400' },
+  proposal_sent:          { label: 'Proposal Sent',           icon: <Send size={14} />, color: 'text-amber-400' },
+  proposal_viewed:        { label: 'Proposal Viewed',         icon: <Eye size={14} />, color: 'text-amber-400' },
+  proposal_approved:      { label: 'Proposal Approved',       icon: <CheckCircle size={14} />, color: 'text-amber-400' },
+  contract_sent:          { label: 'Contract Sent',           icon: <MailIcon size={14} />, color: 'text-amber-400' },
+  contract_viewed:        { label: 'Contract Viewed',         icon: <Eye size={14} />, color: 'text-amber-400' },
+  contract_signed:        { label: 'Contract Signed',         icon: <PenLine size={14} />, color: 'text-emerald-400' },
   // installation
-  permit_submitted:       { label: 'Permit Submitted',        icon: '📋', color: 'text-orange-400' },
-  permit_approved:        { label: 'Permit Approved',         icon: '✅', color: 'text-orange-400' },
-  install_scheduled:      { label: 'Install Scheduled',       icon: '📅', color: 'text-orange-400' },
-  install_started:        { label: 'Installation Started',    icon: '🔧', color: 'text-orange-400' },
-  install_completed:      { label: 'Installation Completed',  icon: '🏠', color: 'text-orange-400' },
-  inspection_passed:      { label: 'Inspection Passed',       icon: '✅', color: 'text-orange-400' },
-  pto_submitted:          { label: 'PTO Submitted',           icon: '📤', color: 'text-orange-400' },
-  pto_approved:           { label: 'PTO Approved',            icon: '⚡', color: 'text-orange-400' },
+  permit_submitted:       { label: 'Permit Submitted',        icon: <ClipboardList size={14} />, color: 'text-orange-400' },
+  permit_approved:        { label: 'Permit Approved',         icon: <CheckCircle size={14} />, color: 'text-orange-400' },
+  install_scheduled:      { label: 'Install Scheduled',       icon: <Calendar size={14} />, color: 'text-orange-400' },
+  install_started:        { label: 'Installation Started',    icon: <Wrench size={14} />, color: 'text-orange-400' },
+  install_completed:      { label: 'Installation Completed',  icon: <Home size={14} />, color: 'text-orange-400' },
+  inspection_passed:      { label: 'Inspection Passed',       icon: <CheckCircle size={14} />, color: 'text-orange-400' },
+  pto_submitted:          { label: 'PTO Submitted',           icon: <Upload size={14} />, color: 'text-orange-400' },
+  pto_approved:           { label: 'PTO Approved',            icon: <Zap size={14} />, color: 'text-orange-400' },
   // completed
-  system_live:            { label: 'System Live',             icon: '🌟', color: 'text-emerald-400' },
-  monitoring_active:      { label: 'Monitoring Active',       icon: '📡', color: 'text-emerald-400' },
+  system_live:            { label: 'System Live',             icon: <Star size={14} />, color: 'text-emerald-400' },
+  monitoring_active:      { label: 'Monitoring Active',       icon: <Radio size={14} />, color: 'text-emerald-400' },
 };
 
 // Which micro stages belong to each homeowner stage
@@ -143,7 +146,7 @@ type StageContent = {
   next: string;
   action: string;
   actionIsRequired: boolean;
-  icon: string;
+  icon: React.ReactNode;
 };
 
 const STAGE_CONTENT: Record<HomeownerStage, StageContent> = {
@@ -152,49 +155,49 @@ const STAGE_CONTENT: Record<HomeownerStage, StageContent> = {
     headline: 'We got your request.',
     body: "We're getting familiar with your home and energy needs. Your project has been created and we'll be in touch soon.",
     next: "Next: We'll review your project and reach out.",
-    action: 'Nothing to do right now.', actionIsRequired: false, icon: '📋',
+    action: 'Nothing to do right now.', actionIsRequired: false, icon: <ClipboardList size={14} />,
   },
   under_review: {
     roadmapLabel: 'Under Review', stepLabel: 'Step 2 of 7',
     headline: "We're reviewing your project.",
     body: "We're looking at your home, roof, and energy usage to figure out the right system for you. This usually takes 1–2 business days.",
     next: "Next: We'll schedule your site survey.",
-    action: 'Nothing to do right now.', actionIsRequired: false, icon: '🔍',
+    action: 'Nothing to do right now.', actionIsRequired: false, icon: <Search size={14} />,
   },
   site_survey: {
     roadmapLabel: 'Site Survey', stepLabel: 'Step 3 of 7',
     headline: 'Your site survey is coming up.',
     body: "We're sending someone to your home to measure your roof and confirm the setup details.",
     next: "Next: After the visit, we'll start designing your system.",
-    action: "Action needed: We'll reach out to confirm your appointment. Please be available.", actionIsRequired: true, icon: '📐',
+    action: "Action needed: We'll reach out to confirm your appointment. Please be available.", actionIsRequired: true, icon: <Ruler size={14} />,
   },
   design: {
     roadmapLabel: 'System Design', stepLabel: 'Step 4 of 7',
     headline: "We're designing your system.",
     body: "Our team is building a solar layout specifically for your home — size, placement, and output.",
     next: "Next: We'll put together your proposal.",
-    action: 'Nothing to do right now.', actionIsRequired: false, icon: '⚡',
+    action: 'Nothing to do right now.', actionIsRequired: false, icon: <Zap size={14} />,
   },
   proposal: {
     roadmapLabel: 'Proposal Ready', stepLabel: 'Step 5 of 7',
     headline: 'Your proposal is ready.',
     body: "We've put together your solar plan — system size, estimated savings, and financing options.",
     next: "Next: Once you approve, we'll move to installation.",
-    action: 'Action needed: Review your proposal and let us know if you have questions.', actionIsRequired: true, icon: '📄',
+    action: 'Action needed: Review your proposal and let us know if you have questions.', actionIsRequired: true, icon: <FileText size={14} />,
   },
   installation: {
     roadmapLabel: 'Installation', stepLabel: 'Step 6 of 7',
     headline: 'Installation is being scheduled.',
     body: "We're handling permits and lining up your crew. You'll hear from us soon with a date.",
     next: "Next: We'll confirm your install date.",
-    action: "Action needed: Watch for our call or email with scheduling details.", actionIsRequired: true, icon: '🔧',
+    action: "Action needed: Watch for our call or email with scheduling details.", actionIsRequired: true, icon: <Wrench size={14} />,
   },
   completed: {
     roadmapLabel: 'Complete', stepLabel: 'Step 7 of 7',
     headline: 'Your system is live.',
     body: "Your solar panels are installed and running. You're now generating your own power.",
     next: '',
-    action: "You're all set. Enjoy the savings.", actionIsRequired: false, icon: '🌟',
+    action: "You're all set. Enjoy the savings.", actionIsRequired: false, icon: <Star size={14} />,
   },
 };
 
@@ -278,13 +281,13 @@ function Roadmap({ stage }: { stage: HomeownerStage | null }) {
                   {past ? <CheckCircle2 size={18} className="text-emerald-400" />
                     : cur ? <span className="text-xl leading-none">{c.icon}</span>
                            : <Circle size={16} className="text-white/[0.08]" />}
-                  {cur && <div className="absolute inset-0 rounded-full bg-amber-500/15 animate-ping scale-[1.6] pointer-events-none" />}
+                  {cur ? <div className="absolute inset-0 rounded-full bg-amber-500/15 animate-ping scale-[1.6] pointer-events-none" /> : null}
                 </div>
                 <span className={`mt-3 text-[10px] font-bold text-center leading-tight max-w-[72px] ${
                   cur ? 'text-amber-300' : past ? 'text-emerald-400/60' : 'text-white/15'
                 }`}>{c.roadmapLabel}</span>
                 {cur  && <span className="mt-1 text-[9px] font-black text-amber-500/50 uppercase tracking-widest">NOW</span>}
-                {past && <span className="mt-1 text-[9px] text-emerald-500/35 uppercase tracking-wider">✓</span>}
+                {past ? <span className="mt-1 text-[9px] text-emerald-500/35 uppercase tracking-wider">✓</span> : null}
               </div>
             );
           })}
@@ -312,7 +315,7 @@ function Roadmap({ stage }: { stage: HomeownerStage | null }) {
                 <div className="flex items-center gap-2">
                   <span className={`text-sm font-bold ${cur ? 'text-amber-300' : past ? 'text-white/35' : 'text-white/15'}`}>{c.roadmapLabel}</span>
                   {cur  && <span className="text-[9px] font-black bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full uppercase tracking-wider">Now</span>}
-                  {past && <span className="text-[9px] text-emerald-500/40">✓</span>}
+                  {past ? <span className="text-[9px] text-emerald-500/40">✓</span> : null}
                 </div>
               </div>
             </div>
@@ -375,7 +378,7 @@ function StageMilestoneFeed({
                   {content.roadmapLabel}
                 </span>
                 {!isCurrent && <span className="text-[9px] text-emerald-500/40 ml-1">✓ Complete</span>}
-                {isCurrent && <span className="text-[9px] bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full uppercase tracking-wider font-black ml-1">Active</span>}
+                {isCurrent ? <span className="text-[9px] bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full uppercase tracking-wider font-black ml-1">Active</span> : null}
               </div>
 
               {/* Micro stage checklist */}
@@ -783,7 +786,7 @@ export default function AdminHomeownerDashboardPage() {
           <div className="flex items-center gap-2 bg-blue-500/8 border border-blue-500/15 rounded-lg px-3 py-1.5">
             <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
             <span className="text-xs text-blue-300 font-medium">Admin Preview — {selected.client_name ?? selected.name}</span>
-            {docLoading && <RefreshCw size={10} className="text-blue-400 animate-spin ml-1" />}
+            {docLoading ? <RefreshCw size={10} className="text-blue-400 animate-spin ml-1" /> : null}
           </div>
           <a href={`/admin/projects/${selected.id}`}
             className="text-xs text-slate-400 hover:text-white border border-white/8 hover:border-white/15 rounded-lg px-3 py-1.5 transition-all">
