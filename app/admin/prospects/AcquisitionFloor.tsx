@@ -327,6 +327,8 @@ export default function AcquisitionFloor({
   const [raging, setRaging] = useState(false);
   const [productivity, setProductivity] = useState(42);
   const [faintTarget, setFaintTarget] = useState<string | null>(null);
+  const [auto, setAuto] = useState(true);
+  const [autoWorking, setAutoWorking] = useState(false);
   const whippedStage = whipTarget ? (whipTarget.split('-')[0] as Stage) : null;
 
   const rooms = useMemo(() => ROOMS.map((r) => {
@@ -448,11 +450,11 @@ export default function AcquisitionFloor({
   // productivity meter — spikes during work, drifts otherwise
   useEffect(() => {
     const iv = setInterval(() => {
-      const base = dispatching ? 90 : 36 + Math.min(42, Math.round(total / 4));
+      const base = (dispatching || autoWorking) ? 90 : 36 + Math.min(42, Math.round(total / 4));
       setProductivity(Math.max(8, Math.min(99, base + Math.round(rand(-8, 8)))));
     }, 1600);
     return () => clearInterval(iv);
-  }, [dispatching, total]);
+  }, [dispatching, autoWorking, total]);
 
   // a clerk faints from exhaustion now and then
   useEffect(() => {
@@ -475,7 +477,7 @@ export default function AcquisitionFloor({
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state: blitzState }),
       });
       const data = await res.json();
-      if (data.success) { setDispatchMsg(`Back from ${data.stateName || blitzState}: ${data.inserted} new, ${data.updated} already known — marched into Scouting!`); onDispatched(); }
+      if (data.success) { setDispatchMsg(`Back from ${data.stateName || blitzState}: ${data.inserted} new, ${data.updated} already known — marched into Scouting!`); onDispatched(); if (auto) setTimeout(() => runTick(), 2000); }
       else setDispatchMsg(data.error || data.message || 'The scouts returned empty-handed.');
     } catch (e) { setDispatchMsg('The scouts were lost to the fog. ' + (e as Error).message); }
     finally { setDispatching(false); setTimeout(() => setDispatchMsg(''), 9000); }
@@ -487,7 +489,7 @@ export default function AcquisitionFloor({
     try {
       const res = await fetch('/api/admin/prospects/seed', { method: 'POST' });
       const data = await res.json();
-      if (data.success || typeof data.total === 'number') { setDispatchMsg(`${data.total} installers on the books!`); onDispatched(); }
+      if (data.success || typeof data.total === 'number') { setDispatchMsg(`${data.total} installers on the books!`); onDispatched(); if (auto) setTimeout(() => runTick(), 2000); }
       else setDispatchMsg(data.error || data.message || 'Could not summon the batch.');
     } catch (e) { setDispatchMsg('Summon failed. ' + (e as Error).message); }
     finally { setDispatching(false); setTimeout(() => setDispatchMsg(''), 6000); }
@@ -523,6 +525,32 @@ export default function AcquisitionFloor({
     } catch (e) { setDispatchMsg('The work faltered. ' + (e as Error).message); }
     finally { setDispatching(false); setTimeout(() => setDispatchMsg(''), 8000); }
   }
+
+  // One automatic pipeline pass — leads flow themselves discovered → enriched → vetted → dossier'd.
+  async function runTick(announce = false) {
+    setAutoWorking(true);
+    try {
+      const d = await fetch('/api/admin/prospects/pipeline/tick', { method: 'POST' }).then((r) => r.json());
+      if (d?.success) {
+        onDispatched();
+        if ((d.moved ?? 0) > 0) {
+          const bits = [d.enriched && `${d.enriched} enriched`, d.qualified && `${d.qualified} vetted`, d.dossiers && `${d.dossiers} briefed`].filter(Boolean);
+          if (announce || bits.length) setDispatchMsg(`The house worked: ${bits.join(', ') || 'nothing new'}.`);
+          setSupLine('Down the line they go!');
+        }
+      }
+    } catch { /* keep quiet, try again next tick */ }
+    finally { setTimeout(() => setAutoWorking(false), 1000); }
+  }
+
+  // Auto-run loop: while ON, tick the pipeline so the workers actually work.
+  useEffect(() => {
+    if (!auto) return;
+    const iv = setInterval(() => { runTick(); }, 25000);
+    const t = setTimeout(() => runTick(), 1500);
+    return () => { clearInterval(iv); clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auto]);
 
   // Generic one-shot job runner (dossier, cleanup, …)
   async function runJob(ep: string, bark: string, fmt: (d: Record<string, number>) => string) {
@@ -648,6 +676,10 @@ export default function AcquisitionFloor({
             <div className="h-full rounded-full transition-all duration-700" style={{ width: `${productivity}%`, background: productivity > 70 ? 'linear-gradient(90deg,#16a34a,#4ade80)' : productivity > 40 ? 'linear-gradient(90deg,#ca8a04,#fbbf24)' : 'linear-gradient(90deg,#b91c1c,#f87171)' }} />
           </div>
           <span className="text-[11px] font-bold text-amber-200 w-10 text-right">{productivity}%</span>
+          <button onClick={() => setAuto((a) => !a)}
+            className={`ml-2 text-[10px] px-2.5 py-1 rounded-md border font-bold whitespace-nowrap transition-colors ${auto ? 'bg-emerald-900/60 text-emerald-200 border-emerald-600/50' : 'bg-black/30 text-slate-400 border-white/10 hover:text-white'}`}>
+            {auto ? (autoWorking ? '⚙ Auto-run: WORKING…' : '⚙ Auto-run: ON') : '▶ Auto-run: OFF'}
+          </button>
         </div>
         {dispatchMsg && <div className="mt-2 text-center text-sm text-amber-300 italic">{dispatchMsg}</div>}
       </div>
