@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, CheckCircle, Loader2, Users } from 'lucide-react';
 import ActionModal from './ActionModal';
+import { postJson } from '@/lib/commands/postJson';
 import type { Crew } from '@/lib/commands/types';
 
 interface ScheduleInstallModalProps {
@@ -58,50 +59,33 @@ export default function ScheduleInstallModal({
 
     try {
       // 1. Update project: install_date, crew, move stage → install_scheduled
-      await fetch(`/api/projects/${projectId}/operations`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          install_date: installDate,
-          ...(crewId ? {} : existingCrew ? {} : {}),
-        }),
-      });
+      await postJson(`/api/projects/${projectId}/operations`, {
+        install_date: installDate,
+      }, { method: 'PATCH' });
 
       // Set crew if selected
       const selectedCrew = crews.find(c => c.id === crewId);
       if (selectedCrew) {
-        await fetch(`/api/projects/${projectId}/operations`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ crew_assigned: selectedCrew.name }),
-        });
+        await postJson(`/api/projects/${projectId}/operations`, {
+          crew_assigned: selectedCrew.name,
+        }, { method: 'PATCH' });
       }
 
       // 2. Auto-advance stage to install_scheduled
-      await fetch('/api/projects/update-status', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, status: 'install_scheduled' }),
-      });
+      await postJson('/api/projects/update-status', { projectId, status: 'install_scheduled' });
 
       // 3. Create schedule item
-      await fetch('/api/schedule', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          project_id: projectId,
-          type: 'install',
-          date: installDate,
-          crew_id: crewId || null,
-          notes: notes || `${durationDays} day install`,
-        }),
+      await postJson('/api/schedule', {
+        project_id: projectId,
+        type: 'install',
+        date: installDate,
+        crew_id: crewId || null,
+        notes: notes || `${durationDays} day install`,
       });
 
-      // 4. Log activity
-      await fetch('/api/activity', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      // 4. Log activity (best-effort — never block a completed schedule on a log write)
+      try {
+        await postJson('/api/activity', {
           project_id: projectId,
           type: 'schedule',
           title: `Install scheduled for ${new Date(installDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
@@ -111,16 +95,12 @@ export default function ScheduleInstallModal({
             crew: selectedCrew?.name || existingCrew || null,
             duration_days: parseInt(durationDays) || 1,
           },
-        }),
-      });
+        });
+      } catch { /* activity log is non-critical */ }
 
       // 5. Complete the command if one exists
       if (commandId) {
-        await fetch(`/api/commands/${commandId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'complete' }),
-        });
+        await postJson(`/api/commands/${commandId}`, { action: 'complete' }, { method: 'PATCH' });
       }
 
       onComplete();

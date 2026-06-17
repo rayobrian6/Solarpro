@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Phone, CheckCircle, Loader2 } from 'lucide-react';
 import ActionModal from './ActionModal';
+import { postJson } from '@/lib/commands/postJson';
 import type { FollowUpOutcome } from '@/lib/commands/types';
 
 interface FollowUpModalProps {
@@ -35,54 +36,36 @@ export default function FollowUpModal({
     setError('');
 
     try {
-      // 1. Log activity
-      await fetch('/api/activity', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      // 1. Log activity (best-effort — never block the action on a log write)
+      try {
+        await postJson('/api/activity', {
           project_id: projectId,
           type: 'follow_up',
           title: `Follow-up: ${OUTCOMES.find(o => o.value === outcome)?.label}`,
           details: notes || null,
           metadata: { outcome, next_follow_up_date: nextDate || null },
-        }),
-      });
+        });
+      } catch { /* activity log is non-critical */ }
 
       // 2. Complete or reschedule the command
       if (outcome === 'no_answer' && nextDate) {
         // Snooze to next follow-up date
         const daysUntil = Math.max(1, Math.ceil((new Date(nextDate).getTime() - Date.now()) / 86400000));
-        await fetch(`/api/commands/${commandId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'snooze', snooze_days: daysUntil }),
-        });
+        await postJson(`/api/commands/${commandId}`, { action: 'snooze', snooze_days: daysUntil }, { method: 'PATCH' });
       } else if (outcome === 'not_interested') {
         // Complete the action — deal is dead
-        await fetch(`/api/commands/${commandId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'complete' }),
-        });
+        await postJson(`/api/commands/${commandId}`, { action: 'complete' }, { method: 'PATCH' });
       } else {
         // Complete the follow-up action
-        await fetch(`/api/commands/${commandId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'complete' }),
-        });
+        await postJson(`/api/commands/${commandId}`, { action: 'complete' }, { method: 'PATCH' });
 
         // If scheduling next step, create a new schedule item
         if (outcome === 'scheduled_next_step' && nextDate) {
-          await fetch('/api/schedule', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              project_id: projectId,
-              type: 'follow_up',
-              date: nextDate,
-              notes: notes || null,
-            }),
+          await postJson('/api/schedule', {
+            project_id: projectId,
+            type: 'follow_up',
+            date: nextDate,
+            notes: notes || null,
           });
         }
       }

@@ -19,7 +19,7 @@
 // Pure ASCII, no Unicode.
 // ============================================================================
 
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useEffect } from 'react';
 import type { SurveyObstructions, SurveySiteOverview, Obstruction } from '../../lib/survey/v2/types';
 import type { DetectedObstruction } from '../../lib/satellite/types';
 import { detectedToSurveyObstruction, mapConfidence } from '../../lib/satellite/types';
@@ -224,6 +224,19 @@ export function StepObstructions({ data, onChange, disabled, siteOverview }: Ste
       unit: '%',
     };
   }, [satelliteAreaComputed, usableAreaResult]);
+
+  // Auto-apply the computed/satellite usable-area estimate into the draft once,
+  // so the value the UI shows ("auto-applied unless you override") actually gets
+  // persisted. Without this, leaving step 4 untouched submitted
+  // estimatedUsableRoofPct: null even though a percentage was displayed.
+  // Mirrors the satellite auto-apply pattern in StepRoof/StepElectrical.
+  useEffect(() => {
+    if (disabled) return;
+    if (data.estimatedUsableRoofPct != null) return;
+    if (areaComputed.value == null) return;
+    set('estimatedUsableRoofPct', Math.min(100, Math.max(0, Math.round(areaComputed.value))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [areaComputed.value, disabled]);
 
   // Whether the user has overridden the computed value
   const isAreaOverridden = data.estimatedUsableRoofPct != null &&

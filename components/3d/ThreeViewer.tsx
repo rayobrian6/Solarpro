@@ -24,13 +24,18 @@ export default function ThreeViewer({
   useEffect(() => {
     if (!mountRef.current) return;
     let renderer: any, animId: number, cleanupFn: (() => void) | undefined;
+    // Guard against stale runs: deps change (mapCenter is a fresh object literal
+    // on most parent renders) or unmount while init() is still awaiting would
+    // otherwise stack a second WebGL context + RAF loop and never dispose them.
+    let cancelled = false;
 
     const init = async () => {
       try {
         const THREE = await import('three');
         const { OrbitControls } = await import('three/examples/jsm/controls/OrbitControls.js');
+        if (cancelled || !mountRef.current) return;
 
-        const container = mountRef.current!;
+        const container = mountRef.current;
         const W = container.clientWidth || 800;
         const H = container.clientHeight || 600;
 
@@ -84,6 +89,13 @@ export default function ThreeViewer({
 
         // ── Satellite Ground ───────────────────────────────────────────────
         const groundSize = await buildSatelliteGround(THREE, scene, mapCenter, mapZoom, setTileStatus);
+        // The renderer/canvas already exist by here; if this run went stale
+        // during the tile fetch, tear them down rather than leaking them.
+        if (cancelled) {
+          renderer.dispose();
+          if (container.contains(renderer.domElement)) container.removeChild(renderer.domElement);
+          return;
+        }
 
         // ── Materials ──────────────────────────────────────────────────────
         const panelFrontMat = new THREE.MeshPhongMaterial({
@@ -145,7 +157,7 @@ export default function ThreeViewer({
     };
 
     init();
-    return () => { cleanupFn?.(); };
+    return () => { cancelled = true; cleanupFn?.(); };
   }, [panels, systemType, tilt, fenceHeight, selectedPanel, mapCenter, mapZoom]);
 
   const typeLabel = systemType === 'roof' ? '🏠 Roof Mount' :

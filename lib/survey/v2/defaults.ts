@@ -179,7 +179,12 @@ export function draftStorageKey(jti: string): string {
 // ---------------------------------------------------------------------------
 export function saveDraft(draft: SurveyV2Draft): void {
   if (typeof window === 'undefined') return;
-  const key = draftStorageKey(draft.token || draft.projectId);
+  // Key on the JWT jti, the same key loadDraft/clearDraft use. draft.token is
+  // the FULL handoff JWT, so keying on it here meant the autosave wrote to a key
+  // the resume path (draftStorageKey(claims.jti)) could never read — silently
+  // losing all in-progress field data on reload.
+  const keyId = decodeTokenClaims(draft.token)?.jti || draft.token || draft.projectId;
+  const key = draftStorageKey(keyId);
   const updated = { ...draft, lastSavedAt: new Date().toISOString() };
   try {
     localStorage.setItem(key, JSON.stringify(updated));

@@ -134,9 +134,11 @@ export default function Google3DViewer({
     });
     streetPanoRef.current = pano;
 
-    // Listen for POV changes to redraw overlay
-    pano.addListener('pov_changed', () => drawStreetViewOverlay());
-    pano.addListener('position_changed', () => drawStreetViewOverlay());
+    // Listen for POV changes to redraw overlay (keep handles for cleanup)
+    svListenerRef.current = [
+      pano.addListener('pov_changed', () => drawStreetViewOverlay()),
+      pano.addListener('position_changed', () => drawStreetViewOverlay()),
+    ];
     setSvReady(true);
     setTimeout(() => drawStreetViewOverlay(), 1500);
   };
@@ -397,6 +399,40 @@ export default function Google3DViewer({
       setTimeout(() => drawStreetViewOverlay(), 500);
     }
   }, [viewMode, svReady]);
+
+  // Recenter the 3D scene when coords resolve after mount.
+  // The one-time init effect captures lat/lng on first render (usually the
+  // Phoenix fallback, since mapCenter is geocoded asynchronously), so without
+  // this the photorealistic scene stays locked on Phoenix even after the real
+  // project address loads.
+  useEffect(() => {
+    if (status !== 'ready') return;
+    const map3d = map3dElRef.current;
+    if (!map3d) return;
+    try {
+      map3d.center = { lat, lng, altitude: 0 };
+      map3d.range = range;
+      drawPanels3D(map3d);
+    } catch (e) { console.warn('3D recenter failed:', e); }
+  }, [lat, lng, range, status, drawPanels3D]);
+
+  // Tear down Google 3D map, Street View panorama, and listeners on unmount —
+  // otherwise the heavy tile renderer and pano keep running after navigation.
+  useEffect(() => {
+    return () => {
+      try {
+        (svListenerRef.current || []).forEach((l: any) => {
+          window.google?.maps?.event?.removeListener?.(l);
+        });
+        svListenerRef.current = null;
+        panelPolygonsRef.current.forEach(p => { try { p.remove(); } catch {} });
+        panelPolygonsRef.current = [];
+        if (map3dContainerRef.current) map3dContainerRef.current.innerHTML = '';
+        map3dElRef.current = null;
+        streetPanoRef.current = null;
+      } catch { /* best-effort teardown */ }
+    };
+  }, []);
 
   const totalKw = ((panels.length * (selectedPanel?.wattage ?? 400)) / 1000).toFixed(1);
 

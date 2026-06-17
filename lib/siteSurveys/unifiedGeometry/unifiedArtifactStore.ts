@@ -715,7 +715,12 @@ export async function writeObstructionArtifact(
 
     // Derive UnifiedGeometryArtifact fields from ObstructionMetadata
     const label = obstructionMeta.obstructionType ?? 'unknown_obstruction';
-    const confidence01 = Math.min(1, Math.max(0, obstructionMeta.confidence / 100));
+    // UnifiedGeometryArtifact.confidence is a 0-100 score everywhere (types.ts,
+    // overlay PLANE_CLEAN_MIN_CONFIDENCE=60, promotion min-confidence gate).
+    // ObstructionMetadata.confidence is also 0-100 — keep the same scale rather
+    // than dividing by 100, otherwise every obstruction reads as ~0.0-1.0 and is
+    // always below numeric confidence thresholds.
+    const confidence = Math.min(100, Math.max(0, obstructionMeta.confidence));
 
     // Build geometry_data JSONB — the full artifact stored as JSON
     const geometryData: Record<string, unknown> = {
@@ -724,7 +729,7 @@ export async function writeObstructionArtifact(
       geometryClass: 'obstruction',
       authority: syntheticAuthority,
       provenance,
-      confidence: confidence01,
+      confidence,
       label,
       limitations: obstructionMeta.limitations ?? [],
       bbox: {
@@ -800,7 +805,7 @@ export async function writeObstructionArtifact(
         'derived_review_only',
         ${JSON.stringify(syntheticAuthority)}::jsonb,
         ${JSON.stringify(provenance)}::jsonb,
-        ${confidence01},
+        ${confidence},
         ${label},
         ${obstructionMeta.limitations ?? []}::text[],
         ${JSON.stringify(geometryData)}::jsonb,

@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Wrench, CheckCircle, Loader2 } from 'lucide-react';
 import ActionModal from './ActionModal';
+import { postJson } from '@/lib/commands/postJson';
 
 interface EngineeringReviewModalProps {
   commandId?: string;
@@ -25,32 +26,22 @@ export default function EngineeringReviewModal({
 
     try {
       // 1. Advance stage → engineering
-      await fetch('/api/projects/update-status', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, status: 'engineering' }),
-      });
+      await postJson('/api/projects/update-status', { projectId, status: 'engineering' });
 
-      // 2. Log activity
-      await fetch('/api/activity', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      // 2. Log activity (best-effort — never block a completed stage move on a log write)
+      try {
+        await postJson('/api/activity', {
           project_id: projectId,
           type: 'stage_change',
           title: 'Engineering review started',
           details: notes || null,
           metadata: { from_stage: 'contract_signed', to_stage: 'engineering' },
-        }),
-      });
+        });
+      } catch { /* activity log is non-critical */ }
 
       // 3. Complete the command if one exists
       if (commandId) {
-        await fetch(`/api/commands/${commandId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'complete' }),
-        });
+        await postJson(`/api/commands/${commandId}`, { action: 'complete' }, { method: 'PATCH' });
       }
 
       onComplete();

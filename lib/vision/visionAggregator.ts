@@ -479,8 +479,9 @@ function assignToRoofPlane(
 ): string | null {
   if (roofPlanes.length === 0) return null;
 
-  // Label-based assignment: look for plane id in photo label
-  if (ctx.label && ctx.roofPlaneId) {
+  // Explicit assignment: the survey told us which plane this photo belongs to.
+  // Only roofPlaneId is used here, so don't gate it on ctx.label being set.
+  if (ctx.roofPlaneId) {
     const match = roofPlanes.find(p => p.id === ctx.roofPlaneId);
     if (match) return match.id;
   }

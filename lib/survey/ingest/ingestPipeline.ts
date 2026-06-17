@@ -949,6 +949,29 @@ async function _resolveClientIdForSurvey(
     // is unique; the user can update the client record later in the UI.
     const placeholderEmail = `survey-${context.event.survey_id.slice(0, 8)}@survey.local`;
 
+    // The clients table has no unique constraint, so the ON CONFLICT below never
+    // matches and would insert a fresh duplicate on every re-delivery/replay of
+    // a survey that carries no address (the address dedupe above is skipped).
+    // The placeholder email is deterministic per survey, so look it up first to
+    // converge idempotently.
+    const existingByEmail = await sql`
+      SELECT id FROM clients
+      WHERE user_id = ${ownerId} AND LOWER(email) = LOWER(${placeholderEmail})
+      LIMIT 1
+    `;
+    const existingByEmailId = (existingByEmail[0] as Record<string, unknown> | undefined)?.id as string | null;
+    if (existingByEmailId && isValidUUID(existingByEmailId)) {
+      console.log(
+        `[ingestPipeline] _resolveClientIdForSurvey: found existing client by placeholder email ` +
+        `clientId=${existingByEmailId} email="${placeholderEmail}"`,
+      );
+      await sql`
+        UPDATE projects SET client_id = ${existingByEmailId}, updated_at = now()
+        WHERE id = ${projectId} AND user_id = ${ownerId} AND client_id IS NULL
+      `;
+      return existingByEmailId;
+    }
+
     const inserted = await sql`
       INSERT INTO clients (user_id, name, email, address, lat, lng)
       VALUES (
