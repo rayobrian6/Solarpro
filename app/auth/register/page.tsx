@@ -273,7 +273,7 @@ export default function RegisterPage() {
           </div>
 
           <p className="text-center text-xs text-slate-600 mt-6">
-            🔒 Secured with 256-bit encryption. We never share your data.
+            <Shield size={12} className="inline mr-1" />Secured with 256-bit encryption. We never share your data.
           </p>
         </div>
       </div>

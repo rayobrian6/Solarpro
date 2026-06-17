@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Sun, Eye, EyeOff, ArrowRight, Mail, Lock, CheckCircle, RefreshCw } from 'lucide-react';
+import { Sun, Eye, EyeOff, ArrowRight, Mail, Lock, CheckCircle, RefreshCw, Shield } from 'lucide-react';
 
 // ── How many times the UI will auto-retry a DB_STARTING 503 ──────────────────
 const MAX_AUTO_RETRIES    = 5;
@@ -340,7 +340,7 @@ function LoginForm() {
         </div>
 
         <p className="text-center text-xs text-slate-600 mt-6">
-          🔒 Secured with 256-bit encryption. We never share your data.
+          <Shield size={12} className="inline mr-1" />Secured with 256-bit encryption. We never share your data.
         </p>
       </div>
     </div>

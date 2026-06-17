@@ -49,7 +49,7 @@ import {
   ArrowLeft, Upload, Map, FileText, Zap, DollarSign,
   User, Calendar, AlertTriangle, CheckCircle, ChevronRight,
   Settings, BarChart2, Shield, Sun, Wrench, Send, Package, Camera,
-  Pencil, X, Network, Loader2, Sparkles, Activity, LayoutGrid, TrendingUp, MapPin
+  Pencil, X, Network, Loader2, Sparkles, Activity, LayoutGrid, TrendingUp, MapPin, Home, Sprout, Fence as FenceIcon
 } from 'lucide-react';
 import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
 import type { ConfidenceSource, ConfidenceLevel } from '@/components/recommend/ConfidenceBadge';
@@ -764,9 +764,9 @@ function ProjectDetailInner() {
               ) : null}
               <div className="p-5 grid grid-cols-1 gap-3">
                 {([
-                  { type: 'roof' as const, label: 'Roof Mount', icon: '🏠', desc: 'Standard rooftop installation with auto roof detection, pitch & azimuth optimization.' },
-                  { type: 'ground' as const, label: 'Ground Mount', icon: '🌱', desc: 'Fixed or adjustable tilt ground array. Adjustable tilt 0–45°, row spacing optimization.' },
-                  { type: 'fence' as const, label: 'Sol Fence (Vertical)', icon: '🔲', desc: 'Vertical bifacial fence-integrated system. 90° mounting, bifacial E-W optimization.' },
+                  { type: 'roof' as const, label: 'Roof Mount', icon: <Home size={20} />, desc: 'Standard rooftop installation with auto roof detection, pitch & azimuth optimization.' },
+                  { type: 'ground' as const, label: 'Ground Mount', icon: <Sprout size={20} />, desc: 'Fixed or adjustable tilt ground array. Adjustable tilt 0–45°, row spacing optimization.' },
+                  { type: 'fence' as const, label: 'Sol Fence (Vertical)', icon: <FenceIcon size={20} />, desc: 'Vertical bifacial fence-integrated system. 90° mounting, bifacial E-W optimization.' },
                 ] as const).map(({ type, label, icon, desc }) => {
                   const isCurrent = type === project.systemType;
                   return (
@@ -780,7 +780,7 @@ function ProjectDetailInner() {
                           : 'border-slate-700 bg-slate-800/40 hover:border-slate-500 hover:bg-slate-700/60 cursor-pointer'
                       }`}
                     >
-                      <span className="text-2xl mt-0.5 flex-shrink-0">{icon}</span>
+                      <span className="mt-0.5 flex-shrink-0">{icon}</span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="font-semibold text-white text-sm">{label}</span>

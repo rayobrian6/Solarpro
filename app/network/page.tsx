@@ -2362,24 +2362,24 @@ function ProfileTab({
             [
               [
                 "battery_certified",
-                "🔋 Battery Certified",
+                "Battery Certified",
                 "Battery storage installs",
               ],
               [
                 "commercial_capable",
-                "🏢 Commercial",
+                "Commercial",
                 "Commercial & industrial",
               ],
-              ["roofing_capable", "🏠 Roofing", "Full roof replacement"],
-              ["steep_roof_capable", "📐 Steep Roof", "6:12 pitch and above"],
+              ["roofing_capable", "Roofing", "Full roof replacement"],
+              ["steep_roof_capable", "Steep Roof", "6:12 pitch and above"],
               [
                 "ev_charger_capable",
-                "⚡ EV Chargers",
+                "EV Chargers",
                 "Level 2 / DCFC install",
               ],
               [
                 "generator_capable",
-                "⚙️ Generators",
+                "Generators",
                 "Standby generator installs",
               ],
             ] as [keyof ContractorProfile, string, string][]
@@ -2400,7 +2400,7 @@ function ProfileTab({
                     : "border-slate-600"
                 }`}
               >
-                {form[key] && "✓"}
+                {form[key] ? "✓" : null}
               </div>
               <div>
                 <div className="text-sm font-medium">{label}</div>
@@ -2509,7 +2509,7 @@ function ProfileTab({
         className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold rounded-xl text-sm transition-colors flex items-center gap-2 disabled:opacity-60"
       >
         {saving && <Loader2 size={15} className="animate-spin" />}
-        {saved ? "✓ Saved" : saving ? "Saving…" : "Save Profile"}
+        {saved ? "Saved" : saving ? "Saving…" : "Save Profile"}
       </button>
     </div>
   );

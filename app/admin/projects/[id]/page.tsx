@@ -6,6 +6,7 @@ import {
   ArrowLeft, RefreshCw, CheckCircle, AlertCircle,
   Clock, MapPin, Zap, User, Building2, History, Activity, Send, Network,
 } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -86,15 +87,10 @@ export default function AdminProjectDetail() {
   const [saving, setSaving]           = useState(false);
   const [selectedStage, setSelectedStage] = useState<HomeownerStage | ''>('');
   const [note, setNote]               = useState('');
-  const [toast, setToast]             = useState<{ msg: string; ok: boolean } | null>(null);
+  const toast = useToast();
   const [activity, setActivity]       = useState<ActivityEntry[]>([]);
   const [inviteSending, setInviteSending] = useState(false);
   const [inviteStatus, setInviteStatus]   = useState<'idle' | 'sent' | 'error'>('idle');
-
-  const showToast = (msg: string, ok = true) => {
-    setToast({ msg, ok });
-    setTimeout(() => setToast(null), 3500);
-  };
 
   const handleSendPortalInvite = async () => {
     if (!project || inviteSending) return;
@@ -105,16 +101,16 @@ export default function AdminProjectDetail() {
       const data = await res.json();
       if (data.success) {
         setInviteStatus('sent');
-        showToast(`Portal invite sent to ${data.sentTo}`);
+        toast.success(`Portal invite sent to ${data.sentTo}`);
         setTimeout(() => setInviteStatus('idle'), 5000);
       } else {
         setInviteStatus('error');
-        showToast(data.error || 'Failed to send invite.', false);
+        toast.error(data.error || 'Failed to send invite.');
         setTimeout(() => setInviteStatus('idle'), 5000);
       }
     } catch {
       setInviteStatus('error');
-      showToast('Connection error. Please try again.', false);
+      toast.error('Connection error. Please try again.');
       setTimeout(() => setInviteStatus('idle'), 5000);
     } finally {
       setInviteSending(false);
@@ -136,7 +132,7 @@ export default function AdminProjectDetail() {
           .then(ad => { if (ad.activity) setActivity(ad.activity); })
           .catch(() => {});
       } else {
-        showToast(d.error || 'Failed to load project', false);
+        toast.error(d.error || 'Failed to load project');
       }
     } finally {
       setLoading(false);
@@ -156,11 +152,11 @@ export default function AdminProjectDetail() {
       });
       const d = await res.json();
       if (d.success) {
-        showToast('✓ Stage updated');
+        toast.error('✓ Stage updated');
         setNote('');
         load();
       } else {
-        showToast(d.error || 'Failed to update stage', false);
+        toast.success(d.error || 'Failed to update stage');
       }
     } finally {
       setSaving(false);
@@ -397,7 +393,7 @@ export default function AdminProjectDetail() {
             <button
               onClick={() => {
                 const url = `${window.location.origin}/portal/login`;
-                navigator.clipboard.writeText(url).then(() => showToast('Portal link copied'));
+                navigator.clipboard.writeText(url).then(() => toast.success('Portal link copied'));
               }}
               className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white border border-white/10 hover:border-white/20 rounded-lg px-3 py-1.5 transition-all"
             >
@@ -513,17 +509,6 @@ export default function AdminProjectDetail() {
         )}
       </div>
 
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium shadow-xl ${
-          toast.ok
-            ? 'bg-green-500/20 border border-green-500/30 text-green-400'
-            : 'bg-red-500/20 border border-red-500/30 text-red-400'
-        }`}>
-          {toast.ok ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-          {toast.msg}
-        </div>
-      )}
     </div>
   );
 }

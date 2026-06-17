@@ -292,7 +292,7 @@ function ResetPasswordForm() {
             {/* Match indicator */}
             {form.confirm.length > 0 && (
               <p className={`text-xs mt-1.5 ${form.password === form.confirm ? 'text-green-400' : 'text-red-400'}`}>
-                {form.password === form.confirm ? '✓ Passwords match' : '✗ Passwords do not match'}
+                {form.password === form.confirm ? 'Passwords match' : 'Passwords do not match'}
               </p>
             )}
           </div>

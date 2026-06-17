@@ -3,7 +3,7 @@ import React, { useEffect, useState, Suspense } from 'react';
 import AppShell from '@/components/ui/AppShell';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, FolderOpen, Sun, Layers, Fence, User, ChevronRight } from 'lucide-react';
+import { ArrowLeft, FolderOpen, Sun, Layers, Fence, User, ChevronRight, Home, Sprout, Fence as FenceIcon } from 'lucide-react';
 import Link from 'next/link';
 import type { Client, SystemType } from '@/types';
 import { useToast } from '@/components/ui/Toast';
@@ -16,7 +16,7 @@ const SYSTEM_TYPES = [
   {
     type: 'roof' as SystemType,
     label: 'Roof Mount',
-    icon: '🏠',
+    icon: <Home size={28} />,
     description: 'Solar panels on your roof — the most common and affordable option.',
     features: ['Panels match your roof angle', 'Automatic fire code setbacks', 'Best for south-facing roofs', 'Works on multiple roof planes'],
     color: 'amber',
@@ -24,7 +24,7 @@ const SYSTEM_TYPES = [
   {
     type: 'ground' as SystemType,
     label: 'Ground Mount',
-    icon: '🌱',
+    icon: <Sprout size={28} />,
     description: 'Solar panels on the ground — ideal if you have open land.',
     features: ['Adjustable panel angle for best production', 'Row spacing for winter sun', 'No roof work required', 'Scales to larger systems'],
     color: 'teal',
@@ -32,7 +32,7 @@ const SYSTEM_TYPES = [
   {
     type: 'fence' as SystemType,
     label: 'Sol Fence (Vertical)',
-    icon: '🔲',
+    icon: <FenceIcon size={28} />,
     description: 'Solar fence around your property — panels act as a boundary wall.',
     features: ['Double-sided panels capture light from both sides', 'Works as a property fence', 'Great for small yards', 'Modern look with vertical panels'],
     color: 'purple',
@@ -245,7 +245,7 @@ function NewProjectContent() {
                       : 'border-slate-700 bg-slate-800/40 hover:border-slate-600'
                   }`}
                 >
-                  <div className="text-3xl mb-2">{icon}</div>
+                  <div className="mb-2">{icon}</div>
                   <div className="font-semibold text-white text-sm mb-1">{label}</div>
                   <div className="text-xs text-slate-400 mb-3">{description}</div>
                   <ul className="space-y-1">
