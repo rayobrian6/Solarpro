@@ -219,7 +219,12 @@ export default function ActivityLogPage() {
               ) : logs.map((log: any) => {
                 const { icon: Icon, color, bg } = getActionDisplay(log.action);
                 const label = ACTION_LABELS[log.action] || log.action.replace(/_/g, ' ');
-                const meta = typeof log.metadata === 'string' ? JSON.parse(log.metadata || '{}') : (log.metadata || {});
+                const meta = ((): Record<string, any> => {
+                  const m = log.metadata;
+                  if (m == null) return {};
+                  if (typeof m !== 'string') return m;
+                  try { return JSON.parse(m || '{}'); } catch { return {}; }
+                })();
                 return (
                   <tr key={log.id} className="border-b border-white/5 hover:bg-white/2 transition-colors">
                     <td className="px-4 py-3">

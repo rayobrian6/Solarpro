@@ -1275,8 +1275,9 @@ export default function CommandCenter() {
             count={dashLoading ? '—' : readyToAdvance} label="Ready to Advance" sub="Move forward"
             cta="Advance" href="/projects?status=design"
             onCtaClick={() => {
-              // Open Decision Engine for most-stale approved project
-              const target = [...projects].filter(p => normalizeStatus(p.status) === 'approved')
+              // Target the SAME set the card counts (design-ready = design + layout),
+              // not 'approved' — the count and the action were decoupled.
+              const target = [...projects].filter(p => normalizeStatus(p.status) === 'design' && !!p.layout)
                 .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
               if (target) openDecisionModal(target.id, target.name, target.client?.name);
               else touchProjects('design');

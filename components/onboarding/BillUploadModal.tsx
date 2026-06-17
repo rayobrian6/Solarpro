@@ -167,6 +167,8 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
   const [error, setError] = useState<string | null>(null);
   const [systemKw, setSystemKw] = useState<number>(0);
   const [offsetPercent, setOffsetPercent] = useState(100);
+  // Recommended size at 100% offset — the offset slider scales systemKw from this.
+  const [baselineKw, setBaselineKw] = useState<number>(0);
   const [selectedFile, setSelectedFile] = useState<{ name: string; size: number } | null>(null);
   const [lastFile, setLastFile] = useState<File | null>(null);
   const [manualKwh, setManualKwh] = useState('');
@@ -256,22 +258,24 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
         // Use API sizing if available, otherwise fall back to client-side calculation
         const apiKw = sizingData.systemSizing?.recommendedKw;
         if (apiKw && apiKw > 0) {
-          setSystemKw(apiKw);
+          setSystemKw(apiKw); setBaselineKw(apiKw);
         } else {
           // system-size returned success but no sizing (likely kWh not received) — compute locally
           console.warn('[BillUploadModal] system-size returned no sizing — using client-side fallback');
           const fallbackKw = computeSystemKwFallback(merged.billData);
-          setSystemKw(fallbackKw);
+          setSystemKw(fallbackKw); setBaselineKw(fallbackKw);
         }
       } else {
         console.warn('[BillUploadModal] /api/system-size failed:', sizingData.error, '— using client-side fallback');
         setResult(uploadResult);
-        setSystemKw(computeSystemKwFallback(uploadResult.billData));
+        const k = computeSystemKwFallback(uploadResult.billData);
+        setSystemKw(k); setBaselineKw(k);
       }
     } catch (sizingErr: unknown) {
       console.warn('[BillUploadModal] /api/system-size threw:', sizingErr instanceof Error ? (sizingErr as Error).message : sizingErr, '— using client-side fallback');
       setResult(uploadResult);
-      setSystemKw(computeSystemKwFallback(uploadResult.billData));
+      const k = computeSystemKwFallback(uploadResult.billData);
+      setSystemKw(k); setBaselineKw(k);
     }
     setProcessingStage('done');
     setTimeout(() => setStep('review'), 400);
@@ -931,7 +935,13 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                     <span className="text-emerald-400 font-bold">{offsetPercent}%</span>
                   </div>
                   <input type="range" min={50} max={120} step={5} value={offsetPercent}
-                    onChange={e => setOffsetPercent(parseInt(e.target.value))}
+                    onChange={e => {
+                      const pct = parseInt(e.target.value);
+                      setOffsetPercent(pct);
+                      // Drive the actual system size off the offset target so the
+                      // slider isn't cosmetic — systemKw is what gets saved/provisioned.
+                      if (baselineKw > 0) setSystemKw(Math.round(baselineKw * pct / 100 * 10) / 10);
+                    }}
                     className="w-full accent-emerald-500" />
                 </div>
                 <div className="grid grid-cols-3 gap-2 mt-3">
