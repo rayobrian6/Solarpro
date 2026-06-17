@@ -2,6 +2,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Plus, Trash2, Edit2, RefreshCw, CheckCircle, AlertCircle,
          Save, X, ChevronDown, ChevronRight, Search, Zap } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 // ─── utility type classifier ─────────────────────────────────────────────────
 function classifyUtility(name: string, notes?: string | null): 'IOU' | 'Co-op' | 'Muni' | 'PUD' {
@@ -235,17 +237,15 @@ export default function AdminUtilities() {
   const [loading, setLoading]   = useState(true);
   const [adding, setAdding]     = useState(false);
   const [editing, setEditing]   = useState<any | null>(null);
-  const [toast, setToast]       = useState<{ msg: string; ok: boolean } | null>(null);
+  const toast = useToast();
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
   const [search, setSearch]     = useState('');
   const [typeFilter, setTypeFilter] = useState<'all'|'IOU'|'Co-op'|'Muni'|'PUD'>('all');
   const [nemFilter, setNemFilter]   = useState<'all'|'yes'|'no'>('all');
   const [stateFilter, setStateFilter] = useState('');
   const [expandAll, setExpandAll]   = useState(false); // collapsed by default — less scroll
 
-  const showToast = (msg: string, ok = true) => {
-    setToast({ msg, ok });
-    setTimeout(() => setToast(null), 3000);
-  };
+
 
   const load = async () => {
     setLoading(true);
@@ -262,16 +262,20 @@ export default function AdminUtilities() {
     const body   = editing ? { ...form, id: editing.id } : form;
     const r = await fetch('/api/admin/utilities', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const d = await r.json();
-    if (d.success) { showToast('✓ Saved'); setAdding(false); setEditing(null); load(); }
-    else showToast(d.error || 'Failed', false);
+    if (d.success) { toast.success('Saved'); setAdding(false); setEditing(null); load(); }
+    else toast.error(d.error || 'Failed');
   };
 
-  const del = async (id: string) => {
-    if (!confirm('Delete this utility?')) return;
-    const r = await fetch('/api/admin/utilities', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
-    const d = await r.json();
-    if (d.success) { showToast('✓ Deleted'); load(); }
-    else showToast(d.error || 'Failed', false);
+  const del = (id: string) => {
+    setConfirmDialog({
+      message: 'Delete this utility?',
+      onConfirm: async () => {
+        const r = await fetch('/api/admin/utilities', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+        const d = await r.json();
+        if (d.success) { toast.success('Deleted'); load(); }
+        else toast.error(d.error || 'Failed');
+      },
+    });
   };
 
   // ── filter ────────────────────────────────────────────────────────────────
@@ -442,15 +446,15 @@ export default function AdminUtilities() {
         </div>
       )}
 
-      {/* ── Toast ── */}
-      {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-medium shadow-xl ${
-          toast.ok ? 'bg-green-500/20 border border-green-500/30 text-green-400'
-                   : 'bg-red-500/20 border border-red-500/30 text-red-400'}`}>
-          {toast.ok ? <CheckCircle size={13}/> : <AlertCircle size={13}/>}
-          {toast.msg}
-        </div>
-      )}
+      {/* ── Confirm Dialog ── */}
+      {confirmDialog ? (
+        <ConfirmDialog
+          message={confirmDialog.message}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+          variant="danger"
+        />
+      ) : null}
     </div>
   );
 }

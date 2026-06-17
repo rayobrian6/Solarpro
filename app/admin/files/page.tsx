@@ -1,6 +1,8 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { HardDrive, RefreshCw, Trash2, Download, CheckCircle, AlertCircle, Filter } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 const FILE_TYPES = ['', 'engineering', 'utility_bill', 'site_photo', 'permit', 'proposal', 'document', 'other'];
 const TYPE_COLORS: Record<string, string> = {
@@ -25,10 +27,9 @@ export default function AdminFiles() {
   const [page, setPage]         = useState(1);
   const [fileType, setFileType] = useState('');
   const [loading, setLoading]   = useState(true);
-  const [toast, setToast]       = useState<{ msg: string; ok: boolean } | null>(null);
+  const toast = useToast();
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
   const LIMIT = 50;
-
-  const showToast = (msg: string, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 3000); };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -41,12 +42,16 @@ export default function AdminFiles() {
 
   useEffect(() => { load(); }, [load]);
 
-  const del = async (id: string, name: string) => {
-    if (!confirm(`Delete file "${name}"?`)) return;
-    const res = await fetch(`/api/admin/files?id=${id}`, { method: 'DELETE' });
-    const d = await res.json();
-    if (d.success) { showToast('✓ File deleted'); load(); }
-    else showToast(d.error || 'Failed', false);
+  const del = (id: string, name: string) => {
+    setConfirmDialog({
+      message: `Delete file "${name}"?`,
+      onConfirm: async () => {
+        const res = await fetch(`/api/admin/files?id=${id}`, { method: 'DELETE' });
+        const d = await res.json();
+        if (d.success) { toast.success('File deleted'); load(); }
+        else toast.error(d.error || 'Failed');
+      },
+    });
   };
 
   const pages = Math.ceil(total / LIMIT);
@@ -158,12 +163,14 @@ export default function AdminFiles() {
         </div>
       )}
 
-      {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium shadow-xl ${toast.ok ? 'bg-green-500/20 border border-green-500/30 text-green-400' : 'bg-red-500/20 border border-red-500/30 text-red-400'}`}>
-          {toast.ok ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-          {toast.msg}
-        </div>
-      )}
+      {confirmDialog ? (
+        <ConfirmDialog
+          message={confirmDialog.message}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+          variant="danger"
+        />
+      ) : null}
     </div>
   );
 }

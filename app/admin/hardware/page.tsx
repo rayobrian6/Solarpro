@@ -5,6 +5,7 @@ import { Cpu, Plus, Edit, Trash2, Save, X, Zap, Settings, Sun, Battery as Batter
 import { useDatasheetIngestion } from '@/hooks/useDatasheetIngestion';
 import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
 import { mapConfidence } from '@/lib/satellite/types';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 // Debounce utility for autosave
 function debounce<T extends (...args: any[]) => any>(fn: T, delay: number): T {
@@ -536,6 +537,7 @@ export default function HardwarePage() {
   
   const [activeTab, setActiveTab] = useState<'panels' | 'inverters' | 'mounting' | 'batteries'>('panels');
   const [saving, setSaving] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
 
   useEffect(() => {
     fetch('/api/hardware').then(r => r.json()).then(d => {
@@ -620,17 +622,21 @@ export default function HardwarePage() {
     }
   };
 
-  const handleDeletePanel = async (panel: SolarPanel) => {
-    if (!confirm(`Delete ${panel.manufacturer} ${panel.model}?`)) return;
-    const res = await fetch('/api/hardware', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'panel', id: panel.id }),
+  const handleDeletePanel = (panel: SolarPanel) => {
+    setConfirmDialog({
+      message: `Delete ${panel.manufacturer} ${panel.model}?`,
+      onConfirm: async () => {
+        const res = await fetch('/api/hardware', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'panel', id: panel.id }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setPanels(prev => prev.filter(p => p.id !== panel.id));
+        }
+      },
     });
-    const data = await res.json();
-    if (data.success) {
-      setPanels(prev => prev.filter(p => p.id !== panel.id));
-    }
   };
 
   // Inverter handlers
@@ -682,17 +688,21 @@ export default function HardwarePage() {
     }
   };
 
-  const handleDeleteInverter = async (inverter: Inverter) => {
-    if (!confirm(`Delete ${inverter.manufacturer} ${inverter.model}?`)) return;
-    const res = await fetch('/api/hardware', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'inverter', id: inverter.id }),
+  const handleDeleteInverter = (inverter: Inverter) => {
+    setConfirmDialog({
+      message: `Delete ${inverter.manufacturer} ${inverter.model}?`,
+      onConfirm: async () => {
+        const res = await fetch('/api/hardware', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'inverter', id: inverter.id }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setInverters(prev => prev.filter(i => i.id !== inverter.id));
+        }
+      },
     });
-    const data = await res.json();
-    if (data.success) {
-      setInverters(prev => prev.filter(i => i.id !== inverter.id));
-    }
   };
 
   const tabs = [
@@ -877,6 +887,14 @@ export default function HardwarePage() {
           </div>
         )}
       </div>
+      {confirmDialog ? (
+        <ConfirmDialog
+          message={confirmDialog.message}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+          variant="danger"
+        />
+      ) : null}
     </>
   );
 }

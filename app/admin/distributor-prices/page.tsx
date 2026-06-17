@@ -6,6 +6,7 @@ import {
   Database, Package, Tag, TrendingUp, ToggleLeft, ToggleRight,
   Info, Zap, Download
 } from 'lucide-react';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -172,6 +173,7 @@ export default function DistributorPricesPage() {
   const [showModal, setShowModal] = useState(false);
   const [editEntry, setEditEntry] = useState<PriceEntry | undefined>();
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -225,16 +227,20 @@ export default function DistributorPricesPage() {
     }
   };
 
-  const handleDelete = async (id: string, partNumber: string) => {
-    if (!confirm(`Delete override for ${partNumber}?`)) return;
-    try {
-      const res = await fetch(`/api/admin/distributor-prices?id=${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      flash(`Override deleted`);
-      await load();
-    } catch (e: any) {
-      flash(e.message, 'error');
-    }
+  const handleDelete = (id: string, partNumber: string) => {
+    setConfirmDialog({
+      message: `Delete override for ${partNumber}?`,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/admin/distributor-prices?id=${id}`, { method: 'DELETE' });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          flash(`Override deleted`);
+          await load();
+        } catch (e: any) {
+          flash(e.message, 'error');
+        }
+      },
+    });
   };
 
   const handleExportCsv = () => {
@@ -586,6 +592,16 @@ export default function DistributorPricesPage() {
           )}
         </>
       )}
+
+      {/* ── Confirm Dialog ── */}
+      {confirmDialog ? (
+        <ConfirmDialog
+          message={confirmDialog.message}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+          variant="danger"
+        />
+      ) : null}
 
       {/* ── Modal ── */}
       {showModal && (

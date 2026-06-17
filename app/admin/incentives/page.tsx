@@ -1,6 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Zap, Plus, Trash2, Edit2, RefreshCw, CheckCircle, AlertCircle, Save, X } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 const TYPES = ['federal_itc','state_credit','rebate','srec','trec','net_metering','exemption','other'];
 const VALUE_TYPES = ['percent','dollar','dollar_per_kwh','dollar_per_w'];
@@ -71,9 +73,9 @@ export default function AdminIncentives() {
   const [loading, setLoading] = useState(true);
   const [adding, setAdding]   = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
-  const [toast, setToast]     = useState<{ msg: string; ok: boolean } | null>(null);
+  const toast = useToast();
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
 
-  const showToast = (msg: string, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 3000); };
 
   const load = async () => {
     setLoading(true);
@@ -91,23 +93,27 @@ export default function AdminIncentives() {
     const body   = editing ? { ...form, id: editing.id } : form;
     const res = await fetch('/api/admin/incentives', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const d = await res.json();
-    if (d.success) { showToast('✓ Saved'); setAdding(false); setEditing(null); load(); }
-    else showToast(d.error || 'Failed', false);
+    if (d.success) { toast.success('Saved'); setAdding(false); setEditing(null); load(); }
+    else toast.error(d.error || 'Failed');
   };
 
-  const del = async (id: string) => {
-    if (!confirm('Delete this incentive?')) return;
-    const res = await fetch(`/api/admin/incentives?id=${id}`, { method: 'DELETE' });
-    const d = await res.json();
-    if (d.success) { showToast('✓ Deleted'); load(); }
-    else showToast(d.error || 'Failed', false);
+  const del = (id: string) => {
+    setConfirmDialog({
+      message: 'Delete this incentive?',
+      onConfirm: async () => {
+        const res = await fetch(`/api/admin/incentives?id=${id}`, { method: 'DELETE' });
+        const d = await res.json();
+        if (d.success) { toast.success('Deleted'); load(); }
+        else toast.error(d.error || 'Failed');
+      },
+    });
   };
 
   const seedDefaults = async () => {
     for (const item of SEED_DATA) {
       await fetch('/api/admin/incentives', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
     }
-    showToast('✓ Default incentives seeded');
+    toast.success('Default incentives seeded');
     load();
   };
 
@@ -176,12 +182,14 @@ export default function AdminIncentives() {
         </div>
       </div>
 
-      {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium shadow-xl ${toast.ok ? 'bg-green-500/20 border border-green-500/30 text-green-400' : 'bg-red-500/20 border border-red-500/30 text-red-400'}`}>
-          {toast.ok ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-          {toast.msg}
-        </div>
-      )}
+      {confirmDialog ? (
+        <ConfirmDialog
+          message={confirmDialog.message}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+          variant="danger"
+        />
+      ) : null}
     </div>
   );
 }

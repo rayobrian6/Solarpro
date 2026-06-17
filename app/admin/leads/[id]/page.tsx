@@ -7,6 +7,8 @@ import {
   CheckCircle, Clock, AlertCircle, XCircle, Star,
   ExternalLink, RefreshCw,
 } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 type User = {
   id: string;
@@ -54,7 +56,8 @@ export default function AdminLeadDetail() {
   const [loading, setLoading]     = useState(true);
   const [saving, setSaving]       = useState(false);
   const [converting, setConverting] = useState(false);
-  const [toast, setToast]         = useState<{ msg: string; ok: boolean } | null>(null);
+  const toast = useToast();
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
   const [users, setUsers]         = useState<User[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [assigning, setAssigning] = useState(false);
@@ -68,10 +71,7 @@ export default function AdminLeadDetail() {
   const [editNotes, setEditNotes]   = useState('');
   const [editStatus, setEditStatus] = useState<typeof VALID_STATUSES[number]>('new');
 
-  const showToast = (msg: string, ok = true) => {
-    setToast({ msg, ok });
-    setTimeout(() => setToast(null), 3500);
-  };
+
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -87,7 +87,7 @@ export default function AdminLeadDetail() {
         setEditNotes(d.lead.notes || '');
         setEditStatus(d.lead.status);
       } else {
-        showToast(d.error || 'Failed to load lead', false);
+        toast.error(d.error || 'Failed to load lead');
       }
     } finally {
       setLoading(false);
@@ -130,37 +130,42 @@ export default function AdminLeadDetail() {
       const d = await res.json();
       if (d.success) {
         setLead(d.lead);
-        showToast('Saved');
+        toast.success('Saved');
       } else {
-        showToast(d.error || 'Save failed', false);
+        toast.error(d.error || 'Save failed');
       }
     } finally {
       setSaving(false);
     }
   };
 
-  const handleConvert = async () => {
-    if (!confirm('Convert this lead to a client and project? You will be taken to the new project.')) return;
-    setConverting(true);
-    try {
-      const res = await fetch(`/api/admin/leads/${id}/convert`, { method: 'POST' });
-      const d = await res.json();
-      if (d.success) {
-        showToast('Converted — client and project created');
-        // #13 FIX: Navigate directly to the new project so the rep can continue
-        // (design, proposal, etc.) without having to find it in the project list
-        if (d.projectId) {
-          router.push(`/projects/${d.projectId}`);
-        } else {
-          await load();
+  const handleConvert = () => {
+    setConfirmDialog({
+      message: 'Convert this lead to a client and project? You will be taken to the new project.',
+      onConfirm: async () => {
+        setConverting(true);
+        try {
+          const res = await fetch(`/api/admin/leads/${id}/convert`, { method: 'POST' });
+          const d = await res.json();
+          if (d.success) {
+            toast.success('Converted — client and project created');
+            // #13 FIX: Navigate directly to the new project so the rep can continue
+            // (design, proposal, etc.) without having to find it in the project list
+            if (d.projectId) {
+              router.push(`/projects/${d.projectId}`);
+            } else {
+              await load();
+            }
+          } else {
+            toast.error(d.error || 'Conversion failed');
+          }
+        } finally {
+          setConverting(false);
         }
-      } else {
-        showToast(d.error || 'Conversion failed', false);
-      }
-    } finally {
-      setConverting(false);
-    }
+      },
+    });
   };
+
 
   const handleAssignUser = async () => {
     if (!selectedUserId) return;
@@ -173,11 +178,11 @@ export default function AdminLeadDetail() {
       });
       const d = await res.json();
       if (d.success) {
-        showToast('Owner assigned successfully');
+        toast.success('Owner assigned successfully');
         setSelectedUserId('');
         await load();
       } else {
-        showToast(d.error || 'Failed to assign owner', false);
+        toast.error(d.error || 'Failed to assign owner');
       }
     } finally {
       setAssigning(false);
@@ -435,14 +440,14 @@ export default function AdminLeadDetail() {
         )}
       </div>
 
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl text-sm font-medium shadow-lg z-50 ${
-          toast.ok ? 'bg-green-500/90 text-white' : 'bg-red-500/90 text-white'
-        }`}>
-          {toast.msg}
-        </div>
-      )}
+      {confirmDialog ? (
+        <ConfirmDialog
+          message={confirmDialog.message}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+          variant="warning"
+        />
+      ) : null}
     </div>
   );
 }
