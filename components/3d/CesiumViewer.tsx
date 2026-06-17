@@ -39,7 +39,10 @@ interface Props {
   projectAddress?: string;
 }
 
-const GOOGLE_API_KEY = 'AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE';
+// Prefer the env var so the key can be rotated/restricted without a code deploy.
+// Falls back to the legacy literal until NEXT_PUBLIC_GOOGLE_MAPS_KEY is set in Vercel
+// (set it + restrict by HTTP referrer/quota in Google Cloud + rotate, then drop the literal).
+const GOOGLE_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY || 'AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE';
 
 declare global { interface Window { Cesium: any; google: any; } }
 

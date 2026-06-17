@@ -914,17 +914,22 @@ export function mapAiResultToBillExtractResult(
     ? ai.monthly_kwh.filter(v => v > 0)
     : undefined;
 
-  const monthlyKwh = ai.total_kwh
-    ?? (monthlyHistory && monthlyHistory.length > 0
-        ? Math.round(monthlyHistory[monthlyHistory.length - 1])  // Most recent month
-        : undefined);
-
   const monthsFound = monthlyHistory?.length ?? 0;
 
   const estimatedAnnualKwh =
     (monthsFound >= 10 ? monthlyHistory!.reduce((a, b) => a + b, 0) : undefined)
     ?? (monthsFound >= 3 ? Math.round(monthlyHistory!.reduce((a, b) => a + b, 0) / monthsFound * 12) : undefined)
     ?? (ai.total_kwh ? ai.total_kwh * 12 : undefined);
+
+  // Pair monthlyKwh with annual on the SAME basis (average month) rather than an
+  // arbitrary last-history bar — otherwise rate = currentCost / monthlyKwh mixes a
+  // single month's kWh with the current period's dollars.
+  const monthlyKwh = ai.total_kwh
+    ?? (estimatedAnnualKwh
+        ? Math.round(estimatedAnnualKwh / 12)
+        : (monthlyHistory && monthlyHistory.length > 0
+            ? Math.round(monthlyHistory[monthlyHistory.length - 1])
+            : undefined));
 
   const extractedFields: string[] = [];
   if (ai.utility_name)         extractedFields.push('utilityProvider');

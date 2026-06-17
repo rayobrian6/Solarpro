@@ -869,14 +869,24 @@ export default function PortalDashboard() {
       setDocuments(d.documents ?? []);
       setMicroStages(d.microStages ?? []);
       setProposals(d.proposals ?? []);
-      setBillUploaded((d.documents ?? []).some((doc: { label: string; file_type?: string }) =>
-        doc.label === 'Utility Bill' || doc.file_type === 'utility_bill'
-      ));
+      // billUploaded is computed per ACTIVE project by the effect below — not here,
+      // since documents holds files for ALL of the homeowner's projects.
     } catch { setError('Connection error. Please refresh the page.'); }
     finally   { setLoading(false); setTimeout(() => setMounted(true), 60); }
   };
 
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Scope the bill-uploaded flag to the ACTIVE project. documents contains files
+  // for every one of the homeowner's projects, so a global some() falsely showed
+  // "Utility bill received" (and hid the upload control) on a project that never
+  // got one. Recompute whenever the active project or documents change.
+  useEffect(() => {
+    if (!activeProject) { setBillUploaded(false); return; }
+    setBillUploaded(documents.some(doc =>
+      doc.project_id === activeProject.id && doc.label === 'Utility Bill'
+    ));
+  }, [activeProject, documents]);
 
   const handleLogout = async () => {
     await fetch('/api/portal/logout', { method: 'POST' });

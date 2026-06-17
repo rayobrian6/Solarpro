@@ -94,7 +94,9 @@ export async function buildDigitalTwin(
   address: string,
   skipDsm = false
 ): Promise<DigitalTwinData> {
-  const _ck = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+  // Include address + full-precision coords: 4-decimal-only keys (~11m) let
+  // adjacent properties collide and receive each other's cached roof/solar data.
+  const _ck = `${address}|${lat.toFixed(6)},${lng.toFixed(6)}`;
   if (_twinCache.has(_ck)) return _twinCache.get(_ck)!;
 
   // PERF v61: If skipDsm, only run elevation + solar in parallel (saves 3-8s at boot).
@@ -142,7 +144,7 @@ export async function buildDigitalTwin(
 export async function enrichDigitalTwinWithDsm(
   twin: DigitalTwinData
 ): Promise<DigitalTwinData> {
-  const _ck = `${twin.lat.toFixed(4)},${twin.lng.toFixed(4)}`;
+  const _ck = `${twin.address}|${twin.lat.toFixed(6)},${twin.lng.toFixed(6)}`;
   if (_twinCache.has(_ck)) return _twinCache.get(_ck)!;  // already enriched
   try {
     const dsm = await fetchDsmRoofPlanes(twin.lat, twin.lng);

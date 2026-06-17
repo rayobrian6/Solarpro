@@ -14,7 +14,7 @@ import {
   Inbox, Search, PenTool, Eye, EyeOff, UserCheck,
   ChevronDown, ChevronUp, X,
   ClipboardList, Phone, Play,
-} from 'lucide-react';
+  Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import BillUploadModal from '@/components/onboarding/BillUploadModal';
@@ -731,6 +731,23 @@ export default function CommandCenter() {
     try { localStorage.removeItem('solarpro:workflowBannerSnoozedUntil'); } catch { /* ignore */ }
   };
 
+  // Onboarding banner — shown for users who haven't completed company setup
+  const [dismissedOnboardBanner, setDismissedOnboardBanner] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const snoozedUntil = localStorage.getItem('solarpro:onboardBannerSnoozedUntil');
+      if (snoozedUntil && Number(snoozedUntil) > Date.now()) return true;
+      localStorage.removeItem('solarpro:onboardBannerSnoozedUntil');
+      return false;
+    } catch { return false; }
+  });
+  const dismissOnboardBanner = () => {
+    setDismissedOnboardBanner(true);
+    try {
+      const until = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30 days
+      localStorage.setItem('solarpro:onboardBannerSnoozedUntil', String(until));
+    } catch { /* ignore */ }
+  };
   // ── Priority Surface: Miller's Law compliant dashboard view ──
   // Default 'priority' shows only Command Header + Today's Commands + Work Queue
   // 'full' shows all sections — toggled by user
@@ -1133,6 +1150,39 @@ export default function CommandCenter() {
           )}
         </>) : null}
 
+
+        {/* Onboarding Banner — users who haven't completed company setup */}
+        {currentUser && !dismissedOnboardBanner && (!currentUser.company || !currentUser.hasSeenTour) ? (
+          <div className="rounded-xl border-l-4 border-l-amber-400 border border-slate-700/60 bg-slate-800/60 px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/15 flex items-center justify-center flex-shrink-0">
+                  <Sparkles size={16} className="text-amber-400" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-white">Complete your setup</div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    {!currentUser.company
+                      ? 'Add your company info to unlock branded proposals and client-facing tools.'
+                      : 'Take the quick tour to learn how SolarPro works.'}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Link href="/onboarding"
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 hover:text-amber-300 transition-all flex items-center gap-1.5">
+                  <ArrowRight size={12} /> {!currentUser.company ? 'Complete Setup' : 'Start Tour'}
+                </Link>
+                <button onClick={dismissOnboardBanner}
+                  title="Dismiss for 30 days"
+                  className="text-slate-500 hover:text-slate-300 transition-colors p-1 rounded"
+                  aria-label="Dismiss onboarding banner">
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {viewMode === 'full' ? (<>
           {/* ══════════ FINANCIAL PRESSURE BAR ══════════ */}
           {!dashLoading && (
@@ -1246,54 +1296,103 @@ export default function CommandCenter() {
         )}
 
         {viewMode === 'full' ? (<>
-        {/* ═══ COMMAND BAR (5 Cards) ═══ */}
-        {/* ═══ COMMAND BAR (5 Cards) ═══
-            PHASE 3: onCtaClick fires real API mutations (touch updatedAt) so
-            urgency counters update after the user acts. Cards still navigate. */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          <CommandCard accentColor="#EF4444" icon={<AlertTriangle size={18} />}
-            count={dashLoading ? '—' : criticalCount} label="Critical Actions" sub="Needs attention now"
-            cta="Resolve Now" href="/projects?status=proposal" pulse={criticalCount > 0}
-            onCtaClick={() => {
-              // Open Decision Engine for most-stale proposal project
-              const target = [...projects].filter(p => normalizeStatus(p.status) === 'proposal')
-                .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
-              if (target) openDecisionModal(target.id, target.name, target.client?.name);
-              else touchProjects('proposal');
-            }} />
-          <CommandCard accentColor="#F59E0B" icon={<Clock size={18} />}
-            count={dashLoading ? '—' : awaitingCount} label="Awaiting Design" sub="Follow-up required"
-            cta="Follow Up" href="/projects?status=design"
-            onCtaClick={() => {
-              // Open Decision Engine for most-stale design project
-              const target = [...projects].filter(p => normalizeStatus(p.status) === 'design')
-                .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
-              if (target) openDecisionModal(target.id, target.name, target.client?.name);
-              else touchProjects('design');
-            }} />
-          <CommandCard accentColor="#22C55E" icon={<CheckCircle size={18} />}
-            count={dashLoading ? '—' : readyToAdvance} label="Ready to Advance" sub="Move forward"
-            cta="Advance" href="/projects?status=design"
-            onCtaClick={() => {
-              // Open Decision Engine for most-stale approved project
-              const target = [...projects].filter(p => normalizeStatus(p.status) === 'approved')
-                .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
-              if (target) openDecisionModal(target.id, target.name, target.client?.name);
-              else touchProjects('design');
-            }} />
-          <CommandCard accentColor="#3B82F6" icon={<DollarSign size={18} />}
-            count={dashLoading ? '—' : `$${(activeRevenue / 1000).toFixed(0)}k`} label="Pipeline Value" sub="Active revenue"
-            cta="View Deals" href="/projects" />
-          <CommandCard accentColor="#A855F7" icon={<TrendingUp size={18} />}
-            count={dashLoading ? '—' : `${conversionRate}%`} label="Conversion Rate" sub="Proposal-to-close ratio"
-            cta="Optimize" href="/projects?status=approved"
-            onCtaClick={() => {
-              // Open Decision Engine for most-stale approved project
-              const target = [...projects].filter(p => normalizeStatus(p.status) === 'approved')
-                .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
-              if (target) openDecisionModal(target.id, target.name, target.client?.name);
-              else touchProjects('approved');
-            }} />
+        {/* ═══ ACTION PRIORITY ═══
+            Merged Command Bar + Action Bar into one prioritized action list.
+            Urgent items first, then quick-action shortcuts, then metrics. */}
+        <div className="card p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Target size={14} className="text-amber-400" />
+            <span className="text-sm font-bold text-white">Action Priority</span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+              style={{ background: 'rgba(245,158,11,0.15)', color: '#F59E0B' }}>
+              {(criticalCount || 0) + (awaitingCount || 0) + (readyToAdvance || 0)} actions
+            </span>
+          </div>
+
+          {/* Urgent Command Cards — 3-column grid */}
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <CommandCard accentColor="#EF4444" icon={<AlertTriangle size={18} />}
+              count={dashLoading ? '—' : criticalCount} label="Critical Actions" sub="Needs attention now"
+              cta="Resolve Now" href="/projects?status=proposal" pulse={criticalCount > 0}
+              onCtaClick={() => {
+                const target = [...projects].filter(p => normalizeStatus(p.status) === 'proposal')
+                  .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
+                if (target) openDecisionModal(target.id, target.name, target.client?.name);
+                else touchProjects('proposal');
+              }} />
+            <CommandCard accentColor="#F59E0B" icon={<Clock size={18} />}
+              count={dashLoading ? '—' : awaitingCount} label="Awaiting Design" sub="Follow-up required"
+              cta="Follow Up" href="/projects?status=design"
+              onCtaClick={() => {
+                const target = [...projects].filter(p => normalizeStatus(p.status) === 'design')
+                  .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
+                if (target) openDecisionModal(target.id, target.name, target.client?.name);
+                else touchProjects('design');
+              }} />
+            <CommandCard accentColor="#22C55E" icon={<CheckCircle size={18} />}
+              count={dashLoading ? '—' : readyToAdvance} label="Ready to Advance" sub="Move forward"
+              cta="Advance" href="/projects?status=design"
+              onCtaClick={() => {
+                const target = [...projects].filter(p => normalizeStatus(p.status) === 'design' && !!p.layout)
+                  .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
+                if (target) openDecisionModal(target.id, target.name, target.client?.name);
+                else touchProjects('design');
+              }} />
+          </div>
+
+          {/* Quick Action Shortcuts — 4-column row (formerly Action Bar) */}
+          <div className="grid grid-cols-4 gap-2">
+            <button onClick={() => setShowBillUpload(true)}
+              className="flex items-center gap-2 p-3 rounded-xl border transition-all hover:-translate-y-0.5 text-left"
+              style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(245,158,11,0.15)' }}>
+                <Flame size={13} className="text-amber-400" />
+              </div>
+              <div><div className="text-xs font-bold text-white">Upload Bill</div><div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Auto-create</div></div>
+            </button>
+            {[
+              { label: 'Add Contact', sub: 'New client', href: '/clients/new', icon: <Users size={13} />, accent: 'var(--accent-blue)', bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.25)' },
+              { label: 'Build System', sub: 'Design studio', href: '/design', icon: <Map size={13} />, accent: 'var(--accent-teal)', bg: 'rgba(20,184,166,0.08)', border: 'rgba(20,184,166,0.25)' },
+              { label: 'Close Deals', sub: 'Proposals', href: '/proposals', icon: <FileText size={13} />, accent: 'var(--accent-purple)', bg: 'rgba(168,85,247,0.08)', border: 'rgba(168,85,247,0.25)' },
+            ].map(a => (
+              <Link key={a.label} href={a.href}
+                className="flex items-center gap-2 p-3 rounded-xl border transition-all hover:-translate-y-0.5"
+                style={{ background: a.bg, border: `1px solid ${a.border}` }}>
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${a.accent}22` }}>
+                  <span style={{ color: a.accent }}>{a.icon}</span>
+                </div>
+                <div><div className="text-xs font-bold text-white">{a.label}</div><div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{a.sub}</div></div>
+              </Link>
+            ))}
+          </div>
+
+          {/* Contextual Metrics — Pipeline Value + Conversion Rate */}
+          <div className="grid grid-cols-2 gap-3 mt-4 pt-3" style={{ borderTop: '1px solid var(--border-color)' }}>
+            <Link href="/projects"
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all hover:brightness-110"
+              style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}>
+              <DollarSign size={15} className="text-blue-400" />
+              <div>
+                <div className="text-sm font-black text-blue-400 tabular-nums">{dashLoading ? '—' : `$${(activeRevenue / 1000).toFixed(0)}k`}</div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Pipeline Value</div>
+              </div>
+            </Link>
+            <Link href="/projects?status=approved"
+              onClick={() => {
+                const target = [...projects].filter(p => normalizeStatus(p.status) === 'approved')
+                  .sort((a, b) => daysSinceUpdate(b) - daysSinceUpdate(a))[0];
+                if (target) openDecisionModal(target.id, target.name, target.client?.name);
+                else touchProjects('approved');
+              }}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all hover:brightness-110"
+              style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)' }}>
+              <TrendingUp size={15} className="text-purple-400" />
+              <div>
+                <div className="text-sm font-black text-purple-400 tabular-nums">{dashLoading ? '—' : `${conversionRate}%`}</div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Conversion Rate</div>
+              </div>
+            </Link>
+          </div>
         </div>
         </>) : null}
 
@@ -1333,12 +1432,14 @@ export default function CommandCenter() {
         </>) : null}
 
         {viewMode === 'full' ? (<>
-        {/* ═══ PIPELINE CONTROL ═══ */}
+        {/* ═══════ PIPELINE & OPERATIONS ═══════
+            Unified section: Pipeline Control (always visible) +
+            Crew Calendar & Operations Board (collapsed by default). */}
         <div className="card p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <Activity size={14} className="text-amber-400" />
-              <span className="text-sm font-bold text-white">Pipeline Control</span>
+              <span className="text-sm font-bold text-white">Pipeline & Operations</span>
               {pipelineFilter !== 'all' && (
                 <button onClick={() => setPipelineFilter('all')} className="text-xs text-slate-400 hover:text-white transition-colors">(clear filter ×)</button>
               )}
@@ -1371,176 +1472,43 @@ export default function CommandCenter() {
               })}
             </div>
           )}
-        </div>
-        </>) : null}
 
-        {/* ═══ WORK QUEUE + HIGH VALUE DEALS ═══ */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2 card p-5">
-            <div className="flex items-center justify-between mb-4">
+          {/* Crew Calendar */}
+          <div className="mt-3 rounded-xl p-3" style={{ background: 'var(--bg-muted)', border: '1px solid var(--border-color)' }}>
+            <CrewCalendar />
+          </div>
+
+          {/* Crew & Operations — collapsed by default, expand to see board */}
+          <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--border-color)' }}>
+            <button onClick={() => { setOpsView(!opsView); if (!opsView && opsProjects.length === 0) fetchOpsProjects(); }}
+              className="w-full flex items-center justify-between py-2 transition-all hover:brightness-95 cursor-pointer rounded-lg px-2 -mx-2"
+              style={{ background: opsView ? 'rgba(34,197,94,0.06)' : 'transparent' }}>
               <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg bg-amber-500/15 flex items-center justify-center"><Zap size={13} className="text-amber-400" /></div>
-                <span className="text-sm font-bold text-white">Active Work Queue</span>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--accent-amber)' }}>{workQueue.length}</span>
-                {dismissedQueueIds.size > 0 && (
-                  <button
-                    onClick={restoreAllDismissed}
-                    title={`Restore ${dismissedQueueIds.size} dismissed item${dismissedQueueIds.size !== 1 ? 's' : ''}`}
-                    className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors hover:bg-slate-700/60"
-                    style={{ background: 'rgba(100,116,139,0.1)', color: 'var(--text-muted)', border: '1px solid rgba(100,116,139,0.2)' }}
-                  >
-                    <EyeOff size={9} /> {dismissedQueueIds.size} hidden
-                  </button>
+                <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: opsView ? 'rgba(34,197,94,0.15)' : 'var(--bg-muted)' }}>
+                  <ClipboardList size={12} style={{ color: opsView ? '#4ADE80' : 'var(--text-muted)' }} />
+                </div>
+                <div className="text-left">
+                  <span className="text-xs font-bold" style={{ color: 'var(--text-primary)' }}>Crew & Operations</span>
+                  <span className="text-[10px] ml-2" style={{ color: 'var(--text-muted)' }}>
+                    {opsView ? 'Calendar, assignments, and project tracking' : 'Expand to manage crews and schedules'}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {opsProjects.length > 0 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                    style={{ background: 'rgba(34,197,94,0.15)', color: '#4ADE80' }}>
+                    {opsProjects.length} projects
+                  </span>
                 )}
+                {opsView ? <ChevronUp size={14} style={{ color: 'var(--text-muted)' }} /> : <ChevronDown size={14} style={{ color: 'var(--text-muted)' }} />}
               </div>
-              <Link href="/projects" className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1">All <ChevronRight size={12} /></Link>
-            </div>
-            {dashLoading ? (
-              <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="shimmer h-14 rounded-xl" />)}</div>
-            ) : workQueue.length === 0 ? (
-              <div className="empty-state py-10">
-                <FolderOpen size={36} className="empty-state-icon" />
-                <p className="empty-state-text">No active projects yet</p>
-                <p className="empty-state-sub">Upload a utility bill to auto-create your first client and project in one step</p>
-                <button onClick={() => setShowBillUpload(true)} className="btn-primary mt-3 btn-sm"><Flame size={13} /> Upload Bill & Start Project</button>
-                <p className="text-xs mt-3" style={{ color: 'var(--text-muted)' }}>
-                  Or <Link href="/clients/new" className="text-amber-400 hover:text-amber-300 underline">add a client manually</Link> first, then <Link href="/projects/new" className="text-amber-400 hover:text-amber-300 underline">create a project</Link>
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">{workQueue.map(p => (
-                <WorkQueueRow key={p.id} project={p}
-                  onAction={(proj, label) => {
-                    // All action buttons open the Decision Engine
-                    openDecisionModal(proj.id, proj.name, proj.client?.name);
-                  }}
-                  onDismiss={proj => {
-                    setDismissedQueueIds(prev => {
-                      const next = new Set([...prev, proj.id]);
-                      try { localStorage.setItem('solarpro:dismissedQueueIds', JSON.stringify([...next])); } catch { /* ignore */ }
-                      return next;
-                    });
-                  }} />
-              ))}</div>
-            )}
+            </button>
           </div>
-          <div className="card p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: 'rgba(168,85,247,0.15)' }}><Star size={13} className="text-purple-400" /></div>
-                <span className="text-sm font-bold text-white">High Value Projects</span>
-              </div>
-              <Link href="/projects" className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1">All <ChevronRight size={12} /></Link>
-            </div>
-            {dashLoading ? (
-              <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="shimmer h-12 rounded-lg" />)}</div>
-            ) : highValueDeals.length === 0 ? (
-              <div className="text-center py-8" style={{ color: 'var(--text-muted)' }}><DollarSign size={28} className="mx-auto mb-2 opacity-30" /><p className="text-sm">No high-value projects yet</p></div>
-            ) : (
-              <div className="space-y-1">{highValueDeals.map((p, i) => <DealRow key={p.id} project={p} rank={i + 1} />)}</div>
-            )}
-            {totalRevenue > 0 && (
-              <div className="mt-4 pt-3 rounded-xl p-3 text-center" style={{ background: 'var(--bg-muted)', borderTop: '1px solid var(--border-color)' }}>
-                <div className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Total Pipeline</div>
-                <div className="text-xl font-black" style={{ color: 'var(--accent-amber)' }}>${(totalRevenue / 1000).toFixed(0)}k</div>
-                <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{totalKw.toFixed(1)} kW across {projects.length} projects</div>
-              </div>
-            )}
-          </div>
-        </div>
 
-        {/* ═══════ SECONDARY: Quick Intel + Actions (Focus view hidden) ═══════ */}
-        {viewMode === 'full' ? (<>
-        {/* ═══ QUICK INTEL STRIP ═══ */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            { label: 'Total Capacity', value: totalKw >= 1000 ? `${(totalKw/1000).toFixed(1)} MW` : `${totalKw.toFixed(1)} kW`, sub: 'Designed systems', icon: <Zap size={16} />, color: 'var(--accent-amber)', colorBg: 'rgba(245,158,11,0.1)' },
-            { label: 'Total Clients', value: clients.length, sub: `${clients.filter(c => projects.some(p => p.clientId === c.id)).length} with projects`, icon: <Users size={16} />, color: 'var(--accent-blue)', colorBg: 'rgba(59,130,246,0.1)' },
-            { label: 'Avg System Size', value: `${(isNaN(avgSystemKw) ? 0 : avgSystemKw).toFixed(1)} kW`, sub: 'Per designed project', icon: <BarChart3 size={16} />, color: 'var(--accent-teal)', colorBg: 'rgba(20,184,166,0.1)' },
-            { label: 'Deals Closed', value: approvedCount, sub: `${proposalCount} total proposals`, icon: <CheckCircle size={16} />, color: 'var(--accent-green)', colorBg: 'rgba(34,197,94,0.1)' },
-          ].map(item => (
-            <div key={item.label} className="rounded-xl p-4 transition-all duration-150 hover:-translate-y-0.5"
-              style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-card)' }}>
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center mb-3" style={{ background: item.colorBg }}>
-                <span style={{ color: item.color }}>{item.icon}</span>
-              </div>
-              <div className="text-xl font-black text-white">{dashLoading ? '—' : item.value}</div>
-              <div className="text-xs font-semibold uppercase tracking-wider mt-0.5" style={{ color: 'var(--text-secondary)' }}>{item.label}</div>
-              <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{item.sub}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* ═══ ACTION BAR ═══ */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <button onClick={() => setShowBillUpload(true)}
-            className="flex items-center gap-3 p-4 rounded-xl border transition-all hover:-translate-y-0.5 hover:shadow-lg text-left"
-            style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(245,158,11,0.15)' }}>
-              <Flame size={16} className="text-amber-400" />
-            </div>
-            <div><div className="text-sm font-bold text-white">Upload Bill</div><div className="text-xs" style={{ color: 'var(--text-muted)' }}>Auto-create client & project</div></div>
-            <ArrowRight size={13} className="ml-auto text-amber-400 opacity-60" />
-          </button>
-          {[
-            { label: 'Add Contact', sub: 'New client', href: '/clients/new', icon: <Users size={16} />, accent: 'var(--accent-blue)', bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.25)' },
-            { label: 'Build System', sub: 'Design studio', href: '/design', icon: <Map size={16} />, accent: 'var(--accent-teal)', bg: 'rgba(20,184,166,0.08)', border: 'rgba(20,184,166,0.25)' },
-            { label: 'Close Deals', sub: 'View proposals', href: '/proposals', icon: <FileText size={16} />, accent: 'var(--accent-purple)', bg: 'rgba(168,85,247,0.08)', border: 'rgba(168,85,247,0.25)' },
-          ].map(a => (
-            <Link key={a.label} href={a.href}
-              className="flex items-center gap-3 p-4 rounded-xl border transition-all hover:-translate-y-0.5 hover:shadow-lg"
-              style={{ background: a.bg, border: `1px solid ${a.border}` }}>
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${a.accent}22` }}>
-                <span style={{ color: a.accent }}>{a.icon}</span>
-              </div>
-              <div><div className="text-sm font-bold text-white">{a.label}</div><div className="text-xs" style={{ color: 'var(--text-muted)' }}>{a.sub}</div></div>
-              <ArrowRight size={13} className="ml-auto opacity-40 text-white" />
-            </Link>
-          ))}
-        </div>
-        </>) : null}
-
-        {/* ═══════ SECONDARY: Crew + Ops Board (Focus view hidden) ═══════ */}
-        {viewMode === 'full' ? (<>
-        {/* ═══ CREW CALENDAR ═══ */}
-        <div className="card p-4">
-          <CrewCalendar />
-        </div>
-
-        {/* ═══ OPERATIONS BOARD TOGGLE ═══ */}
-        <div className="pt-2">
-          <button onClick={() => { setOpsView(!opsView); if (!opsView && opsProjects.length === 0) fetchOpsProjects(); }}
-            className="w-full card p-4 flex items-center justify-between transition-all hover:brightness-95 cursor-pointer"
-            style={{ border: opsView ? '1px solid rgba(34,197,94,0.3)' : '1px solid var(--border-color)' }}>
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-xl" style={{ background: opsView ? 'rgba(34,197,94,0.15)' : 'var(--bg-muted)' }}>
-                <ClipboardList size={18} style={{ color: opsView ? '#4ADE80' : 'var(--text-muted)' }} />
-              </div>
-              <div className="text-left">
-                <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
-                  Operations Board
-                </div>
-                <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                  {opsView ? 'Kanban pipeline with crew assignments, scheduling, and project tracking' : 'Expand to manage crews, schedules, and project execution'}
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {opsProjects.length > 0 && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                  style={{ background: 'rgba(34,197,94,0.15)', color: '#4ADE80' }}>
-                  {opsProjects.length} projects
-                </span>
-              )}
-              {opsView ? <ChevronUp size={16} style={{ color: 'var(--text-muted)' }} /> : <ChevronDown size={16} style={{ color: 'var(--text-muted)' }} />}
-            </div>
-          </button>
-        </div>
-
-        {/* ═══ OPERATIONS BOARD (expandable) ═══ */}
-        {opsView && (
-          <div className="space-y-5">
-            {/* Action Required */}
+          {/* Expanded Operations Board */}
+          {opsView ? (
+            <div className="mt-3 space-y-4">
             {!opsLoading && opsProjects.length > 0 && (
               <ActionRequiredStrip items={opsActionItems}
                 onAction={(projectId, projectName, clientName) =>
@@ -1639,10 +1607,110 @@ export default function CommandCenter() {
                 })}
               </div>
             )}
+            </div>
+          ) : null}
+        </div>
+        </>) : null}
+
+        {/* ═══ WORK QUEUE + HIGH VALUE DEALS ═══ */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 card p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg bg-amber-500/15 flex items-center justify-center"><Zap size={13} className="text-amber-400" /></div>
+                <span className="text-sm font-bold text-white">Active Work Queue</span>
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--accent-amber)' }}>{workQueue.length}</span>
+                {dismissedQueueIds.size > 0 && (
+                  <button
+                    onClick={restoreAllDismissed}
+                    title={`Restore ${dismissedQueueIds.size} dismissed item${dismissedQueueIds.size !== 1 ? 's' : ''}`}
+                    className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors hover:bg-slate-700/60"
+                    style={{ background: 'rgba(100,116,139,0.1)', color: 'var(--text-muted)', border: '1px solid rgba(100,116,139,0.2)' }}
+                  >
+                    <EyeOff size={9} /> {dismissedQueueIds.size} hidden
+                  </button>
+                )}
+              </div>
+              <Link href="/projects" className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1">All <ChevronRight size={12} /></Link>
+            </div>
+            {dashLoading ? (
+              <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="shimmer h-14 rounded-xl" />)}</div>
+            ) : workQueue.length === 0 ? (
+              <div className="empty-state py-10">
+                <FolderOpen size={36} className="empty-state-icon" />
+                <p className="empty-state-text">No active projects yet</p>
+                <p className="empty-state-sub">Upload a utility bill to auto-create your first client and project in one step</p>
+                <button onClick={() => setShowBillUpload(true)} className="btn-primary mt-3 btn-sm"><Flame size={13} /> Upload Bill & Start Project</button>
+                <p className="text-xs mt-3" style={{ color: 'var(--text-muted)' }}>
+                  Or <Link href="/clients/new" className="text-amber-400 hover:text-amber-300 underline">add a client manually</Link> first, then <Link href="/projects/new" className="text-amber-400 hover:text-amber-300 underline">create a project</Link>
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">{workQueue.map(p => (
+                <WorkQueueRow key={p.id} project={p}
+                  onAction={(proj, label) => {
+                    // All action buttons open the Decision Engine
+                    openDecisionModal(proj.id, proj.name, proj.client?.name);
+                  }}
+                  onDismiss={proj => {
+                    setDismissedQueueIds(prev => {
+                      const next = new Set([...prev, proj.id]);
+                      try { localStorage.setItem('solarpro:dismissedQueueIds', JSON.stringify([...next])); } catch { /* ignore */ }
+                      return next;
+                    });
+                  }} />
+              ))}</div>
+            )}
           </div>
-        )}
+          <div className="card p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: 'rgba(168,85,247,0.15)' }}><Star size={13} className="text-purple-400" /></div>
+                <span className="text-sm font-bold text-white">High Value Projects</span>
+              </div>
+              <Link href="/projects" className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1">All <ChevronRight size={12} /></Link>
+            </div>
+            {dashLoading ? (
+              <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="shimmer h-12 rounded-lg" />)}</div>
+            ) : highValueDeals.length === 0 ? (
+              <div className="text-center py-8" style={{ color: 'var(--text-muted)' }}><DollarSign size={28} className="mx-auto mb-2 opacity-30" /><p className="text-sm">No high-value projects yet</p></div>
+            ) : (
+              <div className="space-y-1">{highValueDeals.map((p, i) => <DealRow key={p.id} project={p} rank={i + 1} />)}</div>
+            )}
+            {totalRevenue > 0 && (
+              <div className="mt-4 pt-3 rounded-xl p-3 text-center" style={{ background: 'var(--bg-muted)', borderTop: '1px solid var(--border-color)' }}>
+                <div className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Total Pipeline</div>
+                <div className="text-xl font-black" style={{ color: 'var(--accent-amber)' }}>${(totalRevenue / 1000).toFixed(0)}k</div>
+                <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{totalKw.toFixed(1)} kW across {projects.length} projects</div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ═══════ SECONDARY: Quick Intel Strip (Focus view hidden) ═══════ */}
+        {viewMode === 'full' ? (<>
+        {/* ═══ QUICK INTEL STRIP ═══ */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: 'Total Capacity', value: totalKw >= 1000 ? `${(totalKw/1000).toFixed(1)} MW` : `${totalKw.toFixed(1)} kW`, sub: 'Designed systems', icon: <Zap size={16} />, color: 'var(--accent-amber)', colorBg: 'rgba(245,158,11,0.1)' },
+            { label: 'Total Clients', value: clients.length, sub: `${clients.filter(c => projects.some(p => p.clientId === c.id)).length} with projects`, icon: <Users size={16} />, color: 'var(--accent-blue)', colorBg: 'rgba(59,130,246,0.1)' },
+            { label: 'Avg System Size', value: `${(isNaN(avgSystemKw) ? 0 : avgSystemKw).toFixed(1)} kW`, sub: 'Per designed project', icon: <BarChart3 size={16} />, color: 'var(--accent-teal)', colorBg: 'rgba(20,184,166,0.1)' },
+            { label: 'Deals Closed', value: approvedCount, sub: `${proposalCount} total proposals`, icon: <CheckCircle size={16} />, color: 'var(--accent-green)', colorBg: 'rgba(34,197,94,0.1)' },
+          ].map(item => (
+            <div key={item.label} className="rounded-xl p-4 transition-all duration-150 hover:-translate-y-0.5"
+              style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-card)' }}>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center mb-3" style={{ background: item.colorBg }}>
+                <span style={{ color: item.color }}>{item.icon}</span>
+              </div>
+              <div className="text-xl font-black text-white">{dashLoading ? '—' : item.value}</div>
+              <div className="text-xs font-semibold uppercase tracking-wider mt-0.5" style={{ color: 'var(--text-secondary)' }}>{item.label}</div>
+              <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{item.sub}</div>
+            </div>
+          ))}
+        </div>
 
         </>) : null}
+
       </div>
 
       {/* ═══ DEAL DECISION ENGINE ═══ */}

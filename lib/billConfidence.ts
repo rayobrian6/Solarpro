@@ -148,7 +148,11 @@ function scoreRate(input: BillConfidenceInput): {
     return { level: 'low', rateInRange: false, rateSource };
   }
 
-  const rateInRange = hasRate;
+  // Validate the actual value, not mere presence — an implausible parsed rate
+  // (e.g. $0.003 or $2.50/kWh) must not score 'high' just because it exists and
+  // no validation flags were supplied.
+  const cpk = input.costPerKwh ?? 0;
+  const rateInRange = hasRate && cpk >= 0.05 && cpk <= 0.50;
 
   let level: ConfidenceLevel;
   if (HIGH_RATE_SOURCES.includes(rateSource as RateSourceType) && rateInRange) {

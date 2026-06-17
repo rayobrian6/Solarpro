@@ -65,31 +65,48 @@ export async function GET(req: NextRequest) {
     const windowLow  = new Date(now.getTime() + (REMINDER_DAYS_BEFORE * 24 - WINDOW_HOURS) * 3600_000);
     const windowHigh = new Date(now.getTime() + (REMINDER_DAYS_BEFORE * 24 + WINDOW_HOURS) * 3600_000);
 
+    // Migration 090 adds proposals.reminder_sent_at for idempotency. Detect it so
+    // the cron degrades gracefully (old behavior) if the migration hasn't run yet.
+    const colCheck = await sql`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'proposals' AND column_name = 'reminder_sent_at' LIMIT 1
+    `;
+    const hasReminderCol = colCheck.length > 0;
+
     // Find proposals that:
     //   - Have been sent to a client (sent_at IS NOT NULL)
     //   - Have a share token expiring in the 3-day reminder window
-    //   - Are not yet signed
-    //   - The client column sent_to_email is not null
-    const rows = await sql`
-      SELECT
-        p.id,
-        p.title,
-        p.share_token,
-        p.share_expires_at,
-        p.sent_to_email,
-        c.name   AS client_name,
-        u.name   AS rep_name,
-        u.email  AS rep_email
-      FROM proposals   p
-      JOIN projects    pr ON pr.id   = p.project_id
-      JOIN clients     c  ON c.id    = pr.client_id
-      JOIN users       u  ON u.id    = pr.user_id
-      WHERE p.sent_at         IS NOT NULL
-        AND p.signed_at       IS NULL
-        AND p.share_expires_at BETWEEN ${windowLow} AND ${windowHigh}
-        AND p.share_token     IS NOT NULL
-        AND u.email           IS NOT NULL
-    `;
+    //   - Are not yet signed, and (when the column exists) not already reminded
+    const rows = hasReminderCol
+      ? await sql`
+          SELECT
+            p.id, p.title, p.share_token, p.share_expires_at, p.sent_to_email,
+            c.name AS client_name, u.name AS rep_name, u.email AS rep_email
+          FROM proposals   p
+          JOIN projects    pr ON pr.id   = p.project_id
+          JOIN clients     c  ON c.id    = pr.client_id
+          JOIN users       u  ON u.id    = pr.user_id
+          WHERE p.sent_at         IS NOT NULL
+            AND p.signed_at       IS NULL
+            AND p.share_expires_at BETWEEN ${windowLow} AND ${windowHigh}
+            AND p.share_token     IS NOT NULL
+            AND u.email           IS NOT NULL
+            AND p.reminder_sent_at IS NULL
+        `
+      : await sql`
+          SELECT
+            p.id, p.title, p.share_token, p.share_expires_at, p.sent_to_email,
+            c.name AS client_name, u.name AS rep_name, u.email AS rep_email
+          FROM proposals   p
+          JOIN projects    pr ON pr.id   = p.project_id
+          JOIN clients     c  ON c.id    = pr.client_id
+          JOIN users       u  ON u.id    = pr.user_id
+          WHERE p.sent_at         IS NOT NULL
+            AND p.signed_at       IS NULL
+            AND p.share_expires_at BETWEEN ${windowLow} AND ${windowHigh}
+            AND p.share_token     IS NOT NULL
+            AND u.email           IS NOT NULL
+        `;
 
     if (rows.length === 0) {
       return NextResponse.json({
@@ -116,6 +133,10 @@ export async function GET(req: NextRequest) {
 
         if (emailResult.success) {
           sentCount.ok++;
+          // Stamp so the next daily run won't re-remind this proposal.
+          if (hasReminderCol) {
+            await sql`UPDATE proposals SET reminder_sent_at = now() WHERE id = ${row.id}`.catch(() => {});
+          }
           results.push(`✅ ${row.id} → ${row.rep_email} (expires ${expiresAt.toDateString()})`);
         } else {
           sentCount.fail++;

@@ -28,6 +28,9 @@ export async function POST(
 
   try {
     const admin = await requireAdminApi(req);
+    if (!admin) {
+      return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+    }
     const { id: projectId } = await params;
 
     if (!isValidUUID(projectId)) {

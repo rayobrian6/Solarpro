@@ -124,11 +124,14 @@ export async function POST(
   // ── Run ingest pipeline ────────────────────────────────────────────────────
   const ingestResult = await runIngestPipeline(ingestContext);
 
-  // ── Mark delivery as replayed ──────────────────────────────────────────────
+  // ── Record the real outcome ────────────────────────────────────────────────
+  // A failed re-ingest must not be recorded as 'replayed' (that hid the fact the
+  // survey was never ingested and made the ops view lie).
+  const newStatus = ingestResult.status === 'ingested' ? 'replayed' : 'failed';
   try {
     await sql`
       UPDATE webhook_deliveries
-         SET status = 'replayed', processed_at = now()
+         SET status = ${newStatus}, processed_at = now()
        WHERE id = ${id}
     `;
   } catch {

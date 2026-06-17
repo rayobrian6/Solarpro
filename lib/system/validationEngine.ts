@@ -319,17 +319,9 @@ export function validateDcAcRatio(input: ValidationInput): ValidationIssue[] {
       recommendation:
         `System is electrically feasible. Consider inverter upsizing to bring ratio to 1.20–1.55 if clipping is a concern.`,
     });
-  } else if (ratio < 0.8) {
-    // Note: ratio < 1.0 is already blocked above. This branch only fires
-    // for 0.8 <= ratio < 1.0 range, which can only happen via manual override.
-    issues.push({
-      code: 'DC_AC_RATIO_LOW',
-      severity: 'warning',
-      message: `DC/AC ratio ${roundedRatio} is below 0.8 — inverter is significantly oversized.`,
-      context: { ratio, totalDcKw, totalAcKw, threshold: 0.8 },
-      recommendation: 'Downsize the inverter or add modules.',
-    });
   }
+  // (Removed an unreachable `ratio < 0.8` branch: every ratio < 1.0 already
+  // returns via DC_AC_RATIO_AC_EXCEEDS_DC above, so it could never fire.)
 
   // Brand-specific tightening — only emit if we haven't already failed.
   const brand = getBrandProfile(sizingResult.brand.id);

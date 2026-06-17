@@ -3,7 +3,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
-import { handleRouteDbError } from '@/lib/db-neon';
+import { routeError } from '@/lib/api/routeError';
 import { RoofPlane, RoofEdgeType, SolarApiSegment } from '@/types';
 import { requireAuth } from '@/lib/security';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
@@ -333,7 +333,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(json);
   } catch (error: unknown) {
-    return handleRouteDbError('[solar/GET]', error);
+    return routeError('[solar/GET]', error, { status: 502, clientMessage: 'Solar data temporarily unavailable.' });
   }
 }
 
@@ -473,6 +473,6 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error: unknown) {
-    return handleRouteDbError('[solar/POST]', error);
+    return routeError('[solar/POST]', error, { status: 502, clientMessage: 'Solar data temporarily unavailable.' });
   }
 }

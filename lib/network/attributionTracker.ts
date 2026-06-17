@@ -220,7 +220,9 @@ export async function advanceFunnelStage(event: FunnelEvent): Promise<void> {
     await sql`UPDATE opportunity_sources SET qualified_at = ${ts.toISOString()} WHERE opportunity_id = ${event.opportunity_id}`
   } else if (event.stage === 'claimed') {
     await sql`UPDATE opportunity_sources SET claimed_at = ${ts.toISOString()} WHERE opportunity_id = ${event.opportunity_id}`
-  } else if (event.stage === 'appointment') {
+  } else if (event.stage === 'appointment' || event.stage === 'proposal') {
+    // 'proposal' maps to appointment_at in stageToColumn but had no branch here,
+    // so advancing to 'proposal' wrote funnel_stage but no timestamp.
     await sql`UPDATE opportunity_sources SET appointment_at = ${ts.toISOString()} WHERE opportunity_id = ${event.opportunity_id}`
   } else if (event.stage === 'closed_won' || event.stage === 'closed_lost') {
     await sql`UPDATE opportunity_sources SET closed_at = ${ts.toISOString()} WHERE opportunity_id = ${event.opportunity_id}`

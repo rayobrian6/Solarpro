@@ -550,14 +550,19 @@ export function enrichEquipmentItemsFromV4(
   const enriched: EquipmentItem[] = baseItems.map(i => ({ ...i }));
   const appendItems: EquipmentItem[] = [];
   let appendTag = 100;
+  // Track base items already enriched — several base items can share a category
+  // (e.g. AC-DISC / AC Breaker / Backfeed Breaker are all 'Electrical — AC'), so
+  // each V4 item must claim a distinct one instead of all collapsing onto the first.
+  const consumed = new Set<EquipmentItem>();
 
   for (const v4 of v4Items) {
     const equipCat = V4_TO_EQUIP_CATEGORY[v4.category] || v4.category;
 
-    // Try to match an existing base item by category
-    const baseItem = enriched.find(i => i.category === equipCat);
+    // Match the next unconsumed base item in this category
+    const baseItem = enriched.find(i => i.category === equipCat && !consumed.has(i));
 
     if (baseItem) {
+      consumed.add(baseItem);
       // Enrich: update part number, model, manufacturer, ulListing, and add NEC ref to notes
       if (v4.partNumber && v4.partNumber !== '—') {
         baseItem.model        = `${baseItem.model} [${v4.partNumber}]`;

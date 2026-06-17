@@ -127,7 +127,10 @@ export async function POST(req: NextRequest) {
             RETURNING id
           `;
           deleted = result.length;
-        } catch {}
+        } catch (e) {
+          // Don't report success on a failed cleanup — the operator must know it didn't run.
+          return NextResponse.json({ success: false, error: `Cleanup failed: ${(e as Error).message}` }, { status: 500 });
+        }
         await logAdminAction({ adminId: admin.id, action: 'clear_expired_tokens', metadata: { deleted } });
         return NextResponse.json({ success: true, message: `Cleared ${deleted} expired/used impersonation tokens` });
       }
@@ -169,9 +172,12 @@ export async function POST(req: NextRequest) {
         // For now, just vacuum analyze the main tables
         try {
           await sql`ANALYZE users`;
-          await sql`ANALYZE projects`.catch(() => {});
-          await sql`ANALYZE proposals`.catch(() => {});
-        } catch {}
+        } catch (e) {
+          // The primary ANALYZE failed — don't claim the rebuild completed.
+          return NextResponse.json({ success: false, error: `ANALYZE failed: ${(e as Error).message}` }, { status: 500 });
+        }
+        await sql`ANALYZE projects`.catch(() => {});
+        await sql`ANALYZE proposals`.catch(() => {});
         await logAdminAction({ adminId: admin.id, action: 'rebuild_search_index', metadata: {} });
         return NextResponse.json({ success: true, message: 'Search indexes rebuilt (ANALYZE completed)' });
       }
@@ -186,7 +192,9 @@ export async function POST(req: NextRequest) {
             RETURNING id
           `;
           deleted = result.length;
-        } catch {}
+        } catch (e) {
+          return NextResponse.json({ success: false, error: `Clear failed: ${(e as Error).message}` }, { status: 500 });
+        }
         await logAdminAction({ adminId: admin.id, action: 'clear_old_activity_logs', metadata: { deleted } });
         return NextResponse.json({ success: true, message: `Cleared ${deleted} activity log entries older than 90 days` });
       }

@@ -41,6 +41,12 @@ export async function POST(req: NextRequest) {
     if (b.value_type   && typeof b.value_type   === 'string' && b.value_type.length   > 50)  return NextResponse.json({ success: false, error: 'value_type too long (max 50).'    }, { status: 400 });
     if (b.notes        && typeof b.notes        === 'string' && b.notes.length        > 2000) return NextResponse.json({ success: false, error: 'notes too long (max 2000).'       }, { status: 400 });
 
+    // Required fields — these columns are NOT NULL; without this a missing field
+    // either 500s on the insert or creates a meaningless override row.
+    if (!b.program_name || typeof b.program_name !== 'string') return NextResponse.json({ success: false, error: 'program_name is required.' }, { status: 400 });
+    if (!b.type || typeof b.type !== 'string') return NextResponse.json({ success: false, error: 'type is required.' }, { status: 400 });
+    if (b.value == null || !Number.isFinite(Number(b.value))) return NextResponse.json({ success: false, error: 'value is required and must be a number.' }, { status: 400 });
+
     const rows = await sql`
       INSERT INTO incentive_overrides
         (country, state, utility, program_name, type, value, value_type, start_date, end_date, active, notes, created_by)

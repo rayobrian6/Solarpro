@@ -191,11 +191,14 @@ export async function finalizeLeadClaim(
   const sql = await getDbReady();
 
   // ── Idempotency — already finalized for this payment? no-op. ──
+  // IS NOT DISTINCT FROM so a null payment_intent_id (rare — asking prices are
+  // always > 0) still matches a prior null-PI assignment instead of the equality
+  // silently never matching and re-running the claim logic on re-delivery.
   const already = await sql`
     SELECT id, status FROM opportunity_assignments
      WHERE opportunity_id = ${opportunityId}
        AND contractor_id = ${contractorId}
-       AND payment_intent_id = ${paymentIntentId}
+       AND payment_intent_id IS NOT DISTINCT FROM ${paymentIntentId}
      LIMIT 1
   `;
   if (

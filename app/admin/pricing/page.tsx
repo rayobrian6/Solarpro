@@ -73,7 +73,10 @@ function costPlusPerPanel(d: PricingFormState): number {
   const lab  = d.laborCostPerPanel;
   const ovhd = (mat + lab) * (d.overheadPercent / 100);
   const cost = mat + lab + ovhd;
-  return Math.round(cost / (1 - d.marginPercent / 100));
+  // Guard the cost-plus divisor: margin >= 100 → division by zero/negative →
+  // $Infinity or a negative sell price. Cap at 99.9%.
+  const m = Math.min(99.9, Math.max(0, d.marginPercent));
+  return Math.round(cost / (1 - m / 100));
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────

@@ -23,8 +23,8 @@ const PITCH_TO_TILT: Record<string, number> = {
 };
 
 export function pitchToTilt(pitch: string): number | null {
-  // Direct lookup for our chip values
-  if (PITCH_TO_TILT[pitch]) return PITCH_TO_TILT[pitch];
+  // Direct lookup for our chip values (use `in` so 'flat' → 0 isn't treated as falsy)
+  if (pitch in PITCH_TO_TILT) return PITCH_TO_TILT[pitch];
 
   // Try parsing "X/12" format
   const match = pitch.match(/^(\d+(?:\.\d+)?)\s*\/\s*12/);
