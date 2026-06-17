@@ -440,16 +440,15 @@ export default function AcquisitionFloor({
   const WORK_EP: Partial<Record<Stage, string>> = {
     enriched: '/api/admin/prospects/work/enrich',
     qualified: '/api/admin/prospects/work/qualify',
-    signed_up: '/api/admin/prospects/work/onboard',
   };
   const WORK_LABEL: Partial<Record<Stage, string>> = {
-    enriched: '⚙ Enrich raw leads', qualified: '⚙ Vet the enriched', signed_up: '⚙ Onboard top lead',
+    enriched: '⚙ Enrich raw leads', qualified: '⚙ Vet the enriched',
   };
   const WORK_BARK: Partial<Record<Stage, string>> = {
-    enriched: 'COPY faster, you wretches!', qualified: 'VET them — only the worthy!', signed_up: 'CLOSE the deal!',
+    enriched: 'COPY faster, you wretches!', qualified: 'VET them — only the worthy!',
   };
 
-  // A room does its job: Copying enriches, Assay vets, Counting House onboards.
+  // A room does its data-prep job: Copying enriches contact info, Assay vets quality.
   async function workRoom(stage: Stage) {
     const ep = WORK_EP[stage];
     if (!ep || dispatching) return;
@@ -460,10 +459,9 @@ export default function AcquisitionFloor({
       const res = await fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
       const data = await res.json();
       if (data.success) {
-        const msg = stage === 'enriched' ? `Enriched ${data.enriched} of ${data.processed} raw leads — off to the Assay Room.`
-          : stage === 'qualified' ? `Vetted ${data.processed}: ${data.qualified} qualified, ${data.rejected} to the Catacombs.`
-          : data.onboarded ? `${data.company} signed on as a contractor! 💰` : (data.note || 'Nobody to onboard.');
-        setDispatchMsg(msg);
+        setDispatchMsg(stage === 'enriched'
+          ? `Enriched ${data.enriched} of ${data.processed} raw leads — off to the Assay Room.`
+          : `Vetted ${data.processed}: ${data.qualified} qualified, ${data.rejected} to the Catacombs.`);
         onDispatched();
       } else setDispatchMsg(data.error || data.message || 'The work faltered.');
     } catch (e) { setDispatchMsg('The work faltered. ' + (e as Error).message); }

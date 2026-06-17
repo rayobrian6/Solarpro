@@ -136,16 +136,17 @@ export default function ProspectsPage() {
 
   useEffect(() => { load(); }, [stageFilter, stateFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function convertLead(id: string) {
-    setBusyId(id);
-    try {
-      const res = await fetch(`/api/admin/prospects/${id}/convert`, { method: 'POST' });
-      const data = await res.json();
-      if (data.success) load();
-      else alert(data.error || 'Could not sign them up');
-    } finally {
-      setBusyId(null);
-    }
+  function exportCsv() {
+    const cols: (keyof Prospect)[] = ['company_name', 'contact_name', 'email', 'phone', 'website', 'city', 'state', 'rating', 'review_count', 'quality_score', 'stage', 'source', 'notes'];
+    const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const rows = prospects.map((p) => cols.map((c) => esc((p as Record<string, unknown>)[c])).join(','));
+    const csv = [cols.join(','), ...rows].join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `solarpro-leads-${stageFilter}-${stateFilter || 'all'}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   async function setStage(id: string, stage: Stage) {
@@ -178,8 +179,9 @@ export default function ProspectsPage() {
             Contractor Acquisition
           </h1>
           <p className="text-sm text-slate-400 mt-1 max-w-2xl">
-            The supply side. Robots discover solar installers nationwide and enrich them here —
-            work each prospect down the pipeline until they sign up and start buying leads.
+            The supply side. Robots discover, enrich, and vet solar installers nationwide so your
+            sales team gets a clean, qualified call list. No outreach is sent and no accounts are
+            created — this is lead prep for a human to work the phones.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -283,6 +285,14 @@ export default function ProspectsPage() {
             <option key={s.state} value={s.state}>{s.state} ({s.count})</option>
           ))}
         </select>
+        <button
+          onClick={exportCsv}
+          disabled={prospects.length === 0}
+          title="Download these leads as a CSV for the sales team"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/15 text-emerald-300 text-sm font-medium hover:bg-emerald-500/25 disabled:opacity-50 transition-colors"
+        >
+          ⬇ Export CSV ({prospects.length})
+        </button>
       </div>
 
       {/* Prospect grid */}
@@ -379,18 +389,9 @@ export default function ProspectsPage() {
                       Move to {STAGE_META[next].label} <ArrowRight size={12} />
                     </button>
                   )}
-                  {(p.stage === 'qualified' || p.stage === 'contacted') && (
-                    <button
-                      disabled={busyId === p.id}
-                      onClick={() => convertLead(p.id)}
-                      className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-300 text-xs font-medium hover:bg-emerald-500/25 disabled:opacity-50 transition-colors"
-                    >
-                      <Check size={12} /> Sign up
-                    </button>
-                  )}
                   {p.stage === 'signed_up' && (
                     <span className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-300 text-xs font-medium">
-                      <Check size={12} /> Contractor
+                      <Check size={12} /> Closed
                     </span>
                   )}
                   {p.stage !== 'rejected' && p.stage !== 'signed_up' && (
