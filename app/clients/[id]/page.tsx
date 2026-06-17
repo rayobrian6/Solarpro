@@ -1,8 +1,8 @@
 'use client';
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import AppShell from '@/components/ui/AppShell';
 import { useParams } from 'next/navigation';
-import type { Client, Project } from '@/types';
+import type { Client, Project, ProjectStatus } from '@/types';
 import { useAppStore } from '@/store/appStore';
 import {
   ArrowLeft, Mail, Phone, MapPin, Zap, DollarSign,
@@ -12,6 +12,8 @@ import {
   RefreshCw, AlertTriangle, Eye,
   StickyNote, Send, MessageSquare, Trash2, ExternalLink, TrendingUp,
   LayoutGrid, Activity, Sparkles,
+  ChevronDown, ArrowRight, Check,
+  Home, Trees, Layers, Flame,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -33,27 +35,126 @@ const CLIENT_TABS: { id: ClientTab; label: string; icon: React.ReactNode }[] = [
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-const STATUS_DOT: Record<string, string> = {
-  lead:      'bg-slate-400',
-  design:    'bg-blue-500',
-  proposal:  'bg-amber-500',
-  approved:  'bg-emerald-500',
-  installed: 'bg-green-500',
+const STATUS_STEPS: ProjectStatus[] = ['lead', 'design', 'proposal', 'approved', 'installed'];
+
+const STATUS_CONFIG: Record<ProjectStatus, {
+  label: string; dot: string; badge: string; next?: ProjectStatus;
+  ringColor: string; cardBorder: string; iconColor: string; barColor: string;
+}> = {
+  lead:      { label: 'Lead',      dot: 'bg-slate-400',   badge: 'bg-slate-700/60 text-slate-300 border-slate-600/40',   next: 'design',
+    ringColor: 'ring-slate-500/30',   cardBorder: 'border-slate-600/50',  iconColor: 'text-slate-400', barColor: 'bg-slate-500' },
+  design:    { label: 'Design',    dot: 'bg-blue-500',    badge: 'bg-blue-900/60 text-blue-300 border-blue-700/40',       next: 'proposal',
+    ringColor: 'ring-blue-500/30',    cardBorder: 'border-blue-700/40',   iconColor: 'text-blue-400',  barColor: 'bg-blue-500' },
+  proposal:  { label: 'Proposal',  dot: 'bg-amber-500',   badge: 'bg-amber-900/60 text-amber-300 border-amber-700/40',   next: 'approved',
+    ringColor: 'ring-amber-500/30',   cardBorder: 'border-amber-700/40',  iconColor: 'text-amber-400', barColor: 'bg-amber-500' },
+  approved:  { label: 'Approved',  dot: 'bg-emerald-500', badge: 'bg-emerald-900/60 text-emerald-300 border-emerald-700/40', next: 'installed',
+    ringColor: 'ring-emerald-500/30', cardBorder: 'border-emerald-700/40', iconColor: 'text-emerald-400', barColor: 'bg-emerald-500' },
+  installed: { label: 'Installed', dot: 'bg-green-500',   badge: 'bg-green-900/60 text-green-300 border-green-700/40',
+    ringColor: 'ring-green-500/30',   cardBorder: 'border-green-700/40',  iconColor: 'text-green-400', barColor: 'bg-green-500' },
 };
-const STATUS_BADGE: Record<string, string> = {
-  lead:      'bg-slate-700/60 text-slate-300 border border-slate-600/40',
-  design:    'bg-blue-900/60 text-blue-300 border border-blue-700/40',
-  proposal:  'bg-amber-900/60 text-amber-300 border border-amber-700/40',
-  approved:  'bg-emerald-900/60 text-emerald-300 border border-emerald-700/40',
-  installed: 'bg-green-900/60 text-green-300 border border-green-700/40',
+const TYPE_ICONS_JSX: Record<string, React.ReactNode> = {
+  roof:   <Home size={18} />,
+  ground: <Trees size={18} />,
+  fence:  <Layers size={18} />,
 };
-const STATUS_LABEL: Record<string, string> = {
-  lead: 'Lead', design: 'Design', proposal: 'Proposal', approved: 'Approved', installed: 'Installed',
-};
-const TYPE_ICONS: Record<string, string> = { roof: '🏠', ground: '🌱', fence: '🔲' };
 const TYPE_BG: Record<string, string> = {
-  roof: 'bg-amber-500/10', ground: 'bg-teal-500/10', fence: 'bg-purple-500/10',
+  roof:   'bg-amber-500/15 text-amber-400 border-amber-500/20',
+  ground: 'bg-teal-500/15 text-teal-400 border-teal-500/20',
+  fence:  'bg-purple-500/15 text-purple-400 border-purple-500/20',
 };
+
+// Urgency helper
+function getUrgency(p: Project): 'high' | 'medium' | 'low' {
+  const daysSince = (Date.now() - new Date(p.updatedAt || p.createdAt).getTime()) / 86400000;
+  if (p.status === 'proposal' && daysSince > 5) return 'high';
+  if (p.status === 'approved' && daysSince > 3)  return 'high';
+  if (p.status === 'lead' && daysSince > 14)      return 'medium';
+  if (p.status === 'design' && daysSince > 7)     return 'medium';
+  return 'low';
+}
+
+function getNextAction(p: Project): { label: string; href: string; color: string; bg: string } {
+  switch (p.status) {
+    case 'lead':      return { label: 'Start Design',     href: `/design?projectId=${p.id}`, color: 'text-blue-300',    bg: 'bg-blue-500/15 hover:bg-blue-500/25 border-blue-500/30' };
+    case 'design':    return { label: 'Create Proposal',  href: `/projects/${p.id}`,          color: 'text-amber-300',   bg: 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/30' };
+    case 'proposal':  return { label: 'Follow Up',        href: `/projects/${p.id}`,          color: 'text-orange-300',  bg: 'bg-orange-500/15 hover:bg-orange-500/25 border-orange-500/30' };
+    case 'approved':  return { label: 'Schedule Install', href: `/projects/${p.id}`,          color: 'text-emerald-300', bg: 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/30' };
+    case 'installed': return { label: 'View Project',     href: `/projects/${p.id}`,          color: 'text-green-300',   bg: 'bg-green-500/15 hover:bg-green-500/25 border-green-500/30' };
+  }
+}
+
+// Pipeline progress bar
+function PipelineProgress({ status }: { status: ProjectStatus }) {
+  const idx = STATUS_STEPS.indexOf(status);
+  return (
+    <div className="flex items-center gap-0.5 w-full">
+      {STATUS_STEPS.map((s, i) => {
+        const cfg = STATUS_CONFIG[s];
+        const active = i <= idx;
+        return (
+          <div
+            key={s}
+            className={`h-1 flex-1 rounded-full transition-all ${active ? cfg.barColor : 'bg-slate-700/60'} ${i === idx ? 'ring-1 ring-white/20' : ''}`}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+// Status Dropdown
+function StatusDropdown({ project, onStatusChange }: {
+  project: Project;
+  onStatusChange: (id: string, status: ProjectStatus) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const cfg = STATUS_CONFIG[project.status];
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={e => { e.stopPropagation(); setOpen(v => !v); }}
+        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all hover:opacity-90 ${cfg.badge}`}
+      >
+        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot}`} />
+        {cfg.label}
+        <ChevronDown size={9} className={`transition-transform opacity-60 ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open ? (
+        <div className="absolute left-0 top-full mt-1.5 bg-slate-800/95 backdrop-blur-xl border border-slate-700/80 rounded-xl shadow-2xl z-30 overflow-hidden min-w-[150px]">
+          <div className="px-3 py-1.5 border-b border-slate-700/50">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Set Status</span>
+          </div>
+          {STATUS_STEPS.map(s => {
+            const sc = STATUS_CONFIG[s];
+            return (
+              <button
+                key={s}
+                onClick={e => { e.stopPropagation(); onStatusChange(project.id, s); setOpen(false); }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-slate-700/60 transition-colors ${s === project.status ? 'text-white bg-slate-700/40' : 'text-slate-300'}`}
+              >
+                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${sc.dot}`} />
+                {sc.label}
+                {s === project.status ? <Check size={11} className="ml-auto text-amber-400" /> : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 
 // ---------------------------------------------------------------------------
 // ProposalsSection — shows all proposals linked to this client's projects
@@ -426,6 +527,15 @@ export default function ClientDetailPage() {
   const loadClients = useAppStore(s => s.loadClients);
   const projects = useAppStore(s => s.projects);
   const loadProjects = useAppStore(s => s.loadProjects);
+  const updateProjectInStore = useAppStore(s => s.updateProjectInStore);
+
+  const handleStatusChange = async (id: string, status: ProjectStatus) => {
+    try {
+      await updateProjectInStore(id, { status });
+    } catch {
+      alert('Failed to update status');
+    }
+  };
 
   const [client, setClient] = useState<Client | null>(null);
   const [loading, setLoading] = useState(true);
@@ -574,7 +684,7 @@ export default function ClientDetailPage() {
         </div>
 
         {/* ── Tab Content ── */}
-        {activeTab === 'overview' && (
+        {activeTab === 'overview' ? (
           <div className="space-y-5">
             {/* Contact + Recommendation side-by-side */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -627,9 +737,9 @@ export default function ClientDetailPage() {
             {/* Notes */}
             <NotesSection clientId={id} />
           </div>
-        )}
+        ) : null}
 
-        {activeTab === 'energy' && (
+        {activeTab === 'energy' ? (
           <div className="space-y-5">
             {/* Energy Stats with ConfidenceBadge */}
             <div className="card p-5 space-y-4">
@@ -672,9 +782,9 @@ export default function ClientDetailPage() {
               </ResponsiveContainer>
             </div>
           </div>
-        )}
+        ) : null}
 
-        {activeTab === 'projects' && (
+        {activeTab === 'projects' ? (
           <div className="space-y-5">
             {/* Pipeline Summary */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -719,38 +829,63 @@ export default function ClientDetailPage() {
                 <div className="divide-y divide-slate-700/30">
                   {clientProjects.map(project => {
                     const daysSince = Math.floor((Date.now() - new Date(project.updatedAt || project.createdAt).getTime()) / 86400000);
-                    const isStale = daysSince > 7 && project.status !== 'installed';
+                    const urgency = getUrgency(project);
+                    const nextAction = getNextAction(project);
                     return (
-                      <div key={project.id} className="flex items-center gap-3 px-5 py-3.5 group hover:bg-slate-700/20 transition-colors">
-                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 ${TYPE_BG[project.systemType] || 'bg-slate-700/40'}`}>
-                          {TYPE_ICONS[project.systemType] || '📁'}
+                      <div key={project.id} className="px-5 py-4 group hover:bg-slate-700/20 transition-colors">
+                        {/* Row 1: Type icon + Name + StatusDropdown + Urgency badge + Next Action CTA */}
+                        <div className="flex items-center gap-3">
+                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border ${TYPE_BG[project.systemType] || 'bg-slate-700/40 text-slate-400 border-slate-600/30'}`}>
+                            {TYPE_ICONS_JSX[project.systemType] || <FolderOpen size={18} />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Link href={`/projects/${project.id}`} className="font-semibold text-white text-sm hover:text-indigo-300 transition-colors truncate">
+                                {project.name}
+                              </Link>
+                              <StatusDropdown project={project} onStatusChange={handleStatusChange} />
+                              {urgency === 'high' ? (
+                                <span className="flex items-center gap-1 text-[10px] font-bold text-red-400 bg-red-500/10 border border-red-500/20 px-1.5 py-0.5 rounded">
+                                  <Flame size={9} /> URGENT
+                                </span>
+                              ) : urgency === 'medium' ? (
+                                <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-400/80 bg-amber-500/5 border border-amber-500/15 px-1.5 py-0.5 rounded">
+                                  <Clock size={9} /> {daysSince}d ago
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                          <Link
+                            href={nextAction.href}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${nextAction.bg} ${nextAction.color}`}
+                          >
+                            {nextAction.label}
+                            <ArrowRight size={11} />
+                          </Link>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <Link href={`/projects/${project.id}`} className="font-semibold text-white text-sm hover:text-indigo-300 transition-colors truncate">
-                              {project.name}
-                            </Link>
-                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium border flex items-center gap-1 ${STATUS_BADGE[project.status] || ''}`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[project.status] || 'bg-slate-400'}`} />
-                              {STATUS_LABEL[project.status] || project.status}
-                            </span>
-                            {isStale && (
-                              <span className="flex items-center gap-1 text-xs text-amber-400/70 bg-amber-500/5 border border-amber-500/15 px-1.5 py-0.5 rounded">
-                                <Clock size={9} /> {daysSince}d ago
+                        {/* Row 2: Pipeline progress bar */}
+                        <div className="mt-2.5 ml-12">
+                          <PipelineProgress status={project.status} />
+                          <div className="flex justify-between mt-1">
+                            {STATUS_STEPS.map(s => (
+                              <span key={s} className={`text-[9px] font-medium ${s === project.status ? STATUS_CONFIG[s].iconColor : 'text-slate-600'}`}>
+                                {STATUS_CONFIG[s].label}
                               </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-3 mt-1 text-xs text-slate-500 flex-wrap">
-                            <span className="flex items-center gap-1"><Calendar size={10} />{new Date(project.createdAt).toLocaleDateString()}</span>
-                            {project.layout?.systemSizeKw && (<span className="flex items-center gap-1 text-amber-400/70"><Zap size={10} />{project.layout.systemSizeKw.toFixed(1)} kW</span>)}
-                            {project.production?.annualProductionKwh && (<span>{project.production.annualProductionKwh.toLocaleString()} kWh/yr</span>)}
-                            {project.costEstimate?.netCost && (<span className="text-emerald-400/70">${project.costEstimate.netCost.toLocaleString()}</span>)}
+                            ))}
                           </div>
                         </div>
-                        <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Link href={`/design?projectId=${project.id}`} className="btn-ghost p-1.5 rounded-lg" title="Design Studio"><Map size={13} /></Link>
-                          <Link href={`/projects/${project.id}`} className="btn-ghost p-1.5 rounded-lg" title="Proposal"><FileText size={13} /></Link>
-                          <Link href={`/projects/${project.id}`} className="btn-ghost p-1.5 rounded-lg"><ChevronRight size={14} /></Link>
+                        {/* Row 3: Metadata row */}
+                        <div className="flex items-center gap-3 mt-2 ml-12 text-xs text-slate-500 flex-wrap">
+                          <span className="flex items-center gap-1"><Calendar size={10} />{new Date(project.createdAt).toLocaleDateString()}</span>
+                          {project.layout?.systemSizeKw ? (
+                            <span className="flex items-center gap-1 text-amber-400/70"><Zap size={10} />{project.layout.systemSizeKw.toFixed(1)} kW</span>
+                          ) : null}
+                          {project.production?.annualProductionKwh ? (
+                            <span>{project.production.annualProductionKwh.toLocaleString()} kWh/yr</span>
+                          ) : null}
+                          {project.costEstimate?.netCost ? (
+                            <span className="text-emerald-400/70">${project.costEstimate.netCost.toLocaleString()}</span>
+                          ) : null}
                         </div>
                       </div>
                     );
@@ -758,24 +893,24 @@ export default function ClientDetailPage() {
                 </div>
               )}
 
-              {clientProjects.length > 0 && (
+              {clientProjects.length > 0 ? (
                 <div className="px-5 py-2.5 border-t border-slate-700/50 bg-slate-800/20">
                   <Link href={`/projects?clientId=${id}`} className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 w-fit">
                     View all projects <ChevronRight size={11} />
                   </Link>
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
-        )}
+        ) : null}
 
-        {activeTab === 'documents' && (
+        {activeTab === 'documents' ? (
           <div className="space-y-5">
             <SiteSurveysSection clientId={id} />
             <ProposalsSection clientId={id} />
             <NotesSection clientId={id} />
           </div>
-        )}
+        ) : null}
       </div>
     </AppShell>
   );
