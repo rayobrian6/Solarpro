@@ -1,7 +1,7 @@
 'use client';
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import AppShell from '@/components/ui/AppShell';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation';
 import type { Client, Project, ProjectStatus } from '@/types';
 import { useAppStore } from '@/store/appStore';
 import {
@@ -520,8 +520,11 @@ function SiteSurveysSection({ clientId }: { clientId: string }) {
   );
 }
 
-export default function ClientDetailPage() {
+function ClientDetailContent() {
   const { id } = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
 
   const clients = useAppStore(s => s.clients);
   const loadClients = useAppStore(s => s.loadClients);
@@ -539,7 +542,15 @@ export default function ClientDetailPage() {
 
   const [client, setClient] = useState<Client | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<ClientTab>('overview');
+
+  // Tab state driven by URL ?tab= query param
+  const tabFromUrl = searchParams.get('tab') as ClientTab | null;
+  const activeTab: ClientTab = tabFromUrl && CLIENT_TABS.some(t => t.id === tabFromUrl)
+    ? tabFromUrl
+    : 'overview';
+  const setActiveTab = (tab: ClientTab) => {
+    router.replace(`${pathname}?tab=${tab}`, { scroll: false });
+  };
 
   useEffect(() => {
     // Load projects if needed
@@ -913,5 +924,14 @@ export default function ClientDetailPage() {
         ) : null}
       </div>
     </AppShell>
+  );
+}
+
+// Suspense wrapper required for useSearchParams() in Next.js 14 App Router
+export default function ClientDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <ClientDetailContent />
+    </Suspense>
   );
 }

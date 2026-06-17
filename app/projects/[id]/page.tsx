@@ -42,7 +42,7 @@ class BillErrorBoundary extends Component<
   }
 }
 import AppShell from '@/components/ui/AppShell';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation';
 import type { Project } from '@/types';
 import { useAppStore } from '@/store/appStore';
 import {
@@ -313,6 +313,8 @@ interface QuickAction {
 function ProjectDetailInner() {
   const { id } = useParams<{ id: string }>();
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
 
   const loadActiveProject = useAppStore(s => s.loadActiveProject);
   const projects = useAppStore(s => s.projects);
@@ -321,7 +323,16 @@ function ProjectDetailInner() {
 
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabId>('bill');
+
+  // Tab state driven by URL ?tab= query param
+  const PROJECT_TAB_IDS: TabId[] = ['bill', 'system', 'design', 'engineering', 'proposal', 'operations', 'survey'];
+  const tabFromUrl = searchParams.get('tab') as TabId | null;
+  const activeTab: TabId = tabFromUrl && PROJECT_TAB_IDS.includes(tabFromUrl)
+    ? tabFromUrl
+    : 'bill';
+  const setActiveTab = (tab: TabId) => {
+    router.replace(`${pathname}?tab=${tab}`, { scroll: false });
+  };
   const [showAllWarnings, setShowAllWarnings] = useState(false);
   const [showBillModal, setShowBillModal] = useState(false);
   const [savingBill, setSavingBill] = useState(false);
@@ -366,6 +377,8 @@ function ProjectDetailInner() {
   }, [id]);
 
   const autoSelectTab = (p: Project) => {
+    // Only auto-select if no tab specified in URL
+    if (tabFromUrl) return;
     // Start at first incomplete workflow step
     for (const step of WORKFLOW_STEPS) {
       if (!step.check(p)) {
