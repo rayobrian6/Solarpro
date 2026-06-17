@@ -23,3 +23,6 @@ export {
 
 // Not-found state
 export { NotFoundState } from './NotFoundState';
+
+// Confirm dialog
+export { ConfirmDialog } from './ConfirmDialog';

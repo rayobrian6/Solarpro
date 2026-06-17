@@ -38,6 +38,8 @@ import {
   Download, Image, MapPin, Camera,
 } from 'lucide-react';
 import type { TopographyState, FieldUsage } from '@/lib/topography/getTopographyState';
+import { useToast } from '@/components/ui/Toast';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -906,6 +908,8 @@ interface GetResponse {
 }
 
 function LiveSurveyDataView() {
+  const toast = useToast();
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
   const [projects, setProjects]       = useState<IngestedProject[]>([]);
   const [loadState, setLoadState]     = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
   const [ingestState, setIngestState] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
@@ -1103,33 +1107,37 @@ function LiveSurveyDataView() {
               <button
                 disabled={fixingAll === 'running'}
                 className="text-[10px] px-2.5 py-1 rounded-md bg-blue-600/20 border border-blue-500/30 text-blue-400 hover:bg-blue-600/30 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={async () => {
-                  if (!confirm('Reassign ALL surveys currently owned by the fallback default user to their correct owners (based on solarpro_user_id claim)?\n\nThis will update all affected projects at once.')) return;
-                  setFixingAll('running');
-                  setFixAllResult(null);
-                  try {
-                    const res = await fetch('/api/admin/survey-reassign', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ action: 'fix-all-defaults' }),
-                    });
-                    const data = await res.json();
-                    if (data.success) {
-                      const msg = data.fixed > 0
-                        ? `✓ Fixed ${data.fixed} / ${data.total} surveys (scanned ${data.scanned ?? data.total})` 
-                        : `– ${data.message ?? `No resolvable surveys found (scanned ${data.scanned ?? 0})`}`;
-                      setFixAllResult(msg);
-                      setFixingAll(data.fixed > 0 ? 'done' : 'idle');
-                      if (data.fixed > 0) await loadData();
-                    } else {
-                      setFixAllResult(`⚠ ${data.error}`);
-                      setFixingAll('error');
-                    }
-                  } catch (e) {
-                    setFixAllResult('Network error — check console');
-                    setFixingAll('error');
-                    console.error(e);
-                  }
+                onClick={() => {
+                  setConfirmDialog({
+                    message: 'Reassign ALL surveys currently owned by the fallback default user to their correct owners (based on solarpro_user_id claim)?\n\nThis will update all affected projects at once.',
+                    onConfirm: async () => {
+                      setFixingAll('running');
+                      setFixAllResult(null);
+                      try {
+                        const res = await fetch('/api/admin/survey-reassign', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ action: 'fix-all-defaults' }),
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                          const msg = data.fixed > 0
+                            ? `✓ Fixed ${data.fixed} / ${data.total} surveys (scanned ${data.scanned ?? data.total})` 
+                            : `– ${data.message ?? `No resolvable surveys found (scanned ${data.scanned ?? 0})`}`;
+                          setFixAllResult(msg);
+                          setFixingAll(data.fixed > 0 ? 'done' : 'idle');
+                          if (data.fixed > 0) await loadData();
+                        } else {
+                          setFixAllResult(`⚠ ${data.error}`);
+                          setFixingAll('error');
+                        }
+                      } catch (e) {
+                        setFixAllResult('Network error — check console');
+                        setFixingAll('error');
+                        console.error(e);
+                      }
+                    },
+                  });
                 }}
               >
                 {fixingAll === 'running' ? '⏳ Fixing…' : '⟳ Fix All Defaults'}
@@ -1143,33 +1151,37 @@ function LiveSurveyDataView() {
               <button
                 disabled={fixingWebhook === 'running'}
                 className="text-[10px] px-2.5 py-1 rounded-md bg-violet-600/20 border border-violet-500/30 text-violet-400 hover:bg-violet-600/30 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={async () => {
-                  if (!confirm('Scan webhook delivery log and reassign surveys where solarpro_user_id is recorded in the raw webhook body?\n\nThis fixes surveys ingested before the JWT-forwarding fix.')) return;
-                  setFixingWebhook('running');
-                  setFixWebhookResult(null);
-                  try {
-                    const res = await fetch('/api/admin/survey-reassign', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ action: 'fix-from-webhook-log' }),
-                    });
-                    const data = await res.json();
-                    if (data.success) {
-                      const msg = data.fixed > 0
-                        ? `✓ Fixed ${data.fixed} surveys from webhook log`
-                        : (data.message ?? '✓ No fixable surveys found in webhook log');
-                      setFixWebhookResult(msg);
-                      setFixingWebhook('done');
-                      if (data.fixed > 0) await loadData();
-                    } else {
-                      setFixWebhookResult(`⚠ ${data.error}`);
-                      setFixingWebhook('error');
-                    }
-                  } catch (e) {
-                    setFixWebhookResult('Network error — check console');
-                    setFixingWebhook('error');
-                    console.error(e);
-                  }
+                onClick={() => {
+                  setConfirmDialog({
+                    message: 'Scan webhook delivery log and reassign surveys where solarpro_user_id is recorded in the raw webhook body?\n\nThis fixes surveys ingested before the JWT-forwarding fix.',
+                    onConfirm: async () => {
+                      setFixingWebhook('running');
+                      setFixWebhookResult(null);
+                      try {
+                        const res = await fetch('/api/admin/survey-reassign', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ action: 'fix-from-webhook-log' }),
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                          const msg = data.fixed > 0
+                            ? `✓ Fixed ${data.fixed} surveys from webhook log`
+                            : (data.message ?? '✓ No fixable surveys found in webhook log');
+                          setFixWebhookResult(msg);
+                          setFixingWebhook('done');
+                          if (data.fixed > 0) await loadData();
+                        } else {
+                          setFixWebhookResult(`⚠ ${data.error}`);
+                          setFixingWebhook('error');
+                        }
+                      } catch (e) {
+                        setFixWebhookResult('Network error — check console');
+                        setFixingWebhook('error');
+                        console.error(e);
+                      }
+                    },
+                  });
                 }}
               >
                 {fixingWebhook === 'running' ? '⏳ Scanning…' : '⟳ Fix from Webhook Log'}
@@ -1275,25 +1287,29 @@ function LiveSurveyDataView() {
                             {isDefault && solarproUserId && (
                               <button
                                 className="text-[10px] px-3 py-1 rounded-md bg-blue-600/20 border border-blue-500/30 text-blue-400 hover:bg-blue-600/30 transition-colors font-medium"
-                                onClick={async () => {
-                                  if (!confirm(`Reassign this survey to solarpro_user_id:\n${solarproUserId}\n\nThis will change the project owner. Proceed?`)) return;
-                                  try {
-                                    const res = await fetch('/api/admin/survey-reassign', {
-                                      method: 'POST',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ action: 'fix-one', projectId: project.id }),
-                                    });
-                                    const data = await res.json();
-                                    if (data.success) {
-                                      alert(`✓ Reassigned to ${data.newOwnerEmail ?? data.newOwnerId}`);
-                                      loadData();
-                                    } else {
-                                      alert(`⚠ Fix failed: ${data.error}`);
-                                    }
-                                  } catch (e) {
-                                    alert('Network error — check console');
-                                    console.error(e);
-                                  }
+                                onClick={() => {
+                                  setConfirmDialog({
+                                    message: `Reassign this survey to solarpro_user_id:\n${solarproUserId}\n\nThis will change the project owner. Proceed?`,
+                                    onConfirm: async () => {
+                                      try {
+                                        const res = await fetch('/api/admin/survey-reassign', {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ action: 'fix-one', projectId: project.id }),
+                                        });
+                                        const data = await res.json();
+                                        if (data.success) {
+                                          toast.success(`Reassigned to ${data.newOwnerEmail ?? data.newOwnerId}`);
+                                          loadData();
+                                        } else {
+                                          toast.error(`Fix failed: ${data.error}`);
+                                        }
+                                      } catch (e) {
+                                        toast.error('Network error — check console');
+                                        console.error(e);
+                                      }
+                                    },
+                                  });
                                 }}
                               >
                                 → Fix Owner (assign to solarpro_user_id claim)
@@ -1321,15 +1337,15 @@ function LiveSurveyDataView() {
                                     });
                                     const data = await res.json();
                                     if (data.success) {
-                                      alert(data.alreadyCorrect
+                                      toast.success(data.alreadyCorrect
                                         ? data.message
-                                        : `✓ Reassigned to ${data.newOwnerEmail}`);
+                                        : `Reassigned to ${data.newOwnerEmail}`);
                                       loadData();
                                     } else {
-                                      alert(`⚠ ${data.error}`);
+                                      toast.error(`${data.error}`);
                                     }
                                   } catch (e) {
-                                    alert('Network error — check console');
+                                    toast.error('Network error — check console');
                                     console.error(e);
                                   }
                                 }}
@@ -1349,7 +1365,7 @@ function LiveSurveyDataView() {
                                       body: JSON.stringify({ action: 'debug-claims', projectId: project.id }),
                                     });
                                     const data = await res.json();
-                                    if (!data.success) { alert(`⚠ ${data.error}`); return; }
+                                    if (!data.success) { toast.error(`${data.error}`); return; }
                                     const meta = (data.project.surveyMeta ?? {}) as Record<string,unknown>;
                                     const lines: string[] = [
                                       `Project: ${data.project.name}`,
@@ -1387,9 +1403,9 @@ function LiveSurveyDataView() {
                                       lines.push('');
                                     });
                                     if (data.deliveryCount === 0) lines.push('(no webhook_deliveries rows found for this project)');
-                                    alert(lines.join('\n'));
+                                    toast.info(lines.join('\n'));
                                   } catch (e) {
-                                    alert('Network error');
+                                    toast.error('Network error');
                                     console.error(e);
                                   }
                                 }}
@@ -1492,6 +1508,14 @@ function LiveSurveyDataView() {
           </div>
         )}
       </div>
+      {confirmDialog ? (
+        <ConfirmDialog
+          message={confirmDialog.message}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+          variant="warning"
+        />
+      ) : null}
     </div>
   );
 }
