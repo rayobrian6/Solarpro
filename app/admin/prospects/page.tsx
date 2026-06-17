@@ -136,6 +136,18 @@ export default function ProspectsPage() {
 
   useEffect(() => { load(); }, [stageFilter, stateFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  async function convertLead(id: string) {
+    setBusyId(id);
+    try {
+      const res = await fetch(`/api/admin/prospects/${id}/convert`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) load();
+      else alert(data.error || 'Could not sign them up');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function setStage(id: string, stage: Stage) {
     setBusyId(id);
     try {
@@ -367,9 +379,18 @@ export default function ProspectsPage() {
                       Move to {STAGE_META[next].label} <ArrowRight size={12} />
                     </button>
                   )}
+                  {(p.stage === 'qualified' || p.stage === 'contacted') && (
+                    <button
+                      disabled={busyId === p.id}
+                      onClick={() => convertLead(p.id)}
+                      className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-300 text-xs font-medium hover:bg-emerald-500/25 disabled:opacity-50 transition-colors"
+                    >
+                      <Check size={12} /> Sign up
+                    </button>
+                  )}
                   {p.stage === 'signed_up' && (
                     <span className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-300 text-xs font-medium">
-                      <Check size={12} /> Converted
+                      <Check size={12} /> Contractor
                     </span>
                   )}
                   {p.stage !== 'rejected' && p.stage !== 'signed_up' && (

@@ -437,27 +437,54 @@ export default function AcquisitionFloor({
     finally { setDispatching(false); setTimeout(() => setDispatchMsg(''), 6000); }
   }
 
-  // A room actually does its job: the Copying Room enriches raw leads; the Assay Room vets.
+  const WORK_EP: Partial<Record<Stage, string>> = {
+    enriched: '/api/admin/prospects/work/enrich',
+    qualified: '/api/admin/prospects/work/qualify',
+    signed_up: '/api/admin/prospects/work/onboard',
+  };
+  const WORK_LABEL: Partial<Record<Stage, string>> = {
+    enriched: '⚙ Enrich raw leads', qualified: '⚙ Vet the enriched', signed_up: '⚙ Onboard top lead',
+  };
+  const WORK_BARK: Partial<Record<Stage, string>> = {
+    enriched: 'COPY faster, you wretches!', qualified: 'VET them — only the worthy!', signed_up: 'CLOSE the deal!',
+  };
+
+  // A room does its job: Copying enriches, Assay vets, Counting House onboards.
   async function workRoom(stage: Stage) {
-    const ep = stage === 'enriched' ? '/api/admin/prospects/work/enrich'
-      : stage === 'qualified' ? '/api/admin/prospects/work/qualify' : null;
+    const ep = WORK_EP[stage];
     if (!ep || dispatching) return;
     setDispatching(true);
-    setSupLine(stage === 'enriched' ? 'COPY faster, you wretches!' : 'VET them — only the worthy!');
-    setDispatchMsg(stage === 'enriched' ? 'The clerks comb the wires for contacts…' : 'The assayers weigh each firm…');
+    setSupLine(WORK_BARK[stage] || '');
+    setDispatchMsg('At work…');
     try {
       const res = await fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
       const data = await res.json();
       if (data.success) {
-        setDispatchMsg(stage === 'enriched'
-          ? `Enriched ${data.enriched} of ${data.processed} raw leads — off to the Assay Room.`
-          : `Vetted ${data.processed}: ${data.qualified} qualified, ${data.rejected} to the Catacombs.`);
+        const msg = stage === 'enriched' ? `Enriched ${data.enriched} of ${data.processed} raw leads — off to the Assay Room.`
+          : stage === 'qualified' ? `Vetted ${data.processed}: ${data.qualified} qualified, ${data.rejected} to the Catacombs.`
+          : data.onboarded ? `${data.company} signed on as a contractor! 💰` : (data.note || 'Nobody to onboard.');
+        setDispatchMsg(msg);
         onDispatched();
       } else setDispatchMsg(data.error || data.message || 'The work faltered.');
     } catch (e) { setDispatchMsg('The work faltered. ' + (e as Error).message); }
     finally { setDispatching(false); setTimeout(() => setDispatchMsg(''), 8000); }
   }
-  const WORK_LABEL: Partial<Record<Stage, string>> = { enriched: '⚙ Enrich raw leads', qualified: '⚙ Vet the enriched' };
+
+  // Run the whole house: enrich → vet, one click.
+  async function runHouse() {
+    if (dispatching) return;
+    setDispatching(true);
+    setSupLine('THE WHOLE HOUSE — to WORK!');
+    try {
+      setDispatchMsg('Copying Room: combing the wires for contacts…');
+      await fetch('/api/admin/prospects/work/enrich', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json()).catch(() => null);
+      onDispatched();
+      setDispatchMsg('Assay Room: weighing every firm…');
+      const q = await fetch('/api/admin/prospects/work/qualify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json()).catch(() => null);
+      onDispatched();
+      setDispatchMsg(q?.success ? `The house ran: ${q.qualified} qualified, ${q.rejected} binned. Onboard the worthy in the Counting House.` : 'The house ran.');
+    } finally { setDispatching(false); setTimeout(() => setDispatchMsg(''), 9000); }
+  }
 
   const bubble = 'absolute left-1/2 -translate-x-1/2 -top-7 whitespace-nowrap px-2 py-0.5 rounded-md text-[11px] font-semibold text-amber-950 bg-amber-100 shadow z-50';
 
@@ -506,6 +533,10 @@ export default function AcquisitionFloor({
                 {dispatching ? '🐎 Scouting…' : '🐎 Dispatch the scouts'}
               </button>
             </div>
+            <button onClick={runHouse} disabled={dispatching}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-100 border border-emerald-600/50 bg-emerald-900/40 hover:bg-emerald-800/50 disabled:opacity-60 transition-all">
+              ⚙ Run the whole house (enrich → vet)
+            </button>
             <button onClick={summonBatch} disabled={dispatching} className="text-[11px] text-amber-600/70 hover:text-amber-300 underline disabled:opacity-50 text-right">
               or summon the 84-installer starter batch
             </button>
