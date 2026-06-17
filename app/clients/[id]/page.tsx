@@ -12,8 +12,8 @@ import {
   RefreshCw, AlertTriangle, Eye,
   StickyNote, Send, MessageSquare, Trash2, ExternalLink, TrendingUp,
   LayoutGrid, Activity, Sparkles,
-  ChevronDown, ArrowRight, Check,
-  Home, Trees, Layers, Flame,
+  ArrowRight,
+  Flame,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -22,6 +22,10 @@ import {
 import type { SiteSurvey } from '@/lib/db-neon';
 import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
 import { useToast } from '@/components/ui/Toast';
+import {
+  STATUS_STEPS, STATUS_CONFIG, TYPE_ICONS_JSX, TYPE_BG,
+  getUrgency, getNextAction, PipelineProgress, StatusDropdown,
+} from '@/components/ui/ProjectPipeline';
 import type { ConfidenceSource, ConfidenceLevel } from '@/components/recommend/ConfidenceBadge';
 
 // ── Client Detail Tab IDs ────────────────────────────────────────
@@ -36,128 +40,7 @@ const CLIENT_TABS: { id: ClientTab; label: string; icon: React.ReactNode }[] = [
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-const STATUS_STEPS: ProjectStatus[] = ['lead', 'design', 'proposal', 'approved', 'installed'];
 
-const STATUS_CONFIG: Record<ProjectStatus, {
-  label: string; dot: string; badge: string; next?: ProjectStatus;
-  ringColor: string; cardBorder: string; iconColor: string; barColor: string;
-}> = {
-  lead:      { label: 'Lead',      dot: 'bg-slate-400',   badge: 'bg-slate-700/60 text-slate-300 border-slate-600/40',   next: 'design',
-    ringColor: 'ring-slate-500/30',   cardBorder: 'border-slate-600/50',  iconColor: 'text-slate-400', barColor: 'bg-slate-500' },
-  design:    { label: 'Design',    dot: 'bg-blue-500',    badge: 'bg-blue-900/60 text-blue-300 border-blue-700/40',       next: 'proposal',
-    ringColor: 'ring-blue-500/30',    cardBorder: 'border-blue-700/40',   iconColor: 'text-blue-400',  barColor: 'bg-blue-500' },
-  proposal:  { label: 'Proposal',  dot: 'bg-amber-500',   badge: 'bg-amber-900/60 text-amber-300 border-amber-700/40',   next: 'approved',
-    ringColor: 'ring-amber-500/30',   cardBorder: 'border-amber-700/40',  iconColor: 'text-amber-400', barColor: 'bg-amber-500' },
-  approved:  { label: 'Approved',  dot: 'bg-emerald-500', badge: 'bg-emerald-900/60 text-emerald-300 border-emerald-700/40', next: 'installed',
-    ringColor: 'ring-emerald-500/30', cardBorder: 'border-emerald-700/40', iconColor: 'text-emerald-400', barColor: 'bg-emerald-500' },
-  installed: { label: 'Installed', dot: 'bg-green-500',   badge: 'bg-green-900/60 text-green-300 border-green-700/40',
-    ringColor: 'ring-green-500/30',   cardBorder: 'border-green-700/40',  iconColor: 'text-green-400', barColor: 'bg-green-500' },
-};
-const TYPE_ICONS_JSX: Record<string, React.ReactNode> = {
-  roof:   <Home size={18} />,
-  ground: <Trees size={18} />,
-  fence:  <Layers size={18} />,
-};
-const TYPE_BG: Record<string, string> = {
-  roof:   'bg-amber-500/15 text-amber-400 border-amber-500/20',
-  ground: 'bg-teal-500/15 text-teal-400 border-teal-500/20',
-  fence:  'bg-purple-500/15 text-purple-400 border-purple-500/20',
-};
-
-// Urgency helper
-function getUrgency(p: Project): 'high' | 'medium' | 'low' {
-  const daysSince = (Date.now() - new Date(p.updatedAt || p.createdAt).getTime()) / 86400000;
-  if (p.status === 'proposal' && daysSince > 5) return 'high';
-  if (p.status === 'approved' && daysSince > 3)  return 'high';
-  if (p.status === 'lead' && daysSince > 14)      return 'medium';
-  if (p.status === 'design' && daysSince > 7)     return 'medium';
-  return 'low';
-}
-
-function getNextAction(p: Project): { label: string; href: string; color: string; bg: string } {
-  switch (p.status) {
-    case 'lead':      return { label: 'Start Design',     href: `/design?projectId=${p.id}`, color: 'text-blue-300',    bg: 'bg-blue-500/15 hover:bg-blue-500/25 border-blue-500/30' };
-    case 'design':    return { label: 'Create Proposal',  href: `/projects/${p.id}`,          color: 'text-amber-300',   bg: 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/30' };
-    case 'proposal':  return { label: 'Follow Up',        href: `/projects/${p.id}`,          color: 'text-orange-300',  bg: 'bg-orange-500/15 hover:bg-orange-500/25 border-orange-500/30' };
-    case 'approved':  return { label: 'Schedule Install', href: `/projects/${p.id}`,          color: 'text-emerald-300', bg: 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/30' };
-    case 'installed': return { label: 'View Project',     href: `/projects/${p.id}`,          color: 'text-green-300',   bg: 'bg-green-500/15 hover:bg-green-500/25 border-green-500/30' };
-  }
-}
-
-// Pipeline progress bar
-function PipelineProgress({ status }: { status: ProjectStatus }) {
-  const idx = STATUS_STEPS.indexOf(status);
-  return (
-    <div className="flex items-center gap-0.5 w-full">
-      {STATUS_STEPS.map((s, i) => {
-        const cfg = STATUS_CONFIG[s];
-        const active = i <= idx;
-        return (
-          <div
-            key={s}
-            className={`h-1 flex-1 rounded-full transition-all ${active ? cfg.barColor : 'bg-slate-700/60'} ${i === idx ? 'ring-1 ring-white/20' : ''}`}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-// Status Dropdown
-function StatusDropdown({ project, onStatusChange }: {
-  project: Project;
-  onStatusChange: (id: string, status: ProjectStatus) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const cfg = STATUS_CONFIG[project.status];
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={e => { e.stopPropagation(); setOpen(v => !v); }}
-        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all hover:opacity-90 ${cfg.badge}`}
-      >
-        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot}`} />
-        {cfg.label}
-        <ChevronDown size={9} className={`transition-transform opacity-60 ${open ? 'rotate-180' : ''}`} />
-      </button>
-      {open ? (
-        <div className="absolute left-0 top-full mt-1.5 bg-slate-800/95 backdrop-blur-xl border border-slate-700/80 rounded-xl shadow-2xl z-30 overflow-hidden min-w-[150px]">
-          <div className="px-3 py-1.5 border-b border-slate-700/50">
-            <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Set Status</span>
-          </div>
-          {STATUS_STEPS.map(s => {
-            const sc = STATUS_CONFIG[s];
-            return (
-              <button
-                key={s}
-                onClick={e => { e.stopPropagation(); onStatusChange(project.id, s); setOpen(false); }}
-                className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-slate-700/60 transition-colors ${s === project.status ? 'text-white bg-slate-700/40' : 'text-slate-300'}`}
-              >
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${sc.dot}`} />
-                {sc.label}
-                {s === project.status ? <Check size={11} className="ml-auto text-amber-400" /> : null}
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-
-// ---------------------------------------------------------------------------
 // ProposalsSection — shows all proposals linked to this client's projects
 // ---------------------------------------------------------------------------
 interface ProposalRow {
@@ -205,9 +88,9 @@ function ProposalsSection({ clientId }: { clientId: string }) {
         <div className="flex items-center gap-2">
           <TrendingUp size={15} className="text-violet-400" />
           <span className="font-semibold text-white text-sm">Proposals</span>
-          {proposals.length > 0 && (
+          {proposals.length > 0 ? (
             <span className="text-xs text-slate-500 font-mono">({proposals.length})</span>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -235,19 +118,19 @@ function ProposalsSection({ clientId }: { clientId: string }) {
                     </span>
                   </div>
                   <div className="flex items-center gap-3 mt-0.5 text-xs text-slate-500 flex-wrap">
-                    {p.project_name && (
+                    {p.project_name ? (
                       <span className="flex items-center gap-1">
                         <FolderOpen size={9} />{p.project_name}
                       </span>
-                    )}
-                    {p.net_cost != null && (
+                    ) : null}
+                    {p.net_cost != null ? (
                       <span className="text-emerald-400/70">${p.net_cost.toLocaleString()}</span>
-                    )}
-                    {p.sent_at && (
+                    ) : null}
+                    {p.sent_at ? (
                       <span className="flex items-center gap-1">
                         <Send size={9} />Sent {new Date(p.sent_at).toLocaleDateString()}
                       </span>
-                    )}
+                    ) : null}
                   </div>
                 </div>
                 <Link
@@ -323,9 +206,9 @@ function NotesSection({ clientId }: { clientId: string }) {
       <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-700/50">
         <StickyNote size={15} className="text-amber-400" />
         <span className="font-semibold text-white text-sm">Notes</span>
-        {notes.length > 0 && (
+        {notes.length > 0 ? (
           <span className="text-xs text-slate-500 font-mono">({notes.length})</span>
-        )}
+        ) : null}
       </div>
 
       {/* Add note */}
@@ -422,11 +305,11 @@ function SiteSurveysSection({ clientId }: { clientId: string }) {
         <div className="flex items-center gap-2">
           <Camera size={15} className="text-cyan-400" />
           <h3 className="font-semibold text-white text-sm">Site Surveys</h3>
-          {!loading && (
+          {!loading ? (
             <span className="text-xs text-slate-500 bg-slate-700/50 px-2 py-0.5 rounded-full">
               {surveys.length}
             </span>
-          )}
+          ) : null}
         </div>
         <button
           onClick={load}
@@ -479,22 +362,22 @@ function SiteSurveysSection({ clientId }: { clientId: string }) {
                     <Calendar size={10} />
                     {new Date(s.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </span>
-                  {s.projectName && (
+                  {s.projectName ? (
                     <span className="flex items-center gap-1 text-amber-400/70">
                       <FolderOpen size={10} /> {s.projectName}
                     </span>
-                  )}
-                  {s.fileCount !== undefined && s.fileCount > 0 && (
+                  ) : null}
+                  {s.fileCount !== undefined && s.fileCount > 0 ? (
                     <span className="flex items-center gap-1">
                       <Camera size={10} /> {s.fileCount} photo{s.fileCount !== 1 ? 's' : ''}
                     </span>
-                  )}
+                  ) : null}
                 </div>
               </div>
 
               {/* Actions */}
               <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                {s.projectId && (
+                {s.projectId ? (
                   <Link
                     href={`/projects/${s.projectId}/survey/${s.id}`}
                     className="btn-ghost p-1.5 rounded-lg"
@@ -502,8 +385,8 @@ function SiteSurveysSection({ clientId }: { clientId: string }) {
                   >
                     <Eye size={13} />
                   </Link>
-                )}
-                {s.projectId && (
+                ) : null}
+                {s.projectId ? (
                   <Link
                     href={`/projects/${s.projectId}`}
                     className="btn-ghost p-1.5 rounded-lg"
@@ -511,7 +394,7 @@ function SiteSurveysSection({ clientId }: { clientId: string }) {
                   >
                     <ChevronRight size={14} />
                   </Link>
-                )}
+                ) : null}
               </div>
             </div>
           ))}
@@ -648,9 +531,9 @@ function ClientDetailContent() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 flex-wrap">
                 <h1 className="text-lg font-bold text-white">{client.name}</h1>
-                {client.utilityProvider && (
+                {client.utilityProvider ? (
                   <ConfidenceBadge confidence={dataConfidence('utilityProvider').confidence} source={dataConfidence('utilityProvider').source} size="xs" detail={dataConfidence('utilityProvider').detail} />
-                )}
+                ) : null}
               </div>
               <div className="flex items-center gap-4 mt-1 text-xs text-slate-400 flex-wrap">
                 <span className="flex items-center gap-1"><MapPin size={12} />{client.city}, {client.state}</span>

@@ -125,7 +125,7 @@ export default function ClientsPage() {
             </div>
 
             {/* KPI strip */}
-            {!loading && clients.length > 0 && (
+            {!loading && clients.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div className="bg-slate-900/60 rounded-xl border border-slate-700/40 p-3 text-center">
                   <div className="w-7 h-7 rounded-lg bg-teal-500/15 border border-teal-500/20 flex items-center justify-center mx-auto mb-2">
@@ -153,7 +153,7 @@ export default function ClientsPage() {
                   <div className="text-[10px] text-slate-500 uppercase tracking-wide font-semibold mt-0.5">Avg Bill / yr</div>
                 </div>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -195,7 +195,7 @@ export default function ClientsPage() {
         ) : null}
 
         {/* Starter limit banner */}
-        {atClientLimit && (
+        {atClientLimit ? (
           <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-center gap-3">
             <Lock size={16} className="text-amber-400 flex-shrink-0" />
             <div className="flex-1">
@@ -204,16 +204,16 @@ export default function ClientsPage() {
             </div>
             <button onClick={() => setUpgradeOpen(true)} className="btn-primary btn-sm flex-shrink-0">Upgrade</button>
           </div>
-        )}
+        ) : null}
 
         {/* Error banner */}
-        {clientsError && clients.length === 0 && (
+        {clientsError && clients.length === 0 ? (
           <div className="flex items-center gap-3 p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
             <AlertCircle size={16} className="flex-shrink-0" />
             <span>Could not load clients from server.</span>
             <button onClick={() => loadClients(true)} className="ml-auto btn-ghost text-xs px-2 py-1">Retry</button>
           </div>
-        )}
+        ) : null}
 
         {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-3">
@@ -279,12 +279,12 @@ export default function ClientsPage() {
               <Users size={28} className="text-slate-600" />
             </div>
             <p className="text-slate-400 font-semibold">{search ? 'No clients match your search' : 'No clients yet'}</p>
-            {!search && (
+            {!search ? (
               <>
                 <p className="text-slate-500 text-sm mt-1">Add your first client to get started</p>
                 <Link href="/clients/new" className="btn-primary mt-4 inline-flex"><Plus size={16} /> Add Client</Link>
               </>
-            )}
+            ) : null}
           </div>
         ) : (
           viewMode === 'grid' ? (
@@ -500,14 +500,14 @@ function ClientCard({ client, onDelete }: { client: Client; onDelete: () => void
             </div>
             <span>{client.phone}</span>
           </a>
-          {client.utilityProvider && (
+          {client.utilityProvider ? (
             <div className="flex items-center gap-2 text-xs text-slate-400">
               <div className="w-5 h-5 rounded-md bg-slate-700/60 flex items-center justify-center flex-shrink-0">
                 <Building2 size={10} className="text-slate-500" />
               </div>
               <span className="truncate">{client.utilityProvider}</span>
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* KPI tiles */}
@@ -541,13 +541,13 @@ function ClientCard({ client, onDelete }: { client: Client; onDelete: () => void
         </div>
 
         {/* Monthly usage sparkline */}
-        {client.monthlyKwh?.length > 0 && (
+        {client.monthlyKwh?.length > 0 ? (
           <div className="mb-4">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[10px] text-slate-500 uppercase tracking-wide font-semibold">Monthly kWh</span>
-              {billPerMonth > 0 && (
+              {billPerMonth > 0 ? (
                 <span className="text-[10px] text-emerald-400 font-semibold">~${billPerMonth}/mo</span>
-              )}
+              ) : null}
             </div>
             <div className="flex items-end gap-0.5 h-9 bg-slate-900/40 rounded-lg p-1">
               {client.monthlyKwh.map((kwh, i) => {
@@ -566,7 +566,7 @@ function ClientCard({ client, onDelete }: { client: Client; onDelete: () => void
               })}
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Action row */}
         <div className="flex gap-2 pt-3 border-t border-slate-700/40">

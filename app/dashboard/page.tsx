@@ -154,12 +154,12 @@ function CommandCard({
           style={{ background: `${accentColor}18` }}>
           <span style={{ color: accentColor }}>{icon}</span>
         </div>
-        {pulse && (
+        {pulse ? (
           <span className="flex h-2 w-2 mt-1">
             <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full opacity-75" style={{ background: accentColor }} />
             <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: accentColor }} />
           </span>
-        )}
+        ) : null}
       </div>
       <div className="text-3xl font-black mb-0.5 leading-none" style={{ color: accentColor }}>{count}</div>
       <div className="text-sm font-bold text-white mb-0.5">{label}</div>
@@ -234,21 +234,21 @@ function WorkQueueRow({ project, onAction, onDismiss }: {
           <Link href={`/projects/${project.id}`}
             className="text-sm font-bold text-white truncate hover:text-amber-400 transition-colors"
             onClick={e => e.stopPropagation()}>{project.name}</Link>
-          {urgency === 'high' && (
+          {urgency === 'high' ? (
             <span className="flex items-center gap-0.5 text-[10px] text-amber-300 bg-amber-500/12 border border-amber-500/25 px-1.5 py-0.5 rounded-full font-bold">
               <Zap size={8} /> Hot
             </span>
-          )}
-          {project.client?.name && project.clientId && (
+          ) : null}
+          {project.client?.name && project.clientId ? (
             <Link href={`/clients/${project.clientId}`}
               className="text-xs text-slate-500 hover:text-amber-300 transition-colors flex-shrink-0"
               onClick={e => e.stopPropagation()}>
               {project.client.name}
             </Link>
-          )}
-          {project.client?.name && !project.clientId && (
+          ) : null}
+          {project.client?.name && !project.clientId ? (
             <span className="text-xs text-slate-500 flex-shrink-0">{project.client.name}</span>
-          )}
+          ) : null}
         </div>
         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${stage.bg} ${stage.color}`}>{stage.label}</span>
@@ -275,7 +275,7 @@ function WorkQueueRow({ project, onAction, onDismiss }: {
           onClick={handleActionClick}>
           <ArrowRight size={12} />
         </button>
-        {onDismiss && (
+        {onDismiss ? (
           <button
             title="Dismiss from queue"
             className="p-1.5 rounded-lg text-slate-600 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
@@ -283,7 +283,7 @@ function WorkQueueRow({ project, onAction, onDismiss }: {
             onClick={e => { e.preventDefault(); e.stopPropagation(); onDismiss(project); }}>
             <EyeOff size={12} />
           </button>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -306,9 +306,9 @@ function DealRow({ project, rank }: { project: Project; rank: number }) {
           </div>
           <div className="flex items-center gap-1.5 mt-0.5">
             <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${stage.bg} ${stage.color}`}>{stage.label}</span>
-            {urgency === 'high' && (
+            {urgency === 'high' ? (
               <span className="text-xs text-amber-400 font-semibold">● Urgent</span>
-            )}
+            ) : null}
           </div>
         </div>
         <div className="text-right flex-shrink-0">
@@ -479,12 +479,12 @@ function OpsProjectCard({ proj, onAdvance, onSaveField, busy }: {
         border: proj.is_stalled ? '1px solid rgba(239,68,68,0.4)' : `1px solid ${accentHex}25`,
         boxShadow: proj.is_stalled ? '0 0 12px rgba(239,68,68,0.1), var(--shadow-card)' : `0 0 0 1px ${accentHex}10, var(--shadow-card)` }}>
       <div className="absolute top-0 left-0 right-0 h-[2px] rounded-t-2xl" style={{ background: proj.is_stalled ? '#EF4444' : accentHex }} />
-      {isBusy && (
+      {isBusy ? (
         <div className="absolute inset-0 rounded-2xl z-10 flex items-center justify-center"
           style={{ background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(3px)' }}>
           <Loader2 size={18} className="animate-spin text-white" />
         </div>
-      )}
+      ) : null}
       <div className="p-4 cursor-pointer transition-all duration-200 group-hover:bg-[var(--bg-muted)]/30"
         onClick={() => router.push(`/projects/${proj.id}`)}>
         <div className="flex items-start justify-between gap-2">
@@ -494,18 +494,18 @@ function OpsProjectCard({ proj, onAdvance, onSaveField, busy }: {
           </div>
           <ArrowUpRight size={12} className="flex-shrink-0 mt-0.5 opacity-0 group-hover:opacity-60 transition-opacity" style={{ color: 'var(--text-muted)' }} />
         </div>
-        {proj.address && (
+        {proj.address ? (
           <div className="flex items-center gap-1 mt-1.5">
             <MapPin size={10} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
             <span className="text-[11px] truncate" style={{ color: 'var(--text-muted)' }}>{proj.address}</span>
           </div>
-        )}
+        ) : null}
         <div className="flex flex-wrap gap-1.5 mt-2.5">
           {proj.system_size_kw && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}><Zap size={9} className="inline mr-0.5 -mt-px" style={{ color: '#F59E0B' }} />{proj.system_size_kw.toFixed(1)} kW</span>}
           {proj.install_date && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ background: 'rgba(59,130,246,0.1)', color: '#60a5fa' }}><Calendar size={9} className="inline mr-0.5 -mt-px" />{fmtDate(proj.install_date)}</span>}
           {proj.crew_assigned && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ background: 'rgba(34,197,94,0.1)', color: '#4ade80' }}><Users size={9} className="inline mr-0.5 -mt-px" />{proj.crew_assigned}</span>}
         </div>
-        {proj.is_stalled && (
+        {proj.is_stalled ? (
           <div className="mt-2.5 rounded-lg px-2.5 py-2 flex items-start gap-2" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.15)' }}>
             <AlertTriangle size={12} className="text-red-400 flex-shrink-0 mt-0.5" />
             <div>
@@ -513,15 +513,15 @@ function OpsProjectCard({ proj, onAdvance, onSaveField, busy }: {
               {proj.updated_at && <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>Last update: {fmtDateFull(proj.updated_at)}</div>}
             </div>
           </div>
-        )}
-        {proj.project_status !== 'complete' && !proj.is_stalled && (
+        ) : null}
+        {proj.project_status !== 'complete' && !proj.is_stalled ? (
           <div className="mt-2.5 flex items-start gap-2 text-[11px] leading-snug" style={{ color: uc.text }}>
             <div className="w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1" style={{ background: uc.dot }} />
             <span>{step.label}</span>
           </div>
-        )}
+        ) : null}
       </div>
-      {proj.project_status !== 'complete' && (
+      {proj.project_status !== 'complete' ? (
         <div className="flex items-center gap-1.5 px-4 pb-3 pt-0" onClick={e => e.stopPropagation()}>
           {next && <button onClick={handleAdvanceClick} disabled={isBusy}
             className="text-[10px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition-all hover:brightness-110 hover:-translate-y-0.5 disabled:opacity-50"
@@ -551,7 +551,7 @@ function OpsProjectCard({ proj, onAdvance, onSaveField, busy }: {
             </button>
           </>}
         </div>
-      )}
+      ) : null}
       {inlineAction === 'schedule' && <div className="px-4 pb-3" onClick={e => e.stopPropagation()}>
         <InlineInput type="date" placeholder="Install date" defaultValue={proj.install_date || ''} onSave={v => handleSave('install_date', v)} onCancel={() => setInlineAction(null)} />
       </div>}
@@ -1024,18 +1024,18 @@ export default function CommandCenter() {
                     style={{ background: 'var(--accent-green)', color: '#0f172a' }}>
                     <Radio size={9} className="animate-pulse" /> LIVE
                   </span>
-                  {isAdmin && (
+                  {isAdmin ? (
                     <Link href="/admin" className="text-xs font-semibold px-2.5 py-0.5 rounded-full flex items-center gap-1"
                       style={{ background: 'rgba(245,158,11,0.15)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.3)' }}>
                       <Shield size={9} /> Admin
                     </Link>
-                  )}
-                  {opsStats.stalled.length > 0 && opsView && (
+                  ) : null}
+                  {opsStats.stalled.length > 0 && opsView ? (
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1"
                       style={{ background: 'rgba(239,68,68,0.15)', color: '#EF4444', border: '1px solid rgba(239,68,68,0.3)' }}>
                       <AlertTriangle size={8} /> {opsStats.stalled.length} stalled
                     </span>
-                  )}
+                  ) : null}
                 </div>
                 <h1 className="text-xl lg:text-2xl font-black text-white tracking-tight">
                   {greeting()}{currentUser?.name ? `, ${currentUser.name.split(' ')[0]}` : ''}.
@@ -1050,7 +1050,7 @@ export default function CommandCenter() {
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 {/* Workflow guide restore — only visible when banner is hidden */}
-                {!showWorkflowBanner && (
+                {!showWorkflowBanner ? (
                   <button
                     onClick={restoreWorkflowBanner}
                     title="Show workflow guide"
@@ -1059,7 +1059,7 @@ export default function CommandCenter() {
                   >
                     <Play size={10} className="fill-current ml-0.5" />
                   </button>
-                )}
+                ) : null}
                 <button onClick={() => setShowBillUpload(true)}
                   data-tour="bill"
                   className="btn-secondary btn-sm flex items-center gap-1.5">
@@ -1087,7 +1087,7 @@ export default function CommandCenter() {
 
         {viewMode === 'full' ? (<>
           {/* ══════════ WORKFLOW PROCESS BANNER ══════════ */}
-          {showWorkflowBanner && (
+          {showWorkflowBanner ? (
             <div className="relative rounded-xl border border-amber-500/20 bg-slate-800/60 px-4 py-3 overflow-hidden">
               <div className="absolute inset-0 bg-amber-500/3 pointer-events-none" />
               {/* Dismiss button — snoozes for 7 days */}
@@ -1140,15 +1140,15 @@ export default function CommandCenter() {
                       {href ? (
                         <Link href={href}>{inner}</Link>
                       ) : inner}
-                      {i < arr.length - 1 && (
+                      {i < arr.length - 1 ? (
                         <ChevronRight size={12} className="text-slate-600 flex-shrink-0 mx-0.5" />
-                      )}
+                      ) : null}
                     </React.Fragment>
                   );
                 })}
               </div>
             </div>
-          )}
+          ) : null}
         </>) : null}
 
 
@@ -1186,7 +1186,7 @@ export default function CommandCenter() {
         ) : null}
         {viewMode === 'full' ? (<>
           {/* ══════════ FINANCIAL PRESSURE BAR ══════════ */}
-          {!dashLoading && (
+          {!dashLoading ? (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div className="relative rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
@@ -1216,11 +1216,11 @@ export default function CommandCenter() {
                 </div>
               </div>
             </div>
-          )}
+          ) : null}
 
         </>) : null}
           {/* ═══ TODAY'S COMMANDS ═══ */}
-        {!dashLoading && (
+        {!dashLoading ? (
           <div className="rounded-2xl overflow-hidden"
             style={{ background: 'var(--bg-card)', border: '1px solid rgba(245,158,11,0.2)' }}>
             <div className="px-5 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border-color)' }}>
@@ -1248,12 +1248,12 @@ export default function CommandCenter() {
                         <div className="text-[13px] font-bold truncate" style={{ color: 'var(--text-primary)' }}>{cmd.title}</div>
                         <div className="flex items-center gap-2 mt-0.5">
                           <span className="text-[10px] font-medium truncate" style={{ color: 'var(--text-muted)' }}>{cmd.client_name || cmd.project_name}</span>
-                          {cmd.due_date && (
+                          {cmd.due_date ? (
                             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
                               style={{ background: pc.bg, color: pc.color, border: `1px solid ${pc.border}` }}>
                               {fmtDate(cmd.due_date)}
                             </span>
-                          )}
+                          ) : null}
                         </div>
                       </button>
                       {/* Actions */}
@@ -1294,7 +1294,7 @@ export default function CommandCenter() {
               </div>
             )}
           </div>
-        )}
+        ) : null}
 
         {viewMode === 'full' ? (<>
         {/* ═══ ACTION PRIORITY ═══
@@ -1399,7 +1399,7 @@ export default function CommandCenter() {
 
         {viewMode === 'full' ? (<>
         {/* ═══ UPCOMING SCHEDULE ═══ */}
-        {schedule.length > 0 && (
+        {schedule.length > 0 ? (
           <div className="card p-4">
             <div className="flex items-center gap-2 mb-3">
               <Calendar size={14} className="text-blue-400" />
@@ -1429,7 +1429,7 @@ export default function CommandCenter() {
               ))}
             </div>
           </div>
-        )}
+        ) : null}
         </>) : null}
 
         {viewMode === 'full' ? (<>
@@ -1441,9 +1441,9 @@ export default function CommandCenter() {
             <div className="flex items-center gap-2">
               <Activity size={14} className="text-amber-400" />
               <span className="text-sm font-bold text-white">Pipeline & Operations</span>
-              {pipelineFilter !== 'all' && (
+              {pipelineFilter !== 'all' ? (
                 <button onClick={() => setPipelineFilter('all')} className="text-xs text-slate-400 hover:text-white transition-colors">(clear filter ×)</button>
-              )}
+              ) : null}
             </div>
             <Link href="/projects" className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1">All Projects <ChevronRight size={12} /></Link>
           </div>
@@ -1465,14 +1465,14 @@ export default function CommandCenter() {
               );
             })}
           </div>
-          {projects.length > 0 && (
+          {projects.length > 0 ? (
             <div className="flex gap-0.5 mt-3 h-1 rounded-full overflow-hidden">
               {statusPipeline.map(({ status, count }) => {
                 const cfg = STAGE_CFG[status]; const pct = (count / projects.length) * 100;
                 return pct > 0 ? <div key={status} className="rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: cfg.bar }} /> : null;
               })}
             </div>
-          )}
+          ) : null}
 
           {/* Crew Calendar */}
           <div className="mt-3 rounded-xl p-3" style={{ background: 'var(--bg-muted)', border: '1px solid var(--border-color)' }}>
@@ -1496,12 +1496,12 @@ export default function CommandCenter() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {opsProjects.length > 0 && (
+                {opsProjects.length > 0 ? (
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
                     style={{ background: 'rgba(34,197,94,0.15)', color: '#4ADE80' }}>
                     {opsProjects.length} projects
                   </span>
-                )}
+                ) : null}
                 {opsView ? <ChevronUp size={14} style={{ color: 'var(--text-muted)' }} /> : <ChevronDown size={14} style={{ color: 'var(--text-muted)' }} />}
               </div>
             </button>
@@ -1510,15 +1510,15 @@ export default function CommandCenter() {
           {/* Expanded Operations Board */}
           {opsView ? (
             <div className="mt-3 space-y-4">
-            {!opsLoading && opsProjects.length > 0 && (
+            {!opsLoading && opsProjects.length > 0 ? (
               <ActionRequiredStrip items={opsActionItems}
                 onAction={(projectId, projectName, clientName) =>
                   openDecisionModal(projectId, projectName, clientName)
                 } />
-            )}
+            ) : null}
 
             {/* Search */}
-            {!opsLoading && opsProjects.length > 3 && (
+            {!opsLoading && opsProjects.length > 3 ? (
               <div className="relative">
                 <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
                 <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
@@ -1527,7 +1527,7 @@ export default function CommandCenter() {
                   style={{ background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', outline: 'none' }} />
                 {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }}><X size={14} /></button>}
               </div>
-            )}
+            ) : null}
 
             {/* Kanban */}
             {opsLoading ? (
@@ -1572,7 +1572,7 @@ export default function CommandCenter() {
                         <div className="flex-1 h-px" style={{ background: 'var(--border-color)' }} />
                         {isCollapsed ? <ChevronDown size={14} style={{ color: 'var(--text-muted)' }} /> : <ChevronUp size={14} style={{ color: 'var(--text-muted)' }} />}
                       </button>
-                      {!isCollapsed && (
+                      {!isCollapsed ? (
                         <div className="overflow-x-auto pb-2 -mx-1 px-1" style={{ scrollBehavior: 'smooth', scrollbarWidth: 'thin', scrollbarColor: 'var(--border-color) transparent' }}>
                           <div className="flex gap-3" style={{ minWidth: `${phase.stages.length * 250}px` }}>
                             {phase.stages.map(stage => {
@@ -1602,7 +1602,7 @@ export default function CommandCenter() {
                             })}
                           </div>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   );
                 })}
@@ -1621,7 +1621,7 @@ export default function CommandCenter() {
                 <div className="w-6 h-6 rounded-lg bg-amber-500/15 flex items-center justify-center"><Zap size={13} className="text-amber-400" /></div>
                 <span className="text-sm font-bold text-white">Active Work Queue</span>
                 <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--accent-amber)' }}>{workQueue.length}</span>
-                {dismissedQueueIds.size > 0 && (
+                {dismissedQueueIds.size > 0 ? (
                   <button
                     onClick={restoreAllDismissed}
                     title={`Restore ${dismissedQueueIds.size} dismissed item${dismissedQueueIds.size !== 1 ? 's' : ''}`}
@@ -1630,7 +1630,7 @@ export default function CommandCenter() {
                   >
                     <EyeOff size={9} /> {dismissedQueueIds.size} hidden
                   </button>
-                )}
+                ) : null}
               </div>
               <Link href="/projects" className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1">All <ChevronRight size={12} /></Link>
             </div>
@@ -1678,13 +1678,13 @@ export default function CommandCenter() {
             ) : (
               <div className="space-y-1">{highValueDeals.map((p, i) => <DealRow key={p.id} project={p} rank={i + 1} />)}</div>
             )}
-            {totalRevenue > 0 && (
+            {totalRevenue > 0 ? (
               <div className="mt-4 pt-3 rounded-xl p-3 text-center" style={{ background: 'var(--bg-muted)', borderTop: '1px solid var(--border-color)' }}>
                 <div className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Total Pipeline</div>
                 <div className="text-xl font-black" style={{ color: 'var(--accent-amber)' }}>${(totalRevenue / 1000).toFixed(0)}k</div>
                 <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{totalKw.toFixed(1)} kW across {projects.length} projects</div>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -1716,7 +1716,7 @@ export default function CommandCenter() {
 
       {/* ═══ DEAL DECISION ENGINE ═══ */}
       {/* Intercepts ALL stage-change actions from CommandBar, WorkQueue, ActionStrip */}
-      {decisionModal && (
+      {decisionModal ? (
         <DealDecisionModal
           projectId={decisionModal.projectId}
           projectName={decisionModal.projectName}
@@ -1736,10 +1736,10 @@ export default function CommandCenter() {
             setToast({ msg: `Moved to ${STAGE_LABELS[newStage] || newStage} ✓`, type: 'ok' });
           }}
         />
-      )}
+      ) : null}
 
       {/* Bill Upload Modal */}
-      {showBillUpload && (
+      {showBillUpload ? (
         <BillUploadModal
           onClose={() => setShowBillUpload(false)}
           onComplete={(entities) => {
@@ -1749,10 +1749,10 @@ export default function CommandCenter() {
             window.location.href = `/projects/${entities.projectId}`;
           }}
         />
-      )}
+      ) : null}
 
       {/* Execution Modals */}
-      {activeModal?.type === 'follow_up' && (
+      {activeModal?.type === 'follow_up' ? (
         <FollowUpModal
           commandId={activeModal.commandId || ''}
           projectId={activeModal.projectId}
@@ -1761,8 +1761,8 @@ export default function CommandCenter() {
           onClose={() => setActiveModal(null)}
           onComplete={handleModalComplete}
         />
-      )}
-      {activeModal?.type === 'schedule_install' && (
+      ) : null}
+      {activeModal?.type === 'schedule_install' ? (
         <ScheduleInstallModal
           commandId={activeModal.commandId}
           projectId={activeModal.projectId}
@@ -1771,8 +1771,8 @@ export default function CommandCenter() {
           onClose={() => setActiveModal(null)}
           onComplete={handleModalComplete}
         />
-      )}
-      {activeModal?.type === 'engineering_review' && (
+      ) : null}
+      {activeModal?.type === 'engineering_review' ? (
         <EngineeringReviewModal
           commandId={activeModal.commandId}
           projectId={activeModal.projectId}
@@ -1781,10 +1781,10 @@ export default function CommandCenter() {
           onClose={() => setActiveModal(null)}
           onComplete={handleModalComplete}
         />
-      )}
+      ) : null}
 
       {/* Toast */}
-      {toast && (
+      {toast ? (
         <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2.5 px-5 py-3 rounded-2xl text-sm font-medium shadow-xl"
           style={{
             background: toast.type === 'ok' ? 'var(--bg-card)' : 'rgba(239,68,68,0.1)',
@@ -1797,7 +1797,7 @@ export default function CommandCenter() {
           <span className="max-w-xs">{toast.msg}</span>
           <button onClick={() => setToast(null)} className="ml-2 opacity-50 hover:opacity-100 transition-opacity"><X size={14} /></button>
         </div>
-      )}
+      ) : null}
       <style jsx global>{`@keyframes slideInUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }`}</style>
     </AppShell>
   );

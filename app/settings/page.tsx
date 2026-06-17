@@ -266,7 +266,7 @@ export default function SettingsPage() {
           </div>
 
         {/* Save status toast */}
-        {saveStatus !== 'idle' && (
+        {saveStatus !== 'idle' ? (
           <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-sm font-medium ${
             saveStatus === 'success'
               ? 'banner-success'
@@ -278,7 +278,7 @@ export default function SettingsPage() {
             }
             {saveMessage}
           </div>
-        )}
+        ) : null}
 
         {/* Tabs */}
         <div className="tab-bar">
@@ -295,7 +295,7 @@ export default function SettingsPage() {
         </div>
 
         {/* ── PROFILE TAB ── */}
-        {activeTab === 'profile' && (
+        {activeTab === 'profile' ? (
           <div className="space-y-4">
             <div className="card p-6 space-y-5">
               <h2 className="text-lg font-bold text-white">Profile Information</h2>
@@ -381,10 +381,10 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* ── BRANDING TAB ── */}
-        {activeTab === 'branding' && (
+        {activeTab === 'branding' ? (
           <div className="space-y-5">
 
             {/* Cross-link to onboarding */}
@@ -394,7 +394,7 @@ export default function SettingsPage() {
             </div>
 
             {/* Plan gate notice — hidden for admin/free_pass users */}
-            {currentPlan === 'starter' && !isFreePass && !isAdmin && (
+            {currentPlan === 'starter' && !isFreePass && !isAdmin ? (
               <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm">
                 <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
                 <div>
@@ -402,7 +402,7 @@ export default function SettingsPage() {
                   <a href="/auth/subscribe" className="underline hover:text-amber-200">Upgrade your plan →</a>
                 </div>
               </div>
-            )}
+            ) : null}
 
             {/* Logo Upload */}
             <div className="card p-6 space-y-4">
@@ -590,10 +590,10 @@ export default function SettingsPage() {
               </button>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* ── SUBSCRIPTION TAB ── */}
-        {activeTab === 'subscription' && (
+        {activeTab === 'subscription' ? (
           <div className="space-y-5">
             {/* Current plan */}
             <div className="card p-6">
@@ -620,11 +620,11 @@ export default function SettingsPage() {
                   </div>
                 </div>
                 {/* Hide upgrade button for admin/free_pass users */}
-                {!isFreePass && !isAdmin && (
+                {!isFreePass && !isAdmin ? (
                   <a href="/auth/subscribe" className="btn-primary text-sm">
                     Upgrade Plan
                   </a>
-                )}
+                ) : null}
               </div>
             </div>
 
@@ -677,7 +677,7 @@ export default function SettingsPage() {
             </div>
 
             {/* Billing section — hidden for admin/free_pass users */}
-            {!isFreePass && !isAdmin && (
+            {!isFreePass && !isAdmin ? (
               <div className="card p-6">
                 <h2 className="text-lg font-bold text-white mb-2">Billing</h2>
                 <p className="text-slate-400 text-sm mb-4">Manage your subscription and billing through our secure payment portal.</p>
@@ -693,9 +693,9 @@ export default function SettingsPage() {
                   </a>
                 </div>
               </div>
-            )}
+            ) : null}
           </div>
-        )}
+        ) : null}
 
         {/* —— SolarDog Tutorial —— visible to all users */}
         <div className="card p-6">
@@ -714,7 +714,7 @@ export default function SettingsPage() {
         </div>
 
         {/* ── Admin Tools ── only visible to admin users */}
-        {isAdmin && (
+        {isAdmin ? (
           <div className="card p-6 border border-amber-500/20">
             <h2 className="text-lg font-bold text-white mb-1 flex items-center gap-2">
               🔧 Admin Tools
@@ -722,24 +722,24 @@ export default function SettingsPage() {
             <p className="text-slate-400 text-sm mb-4">Database maintenance and migrations. Safe to run multiple times.</p>
             <MigrateButton />
           </div>
-        )}
+        ) : null}
 
       </div>
 
         {/* ── ORGANIZATION TAB ── */}
-        {activeTab === 'organization' && user && (
+        {activeTab === 'organization' && user ? (
           <OrganizationPanel userId={user.id} />
-        )}
+        ) : null}
 
         {/* ── TEAMS TAB ── */}
-        {activeTab === 'teams' && (
+        {activeTab === 'teams' ? (
           <CrewMembersPanel />
-        )}
+        ) : null}
 
         {/* ── NOTIFICATIONS TAB ── */}
-        {activeTab === 'notifications' && (
+        {activeTab === 'notifications' ? (
           <NotificationsPanel />
-        )}
+        ) : null}
 
     </AppShell>
   );
@@ -958,7 +958,7 @@ function NotificationsPanel() {
       </div>
 
       {/* Status indicator */}
-      {(saving || status !== 'idle') && (
+      {(saving || status !== 'idle') ? (
         <div className={`flex items-center gap-2 text-sm px-4 py-2 rounded-lg ${
           saving       ? 'bg-slate-700/40 text-slate-400' :
           status === 'saved' ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
@@ -972,7 +972,7 @@ function NotificationsPanel() {
             <><AlertCircle size={13} /> Failed to save — try again</>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -1011,13 +1011,13 @@ function MigrateButton() {
       >
         {status === 'running' ? <><Loader2 size={12} className="animate-spin" /> Running...</> : status === 'done' ? <><CheckCircle size={12} /> Done</> : <><Rocket size={12} /> Run Database Migration</>}
       </button>
-      {results.length > 0 && (
+      {results.length > 0 ? (
         <div className="mt-3 bg-slate-900 rounded-xl p-3 max-h-48 overflow-y-auto">
           {results.map((r, i) => (
             <div key={i} className="text-xs font-mono text-slate-300 py-0.5">{r}</div>
           ))}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
