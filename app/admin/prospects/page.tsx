@@ -197,6 +197,7 @@ export default function ProspectsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <a href="/desk" target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/15 text-emerald-300 text-sm font-medium hover:bg-emerald-500/25">📞 Lead Desk</a>
           {/* View toggle */}
           <div className="flex items-center rounded-lg bg-white/5 p-0.5">
             <button

@@ -327,6 +327,28 @@ export async function applyWorkUpdate(id: string, p: WorkUpdate): Promise<void> 
   `;
 }
 
+export interface CallEntry { at: string; by?: string; action: string; note?: string | null }
+
+/**
+ * Record a sales call disposition: append to metadata.calls, move the lead to the
+ * stage the outcome implies, and stamp contacted_at on first contact.
+ */
+export async function recordDisposition(id: string, entry: CallEntry, newStage: ProspectStage): Promise<boolean> {
+  const sql = await getDbReady();
+  const rows = await sql`SELECT metadata FROM installer_prospects WHERE id = ${id} LIMIT 1`;
+  if (rows.length === 0) return false;
+  const meta = ((rows[0] as { metadata: Record<string, unknown> }).metadata) || {};
+  const calls = Array.isArray((meta as { calls?: unknown }).calls) ? (meta as { calls: unknown[] }).calls : [];
+  const merged = { ...meta, calls: [...calls, entry] };
+  await sql`
+    UPDATE installer_prospects
+    SET stage = ${newStage}, metadata = ${JSON.stringify(merged)},
+        contacted_at = COALESCE(contacted_at, NOW()), updated_at = NOW()
+    WHERE id = ${id}
+  `;
+  return true;
+}
+
 export interface UpdateProspectPatch {
   stage?: ProspectStage;
   notes?: string;

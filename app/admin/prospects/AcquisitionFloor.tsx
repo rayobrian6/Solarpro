@@ -62,6 +62,15 @@ const PAIN_LINES = ['OW!', 'EEK!', 'YES SIR!', 'SORRY SIR!', 'AAH!', 'NOT THE WH
 
 const US_STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
 
+const IDLE_TEXT: Partial<Record<Stage, string>> = {
+  discovered: 'awaiting the next scouting run…',
+  enriched: 'no raw leads to enrich…',
+  qualified: 'no leads vetted yet…',
+  contacted: 'awaiting the sales rep…',
+  signed_up: 'no deals closed… yet',
+  rejected: 'the bin lies empty',
+};
+
 // desk anchors as % of the floor strip; top = depth (smaller toward the back)
 const DESKS = [
   { left: 8, top: 20 }, { left: 40, top: 12 }, { left: 70, top: 30 },
@@ -602,6 +611,7 @@ export default function AcquisitionFloor({
         @keyframes faint { 0%{ transform: rotate(0) } 100%{ transform: rotate(82deg) translateY(6px) } }
         @keyframes marquee { 0%,100%{ text-shadow: 0 0 8px rgba(251,191,36,0.7), 0 0 2px #fff } 50%{ text-shadow: 0 0 14px rgba(251,191,36,0.95), 0 0 4px #fff } }
         @keyframes roomFlash { 0%,100%{ box-shadow: 0 10px 28px rgba(0,0,0,0.7) } 50%{ box-shadow: 0 0 26px rgba(239,68,68,0.7), inset 0 0 30px rgba(239,68,68,0.25) } }
+        @keyframes coinDrop { 0%{ transform: translateY(-26px); opacity:0 } 25%{ opacity:1 } 60%{ transform: translateY(3px) } 100%{ transform: translateY(0); opacity:1 } }
       `}</style>
 
       {/* ── Gaslit marquee ── */}
@@ -778,7 +788,16 @@ export default function AcquisitionFloor({
                     </div>
                   ))}
 
-                  {idle && <div className="absolute inset-0 flex items-center justify-center text-sm text-amber-700/70 italic pointer-events-none" style={{ fontFamily: 'Georgia, serif' }}>this chamber lies vacant…</div>}
+                  {/* sold leads drop coins in the Counting House */}
+                  {room.stage === 'signed_up' && room.count > 0 && (
+                    <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex gap-0.5 pointer-events-none" style={{ zIndex: 5 }}>
+                      {Array.from({ length: Math.min(room.count, 8) }).map((_, i) => (
+                        <span key={i} style={{ fontSize: 15, animation: `coinDrop 0.7s ease-out ${i * 0.12}s both` }}>🪙</span>
+                      ))}
+                    </div>
+                  )}
+
+                  {idle && <div className="absolute inset-0 flex items-center justify-center text-sm text-amber-700/70 italic pointer-events-none" style={{ fontFamily: 'Georgia, serif' }}>{IDLE_TEXT[room.stage] || 'this chamber lies vacant…'}</div>}
                 </div>
 
                 {/* SIGN (big, readable, top) */}
