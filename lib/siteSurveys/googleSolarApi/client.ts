@@ -24,7 +24,7 @@ import type {
   GoogleSolarApiConfig,
   PipelineCResult,
 } from './types';
-import { setCachedBuildingInsights } from './cache';
+import { getCachedBuildingInsights, setCachedBuildingInsights } from './cache';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -141,6 +141,22 @@ export async function fetchBuildingInsights(
       error: 'Google Solar API key not configured. Set GOOGLE_SOLAR_API_KEY, GOOGLE_MAPS_API_KEY, or NEXT_PUBLIC_GOOGLE_MAPS_API_KEY environment variable.',
       warnings,
       roofPlaneCount: 0,
+      durationMs: Date.now() - startMs,
+    };
+  }
+
+  // ─── Reuse cached response if present ──────────────────────────────────
+  // The cache existed only as a write before — this client never read it, so
+  // every repeated call to the same lat/lng paid for buildingInsights again
+  // ($0.015/call). Check before issuing the paid fetch.
+  const cached = getCachedBuildingInsights(latitude, longitude);
+  if (cached.hit && cached.data) {
+    return {
+      success: true,
+      buildingInsights: cached.data,
+      error: null,
+      warnings,
+      roofPlaneCount: cached.data.roofPlanes?.length ?? 0,
       durationMs: Date.now() - startMs,
     };
   }

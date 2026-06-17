@@ -307,7 +307,6 @@ function extractKwh(text: string): { monthly?: number; annual?: number; monthlyH
       /(?:annual|yearly|12[- ]month)\s+(?:usage|consumption|average)[\:\s]+([0-9,]+)\s*kwh/i,
       /(?:last\s+12\s+months?)[\:\s]+([0-9,]+)\s*kwh/i,
       /(?:12[- ]month\s+total)[\:\s]+([0-9,]+)\s*kwh/i,
-      /^([0-9,]{4,})\s*kwh\s*$/im,
     ];
     for (const pat of annualPatterns) {
       const m = t.match(pat);
@@ -317,6 +316,18 @@ function extractKwh(text: string): { monthly?: number; annual?: number; monthlyH
           result.annual = val;
           console.log(`[bill-upload] Yearly total from explicit line: ${val} kWh`);
           break;
+        }
+      }
+    }
+    // Bare "NNNN kWh" line (no annual keyword) — require a plausible annual range
+    // so a stray meter/reference number or 4-digit token isn't taken as annual usage.
+    if (!result.annual) {
+      const m = t.match(/^([0-9,]{4,})\s*kwh\s*$/im);
+      if (m) {
+        const val = parseFloat(m[1].replace(/,/g, ''));
+        if (val >= 1000 && val <= 60000) {
+          result.annual = val;
+          console.log(`[bill-upload] Yearly total from bare kWh line: ${val} kWh`);
         }
       }
     }
@@ -377,10 +388,14 @@ function extractMonthlyHistory(text: string): number[] | undefined {
   const monthMatches = text.match(monthAbbrevs);
   if (!monthMatches || monthMatches.length < 6) return undefined;
 
+  // Non-global copy for the per-line .test() — a /g regex retains lastIndex
+  // between calls, so reusing monthAbbrevs here skipped lines non-deterministically.
+  const monthAbbrevLine = /(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i;
+
   // Try to find a sequence of 6–12 numbers near month labels
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
-    if (monthAbbrevs.test(lines[i])) {
+    if (monthAbbrevLine.test(lines[i])) {
       // Look for numbers on same line or next line
       const numLine = lines[i].match(/([0-9,]+)/g) || (lines[i + 1] || '').match(/([0-9,]+)/g);
       if (numLine && numLine.length >= 6) {

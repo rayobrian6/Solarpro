@@ -86,7 +86,13 @@ export function hydrateBillData(
       const annualKwh =
         ((rawBillData.annualKwh as number) || 0) ||
         ((rawBillData.estimatedAnnualKwh as number) || 0) ||
-        monthlyKwhArray.reduce((a: number, b: number) => a + b, 0);
+        // Annualize from the average of non-zero months × 12 rather than summing a
+        // possibly partial array — a 4-month array was undercounting annual usage
+        // (and under-sizing the system). Equivalent to the sum for a full 12 months.
+        (() => {
+          const nz = monthlyKwhArray.filter((v: number) => v > 0);
+          return nz.length > 0 ? Math.round((nz.reduce((a: number, b: number) => a + b, 0) / nz.length) * 12) : 0;
+        })();
       const avgMonthlyKwh = Math.round(annualKwh / 12);
 
       // Rate: validate against utility DB to always get retail rate, not supply-only component

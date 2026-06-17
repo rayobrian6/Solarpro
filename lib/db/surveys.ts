@@ -98,6 +98,7 @@ export async function getSiteSurveysByProject(
   projectId: string,
   userId: string,
 ): Promise<SiteSurvey[]> {
+  if (!isValidUUID(projectId) || !isValidUUID(userId)) return [];
   const sql = await getDbReady();
   const rows = await sql`
     SELECT
@@ -121,6 +122,7 @@ export async function getSiteSurveysByClient(
   clientId: string,
   userId: string,
 ): Promise<SiteSurvey[]> {
+  if (!isValidUUID(clientId) || !isValidUUID(userId)) return [];
   const sql = await getDbReady();
   const rows = await sql`
     SELECT
@@ -155,6 +157,7 @@ export async function getSiteSurveyById(
   userId: string,
   options?: GetSiteSurveyByIdOptions,
 ): Promise<SiteSurvey | null> {
+  if (!isValidUUID(surveyId) || !isValidUUID(userId)) return null;
   const sql = await getDbReady();
 
   const rows = options?.bypassOwnershipCheck

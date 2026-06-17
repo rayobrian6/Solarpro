@@ -126,10 +126,12 @@ export function mergeCADModels(
               azimuth: overrides.azimuth,
             },
           };
+          defChanged = true;
+          applied.push('systemDefinition.layout.azimuth');
+          log.push(`[merge] azimuth overlaid: ${overrides.azimuth}°`);
+        } else {
+          skipped.push('azimuth (systemDefinition absent)');
         }
-        defChanged = true;
-        applied.push('systemDefinition.layout.azimuth');
-        log.push(`[merge] azimuth overlaid: ${overrides.azimuth}°`);
       } else {
         skipped.push('azimuth (not in survey)');
       }
@@ -147,10 +149,12 @@ export function mergeCADModels(
               tilt: overrides.tilt,
             },
           };
+          defChanged = true;
+          applied.push('systemDefinition.layout.tilt');
+          log.push(`[merge] tilt overlaid: ${overrides.tilt}°`);
+        } else {
+          skipped.push('tilt (systemDefinition absent)');
         }
-        defChanged = true;
-        applied.push('systemDefinition.layout.tilt');
-        log.push(`[merge] tilt overlaid: ${overrides.tilt}°`);
       } else {
         skipped.push('tilt (not in survey)');
       }
@@ -168,10 +172,12 @@ export function mergeCADModels(
               rafterSpacing: overrides.rafterSpacingIn,
             },
           };
+          defChanged = true;
+          applied.push('systemDefinition.structure.rafterSpacing');
+          log.push(`[merge] rafterSpacing overlaid: ${overrides.rafterSpacingIn}"`);
+        } else {
+          skipped.push('rafterSpacing (systemDefinition absent)');
         }
-        defChanged = true;
-        applied.push('systemDefinition.structure.rafterSpacing');
-        log.push(`[merge] rafterSpacing overlaid: ${overrides.rafterSpacingIn}"`);
       } else {
         skipped.push('rafterSpacing (not in survey)');
       }
@@ -189,10 +195,12 @@ export function mergeCADModels(
               roofType: overrides.roofType,
             },
           };
+          defChanged = true;
+          applied.push('systemDefinition.structure.roofType');
+          log.push(`[merge] roofType overlaid: ${overrides.roofType}`);
+        } else {
+          skipped.push('roofType (systemDefinition absent)');
         }
-        defChanged = true;
-        applied.push('systemDefinition.structure.roofType');
-        log.push(`[merge] roofType overlaid: ${overrides.roofType}`);
       } else {
         skipped.push('roofType (not in survey)');
       }

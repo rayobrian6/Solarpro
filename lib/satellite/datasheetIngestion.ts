@@ -333,11 +333,15 @@ function extractInverterSpecsFromText(text: string): DatasheetInverterSpecs {
   const ul = firstMatch(text, INVERTER_PATTERNS.ulListing);
 
   // Handle kW → W conversion
+  // Escape the captured number before building a RegExp — a decimal like "7.6"
+  // has a '.' that would otherwise match any char (e.g. "7X6 kW"), spuriously
+  // triggering the ×1000 kW conversion and inflating AC output 1000×.
+  const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const acWVal = acW ? parseFloat(acW) : null;
-  const acWFinal = acWVal !== null ? (text.match(new RegExp(`${acW}\\s*kW`, 'i')) ? acWVal * 1000 : acWVal) : null;
+  const acWFinal = acWVal !== null ? (text.match(new RegExp(`${escRe(String(acW))}\\s*kW`, 'i')) ? acWVal * 1000 : acWVal) : null;
 
   const dcInVal = dcIn ? parseFloat(dcIn) : null;
-  const dcInFinal = dcInVal !== null ? (text.match(new RegExp(`${dcIn}\\s*kW`, 'i')) ? dcInVal * 1000 : dcInVal) : null;
+  const dcInFinal = dcInVal !== null ? (text.match(new RegExp(`${escRe(String(dcIn))}\\s*kW`, 'i')) ? dcInVal * 1000 : dcInVal) : null;
 
   let mpptMin: number | null = null;
   let mpptMax: number | null = null;

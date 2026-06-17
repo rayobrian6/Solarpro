@@ -362,7 +362,10 @@ export function getRoofData(cad: CADModel, input?: Record<string, unknown>): {
   // value, so we can detect the mismatch: if pitchNum ≤ 12 it is almost certainly
   // already in degrees (roof pitches above 12:12 = 45° are extremely rare).
   const rawPitch = (pl?.pitch ?? (p?.roofPitch as number) ?? 5);
-  const isDegrees = rawPitch > 0 && rawPitch <= 90;
+  // Align with the documented heuristic: values <=12 are almost certainly already
+  // a rise-per-12 ratio (e.g. 5:12); only 12<x<=90 is treated as degrees. The old
+  // <=90 threshold tan-converted a 5:12 ratio into a bogus 1:12.
+  const isDegrees = rawPitch > 12 && rawPitch <= 90;
   const pitchRatio = isDegrees
     ? Math.round(Math.tan(rawPitch * Math.PI / 180) * 12 * 10) / 10
     : rawPitch;
