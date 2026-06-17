@@ -189,6 +189,11 @@ export async function POST(req: NextRequest) {
       // SECURITY: Sanitize MIME type before storage — prevents stored XSS via MIME type
       const safeMimeType = sanitizeMimeType(mimeType);
       const fileSize = fileData ? Buffer.byteLength(fileData, 'base64') : 0;
+      // Enforce the same 10MB cap as the multipart branch — the JSON/base64 path
+      // had no size check, so an oversized blob could be stored directly in Postgres.
+      if (fileSize > MAX_FILE_SIZE) {
+        return NextResponse.json({ success: false, error: 'File too large. Maximum 10MB.' }, { status: 413 });
+      }
       const resolvedType = fileType || categorizeFileType(safeMimeType, fileName);
       const fileBuffer = fileData ? Buffer.from(fileData, 'base64') : null;
 

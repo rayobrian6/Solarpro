@@ -24,13 +24,15 @@ export async function POST(req: NextRequest) {
     // Require authenticated session — userId comes from session, not body
     const user = await getUserFromRequest(req);
     if (!user) {
-
-  // ── Rate limiting ──────────────────────────────────────────────────────────
-  const rl = await checkRateLimit('standard', getClientIp(req));
-  if (!rl.allowed) {
-    return NextResponse.json({ success: false, error: 'Too many requests' }, { status: 429 });
-  }
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // ── Rate limiting ────────────────────────────────────────────────────────
+    // Runs on the authenticated write path (was previously dead code nested
+    // inside the !user branch, so the real DB write went unrate-limited).
+    const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests' }, { status: 429 });
     }
 
     const body = await req.json() as Record<string, unknown>;

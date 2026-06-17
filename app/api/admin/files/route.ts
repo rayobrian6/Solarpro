@@ -13,8 +13,10 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const fileType = searchParams.get('fileType') || '';
-  const page     = Math.max(1, parseInt(searchParams.get('page') || '1'));
-  const limit    = Math.min(100, parseInt(searchParams.get('limit') || '25'));
+  const pageRaw  = parseInt(searchParams.get('page') || '1');
+  const limitRaw = parseInt(searchParams.get('limit') || '25');
+  const page     = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+  const limit    = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(100, limitRaw) : 25;
   const offset   = (page - 1) * limit;
 
   try {

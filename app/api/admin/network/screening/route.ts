@@ -174,7 +174,7 @@ async function scoreAndPersistOpportunity(
   if (!opp) throw new Error("Opportunity not found");
 
   const scored = scoreOpportunity({
-    monthly_bill: opp.monthly_bill as number,
+    monthly_bill: (opp.monthly_bill_amount ?? opp.monthly_usage_avg_kwh) as number,
     state: (opp.state ?? opp.location_state) as string,
     roof_age_years: opp.roof_age_years as number,
     structure_type: opp.structure_type as string,
