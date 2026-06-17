@@ -1,0 +1,11 @@
+-- 090_proposal_reminder_sent_at.sql
+-- Idempotency for the proposal-expiry reminder cron.
+--
+-- The cron selects proposals whose share_expires_at falls within a ±12h window
+-- and emails the rep, but had no record of having already reminded. Run daily
+-- against a 24h-wide window, a proposal sitting near a window boundary could
+-- match on two consecutive runs and the rep got two emails. This column lets the
+-- cron exclude already-reminded proposals and stamp the send.
+--
+-- Idempotent, no DO blocks (per the Admin -> System Tools migration runner).
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ;

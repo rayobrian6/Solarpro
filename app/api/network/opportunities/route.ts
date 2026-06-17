@@ -239,8 +239,15 @@ export async function GET(req: NextRequest) {
         AND (${filterMinKw}::numeric IS NULL OR no.estimated_system_size_kw >= ${filterMinKw})
         AND (${filterMaxKw}::numeric IS NULL OR no.estimated_system_size_kw <= ${filterMaxKw})
       ORDER BY no.released_at DESC NULLS LAST, no.created_at DESC
-      LIMIT ${Math.max(limit + offset, limit)}
+      LIMIT 200
     `;
+    // Bounded scan (200): contractor eligibility is evaluated per-row in JS, so
+    // there's no SQL COUNT for it. Scanning a bounded candidate set lets us derive
+    // an accurate eligible total + stable paging instead of deriving total from a
+    // limit+offset window (which understated it and broke deep paging). At current
+    // scale the live set is far under 200; the proper fix at high volume is to
+    // push eligibility into the SQL WHERE so COUNT/LIMIT/OFFSET work natively.
+    const FEED_SCAN_CAP = 200;
 
     const countRows = await sql`
       SELECT COUNT(*) AS total
@@ -363,10 +370,19 @@ export async function GET(req: NextRequest) {
         return { ...row, marketplace_intelligence };
       });
 
+    // total is now the true eligible count within the bounded scan (not a
+    // partial-window count). feed_scan_capped flags when we hit the scan cap so
+    // the caller knows the eligible total may exceed what was counted.
+    const feedScanCapped = canonicalCandidateOpportunityRows.length >= FEED_SCAN_CAP;
+    if (feedScanCapped) {
+      console.info("[NETWORK_DISCOVER_FEED] scan cap hit", { cap: FEED_SCAN_CAP, contractor_id: user.id });
+    }
+
     return NextResponse.json({
       success: true,
       opportunities: [...visibleCanonicalRows, ...visibleLegacyRows],
       total: legacyTotal + eligibleCanonicalRows.length,
+      feed_scan_capped: feedScanCapped,
       page,
       limit,
       profile_states: (profile?.service_states as string[] | undefined) ?? [],
