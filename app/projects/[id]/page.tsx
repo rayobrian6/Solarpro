@@ -54,6 +54,7 @@ import {
 import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
 import type { ConfidenceSource, ConfidenceLevel } from '@/components/recommend/ConfidenceBadge';
 import { useToast } from '@/components/ui/Toast';
+import { NotFoundState } from '@/components/ui/NotFoundState';
 import Link from 'next/link';
 import EngineeringTab from '@/components/engineering/EngineeringTab';
 import BillTab from '@/components/project/BillTab';
@@ -654,10 +655,12 @@ function ProjectDetailInner() {
   if (!project) {
     return (
       <AppShell>
-        <div className="p-6 text-center">
-          <p className="text-slate-400 mb-4">Project not found</p>
-          <Link href="/projects" className="btn-primary">Back to Projects</Link>
-        </div>
+        <NotFoundState
+          title="Project not found"
+          message="This project may have been deleted or the link is incorrect."
+          backHref="/projects"
+          backLabel="Back to Projects"
+        />
       </AppShell>
     );
   }

@@ -26,6 +26,7 @@ import {
   STATUS_STEPS, STATUS_CONFIG, TYPE_ICONS_JSX, TYPE_BG,
   getUrgency, getNextAction, PipelineProgress, StatusDropdown,
 } from '@/components/ui/ProjectPipeline';
+import { NotFoundState } from '@/components/ui/NotFoundState';
 import type { ConfidenceSource, ConfidenceLevel } from '@/components/recommend/ConfidenceBadge';
 
 // ── Client Detail Tab IDs ────────────────────────────────────────
@@ -472,10 +473,12 @@ function ClientDetailContent() {
 
   if (!client) return (
     <AppShell>
-      <div className="p-6 text-center">
-        <p className="text-slate-400 mb-4">Client not found</p>
-        <Link href="/clients" className="btn-primary">Back to Clients</Link>
-      </div>
+      <NotFoundState
+        title="Client not found"
+        message="This client may have been deleted or the link is incorrect."
+        backHref="/clients"
+        backLabel="Back to Clients"
+      />
     </AppShell>
   );
 

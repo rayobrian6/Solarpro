@@ -20,3 +20,6 @@ export {
   STATUS_STEPS, STATUS_CONFIG, TYPE_ICONS_JSX, TYPE_BG, TYPE_LABEL,
   getUrgency, getNextAction, PipelineProgress, StatusDropdown,
 } from './ProjectPipeline';
+
+// Not-found state
+export { NotFoundState } from './NotFoundState';
