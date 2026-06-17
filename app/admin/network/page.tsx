@@ -55,6 +55,7 @@ import {
   ClipboardList,
   Copy,
 } from "lucide-react";
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import {
   buildEnrichmentChips,
   buildEnrichmentDetailGroups,
@@ -666,6 +667,7 @@ function ScreeningSection() {
     unknown
   > | null>(null);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
 
   const loadQueue = useCallback(async () => {
     setLoading(true);
@@ -703,7 +705,7 @@ function ScreeningSection() {
     }
   }
 
-  async function runScreeningAction(
+  function runScreeningAction(
     opportunityId: string,
     action:
       | "approve"
@@ -711,35 +713,40 @@ function ScreeningSection() {
       | "request_more_info"
       | "release_to_marketplace",
   ) {
-    if (
-      action === "release_to_marketplace" &&
-      !confirm(
-        "Release this approved opportunity to the contractor marketplace?",
-      )
-    )
-      return;
-    if (
-      action === "reject" &&
-      !confirm("Reject this opportunity from the marketplace pipeline?")
-    )
-      return;
+    const doAction = async () => {
+      setActionBusy(`${opportunityId}:${action}`);
+      setTriggerResult(null);
+      try {
+        const res = await fetch("/api/admin/network/screening", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ opportunity_id: opportunityId, action }),
+        });
+        const data = await res.json();
+        setTriggerResult(data);
+        await loadQueue();
+      } catch (e) {
+        setTriggerResult({ error: String(e) });
+      } finally {
+        setActionBusy(null);
+      }
+    };
 
-    setActionBusy(`${opportunityId}:${action}`);
-    setTriggerResult(null);
-    try {
-      const res = await fetch("/api/admin/network/screening", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ opportunity_id: opportunityId, action }),
+    if (action === "release_to_marketplace") {
+      setConfirmDialog({
+        message: "Release this approved opportunity to the contractor marketplace?",
+        onConfirm: doAction,
       });
-      const data = await res.json();
-      setTriggerResult(data);
-      await loadQueue();
-    } catch (e) {
-      setTriggerResult({ error: String(e) });
-    } finally {
-      setActionBusy(null);
+      return;
     }
+    if (action === "reject") {
+      setConfirmDialog({
+        message: "Reject this opportunity from the marketplace pipeline?",
+        onConfirm: doAction,
+      });
+      return;
+    }
+    void doAction();
   }
 
   return (
@@ -5697,6 +5704,7 @@ function SimulatorSection() {
     release_to_marketplace: false,
     generate_matches: false,
   });
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
 
   const loadSimulated = useCallback(async () => {
     setLoading(true);
@@ -5726,51 +5734,55 @@ function SimulatorSection() {
     loadSimulated();
   }, [loadSimulated]);
 
-  async function simulatorAction(action: string, opportunity_id?: string) {
-    if (
-      action === "archive" &&
-      !confirm(
-        "Archive this simulated opportunity? This hides it from the simulator list but keeps the record withdrawn.",
-      )
-    )
-      return;
-    if (
-      action === "delete" &&
-      !confirm(
-        "Permanently delete this simulated opportunity and its simulator pipeline records? This only works for simulator-created rows.",
-      )
-    )
-      return;
-    setBusy(opportunity_id ? `${opportunity_id}:${action}` : action);
-    setResult(null);
-    try {
-      const payload =
-        action === "create"
-          ? {
-              action,
-              ...form,
-              estimated_value: form.estimated_value
-                ? Number(form.estimated_value)
-                : undefined,
-            }
-          : { action, opportunity_id };
-      const res = await fetch("/api/admin/network/simulator", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await parseAdminJsonResponse(res, "Simulator action failed");
-      setResult(data);
-      if (data.success !== false) {
-        if (Array.isArray(data.opportunities))
-          setItems(data.opportunities as SimulatedOpportunity[]);
-        await loadSimulated();
+  function simulatorAction(action: string, opportunity_id?: string) {
+    const doAction = async () => {
+      setBusy(opportunity_id ? `${opportunity_id}:${action}` : action);
+      setResult(null);
+      try {
+        const payload =
+          action === "create"
+            ? {
+                action,
+                ...form,
+                estimated_value: form.estimated_value
+                  ? Number(form.estimated_value)
+                  : undefined,
+              }
+            : { action, opportunity_id };
+        const res = await fetch("/api/admin/network/simulator", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await parseAdminJsonResponse(res, "Simulator action failed");
+        setResult(data);
+        if (data.success !== false) {
+          if (Array.isArray(data.opportunities))
+            setItems(data.opportunities as SimulatedOpportunity[]);
+          await loadSimulated();
+        }
+      } catch (e) {
+        setResult({ error: String(e) });
+      } finally {
+        setBusy(null);
       }
-    } catch (e) {
-      setResult({ error: String(e) });
-    } finally {
-      setBusy(null);
+    };
+
+    if (action === "archive") {
+      setConfirmDialog({
+        message: "Archive this simulated opportunity? This hides it from the simulator list but keeps the record withdrawn.",
+        onConfirm: doAction,
+      });
+      return;
     }
+    if (action === "delete") {
+      setConfirmDialog({
+        message: "Permanently delete this simulated opportunity and its simulator pipeline records? This only works for simulator-created rows.",
+        onConfirm: doAction,
+      });
+      return;
+    }
+    void doAction();
   }
 
   return (
@@ -6100,6 +6112,7 @@ function MarketplaceWorkbenchSection() {
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [priceDraft, setPriceDraft] = useState<Record<string, string>>({});
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
 
   const loadMarketplace = useCallback(
     async (options?: { preserveResult?: boolean }) => {
@@ -6167,42 +6180,50 @@ function MarketplaceWorkbenchSection() {
     }
   }
 
-  async function runWorkbenchAction(
+  function runWorkbenchAction(
     opportunityId: string,
     action: "match_contractors" | "create_assignments" | "pause",
   ) {
-    if (
-      action === "pause" &&
-      !confirm("Pause/remove this opportunity from the live marketplace?")
-    )
-      return;
-    if (
-      action === "create_assignments" &&
-      !confirm("Create assignment offers for the top matched contractors?")
-    )
-      return;
-    setBusy(`${opportunityId}:${action}`);
-    setResult(null);
-    try {
-      const res = await fetch("/api/admin/network/marketplace", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          opportunity_id: opportunityId,
-          action,
-          limit: 10,
-          min_score: 30,
-        }),
+    const doAction = async () => {
+      setBusy(`${opportunityId}:${action}`);
+      setResult(null);
+      try {
+        const res = await fetch("/api/admin/network/marketplace", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            opportunity_id: opportunityId,
+            action,
+            limit: 10,
+            min_score: 30,
+          }),
+        });
+        const data = await parseAdminJsonResponse(res, "Workbench action failed");
+        setResult(data);
+        if (data.success !== false)
+          await loadMarketplace({ preserveResult: true });
+      } catch (e) {
+        setResult({ error: String(e) });
+      } finally {
+        setBusy(null);
+      }
+    };
+
+    if (action === "pause") {
+      setConfirmDialog({
+        message: "Pause/remove this opportunity from the live marketplace?",
+        onConfirm: doAction,
       });
-      const data = await parseAdminJsonResponse(res, "Workbench action failed");
-      setResult(data);
-      if (data.success !== false)
-        await loadMarketplace({ preserveResult: true });
-    } catch (e) {
-      setResult({ error: String(e) });
-    } finally {
-      setBusy(null);
+      return;
     }
+    if (action === "create_assignments") {
+      setConfirmDialog({
+        message: "Create assignment offers for the top matched contractors?",
+        onConfirm: doAction,
+      });
+      return;
+    }
+    void doAction();
   }
 
   return (
@@ -7267,6 +7288,7 @@ function CampaignsSection() {
     end_date: "",
     notes: "",
   });
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -7412,17 +7434,18 @@ function CampaignsSection() {
     }
   }
 
-  async function handleArchive(id: string) {
-    if (
-      !confirm("Archive this campaign? It will be hidden from the active list.")
-    )
-      return;
-    await fetch("/api/admin/network/campaigns", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
+  function handleArchive(id: string) {
+    setConfirmDialog({
+      message: "Archive this campaign? It will be hidden from the active list.",
+      onConfirm: async () => {
+        await fetch("/api/admin/network/campaigns", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id }),
+        });
+        void load();
+      },
     });
-    void load();
   }
 
   return (
