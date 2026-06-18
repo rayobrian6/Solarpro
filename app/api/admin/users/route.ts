@@ -122,7 +122,8 @@ export async function PATCH(req: NextRequest) {
 
     } else if (action === 'set_role') {
       const role = body.role;
-      if (!['user', 'admin', 'super_admin'].includes(role))
+      // 'sales' grants Lead Desk access (/desk) WITHOUT the rest of the admin portal — see lib/leadDeskAuth.ts
+      if (!['user', 'admin', 'super_admin', 'sales'].includes(role))
         return NextResponse.json({ success: false, error: 'Invalid role' }, { status: 400 });
       if (admin.role !== 'super_admin')
         return NextResponse.json({ success: false, error: 'Only super_admin can set roles' }, { status: 403 });
@@ -139,7 +140,7 @@ export async function PATCH(req: NextRequest) {
 
     } else if (action === 'update') {
       const { name, company, role, plan } = body;
-      if (role && !['user', 'admin', 'super_admin'].includes(role))
+      if (role && !['user', 'admin', 'super_admin', 'sales'].includes(role))
         return NextResponse.json({ success: false, error: 'Invalid role' }, { status: 400 });
       // SECURITY: a role change here must obey the same gate as 'set_role' —
       // only a super_admin may change roles. Without this, a plain admin could
