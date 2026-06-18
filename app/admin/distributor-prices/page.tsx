@@ -6,6 +6,8 @@ import {
   Database, Package, Tag, TrendingUp, ToggleLeft, ToggleRight,
   Info, Zap, Download
 } from 'lucide-react';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { useToast } from '@/components/ui/Toast';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -166,12 +168,13 @@ export default function DistributorPricesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [activeSection, setActiveSection] = useState<'overrides' | 'catalog' | 'fallbacks'>('overrides');
   const [showModal, setShowModal] = useState(false);
   const [editEntry, setEditEntry] = useState<PriceEntry | undefined>();
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
+  const toast = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -190,10 +193,6 @@ export default function DistributorPricesPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const flash = (msg: string, type: 'success' | 'error' = 'success') => {
-    if (type === 'success') { setSuccess(msg); setTimeout(() => setSuccess(null), 3000); }
-    else { setError(msg); setTimeout(() => setError(null), 5000); }
-  };
 
   const handleSave = async (form: Partial<PriceEntry>) => {
     setSaving(true);
@@ -214,27 +213,31 @@ export default function DistributorPricesPage() {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error || `HTTP ${res.status}`);
       }
-      flash(`Override saved for ${form.partNumber}`);
+      toast.success(`Override saved for ${form.partNumber}`);
       setShowModal(false);
       setEditEntry(undefined);
       await load();
     } catch (e: any) {
-      flash(e.message, 'error');
+      toast.error(e.message);
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async (id: string, partNumber: string) => {
-    if (!confirm(`Delete override for ${partNumber}?`)) return;
-    try {
-      const res = await fetch(`/api/admin/distributor-prices?id=${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      flash(`Override deleted`);
-      await load();
-    } catch (e: any) {
-      flash(e.message, 'error');
-    }
+  const handleDelete = (id: string, partNumber: string) => {
+    setConfirmDialog({
+      message: `Delete override for ${partNumber}?`,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/admin/distributor-prices?id=${id}`, { method: 'DELETE' });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          toast.success(`Override deleted`);
+          await load();
+        } catch (e: any) {
+          toast.error(e.message);
+        }
+      },
+    });
   };
 
   const handleExportCsv = () => {
@@ -303,20 +306,14 @@ export default function DistributorPricesPage() {
         </div>
       </div>
 
-      {/* ── Flash banners ── */}
-      {success && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-sm">
-          <CheckCircle size={14} /> {success}
-        </div>
-      )}
-      {error && (
+      {error ? (
         <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-red-500/30 bg-red-500/10 text-red-400 text-sm">
           <AlertCircle size={14} /> {error}
         </div>
-      )}
+      ) : null}
 
       {/* ── Stats cards ── */}
-      {stats && (
+      {stats ? (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="rounded-xl border border-rose-500/20 bg-slate-800/60 px-4 py-3">
             <div className="text-2xl font-black text-rose-400 tabular-nums">{stats.overrides}</div>
@@ -337,7 +334,7 @@ export default function DistributorPricesPage() {
             <div className="text-xs text-slate-500 mt-0.5">Avg Catalog Cost</div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* ── Pricing resolution explanation ── */}
       <div className="rounded-xl border border-slate-700/50 bg-slate-800/40 px-4 py-3">
@@ -363,11 +360,11 @@ export default function DistributorPricesPage() {
           placeholder="Search by part number, category, or source…"
           className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/50"
         />
-        {search && (
+        {search ? (
           <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
             <X size={13} />
           </button>
-        )}
+        ) : null}
       </div>
 
       {/* ── Section tabs ── */}
@@ -388,28 +385,28 @@ export default function DistributorPricesPage() {
           >
             {tab.icon}
             {tab.label}
-            {tab.count !== undefined && (
+            {tab.count !== undefined ? (
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
                 activeSection === tab.id ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-500'
               }`}>
                 {tab.count}
               </span>
-            )}
+            ) : null}
           </button>
         ))}
       </div>
 
       {/* ── Loading / empty states ── */}
-      {loading && (
+      {loading ? (
         <div className="flex items-center justify-center py-16 text-slate-500">
           <RefreshCw size={18} className="animate-spin mr-2" /> Loading pricing data…
         </div>
-      )}
+      ) : null}
 
-      {!loading && data && (
+      {!loading && data ? (
         <>
           {/* ══════════ DB OVERRIDES ══════════ */}
-          {activeSection === 'overrides' && (
+          {activeSection === 'overrides' ? (
             <div className="space-y-2">
               {data.overrides.filter(filterFn).length === 0 ? (
                 <div className="text-center py-12 text-slate-500">
@@ -478,10 +475,10 @@ export default function DistributorPricesPage() {
                 </div>
               )}
             </div>
-          )}
+          ) : null}
 
           {/* ══════════ STATIC CATALOG ══════════ */}
-          {activeSection === 'catalog' && (
+          {activeSection === 'catalog' ? (
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs text-slate-500 mb-3">
                 <Info size={11} />
@@ -515,7 +512,7 @@ export default function DistributorPricesPage() {
                         </div>
                       </button>
 
-                      {isOpen && (
+                      {isOpen ? (
                         <div>
                           <div className="bg-slate-800/40 px-4 py-1.5 grid grid-cols-12 gap-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-700/40">
                             <div className="col-span-4">Part Number</div>
@@ -545,15 +542,15 @@ export default function DistributorPricesPage() {
                             </div>
                           ))}
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   );
                 })}
             </div>
-          )}
+          ) : null}
 
           {/* ══════════ FALLBACKS ══════════ */}
-          {activeSection === 'fallbacks' && (
+          {activeSection === 'fallbacks' ? (
             <div className="space-y-1">
               <div className="flex items-center gap-2 text-xs text-slate-500 mb-3">
                 <Info size={11} />
@@ -583,18 +580,28 @@ export default function DistributorPricesPage() {
                   ))}
               </div>
             </div>
-          )}
+          ) : null}
         </>
-      )}
+      ) : null}
+
+      {/* ── Confirm Dialog ── */}
+      {confirmDialog ? (
+        <ConfirmDialog
+          message={confirmDialog.message}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+          variant="danger"
+        />
+      ) : null}
 
       {/* ── Modal ── */}
-      {showModal && (
+      {showModal ? (
         <OverrideModal
           entry={editEntry}
           onSave={handleSave}
           onClose={() => { setShowModal(false); setEditEntry(undefined); }}
         />
-      )}
+      ) : null}
     </div>
   );
 }

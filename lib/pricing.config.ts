@@ -36,7 +36,7 @@ export const PRICING_PLANS: Record<Exclude<PlanId, 'free_pass'>, PlanPricingConf
     extraSeatPrice: 29,
   },
   contractor: {
-    price: 249,
+    price: 250,
     usersIncluded: 2,
     extraSeatPrice: 29,
   },

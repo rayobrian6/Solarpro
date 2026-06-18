@@ -19,6 +19,7 @@ import {
   Download, RefreshCw, AlertTriangle, Loader2, ExternalLink,
   Home, ChevronDown,
 } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
 import { PERMIT_SHEET_INDEX } from '@/lib/permit/types';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -58,6 +59,7 @@ function PermitViewerPageInner() {
   const iframeRef     = useRef<HTMLIFrameElement>(null);
 
   const projectId     = searchParams.get('projectId') ?? '';
+  const toast = useToast();
   const [project, setProject]         = useState<ProjectInfo | null>(null);
   // v47.259: Default to PV-0 (14-sheet canonical permit system)
   const [activeSheet, setActiveSheet] = useState<string>('PV-0');
@@ -134,13 +136,13 @@ function PermitViewerPageInner() {
     if (res.status === 409) {
       const errData = await res.json().catch(() => ({}));
       if (errData.code === 'PERMIT_STALE') {
-        alert(`\u26a0\ufe0f Permit Package Outdated\n\n${errData.error}\n\nClick "Generate Permit" to regenerate with the latest fixes.`);
+        toast.error(`Permit Package Outdated: ${errData.error}. Click Generate Permit to regenerate with the latest fixes.`);
         return;
       }
     }
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      alert(`Download failed (${res.status}). Please regenerate the permit package.\n\n${errText.slice(0, 200)}`);
+      toast.error(`Download failed (${res.status}). Please regenerate the permit package. ${errText.slice(0, 200)}`);
       return;
     }
     const blob = await res.blob();
@@ -303,23 +305,23 @@ function PermitViewerPageInner() {
             </div>
 
             {/* Error banner */}
-            {error && (
+            {error ? (
               <div className="pv-error-banner">
                 <AlertTriangle size={14} />
                 &nbsp;{error}
               </div>
-            )}
+            ) : null}
 
             {/* Loading indicator overlay */}
-            {loading && (
+            {loading ? (
               <div className="pv-loading-overlay">
                 <Loader2 size={24} className="spin" />
                 <span>Loading sheet…</span>
               </div>
-            )}
+            ) : null}
 
             {/* Sheet iframe */}
-            {previewUrl && !error && (
+            {previewUrl && !error ? (
               <div
                 className="pv-iframe-container"
                 style={{ transform: `scale(${zoom})`, transformOrigin: 'top left' }}
@@ -334,14 +336,14 @@ function PermitViewerPageInner() {
                   sandbox="allow-same-origin allow-scripts"
                 />
               </div>
-            )}
+            ) : null}
 
-            {!previewUrl && !error && (
+            {!previewUrl && !error ? (
               <div className="pv-empty-state">
                 <FileText size={40} style={{ color: '#444' }} />
                 <p>Select a sheet from the sidebar to preview it.</p>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
 

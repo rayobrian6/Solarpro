@@ -6,6 +6,7 @@ import {
   ArrowLeft, RefreshCw, CheckCircle, AlertCircle,
   Clock, MapPin, Zap, User, Building2, History, Activity, Send, Network,
 } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -86,15 +87,10 @@ export default function AdminProjectDetail() {
   const [saving, setSaving]           = useState(false);
   const [selectedStage, setSelectedStage] = useState<HomeownerStage | ''>('');
   const [note, setNote]               = useState('');
-  const [toast, setToast]             = useState<{ msg: string; ok: boolean } | null>(null);
+  const toast = useToast();
   const [activity, setActivity]       = useState<ActivityEntry[]>([]);
   const [inviteSending, setInviteSending] = useState(false);
   const [inviteStatus, setInviteStatus]   = useState<'idle' | 'sent' | 'error'>('idle');
-
-  const showToast = (msg: string, ok = true) => {
-    setToast({ msg, ok });
-    setTimeout(() => setToast(null), 3500);
-  };
 
   const handleSendPortalInvite = async () => {
     if (!project || inviteSending) return;
@@ -105,16 +101,16 @@ export default function AdminProjectDetail() {
       const data = await res.json();
       if (data.success) {
         setInviteStatus('sent');
-        showToast(`Portal invite sent to ${data.sentTo}`);
+        toast.success(`Portal invite sent to ${data.sentTo}`);
         setTimeout(() => setInviteStatus('idle'), 5000);
       } else {
         setInviteStatus('error');
-        showToast(data.error || 'Failed to send invite.', false);
+        toast.error(data.error || 'Failed to send invite.');
         setTimeout(() => setInviteStatus('idle'), 5000);
       }
     } catch {
       setInviteStatus('error');
-      showToast('Connection error. Please try again.', false);
+      toast.error('Connection error. Please try again.');
       setTimeout(() => setInviteStatus('idle'), 5000);
     } finally {
       setInviteSending(false);
@@ -136,7 +132,7 @@ export default function AdminProjectDetail() {
           .then(ad => { if (ad.activity) setActivity(ad.activity); })
           .catch(() => {});
       } else {
-        showToast(d.error || 'Failed to load project', false);
+        toast.error(d.error || 'Failed to load project');
       }
     } finally {
       setLoading(false);
@@ -156,11 +152,11 @@ export default function AdminProjectDetail() {
       });
       const d = await res.json();
       if (d.success) {
-        showToast('✓ Stage updated');
+        toast.error('✓ Stage updated');
         setNote('');
         load();
       } else {
-        showToast(d.error || 'Failed to update stage', false);
+        toast.success(d.error || 'Failed to update stage');
       }
     } finally {
       setSaving(false);
@@ -262,12 +258,12 @@ export default function AdminProjectDetail() {
           <p className="text-sm font-semibold text-white">
             {project.system_size_kw ? `${project.system_size_kw} kW` : '—'}
           </p>
-          {project.address && (
+          {project.address ? (
             <div className="flex items-start gap-1 mt-1">
               <MapPin size={10} className="text-slate-500 mt-0.5 shrink-0" />
               <p className="text-xs text-slate-400 leading-tight">{project.address}</p>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -283,16 +279,16 @@ export default function AdminProjectDetail() {
               This is <span className="text-amber-400 font-medium">separate</span> from the internal ops pipeline.
             </p>
           </div>
-          {currentMeta && (
+          {currentMeta ? (
             <span className={`text-xs px-3 py-1 rounded-full font-semibold border ${currentMeta.color}`}>
               {currentMeta.label}
             </span>
-          )}
-          {!currentMeta && (
+          ) : null}
+          {!currentMeta ? (
             <span className="text-xs px-3 py-1 rounded-full font-semibold border border-slate-500/30 bg-slate-500/10 text-slate-400">
               Not set
             </span>
-          )}
+          ) : null}
         </div>
 
         {/* Stage progress bar */}
@@ -315,9 +311,9 @@ export default function AdminProjectDetail() {
                     {s.label}
                   </span>
                 </div>
-                {!isLast && (
+                {!isLast ? (
                   <div className={`h-0.5 flex-1 mx-1 rounded-full ${i < currentIndex ? 'bg-white/20' : 'bg-white/5'}`} />
-                )}
+                ) : null}
               </div>
             );
           })}
@@ -362,9 +358,9 @@ export default function AdminProjectDetail() {
               {saving ? <RefreshCw size={13} className="animate-spin" /> : <CheckCircle size={13} />}
               {saving ? 'Saving...' : 'Save Stage'}
             </button>
-            {selectedStage === project.homeowner_stage && selectedStage && (
+            {selectedStage === project.homeowner_stage && selectedStage ? (
               <span className="text-xs text-slate-500">Already set to this stage</span>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -397,7 +393,7 @@ export default function AdminProjectDetail() {
             <button
               onClick={() => {
                 const url = `${window.location.origin}/portal/login`;
-                navigator.clipboard.writeText(url).then(() => showToast('Portal link copied'));
+                navigator.clipboard.writeText(url).then(() => toast.success('Portal link copied'));
               }}
               className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white border border-white/10 hover:border-white/20 rounded-lg px-3 py-1.5 transition-all"
             >
@@ -451,16 +447,16 @@ export default function AdminProjectDetail() {
                       <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${meta?.color ?? 'text-slate-400 bg-slate-500/20 border-slate-500/30'}`}>
                         {meta?.label ?? entry.stage}
                       </span>
-                      {entry.changed_by_name && (
+                      {entry.changed_by_name ? (
                         <span className="text-xs text-slate-500">by {entry.changed_by_name}</span>
-                      )}
+                      ) : null}
                       <span className="text-xs text-slate-600">
                         {new Date(entry.created_at).toLocaleString()}
                       </span>
                     </div>
-                    {entry.note && (
+                    {entry.note ? (
                       <p className="text-xs text-slate-400 mt-1 italic">"{entry.note}"</p>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               );
@@ -470,7 +466,7 @@ export default function AdminProjectDetail() {
       </div>
 
       {/* ── Activity Feed ─────────────────────────────────────────────────────── */}
-      {activity.length > 0 && (
+      {activity.length > 0 ? (
         <div className="rounded-xl border border-white/5 bg-white/2 p-5">
           <div className="flex items-center gap-2 mb-4">
             <Activity size={14} className="text-slate-500" />
@@ -488,15 +484,15 @@ export default function AdminProjectDetail() {
                       {new Date(entry.created_at).toLocaleString()}
                     </span>
                   </div>
-                  {entry.details && (
+                  {entry.details ? (
                     <p className="text-xs text-slate-500 mt-0.5 truncate">{entry.details}</p>
-                  )}
+                  ) : null}
                 </div>
               </div>
             ))}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Meta row */}
       <div className="flex items-center gap-4 text-xs text-slate-600 pb-2">
@@ -508,22 +504,11 @@ export default function AdminProjectDetail() {
           <Clock size={10} />
           Updated {new Date(project.updated_at).toLocaleString()}
         </div>
-        {project.deleted_at && (
+        {project.deleted_at ? (
           <span className="text-red-400">Deleted {new Date(project.deleted_at).toLocaleString()}</span>
-        )}
+        ) : null}
       </div>
 
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium shadow-xl ${
-          toast.ok
-            ? 'bg-green-500/20 border border-green-500/30 text-green-400'
-            : 'bg-red-500/20 border border-red-500/30 text-red-400'
-        }`}>
-          {toast.ok ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-          {toast.msg}
-        </div>
-      )}
     </div>
   );
 }

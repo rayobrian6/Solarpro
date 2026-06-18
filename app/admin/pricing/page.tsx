@@ -216,24 +216,24 @@ function LivePreview({ draft }: { draft: PricingFormState }) {
 
       {/* Price breakdown */}
       <div className="space-y-2 text-sm">
-        {roofPanels > 0 && (
+        {roofPanels > 0 ? (
           <div className="flex justify-between text-gray-300">
             <span>Roof ({roofPanels} panels)</span>
             <span>{fmtCurrency(roofTotal)}</span>
           </div>
-        )}
-        {groundPanels > 0 && (
+        ) : null}
+        {groundPanels > 0 ? (
           <div className="flex justify-between text-gray-300">
             <span>Ground ({groundPanels} panels)</span>
             <span>{fmtCurrency(groundTotal)}</span>
           </div>
-        )}
-        {fencePanels > 0 && (
+        ) : null}
+        {fencePanels > 0 ? (
           <div className="flex justify-between text-gray-300">
             <span>Fence ({fencePanels} panels)</span>
             <span>{fmtCurrency(fenceTotal)}</span>
           </div>
-        )}
+        ) : null}
         <div className="flex justify-between text-gray-400 text-xs">
           <span>Fixed / Permit / Misc</span>
           <span>{fmtCurrency(draft.fixedCost)}</span>
@@ -242,7 +242,7 @@ function LivePreview({ draft }: { draft: PricingFormState }) {
           <span>Gross System Price</span>
           <span>{fmtCurrency(total)}</span>
         </div>
-        {itcRate > 0 && (
+        {itcRate > 0 ? (
           <>
             <div className="flex justify-between text-green-400 text-xs">
               <span>ITC ({itcRate}% — {draft.isCommercial ? 'Commercial' : 'Residential'})</span>
@@ -253,22 +253,22 @@ function LivePreview({ draft }: { draft: PricingFormState }) {
               <span>{fmtCurrency(netCost)}</span>
             </div>
           </>
-        )}
-        {itcRate === 0 && (
+        ) : null}
+        {itcRate === 0 ? (
           <div className="text-xs text-gray-500 italic">
             No ITC for {draft.isCommercial ? 'commercial' : 'residential'} (rate = 0%)
           </div>
-        )}
+        ) : null}
         <div className="border-t border-white/10 pt-2 flex justify-between text-xs text-gray-400">
           <span>Effective $/W</span>
           <span>${effectivePpw}/W</span>
         </div>
-        {draft.pricingMode === 'cost_plus' && (
+        {draft.pricingMode === 'cost_plus' ? (
           <div className="text-xs text-gray-400">
             Cost/panel: {fmtCurrency(draft.materialCostPerPanel + draft.laborCostPerPanel)} +{' '}
             {draft.overheadPercent}% overhead → sell at {fmtCurrency(costPlusPerPanel(draft))}/panel
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -382,11 +382,11 @@ export default function PricingPage() {
           </button>
         </div>
 
-        {error && (
+        {error ? (
           <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-red-400 text-sm">
             {error}
           </div>
-        )}
+        ) : null}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left column: settings */}
@@ -421,7 +421,7 @@ export default function PricingPage() {
             </div>
 
             {/* Per-Panel Pricing */}
-            {draft.pricingMode === 'per_panel' && (
+            {draft.pricingMode === 'per_panel' ? (
               <SectionCard title="Per-Panel Pricing" icon={<Package size={18} />}>
                 <p className="text-gray-400 text-xs mb-4">
                   Set a fixed price per panel for each installation type.
@@ -459,10 +459,10 @@ export default function PricingPage() {
                   />
                 </div>
               </SectionCard>
-            )}
+            ) : null}
 
             {/* Per-Watt Pricing */}
-            {draft.pricingMode === 'per_watt' && (
+            {draft.pricingMode === 'per_watt' ? (
               <SectionCard title="Per-Watt Pricing" icon={<Zap size={18} />}>
                 <p className="text-gray-400 text-xs mb-4">
                   Set a price per watt for each installation type. Price = $/W × system size in watts.
@@ -514,10 +514,10 @@ export default function PricingPage() {
                   />
                 </div>
               </SectionCard>
-            )}
+            ) : null}
 
             {/* Cost-Plus Pricing */}
-            {draft.pricingMode === 'cost_plus' && (
+            {draft.pricingMode === 'cost_plus' ? (
               <SectionCard title="Cost-Plus Pricing" icon={<DollarSign size={18} />}>
                 <p className="text-gray-400 text-xs mb-4">
                   Price = (material + labor) × (1 + overhead%) ÷ (1 − margin%). Applied per panel.
@@ -571,7 +571,7 @@ export default function PricingPage() {
                   />
                 </div>
               </SectionCard>
-            )}
+            ) : null}
 
             {/* ITC / Tax Credit */}
             <SectionCard title="Federal ITC & Tax Credits" icon={<Building2 size={18} />}>
@@ -702,7 +702,7 @@ export default function PricingPage() {
                 <span>Fixed Cost</span>
                 <span>{fmtCurrency(draft.fixedCost)}</span>
               </div>
-              {draft.pricingMode === 'per_panel' && (
+              {draft.pricingMode === 'per_panel' ? (
                 <>
                   <div className="flex justify-between">
                     <span>Roof/panel</span>
@@ -717,8 +717,8 @@ export default function PricingPage() {
                     <span>{fmtCurrency(draft.fencePricePerPanel)}</span>
                   </div>
                 </>
-              )}
-              {draft.pricingMode === 'per_watt' && (
+              ) : null}
+              {draft.pricingMode === 'per_watt' ? (
                 <>
                   <div className="flex justify-between">
                     <span>Roof $/W</span>
@@ -733,8 +733,8 @@ export default function PricingPage() {
                     <span>${draft.fencePricePerWatt.toFixed(2)}</span>
                   </div>
                 </>
-              )}
-              {draft.pricingMode === 'cost_plus' && (
+              ) : null}
+              {draft.pricingMode === 'cost_plus' ? (
                 <>
                   <div className="flex justify-between">
                     <span>Material/panel</span>
@@ -757,7 +757,7 @@ export default function PricingPage() {
                     <span>{fmtCurrency(costPlusPerPanel(draft))}</span>
                   </div>
                 </>
-              )}
+              ) : null}
             </div>
           </div>
         </div>

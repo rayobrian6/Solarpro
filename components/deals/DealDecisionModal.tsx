@@ -281,7 +281,7 @@ export default function DealDecisionModal({
             </div>
 
             {/* ── Manual stage dropdown (only when 'manual' selected) ── */}
-            {selected === 'manual' && (
+            {selected === 'manual' ? (
               <select
                 value={manualStage}
                 onChange={e => setManualStage(e.target.value)}
@@ -297,10 +297,10 @@ export default function DealDecisionModal({
                   <option key={s} value={s}>{STAGE_LABELS[s]}</option>
                 ))}
               </select>
-            )}
+            ) : null}
 
             {/* ── Contextual milestone toggles ─────────────────────────── */}
-            {milestones.length > 0 && (
+            {milestones.length > 0 ? (
               <div className="space-y-1.5 pt-1">
                 {milestones.map(m => (
                   <label
@@ -325,10 +325,10 @@ export default function DealDecisionModal({
                   </label>
                 ))}
               </div>
-            )}
+            ) : null}
 
             {/* ── Error ────────────────────────────────────────────────── */}
-            {error && (
+            {error ? (
               <div className="text-xs font-semibold px-3 py-2 rounded-lg"
                 style={{
                   background: 'rgba(239,68,68,0.1)',
@@ -337,7 +337,7 @@ export default function DealDecisionModal({
                 }}>
                 {error}
               </div>
-            )}
+            ) : null}
 
             {/* ── Confirm / Cancel ──────────────────────────────────────── */}
             <div className="flex items-center gap-2 pt-1">

@@ -362,9 +362,9 @@ export default function SignatureBlock({
               onTouchEnd={endDraw}
             />
           </div>
-          {!hasDrawn && (
+          {!hasDrawn ? (
             <p className="text-xs text-slate-600 mt-1.5 text-center">← Sign with your mouse or finger</p>
-          )}
+          ) : null}
         </div>
       ) : (
         <div className="mb-4">
@@ -398,7 +398,7 @@ export default function SignatureBlock({
       </label>
 
       {/* Error */}
-      {(uiState === 'error' || error) && (
+      {(uiState === 'error' || error) ? (
         <div
           data-testid="signature-error"
           className="flex items-center gap-2 text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2 mb-3"
@@ -406,7 +406,7 @@ export default function SignatureBlock({
           <AlertTriangle size={12} className="flex-shrink-0" />
           {error}
         </div>
-      )}
+      ) : null}
 
       {/* Submit button */}
       <button

@@ -228,7 +228,7 @@ export function ValidationPanel({
       data-passing={result.isPassing}
     >
       {/* v57.5 — Compliance engine failure notice (shown when validation is clean but compliance ran and found issues) */}
-      {result.isClean && !complianceIsClear && (
+      {result.isClean && !complianceIsClear ? (
         <div
           className={`mb-3 px-3 py-2 rounded border flex items-start gap-2 ${
             complianceStatus === 'FAIL'
@@ -247,10 +247,10 @@ export function ValidationPanel({
             {' '}— review the Compliance tab for details before proceeding.
           </span>
         </div>
-      )}
+      ) : null}
 
       {/* Phase 13.8.1 — System Valid banner (shows when passing but has advisories) */}
-      {showValidBanner && (
+      {showValidBanner ? (
         <div
           className="mb-3 px-3 py-2 rounded border border-emerald-500/40 bg-emerald-500/10 flex items-center gap-2"
           data-testid="validation-system-valid-banner"
@@ -260,7 +260,7 @@ export function ValidationPanel({
             System is valid and meets electrical requirements
           </span>
         </div>
-      )}
+      ) : null}
 
       {/* Header: counts by UI severity */}
       <div className="flex items-center justify-between mb-3">
@@ -277,30 +277,30 @@ export function ValidationPanel({
           </h4>
         </div>
         <div className="flex items-center gap-3 text-xs">
-          {uiErrors.length > 0 && (
+          {uiErrors.length > 0 ? (
             <span
               className="text-red-300 font-semibold"
               data-testid="validation-error-count"
             >
               {uiErrors.length} error{uiErrors.length === 1 ? '' : 's'}
             </span>
-          )}
-          {uiWarnings.length > 0 && (
+          ) : null}
+          {uiWarnings.length > 0 ? (
             <span
               className="text-amber-300 font-semibold"
               data-testid="validation-warning-count"
             >
               {uiWarnings.length} warning{uiWarnings.length === 1 ? '' : 's'}
             </span>
-          )}
-          {uiInfo.length > 0 && (
+          ) : null}
+          {uiInfo.length > 0 ? (
             <span
               className="text-sky-300 font-semibold"
               data-testid="validation-info-count"
             >
               {uiInfo.length} info
             </span>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -309,7 +309,7 @@ export function ValidationPanel({
           recommendation. This replaces the "screaming errors with no solution"
           UX with a one-click resolution path.
       ──────────────────────────────────────────────────────────────────────── */}
-      {canOfferFix && sizingRecommendation && (
+      {canOfferFix && sizingRecommendation ? (
         <div
           className="mb-3 px-3 py-3 rounded border border-emerald-500/50 bg-emerald-500/10 flex flex-col gap-2"
           data-testid="validation-fix-banner"
@@ -320,11 +320,11 @@ export function ValidationPanel({
               <div className="text-xs font-bold text-emerald-200 mb-0.5">
                 Recommended fix available
               </div>
-              {fixDescription && (
+              {fixDescription ? (
                 <div className="text-[11px] text-emerald-300/80 leading-snug">
                   {fixDescription}
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
           <button
@@ -337,27 +337,27 @@ export function ValidationPanel({
             Apply Recommended Configuration
           </button>
         </div>
-      )}
+      ) : null}
 
       {/* Downstream-block hint when errors exist — only shown when no fix is available (to avoid redundancy) */}
-      {uiErrors.length > 0 && !canOfferFix && (
+      {uiErrors.length > 0 && !canOfferFix ? (
         <div className="mb-3 px-3 py-2 rounded border border-red-500/40 bg-red-500/10 text-xs text-red-200">
           <span className="font-bold">Blocking:</span> permit export and plan-set
           generation are disabled while errors are present.
         </div>
-      )}
+      ) : null}
 
       {/* When fix IS available, show a softer blocking notice below the fix button */}
-      {uiErrors.length > 0 && canOfferFix && (
+      {uiErrors.length > 0 && canOfferFix ? (
         <div className="mb-3 px-3 py-2 rounded border border-red-500/30 bg-red-500/5 text-xs text-red-300">
           <span className="font-semibold">Blocking</span> — apply the fix above to enable permit export.
         </div>
-      )}
+      ) : null}
 
       {/* Issue sections — rendered by UI severity (not engine severity) */}
-      {hasAny && (
+      {hasAny ? (
         <div className="space-y-3">
-          {uiErrors.length > 0 && (
+          {uiErrors.length > 0 ? (
             <IssueSectionMapped
               title="Errors"
               severity="error"
@@ -366,8 +366,8 @@ export function ValidationPanel({
               onToggle={() => toggle('errors')}
               onIssueClick={onIssueClick}
             />
-          )}
-          {uiWarnings.length > 0 && (
+          ) : null}
+          {uiWarnings.length > 0 ? (
             <IssueSectionMapped
               title="Warnings"
               severity="warning"
@@ -376,8 +376,8 @@ export function ValidationPanel({
               onToggle={() => toggle('warnings')}
               onIssueClick={onIssueClick}
             />
-          )}
-          {uiInfo.length > 0 && (
+          ) : null}
+          {uiInfo.length > 0 ? (
             <IssueSectionMapped
               title="Info"
               severity="info"
@@ -386,14 +386,14 @@ export function ValidationPanel({
               onToggle={() => toggle('info')}
               onIssueClick={onIssueClick}
             />
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       {/* Phase 12 — Engine Recommendation Panel */}
-      {selectedLayoutCandidate && (
+      {selectedLayoutCandidate ? (
         <EngineRecommendationPanel candidate={selectedLayoutCandidate} />
-      )}
+      ) : null}
     </div>
   );
 }
@@ -445,11 +445,11 @@ function EngineRecommendationPanel({ candidate }: EngineRecommendationPanelProps
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {sb && (
+          {sb ? (
             <span className="text-[11px] text-sky-300/70 font-mono">
               score {sb.total.toFixed(0)}
             </span>
-          )}
+          ) : null}
           {expanded ? <ChevronDown size={12} className="text-sky-400" /> : <ChevronRight size={12} className="text-sky-400" />}
         </div>
       </button>
@@ -458,9 +458,9 @@ function EngineRecommendationPanel({ candidate }: EngineRecommendationPanelProps
       <div className="px-3 pb-2 flex items-center gap-3 flex-wrap">
         <span className="text-[11px] text-sky-300/80">
           <span className="font-semibold text-sky-200">{profile.modelName}</span>
-          {inverterQty > 1 && (
+          {inverterQty > 1 ? (
             <span className="text-sky-400/70"> ×{inverterQty}</span>
-          )}
+          ) : null}
         </span>
         <span className="text-[11px] text-slate-400">
           DC/AC <span className="text-white font-semibold">{dcAcRatio.toFixed(2)}</span>
@@ -474,21 +474,21 @@ function EngineRecommendationPanel({ candidate }: EngineRecommendationPanelProps
       </div>
 
       {/* Expanded detail */}
-      {expanded && (
+      {expanded ? (
         <div className="px-3 pb-3 space-y-3 border-t border-sky-500/20 pt-2">
 
           {/* Rationale text */}
-          {selectionRationale && (
+          {selectionRationale ? (
             <div
               className="text-[11px] text-sky-100/80 leading-relaxed"
               data-testid="engine-recommendation-rationale"
             >
               {selectionRationale}
             </div>
-          )}
+          ) : null}
 
           {/* Score breakdown */}
-          {sb && (
+          {sb ? (
             <div data-testid="engine-recommendation-scores">
               <div className="flex items-center gap-1.5 mb-1.5">
                 <BarChart3 size={11} className="text-sky-400" />
@@ -504,17 +504,17 @@ function EngineRecommendationPanel({ candidate }: EngineRecommendationPanelProps
                 <ScoreBar label="Simplicity"  value={sb.simplicityScore}   max={25} color="bg-sky-500" />
                 <ScoreBar label="Str Balance" value={sb.stringBalanceScore} max={20} color="bg-violet-500" />
                 <ScoreBar label="Economic"    value={sb.economicScore}      max={15} color="bg-amber-500" />
-                {sb.penalty < 0 && (
+                {sb.penalty < 0 ? (
                   <div className="flex items-center justify-between text-[10px] mt-0.5">
                     <span className="text-red-400/80">Penalties</span>
                     <span className="text-red-400 font-mono">{sb.penalty.toFixed(0)}</span>
                   </div>
-                )}
+                ) : null}
               </div>
             </div>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -586,7 +586,7 @@ function IssueSectionMapped({
         </span>
       </button>
 
-      {isExpanded && (
+      {isExpanded ? (
         <div className="space-y-1 ml-4" data-testid={`validation-issues-${severity}`}>
           {items.map(({ mapped, original }, i) => (
             <IssueCard
@@ -598,7 +598,7 @@ function IssueSectionMapped({
             />
           ))}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -632,11 +632,11 @@ function IssueCard({ mapped, original, color, onClick }: IssueCardProps) {
         </span>
         <div className="flex-1 min-w-0">
           <div className={`${color.text} leading-snug`}>{mapped.message}</div>
-          {original.recommendation && (
+          {original.recommendation ? (
             <div className="mt-1 text-slate-400 text-[11px] italic">
               → {original.recommendation}
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

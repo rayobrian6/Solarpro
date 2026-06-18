@@ -47,12 +47,12 @@ export default function ActionModal({
         {/* Header */}
         <div className="flex items-start justify-between px-6 pt-5 pb-3">
           <div className="flex items-center gap-3">
-            {icon && (
+            {icon ? (
               <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
                 style={{ background: `${accentColor}18` }}>
                 <span style={{ color: accentColor }}>{icon}</span>
               </div>
-            )}
+            ) : null}
             <div>
               <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>{title}</h2>
               {subtitle && <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{subtitle}</p>}

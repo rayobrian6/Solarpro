@@ -236,15 +236,15 @@ export default function ShadeAnalysisPanel({
       </button>
 
       {/* Error */}
-      {error && (
+      {error ? (
         <div className="flex items-center gap-2 text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2">
           <AlertTriangle size={12} />
           {error}
         </div>
-      )}
+      ) : null}
 
       {/* Results */}
-      {result && (
+      {result ? (
         <div className="space-y-3">
           {/* System summary */}
           <div className="bg-slate-800/60 rounded-xl p-4">
@@ -319,7 +319,7 @@ export default function ShadeAnalysisPanel({
 
           {/* Worst/best callouts */}
           <div className="grid grid-cols-2 gap-2">
-            {result.worstPanelId && (
+            {result.worstPanelId ? (
               <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
                 <div className="text-[10px] text-red-400 font-medium">Most Shaded</div>
                 <div className="text-xs text-white">
@@ -329,8 +329,8 @@ export default function ShadeAnalysisPanel({
                   Panel {result.worstPanelId.slice(0, 8)}…
                 </div>
               </div>
-            )}
-            {result.bestPanelId && (
+            ) : null}
+            {result.bestPanelId ? (
               <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">
                 <div className="text-[10px] text-emerald-400 font-medium">Least Shaded</div>
                 <div className="text-xs text-white">
@@ -340,7 +340,7 @@ export default function ShadeAnalysisPanel({
                   Panel {result.bestPanelId.slice(0, 8)}…
                 </div>
               </div>
-            )}
+            ) : null}
           </div>
 
           {/* Production impact note */}
@@ -352,7 +352,7 @@ export default function ShadeAnalysisPanel({
             Shade factors are stored per panel and applied to PVWatts losses.
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -431,13 +431,13 @@ function PanelHeatmapGrid({
       </div>
 
       {/* Hover tooltip */}
-      {hoveredBucket && (
+      {hoveredBucket ? (
         <div className="mt-2 text-[10px] text-slate-300 bg-slate-800 rounded px-2 py-1 inline-block">
           Solar access: <strong>{(hoveredBucket.shadeFactor * 100).toFixed(1)}%</strong>
           {' '}·{' '}
           Derate: <strong>{((1 - hoveredBucket.shadeFactor) * 100).toFixed(1)}%</strong>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

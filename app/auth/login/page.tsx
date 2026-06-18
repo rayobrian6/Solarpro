@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Sun, Eye, EyeOff, ArrowRight, Mail, Lock, CheckCircle, RefreshCw } from 'lucide-react';
+import { Sun, Eye, EyeOff, ArrowRight, Mail, Lock, CheckCircle, RefreshCw, Shield } from 'lucide-react';
 
 // ── How many times the UI will auto-retry a DB_STARTING 503 ──────────────────
 const MAX_AUTO_RETRIES    = 5;
@@ -289,14 +289,14 @@ function LoginForm() {
 
             <label className="flex items-center gap-3 cursor-pointer group">
               <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${form.remember ? 'bg-amber-500 border-amber-500' : 'border-slate-600 group-hover:border-slate-500'}`}>
-                {form.remember && <CheckCircle size={12} className="text-slate-900" />}
+                {form.remember ? <CheckCircle size={12} className="text-slate-900" /> : null}
               </div>
               <input name="remember" type="checkbox" checked={form.remember} onChange={handleChange} className="sr-only" />
               <span className="text-sm text-slate-400">Remember me for 30 days</span>
             </label>
 
             {/* ── DB cold-start banner ──────────────────────────────────── */}
-            {starting && (
+            {starting ? (
               <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
                 <div className="flex items-center gap-2 text-amber-400 text-sm font-medium mb-1">
                   <RefreshCw size={14} className="animate-spin flex-shrink-0" />
@@ -308,13 +308,13 @@ function LoginForm() {
                     : 'Connecting to database…'}
                 </p>
               </div>
-            )}
+            ) : null}
 
             {/* ── Error banner ─────────────────────────────────────────── */}
-            {error && !starting && (
+            {error && !starting ? (
               <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3">
                 <p className="text-red-400 text-sm">{error}</p>
-                {error.includes('taking longer') && (
+                {error.includes('taking longer') ? (
                   <button
                     type="button"
                     onClick={handleManualRetry}
@@ -322,9 +322,9 @@ function LoginForm() {
                   >
                     Try again
                   </button>
-                )}
+                ) : null}
               </div>
-            )}
+            ) : null}
 
             <button
               type="submit"
@@ -340,7 +340,7 @@ function LoginForm() {
         </div>
 
         <p className="text-center text-xs text-slate-600 mt-6">
-          🔒 Secured with 256-bit encryption. We never share your data.
+          <Shield size={12} className="inline mr-1" />Secured with 256-bit encryption. We never share your data.
         </p>
       </div>
     </div>

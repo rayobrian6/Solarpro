@@ -194,7 +194,7 @@ export function RecommendationCard({
       </div>
 
       {/* Current vs Recommended — side by side */}
-      {!isMatch && (
+      {!isMatch ? (
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div className="rounded bg-slate-800/60 border border-slate-700/50 px-3 py-2">
             <p className="text-slate-500 text-[10px] uppercase tracking-wide mb-0.5">Current</p>
@@ -209,15 +209,15 @@ export function RecommendationCard({
             </p>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Match state display */}
-      {isMatch && (
+      {isMatch ? (
         <div className="mb-3 text-sm text-emerald-300 flex items-center gap-2">
           <span className="font-medium">{currentDisplay}</span>
           {recommended.unit && <span className="text-emerald-400">{recommended.unit}</span>}
         </div>
-      )}
+      ) : null}
 
       {/* Reason text */}
       <p className="text-xs text-slate-400 mb-3 leading-relaxed">
@@ -225,7 +225,7 @@ export function RecommendationCard({
       </p>
 
       {/* Expandable derivation */}
-      {derivation && (
+      {derivation ? (
         <div className="mb-3">
           <button
             type="button"
@@ -235,28 +235,28 @@ export function RecommendationCard({
             {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
             {expanded ? 'Hide details' : 'How was this computed?'}
           </button>
-          {expanded && (
+          {expanded ? (
             <div className="mt-1.5 px-3 py-2 rounded bg-slate-900/60 border-l-2 border-slate-700/60 text-[11px] text-slate-400 leading-relaxed">
               {derivation}
-              {necReference && (
+              {necReference ? (
                 <span className="block mt-1 text-slate-600 font-mono">
                   Ref: {necReference}
                 </span>
-              )}
+              ) : null}
             </div>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       {/* NEC reference when no derivation */}
-      {!derivation && necReference && (
+      {!derivation && necReference ? (
         <p className="text-[10px] text-slate-600 mb-3 font-mono">
           Ref: {necReference}
         </p>
-      )}
+      ) : null}
 
       {/* Action buttons — only when mismatch */}
-      {!isMatch && (
+      {!isMatch ? (
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -276,7 +276,7 @@ export function RecommendationCard({
             Keep Current
           </button>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

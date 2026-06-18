@@ -5,8 +5,8 @@ import {
   CheckCircle, AlertCircle, Play, ChevronRight, Server,
   Clock, Users, FolderOpen, FileText, Shield,
 } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
 
-type ToastState = { msg: string; ok: boolean } | null;
 type ToolResult = { tool: string; result: any; ok: boolean; ts: string } | null;
 
 const TOOLS = [
@@ -94,16 +94,13 @@ const TOOLS = [
 
 export default function SystemToolsPage() {
   const [running, setRunning]         = useState<string | null>(null);
-  const [toast, setToast]             = useState<ToastState>(null);
+  const toast = useToast();
   const [lastResult, setLastResult]   = useState<ToolResult>(null);
   const [migrations, setMigrations]   = useState<string[]>([]);
   const [selectedMig, setSelectedMig] = useState('');
   const [confirmTool, setConfirmTool] = useState<string | null>(null);
 
-  const showToast = (msg: string, ok = true) => {
-    setToast({ msg, ok });
-    setTimeout(() => setToast(null), 5000);
-  };
+  
 
   const runTool = async (toolId: string, params: any = {}) => {
     setRunning(toolId);
@@ -116,17 +113,17 @@ export default function SystemToolsPage() {
       });
       const d = await res.json();
       if (d.success) {
-        showToast(`✓ ${d.message || toolId + ' completed'}`);
+        toast.success(`${d.message || toolId + ' completed'}`);
         setLastResult({ tool: toolId, result: d, ok: true, ts: new Date().toLocaleTimeString() });
         if (toolId === 'list_migrations' && d.migrations) {
           setMigrations(d.migrations);
         }
       } else {
-        showToast(d.error || 'Tool failed', false);
+        toast.error(d.error || 'Tool failed');
         setLastResult({ tool: toolId, result: d, ok: false, ts: new Date().toLocaleTimeString() });
       }
     } catch (e: unknown) {
-      showToast((e as Error).message || 'Network error', false);
+      toast.error((e as Error).message || 'Network error');
     } finally {
       setRunning(null);
     }
@@ -172,9 +169,9 @@ export default function SystemToolsPage() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="font-semibold text-white text-sm">{tool.label}</span>
-                  {tool.dangerous && (
+                  {tool.dangerous ? (
                     <span className="text-[9px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider">Destructive</span>
-                  )}
+                  ) : null}
                 </div>
                 <p className="text-xs text-slate-400 mb-3">{tool.description}</p>
                 <button
@@ -243,7 +240,7 @@ export default function SystemToolsPage() {
       </div>
 
       {/* Last Result */}
-      {lastResult && (
+      {lastResult ? (
         <div className={`rounded-xl border p-4 ${lastResult.ok ? 'border-green-500/20 bg-green-500/5' : 'border-red-500/20 bg-red-500/5'}`}>
           <div className="flex items-center gap-2 mb-3">
             {lastResult.ok ? <CheckCircle size={14} className="text-green-400" /> : <AlertCircle size={14} className="text-red-400" />}
@@ -253,10 +250,10 @@ export default function SystemToolsPage() {
             {JSON.stringify(lastResult.result, null, 2)}
           </pre>
         </div>
-      )}
+      ) : null}
 
       {/* Confirm Modal */}
-      {confirmTool && (
+      {confirmTool ? (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#0d1424] border border-white/10 rounded-2xl p-6 w-full max-w-sm space-y-4">
             <div className="flex items-center gap-3">
@@ -288,17 +285,7 @@ export default function SystemToolsPage() {
             </div>
           </div>
         </div>
-      )}
-
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium shadow-xl ${
-          toast.ok ? 'bg-green-500/20 border border-green-500/30 text-green-400' : 'bg-red-500/20 border border-red-500/30 text-red-400'
-        }`}>
-          {toast.ok ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-          {toast.msg}
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -140,13 +140,13 @@ export function PhotoSlot({
           <p className="text-white text-xs font-medium truncate">{meta.label}</p>
         </div>
         {/* Required badge */}
-        {meta.required && (
+        {meta.required ? (
           <div className="absolute top-1.5 left-1.5 bg-cyan-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
             REQ
           </div>
-        )}
+        ) : null}
         {/* Remove button */}
-        {!disabled && (
+        {!disabled ? (
           <button
             type="button"
             onClick={onRemove}
@@ -156,7 +156,7 @@ export function PhotoSlot({
           >
             x
           </button>
-        )}
+        ) : null}
       </div>
     );
   }
@@ -206,14 +206,14 @@ export function PhotoSlot({
       </div>
       <p className="text-xs font-semibold text-gray-700 text-center">{meta.label}</p>
       <p className="text-[10px] text-gray-400 text-center leading-tight">{meta.hint}</p>
-      {meta.required && (
+      {meta.required ? (
         <span className="text-[10px] font-bold text-red-400 uppercase tracking-wide">
           Required
         </span>
-      )}
-      {error && (
+      ) : null}
+      {error ? (
         <p className="text-[10px] text-red-500 text-center">{error}</p>
-      )}
+      ) : null}
       {/* Hidden file input */}
       <input
         ref={inputRef}

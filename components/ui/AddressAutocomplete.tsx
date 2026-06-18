@@ -182,14 +182,14 @@ export default function AddressAutocomplete({
         />
         {/* Right icon: spinner while fetching/loading */}
         <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-          {(fetching || loading) && (
+          {(fetching || loading) ? (
             <Loader2 size={13} className="animate-spin text-amber-400/60" />
-          )}
+          ) : null}
         </div>
       </div>
 
       {/* Dropdown */}
-      {showDropdown && suggestions.length > 0 && (
+      {showDropdown && suggestions.length > 0 ? (
         <div
           ref={dropdownRef}
           className="absolute top-full left-0 right-0 mt-1.5 z-[200] rounded-xl overflow-hidden shadow-2xl border border-slate-600/80"
@@ -213,14 +213,14 @@ export default function AddressAutocomplete({
               />
               <div className="min-w-0">
                 <div className="text-xs font-semibold truncate">{s.short_name || s.display_name}</div>
-                {s.display_name && s.display_name !== s.short_name && (
+                {s.display_name && s.display_name !== s.short_name ? (
                   <div className="text-[11px] text-slate-500 truncate mt-0.5">{s.display_name}</div>
-                )}
+                ) : null}
               </div>
             </button>
           ))}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

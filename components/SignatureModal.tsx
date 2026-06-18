@@ -281,9 +281,9 @@ export default function SignatureModal({
                   onTouchEnd={endDraw}
                 />
               </div>
-              {!hasDrawn && (
+              {!hasDrawn ? (
                 <p className="text-xs text-slate-600 mt-1.5 text-center">← Sign with your mouse or finger</p>
-              )}
+              ) : null}
             </div>
           ) : (
             <div>
@@ -309,12 +309,12 @@ export default function SignatureModal({
           </div>
 
           {/* Error */}
-          {error && (
+          {error ? (
             <div className="flex items-center gap-2 text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2">
               <AlertTriangle size={12} className="flex-shrink-0" />
               {error}
             </div>
-          )}
+          ) : null}
 
           {/* Submit */}
           <button

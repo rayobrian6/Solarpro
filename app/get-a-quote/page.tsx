@@ -186,12 +186,12 @@ export default function GetAQuotePage() {
             <h2 className="text-lg font-black text-white mb-1">Get your free estimate</h2>
             <p className="text-xs text-slate-600 mb-7">We'll respond within 1 business day.</p>
 
-            {error && (
+            {error ? (
               <div className="flex items-start gap-2.5 rounded-xl bg-red-500/[0.08] border border-red-500/[0.15] px-4 py-3 mb-5">
                 <AlertCircle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />
                 <p className="text-sm text-red-300">{error}</p>
               </div>
-            )}
+            ) : null}
 
             <form onSubmit={handleSubmit} className="space-y-4">
 

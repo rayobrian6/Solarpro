@@ -2,6 +2,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, RefreshCw, Trash2, RotateCcw, CheckCircle, AlertCircle, ExternalLink, ChevronRight, GitBranch } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 const STATUS_COLORS: Record<string, string> = {
   lead:      'bg-blue-500/20 text-blue-400',
@@ -38,10 +40,10 @@ export default function AdminProjects() {
   const [search, setSearch]     = useState('');
   const [originFilter, setOriginFilter] = useState<'all' | 'survey' | 'manual' | 'bill_upload'>('all');
   const [loading, setLoading]   = useState(true);
-  const [toast, setToast]       = useState<{ msg: string; ok: boolean } | null>(null);
+  const toast = useToast();
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
   const LIMIT = 50;
 
-  const showToast = (msg: string, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 3000); };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,8 +63,8 @@ export default function AdminProjects() {
       body: JSON.stringify({ id: projectId, action, ...extra }),
     });
     const d = await res.json();
-    if (d.success) { showToast(`✓ ${action}`); load(); }
-    else showToast(d.error || 'Failed', false);
+    if (d.success) { toast.success(`${action}`); load(); }
+    else toast.error(d.error || 'Failed');
   };
 
   return (
@@ -185,7 +187,7 @@ export default function AdminProjects() {
                         </button>
                       ) : (
                         <button
-                          onClick={() => { if (confirm(`Hard-delete "${p.name}"? This cannot be undone.`)) act(p.id, 'delete'); }}
+                          onClick={() => { setConfirmDialog({ message: `Hard-delete "${p.name}"? This cannot be undone.`, onConfirm: () => act(p.id, 'delete') }); }}
                           title="Hard delete (permanent)"
                           className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors"
                         >
@@ -201,7 +203,7 @@ export default function AdminProjects() {
         </div>
       </div>
 
-      {Math.ceil(total / LIMIT) > 1 && (
+      {Math.ceil(total / LIMIT) > 1 ? (
         <div className="flex items-center justify-between text-xs text-slate-400">
           <span>Page {page} of {Math.ceil(total / LIMIT)}</span>
           <div className="flex gap-2">
@@ -209,14 +211,16 @@ export default function AdminProjects() {
             <button onClick={() => setPage(p => Math.min(Math.ceil(total / LIMIT), p + 1))} disabled={page === Math.ceil(total / LIMIT)} className="px-3 py-1.5 rounded-lg border border-white/10 disabled:opacity-40">Next</button>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium shadow-xl ${toast.ok ? 'bg-green-500/20 border border-green-500/30 text-green-400' : 'bg-red-500/20 border border-red-500/30 text-red-400'}`}>
-          {toast.ok ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-          {toast.msg}
-        </div>
-      )}
+      {confirmDialog ? (
+        <ConfirmDialog
+          message={confirmDialog.message}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+          variant="danger"
+        />
+      ) : null}
     </div>
   );
 }

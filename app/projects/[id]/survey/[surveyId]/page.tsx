@@ -655,7 +655,7 @@ function SurveySessionHygieneViewer({
       iconColor="text-cyan-400"
     >
       <div className="space-y-4">
-        {hygiene.banner && (
+        {hygiene.banner ? (
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
             <div className="flex items-center gap-2 text-amber-200">
               <AlertTriangle size={13} />
@@ -667,7 +667,7 @@ function SurveySessionHygieneViewer({
               representatives so repeated path walks do not inflate confidence.
             </p>
           </div>
-        )}
+        ) : null}
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
@@ -704,7 +704,7 @@ function SurveySessionHygieneViewer({
           </div>
         </div>
 
-        {canonical && (
+        {canonical ? (
           <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
             <p className="text-[10px] font-semibold text-emerald-300 uppercase tracking-wider">
               Canonical / current survey session
@@ -721,9 +721,9 @@ function SurveySessionHygieneViewer({
               representative(s), technician {canonical.technician ?? "unknown"}.
             </p>
           </div>
-        )}
+        ) : null}
 
-        {historical.length > 0 && (
+        {historical.length > 0 ? (
           <details className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-3">
             <summary className="cursor-pointer text-xs font-semibold text-slate-300">
               Historical repeated survey submissions preserved (
@@ -759,9 +759,9 @@ function SurveySessionHygieneViewer({
               ))}
             </div>
           </details>
-        )}
+        ) : null}
 
-        {hygiene.evidenceDuplicateGroups.length > 0 && (
+        {hygiene.evidenceDuplicateGroups.length > 0 ? (
           <details className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-3">
             <summary className="cursor-pointer text-xs font-semibold text-slate-300">
               Photo evidence duplicate groups (
@@ -790,7 +790,7 @@ function SurveySessionHygieneViewer({
               ))}
             </div>
           </details>
-        )}
+        ) : null}
       </div>
     </SectionCard>
   );
@@ -1374,16 +1374,16 @@ function SurveyPhotoClassificationPreviewPanel({
           </div>
         </div>
 
-        {error && (
+        {error ? (
           <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-100">
             <div className="flex items-center gap-2 font-semibold">
               <AlertTriangle size={13} /> Classification preview unavailable
             </div>
             <p className="mt-1 text-[11px] text-red-100/80">{error}</p>
           </div>
-        )}
+        ) : null}
 
-        {preview && (
+        {preview ? (
           <div className="space-y-3">
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
               <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
@@ -1473,12 +1473,12 @@ function SurveyPhotoClassificationPreviewPanel({
                   non-uncategorized suggestions to existing file labels.
                 </span>
               </div>
-              {applyResult && (
+              {applyResult ? (
                 <p className="mt-2 text-[11px] text-emerald-200">
                   {applyResult}
                 </p>
-              )}
-              {applyDiagnostics && (
+              ) : null}
+              {applyDiagnostics ? (
                 <div
                   className={`mt-3 rounded-xl border p-3 ${
                     applyDiagnostics.status === "success"
@@ -1532,39 +1532,39 @@ function SurveyPhotoClassificationPreviewPanel({
                   {(applyDiagnostics.unmatchedFileIds.length > 0 ||
                     applyDiagnostics.failedFileIds.length > 0 ||
                     applyDiagnostics.rowMatchFailures.length > 0 ||
-                    applyDiagnostics.requiredMissing.length > 0) && (
+                    applyDiagnostics.requiredMissing.length > 0) ? (
                     <div className="mt-3 space-y-1 text-[10px] text-slate-400">
-                      {applyDiagnostics.unmatchedFileIds.length > 0 && (
+                      {applyDiagnostics.unmatchedFileIds.length > 0 ? (
                         <p>
                           Unmatched file IDs:{" "}
                           {applyDiagnostics.unmatchedFileIds.join(", ")}
                         </p>
-                      )}
-                      {applyDiagnostics.failedFileIds.length > 0 && (
+                      ) : null}
+                      {applyDiagnostics.failedFileIds.length > 0 ? (
                         <p>
                           Failed persistence IDs:{" "}
                           {applyDiagnostics.failedFileIds.join(", ")}
                         </p>
-                      )}
-                      {applyDiagnostics.rowMatchFailures.length > 0 && (
+                      ) : null}
+                      {applyDiagnostics.rowMatchFailures.length > 0 ? (
                         <p>
                           Row match failures:{" "}
                           {applyDiagnostics.rowMatchFailures.join("; ")}
                         </p>
-                      )}
-                      {applyDiagnostics.requiredMissing.length > 0 && (
+                      ) : null}
+                      {applyDiagnostics.requiredMissing.length > 0 ? (
                         <p>
                           Required categories still missing:{" "}
                           {applyDiagnostics.requiredMissing.join(", ")}
                         </p>
-                      )}
+                      ) : null}
                     </div>
-                  )}
+                  ) : null}
                 </div>
-              )}
+              ) : null}
             </div>
 
-            {nonEmptyCounts.length > 0 && (
+            {nonEmptyCounts.length > 0 ? (
               <div className="flex flex-wrap gap-2">
                 {nonEmptyCounts.map(([category, count]) => (
                   <span
@@ -1576,7 +1576,7 @@ function SurveyPhotoClassificationPreviewPanel({
                   </span>
                 ))}
               </div>
-            )}
+            ) : null}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
               {visibleCandidates.map((candidate) => (
@@ -1605,12 +1605,12 @@ function SurveyPhotoClassificationPreviewPanel({
                   <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
                     {candidate.rationale}
                   </p>
-                  {(candidate.evidenceSignals ?? []).length > 0 && (
+                  {(candidate.evidenceSignals ?? []).length > 0 ? (
                     <p className="mt-2 text-[10px] text-slate-500">
                       Signals: {(candidate.evidenceSignals ?? []).join(" · ")}
                     </p>
-                  )}
-                  {candidate.openSourceAnalysis && (
+                  ) : null}
+                  {candidate.openSourceAnalysis ? (
                     <p className="mt-2 text-[10px] text-slate-500">
                       Quality: {candidate.openSourceAnalysis.qualityStatus} (
                       {candidate.openSourceAnalysis.qualityScore}/100) ·
@@ -1628,7 +1628,7 @@ function SurveyPhotoClassificationPreviewPanel({
                         ? ` · ${(candidate.openSourceAnalysis.qualityFlags ?? []).join(", ")}`
                         : ""}
                     </p>
-                  )}
+                  ) : null}
                   <p className="mt-2 text-[10px] text-slate-600">
                     Current: {evidenceCategoryLabel(candidate.currentCategory)}{" "}
                     → Suggested: {candidate.suggestedLabel}
@@ -1638,7 +1638,7 @@ function SurveyPhotoClassificationPreviewPanel({
               ))}
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     </SectionCard>
   );
@@ -1739,7 +1739,7 @@ function SurveyEvidenceViewer({
           </div>
         </div>
 
-        {manifest.diagnostics && (
+        {manifest.diagnostics ? (
           <div className="rounded-xl border border-slate-700/60 bg-slate-950/40 p-3">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
               Canonical promotion diagnostics
@@ -1760,7 +1760,7 @@ function SurveyEvidenceViewer({
                 <b>{manifest.diagnostics.suppressedDuplicateCount}</b>
               </span>
             </div>
-            {manifest.diagnostics.requirementReasoning.length > 0 && (
+            {manifest.diagnostics.requirementReasoning.length > 0 ? (
               <div className="mt-2 space-y-1">
                 {manifest.diagnostics.requirementReasoning.map((reason) => (
                   <p
@@ -1780,9 +1780,9 @@ function SurveyEvidenceViewer({
                   </p>
                 ))}
               </div>
-            )}
+            ) : null}
           </div>
-        )}
+        ) : null}
 
         <div>
           <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
@@ -1809,7 +1809,7 @@ function SurveyEvidenceViewer({
           </div>
         </div>
 
-        {bridge && (
+        {bridge ? (
           <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3">
             <div className="flex items-center justify-between gap-3 mb-3">
               <div>
@@ -1844,9 +1844,9 @@ function SurveyEvidenceViewer({
               <b className="text-slate-300">{bridge.cadAutomationStatus}</b>
             </p>
           </div>
-        )}
+        ) : null}
 
-        {requirementEvaluation && (
+        {requirementEvaluation ? (
           <div className="rounded-xl border border-violet-500/20 bg-violet-500/10 p-3">
             <div className="flex items-center justify-between gap-3 mb-3">
               <div>
@@ -2057,9 +2057,9 @@ function SurveyEvidenceViewer({
               </details>
             </div>
           </div>
-        )}
+        ) : null}
 
-        {manifest.warnings.length > 0 && (
+        {manifest.warnings.length > 0 ? (
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
             <div className="flex items-center gap-2 mb-2 text-amber-300">
               <AlertTriangle size={13} />
@@ -2076,7 +2076,7 @@ function SurveyEvidenceViewer({
               ))}
             </ul>
           </div>
-        )}
+        ) : null}
 
         <div className="space-y-4">
           {(Object.keys(grouped) as SurveyEvidenceDomain[]).map((domain) => {
@@ -2142,7 +2142,7 @@ function SurveyEvidenceViewer({
                             {item.quality.duplicateScore ?? "not checked"}
                           </b>
                         </span>
-                        {item.image.widthPx && item.image.heightPx && (
+                        {item.image.widthPx && item.image.heightPx ? (
                           <span className="col-span-2">
                             Image scan:{" "}
                             <b className="text-slate-300">
@@ -2152,7 +2152,7 @@ function SurveyEvidenceViewer({
                               ? ` · ${item.quality.warnings.slice(0, 2).join(" · ")}`
                               : ""}
                           </span>
-                        )}
+                        ) : null}
                       </div>
                     </a>
                   ))}
@@ -2216,12 +2216,12 @@ function ElectricalSection({ elec }: { elec: SurveyElectricalService }) {
           value={fmtVal(elec.serviceEntrance, SERVICE_ENTRANCE_LABELS)}
         />
         <FieldRow label="Has Sub-Panel" value={fmtBool(elec.hasSubPanel)} />
-        {elec.hasSubPanel && (
+        {elec.hasSubPanel ? (
           <FieldRow
             label="Sub-Panel Rating"
             value={elec.subPanelRating ? `${elec.subPanelRating}A` : null}
           />
-        )}
+        ) : null}
       </div>
     </SectionCard>
   );
@@ -2295,7 +2295,7 @@ function ObstructionsSection({ obs }: { obs: SurveyObstructions }) {
         </div>
 
         {/* Obstruction list */}
-        {hasObstructions && (
+        {hasObstructions ? (
           <div className="space-y-2 pt-1">
             {obs.obstructions.map((o: Obstruction) => (
               <div
@@ -2315,16 +2315,16 @@ function ObstructionsSection({ obs }: { obs: SurveyObstructions }) {
                       {OBSTRUCTION_LOCATION_LABELS[o.location] ?? o.location}
                     </span>
                   </div>
-                  {o.notes && (
+                  {o.notes ? (
                     <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
                       {o.notes}
                     </p>
-                  )}
+                  ) : null}
                 </div>
               </div>
             ))}
           </div>
-        )}
+        ) : null}
       </div>
     </SectionCard>
   );
@@ -2355,12 +2355,12 @@ function SiteOverviewSection({ site }: { site: SurveySiteOverview }) {
           value={fmtVal(site.structureType, STRUCTURE_LABELS)}
         />
         <FieldRow label="Stories" value={fmtVal(site.stories)} />
-        {site.latitude != null && site.longitude != null && (
+        {site.latitude != null && site.longitude != null ? (
           <FieldRow
             label="Coordinates"
             value={`${site.latitude.toFixed(5)}, ${site.longitude.toFixed(5)}`}
           />
-        )}
+        ) : null}
       </div>
     </SectionCard>
   );
@@ -2423,13 +2423,13 @@ function RawDataSection({ data }: { data: Record<string, unknown> | null }) {
         </span>
         {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
       </button>
-      {open && (
+      {open ? (
         <div className="border-t border-slate-700/50 px-5 py-4">
           <pre className="text-[10px] text-slate-400 overflow-auto max-h-[400px] leading-relaxed">
             {data ? JSON.stringify(data, null, 2) : "No data"}
           </pre>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -2453,12 +2453,12 @@ function V1SiteSection({ d }: { d: V1DisplayData }) {
         <FieldRow label="Survey Date" value={d.surveyDate} />
         <FieldRow label="Survey Type" value={d.surveyType} />
         <FieldRow label="Category" value={d.categoryName} />
-        {d.latitude != null && d.longitude != null && (
+        {d.latitude != null && d.longitude != null ? (
           <FieldRow
             label="Coordinates"
             value={`${d.latitude.toFixed(5)}, ${d.longitude.toFixed(5)}`}
           />
-        )}
+        ) : null}
       </div>
     </SectionCard>
   );
@@ -2542,11 +2542,11 @@ function V1ChecklistSection({ items }: { items: V1DisplayData["checklist"] }) {
                 <p className="text-xs text-slate-200 font-medium">
                   {item.label}
                 </p>
-                {item.notes && (
+                {item.notes ? (
                   <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
                     {item.notes}
                   </p>
-                )}
+                ) : null}
               </div>
             </div>
           );
@@ -3026,9 +3026,9 @@ function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
           <ReadinessPill tone="amber">No Solver Execution</ReadinessPill>
           <ReadinessPill tone="slate">No Permit Trigger</ReadinessPill>
           <ReadinessPill tone="cyan">Survey Source Traceable</ReadinessPill>
-          {isFallbackPreview && (
+          {isFallbackPreview ? (
             <ReadinessPill tone="amber">Fallback Geometry Only</ReadinessPill>
-          )}
+          ) : null}
         </div>
 
         <div className={`rounded-2xl border p-4 ${sourceHealthTone}`}>
@@ -3075,7 +3075,7 @@ function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
               </div>
             </div>
           </div>
-          {(missingSourceFacts.length > 0 || reviewItems.length > 0) && (
+          {(missingSourceFacts.length > 0 || reviewItems.length > 0) ? (
             <div className="mt-4 grid gap-3 lg:grid-cols-2">
               <IssueList
                 title="Missing or weak parsed source facts"
@@ -3088,10 +3088,10 @@ function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
                 tone={isFallbackPreview ? "red" : "amber"}
               />
             </div>
-          )}
+          ) : null}
         </div>
 
-        {sheets.length > 1 && (
+        {sheets.length > 1 ? (
           <div className="flex flex-wrap gap-2">
             {sheets.map((sheet) => (
               <button
@@ -3103,9 +3103,9 @@ function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
               </button>
             ))}
           </div>
-        )}
+        ) : null}
 
-        {selectedSheet && (
+        {selectedSheet ? (
           <div className="rounded-2xl border border-slate-700/70 bg-slate-950/50 p-3 overflow-hidden">
             <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -3157,7 +3157,7 @@ function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
               </div>
             </div>
           </div>
-        )}
+        ) : null}
 
         <details className="rounded-xl border border-slate-700/60 bg-slate-950/30 p-3">
           <summary className="cursor-pointer text-xs font-semibold text-slate-300">
@@ -3188,21 +3188,21 @@ function SurveyCadWorkbenchPanel({ surveyId }: { surveyId: string }) {
               setbacks: <b className="text-slate-300">{summary.setbackCount}</b>
               .
             </p>
-            {selectedSheet && (
+            {selectedSheet ? (
               <p>
                 Visible layer order:{" "}
                 <span className="text-slate-400">
                   {safeArray(selectedSheet.layerOrder).join(" → ")}
                 </span>
               </p>
-            )}
-            {reviewItems.length > 0 && (
+            ) : null}
+            {reviewItems.length > 0 ? (
               <ul className="space-y-1 text-amber-100/80">
                 {reviewItems.map((item, i) => (
                   <li key={`${item}-${i}`}>- {item}</li>
                 ))}
               </ul>
-            )}
+            ) : null}
           </div>
         </details>
       </div>
@@ -3449,12 +3449,12 @@ function ProfessionalReadinessPanel({ surveyId }: { surveyId: string }) {
         {blockingIssues.length === 0 &&
           report.summaries.missingRequiredFields.length === 0 &&
           reviewRequired.length === 0 &&
-          warnings.length === 0 && (
+          warnings.length === 0 ? (
             <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-[11px] text-emerald-100/80">
               No blocking issues, missing required fields, parser warnings, or
               confidence gaps were reported for this preview.
             </div>
-          )}
+          ) : null}
 
         <details className="rounded-xl border border-slate-700/60 bg-slate-950/30 p-3">
           <summary className="cursor-pointer text-xs font-semibold text-slate-300">
@@ -3681,24 +3681,24 @@ export default function SurveyDetailPage() {
                   ? "Standalone"
                   : "Project Handoff"}
               </span>
-              {payload && (
+              {payload ? (
                 <span className="text-[10px] text-emerald-400 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
                   v2.0
                 </span>
-              )}
-              {v1Data && (
+              ) : null}
+              {v1Data ? (
                 <span className="text-[10px] text-slate-400 px-2 py-0.5 rounded-full bg-slate-700/40 border border-slate-600/30">
                   Field Survey
                 </span>
-              )}
+              ) : null}
             </div>
             <div className="flex items-center gap-3 mt-1 flex-wrap">
-              {survey.addressSnapshot && (
+              {survey.addressSnapshot ? (
                 <span className="flex items-center gap-1 text-xs text-slate-400">
                   <MapPin size={10} />
                   {survey.addressSnapshot}
                 </span>
-              )}
+              ) : null}
               <span className="flex items-center gap-1 text-xs text-slate-400">
                 <Calendar size={10} />
                 {new Date(survey.createdAt).toLocaleDateString("en-US", {
@@ -3707,12 +3707,12 @@ export default function SurveyDetailPage() {
                   year: "numeric",
                 })}
               </span>
-              {survey.inspectorName && (
+              {survey.inspectorName ? (
                 <span className="flex items-center gap-1 text-xs text-slate-400">
                   <User size={10} />
                   {survey.inspectorName}
                 </span>
-              )}
+              ) : null}
             </div>
           </div>
           <Link

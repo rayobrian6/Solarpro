@@ -119,7 +119,7 @@ export default function BillingPage() {
         </div>
 
         {/* Alert Banners — never shown to admins or free pass users */}
-        {!hasFullAccess && isExpired && (
+        {!hasFullAccess && isExpired ? (
           <div className="mb-6 bg-red-900/30 border border-red-500 rounded-xl p-4 flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
             <div className="flex-1">
@@ -130,9 +130,9 @@ export default function BillingPage() {
               Subscribe Now
             </Link>
           </div>
-        )}
+        ) : null}
 
-        {!hasFullAccess && isPastDue && (
+        {!hasFullAccess && isPastDue ? (
           <div className="mb-6 bg-orange-900/30 border border-orange-500 rounded-xl p-4 flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-orange-400 shrink-0 mt-0.5" />
             <div className="flex-1">
@@ -143,15 +143,15 @@ export default function BillingPage() {
               Update Payment
             </button>
           </div>
-        )}
+        ) : null}
 
-        {error && (
+        {error ? (
           <div className="mb-6 bg-red-900/30 border border-red-500 rounded-xl p-4 flex items-center gap-3">
             <AlertTriangle className="w-5 h-5 text-red-400" />
             <span className="text-red-300 text-sm">{error}</span>
             <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-white"><X className="w-4 h-4" /></button>
           </div>
-        )}
+        ) : null}
 
         {/* Account Overview Card — shows Role AND Plan separately */}
         <div className={`bg-slate-900 border-2 ${isAdmin ? roleInfo.borderColor : planInfo.borderColor} rounded-2xl p-6 mb-6`}>
@@ -163,7 +163,7 @@ export default function BillingPage() {
               <div className="flex items-center gap-3 mb-2">
                 <span className="text-slate-500 text-sm w-12">Role</span>
                 <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm font-semibold ${roleInfo.bgColor} ${roleInfo.color} border ${roleInfo.borderColor}`}>
-                  {isAdmin && <Shield className="w-3.5 h-3.5" />}
+                  {isAdmin ? <Shield className="w-3.5 h-3.5" /> : null}
                   {roleInfo.label}
                 </div>
               </div>
@@ -173,27 +173,27 @@ export default function BillingPage() {
                 <span className="text-slate-500 text-sm w-12">Plan</span>
                 <div className="flex items-center gap-2">
                   <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm font-semibold ${planInfo.bgColor} ${planInfo.color} border ${planInfo.borderColor}`}>
-                    {isFreePass && <Star className="w-3.5 h-3.5" />}
+                    {isFreePass ? <Star className="w-3.5 h-3.5" /> : null}
                     {isFreePass ? 'Free Pass' : planInfo.label}
                   </div>
-                  {!isFreePass && (
+                  {!isFreePass ? (
                     <span className={`text-xs font-medium ${planInfo.color} opacity-70`}>{planInfo.price}</span>
-                  )}
+                  ) : null}
                 </div>
               </div>
             </div>
 
             {/* Status badge — top right */}
-            {!hasFullAccess && (
+            {!hasFullAccess ? (
               <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium ${statusInfo.color} bg-slate-800`}>
                 {statusInfo.icon}
                 {statusInfo.label}
               </div>
-            )}
+            ) : null}
           </div>
 
           {/* Admin full access notice */}
-          {isAdmin && (
+          {isAdmin ? (
             <div className={`${roleInfo.bgColor} border ${roleInfo.borderColor} rounded-xl p-4 mb-4`}>
               <div className={`flex items-center gap-2 ${roleInfo.color}`}>
                 <Shield className="w-5 h-5" />
@@ -205,10 +205,10 @@ export default function BillingPage() {
                 {roleInfo.description}. Subscription billing does not apply to admin accounts.
               </p>
             </div>
-          )}
+          ) : null}
 
           {/* Free pass notice — shown for non-admin free pass users */}
-          {isFreePass && !isAdmin && (
+          {isFreePass && !isAdmin ? (
             <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 mb-4">
               <div className="flex items-center gap-2 text-emerald-400">
                 <Star className="w-5 h-5" />
@@ -218,10 +218,10 @@ export default function BillingPage() {
                 Full access to all Contractor-level features at no charge.
               </p>
             </div>
-          )}
+          ) : null}
 
           {/* Trial countdown — only for regular users */}
-          {!hasFullAccess && isTrialing && !isExpired && trialDays > 0 && (
+          {!hasFullAccess && isTrialing && !isExpired && trialDays > 0 ? (
             <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 mb-4">
               <div className="flex items-center gap-2 text-amber-400">
                 <Clock className="w-5 h-5" />
@@ -233,28 +233,28 @@ export default function BillingPage() {
                 Subscribe before your trial ends to keep access to all features.
               </p>
             </div>
-          )}
+          ) : null}
 
           {/* Action Buttons */}
           <div className="flex flex-wrap gap-3">
             {/* Admin: no billing actions needed */}
-            {isAdmin && (
+            {isAdmin ? (
               <div className={`flex items-center gap-2 text-sm ${roleInfo.color}`}>
                 <Shield className="w-4 h-4" />
                 <span>No billing required — admin account</span>
               </div>
-            )}
+            ) : null}
 
             {/* Free pass non-admin: no billing actions */}
-            {isFreePass && !isAdmin && (
+            {isFreePass && !isAdmin ? (
               <div className="flex items-center gap-2 text-emerald-400 text-sm">
                 <Star className="w-4 h-4" />
                 <span>No billing required — free pass active</span>
               </div>
-            )}
+            ) : null}
 
             {/* Regular users: show billing actions */}
-            {!hasFullAccess && (
+            {!hasFullAccess ? (
               <>
                 {hasStripe ? (
                   <button
@@ -280,21 +280,21 @@ export default function BillingPage() {
                   <ArrowRight className="w-4 h-4" />
                 </Link>
 
-                {hasStripe && isActive && (
+                {hasStripe && isActive ? (
                   <button
                     onClick={handleManageBilling}
                     className="flex items-center gap-2 text-slate-400 hover:text-red-400 border border-slate-700 hover:border-red-500/50 px-4 py-2.5 rounded-xl text-sm transition-colors"
                   >
                     Cancel Subscription
                   </button>
-                )}
+                ) : null}
               </>
-            )}
+            ) : null}
           </div>
         </div>
 
         {/* Plan Comparison Mini Grid — hidden for admins (not relevant) */}
-        {!isAdmin && (
+        {!isAdmin ? (
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6">
             <h3 className="text-lg font-semibold text-white mb-4">Plan Comparison</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -321,25 +321,25 @@ export default function BillingPage() {
                         </li>
                       ))}
                     </ul>
-                    {!isCurrent && p.id !== 'enterprise' && (
+                    {!isCurrent && p.id !== 'enterprise' ? (
                       <Link href="/subscribe" className={`mt-3 block text-center text-xs py-1.5 rounded-lg font-semibold transition-colors ${info.bgColor} ${info.color} hover:opacity-80`}>
                         Upgrade →
                       </Link>
-                    )}
-                    {!isCurrent && p.id === 'enterprise' && (
+                    ) : null}
+                    {!isCurrent && p.id === 'enterprise' ? (
                       <Link href="/enterprise" className="mt-3 block text-center text-xs py-1.5 rounded-lg font-semibold bg-purple-500/20 text-purple-400 hover:opacity-80 transition-colors">
                         Contact Sales →
                       </Link>
-                    )}
+                    ) : null}
                   </div>
                 );
               })}
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Admin: show admin portal link instead of plan comparison */}
-        {isAdmin && (
+        {isAdmin ? (
           <div className={`bg-slate-900 border ${roleInfo.borderColor} rounded-2xl p-6`}>
             <h3 className="text-lg font-semibold text-white mb-2">Admin Access</h3>
             <p className="text-slate-400 text-sm mb-4">
@@ -354,7 +354,7 @@ export default function BillingPage() {
               <ArrowRight className="w-4 h-4" />
             </Link>
           </div>
-        )}
+        ) : null}
       </div>
     </AppShell>
   );

@@ -21,6 +21,7 @@ import {
   Sparkles,
   Flame,
 } from "lucide-react";
+import { useToast } from "@/components/ui/Toast";
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
@@ -150,11 +151,11 @@ function Breakdown({
             <span className="w-10 shrink-0 text-right text-[10px] tabular-nums text-slate-500">
               {Math.round((r.count / total) * 100)}%
             </span>
-            {showValue && r.value > 0 && (
+            {showValue && r.value > 0 ? (
               <span className="hidden w-12 shrink-0 text-right text-[10px] tabular-nums text-emerald-400/80 sm:inline">
                 {usdShort(r.value)}
               </span>
-            )}
+            ) : null}
           </div>
         ))}
       </div>
@@ -302,11 +303,11 @@ function LeadCard({
           >
             {lead.grade}
           </span>
-          {score >= 85 && (
+          {score >= 85 ? (
             <span className="flex items-center gap-1 rounded-full border border-orange-500/40 bg-orange-500/15 px-1.5 py-0.5 text-[9px] font-black uppercase text-orange-300">
               <Flame size={9} /> Hot
             </span>
-          )}
+          ) : null}
         </div>
         <div className="text-right">
           <div className="text-xl font-black leading-none text-white">
@@ -339,7 +340,7 @@ function LeadCard({
         </div>
       </div>
 
-      {chips.length > 0 && (
+      {chips.length > 0 ? (
         <div className="mt-3 flex flex-wrap gap-1.5">
           {chips.map((c) => (
             <span
@@ -350,7 +351,7 @@ function LeadCard({
             </span>
           ))}
         </div>
-      )}
+      ) : null}
 
       <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-800 pt-3">
         <span className="inline-flex items-center gap-1 text-[12px] font-bold text-emerald-300 transition-all group-hover:gap-2">
@@ -391,6 +392,7 @@ function TerritoryView() {
   const stateName = STATE_NAMES[state] ?? state;
 
   const [data, setData] = useState<Territory | null>(null);
+  const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [claimingId, setClaimingId] = useState<string>("");
 
@@ -423,7 +425,7 @@ function TerritoryView() {
         window.location.href = d.url as string;
         return;
       }
-      alert(d.error || "Could not start checkout.");
+      toast.error(d.error || "Could not start checkout.");
     } finally {
       setClaimingId("");
     }

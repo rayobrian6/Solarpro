@@ -461,7 +461,7 @@ export default function SurveyPage() {
       standalone={draft.standalone}
       hasSelection={!!(draft.selectedProjectId || draft.selectedClientId)}
     >
-      {draft.currentStep === 1 && (
+      {draft.currentStep === 1 ? (
         <StepSiteOverview
           data={draft.siteOverview}
           onChange={handleSiteOverview}
@@ -477,8 +477,8 @@ export default function SurveyPage() {
           onSelectProject={handleSelectProject}
           onClearSelection={handleClearSelection}
         />
-      )}
-      {draft.currentStep === 2 && (
+      ) : null}
+      {draft.currentStep === 2 ? (
         <StepRoof
           data={draft.roofConditions}
           onChange={handleRoof}
@@ -486,8 +486,8 @@ export default function SurveyPage() {
           siteOverview={draft.siteOverview}
           photos={draft.photos.photos}
         />
-      )}
-      {draft.currentStep === 3 && (
+      ) : null}
+      {draft.currentStep === 3 ? (
         <StepElectrical
           data={draft.electricalService}
           onChange={handleElectrical}
@@ -497,16 +497,16 @@ export default function SurveyPage() {
           roofAgeYears={draft.roofConditions.roofAgeYears}
           roofMaterial={draft.roofConditions.roofMaterial || undefined}
         />
-      )}
-      {draft.currentStep === 4 && (
+      ) : null}
+      {draft.currentStep === 4 ? (
         <StepObstructions
           data={draft.obstructions}
           onChange={handleObstructions}
           disabled={submitting}
           siteOverview={draft.siteOverview}
         />
-      )}
-      {draft.currentStep === 5 && (
+      ) : null}
+      {draft.currentStep === 5 ? (
         <StepPhotos
           surveyToken={token}
           data={draft.photos}
@@ -514,14 +514,14 @@ export default function SurveyPage() {
           onPhotoRemoved={handlePhotoRemoved}
           disabled={submitting}
         />
-      )}
-      {draft.currentStep === 6 && (
+      ) : null}
+      {draft.currentStep === 6 ? (
         <StepReview
           draft={draft}
           onEditStep={handleEditStep}
           submitError={submitError}
         />
-      )}
+      ) : null}
     </SurveyShell>
   );
 }

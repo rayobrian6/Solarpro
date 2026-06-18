@@ -819,12 +819,12 @@ export default function CesiumViewer({
         </div>
 
         {/* Stats */}
-        {panels.length > 0 && (
+        {panels.length > 0 ? (
           <div style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center' }}>
             <span style={{ color:'#fbbf24', fontSize:11 }}>⚡ <b style={{color:'#f1f5f9'}}>{panels.length}</b> <span style={{color:'#475569'}}>panels</span></span>
             <span style={{ color:'#60a5fa', fontWeight:700, fontSize:11 }}>{totalKw} kW</span>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* ── Viewer ── */}
@@ -837,15 +837,15 @@ export default function CesiumViewer({
         <div style={{ position:'absolute', inset:0, display: viewMode==='street'?'block':'none' }}>
           <div ref={streetRef} style={{ position:'absolute', inset:0 }} />
           <canvas ref={svCanvasRef} style={{ position:'absolute', inset:0, pointerEvents:'none', zIndex:5 }} />
-          {svReady && (
+          {svReady ? (
             <button onClick={drawSVOverlay} style={{ position:'absolute', top:10, right:10, zIndex:10, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(8px)', border:'1px solid rgba(59,130,246,0.4)', borderRadius:8, color:'#93c5fd', fontSize:11, fontWeight:600, padding:'5px 12px', cursor:'pointer' }}>
               🔄 Refresh AR
             </button>
-          )}
+          ) : null}
         </div>
 
         {/* Loading */}
-        {isLoading && (
+        {isLoading ? (
           <div style={{ position:'absolute', inset:0, zIndex:30, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'linear-gradient(160deg,#0d1117,#0f172a)', gap:20 }}>
             <div style={{ position:'relative', width:80, height:80 }}>
               <div style={{ position:'absolute', inset:0, borderRadius:'50%', background:'radial-gradient(circle at 35% 35%,#1e3a8a,#0f172a)', boxShadow:'0 0 50px rgba(59,130,246,0.2)' }} />
@@ -886,10 +886,10 @@ export default function CesiumViewer({
             </div>
             <style>{`@keyframes dt_spin{to{transform:rotate(360deg)}}`}</style>
           </div>
-        )}
+        ) : null}
 
         {/* Error */}
-        {stage === 'error' && (
+        {stage === 'error' ? (
           <div style={{ position:'absolute', inset:0, zIndex:30, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#0d1117', gap:16 }}>
             <div style={{ fontSize:48 }}>⚠️</div>
             <div style={{ color:'#f87171', fontSize:16, fontWeight:700 }}>Digital Twin Failed</div>
@@ -899,10 +899,10 @@ export default function CesiumViewer({
               <button onClick={() => { initDone.current=false; window.location.reload(); }} style={{ padding:'8px 18px', background:'linear-gradient(135deg,#1d4ed8,#2563eb)', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>Reload</button>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Ready overlays */}
-        {stage === 'done' && (
+        {stage === 'done' ? (
           <>
             <div style={{ position:'absolute', top:10, left:10, zIndex:10, background:'rgba(0,0,0,0.82)', backdropFilter:'blur(12px)', border:'1px solid rgba(59,130,246,0.3)', borderRadius:10, padding:'6px 12px', display:'flex', alignItems:'center', gap:7, pointerEvents:'none' }}>
               <div style={{ width:7, height:7, borderRadius:'50%', background:'#22c55e', boxShadow:'0 0 8px #22c55e' }} />
@@ -911,15 +911,15 @@ export default function CesiumViewer({
               </span>
             </div>
 
-            {viewMode !== 'street' && sunPos.elevation > 0 && (
+            {viewMode !== 'street' && sunPos.elevation > 0 ? (
               <div style={{ position:'absolute', top:10, right:10, zIndex:10, background:'rgba(0,0,0,0.78)', backdropFilter:'blur(8px)', border:'1px solid rgba(245,158,11,0.3)', borderRadius:10, padding:'6px 12px', pointerEvents:'none' }}>
                 <div style={{ color:'#fbbf24', fontSize:11, fontWeight:600 }}>
                   ☀️ Az {sunPos.azimuth.toFixed(0)}° · El {sunPos.elevation.toFixed(0)}°
                 </div>
               </div>
-            )}
+            ) : null}
 
-            {twin && (
+            {twin ? (
               <div style={{ position:'absolute', bottom:36, right:10, zIndex:10, background:'rgba(0,0,0,0.78)', backdropFilter:'blur(8px)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:10, padding:'8px 12px', pointerEvents:'none', minWidth:160 }}>
                 <div style={{ color:'#94a3b8', fontSize:10, marginBottom:4, fontWeight:600 }}>PROPERTY DATA</div>
                 <div style={{ color:'#f1f5f9', fontSize:11, lineHeight:1.7 }}>
@@ -929,15 +929,15 @@ export default function CesiumViewer({
                   <div>⚡ {twin.solarData?.solarPotential?.maxArrayPanelsCount ?? '—'} max panels</div>
                 </div>
               </div>
-            )}
+            ) : null}
 
-            {viewMode === '3d' && (
+            {viewMode === '3d' ? (
               <div style={{ position:'absolute', bottom:10, left:'50%', transform:'translateX(-50%)', zIndex:10, background:'rgba(0,0,0,0.7)', backdropFilter:'blur(8px)', borderRadius:8, padding:'5px 14px', color:'#94a3b8', fontSize:11, display:'flex', gap:14, pointerEvents:'none', whiteSpace:'nowrap' }}>
                 <span>🖱️ Left: orbit</span><span>Right: pan</span><span>⚲ Scroll: zoom</span><span>Middle: tilt</span>
               </div>
-            )}
+            ) : null}
           </>
-        )}
+        ) : null}
       </div>
     </div>
   );

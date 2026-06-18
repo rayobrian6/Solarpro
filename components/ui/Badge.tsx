@@ -81,9 +81,9 @@ export function Badge({
     <span
       className={`inline-flex items-center gap-1.5 rounded-full font-medium ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
     >
-      {dot && (
+      {dot ? (
         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotColors[variant]}`} />
-      )}
+      ) : null}
       {icon && <span className="flex-shrink-0">{icon}</span>}
       {children}
     </span>

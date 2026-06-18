@@ -1,8 +1,8 @@
 'use client';
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import AppShell from '@/components/ui/AppShell';
-import { useParams } from 'next/navigation';
-import type { Client, Project } from '@/types';
+import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation';
+import type { Client, Project, ProjectStatus } from '@/types';
 import { useAppStore } from '@/store/appStore';
 import {
   ArrowLeft, Mail, Phone, MapPin, Zap, DollarSign,
@@ -12,6 +12,8 @@ import {
   RefreshCw, AlertTriangle, Eye,
   StickyNote, Send, MessageSquare, Trash2, ExternalLink, TrendingUp,
   LayoutGrid, Activity, Sparkles,
+  ArrowRight,
+  Flame,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -19,6 +21,12 @@ import {
 } from 'recharts';
 import type { SiteSurvey } from '@/lib/db-neon';
 import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
+import { useToast } from '@/components/ui/Toast';
+import {
+  STATUS_STEPS, STATUS_CONFIG, TYPE_ICONS_JSX, TYPE_BG,
+  getUrgency, getNextAction, PipelineProgress, StatusDropdown,
+} from '@/components/ui/ProjectPipeline';
+import { NotFoundState } from '@/components/ui/NotFoundState';
 import type { ConfidenceSource, ConfidenceLevel } from '@/components/recommend/ConfidenceBadge';
 
 // ── Client Detail Tab IDs ────────────────────────────────────────
@@ -33,29 +41,7 @@ const CLIENT_TABS: { id: ClientTab; label: string; icon: React.ReactNode }[] = [
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-const STATUS_DOT: Record<string, string> = {
-  lead:      'bg-slate-400',
-  design:    'bg-blue-500',
-  proposal:  'bg-amber-500',
-  approved:  'bg-emerald-500',
-  installed: 'bg-green-500',
-};
-const STATUS_BADGE: Record<string, string> = {
-  lead:      'bg-slate-700/60 text-slate-300 border border-slate-600/40',
-  design:    'bg-blue-900/60 text-blue-300 border border-blue-700/40',
-  proposal:  'bg-amber-900/60 text-amber-300 border border-amber-700/40',
-  approved:  'bg-emerald-900/60 text-emerald-300 border border-emerald-700/40',
-  installed: 'bg-green-900/60 text-green-300 border border-green-700/40',
-};
-const STATUS_LABEL: Record<string, string> = {
-  lead: 'Lead', design: 'Design', proposal: 'Proposal', approved: 'Approved', installed: 'Installed',
-};
-const TYPE_ICONS: Record<string, string> = { roof: '🏠', ground: '🌱', fence: '🔲' };
-const TYPE_BG: Record<string, string> = {
-  roof: 'bg-amber-500/10', ground: 'bg-teal-500/10', fence: 'bg-purple-500/10',
-};
 
-// ---------------------------------------------------------------------------
 // ProposalsSection — shows all proposals linked to this client's projects
 // ---------------------------------------------------------------------------
 interface ProposalRow {
@@ -103,9 +89,9 @@ function ProposalsSection({ clientId }: { clientId: string }) {
         <div className="flex items-center gap-2">
           <TrendingUp size={15} className="text-violet-400" />
           <span className="font-semibold text-white text-sm">Proposals</span>
-          {proposals.length > 0 && (
+          {proposals.length > 0 ? (
             <span className="text-xs text-slate-500 font-mono">({proposals.length})</span>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -133,19 +119,19 @@ function ProposalsSection({ clientId }: { clientId: string }) {
                     </span>
                   </div>
                   <div className="flex items-center gap-3 mt-0.5 text-xs text-slate-500 flex-wrap">
-                    {p.project_name && (
+                    {p.project_name ? (
                       <span className="flex items-center gap-1">
                         <FolderOpen size={9} />{p.project_name}
                       </span>
-                    )}
-                    {p.net_cost != null && (
+                    ) : null}
+                    {p.net_cost != null ? (
                       <span className="text-emerald-400/70">${p.net_cost.toLocaleString()}</span>
-                    )}
-                    {p.sent_at && (
+                    ) : null}
+                    {p.sent_at ? (
                       <span className="flex items-center gap-1">
                         <Send size={9} />Sent {new Date(p.sent_at).toLocaleDateString()}
                       </span>
-                    )}
+                    ) : null}
                   </div>
                 </div>
                 <Link
@@ -221,9 +207,9 @@ function NotesSection({ clientId }: { clientId: string }) {
       <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-700/50">
         <StickyNote size={15} className="text-amber-400" />
         <span className="font-semibold text-white text-sm">Notes</span>
-        {notes.length > 0 && (
+        {notes.length > 0 ? (
           <span className="text-xs text-slate-500 font-mono">({notes.length})</span>
-        )}
+        ) : null}
       </div>
 
       {/* Add note */}
@@ -320,11 +306,11 @@ function SiteSurveysSection({ clientId }: { clientId: string }) {
         <div className="flex items-center gap-2">
           <Camera size={15} className="text-cyan-400" />
           <h3 className="font-semibold text-white text-sm">Site Surveys</h3>
-          {!loading && (
+          {!loading ? (
             <span className="text-xs text-slate-500 bg-slate-700/50 px-2 py-0.5 rounded-full">
               {surveys.length}
             </span>
-          )}
+          ) : null}
         </div>
         <button
           onClick={load}
@@ -377,22 +363,22 @@ function SiteSurveysSection({ clientId }: { clientId: string }) {
                     <Calendar size={10} />
                     {new Date(s.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </span>
-                  {s.projectName && (
+                  {s.projectName ? (
                     <span className="flex items-center gap-1 text-amber-400/70">
                       <FolderOpen size={10} /> {s.projectName}
                     </span>
-                  )}
-                  {s.fileCount !== undefined && s.fileCount > 0 && (
+                  ) : null}
+                  {s.fileCount !== undefined && s.fileCount > 0 ? (
                     <span className="flex items-center gap-1">
                       <Camera size={10} /> {s.fileCount} photo{s.fileCount !== 1 ? 's' : ''}
                     </span>
-                  )}
+                  ) : null}
                 </div>
               </div>
 
               {/* Actions */}
               <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                {s.projectId && (
+                {s.projectId ? (
                   <Link
                     href={`/projects/${s.projectId}/survey/${s.id}`}
                     className="btn-ghost p-1.5 rounded-lg"
@@ -400,8 +386,8 @@ function SiteSurveysSection({ clientId }: { clientId: string }) {
                   >
                     <Eye size={13} />
                   </Link>
-                )}
-                {s.projectId && (
+                ) : null}
+                {s.projectId ? (
                   <Link
                     href={`/projects/${s.projectId}`}
                     className="btn-ghost p-1.5 rounded-lg"
@@ -409,7 +395,7 @@ function SiteSurveysSection({ clientId }: { clientId: string }) {
                   >
                     <ChevronRight size={14} />
                   </Link>
-                )}
+                ) : null}
               </div>
             </div>
           ))}
@@ -419,17 +405,39 @@ function SiteSurveysSection({ clientId }: { clientId: string }) {
   );
 }
 
-export default function ClientDetailPage() {
+function ClientDetailContent() {
   const { id } = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
 
   const clients = useAppStore(s => s.clients);
   const loadClients = useAppStore(s => s.loadClients);
   const projects = useAppStore(s => s.projects);
   const loadProjects = useAppStore(s => s.loadProjects);
+  const updateProjectInStore = useAppStore(s => s.updateProjectInStore);
+  const toast = useToast();
+
+  const handleStatusChange = async (id: string, status: ProjectStatus) => {
+    try {
+      await updateProjectInStore(id, { status });
+      toast.success('Status updated', `Project moved to ${STATUS_CONFIG[status].label}`);
+    } catch {
+      toast.error('Status update failed', 'Could not update project status. Please try again.');
+    }
+  };
 
   const [client, setClient] = useState<Client | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<ClientTab>('overview');
+
+  // Tab state driven by URL ?tab= query param
+  const tabFromUrl = searchParams.get('tab') as ClientTab | null;
+  const activeTab: ClientTab = tabFromUrl && CLIENT_TABS.some(t => t.id === tabFromUrl)
+    ? tabFromUrl
+    : 'overview';
+  const setActiveTab = (tab: ClientTab) => {
+    router.replace(`${pathname}?tab=${tab}`, { scroll: false });
+  };
 
   useEffect(() => {
     // Load projects if needed
@@ -465,10 +473,12 @@ export default function ClientDetailPage() {
 
   if (!client) return (
     <AppShell>
-      <div className="p-6 text-center">
-        <p className="text-slate-400 mb-4">Client not found</p>
-        <Link href="/clients" className="btn-primary">Back to Clients</Link>
-      </div>
+      <NotFoundState
+        title="Client not found"
+        message="This client may have been deleted or the link is incorrect."
+        backHref="/clients"
+        backLabel="Back to Clients"
+      />
     </AppShell>
   );
 
@@ -524,9 +534,9 @@ export default function ClientDetailPage() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 flex-wrap">
                 <h1 className="text-lg font-bold text-white">{client.name}</h1>
-                {client.utilityProvider && (
+                {client.utilityProvider ? (
                   <ConfidenceBadge confidence={dataConfidence('utilityProvider').confidence} source={dataConfidence('utilityProvider').source} size="xs" detail={dataConfidence('utilityProvider').detail} />
-                )}
+                ) : null}
               </div>
               <div className="flex items-center gap-4 mt-1 text-xs text-slate-400 flex-wrap">
                 <span className="flex items-center gap-1"><MapPin size={12} />{client.city}, {client.state}</span>
@@ -574,7 +584,7 @@ export default function ClientDetailPage() {
         </div>
 
         {/* ── Tab Content ── */}
-        {activeTab === 'overview' && (
+        {activeTab === 'overview' ? (
           <div className="space-y-5">
             {/* Contact + Recommendation side-by-side */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -593,7 +603,7 @@ export default function ClientDetailPage() {
                     <div key={i} className="flex items-start gap-3 text-sm">
                       <span className="text-slate-500 mt-0.5 flex-shrink-0">{item.icon}</span>
                       <span className="text-slate-300 flex-1">{item.value}</span>
-                      {item.field && <ConfidenceBadge confidence={dataConfidence(item.field).confidence} source={dataConfidence(item.field).source} size="xs" detail={dataConfidence(item.field).detail} />}
+                      {item.field ? <ConfidenceBadge confidence={dataConfidence(item.field).confidence} source={dataConfidence(item.field).source} size="xs" detail={dataConfidence(item.field).detail} /> : null}
                     </div>
                   ))}
                 </div>
@@ -627,9 +637,9 @@ export default function ClientDetailPage() {
             {/* Notes */}
             <NotesSection clientId={id} />
           </div>
-        )}
+        ) : null}
 
-        {activeTab === 'energy' && (
+        {activeTab === 'energy' ? (
           <div className="space-y-5">
             {/* Energy Stats with ConfidenceBadge */}
             <div className="card p-5 space-y-4">
@@ -646,7 +656,7 @@ export default function ClientDetailPage() {
                   <div key={item.label} className="bg-slate-800/60 rounded-xl p-3">
                     <div className="flex items-center justify-between mb-1">
                       <div className={`flex items-center gap-1.5 ${item.color}`}>{item.icon}<span className="text-xs">{item.label}</span></div>
-                      {item.field && <ConfidenceBadge confidence={dataConfidence(item.field).confidence} source={dataConfidence(item.field).source} size="xs" detail={dataConfidence(item.field).detail} />}
+                      {item.field ? <ConfidenceBadge confidence={dataConfidence(item.field).confidence} source={dataConfidence(item.field).source} size="xs" detail={dataConfidence(item.field).detail} /> : null}
                     </div>
                     <div className="font-bold text-white text-sm">{item.value}</div>
                   </div>
@@ -672,9 +682,9 @@ export default function ClientDetailPage() {
               </ResponsiveContainer>
             </div>
           </div>
-        )}
+        ) : null}
 
-        {activeTab === 'projects' && (
+        {activeTab === 'projects' ? (
           <div className="space-y-5">
             {/* Pipeline Summary */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -719,38 +729,63 @@ export default function ClientDetailPage() {
                 <div className="divide-y divide-slate-700/30">
                   {clientProjects.map(project => {
                     const daysSince = Math.floor((Date.now() - new Date(project.updatedAt || project.createdAt).getTime()) / 86400000);
-                    const isStale = daysSince > 7 && project.status !== 'installed';
+                    const urgency = getUrgency(project);
+                    const nextAction = getNextAction(project);
                     return (
-                      <div key={project.id} className="flex items-center gap-3 px-5 py-3.5 group hover:bg-slate-700/20 transition-colors">
-                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 ${TYPE_BG[project.systemType] || 'bg-slate-700/40'}`}>
-                          {TYPE_ICONS[project.systemType] || '📁'}
+                      <div key={project.id} className="px-5 py-4 group hover:bg-slate-700/20 transition-colors">
+                        {/* Row 1: Type icon + Name + StatusDropdown + Urgency badge + Next Action CTA */}
+                        <div className="flex items-center gap-3">
+                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border ${TYPE_BG[project.systemType] || 'bg-slate-700/40 text-slate-400 border-slate-600/30'}`}>
+                            {TYPE_ICONS_JSX[project.systemType] || <FolderOpen size={18} />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Link href={`/projects/${project.id}`} className="font-semibold text-white text-sm hover:text-indigo-300 transition-colors truncate">
+                                {project.name}
+                              </Link>
+                              <StatusDropdown project={project} onStatusChange={handleStatusChange} />
+                              {urgency === 'high' ? (
+                                <span className="flex items-center gap-1 text-[10px] font-bold text-red-400 bg-red-500/10 border border-red-500/20 px-1.5 py-0.5 rounded">
+                                  <Flame size={9} /> URGENT
+                                </span>
+                              ) : urgency === 'medium' ? (
+                                <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-400/80 bg-amber-500/5 border border-amber-500/15 px-1.5 py-0.5 rounded">
+                                  <Clock size={9} /> {daysSince}d ago
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                          <Link
+                            href={nextAction.href}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${nextAction.bg} ${nextAction.color}`}
+                          >
+                            {nextAction.label}
+                            <ArrowRight size={11} />
+                          </Link>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <Link href={`/projects/${project.id}`} className="font-semibold text-white text-sm hover:text-indigo-300 transition-colors truncate">
-                              {project.name}
-                            </Link>
-                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium border flex items-center gap-1 ${STATUS_BADGE[project.status] || ''}`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[project.status] || 'bg-slate-400'}`} />
-                              {STATUS_LABEL[project.status] || project.status}
-                            </span>
-                            {isStale && (
-                              <span className="flex items-center gap-1 text-xs text-amber-400/70 bg-amber-500/5 border border-amber-500/15 px-1.5 py-0.5 rounded">
-                                <Clock size={9} /> {daysSince}d ago
+                        {/* Row 2: Pipeline progress bar */}
+                        <div className="mt-2.5 ml-12">
+                          <PipelineProgress status={project.status} />
+                          <div className="flex justify-between mt-1">
+                            {STATUS_STEPS.map(s => (
+                              <span key={s} className={`text-[9px] font-medium ${s === project.status ? STATUS_CONFIG[s].iconColor : 'text-slate-600'}`}>
+                                {STATUS_CONFIG[s].label}
                               </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-3 mt-1 text-xs text-slate-500 flex-wrap">
-                            <span className="flex items-center gap-1"><Calendar size={10} />{new Date(project.createdAt).toLocaleDateString()}</span>
-                            {project.layout?.systemSizeKw && (<span className="flex items-center gap-1 text-amber-400/70"><Zap size={10} />{project.layout.systemSizeKw.toFixed(1)} kW</span>)}
-                            {project.production?.annualProductionKwh && (<span>{project.production.annualProductionKwh.toLocaleString()} kWh/yr</span>)}
-                            {project.costEstimate?.netCost && (<span className="text-emerald-400/70">${project.costEstimate.netCost.toLocaleString()}</span>)}
+                            ))}
                           </div>
                         </div>
-                        <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Link href={`/design?projectId=${project.id}`} className="btn-ghost p-1.5 rounded-lg" title="Design Studio"><Map size={13} /></Link>
-                          <Link href={`/projects/${project.id}`} className="btn-ghost p-1.5 rounded-lg" title="Proposal"><FileText size={13} /></Link>
-                          <Link href={`/projects/${project.id}`} className="btn-ghost p-1.5 rounded-lg"><ChevronRight size={14} /></Link>
+                        {/* Row 3: Metadata row */}
+                        <div className="flex items-center gap-3 mt-2 ml-12 text-xs text-slate-500 flex-wrap">
+                          <span className="flex items-center gap-1"><Calendar size={10} />{new Date(project.createdAt).toLocaleDateString()}</span>
+                          {project.layout?.systemSizeKw ? (
+                            <span className="flex items-center gap-1 text-amber-400/70"><Zap size={10} />{project.layout.systemSizeKw.toFixed(1)} kW</span>
+                          ) : null}
+                          {project.production?.annualProductionKwh ? (
+                            <span>{project.production.annualProductionKwh.toLocaleString()} kWh/yr</span>
+                          ) : null}
+                          {project.costEstimate?.netCost ? (
+                            <span className="text-emerald-400/70">${project.costEstimate.netCost.toLocaleString()}</span>
+                          ) : null}
                         </div>
                       </div>
                     );
@@ -758,25 +793,34 @@ export default function ClientDetailPage() {
                 </div>
               )}
 
-              {clientProjects.length > 0 && (
+              {clientProjects.length > 0 ? (
                 <div className="px-5 py-2.5 border-t border-slate-700/50 bg-slate-800/20">
                   <Link href={`/projects?clientId=${id}`} className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 w-fit">
                     View all projects <ChevronRight size={11} />
                   </Link>
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
-        )}
+        ) : null}
 
-        {activeTab === 'documents' && (
+        {activeTab === 'documents' ? (
           <div className="space-y-5">
             <SiteSurveysSection clientId={id} />
             <ProposalsSection clientId={id} />
             <NotesSection clientId={id} />
           </div>
-        )}
+        ) : null}
       </div>
     </AppShell>
+  );
+}
+
+// Suspense wrapper required for useSearchParams() in Next.js 14 App Router
+export default function ClientDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <ClientDetailContent />
+    </Suspense>
   );
 }

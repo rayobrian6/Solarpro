@@ -137,7 +137,7 @@ function EmblemCard({ symbol, zoom, showDetails }: { symbol: SLDSymbol; zoom: nu
         </span>
 
         {/* Connection points */}
-        {showDetails && symbol.connections.length > 0 && (
+        {showDetails && symbol.connections.length > 0 ? (
           <div className="mt-2 pt-2 border-t border-white/5">
             <div className="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-1.5">Connection Points</div>
             <div className="flex flex-col gap-1">
@@ -146,15 +146,15 @@ function EmblemCard({ symbol, zoom, showDetails }: { symbol: SLDSymbol; zoom: nu
               ))}
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Label anchor */}
-        {showDetails && (
+        {showDetails ? (
           <div className="mt-1 text-[9px] text-slate-600">
             <span className="font-bold text-slate-500">Label anchor: </span>
             ({symbol.labelAnchor.x}, {symbol.labelAnchor.y}) {symbol.labelAnchor.anchor}
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -209,11 +209,11 @@ function BrandEmblemCard({
         >
           {tuned ? 'TUNED' : 'FALLBACK'}
         </div>
-        {ecosystemEntry && (
+        {ecosystemEntry ? (
           <div className="absolute top-2 right-2 text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/20">
             ECOSYSTEM
           </div>
-        )}
+        ) : null}
       </div>
 
       <div className="p-4 flex flex-col gap-2 flex-1">
@@ -238,7 +238,7 @@ function BrandEmblemCard({
           <span className="text-[9px] font-mono text-slate-500">{style.fill}</span>
         </div>
 
-        {showDetails && (
+        {showDetails ? (
           <div className="mt-2 pt-2 border-t border-white/5 space-y-1">
             <div className="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-1">
               Style Properties
@@ -262,7 +262,7 @@ function BrandEmblemCard({
                 />
                 {style.ink}
               </div>
-              {style.stroke && (
+              {style.stroke ? (
                 <>
                   <div className="text-slate-500">Stroke</div>
                   <div className="font-mono text-slate-200 flex items-center gap-1">
@@ -273,7 +273,7 @@ function BrandEmblemCard({
                     {style.stroke}
                   </div>
                 </>
-              )}
+              ) : null}
               <div className="text-slate-500">Font size</div>
               <div className="font-mono text-slate-200">{style.fontSize ?? 9}px</div>
               <div className="text-slate-500">Weight</div>
@@ -294,7 +294,7 @@ function BrandEmblemCard({
               {badgeW}x{badgeH} px (scales with host symbol)
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -351,7 +351,7 @@ function DeviceIllustrationCard({
           <div className="text-sm font-bold text-slate-100">{device.label}</div>
           <div className="text-[10px] text-slate-500 mt-0.5">{device.sub}</div>
         </div>
-        {showDetails && (
+        {showDetails ? (
           <div className="mt-1 pt-2 border-t border-white/5 space-y-1">
             <div className="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-1">
               Illustration Properties
@@ -373,7 +373,7 @@ function DeviceIllustrationCard({
               Replaces generic IEEE emblem when this brand is selected.
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -729,7 +729,7 @@ ${Object.entries(LINE_TYPES).map(([, lt]) => {
         ))}
 
         {/* v58.16 - Device illustrations (front-view hardware silhouettes) */}
-        {showDevices && DEVICE_ILLUSTRATIONS.length > 0 && (
+        {showDevices && DEVICE_ILLUSTRATIONS.length > 0 ? (
           <div className="sec">
             <div className="mb-4 flex items-center justify-between">
               <div>
@@ -746,7 +746,7 @@ ${Object.entries(LINE_TYPES).map(([, lt]) => {
               ))}
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* v58.15 - Brand emblem sections */}
         {visibleBrandGroups.map(group => (
@@ -769,7 +769,7 @@ ${Object.entries(LINE_TYPES).map(([, lt]) => {
         ))}
 
         {/* Wire types */}
-        {(activeSection === 'all' || activeSection === 'wires') && (
+        {(activeSection === 'all' || activeSection === 'wires') ? (
           <div className="sec">
             <div className="mb-4">
               <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">Line Type System</div>
@@ -794,7 +794,7 @@ ${Object.entries(LINE_TYPES).map(([, lt]) => {
               ))}
             </div>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* ── Design tokens reference ── */}

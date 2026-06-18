@@ -282,7 +282,7 @@ export default function NewClientPage() {
         </div>
 
         {/* Step 1: Contact Info */}
-        {step === 1 && (
+        {step === 1 ? (
           <div className="card p-6 space-y-5 animate-fade-in">
             <div className="flex items-center gap-2 mb-2">
               <User size={16} className="text-amber-400" />
@@ -337,7 +337,7 @@ export default function NewClientPage() {
                   </div>
 
                   {/* Suggestions dropdown */}
-                  {showSuggestions && suggestions.length > 0 && (
+                  {showSuggestions && suggestions.length > 0 ? (
                     <div
                       ref={suggestionsRef}
                       className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-600 rounded-xl shadow-2xl z-50 overflow-hidden"
@@ -362,14 +362,14 @@ export default function NewClientPage() {
                         <span className="text-xs text-slate-400 font-medium">OpenStreetMap</span>
                       </div>
                     </div>
-                  )}
+                  ) : null}
                 </div>
-                {selectedSuggestion && geocodeResult && (
+                {selectedSuggestion && geocodeResult ? (
                   <div className="flex items-center gap-1.5 mt-1.5 text-emerald-400 text-xs">
                     <CheckCircle size={11} />
                     <span>Location verified — coordinates saved</span>
                   </div>
-                )}
+                ) : null}
               </div>
 
               <div>
@@ -388,11 +388,11 @@ export default function NewClientPage() {
               </div>
             </div>
 
-            {geocodeError && (
+            {geocodeError ? (
               <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-xs text-amber-400">
                 ⚠️ {geocodeError}
               </div>
-            )}
+            ) : null}
 
             <div className="flex justify-end pt-2">
               <button
@@ -408,7 +408,7 @@ export default function NewClientPage() {
               </button>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Step 2: Utility Data */}
         {step === 2 && (
@@ -419,12 +419,12 @@ export default function NewClientPage() {
             </div>
 
             {/* Location confirmed */}
-            {geocodeResult && (
+            {geocodeResult ? (
               <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3 flex items-center gap-2 text-xs text-emerald-400">
                 <CheckCircle size={14} />
                 <span>Location found: {geocodeResult.lat.toFixed(5)}, {geocodeResult.lng.toFixed(5)} — map will open at this address</span>
               </div>
-            )}
+            ) : null}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
@@ -504,7 +504,7 @@ export default function NewClientPage() {
             )}
 
             {/* Auto-calculated summary */}
-            {computedAnnual > 0 && (
+            {computedAnnual > 0 ? (
               <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <Calculator size={14} className="text-amber-400" />
@@ -524,7 +524,7 @@ export default function NewClientPage() {
                   ))}
                 </div>
               </div>
-            )}
+            ) : null}
 
             <div className="flex justify-between pt-2">
               <button className="btn-secondary" onClick={() => setStep(1)}>← Back</button>
@@ -534,7 +534,7 @@ export default function NewClientPage() {
         )}
 
         {/* Step 3: Review */}
-        {step === 3 && (
+        {step === 3 ? (
           <div className="card p-6 space-y-5 animate-fade-in">
             <div className="flex items-center gap-2 mb-2">
               <CheckCircle size={16} className="text-emerald-400" />
@@ -576,7 +576,7 @@ export default function NewClientPage() {
               </button>
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     </AppShell>
   );

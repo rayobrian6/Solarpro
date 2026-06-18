@@ -180,11 +180,11 @@ export default function EcosystemPicker({
                   }`}
                 />
                 <span className="text-sm font-bold text-white">{b.displayName}</span>
-                {isApplied && (
+                {isApplied ? (
                   <span className="ml-auto flex items-center gap-0.5 text-xs text-emerald-400">
                     <CheckCircle2 size={11} /> active
                   </span>
-                )}
+                ) : null}
               </div>
               <div className="text-xs text-slate-400 leading-snug">{b.description}</div>
             </button>
@@ -280,7 +280,7 @@ function SimplifiedKitPanel(props: SimplifiedKitPanelProps) {
       </div>
 
       {/* Battery toggle — the only user decision besides brand */}
-      {kit.batteries.length > 0 && (
+      {kit.batteries.length > 0 ? (
         <label className="flex items-center gap-3 cursor-pointer group">
           <div className={`
             relative w-10 h-5 rounded-full transition-colors
@@ -308,12 +308,12 @@ function SimplifiedKitPanel(props: SimplifiedKitPanelProps) {
             className="sr-only"
           />
         </label>
-      )}
+      ) : null}
 
       {/* Auto-selected equipment confirmation list */}
       <div className="space-y-2">
         {/* Inverter */}
-        {selectedInv && (
+        {selectedInv ? (
           <div className="flex items-center gap-2 text-sm text-slate-200">
             <Cpu size={14} className="text-blue-300 flex-shrink-0" />
             <span className="flex-1">
@@ -323,10 +323,10 @@ function SimplifiedKitPanel(props: SimplifiedKitPanelProps) {
               <CheckCircle2 size={10} /> Auto-selected
             </span>
           </div>
-        )}
+        ) : null}
 
         {/* Battery */}
-        {includeBattery && selectedBat && (
+        {includeBattery && selectedBat ? (
           <div className="flex items-center gap-2 text-sm text-slate-200">
             <Battery size={14} className="text-emerald-300 flex-shrink-0" />
             <span className="flex-1">
@@ -336,10 +336,10 @@ function SimplifiedKitPanel(props: SimplifiedKitPanelProps) {
               <CheckCircle2 size={10} /> Auto-selected
             </span>
           </div>
-        )}
+        ) : null}
 
         {/* Gateway */}
-        {selectedGw && (
+        {selectedGw ? (
           <div className="flex items-center gap-2 text-sm text-slate-200">
             <Wifi size={14} className="text-cyan-300 flex-shrink-0" />
             <span className="flex-1">
@@ -349,7 +349,7 @@ function SimplifiedKitPanel(props: SimplifiedKitPanelProps) {
               <CheckCircle2 size={10} /> Auto-selected
             </span>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Compatible racking (read-only, same as expert mode) */}
@@ -499,7 +499,7 @@ function EcosystemKitPanel(props: KitPanelProps) {
       </div>
 
       {/* Inverter / Micro */}
-      {allInverters.length > 0 && (
+      {allInverters.length > 0 ? (
         <KitRow
           icon={<Cpu size={13} className="text-blue-300" />}
           label="Inverter"
@@ -518,10 +518,10 @@ function EcosystemKitPanel(props: KitPanelProps) {
             ))}
           </select>
         </KitRow>
-      )}
+      ) : null}
 
       {/* Battery */}
-      {kit.batteries.length > 0 && (
+      {kit.batteries.length > 0 ? (
         <KitRow
           icon={<Battery size={13} className="text-emerald-300" />}
           label="Battery Storage"
@@ -540,10 +540,10 @@ function EcosystemKitPanel(props: KitPanelProps) {
             ))}
           </select>
         </KitRow>
-      )}
+      ) : null}
 
       {/* Monitoring Gateway */}
-      {kit.monitoringGateways.length > 0 && (
+      {kit.monitoringGateways.length > 0 ? (
         <KitRow
           icon={<Wifi size={13} className="text-cyan-300" />}
           label="Monitoring Gateway"
@@ -562,10 +562,10 @@ function EcosystemKitPanel(props: KitPanelProps) {
             ))}
           </select>
         </KitRow>
-      )}
+      ) : null}
 
       {/* EV Charger */}
-      {kit.evChargers.length > 0 && (
+      {kit.evChargers.length > 0 ? (
         <KitRow
           icon={<Zap size={13} className="text-amber-300" />}
           label="EV Charger"
@@ -585,7 +585,7 @@ function EcosystemKitPanel(props: KitPanelProps) {
             ))}
           </select>
         </KitRow>
-      )}
+      ) : null}
 
       {/* v47.429 — Stage 6: Compatible Racking (read-only informational). */}
       <div className="rounded-lg bg-slate-800/40 border border-slate-700/50 p-3">
@@ -622,7 +622,7 @@ function EcosystemKitPanel(props: KitPanelProps) {
       </div>
 
       {/* Backup peripherals (read-only informational) */}
-      {anyBackup && (
+      {anyBackup ? (
         <div className="rounded-lg bg-slate-800/40 border border-slate-700/50 p-3">
           <div className="flex items-center gap-2 text-xs text-slate-400 font-semibold uppercase tracking-wide mb-1.5">
             <Shield size={11} /> Backup & Accessories
@@ -639,7 +639,7 @@ function EcosystemKitPanel(props: KitPanelProps) {
             ))}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Empty-state hint — triggered only when NO hardware rows at all. The racking
           section (v47.429) is always rendered, so we still want this hint when
@@ -647,12 +647,12 @@ function EcosystemKitPanel(props: KitPanelProps) {
       {allInverters.length === 0 &&
         kit.batteries.length === 0 &&
         kit.monitoringGateways.length === 0 &&
-        kit.evChargers.length === 0 && (
+        kit.evChargers.length === 0 ? (
           <div className="flex items-center gap-2 text-xs text-amber-300/80 bg-amber-500/5 border border-amber-500/20 rounded-lg p-2.5">
             <Info size={12} />
             <span>No ecosystem-tagged hardware found for this brand yet. Use the manual dropdowns below (racking compatibility shown above).</span>
           </div>
-        )}
+        ) : null}
 
       {/* v47.401 — Battery-only ecosystem hint (e.g. Tesla) */}
       {isBatteryOnlyEcosystem && (
@@ -716,9 +716,9 @@ function KitRow({
         {icon}
         <span className="text-xs font-semibold text-slate-300">{label}</span>
         <span className="text-xs text-slate-500">({count} option{count !== 1 ? 's' : ''})</span>
-        {optional && (
+        {optional ? (
           <span className="text-xs text-amber-400/70 italic ml-1">optional</span>
-        )}
+        ) : null}
       </div>
       {children}
     </div>

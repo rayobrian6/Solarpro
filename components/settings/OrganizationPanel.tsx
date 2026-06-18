@@ -115,11 +115,11 @@ export default function OrganizationPanel({ userId }: { userId: string }) {
   return (
     <div className="space-y-5">
       {/* Toast */}
-      {toast && (
+      {toast ? (
         <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl text-sm font-medium shadow-lg transition-all ${toast.ok ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300' : 'bg-red-500/20 border border-red-500/40 text-red-300'}`}>
           {toast.msg}
         </div>
-      )}
+      ) : null}
 
       {!org ? (
         /* ── No org yet ── */
@@ -170,20 +170,20 @@ export default function OrganizationPanel({ userId }: { userId: string }) {
                     <span className="text-xs text-slate-400">{org.member_count} seat{Number(org.member_count) !== 1 ? 's' : ''}</span>
                     <span className="text-slate-600">·</span>
                     <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 font-medium capitalize">{org.plan}</span>
-                    {org.org_role === 'owner' && (
+                    {org.org_role === 'owner' ? (
                       <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-400 font-medium flex items-center gap-1">
                         <Crown size={9} /> Owner
                       </span>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               </div>
-              {org.org_role === 'owner' && (
+              {org.org_role === 'owner' ? (
                 <button onClick={() => setConfirmDelete(true)}
                   className="text-xs text-red-500/60 hover:text-red-400 transition-colors">
                   Delete org
                 </button>
-              )}
+              ) : null}
             </div>
           </div>
 
@@ -205,18 +205,18 @@ export default function OrganizationPanel({ userId }: { userId: string }) {
                   <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${m.org_role === 'owner' ? 'bg-purple-500/15 text-purple-400' : 'bg-slate-500/15 text-slate-400'}`}>
                     {m.org_role}
                   </span>
-                  {org.org_role === 'owner' && m.id !== userId && (
+                  {org.org_role === 'owner' && m.id !== userId ? (
                     <button onClick={() => removeMember(m.id, m.name)}
                       className="p-1.5 rounded-lg text-slate-600 hover:text-red-400 transition-colors">
                       <UserMinus size={13} />
                     </button>
-                  )}
+                  ) : null}
                 </div>
               ))}
             </div>
 
             {/* Invite form — owners only */}
-            {org.org_role === 'owner' && (
+            {org.org_role === 'owner' ? (
               <div className="mt-4 pt-4 border-t border-white/5">
                 <div className="text-xs text-slate-400 mb-2 font-medium">Invite by email</div>
                 <div className="flex items-center gap-2">
@@ -235,11 +235,11 @@ export default function OrganizationPanel({ userId }: { userId: string }) {
                   </button>
                 </div>
               </div>
-            )}
+            ) : null}
           </div>
 
           {/* ── Pending invites ── */}
-          {org.org_role === 'owner' && (org.pending_invites ?? []).length > 0 && (
+          {org.org_role === 'owner' && (org.pending_invites ?? []).length > 0 ? (
             <div className="card p-5">
               <h4 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
                 <Mail size={14} className="text-slate-400" /> Pending Invites
@@ -260,12 +260,12 @@ export default function OrganizationPanel({ userId }: { userId: string }) {
                 ))}
               </div>
             </div>
-          )}
+          ) : null}
         </>
       )}
 
       {/* Delete confirm modal */}
-      {confirmDelete && (
+      {confirmDelete ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-slate-900 border border-red-500/30 rounded-2xl p-6 max-w-sm w-full mx-4">
             <h3 className="text-white font-bold mb-2">Delete Organization?</h3>
@@ -276,7 +276,7 @@ export default function OrganizationPanel({ userId }: { userId: string }) {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

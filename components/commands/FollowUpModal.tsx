@@ -123,7 +123,7 @@ export default function FollowUpModal({
       </div>
 
       {/* Next Follow-up Date */}
-      {(outcome === 'no_answer' || outcome === 'scheduled_next_step') && (
+      {(outcome === 'no_answer' || outcome === 'scheduled_next_step') ? (
         <div className="mb-4">
           <label className="text-xs font-bold uppercase tracking-wider mb-2 block"
             style={{ color: 'var(--text-secondary)' }}>
@@ -138,7 +138,7 @@ export default function FollowUpModal({
               outline: 'none',
             }} />
         </div>
-      )}
+      ) : null}
 
       {error && <div className="text-xs text-red-400 font-medium mb-3">{error}</div>}
 

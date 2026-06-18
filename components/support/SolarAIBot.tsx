@@ -334,7 +334,7 @@ export default function SolarAIBot() {
         display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8,
       }}>
         {/* Tooltip when closed */}
-        {!open && (
+        {!open ? (
           <div style={{
             background: 'rgba(15,23,42,0.95)', color: '#e2e8f0',
             padding: '8px 14px', borderRadius: 10, fontSize: 13, fontWeight: 500,
@@ -344,7 +344,7 @@ export default function SolarAIBot() {
           }}>
             ⚡ Ask SolarBot anything
           </div>
-        )}
+        ) : null}
 
         {/* Main button */}
         <button
@@ -360,7 +360,7 @@ export default function SolarAIBot() {
           title={open ? 'Close chat' : 'Open SolarBot'}
         >
           {open ? '✕' : '⚡'}
-          {unread > 0 && !open && (
+          {unread > 0 && !open ? (
             <div style={{
               position: 'absolute', top: -4, right: -4,
               background: '#ef4444', color: '#fff',
@@ -368,12 +368,12 @@ export default function SolarAIBot() {
               fontSize: 11, fontWeight: 700,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>{unread}</div>
-          )}
+          ) : null}
         </button>
       </div>
 
       {/* Chat window */}
-      {open && (
+      {open ? (
         <div style={{
           position: 'fixed', bottom: 92, right: 24, zIndex: 9998,
           width: 360, height: 520,
@@ -422,14 +422,14 @@ export default function SolarAIBot() {
                 flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
                 gap: 8, alignItems: 'flex-start',
               }}>
-                {msg.role === 'bot' && (
+                {msg.role === 'bot' ? (
                   <div style={{
                     width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
                     background: 'linear-gradient(135deg, #f59e0b, #d97706)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: 13, marginTop: 2,
                   }}>⚡</div>
-                )}
+                ) : null}
                 <div style={{ maxWidth: '80%' }}>
                   <div style={{
                     background: msg.role === 'user'
@@ -447,7 +447,7 @@ export default function SolarAIBot() {
                     {formatText(msg.text)}
                   </div>
                   {/* Quick replies */}
-                  {msg.role === 'bot' && msg.quickReplies && (
+                  {msg.role === 'bot' && msg.quickReplies ? (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
                       {msg.quickReplies.map(qr => (
                         <button
@@ -464,13 +464,13 @@ export default function SolarAIBot() {
                         >{qr}</button>
                       ))}
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </div>
             ))}
 
             {/* Typing indicator */}
-            {typing && (
+            {typing ? (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <div style={{
                   width: 28, height: 28, borderRadius: '50%',
@@ -493,7 +493,7 @@ export default function SolarAIBot() {
                   ))}
                 </div>
               </div>
-            )}
+            ) : null}
             <div ref={messagesEndRef} />
           </div>
 
@@ -536,7 +536,7 @@ export default function SolarAIBot() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       <style>{`
         @keyframes slideUp {

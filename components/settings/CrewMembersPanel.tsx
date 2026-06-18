@@ -47,6 +47,9 @@ interface CrewMember {
   crew_id: string;
   name: string;
   role: string;
+  member_type?: string;     // 'employee' | 'subcontractor'
+  company?: string | null;
+  trade?: string | null;
   phone: string | null;
   email: string | null;
   certifications: string[] | null;
@@ -54,6 +57,31 @@ interface CrewMember {
   notes: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface MemberCert {
+  id: string;
+  name: string;
+  issuer: string | null;
+  issued_on: string | null;
+  expires_on: string | null;
+  file_url: string | null;
+  notes: string | null;
+}
+
+const SUBCONTRACTOR_TRADES = [
+  'electrical', 'roofing', 'structural', 'hvac', 'general', 'crane', 'other',
+];
+
+// Expiry status for a cert (client-side; pure). Mirrors lib/crews certExpiryStatus.
+function certStatus(expiresOn: string | null): 'valid' | 'expiring_soon' | 'expired' | 'no_expiry' {
+  if (!expiresOn || !/^\d{4}-\d{2}-\d{2}$/.test(expiresOn)) return 'no_expiry';
+  const exp = Date.parse(`${expiresOn}T00:00:00Z`);
+  if (Number.isNaN(exp)) return 'no_expiry';
+  const days = (exp - Date.now()) / 86_400_000;
+  if (days < 0) return 'expired';
+  if (days <= 60) return 'expiring_soon';
+  return 'valid';
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -137,6 +165,9 @@ function AddMemberForm({ crewId, onAdded, onCancel, showToast }: AddMemberFormPr
   const [form, setForm] = useState({
     name: '',
     role: 'installer',
+    member_type: 'employee',
+    company: '',
+    trade: 'electrical',
     phone: '',
     email: '',
     notes: '',
@@ -144,6 +175,7 @@ function AddMemberForm({ crewId, onAdded, onCancel, showToast }: AddMemberFormPr
     certifications: [] as string[],
     customCert: '',
   });
+  const isSub = form.member_type === 'subcontractor';
 
   const set = (key: string, val: unknown) => setForm(f => ({ ...f, [key]: val }));
 
@@ -184,6 +216,9 @@ function AddMemberForm({ crewId, onAdded, onCancel, showToast }: AddMemberFormPr
         body: JSON.stringify({
           name: form.name.trim(),
           role: form.role,
+          member_type: form.member_type,
+          company: isSub ? (form.company.trim() || null) : null,
+          trade: isSub ? (form.trade.trim() || null) : null,
           phone: form.phone.trim() || null,
           email: form.email.trim() || null,
           certifications: form.certifications.length > 0 ? form.certifications : null,
@@ -192,7 +227,7 @@ function AddMemberForm({ crewId, onAdded, onCancel, showToast }: AddMemberFormPr
         }),
       });
       const d = await res.json();
-      if (d.member) { showToast('Employee added'); onAdded(); }
+      if (d.member) { showToast(isSub ? 'Subcontractor added' : 'Employee added'); onAdded(); }
       else showToast(d.error || 'Failed to add', false);
     } catch {
       showToast('Network error', false);
@@ -204,8 +239,51 @@ function AddMemberForm({ crewId, onAdded, onCancel, showToast }: AddMemberFormPr
   return (
     <div className="mt-3 p-4 rounded-xl bg-white/3 border border-white/8 space-y-3">
       <div className="text-xs font-semibold text-slate-300 flex items-center gap-1.5 mb-1">
-        <UserPlus size={12} className="text-amber-400" /> Add Employee
+        <UserPlus size={12} className="text-amber-400" /> Add {isSub ? 'Subcontractor' : 'Employee'}
       </div>
+
+      {/* Type toggle: employee vs subcontractor */}
+      <div className="flex items-center gap-0.5 bg-slate-800 border border-white/10 rounded-lg overflow-hidden w-fit">
+        {(['employee', 'subcontractor'] as const).map(t => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => set('member_type', t)}
+            className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
+              form.member_type === t ? 'bg-amber-500 text-slate-900' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            {t === 'employee' ? 'Employee' : 'Subcontractor'}
+          </button>
+        ))}
+      </div>
+
+      {/* Subcontractor fields */}
+      {isSub ? (
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="text-[10px] text-slate-500 font-medium mb-1 block">Company</label>
+            <input
+              value={form.company}
+              onChange={e => set('company', e.target.value)}
+              placeholder="e.g. Bolt Electric LLC"
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] text-slate-500 font-medium mb-1 block">Trade</label>
+            <select
+              value={form.trade}
+              onChange={e => set('trade', e.target.value)}
+              className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50"
+            >
+              {SUBCONTRACTOR_TRADES.map(t => (
+                <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      ) : null}
 
       {/* Name + Role row */}
       <div className="grid grid-cols-2 gap-2">
@@ -260,11 +338,11 @@ function AddMemberForm({ crewId, onAdded, onCancel, showToast }: AddMemberFormPr
       <div ref={certRef} className="relative">
         <label className="text-[10px] text-slate-500 font-medium mb-1 block">
           Certifications
-          {form.certifications.length > 0 && (
+          {form.certifications.length > 0 ? (
             <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 text-[9px]">
               {form.certifications.length} selected
             </span>
-          )}
+          ) : null}
         </label>
         <button
           type="button"
@@ -280,7 +358,7 @@ function AddMemberForm({ crewId, onAdded, onCancel, showToast }: AddMemberFormPr
           <ChevronDown size={12} className={`transition-transform ${certOpen ? 'rotate-180' : ''}`} />
         </button>
 
-        {certOpen && (
+        {certOpen ? (
           <div className="absolute z-20 top-full mt-1 left-0 right-0 bg-slate-900 border border-white/15 rounded-xl shadow-2xl overflow-hidden">
             <div className="max-h-52 overflow-y-auto p-1">
               {KNOWN_CERTIFICATIONS.map(cert => (
@@ -297,11 +375,11 @@ function AddMemberForm({ crewId, onAdded, onCancel, showToast }: AddMemberFormPr
                     ${form.certifications.includes(cert)
                       ? 'bg-amber-500 border-amber-500'
                       : 'border-slate-600'}`}>
-                    {form.certifications.includes(cert) && (
+                    {form.certifications.includes(cert) ? (
                       <svg className="w-2.5 h-2.5 text-slate-900" viewBox="0 0 10 10" fill="currentColor">
                         <path d="M8.5 2.5L4 7.5 1.5 5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
-                    )}
+                    ) : null}
                   </div>
                   {cert}
                 </button>
@@ -325,10 +403,10 @@ function AddMemberForm({ crewId, onAdded, onCancel, showToast }: AddMemberFormPr
               </button>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Selected cert tags */}
-        {form.certifications.length > 0 && (
+        {form.certifications.length > 0 ? (
           <div className="flex flex-wrap gap-1 mt-2">
             {form.certifications.map(cert => (
               <span key={cert}
@@ -341,7 +419,7 @@ function AddMemberForm({ crewId, onAdded, onCancel, showToast }: AddMemberFormPr
               </span>
             ))}
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Notes */}
@@ -379,12 +457,110 @@ function AddMemberForm({ crewId, onAdded, onCancel, showToast }: AddMemberFormPr
           className="btn-primary btn-sm flex items-center gap-1.5 disabled:opacity-50"
         >
           {saving ? <RefreshCw size={12} className="animate-spin" /> : <Plus size={12} />}
-          Add Employee
+          Add {isSub ? 'Subcontractor' : 'Employee'}
         </button>
         <button onClick={onCancel} className="btn-secondary btn-sm">
           Cancel
         </button>
       </div>
+    </div>
+  );
+}
+
+// ── Certification Vault (per member) ────────────────────────────────────────
+
+function MemberCerts({ memberId, showToast }: { memberId: string; showToast: (m: string, ok?: boolean) => void }) {
+  const [certs, setCerts] = useState<MemberCert[] | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [f, setF] = useState({ name: '', issuer: '', expires_on: '' });
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/crew-members/${memberId}/certifications`);
+      const d = await res.json();
+      setCerts(d.certifications || []);
+    } catch { setCerts([]); }
+  }, [memberId]);
+  useEffect(() => { load(); }, [load]);
+
+  const addCert = async () => {
+    if (!f.name.trim()) { showToast('Certification name required', false); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/crew-members/${memberId}/certifications`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: f.name.trim(), issuer: f.issuer.trim() || null, expires_on: f.expires_on || null }),
+      });
+      const d = await res.json();
+      if (d.certification) { showToast('Certification added'); setF({ name: '', issuer: '', expires_on: '' }); setAdding(false); load(); }
+      else showToast(d.error || 'Failed to add', false);
+    } catch { showToast('Network error', false); }
+    finally { setSaving(false); }
+  };
+
+  const delCert = async (id: string, name: string) => {
+    if (!confirm(`Remove "${name}"?`)) return;
+    try {
+      const res = await fetch(`/api/crew-members/${memberId}/certifications/${id}`, { method: 'DELETE' });
+      const d = await res.json();
+      if (d.deleted) setCerts(c => (c || []).filter(x => x.id !== id));
+      else showToast(d.error || 'Failed', false);
+    } catch { showToast('Network error', false); }
+  };
+
+  const STATUS: Record<string, { cls: string; label: (e: string | null) => string }> = {
+    expired:       { cls: 'bg-red-500/15 border-red-500/30 text-red-400',         label: e => `Expired ${e}` },
+    expiring_soon: { cls: 'bg-amber-500/15 border-amber-500/30 text-amber-400',   label: e => `Expires ${e}` },
+    valid:         { cls: 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400', label: e => `Valid to ${e}` },
+    no_expiry:     { cls: 'bg-slate-600/20 border-slate-600/30 text-slate-400',    label: () => 'No expiry' },
+  };
+
+  if (certs === null) return null;
+
+  return (
+    <div className="mt-2">
+      <div className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold mb-1 flex items-center gap-1">
+        <Award size={9} className="text-amber-400/70" /> Certification Vault
+      </div>
+      {certs.length === 0 && !adding ? (
+        <div className="text-[11px] text-slate-600 mb-1">No certifications on file.</div>
+      ) : null}
+      <div className="space-y-1">
+        {certs.map(c => {
+          const s = STATUS[certStatus(c.expires_on)];
+          return (
+            <div key={c.id} className="flex items-center gap-2 text-xs">
+              <span className="text-slate-300">{c.name}</span>
+              {c.issuer && <span className="text-slate-600 text-[11px]">· {c.issuer}</span>}
+              <span className={`px-1.5 py-0.5 rounded-full border text-[9px] font-semibold ${s.cls}`}>
+                {s.label(c.expires_on)}
+              </span>
+              <button onClick={() => delCert(c.id, c.name)} className="text-slate-600 hover:text-red-400 ml-auto" title="Remove">
+                <X size={11} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      {adding ? (
+        <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+          <input value={f.name} onChange={e => setF(p => ({ ...p, name: e.target.value }))} placeholder="Cert / license" className="bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50" />
+          <input value={f.issuer} onChange={e => setF(p => ({ ...p, issuer: e.target.value }))} placeholder="Issuer (optional)" className="bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50" />
+          <input value={f.expires_on} onChange={e => setF(p => ({ ...p, expires_on: e.target.value }))} type="date" title="Expiry date" className="bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-amber-500/50" />
+          <div className="col-span-3 flex gap-2">
+            <button onClick={addCert} disabled={saving || !f.name.trim()} className="text-[11px] px-2 py-1 rounded bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 disabled:opacity-50">
+              {saving ? 'Saving…' : 'Save certification'}
+            </button>
+            <button onClick={() => setAdding(false)} className="text-[11px] px-2 py-1 rounded text-slate-500 hover:text-white">Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <button onClick={() => setAdding(true)} className="mt-1 text-[11px] text-amber-400/80 hover:text-amber-300 flex items-center gap-1">
+          <Plus size={10} /> Add certification
+        </button>
+      )}
     </div>
   );
 }
@@ -506,7 +682,7 @@ function CrewRow({ crew, onDeleted, showToast }: CrewRowProps) {
       </div>
 
       {/* Expanded members list */}
-      {expanded && (
+      {expanded ? (
         <div className="border-t border-white/5 px-4 pb-4">
           {loading ? (
             <div className="flex items-center gap-2 text-slate-500 text-sm py-3">
@@ -535,32 +711,42 @@ function CrewRow({ crew, onDeleted, showToast }: CrewRowProps) {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-sm font-semibold text-white">{member.name}</span>
-                      {member.is_lead && (
+                      {member.is_lead ? (
                         <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold flex items-center gap-0.5">
                           <Star size={8} fill="currentColor" /> LEAD
                         </span>
-                      )}
+                      ) : null}
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-700/60 text-slate-400">
                         {formatRole(member.role)}
                       </span>
+                      {member.member_type === 'subcontractor' ? (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-violet-300 font-bold">
+                          SUB{member.trade ? ` · ${member.trade}` : ''}
+                        </span>
+                      ) : null}
                     </div>
 
                     {/* Contact */}
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
-                      {member.phone && (
+                      {member.company ? (
+                        <span className="text-xs text-slate-500 flex items-center gap-1">
+                          <Shield size={9} /> {member.company}
+                        </span>
+                      ) : null}
+                      {member.phone ? (
                         <span className="text-xs text-slate-500 flex items-center gap-1">
                           <Phone size={9} /> {member.phone}
                         </span>
-                      )}
-                      {member.email && (
+                      ) : null}
+                      {member.email ? (
                         <span className="text-xs text-slate-500 flex items-center gap-1">
                           <Mail size={9} /> {member.email}
                         </span>
-                      )}
+                      ) : null}
                     </div>
 
                     {/* Certifications */}
-                    {member.certifications && member.certifications.length > 0 && (
+                    {member.certifications && member.certifications.length > 0 ? (
                       <div className="flex flex-wrap gap-1 mt-1.5">
                         {member.certifications.map(cert => (
                           <span
@@ -571,14 +757,17 @@ function CrewRow({ crew, onDeleted, showToast }: CrewRowProps) {
                           </span>
                         ))}
                       </div>
-                    )}
+                    ) : null}
+
+                    {/* Certification vault (structured, with expiry) */}
+                    <MemberCerts memberId={member.id} showToast={showToast} />
 
                     {/* Notes */}
-                    {member.notes && (
+                    {member.notes ? (
                       <p className="text-xs text-slate-600 mt-1 flex items-start gap-1">
                         <FileText size={9} className="mt-0.5 flex-shrink-0" /> {member.notes}
                       </p>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* Actions */}
@@ -620,10 +809,10 @@ function CrewRow({ crew, onDeleted, showToast }: CrewRowProps) {
             </button>
           )}
         </div>
-      )}
+      ) : null}
 
       {/* Delete crew confirm */}
-      {confirmDeleteCrew && (
+      {confirmDeleteCrew ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-slate-900 border border-red-500/30 rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl">
             <h3 className="text-white font-bold mb-2">Delete "{crew.name}"?</h3>
@@ -646,7 +835,7 @@ function CrewRow({ crew, onDeleted, showToast }: CrewRowProps) {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -704,7 +893,7 @@ export default function CrewMembersPanel() {
 
   return (
     <div className="space-y-5">
-      {toast && <Toast msg={toast.msg} ok={toast.ok} />}
+      {toast ? <Toast msg={toast.msg} ok={toast.ok} /> : null}
 
       {/* Header card */}
       <div className="card p-6">
@@ -720,18 +909,18 @@ export default function CrewMembersPanel() {
               </p>
             </div>
           </div>
-          {!creating && (
+          {!creating ? (
             <button
               onClick={() => setCreating(true)}
               className="btn-primary btn-sm flex items-center gap-1.5 flex-shrink-0"
             >
               <Plus size={13} /> New Crew
             </button>
-          )}
+          ) : null}
         </div>
 
         {/* Create crew form */}
-        {creating && (
+        {creating ? (
           <div className="mt-5 pt-5 border-t border-white/8 space-y-3">
             <div className="text-xs font-semibold text-slate-300 mb-2 flex items-center gap-1.5">
               <Shield size={11} className="text-amber-400" /> Create New Crew
@@ -778,7 +967,7 @@ export default function CrewMembersPanel() {
               </button>
             </div>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Crews list */}

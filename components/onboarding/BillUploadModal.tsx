@@ -708,20 +708,20 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                 ))}
               </div>
 
-              {error && (
+              {error ? (
                 <div className="flex items-start gap-3 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
                   <AlertCircle size={15} className="text-red-400 flex-shrink-0 mt-0.5" />
                   <div className="flex-1 min-w-0">
                     <p className="text-red-300 text-sm">{error}</p>
-                    {lastFile && (
+                    {lastFile ? (
                       <button onClick={e => { e.stopPropagation(); setError(null); handleFile(lastFile); }}
                         className="mt-2 flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 transition-colors">
                         <RefreshCw size={11} /> Try again
                       </button>
-                    )}
+                    ) : null}
                   </div>
                 </div>
-              )}
+              ) : null}
 
               <div className="flex items-center gap-3">
                 <div className="flex-1 h-px bg-slate-700" />
@@ -756,13 +756,13 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
           {/* ── STEP 2: Review ── */}
           {step === 'review' && result && (
             <div className="space-y-4">
-              {selectedFile && (
+              {selectedFile ? (
                 <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-2 border border-slate-700/50">
                   <FileText size={13} className="text-slate-400 flex-shrink-0" />
                   <span className="text-slate-300 text-xs truncate flex-1">{selectedFile.name}</span>
                   <span className="text-slate-500 text-xs flex-shrink-0">{formatFileSize(selectedFile.size)}</span>
                 </div>
-              )}
+              ) : null}
 
               <div className={`flex items-center gap-2 rounded-lg px-3 py-2 border text-sm ${confidenceBg(result.billData.confidence)}`}>
                 <Info size={14} className={confidenceColor(result.billData.confidence)} />
@@ -795,7 +795,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
               </div>
 
               {/* Monthly usage sparkline */}
-              {result.billData.monthlyUsageHistory && result.billData.monthlyUsageHistory.length >= 3 && (
+              {result.billData.monthlyUsageHistory && result.billData.monthlyUsageHistory.length >= 3 ? (
                 <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
                   <p className="text-slate-400 text-xs mb-2 font-medium flex items-center gap-1.5">
                     <BarChart2 size={12} /> Monthly Usage ({result.billData.monthlyUsageHistory.length} months)
@@ -810,10 +810,10 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                     })}
                   </div>
                 </div>
-              )}
+              ) : null}
 
               {/* v47.306: Bill Analysis — read-only, safe, never changes existing displayed rate */}
-              {result.billData.billInsights && (
+              {result.billData.billInsights ? (
                 <div className="bg-slate-800/60 border border-slate-600/50 rounded-lg p-3 text-xs">
                   <div className="flex items-center gap-1.5 mb-2">
                     <Info size={12} className="text-sky-400" />
@@ -835,23 +835,23 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                       </span>
                     </div>
                     {/* Detected services */}
-                    {result.billData.billInsights.detectedServices.length > 0 && (
+                    {result.billData.billInsights.detectedServices.length > 0 ? (
                       <div className="flex items-start justify-between gap-2">
                         <span className="text-slate-400 shrink-0">Detected Services</span>
                         <span className="text-amber-300 text-right capitalize">
                           {result.billData.billInsights.detectedServices.join(', ')}
                         </span>
                       </div>
-                    )}
+                    ) : null}
                     {/* Suggested electric rate */}
                     {result.billData.billInsights.suggestedRate !== null ? (
                       <div className="flex items-center justify-between">
                         <span className="text-slate-400">Suggested Electric Rate</span>
                         <span className={`font-medium ${result.billData.billInsights.overrideRecommended ? 'text-sky-300' : 'text-slate-300'}`}>
                           ${result.billData.billInsights.suggestedRate.toFixed(3)}/kWh
-                          {result.billData.billInsights.rateSource === 'electric-subtotal' && (
+                          {result.billData.billInsights.rateSource === 'electric-subtotal' ? (
                             <span className="ml-1 text-[10px] text-slate-400">(electric only)</span>
-                          )}
+                          ) : null}
                         </span>
                       </div>
                     ) : (
@@ -863,29 +863,29 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                       )
                     )}
                     {/* Override recommendation note */}
-                    {result.billData.billInsights.overrideRecommended && (
+                    {result.billData.billInsights.overrideRecommended ? (
                       <div className="mt-1 flex items-start gap-1.5 bg-sky-500/10 border border-sky-500/20 rounded px-2 py-1.5">
                         <Info size={10} className="text-sky-400 mt-0.5 shrink-0" />
                         <span className="text-sky-300 text-[10px]">
                           Suggested rate differs from current — review before finalizing proposal
                         </span>
                       </div>
-                    )}
+                    ) : null}
                     {/* Combined utility warning */}
-                    {result.billData.billInsights.combinedUtilityDetected && result.billData.billInsights.suggestedRate === null && (
+                    {result.billData.billInsights.combinedUtilityDetected && result.billData.billInsights.suggestedRate === null ? (
                       <div className="mt-1 flex items-start gap-1.5 bg-amber-500/10 border border-amber-500/20 rounded px-2 py-1.5">
                         <Info size={10} className="text-amber-400 mt-0.5 shrink-0" />
                         <span className="text-amber-300 text-[10px]">
                           Combined utility bill detected — electric-only rate could not be isolated. Verify rate manually.
                         </span>
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 </div>
-              )}
+              ) : null}
 
               {/* Location */}
-              {result.locationData && (
+              {result.locationData ? (
                 <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-3">
                   <div className="flex items-center gap-2 mb-1">
                     <MapPin size={13} className="text-blue-400" />
@@ -893,10 +893,10 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                   </div>
                   <p className="text-white text-sm">{result.locationData.city}, {result.locationData.county ? `${result.locationData.county} County, ` : ''}{result.locationData.state} {result.locationData.zip}</p>
                 </div>
-              )}
+              ) : null}
 
               {/* Rate correction warning */}
-              {result.rateValidation?.corrected && (
+              {result.rateValidation?.corrected ? (
                 <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
                   <AlertCircle size={13} className="text-amber-400 flex-shrink-0 mt-0.5" />
                   <div>
@@ -907,7 +907,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                     </p>
                   </div>
                 </div>
-              )}
+              ) : null}
 
               {/* Warnings */}
               {result.validation.warnings.map((w, i) => (
@@ -973,7 +973,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
           )}
 
           {/* ── STEP 3: Creating ── */}
-          {step === 'creating' && (
+          {step === 'creating' ? (
             <div className="space-y-4 py-4">
               <div className="flex flex-col items-center gap-3 mb-4">
                 <Loader2 size={32} className="text-amber-400 animate-spin" />
@@ -990,17 +990,17 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                   </div>
                 ))}
               </div>
-              {error && (
+              {error ? (
                 <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
                   <AlertCircle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />
                   <p className="text-red-300 text-sm">{error}</p>
                 </div>
-              )}
+              ) : null}
             </div>
-          )}
+          ) : null}
 
           {/* ── STEP 4: Done ── */}
-          {step === 'done' && created && (
+          {step === 'done' && created ? (
             <div className="space-y-4 py-4 text-center">
               <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto">
                 <CheckCircle size={32} className="text-emerald-400" />
@@ -1052,7 +1052,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                 </a>
               </div>
             </div>
-          )}
+          ) : null}
 
         </div>
       </div>

@@ -43,8 +43,9 @@ import {
   FileText, ArrowRight, MousePointer2, Home, Square, Minus, Ruler,
   Trash2, CheckSquare, Fence, Plus, Minus as MinusIcon, Search,
   TrendingUp, Leaf, BarChart2, AlertCircle, X, Upload, Calculator,
-  Info, ChevronRight, Eye, EyeOff
+  Info, ChevronRight, Eye, EyeOff, Bug
 } from 'lucide-react';
+import FeedbackModal from '@/components/ui/FeedbackModal';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -399,7 +400,7 @@ function BillCalculator({ onAnalysis, project }: {
       </div>
 
       {/* Phase 3D: Monthly usage distribution — sparkline instead of 12 blank fields */}
-      {annualKwh > 0 && (
+      {annualKwh > 0 ? (
         <div>
           <div className="text-xs text-slate-500 mb-1">Seasonal Usage Pattern</div>
           <div className="flex items-end gap-0.5 h-8">
@@ -422,7 +423,7 @@ function BillCalculator({ onAnalysis, project }: {
             })()}
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -470,6 +471,10 @@ export default function DesignStudio({ project, onSave }: Props) {
   // 'google' forces Google only. 'esri' forces ESRI only (caps at zoom 19).
   // 'auto' is the default — Google primary for zoom 20+, ESRI for zoom <=19 if Google fails.
   const [tileProvider, setTileProvider] = useState<'auto' | 'google' | 'esri'>('auto');
+  // High-res Google Solar RGB backdrop (~10 cm, covered addresses) — sharp enough to tag vents/obstructions
+  const [hdImagery, setHdImagery] = useState(false);
+  const [hdStatus, setHdStatus]   = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
+  const hdImageRef = useRef<{ img: HTMLImageElement; bounds: { north: number; south: number; east: number; west: number } } | null>(null);
   // Track which zoom levels ESRI has run out of imagery (variance too low)
   const esriBlankZoomsRef = React.useRef<Set<number>>(new Set());
   // Current active provider per tile batch (for the badge)
@@ -700,6 +705,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [production, setProduction] = useState<any>(null);
   const [costEstimate, setCostEstimate] = useState<any>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [calcMessage, setCalcMessage] = useState<string>('');
   // QW-10: Reactive production calculation — auto-compute when layout changes
@@ -1421,6 +1427,32 @@ export default function DesignStudio({ project, onSave }: Props) {
     scheduleTileRedraw();
   }, [mapCenter, zoom, tileProvider, scheduleTileRedraw]);
 
+  // Fetch high-res Google Solar RGB imagery when HD is on (covered addresses).
+  // 404 = no coverage (rural) → keep base tiles. Loaded image drawn georeferenced in the redraw.
+  useEffect(() => {
+    if (!hdImagery || show3D) { hdImageRef.current = null; return; }
+    let cancelled = false;
+    setHdStatus('loading');
+    (async () => {
+      try {
+        const res = await fetch(`/api/solar-rgb?lat=${mapCenter.lat}&lng=${mapCenter.lng}`);
+        if (!res.ok) { if (!cancelled) { hdImageRef.current = null; setHdStatus('unavailable'); } return; }
+        const data = await res.json();
+        if (cancelled || !data?.imageDataUrl || !data?.bounds) { if (!cancelled) setHdStatus('unavailable'); return; }
+        const img = new Image();
+        img.onload = () => {
+          if (cancelled) return;
+          hdImageRef.current = { img, bounds: data.bounds };
+          setHdStatus('ready');
+          scheduleTileRedraw();
+        };
+        img.onerror = () => { if (!cancelled) { hdImageRef.current = null; setHdStatus('unavailable'); } };
+        img.src = data.imageDataUrl;
+      } catch { if (!cancelled) { hdImageRef.current = null; setHdStatus('unavailable'); } }
+    })();
+    return () => { cancelled = true; };
+  }, [hdImagery, show3D, mapCenter.lat, mapCenter.lng, scheduleTileRedraw]);
+
   // Debounced loadTiles — 80ms debounce prevents firing on every pixel of pan/zoom
   useEffect(() => {
     if (show3D) return;
@@ -1470,6 +1502,15 @@ export default function DesignStudio({ project, onSave }: Props) {
 
       ctx.drawImage(img, cx, cy, displayTileSize, displayTileSize);
     });
+
+    // High-res Solar RGB backdrop — overlays base tiles where available (covered addresses).
+    // Gated on the ref (nulled when HD is off/unavailable) so this stays out of the redraw deps.
+    const _hd = hdImageRef.current;
+    if (_hd && _hd.img.naturalWidth > 0) {
+      const nw = latLngToCanvas(_hd.bounds.north, _hd.bounds.west, mapCenter, zoom, W, H);
+      const se = latLngToCanvas(_hd.bounds.south, _hd.bounds.east, mapCenter, zoom, W, H);
+      ctx.drawImage(_hd.img, nw.x, nw.y, se.x - nw.x, se.y - nw.y);
+    }
 
     const mpp = metersPerPixel(mapCenter.lat, zoom);
     const pxPerM = 1 / mpp;
@@ -3175,15 +3216,26 @@ export default function DesignStudio({ project, onSave }: Props) {
 
   return (
     <div className="flex flex-col h-full bg-slate-950">
+      {/* Report a Bug — floating (Design Studio runs without the app header) */}
+      <button
+        type="button"
+        onClick={() => setFeedbackOpen(true)}
+        title="Report a bug or suggest an improvement"
+        className="fixed bottom-4 left-4 z-[60] flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800/90 border border-slate-600/60 text-xs font-medium text-slate-300 hover:text-amber-400 hover:border-amber-500/40 shadow-lg backdrop-blur transition-colors"
+      >
+        <Bug size={14} /> Report a Bug
+      </button>
+      <FeedbackModal open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
+
       {/* ── Studio Header ── */}
       <div className="flex items-center gap-2 px-3 py-2.5 bg-slate-900 border-b border-slate-700/50 flex-shrink-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
         <div className={`px-2.5 py-1 rounded-lg border text-xs font-semibold ${systemTypeBg} ${systemTypeColor}`}>
           {systemTypeLabel}
         </div>
         <span className="font-semibold text-white text-sm truncate">{project.name}</span>
-        {project.client && (
+        {project.client ? (
           <span className="text-xs text-slate-500 truncate hidden md:block">— {project.client.name}</span>
-        )}
+        ) : null}
 
         {/* Address search with autocomplete */}
         <div className="flex items-center gap-2 ml-2 flex-1 max-w-sm">
@@ -3217,7 +3269,7 @@ export default function DesignStudio({ project, onSave }: Props) {
             </div>
 
             {/* Autocomplete dropdown */}
-            {showAddressSuggestions && addressSuggestions.length > 0 && (
+            {showAddressSuggestions && addressSuggestions.length > 0 ? (
               <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-600 rounded-xl shadow-2xl z-50 overflow-hidden">
                 {addressSuggestions.map((s, i) => (
                   <button
@@ -3235,7 +3287,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                   </button>
                 ))}
               </div>
-            )}
+            ) : null}
           </div>
           <button
             onClick={() => { setShowAddressSuggestions(false); geocodeAddress(addressSearch); }}
@@ -3248,7 +3300,7 @@ export default function DesignStudio({ project, onSave }: Props) {
 
         <div className="flex items-center gap-2 ml-auto flex-shrink-0">
           {/* Automation buttons */}
-          {(roofPlanes.length > 0 || groundArea.length > 0 || fenceLine.length > 0) && (
+          {(roofPlanes.length > 0 || groundArea.length > 0 || fenceLine.length > 0) ? (
             <div className="flex items-center gap-1 bg-slate-800/60 rounded-lg px-2 py-1">
               <button
                 onClick={autoLayoutAll}
@@ -3278,13 +3330,13 @@ export default function DesignStudio({ project, onSave }: Props) {
                 Optimize
               </button>
             </div>
-          )}
-          {panels.length > 0 && (
+          ) : null}
+          {panels.length > 0 ? (
             <div className="flex items-center gap-3 text-xs bg-slate-800/60 rounded-lg px-3 py-1.5">
               <span className="text-slate-400">{panels.length} panels</span>
               <span className="text-amber-400 font-bold">{systemSizeKw.toFixed(2)} kW</span>
             </div>
-          )}
+          ) : null}
           <button
             onClick={() => setShowPanels(!showPanels)}
             className={`btn-sm ${showPanels ? 'btn-secondary' : 'btn-ghost'}`}
@@ -3307,7 +3359,7 @@ export default function DesignStudio({ project, onSave }: Props) {
             {show3D ? '🌐 3D View' : '🗺️ 2D Map'}
           </button>
           {/* Tile provider toggle — only shown in 2D mode */}
-          {!show3D && (
+          {!show3D ? (
             <div className="flex items-center gap-0.5 bg-slate-800 border border-slate-600 rounded-lg overflow-hidden">
               {(['auto', 'google', 'esri'] as const).map(p => (
                 <button
@@ -3336,7 +3388,25 @@ export default function DesignStudio({ project, onSave }: Props) {
                 {activeTileSource === 'google' ? '✓G' : '✓E'}
               </span>
             </div>
-          )}
+          ) : null}
+          {/* HD imagery — Google Solar RGB (~10cm) for tagging vents/obstructions; covered addresses only */}
+          {!show3D ? (
+            <button
+              onClick={() => setHdImagery(v => !v)}
+              className={`px-2 py-1 text-[10px] font-semibold rounded-lg border transition-colors ${
+                hdImagery
+                  ? (hdStatus === 'unavailable'
+                      ? 'bg-slate-800 text-amber-400 border-amber-500/40'
+                      : 'bg-emerald-600 text-white border-emerald-500')
+                  : 'bg-slate-800 text-slate-400 border-slate-600 hover:text-white'
+              }`}
+              title="High-res Solar aerial (~10cm) — sharp enough to tag vents/obstructions. Covered addresses only."
+            >
+              {hdImagery && hdStatus === 'loading' ? '⏳ HD'
+                : hdImagery && hdStatus === 'unavailable' ? '🛰 HD n/a here'
+                : '🛰 HD'}
+            </button>
+          ) : null}
           <button onClick={clearAll} className="btn-secondary btn-sm">
             <RotateCcw size={13} /> Clear
           </button>
@@ -3355,19 +3425,19 @@ export default function DesignStudio({ project, onSave }: Props) {
             className="ml-1"
           />
           {/* Unsaved Design badge — shown when panels exist but design has never been saved this session */}
-          {panels.length > 0 && saveStatus !== 'saving' && saveStatus !== 'saved' && lastSavedAt === null && !layoutLoadedFromDB && (
+          {panels.length > 0 && saveStatus !== 'saving' && saveStatus !== 'saved' && lastSavedAt === null && !layoutLoadedFromDB ? (
             <span className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full ml-1 flex items-center gap-1 flex-shrink-0">
               <AlertCircle size={10} /> Unsaved Design
             </span>
-          )}
+          ) : null}
           {/* Restore indicators — visible proof that layout was loaded from DB */}
-          {layoutLoadedFromDB && (
+          {layoutLoadedFromDB ? (
             <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full ml-1 flex items-center gap-1">
               <CheckCircle size={10} /> Layout loaded from DB · {restoredPanelCount} panels{restoredRoofPlaneCount > 0 ? ` · ${restoredRoofPlaneCount} roof planes` : ''}
             </span>
-          )}
+          ) : null}
           {/* Proceed to Engineering CTA — shown once panels are placed */}
-          {panels.length > 0 && (
+          {panels.length > 0 ? (
             <button
               onClick={() => router.push(`/engineering?projectId=${project.id}`)}
               className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 hover:text-blue-300 transition-all text-xs font-semibold flex-shrink-0"
@@ -3375,7 +3445,7 @@ export default function DesignStudio({ project, onSave }: Props) {
             >
               Engineering <ArrowRight size={11} />
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -3447,7 +3517,7 @@ export default function DesignStudio({ project, onSave }: Props) {
             </div>
           </button>
 
-          {drawnPoints.length >= 2 && (
+          {drawnPoints.length >= 2 ? (
             <button
               onClick={finalizeDrawing}
               title="Finish Drawing"
@@ -3458,9 +3528,9 @@ export default function DesignStudio({ project, onSave }: Props) {
                 Finish Drawing
               </div>
             </button>
-          )}
+          ) : null}
 
-          {selectedPanelIds.size > 0 && (
+          {selectedPanelIds.size > 0 ? (
             <button
               onClick={() => { setPanels(prev => prev.filter(p => !selectedPanelIds.has(p.id))); setSelectedPanelIds(new Set()); }}
               title="Delete Selected"
@@ -3471,13 +3541,13 @@ export default function DesignStudio({ project, onSave }: Props) {
                 Delete Selected
               </div>
             </button>
-          )}
+          ) : null}
 
-          {drawnPoints.length > 0 && (
+          {drawnPoints.length > 0 ? (
             <div className="mt-auto mb-2 w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 text-xs font-bold">
               {drawnPoints.length}
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* ── Map Canvas ── */}
@@ -3560,7 +3630,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                   Appears after user finishes drawing a roof plane.
                   Lets them specify which direction the roof face slopes (azimuth)
                   and pitch before panels are placed. */}
-              {pendingPlane && (
+              {pendingPlane ? (
                 <div className="absolute inset-0 flex items-center justify-center bg-slate-900/70 z-50">
                   <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-5 w-80 shadow-2xl">
                     <div className="text-amber-400 font-bold text-sm mb-1">🏠 Tag This Roof Plane</div>
@@ -3669,19 +3739,19 @@ export default function DesignStudio({ project, onSave }: Props) {
                     </div>
                   </div>
                 </div>
-              )}
+              ) : null}
 
-              {!mapLoaded && (
+              {!mapLoaded ? (
                 <div className="absolute inset-0 flex items-center justify-center bg-slate-900/80">
                   <div className="text-center">
                     <div className="spinner w-8 h-8 mx-auto mb-3" />
                     <p className="text-slate-400 text-sm">Loading satellite imagery...</p>
                   </div>
                 </div>
-              )}
+              ) : null}
 
               {/* Location finding overlay */}
-              {(locationStatus === 'locating' || searchLoading) && (
+              {(locationStatus === 'locating' || searchLoading) ? (
                 <div className="absolute inset-0 flex items-center justify-center bg-slate-900/60 pointer-events-none">
                   <div className="glass rounded-2xl px-6 py-4 text-center">
                     <div className="spinner w-8 h-8 mx-auto mb-3" />
@@ -3689,26 +3759,26 @@ export default function DesignStudio({ project, onSave }: Props) {
                     <p className="text-slate-400 text-xs mt-1">{addressSearch}</p>
                   </div>
                 </div>
-              )}
+              ) : null}
 
               {/* Location found toast */}
-              {locationStatus === 'found' && !searchLoading && (
+              {locationStatus === 'found' && !searchLoading ? (
                 <div className="absolute top-4 right-16 glass rounded-xl px-3 py-2 flex items-center gap-2 pointer-events-none">
                   <CheckCircle size={14} className="text-emerald-400" />
                   <span className="text-xs text-emerald-400 font-medium">Location found</span>
                 </div>
-              )}
+              ) : null}
 
               {/* Location failed toast */}
-              {locationStatus === 'failed' && (
+              {locationStatus === 'failed' ? (
                 <div className="absolute top-4 right-16 glass rounded-xl px-3 py-2 flex items-center gap-2 pointer-events-none">
                   <AlertCircle size={14} className="text-red-400" />
                   <span className="text-xs text-red-400 font-medium">Address not found — try a different search</span>
                 </div>
-              )}
+              ) : null}
 
               {/* Drawing instructions */}
-              {drawingMode !== 'select' && drawingMode !== 'measure' && (
+              {drawingMode !== 'select' && drawingMode !== 'measure' ? (
                 <div className="absolute top-4 left-1/2 -translate-x-1/2 glass rounded-xl px-4 py-2 text-sm text-white pointer-events-none flex items-center gap-2">
                   <span>
                     {drawingMode === 'draw_roof' && '🏠 Click to draw roof outline'}
@@ -3718,22 +3788,22 @@ export default function DesignStudio({ project, onSave }: Props) {
                   <span className="text-slate-400">• Double-click to finish</span>
                   {drawnPoints.length > 0 && <span className="text-amber-400 font-semibold">{drawnPoints.length} pts</span>}
                 </div>
-              )}
-              {drawingMode === 'measure' && (
+              ) : null}
+              {drawingMode === 'measure' ? (
                 <div className="absolute top-4 left-1/2 -translate-x-1/2 glass rounded-xl px-4 py-2 text-sm text-cyan-300 pointer-events-none">
                   📏 Click to measure distance • Double-click to clear
                   {measureDistance !== null && <span className="ml-2 font-bold">{measureDistance.toFixed(1)}m</span>}
                 </div>
-              )}
+              ) : null}
 
               {/* v30.9: Multi-row mode hint */}
-              {multiRowMode && (
+              {multiRowMode ? (
                 <div className="absolute top-4 left-1/2 -translate-x-1/2 glass rounded-xl px-4 py-2 text-sm text-amber-300 pointer-events-none flex items-center gap-2">
                   <span>⊞ Multi-Row Tool ({multiRowCount} rows)</span>
                   <span className="text-slate-400">•</span>
                   <span>{multiRowStart ? '📍 Click end of first row' : '📍 Click start of first row'}</span>
                 </div>
-              )}
+              ) : null}
 
               {/* v31.1: Active Tool Indicator */}
               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 glass rounded-xl px-3 py-1.5 pointer-events-none">
@@ -3753,11 +3823,11 @@ export default function DesignStudio({ project, onSave }: Props) {
                    drawingMode === 'draw_fence' ? '🔲 Draw Fence Line' :
                    drawingMode === 'measure' ? '📏 Measure' : drawingMode}
                 </span>
-                {selectedPanelIds.size > 0 && (
+                {selectedPanelIds.size > 0 ? (
                   <span className="text-xs text-amber-400 font-semibold ml-1">
                     · {selectedPanelIds.size} selected
                   </span>
-                )}
+                ) : null}
                 <span className="text-xs text-slate-600 ml-1">V/R/G/F/M</span>
               </div>
 
@@ -3769,7 +3839,7 @@ export default function DesignStudio({ project, onSave }: Props) {
               </div>
 
               {/* Panel count overlay */}
-              {panels.length > 0 && (
+              {panels.length > 0 ? (
                 <div className="absolute bottom-10 left-4 glass rounded-xl px-3 py-2">
                   <div className="flex items-center gap-3 text-xs">
                     <div className="flex items-center gap-1.5">
@@ -3780,21 +3850,21 @@ export default function DesignStudio({ project, onSave }: Props) {
                       <Zap size={12} className="text-amber-400" />
                       <span className="text-amber-400 font-bold">{systemSizeKw.toFixed(2)} kW</span>
                     </div>
-                    {selectedPanelIds.size > 0 && (
+                    {selectedPanelIds.size > 0 ? (
                       <span className="text-blue-400">{selectedPanelIds.size} selected</span>
-                    )}
+                    ) : null}
                   </div>
                 </div>
-              )}
+              ) : null}
 
               {/* Bill analysis recommendation banner */}
-              {billAnalysis && panels.length === 0 && (
+              {billAnalysis && panels.length === 0 ? (
                 <div className="absolute top-16 left-1/2 -translate-x-1/2 glass rounded-xl px-4 py-3 text-sm pointer-events-none max-w-sm text-center">
                   <div className="text-amber-400 font-semibold">Recommended System Size</div>
                   <div className="text-white text-lg font-bold">{billAnalysis.recommendedSystemKw} kW</div>
                   <div className="text-slate-400 text-xs">~{billAnalysis.recommendedPanelCount} panels • Draw your {activeZoneType === 'roof' ? 'roof' : activeZoneType === 'ground' ? 'ground area' : 'fence line'} to place panels</div>
                 </div>
-              )}
+              ) : null}
             </>
           )}
         </div>
@@ -3850,7 +3920,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                     </div>
                   )}
                   {/* Phase 2I: PVWatts-quality production estimate with monthly breakdown */}
-                  {quickEstimate && !production && (
+                  {quickEstimate && !production ? (
                     <div className="bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/50">
                       <div className="flex items-center gap-1.5 mb-2">
                         <Sun size={11} className="text-amber-400" />
@@ -3879,7 +3949,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                         </div>
                       </div>
                       {/* Monthly production sparkline */}
-                      {quickEstimate.monthlyProduction && (
+                      {quickEstimate.monthlyProduction ? (
                         <div className="mt-2">
                           <div className="text-xs text-slate-500 mb-1">Monthly</div>
                           <div className="flex items-end gap-px h-8">
@@ -3901,10 +3971,10 @@ export default function DesignStudio({ project, onSave }: Props) {
                             <span>J</span><span>A</span><span>S</span><span>O</span><span>N</span><span>D</span>
                           </div>
                         </div>
-                      )}
+                      ) : null}
                       <div className="text-xs text-slate-600 mt-1.5 text-center">API calculation pending...</div>
                     </div>
-                  )}
+                  ) : null}
                   {/* QW-10: Production auto-calculates with 3s debounce.
                       This button allows immediate re-calculation if needed. */}
                   <button
@@ -3918,12 +3988,12 @@ export default function DesignStudio({ project, onSave }: Props) {
                   >
                     {calculating ? <><Loader size={14} className="animate-spin" /> Calculating...</> : <><Play size={14} /> Recalculate</>}
                   </button>
-                  {!calculating && panels.length > 0 && !production && (
+                  {!calculating && panels.length > 0 && !production ? (
                     <div className="text-xs text-slate-500 text-center mt-0.5">
                       Auto-calculating in 3s...
                     </div>
-                  )}
-                  {calcMessage && (
+                  ) : null}
+                  {calcMessage ? (
                     <div className={`text-xs mt-1 px-2 py-1.5 rounded-lg ${
                       calcMessage.startsWith('✅')
                         ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
@@ -3931,7 +4001,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                     }`}>
                       {calcMessage}
                     </div>
-                  )}
+                  ) : null}
                   {/* Generate Proposal — always visible, disabled until production is calculated */}
                   <Link
                     href={production ? `/proposals?projectId=${project.id}` : '#'}
@@ -3940,13 +4010,13 @@ export default function DesignStudio({ project, onSave }: Props) {
                   >
                     Generate Proposal <ArrowRight size={12} />
                   </Link>
-                  {!production && (
+                  {!production ? (
                     <div className="text-xs text-slate-600 text-center -mt-1">Calculate production first</div>
-                  )}
+                  ) : null}
                 </Section>
 
                 {/* Production Results */}
-                {production && (
+                {production ? (
                   <Section title="Production Results" icon={<BarChart2 size={12} />}>
                     <div className="flex items-center gap-1.5 mb-1">
                       <ConfidenceBadge
@@ -3997,10 +4067,10 @@ export default function DesignStudio({ project, onSave }: Props) {
                       </div>
                     </div>
                   </Section>
-                )}
+                ) : null}
 
                 {/* Cost Estimate */}
-                {costEstimate && (
+                {costEstimate ? (
                   <Section title="Cost Estimate" icon={<DollarSign size={12} />}>
                     <div className="space-y-2 text-xs">
                       {[
@@ -4037,7 +4107,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                       Generate Proposal <ArrowRight size={12} />
                     </Link>
                   </Section>
-                )}
+                ) : null}
                 {/* System Configuration */}
                 <Section title="Configuration" icon={<Settings size={12} />} defaultOpen={true}>
                   {/* Active Zone Type Switcher */}
@@ -4079,7 +4149,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                     })()}
                   </div>
 
-                  {activeZoneType !== 'fence' && (
+                  {activeZoneType !== 'fence' ? (
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className="text-xs text-slate-400 flex items-center gap-1.5">
@@ -4097,12 +4167,12 @@ export default function DesignStudio({ project, onSave }: Props) {
                         Optimal: |lat| = {Math.abs(initialLat).toFixed(0)}° for max annual production
                       </p>
                     </div>
-                  )}
-                  {activeZoneType === 'fence' && (
+                  ) : null}
+                  {activeZoneType === 'fence' ? (
                     <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-2 text-xs text-purple-300">
                       ⚡ Vertical mount (90°) — Sol Fence bifacial optimized
                     </div>
-                  )}
+                  ) : null}
                   <div>
                     <div className="flex justify-between items-center mb-1">
                       <label className="text-xs text-slate-400 flex items-center gap-1.5">
@@ -4121,9 +4191,9 @@ export default function DesignStudio({ project, onSave }: Props) {
                     </div>
                   </div>
 
-                  {activeZoneType === 'roof' && (
+                  {activeZoneType === 'roof' ? (
                     <SliderRow label="Roof Setback" value={setback} min={0} max={2.0} step={0.05} unit="m" onChange={v => { clearGridCache(); setSetback(v); }} />
-                  )}
+                  ) : null}
                   {(activeZoneType === 'roof' || activeZoneType === 'ground') && (
                     <SliderRow label="Row Spacing" value={rowSpacing} min={0.01} max={3.0} step={0.01} unit="m" onChange={v => { clearGridCache(); setRowSpacing(v); }} />
                   )}
@@ -4220,11 +4290,11 @@ export default function DesignStudio({ project, onSave }: Props) {
                           <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${fireSetbacks.enforcePathway ? 'translate-x-5' : 'translate-x-0.5'}`} />
                         </button>
                       </div>
-                      {fireSetbacks.enforcePathway && (
+                      {fireSetbacks.enforcePathway ? (
                         <div className="text-xs text-red-400/80 bg-red-500/10 rounded-lg p-2">
                           36″ side-edge pathway enforced — rake/hip edge setback includes pathway clearance
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   )}
 
@@ -4247,21 +4317,21 @@ export default function DesignStudio({ project, onSave }: Props) {
                         <button onClick={() => setMultiRowCount(v => Math.min(20, v + 1))} className="w-6 h-6 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 flex items-center justify-center text-xs">+</button>
                       </div>
                     </div>
-                    {multiRowMode && (
+                    {multiRowMode ? (
                       <div className="mt-2 text-xs text-amber-400 bg-amber-500/10 rounded-lg p-2">
                         {multiRowStart ? '📍 Click end of first row to generate all rows' : '📍 Click start of first row on the map'}
                       </div>
-                    )}
+                    ) : null}
                   </div>
 
-                  {activeZoneType === 'ground' && (
+                  {activeZoneType === 'ground' ? (
                     <>
                       <SliderRow label="Mount Height" value={groundHeight} min={0.3} max={2.0} step={0.1} unit="m" onChange={setGroundHeight} />
                       <SliderRow label="Panels Per Row" value={panelsPerRow} min={2} max={30} step={1} unit="" onChange={setPanelsPerRow} />
                     </>
-                  )}
+                  ) : null}
 
-                  {activeZoneType === 'fence' && (
+                  {activeZoneType === 'fence' ? (
                     <>
                       <SliderRow label="Fence Height" value={fenceHeight} min={1.0} max={4.0} step={0.1} unit="m" onChange={setFenceHeight} />
                       <div className="flex items-center justify-between">
@@ -4273,13 +4343,13 @@ export default function DesignStudio({ project, onSave }: Props) {
                           <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${bifacialOptimized ? 'translate-x-5' : 'translate-x-0.5'}`} />
                         </button>
                       </div>
-                      {bifacialOptimized && (
+                      {bifacialOptimized ? (
                         <div className="text-xs text-amber-400 bg-amber-500/10 rounded-lg p-2">
                           +20% bifacial gain applied for E-W facing panels
                         </div>
-                      )}
+                      ) : null}
                     </>
-                  )}
+                  ) : null}
                 </Section>
 
 
@@ -4319,15 +4389,15 @@ export default function DesignStudio({ project, onSave }: Props) {
                       <div className="space-y-2">
 
                         {/* Address tag — shows which building this data is for */}
-                        {solarDataAddress && (
+                        {solarDataAddress ? (
                           <div className="flex items-center gap-1.5 text-[10px] text-slate-500 bg-slate-900/60 rounded px-2 py-1 border border-slate-700/30">
                             <span>📍</span>
                             <span className="truncate">{solarDataAddress}</span>
                           </div>
-                        )}
+                        ) : null}
 
                         {/* v50.13: City-only address warning — data may not match building on screen */}
-                        {solarDataCityOnly && (
+                        {solarDataCityOnly ? (
                           <div className="flex items-start gap-2 text-[10px] text-amber-300 bg-amber-500/10 rounded-lg px-2.5 py-2 border border-amber-500/30">
                             <span className="text-sm leading-none mt-0.5">⚠</span>
                             <div>
@@ -4337,7 +4407,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                               </div>
                             </div>
                           </div>
-                        )}
+                        ) : null}
 
                         {/* Hero summary row */}
                         <div className="grid grid-cols-3 gap-1.5">
@@ -4406,7 +4476,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                         </div>
 
                         {/* v50.11: Heatmap toggle button */}
-                        {show3D && (
+                        {show3D ? (
                           <button
                             onClick={() => setShowIrradiance(v => !v)}
                             className={`w-full py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 ${
@@ -4418,10 +4488,10 @@ export default function DesignStudio({ project, onSave }: Props) {
                             <span>☀</span>
                             <span>{showIrradiance ? 'Heatmap On — Click to Hide' : 'Show Irradiance Heatmap'}</span>
                           </button>
-                        )}
+                        ) : null}
 
                         {/* v50.11: Irradiance colormap legend */}
-                        {showIrradiance && (
+                        {showIrradiance ? (
                           <div className="space-y-1">
                             <div className="h-3 rounded w-full" style={{
                               background: 'linear-gradient(to right, #3b82f6, #8b5cf6, #facc15, #f97316, #ef4444)',
@@ -4432,7 +4502,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                               <span>High</span>
                             </div>
                           </div>
-                        )}
+                        ) : null}
 
                       </div>
                     </Section>
@@ -4449,39 +4519,39 @@ export default function DesignStudio({ project, onSave }: Props) {
                     <div className="space-y-2">
 
                       {/* Idle state */}                      {/* Idle state */}
-                      {solarApiStatus === 'idle' && roofPlanes.length === 0 && (
+                      {solarApiStatus === 'idle' && roofPlanes.length === 0 ? (
                         <div className="text-xs text-slate-400 bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/40">
                           <div className="font-semibold text-slate-300 mb-1">No Planes Detected</div>
                           <div className="leading-relaxed">Navigate to an address to auto-detect, or use <span className="text-amber-400 font-medium">Draw Roof Zone</span> to trace manually.</div>
                         </div>
-                      )}
+                      ) : null}
 
                       {/* Loading */}
-                      {solarApiStatus === 'loading' && (
+                      {solarApiStatus === 'loading' ? (
                         <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 rounded-lg p-2.5 border border-amber-500/20">
                           <div className="w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
                           <span>Detecting roof planes…</span>
                         </div>
-                      )}
+                      ) : null}
 
                       {/* Unavailable */}
-                      {solarApiStatus === 'unavailable' && roofPlanes.length === 0 && (
+                      {solarApiStatus === 'unavailable' && roofPlanes.length === 0 ? (
                         <div className="text-xs text-slate-400 bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/40">
                           <div className="font-semibold text-slate-300 mb-1">⚠ Auto-detect Unavailable</div>
                           <div>Use <span className="text-amber-400 font-medium">Draw Roof Zone</span> to trace planes manually.</div>
                         </div>
-                      )}
+                      ) : null}
 
                       {/* Address tag for Roof Planes */}
-                      {solarDataAddress && roofPlanes.length > 0 && (
+                      {solarDataAddress && roofPlanes.length > 0 ? (
                         <div className="flex items-center gap-1.5 text-[10px] text-slate-500 bg-slate-900/60 rounded px-2 py-1 border border-slate-700/30">
                           <span>📍</span>
                           <span className="truncate">{solarDataAddress}</span>
                         </div>
-                      )}
+                      ) : null}
 
                       {/* Unconfirmed banner */}
-                      {roofPlanes.some(p => p.confirmed === false) && (
+                      {roofPlanes.some(p => p.confirmed === false) ? (
                         <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 text-xs">
                           <div className="text-amber-300 font-semibold mb-1">🛰️ We found your roof sections</div>
                           <div className="text-slate-300 mb-2 leading-relaxed">
@@ -4508,19 +4578,19 @@ export default function DesignStudio({ project, onSave }: Props) {
                             ✏️ Draw Manually Instead
                           </button>
                         </div>
-                      )}
+                      ) : null}
 
                       {/* All confirmed banner */}
-                      {roofPlanes.length > 0 && roofPlanes.every(p => p.confirmed !== false) && (
+                      {roofPlanes.length > 0 && roofPlanes.every(p => p.confirmed !== false) ? (
                         <div className="flex items-center gap-2 text-xs text-emerald-300 bg-emerald-500/10 rounded-lg p-2 border border-emerald-500/20">
                           <span>✅</span>
                           <span className="font-semibold">{roofPlanes.length} planes confirmed</span>
                           <span className="text-slate-500 ml-auto">Ready for permit</span>
                         </div>
-                      )}
+                      ) : null}
 
                       {/* Plane table — contractor-grade compact rows */}
-                      {roofPlanes.length > 0 && (
+                      {roofPlanes.length > 0 ? (
                         <div className="rounded-lg overflow-hidden border border-slate-700/40">
                           {/* Header */}
                           <div className="grid grid-cols-[1.2rem_1fr_2rem_2.5rem_2rem] gap-1.5 bg-slate-900/80 px-2 py-1 text-[10px] text-slate-500 font-semibold uppercase tracking-wide items-center">
@@ -4560,17 +4630,17 @@ export default function DesignStudio({ project, onSave }: Props) {
                                 </div>
 
                                 {/* Expanded editor */}
-                                {isExpanded && (
+                                {isExpanded ? (
                                   <div className="px-3 pb-2.5 pt-0.5 border-t border-slate-700/20 bg-slate-900/30 space-y-2">
                                     {/* Confirm / unconfirm */}
-                                    {isUnconfirmed && (
+                                    {isUnconfirmed ? (
                                       <button
                                         onClick={() => setRoofPlanes(prev => prev.map(p => p.id === plane.id ? { ...p, confirmed: true } : p))}
                                         className="w-full py-1 bg-emerald-600/80 hover:bg-emerald-500 text-white rounded text-[10px] font-semibold transition-colors"
                                       >
                                         ✓ Confirm This Plane
                                       </button>
-                                    )}
+                                    ) : null}
                                     {/* Slope slider */}
                                     <div className="flex items-center gap-2">
                                       <span className="text-[10px] text-slate-500 w-10 flex-shrink-0">Slope</span>
@@ -4644,12 +4714,12 @@ export default function DesignStudio({ project, onSave }: Props) {
                                       ↺ Update Panel Layout
                                     </button>
                                   </div>
-                                )}
+                                ) : null}
                               </div>
                             );
                           })}
                         </div>
-                      )}
+                      ) : null}
 
                       {/* Add plane button */}
                       <button
@@ -4668,19 +4738,19 @@ export default function DesignStudio({ project, onSave }: Props) {
             )}
 
             {/* ── BILL ANALYSIS TAB ── */}
-            {activeTab === 'bill' && (
+            {activeTab === 'bill' ? (
               <>
                 <Section title="Bill Analysis" icon={<Calculator size={12} />} defaultOpen={true}>
                   <BillCalculator onAnalysis={setBillAnalysis} project={project} />
 
                   {/* Phase 2E: PVWatts Auto-Sizing Recommendation */}
-                  {pvwattsLoading && (
+                  {pvwattsLoading ? (
                     <div className="flex items-center gap-2 text-xs text-slate-400 mt-3">
                       <span className="spinner w-3 h-3" />
                       Running PVWatts simulation...
                     </div>
-                  )}
-                  {pvwattsSizing && billAnalysis && (
+                  ) : null}
+                  {pvwattsSizing && billAnalysis ? (
                     <div className="mt-3">
                       <RecommendationCard
                         title="System Size"
@@ -4704,10 +4774,10 @@ export default function DesignStudio({ project, onSave }: Props) {
                         data-testid="pvwatts-sizing-recommendation"
                       />
                     </div>
-                  )}
+                  ) : null}
                 </Section>
 
-                {billAnalysis && (
+                {billAnalysis ? (
                   <Section title="Recommendation" icon={<TrendingUp size={12} />} defaultOpen={true}>
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       {[
@@ -4753,7 +4823,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                       </div>
                     </div>
 
-                    {billAnalysis.batteryRecommendation && (
+                    {billAnalysis.batteryRecommendation ? (
                       <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-3 text-xs">
                         <div className="text-purple-400 font-semibold mb-1">🔋 Battery Recommendation</div>
                         <div className="text-slate-300 mb-2">{billAnalysis.batteryRecommendation.reason}</div>
@@ -4767,14 +4837,14 @@ export default function DesignStudio({ project, onSave }: Props) {
                           View Battery Options →
                         </button>
                       </div>
-                    )}
+                    ) : null}
                   </Section>
-                )}
+                ) : null}
               </>
-            )}
+            ) : null}
 
             {/* ── EQUIPMENT TAB ── */}
-            {activeTab === 'equipment' && (
+            {activeTab === 'equipment' ? (
               <>
                 {/* Panel Selection */}
                 <Section title="Solar Panels" icon={<Sun size={12} />} badge={`${availablePanels.length} models`}>
@@ -4819,7 +4889,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                     ))}
                   </div>
 
-                  {selectedPanel && (
+                  {selectedPanel ? (
                     <div className="bg-slate-800/60 rounded-lg p-3 text-xs space-y-1.5">
                       <div className="text-slate-300 font-semibold">Selected: {selectedPanel.manufacturer} {selectedPanel.model}</div>
                       <div className="grid grid-cols-2 gap-1">
@@ -4831,7 +4901,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                         <div><span className="text-slate-500">Warranty:</span> <span className="text-white">{selectedPanel.warranty || 25}yr</span></div>
                       </div>
                     </div>
-                  )}
+                  ) : null}
                 </Section>
 
                 {/* Inverter Selection */}
@@ -4882,10 +4952,10 @@ export default function DesignStudio({ project, onSave }: Props) {
                   </div>
                 </Section>
               </>
-            )}
+            ) : null}
 
             {/* ── BATTERY TAB ── */}
-            {activeTab === 'battery' && (
+            {activeTab === 'battery' ? (
               <>
                 <Section title="Battery Storage" icon={<BatteryIcon size={12} />} badge={`${availableBatteries.length} models`}>
                   <div className="text-xs text-slate-400 bg-slate-800/40 rounded-lg p-2.5">
@@ -4926,7 +4996,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                   </div>
                 </Section>
 
-                {selectedBattery && (
+                {selectedBattery ? (
                   <Section title="Battery Configuration" icon={<Settings size={12} />}>
                     <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-3 text-xs">
                       <div className="font-semibold text-purple-300 mb-2">{selectedBattery.manufacturer} {selectedBattery.model}</div>
@@ -4940,7 +5010,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                       </div>
                     </div>
 
-                    {selectedBattery.stackable && (
+                    {selectedBattery.stackable ? (
                       <div>
                         <div className="flex justify-between items-center mb-2">
                           <label className="text-xs text-slate-400">Number of Units</label>
@@ -4979,10 +5049,10 @@ export default function DesignStudio({ project, onSave }: Props) {
                           </div>
                         </div>
                       </div>
-                    )}
+                    ) : null}
 
                     {/* Backup estimate */}
-                    {billAnalysis && (
+                    {billAnalysis ? (
                       <div className="bg-slate-800/60 rounded-lg p-3 text-xs">
                         <div className="text-slate-300 font-semibold mb-1.5">Backup Estimate</div>
                         <div className="space-y-1">
@@ -5002,17 +5072,17 @@ export default function DesignStudio({ project, onSave }: Props) {
                           </div>
                         </div>
                       </div>
-                    )}
+                    ) : null}
                   </Section>
-                )}
+                ) : null}
 
-                {!selectedBattery && (
+                {!selectedBattery ? (
                   <div className="p-4 text-center text-slate-500 text-xs">
                     Select a battery above to configure storage
                   </div>
-                )}
+                ) : null}
               </>
-            )}
+            ) : null}
           </div>
         </div>
       </div>

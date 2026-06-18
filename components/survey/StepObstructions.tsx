@@ -245,7 +245,7 @@ export function StepObstructions({ data, onChange, disabled, siteOverview }: Ste
   return (
     <div className="space-y-4">
       {/* ---- Satellite detection banner ---- */}
-      {satelliteLoading && (
+      {satelliteLoading ? (
         <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3">
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
@@ -254,10 +254,10 @@ export function StepObstructions({ data, onChange, disabled, siteOverview }: Ste
             </p>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* ---- Detected obstructions (accept/dismiss) ---- */}
-      {pendingSatelliteObstructions.length > 0 && (
+      {pendingSatelliteObstructions.length > 0 ? (
         <StepCard
           title="Satellite Detection"
           subtitle="Obstructions detected from aerial imagery. Review and accept or dismiss each."
@@ -277,7 +277,7 @@ export function StepObstructions({ data, onChange, disabled, siteOverview }: Ste
             </p>
           </div>
         </StepCard>
-      )}
+      ) : null}
 
       {/* ---- Obstruction map ---- */}
       <StepCard
@@ -290,7 +290,7 @@ export function StepObstructions({ data, onChange, disabled, siteOverview }: Ste
           disabled={disabled}
         />
         {/* Satellite detection result summary */}
-        {satelliteResult?.obstructions && !satelliteLoading && (
+        {satelliteResult?.obstructions && !satelliteLoading ? (
           <div className="mt-2 flex items-center gap-2">
             <ConfidenceBadge
               confidence={
@@ -304,7 +304,7 @@ export function StepObstructions({ data, onChange, disabled, siteOverview }: Ste
               Method: {satelliteResult.obstructions.method.replace(/_/g, ' ')}
             </span>
           </div>
-        )}
+        ) : null}
       </StepCard>
 
       {/* ---- Usable roof area ---- */}
@@ -336,7 +336,7 @@ export function StepObstructions({ data, onChange, disabled, siteOverview }: Ste
           />
 
           {/* Color-coded area label */}
-          {data.estimatedUsableRoofPct != null && (
+          {data.estimatedUsableRoofPct != null ? (
             <div className="mt-2">
               {data.estimatedUsableRoofPct >= 70 ? (
                 <span className="text-xs font-medium text-green-600">
@@ -352,15 +352,15 @@ export function StepObstructions({ data, onChange, disabled, siteOverview }: Ste
                 </span>
               )}
             </div>
-          )}
+          ) : null}
 
           {/* Show satellite area estimate when user hasn't set a value yet */}
-          {data.estimatedUsableRoofPct == null && satelliteAreaComputed && (
+          {data.estimatedUsableRoofPct == null && satelliteAreaComputed ? (
             <p className="mt-1 text-xs text-cyan-600 italic">
               Satellite estimate: {satelliteAreaComputed.value}% usable.
               Value auto-applied unless you override.
             </p>
-          )}
+          ) : null}
         </StepField>
       </StepCard>
 
@@ -384,7 +384,7 @@ export function StepObstructions({ data, onChange, disabled, siteOverview }: Ste
       </StepCard>
 
       {/* ---- Summary ---- */}
-      {data.obstructions.length > 0 && (
+      {data.obstructions.length > 0 ? (
         <div className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
           <p className="text-xs font-semibold text-orange-700 mb-1">
             Obstruction Summary
@@ -394,19 +394,19 @@ export function StepObstructions({ data, onChange, disabled, siteOverview }: Ste
               <li key={ob.id} className="text-xs text-orange-600">
                 {ob.type.replace(/_/g, ' ')} - {ob.location}
                 {ob.notes ? `: ${ob.notes}` : ''}
-                {ob.id.startsWith('sat_') && (
+                {ob.id.startsWith('sat_') ? (
                   <ConfidenceBadge
                     confidence="medium"
                     source="satellite"
                     size="xs"
                     className="ml-1"
                   />
-                )}
+                ) : null}
               </li>
             ))}
           </ul>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

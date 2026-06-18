@@ -181,7 +181,7 @@ function buildOperationalNotes(form: FormState, billFile: File | null): string {
 
   if (billFile) {
     lines.push(
-      `Utility bill file selected: ${billFile.name} (${Math.round(billFile.size / 1024)} KB). The intake endpoint stores any non-empty utility bill file and links the attachment metadata to the canonical intake event.`,
+      `Utility bill file selected: ${billFile.name} (${Math.round(billFile.size / 1024)} KB). Any utility bill file you upload will be attached to your request for advisor review.`,
     );
   }
 
@@ -426,27 +426,25 @@ export default function FreeSolarEstimatePage() {
             </h1>
             <p className="text-sm leading-6 text-slate-300">
               Thanks, {form.first_name.trim() || "there"}. Your information was
-              submitted through SolarPro’s canonical homeowner intake event
-              flow. A solar advisor will review the details and follow up
-              shortly.
+              submitted successfully. A solar advisor will review your details
+              and reach out shortly with your personalized estimate.
             </p>
-            {intakeReference && (
+            {intakeReference ? (
               <p className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs text-slate-400">
-                Internal intake event reference:{" "}
+                Your reference number:{" "}
                 <span className="font-mono text-slate-200">
                   {intakeReference}
                 </span>
               </p>
-            )}
+            ) : null}
             <div className="mt-8 rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] p-4">
               <p className="text-xs font-black uppercase tracking-[0.2em] text-amber-200">
-                Optional next step
+                Optional — refine your estimate
               </p>
               <p className="mt-2 text-sm leading-6 text-slate-300">
-                Answer seven quick questions so SolarPro can better understand
-                financing preferences, battery readiness, shade risk, and
-                property fit before review. This does not change your original
-                request.
+                Answer a few quick questions about your property and preferences so
+                we can prepare a more accurate estimate. This is optional and
+                won't change your original request.
               </p>
             </div>
             <a
@@ -470,8 +468,7 @@ export default function FreeSolarEstimatePage() {
                   Your opportunity profile is now more complete.
                 </h2>
                 <p className="text-sm leading-6 text-slate-300">
-                  These details were added as a second-stage qualification event
-                  for SolarPro review.
+                  These extra details help your advisor prepare a more accurate estimate.
                 </p>
                 <div className="mt-5 rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4 text-sm leading-6 text-emerald-100">
                   Thanks — your additional details were saved for SolarPro
@@ -488,9 +485,8 @@ export default function FreeSolarEstimatePage() {
                   No problem — your estimate request is still submitted.
                 </h2>
                 <p className="text-sm leading-6 text-slate-300">
-                  SolarPro can still review your original intake. You can
-                  provide additional qualification details later with an
-                  advisor.
+                  A solar advisor can still review your original request. You can
+                  always provide more details later when you speak with them.
                 </p>
               </div>
             ) : (
@@ -500,21 +496,20 @@ export default function FreeSolarEstimatePage() {
                     Quick qualification
                   </p>
                   <h2 className="text-2xl font-black">
-                    Help us qualify your solar opportunity.
+                    Help us tailor your estimate.
                   </h2>
                   <p className="mt-2 text-sm leading-6 text-slate-400">
-                    These optional post-submit answers help SolarPro understand
-                    financing readiness, property fit, battery readiness, and
-                    contractor matching.
+                    These optional questions help us understand your property and
+                    preferences so we can give you the most relevant estimate.
                   </p>
                 </div>
 
-                {qualificationError && (
+                {qualificationError ? (
                   <div className="flex items-start gap-3 rounded-2xl border border-red-400/20 bg-red-400/[0.07] px-4 py-3 text-sm text-red-200">
                     <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
                     <span>{qualificationError}</span>
                   </div>
-                )}
+                ) : null}
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <SelectField
@@ -676,7 +671,7 @@ export default function FreeSolarEstimatePage() {
             <span className="text-sm font-black tracking-tight">SolarPro</span>
           </a>
           <p className="hidden text-xs text-slate-500 sm:block">
-            Canonical homeowner intake
+            Free estimate — no obligation
           </p>
         </div>
       </header>
@@ -690,28 +685,27 @@ export default function FreeSolarEstimatePage() {
             Get a realistic solar estimate for your home.
           </h1>
           <p className="mb-8 max-w-xl text-base leading-7 text-slate-400">
-            Share your utility, bill, homeowner, battery, roof, and timeline
-            details. This form submits directly into SolarPro’s canonical intake
-            event log for operator review before any marketplace opportunity is
-            created.
+            Tell us about your home and energy use. A solar advisor will review
+            your details and reach out with a personalized estimate — no pressure,
+            no commitment, just honest answers about your solar potential.
           </p>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
             {[
               {
                 icon: Zap,
-                title: "Utility-aware estimate",
-                text: "Your provider and bill help route the lead into the existing enrichment flow.",
+                title: "Custom system design",
+                text: "Your utility and bill details help us design a system sized to your actual energy use.",
               },
               {
                 icon: BatteryCharging,
-                title: "Battery readiness signal",
-                text: "Battery interest is captured for downstream opportunity intelligence review.",
+                title: "Backup power options",
+                text: "Let us know if you want battery backup — we'll include storage options in your estimate.",
               },
               {
                 icon: ShieldCheck,
-                title: "No duplicate intake path",
-                text: "The form posts only to /api/intake/homeowner and does not insert marketplace rows directly.",
+                title: "Privacy-first process",
+                text: "Your information stays private and is only shared with a trusted solar advisor.",
               },
             ].map(({ icon: Icon, title, text }) => (
               <div
@@ -745,12 +739,12 @@ export default function FreeSolarEstimatePage() {
             </div>
           </div>
 
-          {error && (
+          {error ? (
             <div className="mb-5 flex items-start gap-3 rounded-2xl border border-red-400/20 bg-red-400/[0.07] px-4 py-3 text-sm text-red-200">
               <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
               <span>{error}</span>
             </div>
-          )}
+          ) : null}
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -936,8 +930,8 @@ export default function FreeSolarEstimatePage() {
             >
               {submitState === "submitting" ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> Submitting to
-                  intake pipeline...
+                  <Loader2 className="h-4 w-4 animate-spin" /> Submitting your
+                  request...
                 </>
               ) : (
                 <>
@@ -974,12 +968,12 @@ function TextField({
   return (
     <label className="block">
       <span className="mb-2 block text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">
-        {label} {required && <span className="text-red-300">*</span>}
+        {label} {required ? <span className="text-red-300">*</span> : null}
       </span>
       <span className="relative block">
-        {Icon && (
+        {Icon ? (
           <Icon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
-        )}
+        ) : null}
         <input
           value={value}
           onChange={(event) => onChange(event.target.value)}
@@ -1010,7 +1004,7 @@ function SelectField({
   return (
     <label className="block">
       <span className="mb-2 block text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">
-        {label} {required && <span className="text-red-300">*</span>}
+        {label} {required ? <span className="text-red-300">*</span> : null}
       </span>
       <select
         value={value}

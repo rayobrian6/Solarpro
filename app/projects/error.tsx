@@ -1,4 +1,5 @@
 'use client';
+import { ClipboardList } from 'lucide-react';
 
 export default function ProjectsError({ error, reset }: { error: Error; reset: () => void }) {
   return (
@@ -6,7 +7,7 @@ export default function ProjectsError({ error, reset }: { error: Error; reset: (
       display: 'flex', flexDirection: 'column', alignItems: 'center',
       justifyContent: 'center', minHeight: '60vh', padding: 32,
     }}>
-      <div style={{ fontSize: 48, marginBottom: 16 }}>📋</div>
+      <ClipboardList size={48} style={{ marginBottom: 16, color: "#f87171" }} />
       <h2 style={{ color: '#f87171', fontSize: 20, fontWeight: 600, marginBottom: 8 }}>
         Projects Error
       </h2>

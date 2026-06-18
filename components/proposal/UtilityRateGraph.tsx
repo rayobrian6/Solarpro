@@ -114,12 +114,12 @@ export function UtilityRateGraph({ utility, financial }: UtilityRateGraphProps) 
           <div className="w-6 h-0.5 bg-red-600 rounded" />
           <span className="text-slate-500">Projected utility rate</span>
         </div>
-        {solarEffectiveRate > 0 && (
+        {solarEffectiveRate > 0 ? (
           <div className="flex items-center gap-1.5">
             <div className="w-6 h-0.5 bg-emerald-500 rounded" />
             <span className="text-slate-500">Your solar rate (fixed)</span>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* SVG Chart */}
@@ -151,7 +151,7 @@ export function UtilityRateGraph({ utility, financial }: UtilityRateGraphProps) 
         >Today</text>
 
         {/* Solar flat line */}
-        {solarEffectiveRate > 0 && solarY > 0 && (
+        {solarEffectiveRate > 0 && solarY > 0 ? (
           <>
             <line
               x1={PAD_LEFT} y1={solarY}
@@ -164,7 +164,7 @@ export function UtilityRateGraph({ utility, financial }: UtilityRateGraphProps) 
               fontSize="8" fill="#059669" textAnchor="end"
             >${solarEffectiveRate.toFixed(3)}/kWh</text>
           </>
-        )}
+        ) : null}
 
         {/* Historical rate line (dashed red) */}
         <polyline

@@ -138,13 +138,13 @@ function CoverSheetInner({ data }: { data: PermitCoverData }) {
                   <td className="E-qty">{moduleCount}</td>
                   <td className="E-desc">–&nbsp;{inverterManufacturer ? inverterManufacturer + ': ' : ''}{inverterModel} {inverterLabel}</td>
                 </tr>
-                {batteryCount !== undefined && batteryCount > 0 && (
+                {batteryCount !== undefined && batteryCount > 0 ? (
                   <tr>
                     <td className="E-tag">(N)</td>
                     <td className="E-qty">{batteryCount}</td>
                     <td className="E-desc">–&nbsp;{batteryManufacturer ? batteryManufacturer + ' ' : ''}{batteryModel ?? '—'} BATTERY STORAGE SYSTEM</td>
                   </tr>
-                )}
+                ) : null}
                 <tr>
                   <td className="E-tag">(E)</td>
                   <td className="E-qty">1</td>
@@ -216,7 +216,7 @@ function CoverSheetInner({ data }: { data: PermitCoverData }) {
             </table>
 
             {/* SHEET INDEX */}
-            {sheets && sheets.length > 0 && (
+            {sheets && sheets.length > 0 ? (
               <>
                 <div className="E-sec" style={{ marginTop: '4px' }}>SHEET INDEX</div>
                 <table className="E-idx">
@@ -238,7 +238,7 @@ function CoverSheetInner({ data }: { data: PermitCoverData }) {
                   </tbody>
                 </table>
               </>
-            )}
+            ) : null}
 
             {/* PROJECT INFO */}
             <div className="E-sec" style={{ marginTop: '4px' }}>PROJECT INFORMATION</div>
@@ -266,7 +266,7 @@ function CoverSheetInner({ data }: { data: PermitCoverData }) {
           <div className="E-col-r">
 
             {/* CONSTRUCTION NOTES */}
-            {constructionNotes && constructionNotes.length > 0 && (
+            {constructionNotes && constructionNotes.length > 0 ? (
               <>
                 <div className="E-sec">GENERAL CONSTRUCTION NOTES</div>
                 <div className="E-notes">
@@ -282,7 +282,7 @@ function CoverSheetInner({ data }: { data: PermitCoverData }) {
                   </div>
                 </div>
               </>
-            )}
+            ) : null}
 
           </div>{/* end right */}
 

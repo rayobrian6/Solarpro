@@ -170,11 +170,11 @@ export function ConfidenceBadge({
       >
         {SOURCE_LABELS[source]}
       </Badge>
-      {detail && (
+      {detail ? (
         <span className="text-[10px] text-slate-500 truncate max-w-[120px]">
           {detail}
         </span>
-      )}
+      ) : null}
     </span>
   );
 }

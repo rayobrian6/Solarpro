@@ -111,7 +111,7 @@ export function PanelCompatibilityBanner({
               {expanded ? 'Hide details ▲' : 'Why? ▼'}
             </button>
 
-            {hasSuggestions && !verdict.autoSwitched && onChangePanel && (
+            {hasSuggestions && !verdict.autoSwitched && onChangePanel ? (
               <button
                 type="button"
                 onClick={() => onChangePanel(verdict.suggestions[0].id)}
@@ -120,9 +120,9 @@ export function PanelCompatibilityBanner({
                 Switch to {verdict.suggestions[0].manufacturer}{' '}
                 {verdict.suggestions[0].model} →
               </button>
-            )}
+            ) : null}
 
-            {onDismiss && (
+            {onDismiss ? (
               <button
                 type="button"
                 onClick={onDismiss}
@@ -131,10 +131,10 @@ export function PanelCompatibilityBanner({
               >
                 ×
               </button>
-            )}
+            ) : null}
           </div>
 
-          {expanded && (
+          {expanded ? (
             <div className="mt-3 pt-3 border-t border-current/20 space-y-3">
               <div className="text-xs opacity-80">
                 <strong>Brand MPPT cap:</strong>{' '}
@@ -149,15 +149,15 @@ export function PanelCompatibilityBanner({
                 {verdict.headroomPct < 0 && '(OVER CAP)'}
               </div>
 
-              {hasSuggestions && (
+              {hasSuggestions ? (
                 <div>
                   <div className="text-xs font-semibold mb-1.5">
                     Compatible replacements
-                    {verdict.autoSwitched && (
+                    {verdict.autoSwitched ? (
                       <span className="ml-2 opacity-70 font-normal">
                         (top choice applied automatically)
                       </span>
-                    )}
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {verdict.suggestions.map(s => {
@@ -188,9 +188,9 @@ export function PanelCompatibilityBanner({
                     })}
                   </div>
                 </div>
-              )}
+              ) : null}
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

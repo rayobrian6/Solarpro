@@ -151,23 +151,23 @@ function SubscribePageInner() {
       <div className="max-w-7xl mx-auto px-4 py-16">
 
         {/* ── Status banners ───────────────────────────────────────────────── */}
-        {expired && (
+        {expired ? (
           <div className="mb-8 bg-red-900/30 border border-red-500/50 rounded-xl p-5 text-center">
             <p className="text-red-300 font-semibold text-lg mb-1">⏰ Your free trial has expired</p>
             <p className="text-red-400/80 text-sm">Choose a plan below to keep all your projects and data.</p>
           </div>
-        )}
-        {canceled && (
+        ) : null}
+        {canceled ? (
           <div className="mb-8 bg-slate-800 border border-slate-600 rounded-xl p-4 text-center text-slate-300">
             Checkout was canceled. No charges were made. Choose a plan below to continue.
           </div>
-        )}
-        {error && (
+        ) : null}
+        {error ? (
           <div className="mb-8 bg-red-900/40 border border-red-500 rounded-xl p-4 text-center text-red-300 flex items-center justify-center gap-2">
             <span>⚠️ {error}</span>
             <button onClick={() => setError(null)} className="ml-4 text-red-400 hover:text-white">✕</button>
           </div>
-        )}
+        ) : null}
 
         {/* ── Hero ─────────────────────────────────────────────────────────── */}
         <div className="text-center mb-14">
@@ -198,16 +198,16 @@ function SubscribePageInner() {
                 } backdrop-blur p-6 flex flex-col`}
               >
                 {/* Badge */}
-                {plan.badge && (
+                {plan.badge ? (
                   <div className={`absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${styles.badge}`}>
                     ✦ {plan.badge}
                   </div>
-                )}
-                {plan.id === 'starter' && (
+                ) : null}
+                {plan.id === 'starter' ? (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-medium bg-green-500/20 text-green-400 border border-green-500/30 whitespace-nowrap">
                     3-Day Free Trial
                   </div>
-                )}
+                ) : null}
 
                 {/* Plan name & description */}
                 <div className="mb-4 mt-2">
@@ -229,15 +229,15 @@ function SubscribePageInner() {
                     <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                     <span className="text-slate-300">{plan.seatLabel}</span>
                   </div>
-                  {plan.extraSeatMsg && (
+                  {plan.extraSeatMsg ? (
                     <div className="text-xs text-slate-500 pl-5">{plan.extraSeatMsg}</div>
-                  )}
-                  {plan.id === 'enterprise' && (
+                  ) : null}
+                  {plan.id === 'enterprise' ? (
                     <div className="flex items-center gap-1.5 text-sm">
                       <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                       <span className="text-slate-300">Unlimited users</span>
                     </div>
-                  )}
+                  ) : null}
                 </div>
 
                 {/* CTA */}
@@ -257,11 +257,11 @@ function SubscribePageInner() {
                 </button>
 
                 {/* Contractor replacement message */}
-                {plan.id === 'contractor' && (
+                {plan.id === 'contractor' ? (
                   <p className="text-xs text-amber-400/80 text-center -mt-2 mb-4 leading-snug">
                     Replace $300–$1,000/month in solar software tools with one platform
                   </p>
-                )}
+                ) : null}
 
                 {/* Features */}
                 <div className="flex-1 space-y-2 border-t border-slate-700/50 pt-4">
@@ -300,7 +300,7 @@ function SubscribePageInner() {
         </div>
 
         {/* ── Feature Comparison Table ─────────────────────────────────────── */}
-        {showComparison && (
+        {showComparison ? (
           <div className="bg-slate-900/60 border border-slate-700 rounded-2xl overflow-hidden mb-16">
             <div className="p-6 border-b border-slate-700">
               <h2 className="text-2xl font-bold text-center">Feature Comparison</h2>
@@ -355,7 +355,7 @@ function SubscribePageInner() {
               </table>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* ── Trust badges ─────────────────────────────────────────────────── */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">

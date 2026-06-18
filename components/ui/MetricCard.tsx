@@ -52,29 +52,29 @@ export function MetricCard({
     >
       <div className="flex flex-col gap-3">
         {/* Icon + trend row */}
-        {(icon || trend) && (
+        {(icon || trend) ? (
           <div className="flex items-start justify-between">
-            {icon && (
+            {icon ? (
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${cfg.iconBg}`}>
                 <span className={cfg.iconColor}>{icon}</span>
               </div>
-            )}
-            {trend && (
+            ) : null}
+            {trend ? (
               <div className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full ml-auto ${cfg.trendColor} ${cfg.trendBg}`}>
                 <span>{trendUp ? '↑' : '↓'}</span>
                 {trend}
               </div>
-            )}
+            ) : null}
           </div>
-        )}
+        ) : null}
 
         {/* Value + label */}
         <div className={icon || trend ? '' : 'pt-1'}>
           <div className="metric-value-xl">{value}</div>
           <div className="metric-label-sm mt-1">{label}</div>
-          {subtext && (
+          {subtext ? (
             <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{subtext}</div>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

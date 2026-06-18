@@ -2,6 +2,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Plus, Trash2, Edit2, RefreshCw, CheckCircle, AlertCircle,
          Save, X, ChevronDown, ChevronRight, Search, Zap } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 // ─── utility type classifier ─────────────────────────────────────────────────
 function classifyUtility(name: string, notes?: string | null): 'IOU' | 'Co-op' | 'Muni' | 'PUD' {
@@ -159,7 +161,7 @@ function StateSection({ state, utilities, defaultOpen, onEdit, onDelete }: {
       </button>
 
       {/* ── Table ── */}
-      {open && (
+      {open ? (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
@@ -224,7 +226,7 @@ function StateSection({ state, utilities, defaultOpen, onEdit, onDelete }: {
             </tbody>
           </table>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -235,17 +237,15 @@ export default function AdminUtilities() {
   const [loading, setLoading]   = useState(true);
   const [adding, setAdding]     = useState(false);
   const [editing, setEditing]   = useState<any | null>(null);
-  const [toast, setToast]       = useState<{ msg: string; ok: boolean } | null>(null);
+  const toast = useToast();
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
   const [search, setSearch]     = useState('');
   const [typeFilter, setTypeFilter] = useState<'all'|'IOU'|'Co-op'|'Muni'|'PUD'>('all');
   const [nemFilter, setNemFilter]   = useState<'all'|'yes'|'no'>('all');
   const [stateFilter, setStateFilter] = useState('');
   const [expandAll, setExpandAll]   = useState(false); // collapsed by default — less scroll
 
-  const showToast = (msg: string, ok = true) => {
-    setToast({ msg, ok });
-    setTimeout(() => setToast(null), 3000);
-  };
+
 
   const load = async () => {
     setLoading(true);
@@ -262,16 +262,20 @@ export default function AdminUtilities() {
     const body   = editing ? { ...form, id: editing.id } : form;
     const r = await fetch('/api/admin/utilities', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const d = await r.json();
-    if (d.success) { showToast('✓ Saved'); setAdding(false); setEditing(null); load(); }
-    else showToast(d.error || 'Failed', false);
+    if (d.success) { toast.success('Saved'); setAdding(false); setEditing(null); load(); }
+    else toast.error(d.error || 'Failed');
   };
 
-  const del = async (id: string) => {
-    if (!confirm('Delete this utility?')) return;
-    const r = await fetch('/api/admin/utilities', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
-    const d = await r.json();
-    if (d.success) { showToast('✓ Deleted'); load(); }
-    else showToast(d.error || 'Failed', false);
+  const del = (id: string) => {
+    setConfirmDialog({
+      message: 'Delete this utility?',
+      onConfirm: async () => {
+        const r = await fetch('/api/admin/utilities', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+        const d = await r.json();
+        if (d.success) { toast.success('Deleted'); load(); }
+        else toast.error(d.error || 'Failed');
+      },
+    });
   };
 
   // ── filter ────────────────────────────────────────────────────────────────
@@ -326,14 +330,14 @@ export default function AdminUtilities() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-black text-white">Utility Intelligence Database</h1>
-          {!loading && items.length > 0 && (
+          {!loading && items.length > 0 ? (
             <div className="flex gap-3 mt-1 text-[11px]">
               <span className="text-slate-500">{items.length} utilities · {states.length} states</span>
               <span className="text-blue-400">{iouCount} IOU</span>
               <span className="text-green-400">{coopCount} Co-op</span>
               <span className="text-amber-400">{muniCount} Muni/PUD</span>
             </div>
-          )}
+          ) : null}
         </div>
         <button onClick={() => { setAdding(true); setEditing(null); }}
           className="flex items-center gap-1.5 text-xs bg-blue-500 text-white font-semibold rounded-lg px-3 py-2 hover:bg-blue-400 transition-all shrink-0">
@@ -343,7 +347,7 @@ export default function AdminUtilities() {
 
       {/* ── Add/Edit form ── */}
       {(adding && !editing) && <UtilityForm onSave={save} onCancel={() => setAdding(false)} />}
-      {editing && <UtilityForm initial={editing} onSave={save} onCancel={() => setEditing(null)} />}
+      {editing ? <UtilityForm initial={editing} onSave={save} onCancel={() => setEditing(null)} /> : null}
 
       {/* ── Filter bar ── */}
       <div className="flex flex-wrap gap-2 items-center p-3 rounded-xl bg-white/[0.03] border border-white/5">
@@ -392,12 +396,12 @@ export default function AdminUtilities() {
         </div>
 
         <div className="flex gap-1 ml-auto">
-          {hasFilter && (
+          {hasFilter ? (
             <button onClick={() => { setSearch(''); setTypeFilter('all'); setNemFilter('all'); setStateFilter(''); }}
               className="px-2 py-1 rounded-md text-[10px] text-slate-400 border border-white/5 hover:text-white transition-colors">
               Clear
             </button>
-          )}
+          ) : null}
           <button onClick={() => setExpandAll(v => !v)}
             className="px-2 py-1 rounded-md text-[10px] text-slate-400 border border-white/5 hover:text-white transition-colors flex items-center gap-1">
             {expandAll ? <><ChevronDown size={10}/>Collapse All</> : <><ChevronRight size={10}/>Expand All</>}
@@ -410,11 +414,11 @@ export default function AdminUtilities() {
       </div>
 
       {/* ── Results summary ── */}
-      {hasFilter && !loading && (
+      {hasFilter && !loading ? (
         <p className="text-[11px] text-slate-500 -mt-1">
           Showing {filtered.length} of {items.length} utilities across {grouped.length} states
         </p>
-      )}
+      ) : null}
 
       {/* ── Content ── */}
       {loading ? (
@@ -442,15 +446,15 @@ export default function AdminUtilities() {
         </div>
       )}
 
-      {/* ── Toast ── */}
-      {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-medium shadow-xl ${
-          toast.ok ? 'bg-green-500/20 border border-green-500/30 text-green-400'
-                   : 'bg-red-500/20 border border-red-500/30 text-red-400'}`}>
-          {toast.ok ? <CheckCircle size={13}/> : <AlertCircle size={13}/>}
-          {toast.msg}
-        </div>
-      )}
+      {/* ── Confirm Dialog ── */}
+      {confirmDialog ? (
+        <ConfirmDialog
+          message={confirmDialog.message}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+          variant="danger"
+        />
+      ) : null}
     </div>
   );
 }

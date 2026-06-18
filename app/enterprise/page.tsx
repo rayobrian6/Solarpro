@@ -137,13 +137,13 @@ export default function EnterprisePage() {
                 <h2 className="text-xl font-black text-white mb-1">Contact Sales</h2>
                 <p className="text-slate-400 text-sm mb-6">Tell us about your operation and we'll get back to you within 1 business day.</p>
 
-                {error && (
+                {error ? (
                   <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-300 text-sm mb-5">
                     <AlertCircle size={14} className="flex-shrink-0" />
                     {error}
                     <button onClick={() => setError(null)} className="ml-auto"><X size={12} /></button>
                   </div>
-                )}
+                ) : null}
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div>

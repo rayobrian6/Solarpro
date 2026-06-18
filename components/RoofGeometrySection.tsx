@@ -748,41 +748,41 @@ export function RoofGeometrySection({
         <div className="flex items-center gap-2">
           <Home size={16} className="text-emerald-400" />
           <h3 className="text-sm font-semibold text-white">Roof Geometry</h3>
-          {hasAnyData && (
+          {hasAnyData ? (
             <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
               {artifacts.length} artifacts
             </span>
-          )}
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
-          {hasPipelineBData && (
+          {hasPipelineBData ? (
             <span className="flex items-center gap-1 text-[10px] text-emerald-400">
               <CheckCircle size={10} /> Pipeline B
-              {pipelineBackend === 'sam2' && (
+              {pipelineBackend === 'sam2' ? (
                 <span className="flex items-center gap-0.5 rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-300">
                   <Zap size={8} /> SAM 2
                 </span>
-              )}
-              {pipelineBackend === 'canny' && (
+              ) : null}
+              {pipelineBackend === 'canny' ? (
                 <span className="flex items-center gap-0.5 rounded-full bg-slate-500/20 px-1.5 py-0.5 text-[9px] font-medium text-slate-400">
                   <Cpu size={8} /> Canny
                 </span>
-              )}
+              ) : null}
             </span>
-          )}
-          {hasPipelineCData && (
+          ) : null}
+          {hasPipelineCData ? (
             <span className="flex items-center gap-1 text-[10px] text-amber-400">
               <Sun size={10} /> Pipeline C (Solar API)
             </span>
-          )}
-          {hasPipelineAData && !hasPipelineBData && !hasPipelineCData && (
+          ) : null}
+          {hasPipelineAData && !hasPipelineBData && !hasPipelineCData ? (
             <span className="flex items-center gap-1 text-[10px] text-amber-400">
               <ScanLine size={10} /> Pipeline A only
             </span>
-          )}
-          {!hasAnyData && !bundleLoading && (
+          ) : null}
+          {!hasAnyData && !bundleLoading ? (
             <span className="text-[10px] text-slate-500">No geometry data yet</span>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -836,18 +836,18 @@ export function RoofGeometrySection({
             )}
             {pipelineCLoading ? 'Fetching Solar API…' : pipelineCNoCoverage ? 'Solar API (No Coverage)' : googleSolarApiConfigured === false ? 'Solar API (No Key)' : 'Google Solar API (Real Shapes)'}
           </button>
-          {hasAnyData && (
+          {hasAnyData ? (
             <button
               onClick={() => fetchBundle()}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/60 px-2.5 py-1.5 text-[10px] text-slate-400 transition hover:text-slate-200"
             >
               <RefreshCw size={10} />
             </button>
-          )}
+          ) : null}
         </div>
 
         {/* ── Pipeline Status ── */}
-        {pipelineStatus === 'running' && (
+        {pipelineStatus === 'running' ? (
           <div className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-2.5">
             <div className="flex items-center gap-2">
               <RefreshCw size={12} className="animate-spin text-blue-400" />
@@ -856,30 +856,30 @@ export function RoofGeometrySection({
               </span>
             </div>
           </div>
-        )}
+        ) : null}
 
-        {pipelineStatus === 'completed' && generationSummary && (
+        {pipelineStatus === 'completed' && generationSummary ? (
           <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-2.5">
             <p className="text-[11px] font-semibold text-emerald-300">Geometry generated</p>
             <p className="mt-0.5 text-[10px] text-emerald-100/70">{generationSummary}</p>
           </div>
-        )}
+        ) : null}
 
-        {pipelineStatus === 'failed' && pipelineError && (
+        {pipelineStatus === 'failed' && pipelineError ? (
           <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-2.5">
             <p className="text-[11px] font-semibold text-red-300">Error</p>
             <p className="mt-0.5 text-[10px] text-red-200/70">{pipelineError}</p>
           </div>
-        )}
+        ) : null}
 
         {/* ── Pipeline C (Solar API) Status ── */}
-        {pipelineCSummary && (
+        {pipelineCSummary ? (
           <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-2.5">
             <p className="text-[11px] font-semibold text-amber-300">Solar API Result</p>
             <p className="mt-0.5 text-[10px] text-amber-100/70">{pipelineCSummary}</p>
           </div>
-        )}
-        {pipelineCNoCoverage && pipelineCError && (
+        ) : null}
+        {pipelineCNoCoverage && pipelineCError ? (
           <div className="rounded-lg border border-slate-600/30 bg-slate-800/50 p-3">
             <div className="flex items-start gap-2">
               <AlertTriangle size={14} className="text-slate-400 mt-0.5 flex-shrink-0" />
@@ -907,18 +907,18 @@ export function RoofGeometrySection({
               </div>
             </div>
           </div>
-        )}
-        {pipelineCError && !pipelineCNoCoverage && (
+        ) : null}
+        {pipelineCError && !pipelineCNoCoverage ? (
           <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-2.5">
             <div className="flex items-start gap-2">
               <AlertTriangle size={12} className="text-amber-400 mt-0.5 flex-shrink-0" />
               <p className="text-[10px] text-amber-200/70">{pipelineCError}</p>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* ── Per-Photo Segmentation Status ── */}
-        {photoResults.length > 0 && (
+        {photoResults.length > 0 ? (
           <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
             <div className="flex items-center gap-2 mb-2">
               <Camera size={12} className="text-emerald-400" />
@@ -939,44 +939,44 @@ export function RoofGeometrySection({
                 const skippedNotConfig = photoResults.filter(r => r.status === 'skipped_not_configured').length;
                 return (
                   <>
-                    {successCount > 0 && (
+                    {successCount > 0 ? (
                       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[9px] font-medium text-emerald-300">
                         <CheckCircle size={8} /> {successCount} SAM 2
                       </span>
-                    )}
-                    {failedCount > 0 && (
+                    ) : null}
+                    {failedCount > 0 ? (
                       <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2 py-0.5 text-[9px] font-medium text-red-300">
                         <XCircle size={8} /> {failedCount} failed
                       </span>
-                    )}
-                    {skippedBudget > 0 && (
+                    ) : null}
+                    {skippedBudget > 0 ? (
                       <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[9px] font-medium text-amber-300">
                         <SkipForward size={8} /> {skippedBudget} budget
                       </span>
-                    )}
-                    {skippedTimeout > 0 && (
+                    ) : null}
+                    {skippedTimeout > 0 ? (
                       <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/15 px-2 py-0.5 text-[9px] font-medium text-orange-300">
                         <Clock size={8} /> {skippedTimeout} timeout
                       </span>
-                    )}
-                    {skippedWarmup > 0 && (
+                    ) : null}
+                    {skippedWarmup > 0 ? (
                       <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/15 px-2 py-0.5 text-[9px] font-medium text-slate-300">
                         <AlertTriangle size={8} /> {skippedWarmup} warm-up fail
                       </span>
-                    )}
-                    {skippedNotConfig > 0 && (
+                    ) : null}
+                    {skippedNotConfig > 0 ? (
                       <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/15 px-2 py-0.5 text-[9px] font-medium text-slate-400">
                         <Cpu size={8} /> {skippedNotConfig} no SAM 2 URL
                       </span>
-                    )}
+                    ) : null}
                   </>
                 );
               })()}
             </div>
 
-            {budgetExhaustedReason && (
+            {budgetExhaustedReason ? (
               <p className="text-[9px] text-amber-300/60 mb-2">Budget reason: {budgetExhaustedReason}</p>
-            )}
+            ) : null}
 
             {/* Per-photo list -- successes first, then failures, then skips */}
             <div className="max-h-40 overflow-y-auto space-y-1">
@@ -1022,25 +1022,25 @@ export function RoofGeometrySection({
                     >
                       {icon}
                       <span className={"truncate flex-1 " + textColor}>{label}</span>
-                      {isSuccess && pr.maskCount > 0 && (
+                      {isSuccess && pr.maskCount > 0 ? (
                         <span className="text-[9px] text-emerald-400/60">{pr.maskCount} mask{pr.maskCount !== 1 ? 's' : ''}</span>
-                      )}
-                      {!isSuccess && (
+                      ) : null}
+                      {!isSuccess ? (
                         <span className="text-[9px] text-slate-500">{statusLabel}</span>
-                      )}
-                      {pr.reason && (
+                      ) : null}
+                      {pr.reason ? (
                         <span className="text-[9px] text-slate-500 truncate max-w-[200px]" title={pr.reason}>{pr.reason}</span>
-                      )}
+                      ) : null}
                     </div>
                   );
                 });
               })()}
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* ── Quick Stats ── */}
-        {hasAnyData && (
+        {hasAnyData ? (
           <div className="flex flex-wrap gap-2">
             {Object.entries(classCounts).map(([cls, count]) => (
               <span
@@ -1060,10 +1060,10 @@ export function RoofGeometrySection({
               Source: {hasPipelineCData ? 'Google Solar API + ' : ''}{hasPipelineBData ? 'Geometry Recon + ' : ''}Photo Vision
             </span>
           </div>
-        )}
+        ) : null}
 
         {/* ── Geometry Stats Summary Panel ── */}
-        {hasAnyData && (geometryStats.planeCount > 0 || geometryStats.lineCount > 0) && (
+        {hasAnyData && (geometryStats.planeCount > 0 || geometryStats.lineCount > 0) ? (
           <div className="rounded-lg border border-slate-700/40 bg-slate-900/30 p-3">
             <div className="flex items-center gap-2 mb-2">
               <Eye size={12} className="text-slate-400" />
@@ -1074,25 +1074,25 @@ export function RoofGeometrySection({
               <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 px-2.5 py-2">
                 <p className="text-[9px] text-emerald-400/70 uppercase tracking-wider">Planes</p>
                 <p className="text-lg font-bold text-emerald-300">{geometryStats.planeCount}</p>
-                {geometryStats.totalAreaSqM > 0 && (
+                {geometryStats.totalAreaSqM > 0 ? (
                   <p className="text-[9px] text-emerald-400/50">{geometryStats.totalAreaSqM.toFixed(1)} m² total</p>
-                )}
+                ) : null}
               </div>
               {/* Total lines */}
               <div className="rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-2">
                 <p className="text-[9px] text-amber-400/70 uppercase tracking-wider">Roof Lines</p>
                 <p className="text-lg font-bold text-amber-300">{geometryStats.lineCount}</p>
-                {geometryStats.totalLineLengthM > 0 && (
+                {geometryStats.totalLineLengthM > 0 ? (
                   <p className="text-[9px] text-amber-400/50">{geometryStats.totalLineLengthM.toFixed(1)} m total</p>
-                )}
+                ) : null}
               </div>
               {/* Avg confidence */}
               <div className="rounded-md border border-blue-500/20 bg-blue-500/5 px-2.5 py-2">
                 <p className="text-[9px] text-blue-400/70 uppercase tracking-wider">Avg Confidence</p>
                 <p className="text-lg font-bold text-blue-300">{geometryStats.avgConfidence != null ? `${Math.round(geometryStats.avgConfidence)}%` : '—'}</p>
-                {geometryStats.avgLineConfidence != null && geometryStats.lineCount > 0 && (
+                {geometryStats.avgLineConfidence != null && geometryStats.lineCount > 0 ? (
                   <p className="text-[9px] text-blue-400/50">Lines: {Math.round(geometryStats.avgLineConfidence)}%</p>
-                )}
+                ) : null}
               </div>
               {/* Pitch / Azimuth range */}
               <div className="rounded-md border border-violet-500/20 bg-violet-500/5 px-2.5 py-2">
@@ -1109,7 +1109,7 @@ export function RoofGeometrySection({
             </div>
 
             {/* Line subtype breakdown (if any roof lines) */}
-            {geometryStats.lineCount > 0 && Object.keys(geometryStats.lineSubtypes).length > 0 && (
+            {geometryStats.lineCount > 0 && Object.keys(geometryStats.lineSubtypes).length > 0 ? (
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {Object.entries(geometryStats.lineSubtypes).map(([sub, count]) => (
                   <span
@@ -1120,10 +1120,10 @@ export function RoofGeometrySection({
                   </span>
                 ))}
               </div>
-            )}
+            ) : null}
 
             {/* Pass 3E: Segmentation mask participation breakdown */}
-            {geometryStats.segMaskCount > 0 && (
+            {geometryStats.segMaskCount > 0 ? (
               <div className="mt-2 flex flex-wrap gap-1.5">
                 <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-0.5 text-[9px] text-cyan-300">
                   Masks: {geometryStats.segMaskCount}
@@ -1131,23 +1131,23 @@ export function RoofGeometrySection({
                 <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-300">
                   Geometry: {geometryStats.participatingMaskCount}
                 </span>
-                {geometryStats.excludedMaskCount > 0 && (
+                {geometryStats.excludedMaskCount > 0 ? (
                   <span className="rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 text-[9px] text-orange-300">
                     Excluded: {geometryStats.excludedMaskCount}
                   </span>
-                )}
-                {geometryStats.partialMaskCount > 0 && (
+                ) : null}
+                {geometryStats.partialMaskCount > 0 ? (
                   <span className="rounded-full border border-yellow-500/20 bg-yellow-500/10 px-2 py-0.5 text-[9px] text-yellow-300">
                     Partial: {geometryStats.partialMaskCount}
                   </span>
-                )}
+                ) : null}
               </div>
-            )}
+            ) : null}
           </div>
-        )}
+        ) : null}
 
         {/* ── Info banner when no Pipeline B/C data ── */}
-        {hasPipelineAData && !hasPipelineBData && !hasPipelineCData && (
+        {hasPipelineAData && !hasPipelineBData && !hasPipelineCData ? (
           <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-2.5">
             <div className="flex items-start gap-2">
               <AlertTriangle size={12} className="text-amber-400 mt-0.5 flex-shrink-0" />
@@ -1164,10 +1164,10 @@ export function RoofGeometrySection({
               </div>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* ── Photo + Geometry Overlay ── */}
-        {hasAnyData && filesWithArtifacts.length > 0 && (
+        {hasAnyData && filesWithArtifacts.length > 0 ? (
           <div className="rounded-lg border border-slate-700/40 bg-slate-950/30 p-2">
             {/* Debug roof-line toggle & polygon detail toggle */}
             <div className="flex items-center gap-2 mb-2 flex-wrap">
@@ -1190,11 +1190,11 @@ export function RoofGeometrySection({
                   <>📋 Show Debug Roof-Line Candidates</>
                 )}
               </button>
-              {showDebugRoofLines && (
+              {showDebugRoofLines ? (
                 <span className="text-[8px] text-amber-400/60">
                   Thick lines visible. Low-confidence & duplicate lines shown.
                 </span>
-              )}
+              ) : null}
               {/* Debug overlay toggle — show excluded/background/unknown artifacts */}
               <button
                 type="button"
@@ -1215,36 +1215,36 @@ export function RoofGeometrySection({
                   <>🛡️ Show Debug Overlays</>
                 )}
               </button>
-              {showDebugOverlays && (
+              {showDebugOverlays ? (
                 <span className="text-[8px] text-violet-400/60">
                   Raw overlay mode — excluded, background & unknown artifacts visible.
                 </span>
-              )}
+              ) : null}
               {/* Per-photo overlay status indicator */}
-              {bundleMode === 'stats' && overlayArtifactsByFile.size === 0 && !overlayLoading && selectedFileId && (
+              {bundleMode === 'stats' && overlayArtifactsByFile.size === 0 && !overlayLoading && selectedFileId ? (
                 <span className="inline-flex items-center gap-1 text-[9px] text-slate-500">
                   <Shapes size={10} />
                   Click a photo to load polygons
                 </span>
-              )}
-              {bundleMode === 'stats' && overlayLoading && (
+              ) : null}
+              {bundleMode === 'stats' && overlayLoading ? (
                 <span className="inline-flex items-center gap-1 text-[9px] text-cyan-400 animate-pulse">
                   <Shapes size={10} />
                   Loading polygons...
                 </span>
-              )}
-              {bundleMode === 'stats' && overlayArtifactsByFile.size > 0 && !overlayLoading && (
+              ) : null}
+              {bundleMode === 'stats' && overlayArtifactsByFile.size > 0 && !overlayLoading ? (
                 <span className="inline-flex items-center gap-1 text-[9px] text-cyan-400/60">
                   <Shapes size={10} />
                   Polygons loaded for {overlayArtifactsByFile.size} photo{overlayArtifactsByFile.size !== 1 ? 's' : ''}
                 </span>
-              )}
-              {bundleMode === 'overlay' && (
+              ) : null}
+              {bundleMode === 'overlay' ? (
                 <span className="inline-flex items-center gap-1 text-[9px] text-cyan-400/60">
                   <Shapes size={10} />
                   All polygon detail loaded
                 </span>
-              )}
+              ) : null}
               {/* Load All Polygons button removed — per-photo overlay makes it unnecessary and it could exceed Vercel 4.5MB limit */}
             </div>
             <OverlayErrorBoundary>
@@ -1258,10 +1258,10 @@ export function RoofGeometrySection({
               />
             </OverlayErrorBoundary>
           </div>
-        )}
+        ) : null}
 
         {/* ── Empty State ── */}
-        {!hasAnyData && !bundleLoading && (
+        {!hasAnyData && !bundleLoading ? (
           <div className="rounded-lg border border-slate-700/40 bg-slate-900/20 p-6 text-center">
             <Box size={24} className="mx-auto text-slate-600 mb-2" />
             {authRequired ? (
@@ -1275,10 +1275,10 @@ export function RoofGeometrySection({
               </p>
             )}
           </div>
-        )}
+        ) : null}
 
         {/* ── Collapsible Details ── */}
-        {hasAnyData && (
+        {hasAnyData ? (
           <button
             onClick={() => setDetailsOpen(!detailsOpen)}
             className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-300 transition"
@@ -1286,9 +1286,9 @@ export function RoofGeometrySection({
             {detailsOpen ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
             {detailsOpen ? 'Hide' : 'Show'} raw artifact details
           </button>
-        )}
+        ) : null}
 
-        {detailsOpen && hasAnyData && (
+        {detailsOpen && hasAnyData ? (
           <div className="rounded-lg border border-slate-700/40 bg-slate-900/20 p-3 max-h-80 overflow-y-auto">
             <div className="space-y-1.5">
               {artifacts.slice(0, 50).map((artifact, i) => (
@@ -1314,25 +1314,25 @@ export function RoofGeometrySection({
                     <span className="text-[9px] text-slate-500">
                       {artifact.provenance?.sourcePipeline === 'google_solar_api' ? 'Pipeline C' : artifact.provenance?.sourcePipeline === 'geometry_recon' ? 'Pipeline B' : 'Pipeline A'}
                     </span>
-                    {artifact.confidence != null && (
+                    {artifact.confidence != null ? (
                       <span className="text-[9px] text-slate-500">
                         {Math.round(artifact.confidence)}%
                       </span>
-                    )}
-                    {artifact.authority?.mockArtifact && (
+                    ) : null}
+                    {artifact.authority?.mockArtifact ? (
                       <span className="text-[8px] text-red-400">MOCK</span>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               ))}
-              {artifacts.length > 50 && (
+              {artifacts.length > 50 ? (
                 <p className="text-[9px] text-slate-500 text-center pt-1">
                   …and {artifacts.length - 50} more
                 </p>
-              )}
+              ) : null}
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

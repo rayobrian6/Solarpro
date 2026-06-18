@@ -61,7 +61,7 @@ export default function ProductionPanel({ production, costEstimate, clientAnnual
       </div>
 
       {/* Cumulative savings */}
-      {costEstimate && (
+      {costEstimate ? (
         <div className="card p-4">
           <h4 className="text-xs font-semibold text-slate-300 mb-3">25-Year Cumulative Savings</h4>
           <ResponsiveContainer width="100%" height={120}>
@@ -74,7 +74,7 @@ export default function ProductionPanel({ production, costEstimate, clientAnnual
             </LineChart>
           </ResponsiveContainer>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

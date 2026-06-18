@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
-  ArrowLeft, RefreshCw, ExternalLink, Sun,
+  ArrowLeft, RefreshCw, ExternalLink, Sun, ClipboardList, Search, Ruler, FileOutput, Wrench, Star,
   MapPin, Clock, CheckCircle2, Circle,
   AlertCircle, Zap, TrendingUp, Home, Phone, Mail,
 } from 'lucide-react';
@@ -48,7 +48,7 @@ type StageContent = {
   next: string;
   action: string;
   actionIsRequired: boolean;
-  icon: string;
+  icon: React.ReactNode;
 };
 
 const STAGE_CONTENT: Record<HomeownerStage, StageContent> = {
@@ -57,49 +57,49 @@ const STAGE_CONTENT: Record<HomeownerStage, StageContent> = {
     headline: 'We got your request.',
     body: "We're getting familiar with your home and energy needs. Your project has been created and we'll be in touch soon.",
     next: "Next: We'll review your project and reach out.",
-    action: 'Nothing to do right now.', actionIsRequired: false, icon: '📋',
+    action: 'Nothing to do right now.', actionIsRequired: false, icon: <ClipboardList size={18} />,
   },
   under_review: {
     roadmapLabel: 'Under Review', stepLabel: 'Step 2 of 7',
     headline: "We're reviewing your project.",
     body: "We're looking at your home, roof, and energy usage to figure out the right system for you. This usually takes 1–2 business days.",
     next: "Next: We'll schedule your site survey.",
-    action: 'Nothing to do right now.', actionIsRequired: false, icon: '🔍',
+    action: 'Nothing to do right now.', actionIsRequired: false, icon: <Search size={18} />,
   },
   site_survey: {
     roadmapLabel: 'Site Survey', stepLabel: 'Step 3 of 7',
     headline: 'Your site survey is coming up.',
     body: "We're sending someone to your home to measure your roof and confirm the setup details.",
     next: "Next: After the visit, we'll start designing your system.",
-    action: "Action needed: We'll reach out to confirm your appointment. Please be available.", actionIsRequired: true, icon: '📐',
+    action: "Action needed: We'll reach out to confirm your appointment. Please be available.", actionIsRequired: true, icon: <Ruler size={18} />,
   },
   design: {
     roadmapLabel: 'System Design', stepLabel: 'Step 4 of 7',
     headline: "We're designing your system.",
     body: "Our team is building a solar layout specifically for your home — size, placement, and output.",
     next: "Next: We'll put together your proposal.",
-    action: 'Nothing to do right now.', actionIsRequired: false, icon: '⚡',
+    action: 'Nothing to do right now.', actionIsRequired: false, icon: <Zap size={18} />,
   },
   proposal: {
     roadmapLabel: 'Proposal Ready', stepLabel: 'Step 5 of 7',
     headline: 'Your proposal is ready.',
     body: "We've put together your solar plan — system size, estimated savings, and financing options.",
     next: "Next: Once you approve, we'll move to installation.",
-    action: 'Action needed: Review your proposal and let us know if you have questions.', actionIsRequired: true, icon: '📄',
+    action: 'Action needed: Review your proposal and let us know if you have questions.', actionIsRequired: true, icon: <FileOutput size={18} />,
   },
   installation: {
     roadmapLabel: 'Installation', stepLabel: 'Step 6 of 7',
     headline: 'Installation is being scheduled.',
     body: "We're handling permits and lining up your crew. You'll hear from us soon with a date.",
     next: "Next: We'll confirm your install date.",
-    action: "Action needed: Watch for our call or email with scheduling details.", actionIsRequired: true, icon: '🔧',
+    action: "Action needed: Watch for our call or email with scheduling details.", actionIsRequired: true, icon: <Wrench size={18} />,
   },
   completed: {
     roadmapLabel: 'Complete', stepLabel: 'Step 7 of 7',
     headline: 'Your system is live.',
     body: "Your solar panels are installed and running. You're now generating your own power.",
     next: '',
-    action: "You're all set. Enjoy the savings.", actionIsRequired: false, icon: '🌟',
+    action: "You're all set. Enjoy the savings.", actionIsRequired: false, icon: <Star size={18} />,
   },
 };
 
@@ -166,11 +166,11 @@ function Roadmap({ stage }: { stage: HomeownerStage | null }) {
             const c = STAGE_CONTENT[s];
             return (
               <div key={s} className="flex-1 flex flex-col items-center relative z-10">
-                {i > 0 && (
+                {i > 0 ? (
                   <div className={`absolute top-[38px] right-1/2 left-[-50%] h-[2px] z-0 transition-all duration-700 ${
                     past || cur ? 'bg-gradient-to-r from-emerald-500/60 to-emerald-400/40' : 'bg-white/[0.05]'
                   }`} />
-                )}
+                ) : null}
                 <div className={`relative flex items-center justify-center rounded-full transition-all duration-500 z-10 ${
                   cur  ? 'w-[56px] h-[56px] bg-gradient-to-br from-amber-400 to-amber-600 border-2 border-amber-300/50 shadow-xl shadow-amber-500/30'
                   : past ? 'w-10 h-10 bg-emerald-500/15 border-2 border-emerald-500/40'
@@ -185,7 +185,7 @@ function Roadmap({ stage }: { stage: HomeownerStage | null }) {
                   cur ? 'text-amber-300' : past ? 'text-emerald-400/60' : 'text-white/15'
                 }`}>{c.roadmapLabel}</span>
                 {cur  && <span className="mt-1 text-[9px] font-black text-amber-500/50 uppercase tracking-widest">NOW</span>}
-                {past && <span className="mt-1 text-[9px] text-emerald-500/35 uppercase tracking-wider">✓</span>}
+                {past ? <span className="mt-1 text-[9px] text-emerald-500/35 uppercase tracking-wider">✓</span> : null}
               </div>
             );
           })}
@@ -213,7 +213,7 @@ function Roadmap({ stage }: { stage: HomeownerStage | null }) {
                 <div className="flex items-center gap-2">
                   <span className={`text-sm font-bold ${cur ? 'text-amber-300' : past ? 'text-white/35' : 'text-white/15'}`}>{c.roadmapLabel}</span>
                   {cur  && <span className="text-[9px] font-black bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full uppercase tracking-wider">Now</span>}
-                  {past && <span className="text-[9px] text-emerald-500/40">✓</span>}
+                  {past ? <span className="text-[9px] text-emerald-500/40">✓</span> : null}
                 </div>
               </div>
             </div>
@@ -336,12 +336,12 @@ export default function AdminPortalPreview() {
               {greeting},{' '}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-amber-500">{firstName}</span>
             </h1>
-            {project.address && (
+            {project.address ? (
               <div className="flex items-center gap-2 mt-3">
                 <MapPin size={12} className="text-slate-600 flex-shrink-0" />
                 <span className="text-sm text-slate-400">{project.address}</span>
               </div>
-            )}
+            ) : null}
             <div className="flex items-center gap-2 mt-1.5">
               <Clock size={11} className="text-slate-700 flex-shrink-0" />
               <span className="text-xs text-slate-600">Last updated {lastUpdated}</span>
@@ -368,7 +368,7 @@ export default function AdminPortalPreview() {
           </div>
 
           {/* ── 3. CURRENT STAGE — single narrative block ── */}
-          {content && (
+          {content ? (
             <div className="rounded-2xl border border-amber-500/[0.12] bg-amber-500/[0.04] px-6 sm:px-10 py-8">
               <div className="flex items-center gap-2 mb-5">
                 <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
@@ -378,9 +378,9 @@ export default function AdminPortalPreview() {
                 {content.headline}
               </h2>
               <p className="text-sm text-slate-300 leading-relaxed max-w-2xl">{content.body}</p>
-              {content.next && (
+              {content.next ? (
                 <p className="text-sm text-slate-400 mt-4">{content.next}</p>
-              )}
+              ) : null}
               <div className={`mt-6 inline-flex items-center gap-2.5 rounded-xl px-4 py-2.5 border ${
                 content.actionIsRequired
                   ? 'bg-blue-500/[0.08] border-blue-500/[0.15] text-blue-300'
@@ -392,7 +392,7 @@ export default function AdminPortalPreview() {
                 <span className="text-sm font-medium">{content.action}</span>
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* ── 4. PROJECT DETAILS (small) ── */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">

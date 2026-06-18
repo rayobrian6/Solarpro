@@ -795,7 +795,7 @@ export function UnifiedGeometryOverlayRenderer({
   return (
     <div className="space-y-3">
       {/* File selector strip */}
-      {filesWithDrawable.length > 1 && (
+      {filesWithDrawable.length > 1 ? (
         <div className="flex flex-wrap gap-1.5">
           {filesWithDrawable.map((fw) => (
             <button
@@ -815,10 +815,10 @@ export function UnifiedGeometryOverlayRenderer({
             </button>
           ))}
         </div>
-      )}
+      ) : null}
 
       {/* Overlay image viewer */}
-      {activeFile && (
+      {activeFile ? (
         <PhotoWithUnifiedOverlays
           fileUrl={activeFile.fileUrl}
           filename={activeFile.filename}
@@ -826,7 +826,7 @@ export function UnifiedGeometryOverlayRenderer({
           showDebugRoofLines={showDebugRoofLines}
           showDebugOverlays={showDebugOverlays}
         />
-      )}
+      ) : null}
 
       {/* Legend */}
       <div className="flex flex-wrap items-center gap-3 px-1">
@@ -950,11 +950,11 @@ export function UnifiedGeometryOverlayRenderer({
             {showDebugRoofLines ? '🔍 Debug: All line candidates' : '📋 Review: Trusted lines only'}
           </span>
         </label>
-        {showDebugRoofLines && (
+        {showDebugRoofLines ? (
           <span className="text-[8px] text-amber-400/60">
             Thick lines = debug mode. Low-conf & duplicates visible.
           </span>
-        )}
+        ) : null}
         <label className="flex items-center gap-1.5 cursor-pointer group">
           <span
             className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[9px] font-medium transition ${
@@ -970,11 +970,11 @@ export function UnifiedGeometryOverlayRenderer({
             {showDebugOverlays ? '🔍 Debug: All overlays' : '🛡️ Clean: Filtered view'}
           </span>
         </label>
-        {showDebugOverlays && (
+        {showDebugOverlays ? (
           <span className="text-[8px] text-violet-400/60">
             Raw mode — excluded, background & unknown artifacts visible.
           </span>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -1122,7 +1122,7 @@ function PhotoWithUnifiedOverlays({
           return (
             <g key={entry.artifact.id}>
               {/* Polygon (real roof geometry from Pipeline B) */}
-              {entry.polygonSvg && (
+              {entry.polygonSvg ? (
                 <polygon
                   points={entry.polygonSvg.points}
                   fill={isRoofLine ? 'none' : entry.color.stroke}
@@ -1134,10 +1134,10 @@ function PhotoWithUnifiedOverlays({
                   onMouseEnter={() => setHoveredIdx(idx)}
                   onMouseLeave={() => setHoveredIdx(null)}
                 />
-              )}
+              ) : null}
 
               {/* Bounding box (fallback when no polygon) */}
-              {!entry.polygonSvg && entry.rectSvg && (
+              {!entry.polygonSvg && entry.rectSvg ? (
                 <rect
                   x={entry.rectSvg.x}
                   y={entry.rectSvg.y}
@@ -1153,7 +1153,7 @@ function PhotoWithUnifiedOverlays({
                   onMouseEnter={() => setHoveredIdx(idx)}
                   onMouseLeave={() => setHoveredIdx(null)}
                 />
-              )}
+              ) : null}
 
               {/* Line segment - thick colored lines for roof edges */}
               {entry.lineSvg && (() => {
@@ -1172,7 +1172,7 @@ function PhotoWithUnifiedOverlays({
                 return (
                   <g>
                     {/* Outer glow / outline — only in debug mode for visibility on any background */}
-                    {showDebugRoofLines && (
+                    {showDebugRoofLines ? (
                       <line
                         x1={entry.lineSvg.x1}
                         y1={entry.lineSvg.y1}
@@ -1183,7 +1183,7 @@ function PhotoWithUnifiedOverlays({
                         strokeLinecap="round"
                         style={{ pointerEvents: 'none' }}
                       />
-                    )}
+                    ) : null}
                     {/* Main colored line */}
                     <line
                       x1={entry.lineSvg.x1}
@@ -1232,16 +1232,16 @@ function PhotoWithUnifiedOverlays({
               <span className="text-[10px] text-slate-500">
                 {Math.round(a.confidence)}% conf
               </span>
-              {a.lineSubtype && (
+              {a.lineSubtype ? (
                 <span className="text-[9px] text-amber-300 border border-amber-500/30 rounded px-1">
                   {lineStyle?.label ?? a.lineSubtype}
                 </span>
-              )}
-              {a.planeType && (
+              ) : null}
+              {a.planeType ? (
                 <span className="text-[9px] text-emerald-300 border border-emerald-500/30 rounded px-1">
                   {a.planeType}
                 </span>
-              )}
+              ) : null}
               {a.authority?.mockArtifact ? (
                 <span className="text-[9px] text-red-300 border border-red-500/30 rounded px-1">
                   MOCK
@@ -1252,25 +1252,25 @@ function PhotoWithUnifiedOverlays({
                 </span>
               )}
               {/* Occluder badge */}
-              {a.isOccluder && (
+              {a.isOccluder ? (
                 <span className="text-[9px] text-gray-400 border border-gray-500/30 rounded px-1">
                   OCCLUDER
                 </span>
-              )}
+              ) : null}
               {/* Pass 3E: Geometry exclusion badge */}
-              {a.excludeFromGeometry && (
+              {a.excludeFromGeometry ? (
                 <span className="text-[9px] text-orange-400 border border-orange-500/30 rounded px-1">
                   EXCLUDED
                 </span>
-              )}
+              ) : null}
               {/* Pass 3E: Partial participation badge (some stages disabled) */}
-              {!a.excludeFromGeometry && a.geometryParticipation && (
+              {!a.excludeFromGeometry && a.geometryParticipation ? (
                 Object.values(a.geometryParticipation).some(v => v === false) && (
                   <span className="text-[9px] text-yellow-400 border border-yellow-500/30 rounded px-1">
                     PARTIAL
                   </span>
                 )
-              )}
+              ) : null}
               {/* Condition flag badges */}
               {a.conditionFlags && a.conditionFlags.map((flag, fi) => (
                 <span key={fi} className="text-[9px] text-red-300 border border-red-500/30 rounded px-1">
@@ -1278,91 +1278,91 @@ function PhotoWithUnifiedOverlays({
                 </span>
               ))}
               {/* Segmentation class badge for segmentation_mask */}
-              {a.geometryClass === 'segmentation_mask' && a.segmentationClass && (
+              {a.geometryClass === 'segmentation_mask' && a.segmentationClass ? (
                 <span className="text-[9px] text-cyan-300 border border-cyan-500/30 rounded px-1">
                   {a.segmentationClass.replace(/_/g, ' ')}
                 </span>
-              )}
+              ) : null}
               {/* Facade/site context subtype badges */}
-              {a.facadeSubtype && (
+              {a.facadeSubtype ? (
                 <span className="text-[9px] text-amber-300 border border-amber-500/30 rounded px-1">
                   {a.facadeSubtype.replace(/_/g, ' ')}
                 </span>
-              )}
-              {a.siteContextSubtype && (
+              ) : null}
+              {a.siteContextSubtype ? (
                 <span className="text-[9px] text-lime-300 border border-lime-500/30 rounded px-1">
                   {a.siteContextSubtype.replace(/_/g, ' ')}
                 </span>
-              )}
+              ) : null}
             </div>
 
             {/* Plane-specific details: pitch, azimuth, area, vertices */}
-            {isRoofPlane && (
+            {isRoofPlane ? (
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] text-slate-400">
-                {a.pitchDegrees != null && (
+                {a.pitchDegrees != null ? (
                   <span className="text-slate-300">Pitch: <span className="text-emerald-300">{a.pitchDegrees}°</span></span>
-                )}
-                {a.azimuthDegrees != null && (
+                ) : null}
+                {a.azimuthDegrees != null ? (
                   <span className="text-slate-300">Azimuth: <span className="text-emerald-300">{a.azimuthDegrees}°</span></span>
-                )}
-                {a.areaSqM != null && (
+                ) : null}
+                {a.areaSqM != null ? (
                   <span className="text-slate-300">Area: <span className="text-emerald-300">{a.areaSqM.toFixed(1)} m²</span></span>
-                )}
-                {a.polygon?.vertices != null && a.polygon.vertices.length > 0 && (
+                ) : null}
+                {a.polygon?.vertices != null && a.polygon.vertices.length > 0 ? (
                   <span className="text-slate-300">Vertices: <span className="text-slate-200">{a.polygon.vertices.length}</span></span>
-                )}
-                {a.polygon?.vertices != null && a.polygon.vertices.length === 0 && a.geometryClass === 'segmentation_mask' && (
+                ) : null}
+                {a.polygon?.vertices != null && a.polygon.vertices.length === 0 && a.geometryClass === 'segmentation_mask' ? (
                   <span className="text-slate-400/60 italic">Vertices: loading polygon detail...</span>
-                )}
-                {a.inlierCount != null && (
+                ) : null}
+                {a.inlierCount != null ? (
                   <span className="text-slate-300">Inliers: <span className="text-slate-200">{a.inlierCount}/{a.totalPoints}</span></span>
-                )}
-                {a.consensusPhotoCount != null && (
+                ) : null}
+                {a.consensusPhotoCount != null ? (
                   <span className="text-slate-300">Photos: <span className="text-slate-200">{a.consensusPhotoCount}</span></span>
-                )}
-                {a.isSynthetic && (
+                ) : null}
+                {a.isSynthetic ? (
                   <span className="text-amber-400">⚠ Synthetic</span>
-                )}
+                ) : null}
               </div>
-            )}
+            ) : null}
 
             {/* Line-specific details: subtype, confidence, length */}
-            {isRoofLine && (
+            {isRoofLine ? (
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] text-slate-400">
-                {a.lineSubtype && (
+                {a.lineSubtype ? (
                   <span className="text-slate-300">Type: <span className="text-amber-300">{lineStyle?.label ?? a.lineSubtype}</span></span>
-                )}
+                ) : null}
                 <span className="text-slate-300">Confidence: <span className="text-amber-300">{Math.round(a.confidence)}%</span></span>
-                {a.estimatedLengthM != null && (
+                {a.estimatedLengthM != null ? (
                   <span className="text-slate-300">Length: <span className="text-amber-300">{a.estimatedLengthM.toFixed(1)} m</span></span>
-                )}
-                {a.isSynthetic && (
+                ) : null}
+                {a.isSynthetic ? (
                   <span className="text-amber-400">⚠ Synthetic</span>
-                )}
+                ) : null}
               </div>
-            )}
+            ) : null}
 
             {/* Non-plane/non-line: generic details */}
-            {!isRoofPlane && !isRoofLine && (
+            {!isRoofPlane && !isRoofLine ? (
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] text-slate-500">
-                {a.segmentationBackend && (
+                {a.segmentationBackend ? (
                   <span className="text-slate-300">
                     Backend: <span className={a.segmentationBackend === 'sam2' ? 'text-emerald-300' : 'text-cyan-300'}>
                       {a.segmentationBackend === 'sam2' ? 'SAM 2' : 'Canny'}
                     </span>
                   </span>
-                )}
-                {a.areaSqM != null && (
+                ) : null}
+                {a.areaSqM != null ? (
                   <span>Area: {a.areaSqM.toFixed(1)} m²</span>
-                )}
-                {a.estimatedLengthM != null && (
+                ) : null}
+                {a.estimatedLengthM != null ? (
                   <span>Length: {a.estimatedLengthM.toFixed(1)} m</span>
-                )}
-                {a.isSynthetic && (
+                ) : null}
+                {a.isSynthetic ? (
                   <span className="text-amber-400">⚠ Synthetic</span>
-                )}
+                ) : null}
                 {/* Pass 3E: Geometry participation details */}
-                {a.geometryParticipation && (
+                {a.geometryParticipation ? (
                   <span className="text-slate-300">
                     Participation: {[
                       a.geometryParticipation.participatesInLines !== false ? 'Lines' : null,
@@ -1371,12 +1371,12 @@ function PhotoWithUnifiedOverlays({
                       a.geometryParticipation.participatesInPhotogrammetry !== false ? 'Photo' : null,
                     ].filter(Boolean).join(', ') || 'none'}
                   </span>
-                )}
-                {a.excludeFromGeometry && (
+                ) : null}
+                {a.excludeFromGeometry ? (
                   <span className="text-orange-400">⛔ Excluded from geometry</span>
-                )}
+                ) : null}
               </div>
-            )}
+            ) : null}
 
             <p className="mt-0.5 text-[9px] text-slate-600">
               Source: {a.provenance?.sourcePipeline ?? 'unknown'} / {a.provenance?.toolName ?? 'unknown'} · REVIEW-ONLY / NON-AUTHORITATIVE

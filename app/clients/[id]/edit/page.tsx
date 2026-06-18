@@ -2,8 +2,9 @@
 import React, { useEffect, useState } from 'react';
 import AppShell from '@/components/ui/AppShell';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Save } from 'lucide-react';
+import { ArrowLeft, Save, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
+import { NotFoundState } from '@/components/ui/NotFoundState';
 import type { Client } from '@/types';
 import { useAppStore } from '@/store/appStore';
 import AddressAutocomplete, { type AddressSuggestion } from '@/components/ui/AddressAutocomplete';
@@ -84,9 +85,18 @@ export default function EditClientPage() {
 
   if (!client) return (
     <AppShell>
-      <div className="p-6 flex items-center justify-center h-64">
-        <div className="spinner w-8 h-8" />
-      </div>
+      {clients.length > 0 ? (
+        <NotFoundState
+          title="Client not found"
+          message="This client may have been deleted or the link is incorrect."
+          backHref="/clients"
+          backLabel="Back to Clients"
+        />
+      ) : (
+        <div className="p-6 flex items-center justify-center h-64">
+          <div className="spinner w-8 h-8" />
+        </div>
+      )}
     </AppShell>
   );
 
@@ -98,11 +108,11 @@ export default function EditClientPage() {
           <h1 className="text-xl font-bold text-white">Edit Client</h1>
         </div>
 
-        {error && (
+        {error ? (
           <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-red-400 text-sm">
-            ⚠️ {error}
+            <AlertTriangle size={13} className="inline -mt-px mr-1" /> {error}
           </div>
-        )}
+        ) : null}
 
         <div className="card p-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">

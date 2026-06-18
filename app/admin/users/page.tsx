@@ -6,6 +6,8 @@ import {
   AlertCircle, Crown, UserX, Key, Eye, ChevronDown,
   UserCheck, Star, XCircle,
 } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useUser } from '@/contexts/UserContext';
 
 const PLAN_COLORS: Record<string, string> = {
@@ -27,8 +29,6 @@ const ROLE_COLORS: Record<string, string> = {
   user:        'bg-slate-500/20 text-slate-400',
 };
 
-type ToastState = { msg: string; ok: boolean } | null;
-
 export default function AdminUsers() {
   const { refreshUser, user: currentAdmin } = useUser();
   const isSuperAdmin = currentAdmin?.role === 'super_admin';
@@ -39,17 +39,13 @@ export default function AdminUsers() {
   const [search, setSearch]       = useState('');
   const [loading, setLoading]     = useState(true);
   const [acting, setActing]       = useState<string | null>(null);
-  const [toast, setToast]         = useState<ToastState>(null);
+  const toast = useToast();
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
   const [editUser, setEditUser]   = useState<any | null>(null);
   const [openMenu, setOpenMenu]   = useState<string | null>(null);
   const [confirmModal, setConfirmModal] = useState<{ userId: string; action: string; label: string; extra?: any } | null>(null);
   const [tempPasswordModal, setTempPasswordModal] = useState<{ password: string; email: string } | null>(null);
   const LIMIT = 50;
-
-  const showToast = (msg: string, ok = true) => {
-    setToast({ msg, ok });
-    setTimeout(() => setToast(null), 4000);
-  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -96,27 +92,31 @@ export default function AdminUsers() {
           const impData = await impRes.json();
           if (impRes.ok && impData.success && impData.redirectTo) {
             window.open(impData.redirectTo, '_blank');
-            showToast(`✓ Impersonating ${d.targetUser?.name || 'user'} — check new tab`);
+            toast.success(`Impersonating ${d.targetUser?.name || 'user'} — check new tab`);
           } else {
-            showToast(impData.error || 'Impersonation failed', false);
+            toast.error(impData.error || 'Impersonation failed');
           }
         } else {
-          showToast(`✓ ${actionName.replace(/_/g, ' ')} applied`);
+          toast.success(`✓ ${actionName.replace(/_/g, ' ')} applied`);
         }
         load();
         setTimeout(() => refreshUser(), 100);
       } else {
-        showToast(d.error || 'Failed', false);
+        toast.error(d.error || 'Failed');
       }
     } finally { setActing(null); }
   };
 
-  const deleteUser = async (userId: string, email: string) => {
-    if (!confirm(`Delete user ${email}? This cannot be undone.`)) return;
-    const res = await fetch(`/api/admin/users?id=${userId}`, { method: 'DELETE' });
-    const d = await res.json();
-    if (d.success) { showToast('User deleted'); load(); }
-    else showToast(d.error || 'Failed', false);
+  const deleteUser = (userId: string, email: string) => {
+    setConfirmDialog({
+      message: `Delete user ${email}? This cannot be undone.`,
+      onConfirm: async () => {
+        const res = await fetch(`/api/admin/users?id=${userId}`, { method: 'DELETE' });
+        const d = await res.json();
+        if (d.success) { toast.success('User deleted'); load(); }
+        else toast.error(d.error || 'Failed');
+      },
+    });
   };
 
   const handleConfirm = () => {
@@ -248,12 +248,12 @@ export default function AdminUsers() {
                           <ChevronDown size={13} />
                         </button>
 
-                        {openMenu === u.id && (
+                        {openMenu === u.id ? (
                           <div className="absolute right-0 top-8 z-50 w-52 bg-[#0d1424] border border-white/10 rounded-xl shadow-2xl py-1 overflow-hidden">
                             <div className="px-3 py-1.5 text-[10px] text-slate-500 font-semibold uppercase tracking-wider border-b border-white/5">
                               Role
                             </div>
-                            {isSuperAdmin && (
+                            {isSuperAdmin ? (
                               <>
                                 <button
                                   onClick={() => { action(u.id, 'set_role', { role: 'user' }); }}
@@ -274,7 +274,7 @@ export default function AdminUsers() {
                                   <Star size={12} className="text-amber-400" /> Promote to Super Admin
                                 </button>
                               </>
-                            )}
+                            ) : null}
 
                             <div className="px-3 py-1.5 text-[10px] text-slate-500 font-semibold uppercase tracking-wider border-b border-white/5 border-t border-white/5 mt-1">
                               Access
@@ -307,14 +307,14 @@ export default function AdminUsers() {
                             >
                               <Key size={12} className="text-yellow-400" /> Reset Password
                             </button>
-                            {isSuperAdmin && (
+                            {isSuperAdmin ? (
                               <button
                                 onClick={() => setConfirmModal({ userId: u.id, action: 'impersonate', label: `Impersonate ${u.name} (${u.email})? You will be logged in as this user in a new tab.` })}
                                 className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
                               >
                                 <Eye size={12} className="text-purple-400" /> Impersonate User
                               </button>
-                            )}
+                            ) : null}
                             <button
                               onClick={() => deleteUser(u.id, u.email)}
                               className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
@@ -322,7 +322,7 @@ export default function AdminUsers() {
                               <Trash2 size={12} /> Delete User
                             </button>
                           </div>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                   </td>
@@ -334,7 +334,7 @@ export default function AdminUsers() {
       </div>
 
       {/* Pagination */}
-      {pages > 1 && (
+      {pages > 1 ? (
         <div className="flex items-center justify-between text-xs text-slate-400">
           <span>Page {page} of {pages} · {total} users</span>
           <div className="flex gap-2">
@@ -346,10 +346,10 @@ export default function AdminUsers() {
             </button>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Edit Modal */}
-      {editUser && (
+      {editUser ? (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#0d1424] border border-white/10 rounded-2xl p-6 w-full max-w-md space-y-4">
             <h2 className="text-lg font-bold text-white">Edit User</h2>
@@ -403,10 +403,10 @@ export default function AdminUsers() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Confirm Modal */}
-      {confirmModal && (
+      {confirmModal ? (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#0d1424] border border-white/10 rounded-2xl p-6 w-full max-w-sm space-y-4">
             <div className="flex items-center gap-3">
@@ -422,10 +422,10 @@ export default function AdminUsers() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Temp Password Modal */}
-      {tempPasswordModal && (
+      {tempPasswordModal ? (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#0d1424] border border-white/10 rounded-2xl p-6 w-full max-w-sm space-y-4">
             <div className="flex items-center gap-3">
@@ -440,24 +440,23 @@ export default function AdminUsers() {
             </div>
             <p className="text-xs text-slate-500">Share this with the user. They should change it immediately after logging in.</p>
             <button
-              onClick={() => { navigator.clipboard.writeText(tempPasswordModal.password); showToast('Copied to clipboard'); setTempPasswordModal(null); }}
+              onClick={() => { navigator.clipboard.writeText(tempPasswordModal.password); toast.success('Copied to clipboard'); setTempPasswordModal(null); }}
               className="w-full py-2 rounded-lg bg-amber-500 text-black text-sm font-semibold hover:bg-amber-400 transition-colors"
             >
               Copy & Close
             </button>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium shadow-xl ${
-          toast.ok ? 'bg-green-500/20 border border-green-500/30 text-green-400' : 'bg-red-500/20 border border-red-500/30 text-red-400'
-        }`}>
-          {toast.ok ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-          {toast.msg}
-        </div>
-      )}
+      {confirmDialog ? (
+        <ConfirmDialog
+          message={confirmDialog.message}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+          variant="danger"
+        />
+      ) : null}
     </div>
   );
 }

@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { syncSeatsForOrg } from '@/lib/stripe';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -65,7 +66,9 @@ export async function POST(req: NextRequest) {
       await sql`
         UPDATE org_invites SET accepted_at = now() WHERE id = ${invite.id}
       `;
-      return NextResponse.json({ success: true, autoAccepted: true, invite });
+      // Bill the new seat on the owner's subscription (no-op if seat billing not set up).
+      const seatSync = await syncSeatsForOrg(orgId);
+      return NextResponse.json({ success: true, autoAccepted: true, invite, seatSync });
     }
 
     return NextResponse.json({ success: true, autoAccepted: false, invite });

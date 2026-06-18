@@ -165,9 +165,9 @@ function EventChip({ event, crewColor }: EventChipProps) {
     >
       <div className="flex-1 min-w-0">
         <div className="font-semibold truncate">{event.projectName}</div>
-        {event.systemSizeKw && (
+        {event.systemSizeKw ? (
           <div className="opacity-80">{event.systemSizeKw} kW</div>
-        )}
+        ) : null}
         <div className="opacity-70 truncate" style={{ fontSize: 8 }}>
           {event.crewAssigned}
         </div>
@@ -221,14 +221,14 @@ function DayCell({ date, events, crewColorMap }: DayCellProps) {
         ))}
       </div>
 
-      {events.length === 0 && (
+      {events.length === 0 ? (
         <div
           className="flex-1 flex items-center justify-center text-[9px]"
           style={{ color: 'var(--border-color)' }}
         >
           —
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -371,7 +371,7 @@ export default function CrewCalendar() {
         </div>
       }
     >
-      {error && (
+      {error ? (
         <div
           className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg mb-3"
           style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)' }}
@@ -380,7 +380,7 @@ export default function CrewCalendar() {
           {error}
           <button onClick={() => setError(null)} className="ml-auto underline text-[10px]">dismiss</button>
         </div>
-      )}
+      ) : null}
 
       {loading ? (
         <div className="flex items-center justify-center py-12 gap-2" style={{ color: 'var(--text-muted)' }}>

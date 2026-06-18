@@ -42,17 +42,19 @@ class BillErrorBoundary extends Component<
   }
 }
 import AppShell from '@/components/ui/AppShell';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation';
 import type { Project } from '@/types';
 import { useAppStore } from '@/store/appStore';
 import {
   ArrowLeft, Upload, Map, FileText, Zap, DollarSign,
   User, Calendar, AlertTriangle, CheckCircle, ChevronRight,
   Settings, BarChart2, Shield, Sun, Wrench, Send, Package, Camera,
-  Pencil, X, Network, Loader2, Sparkles, Activity, LayoutGrid, TrendingUp, MapPin
+  Pencil, X, Network, Loader2, Sparkles, Activity, LayoutGrid, TrendingUp, MapPin, Home, Sprout, Fence as FenceIcon
 } from 'lucide-react';
 import { ConfidenceBadge } from '@/components/recommend/ConfidenceBadge';
 import type { ConfidenceSource, ConfidenceLevel } from '@/components/recommend/ConfidenceBadge';
+import { useToast } from '@/components/ui/Toast';
+import { NotFoundState } from '@/components/ui/NotFoundState';
 import Link from 'next/link';
 import EngineeringTab from '@/components/engineering/EngineeringTab';
 import BillTab from '@/components/project/BillTab';
@@ -313,15 +315,27 @@ interface QuickAction {
 function ProjectDetailInner() {
   const { id } = useParams<{ id: string }>();
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
 
   const loadActiveProject = useAppStore(s => s.loadActiveProject);
   const projects = useAppStore(s => s.projects);
   // FIX v47.8: sync updated project to store cache after bill save
   const syncProjectToStore = useAppStore(s => s.syncProjectToStore);
+  const toast = useToast();
 
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabId>('bill');
+
+  // Tab state driven by URL ?tab= query param
+  const PROJECT_TAB_IDS: TabId[] = ['bill', 'system', 'design', 'engineering', 'proposal', 'operations', 'survey'];
+  const tabFromUrl = searchParams.get('tab') as TabId | null;
+  const activeTab: TabId = tabFromUrl && PROJECT_TAB_IDS.includes(tabFromUrl)
+    ? tabFromUrl
+    : 'bill';
+  const setActiveTab = (tab: TabId) => {
+    router.replace(`${pathname}?tab=${tab}`, { scroll: false });
+  };
   const [showAllWarnings, setShowAllWarnings] = useState(false);
   const [showBillModal, setShowBillModal] = useState(false);
   const [savingBill, setSavingBill] = useState(false);
@@ -366,6 +380,8 @@ function ProjectDetailInner() {
   }, [id]);
 
   const autoSelectTab = (p: Project) => {
+    // Only auto-select if no tab specified in URL
+    if (tabFromUrl) return;
     // Start at first incomplete workflow step
     for (const step of WORKFLOW_STEPS) {
       if (!step.check(p)) {
@@ -400,7 +416,7 @@ function ProjectDetailInner() {
       setShowChangeTypeModal(false);
     } catch (e: unknown) {
       console.error('[ChangeSystemType]', e);
-      alert((e as Error)?.message || 'Failed to change system type. Please try again.');
+      toast.error('System type change failed', (e as Error)?.message || 'Please try again.');
     } finally {
       setChangingType(false);
     }
@@ -639,10 +655,12 @@ function ProjectDetailInner() {
   if (!project) {
     return (
       <AppShell>
-        <div className="p-6 text-center">
-          <p className="text-slate-400 mb-4">Project not found</p>
-          <Link href="/projects" className="btn-primary">Back to Projects</Link>
-        </div>
+        <NotFoundState
+          title="Project not found"
+          message="This project may have been deleted or the link is incorrect."
+          backHref="/projects"
+          backLabel="Back to Projects"
+        />
       </AppShell>
     );
   }
@@ -668,8 +686,7 @@ function ProjectDetailInner() {
       color: 'text-blue-400',
       action: 'link',
       target: `/design?projectId=${id}`,
-      enabled: p => !!p.billAnalysis,
-      disabledReason: 'Upload bill first',
+      enabled: () => true, // design needs no bill — don't gate it (was a dead-end)
     },
     {
       label: 'Engineering',
@@ -713,7 +730,7 @@ function ProjectDetailInner() {
       <div className="p-4 md:p-6 space-y-4 animate-fade-in">
 
         {/* ── Change System Type Modal ─────────────────────────────────────── */}
-        {showChangeTypeModal && (
+        {showChangeTypeModal ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl animate-fade-in">
               <div className="flex items-center justify-between p-5 border-b border-slate-700">
@@ -721,9 +738,9 @@ function ProjectDetailInner() {
                   <h2 className="text-white font-bold text-base">Change System Type</h2>
                   <p className="text-slate-400 text-xs mt-0.5">
                     Currently: <span className="text-white font-medium">{typeLabel}</span>
-                    {project.layout && (
-                      <span className="ml-2 text-amber-400">⚠ Existing design will be cleared</span>
-                    )}
+                    {project.layout ? (
+                      <span className="ml-2 text-amber-400"><AlertTriangle size={11} className="inline -mt-px mr-1" />Existing design will be cleared</span>
+                    ) : null}
                   </p>
                 </div>
                 <button
@@ -734,7 +751,7 @@ function ProjectDetailInner() {
                   <X size={16} />
                 </button>
               </div>
-              {project.layout && (
+              {project.layout ? (
                 <div className="mx-5 mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2">
                   <AlertTriangle size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-amber-300">
@@ -743,12 +760,12 @@ function ProjectDetailInner() {
                     Bill data, system size, and engineering settings are kept.
                   </p>
                 </div>
-              )}
+              ) : null}
               <div className="p-5 grid grid-cols-1 gap-3">
                 {([
-                  { type: 'roof' as const, label: 'Roof Mount', icon: '🏠', desc: 'Standard rooftop installation with auto roof detection, pitch & azimuth optimization.' },
-                  { type: 'ground' as const, label: 'Ground Mount', icon: '🌱', desc: 'Fixed or adjustable tilt ground array. Adjustable tilt 0–45°, row spacing optimization.' },
-                  { type: 'fence' as const, label: 'Sol Fence (Vertical)', icon: '🔲', desc: 'Vertical bifacial fence-integrated system. 90° mounting, bifacial E-W optimization.' },
+                  { type: 'roof' as const, label: 'Roof Mount', icon: <Home size={20} />, desc: 'Standard rooftop installation with auto roof detection, pitch & azimuth optimization.' },
+                  { type: 'ground' as const, label: 'Ground Mount', icon: <Sprout size={20} />, desc: 'Fixed or adjustable tilt ground array. Adjustable tilt 0–45°, row spacing optimization.' },
+                  { type: 'fence' as const, label: 'Sol Fence (Vertical)', icon: <FenceIcon size={20} />, desc: 'Vertical bifacial fence-integrated system. 90° mounting, bifacial E-W optimization.' },
                 ] as const).map(({ type, label, icon, desc }) => {
                   const isCurrent = type === project.systemType;
                   return (
@@ -762,7 +779,7 @@ function ProjectDetailInner() {
                           : 'border-slate-700 bg-slate-800/40 hover:border-slate-500 hover:bg-slate-700/60 cursor-pointer'
                       }`}
                     >
-                      <span className="text-2xl mt-0.5 flex-shrink-0">{icon}</span>
+                      <span className="mt-0.5 flex-shrink-0">{icon}</span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="font-semibold text-white text-sm">{label}</span>
@@ -782,7 +799,7 @@ function ProjectDetailInner() {
               </div>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* ── Project Header ── */}
         <div className="card overflow-hidden">
@@ -807,13 +824,13 @@ function ProjectDetailInner() {
                 </div>
                 {/* Context row */}
                 <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-400 flex-wrap">
-                  {project.client?.name && (
+                  {project.client?.name ? (
                     <Link href={`/clients/${project.client.id}`} className="flex items-center gap-1 text-slate-300 hover:text-white transition-colors">
                       <User size={10} />{project.client.name}
                     </Link>
-                  )}
+                  ) : null}
                   <span className="flex items-center gap-1"><Calendar size={10} />{new Date(project.createdAt).toLocaleDateString()}</span>
-                  {project.address && (() => {
+                  {project.address ? (() => {
                     const ac = projectConfidence('address', project);
                     return (
                       <span className="flex items-center gap-1.5">
@@ -822,7 +839,7 @@ function ProjectDetailInner() {
                         <ConfidenceBadge confidence={ac.confidence} source={ac.source} size="xs" detail={ac.detail} />
                       </span>
                     );
-                  })()}
+                  })() : null}
                 </div>
               </div>
             </div>
@@ -942,9 +959,9 @@ function ProjectDetailInner() {
                     <span className="hidden sm:inline">{step.label}</span>
                     <span className="sm:hidden">{step.shortLabel}</span>
                   </button>
-                  {i < WORKFLOW_STEPS.length - 1 && (
+                  {i < WORKFLOW_STEPS.length - 1 ? (
                     <ChevronRight size={12} className={`flex-shrink-0 ${done ? 'text-emerald-500/40' : 'text-slate-700'}`} />
-                  )}
+                  ) : null}
                 </React.Fragment>
               );
             })}
@@ -1008,7 +1025,7 @@ function ProjectDetailInner() {
         </div>
 
         {/* ── Missing Data Warnings ───────────────────────────────────────── */}
-        {warnings.length > 0 && (
+        {warnings.length > 0 ? (
           <div className="card-warning p-4">
             <div className="flex items-center gap-2 mb-3">
               <AlertTriangle size={14} className="text-amber-400" />
@@ -1030,16 +1047,16 @@ function ProjectDetailInner() {
                 </div>
               ))}
             </div>
-            {warnings.length > 3 && (
+            {warnings.length > 3 ? (
               <button
                 onClick={() => setShowAllWarnings(!showAllWarnings)}
                 className="text-xs text-slate-500 hover:text-slate-300 mt-2 transition-colors"
               >
                 {showAllWarnings ? 'Show less' : `+${warnings.length - 3} more`}
               </button>
-            )}
+            ) : null}
           </div>
-        )}
+        ) : null}
 
         {/* -- Field Survey Card (always visible, above tabs) -- */}
         <FieldSurveyCard projectId={id} />
@@ -1062,11 +1079,11 @@ function ProjectDetailInner() {
                   {tab.icon}
                 </span>
                 {tab.label}
-                {badge && (
+                {badge ? (
                   <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-slate-900 text-xs font-bold flex items-center justify-center">
                     {badge}
                   </span>
-                )}
+                ) : null}
               </button>
             );
           })}
@@ -1074,11 +1091,11 @@ function ProjectDetailInner() {
 
         {/* ── Tab Content ─────────────────────────────────────────────────── */}
         <div className="min-h-[400px]">
-          {activeTab === 'bill' && (
+          {activeTab === 'bill' ? (
             <div className="space-y-0">
-              {TUTORIAL_CONFIG.bill && (
+              {TUTORIAL_CONFIG.bill ? (
                 <TutorialPanel tabId="bill" {...TUTORIAL_CONFIG.bill} />
-              )}
+              ) : null}
               <BillErrorBoundary>
                 <BillTab
                   project={project}
@@ -1087,65 +1104,65 @@ function ProjectDetailInner() {
                 />
               </BillErrorBoundary>
             </div>
-          )}
-          {activeTab === 'system' && (
+          ) : null}
+          {activeTab === 'system' ? (
             <div className="space-y-0">
-              {TUTORIAL_CONFIG.system && (
+              {TUTORIAL_CONFIG.system ? (
                 <TutorialPanel tabId="system" {...TUTORIAL_CONFIG.system} />
-              )}
+              ) : null}
               <SystemSizeTab
                 project={project}
                 onRunAutoSize={handleRunAutoSize}
                 onSizeOverride={newKw => setProject(prev => prev ? { ...prev, systemSizeKw: newKw } : prev)}
               />
             </div>
-          )}
-          {activeTab === 'design' && (
+          ) : null}
+          {activeTab === 'design' ? (
             <div className="space-y-0">
-              {TUTORIAL_CONFIG.design && (
+              {TUTORIAL_CONFIG.design ? (
                 <TutorialPanel tabId="design" {...TUTORIAL_CONFIG.design} />
-              )}
+              ) : null}
               <DesignTab
                 project={project}
                 onEquipmentUpdate={(updates) => setProject(prev => prev ? { ...prev, ...updates } : prev)}
               />
             </div>
-          )}
-          {activeTab === 'engineering' && (
+          ) : null}
+          {activeTab === 'engineering' ? (
             <div className="space-y-0">
-              {TUTORIAL_CONFIG.engineering && (
+              {TUTORIAL_CONFIG.engineering ? (
                 <TutorialPanel tabId="engineering" {...TUTORIAL_CONFIG.engineering} />
-              )}
+              ) : null}
               <div className="card p-0 overflow-hidden">
                 <EngineeringTab projectId={id} projectName={project.name} />
               </div>
             </div>
-          )}
-          {activeTab === 'proposal' && (
+          ) : null}
+          {activeTab === 'proposal' ? (
             <div className="space-y-0">
-              {TUTORIAL_CONFIG.proposal && (
+              {TUTORIAL_CONFIG.proposal ? (
                 <TutorialPanel tabId="proposal" {...TUTORIAL_CONFIG.proposal} />
-              )}
+              ) : null}
               <ProposalTab project={project} />
             </div>
-          )}
-          {activeTab === 'operations' && (
+          ) : null}
+          {activeTab === 'operations' ? (
             <div className="space-y-0">
-              {TUTORIAL_CONFIG.operations && (
+              {TUTORIAL_CONFIG.operations ? (
                 <TutorialPanel tabId="operations" {...TUTORIAL_CONFIG.operations} />
-              )}
+              ) : null}
               <OperationsTab projectId={id} />
             </div>
-          )}
-          {activeTab === 'survey' && (
+          ) : null}
+          {activeTab === 'survey' ? (
             <FieldSurveyPanel projectId={id} />
-          )}
+          ) : null}
         </div>
 
       </div>
 
       {/* ── Bill Upload Modal ──────────────────────────────────────────── */}
-      {showBillModal && (
+      {showBillModal ? (
         <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-8 bg-black/60 backdrop-blur-sm overflow-y-auto">
           <div className="w-full max-w-xl">
             <BillErrorBoundary onError={() => setShowBillModal(false)}>
@@ -1156,10 +1173,10 @@ function ProjectDetailInner() {
             </BillErrorBoundary>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* ── Share to Network Modal ──────────────────────────────────────── */}
-      {showShareNetworkModal && project && (
+      {showShareNetworkModal && project ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl">
             <div className="p-6">
@@ -1276,7 +1293,7 @@ function ProjectDetailInner() {
                             setShareNetworkSuccess(true);
                           } else {
                             const data = await res.json();
-                            alert(data.error || 'Failed to share opportunity.');
+                            toast.error('Share failed', data.error || 'Could not share opportunity.');
                           }
                         } finally {
                           setShareNetworkLoading(false);
@@ -1293,7 +1310,7 @@ function ProjectDetailInner() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
 
     </AppShell>

@@ -126,9 +126,9 @@ export default function TutorialPanel({
           <PlayCircle size={16} className="text-amber-400 flex-shrink-0" />
           <div className="flex-1 min-w-0">
             <span className="text-amber-300 font-semibold text-sm">{title}</span>
-            {duration && (
+            {duration ? (
               <span className="ml-2 text-amber-600 text-xs">· {duration}</span>
-            )}
+            ) : null}
           </div>
           <div className="flex items-center gap-1 flex-shrink-0 mr-1">
             {expanded ? (
@@ -138,7 +138,7 @@ export default function TutorialPanel({
             )}
           </div>
         </button>
-        {expanded && (
+        {expanded ? (
           <button
             onClick={dismiss}
             data-testid={`tutorial-dismiss-${tabId}`}
@@ -147,11 +147,11 @@ export default function TutorialPanel({
           >
             <X size={14} />
           </button>
-        )}
+        ) : null}
       </div>
 
       {/* ── Expanded content ─────────────────────────────────────────────── */}
-      {expanded && (
+      {expanded ? (
         <div
           id={`tutorial-video-${tabId}`}
           role="region"
@@ -177,7 +177,7 @@ export default function TutorialPanel({
             />
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

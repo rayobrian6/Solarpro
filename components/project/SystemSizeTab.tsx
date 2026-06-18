@@ -172,11 +172,11 @@ export default function SystemSizeTab({ project, onRunAutoSize, onSizeOverride }
                 </button>
               </div>
             )}
-            {bill?.recommendedPanelCount && !editing && (
+            {bill?.recommendedPanelCount && !editing ? (
               <div className="text-sm text-slate-400 mt-1">
                 ≈ {bill.recommendedPanelCount} panels @ 400W
               </div>
-            )}
+            ) : null}
           </div>
           <div className="text-right">
             <div className="text-xs text-slate-400 mb-1">Data Confidence</div>
@@ -243,11 +243,11 @@ export default function SystemSizeTab({ project, onRunAutoSize, onSizeOverride }
       </div>
 
       {/* Utility Rules Panel */}
-      {utilityRules && utilityRules.id !== 'default' && (
+      {utilityRules && utilityRules.id !== 'default' ? (
         <div className="card p-5">
           <h4 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
             <Sun size={14} className="text-amber-400" /> Utility Rules — {utilityRules.name}
-            {utilityRules.interconnectionApplicationUrl && (
+            {utilityRules.interconnectionApplicationUrl ? (
               <a
                 href={utilityRules.interconnectionApplicationUrl}
                 target="_blank"
@@ -256,7 +256,7 @@ export default function SystemSizeTab({ project, onRunAutoSize, onSizeOverride }
               >
                 Application <ExternalLink size={10} />
               </a>
-            )}
+            ) : null}
           </h4>
 
           {/* Net Metering */}
@@ -309,19 +309,19 @@ export default function SystemSizeTab({ project, onRunAutoSize, onSizeOverride }
           </div>
 
           {/* Notes */}
-          {utilityRules.notes && (
+          {utilityRules.notes ? (
             <div className="mt-4 p-3 rounded-lg bg-blue-500/5 border border-blue-500/20">
               <div className="flex items-start gap-2">
                 <Info size={13} className="text-blue-400 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-slate-400">{utilityRules.notes}</p>
               </div>
             </div>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       {/* No utility rules fallback */}
-      {(!utilityRules || utilityRules.id === 'default') && (
+      {(!utilityRules || utilityRules.id === 'default') ? (
         <div className="card p-4 border border-amber-500/20 bg-amber-500/5">
           <div className="flex items-start gap-3">
             <AlertTriangle size={16} className="text-amber-400 flex-shrink-0 mt-0.5" />
@@ -335,10 +335,10 @@ export default function SystemSizeTab({ project, onRunAutoSize, onSizeOverride }
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Net metering warning */}
-      {netMeteringWarning && (
+      {netMeteringWarning ? (
         <div className="card p-4 border border-red-500/30 bg-red-500/5">
           <div className="flex items-start gap-3">
             <AlertTriangle size={16} className="text-red-400 flex-shrink-0 mt-0.5" />
@@ -348,7 +348,7 @@ export default function SystemSizeTab({ project, onRunAutoSize, onSizeOverride }
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
     </div>
   );

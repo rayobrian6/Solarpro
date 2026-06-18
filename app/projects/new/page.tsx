@@ -3,7 +3,7 @@ import React, { useEffect, useState, Suspense } from 'react';
 import AppShell from '@/components/ui/AppShell';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, FolderOpen, Sun, Layers, Fence, User, ChevronRight } from 'lucide-react';
+import { ArrowLeft, FolderOpen, Sun, Layers, Fence, User, ChevronRight, Home, Sprout, Fence as FenceIcon } from 'lucide-react';
 import Link from 'next/link';
 import type { Client, SystemType } from '@/types';
 import { useToast } from '@/components/ui/Toast';
@@ -16,7 +16,7 @@ const SYSTEM_TYPES = [
   {
     type: 'roof' as SystemType,
     label: 'Roof Mount',
-    icon: '🏠',
+    icon: <Home size={28} />,
     description: 'Solar panels on your roof — the most common and affordable option.',
     features: ['Panels match your roof angle', 'Automatic fire code setbacks', 'Best for south-facing roofs', 'Works on multiple roof planes'],
     color: 'amber',
@@ -24,7 +24,7 @@ const SYSTEM_TYPES = [
   {
     type: 'ground' as SystemType,
     label: 'Ground Mount',
-    icon: '🌱',
+    icon: <Sprout size={28} />,
     description: 'Solar panels on the ground — ideal if you have open land.',
     features: ['Adjustable panel angle for best production', 'Row spacing for winter sun', 'No roof work required', 'Scales to larger systems'],
     color: 'teal',
@@ -32,7 +32,7 @@ const SYSTEM_TYPES = [
   {
     type: 'fence' as SystemType,
     label: 'Sol Fence (Vertical)',
-    icon: '🔲',
+    icon: <FenceIcon size={28} />,
     description: 'Solar fence around your property — panels act as a boundary wall.',
     features: ['Double-sided panels capture light from both sides', 'Works as a property fence', 'Great for small yards', 'Modern look with vertical panels'],
     color: 'purple',
@@ -87,6 +87,19 @@ function NewProjectContent() {
       setName(`${client.name} - ${SYSTEM_TYPES.find(t => t.type === selectedType)?.label}`);
     }
   }, [selectedClient, selectedType, clients]);
+
+  // Auto-populate the project address from the selected client (only when the
+  // address field is still blank, so we never clobber something the user typed).
+  useEffect(() => {
+    const client = clients.find(c => c.id === selectedClient);
+    if (!client) return;
+    const composed = [client.address, client.city, client.state, client.zip].filter(Boolean).join(', ');
+    if (composed && !address.trim()) {
+      setAddress(composed);
+      resolveAddress(composed);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClient, clients]);
 
   // Resolve full location + utility data from an address string
   const resolveAddress = async (addressStr: string) => {
@@ -165,9 +178,12 @@ function NewProjectContent() {
       toast.update(toastId, {
         type: 'success',
         title: `Project "${project.name}" created!`,
-        message: 'Project created successfully. Opening client folder…',
+        message: 'Opening the design studio…',
       });
-      setTimeout(() => router.push(`/clients/${selectedClient}`), 600);
+      // Button promises "Open Design Studio" — take them straight there (was
+      // redirecting to the client folder, which dead-ended on a disabled Design
+      // button and felt like a loop back to creating a project).
+      setTimeout(() => router.push(`/design?projectId=${project.id}`), 600);
     } catch (e: unknown) {
       console.error('[NewProject] handleSubmit error:', e);
       toast.update(toastId, {
@@ -245,7 +261,7 @@ function NewProjectContent() {
                       : 'border-slate-700 bg-slate-800/40 hover:border-slate-600'
                   }`}
                 >
-                  <div className="text-3xl mb-2">{icon}</div>
+                  <div className="mb-2">{icon}</div>
                   <div className="font-semibold text-white text-sm mb-1">{label}</div>
                   <div className="text-xs text-slate-400 mb-3">{description}</div>
                   <ul className="space-y-1">
@@ -256,11 +272,11 @@ function NewProjectContent() {
                       </li>
                     ))}
                   </ul>
-                  {selectedType === type && (
+                  {selectedType === type ? (
                     <div className={`mt-3 text-xs font-semibold text-${color}-400 flex items-center gap-1`}>
                       ✓ Selected
                     </div>
-                  )}
+                  ) : null}
                 </button>
               ))}
             </div>
@@ -284,18 +300,18 @@ function NewProjectContent() {
                 {showBillUpload ? 'Hide' : 'Upload Bill'}
               </button>
             </div>
-            {showBillUpload && (
+            {showBillUpload ? (
               <div className="mt-4">
                 <BillUploadFlow
                   onComplete={handleBillUploadComplete}
                   onClose={() => setShowBillUpload(false)}
                 />
               </div>
-            )}
+            ) : null}
           </div>
 
           {/* Project Name */}
-          {selectedClient && selectedType && (
+          {selectedClient && selectedType ? (
             <div className="card p-5 animate-fade-in">
               <div className="flex items-center gap-2 mb-4">
                 <FolderOpen size={16} className="text-amber-400" />
@@ -320,23 +336,23 @@ function NewProjectContent() {
                     placeholder="123 Main St, City, ST 12345"
                     loading={geocoding}
                   />
-                  {locationData && (
+                  {locationData ? (
                     <div className="mt-2 flex flex-wrap gap-2">
                       <span className="inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2 py-0.5 text-xs text-emerald-300">
                         <MapPin size={10} /> {locationData.city}, {locationData.stateCode} {locationData.zip}
                       </span>
-                      {utilityData && (
+                      {utilityData ? (
                         <span className="inline-flex items-center gap-1 bg-blue-500/10 border border-blue-500/20 rounded-full px-2 py-0.5 text-xs text-blue-300">
                           <Zap size={10} /> {utilityData.utilityName} · ${utilityData.avgRatePerKwh.toFixed(3)}/kWh
                         </span>
-                      )}
-                      {utilityData?.netMeteringEligible && (
+                      ) : null}
+                      {utilityData?.netMeteringEligible ? (
                         <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/20 rounded-full px-2 py-0.5 text-xs text-amber-300">
                           ✓ Net Metering Eligible
                         </span>
-                      )}
+                      ) : null}
                     </div>
-                  )}
+                  ) : null}
                 </div>
 
                 <div>
@@ -345,7 +361,7 @@ function NewProjectContent() {
                 </div>
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* Submit */}
           <div className="flex justify-end gap-3">

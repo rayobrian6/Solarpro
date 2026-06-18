@@ -171,7 +171,7 @@ function Lightbox({ photos, initialIndex, onClose }: LightboxProps) {
         </div>
 
         {/* Prev / Next */}
-        {photos.length > 1 && (
+        {photos.length > 1 ? (
           <div className="absolute inset-y-0 w-full flex items-center justify-between pointer-events-none">
             <button
               onClick={prev}
@@ -190,12 +190,12 @@ function Lightbox({ photos, initialIndex, onClose }: LightboxProps) {
               <ChevronRight size={28} />
             </button>
           </div>
-        )}
+        ) : null}
 
         {/* Counter */}
-        {photos.length > 1 && (
+        {photos.length > 1 ? (
           <span className="text-white/50 text-[10px]">{index + 1} / {photos.length}</span>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -320,12 +320,12 @@ function CategoryPanel({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {photos.length > 0 && (
+            {photos.length > 0 ? (
               <span className="text-[10px] px-2 py-0.5 rounded-full font-medium"
                 style={{ background: 'var(--accent-color)', color: '#fff' }}>
                 {photos.length}
               </span>
-            )}
+            ) : null}
             <button
               onClick={handleFilePick}
               disabled={uploading}
@@ -356,7 +356,7 @@ function CategoryPanel({
         </div>
 
         {/* Thumbnail grid */}
-        {photos.length > 0 && (
+        {photos.length > 0 ? (
           <div
             className="grid gap-1.5"
             style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(64px, 1fr))' }}
@@ -371,9 +371,9 @@ function CategoryPanel({
               />
             ))}
           </div>
-        )}
+        ) : null}
 
-        {photos.length === 0 && !uploading && (
+        {photos.length === 0 && !uploading ? (
           <div
             className="flex flex-col items-center justify-center py-4 rounded-lg border border-dashed gap-1 cursor-pointer"
             style={{ borderColor: 'var(--border-color)' }}
@@ -384,16 +384,16 @@ function CategoryPanel({
               Click to upload
             </span>
           </div>
-        )}
+        ) : null}
       </Card>
 
-      {lightboxIndex !== null && (
+      {lightboxIndex !== null ? (
         <Lightbox
           photos={photos}
           initialIndex={lightboxIndex}
           onClose={() => setLightboxIndex(null)}
         />
-      )}
+      ) : null}
     </>
   );
 }
@@ -554,7 +554,7 @@ export default function InstallPhotosSection({ projectId }: InstallPhotosSection
         ) : undefined
       }
     >
-      {error && (
+      {error ? (
         <div
           className="flex items-start gap-2 text-xs px-3 py-2 rounded-lg mb-3"
           style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)' }}
@@ -563,7 +563,7 @@ export default function InstallPhotosSection({ projectId }: InstallPhotosSection
           <span>{error}</span>
           <button onClick={() => setError(null)} className="ml-auto underline text-[10px]">dismiss</button>
         </div>
-      )}
+      ) : null}
 
       {loading ? (
         <div className="flex items-center justify-center py-10 gap-2"

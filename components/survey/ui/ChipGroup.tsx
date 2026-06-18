@@ -86,9 +86,9 @@ export function ChipGroup({
             `}
             aria-pressed={selected}
           >
-            {opt.icon && (
+            {opt.icon ? (
               <span className="text-base leading-none">{opt.icon}</span>
-            )}
+            ) : null}
             <span className="text-center leading-tight">{opt.label}</span>
           </button>
         );
@@ -148,9 +148,9 @@ export function MultiChipGroup({
             `}
             aria-pressed={selected}
           >
-            {opt.icon && (
+            {opt.icon ? (
               <span className="text-base leading-none">{opt.icon}</span>
-            )}
+            ) : null}
             <span className="text-center leading-tight">{opt.label}</span>
           </button>
         );

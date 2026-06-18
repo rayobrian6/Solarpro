@@ -7,6 +7,8 @@ import {
   CheckCircle, Clock, AlertCircle, XCircle, Star,
   ExternalLink, RefreshCw,
 } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 type User = {
   id: string;
@@ -54,7 +56,8 @@ export default function AdminLeadDetail() {
   const [loading, setLoading]     = useState(true);
   const [saving, setSaving]       = useState(false);
   const [converting, setConverting] = useState(false);
-  const [toast, setToast]         = useState<{ msg: string; ok: boolean } | null>(null);
+  const toast = useToast();
+  const [confirmDialog, setConfirmDialog] = useState<null | { message: string; onConfirm: () => void }>(null);
   const [users, setUsers]         = useState<User[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [assigning, setAssigning] = useState(false);
@@ -68,10 +71,7 @@ export default function AdminLeadDetail() {
   const [editNotes, setEditNotes]   = useState('');
   const [editStatus, setEditStatus] = useState<typeof VALID_STATUSES[number]>('new');
 
-  const showToast = (msg: string, ok = true) => {
-    setToast({ msg, ok });
-    setTimeout(() => setToast(null), 3500);
-  };
+
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -87,7 +87,7 @@ export default function AdminLeadDetail() {
         setEditNotes(d.lead.notes || '');
         setEditStatus(d.lead.status);
       } else {
-        showToast(d.error || 'Failed to load lead', false);
+        toast.error(d.error || 'Failed to load lead');
       }
     } finally {
       setLoading(false);
@@ -130,37 +130,42 @@ export default function AdminLeadDetail() {
       const d = await res.json();
       if (d.success) {
         setLead(d.lead);
-        showToast('Saved');
+        toast.success('Saved');
       } else {
-        showToast(d.error || 'Save failed', false);
+        toast.error(d.error || 'Save failed');
       }
     } finally {
       setSaving(false);
     }
   };
 
-  const handleConvert = async () => {
-    if (!confirm('Convert this lead to a client and project? You will be taken to the new project.')) return;
-    setConverting(true);
-    try {
-      const res = await fetch(`/api/admin/leads/${id}/convert`, { method: 'POST' });
-      const d = await res.json();
-      if (d.success) {
-        showToast('Converted — client and project created');
-        // #13 FIX: Navigate directly to the new project so the rep can continue
-        // (design, proposal, etc.) without having to find it in the project list
-        if (d.projectId) {
-          router.push(`/projects/${d.projectId}`);
-        } else {
-          await load();
+  const handleConvert = () => {
+    setConfirmDialog({
+      message: 'Convert this lead to a client and project? You will be taken to the new project.',
+      onConfirm: async () => {
+        setConverting(true);
+        try {
+          const res = await fetch(`/api/admin/leads/${id}/convert`, { method: 'POST' });
+          const d = await res.json();
+          if (d.success) {
+            toast.success('Converted — client and project created');
+            // #13 FIX: Navigate directly to the new project so the rep can continue
+            // (design, proposal, etc.) without having to find it in the project list
+            if (d.projectId) {
+              router.push(`/projects/${d.projectId}`);
+            } else {
+              await load();
+            }
+          } else {
+            toast.error(d.error || 'Conversion failed');
+          }
+        } finally {
+          setConverting(false);
         }
-      } else {
-        showToast(d.error || 'Conversion failed', false);
-      }
-    } finally {
-      setConverting(false);
-    }
+      },
+    });
   };
+
 
   const handleAssignUser = async () => {
     if (!selectedUserId) return;
@@ -173,11 +178,11 @@ export default function AdminLeadDetail() {
       });
       const d = await res.json();
       if (d.success) {
-        showToast('Owner assigned successfully');
+        toast.success('Owner assigned successfully');
         setSelectedUserId('');
         await load();
       } else {
-        showToast(d.error || 'Failed to assign owner', false);
+        toast.error(d.error || 'Failed to assign owner');
       }
     } finally {
       setAssigning(false);
@@ -228,14 +233,14 @@ export default function AdminLeadDetail() {
             <span className="text-xs text-slate-500">
               Created {new Date(lead.created_at).toLocaleDateString()}
             </span>
-            {lead.owner_name && (
+            {lead.owner_name ? (
               <span className="text-xs text-slate-500">· Owner: {lead.owner_name}</span>
-            )}
+            ) : null}
           </div>
         </div>
 
         {/* Convert button */}
-        {!isConverted && (
+        {!isConverted ? (
           <button
             onClick={handleConvert}
             disabled={converting}
@@ -248,9 +253,9 @@ export default function AdminLeadDetail() {
             )}
             Convert to Project
           </button>
-        )}
+        ) : null}
 
-        {isConverted && lead.converted_project_id && (
+        {isConverted && lead.converted_project_id ? (
           <Link
             href={`/projects/${lead.converted_project_id}`}
             className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 text-green-400 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:bg-green-500/20"
@@ -258,10 +263,10 @@ export default function AdminLeadDetail() {
             <ExternalLink size={14} />
             View Project
           </Link>
-        )}
+        ) : null}
       </div>
       {/* Assign Owner Section */}
-      {!lead.user_id && (
+      {!lead.user_id ? (
         <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 text-sm">
           <p className="text-amber-400 font-medium flex items-center gap-2 mb-2">
             <AlertCircle size={14} />
@@ -296,21 +301,21 @@ export default function AdminLeadDetail() {
             </button>
           </div>
         </div>
-      )}
+      ) : null}
       {/* Converted notice */}
-      {isConverted && (
+      {isConverted ? (
         <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-4 text-sm">
           <p className="text-green-400 font-medium flex items-center gap-2">
             <CheckCircle size={14} /> Converted on {lead.converted_at ? new Date(lead.converted_at).toLocaleDateString() : '—'}
           </p>
-          {lead.project_name && (
+          {lead.project_name ? (
             <p className="text-slate-400 mt-1">Project: <span className="text-white">{lead.project_name}</span></p>
-          )}
-          {lead.client_name && (
+          ) : null}
+          {lead.client_name ? (
             <p className="text-slate-400 mt-0.5">Client: <span className="text-white">{lead.client_name}</span></p>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       {/* Edit form */}
       <div className="bg-white/3 border border-white/8 rounded-xl p-6 space-y-4">
@@ -406,14 +411,14 @@ export default function AdminLeadDetail() {
               Email on file:{' '}
               <span className="text-white font-medium">{lead.email || '—'}</span>
             </p>
-            {lead.converted_project_id && (
+            {lead.converted_project_id ? (
               <p className="text-xs text-slate-400">
                 Project ID:{' '}
                 <span className="text-white font-mono text-[10px]">
                   {lead.converted_project_id}
                 </span>
               </p>
-            )}
+            ) : null}
           </div>
 
           {isConverted && lead.converted_project_id ? (
@@ -426,23 +431,23 @@ export default function AdminLeadDetail() {
           )}
         </div>
 
-        {isConverted && lead.email && (
+        {isConverted && lead.email ? (
           <p className="text-xs text-slate-500">
             Homeowner can log in at{' '}
             <span className="font-mono text-slate-400">/portal/login</span>{' '}
             using <span className="text-slate-300">{lead.email}</span>.
           </p>
-        )}
+        ) : null}
       </div>
 
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl text-sm font-medium shadow-lg z-50 ${
-          toast.ok ? 'bg-green-500/90 text-white' : 'bg-red-500/90 text-white'
-        }`}>
-          {toast.msg}
-        </div>
-      )}
+      {confirmDialog ? (
+        <ConfirmDialog
+          message={confirmDialog.message}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+          variant="warning"
+        />
+      ) : null}
     </div>
   );
 }

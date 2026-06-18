@@ -166,7 +166,7 @@ export default function ThreeViewer({
   return (
     <div className="relative w-full h-full">
       <div ref={mountRef} className="w-full h-full" />
-      {!loaded && !error && (
+      {!loaded && !error ? (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
           <div className="text-center">
             <div className="spinner w-8 h-8 mx-auto mb-3" />
@@ -174,13 +174,13 @@ export default function ThreeViewer({
             <p className="text-slate-600 text-xs mt-1">Fetching satellite imagery</p>
           </div>
         </div>
-      )}
-      {error && (
+      ) : null}
+      {error ? (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
           <p className="text-red-400 text-sm">3D Error: {error}</p>
         </div>
-      )}
-      {loaded && (
+      ) : null}
+      {loaded ? (
         <>
           <div className="absolute bottom-4 left-4 glass rounded-lg px-3 py-2 text-xs text-slate-400 pointer-events-none">
             🖱 Drag to rotate • Scroll to zoom • Right-drag to pan
@@ -188,18 +188,18 @@ export default function ThreeViewer({
           <div className="absolute top-4 right-4 glass rounded-lg px-3 py-2 text-xs text-slate-300 pointer-events-none">
             {typeLabel} — 3D View
           </div>
-          {tileStatus === 'ok' && (
+          {tileStatus === 'ok' ? (
             <div className="absolute top-4 left-4 glass rounded-lg px-2 py-1 text-xs text-emerald-400 pointer-events-none">
               🛰 Satellite
             </div>
-          )}
-          {tileStatus === 'fallback' && (
+          ) : null}
+          {tileStatus === 'fallback' ? (
             <div className="absolute top-4 left-4 glass rounded-lg px-2 py-1 text-xs text-amber-400 pointer-events-none">
               🗺 Terrain
             </div>
-          )}
+          ) : null}
         </>
-      )}
+      ) : null}
     </div>
   );
 }

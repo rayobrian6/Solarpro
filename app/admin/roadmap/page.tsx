@@ -147,11 +147,11 @@ function RoadmapCard({ item }: { item: RoadmapItem }) {
           <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${priority.badge}`}>
             {item.priority}
           </span>
-          {item.effort && (
+          {item.effort ? (
             <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border border-white/10 bg-black/40 text-zinc-400">
               {EFFORT_LABEL[item.effort]}
             </span>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -169,30 +169,30 @@ function RoadmapCard({ item }: { item: RoadmapItem }) {
           {item.shippedIn && <span className="font-mono text-[10px] opacity-80 ml-1">· {item.shippedIn}</span>}
         </div>
         <div className="flex items-center gap-2 text-[10px] text-zinc-600 font-mono">
-          {item.commits && item.commits.length > 0 && (
+          {item.commits && item.commits.length > 0 ? (
             <span title={`${item.commits.length} commit(s)`} className="inline-flex items-center gap-0.5">
               <GitCommit className="h-3 w-3" /> {item.commits[0].slice(0, 7)}
             </span>
-          )}
-          {item.files && item.files.length > 0 && (
+          ) : null}
+          {item.files && item.files.length > 0 ? (
             <span title={`${item.files.length} file(s)`} className="inline-flex items-center gap-0.5">
               <FileCode className="h-3 w-3" /> {item.files.length}
             </span>
-          )}
-          {item.dependsOn && item.dependsOn.length > 0 && (
+          ) : null}
+          {item.dependsOn && item.dependsOn.length > 0 ? (
             <span title={`depends on ${item.dependsOn.length}`} className="inline-flex items-center gap-0.5">
               <ArrowRight className="h-3 w-3" /> {item.dependsOn.length}
             </span>
-          )}
+          ) : null}
         </div>
       </div>
 
-      {item.notes && (
+      {item.notes ? (
         <details className="mt-2">
           <summary className="text-[10px] text-zinc-600 hover:text-zinc-400 cursor-pointer">notes</summary>
           <p className="text-[11px] text-zinc-500 mt-1 leading-relaxed italic">{item.notes}</p>
         </details>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -356,14 +356,14 @@ export default function RoadmapPage() {
               </span>
             </h2>
           </div>
-          {activeFilterCount > 0 && (
+          {activeFilterCount > 0 ? (
             <button
               onClick={() => { setStatusFilter('all'); setPriorityFilter('all'); setTrackFilter('all'); }}
               className="text-xs text-zinc-400 hover:text-white px-3 py-1 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition"
             >
               Clear filters ({activeFilterCount})
             </button>
-          )}
+          ) : null}
         </div>
 
         {/* Filter chips */}

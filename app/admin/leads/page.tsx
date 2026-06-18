@@ -7,6 +7,7 @@ import {
   Globe, Users, DoorOpen, PhoneCall, Share2, Megaphone,
   Handshake, Calendar, HelpCircle,
 } from 'lucide-react';
+import { useToast } from '@/components/ui/Toast';
 
 type Lead = {
   id: string;
@@ -73,7 +74,7 @@ export default function AdminLeads() {
   const [search, setSearch]     = useState('');
   const [status, setStatus]     = useState<typeof STATUSES[number]>('all');
   const [loading, setLoading]   = useState(true);
-  const [toast, setToast]       = useState<{ msg: string; ok: boolean } | null>(null);
+  const toast = useToast();
 
   // Modal state
   const [showModal, setShowModal]         = useState(false);
@@ -86,10 +87,7 @@ export default function AdminLeads() {
   const [formSource, setFormSource]       = useState<string>('');
   const LIMIT = 50;
 
-  const showToast = (msg: string, ok = true) => {
-    setToast({ msg, ok });
-    setTimeout(() => setToast(null), 3000);
-  };
+  
 
   const resetForm = () => {
     setFormName('');
@@ -102,7 +100,7 @@ export default function AdminLeads() {
 
   const handleCreate = async () => {
     if (!formName.trim() || !formEmail.trim()) {
-      showToast('Name and email are required', false);
+      toast.error('Name and email are required');
       return;
     }
     setSaving(true);
@@ -123,13 +121,13 @@ export default function AdminLeads() {
       if (d.success) {
         setShowModal(false);
         resetForm();
-        showToast('✓ Lead created');
+        toast.error('✓ Lead created');
         load();
       } else {
-        showToast(d.error || 'Failed to create lead', false);
+        toast.success(d.error || 'Failed to create lead');
       }
     } catch {
-      showToast('Connection error', false);
+      toast.error('Connection error');
     } finally {
       setSaving(false);
     }
@@ -247,23 +245,23 @@ export default function AdminLeads() {
                       <Link href={`/admin/leads/${lead.id}`} className="font-medium text-white hover:text-blue-400 transition-colors">
                         {lead.name}
                       </Link>
-                      {lead.notes && (
+                      {lead.notes ? (
                         <p className="text-xs text-slate-500 mt-0.5 truncate max-w-[180px]">{lead.notes}</p>
-                      )}
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-slate-400">
-                      {lead.email && (
+                      {lead.email ? (
                         <div className="flex items-center gap-1 text-xs">
                           <Mail size={11} className="text-slate-500" />
                           {lead.email}
                         </div>
-                      )}
-                      {lead.phone && (
+                      ) : null}
+                      {lead.phone ? (
                         <div className="flex items-center gap-1 text-xs mt-0.5">
                           <Phone size={11} className="text-slate-500" />
                           {lead.phone}
                         </div>
-                      )}
+                      ) : null}
                     </td>
                     <td className="px-4 py-3">
                       {lead.address ? (
@@ -283,11 +281,11 @@ export default function AdminLeads() {
                         <Icon size={10} />
                         {cfg.label}
                       </span>
-                      {lead.status === 'converted' && lead.project_name && (
+                      {lead.status === 'converted' && lead.project_name ? (
                         <p className="text-xs text-slate-500 mt-0.5">
                           → {lead.project_name}
                         </p>
-                      )}
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-400">
                       {lead.owner_name || lead.owner_email || '—'}
@@ -312,7 +310,7 @@ export default function AdminLeads() {
       </div>
 
       {/* Pagination */}
-      {totalPages > 1 && (
+      {totalPages > 1 ? (
         <div className="flex items-center justify-between text-xs text-slate-400">
           <span>Page {page} of {totalPages}</span>
           <div className="flex gap-2">
@@ -332,10 +330,10 @@ export default function AdminLeads() {
             </button>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Create Lead Modal */}
-      {showModal && (
+      {showModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           {/* Backdrop */}
           <div
@@ -475,16 +473,7 @@ export default function AdminLeads() {
             </div>
           </div>
         </div>
-      )}
-
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl text-sm font-medium shadow-lg z-50 ${
-          toast.ok ? 'bg-green-500/90 text-white' : 'bg-red-500/90 text-white'
-        }`}>
-          {toast.msg}
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }

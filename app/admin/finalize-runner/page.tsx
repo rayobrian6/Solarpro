@@ -72,13 +72,13 @@ export default function FinalizeRunnerPage() {
         {loading ? '⏳ Running... (may take 30-60s)' : '▶ Run Finalize (retry=1)'}
       </button>
 
-      {error && (
+      {error ? (
         <div style={{ marginTop: 24, color: '#f44336' }}>
           ❌ Error: {error}
         </div>
-      )}
+      ) : null}
 
-      {result && (
+      {result ? (
         <div style={{ marginTop: 24 }}>
           <p style={{ color: result.success ? '#4caf50' : '#f44336', fontWeight: 600, marginBottom: 12 }}>
             {result.success ? '✅ Finalize completed!' : '❌ Finalize failed'}
@@ -97,7 +97,7 @@ export default function FinalizeRunnerPage() {
             {JSON.stringify(result, null, 2)}
           </pre>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

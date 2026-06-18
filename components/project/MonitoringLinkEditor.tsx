@@ -153,7 +153,7 @@ export default function MonitoringLinkEditor({ projectId }: MonitoringLinkEditor
       </div>
 
       {/* Preview link */}
-      {url.trim() && (
+      {url.trim() ? (
         <a
           href={url.trim()}
           target="_blank"
@@ -163,7 +163,7 @@ export default function MonitoringLinkEditor({ projectId }: MonitoringLinkEditor
           <ExternalLink size={10} />
           Preview monitoring dashboard
         </a>
-      )}
+      ) : null}
 
       {/* Save button */}
       <div className="flex items-center gap-3 pt-1">
@@ -179,12 +179,12 @@ export default function MonitoringLinkEditor({ projectId }: MonitoringLinkEditor
           {saving ? <Loader2 size={10} className="animate-spin" /> : saved ? <Check size={10} /> : null}
           {saving ? 'Saving…' : saved ? 'Saved!' : 'Save Monitoring Link'}
         </button>
-        {error && (
+        {error ? (
           <span className="flex items-center gap-1 text-[11px] text-red-400">
             <AlertCircle size={10} />
             {error}
           </span>
-        )}
+        ) : null}
       </div>
     </div>
   );

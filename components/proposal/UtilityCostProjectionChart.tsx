@@ -152,7 +152,7 @@ export function UtilityCostProjectionChart({
   return (
     <div className="w-full">
       {/* Break-even announcement banner */}
-      {crossoverYear !== null && crossoverYear > 1 && (
+      {crossoverYear !== null && crossoverYear > 1 ? (
         <div className="mb-3 flex items-center gap-2 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-xl">
           <span className="text-indigo-600 text-base">⚡</span>
           <span className="text-sm font-bold text-indigo-800">
@@ -162,7 +162,7 @@ export function UtilityCostProjectionChart({
             — every year after that is net savings
           </span>
         </div>
-      )}
+      ) : null}
 
       {/* Source label */}
       <p className="text-xs text-slate-500 mb-2">
@@ -229,13 +229,13 @@ export function UtilityCostProjectionChart({
         />
 
         {/* Shaded savings region (post-crossover) */}
-        {savingsRegionPath && (
+        {savingsRegionPath ? (
           <path
             d={savingsRegionPath}
             fill="#d1fae5"
             opacity={0.6}
           />
-        )}
+        ) : null}
 
         {/* Shaded deficit region (pre-crossover, where solar costs more) */}
         {crossoverYear !== null && crossoverYear > 1 && (() => {
@@ -300,7 +300,7 @@ export function UtilityCostProjectionChart({
         </text>
 
         {/* Break-even vertical marker */}
-        {crossoverX !== null && crossoverYear !== null && crossoverYear > 1 && crossoverYear < YEARS && (
+        {crossoverX !== null && crossoverYear !== null && crossoverYear > 1 && crossoverYear < YEARS ? (
           <>
             {/* Dashed vertical line */}
             <line
@@ -341,7 +341,7 @@ export function UtilityCostProjectionChart({
               Break-Even: Yr {crossoverYear}
             </text>
           </>
-        )}
+        ) : null}
 
         {/* Cumulative savings annotation at Year 25 midpoint */}
         {savings25 > 0 && (() => {
@@ -409,13 +409,13 @@ export function UtilityCostProjectionChart({
           <div className="w-4 h-3 bg-green-100 border border-green-300 rounded-sm" />
           <span className="text-xs text-slate-500">Savings Region</span>
         </div>
-        {savings25 > 0 && (
+        {savings25 > 0 ? (
           <div className="flex items-center gap-2 ml-auto">
             <span className="text-xs font-bold text-green-700">
               25-yr advantage: {formatK(savings25)}
             </span>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

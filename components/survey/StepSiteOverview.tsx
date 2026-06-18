@@ -242,7 +242,7 @@ function ClientProjectPicker({
         />
 
         {/* Clear button */}
-        {hasSelection && !disabled && (
+        {hasSelection && !disabled ? (
           <button
             type="button"
             onClick={handleClear}
@@ -252,10 +252,10 @@ function ClientProjectPicker({
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
-        )}
+        ) : null}
 
         {/* Chevron */}
-        {!hasSelection && (
+        {!hasSelection ? (
           <svg
             className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
             fill="none"
@@ -265,11 +265,11 @@ function ClientProjectPicker({
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
-        )}
+        ) : null}
       </div>
 
       {/* Selection badge */}
-      {hasSelection && selectedItem && (
+      {hasSelection && selectedItem ? (
         <div className="mt-2 flex items-center gap-2 px-1">
           <span
             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide
@@ -282,10 +282,10 @@ function ClientProjectPicker({
           </span>
           <span className="text-xs text-gray-600 truncate">{selectedItem.sublabel}</span>
         </div>
-      )}
+      ) : null}
 
       {/* Dropdown */}
-      {open && (
+      {open ? (
         <div
           ref={listRef}
           className="absolute z-50 top-full left-0 right-0 mt-1 bg-white rounded-xl border border-gray-200
@@ -298,7 +298,7 @@ function ClientProjectPicker({
           ) : (
             <>
               {/* Clients section */}
-              {filteredClients.length > 0 && (
+              {filteredClients.length > 0 ? (
                 <div>
                   <div className="px-3 py-1.5 bg-gray-50 border-b border-gray-100">
                     <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">
@@ -313,16 +313,16 @@ function ClientProjectPicker({
                       className="w-full text-left px-4 py-2.5 hover:bg-purple-50 transition-colors border-b border-gray-50 last:border-0"
                     >
                       <p className="text-sm font-medium text-gray-900">{item.label}</p>
-                      {item.sublabel && (
+                      {item.sublabel ? (
                         <p className="text-xs text-gray-500 truncate mt-0.5">{item.sublabel}</p>
-                      )}
+                      ) : null}
                     </button>
                   ))}
                 </div>
-              )}
+              ) : null}
 
               {/* Projects section */}
-              {filteredProjects.length > 0 && (
+              {filteredProjects.length > 0 ? (
                 <div>
                   <div className="px-3 py-1.5 bg-gray-50 border-b border-gray-100">
                     <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">
@@ -337,17 +337,17 @@ function ClientProjectPicker({
                       className="w-full text-left px-4 py-2.5 hover:bg-cyan-50 transition-colors border-b border-gray-50 last:border-0"
                     >
                       <p className="text-sm font-medium text-gray-900">{item.label}</p>
-                      {item.sublabel && (
+                      {item.sublabel ? (
                         <p className="text-xs text-gray-500 truncate mt-0.5">{item.sublabel}</p>
-                      )}
+                      ) : null}
                     </button>
                   ))}
                 </div>
-              )}
+              ) : null}
             </>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -381,7 +381,7 @@ export function StepSiteOverview({
     <div className="space-y-4">
 
       {/* ---- v47.438: Client/Project picker (standalone surveys only) ---- */}
-      {standalone && (
+      {standalone ? (
         <StepCard
           title="Associate with Client or Project"
           subtitle="Required - select who this survey is for"
@@ -406,7 +406,7 @@ export function StepSiteOverview({
           </StepField>
 
           {/* Hint about what happens with each selection type */}
-          {!selectedClientId && !selectedProjectId && !lookupLoading && !lookupError && (
+          {!selectedClientId && !selectedProjectId && !lookupLoading && !lookupError ? (
             <div className="mt-2 rounded-lg bg-amber-50 border border-amber-200 p-3">
               <p className="text-xs text-amber-700 font-medium">
                 Selection required before continuing
@@ -416,27 +416,27 @@ export function StepSiteOverview({
                 Picking a <strong>Client</strong> creates a new project under that client.
               </p>
             </div>
-          )}
+          ) : null}
 
-          {selectedProjectId && (
+          {selectedProjectId ? (
             <div className="mt-2 rounded-lg bg-cyan-50 border border-cyan-200 p-3">
               <p className="text-xs text-cyan-700 font-medium">Survey will attach to this project</p>
               <p className="text-xs text-cyan-600 mt-0.5">
                 Data will be linked to the selected project when submitted.
               </p>
             </div>
-          )}
+          ) : null}
 
-          {selectedClientId && !selectedProjectId && (
+          {selectedClientId && !selectedProjectId ? (
             <div className="mt-2 rounded-lg bg-purple-50 border border-purple-200 p-3">
               <p className="text-xs text-purple-700 font-medium">A new project will be created under this client</p>
               <p className="text-xs text-purple-600 mt-0.5">
                 Survey data will be attached to a new project under this client when submitted.
               </p>
             </div>
-          )}
+          ) : null}
         </StepCard>
-      )}
+      ) : null}
 
       {/* ---- Project Info ---- */}
       <StepCard title="Project Info">

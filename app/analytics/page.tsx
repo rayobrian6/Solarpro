@@ -10,7 +10,7 @@ import {
   TrendingUp, Zap, DollarSign, Leaf, Sun, BarChart2, BarChart3,
   Users, Home, Sprout, Fence, ArrowUpRight,
   ArrowDownRight, Target, Clock,
-  ChevronRight, RefreshCcw,
+  ChevronRight, RefreshCcw, AlertTriangle,
 } from 'lucide-react';
 import type { Project, Client } from '@/types';
 import Link from 'next/link';
@@ -94,19 +94,19 @@ function KpiCard({ icon, label, value, sub, trend, color, loading }: {
           style={{ background: `${color}15` }}>
           {icon}
         </div>
-        {trend && !loading && (
+        {trend && !loading ? (
           <div className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full ${
             trend.neutral ? 'text-slate-400 bg-slate-700/40'
               : trend.positive ? 'text-emerald-400 bg-emerald-500/10'
                 : 'text-red-400 bg-red-500/10'
           }`}>
-            {!trend.neutral && (trend.positive
+            {!trend.neutral ? (trend.positive
               ? <ArrowUpRight size={9} />
               : <ArrowDownRight size={9} />
-            )}
+            ) : null}
             {trend.label}
           </div>
-        )}
+        ) : null}
       </div>
       <div className="text-2xl font-black" style={{ color: 'var(--text-primary)' }}>
         {loading ? '—' : value}
@@ -340,7 +340,7 @@ export default function AnalyticsPage() {
                 <div className="flex items-center gap-2 mb-1">
                   <BarChart3 size={13} className="text-green-400" />
                   <span className="text-xs font-semibold text-green-400 uppercase tracking-wider">Performance Intelligence</span>
-                  {loading && <RefreshCcw size={11} className="text-slate-500 animate-spin" />}
+                  {loading ? <RefreshCcw size={11} className="text-slate-500 animate-spin" /> : null}
                 </div>
                 <h1 className="text-2xl font-black text-white tracking-tight">Analytics</h1>
                 <p className="text-sm text-slate-400 mt-0.5">
@@ -365,17 +365,17 @@ export default function AnalyticsPage() {
           {/* ═══ KPI STRIP ═══ */}
 
           {/* #9 FIX: Revenue data quality banner — shown when <80% of projects have pricing */}
-          {!loading && projects.length > 0 && revenueDataQuality < 80 && (
+          {!loading && projects.length > 0 && revenueDataQuality < 80 ? (
             <div className="flex items-start gap-3 rounded-xl px-4 py-3 text-xs"
               style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.18)' }}>
-              <span style={{ color: '#f59e0b', fontSize: 16, lineHeight: 1, marginTop: 1 }}>⚠</span>
+              <AlertTriangle size={14} style={{ color: '#f59e0b', flexShrink: 0, marginTop: 1 }} />
               <span style={{ color: '#94a3b8' }}>
                 Revenue figures only include projects with completed proposals
                 ({pricedProjectCount} of {projects.length} projects have pricing data).
                 Complete proposals to see accurate revenue metrics.
               </span>
             </div>
-          )}
+          ) : null}
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <KpiCard icon={<DollarSign size={18} style={{ color: '#4ADE80' }} />}
@@ -410,11 +410,11 @@ export default function AnalyticsPage() {
               <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Revenue Over Time</h3>
               <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
                 Monthly revenue + cumulative pipeline
-                {pricedProjectCount < projects.length && projects.length > 0 && (
+                {pricedProjectCount < projects.length && projects.length > 0 ? (
                   <span style={{ color: 'rgba(245,158,11,0.7)', marginLeft: 6 }}>
                     · {pricedProjectCount}/{projects.length} projects priced
                   </span>
-                )}
+                ) : null}
               </p>
             </div>
             <div className="flex items-center gap-4 text-[10px] font-medium" style={{ color: 'var(--text-muted)' }}>
@@ -422,7 +422,7 @@ export default function AnalyticsPage() {
               <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-blue-500 inline-block" />Cumulative</span>
             </div>
           </div>
-          {mounted && (
+          {mounted ? (
             <ResponsiveContainer width="100%" height={240}>
               <ComposedChart data={revenueByMonth} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
                 <defs>
@@ -446,7 +446,7 @@ export default function AnalyticsPage() {
                 <Line yAxisId="cum" type="monotone" dataKey="cumulative" stroke="#3b82f6" strokeWidth={2} dot={false} />
               </ComposedChart>
             </ResponsiveContainer>
-          )}
+          ) : null}
         </div>
 
         {/* ═══ CONVERSION FUNNEL + SALES VELOCITY ═══ */}
@@ -477,11 +477,11 @@ export default function AnalyticsPage() {
                             style={{ background: `${f.color}15`, color: f.color }}>
                             {f.pct}%
                           </span>
-                          {i > 0 && f.dropoff > 0 && (
+                          {i > 0 && f.dropoff > 0 ? (
                             <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-400">
                               −{f.dropoff}% drop
                             </span>
-                          )}
+                          ) : null}
                         </div>
                       </div>
                       <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--bg-muted)' }}>
@@ -502,12 +502,12 @@ export default function AnalyticsPage() {
                 <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Sales Velocity</h3>
                 <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>Avg days per pipeline stage</p>
               </div>
-              {avgDaysToClose > 0 && (
+              {avgDaysToClose > 0 ? (
                 <div className="text-[10px] font-bold px-2.5 py-1 rounded-full"
                   style={{ background: 'rgba(168,85,247,0.1)', color: '#A855F7', border: '1px solid rgba(168,85,247,0.2)' }}>
                   Total: {avgDaysToClose}d avg
                 </div>
-              )}
+              ) : null}
             </div>
             {velocityData.every(v => v.days === 0) ? (
               <div className="flex flex-col items-center justify-center h-40 text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -533,11 +533,11 @@ export default function AnalyticsPage() {
                           style={{ width: `${Math.max((v.days / maxDays) * 100, 4)}%`, background: `${v.color}30`, borderRight: `3px solid ${v.color}` }}>
                         </div>
                       </div>
-                      {i < velocityData.length - 1 && (
+                      {i < velocityData.length - 1 ? (
                         <div className="flex justify-center my-1">
                           <ChevronRight size={10} style={{ color: 'var(--text-muted)', opacity: 0.3 }} />
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   );
                 })}
@@ -560,7 +560,7 @@ export default function AnalyticsPage() {
                 <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-purple-500 inline-block" />Fence</span>
               </div>
             </div>
-            {mounted && (
+            {mounted ? (
               <ResponsiveContainer width="100%" height={220}>
                 <AreaChart data={monthlyProduction} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
                   <defs>
@@ -582,7 +582,7 @@ export default function AnalyticsPage() {
                   <Area type="monotone" dataKey="fence" stroke="#a855f7" fill="url(#fenceGrad)" strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
-            )}
+            ) : null}
           </div>
 
           {/* System Type Distribution */}
@@ -632,7 +632,7 @@ export default function AnalyticsPage() {
               <Link href="/projects" className="text-[10px] font-bold hover:brightness-110 transition-all"
                 style={{ color: 'var(--accent-amber)' }}>View all →</Link>
             </div>
-            {mounted && (
+            {mounted ? (
               <ResponsiveContainer width="100%" height={180}>
                 <BarChart data={statusBreakdown} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
@@ -648,7 +648,7 @@ export default function AnalyticsPage() {
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-            )}
+            ) : null}
           </div>
 
           {/* Top Deals by Value */}

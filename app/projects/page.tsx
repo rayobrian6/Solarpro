@@ -8,11 +8,12 @@ import {
   FolderOpen, Plus, Search, Zap, DollarSign,
   ChevronRight, Trash2, Map, FileText,
   Calendar, User, RefreshCw, AlertCircle, Lock,
-  MoreHorizontal, Copy, Archive, ChevronDown,
-  CheckSquare, Square, X, Check, AlertTriangle,
-  TrendingUp, Clock, Flame, Layers, Home, Trees,
+  MoreHorizontal, Copy, Archive,
+  CheckSquare, Square, X, AlertTriangle,
+  TrendingUp, Clock, Flame,
   Shield, Activity, ArrowRight, Sparkles, Grid3x3,
-  List, Filter, SortAsc
+  List, Filter, SortAsc,
+  ArrowUpDown
 } from 'lucide-react';
 import type { Project, ProjectStatus } from '@/types';
 import { useAppStore } from '@/store/appStore';
@@ -20,129 +21,12 @@ import { useSubscription } from '@/hooks/useSubscription';
 import { useUser } from '@/contexts/UserContext';
 import { hasPlatformAccess } from '@/lib/permissions';
 import UpgradeModal from '@/components/ui/UpgradeModal';
+import { useToast } from '@/components/ui/Toast';
+import {
+  STATUS_STEPS, STATUS_CONFIG, TYPE_ICONS_JSX, TYPE_BG, TYPE_LABEL,
+  getUrgency, getNextAction, PipelineProgress, StatusDropdown,
+} from '@/components/ui/ProjectPipeline';
 
-// ── Status config ─────────────────────────────────────────────────────────────
-const STATUS_STEPS: ProjectStatus[] = ['lead', 'design', 'proposal', 'approved', 'installed'];
-
-const STATUS_CONFIG: Record<ProjectStatus, {
-  label: string; dot: string; badge: string; next?: ProjectStatus;
-  ringColor: string; cardBorder: string; iconColor: string; barColor: string;
-}> = {
-  lead:      { label: 'Lead',      dot: 'bg-slate-400',   badge: 'bg-slate-700/60 text-slate-300 border-slate-600/40',   next: 'design',
-    ringColor: 'ring-slate-500/30',   cardBorder: 'border-slate-600/50',  iconColor: 'text-slate-400', barColor: 'bg-slate-500' },
-  design:    { label: 'Design',    dot: 'bg-blue-500',    badge: 'bg-blue-900/60 text-blue-300 border-blue-700/40',       next: 'proposal',
-    ringColor: 'ring-blue-500/30',    cardBorder: 'border-blue-700/40',   iconColor: 'text-blue-400',  barColor: 'bg-blue-500' },
-  proposal:  { label: 'Proposal',  dot: 'bg-amber-500',   badge: 'bg-amber-900/60 text-amber-300 border-amber-700/40',   next: 'approved',
-    ringColor: 'ring-amber-500/30',   cardBorder: 'border-amber-700/40',  iconColor: 'text-amber-400', barColor: 'bg-amber-500' },
-  approved:  { label: 'Approved',  dot: 'bg-emerald-500', badge: 'bg-emerald-900/60 text-emerald-300 border-emerald-700/40', next: 'installed',
-    ringColor: 'ring-emerald-500/30', cardBorder: 'border-emerald-700/40', iconColor: 'text-emerald-400', barColor: 'bg-emerald-500' },
-  installed: { label: 'Installed', dot: 'bg-green-500',   badge: 'bg-green-900/60 text-green-300 border-green-700/40',
-    ringColor: 'ring-green-500/30',   cardBorder: 'border-green-700/40',  iconColor: 'text-green-400', barColor: 'bg-green-500' },
-};
-
-const TYPE_ICONS_JSX: Record<string, React.ReactNode> = {
-  roof:   <Home size={18} />,
-  ground: <Trees size={18} />,
-  fence:  <Layers size={18} />,
-};
-const TYPE_BG: Record<string, string> = {
-  roof:   'bg-amber-500/15 text-amber-400 border-amber-500/20',
-  ground: 'bg-teal-500/15 text-teal-400 border-teal-500/20',
-  fence:  'bg-purple-500/15 text-purple-400 border-purple-500/20',
-};
-const TYPE_LABEL: Record<string, string> = { roof: 'Roof Mount', ground: 'Ground Mount', fence: 'Sol Fence' };
-
-// ── Urgency helper ────────────────────────────────────────────────────────────
-function getUrgency(p: Project): 'high' | 'medium' | 'low' {
-  const daysSince = (Date.now() - new Date(p.updatedAt || p.createdAt).getTime()) / 86400000;
-  if (p.status === 'proposal' && daysSince > 5) return 'high';
-  if (p.status === 'approved' && daysSince > 3)  return 'high';
-  if (p.status === 'lead' && daysSince > 14)      return 'medium';
-  if (p.status === 'design' && daysSince > 7)     return 'medium';
-  return 'low';
-}
-
-function getNextAction(p: Project): { label: string; href: string; color: string; bg: string } {
-  switch (p.status) {
-    case 'lead':      return { label: 'Start Design',     href: `/design?projectId=${p.id}`, color: 'text-blue-300',    bg: 'bg-blue-500/15 hover:bg-blue-500/25 border-blue-500/30' };
-    case 'design':    return { label: 'Create Proposal',  href: `/projects/${p.id}`,          color: 'text-amber-300',   bg: 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/30' };
-    case 'proposal':  return { label: 'Follow Up',        href: `/projects/${p.id}`,          color: 'text-orange-300',  bg: 'bg-orange-500/15 hover:bg-orange-500/25 border-orange-500/30' };
-    case 'approved':  return { label: 'Schedule Install', href: `/projects/${p.id}`,          color: 'text-emerald-300', bg: 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/30' };
-    case 'installed': return { label: 'View Project',     href: `/projects/${p.id}`,          color: 'text-green-300',   bg: 'bg-green-500/15 hover:bg-green-500/25 border-green-500/30' };
-  }
-}
-
-// ── Status pipeline progress bar ─────────────────────────────────────────────
-function PipelineProgress({ status }: { status: ProjectStatus }) {
-  const idx = STATUS_STEPS.indexOf(status);
-  return (
-    <div className="flex items-center gap-0.5 w-full">
-      {STATUS_STEPS.map((s, i) => {
-        const cfg = STATUS_CONFIG[s];
-        const active = i <= idx;
-        return (
-          <div
-            key={s}
-            className={`h-1 flex-1 rounded-full transition-all ${active ? cfg.barColor : 'bg-slate-700/60'} ${i === idx ? 'ring-1 ring-white/20' : ''}`}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-// ── Status Dropdown ───────────────────────────────────────────────────────────
-function StatusDropdown({ project, onStatusChange }: {
-  project: Project;
-  onStatusChange: (id: string, status: ProjectStatus) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const cfg = STATUS_CONFIG[project.status];
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={e => { e.stopPropagation(); setOpen(v => !v); }}
-        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all hover:opacity-90 ${cfg.badge}`}
-      >
-        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot}`} />
-        {cfg.label}
-        <ChevronDown size={9} className={`transition-transform opacity-60 ${open ? 'rotate-180' : ''}`} />
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full mt-1.5 bg-slate-800/95 backdrop-blur-xl border border-slate-700/80 rounded-xl shadow-2xl z-30 overflow-hidden min-w-[150px]">
-          <div className="px-3 py-1.5 border-b border-slate-700/50">
-            <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Set Status</span>
-          </div>
-          {STATUS_STEPS.map(s => {
-            const sc = STATUS_CONFIG[s];
-            return (
-              <button
-                key={s}
-                onClick={e => { e.stopPropagation(); onStatusChange(project.id, s); setOpen(false); }}
-                className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-slate-700/60 transition-colors ${s === project.status ? 'text-white bg-slate-700/40' : 'text-slate-300'}`}
-              >
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${sc.dot}`} />
-                {sc.label}
-                {s === project.status && <Check size={11} className="ml-auto text-amber-400" />}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Action Menu ───────────────────────────────────────────────────────────────
 function ActionMenu({ project, onDuplicate, onDelete, onClose }: {
@@ -284,16 +168,16 @@ function ProjectCard({
               >
                 {project.name}
               </Link>
-              {urgency === 'high' && (
+              {urgency === 'high' ? (
                 <span className="flex items-center gap-1 text-[10px] text-red-300 bg-red-500/12 border border-red-500/25 px-1.5 py-0.5 rounded-full font-bold">
                   <Flame size={8} /> Hot
                 </span>
-              )}
-              {urgency === 'medium' && (
+              ) : null}
+              {urgency === 'medium' ? (
                 <span className="flex items-center gap-1 text-[10px] text-amber-400/80 bg-amber-500/8 border border-amber-500/20 px-1.5 py-0.5 rounded-full">
                   <Clock size={8} /> Stale
                 </span>
-              )}
+              ) : null}
             </div>
             <div className="flex items-center gap-2 mt-0.5">
               <span className={`text-[10px] px-1.5 py-0.5 rounded-md border font-semibold ${TYPE_BG[project.systemType] || ''}`}>
@@ -310,27 +194,27 @@ function ProjectCard({
             >
               <MoreHorizontal size={14} />
             </button>
-            {menuOpen && (
+            {menuOpen ? (
               <ActionMenu
                 project={project}
                 onDuplicate={() => onDuplicate(project)}
                 onDelete={() => onDelete(project.id)}
                 onClose={() => setActionMenuId(null)}
               />
-            )}
+            ) : null}
           </div>
         </div>
 
         {/* Row 2: Client + date */}
         <div className="flex items-center gap-3 text-xs text-slate-500 mb-3">
-          {project.client?.name && (
+          {project.client?.name ? (
             <span className="flex items-center gap-1 truncate">
               <User size={10} className="flex-shrink-0" />
               <Link href={`/clients/${project.clientId}`} className="hover:text-slate-300 transition-colors truncate">
                 {project.client.name}
               </Link>
             </span>
-          )}
+          ) : null}
           <span className="flex items-center gap-1 flex-shrink-0 ml-auto">
             <Calendar size={10} />
             {new Date(project.updatedAt || project.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
@@ -439,26 +323,26 @@ function ProjectRow({
           <Link href={`/projects/${project.id}`} className="font-semibold text-white text-sm hover:text-amber-300 transition-colors">
             {project.name}
           </Link>
-          {urgency === 'high' && (
+          {urgency === 'high' ? (
             <span className="flex items-center gap-1 text-[10px] text-red-400 bg-red-500/10 border border-red-500/20 px-1.5 py-0.5 rounded-full font-bold">
               <Flame size={8} /> Hot
             </span>
-          )}
+          ) : null}
         </div>
         <div className="flex items-center gap-3 mt-0.5 text-xs text-slate-500">
-          {project.client?.name && (
+          {project.client?.name ? (
             <span className="flex items-center gap-1">
               <User size={9} />
               <Link href={`/clients/${project.clientId}`} className="hover:text-slate-300 transition-colors">
                 {project.client.name}
               </Link>
             </span>
-          )}
-          {project.layout?.systemSizeKw && (
+          ) : null}
+          {project.layout?.systemSizeKw ? (
             <span className="flex items-center gap-1 text-amber-400/70">
               <Zap size={9} /> {project.layout.systemSizeKw.toFixed(1)} kW
             </span>
-          )}
+          ) : null}
           <span className="flex items-center gap-1">
             <Calendar size={9} />
             {new Date(project.updatedAt || project.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
@@ -504,14 +388,14 @@ function ProjectRow({
           >
             <MoreHorizontal size={14} />
           </button>
-          {menuOpen && (
+          {menuOpen ? (
             <ActionMenu
               project={project}
               onDuplicate={() => onDuplicate(project)}
               onDelete={() => onDelete(project.id)}
               onClose={() => setActionMenuId(null)}
             />
-          )}
+          ) : null}
         </div>
       </div>
     </div>
@@ -530,7 +414,14 @@ export default function ProjectsPage() {
   const [filterType, setFilterType]       = useState('all');
   const [filterStatus, setFilterStatus]   = useState('all');
   const [sortBy, setSortBy]               = useState<'updated' | 'created' | 'name' | 'size'>('updated');
-  const [viewMode, setViewMode]           = useState<'grid' | 'list'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
+    if (typeof window === 'undefined') return 'grid';
+    try {
+      const saved = localStorage.getItem('solarpro:projectsViewMode');
+      if (saved === 'list' || saved === 'grid') return saved;
+    } catch { /* ignore */ }
+    return 'grid';
+  });
   const [upgradeOpen, setUpgradeOpen]     = useState(false);
   const [actionMenuId, setActionMenuId]   = useState<string | null>(null);
   const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set());
@@ -540,6 +431,7 @@ export default function ProjectsPage() {
 
   const { plan, loading: subLoading } = useSubscription();
   const { user }       = useUser();
+  const toast          = useToast();
   const isUnlimited    = hasPlatformAccess(user);
   const maxProjects    = (!subLoading && plan === 'starter' && !isUnlimited) ? 2 : null;
   const atProjectLimit = maxProjects !== null && projects.length >= maxProjects;
@@ -591,7 +483,7 @@ export default function ProjectsPage() {
         body: JSON.stringify({ status }),
       });
       await loadProjects(true);
-    } catch { alert('Failed to update status'); }
+    } catch { toast.error('Status update failed', 'Could not update project status. Please try again.'); }
     finally { setUpdatingStatus(null); }
   };
 
@@ -608,7 +500,7 @@ export default function ProjectsPage() {
         }),
       });
       if (res.ok) await loadProjects(true);
-    } catch { alert('Failed to duplicate project'); }
+    } catch { toast.error('Duplicate failed', 'Could not duplicate project. Please try again.'); }
   };
 
   const handleDeleteSingle   = (id: string) => setConfirmDelete({ ids: [id] });
@@ -634,13 +526,13 @@ export default function ProjectsPage() {
         // Reload projects to reflect server state
         await loadProjects(true);
         if (json.skipped?.length > 0) {
-          alert(`${json.deleted.length} project(s) deleted. ${json.skipped.length} could not be deleted (not found or not owned by you).`);
+          toast.warning('Some projects skipped', `${json.deleted.length} deleted, ${json.skipped.length} could not be deleted (not found or not owned by you).`);
         }
       }
       setSelectedIds(new Set());
       setConfirmDelete(null);
     } catch (e: unknown) {
-      alert(`Delete failed: ${(e as Error)?.message || 'Unknown error'}`);
+      toast.error('Delete failed', (e as Error)?.message || 'Unknown error');
     } finally { setDeleteLoading(false); }
   };
 
@@ -658,14 +550,14 @@ export default function ProjectsPage() {
     <AppShell>
       <div className="p-6 space-y-5 animate-fade-in">
         {/* Modals */}
-        {confirmDelete && (
+        {confirmDelete ? (
           <ConfirmDeleteModal
             count={confirmDelete.ids.length}
             onConfirm={executeDelete}
             onCancel={() => setConfirmDelete(null)}
             loading={deleteLoading}
           />
-        )}
+        ) : null}
         <UpgradeModal
           isOpen={upgradeOpen}
           onClose={() => setUpgradeOpen(false)}
@@ -684,7 +576,7 @@ export default function ProjectsPage() {
                     <FolderOpen size={12} className="text-blue-400" />
                   </div>
                   <span className="text-xs font-bold text-blue-400 uppercase tracking-widest">Project Pipeline</span>
-                  {loading && <RefreshCw size={11} className="text-slate-500 animate-spin" />}
+                  {loading ? <RefreshCw size={11} className="text-slate-500 animate-spin" /> : null}
                 </div>
                 <h1 className="text-2xl font-black text-white tracking-tight">Projects</h1>
                 <p className="text-sm text-slate-400 mt-0.5">
@@ -711,7 +603,7 @@ export default function ProjectsPage() {
             </div>
 
             {/* Status KPI pills */}
-            {!loading && projects.length > 0 && (
+            {!loading && projects.length > 0 ? (
               <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
                 {STATUS_STEPS.map(status => {
                   const count    = statusCounts[status] ?? 0;
@@ -737,12 +629,12 @@ export default function ProjectsPage() {
                   );
                 })}
               </div>
-            )}
+            ) : null}
           </div>
         </div>
 
         {/* Starter limit banner */}
-        {atProjectLimit && (
+        {atProjectLimit ? (
           <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-center gap-3">
             <Lock size={16} className="text-amber-400 flex-shrink-0" />
             <div className="flex-1">
@@ -751,16 +643,16 @@ export default function ProjectsPage() {
             </div>
             <button onClick={() => setUpgradeOpen(true)} className="btn-primary btn-sm flex-shrink-0">Upgrade</button>
           </div>
-        )}
+        ) : null}
 
         {/* Error banner */}
-        {projectsError && projects.length > 0 && (
+        {projectsError && projects.length > 0 ? (
           <div className="banner-warning">
             <AlertCircle size={16} className="text-amber-400 flex-shrink-0" />
             <p className="text-amber-400 text-sm flex-1">Showing cached data — server sync failed: {projectsError}</p>
             <button onClick={() => loadProjects(true)} className="btn-secondary btn-sm">Retry</button>
           </div>
-        )}
+        ) : null}
 
         {/* ══════════ FILTER + SORT + VIEW TOGGLE BAR ══════════ */}
         <div className="flex flex-col sm:flex-row gap-2.5">
@@ -789,14 +681,14 @@ export default function ProjectsPage() {
           {/* View toggle */}
           <div className="flex items-center gap-1 bg-slate-800/60 border border-slate-700/60 rounded-xl p-1 flex-shrink-0">
             <button
-              onClick={() => setViewMode('grid')}
+              onClick={() => { setViewMode('grid'); try { localStorage.setItem('solarpro:projectsViewMode', 'grid'); } catch {} }}
               className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}
               title="Card Grid"
             >
               <Grid3x3 size={14} />
             </button>
             <button
-              onClick={() => setViewMode('list')}
+              onClick={() => { setViewMode('list'); try { localStorage.setItem('solarpro:projectsViewMode', 'list'); } catch {} }}
               className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}
               title="List View"
             >
@@ -806,7 +698,7 @@ export default function ProjectsPage() {
         </div>
 
         {/* ══════════ BULK TOOLBAR ══════════ */}
-        {selectedIds.size > 0 && (
+        {selectedIds.size > 0 ? (
           <div className="flex items-center gap-3 px-4 py-3 bg-amber-500/10 border border-amber-500/30 rounded-xl">
             <CheckSquare size={15} className="text-amber-400" />
             <span className="text-amber-300 font-semibold text-sm">{selectedIds.size} project{selectedIds.size !== 1 ? 's' : ''} selected</span>
@@ -820,7 +712,7 @@ export default function ProjectsPage() {
               </button>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* ══════════ CONTENT ══════════ */}
         {loading ? (
@@ -859,11 +751,11 @@ export default function ProjectsPage() {
                 ? 'Try adjusting your filters'
                 : 'Create your first project to get started'}
             </p>
-            {!search && filterType === 'all' && filterStatus === 'all' && (
+            {!search && filterType === 'all' && filterStatus === 'all' ? (
               <Link href="/projects/new" className="btn-primary mt-4 inline-flex">
                 <Plus size={16} /> Create Project
               </Link>
-            )}
+            ) : null}
           </div>
         ) : viewMode === 'grid' ? (
           <div>
@@ -874,11 +766,11 @@ export default function ProjectsPage() {
                   : <Square size={13} />}
                 <span>{allFilteredSelected ? 'Deselect all' : `Select all ${filtered.length}`}</span>
               </button>
-              {filtered.some(p => getUrgency(p) === 'high') && (
+              {filtered.some(p => getUrgency(p) === 'high') ? (
                 <span className="flex items-center gap-1 text-xs text-red-400">
                   <Flame size={11} /> {filtered.filter(p => getUrgency(p) === 'high').length} need attention
                 </span>
-              )}
+              ) : null}
               <span className="text-xs text-slate-600 ml-auto">
                 {filtered.length} project{filtered.length !== 1 ? 's' : ''}
               </span>
@@ -896,16 +788,26 @@ export default function ProjectsPage() {
           </div>
         ) : (
           <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 overflow-hidden">
-            <div className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-700/50 bg-slate-800/50">
+            <div className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-700/50 bg-slate-800/50 text-[10px] text-slate-500 uppercase tracking-wide font-semibold">
               <button onClick={toggleSelectAll} className="text-slate-500 hover:text-slate-300 transition-colors flex-shrink-0">
                 {allFilteredSelected ? <CheckSquare size={14} className="text-amber-400" /> : <Square size={14} />}
               </button>
-              <span className="text-xs text-slate-500 font-semibold">{filtered.length} project{filtered.length !== 1 ? 's' : ''}</span>
-              {filtered.some(p => getUrgency(p) === 'high') && (
-                <span className="flex items-center gap-1 text-xs text-red-400 ml-auto">
+              <span className="w-8"></span>
+              <button onClick={() => setSortBy('name')} className={`flex items-center gap-1 flex-1 text-left hover:text-slate-300 transition-colors ${sortBy === 'name' ? 'text-slate-300' : ''}`}>
+                Project {sortBy === 'name' ? <ArrowUpDown size={8} /> : null}
+              </button>
+              <span className="hidden lg:block min-w-[80px] text-right">Cost</span>
+              <span className="hidden md:block min-w-[80px]">Next Step</span>
+              <button onClick={() => setSortBy('size')} className={`hidden md:flex items-center gap-1 min-w-[60px] hover:text-slate-300 transition-colors ${sortBy === 'size' ? 'text-slate-300' : ''}`}>
+                Size {sortBy === 'size' ? <ArrowUpDown size={8} /> : null}
+              </button>
+              <span>Status</span>
+              <span>Actions</span>
+              {filtered.some(p => getUrgency(p) === 'high') ? (
+                <span className="flex items-center gap-1 text-red-400 ml-auto">
                   <Flame size={11} /> {filtered.filter(p => getUrgency(p) === 'high').length} need attention
                 </span>
-              )}
+              ) : null}
             </div>
             {filtered.map(project => (
               <ProjectRow

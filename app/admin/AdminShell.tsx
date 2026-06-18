@@ -7,7 +7,7 @@ import {
   Cpu, Zap, Database, HardDrive, Activity,
   Shield, ChevronRight, LogOut, Sun, Wrench,
   ScrollText, Terminal, MessageSquare, Rocket, Layers, DollarSign, PenTool,
-  UserPlus, LayoutTemplate, Network, GitBranch, History, Share2,
+  UserPlus, LayoutTemplate, Network, GitBranch, History, Share2, Factory,
 } from 'lucide-react';
 
 const NAV_SECTIONS = [
@@ -33,6 +33,7 @@ const NAV_SECTIONS = [
     label: 'Network Intelligence',
     items: [
       { href: '/admin/network', label: 'Control Center', icon: Network },
+      { href: '/admin/prospects', label: 'Contractor Acquisition', icon: Factory },
     ],
   },  {
     label: 'Configuration',
@@ -147,11 +148,11 @@ export default function AdminShell({
                       <Icon size={15} />
                       {label}
                       {/* New feedback badge */}
-                      {isFeedback && newFeedbackCount > 0 && (
+                      {isFeedback && newFeedbackCount > 0 ? (
                         <span className="ml-auto min-w-[20px] h-5 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1.5">
                           {newFeedbackCount > 99 ? '99+' : newFeedbackCount}
                         </span>
-                      )}
+                      ) : null}
                       {active && !isFeedback && <ChevronRight size={12} className="ml-auto opacity-60" />}
                       {active && isFeedback && newFeedbackCount === 0 && <ChevronRight size={12} className="ml-auto opacity-60" />}
                     </Link>

@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { syncSeatsForOrg } from '@/lib/stripe';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -33,8 +34,11 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Owner cannot leave — delete the org or transfer ownership first' }, { status: 400 });
     }
 
-    await sql`UPDATE users SET org_id = NULL, org_role = 'owner' WHERE id = ${memberId} AND org_id = ${callerRow[0].org_id}`;
-    return NextResponse.json({ success: true });
+    const orgId = callerRow[0].org_id as string;
+    await sql`UPDATE users SET org_id = NULL, org_role = 'owner' WHERE id = ${memberId} AND org_id = ${orgId}`;
+    // Drop the freed seat from the owner's subscription (no-op if seat billing not set up).
+    const seatSync = await syncSeatsForOrg(orgId);
+    return NextResponse.json({ success: true, seatSync });
   } catch (e) {
     return handleRouteDbError('[DELETE /api/organizations/member]', e);
   }

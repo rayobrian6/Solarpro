@@ -54,7 +54,7 @@ function TermsContent() {
       {/* Main Content */}
       <main style={{ maxWidth: 860, margin: '0 auto', padding: '48px 32px 80px' }}>
 
-        {fromSignup && (
+        {fromSignup ? (
           <div style={{
             background: '#f0f9ff', border: '1px solid #bae6fd',
             borderLeft: '4px solid #0284c7', borderRadius: 8,
@@ -64,7 +64,7 @@ function TermsContent() {
               Please review this agreement carefully before creating your account. You must scroll through and accept these terms to complete registration.
             </p>
           </div>
-        )}
+        ) : null}
 
         {/* Table of Contents */}
         <nav style={{
@@ -870,7 +870,7 @@ function TermsContent() {
         </section>
 
         {/* Back to signup link if coming from signup */}
-        {fromSignup && (
+        {fromSignup ? (
           <div style={{ textAlign: 'center', marginTop: 40, marginBottom: 20 }}>
             <Link
               href="/auth/register"
@@ -885,7 +885,7 @@ function TermsContent() {
               ← Return to Sign Up
             </Link>
           </div>
-        )}
+        ) : null}
       </main>
 
       {/* Footer */}
