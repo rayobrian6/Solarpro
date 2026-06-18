@@ -110,6 +110,25 @@ export async function POST(req: NextRequest) {
       )
     `;
 
+    // If this email was invited to an organization, auto-join it now and bill the
+    // seat on the owner's subscription. Non-fatal — registration must never break.
+    try {
+      const inv = await sql`
+        SELECT id, org_id FROM org_invites
+        WHERE invited_email = ${email.toLowerCase().trim()}
+          AND accepted_at IS NULL AND expires_at > now()
+        ORDER BY expires_at DESC LIMIT 1
+      `;
+      if (inv[0]?.org_id) {
+        await sql`UPDATE users SET org_id = ${inv[0].org_id}, org_role = 'member', updated_at = NOW() WHERE id = ${userId}`;
+        await sql`UPDATE org_invites SET accepted_at = now() WHERE id = ${inv[0].id}`;
+        const { syncSeatsForOrg } = await import('@/lib/stripe');
+        await syncSeatsForOrg(inv[0].org_id as string);
+      }
+    } catch (inviteErr: unknown) {
+      console.warn('[/api/auth/register] invite auto-accept skipped:', (inviteErr as Error)?.message);
+    }
+
     // Attempt to record ToS acceptance — silently skip if columns don't exist yet
     if (tosAccepted) {
       try {

@@ -8,6 +8,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 import { syncSeatsForOrg } from '@/lib/stripe';
+import { sendEmail } from '@/lib/email';
+import { getBaseUrl } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -56,6 +58,11 @@ export async function POST(req: NextRequest) {
     `;
     const invite = inviteRows[0];
 
+    const orgRow = await sql`SELECT name FROM organizations WHERE id = ${orgId} LIMIT 1`;
+    const orgName = (orgRow[0]?.name as string) || 'their team';
+    const inviter = user.name || 'A teammate';
+    const base = getBaseUrl();
+
     // If the user already has an account, auto-accept the invite
     const existingUser = await sql`SELECT id FROM users WHERE email = ${normalizedEmail} AND org_id IS NULL LIMIT 1`;
     if (existingUser.length > 0) {
@@ -68,8 +75,23 @@ export async function POST(req: NextRequest) {
       `;
       // Bill the new seat on the owner's subscription (no-op if seat billing not set up).
       const seatSync = await syncSeatsForOrg(orgId);
+      // Notify the added teammate (non-fatal).
+      sendEmail({
+        to: normalizedEmail,
+        subject: `You've been added to ${orgName} on SolarPro`,
+        html: `<p>${inviter} added you to <strong>${orgName}</strong> on SolarPro.</p><p>Just log in with this email to access the team's workspace.</p><p><a href="${base}/auth/login">Log in to SolarPro</a></p>`,
+        text: `${inviter} added you to ${orgName} on SolarPro. Log in with this email: ${base}/auth/login`,
+      }).catch(() => {});
       return NextResponse.json({ success: true, autoAccepted: true, invite, seatSync });
     }
+
+    // New email — send an invite to sign up (they auto-join on register with this email).
+    sendEmail({
+      to: normalizedEmail,
+      subject: `${inviter} invited you to join ${orgName} on SolarPro`,
+      html: `<p>${inviter} invited you to join <strong>${orgName}</strong> on SolarPro — the solar design & proposal platform.</p><p>Create your account with <strong>this email address</strong> and you'll join the team automatically:</p><p><a href="${base}/auth/register">Accept the invite & sign up</a></p>`,
+      text: `${inviter} invited you to join ${orgName} on SolarPro. Sign up with this email to join: ${base}/auth/register`,
+    }).catch(() => {});
 
     return NextResponse.json({ success: true, autoAccepted: false, invite });
   } catch (e) {
