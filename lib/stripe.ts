@@ -393,3 +393,58 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<{ success
       return { success: true, message: `Unhandled: ${event.type}` };
   }
 }
+// ============================================================
+// SEAT BILLING — sync extra-seat quantity on the org owner's subscription
+// ============================================================
+// Billable seats = (# users in the org) − (users included in the owner's plan).
+// Charged via the Stripe "Additional Seat" recurring price (STRIPE_PRICE_EXTRA_SEAT),
+// added as a second line item on the owner's subscription with quantity = extras.
+// Call this whenever org membership changes (invite accepted, member removed).
+// Fully defensive: no-ops (never throws) if anything's missing so membership
+// changes never break.
+export async function syncSeatsForOrg(
+  orgId: string,
+): Promise<{ ok: boolean; extraSeats?: number; reason?: string }> {
+  try {
+    const seatPrice = process.env.STRIPE_PRICE_EXTRA_SEAT;
+    if (!seatPrice) return { ok: false, reason: 'STRIPE_PRICE_EXTRA_SEAT not set' };
+
+    const sql = await getDbReady();
+    const ownerRows = await sql`
+      SELECT u.id, u.plan, u.stripe_subscription_id
+      FROM organizations o JOIN users u ON u.id = o.owner_id
+      WHERE o.id = ${orgId} LIMIT 1
+    `;
+    const owner = ownerRows[0] as { plan?: string; stripe_subscription_id?: string } | undefined;
+    if (!owner) return { ok: false, reason: 'org owner not found' };
+    if (!owner.stripe_subscription_id) return { ok: false, reason: 'owner has no active subscription' };
+
+    const plan = (owner.plan as PlanId) || 'starter';
+    const cfg = PRICING_PLANS[plan as Exclude<PlanId, 'free_pass'>];
+    // Unlimited / custom plans (enterprise) don't meter seats
+    if (!cfg || cfg.usersIncluded === null) return { ok: true, extraSeats: 0, reason: 'plan does not meter seats' };
+
+    const cntRows = await sql`SELECT COUNT(*)::int AS n FROM users WHERE org_id = ${orgId}`;
+    const total = (cntRows[0]?.n as number) ?? 1;
+    const extra = Math.max(0, total - cfg.usersIncluded);
+
+    const s = getStripe();
+    const sub = await s.subscriptions.retrieve(owner.stripe_subscription_id);
+    const seatItem = sub.items.data.find((it) => it.price.id === seatPrice);
+
+    if (extra > 0) {
+      if (seatItem) {
+        await s.subscriptionItems.update(seatItem.id, { quantity: extra, proration_behavior: 'create_prorations' });
+      } else {
+        await s.subscriptionItems.create({ subscription: owner.stripe_subscription_id, price: seatPrice, quantity: extra, proration_behavior: 'create_prorations' });
+      }
+    } else if (seatItem) {
+      await s.subscriptionItems.del(seatItem.id, { proration_behavior: 'create_prorations' });
+    }
+
+    return { ok: true, extraSeats: extra };
+  } catch (e) {
+    console.error('[syncSeatsForOrg]', (e as Error).message);
+    return { ok: false, reason: (e as Error).message };
+  }
+}
