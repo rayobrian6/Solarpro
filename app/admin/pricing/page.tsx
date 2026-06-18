@@ -110,7 +110,7 @@ function NumberInput({ label, value, onChange, prefix, suffix, step, min, helpTe
     <div className="flex flex-col gap-1">
       <label className="text-xs text-gray-400 font-medium">{label}</label>
       <div className="flex items-center bg-white/5 border border-white/10 rounded-lg overflow-hidden focus-within:border-orange-500/50">
-        {prefix && <span className="px-3 py-2 text-gray-400 text-sm border-r border-white/10 bg-white/5">{prefix}</span>}
+        {prefix ? <span className="px-3 py-2 text-gray-400 text-sm border-r border-white/10 bg-white/5">{prefix}</span> : null}
         <input
           type="number"
           value={value}
@@ -119,9 +119,9 @@ function NumberInput({ label, value, onChange, prefix, suffix, step, min, helpTe
           onChange={e => onChange(parseFloat(e.target.value) || 0)}
           className="flex-1 bg-transparent px-3 py-2 text-white text-sm outline-none"
         />
-        {suffix && <span className="px-3 py-2 text-gray-400 text-sm border-l border-white/10 bg-white/5">{suffix}</span>}
+        {suffix ? <span className="px-3 py-2 text-gray-400 text-sm border-l border-white/10 bg-white/5">{suffix}</span> : null}
       </div>
-      {helpText && <p className="text-xs text-gray-500">{helpText}</p>}
+      {helpText ? <p className="text-xs text-gray-500">{helpText}</p> : null}
     </div>
   );
 }
@@ -142,7 +142,7 @@ function SectionCard({ title, icon, children, defaultOpen = true }: {
         </div>
         {open ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
       </button>
-      {open && <div className="px-6 pb-6 pt-2">{children}</div>}
+      {open ? <div className="px-6 pb-6 pt-2">{children}</div> : null}
     </div>
   );
 }

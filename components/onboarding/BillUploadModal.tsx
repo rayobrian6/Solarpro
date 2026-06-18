@@ -637,7 +637,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                     ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                     : 'bg-slate-700 text-slate-500'
                 }`}>{i + 1}</div>
-                {i < 3 && <div className={`w-4 h-px ${['upload', 'review', 'creating', 'done'].indexOf(step) > i ? 'bg-emerald-500/50' : 'bg-slate-700'}`} />}
+                {i < 3 ? <div className={`w-4 h-px ${['upload', 'review', 'creating', 'done'].indexOf(step) > i ? 'bg-emerald-500/50' : 'bg-slate-700'}`} /> : null}
               </div>
             ))}
             <button onClick={onClose} className="ml-2 text-slate-400 hover:text-white transition-colors">
@@ -649,7 +649,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
         <div className="p-6">
 
           {/* ── STEP 1: Upload ── */}
-          {step === 'upload' && (
+          {step === 'upload' ? (
             <div className="space-y-4">
               <div
                 onDragOver={e => { e.preventDefault(); setDragging(true); }}
@@ -751,7 +751,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                 </button>
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* ── STEP 2: Review ── */}
           {step === 'review' && result && (
@@ -769,7 +769,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                 <span className={confidenceColor(result.billData.confidence)}>
                   Extraction confidence: <strong>{result.billData.confidence}</strong>
                   {' '}— {result.billData.extractedFields.length} fields extracted
-                  {result.billData.usedLlmFallback && <span className="ml-1 text-xs opacity-75">(AI-assisted)</span>}
+                  {result.billData.usedLlmFallback ? <span className="ml-1 text-xs opacity-75">(AI-assisted)</span> : null}
                 </span>
               </div>
 

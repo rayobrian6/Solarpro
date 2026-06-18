@@ -55,7 +55,7 @@ export default function ActionModal({
             ) : null}
             <div>
               <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>{title}</h2>
-              {subtitle && <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{subtitle}</p>}
+              {subtitle ? <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{subtitle}</p> : null}
             </div>
           </div>
           <button onClick={onClose}

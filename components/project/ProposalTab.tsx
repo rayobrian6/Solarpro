@@ -131,8 +131,8 @@ export default function ProposalTab({ project }: ProposalTabProps) {
             <div>
               <div className="text-sm font-semibold text-amber-300 mb-1">Proposal Not Ready</div>
               <div className="text-xs text-slate-400 space-y-0.5">
-                {!hasBill && <div>&bull; Upload a utility bill to get usage data and financials</div>}
-                {!hasDesign && <div>&bull; Complete a design in Design Studio to get system specs</div>}
+                {!hasBill ? <div>&bull; Upload a utility bill to get usage data and financials</div> : null}
+                {!hasDesign ? <div>&bull; Complete a design in Design Studio to get system specs</div> : null}
               </div>
             </div>
           </div>

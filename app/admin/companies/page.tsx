@@ -147,11 +147,11 @@ export default function AdminCompanies() {
                         <div className="font-semibold text-white text-sm truncate">{name}</div>
                         <div className="text-xs text-slate-500 flex items-center gap-3 mt-0.5">
                           <span className="flex items-center gap-1"><Users size={10} /> {co.user_count || co.users?.length || 0} users</span>
-                          {plans && <span className="capitalize">{plans}</span>}
+                          {plans ? <span className="capitalize">{plans}</span> : null}
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        {co.has_free_pass && <span className="text-[10px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full">⚡ Free Pass</span>}
+                        {co.has_free_pass ? <span className="text-[10px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full">⚡ Free Pass</span> : null}
                         <ChevronRight size={14} className={`text-slate-600 transition-transform ${isSelected ? 'rotate-90 text-amber-400' : ''}`} />
                       </div>
                     </div>
@@ -287,7 +287,7 @@ export default function AdminCompanies() {
                     )}
 
                     {/* Disable / Enable Company */}
-                    {isSuperAdmin && (
+                    {isSuperAdmin ? (
                       isSuspended ? (
                         <button
                           onClick={() => companyAction('enable_company')}
@@ -307,7 +307,7 @@ export default function AdminCompanies() {
                           Disable Company
                         </button>
                       )
-                    )}
+                    ) : null}
 
                     {/* Transfer Ownership */}
                     {isSuperAdmin && companyDetail.userCount > 1 ? (

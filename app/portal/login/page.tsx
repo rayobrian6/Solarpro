@@ -288,7 +288,7 @@ function PortalLogin() {
           </div>
 
           {/* ─── STEP 1: Email ─── */}
-          {step === 'email' && (
+          {step === 'email' ? (
             <>
               <div className="mb-8">
                 <h2 className="text-2xl font-black text-white tracking-tight">Sign In</h2>
@@ -362,7 +362,7 @@ function PortalLogin() {
                 </div>
               </div>
             </>
-          )}
+          ) : null}
 
           {/* ─── STEP 2: OTP ─── */}
           {step === 'otp' ? (

@@ -543,10 +543,10 @@ function IssueRow({ issue, expanded: defaultExpanded = false }: { issue: any; ex
         {cfg.icon}
         <div className="flex-1 min-w-0">
           <div className="text-xs text-white">{issue.message}</div>
-          {issue.necReference && <div className="text-xs text-slate-500 mt-0.5">{issue.necReference}</div>}
-          {issue.suggestion && <div className="text-xs text-amber-400/80 mt-0.5">💡 {issue.suggestion}</div>}
+          {issue.necReference ? <div className="text-xs text-slate-500 mt-0.5">{issue.necReference}</div> : null}
+          {issue.suggestion ? <div className="text-xs text-amber-400/80 mt-0.5">💡 {issue.suggestion}</div> : null}
         </div>
-        {issue.code && <div className="text-xs text-slate-600 font-mono flex-shrink-0">{issue.code}</div>}
+        {issue.code ? <div className="text-xs text-slate-600 font-mono flex-shrink-0">{issue.code}</div> : null}
         {explanation ? (
           <div className="text-xs text-slate-600 flex-shrink-0 ml-1">
             {open ? '▲' : '▼'}
@@ -605,7 +605,7 @@ function ProgramRow({
             <span className="text-xs font-semibold text-white leading-tight">{title}</span>
             {status ? <ProgramStatusBadge status={status} /> : null}
           </div>
-          {subtitle && <p className="text-[11px] text-slate-400 leading-snug">{subtitle}</p>}
+          {subtitle ? <p className="text-[11px] text-slate-400 leading-snug">{subtitle}</p> : null}
           {value ? (
             <p className="text-[11px] text-emerald-300 font-medium mt-0.5 leading-snug">{value}</p>
           ) : null}
@@ -6770,8 +6770,8 @@ function EngineeringPageInner() {
             <span className="compliance-segment-value">
               {overallStatus ?? <span style={{color:'rgba(148,163,184,0.4)'}}>—</span>}
             </span>
-            {overallStatus === 'FAIL' && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />}
-            {overallStatus === 'WARNING' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0" />}
+            {overallStatus === 'FAIL' ? <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" /> : null}
+            {overallStatus === 'WARNING' ? <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0" /> : null}
           </div>
 
           {/* Electrical segment */}
@@ -6945,9 +6945,9 @@ function EngineeringPageInner() {
             {/* Rules engine summary */}
             {rulesResult && (rulesResult.errorCount > 0 || rulesResult.warningCount > 0) ? (
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-700/50 bg-slate-800/60 text-xs">
-                {rulesResult.errorCount > 0 && <span className="text-red-400 font-bold">{rulesResult.errorCount}E</span>}
-                {rulesResult.warningCount > 0 && <span className="text-amber-400 font-bold">{rulesResult.warningCount}W</span>}
-                {rulesResult.autoFixCount > 0 && <span className="text-emerald-400">{rulesResult.autoFixCount} fixed</span>}
+                {rulesResult.errorCount > 0 ? <span className="text-red-400 font-bold">{rulesResult.errorCount}E</span> : null}
+                {rulesResult.warningCount > 0 ? <span className="text-amber-400 font-bold">{rulesResult.warningCount}W</span> : null}
+                {rulesResult.autoFixCount > 0 ? <span className="text-emerald-400">{rulesResult.autoFixCount} fixed</span> : null}
               </div>
             ) : null}
 
@@ -7030,10 +7030,10 @@ function EngineeringPageInner() {
                   }
                 }}
               >
-                {saveState === 'saving' && <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>}
-                {saveState === 'saved'  && <CheckCircle size={13} />}
-                {saveState === 'error'  && <AlertCircle size={13} />}
-                {saveState === 'idle'   && <span>💾</span>}
+                {saveState === 'saving' ? <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> : null}
+                {saveState === 'saved' ? <CheckCircle size={13} /> : null}
+                {saveState === 'error' ? <AlertCircle size={13} /> : null}
+                {saveState === 'idle' ? <span>💾</span> : null}
                 <span className="hidden sm:inline">
                   {saveState === 'saving' ? 'Saving…' :
                    saveState === 'saved'  ? 'Saved ✓' :
@@ -7156,8 +7156,8 @@ function EngineeringPageInner() {
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
               </svg>
             ) : null}
-            {saveState === 'saved'  && <CheckCircle size={12} />}
-            {saveState === 'error'  && <AlertCircle size={12} />}
+            {saveState === 'saved' ? <CheckCircle size={12} /> : null}
+            {saveState === 'error' ? <AlertCircle size={12} /> : null}
             {saveState === 'idle'   && '💾'}
             {saveState === 'saving' ? 'Saving…' :
              saveState === 'saved'  ? (lastSavedAt && Math.round((Date.now() - lastSavedAt.getTime()) / 1000) < 5 ? 'Saved ✓' : 'Saved ✓') :
@@ -7217,8 +7217,8 @@ function EngineeringPageInner() {
                           <div>
                             <div className="text-sm font-medium text-white">{p.name}</div>
                             <div className="text-xs text-slate-400 mt-0.5">
-                              {p.client?.name && <span className="mr-2">👤 {p.client.name}</span>}
-                              {p.address && <span>{p.address}</span>}
+                              {p.client?.name ? <span className="mr-2">👤 {p.client.name}</span> : null}
+                              {p.address ? <span>{p.address}</span> : null}
                             </div>
                           </div>
                           <div className="text-right flex-shrink-0">
@@ -7349,7 +7349,7 @@ function EngineeringPageInner() {
               Preview only — apply below to make this your config
             </span>
           ) : null}
-          {displayMode === 'current' && (() => {
+          {displayMode === 'current' ? ((() => {
             const _cStr = currentDisplayConfig.totalStrings;
             const _rStr = recommendedDisplayConfig.totalStrings;
             const _sDiff = _cStr !== _rStr;
@@ -7360,7 +7360,7 @@ function EngineeringPageInner() {
                 Recommendation differs:{_sDiff && <> {_cStr}→{_rStr} strings</>}{_iDiff && <> · inverter upgrade suggested</>}
               </span>
             );
-          })()}
+          })()) : null}
         </div>
       ) : null}
 
@@ -7867,7 +7867,7 @@ function EngineeringPageInner() {
                       </div>
 
                       {/* AHJ Auto-detect banner */}
-                      {ahjInfo && (
+                      {ahjInfo ? (
                         <div className="mt-3 bg-amber-500/5 border border-amber-500/20 rounded-xl p-3">
                           <div className="flex items-center gap-2 mb-2">
                             <MapPin size={12} className="text-amber-400" />
@@ -7881,7 +7881,7 @@ function EngineeringPageInner() {
                             <div><span className="text-slate-500">Roof Setback:</span><span className="text-slate-300 ml-1">{ahjInfo.roofSetbackInches}"</span></div>
                           </div>
                         </div>
-                      )}
+                      ) : null}
 
                       {/* Utility + AHJ selectors */}
                       <div className="grid grid-cols-1 gap-3 mt-3">
@@ -7896,7 +7896,7 @@ function EngineeringPageInner() {
                               <option key={u.id} value={u.id}>{u.name}</option>
                             ))}
                           </select>
-                          {config.utilityId && config.state && (() => {
+                          {config.utilityId && config.state ? ((() => {
                             // ✅ v48.24 fix: use per-utility rate from UtilityOption, not state fallback
                             const utils = getUtilitiesByStateNational(config.state);
                             const selectedUtil = utils.find(u => u.id === config.utilityId);
@@ -7908,11 +7908,11 @@ function EngineeringPageInner() {
                                 <span className="text-slate-500">Max: {selectedUtil.interconnectionMaxKw}kW</span>
                               </div>
                             );
-                          })()}
+                          })()) : null}
                         </div>
 
                         {/* v48.29: Utility Programs Panel — full programs with Pro Tips */}
-                        {config.utilityId && (() => {
+                        {config.utilityId ? ((() => {
                           const utils = getUtilitiesByStateNational(config.state || '');
                           const selectedUtil = utils.find(u => u.id === config.utilityId);
                           if (!selectedUtil) return null;
@@ -7943,7 +7943,7 @@ function EngineeringPageInner() {
                               stateCode={stateCode}
                             />
                           );
-                        })()}
+                        })()) : null}
                         <div>
                           <label className="eng-label">Authority Having Jurisdiction (AHJ)</label>
                           <select value={config.ahjId} onChange={e => updateConfig({ ahjId: e.target.value })} className="eng-select">
@@ -8170,11 +8170,11 @@ function EngineeringPageInner() {
                           <label key={item.key} className="flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-slate-800/40 transition-colors"
                             onClick={() => updateConfig({ [item.key]: !(config as any)[item.key] } as any)}>
                             <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all flex-shrink-0 ${(config as any)[item.key] ? 'bg-amber-500 border-amber-500' : 'border-slate-600'}`}>
-                              {(config as any)[item.key] && <CheckCircle size={12} className="text-slate-900" />}
+                              {(config as any)[item.key] ? <CheckCircle size={12} className="text-slate-900" /> : null}
                             </div>
                             <div>
                               <span className="text-xs text-slate-300 block">{item.label}</span>
-                              {item.sub && <span className="text-[10px] text-slate-500">{item.sub}</span>}
+                              {item.sub ? <span className="text-[10px] text-slate-500">{item.sub}</span> : null}
                             </div>
                           </label>
                         ))}
@@ -8493,7 +8493,7 @@ function EngineeringPageInner() {
                                       {Array.from({ length: Math.min(count, 20) }, (_, pi) => (
                                         <div key={pi} className="h-3 flex-1 rounded-sm bg-purple-500/50 border border-purple-500/30 min-w-[4px] max-w-[12px]" />
                                       ))}
-                                      {count > 20 && <span className="text-[9px] text-purple-400 ml-1">+{count - 20}</span>}
+                                      {count > 20 ? <span className="text-[9px] text-purple-400 ml-1">+{count - 20}</span> : null}
                                     </div>
                                     <span className="text-[10px] text-slate-400 font-mono w-8 text-right shrink-0">{count}</span>
                                   </div>
@@ -8524,7 +8524,7 @@ function EngineeringPageInner() {
                                           {Array.from({ length: Math.min(str.panelCount, _maxPanels) }, (_, pi) => (
                                             <div key={pi} className={`h-3 flex-1 rounded-sm border min-w-[4px] max-w-[14px] ${bgCls}`} />
                                           ))}
-                                          {str.panelCount > _maxPanels && <span className={`text-[9px] ml-1 ${colorCls}`}>+{str.panelCount - _maxPanels}</span>}
+                                          {str.panelCount > _maxPanels ? <span className={`text-[9px] ml-1 ${colorCls}`}>+{str.panelCount - _maxPanels}</span> : null}
                                         </div>
                                         <span className="text-[10px] text-slate-400 font-mono w-16 text-right shrink-0">{str.panelCount}p · {kw.toFixed(1)}kW</span>
                                       </div>
@@ -8564,7 +8564,7 @@ function EngineeringPageInner() {
                                       ? systemPanelCount
                                       : inv.strings.reduce((s, str) => s + str.panelCount, 0)} panels ·
                                     {(inv.strings.reduce((s, str) => s + str.panelCount * (getPanelById(str.panelId)?.watts || 400), 0) / 1000).toFixed(2)} kW DC
-                                    {(inv.type === 'string' || inv.type === 'hybrid' || inv.type === 'ecoflow') && (() => {
+                                    {(inv.type === 'string' || inv.type === 'hybrid' || inv.type === 'ecoflow') ? ((() => {
                                       const perInvStringCount = inv.strings.length;
                                       const perInvPanelCounts = inv.strings.map(s => s.panelCount);
                                       const allEqual = perInvPanelCounts.every(c => c === perInvPanelCounts[0]);
@@ -8576,7 +8576,7 @@ function EngineeringPageInner() {
                                           · {perInvStringCount} string{perInvStringCount === 1 ? '' : 's'} ({pps})
                                         </span>
                                       );
-                                    })()}
+                                    })()) : null}
                                     {inv.type === 'micro' ? (
                                       <span className="ml-1 text-purple-400 font-semibold">
                                         · {cs.microDeviceCount} microinverters · {cs.acBranchCount} AC branch{cs.acBranchCount > 1 ? 'es' : ''}
@@ -8594,7 +8594,7 @@ function EngineeringPageInner() {
                                   {/* Topology selector — segmented control */}
                                   <div className="flex items-center gap-2 mb-1">
                                     <span className="text-xs text-slate-400 font-semibold uppercase tracking-wide">Topology</span>
-                                    {topologySwitching && <span className="text-xs text-amber-400 animate-pulse">Propagating ecosystem…</span>}
+                                    {topologySwitching ? <span className="text-xs text-amber-400 animate-pulse">Propagating ecosystem…</span> : null}
                                   </div>
                                   <div className="flex rounded-xl overflow-hidden border border-slate-700/60 mb-3">
                                     {([
@@ -8674,7 +8674,7 @@ function EngineeringPageInner() {
                                                   <div className="mt-1.5 pt-1 border-t border-slate-700/30">
                                                     <div className="text-slate-400 mb-1">
                                                       Auto: <span className="text-amber-300 font-bold">{autoStrings}×{autoPerStr}</span>
-                                                      {autoLastStr !== autoPerStr && autoStrings > 1 && <span className="text-slate-500"> (last: {autoLastStr})</span>}
+                                                      {autoLastStr !== autoPerStr && autoStrings > 1 ? <span className="text-slate-500"> (last: {autoLastStr})</span> : null}
                                                     </div>
                                                     <button
                                                       onClick={() => {
@@ -8710,7 +8710,7 @@ function EngineeringPageInner() {
                                   </div>
                                   {/* Device Ratio Override */}
                                   <div className="bg-slate-800/40 border border-slate-700/40 rounded-lg px-3 py-2 mt-1">
-                                    {inv.type === 'micro' && (() => {
+                                    {inv.type === 'micro' ? ((() => {
                                       const regMpd = (getInvById(inv.inverterId, 'micro') as any)?.modulesPerDevice ?? 1;
                                       return (
                                         <div className="flex items-center gap-3">
@@ -8726,7 +8726,7 @@ function EngineeringPageInner() {
                                           <div className="text-xs text-slate-500 italic pt-4">Changing this will recalculate engineering values.</div>
                                         </div>
                                       );
-                                    })()}
+                                    })()) : null}
                                     {inv.type === 'optimizer' ? (
                                       <div className="flex items-center gap-3">
                                         <div className="flex-1">
@@ -8909,7 +8909,7 @@ function EngineeringPageInner() {
                               </div>
                               <div className="flex-1 min-w-0">
                                 <div className="text-xs font-bold text-white">{comp.manufacturer} {comp.model}</div>
-                                {comp.partNumber && <div className="text-xs text-emerald-400/70 font-mono">{comp.partNumber}</div>}
+                                {comp.partNumber ? <div className="text-xs text-emerald-400/70 font-mono">{comp.partNumber}</div> : null}
                                 <div className="text-xs text-slate-400 truncate">{comp.reason}</div>
                               </div>
                               <div className="text-xs text-emerald-400 font-bold flex-shrink-0">×{comp.quantity}</div>
@@ -9061,14 +9061,14 @@ function EngineeringPageInner() {
                               <input type="number" min={0} step={0.1} value={config.batteryKwh} onChange={e => updateConfig({ batteryKwh: +e.target.value })} className="eng-input" />
                             </div>
                           </div>
-                          {config.batteryId && (() => {
+                          {config.batteryId ? ((() => {
                             const bat = getBatteryById(config.batteryId);
                             return bat?.backfeedBreakerA ? (
                               <div className="text-xs text-orange-400 text-center">
                                 +{bat.backfeedBreakerA}A bus load (NEC 705.12B)
                               </div>
                             ) : null;
-                          })()}
+                          })()) : null}
                         </div>
                       )}
 
@@ -9077,7 +9077,7 @@ function EngineeringPageInner() {
                         <div className="flex items-center gap-2 mb-3">
                           <Wrench size={12} className="text-orange-400" />
                           <span className="text-xs font-bold text-slate-300 uppercase tracking-wide">Generator & Transfer Switch</span>
-                          {!config.generatorId && <span className="px-1.5 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">+4 Models</span>}
+                          {!config.generatorId ? <span className="px-1.5 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">+4 Models</span> : null}
                           {config.generatorId && _genData ? (
                             <span className="px-1.5 py-0.5 rounded text-xs font-semibold bg-orange-500/20 text-orange-300 border border-orange-500/30">
                               {_genData.ratedOutputKw}kW {_genData.manufacturer}
@@ -9138,7 +9138,7 @@ function EngineeringPageInner() {
                                 value={config.generatorWireLength ?? 50}
                                 onChange={e => updateConfig({ generatorWireLength: Math.max(5, +e.target.value) })}
                                 className="eng-input" />
-                              {config.generatorWireLength && (() => {
+                              {config.generatorWireLength ? ((() => {
                                 const genRun = cs.runs?.find((r: any) => r.id === 'GENERATOR_TO_ATS_RUN');
                                 if (!genRun) return null;
                                 return (
@@ -9148,7 +9148,7 @@ function EngineeringPageInner() {
                                     <span className="text-slate-500">{config.generatorWireLength}ft · {genRun.ocpdAmps}A OCPD</span>
                                   </div>
                                 );
-                              })()}
+                              })()) : null}
                             </div>
                           ) : null}
                         </div>
@@ -9232,8 +9232,8 @@ function EngineeringPageInner() {
                                           <span className={`text-[11px] font-bold leading-tight truncate ${isActive ? 'text-amber-200' : isRecommended ? 'text-emerald-200' : ''}`}>
                                             {opt.label}
                                           </span>
-                                          {isRecommended && <span className="ml-auto text-[8px] font-bold text-emerald-400 bg-emerald-500/20 border border-emerald-500/30 rounded px-1 shrink-0">FIX</span>}
-                                          {isActive && !isRecommended && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />}
+                                          {isRecommended ? <span className="ml-auto text-[8px] font-bold text-emerald-400 bg-emerald-500/20 border border-emerald-500/30 rounded px-1 shrink-0">FIX</span> : null}
+                                          {isActive && !isRecommended ? <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" /> : null}
                                         </span>
                                         <span className={`text-[9px] font-mono mt-0.5 ${isActive ? 'text-amber-400/80' : isRecommended ? 'text-emerald-400/80' : 'text-slate-600'}`}>{opt.nec}</span>
                                       </button>
@@ -9441,10 +9441,10 @@ function EngineeringPageInner() {
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 mb-1">
                                     <span className="text-xs font-bold text-red-300">{rule.ruleId || `Rule ${i+1}`}</span>
-                                    {rule.necReference && <span className="text-[10px] font-mono text-red-500/70 bg-red-500/10 px-1.5 py-0.5 rounded">{rule.necReference}</span>}
+                                    {rule.necReference ? <span className="text-[10px] font-mono text-red-500/70 bg-red-500/10 px-1.5 py-0.5 rounded">{rule.necReference}</span> : null}
                                   </div>
                                   <p className="text-xs text-red-200/80 leading-relaxed">{rule.message || rule.description}</p>
-                                  {rule.detail && <p className="text-xs text-red-400/60 mt-1">{rule.detail}</p>}
+                                  {rule.detail ? <p className="text-xs text-red-400/60 mt-1">{rule.detail}</p> : null}
                                 </div>
                                 <span className="flex-shrink-0 text-[10px] font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">FAIL</span>
                               </div>
@@ -9470,10 +9470,10 @@ function EngineeringPageInner() {
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 mb-1">
                                     <span className="text-xs font-bold text-amber-300">{rule.ruleId || `Rule ${i+1}`}</span>
-                                    {rule.necReference && <span className="text-[10px] font-mono text-amber-500/70 bg-amber-500/10 px-1.5 py-0.5 rounded">{rule.necReference}</span>}
+                                    {rule.necReference ? <span className="text-[10px] font-mono text-amber-500/70 bg-amber-500/10 px-1.5 py-0.5 rounded">{rule.necReference}</span> : null}
                                   </div>
                                   <p className="text-xs text-amber-200/80 leading-relaxed">{rule.message || rule.description}</p>
-                                  {rule.detail && <p className="text-xs text-amber-400/60 mt-1">{rule.detail}</p>}
+                                  {rule.detail ? <p className="text-xs text-amber-400/60 mt-1">{rule.detail}</p> : null}
                                 </div>
                                 <span className="flex-shrink-0 text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">WARN</span>
                               </div>
@@ -9498,7 +9498,7 @@ function EngineeringPageInner() {
                               <div className="flex items-center justify-between gap-3">
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs text-emerald-300/80">{rule.ruleId || `Rule ${i+1}`}</span>
-                                  {rule.necReference && <span className="text-[10px] font-mono text-emerald-600 bg-emerald-500/8 px-1.5 py-0.5 rounded">{rule.necReference}</span>}
+                                  {rule.necReference ? <span className="text-[10px] font-mono text-emerald-600 bg-emerald-500/8 px-1.5 py-0.5 rounded">{rule.necReference}</span> : null}
                                   <span className="text-xs text-slate-500">{rule.message || rule.description}</span>
                                 </div>
                                 <span className="flex-shrink-0 text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">PASS</span>
@@ -9671,7 +9671,7 @@ function EngineeringPageInner() {
                     ) : null}
 
                     {/* Structural compliance detail */}
-                    {compliance.structural && (() => {
+                    {compliance.structural ? ((() => {
                       const _str = compliance.structural as any;
                       return (
                         <div className={`rounded-xl border p-4 ${_sGlow(_st)}`}>
@@ -9776,7 +9776,7 @@ function EngineeringPageInner() {
                           </div>
                         </div>
                       );
-                    })()}
+                    })()) : null}
 
                   </div>
                 </div>
@@ -10030,9 +10030,9 @@ function EngineeringPageInner() {
                             <div key={i} className="flex items-start gap-2 text-xs text-red-300/80">
                               <span className="text-red-500 mt-0.5">•</span>
                               <span>
-                                {v.code && <span className="font-mono text-red-400 font-bold mr-1">[{v.code}]</span>}
+                                {v.code ? <span className="font-mono text-red-400 font-bold mr-1">[{v.code}]</span> : null}
                                 {typeof v === 'string' ? v : v.message || v.description || v.reason || String(v)}
-                                {v.suggestion && <span className="text-amber-400/70 ml-1"> → {v.suggestion}</span>}
+                                {v.suggestion ? <span className="text-amber-400/70 ml-1"> → {v.suggestion}</span> : null}
                               </span>
                             </div>
                           ))}
@@ -10145,9 +10145,9 @@ function EngineeringPageInner() {
                                 <span className="text-slate-300 font-medium">{run.id || run.label}</span>
                               </div>
                               <div className="flex items-center gap-3 text-slate-500">
-                                {run.wireGauge && <span className="text-white font-bold">{run.wireGauge}</span>}
-                                {run.ocpdAmps  && <span>{run.ocpdAmps}A OCPD</span>}
-                                {run.conduitSize && <span>{run.conduitSize}" {run.conduitType}</span>}
+                                {run.wireGauge ? <span className="text-white font-bold">{run.wireGauge}</span> : null}
+                                {run.ocpdAmps ? <span>{run.ocpdAmps}A OCPD</span> : null}
+                                {run.conduitSize ? <span>{run.conduitSize}" {run.conduitType}</span> : null}
                               </div>
                             </div>
                           ))}
@@ -10374,12 +10374,12 @@ function EngineeringPageInner() {
                     <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-400 bg-slate-800/40 rounded-lg px-3 py-2">
                       <span>System: <span className="text-white font-bold">{sel.productLine} {sel.model}</span></span>
                       <span>Type: <span className="text-amber-300 font-bold">{sel.systemType.replace(/_/g, ' ')}</span></span>
-                      {sel.mount?.fastenersPerMount && <span>Fasteners/mount: <span className="text-amber-300 font-bold">{sel.mount.fastenersPerMount}</span></span>}
-                      {sel.mount?.upliftCapacityLbs && <span>Uplift capacity: <span className="text-amber-300 font-bold">{sel.mount.upliftCapacityLbs} lbf</span></span>}
-                      {sel.mount?.maxSpacingIn && <span>Max spacing: <span className="text-slate-300 font-bold">{sel.mount.maxSpacingIn}&quot;</span></span>}
-                      {sel.maxWindSpeedMph && <span>Max wind: <span className="text-slate-300 font-bold">{sel.maxWindSpeedMph} mph</span></span>}
-                      {sel.maxSnowLoadPsf && <span>Max snow: <span className="text-slate-300 font-bold">{sel.maxSnowLoadPsf} psf</span></span>}
-                      {sel.ul2703Listed && <span className="text-emerald-400 font-bold">✓ UL 2703</span>}
+                      {sel.mount?.fastenersPerMount ? <span>Fasteners/mount: <span className="text-amber-300 font-bold">{sel.mount.fastenersPerMount}</span></span> : null}
+                      {sel.mount?.upliftCapacityLbs ? <span>Uplift capacity: <span className="text-amber-300 font-bold">{sel.mount.upliftCapacityLbs} lbf</span></span> : null}
+                      {sel.mount?.maxSpacingIn ? <span>Max spacing: <span className="text-slate-300 font-bold">{sel.mount.maxSpacingIn}&quot;</span></span> : null}
+                      {sel.maxWindSpeedMph ? <span>Max wind: <span className="text-slate-300 font-bold">{sel.maxWindSpeedMph} mph</span></span> : null}
+                      {sel.maxSnowLoadPsf ? <span>Max snow: <span className="text-slate-300 font-bold">{sel.maxSnowLoadPsf} psf</span></span> : null}
+                      {sel.ul2703Listed ? <span className="text-emerald-400 font-bold">✓ UL 2703</span> : null}
                       <span className="text-slate-500 italic ml-auto">Mount spacing is calculated from wind/snow loads.</span>
                     </div>
                   );
@@ -10475,7 +10475,7 @@ function EngineeringPageInner() {
                       </div>
                     </div>
                     {/* Rail Analysis (if applicable) */}
-                    {compliance.structural.railAnalysis && (
+                    {compliance.structural.railAnalysis ? (
                       <div className="bg-slate-800/40 rounded-xl p-4 md:col-span-2">
                         <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-1"><Ruler size={11} /> Rail Analysis</div>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
@@ -10493,7 +10493,7 @@ function EngineeringPageInner() {
                           <div className="flex justify-between"><span className="text-slate-400">Status</span><span className={compliance.structural.railAnalysis.passes ? 'text-emerald-400' : 'text-red-400'}>{compliance.structural.railAnalysis.passes ? 'PASS' : 'FAIL'}</span></div>
                         </div>
                       </div>
-                    )}
+                    ) : null}
                   </div>
                   {/* Racking BOM Summary */}
                   {compliance.structural.rackingBOM ? (
@@ -10651,8 +10651,8 @@ function EngineeringPageInner() {
                       {/* Status */}
                       <div className={`rounded-lg px-3 py-2 text-xs font-bold ${compliance.structural.status === 'PASS' ? 'bg-emerald-500/10 text-emerald-400' : compliance.structural.status === 'WARNING' ? 'bg-amber-500/10 text-amber-400' : 'bg-red-500/10 text-red-400'}`}>
                         STRUCTURAL STATUS: {compliance.structural.status}
-                        {compliance.structural.errors?.length > 0 && <span className="ml-3 font-normal text-red-300">{compliance.structural.errors.map((e: any) => (e as Error).message).join(' | ')}</span>}
-                        {compliance.structural.warnings?.length > 0 && <span className="ml-3 font-normal text-amber-300">{compliance.structural.warnings.map((w: any) => w.message).join(' | ')}</span>}
+                        {compliance.structural.errors?.length > 0 ? <span className="ml-3 font-normal text-red-300">{compliance.structural.errors.map((e: any) => (e as Error).message).join(' | ')}</span> : null}
+                        {compliance.structural.warnings?.length > 0 ? <span className="ml-3 font-normal text-amber-300">{compliance.structural.warnings.map((w: any) => w.message).join(' | ')}</span> : null}
                       </div>
                     </div>
                   </details>
@@ -10919,7 +10919,7 @@ function EngineeringPageInner() {
           )}
 
           {/* ── SINGLE-LINE DIAGRAM TAB ── */}
-          {activeTab === 'diagram' && (!canSLD ? (
+          {activeTab === 'diagram' ? (!canSLD ? (
               <div className="flex flex-col items-center justify-center h-64 text-center">
                 <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-4">
                   <Lock size={28} className="text-amber-400" />
@@ -11247,7 +11247,7 @@ function EngineeringPageInner() {
                 ) : null}
 
               </div>
-            ))}
+            )) : null}
 
           {/* ── EQUIPMENT SCHEDULE TAB ── */}
           {activeTab === 'schedule' ? (
@@ -11539,7 +11539,7 @@ function EngineeringPageInner() {
                   </table>
                 </div>
                 {/* Electrical Equipment Section — sourced from compliance.electrical.acSizing */}
-                {(compliance.electrical as any)?.acSizing && (() => {
+                {(compliance.electrical as any)?.acSizing ? ((() => {
                   const ac = (compliance.electrical as any).acSizing;
                   const interconnectLabels: Record<string, string> = {
                     LOAD_SIDE: 'Load-Side Breaker (NEC 705.12(B) — 120% Rule)',
@@ -11623,7 +11623,7 @@ function EngineeringPageInner() {
                       </table>
                     </div>
                   );
-                })()}
+                })()) : null}
                 {/* ComputedSystem Conduit Schedule — auto-populated from cs.conduitSchedule */}
                 <div className="mb-6">
                   <div className="text-sm font-black text-slate-700 mb-2 uppercase tracking-wide flex items-center gap-2">
@@ -11857,7 +11857,7 @@ function EngineeringPageInner() {
                         <circle cx={m.x} cy={m.y} r={1.5} fill="white"/>
                       </g>);
                     })}
-                    {isRtMini && (()=>{
+                    {isRtMini ? ((()=>{
                       const rA=mountPts.find(m=>m.rail===0&&m.staggered);
                       const rB=mountPts.find(m=>m.rail===1&&m.staggered);
                       if(!rA||!rB)return null;
@@ -11869,7 +11869,7 @@ function EngineeringPageInner() {
                         <rect x={midX-24} y={dy-9} width={48} height={10} fill="#0f172a"/>
                         <text x={midX} y={dy-0.5} textAnchor="middle" fill="#a855f7" fontSize="7" fontFamily="monospace">{Math.round(attachSpIn/2)}" stagger</text>
                       </g>);
-                    })()}
+                    })()) : null}
                     {(()=>{
                       const p0=mountPts.filter(m=>m.rail===0);
                       if(p0.length<2)return null;
@@ -11882,13 +11882,13 @@ function EngineeringPageInner() {
                         <text x={(p0[0].x+p0[1].x)/2} y={dy} textAnchor="middle" fill="#94a3b8" fontSize="7.5" fontFamily="monospace">{attachSpIn}" O.C.</text>
                       </g>);
                     })()}
-                    {rows>=1&&(()=>{
+                    {rows>=1 ? ((()=>{
                       const [y1,y2]=railY(0); const dx=svgW-14;
                       return (<g>
                         <line x1={dx} y1={y1} x2={dx} y2={y2} stroke="#f59e0b" strokeWidth="1" markerStart="url(#da-l)" markerEnd="url(#da-r)"/>
                         <text x={dx+5} y={(y1+y2)/2+3} textAnchor="start" fill="#f59e0b" fontSize="7" fontFamily="monospace">{railSpIn}"</text>
                       </g>);
-                    })()}
+                    })()) : null}
                     <g transform={`translate(${marginL},${svgH-12})`}>
                       <rect x={0} y={0} width={9} height={7} fill="#0f172a" stroke="#334155" rx="1"/>
                       <text x={13} y={7} fill="#64748b" fontSize="7" fontFamily="monospace">Panel</text>
@@ -11942,7 +11942,7 @@ function EngineeringPageInner() {
                     {rafters.map((rx,i)=>(
                       <g key={`rf-${i}`}>
                         <rect x={rx} y={rafterTop} width={RW} height={rafterH} fill="url(#rfG)" stroke="#92400e" strokeWidth="1"/>
-                        {i===1&&<text x={rx+RW/2} y={rafterTop+55} textAnchor="middle" fill="#fbbf24" fontSize="6.5" fontFamily="monospace" transform={`rotate(-90,${rx+RW/2},${rafterTop+55})`}>{config.rafterSize??'2x6'} RAFTER</text>}
+                        {i===1 ? <text x={rx+RW/2} y={rafterTop+55} textAnchor="middle" fill="#fbbf24" fontSize="6.5" fontFamily="monospace" transform={`rotate(-90,${rx+RW/2},${rafterTop+55})`}>{config.rafterSize??'2x6'} RAFTER</text> : null}
                       </g>
                     ))}
                     <line x1={rafters[0]+RW/2} y1={groundY+5} x2={rafters[1]+RW/2} y2={groundY+5} stroke="#64748b" strokeWidth="0.8" markerStart="url(#sa-l)" markerEnd="url(#sa-r)"/>
@@ -12061,9 +12061,9 @@ function EngineeringPageInner() {
                     ))}
                   </div>
                   <div className="bg-slate-950 rounded-xl p-2 border border-slate-800">
-                    {diagramView==='layout'  && <TopDownLayout />}
-                    {diagramView==='section' && <CrossSectionView />}
-                    {diagramView==='iso'     && <IsoView />}
+                    {diagramView==='layout' ? <TopDownLayout /> : null}
+                    {diagramView==='section' ? <CrossSectionView /> : null}
+                    {diagramView==='iso' ? <IsoView /> : null}
                   </div>
                   <div className="mt-2 grid grid-cols-3 gap-1.5 text-xs">
                     <div className="bg-slate-900/60 rounded-lg px-2 py-1.5">
@@ -12196,9 +12196,9 @@ function EngineeringPageInner() {
                     <div className="mb-3 flex items-center gap-2 text-xs bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
                       <span className="text-amber-400 font-bold">⚡ Active in project:</span>
                       <span className="text-white font-bold">{ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId)?.manufacturer} {ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId)?.model}</span>
-                      {config.mountingId !== selectedMountingId && (
+                      {config.mountingId !== selectedMountingId ? (
                         <button onClick={() => setSelectedMountingId(config.mountingId)} className="ml-auto text-amber-400 hover:text-amber-300 font-bold">View →</button>
-                      )}
+                      ) : null}
                     </div>
                   ) : null}
 
@@ -12222,8 +12222,8 @@ function EngineeringPageInner() {
                         <div className="flex items-start justify-between gap-2 mb-1">
                           <div className="text-xs font-bold text-white leading-tight">{sys.manufacturer}</div>
                           <div className="flex gap-1 flex-shrink-0">
-                            {sys.iccEsReport && <span className="text-xs text-emerald-400 font-bold">ICC-ES</span>}
-                            {config.mountingId === sys.id && <span className="text-xs text-blue-400 font-bold">⚡</span>}
+                            {sys.iccEsReport ? <span className="text-xs text-emerald-400 font-bold">ICC-ES</span> : null}
+                            {config.mountingId === sys.id ? <span className="text-xs text-blue-400 font-bold">⚡</span> : null}
                           </div>
                         </div>
                         <div className="text-xs text-amber-300 font-bold mb-0.5">{sys.model}</div>
@@ -12237,7 +12237,7 @@ function EngineeringPageInner() {
                                 className="text-xs bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold px-2 py-0.5 rounded-full transition-colors"
                               >Use This</button>
                             ) : null}
-                            {config.mountingId === sys.id && <span className="text-xs text-blue-400 font-bold">⚡ Active</span>}
+                            {config.mountingId === sys.id ? <span className="text-xs text-blue-400 font-bold">⚡ Active</span> : null}
                           </div>
                         ) : null}
                       </button>
@@ -12265,8 +12265,8 @@ function EngineeringPageInner() {
                       <div>
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-xs font-bold bg-amber-500 text-slate-900 px-2 py-0.5 rounded-full">SELECTED SYSTEM</span>
-                          {selectedSystem.iccEsReport && <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full">{selectedSystem.iccEsReport}</span>}
-                          {selectedSystem.ul2703Listed && <span className="text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded-full">UL 2703</span>}
+                          {selectedSystem.iccEsReport ? <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full">{selectedSystem.iccEsReport}</span> : null}
+                          {selectedSystem.ul2703Listed ? <span className="text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded-full">UL 2703</span> : null}
                         </div>
                         <h4 className="text-xl font-black text-white">{selectedSystem.manufacturer} {selectedSystem.model}</h4>
                         <p className="text-slate-400 text-xs mt-0.5">{selectedSystem.description}</p>
@@ -12413,14 +12413,14 @@ function EngineeringPageInner() {
                         </div>
                         <div className="bg-slate-900/60 rounded-xl p-4">
                           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
-                            {selectedSystem.hardware.midClamp && <div><div className="text-slate-500 mb-0.5">Mid Clamp</div><div className="text-white">{selectedSystem.hardware.midClamp}</div></div>}
-                            {selectedSystem.hardware.endClamp && <div><div className="text-slate-500 mb-0.5">End Clamp</div><div className="text-white">{selectedSystem.hardware.endClamp}</div></div>}
-                            {selectedSystem.hardware.railSplice && <div><div className="text-slate-500 mb-0.5">Rail Splice</div><div className="text-white">{selectedSystem.hardware.railSplice}</div></div>}
-                            {selectedSystem.hardware.groundLug && <div><div className="text-slate-500 mb-0.5">Ground Lug</div><div className="text-white">{selectedSystem.hardware.groundLug}</div></div>}
-                            {selectedSystem.hardware.lagBolt && <div><div className="text-slate-500 mb-0.5">Lag Bolt</div><div className="text-white">{selectedSystem.hardware.lagBolt}</div></div>}
-                            {selectedSystem.hardware.bondingHardware && <div><div className="text-slate-500 mb-0.5">Bonding</div><div className="text-white">{selectedSystem.hardware.bondingHardware}</div></div>}
-                            {selectedSystem.hardware.flashingKit && <div><div className="text-slate-500 mb-0.5">Flashing Kit</div><div className="text-white">{selectedSystem.hardware.flashingKit}</div></div>}
-                            {selectedSystem.hardware.tileHook && <div><div className="text-slate-500 mb-0.5">Tile Hook</div><div className="text-white">{selectedSystem.hardware.tileHook}</div></div>}
+                            {selectedSystem.hardware.midClamp ? <div><div className="text-slate-500 mb-0.5">Mid Clamp</div><div className="text-white">{selectedSystem.hardware.midClamp}</div></div> : null}
+                            {selectedSystem.hardware.endClamp ? <div><div className="text-slate-500 mb-0.5">End Clamp</div><div className="text-white">{selectedSystem.hardware.endClamp}</div></div> : null}
+                            {selectedSystem.hardware.railSplice ? <div><div className="text-slate-500 mb-0.5">Rail Splice</div><div className="text-white">{selectedSystem.hardware.railSplice}</div></div> : null}
+                            {selectedSystem.hardware.groundLug ? <div><div className="text-slate-500 mb-0.5">Ground Lug</div><div className="text-white">{selectedSystem.hardware.groundLug}</div></div> : null}
+                            {selectedSystem.hardware.lagBolt ? <div><div className="text-slate-500 mb-0.5">Lag Bolt</div><div className="text-white">{selectedSystem.hardware.lagBolt}</div></div> : null}
+                            {selectedSystem.hardware.bondingHardware ? <div><div className="text-slate-500 mb-0.5">Bonding</div><div className="text-white">{selectedSystem.hardware.bondingHardware}</div></div> : null}
+                            {selectedSystem.hardware.flashingKit ? <div><div className="text-slate-500 mb-0.5">Flashing Kit</div><div className="text-white">{selectedSystem.hardware.flashingKit}</div></div> : null}
+                            {selectedSystem.hardware.tileHook ? <div><div className="text-slate-500 mb-0.5">Tile Hook</div><div className="text-white">{selectedSystem.hardware.tileHook}</div></div> : null}
                           </div>
                         </div>
                       </div>
@@ -12437,9 +12437,9 @@ function EngineeringPageInner() {
                       {mountingInstallType === 'ground' ? 'Ground Mount Layout' : mountingInstallType === 'commercial' ? 'Ballast Layout' : 'Mount Spacing Diagram'}
                     </h4>
                     <div className="bg-slate-900/60 rounded-xl p-3 mb-3">
-                      {mountingInstallType === 'residential' && <MountSpacingDiagram />}
-                      {mountingInstallType === 'commercial' && <BallastLayoutDiagram />}
-                      {mountingInstallType === 'ground' && <GroundMountDiagram />}
+                      {mountingInstallType === 'residential' ? <MountSpacingDiagram /> : null}
+                      {mountingInstallType === 'commercial' ? <BallastLayoutDiagram /> : null}
+                      {mountingInstallType === 'ground' ? <GroundMountDiagram /> : null}
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       {mountingInstallType === 'residential' && <>
@@ -12629,12 +12629,12 @@ function EngineeringPageInner() {
                     <div className="mt-3 border-t border-slate-700/50 pt-3">
                       <div className="text-xs text-slate-500 mb-2">Estimated quantities (from system specs, {totalPanels} panels):</div>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                        {selectedSystem.mount && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Mounts (est.)</div><div className="text-white font-bold">{Math.ceil(totalPanels * 2.5)}</div></div>}
-                        {selectedSystem.rail && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Rail (est.)</div><div className="text-white font-bold">{Math.ceil(totalPanels * 0.8 * 2)} ft</div></div>}
-                        {selectedSystem.hardware?.midClamp && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Mid Clamps</div><div className="text-white font-bold">{totalPanels * 2} est.</div></div>}
-                        {selectedSystem.hardware?.endClamp && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">End Clamps</div><div className="text-white font-bold">{Math.ceil(totalPanels * 0.5)} est.</div></div>}
-                        {selectedSystem.ballast && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Ballast Blocks</div><div className="text-purple-300 font-bold">{totalPanels * selectedSystem.ballast.minBlocksPerModule}–{totalPanels * selectedSystem.ballast.maxBlocksPerModule}</div></div>}
-                        {selectedSystem.groundMount && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Piles (est.)</div><div className="text-green-300 font-bold">{Math.ceil(totalPanels / 4)}</div></div>}
+                        {selectedSystem.mount ? <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Mounts (est.)</div><div className="text-white font-bold">{Math.ceil(totalPanels * 2.5)}</div></div> : null}
+                        {selectedSystem.rail ? <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Rail (est.)</div><div className="text-white font-bold">{Math.ceil(totalPanels * 0.8 * 2)} ft</div></div> : null}
+                        {selectedSystem.hardware?.midClamp ? <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Mid Clamps</div><div className="text-white font-bold">{totalPanels * 2} est.</div></div> : null}
+                        {selectedSystem.hardware?.endClamp ? <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">End Clamps</div><div className="text-white font-bold">{Math.ceil(totalPanels * 0.5)} est.</div></div> : null}
+                        {selectedSystem.ballast ? <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Ballast Blocks</div><div className="text-purple-300 font-bold">{totalPanels * selectedSystem.ballast.minBlocksPerModule}–{totalPanels * selectedSystem.ballast.maxBlocksPerModule}</div></div> : null}
+                        {selectedSystem.groundMount ? <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Piles (est.)</div><div className="text-green-300 font-bold">{Math.ceil(totalPanels / 4)}</div></div> : null}
                       </div>
                     </div>
                   ) : null}
@@ -13103,7 +13103,7 @@ function EngineeringPageInner() {
                                   {_icaProfile.common_rejections.map((r, i) => (
                                     <div key={i} className="text-xs">
                                       <span className="font-bold text-red-300">{r.reason}</span>
-                                      {r.how_to_avoid && <span className="text-slate-400"> — {r.how_to_avoid}</span>}
+                                      {r.how_to_avoid ? <span className="text-slate-400"> — {r.how_to_avoid}</span> : null}
                                     </div>
                                   ))}
                                 </div>
@@ -13323,7 +13323,7 @@ function EngineeringPageInner() {
                             <div className="text-3xl font-black text-white tabular-nums tracking-tight">{fmtK(totalCost)}</div>
                             <div className="text-xs text-slate-500 mt-0.5">
                               {bomPricing?.pricingApplied ? 'CED · Soligent · KWh Q1 2025' : 'Category estimates'}
-                              {unpricedCount > 0 && <span className="text-amber-400 ml-2">· {unpricedCount} unpriced</span>}
+                              {unpricedCount > 0 ? <span className="text-amber-400 ml-2">· {unpricedCount} unpriced</span> : null}
                             </div>
                           </div>
 
@@ -13505,9 +13505,9 @@ function EngineeringPageInner() {
                         return (
                           <div className="px-3 py-2.5 rounded-lg bg-amber-500/8 border border-amber-500/25 space-y-1">
                             <div className="flex items-center gap-2 text-xs text-amber-400 font-semibold"><AlertCircle size={13} /> BOM self-check warnings</div>
-                            {!panelCheck && <div className="text-xs text-amber-300/80 pl-5">Panels: BOM={bomPanelQty} · Config={totalPanelsBom}</div>}
-                            {!microCheck && isMicroBom && <div className="text-xs text-amber-300/80 pl-5">Microinverters: BOM={bomMicroQty} · Expected={expectedMicro}</div>}
-                            {!stringInvCheck && !isMicroBom && <div className="text-xs text-amber-300/80 pl-5">String inverters: BOM={bomStringInvQty} · Config={expectedStringInv}</div>}
+                            {!panelCheck ? <div className="text-xs text-amber-300/80 pl-5">Panels: BOM={bomPanelQty} · Config={totalPanelsBom}</div> : null}
+                            {!microCheck && isMicroBom ? <div className="text-xs text-amber-300/80 pl-5">Microinverters: BOM={bomMicroQty} · Expected={expectedMicro}</div> : null}
+                            {!stringInvCheck && !isMicroBom ? <div className="text-xs text-amber-300/80 pl-5">String inverters: BOM={bomStringInvQty} · Config={expectedStringInv}</div> : null}
                           </div>
                         );
                       })()}
@@ -14505,7 +14505,7 @@ function EngineeringPageInner() {
                 >
                   <Grid size={12} className={bomLoading ? 'animate-spin' : ''} />
                   <span className="flex-1 text-left">{bomLoading ? 'Generating BOM…' : 'Generate BOM'}</span>
-                  {bom.length > 0 && !bomLoading && <span className="text-teal-600 text-xs">{bom.length} items</span>}
+                  {bom.length > 0 && !bomLoading ? <span className="text-teal-600 text-xs">{bom.length} items</span> : null}
                 </button>
 
                 {/* Row 6: Generate SLD */}

@@ -42,7 +42,7 @@ export default function GlobalError({
           </p>
           <p style={{ color: '#64748b', fontSize: 12, marginBottom: 24 }}>
             {error.message || 'An unexpected error occurred.'}
-            {error.digest && <span style={{ display: 'block', marginTop: 4 }}>Reference: {error.digest}</span>}
+            {error.digest ? <span style={{ display: 'block', marginTop: 4 }}>Reference: {error.digest}</span> : null}
           </p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
             <button

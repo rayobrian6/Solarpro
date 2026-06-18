@@ -197,7 +197,7 @@ export default function AdminUsers() {
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[u.subscription_status] || 'bg-slate-500/20 text-slate-400'}`}>
                       {u.subscription_status || 'unknown'}
                     </span>
-                    {u.is_free_pass && <span className="ml-1 text-[10px] text-amber-400">⚡</span>}
+                    {u.is_free_pass ? <span className="ml-1 text-[10px] text-amber-400">⚡</span> : null}
                   </td>
                   <td className="px-4 py-3">
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${ROLE_COLORS[u.role] || 'bg-slate-500/20 text-slate-400'}`}>
@@ -373,7 +373,7 @@ export default function AdminUsers() {
                   <option value="admin">admin</option>
                   <option value="super_admin">super_admin</option>
                 </select>
-                {!isSuperAdmin && <p className="text-[10px] text-slate-500 mt-1">Only super_admin can change roles</p>}
+                {!isSuperAdmin ? <p className="text-[10px] text-slate-500 mt-1">Only super_admin can change roles</p> : null}
               </div>
               <div>
                 <label className="text-xs text-slate-400 mb-1 block">Plan</label>

@@ -179,12 +179,12 @@ function Roadmap({ stage }: { stage: HomeownerStage | null }) {
                   {past ? <CheckCircle2 size={18} className="text-emerald-400" />
                     : cur ? <span className="text-xl leading-none">{c.icon}</span>
                            : <Circle size={16} className="text-white/[0.08]" />}
-                  {cur && <div className="absolute inset-0 rounded-full bg-amber-500/15 animate-ping scale-[1.6] pointer-events-none" />}
+                  {cur ? <div className="absolute inset-0 rounded-full bg-amber-500/15 animate-ping scale-[1.6] pointer-events-none" /> : null}
                 </div>
                 <span className={`mt-3 text-[10px] font-bold text-center leading-tight max-w-[72px] ${
                   cur ? 'text-amber-300' : past ? 'text-emerald-400/60' : 'text-white/15'
                 }`}>{c.roadmapLabel}</span>
-                {cur  && <span className="mt-1 text-[9px] font-black text-amber-500/50 uppercase tracking-widest">NOW</span>}
+                {cur ? <span className="mt-1 text-[9px] font-black text-amber-500/50 uppercase tracking-widest">NOW</span> : null}
                 {past ? <span className="mt-1 text-[9px] text-emerald-500/35 uppercase tracking-wider">✓</span> : null}
               </div>
             );
@@ -207,12 +207,12 @@ function Roadmap({ stage }: { stage: HomeownerStage | null }) {
                     : cur ? <span className="text-sm">{c.icon}</span>
                            : <Circle size={14} className="text-white/[0.08]" />}
                 </div>
-                {!last && <div className={`w-[2px] flex-1 min-h-[24px] mt-1 rounded-full ${past ? 'bg-emerald-500/25' : 'bg-white/[0.04]'}`} />}
+                {!last ? <div className={`w-[2px] flex-1 min-h-[24px] mt-1 rounded-full ${past ? 'bg-emerald-500/25' : 'bg-white/[0.04]'}`} /> : null}
               </div>
               <div className={`pb-5 pt-1 flex-1 ${last ? 'pb-0' : ''}`}>
                 <div className="flex items-center gap-2">
                   <span className={`text-sm font-bold ${cur ? 'text-amber-300' : past ? 'text-white/35' : 'text-white/15'}`}>{c.roadmapLabel}</span>
-                  {cur  && <span className="text-[9px] font-black bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full uppercase tracking-wider">Now</span>}
+                  {cur ? <span className="text-[9px] font-black bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full uppercase tracking-wider">Now</span> : null}
                   {past ? <span className="text-[9px] text-emerald-500/40">✓</span> : null}
                 </div>
               </div>
@@ -402,7 +402,7 @@ export default function AdminPortalPreview() {
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600">Property</p>
               </div>
               <p className="text-sm font-semibold text-white leading-snug">{project.address ? project.address.split(',')[0] : '—'}</p>
-              {project.address?.includes(',') && <p className="text-xs text-slate-600 mt-0.5">{project.address.split(',').slice(1).join(',').trim()}</p>}
+              {project.address?.includes(',') ? <p className="text-xs text-slate-600 mt-0.5">{project.address.split(',').slice(1).join(',').trim()}</p> : null}
             </div>
             <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] p-4">
               <div className="flex items-center gap-2 mb-2">

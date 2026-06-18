@@ -215,7 +215,7 @@ export function RecommendationCard({
       {isMatch ? (
         <div className="mb-3 text-sm text-emerald-300 flex items-center gap-2">
           <span className="font-medium">{currentDisplay}</span>
-          {recommended.unit && <span className="text-emerald-400">{recommended.unit}</span>}
+          {recommended.unit ? <span className="text-emerald-400">{recommended.unit}</span> : null}
         </div>
       ) : null}
 

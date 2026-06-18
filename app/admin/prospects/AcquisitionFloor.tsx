@@ -109,7 +109,7 @@ function Clerk({ c, variant = 0, seated, gold }: { c: string; variant?: number; 
       {/* hair tuft */}
       <path d="M11 9 Q19 2 27 9 Q23 6 19 7 Q15 6 11 9 Z" fill="#3a2d22" />
       {/* visor variant */}
-      {variant === 1 && <rect x="10.5" y="9.5" width="17" height="3.2" rx="1.6" fill="#2f7d4f" opacity="0.92" />}
+      {variant === 1 ? <rect x="10.5" y="9.5" width="17" height="3.2" rx="1.6" fill="#2f7d4f" opacity="0.92" /> : null}
       {/* tired eyes with bags */}
       <ellipse cx="15.5" cy="14" rx="2.1" ry="1.7" fill="#fff" />
       <ellipse cx="22.5" cy="14" rx="2.1" ry="1.7" fill="#fff" />
@@ -123,9 +123,9 @@ function Clerk({ c, variant = 0, seated, gold }: { c: string; variant?: number; 
       {/* sweat drop */}
       <path d="M27 11 q1.4 2 0 3.2 q-1.4 -1.2 0 -3.2 z" fill="#7dd3fc" opacity="0.85" />
       {/* coffee variant */}
-      {variant === 2 && <g><rect x="0.5" y="33" width="6" height="5" rx="1" fill="#e6e0d2" stroke="#8a7d63" strokeWidth="0.6" /><path d="M6.5 34 q2 0.5 0 2.5" stroke="#8a7d63" strokeWidth="0.7" fill="none" /></g>}
+      {variant === 2 ? <g><rect x="0.5" y="33" width="6" height="5" rx="1" fill="#e6e0d2" stroke="#8a7d63" strokeWidth="0.6" /><path d="M6.5 34 q2 0.5 0 2.5" stroke="#8a7d63" strokeWidth="0.7" fill="none" /></g> : null}
       {/* gold crown */}
-      {gold && <path d="M12 5 l2 3 2.5-3 2.5 3 2.5-3 2 3 -1 2 H13 z" fill="#fbbf24" stroke="#b8860b" strokeWidth="0.5" />}
+      {gold ? <path d="M12 5 l2 3 2.5-3 2.5 3 2.5-3 2 3 -1 2 H13 z" fill="#fbbf24" stroke="#b8860b" strokeWidth="0.5" /> : null}
     </svg>
   );
 }
@@ -647,7 +647,7 @@ export default function AcquisitionFloor({
                   {supLine}
                 </div>
               ) : null}
-              {raging && <div className="absolute top-3 left-[4.5rem] text-lg font-black text-amber-300 pointer-events-none z-50" style={{ animation: 'crackPop 0.8s ease-out forwards', textShadow: '0 0 10px #f59e0b, 0 0 4px #fff' }}>💥 CRACK!</div>}
+              {raging ? <div className="absolute top-3 left-[4.5rem] text-lg font-black text-amber-300 pointer-events-none z-50" style={{ animation: 'crackPop 0.8s ease-out forwards', textShadow: '0 0 10px #f59e0b, 0 0 4px #fff' }}>💥 CRACK!</div> : null}
               <div ref={supSpriteRef} style={{ transformOrigin: 'center bottom' }}><Overseer /></div>
             </div>
           </div>
@@ -690,7 +690,7 @@ export default function AcquisitionFloor({
             {auto ? (autoWorking ? '⚙ Auto-vet: WORKING…' : '⚙ Auto-vet: ON (free)') : '▶ Auto-vet: OFF'}
           </button>
         </div>
-        {dispatchMsg && <div className="mt-2 text-center text-sm text-amber-300 italic">{dispatchMsg}</div>}
+        {dispatchMsg ? <div className="mt-2 text-center text-sm text-amber-300 italic">{dispatchMsg}</div> : null}
       </div>
 
       {/* ── The workshop bays ── */}
@@ -755,7 +755,7 @@ export default function AcquisitionFloor({
                   {/* a rat scurries the baseboards */}
                   <div className="absolute bottom-0 pointer-events-none" style={{ left: 0, zIndex: 2, animation: 'ratRun 9s linear infinite', animationDelay: `${ROOMS.findIndex((r) => r.stage === room.stage) * 1.6}s` }}><Rat /></div>
                   {/* the tea cart rolls through the busy Copying Room */}
-                  {room.stage === 'enriched' && <div className="absolute bottom-1 pointer-events-none" style={{ left: 0, zIndex: 3, animation: 'rollAcross 24s linear infinite' }}><TeaCart /></div>}
+                  {room.stage === 'enriched' ? <div className="absolute bottom-1 pointer-events-none" style={{ left: 0, zIndex: 3, animation: 'rollAcross 24s linear infinite' }}><TeaCart /></div> : null}
 
                   {/* filing cabinet in the corner */}
                   <div className="absolute right-2 bottom-1" style={{ zIndex: 60 }}><FilingCabinet accent={room.accent} /></div>
@@ -768,7 +768,7 @@ export default function AcquisitionFloor({
                         <Desk accent={room.accent} delay={i * 0.7} />
                         {seatList.includes(i) ? (
                           <div className="absolute" style={{ left: 16, top: 2 }}>
-                            {bubbles[`${room.stage}-seat-${i}`] && <div className={bubble} style={{ animation: 'bubblePop 2.2s ease-in-out forwards' }}>{bubbles[`${room.stage}-seat-${i}`]}</div>}
+                            {bubbles[`${room.stage}-seat-${i}`] ? <div className={bubble} style={{ animation: 'bubblePop 2.2s ease-in-out forwards' }}>{bubbles[`${room.stage}-seat-${i}`]}</div> : null}
                             <div style={{ animation: whipTarget === `${room.stage}-seat-${i}` ? 'whipShake 0.4s ease-in-out infinite' : 'typeBob 0.5s ease-in-out infinite' }}><Clerk c={room.accent} variant={i % 3} seated gold={room.stage === 'signed_up' && i === 0} /></div>
                           </div>
                         ) : null}
@@ -779,7 +779,7 @@ export default function AcquisitionFloor({
                   {/* wandering clerks */}
                   {wlist.map((w) => (
                     <div key={w.id} ref={(el) => { wanderEls.current.set(w.id, el); }} className="absolute top-0 left-0 will-change-transform" style={{ transform: 'translate(20px,20px)' }}>
-                      {bubbles[w.id] && <div className={bubble} style={{ animation: 'bubblePop 2.2s ease-in-out forwards' }}>{bubbles[w.id]}</div>}
+                      {bubbles[w.id] ? <div className={bubble} style={{ animation: 'bubblePop 2.2s ease-in-out forwards' }}>{bubbles[w.id]}</div> : null}
                       <div ref={(el) => { spriteEls.current.set(w.id, el); }} style={{ transformOrigin: 'center bottom' }}>
                         <div style={{ transformOrigin: 'bottom center', animation: faintTarget === w.id ? 'faint 0.5s ease-in forwards' : whipTarget === w.id ? 'whipShake 0.4s ease-in-out infinite' : 'floorBob 1.3s ease-in-out infinite' }}>
                           <Clerk c={room.accent} variant={w.variant} />
@@ -797,7 +797,7 @@ export default function AcquisitionFloor({
                     </div>
                   ) : null}
 
-                  {idle && <div className="absolute inset-0 flex items-center justify-center text-sm text-amber-700/70 italic pointer-events-none" style={{ fontFamily: 'Georgia, serif' }}>{IDLE_TEXT[room.stage] || 'this chamber lies vacant…'}</div>}
+                  {idle ? <div className="absolute inset-0 flex items-center justify-center text-sm text-amber-700/70 italic pointer-events-none" style={{ fontFamily: 'Georgia, serif' }}>{IDLE_TEXT[room.stage] || 'this chamber lies vacant…'}</div> : null}
                 </div>
 
                 {/* SIGN (big, readable, top) */}

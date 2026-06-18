@@ -489,7 +489,7 @@ function OpsProjectCard({ proj, onAdvance, onSaveField, busy }: {
         onClick={() => router.push(`/projects/${proj.id}`)}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            {proj.client_name && <div className="text-[10px] font-bold uppercase tracking-wider mb-0.5" style={{ color: accentHex }}>{proj.client_name}</div>}
+            {proj.client_name ? <div className="text-[10px] font-bold uppercase tracking-wider mb-0.5" style={{ color: accentHex }}>{proj.client_name}</div> : null}
             <div className="text-[13px] font-bold leading-tight truncate" style={{ color: 'var(--text-primary)' }}>{proj.name}</div>
           </div>
           <ArrowUpRight size={12} className="flex-shrink-0 mt-0.5 opacity-0 group-hover:opacity-60 transition-opacity" style={{ color: 'var(--text-muted)' }} />
@@ -501,16 +501,16 @@ function OpsProjectCard({ proj, onAdvance, onSaveField, busy }: {
           </div>
         ) : null}
         <div className="flex flex-wrap gap-1.5 mt-2.5">
-          {proj.system_size_kw && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}><Zap size={9} className="inline mr-0.5 -mt-px" style={{ color: '#F59E0B' }} />{proj.system_size_kw.toFixed(1)} kW</span>}
-          {proj.install_date && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ background: 'rgba(59,130,246,0.1)', color: '#60a5fa' }}><Calendar size={9} className="inline mr-0.5 -mt-px" />{fmtDate(proj.install_date)}</span>}
-          {proj.crew_assigned && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ background: 'rgba(34,197,94,0.1)', color: '#4ade80' }}><Users size={9} className="inline mr-0.5 -mt-px" />{proj.crew_assigned}</span>}
+          {proj.system_size_kw ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}><Zap size={9} className="inline mr-0.5 -mt-px" style={{ color: '#F59E0B' }} />{proj.system_size_kw.toFixed(1)} kW</span> : null}
+          {proj.install_date ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ background: 'rgba(59,130,246,0.1)', color: '#60a5fa' }}><Calendar size={9} className="inline mr-0.5 -mt-px" />{fmtDate(proj.install_date)}</span> : null}
+          {proj.crew_assigned ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ background: 'rgba(34,197,94,0.1)', color: '#4ade80' }}><Users size={9} className="inline mr-0.5 -mt-px" />{proj.crew_assigned}</span> : null}
         </div>
         {proj.is_stalled ? (
           <div className="mt-2.5 rounded-lg px-2.5 py-2 flex items-start gap-2" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.15)' }}>
             <AlertTriangle size={12} className="text-red-400 flex-shrink-0 mt-0.5" />
             <div>
               <div className="text-[11px] font-bold text-red-400">{proj.days_in_stage}d NO ACTIVITY</div>
-              {proj.updated_at && <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>Last update: {fmtDateFull(proj.updated_at)}</div>}
+              {proj.updated_at ? <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>Last update: {fmtDateFull(proj.updated_at)}</div> : null}
             </div>
           </div>
         ) : null}
@@ -523,21 +523,21 @@ function OpsProjectCard({ proj, onAdvance, onSaveField, busy }: {
       </div>
       {proj.project_status !== 'complete' ? (
         <div className="flex items-center gap-1.5 px-4 pb-3 pt-0" onClick={e => e.stopPropagation()}>
-          {next && <button onClick={handleAdvanceClick} disabled={isBusy}
+          {next ? (<button onClick={handleAdvanceClick} disabled={isBusy}
             className="text-[10px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition-all hover:brightness-110 hover:-translate-y-0.5 disabled:opacity-50"
             style={{ background: accentHex, color: '#fff' }} title={`Move to ${STAGE_LABELS[next]}`}>
             <ArrowRight size={10} /> {step.buttonLabel}
-          </button>}
-          {!proj.install_date && <button onClick={e => { e.preventDefault(); e.stopPropagation(); setInlineAction(inlineAction === 'schedule' ? null : 'schedule'); }} disabled={isBusy}
+          </button>) : null}
+          {!proj.install_date ? (<button onClick={e => { e.preventDefault(); e.stopPropagation(); setInlineAction(inlineAction === 'schedule' ? null : 'schedule'); }} disabled={isBusy}
             className="text-[10px] font-medium px-2.5 py-1.5 rounded-lg transition-all hover:brightness-110 disabled:opacity-50"
             style={{ background: inlineAction === 'schedule' ? '#3B82F6' : 'var(--bg-muted)', color: inlineAction === 'schedule' ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
             <Calendar size={10} className="inline mr-0.5" /> Schedule
-          </button>}
-          {proj.install_date && !proj.crew_assigned && <button onClick={e => { e.preventDefault(); e.stopPropagation(); setInlineAction(inlineAction === 'crew' ? null : 'crew'); }} disabled={isBusy}
+          </button>) : null}
+          {proj.install_date && !proj.crew_assigned ? (<button onClick={e => { e.preventDefault(); e.stopPropagation(); setInlineAction(inlineAction === 'crew' ? null : 'crew'); }} disabled={isBusy}
             className="text-[10px] font-medium px-2.5 py-1.5 rounded-lg transition-all hover:brightness-110 disabled:opacity-50"
             style={{ background: inlineAction === 'crew' ? '#22C55E' : 'var(--bg-muted)', color: inlineAction === 'crew' ? '#fff' : 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
             <Users size={10} className="inline mr-0.5" /> Assign Crew
-          </button>}
+          </button>) : null}
           {proj.install_date && proj.crew_assigned && <>
             <button onClick={e => { e.preventDefault(); e.stopPropagation(); setInlineAction(inlineAction === 'schedule' ? null : 'schedule'); }} disabled={isBusy}
               className="text-[10px] font-medium px-2.5 py-1.5 rounded-lg transition-all disabled:opacity-50"
@@ -552,12 +552,12 @@ function OpsProjectCard({ proj, onAdvance, onSaveField, busy }: {
           </>}
         </div>
       ) : null}
-      {inlineAction === 'schedule' && <div className="px-4 pb-3" onClick={e => e.stopPropagation()}>
+      {inlineAction === 'schedule' ? (<div className="px-4 pb-3" onClick={e => e.stopPropagation()}>
         <InlineInput type="date" placeholder="Install date" defaultValue={proj.install_date || ''} onSave={v => handleSave('install_date', v)} onCancel={() => setInlineAction(null)} />
-      </div>}
-      {inlineAction === 'crew' && <div className="px-4 pb-3" onClick={e => e.stopPropagation()}>
+      </div>) : null}
+      {inlineAction === 'crew' ? (<div className="px-4 pb-3" onClick={e => e.stopPropagation()}>
         <InlineInput type="text" placeholder="e.g. Team Alpha" defaultValue={proj.crew_assigned || ''} onSave={v => handleSave('crew_assigned', v)} onCancel={() => setInlineAction(null)} />
-      </div>}
+      </div>) : null}
     </div>
   );
 }
@@ -620,8 +620,8 @@ function ActionRequiredStrip({ items, onAction }: {
                 <span className="text-[12px] font-bold truncate block" style={{ color: uc.text }}>{item.action}</span>
                 <span className="text-[11px] mt-0.5 truncate block" style={{ color: 'var(--text-muted)' }}>{item.clientName || item.projectName}</span>
               </button>
-              {item.daysInStage > 0 && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 tabular-nums"
-                style={{ background: uc.bg, color: uc.text, border: `1px solid ${uc.border}` }}>{item.daysInStage}d</span>}
+              {item.daysInStage > 0 ? (<span className="text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 tabular-nums"
+                style={{ background: uc.bg, color: uc.text, border: `1px solid ${uc.border}` }}>{item.daysInStage}d</span>) : null}
               {/* Act button — always opens modal when onAction available */}
               {onAction ? (
                 <button onClick={handleClick}
@@ -1227,8 +1227,8 @@ export default function CommandCenter() {
               <div className="flex items-center gap-2">
                 <Zap size={15} className="text-amber-400" />
                 <span className="text-sm font-bold" style={{ color: '#FBBF24' }}>TODAY'S COMMANDS</span>
-                {commands.length > 0 && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                  style={{ background: 'rgba(245,158,11,0.15)', color: '#F59E0B' }}>{commands.length}</span>}
+                {commands.length > 0 ? (<span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                  style={{ background: 'rgba(245,158,11,0.15)', color: '#F59E0B' }}>{commands.length}</span>) : null}
               </div>
             </div>
             {commands.length > 0 ? (
@@ -1421,7 +1421,7 @@ export default function CommandCenter() {
                     </div>
                     <div className="text-[11px] truncate" style={{ color: 'var(--text-muted)' }}>
                       {item.client_name || item.project_name}
-                      {item.crew_name && <span style={{ color: item.crew_color || '#4ade80' }}> · <HardHat size={9} className="inline -mt-px" /> {item.crew_name}</span>}
+                      {item.crew_name ? <span style={{ color: item.crew_color || '#4ade80' }}> · <HardHat size={9} className="inline -mt-px" /> {item.crew_name}</span> : null}
                     </div>
                   </div>
                   <ChevronRight size={12} className="opacity-0 group-hover:opacity-50 transition-opacity" style={{ color: 'var(--text-muted)' }} />
@@ -1525,7 +1525,7 @@ export default function CommandCenter() {
                   placeholder="Search projects, clients, crews..."
                   className="w-full text-sm rounded-xl pl-10 pr-4 py-2.5 transition-all focus:ring-2"
                   style={{ background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', outline: 'none' }} />
-                {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }}><X size={14} /></button>}
+                {searchQuery ? <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }}><X size={14} /></button> : null}
               </div>
             ) : null}
 
@@ -1568,7 +1568,7 @@ export default function CommandCenter() {
                         </div>
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full tabular-nums"
                           style={{ background: phaseProjects.length > 0 ? phase.color : 'var(--bg-muted)', color: phaseProjects.length > 0 ? '#fff' : 'var(--text-muted)' }}>{phaseProjects.length}</span>
-                        {stalledInPhase > 0 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#EF4444' }}>{stalledInPhase} stalled</span>}
+                        {stalledInPhase > 0 ? <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#EF4444' }}>{stalledInPhase} stalled</span> : null}
                         <div className="flex-1 h-px" style={{ background: 'var(--border-color)' }} />
                         {isCollapsed ? <ChevronDown size={14} style={{ color: 'var(--text-muted)' }} /> : <ChevronUp size={14} style={{ color: 'var(--text-muted)' }} />}
                       </button>

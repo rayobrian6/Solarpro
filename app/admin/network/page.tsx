@@ -434,7 +434,7 @@ function StatCard({
         <div>
           <div className="text-xs text-zinc-400 mb-1">{label}</div>
           <div className={`text-2xl font-bold ${color}`}>{value}</div>
-          {sub && <div className="text-xs text-zinc-500 mt-0.5">{sub}</div>}
+          {sub ? <div className="text-xs text-zinc-500 mt-0.5">{sub}</div> : null}
         </div>
         {Icon ? (
           <div className="w-8 h-8 rounded-lg bg-zinc-700/50 flex items-center justify-center">
@@ -1627,10 +1627,10 @@ export default function NetworkControlCenter() {
             loading={loading}
           />
         ) : null}
-        {activeTab === "marketplace" && <MarketplaceWorkbenchSection />}
-        {activeTab === "simulator" && <SimulatorSection />}
-        {activeTab === "screening" && <ScreeningSection />}
-        {activeTab === "analytics" && <AnalyticsSection data={analytics} />}
+        {activeTab === "marketplace" ? <MarketplaceWorkbenchSection /> : null}
+        {activeTab === "simulator" ? <SimulatorSection /> : null}
+        {activeTab === "screening" ? <ScreeningSection /> : null}
+        {activeTab === "analytics" ? <AnalyticsSection data={analytics} /> : null}
         {activeTab === "matching" ? (
           <div className="space-y-4">
             <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl p-6">
@@ -1644,12 +1644,12 @@ export default function NetworkControlCenter() {
             </div>
           </div>
         ) : null}
-        {activeTab === "health" && <HealthSection health={healthData} />}
-        {activeTab === "intake" && <IntakeFeedSection />}
-        {activeTab === "enrichment" && <EnrichmentQueueSection />}
-        {activeTab === "webhooks" && <WebhookLogSection />}
-        {activeTab === "funnels" && <IntakeFunnelsSection />}
-        {activeTab === "campaigns" && <CampaignsSection />}
+        {activeTab === "health" ? <HealthSection health={healthData} /> : null}
+        {activeTab === "intake" ? <IntakeFeedSection /> : null}
+        {activeTab === "enrichment" ? <EnrichmentQueueSection /> : null}
+        {activeTab === "webhooks" ? <WebhookLogSection /> : null}
+        {activeTab === "funnels" ? <IntakeFunnelsSection /> : null}
+        {activeTab === "campaigns" ? <CampaignsSection /> : null}
       </div>
     </div>
   );
@@ -3838,8 +3838,7 @@ function IntakeFeedSection() {
                                 )}
                               </div>
                             ) : null}
-                            {expanded &&
-                              (details.length > 0 ? (
+                            {expanded ? (details.length > 0 ? (
                                 <div className="mt-3 rounded-lg border border-zinc-800/80 bg-zinc-950/30 p-3">
                                   <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
                                     Homeowner-entered intake values
@@ -3868,7 +3867,7 @@ function IntakeFeedSection() {
                                   No payload details were returned for this
                                   intake row.
                                 </div>
-                              ))}
+                              )) : null}
                             {expanded && qualificationDetails.length > 0 ? (
                               <div className="mt-3 rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-3">
                                 <div className="mb-2 flex items-center justify-between gap-3">
@@ -3915,8 +3914,7 @@ function IntakeFeedSection() {
                                 ) : null}
                               </div>
                             ) : null}
-                            {lead.release_readiness &&
-                              (() => {
+                            {lead.release_readiness ? ((() => {
                                 const missing =
                                   lead.release_readiness?.missing ?? [];
                                 const ready =
@@ -3994,7 +3992,7 @@ function IntakeFeedSection() {
                                     </div>
                                   </div>
                                 );
-                              })()}
+                              })()) : null}
                             {lead.intake_record_type === "intake_event" ? (
                               <div className="mt-3 rounded-lg border border-purple-900/50 bg-purple-950/20 p-3">
                                 <div className="mb-2 flex items-center justify-between gap-3">

@@ -153,7 +153,7 @@ export function ObstructionMap({ obstructions, onChange, disabled }: Obstruction
       ) : null}
 
       {/* ---- Obstruction list ---- */}
-      {obstructions.length > 0 && (
+      {obstructions.length > 0 ? (
         <div className="space-y-2">
           <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
             Logged Obstructions ({obstructions.length})
@@ -168,7 +168,7 @@ export function ObstructionMap({ obstructions, onChange, disabled }: Obstruction
             />
           ))}
         </div>
-      )}
+      ) : null}
 
       {obstructions.length === 0 && !editorMode ? (
         <p className="text-center text-xs text-gray-400 py-2">

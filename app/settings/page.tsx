@@ -792,7 +792,7 @@ function NotifToggle({
     <div className="flex items-center justify-between py-3 border-b border-slate-700/40 last:border-0">
       <div className="flex-1 pr-4">
         <p className="text-sm font-medium text-white">{label}</p>
-        {description && <p className="text-xs text-slate-500 mt-0.5">{description}</p>}
+        {description ? <p className="text-xs text-slate-500 mt-0.5">{description}</p> : null}
       </div>
       <button
         onClick={() => onChange(!checked)}

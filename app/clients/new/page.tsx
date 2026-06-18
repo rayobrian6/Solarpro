@@ -276,7 +276,7 @@ export default function NewClientPage() {
                 {step > n ? <CheckCircle size={14} /> : <span className="w-5 h-5 rounded-full border border-current flex items-center justify-center text-xs">{n}</span>}
                 {label}
               </button>
-              {n < 3 && <div className={`flex-1 h-px ${step > n ? 'bg-emerald-500/40' : 'bg-slate-700'}`} />}
+              {n < 3 ? <div className={`flex-1 h-px ${step > n ? 'bg-emerald-500/40' : 'bg-slate-700'}`} /> : null}
             </React.Fragment>
           ))}
         </div>
@@ -411,7 +411,7 @@ export default function NewClientPage() {
         ) : null}
 
         {/* Step 2: Utility Data */}
-        {step === 2 && (
+        {step === 2 ? (
           <div className="card p-6 space-y-5 animate-fade-in">
             <div className="flex items-center gap-2 mb-2">
               <Zap size={16} className="text-amber-400" />
@@ -531,7 +531,7 @@ export default function NewClientPage() {
               <button className="btn-primary" onClick={() => setStep(3)}>Next: Review →</button>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Step 3: Review */}
         {step === 3 ? (

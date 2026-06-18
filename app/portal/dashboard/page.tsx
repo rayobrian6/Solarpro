@@ -370,8 +370,8 @@ function StepTimeline({ stage }: { stage: HomeownerStage | null }) {
           const c = STAGE_CONTENT[s];
           return (
             <div key={s} className="flex-1 flex flex-col items-center relative">
-              {i > 0 && <div className={`absolute top-[18px] right-1/2 w-1/2 h-[2px] ${done || cur ? 'bg-amber-500/50' : 'bg-white/[0.07]'}`} />}
-              {i < ROADMAP_STEPS.length - 1 && <div className={`absolute top-[18px] left-1/2 w-1/2 h-[2px] ${done ? 'bg-amber-500/50' : 'bg-white/[0.07]'}`} />}
+              {i > 0 ? <div className={`absolute top-[18px] right-1/2 w-1/2 h-[2px] ${done || cur ? 'bg-amber-500/50' : 'bg-white/[0.07]'}`} /> : null}
+              {i < ROADMAP_STEPS.length - 1 ? <div className={`absolute top-[18px] left-1/2 w-1/2 h-[2px] ${done ? 'bg-amber-500/50' : 'bg-white/[0.07]'}`} /> : null}
               <div className={`relative z-10 flex items-center justify-center rounded-full border-2 transition-all duration-500 ${
                 cur  ? 'w-10 h-10 bg-amber-500 border-amber-400 shadow-lg shadow-amber-500/40'
                 : done ? 'w-8 h-8 bg-emerald-500/20 border-emerald-500/60'
@@ -380,12 +380,12 @@ function StepTimeline({ stage }: { stage: HomeownerStage | null }) {
                 {done ? <CheckCircle2 size={15} className="text-emerald-400" />
                   : cur ? <span className="text-base leading-none">{c.emoji}</span>
                         : <span className="text-xs font-black text-white/20">{i + 1}</span>}
-                {cur && <span className="absolute inset-0 rounded-full bg-amber-500/20 animate-ping" />}
+                {cur ? <span className="absolute inset-0 rounded-full bg-amber-500/20 animate-ping" /> : null}
               </div>
               <span className={`mt-2.5 text-[10px] font-bold text-center leading-tight px-1 max-w-[72px] ${
                 cur ? 'text-amber-300' : done ? 'text-emerald-400/70' : fut ? 'text-white/20' : 'text-white/20'
               }`}>{c.roadmapLabel}</span>
-              {cur && <span className="mt-0.5 text-[9px] font-black text-amber-500/50 uppercase tracking-widest">NOW</span>}
+              {cur ? <span className="mt-0.5 text-[9px] font-black text-amber-500/50 uppercase tracking-widest">NOW</span> : null}
             </div>
           );
         })}
@@ -408,14 +408,14 @@ function StepTimeline({ stage }: { stage: HomeownerStage | null }) {
                     : cur ? <span className="text-xs">{c.emoji}</span>
                           : <span className="text-[9px] font-black text-white/15">{i + 1}</span>}
                 </div>
-                {!last && <div className={`w-px flex-1 min-h-[20px] my-1 rounded-full ${done ? 'bg-emerald-500/25' : 'bg-white/[0.05]'}`} />}
+                {!last ? <div className={`w-px flex-1 min-h-[20px] my-1 rounded-full ${done ? 'bg-emerald-500/25' : 'bg-white/[0.05]'}`} /> : null}
               </div>
               <div className={`pb-4 pt-1 flex-1 ${last ? 'pb-0' : ''}`}>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className={`text-sm font-semibold ${cur ? 'text-amber-300' : done ? 'text-white/30' : 'text-white/15'}`}>
                     {c.roadmapLabel}
                   </span>
-                  {cur && <span className="text-[9px] font-black bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full uppercase tracking-wider">Now</span>}
+                  {cur ? <span className="text-[9px] font-black bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full uppercase tracking-wider">Now</span> : null}
                 </div>
               </div>
             </div>
@@ -483,7 +483,7 @@ function RecentActivity({ microStages, stageHistory }: { microStages: MicroStage
           <div key={item.key} className="flex items-start gap-3.5 px-6 sm:px-8 py-3.5">
             <div className="flex flex-col items-center flex-shrink-0 pt-1">
               <div className={`w-2 h-2 rounded-full flex-shrink-0 ${i === 0 ? 'bg-amber-400' : 'bg-emerald-500/60'}`} />
-              {i < items.length - 1 && <div className="w-px flex-1 min-h-[16px] mt-1.5 bg-white/[0.05]" />}
+              {i < items.length - 1 ? <div className="w-px flex-1 min-h-[16px] mt-1.5 bg-white/[0.05]" /> : null}
             </div>
             <div className="flex-1 min-w-0 pb-0.5">
               <p className={`text-sm leading-snug ${i === 0 ? 'text-white font-medium' : 'text-slate-300'}`}>{item.label}</p>
@@ -547,8 +547,8 @@ function ProjectTeam({ owner }: { owner: Owner }) {
           <span className="text-sm font-black text-amber-300">{initials}</span>
         </div>
         <div className="flex-1 min-w-0">
-          {owner.name && <p className="text-base font-bold text-white leading-tight">{owner.name}</p>}
-          {owner.company && <p className="text-xs text-amber-400/70 mt-0.5">{owner.company}</p>}
+          {owner.name ? <p className="text-base font-bold text-white leading-tight">{owner.name}</p> : null}
+          {owner.company ? <p className="text-xs text-amber-400/70 mt-0.5">{owner.company}</p> : null}
           <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
             Your dedicated solar specialist. Reach out any time — we're here to make this easy for you.
           </p>
@@ -965,7 +965,7 @@ export default function PortalDashboard() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {client && <span className="hidden sm:block text-xs text-slate-600">{client.email}</span>}
+            {client ? <span className="hidden sm:block text-xs text-slate-600">{client.email}</span> : null}
             <button onClick={handleLogout}
               className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 border border-white/[0.06] hover:border-white/15 rounded-lg px-3 py-1.5 transition-all">
               <LogOut size={11} /> Sign out
@@ -1105,7 +1105,7 @@ export default function PortalDashboard() {
                       <div>
                         <p className="text-sm font-bold text-white mb-1">Upload Your Utility Bill</p>
                         <p className="text-xs text-slate-500 mb-4">Share your electric bill so we can accurately size your solar system.</p>
-                        {billUploadErr && <p className="text-xs text-red-400 mb-3">{billUploadErr}</p>}
+                        {billUploadErr ? <p className="text-xs text-red-400 mb-3">{billUploadErr}</p> : null}
                         <label className={`inline-flex items-center gap-2.5 rounded-xl px-5 py-2.5 border cursor-pointer transition-all ${
                           billUploading
                             ? 'bg-white/[0.02] border-white/[0.06] text-slate-600 cursor-not-allowed'
@@ -1139,7 +1139,7 @@ export default function PortalDashboard() {
                 )}
 
                 {/* Proposal CTA */}
-                {(stage === 'proposal' || projectProposals.some(pr => !!pr.signed_at)) && projectProposals.length > 0 && (() => {
+                {(stage === 'proposal' || projectProposals.some(pr => !!pr.signed_at)) && projectProposals.length > 0 ? ((() => {
                   const prop = projectProposals[0];
                   const propUrl = `/proposals/view/${prop.id}?token=${prop.share_token}`;
                   return (
@@ -1187,12 +1187,12 @@ export default function PortalDashboard() {
                       )}
                     </div>
                   );
-                })()}
+                })()) : null}
               </div>
             )}
 
             {/* ══ PHASE 2: PROPOSAL ANTICIPATION (design stage) ═══════════ */}
-            {stage === 'design' && <ProposalAnticipation systemSizeKw={p.system_size_kw} />}
+            {stage === 'design' ? <ProposalAnticipation systemSizeKw={p.system_size_kw} /> : null}
 
             {/* ══ PHASE 1: RECENT ACTIVITY ════════════════════════════════ */}
             <RecentActivity microStages={projectMicros} stageHistory={projectHistory} />
@@ -1249,7 +1249,7 @@ export default function PortalDashboard() {
                         <div key={idx} className="flex gap-3">
                           <div className="flex flex-col items-center flex-shrink-0">
                             <div className="w-6 h-6 rounded-full border-2 border-violet-500/30 flex items-center justify-center text-xs font-black text-violet-400">{idx + 1}</div>
-                            {idx < steps.length - 1 && <div className="w-px flex-1 bg-violet-500/20 my-1" />}
+                            {idx < steps.length - 1 ? <div className="w-px flex-1 bg-violet-500/20 my-1" /> : null}
                           </div>
                           <div className={`${idx < steps.length - 1 ? 'pb-3' : ''} flex-1 min-w-0`}>
                             <p className="text-xs text-slate-300 leading-relaxed">{step}</p>

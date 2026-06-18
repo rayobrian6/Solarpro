@@ -7006,7 +7006,7 @@ function SolarEngine3D({
               </div>{/* end spine */}
 
               {/* ── Flyout panel (slides out to the right when a group is open) ── */}
-              {openGroup && (() => {
+              {openGroup ? ((() => {
                 const grp = groups.find(g => g.id === openGroup)!;
                 return (
                   <div style={{
@@ -7046,7 +7046,7 @@ function SolarEngine3D({
                     ))}
                   </div>
                 );
-              })()}
+              })()) : null}
 
             </div>{/* end toolbar row */}
 
@@ -7184,7 +7184,7 @@ function SolarEngine3D({
                   </div>
 
                   {/* Racking style row (only when racking is visible) */}
-                  {showRacking && (
+                  {showRacking ? (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
                       <span style={{ color: '#aaa', fontSize: 10 }}>Style</span>
                       {/* v48.30: IronRidge XR is a 4-row landscape system — not yet built.
@@ -7212,7 +7212,7 @@ function SolarEngine3D({
                         >IronRidge XR</button>
                       </div>
                     </div>
-                  )}
+                  ) : null}
 
                   {/* Status / confirm section */}
                   {groundArrayRowCount > 0 ? (
@@ -7320,7 +7320,7 @@ function SolarEngine3D({
                     <span style={{ color: '#666', fontSize: 10 }}>SHIFT+click to add</span>
                   ) : null}
                   {/* Fence section conversion */}
-                  {selectedPanelIds.size >= 1 && (() => {
+                  {selectedPanelIds.size >= 1 ? ((() => {
                     const selId = [...selectedPanelIds][0];
                     const sectionsCount = fenceSectionsRef.current.length;
                     if (sectionsCount === 0 && panelsRef.current.length > 0) {
@@ -7382,7 +7382,7 @@ function SolarEngine3D({
                         <span style={{ color: '#666', fontSize: 9 }}>({sec.type})</span>
                       </div>
                     );
-                  })()}
+                  })()) : null}
                 </div>
               ) : null}
 
@@ -7578,7 +7578,7 @@ function SolarEngine3D({
                 <div key={h} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
                   <div style={{ width: 1, height: h % 3 === 0 ? 7 : 3,
                     background: h % 3 === 0 ? 'rgba(255,200,0,0.5)' : 'rgba(255,255,255,0.15)' }} />
-                  {h % 3 === 0 && <div style={{ color: 'rgba(255,200,0,0.55)', fontSize: 9 }}>{h}</div>}
+                  {h % 3 === 0 ? <div style={{ color: 'rgba(255,200,0,0.55)', fontSize: 9 }}>{h}</div> : null}
                 </div>
               ))}
             </div>

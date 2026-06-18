@@ -127,7 +127,7 @@ export default function ActivityLogPage() {
       </div>
 
       {/* Migration Required Banner */}
-      {migrationRequired && (
+      {migrationRequired ? (
         <div className="flex items-start gap-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-4">
           <AlertCircle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
           <div>
@@ -138,7 +138,7 @@ export default function ActivityLogPage() {
             </p>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Search / Filter */}
       <div className="rounded-xl border border-white/10 bg-white/2 p-4 space-y-3">
@@ -185,10 +185,10 @@ export default function ActivityLogPage() {
         {hasFilters ? (
           <div className="flex items-center gap-2 pt-1">
             <span className="text-xs text-slate-500">Active filters:</span>
-            {search && <span className="text-xs bg-amber-500/15 text-amber-300 px-2 py-0.5 rounded-full">action: {search}</span>}
-            {targetEmail && <span className="text-xs bg-blue-500/15 text-blue-300 px-2 py-0.5 rounded-full">user: {targetEmail}</span>}
-            {dateFrom && <span className="text-xs bg-purple-500/15 text-purple-300 px-2 py-0.5 rounded-full">from: {dateFrom}</span>}
-            {dateTo && <span className="text-xs bg-purple-500/15 text-purple-300 px-2 py-0.5 rounded-full">to: {dateTo}</span>}
+            {search ? <span className="text-xs bg-amber-500/15 text-amber-300 px-2 py-0.5 rounded-full">action: {search}</span> : null}
+            {targetEmail ? <span className="text-xs bg-blue-500/15 text-blue-300 px-2 py-0.5 rounded-full">user: {targetEmail}</span> : null}
+            {dateFrom ? <span className="text-xs bg-purple-500/15 text-purple-300 px-2 py-0.5 rounded-full">from: {dateFrom}</span> : null}
+            {dateTo ? <span className="text-xs bg-purple-500/15 text-purple-300 px-2 py-0.5 rounded-full">to: {dateTo}</span> : null}
             <button onClick={clearFilters} className="text-xs text-slate-500 hover:text-white ml-auto transition-colors">✕ Clear all</button>
           </div>
         ) : null}
@@ -256,12 +256,12 @@ export default function ActivityLogPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="text-[10px] text-slate-500 space-y-0.5">
-                        {meta.newRole && <div>Role → <span className="text-slate-300">{meta.newRole}</span></div>}
-                        {meta.newPlan && <div>Plan → <span className="text-slate-300">{meta.newPlan}</span></div>}
-                        {meta.note && <div>Note: <span className="text-slate-300">{meta.note}</span></div>}
-                        {meta.file && <div>File: <span className="text-slate-300 font-mono">{meta.file}</span></div>}
-                        {meta.expiredCount !== undefined && <div>Updated: <span className="text-slate-300">{meta.expiredCount}</span></div>}
-                        {meta.deleted !== undefined && <div>Deleted: <span className="text-slate-300">{meta.deleted}</span></div>}
+                        {meta.newRole ? <div>Role → <span className="text-slate-300">{meta.newRole}</span></div> : null}
+                        {meta.newPlan ? <div>Plan → <span className="text-slate-300">{meta.newPlan}</span></div> : null}
+                        {meta.note ? <div>Note: <span className="text-slate-300">{meta.note}</span></div> : null}
+                        {meta.file ? <div>File: <span className="text-slate-300 font-mono">{meta.file}</span></div> : null}
+                        {meta.expiredCount !== undefined ? <div>Updated: <span className="text-slate-300">{meta.expiredCount}</span></div> : null}
+                        {meta.deleted !== undefined ? <div>Deleted: <span className="text-slate-300">{meta.deleted}</span></div> : null}
                         {log.target_company && !meta.newRole && !meta.newPlan && !meta.note && !meta.file ? (
                           <div className="flex items-center gap-1"><Building2 size={9} />{log.target_company}</div>
                         ) : null}

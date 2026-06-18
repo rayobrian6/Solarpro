@@ -188,9 +188,9 @@ function PanelForm({ panel, onSave, onCancel }: {
               <input className="input w-24" type="number" step="0.01" min="1.0" max="1.5" value={form.bifacialFactor} onChange={e => set('bifacialFactor', +e.target.value)} />
             </div>
           ) : null}
-          {dsAutoFields.bifacial && dsResult?.panelSpecs?.bifacial && (
+          {dsAutoFields.bifacial && dsResult?.panelSpecs?.bifacial ? (
             <ConfidenceBadge confidence={mapConfidence(dsResult.panelSpecs.bifacial.confidence)} source="datasheet" size="xs" overridden={dsOverrides.bifacial} />
-          )}
+          ) : null}
         </div>
       </div>
       <div className="flex gap-2 mt-4">

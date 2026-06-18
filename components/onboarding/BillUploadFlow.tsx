@@ -469,7 +469,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                   ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                   : 'bg-slate-700 text-slate-500'
               }`}>{i + 1}</div>
-              {i < 3 && <div className={`w-4 h-px ${['upload', 'review', 'sizing', 'complete'].indexOf(step) > i ? 'bg-emerald-500/50' : 'bg-slate-700'}`} />}
+              {i < 3 ? <div className={`w-4 h-px ${['upload', 'review', 'sizing', 'complete'].indexOf(step) > i ? 'bg-emerald-500/50' : 'bg-slate-700'}`} /> : null}
             </div>
           ))}
           {onClose ? (
@@ -586,7 +586,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
             ) : null}
 
             {/* ── NORMAL MODE: upload drop zone + manual entry below ── */}
-            {!parseFailedMode && (
+            {!parseFailedMode ? (
               <>
                 {/* Drop zone */}
                 <div
@@ -729,7 +729,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                   </button>
                 </div>
               </>
-            )}
+            ) : null}
           </div>
         )}
 

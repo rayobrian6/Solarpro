@@ -63,7 +63,7 @@ export default function LeadDeskBoard({ name }: { name: string }) {
   const Tab = ({ v, label, n }: { v: View; label: string; n?: number }) => (
     <button onClick={() => setView(v)}
       className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${view === v ? 'bg-amber-500/20 text-amber-300' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
-      {label}{typeof n === 'number' && <span className="ml-1.5 opacity-60">{n}</span>}
+      {label}{typeof n === 'number' ? <span className="ml-1.5 opacity-60">{n}</span> : null}
     </button>
   );
 
@@ -122,34 +122,34 @@ export default function LeadDeskBoard({ name }: { name: string }) {
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-semibold text-white">{p.company_name}</span>
                         <span className={`text-[10px] px-2 py-0.5 rounded-full border font-semibold ${t.cls}`}>{t.label}</span>
-                        {p.stage === 'contacted' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30">in progress</span>}
+                        {p.stage === 'contacted' ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30">in progress</span> : null}
                       </div>
                       <div className="text-xs text-slate-500 flex items-center gap-1 mt-1">
                         <MapPin size={11} />{[p.city, p.state].filter(Boolean).join(', ') || '—'}
-                        {p.rating != null && <span className="ml-2 flex items-center gap-1"><Star size={11} className="text-amber-400 fill-amber-400" />{p.rating}{p.review_count != null && ` (${p.review_count})`}</span>}
+                        {p.rating != null ? <span className="ml-2 flex items-center gap-1"><Star size={11} className="text-amber-400 fill-amber-400" />{p.rating}{p.review_count != null && ` (${p.review_count})`}</span> : null}
                       </div>
                     </div>
                     {/* Contact — the point of the desk */}
                     <div className="flex items-center gap-2 flex-wrap">
-                      {p.phone && <a href={`tel:${p.phone}`} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-300 text-sm font-semibold hover:bg-emerald-500/25"><Phone size={14} /> {p.phone}</a>}
-                      {p.email && <a href={`mailto:${p.email}`} className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-white/5 text-sky-300 text-xs hover:bg-white/10"><Mail size={13} /></a>}
-                      {p.website && <a href={p.website.startsWith('http') ? p.website : `https://${p.website}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-white/5 text-slate-300 text-xs hover:bg-white/10"><Globe size={13} /></a>}
+                      {p.phone ? <a href={`tel:${p.phone}`} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-300 text-sm font-semibold hover:bg-emerald-500/25"><Phone size={14} /> {p.phone}</a> : null}
+                      {p.email ? <a href={`mailto:${p.email}`} className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-white/5 text-sky-300 text-xs hover:bg-white/10"><Mail size={13} /></a> : null}
+                      {p.website ? <a href={p.website.startsWith('http') ? p.website : `https://${p.website}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-white/5 text-slate-300 text-xs hover:bg-white/10"><Globe size={13} /></a> : null}
                     </div>
                   </div>
 
                   {/* Dossier — what to say */}
                   {d && (d.whyCall || d.opener) ? (
                     <div className="mt-3 rounded-lg bg-violet-500/10 border border-violet-500/20 p-3 text-[12px] space-y-1">
-                      {d.whyCall && <div className="text-violet-300 font-semibold flex items-center gap-1.5"><BookOpen size={13} /> {d.whyCall}</div>}
-                      {d.opener && <div className="text-slate-300 italic">&ldquo;{d.opener}&rdquo;</div>}
-                      {d.facts && d.facts.length > 0 && <ul className="text-slate-400 list-disc list-inside">{d.facts.map((f, i) => <li key={i}>{f}</li>)}</ul>}
+                      {d.whyCall ? <div className="text-violet-300 font-semibold flex items-center gap-1.5"><BookOpen size={13} /> {d.whyCall}</div> : null}
+                      {d.opener ? <div className="text-slate-300 italic">&ldquo;{d.opener}&rdquo;</div> : null}
+                      {d.facts && d.facts.length > 0 ? <ul className="text-slate-400 list-disc list-inside">{d.facts.map((f, i) => <li key={i}>{f}</li>)}</ul> : null}
                     </div>
                   ) : null}
 
                   {lastCall && (
                     <div className="mt-2 text-[11px] text-slate-500 flex items-center gap-1.5">
                       <Clock size={11} /> Last: <span className="text-slate-400">{ACTION_LABEL[lastCall.action] || lastCall.action}</span>
-                      {lastCall.note && <>— &ldquo;{lastCall.note}&rdquo;</>} {lastCall.by && <span className="opacity-60">by {lastCall.by}</span>}
+                      {lastCall.note && <>— &ldquo;{lastCall.note}&rdquo;</>} {lastCall.by ? <span className="opacity-60">by {lastCall.by}</span> : null}
                     </div>
                   )}
 

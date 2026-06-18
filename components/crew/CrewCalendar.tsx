@@ -421,7 +421,7 @@ export default function CrewCalendar() {
           </div>
 
           {/* Empty state */}
-          {totalThisWeek === 0 && (
+          {totalThisWeek === 0 ? (
             <div className="text-center py-6 mt-2">
               <Calendar size={24} className="mx-auto mb-2" style={{ color: 'var(--text-muted)' }} />
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -431,7 +431,7 @@ export default function CrewCalendar() {
                 Set an Install Date and Crew in any project's Operations tab to see it here.
               </p>
             </div>
-          )}
+          ) : null}
         </>
       )}
     </Section>

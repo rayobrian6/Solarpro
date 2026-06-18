@@ -297,7 +297,7 @@ export function RouteNav({ routes }: { routes: EngineeringIntelligenceRouteSumma
               <span className="rounded-full border border-slate-500/30 bg-slate-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-400">{stateLabel}</span>
             </div>
             <div className="mt-2 text-xs leading-5 text-slate-400">{safeRenderValue(route.deterministicPurpose)}</div>
-            {isProjectRoute && <div className="mt-3 text-[10px] font-mono text-sky-300">Project route requires an actual project UUID selected below.</div>}
+            {isProjectRoute ? <div className="mt-3 text-[10px] font-mono text-sky-300">Project route requires an actual project UUID selected below.</div> : null}
           </Link>
         );
       })}
@@ -359,7 +359,7 @@ export function Panel({ title, eyebrow, children }: { title: string; eyebrow?: s
   return (
     <section className="rounded-2xl border border-white/10 bg-slate-950/80 p-5 shadow-xl shadow-black/10">
       <div className="mb-4">
-        {eyebrow && <div className="mb-1 text-[10px] font-black uppercase tracking-[0.24em] text-sky-300">{safeRenderValue(eyebrow)}</div>}
+        {eyebrow ? <div className="mb-1 text-[10px] font-black uppercase tracking-[0.24em] text-sky-300">{safeRenderValue(eyebrow)}</div> : null}
         <h2 className="text-lg font-black text-white">{safeRenderValue(title, 'Panel')}</h2>
       </div>
       {children}
@@ -389,7 +389,7 @@ function TokenList({ values, limit = 6 }: { values: WorkspaceRenderable; limit?:
   return (
     <div className="flex flex-wrap gap-1">
       {visible.map((value, index) => <span key={workspaceKey('token', value, index)} className="rounded-md bg-white/5 px-2 py-1 font-mono text-[10px] text-slate-300">{value}</span>)}
-      {remaining > 0 && <span className="rounded-md bg-white/5 px-2 py-1 text-[10px] text-slate-400">+{remaining}</span>}
+      {remaining > 0 ? <span className="rounded-md bg-white/5 px-2 py-1 text-[10px] text-slate-400">+{remaining}</span> : null}
     </div>
   );
 }

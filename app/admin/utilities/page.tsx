@@ -346,7 +346,7 @@ export default function AdminUtilities() {
       </div>
 
       {/* ── Add/Edit form ── */}
-      {(adding && !editing) && <UtilityForm onSave={save} onCancel={() => setAdding(false)} />}
+      {(adding && !editing) ? <UtilityForm onSave={save} onCancel={() => setAdding(false)} /> : null}
       {editing ? <UtilityForm initial={editing} onSave={save} onCancel={() => setEditing(null)} /> : null}
 
       {/* ── Filter bar ── */}
@@ -356,7 +356,7 @@ export default function AdminUtilities() {
           <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
           <input type="text" placeholder="Search utility…" value={search} onChange={e => setSearch(e.target.value)}
             className="w-full bg-white/5 border border-white/10 rounded-lg pl-7 pr-7 py-1.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-blue-500/40" />
-          {search && <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"><X size={10} /></button>}
+          {search ? <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"><X size={10} /></button> : null}
         </div>
 
         {/* State dropdown */}
