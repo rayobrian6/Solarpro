@@ -165,9 +165,12 @@ function NewProjectContent() {
       toast.update(toastId, {
         type: 'success',
         title: `Project "${project.name}" created!`,
-        message: 'Project created successfully. Opening client folder…',
+        message: 'Opening the design studio…',
       });
-      setTimeout(() => router.push(`/clients/${selectedClient}`), 600);
+      // Button promises "Open Design Studio" — take them straight there (was
+      // redirecting to the client folder, which dead-ended on a disabled Design
+      // button and felt like a loop back to creating a project).
+      setTimeout(() => router.push(`/design?projectId=${project.id}`), 600);
     } catch (e: unknown) {
       console.error('[NewProject] handleSubmit error:', e);
       toast.update(toastId, {

@@ -43,8 +43,9 @@ import {
   FileText, ArrowRight, MousePointer2, Home, Square, Minus, Ruler,
   Trash2, CheckSquare, Fence, Plus, Minus as MinusIcon, Search,
   TrendingUp, Leaf, BarChart2, AlertCircle, X, Upload, Calculator,
-  Info, ChevronRight, Eye, EyeOff
+  Info, ChevronRight, Eye, EyeOff, Bug
 } from 'lucide-react';
+import FeedbackModal from '@/components/ui/FeedbackModal';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -704,6 +705,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [production, setProduction] = useState<any>(null);
   const [costEstimate, setCostEstimate] = useState<any>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [calcMessage, setCalcMessage] = useState<string>('');
   // QW-10: Reactive production calculation — auto-compute when layout changes
@@ -3214,6 +3216,17 @@ export default function DesignStudio({ project, onSave }: Props) {
 
   return (
     <div className="flex flex-col h-full bg-slate-950">
+      {/* Report a Bug — floating (Design Studio runs without the app header) */}
+      <button
+        type="button"
+        onClick={() => setFeedbackOpen(true)}
+        title="Report a bug or suggest an improvement"
+        className="fixed bottom-4 left-4 z-[60] flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800/90 border border-slate-600/60 text-xs font-medium text-slate-300 hover:text-amber-400 hover:border-amber-500/40 shadow-lg backdrop-blur transition-colors"
+      >
+        <Bug size={14} /> Report a Bug
+      </button>
+      <FeedbackModal open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
+
       {/* ── Studio Header ── */}
       <div className="flex items-center gap-2 px-3 py-2.5 bg-slate-900 border-b border-slate-700/50 flex-shrink-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
         <div className={`px-2.5 py-1 rounded-lg border text-xs font-semibold ${systemTypeBg} ${systemTypeColor}`}>

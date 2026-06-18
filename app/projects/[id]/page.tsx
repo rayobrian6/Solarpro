@@ -686,8 +686,7 @@ function ProjectDetailInner() {
       color: 'text-blue-400',
       action: 'link',
       target: `/design?projectId=${id}`,
-      enabled: p => !!p.billAnalysis,
-      disabledReason: 'Upload bill first',
+      enabled: () => true, // design needs no bill — don't gate it (was a dead-end)
     },
     {
       label: 'Engineering',
