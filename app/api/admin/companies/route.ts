@@ -162,6 +162,12 @@ export async function PATCH(req: NextRequest) {
           return NextResponse.json({ success: false, error: 'Invalid newOwnerId format.' }, { status: 400 });
         if (admin.role !== 'super_admin')
           return NextResponse.json({ success: false, error: 'Only super_admin can transfer ownership' }, { status: 403 });
+        // BUGFIX: verify the new owner actually belongs to this company BEFORE
+        // demoting the existing owners — otherwise a bad/foreign newOwnerId would
+        // demote every super_admin and promote nobody, leaving the company ownerless.
+        const ownerRows = await sql`SELECT 1 FROM users WHERE id = ${newOwnerId} AND company = ${company} LIMIT 1`;
+        if (ownerRows.length === 0)
+          return NextResponse.json({ success: false, error: 'New owner not found in this company' }, { status: 404 });
         // Demote all current super_admins in company to admin, then promote new owner
         await sql`UPDATE users SET role = 'admin', updated_at = NOW() WHERE company = ${company} AND role = 'super_admin'`;
         await sql`UPDATE users SET role = 'super_admin', updated_at = NOW() WHERE id = ${newOwnerId} AND company = ${company}`;
