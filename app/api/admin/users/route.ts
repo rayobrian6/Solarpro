@@ -115,7 +115,14 @@ export async function PATCH(req: NextRequest) {
       // Also clear is_free_pass so Safety Net B can never fire after admin reset.
       const { hashPassword: hp } = await import('@/lib/auth');
       const hash = await hp(tempPassword);
-      await sql`UPDATE users SET password_hash = ${hash}, is_free_pass = false, updated_at = NOW() WHERE id = ${id}`;
+      // password_changed_at invalidates the user's other active sessions (migration
+      // 094). Best-effort fallback keeps admin reset working pre-migration.
+      try {
+        await sql`UPDATE users SET password_hash = ${hash}, is_free_pass = false, password_changed_at = NOW(), updated_at = NOW() WHERE id = ${id}`;
+      } catch (colErr) {
+        console.warn('[admin/users] password_changed_at column missing, updating without it:', (colErr as Error).message);
+        await sql`UPDATE users SET password_hash = ${hash}, is_free_pass = false, updated_at = NOW() WHERE id = ${id}`;
+      }
       await logAdminAction({ adminId: admin.id, action: 'reset_password', targetUserId: id, targetCompany: targetUser?.company, metadata: { targetEmail: targetUser?.email } });
       // Return the temp password so admin can share it
       return NextResponse.json({ success: true, tempPassword, message: `Password reset. Temporary password: ${tempPassword}` });
