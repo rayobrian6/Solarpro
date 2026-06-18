@@ -88,6 +88,19 @@ function NewProjectContent() {
     }
   }, [selectedClient, selectedType, clients]);
 
+  // Auto-populate the project address from the selected client (only when the
+  // address field is still blank, so we never clobber something the user typed).
+  useEffect(() => {
+    const client = clients.find(c => c.id === selectedClient);
+    if (!client) return;
+    const composed = [client.address, client.city, client.state, client.zip].filter(Boolean).join(', ');
+    if (composed && !address.trim()) {
+      setAddress(composed);
+      resolveAddress(composed);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClient, clients]);
+
   // Resolve full location + utility data from an address string
   const resolveAddress = async (addressStr: string) => {
     if (!addressStr.trim() || geocoding) return;
