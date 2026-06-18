@@ -7077,7 +7077,7 @@ function EngineeringPageInner() {
       ) : null}
 
       {/* ─── Change Project chip + Auto-save indicator ─── */}
-      {currentProjectId && (
+      {currentProjectId ? (
         <div className="bg-slate-900/60 border-b border-slate-700/30 px-6 py-2 flex-shrink-0 flex items-center gap-3">
           <span className="text-xs text-slate-500">Project loaded</span>
           <button
@@ -7165,7 +7165,7 @@ function EngineeringPageInner() {
                                       'Save Config'}
           </button>
         </div>
-      )}
+      ) : null}
 
       {/* ── Project Selector: shown when no projectId in URL ── */}
       {!currentProjectId ? (
@@ -7435,7 +7435,7 @@ function EngineeringPageInner() {
         <div className="flex-1 overflow-y-auto p-3 md:p-4 lg:p-6" ref={printRef}>
 
           {/* ── CONFIG TAB ── */}
-          {activeTab === 'config' && (() => {
+          {activeTab === 'config' ? ((() => {
             /* ═══════════════════════════════════════════════════════════
                CONFIG V2 UI  —  v55.0
                Feature flag: ENABLE_CONFIG_V2_UI
@@ -9315,10 +9315,10 @@ function EngineeringPageInner() {
 
               </div>
             );
-          })()}
+          })()) : null}
 
           {/* ── COMPLIANCE TAB ── */}
-          {activeTab === 'compliance' && (() => {
+          {activeTab === 'compliance' ? ((() => {
             const _ov   = compliance.overallStatus;
             const _el   = compliance.electrical?.status;
             const _st   = compliance.structural?.status;
@@ -9801,10 +9801,10 @@ function EngineeringPageInner() {
 
               </div>
             );
-          })()}
+          })()) : null}
 
           {/* ── ELECTRICAL SIZING TAB ── */}
-          {activeTab === 'electrical' && (() => {
+          {activeTab === 'electrical' ? ((() => {
             const elec     = compliance.electrical as any;
             const acSizing = elec?.acSizing;
             const _st      = elec?.status;
@@ -10132,7 +10132,7 @@ function EngineeringPageInner() {
                     )}
 
                     {/* Wire runs detail */}
-                    {cs.runs?.length > 0 && (
+                    {cs.runs?.length > 0 ? (
                       <div className="rounded-xl border border-slate-700/60 bg-slate-800/30 p-4">
                         <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
                           <GitBranch size={12} className="text-blue-400" /> Wire Runs
@@ -10153,16 +10153,16 @@ function EngineeringPageInner() {
                           ))}
                         </div>
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 </div>
 
               </div>
             );
-          })()}
+          })()) : null}
 
           {/* ── STRUCTURAL TAB ── */}
-          {activeTab === 'structural' && (
+          {activeTab === 'structural' ? (
             <div className="max-w-none space-y-5">
               {/* ══════════ STRUCTURAL INTEGRITY HERO ══════════ */}
               <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5 mb-5">
@@ -10385,7 +10385,7 @@ function EngineeringPageInner() {
                   );
                 })()}
               </div>
-              {compliance.structural && (
+              {compliance.structural ? (
                 <div className="eng-panel">
                   <h3 className="text-sm font-extrabold text-slate-100 mb-4 flex items-center gap-2 tracking-tight">
                     <BarChart2 size={14} className="text-amber-400" /> Structural Analysis Results
@@ -10562,7 +10562,7 @@ function EngineeringPageInner() {
                     </div>
                   ) : null}
                 </div>
-              )}
+              ) : null}
 
               {/* ── STRUCTURAL DEBUG PANEL ── */}
               {compliance.structural ? (
@@ -10916,7 +10916,7 @@ function EngineeringPageInner() {
             ) : null}
 
             </div>
-          )}
+          ) : null}
 
           {/* ── SINGLE-LINE DIAGRAM TAB ── */}
           {activeTab === 'diagram' ? (!canSLD ? (
@@ -11697,7 +11697,7 @@ function EngineeringPageInner() {
           ) : null}
 
           {/* ── MOUNTING DETAILS TAB ── */}
-          {activeTab === 'mounting' && (() => {
+          {activeTab === 'mounting' ? ((() => {
             // ── Mounting Details Tab ── Full Redesign ──────────────────────────────
             const allSystems = getAllMountingSystems();
 
@@ -12663,10 +12663,10 @@ function EngineeringPageInner() {
                 </div>
               </div>
             );
-          })()}
+          })()) : null}
 
           {/* ── PERMIT PACKAGE TAB ── */}
-          {activeTab === 'permit' && (!canPermit ? (
+          {activeTab === 'permit' ? (!canPermit ? (
               <div className="flex flex-col items-center justify-center h-64 text-center">
                 <div className="w-16 h-16 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mx-auto mb-4">
                   <Lock size={28} className="text-blue-400" />
@@ -13166,10 +13166,10 @@ function EngineeringPageInner() {
 
                 </div>
               );
-            })())}
+            })()) : null}
 
           {/* ── BOM TAB ── */}
-          {activeTab === 'bom' && (!canBOM ? (
+          {activeTab === 'bom' ? (!canBOM ? (
               <div className="flex flex-col items-center justify-center h-64 text-center">
                 <div className="w-16 h-16 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center mx-auto mb-4">
                   <Lock size={28} className="text-violet-400" />
@@ -13257,7 +13257,7 @@ function EngineeringPageInner() {
                   </div>
                 ) : null}
 
-                {bom.length > 0 && !bomLoading && (() => {
+                {bom.length > 0 && !bomLoading ? ((() => {
                   // ── cost helpers ──
                   const fmt$ = (n: number) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                   const fmtK = (n: number) => n >= 1000 ? '$' + (n / 1000).toFixed(1) + 'k' : fmt$(n);
@@ -13611,10 +13611,10 @@ function EngineeringPageInner() {
 
                     </>
                   );
-                })()}
+                })()) : null}
 
               </div>
-            ))}
+            )) : null}
 
         {/* ── CLIENT FILES TAB ── */}
           {activeTab === 'files' ? (

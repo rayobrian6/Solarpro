@@ -504,7 +504,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
 
       <div className="p-6">
         {/* ── STEP 1: Upload ── */}
-        {step === 'upload' && (
+        {step === 'upload' ? (
           <div className="space-y-4">
 
             {/* ── PARSE FAILED MODE: manual entry is primary ── */}
@@ -740,7 +740,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
               </>
             ) : null}
           </div>
-        )}
+        ) : null}
 
         {/* ── STEP 2: Review extracted data ── */}
         {step === 'review' && result ? (

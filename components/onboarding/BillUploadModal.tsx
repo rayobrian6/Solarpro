@@ -754,7 +754,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
           ) : null}
 
           {/* ── STEP 2: Review ── */}
-          {step === 'review' && result && (
+          {step === 'review' && result ? (
             <div className="space-y-4">
               {selectedFile ? (
                 <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-2 border border-slate-700/50">
@@ -975,7 +975,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                 </button>
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* ── STEP 3: Creating ── */}
           {step === 'creating' ? (

@@ -6851,7 +6851,7 @@ function SolarEngine3D({
       ) : null}
 
       {/* ── Collapsible grouped toolbar ── */}
-      {stage === 'done' && (() => {
+      {stage === 'done' ? ((() => {
         const btnBase: React.CSSProperties = {
           width: 36, height: 36, borderRadius: 8, fontSize: 16,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -7139,7 +7139,7 @@ function SolarEngine3D({
               </div>
 
               {/* ── Ground mode context controls (v48.28) ── */}
-              {(placementMode === 'ground' || placementMode === 'ground_array') && (
+              {(placementMode === 'ground' || placementMode === 'ground_array') ? (
                 <div style={{
                   display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'stretch',
                   background: 'rgba(15,15,30,0.93)', backdropFilter: 'blur(8px)',
@@ -7240,7 +7240,7 @@ function SolarEngine3D({
                     </div>
                   )}
                 </div>
-              )}
+              ) : null}
 
               {/* ── 3D Plane context controls ── */}
               {placementMode === 'plane3d' ? (
@@ -7482,7 +7482,7 @@ function SolarEngine3D({
             </div>
           </>
         );
-      })()}
+      })()) : null}
 
 
 

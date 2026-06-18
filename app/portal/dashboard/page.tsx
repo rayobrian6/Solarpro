@@ -1056,7 +1056,7 @@ export default function PortalDashboard() {
             </div>
 
             {/* ══ CURRENT STAGE ═══════════════════════════════════════════ */}
-            {content && stage && (
+            {content && stage ? (
               <div className={`rounded-2xl border px-6 sm:px-8 py-7 ${
                 isComplete              ? 'border-emerald-500/[0.15] bg-emerald-500/[0.03]'
                 : content.actionIsRequired ? 'border-blue-500/[0.15] bg-blue-500/[0.03]'
@@ -1091,7 +1091,7 @@ export default function PortalDashboard() {
                 </div>
 
                 {/* Bill upload */}
-                {(stage === 'lead_submitted' || stage === 'under_review') && (
+                {(stage === 'lead_submitted' || stage === 'under_review') ? (
                   <div className="mt-6 border-t border-white/[0.05] pt-6">
                     {billUploaded ? (
                       <div className="flex items-center gap-3 rounded-xl bg-emerald-500/[0.06] border border-emerald-500/[0.12] px-4 py-3">
@@ -1136,7 +1136,7 @@ export default function PortalDashboard() {
                       </div>
                     )}
                   </div>
-                )}
+                ) : null}
 
                 {/* Proposal CTA */}
                 {(stage === 'proposal' || projectProposals.some(pr => !!pr.signed_at)) && projectProposals.length > 0 ? ((() => {
@@ -1189,7 +1189,7 @@ export default function PortalDashboard() {
                   );
                 })()) : null}
               </div>
-            )}
+            ) : null}
 
             {/* ══ PHASE 2: PROPOSAL ANTICIPATION (design stage) ═══════════ */}
             {stage === 'design' ? <ProposalAnticipation systemSizeKw={p.system_size_kw} /> : null}
@@ -1201,7 +1201,7 @@ export default function PortalDashboard() {
             <ProjectedBenefits systemSizeKw={p.system_size_kw} stage={stage} />
 
             {/* ══ ICA / PTO (installation) ════════════════════════════════ */}
-            {showIca && (icaTier1 || icaFallback) && (() => {
+            {showIca && (icaTier1 || icaFallback) ? ((() => {
               const t1 = icaTier1, t2 = icaFallback;
               const steps   = t1 ? t1.pto_steps : (t2?.generic_steps ?? []);
               const icaTime = t1 ? `${t1.ica_approval_days_min}–${t1.ica_approval_days_max} business days` : t2 ? `${t2.typical_ica_days_min}–${t2.typical_ica_days_max} business days` : null;
@@ -1263,7 +1263,7 @@ export default function PortalDashboard() {
                   </div>
                 </div>
               );
-            })()}
+            })()) : null}
 
             {/* ══ DOCUMENT VAULT ════════════════════════════════════════════ */}
             <DocumentVault documents={documents} />

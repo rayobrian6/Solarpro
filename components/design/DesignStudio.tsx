@@ -3896,7 +3896,7 @@ export default function DesignStudio({ project, onSave }: Props) {
           <div className="flex-1 overflow-y-auto">
 
             {/* ── DESIGN TAB ── */}
-            {activeTab === 'design' && (
+            {activeTab === 'design' ? (
               <>
                 {/* System Summary — always visible so Calculate Production is always accessible */}
                 <Section title="System Summary" icon={<Zap size={12} />}>
@@ -4228,7 +4228,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                   </div>
 
                   {/* v30.9: Fire Setback Controls (roof only) */}
-                  {activeZoneType === 'roof' && (
+                  {activeZoneType === 'roof' ? (
                     <div className="mt-2 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium text-red-400">🔥 Fire Setbacks</span>
@@ -4296,7 +4296,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                         </div>
                       ) : null}
                     </div>
-                  )}
+                  ) : null}
 
                   {/* v30.9: Multi-Row Placement Tool */}
                   <div className="mt-2 pt-2 border-t border-slate-700/50">
@@ -4735,7 +4735,7 @@ export default function DesignStudio({ project, onSave }: Props) {
 
 
               </>
-            )}
+            ) : null}
 
             {/* ── BILL ANALYSIS TAB ── */}
             {activeTab === 'bill' ? (

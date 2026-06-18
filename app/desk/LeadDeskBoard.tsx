@@ -146,12 +146,12 @@ export default function LeadDeskBoard({ name }: { name: string }) {
                     </div>
                   ) : null}
 
-                  {lastCall && (
+                  {lastCall ? (
                     <div className="mt-2 text-[11px] text-slate-500 flex items-center gap-1.5">
                       <Clock size={11} /> Last: <span className="text-slate-400">{ACTION_LABEL[lastCall.action] || lastCall.action}</span>
                       {lastCall.note && <>— &ldquo;{lastCall.note}&rdquo;</>} {lastCall.by ? <span className="opacity-60">by {lastCall.by}</span> : null}
                     </div>
-                  )}
+                  ) : null}
 
                   {/* Disposition */}
                   {view === 'active' ? (
