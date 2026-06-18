@@ -928,7 +928,12 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                     <span className="text-amber-400 font-bold text-lg">{systemKw.toFixed(1)} kW</span>
                   </div>
                   <input type="range" min={1} max={50} step={0.1} value={systemKw}
-                    onChange={e => setSystemKw(parseFloat(e.target.value))}
+                    onChange={e => {
+                      const kw = parseFloat(e.target.value);
+                      setSystemKw(kw);
+                      // Keep the offset % in sync so the two sliders never disagree.
+                      if (baselineKw > 0) setOffsetPercent(Math.round(kw / baselineKw * 100));
+                    }}
                     className="w-full accent-amber-500" />
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400 text-xs">Offset Target</span>
