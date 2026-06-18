@@ -333,7 +333,7 @@ function OpportunityCard({
               {headline}
             </p>
           </div>
-          {confidence && (
+          {confidence ? (
             <div
               className={`rounded-2xl border px-3 py-2 text-right ${confidenceClasses(confidence.level)}`}
             >
@@ -344,14 +344,14 @@ function OpportunityCard({
                 Confidence
               </div>
             </div>
-          )}
+          ) : null}
         </div>
 
-        {summary && (
+        {summary ? (
           <p className="mb-4 rounded-2xl border border-slate-800 bg-slate-950/35 p-3 text-xs leading-relaxed text-slate-300">
             {summary}
           </p>
-        )}
+        ) : null}
 
         <div className="mb-4 rounded-3xl border border-emerald-400/25 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.24),transparent_36%),rgba(6,78,59,0.16)] p-4 shadow-lg shadow-emerald-950/20">
           <div className="mb-1 flex items-center justify-between gap-3">
@@ -467,7 +467,7 @@ function OpportunityCard({
           </div>
         )}
 
-        {experience && (
+        {experience ? (
           <div className="mb-4 rounded-2xl border border-emerald-500/25 bg-emerald-500/8 p-3 text-xs">
             <div className="mb-2 flex items-center justify-between gap-2">
               <div className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">
@@ -492,11 +492,11 @@ function OpportunityCard({
               ))}
             </div>
           </div>
-        )}
+        ) : null}
 
         {(experience?.acquisition_tags?.length ||
           revenueProjection ||
-          purchaseBehavior) && (
+          purchaseBehavior) ? (
           <div className="mb-4 rounded-2xl border border-amber-500/25 bg-amber-500/8 p-3 text-xs">
             <div className="mb-1 text-[10px] font-black uppercase tracking-[0.2em] text-amber-300">
               Estimated acquisition fit
@@ -519,7 +519,7 @@ function OpportunityCard({
                 ))}
             </div>
           </div>
-        )}
+        ) : null}
 
         {verifiedTrust.length ? (
           <div className="mb-4 flex flex-wrap gap-1.5">
@@ -572,21 +572,21 @@ function OpportunityCard({
           {opp.battery_candidate &&
             !visibleBadges.some((badge) =>
               badge.label.toLowerCase().includes("battery"),
-            ) && (
+            ) ? (
               <span className="flex items-center gap-1 px-2 py-1 bg-amber-500/15 border border-amber-500/40 rounded-lg text-amber-400 text-[10px] font-black uppercase tracking-wide">
                 <Battery size={9} /> Battery
               </span>
-            )}
-          {isSteep && (
+            ) : null}
+          {isSteep ? (
             <span className="px-2 py-1 bg-rose-500/15 border border-rose-500/30 rounded-lg text-rose-400 text-[10px] font-black uppercase tracking-wide">
               Steep roof
             </span>
-          )}
-          {opp.complex_ahj && (
+          ) : null}
+          {opp.complex_ahj ? (
             <span className="px-2 py-1 bg-orange-500/15 border border-orange-500/30 rounded-lg text-orange-400 text-[10px] font-black uppercase tracking-wide">
               Complex AHJ
             </span>
-          )}
+          ) : null}
         </div>
 
         <div className="grid grid-cols-2 gap-2 text-xs">
@@ -609,11 +609,11 @@ function OpportunityCard({
           </div>
         </div>
 
-        {opp.listing_notes && (
+        {opp.listing_notes ? (
           <p className="text-slate-500 text-xs mt-4 italic line-clamp-1">
             &quot;{opp.listing_notes}&quot;
           </p>
-        )}
+        ) : null}
       </div>
 
       <div className="px-5 pb-4 pt-0">
@@ -871,7 +871,7 @@ function ProfileTab({
         disabled={saving}
         className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold rounded-xl text-sm transition-colors flex items-center gap-2 disabled:opacity-60"
       >
-        {saving && <Loader2 size={15} className="animate-spin" />}
+        {saving ? <Loader2 size={15} className="animate-spin" /> : null}
         {saved ? "Saved" : saving ? "Saving…" : "Save Profile"}
       </button>
     </div>
@@ -1102,7 +1102,7 @@ export default function NetworkPage() {
               </div>
 
               {/* Stats cards */}
-              {!loading && (
+              {!loading ? (
                 <div className="flex gap-3 flex-shrink-0">
                   {[
                     {
@@ -1143,7 +1143,7 @@ export default function NetworkPage() {
                     </div>
                   ))}
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
@@ -1164,7 +1164,7 @@ export default function NetworkPage() {
                 >
                   {t.icon}
                   {t.label}
-                  {t.count !== undefined && t.count > 0 && (
+                  {t.count !== undefined && t.count > 0 ? (
                     <span
                       className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
                         tab === t.id
@@ -1174,7 +1174,7 @@ export default function NetworkPage() {
                     >
                       {t.count > 99 ? "99+" : t.count}
                     </span>
-                  )}
+                  ) : null}
                 </button>
               ))}
             </div>
@@ -1196,7 +1196,7 @@ export default function NetworkPage() {
           ) : (
             <>
               {/* DISCOVER */}
-              {tab === "discover" && (
+              {tab === "discover" ? (
                 <div>
                   {/* Territory map */}
                   <div className="mb-6 rounded-2xl border border-slate-700/60 bg-[#0b111d] p-3">
@@ -1268,11 +1268,11 @@ export default function NetworkPage() {
                     >
                       <RefreshCw size={14} /> Refresh
                     </button>
-                    {total > 0 && (
+                    {total > 0 ? (
                       <span className="text-slate-500 text-sm ml-auto">
                         {total} {total === 1 ? "opportunity" : "opportunities"}
                       </span>
-                    )}
+                    ) : null}
                   </div>
 
                   {opportunities.length === 0 ? (
@@ -1288,14 +1288,14 @@ export default function NetworkPage() {
                           ? "Set up your service states in My Profile to see relevant opportunities in your territory."
                           : "New opportunities appear here when contractors share projects they can't service. Check back soon."}
                       </p>
-                      {profile?.service_states?.length === 0 && (
+                      {profile?.service_states?.length === 0 ? (
                         <button
                           onClick={() => setTab("profile")}
                           className="mt-4 px-4 py-2 text-sm font-medium text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 rounded-xl hover:bg-emerald-500/15 transition-colors"
                         >
                           Set Up My Profile →
                         </button>
-                      )}
+                      ) : null}
                     </div>
                   ) : (
                     /* Leads are gated behind territory — drill state → county
@@ -1328,10 +1328,10 @@ export default function NetworkPage() {
                     </div>
                   )}
                 </div>
-              )}
+              ) : null}
 
               {/* MY SHARED */}
-              {tab === "my-shared" && (
+              {tab === "my-shared" ? (
                 <div>
                   {myShared.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-28 text-center">
@@ -1375,7 +1375,7 @@ export default function NetworkPage() {
                                 {opp.status}
                               </span>
                               {(opp as unknown as Record<string, unknown>)
-                                .claimer_company && (
+                                .claimer_company ? (
                                 <span className="text-slate-500 text-xs flex items-center gap-1">
                                   <ArrowRight size={10} />
                                   {
@@ -1383,7 +1383,7 @@ export default function NetworkPage() {
                                       .claimer_company as string
                                   }
                                 </span>
-                              )}
+                              ) : null}
                             </div>
                           </div>
                           <div className="text-slate-600 text-xs">
@@ -1394,10 +1394,10 @@ export default function NetworkPage() {
                     </div>
                   )}
                 </div>
-              )}
+              ) : null}
 
               {/* MY CLAIMS */}
-              {tab === "my-claims" && (
+              {tab === "my-claims" ? (
                 <div>
                   {myClaims.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-28 text-center">
@@ -1541,16 +1541,16 @@ export default function NetworkPage() {
                                     opp.site_name ||
                                     "Unnamed Project"}
                                 </div>
-                                {opp.address && (
+                                {opp.address ? (
                                   <div className="flex items-center gap-1.5 mt-1 text-emerald-400 text-xs">
                                     <MapPin size={11} />
                                     {opp.address}
                                   </div>
-                                )}
+                                ) : null}
                                 {(opp.homeowner_phone ||
-                                  opp.homeowner_email) && (
+                                  opp.homeowner_email) ? (
                                   <div className="flex flex-wrap items-center gap-3 mt-1.5">
-                                    {opp.homeowner_phone && (
+                                    {opp.homeowner_phone ? (
                                       <a
                                         href={`tel:${opp.homeowner_phone}`}
                                         onClick={(e) => e.stopPropagation()}
@@ -1558,8 +1558,8 @@ export default function NetworkPage() {
                                       >
                                         {opp.homeowner_phone}
                                       </a>
-                                    )}
-                                    {opp.homeowner_email && (
+                                    ) : null}
+                                    {opp.homeowner_email ? (
                                       <a
                                         href={`mailto:${opp.homeowner_email}`}
                                         onClick={(e) => e.stopPropagation()}
@@ -1567,30 +1567,30 @@ export default function NetworkPage() {
                                       >
                                         {opp.homeowner_email}
                                       </a>
-                                    )}
+                                    ) : null}
                                   </div>
-                                )}
+                                ) : null}
                                 <div className="flex items-center gap-3 mt-2">
                                   <span className="text-slate-500 text-xs">
                                     {fmtKw(opp.system_size_kw)}
                                   </span>
-                                  {opp.utility_name && (
+                                  {opp.utility_name ? (
                                     <span className="text-slate-500 text-xs">
                                       {opp.utility_name}
                                     </span>
-                                  )}
-                                  {opp.battery_candidate && (
+                                  ) : null}
+                                  {opp.battery_candidate ? (
                                     <span className="text-amber-400 text-xs flex items-center gap-1">
                                       <Battery size={10} /> Battery
                                     </span>
-                                  )}
+                                  ) : null}
                                 </div>
                               </div>
                               <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-500/15 text-amber-400 ml-3 flex-shrink-0">
                                 {(rec.claim_status as string) || "active"}
                               </span>
                             </div>
-                            {isOpen && (
+                            {isOpen ? (
                               <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 border-t border-slate-700/60 pt-3">
                                 {detail
                                   .filter(([, v]) => v)
@@ -1605,18 +1605,18 @@ export default function NetworkPage() {
                                     </div>
                                   ))}
                                 {!opp.homeowner_phone &&
-                                  !opp.homeowner_email && (
+                                  !opp.homeowner_email ? (
                                     <div className="col-span-2 text-xs text-amber-400">
                                       No contact info stored on this lead yet.
                                     </div>
-                                  )}
+                                  ) : null}
                                 {(qualFacts.length > 0 ||
-                                  operatorNotes.length > 0) && (
+                                  operatorNotes.length > 0) ? (
                                   <div className="col-span-2 mt-2 border-t border-slate-700/60 pt-2">
                                     <div className="text-[10px] uppercase tracking-wider text-emerald-400 mb-1.5">
                                       Vetting — already done for you
                                     </div>
-                                    {qualFacts.length > 0 && (
+                                    {qualFacts.length > 0 ? (
                                       <div className="flex flex-wrap gap-x-4 gap-y-1">
                                         {qualFacts.map(([k, v]) => (
                                           <span
@@ -1635,7 +1635,7 @@ export default function NetworkPage() {
                                           </span>
                                         ))}
                                       </div>
-                                    )}
+                                    ) : null}
                                     {operatorNotes.map((n, i) => (
                                       <div
                                         key={i}
@@ -1648,42 +1648,42 @@ export default function NetworkPage() {
                                       </div>
                                     ))}
                                   </div>
-                                )}
+                                ) : null}
                               </div>
-                            )}
+                            ) : null}
                           </div>
                         );
                       })}
                     </div>
                   )}
                 </div>
-              )}
+              ) : null}
 
               {/* PROFILE */}
-              {tab === "profile" && profile && (
+              {tab === "profile" && profile ? (
                 <ProfileTab profile={profile} onSave={saveProfile} />
-              )}
+              ) : null}
             </>
           )}
         </div>
 
         {/* ── Modals ───────────────────────────────────────────────────────── */}
-        {claimOppForModal && (
+        {claimOppForModal ? (
           <ClaimModal
             opp={claimOppForModal}
             onConfirm={confirmClaim}
             onCancel={() => setClaimTarget(null)}
             loading={claimLoading}
           />
-        )}
-        {detailOpp && (
+        ) : null}
+        {detailOpp ? (
           <DetailModal
             opp={detailOpp}
             onClaim={setClaimTarget}
             onClose={() => setDetailOpp(null)}
             isClaimed={claimedIds.has(detailOpp.id)}
           />
-        )}
+        ) : null}
       </div>
     </AppShell>
   );

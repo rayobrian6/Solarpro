@@ -91,14 +91,14 @@ export default function ClaimModal({
             </p>
           </div>
 
-          {opp.asking_price && (
+          {opp.asking_price ? (
             <div className="flex items-center justify-between mb-5 px-1">
               <span className="text-slate-400 text-sm">Opportunity price</span>
               <span className="text-emerald-400 font-bold text-xl">
                 {fmtCurrency(opp.asking_price)}
               </span>
             </div>
-          )}
+          ) : null}
 
           <div className="flex gap-3">
             <button

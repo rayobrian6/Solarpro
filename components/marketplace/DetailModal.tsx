@@ -151,7 +151,7 @@ export default function DetailModal({
               </p>
             </div>
             <div className="flex items-start gap-3">
-              {confidence && (
+              {confidence ? (
                 <div
                   className={`rounded-2xl border px-3 py-2 text-right ${confidenceClasses(confidence.level)}`}
                 >
@@ -162,7 +162,7 @@ export default function DetailModal({
                     {confidence.label}
                   </div>
                 </div>
-              )}
+              ) : null}
               <button
                 onClick={onClose}
                 className="text-slate-500 hover:text-white"
@@ -172,12 +172,12 @@ export default function DetailModal({
             </div>
           </div>
 
-          {narrative?.summary && (
+          {narrative?.summary ? (
             <div className="mb-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/8 p-4">
               <p className="text-sm leading-relaxed text-slate-200">
                 {narrative.summary}
               </p>
-              {narrative.bullets.length > 0 && (
+              {narrative.bullets.length > 0 ? (
                 <div className="mt-3 grid gap-2">
                   {narrative.bullets.map((bullet) => (
                     <div
@@ -192,12 +192,12 @@ export default function DetailModal({
                     </div>
                   ))}
                 </div>
-              )}
+              ) : null}
               <p className="mt-3 text-[10px] text-slate-600">
                 {narrative.source_note}
               </p>
             </div>
-          )}
+          ) : null}
 
           {experience?.deal_attractiveness?.length ? (
             <section className="mb-4 rounded-2xl border border-emerald-400/25 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.18),transparent_36%),rgba(16,185,129,0.08)] p-4">
@@ -842,7 +842,7 @@ export default function DetailModal({
 
           <ContractorEnrichmentDetails opp={opp} />
 
-          {opp.address && (
+          {opp.address ? (
             <section className="mb-5">
               <p className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold mb-2">
                 Full Address
@@ -852,9 +852,9 @@ export default function DetailModal({
                 {opp.address}
               </div>
             </section>
-          )}
+          ) : null}
 
-          {opp.listing_notes && (
+          {opp.listing_notes ? (
             <section className="mb-5">
               <p className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold mb-2">
                 Notes
@@ -863,7 +863,7 @@ export default function DetailModal({
                 &quot;{opp.listing_notes}&quot;
               </p>
             </section>
-          )}
+          ) : null}
 
           <div className="flex gap-3 pt-1">
             <button

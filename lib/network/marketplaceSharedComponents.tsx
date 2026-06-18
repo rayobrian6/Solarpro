@@ -39,9 +39,9 @@ export function RevenueMetric({
       >
         {value}
       </div>
-      {source && (
+      {source ? (
         <div className="mt-1 text-[10px] text-slate-500">{source}</div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -62,9 +62,9 @@ export function EvidencePanel({
         <p className="text-slate-400 text-[10px] uppercase tracking-[0.2em] font-black">
           {title}
         </p>
-        {subtitle && (
+        {subtitle ? (
           <p className="mt-1 text-[11px] text-slate-600">{subtitle}</p>
-        )}
+        ) : null}
       </div>
       <div className="grid grid-cols-2 gap-2">
         {items.map((item) => (
@@ -114,11 +114,11 @@ export function BillVisualsPanel({
             marketplace payload.
           </p>
         </div>
-        {visuals.confidence_label && (
+        {visuals.confidence_label ? (
           <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-300">
             {visuals.confidence_label}
           </span>
-        )}
+        ) : null}
       </div>
 
       {visuals.monthly_usage_history.length ? (
