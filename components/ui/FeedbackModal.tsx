@@ -216,11 +216,11 @@ export default function FeedbackModal({ open, onClose }: FeedbackModalProps) {
               </div>
 
               {/* Error */}
-              {error && (
+              {error ? (
                 <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
                   {error}
                 </div>
-              )}
+              ) : null}
             </div>
 
             {/* Footer */}

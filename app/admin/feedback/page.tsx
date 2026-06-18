@@ -144,7 +144,7 @@ export default function AdminFeedbackPage() {
             </div>
 
             {/* Screenshot */}
-            {selected.has_screenshot && (
+            {selected.has_screenshot ? (
               <div>
                 <label className="text-xs font-medium text-slate-500 mb-1.5 flex items-center gap-1.5 block">
                   <Image size={12} /> Screenshot
@@ -160,7 +160,7 @@ export default function AdminFeedbackPage() {
                   </div>
                 </div>
               </div>
-            )}
+            ) : null}
 
             {/* Metadata */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -171,7 +171,7 @@ export default function AdminFeedbackPage() {
                 <div className="text-sm text-white">{selected.user_email || selected.user_id}</div>
               </div>
 
-              {selected.page_url && (
+              {selected.page_url ? (
                 <div className="bg-slate-800/30 rounded-xl p-3 border border-slate-700/30">
                   <label className="text-xs text-slate-500 flex items-center gap-1.5 mb-1">
                     <Globe size={11} /> Page URL
@@ -185,36 +185,36 @@ export default function AdminFeedbackPage() {
                     {selected.page_url.replace(/https?:\/\/[^/]+/, '')} <ExternalLink size={11} />
                   </a>
                 </div>
-              )}
+              ) : null}
 
-              {selected.app_version && (
+              {selected.app_version ? (
                 <div className="bg-slate-800/30 rounded-xl p-3 border border-slate-700/30">
                   <label className="text-xs text-slate-500 mb-1 block">App Version</label>
                   <div className="text-sm text-white font-mono">{selected.app_version}</div>
                 </div>
-              )}
+              ) : null}
 
-              {selected.screen_size && (
+              {selected.screen_size ? (
                 <div className="bg-slate-800/30 rounded-xl p-3 border border-slate-700/30">
                   <label className="text-xs text-slate-500 flex items-center gap-1.5 mb-1">
                     <Monitor size={11} /> Screen Size
                   </label>
                   <div className="text-sm text-white font-mono">{selected.screen_size}</div>
                 </div>
-              )}
+              ) : null}
             </div>
 
-            {selected.browser_info && (
+            {selected.browser_info ? (
               <div className="bg-slate-800/30 rounded-xl p-3 border border-slate-700/30">
                 <label className="text-xs text-slate-500 mb-1 block">Browser Info</label>
                 <div className="text-xs text-slate-400 font-mono break-all">{selected.browser_info}</div>
               </div>
-            )}
+            ) : null}
           </div>
 
           {/* Actions */}
           <div className="px-6 py-4 border-t border-slate-700 flex gap-3">
-            {selected.status !== 'reviewed' && (
+            {selected.status !== 'reviewed' ? (
               <button
                 onClick={() => updateStatus(selected.id, 'reviewed')}
                 disabled={updating === selected.id}
@@ -222,8 +222,8 @@ export default function AdminFeedbackPage() {
               >
                 Mark as Reviewed
               </button>
-            )}
-            {selected.status !== 'resolved' && (
+            ) : null}
+            {selected.status !== 'resolved' ? (
               <button
                 onClick={() => updateStatus(selected.id, 'resolved')}
                 disabled={updating === selected.id}
@@ -231,8 +231,8 @@ export default function AdminFeedbackPage() {
               >
                 Mark as Resolved
               </button>
-            )}
-            {selected.status === 'resolved' && (
+            ) : null}
+            {selected.status === 'resolved' ? (
               <button
                 onClick={() => updateStatus(selected.id, 'new')}
                 disabled={updating === selected.id}
@@ -240,7 +240,7 @@ export default function AdminFeedbackPage() {
               >
                 Reopen
               </button>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -278,11 +278,11 @@ export default function AdminFeedbackPage() {
       </div>
 
       {/* Error */}
-      {error && (
+      {error ? (
         <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 mb-4">
           {error}
         </div>
-      )}
+      ) : null}
 
       {/* Loading */}
       {loading ? (
@@ -325,18 +325,18 @@ export default function AdminFeedbackPage() {
                     <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-500">
                       <span>{item.user_email || item.user_id.substring(0, 8)}</span>
                       <span>{formatDate(item.created_at)}</span>
-                      {item.has_screenshot && (
+                      {item.has_screenshot ? (
                         <span className="flex items-center gap-1 text-slate-400">
                           <Image size={10} /> Screenshot
                         </span>
-                      )}
+                      ) : null}
                       {item.app_version && <span className="font-mono">{item.app_version}</span>}
                     </div>
                   </div>
 
                   {/* Quick actions */}
                   <div className="flex-shrink-0 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {item.status === 'new' && (
+                    {item.status === 'new' ? (
                       <button
                         onClick={(e) => { e.stopPropagation(); updateStatus(item.id, 'reviewed'); }}
                         className="px-2.5 py-1 text-xs bg-amber-600/20 text-amber-400 rounded-md hover:bg-amber-600/30 transition-colors"
@@ -344,8 +344,8 @@ export default function AdminFeedbackPage() {
                       >
                         Review
                       </button>
-                    )}
-                    {item.status !== 'resolved' && (
+                    ) : null}
+                    {item.status !== 'resolved' ? (
                       <button
                         onClick={(e) => { e.stopPropagation(); updateStatus(item.id, 'resolved'); }}
                         className="px-2.5 py-1 text-xs bg-emerald-600/20 text-emerald-400 rounded-md hover:bg-emerald-600/30 transition-colors"
@@ -353,7 +353,7 @@ export default function AdminFeedbackPage() {
                       >
                         Resolve
                       </button>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               </div>

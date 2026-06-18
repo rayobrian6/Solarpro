@@ -418,7 +418,7 @@ export default function IntelligenceRunnerPanel({
         </section>
       </form>
 
-      {summary && (
+      {summary ? (
         <section className="rounded-2xl border border-white/10 bg-slate-950/40 p-5">
           <div className="mb-4 flex items-center gap-2">
             {result?.success ? <CheckCircle2 className="h-5 w-5 text-emerald-400" /> : <AlertTriangle className="h-5 w-5 text-amber-400" />}
@@ -440,9 +440,9 @@ export default function IntelligenceRunnerPanel({
             <MetricCard label="Failures" value={summary.producer_failures.length + summary.write_failures.length} tone={summary.producer_failures.length + summary.write_failures.length > 0 ? 'danger' : 'default'} />
           </div>
         </section>
-      )}
+      ) : null}
 
-      {preview.length > 0 && (
+      {preview.length > 0 ? (
         <section className="rounded-2xl border border-white/10 bg-slate-950/40 p-5">
           <h2 className="text-sm font-bold text-white">Observation Preview</h2>
           <p className="mt-1 text-xs text-slate-500">Bounded preview rows returned by the runner endpoint. Raw payloads are intentionally not dumped here.</p>
@@ -471,9 +471,9 @@ export default function IntelligenceRunnerPanel({
             </table>
           </div>
         </section>
-      )}
+      ) : null}
 
-      {hasFailures && (
+      {hasFailures ? (
         <section className="rounded-2xl border border-red-500/20 bg-red-500/10 p-5">
           <div className="mb-3 flex items-center gap-2">
             <XCircle className="h-5 w-5 text-red-300" />
@@ -500,9 +500,9 @@ export default function IntelligenceRunnerPanel({
             </div>
           ))}
         </section>
-      )}
+      ) : null}
 
-      {confirmWrite && (
+      {confirmWrite ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-lg rounded-2xl border border-red-500/30 bg-slate-950 p-6 shadow-2xl">
             <div className="flex items-start gap-3">
@@ -520,7 +520,7 @@ export default function IntelligenceRunnerPanel({
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

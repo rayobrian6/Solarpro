@@ -180,13 +180,13 @@ export default function DebugProjectPage() {
           </button>
         </div>
 
-        {error && (
+        {error ? (
           <div style={{ background: '#450a0a', border: '1px solid #dc2626', borderRadius: '6px', padding: '12px', color: '#fca5a5', marginBottom: '16px', fontSize: '13px' }}>
             ❌ Error: {error}
           </div>
-        )}
+        ) : null}
 
-        {data && (
+        {data ? (
           <>
             {/* Pipeline Status Summary */}
             <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', padding: '16px', marginBottom: '16px' }}>
@@ -218,7 +218,7 @@ export default function DebugProjectPage() {
               </div>
 
               {/* Mismatches */}
-              {data.layers.mismatches.length > 0 && (
+              {data.layers.mismatches.length > 0 ? (
                 <div style={{ marginTop: '12px', background: '#450a0a', border: '1px solid #dc2626', borderRadius: '6px', padding: '10px', fontSize: '12px' }}>
                   <div style={{ fontWeight: 'bold', color: '#fca5a5', marginBottom: '6px' }}>⚠️ PIPELINE MISMATCHES DETECTED</div>
                   {data.layers.mismatches.map((m, i) => (
@@ -227,13 +227,13 @@ export default function DebugProjectPage() {
                     </div>
                   ))}
                 </div>
-              )}
+              ) : null}
 
-              {data.layers.mismatches.length === 0 && data.layers.layout.panelCount > 0 && (
+              {data.layers.mismatches.length === 0 && data.layers.layout.panelCount > 0 ? (
                 <div style={{ marginTop: '12px', background: '#052e16', border: '1px solid #059669', borderRadius: '6px', padding: '10px', fontSize: '12px', color: '#34d399' }}>
                   ✅ Pipeline in sync — layout({data.layers.layout.panelCount} panels) = engineering({data.layers.engineering.panelCount} panels)
                 </div>
-              )}
+              ) : null}
             </div>
 
             {/* Permit Preflight Check */}
@@ -298,13 +298,13 @@ export default function DebugProjectPage() {
               </pre>
             </div>
           </>
-        )}
+        ) : null}
 
-        {!data && !loading && (
+        {!data && !loading ? (
           <div style={{ textAlign: 'center', color: '#475569', marginTop: '60px', fontSize: '14px' }}>
             Enter a Project ID above and click Run Diagnostics
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

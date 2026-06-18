@@ -182,7 +182,7 @@ export default function ActivityLogPage() {
             />
           </div>
         </div>
-        {hasFilters && (
+        {hasFilters ? (
           <div className="flex items-center gap-2 pt-1">
             <span className="text-xs text-slate-500">Active filters:</span>
             {search && <span className="text-xs bg-amber-500/15 text-amber-300 px-2 py-0.5 rounded-full">action: {search}</span>}
@@ -191,7 +191,7 @@ export default function ActivityLogPage() {
             {dateTo && <span className="text-xs bg-purple-500/15 text-purple-300 px-2 py-0.5 rounded-full">to: {dateTo}</span>}
             <button onClick={clearFilters} className="text-xs text-slate-500 hover:text-white ml-auto transition-colors">✕ Clear all</button>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Log Table */}
@@ -262,9 +262,9 @@ export default function ActivityLogPage() {
                         {meta.file && <div>File: <span className="text-slate-300 font-mono">{meta.file}</span></div>}
                         {meta.expiredCount !== undefined && <div>Updated: <span className="text-slate-300">{meta.expiredCount}</span></div>}
                         {meta.deleted !== undefined && <div>Deleted: <span className="text-slate-300">{meta.deleted}</span></div>}
-                        {log.target_company && !meta.newRole && !meta.newPlan && !meta.note && !meta.file && (
+                        {log.target_company && !meta.newRole && !meta.newPlan && !meta.note && !meta.file ? (
                           <div className="flex items-center gap-1"><Building2 size={9} />{log.target_company}</div>
-                        )}
+                        ) : null}
                       </div>
                     </td>
                     <td className="px-4 py-3 text-[10px] text-slate-500 whitespace-nowrap">
@@ -279,7 +279,7 @@ export default function ActivityLogPage() {
       </div>
 
       {/* Pagination */}
-      {pages > 1 && (
+      {pages > 1 ? (
         <div className="flex items-center justify-between text-xs text-slate-400">
           <span>Page {page} of {pages} · {total} entries</span>
           <div className="flex gap-2">
@@ -291,7 +291,7 @@ export default function ActivityLogPage() {
             </button>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -305,23 +305,23 @@ function PermitViewerPageInner() {
             </div>
 
             {/* Error banner */}
-            {error && (
+            {error ? (
               <div className="pv-error-banner">
                 <AlertTriangle size={14} />
                 &nbsp;{error}
               </div>
-            )}
+            ) : null}
 
             {/* Loading indicator overlay */}
-            {loading && (
+            {loading ? (
               <div className="pv-loading-overlay">
                 <Loader2 size={24} className="spin" />
                 <span>Loading sheet…</span>
               </div>
-            )}
+            ) : null}
 
             {/* Sheet iframe */}
-            {previewUrl && !error && (
+            {previewUrl && !error ? (
               <div
                 className="pv-iframe-container"
                 style={{ transform: `scale(${zoom})`, transformOrigin: 'top left' }}
@@ -336,14 +336,14 @@ function PermitViewerPageInner() {
                   sandbox="allow-same-origin allow-scripts"
                 />
               </div>
-            )}
+            ) : null}
 
-            {!previewUrl && !error && (
+            {!previewUrl && !error ? (
               <div className="pv-empty-state">
                 <FileText size={40} style={{ color: '#444' }} />
                 <p>Select a sheet from the sidebar to preview it.</p>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
 

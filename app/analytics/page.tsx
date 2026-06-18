@@ -340,7 +340,7 @@ export default function AnalyticsPage() {
                 <div className="flex items-center gap-2 mb-1">
                   <BarChart3 size={13} className="text-green-400" />
                   <span className="text-xs font-semibold text-green-400 uppercase tracking-wider">Performance Intelligence</span>
-                  {loading && <RefreshCcw size={11} className="text-slate-500 animate-spin" />}
+                  {loading ? <RefreshCcw size={11} className="text-slate-500 animate-spin" /> : null}
                 </div>
                 <h1 className="text-2xl font-black text-white tracking-tight">Analytics</h1>
                 <p className="text-sm text-slate-400 mt-0.5">

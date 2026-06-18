@@ -112,7 +112,7 @@ export function ComputedField({
       <div className="flex items-center justify-between mb-1">
         <label className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
           {label}
-          {hasComputedValue && (
+          {hasComputedValue ? (
             <ConfidenceBadge
               confidence={computed.confidence}
               source={computed.source}
@@ -120,11 +120,11 @@ export function ComputedField({
               size="xs"
               overridden={isOverridden}
             />
-          )}
+          ) : null}
         </label>
 
         {/* Override/restore actions */}
-        {hasComputedValue && !isOverridden && !disabled && (
+        {hasComputedValue && !isOverridden && !disabled ? (
           <button
             type="button"
             onClick={handleOverride}
@@ -133,8 +133,8 @@ export function ComputedField({
           >
             <Pencil size={12} />
           </button>
-        )}
-        {isOverridden && !disabled && (
+        ) : null}
+        {isOverridden && !disabled ? (
           <button
             type="button"
             onClick={handleRestore}
@@ -145,7 +145,7 @@ export function ComputedField({
             <RotateCcw size={10} />
             <span>Restore</span>
           </button>
-        )}
+        ) : null}
       </div>
 
       {/* Input field with computed value styling */}
@@ -174,24 +174,24 @@ export function ComputedField({
         />
 
         {/* Computed value sparkles indicator */}
-        {hasComputedValue && !isOverridden && (
+        {hasComputedValue && !isOverridden ? (
           <span className="absolute right-2 top-1/2 -translate-y-1/2 text-emerald-400">
             <Sparkles size={12} />
           </span>
-        )}
+        ) : null}
 
         {/* Unit suffix */}
-        {computed?.unit && (
+        {computed?.unit ? (
           <span className="absolute right-8 top-1/2 -translate-y-1/2 text-xs text-slate-500">
             {computed.unit}
           </span>
-        )}
+        ) : null}
       </div>
 
       {/* Derivation / NEC reference — expandable */}
-      {hasComputedValue && !compact && (
+      {hasComputedValue && !compact ? (
         <div className="mt-1">
-          {computed.derivation && (
+          {computed.derivation ? (
             <button
               type="button"
               onClick={() => setShowDerivation(!showDerivation)}
@@ -200,31 +200,31 @@ export function ComputedField({
               <Info size={10} />
               {showDerivation ? 'Hide details' : 'How was this computed?'}
             </button>
-          )}
-          {showDerivation && computed.derivation && (
+          ) : null}
+          {showDerivation && computed.derivation ? (
             <p className="text-[10px] text-slate-500 mt-0.5 pl-3 border-l border-slate-700/40">
               {computed.derivation}
-              {computed.necReference && (
+              {computed.necReference ? (
                 <span className="block mt-0.5 text-slate-600">
                   Ref: {computed.necReference}
                 </span>
-              )}
+              ) : null}
             </p>
-          )}
-          {!computed.derivation && computed.necReference && (
+          ) : null}
+          {!computed.derivation && computed.necReference ? (
             <p className="text-[10px] text-slate-600">
               Ref: {computed.necReference}
             </p>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       {/* Overridden warning */}
-      {isOverridden && (
+      {isOverridden ? (
         <p className="text-[10px] text-amber-500/70 mt-1">
           Custom value — computed was {String(computed.value)}{computed.unit ? ` ${computed.unit}` : ''}
         </p>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -320,7 +320,7 @@ export default function GuidedTour({ onComplete }: GuidedTourProps) {
         <defs>
           <mask id="gt-spotlight-mask">
             <rect width="100%" height="100%" fill="white" />
-            {spotRect && (
+            {spotRect ? (
               <rect
                 x={spotRect.left - pad}
                 y={spotRect.top  - pad}
@@ -329,7 +329,7 @@ export default function GuidedTour({ onComplete }: GuidedTourProps) {
                 rx={rx}
                 fill="black"
               />
-            )}
+            ) : null}
           </mask>
         </defs>
         <rect
@@ -341,7 +341,7 @@ export default function GuidedTour({ onComplete }: GuidedTourProps) {
       </svg>
 
       {/* Spotlight border ring */}
-      {spotRect && (
+      {spotRect ? (
         <div
           className="absolute rounded-xl border-2 border-amber-400/70 pointer-events-none shadow-[0_0_0_3px_rgba(251,191,36,0.15)]"
           style={{
@@ -352,7 +352,7 @@ export default function GuidedTour({ onComplete }: GuidedTourProps) {
             transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)',
           }}
         />
-      )}
+      ) : null}
 
       {/* ── Popover ── */}
       <div
@@ -411,7 +411,7 @@ export default function GuidedTour({ onComplete }: GuidedTourProps) {
 
         {/* Footer actions */}
         <div className="flex items-center gap-2 px-4 pb-4">
-          {stepIdx > 0 && (
+          {stepIdx > 0 ? (
             <button
               onClick={handleBack}
               aria-label="Back"
@@ -419,7 +419,7 @@ export default function GuidedTour({ onComplete }: GuidedTourProps) {
             >
               <ChevronLeft size={13} /> Back
             </button>
-          )}
+          ) : null}
           <div className="flex-1" />
           <button
             onClick={handleSkip}

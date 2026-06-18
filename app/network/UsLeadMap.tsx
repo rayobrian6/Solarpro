@@ -405,7 +405,7 @@ export default function UsLeadMap({
 
       {/* Breakdown entry bar — always available once drilled, so the deep
           state page is reachable even before any county is lit. */}
-      {drilled && (
+      {drilled ? (
         <button
           type="button"
           onClick={() => openBreakdown()}
@@ -433,9 +433,9 @@ export default function UsLeadMap({
             View full breakdown →
           </span>
         </button>
-      )}
+      ) : null}
 
-      {hover && (
+      {hover ? (
         <div
           style={{
             position: "absolute",
@@ -468,9 +468,9 @@ export default function UsLeadMap({
                 : "No leads here yet"}
           </div>
         </div>
-      )}
+      ) : null}
 
-      {selected && (
+      {selected ? (
         <button
           type="button"
           onClick={() => onSelect("")}
@@ -489,7 +489,7 @@ export default function UsLeadMap({
         >
           Clear {selected}
         </button>
-      )}
+      ) : null}
 
       <div
         style={{

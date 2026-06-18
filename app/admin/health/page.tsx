@@ -231,7 +231,7 @@ export default function SystemHealthPage() {
       </div>
 
       {/* Server-side timing breakdown — only shown when _timing is present in response */}
-      {health?._timing && (
+      {health?._timing ? (
         <div className="bg-slate-800/60 border border-slate-700/50 rounded-xl p-5">
           <div className="flex items-center gap-2 mb-4">
             <Zap className="w-4 h-4 text-amber-400" />
@@ -258,7 +258,7 @@ export default function SystemHealthPage() {
             High "Network+Cold Start" = Vercel function cold start. High "Auth" = DB role lookup slow. High "DB Batch" = Neon query overhead.
           </div>
         </div>
-      )}
+      ) : null}
 
       <div>
         <h2 className="text-white font-semibold mb-3 flex items-center gap-2"><Database className="w-4 h-4 text-amber-400" />Database Row Counts</h2>

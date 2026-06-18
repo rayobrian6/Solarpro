@@ -461,14 +461,14 @@ export default function Google3DViewer({
             {mode === '3d' ? '🏙️ Photorealistic 3D' : '🚶 Street View + AR Panels'}
           </button>
         ))}
-        {panels.length > 0 && (
+        {panels.length > 0 ? (
           <div style={{ marginLeft: 'auto', color: '#94a3b8', fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
             <span style={{ color: '#fbbf24' }}>☀️</span>
             <span style={{ color: '#f1f5f9', fontWeight: 700 }}>{panels.length}</span>
             <span style={{ color: '#475569' }}>panels ·</span>
             <span style={{ color: '#60a5fa', fontWeight: 700 }}>{totalKw} kW</span>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* ── Map Area ── */}
@@ -492,7 +492,7 @@ export default function Google3DViewer({
             pointerEvents: 'none', zIndex: 5,
           }} />
           {/* Redraw button */}
-          {svReady && (
+          {svReady ? (
             <button
               onClick={() => drawStreetViewOverlay()}
               style={{
@@ -505,11 +505,11 @@ export default function Google3DViewer({
             >
               🔄 Refresh Overlay
             </button>
-          )}
+          ) : null}
         </div>
 
         {/* Loading */}
-        {status === 'loading' && (
+        {status === 'loading' ? (
           <div style={{
             position: 'absolute', inset: 0, zIndex: 30,
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -530,10 +530,10 @@ export default function Google3DViewer({
             </div>
             <style>{`@keyframes gv_spin{to{transform:rotate(360deg)}}`}</style>
           </div>
-        )}
+        ) : null}
 
         {/* Error */}
-        {status === 'error' && (
+        {status === 'error' ? (
           <div style={{ position: 'absolute', inset: 0, zIndex: 30, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0d1117', gap: 16 }}>
             <div style={{ fontSize: 48 }}>🌐</div>
             <div style={{ color: '#f87171', fontSize: 16, fontWeight: 700 }}>3D Map Failed</div>
@@ -548,10 +548,10 @@ export default function Google3DViewer({
               </button>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Ready badges */}
-        {status === 'ready' && (
+        {status === 'ready' ? (
           <>
             <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 10, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(12px)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 10, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 7, pointerEvents: 'none' }}>
               <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 8px #22c55e' }} />
@@ -559,18 +559,18 @@ export default function Google3DViewer({
                 {viewMode === '3d' ? 'Google Photorealistic 3D · Alpha' : 'Street View · AR Solar Overlay'}
               </span>
             </div>
-            {viewMode === '3d' && (
+            {viewMode === '3d' ? (
               <div style={{ position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 10, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', borderRadius: 8, padding: '5px 14px', color: '#94a3b8', fontSize: 11, display: 'flex', gap: 14, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
                 <span>🖱️ Drag: orbit</span><span>⚲ Scroll: zoom</span><span>⇧ Shift+drag: tilt</span>
               </div>
-            )}
-            {viewMode === 'street' && panels.length > 0 && (
+            ) : null}
+            {viewMode === 'street' && panels.length > 0 ? (
               <div style={{ position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 10, background: 'rgba(30,58,138,0.85)', backdropFilter: 'blur(8px)', borderRadius: 8, padding: '5px 14px', color: '#bfdbfe', fontSize: 11, pointerEvents: 'none', whiteSpace: 'nowrap', border: '1px solid rgba(59,130,246,0.3)' }}>
                 ☀️ Solar panels overlaid on real Street View · Drag to look around
               </div>
-            )}
+            ) : null}
           </>
-        )}
+        ) : null}
       </div>
     </div>
   );

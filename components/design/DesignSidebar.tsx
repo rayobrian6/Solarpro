@@ -137,14 +137,14 @@ export default function DesignSidebar({
 
         {/* System Configuration */}
         <Section title="Configuration" icon={<Settings size={12} />}>
-          {systemType !== 'fence' && (
+          {systemType !== 'fence' ? (
             <SliderRow label="Panel Angle" value={tilt} min={0} max={45} step={1} unit={`° (matches roof pitch)`} onChange={setTilt} />
-          )}
-          {systemType === 'fence' && (
+          ) : null}
+          {systemType === 'fence' ? (
             <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-2 text-xs text-purple-300">
               ⚡ Vertical mount (90°) — Bifacial optimized
             </div>
-          )}
+          ) : null}
           <div>
             <div className="flex justify-between items-center mb-1">
               <label className="text-xs text-slate-400">Roof Direction</label>
@@ -161,22 +161,22 @@ export default function DesignSidebar({
             </div>
           </div>
 
-          {systemType === 'roof' && (
+          {systemType === 'roof' ? (
             <SliderRow label="Fire Code Clearance" value={setback} min={0.3} max={2.0} step={0.1} unit="m" onChange={setSetback} />
-          )}
-          {(systemType === 'roof' || systemType === 'ground') && (
+          ) : null}
+          {(systemType === 'roof' || systemType === 'ground') ? (
             <SliderRow label="Row Spacing (winter shadow clearance)" value={rowSpacing} min={0.5} max={5.0} step={0.1} unit="m" onChange={setRowSpacing} />
-          )}
+          ) : null}
           <SliderRow label="Panel Gap (manufacturer spec)" value={panelSpacing} min={0.01} max={0.1} step={0.01} unit="m" onChange={setPanelSpacing} />
 
-          {systemType === 'ground' && (
+          {systemType === 'ground' ? (
             <>
               <SliderRow label="Ground Height" value={groundHeight} min={0.3} max={2.0} step={0.1} unit="m" onChange={setGroundHeight} />
               <SliderRow label="Panels Per Row" value={panelsPerRow} min={2} max={30} step={1} unit="" onChange={setPanelsPerRow} />
             </>
-          )}
+          ) : null}
 
-          {systemType === 'fence' && (
+          {systemType === 'fence' ? (
             <>
               <SliderRow label="Fence Height (code standard)" value={fenceHeight} min={1.0} max={4.0} step={0.1} unit="m" onChange={setFenceHeight} />
               <div className="flex items-center justify-between">
@@ -188,17 +188,17 @@ export default function DesignSidebar({
                   <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${bifacialOptimized ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </button>
               </div>
-              {bifacialOptimized && (
+              {bifacialOptimized ? (
                 <div className="text-xs text-amber-400 bg-amber-500/10 rounded-lg p-2">
                   +20% production gain for double-sided east-west facing panels
                 </div>
-              )}
+              ) : null}
             </>
-          )}
+          ) : null}
         </Section>
 
         {/* System Summary */}
-        {panels.length > 0 && (
+        {panels.length > 0 ? (
           <Section title="System Summary" icon={<Zap size={12} />}>
             <div className="grid grid-cols-2 gap-2 text-xs">
               {[
@@ -222,10 +222,10 @@ export default function DesignSidebar({
               {calculating ? <><Loader size={14} className="animate-spin" /> Calculating...</> : <><Play size={14} /> Calculate Production</>}
             </button>
           </Section>
-        )}
+        ) : null}
 
         {/* Production Results */}
-        {production && (
+        {production ? (
           <Section title="Production Results" icon={<BarChart2 size={12} />}>
             <div className="grid grid-cols-2 gap-2 text-xs">
               {[
@@ -275,10 +275,10 @@ export default function DesignSidebar({
               </div>
             </div>
           </Section>
-        )}
+        ) : null}
 
         {/* Cost Estimate */}
-        {costEstimate && (
+        {costEstimate ? (
           <Section title="Cost Estimate" icon={<DollarSign size={12} />}>
             <div className="space-y-2 text-xs">
               {[
@@ -325,7 +325,7 @@ export default function DesignSidebar({
               </div>
             )}
           </Section>
-        )}
+        ) : null}
       </div>
     </div>
   );

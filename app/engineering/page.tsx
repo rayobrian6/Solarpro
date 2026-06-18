@@ -547,13 +547,13 @@ function IssueRow({ issue, expanded: defaultExpanded = false }: { issue: any; ex
           {issue.suggestion && <div className="text-xs text-amber-400/80 mt-0.5">💡 {issue.suggestion}</div>}
         </div>
         {issue.code && <div className="text-xs text-slate-600 font-mono flex-shrink-0">{issue.code}</div>}
-        {explanation && (
+        {explanation ? (
           <div className="text-xs text-slate-600 flex-shrink-0 ml-1">
             {open ? '▲' : '▼'}
           </div>
-        )}
+        ) : null}
       </div>
-      {open && explanation && (
+      {open && explanation ? (
         <div className="px-3 pb-3 border-t border-slate-700/50 bg-slate-900/40">
           <div className="pt-2 space-y-2">
             <div className="text-xs font-semibold text-white">{explanation.title} — {explanation.ref}</div>
@@ -564,7 +564,7 @@ function IssueRow({ issue, expanded: defaultExpanded = false }: { issue: any; ex
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -603,22 +603,22 @@ function ProgramRow({
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
             <span className="text-xs font-semibold text-white leading-tight">{title}</span>
-            {status && <ProgramStatusBadge status={status} />}
+            {status ? <ProgramStatusBadge status={status} /> : null}
           </div>
           {subtitle && <p className="text-[11px] text-slate-400 leading-snug">{subtitle}</p>}
-          {value && (
+          {value ? (
             <p className="text-[11px] text-emerald-300 font-medium mt-0.5 leading-snug">{value}</p>
-          )}
+          ) : null}
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0 ml-1">
-          {enrollUrl && (
+          {enrollUrl ? (
             <a
               href={enrollUrl} target="_blank" rel="noopener noreferrer"
               className="text-[10px] text-violet-400 hover:text-violet-300 underline whitespace-nowrap transition-colors"
             >
               Enroll →
             </a>
-          )}
+          ) : null}
           <button
             onClick={() => setTipOpen(o => !o)}
             title="Toggle Pro Tip"
@@ -632,19 +632,19 @@ function ProgramRow({
           </button>
         </div>
       </div>
-      {tipOpen && (
+      {tipOpen ? (
         <div className="mx-2.5 mb-2 px-2.5 py-2 bg-amber-500/[0.08] border border-amber-500/20 rounded-lg">
           <div className="flex gap-1.5">
             <span className="text-amber-400 text-xs flex-shrink-0 mt-0.5">💡</span>
             <div>
               <p className="text-[11px] text-amber-100/90 leading-relaxed">{note}</p>
-              {lastVerified && (
+              {lastVerified ? (
                 <p className="text-[10px] text-slate-500 mt-1">Last verified: {lastVerified}</p>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -669,11 +669,11 @@ function ProgramSection({
         </div>
         <span className="text-slate-500 text-xs">{open ? '▾' : '▸'}</span>
       </button>
-      {open && (
+      {open ? (
         <div className="px-2 pb-2 space-y-1.5 border-t border-white/5 pt-1.5">
           {children}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -721,11 +721,11 @@ function UtilityProgramsPanel({
           <span className="text-[10px] text-violet-400/70 bg-violet-500/10 border border-violet-500/20 rounded px-1.5 py-0.5">
             {totalCount} program{totalCount !== 1 ? 's' : ''}
           </span>
-          {interconnection && (
+          {interconnection ? (
             <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 border border-emerald-500/20 rounded px-1.5 py-0.5">
               ICA data ✓
             </span>
-          )}
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-slate-500">tap 💡 for rep guidance</span>
@@ -733,10 +733,10 @@ function UtilityProgramsPanel({
         </div>
       </button>
 
-      {panelOpen && (
+      {panelOpen ? (
         <div className="px-2.5 pb-3 pt-1 space-y-2 border-t border-violet-500/15">
 
-          {touCount > 0 && (
+          {touCount > 0 ? (
             <ProgramSection sectionIcon="🕐" title="TOU Rate Plans" count={touCount}>
               {programs.tou_plans.map((p: TouRatePlan) => (
                 <ProgramRow
@@ -761,9 +761,9 @@ function UtilityProgramsPanel({
                 />
               ))}
             </ProgramSection>
-          )}
+          ) : null}
 
-          {batteryCount > 0 && (
+          {batteryCount > 0 ? (
             <ProgramSection sectionIcon="🔋" title="Battery Incentives" count={batteryCount}>
               {programs.battery_incentives.map((p: BatteryIncentiveProgram) => (
                 <ProgramRow
@@ -780,9 +780,9 @@ function UtilityProgramsPanel({
                 />
               ))}
             </ProgramSection>
-          )}
+          ) : null}
 
-          {solarCount > 0 && (
+          {solarCount > 0 ? (
             <ProgramSection sectionIcon="🌞" title="Solar Rebates & Incentives" count={solarCount}>
               {programs.solar_rebates.map((p: SolarRebateProgram) => (
                 <ProgramRow
@@ -799,9 +799,9 @@ function UtilityProgramsPanel({
                 />
               ))}
             </ProgramSection>
-          )}
+          ) : null}
 
-          {nemCount > 0 && (
+          {nemCount > 0 ? (
             <ProgramSection sectionIcon="📋" title="Net Metering Policy" count={nemCount}>
               {programs.nem_programs.map((p: NemSpecialProgram) => (
                 <ProgramRow
@@ -818,9 +818,9 @@ function UtilityProgramsPanel({
                 />
               ))}
             </ProgramSection>
-          )}
+          ) : null}
 
-          {evCount > 0 && (
+          {evCount > 0 ? (
             <ProgramSection sectionIcon="🚗" title="EV Charger Incentives" count={evCount}>
               {programs.ev_charger_incentives!.map((p: EvChargerIncentive) => (
                 <ProgramRow
@@ -837,9 +837,9 @@ function UtilityProgramsPanel({
                 />
               ))}
             </ProgramSection>
-          )}
+          ) : null}
 
-          {paceCount > 0 && (
+          {paceCount > 0 ? (
             <ProgramSection sectionIcon="🏠" title="PACE Financing" count={paceCount}>
               {paceProgs.map((p: PaceFinancingProgram) => (
                 <ProgramRow
@@ -856,9 +856,9 @@ function UtilityProgramsPanel({
                 />
               ))}
             </ProgramSection>
-          )}
+          ) : null}
 
-          {liTotalCount > 0 && (
+          {liTotalCount > 0 ? (
             <ProgramSection sectionIcon="🤝" title="Low-Income / DAC Programs" count={liTotalCount}>
               {[...(programs.low_income_programs ?? []), ...liStateProgs].map((p: LowIncomeSolarProgram) => (
                 <ProgramRow
@@ -875,10 +875,10 @@ function UtilityProgramsPanel({
                 />
               ))}
             </ProgramSection>
-          )}
+          ) : null}
 
           {/* ── Interconnection & PTO Roadmap (v48.33) ── */}
-          {interconnection && (
+          {interconnection ? (
             <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.04] overflow-hidden">
               <button
                 onClick={() => setIcaOpen(o => !o)}
@@ -896,7 +896,7 @@ function UtilityProgramsPanel({
                 </div>
                 <span className="text-slate-500 text-xs">{icaOpen ? '▾' : '▸'}</span>
               </button>
-              {icaOpen && (
+              {icaOpen ? (
                 <div className="px-3 pb-3 pt-1 space-y-3 border-t border-emerald-500/15 text-xs">
                   {/* ICA Info */}
                   <div className="space-y-1.5">
@@ -911,12 +911,12 @@ function UtilityProgramsPanel({
                         {interconnection.application_url}
                       </a>
                     </div>
-                    {interconnection.interconnection_phone && (
+                    {interconnection.interconnection_phone ? (
                       <div className="flex gap-2 text-slate-300">
                         <span className="text-slate-500 min-w-[90px]">Phone:</span>
                         <span>{interconnection.interconnection_phone}</span>
                       </div>
-                    )}
+                    ) : null}
                     <div className="flex gap-2 text-slate-300">
                       <span className="text-slate-500 min-w-[90px]">Timeline:</span>
                       <span className="text-amber-300">{interconnection.ica_approval_days_min}–{interconnection.ica_approval_days_max} business days</span>
@@ -963,7 +963,7 @@ function UtilityProgramsPanel({
                   </div>
 
                   {/* Common Rejections */}
-                  {interconnection.common_rejections.length > 0 && (
+                  {interconnection.common_rejections.length > 0 ? (
                     <div className="space-y-1.5">
                       <div className="text-[10px] font-bold text-red-400 uppercase tracking-wide">⚠️ Common Rejection Reasons</div>
                       {interconnection.common_rejections.map((r, i) => (
@@ -973,14 +973,14 @@ function UtilityProgramsPanel({
                         </div>
                       ))}
                     </div>
-                  )}
+                  ) : null}
                 </div>
-              )}
+              ) : null}
             </div>
-          )}
+          ) : null}
 
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -6791,53 +6791,53 @@ function EngineeringPageInner() {
           </div>
 
           {/* Rules engine counts */}
-          {rulesResult && (
+          {rulesResult ? (
             <div className="compliance-segment">
-              {rulesResult.errorCount > 0 && (
+              {rulesResult.errorCount > 0 ? (
                 <span className="text-[11px] font-bold text-red-400 tabular-nums">
                   {rulesResult.errorCount}E
                 </span>
-              )}
-              {rulesResult.warningCount > 0 && (
+              ) : null}
+              {rulesResult.warningCount > 0 ? (
                 <span className="text-[11px] font-bold text-amber-400 tabular-nums ml-1">
                   {rulesResult.warningCount}W
                 </span>
-              )}
-              {rulesResult.autoFixCount > 0 && (
+              ) : null}
+              {rulesResult.autoFixCount > 0 ? (
                 <span className="text-[11px] text-emerald-400 tabular-nums ml-1">
                   {rulesResult.autoFixCount} fixed
                 </span>
-              )}
-              {overrides.length > 0 && (
+              ) : null}
+              {overrides.length > 0 ? (
                 <span className="text-[11px] text-blue-400 ml-1">
                   {overrides.length} ovr
                 </span>
-              )}
-              {rulesResult.errorCount === 0 && rulesResult.warningCount === 0 && (
+              ) : null}
+              {rulesResult.errorCount === 0 && rulesResult.warningCount === 0 ? (
                 <span className="compliance-segment-value pass">✓ Clean</span>
-              )}
+              ) : null}
             </div>
-          )}
+          ) : null}
 
           {/* Jurisdiction segment */}
-          {compliance.jurisdiction && (
+          {compliance.jurisdiction ? (
             <div className="compliance-segment">
               <MapPin size={10} className="text-amber-400/70 flex-shrink-0" />
               <span className="compliance-segment-label">{compliance.jurisdiction.state}</span>
               <span className="text-[11px] text-slate-400 font-mono">NEC {compliance.jurisdiction.necVersion}</span>
             </div>
-          )}
+          ) : null}
 
           {/* Spacer */}
           <div className="flex-1" />
 
           {/* Config dirty indicator */}
-          {configDirty && !calculating && (
+          {configDirty && !calculating ? (
             <div className="compliance-segment">
               <AlertCircle size={10} className="text-amber-400/70" />
               <span className="text-[11px] text-amber-400/70 font-semibold">Unsaved</span>
             </div>
-          )}
+          ) : null}
 
           {/* Calculating / Recalculate */}
           {calculating ? (
@@ -6886,21 +6886,21 @@ function EngineeringPageInner() {
                 <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 whitespace-nowrap">
                   {totalKw} kW DC
                 </span>
-                {totalInverterKw && (
+                {totalInverterKw ? (
                   <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700/80 text-slate-300 border border-slate-600/50 whitespace-nowrap">
                     {totalInverterKw} kW AC
                   </span>
-                )}
+                ) : null}
                 <span className="text-xs px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 font-mono border border-slate-700/50">
                   {BUILD_VERSION}
                 </span>
               </div>
-              {config.address && (
+              {config.address ? (
                 <div className="flex items-center gap-1 mt-0.5">
                   <MapPin size={10} className="text-slate-500 flex-shrink-0" />
                   <span className="text-xs text-slate-500 truncate max-w-[280px]">{config.address}</span>
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
 
@@ -6927,41 +6927,41 @@ function EngineeringPageInner() {
             </div>
 
             {/* BOM cost chip */}
-            {bomPricing && bomPricing.pricingApplied && (
+            {bomPricing && bomPricing.pricingApplied ? (
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-xs font-semibold text-emerald-400">
                 <DollarSign size={12} />
                 ${bomPricing.totalBomCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}
               </div>
-            )}
+            ) : null}
 
             {/* NEC version chip */}
-            {compliance.jurisdiction && (
+            {compliance.jurisdiction ? (
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-600/50 bg-slate-800/60 text-xs text-slate-400">
                 <FileText size={11} />
                 NEC {compliance.jurisdiction.necVersion}
               </div>
-            )}
+            ) : null}
 
             {/* Rules engine summary */}
-            {rulesResult && (rulesResult.errorCount > 0 || rulesResult.warningCount > 0) && (
+            {rulesResult && (rulesResult.errorCount > 0 || rulesResult.warningCount > 0) ? (
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-700/50 bg-slate-800/60 text-xs">
                 {rulesResult.errorCount > 0 && <span className="text-red-400 font-bold">{rulesResult.errorCount}E</span>}
                 {rulesResult.warningCount > 0 && <span className="text-amber-400 font-bold">{rulesResult.warningCount}W</span>}
                 {rulesResult.autoFixCount > 0 && <span className="text-emerald-400">{rulesResult.autoFixCount} fixed</span>}
               </div>
-            )}
+            ) : null}
 
             {/* Dirty / calculating indicator */}
-            {calculating && (
+            {calculating ? (
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-blue-500/30 bg-blue-500/10 text-xs text-blue-400">
                 <RefreshCw size={11} className="animate-spin" /> Running…
               </div>
-            )}
-            {configDirty && !calculating && (
+            ) : null}
+            {configDirty && !calculating ? (
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-amber-500/30 bg-amber-500/10 text-xs text-amber-400">
                 <AlertCircle size={11} /> Unsaved
               </div>
-            )}
+            ) : null}
           </div>
 
           {/* Right: action buttons */}
@@ -6991,7 +6991,7 @@ function EngineeringPageInner() {
             </button>
 
             {/* Save Config button — always visible in header */}
-            {currentProjectId && (
+            {currentProjectId ? (
               <button
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
                   saveState === 'saving' ? 'border-slate-600 bg-slate-800/80 text-slate-400 cursor-wait' :
@@ -7041,7 +7041,7 @@ function EngineeringPageInner() {
                                             'Save'}
                 </span>
               </button>
-            )}
+            ) : null}
 
             <button
               onClick={handlePrint}
@@ -7059,7 +7059,7 @@ function EngineeringPageInner() {
       </div>
 
       {/* ── Reverse hydration banner ── */}
-      {fileHydrationBanner && (
+      {fileHydrationBanner ? (
         <div className={`flex items-start gap-3 px-6 py-3 text-sm flex-shrink-0 border-b ${
           fileHydrationBanner.startsWith('⚠️')
             ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
@@ -7074,7 +7074,7 @@ function EngineeringPageInner() {
             <XCircle size={16} />
           </button>
         </div>
-      )}
+      ) : null}
 
       {/* ─── Change Project chip + Auto-save indicator ─── */}
       {currentProjectId && (
@@ -7150,12 +7150,12 @@ function EngineeringPageInner() {
               }
             }}
           >
-            {saveState === 'saving' && (
+            {saveState === 'saving' ? (
               <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
               </svg>
-            )}
+            ) : null}
             {saveState === 'saved'  && <CheckCircle size={12} />}
             {saveState === 'error'  && <AlertCircle size={12} />}
             {saveState === 'idle'   && '💾'}
@@ -7168,7 +7168,7 @@ function EngineeringPageInner() {
       )}
 
       {/* ── Project Selector: shown when no projectId in URL ── */}
-      {!currentProjectId && (
+      {!currentProjectId ? (
         <div className="bg-slate-900/80 border-b border-slate-700/50 px-6 py-4 flex-shrink-0">
           <div className="max-w-2xl">
             <div className="flex items-center gap-3 mb-3">
@@ -7187,7 +7187,7 @@ function EngineeringPageInner() {
                   onFocus={() => setSelectorOpen(true)}
                   className="w-full bg-slate-800 border border-slate-600 rounded-xl pl-3 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/50"
                 />
-                {selectorOpen && selectorProjects.length > 0 && (
+                {selectorOpen && selectorProjects.length > 0 ? (
                   <div className="absolute top-full left-0 right-0 mt-1 bg-slate-900/95 border border-amber-500/20 rounded-xl shadow-2xl shadow-black/50 z-50 overflow-hidden max-h-72 overflow-y-auto backdrop-blur-xl">
                     {selectorProjects
                       .filter(p => {
@@ -7232,22 +7232,22 @@ function EngineeringPageInner() {
                       if (!selectorSearch) return true;
                       const q = selectorSearch.toLowerCase();
                       return p.name.toLowerCase().includes(q) || (p.client?.name || '').toLowerCase().includes(q) || (p.address || '').toLowerCase().includes(q);
-                    }).length === 0 && (
+                    }).length === 0 ? (
                       <div className="px-4 py-3 text-slate-500 text-sm">No projects match your search.</div>
-                    )}
+                    ) : null}
                   </div>
-                )}
+                ) : null}
               </div>
             )}
-            {!selectorLoading && selectorProjects.length === 0 && (
+            {!selectorLoading && selectorProjects.length === 0 ? (
               <p className="text-slate-500 text-sm mt-1">No projects found. <a href="/projects/new" className="text-amber-400 hover:text-amber-300">Create one →</a></p>
-            )}
+            ) : null}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* ── Topology change banner (v57.5) ── */}
-      {showTopologyBanner && topologyChangeLog.length > 0 && (
+      {showTopologyBanner && topologyChangeLog.length > 0 ? (
         <div className="flex items-start gap-3 px-6 py-3 text-sm bg-amber-500/10 border-b border-amber-500/30 text-amber-300 flex-shrink-0">
           <AlertTriangle size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
           <div className="flex-1">
@@ -7268,10 +7268,10 @@ function EngineeringPageInner() {
             <XCircle size={16} />
           </button>
         </div>
-      )}
+      ) : null}
 
      {/* ── Auto-load banner ── */}
-      {autoLoadBanner && !fileHydrationBanner && (
+      {autoLoadBanner && !fileHydrationBanner ? (
         <div className="flex items-start gap-3 px-6 py-3 text-sm bg-blue-500/10 border-b border-blue-500/30 text-blue-300 flex-shrink-0">
           <span className="flex-1">{autoLoadBanner}</span>
           <button
@@ -7282,7 +7282,7 @@ function EngineeringPageInner() {
             <XCircle size={16} />
           </button>
         </div>
-      )}
+      ) : null}
 
       {/* ── v61: Control Mode Banner ── */}
       <ControlModeBanner
@@ -7314,14 +7314,14 @@ function EngineeringPageInner() {
       />
 
       {/* ── v61: Pending Suggestion Card ── */}
-      {pendingSuggestion && (
+      {pendingSuggestion ? (
         <div className="px-3 md:px-6 pt-3 flex-shrink-0">
           <SuggestionCard suggestion={pendingSuggestion} />
         </div>
-      )}
+      ) : null}
 
       {/* ── v61.2 Display Mode Toggle ── */}
-      {sizingRecommendation && !sizingDismissed && (
+      {sizingRecommendation && !sizingDismissed ? (
         <div className="bg-slate-900/50 border-b border-slate-700/40 px-6 py-2 flex-shrink-0 flex items-center gap-2 flex-wrap">
           <span className="text-xs text-slate-500 mr-1 font-medium select-none">Viewing:</span>
           <button
@@ -7344,11 +7344,11 @@ function EngineeringPageInner() {
           >
             Recommended
           </button>
-          {displayMode === 'recommended' && (
+          {displayMode === 'recommended' ? (
             <span className="text-xs text-amber-400/70 ml-1 italic select-none">
               Preview only — apply below to make this your config
             </span>
-          )}
+          ) : null}
           {displayMode === 'current' && (() => {
             const _cStr = currentDisplayConfig.totalStrings;
             const _rStr = recommendedDisplayConfig.totalStrings;
@@ -7362,7 +7362,7 @@ function EngineeringPageInner() {
             );
           })()}
         </div>
-      )}
+      ) : null}
 
       {/* ── Tab Bar ── */}
       <div className="flex gap-0 px-4 bg-slate-900/70 backdrop-blur-md border-b border-slate-700/50 flex-shrink-0 overflow-x-auto scrollbar-thin scrollbar-thumb-slate-700">
@@ -7387,13 +7387,13 @@ function EngineeringPageInner() {
               }`}
             >
               {/* Active glow underline */}
-              {isActive && (
+              {isActive ? (
                 <span className="absolute bottom-0 inset-x-2 h-0.5 bg-amber-400 rounded-full shadow-[0_0_8px_2px_rgba(251,191,36,0.5)]" />
-              )}
+              ) : null}
               {/* Hover underline */}
-              {!isActive && !isLocked && (
+              {!isActive && !isLocked ? (
                 <span className="absolute bottom-0 inset-x-2 h-0.5 bg-slate-600 rounded-full scale-x-0 group-hover:scale-x-100 transition-transform origin-left" />
-              )}
+              ) : null}
 
               <span className={`transition-colors ${isActive ? 'text-amber-400' : 'text-current'}`}>
                 {tab.icon}
@@ -7406,23 +7406,23 @@ function EngineeringPageInner() {
               </span>
 
               {/* Lock badge */}
-              {isLocked && <Lock size={9} className="text-slate-600 ml-0.5" />}
+              {isLocked ? <Lock size={9} className="text-slate-600 ml-0.5" /> : null}
 
               {/* Compliance dot */}
-              {tab.id === 'compliance' && complianceStatus === 'FAIL' && (
+              {tab.id === 'compliance' && complianceStatus === 'FAIL' ? (
                 <span className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_4px_1px_rgba(239,68,68,0.7)] animate-pulse ml-0.5" />
-              )}
-              {tab.id === 'compliance' && complianceStatus === 'WARNING' && (
+              ) : null}
+              {tab.id === 'compliance' && complianceStatus === 'WARNING' ? (
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shadow-[0_0_4px_1px_rgba(245,158,11,0.7)] animate-pulse ml-0.5" />
-              )}
-              {tab.id === 'compliance' && configDirty && !calculating && (
+              ) : null}
+              {tab.id === 'compliance' && configDirty && !calculating ? (
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60 ml-0.5 animate-pulse" />
-              )}
+              ) : null}
 
               {/* BOM cost dot when priced */}
-              {tab.id === 'bom' && bomPricing?.pricingApplied && (
+              {tab.id === 'bom' && bomPricing?.pricingApplied ? (
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_4px_1px_rgba(16,185,129,0.5)] ml-0.5" />
-              )}
+              ) : null}
             </button>
           );
         })}
@@ -7679,7 +7679,7 @@ function EngineeringPageInner() {
                       </div>
 
                       {/* Battery (if enabled) */}
-                      {config.batteryCount > 0 && _batTotalKwh > 0 && (
+                      {config.batteryCount > 0 && _batTotalKwh > 0 ? (
                         <>
                           <div className="flex flex-col items-center px-1">
                             <div className="flex items-center gap-0.5">
@@ -7694,10 +7694,10 @@ function EngineeringPageInner() {
                             <div className="text-[9px] font-bold text-emerald-400">{_backupPct}% est.</div>
                           </div>
                         </>
-                      )}
+                      ) : null}
 
                       {/* Generator (if set) */}
-                      {_genData && (
+                      {_genData ? (
                         <>
                           <div className="flex flex-col items-center px-1">
                             <div className="flex items-center gap-0.5">
@@ -7712,7 +7712,7 @@ function EngineeringPageInner() {
                             <div className="text-[9px] font-bold text-orange-400 uppercase">{_genData.fuelType?.replace('_', ' ')}</div>
                           </div>
                         </>
-                      )}
+                      ) : null}
                     </div>
                   </div>
 
@@ -7722,18 +7722,18 @@ function EngineeringPageInner() {
                       <ClipboardCheck size={11} />
                       {_compStatus || 'Not checked'}
                     </div>
-                    {compliance.jurisdiction && (
+                    {compliance.jurisdiction ? (
                       <div className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700/50 bg-slate-800/60 text-slate-300">
                         <MapPin size={11} className="text-amber-400" />
                         {compliance.jurisdiction.state} · NEC {compliance.jurisdiction.necVersion}
                       </div>
-                    )}
-                    {config.systemType && (
+                    ) : null}
+                    {config.systemType ? (
                       <div className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700/50 bg-slate-800/60 text-slate-300">
                         <Cpu size={11} className="text-blue-400" />
                         {config.systemType}
                       </div>
-                    )}
+                    ) : null}
                     <div className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700/50 bg-slate-800/60 text-slate-400">
                       <Activity size={11} />
                       DC/AC: {_dcAcRatio}
@@ -7742,16 +7742,16 @@ function EngineeringPageInner() {
                       <GitBranch size={11} />
                       {_branchCount} {cs.isMicro ? 'AC Branches' : 'Strings'}
                     </div>
-                    {rulesResult && rulesResult.errorCount === 0 && rulesResult.warningCount === 0 && (
+                    {rulesResult && rulesResult.errorCount === 0 && rulesResult.warningCount === 0 ? (
                       <div className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
                         <CheckCircle size={11} /> All rules passed
                       </div>
-                    )}
-                    {rulesResult && rulesResult.errorCount > 0 && (
+                    ) : null}
+                    {rulesResult && rulesResult.errorCount > 0 ? (
                       <div className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400">
                         <AlertTriangle size={11} /> {rulesResult.errorCount} error{rulesResult.errorCount > 1 ? 's' : ''}
                       </div>
-                    )}
+                    ) : null}
                     {engineeringMode === 'AUTO' ? (
                       <div className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700/50 bg-slate-800/60 text-slate-400">
                         <Activity size={11} /> ⚡ Auto-resolves violations
@@ -7812,9 +7812,9 @@ function EngineeringPageInner() {
                         <div>
                           <label className="eng-label flex items-center gap-2">
                             State
-                            {config.state && config.address && parseStateFromAddress(config.address) === config.state && (
+                            {config.state && config.address && parseStateFromAddress(config.address) === config.state ? (
                               <span className="text-emerald-400 text-xs font-normal">✓ auto-detected</span>
-                            )}
+                            ) : null}
                           </label>
                           <select value={config.state} onChange={e => {
                             const newState = e.target.value;
@@ -7952,7 +7952,7 @@ function EngineeringPageInner() {
                               <option key={a.id} value={a.id}>{a.name}</option>
                             ))}
                           </select>
-                          {config.ahjId && (
+                          {config.ahjId ? (
                             <div className="text-xs text-slate-500 mt-1">
                               {(() => {
                                 const ahjs = getAhjsByState(config.state || '');
@@ -7960,12 +7960,12 @@ function EngineeringPageInner() {
                                 return a ? a.notes : '';
                               })()}
                             </div>
-                          )}
+                          ) : null}
                         </div>
                       </div>
 
                       {/* Jurisdiction strip */}
-                      {compliance.jurisdiction && (
+                      {compliance.jurisdiction ? (
                         <div className="mt-3 p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl flex items-start gap-3">
                           <MapPin size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
                           <div>
@@ -7976,7 +7976,7 @@ function EngineeringPageInner() {
                             ))}
                           </div>
                         </div>
-                      )}
+                      ) : null}
                     </div>
 
                     {/* ── Section 1: Main Service Panel ───────────────────────────── */}
@@ -8065,12 +8065,12 @@ function EngineeringPageInner() {
                     <div className="eng-panel">
                       <h3 className="text-sm font-extrabold text-slate-100 mb-1 flex items-center gap-2 tracking-tight">
                         <Zap size={14} className="text-amber-400" /> PV AC Output Circuit
-                        {_elecStatus && (
+                        {_elecStatus ? (
                           <span className={`ml-auto flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full border ${statusGlow(_elecStatus)}`}>
                             <span className={`w-1.5 h-1.5 rounded-full ${statusDot(_elecStatus)}`} />
                             {_elecStatus}
                           </span>
-                        )}
+                        ) : null}
                       </h3>
 
                       {/* PV AC summary strip */}
@@ -8099,7 +8099,7 @@ function EngineeringPageInner() {
                           <span className="text-slate-500">Conduit:</span>
                           <span className="text-slate-300">{config.conduitType?.split(' ')[0]}</span>
                         </div>
-                        {cs.backfeedBreakerAmps > 0 && (
+                        {cs.backfeedBreakerAmps > 0 ? (
                           <>
                             <span className="text-slate-700">·</span>
                             <div className="flex items-center gap-1.5 text-xs" title="NEC 705.12(B): min(required, 120% cap)">
@@ -8109,26 +8109,26 @@ function EngineeringPageInner() {
                               </span>
                             </div>
                           </>
-                        )}
+                        ) : null}
                       </div>
 
                       {/* Inline electrical violation */}
-                      {compliance.electrical?.status === 'FAIL' && (compliance.electrical?.errors?.length > 0 || compliance.electrical?.warnings?.length > 0) && (
+                      {compliance.electrical?.status === 'FAIL' && (compliance.electrical?.errors?.length > 0 || compliance.electrical?.warnings?.length > 0) ? (
                         <div className="mb-3 p-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">
                           <div className="font-bold flex items-center gap-1.5 mb-1"><AlertTriangle size={11} /> Electrical Violations</div>
                           {[...(compliance.electrical.errors?.slice(0,2) ?? []), ...(compliance.electrical.warnings?.slice(0,1) ?? [])].map((v: any, i: number) => (
                             <div key={i} className="text-red-300/80 ml-4">• {v.message || v}</div>
                           ))}
                         </div>
-                      )}
-                      {compliance.electrical?.status === 'WARNING' && compliance.electrical?.warnings?.length > 0 && (
+                      ) : null}
+                      {compliance.electrical?.status === 'WARNING' && compliance.electrical?.warnings?.length > 0 ? (
                         <div className="mb-3 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-400">
                           <div className="font-bold flex items-center gap-1.5 mb-1"><AlertCircle size={11} /> Electrical Warnings</div>
                           {compliance.electrical.warnings.slice(0, 2).map((w: any, i: number) => (
                             <div key={i} className="text-amber-300/80 ml-4">• {w.message || w}</div>
                           ))}
                         </div>
-                      )}
+                      ) : null}
 
                       <div className="grid grid-cols-2 gap-3">
                         <div>
@@ -8178,7 +8178,7 @@ function EngineeringPageInner() {
                             </div>
                           </label>
                         ))}
-                        {config.inverters[0]?.type === 'micro' && (
+                        {config.inverters[0]?.type === 'micro' ? (
                           <div className="flex items-center gap-2 opacity-40 cursor-not-allowed p-2">
                             <div className="w-5 h-5 rounded border-2 border-slate-700 flex items-center justify-center bg-slate-800">
                               <span className="text-slate-600 text-xs">—</span>
@@ -8188,7 +8188,7 @@ function EngineeringPageInner() {
                               <span className="text-[10px] text-purple-400">(N/A — micro)</span>
                             </div>
                           </div>
-                        )}
+                        ) : null}
                       </div>
                     </div>
 
@@ -8219,11 +8219,11 @@ function EngineeringPageInner() {
                             <span className="font-bold text-amber-300">{String((config as any).ecosystemBrand).toUpperCase()}</span>
                             <span className="text-slate-400 ml-1.5">ecosystem applied</span>
                           </div>
-                          {displayedEcosystemComponents.length > 0 && (
+                          {displayedEcosystemComponents.length > 0 ? (
                             <div className="text-[11px] text-slate-500 mt-0.5">
                               {displayedEcosystemComponents.length} component{displayedEcosystemComponents.length !== 1 ? 's' : ''} auto-resolved
                             </div>
-                          )}
+                          ) : null}
                         </div>
                         <button
                           type="button"
@@ -8389,15 +8389,15 @@ function EngineeringPageInner() {
                     )}
 
                     {/* Auto-configured indicator */}
-                    {config.defaultsApplied && config.inverters.length > 0 && (
+                    {config.defaultsApplied && config.inverters.length > 0 ? (
                       <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-50 border border-amber-200 text-amber-900 text-xs w-fit">
                         <span aria-hidden>⚡</span>
                         <span>Auto-configured system — edit any field to customize.</span>
                       </div>
-                    )}
+                    ) : null}
 
                     {/* Panel Compatibility Banner */}
-                    {sizingRecommendation?.panelCompatibility && (
+                    {sizingRecommendation?.panelCompatibility ? (
                       <PanelCompatibilityBanner
                         verdict={sizingRecommendation.panelCompatibility}
                         onChangePanel={(newPanelId) => {
@@ -8411,10 +8411,10 @@ function EngineeringPageInner() {
                           }));
                         }}
                       />
-                    )}
+                    ) : null}
 
                     {/* Sizing Recommendation */}
-                    {sizingRecommendation && !sizingDismissed && (
+                    {sizingRecommendation && !sizingDismissed ? (
                       <SizingRecommendation
                         sizing={sizingRecommendation}
                         current={sizingCurrentSnapshot}
@@ -8436,10 +8436,10 @@ function EngineeringPageInner() {
                           configValue: totalPanels,
                         }}
                       />
-                    )}
+                    ) : null}
 
                     {/* Validation Panel */}
-                    {validationResult && config.inverters.length > 0 && (
+                    {validationResult && config.inverters.length > 0 ? (
                       <ValidationPanel
                         result={validationResult}
                         complianceStatus={compliance.overallStatus ?? rulesResult?.overallStatus ?? null}
@@ -8449,7 +8449,7 @@ function EngineeringPageInner() {
                         }}
                         selectedLayoutCandidate={sizingRecommendation?.selectedLayoutCandidate ?? null}
                       />
-                    )}
+                    ) : null}
 
                     {/* Inverters & Strings Card */}
                     <div className="eng-panel">
@@ -8472,7 +8472,7 @@ function EngineeringPageInner() {
                       </div>
 
                       {/* Branch Visualization */}
-                      {config.inverters.length > 0 && (
+                      {config.inverters.length > 0 ? (
                         <div className="mb-4 p-3 rounded-xl bg-slate-900/60 border border-slate-700/40">
                           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2">
                             {cs.isMicro ? 'AC Branch Layout' : 'String Layout'}
@@ -8533,12 +8533,12 @@ function EngineeringPageInner() {
                                 });
                               })()
                             )}
-                            {cs.isMicro && cs.acBranchCount > 8 && (
+                            {cs.isMicro && cs.acBranchCount > 8 ? (
                               <div className="text-[10px] text-slate-500 text-center">+ {cs.acBranchCount - 8} more branches</div>
-                            )}
+                            ) : null}
                           </div>
                         </div>
-                      )}
+                      ) : null}
 
                       <div className="space-y-3">
                         {config.inverters.map((inv, invIdx) => {
@@ -8577,11 +8577,11 @@ function EngineeringPageInner() {
                                         </span>
                                       );
                                     })()}
-                                    {inv.type === 'micro' && (
+                                    {inv.type === 'micro' ? (
                                       <span className="ml-1 text-purple-400 font-semibold">
                                         · {cs.microDeviceCount} microinverters · {cs.acBranchCount} AC branch{cs.acBranchCount > 1 ? 'es' : ''}
                                       </span>
-                                    )}
+                                    ) : null}
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -8589,7 +8589,7 @@ function EngineeringPageInner() {
                                   {expandedInv === inv.id ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
                                 </div>
                               </div>
-                              {expandedInv === inv.id && (
+                              {expandedInv === inv.id ? (
                                 <div className="p-4 space-y-4 bg-slate-900/30">
                                   {/* Topology selector — segmented control */}
                                   <div className="flex items-center gap-2 mb-1">
@@ -8642,7 +8642,7 @@ function EngineeringPageInner() {
                                         {invList.map(i => <option key={i.id} value={i.id}>{(i as any).isNew ? '🆕 ' : ''}{i.manufacturer} {i.model}{(inv.type === 'string' || inv.type === 'ecoflow' || inv.type === 'hybrid' || inv.type === 'optimizer') ? ` (${(i as any).acOutputKw}kW)` : ` (${(i as any).acOutputW}W)`}</option>)}
                                       </select>
                                     </div>
-                                    {invData && (
+                                    {invData ? (
                                       <div className="bg-slate-800/60 rounded-lg p-2 text-xs space-y-0.5">
                                         <div className="text-slate-400">Max DC: <span className="text-white">{invData.maxDcVoltage}V</span></div>
                                         <div className="text-slate-400">MPPT: <span className="text-white">{invData.mpptVoltageMin}–{invData.mpptVoltageMax}V</span></div>
@@ -8706,7 +8706,7 @@ function EngineeringPageInner() {
                                           );
                                         })()}
                                       </div>
-                                    )}
+                                    ) : null}
                                   </div>
                                   {/* Device Ratio Override */}
                                   <div className="bg-slate-800/40 border border-slate-700/40 rounded-lg px-3 py-2 mt-1">
@@ -8727,7 +8727,7 @@ function EngineeringPageInner() {
                                         </div>
                                       );
                                     })()}
-                                    {inv.type === 'optimizer' && (
+                                    {inv.type === 'optimizer' ? (
                                       <div className="flex items-center gap-3">
                                         <div className="flex-1">
                                           <label className="eng-label">Optimizers per module</label>
@@ -8740,8 +8740,8 @@ function EngineeringPageInner() {
                                         </div>
                                         <div className="text-xs text-slate-500 italic pt-4">Changing this will recalculate engineering values.</div>
                                       </div>
-                                    )}
-                                    {(inv.type === 'string' || inv.type === 'hybrid' || inv.type === 'ecoflow') && (
+                                    ) : null}
+                                    {(inv.type === 'string' || inv.type === 'hybrid' || inv.type === 'ecoflow') ? (
                                       <div className="grid grid-cols-2 gap-3">
                                         <div>
                                           <label className="eng-label">Modules per string</label>
@@ -8763,7 +8763,7 @@ function EngineeringPageInner() {
                                         </div>
                                         <div className="col-span-2 text-xs text-slate-500 italic">Changing this will recalculate engineering values.</div>
                                       </div>
-                                    )}
+                                    ) : null}
                                   </div>
                                   {/* MICRO: panel count only */}
                                   {inv.type === 'micro' ? (
@@ -8847,7 +8847,7 @@ function EngineeringPageInner() {
                                                 </div>
                                               </div>
                                               {/* MANUAL OCPD override */}
-                                              {engineeringMode === 'MANUAL' && (
+                                              {engineeringMode === 'MANUAL' ? (
                                                 <div className="mt-2 p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg">
                                                   <div className="flex items-center gap-2 mb-1">
                                                     <Lock size={10} className="text-amber-400" />
@@ -8859,18 +8859,18 @@ function EngineeringPageInner() {
                                                       onChange={e => updateString(inv.id, str.id, { ocpdOverride: e.target.value ? +e.target.value : undefined, ocpdOverrideAcknowledged: false })}
                                                       className="w-20 bg-slate-700 border border-amber-500/40 rounded px-2 py-1 text-xs text-white focus:outline-none" />
                                                     <span className="text-xs text-slate-400">A breaker</span>
-                                                    {str.ocpdOverride && panel && str.ocpdOverride > panel.maxSeriesFuseRating && (
+                                                    {str.ocpdOverride && panel && str.ocpdOverride > panel.maxSeriesFuseRating ? (
                                                       <span className="text-xs text-red-400 font-bold flex items-center gap-1">
                                                         <AlertTriangle size={10} /> Exceeds maxSeriesFuse ({panel.maxSeriesFuseRating}A) — NEC 690.8(B) VIOLATION
                                                       </span>
-                                                    )}
-                                                    {str.ocpdOverride && panel && str.ocpdOverride <= panel.maxSeriesFuseRating && (
+                                                    ) : null}
+                                                    {str.ocpdOverride && panel && str.ocpdOverride <= panel.maxSeriesFuseRating ? (
                                                       <span className="text-xs text-amber-400">Override active — verify compliance</span>
-                                                    )}
+                                                    ) : null}
                                                   </div>
                                                 </div>
-                                              )}
-                                              {panel && (
+                                              ) : null}
+                                              {panel ? (
                                                 <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
                                                   <span>Voc: <span className="text-slate-300">{panel.voc}V</span></span>
                                                   <span>Isc: <span className="text-slate-300">{panel.isc}A</span></span>
@@ -8878,7 +8878,7 @@ function EngineeringPageInner() {
                                                   <span>Temp Coeff: <span className="text-slate-300">{panel.tempCoeffVoc}%/°C</span></span>
                                                   <span>Max Fuse: <span className="text-slate-300">{panel.maxSeriesFuseRating}A</span></span>
                                                 </div>
-                                              )}
+                                              ) : null}
                                             </div>
                                           );
                                         })}
@@ -8886,7 +8886,7 @@ function EngineeringPageInner() {
                                     </div>
                                   )}
                                 </div>
-                              )}
+                              ) : null}
                             </div>
                           );
                         })}
@@ -8894,7 +8894,7 @@ function EngineeringPageInner() {
                     </div>
 
                     {/* Ecosystem Propagation Panel */}
-                    {displayedEcosystemComponents.length > 0 && (
+                    {displayedEcosystemComponents.length > 0 ? (
                       <div className="card p-5 border border-emerald-500/20 bg-emerald-500/5">
                         <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
                           <Package size={14} className="text-emerald-400" />
@@ -8916,7 +8916,7 @@ function EngineeringPageInner() {
                             </div>
                           ))}
                         </div>
-                        {ecosystemLog.length > 0 && (
+                        {ecosystemLog.length > 0 ? (
                           <div className="mt-3 pt-3 border-t border-emerald-500/10">
                             <div className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">Propagation Log</div>
                             {ecosystemLog.map((entry: any, i: number) => (
@@ -8925,9 +8925,9 @@ function EngineeringPageInner() {
                               </div>
                             ))}
                           </div>
-                        )}
+                        ) : null}
                       </div>
-                    )}
+                    ) : null}
 
                   </div>{/* end center col */}
 
@@ -8980,20 +8980,20 @@ function EngineeringPageInner() {
                           </div>
                         ))}
                       </div>
-                      {rulesResult && (rulesResult.errorCount > 0 || rulesResult.warningCount > 0) && (
+                      {rulesResult && (rulesResult.errorCount > 0 || rulesResult.warningCount > 0) ? (
                         <div className="mt-2 flex gap-3 text-xs">
-                          {rulesResult.errorCount > 0 && (
+                          {rulesResult.errorCount > 0 ? (
                             <span className="flex items-center gap-1 text-red-400">
                               <AlertTriangle size={10} /> {rulesResult.errorCount} error{rulesResult.errorCount > 1 ? 's' : ''}
                             </span>
-                          )}
-                          {rulesResult.warningCount > 0 && (
+                          ) : null}
+                          {rulesResult.warningCount > 0 ? (
                             <span className="flex items-center gap-1 text-amber-400">
                               <AlertCircle size={10} /> {rulesResult.warningCount} warning{rulesResult.warningCount > 1 ? 's' : ''}
                             </span>
-                          )}
+                          ) : null}
                         </div>
-                      )}
+                      ) : null}
                     </div>
 
                     {/* Battery Card — Toggleable Module */}
@@ -9021,7 +9021,7 @@ function EngineeringPageInner() {
                         /* ON state — expanded */
                         <div className="space-y-3">
                           {/* kWh summary strip */}
-                          {_batTotalKwh > 0 && (
+                          {_batTotalKwh > 0 ? (
                             <div className="grid grid-cols-3 gap-2 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
                               <div className="text-center">
                                 <div className="text-lg font-black text-emerald-400 tabular-nums">{_batTotalKwh.toFixed(1)}</div>
@@ -9038,7 +9038,7 @@ function EngineeringPageInner() {
                                 <div className="text-[10px] text-slate-500">Est. Runtime</div>
                               </div>
                             </div>
-                          )}
+                          ) : null}
                           <div className="grid grid-cols-2 gap-3">
                             <div className="col-span-2">
                               <label className="eng-label">Battery Model</label>
@@ -9078,11 +9078,11 @@ function EngineeringPageInner() {
                           <Wrench size={12} className="text-orange-400" />
                           <span className="text-xs font-bold text-slate-300 uppercase tracking-wide">Generator & Transfer Switch</span>
                           {!config.generatorId && <span className="px-1.5 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">+4 Models</span>}
-                          {config.generatorId && _genData && (
+                          {config.generatorId && _genData ? (
                             <span className="px-1.5 py-0.5 rounded text-xs font-semibold bg-orange-500/20 text-orange-300 border border-orange-500/30">
                               {_genData.ratedOutputKw}kW {_genData.manufacturer}
                             </span>
-                          )}
+                          ) : null}
                         </div>
 
                           {/* Generator OFF state */}
@@ -9111,7 +9111,7 @@ function EngineeringPageInner() {
                           )
                         )}
 
-                        {(config.generatorId || config.atsId || genSectionOpen) && (
+                        {(config.generatorId || config.atsId || genSectionOpen) ? (
                         <div className="grid grid-cols-1 gap-3 mt-3">
                           <div>
                             <label className="eng-label">Generator</label>
@@ -9131,7 +9131,7 @@ function EngineeringPageInner() {
                               ))}
                             </select>
                           </div>
-                          {config.generatorId && (
+                          {config.generatorId ? (
                             <div>
                               <label className="eng-label flex items-center gap-1">Generator → ATS Wire Length <span className="text-slate-500">(ft)</span></label>
                               <input type="number" min={5} max={500} step={5}
@@ -9150,9 +9150,9 @@ function EngineeringPageInner() {
                                 );
                               })()}
                             </div>
-                          )}
+                          ) : null}
                         </div>
-                        )}
+                        ) : null}
                       </div>
                     </div>
 
@@ -9405,11 +9405,11 @@ function EngineeringPageInner() {
                         {label}: {status || '—'}
                       </div>
                     ))}
-                    {compliance.jurisdiction?.necVersion && (
+                    {compliance.jurisdiction?.necVersion ? (
                       <div className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-blue-500/25 bg-blue-500/10 text-blue-400">
                         <Book size={10} /> NEC {compliance.jurisdiction.necVersion}
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 </div>
 
@@ -9420,13 +9420,13 @@ function EngineeringPageInner() {
                   <div className="xl:col-span-2 space-y-3">
                     <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
                       <Shield size={12} className="text-emerald-400" /> Rule Results
-                      {rulesResult?.rules?.length > 0 && (
+                      {rulesResult?.rules?.length > 0 ? (
                         <span className="text-slate-600 font-normal">({rulesResult.rules.length} rules evaluated)</span>
-                      )}
+                      ) : null}
                     </h3>
 
                     {/* Error rules first */}
-                    {(rulesResult?.rules ?? []).filter((r: any) => r.severity === 'error').length > 0 && (
+                    {(rulesResult?.rules ?? []).filter((r: any) => r.severity === 'error').length > 0 ? (
                       <div className="rounded-xl border border-red-500/30 overflow-hidden">
                         <div className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border-b border-red-500/20">
                           <AlertCircle size={13} className="text-red-400" />
@@ -9452,10 +9452,10 @@ function EngineeringPageInner() {
                           ))}
                         </div>
                       </div>
-                    )}
+                    ) : null}
 
                     {/* Warning rules */}
-                    {(rulesResult?.rules ?? []).filter((r: any) => r.severity === 'warning').length > 0 && (
+                    {(rulesResult?.rules ?? []).filter((r: any) => r.severity === 'warning').length > 0 ? (
                       <div className="rounded-xl border border-amber-500/30 overflow-hidden">
                         <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-500/10 border-b border-amber-500/20">
                           <AlertTriangle size={13} className="text-amber-400" />
@@ -9481,10 +9481,10 @@ function EngineeringPageInner() {
                           ))}
                         </div>
                       </div>
-                    )}
+                    ) : null}
 
                     {/* Passing rules */}
-                    {(rulesResult?.rules ?? []).filter((r: any) => r.severity === 'pass').length > 0 && (
+                    {(rulesResult?.rules ?? []).filter((r: any) => r.severity === 'pass').length > 0 ? (
                       <div className="rounded-xl border border-emerald-500/20 overflow-hidden">
                         <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-500/8 border-b border-emerald-500/15">
                           <CheckCircle size={13} className="text-emerald-400" />
@@ -9507,16 +9507,16 @@ function EngineeringPageInner() {
                           ))}
                         </div>
                       </div>
-                    )}
+                    ) : null}
 
                     {/* Empty state */}
-                    {(!rulesResult?.rules  || rulesResult.rules.length === 0) && (
+                    {(!rulesResult?.rules  || rulesResult.rules.length === 0) ? (
                       <div className="card p-10 text-center border-dashed border-slate-700">
                         <ClipboardCheck size={36} className="mx-auto mb-3 text-slate-600" />
                         <div className="text-sm font-bold text-slate-400 mb-1">No Rules Evaluated</div>
                         <div className="text-xs text-slate-600">Complete system configuration to run NEC compliance checks.</div>
                       </div>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* RIGHT: Summary + Auto-resolutions + Jurisdiction */}
@@ -9564,7 +9564,7 @@ function EngineeringPageInner() {
                     </div>
 
                     {/* Auto-resolutions */}
-                    {(compliance.electrical as any)?.autoResolutions?.length > 0 && (
+                    {(compliance.electrical as any)?.autoResolutions?.length > 0 ? (
                       <div className="rounded-xl border border-blue-500/25 bg-blue-500/8 p-4">
                         <h4 className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-2 flex items-center gap-2">
                           <Zap size={12} /> Auto-Resolutions Applied
@@ -9580,10 +9580,10 @@ function EngineeringPageInner() {
                           ))}
                         </div>
                       </div>
-                    )}
+                    ) : null}
 
                     {/* Jurisdiction panel */}
-                    {compliance.jurisdiction && (
+                    {compliance.jurisdiction ? (
                       <div className="rounded-xl border border-slate-700/60 bg-slate-800/40 p-4">
                         <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
                           <MapPin size={12} className="text-amber-400" /> Jurisdiction
@@ -9602,10 +9602,10 @@ function EngineeringPageInner() {
                           ))}
                         </div>
                       </div>
-                    )}
+                    ) : null}
 
                     {/* Electrical compliance detail */}
-                    {compliance.electrical && (
+                    {compliance.electrical ? (
                       <div className={`rounded-xl border p-4 ${_sGlow(_el)}`}>
                         <h4 className="text-xs font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
                           <Zap size={12} /> Electrical Compliance
@@ -9626,36 +9626,36 @@ function EngineeringPageInner() {
                             const showBackfedBreaker = !isSupplySide && !isMainDerate && !isPanelUpgrade && backfedBreakerAmps > 0;
                             return (
                               <>
-                                {showBackfedBreaker && (
+                                {showBackfedBreaker ? (
                                   <div className="flex justify-between">
                                     <span className="text-slate-500">Backfeed Breaker</span>
                                     <span className={`font-bold ${isCapped ? 'text-amber-400' : 'text-emerald-400'}`}>
                                       {backfedBreakerAmps}A{isCapped ? ' (120% cap)' : ''}
                                     </span>
                                   </div>
-                                )}
-                                {isSupplySide && (
+                                ) : null}
+                                {isSupplySide ? (
                                   <div className="flex justify-between">
                                     <span className="text-slate-500">Interconnection</span>
                                     <span className="font-bold text-emerald-400">Supply-Side Tap (NEC 705.11)</span>
                                   </div>
-                                )}
-                                {elec?.acSizing?.ocpdAmps != null && (
+                                ) : null}
+                                {elec?.acSizing?.ocpdAmps != null ? (
                                   <div className="flex justify-between">
                                     <span className="text-slate-500">OCPD</span>
                                     <span className="font-bold">{elec.acSizing.ocpdAmps}A</span>
                                   </div>
-                                )}
-                                {elec?.acSizing?.conductorGauge && (
+                                ) : null}
+                                {elec?.acSizing?.conductorGauge ? (
                                   <div className="flex justify-between">
                                     <span className="text-slate-500">Conductor</span>
                                     <span className="font-bold">{elec.acSizing.conductorGauge}</span>
                                   </div>
-                                )}
+                                ) : null}
                               </>
                             );
                           })()}
-                          {((compliance.electrical as any).errors?.length > 0 || (compliance.electrical as any).warnings?.length > 0) && (
+                          {((compliance.electrical as any).errors?.length > 0 || (compliance.electrical as any).warnings?.length > 0) ? (
                             <div className="mt-2 pt-2 border-t border-current/20">
                               <div className="text-[10px] font-bold uppercase tracking-wider mb-1 opacity-70">Issues</div>
                               {[...((compliance.electrical as any).errors ?? []), ...((compliance.electrical as any).warnings ?? [])].map((v: any, i: number) => (
@@ -9665,10 +9665,10 @@ function EngineeringPageInner() {
                                 </div>
                               ))}
                             </div>
-                          )}
+                          ) : null}
                         </div>
                       </div>
-                    )}
+                    ) : null}
 
                     {/* Structural compliance detail */}
                     {compliance.structural && (() => {
@@ -9680,79 +9680,79 @@ function EngineeringPageInner() {
                           </h4>
                           <div className="space-y-1.5 text-xs">
                             {/* Wind uplift */}
-                            {_str.wind?.netUpliftPressurePsf != null && (
+                            {_str.wind?.netUpliftPressurePsf != null ? (
                               <div className="flex justify-between">
                                 <span className="text-slate-500">Net Uplift</span>
                                 <span className="font-bold">{_str.wind?.netUpliftPressurePsf?.toFixed(1)} psf</span>
                               </div>
-                            )}
+                            ) : null}
                             {/* Snow load */}
-                            {_str.snow?.roofSnowLoadPsf != null && (
+                            {_str.snow?.roofSnowLoadPsf != null ? (
                               <div className="flex justify-between">
                                 <span className="text-slate-500">Roof Snow Load</span>
                                 <span className="font-bold">{_str.snow?.roofSnowLoadPsf?.toFixed(1)} psf</span>
                               </div>
-                            )}
+                            ) : null}
                             {/* Dead load */}
-                            {_str.addedDeadLoadPsf != null && (
+                            {_str.addedDeadLoadPsf != null ? (
                               <div className="flex justify-between">
                                 <span className="text-slate-500">Added Dead Load</span>
                                 <span className="font-bold">{_str.addedDeadLoadPsf?.toFixed(2)} psf</span>
                               </div>
-                            )}
+                            ) : null}
                             {/* System weight */}
-                            {_str.totalSystemWeightLbs != null && (
+                            {_str.totalSystemWeightLbs != null ? (
                               <div className="flex justify-between">
                                 <span className="text-slate-500">System Weight</span>
                                 <span className="font-bold">{_str.totalSystemWeightLbs?.toFixed(0)} lbs</span>
                               </div>
-                            )}
+                            ) : null}
                             {/* Mount layout */}
-                            {_str.mountLayout?.mountSpacingIn != null && (
+                            {_str.mountLayout?.mountSpacingIn != null ? (
                               <div className="flex justify-between">
                                 <span className="text-slate-500">Attachment Spacing</span>
                                 <span className="font-bold">{(_str.mountLayout?.mountSpacingIn / 12).toFixed(1)} ft</span>
                               </div>
-                            )}
-                            {_str.mountLayout?.mountCount != null && (
+                            ) : null}
+                            {_str.mountLayout?.mountCount != null ? (
                               <div className="flex justify-between">
                                 <span className="text-slate-500">Mount Count</span>
                                 <span className="font-bold">{_str.mountLayout?.mountCount}</span>
                               </div>
-                            )}
-                            {_str.mountLayout?.safetyFactor != null && (
+                            ) : null}
+                            {_str.mountLayout?.safetyFactor != null ? (
                               <div className="flex justify-between">
                                 <span className="text-slate-500">Safety Factor</span>
                                 <span className={`font-bold ${_str.mountLayout?.safetyFactor >= 1.5 ? 'text-emerald-400' : 'text-amber-400'}`}>
                                   {_str.mountLayout?.safetyFactor?.toFixed(2)}×
                                 </span>
                               </div>
-                            )}
-                            {_str.mountLayout?.upliftPerMountLbs != null && (
+                            ) : null}
+                            {_str.mountLayout?.upliftPerMountLbs != null ? (
                               <div className="flex justify-between">
                                 <span className="text-slate-500">Uplift / Mount</span>
                                 <span className="font-bold">{_str.mountLayout?.upliftPerMountLbs?.toFixed(0)} lbs</span>
                               </div>
-                            )}
+                            ) : null}
                             {/* Rafter analysis */}
-                            {_str.rafterAnalysis && (
+                            {_str.rafterAnalysis ? (
                               <>
                                 <div className="flex justify-between">
                                   <span className="text-slate-500">Framing</span>
                                   <span className="font-bold capitalize">{_str.rafterAnalysis?.framingType} {_str.rafterAnalysis?.size}</span>
                                 </div>
-                                {_str.rafterAnalysis?.overallUtilization != null && (
+                                {_str.rafterAnalysis?.overallUtilization != null ? (
                                   <div className="flex justify-between">
                                     <span className="text-slate-500">Rafter Utilization</span>
                                     <span className={`font-bold ${_str.rafterAnalysis?.overallUtilization > 0.9 ? 'text-red-400' : _str.rafterAnalysis?.overallUtilization > 0.75 ? 'text-amber-400' : 'text-emerald-400'}`}>
                                       {(_str.rafterAnalysis?.overallUtilization * 100)?.toFixed(0)}%
                                     </span>
                                   </div>
-                                )}
+                                ) : null}
                               </>
-                            )}
+                            ) : null}
                             {/* Structural errors + warnings */}
-                            {((_str.errors?.length ?? 0) + (_str.warnings?.length ?? 0)) > 0 && (
+                            {((_str.errors?.length ?? 0) + (_str.warnings?.length ?? 0)) > 0 ? (
                               <div className="mt-2 pt-2 border-t border-current/20">
                                 <div className="text-[10px] font-bold uppercase tracking-wider mb-1 opacity-70">Structural Issues</div>
                                 {[...(_str.errors ?? []), ...(_str.warnings ?? [])].map((issue: any, i: number) => (
@@ -9762,9 +9762,9 @@ function EngineeringPageInner() {
                                   </div>
                                 ))}
                               </div>
-                            )}
+                            ) : null}
                             {/* Recommendations */}
-                            {_str.recommendations?.length > 0 && (
+                            {_str.recommendations?.length > 0 ? (
                               <div className="mt-1.5 pt-1.5 border-t border-current/10 space-y-0.5">
                                 {_str.recommendations.map((rec: string, i: number) => (
                                   <div key={i} className="flex items-start gap-1 text-[10px] opacity-60">
@@ -9772,7 +9772,7 @@ function EngineeringPageInner() {
                                   </div>
                                 ))}
                               </div>
-                            )}
+                            ) : null}
                           </div>
                         </div>
                       );
@@ -9782,7 +9782,7 @@ function EngineeringPageInner() {
                 </div>
 
                 {/* ValidationPanel (existing component — preserved) */}
-                {validationResult && (
+                {validationResult ? (
                   <div className="rounded-xl border border-slate-700/60 bg-slate-800/30 p-4">
                     <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
                       <Shield size={12} className="text-amber-400" /> System Validation
@@ -9797,7 +9797,7 @@ function EngineeringPageInner() {
                       selectedLayoutCandidate={sizingRecommendation?.selectedLayoutCandidate ?? null}
                     />
                   </div>
-                )}
+                ) : null}
 
               </div>
             );
@@ -9872,7 +9872,7 @@ function EngineeringPageInner() {
                   </div>
 
                   {/* Backfeed / 120% rule strip */}
-                  {acSizing && (
+                  {acSizing ? (
                     <div className="flex flex-wrap gap-2 mt-2">
                       <div className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-slate-300">
                         <Activity size={10} className="text-blue-400" />
@@ -9882,13 +9882,13 @@ function EngineeringPageInner() {
                         <Zap size={10} className="text-amber-400" />
                         Interconnection: {config.interconnectionMethod || '—'}
                       </div>
-                      {(elec?.errors?.length > 0 || elec?.warnings?.length > 0) && (
+                      {(elec?.errors?.length > 0 || elec?.warnings?.length > 0) ? (
                         <div className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 font-semibold">
                           <AlertCircle size={10} /> {(elec?.errors?.length ?? 0) + (elec?.warnings?.length ?? 0)} issue{((elec?.errors?.length ?? 0) + (elec?.warnings?.length ?? 0)) !== 1 ? 's' : ''}
                         </div>
-                      )}
+                      ) : null}
                     </div>
-                  )}
+                  ) : null}
                 </div>
 
                 {/* ══ 2-COL LAYOUT ══════════════════════════════════════════════ */}
@@ -9912,14 +9912,14 @@ function EngineeringPageInner() {
                           </div>
                           <div className="grid grid-cols-2 gap-3">
                            {/* v58.0: clarify branch vs aggregate */}
-                           {!cs.isMicro && config.inverters.length > 1 && (
+                           {!cs.isMicro && config.inverters.length > 1 ? (
                              <div className="mb-2 px-2 py-1.5 rounded bg-blue-500/8 border border-blue-500/20 text-[10px] text-blue-300">
                                <span className="font-semibold">Per-inverter branch:</span>
                                {' '}{canonicalAcKw > 0 ? (canonicalAcKw / config.inverters.length).toFixed(2) : '—'} kW
                                {' '}({acAmps > 0 ? Math.round(acAmps / config.inverters.length) : '—'}A) per unit.
                                {' '}Aggregate system: {canonicalAcKw.toFixed(2)} kW total.
                              </div>
-                           )}
+                           ) : null}
                             <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
                               <div className="text-sm font-black text-white">{acSizing.conductorLabel || acSizing.conductorGauge}</div>
                               <div className="text-[10px] text-slate-500 mt-0.5">Conductor</div>
@@ -9975,12 +9975,12 @@ function EngineeringPageInner() {
                               <div className="text-[10px] text-slate-500 mt-0.5">Backfeed OCPD</div>
                             </div>
                           </div>
-                          {acSizing.disconnectType === 'fused' && acSizing.fuseAmps && (
+                          {acSizing.disconnectType === 'fused' && acSizing.fuseAmps ? (
                             <div className="mt-2 p-2 bg-amber-500/8 rounded-lg text-xs text-amber-300 flex items-center gap-2">
                               <AlertTriangle size={10} />
                               Fused: {acSizing.fuseAmps}A × 2 Class R (NEC 690.9)
                             </div>
-                          )}
+                          ) : null}
                         </div>
 
                         {/* Grounding card */}
@@ -10020,7 +10020,7 @@ function EngineeringPageInner() {
                     </h3>
 
                     {/* Issues inline */}
-                    {(elec?.errors?.length > 0 || elec?.warnings?.length > 0) && (
+                    {(elec?.errors?.length > 0 || elec?.warnings?.length > 0) ? (
                       <div className="space-y-2">
                         <div className="rounded-xl border border-red-500/30 bg-red-500/8 p-4 space-y-2">
                           <h4 className="text-xs font-bold text-red-400 flex items-center gap-2">
@@ -10038,7 +10038,7 @@ function EngineeringPageInner() {
                           ))}
                         </div>
                         {/* Busbar 120% violation: show alternatives panel */}
-                        {elec?.errors?.some((e: any) => e.code === 'E-BUSBAR-120') && elec?.interconnection?.alternatives?.length > 0 && (
+                        {elec?.errors?.some((e: any) => e.code === 'E-BUSBAR-120') && elec?.interconnection?.alternatives?.length > 0 ? (
                           <div className="rounded-xl border border-amber-500/30 bg-amber-500/8 p-4">
                             <h4 className="text-xs font-bold text-amber-400 flex items-center gap-2 mb-3">
                               <Zap size={12} /> 120% Busbar Violation — Resolution Options (NEC 705)
@@ -10052,22 +10052,22 @@ function EngineeringPageInner() {
                                   <div className="flex-1">
                                     <div className={`font-bold ${alt.passes ? 'text-emerald-400' : 'text-slate-400'}`}>{alt.label}</div>
                                     <div className="text-slate-500 mt-0.5">{alt.description}</div>
-                                    {alt.method === 'SUPPLY_SIDE_TAP' && alt.passes && (
+                                    {alt.method === 'SUPPLY_SIDE_TAP' && alt.passes ? (
                                       <button
                                         onClick={() => updateConfig({ interconnectionMethod: 'SUPPLY_SIDE_TAP' })}
                                         className="mt-1.5 text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/30 transition-colors font-semibold"
                                       >
                                         Apply Supply-Side Tap →
                                       </button>
-                                    )}
+                                    ) : null}
                                   </div>
                                 </div>
                               ))}
                             </div>
                           </div>
-                        )}
+                        ) : null}
                         {/* Auto-resolutions log */}
-                        {elec?.autoResolutions?.length > 0 && (
+                        {elec?.autoResolutions?.length > 0 ? (
                           <details className="group">
                             <summary className="text-xs text-amber-400/70 cursor-pointer hover:text-amber-400 flex items-center gap-1.5 px-1">
                               <span className="group-open:rotate-90 transition-transform inline-block">›</span>
@@ -10082,9 +10082,9 @@ function EngineeringPageInner() {
                               ))}
                             </div>
                           </details>
-                        )}
+                        ) : null}
                       </div>
-                    )}
+                    ) : null}
 
                     {/* Conduit schedule table */}
                     {cs.conduitSchedule?.length > 0 ? (
@@ -10195,11 +10195,11 @@ function EngineeringPageInner() {
                   <div className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border border-slate-700/50 bg-slate-800/60 text-slate-400">
                     Racking · Lag Pattern · Load Path · Attachment
                   </div>
-                  {config.roofType && (
+                  {config.roofType ? (
                     <div className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-400 font-semibold">
                       <CheckCircle size={10} /> {config.roofType}
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </div>
               <div className="eng-panel">
@@ -10392,7 +10392,7 @@ function EngineeringPageInner() {
                     <StatusBadge status={compliance.structural.status} size="sm" />
                   </h3>
                   {/* Array Geometry Summary */}
-                  {compliance.structural.arrayGeometry && (
+                  {compliance.structural.arrayGeometry ? (
                     <div className="mb-4 bg-slate-800/40 rounded-xl p-4">
                       <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-1"><Grid size={11} /> Array Geometry</div>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
@@ -10406,7 +10406,7 @@ function EngineeringPageInner() {
                         <div className="flex justify-between"><span className="text-slate-400">Mid Clamps</span><span className="text-white">{compliance.structural.arrayGeometry.totalMidClamps}</span></div>
                       </div>
                     </div>
-                  )}
+                  ) : null}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {/* Wind Analysis */}
                     <div className="bg-slate-800/40 rounded-xl p-4">
@@ -10469,9 +10469,9 @@ function EngineeringPageInner() {
                           </span>
                         </div>
                         <div className="flex justify-between"><span className="text-slate-400">Calc. Spacing</span><span className="text-white">{compliance.structural.mountLayout?.mountSpacingIn ?? compliance.structural.mountLayout?.finalSpacingIn ?? compliance.structural.attachment?.maxAllowedSpacing}"</span></div>
-                        {compliance.structural.mountLayout?.spacingWasReduced && (
+                        {compliance.structural.mountLayout?.spacingWasReduced ? (
                           <div className="text-amber-400 text-xs mt-1">⚠ Spacing auto-reduced for safety</div>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                     {/* Rail Analysis (if applicable) */}
@@ -10496,32 +10496,32 @@ function EngineeringPageInner() {
                     )}
                   </div>
                   {/* Racking BOM Summary */}
-                  {compliance.structural.rackingBOM && (
+                  {compliance.structural.rackingBOM ? (
                     <div className="mt-4 bg-slate-800/40 rounded-xl p-4">
                       <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-1"><Package size={11} /> Racking Materials (Calculated)</div>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                        {compliance.structural.rackingBOM.rails?.qty > 0 && (
+                        {compliance.structural.rackingBOM.rails?.qty > 0 ? (
                           <div className="flex justify-between bg-slate-900/40 rounded px-2 py-1.5">
                             <span className="text-slate-400">Rails</span>
                             <span className="text-white font-bold">{compliance.structural.rackingBOM.rails.qty} × {compliance.structural.rackingBOM.rails.lengthFt?.toFixed(1)}ft</span>
                           </div>
-                        )}
-                        {compliance.structural.rackingBOM.railSplices?.qty > 0 && (
+                        ) : null}
+                        {compliance.structural.rackingBOM.railSplices?.qty > 0 ? (
                           <div className="flex justify-between bg-slate-900/40 rounded px-2 py-1.5">
                             <span className="text-slate-400">Rail Splices</span>
                             <span className="text-white font-bold">{compliance.structural.rackingBOM.railSplices.qty} ea</span>
                           </div>
-                        )}
+                        ) : null}
                         <div className="flex justify-between bg-slate-900/40 rounded px-2 py-1.5">
                           <span className="text-slate-400">Mounts</span>
                           <span className="text-white font-bold">{compliance.structural.rackingBOM.mounts?.qty} ea</span>
                         </div>
-                        {compliance.structural.rackingBOM.lFeet?.qty > 0 && (
+                        {compliance.structural.rackingBOM.lFeet?.qty > 0 ? (
                           <div className="flex justify-between bg-slate-900/40 rounded px-2 py-1.5">
                             <span className="text-slate-400">L-Feet</span>
                             <span className="text-white font-bold">{compliance.structural.rackingBOM.lFeet.qty} ea</span>
                           </div>
-                        )}
+                        ) : null}
                         <div className="flex justify-between bg-slate-900/40 rounded px-2 py-1.5">
                           <span className="text-slate-400">Mid Clamps</span>
                           <span className="text-white font-bold">{compliance.structural.rackingBOM.midClamps?.qty} ea</span>
@@ -10538,21 +10538,21 @@ function EngineeringPageInner() {
                           <span className="text-slate-400">Lag Bolts</span>
                           <span className="text-white font-bold">{compliance.structural.rackingBOM.lagBolts?.qty} ea</span>
                         </div>
-                        {compliance.structural.rackingBOM.flashingKits?.qty > 0 && (
+                        {compliance.structural.rackingBOM.flashingKits?.qty > 0 ? (
                           <div className="flex justify-between bg-slate-900/40 rounded px-2 py-1.5">
                             <span className="text-slate-400">Flashing Kits</span>
                             <span className="text-white font-bold">{compliance.structural.rackingBOM.flashingKits.qty} ea</span>
                           </div>
-                        )}
+                        ) : null}
                         <div className="flex justify-between bg-slate-900/40 rounded px-2 py-1.5">
                           <span className="text-slate-400">Bonding Clips</span>
                           <span className="text-white font-bold">{compliance.structural.rackingBOM.bondingClips?.qty} ea</span>
                         </div>
                       </div>
                     </div>
-                  )}
+                  ) : null}
                   {/* Recommendations */}
-                  {compliance.structural.recommendations?.length > 0 && (
+                  {compliance.structural.recommendations?.length > 0 ? (
                     <div className="mt-3 space-y-1">
                       {compliance.structural.recommendations.map((rec: string, i: number) => (
                         <div key={i} className="text-xs text-amber-300/80 flex items-start gap-1.5">
@@ -10560,12 +10560,12 @@ function EngineeringPageInner() {
                         </div>
                       ))}
                     </div>
-                  )}
+                  ) : null}
                 </div>
               )}
 
               {/* ── STRUCTURAL DEBUG PANEL ── */}
-              {compliance.structural && (
+              {compliance.structural ? (
                 <div className="card p-5 border border-slate-700/50">
                   <details>
                     <summary className="text-xs font-bold text-slate-400 uppercase tracking-wide cursor-pointer flex items-center gap-2 select-none hover:text-amber-400 transition-colors">
@@ -10657,10 +10657,10 @@ function EngineeringPageInner() {
                     </div>
                   </details>
                 </div>
-              )}
+              ) : null}
 
             {/* ── STATUS AGGREGATION DEBUG INSPECTOR ── */}
-            {(compliance.overallStatus || rulesResult) && (
+            {(compliance.overallStatus || rulesResult) ? (
               <div className="card p-5 border border-slate-700/50">
                 <details>
                   <summary className="text-xs font-bold text-slate-400 uppercase tracking-wide cursor-pointer flex items-center gap-2 select-none hover:text-amber-400 transition-colors">
@@ -10695,7 +10695,7 @@ function EngineeringPageInner() {
                         <div className="mt-2 text-blue-300">Result: <span className={`font-bold ${compliance.overallStatus === 'FAIL' ? 'text-red-400' : compliance.overallStatus === 'WARNING' ? 'text-amber-400' : 'text-emerald-400'}`}>{compliance.overallStatus ?? '—'}</span></div>
                       </div>
                     </div>
-                    {compliance.electrical?.errors?.length > 0 && (
+                    {compliance.electrical?.errors?.length > 0 ? (
                       <div className="bg-slate-900/60 rounded-lg p-3">
                         <div className="text-red-400 font-bold mb-2">── Electrical Errors ──</div>
                         {compliance.electrical.errors.map((e: any, i: number) => (
@@ -10704,8 +10704,8 @@ function EngineeringPageInner() {
                           </div>
                         ))}
                       </div>
-                    )}
-                    {compliance.structural?.errors?.length > 0 && (
+                    ) : null}
+                    {compliance.structural?.errors?.length > 0 ? (
                       <div className="bg-slate-900/60 rounded-lg p-3">
                         <div className="text-red-400 font-bold mb-2">── Structural Errors ──</div>
                         {compliance.structural.errors.map((e: any, i: number) => (
@@ -10714,14 +10714,14 @@ function EngineeringPageInner() {
                           </div>
                         ))}
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 </details>
               </div>
-            )}
+            ) : null}
 
             {/* ── RULES ENGINE RESULTS ── */}
-            {rulesResult && (
+            {rulesResult ? (
               <div className="space-y-3">
                 {/* Rules Summary Header */}
                 <div className="eng-panel">
@@ -10746,14 +10746,14 @@ function EngineeringPageInner() {
                     ))}
                   </div>
                   {/* Dependency Chain */}
-                  {rulesResult.dependencyChain?.length > 0 && (
+                  {rulesResult.dependencyChain?.length > 0 ? (
                     <div className="flex flex-wrap gap-1.5">
                       <span className="text-xs text-slate-500 mr-1">Rules fired:</span>
                       {rulesResult.dependencyChain.map((r: string) => (
                         <span key={r} className="text-xs font-mono bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700">{r}</span>
                       ))}
                     </div>
-                  )}
+                  ) : null}
                 </div>
 
                 {/* Per-Rule Cards */}
@@ -10769,61 +10769,61 @@ function EngineeringPageInner() {
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-start gap-3 flex-1 min-w-0">
                             <div className="flex-shrink-0 mt-0.5">
-                              {isError && <XCircle size={15} className="text-red-400" />}
-                              {isWarn && <AlertTriangle size={15} className="text-amber-400" />}
-                              {isPass && <CheckCircle size={15} className="text-emerald-400" />}
+                              {isError ? <XCircle size={15} className="text-red-400" /> : null}
+                              {isWarn ? <AlertTriangle size={15} className="text-amber-400" /> : null}
+                              {isPass ? <CheckCircle size={15} className="text-emerald-400" /> : null}
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm font-bold text-white">{rule.title}</span>
-                                {rule.autoFixed && (
+                                {rule.autoFixed ? (
                                   <span className="text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded">Auto-Fixed</span>
-                                )}
-                                {hasOverride && (
+                                ) : null}
+                                {hasOverride ? (
                                   <span className="text-xs bg-blue-500/20 text-blue-400 border border-blue-500/30 px-1.5 py-0.5 rounded">Overridden</span>
-                                )}
+                                ) : null}
                               </div>
                               <div className="text-xs text-slate-400 mt-1">{rule.message}</div>
-                              {rule.autoFixDescription && (
+                              {rule.autoFixDescription ? (
                                 <div className="text-xs text-emerald-400/80 mt-1">↳ {rule.autoFixDescription}</div>
-                              )}
+                              ) : null}
                               <div className="flex items-center gap-3 mt-2 flex-wrap">
-                                {(rule.necReference || rule.asceReference) && (
+                                {(rule.necReference || rule.asceReference) ? (
                                   <span className="text-xs font-mono text-slate-500 bg-slate-800 px-2 py-0.5 rounded">
                                     {rule.necReference || rule.asceReference}
                                   </span>
-                                )}
-                                {rule.value !== undefined && (
+                                ) : null}
+                                {rule.value !== undefined ? (
                                   <span className="text-xs text-slate-400">
                                     Value: <span className="text-white font-mono">{rule.value}</span>
                                     {rule.limit !== undefined && <> · Limit: <span className="text-white font-mono">{rule.limit}</span></>}
                                   </span>
-                                )}
+                                ) : null}
                               </div>
                             </div>
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0">
-                            {rule.overridable && !isPass && !hasOverride && (
+                            {rule.overridable && !isPass && !hasOverride ? (
                               <button
                                 onClick={() => setOverrideForm(isOverrideOpen ? null : { ruleId: rule.ruleId, field: rule.overrideField, value: '', justification: '' })}
                                 className="text-xs text-slate-400 hover:text-amber-400 border border-slate-700 hover:border-amber-500/50 px-2 py-1 rounded transition-colors"
                               >
                                 Override
                               </button>
-                            )}
-                            {hasOverride && (
+                            ) : null}
+                            {hasOverride ? (
                               <button
                                 onClick={() => removeOverride(rule.overrideField)}
                                 className="text-xs text-red-400 hover:text-red-300 border border-red-500/30 px-2 py-1 rounded transition-colors"
                               >
                                 Remove Override
                               </button>
-                            )}
+                            ) : null}
                           </div>
                         </div>
 
                         {/* Override Form */}
-                        {isOverrideOpen && (
+                        {isOverrideOpen ? (
                           <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-2">
                             <div className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
                               <Lock size={11} /> Engineering Override — {rule.overrideField}
@@ -10861,14 +10861,14 @@ function EngineeringPageInner() {
                               <button onClick={() => setOverrideForm(null)} className="btn-secondary btn-sm text-xs">Cancel</button>
                             </div>
                           </div>
-                        )}
+                        ) : null}
                       </div>
                     );
                   })}
                 </div>
 
                 {/* Active Overrides Log */}
-                {overrides.length > 0 && (
+                {overrides.length > 0 ? (
                   <div className="card p-4">
                     <h4 className="text-xs font-bold text-blue-400 mb-3 flex items-center gap-2">
                       <Lock size={12} /> Active Engineering Overrides ({overrides.length})
@@ -10887,10 +10887,10 @@ function EngineeringPageInner() {
                       ))}
                     </div>
                   </div>
-                )}
+                ) : null}
 
                 {/* Structural Auto-Resolutions */}
-                {rulesResult.structuralAutoResolutions?.length > 0 && (
+                {rulesResult.structuralAutoResolutions?.length > 0 ? (
                   <div className="card p-4">
                     <h4 className="text-xs font-bold text-emerald-400 mb-3 flex items-center gap-2">
                       <CheckCircle size={12} /> Structural Auto-Resolutions ({rulesResult.structuralAutoResolutions.length})
@@ -10911,9 +10911,9 @@ function EngineeringPageInner() {
                       ))}
                     </div>
                   </div>
-                )}
+                ) : null}
               </div>
-            )}
+            ) : null}
 
             </div>
           )}
@@ -10977,11 +10977,11 @@ function EngineeringPageInner() {
                     <div className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border border-blue-500/30 bg-blue-500/10 text-blue-400 font-semibold">
                       <CheckCircle size={10} /> Permit-grade SLD
                     </div>
-                    {sldSvg && (
+                    {sldSvg ? (
                       <div className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 font-semibold">
                         <CheckCircle size={10} /> Rendered · {engineeringMode} mode
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 </div>
 
@@ -11003,7 +11003,7 @@ function EngineeringPageInner() {
                       <RefreshCw size={14} className={sldLoading ? 'animate-spin' : ''} />
                       {sldLoading ? 'Generating...' : sldSvg ? 'Regenerate SLD' : 'Generate SLD'}
                     </button>
-                    {sldSvg && (
+                    {sldSvg ? (
                       <a
                         href={`/api/engineering/sld/pdf`}
                         onClick={async (e) => {
@@ -11117,19 +11117,19 @@ function EngineeringPageInner() {
                       >
                         <Download size={14} /> Export PDF
                       </a>
-                    )}
+                    ) : null}
                   </div>
                 </div>
 
                 {/* Error state */}
-                {sldError && (
+                {sldError ? (
                   <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 flex items-center gap-2">
                     <XCircle size={14} /> {sldError}
                   </div>
-                )}
+                ) : null}
 
                 {/* Empty state */}
-                {!sldSvg && !sldLoading && !sldError && (
+                {!sldSvg && !sldLoading && !sldError ? (
                   <div className="card p-12 text-center">
                     <Zap size={40} className="mx-auto mb-4 text-slate-600" />
                     <div className="text-sm font-bold text-white mb-1">Permit-Grade SLD Ready</div>
@@ -11140,19 +11140,19 @@ function EngineeringPageInner() {
                       <Zap size={14} /> Generate SLD
                     </button>
                   </div>
-                )}
+                ) : null}
 
                 {/* Loading state */}
-                {sldLoading && (
+                {sldLoading ? (
                   <div className="card p-12 text-center">
                     <RefreshCw size={32} className="mx-auto mb-3 text-amber-400 animate-spin" />
                     <div className="text-sm text-slate-400">Rendering permit-grade SLD...</div>
                     <div className="text-xs text-slate-600 mt-1">Applying IEEE symbols · ANSI C sheet · Conductor callouts</div>
                   </div>
-                )}
+                ) : null}
 
                 {/* SVG Diagram */}
-                {sldSvg && !sldLoading && (
+                {sldSvg && !sldLoading ? (
                   <div className="card overflow-hidden">
                     <div className="bg-slate-800/50 border-b border-slate-700/50 px-4 py-2 flex items-center justify-between">
                       <div className="text-xs text-slate-400 flex items-center gap-2">
@@ -11178,9 +11178,9 @@ function EngineeringPageInner() {
                             title="Fit to Screen"
                           >↺</button>
                         </div>
-                        {compliance.electrical?.autoResolutions?.length > 0 && (
+                        {compliance.electrical?.autoResolutions?.length > 0 ? (
                           <span className="text-emerald-400">{compliance.electrical.autoResolutions.length} auto-resolution{compliance.electrical.autoResolutions.length !== 1 ? 's' : ''} applied</span>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                     <div
@@ -11219,10 +11219,10 @@ function EngineeringPageInner() {
                       />
                     </div>
                   </div>
-                )}
+                ) : null}
 
                 {/* Electrical Sizing Callout Panel on SLD */}
-                {(compliance.electrical as any)?.acSizing && (
+                {(compliance.electrical as any)?.acSizing ? (
                   <div className="card p-4">
                     <h4 className="text-xs font-bold text-amber-400 mb-3 flex items-center gap-2">
                       <Activity size={12} /> Conductor & Disconnect Callouts — NEC 705.60 · 310.16 · Ch.9
@@ -11244,13 +11244,13 @@ function EngineeringPageInner() {
                       ))}
                     </div>
                   </div>
-                )}
+                ) : null}
 
               </div>
             ))}
 
           {/* ── EQUIPMENT SCHEDULE TAB ── */}
-          {activeTab === 'schedule' && (
+          {activeTab === 'schedule' ? (
             <div className="max-w-none">
               {/* ═══════════ EQUIPMENT SCHEDULE HERO ═══════════ */}
               <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5 mb-5">
@@ -11314,12 +11314,12 @@ function EngineeringPageInner() {
 
                 {/* Status chips */}
                 <div className="flex flex-wrap gap-1.5">
-                  {config.systemType && (
+                  {config.systemType ? (
                     <div className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border border-slate-700/50 bg-slate-800/60 text-slate-300">
                       <Cpu size={10} className="text-blue-400" /> {config.systemType}
                     </div>
-                  )}
-                  {(compliance.electrical?.status || compliance.structural?.status) && (
+                  ) : null}
+                  {(compliance.electrical?.status || compliance.structural?.status) ? (
                     <div className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border font-semibold ${
                       compliance.overallStatus === 'FAIL' ? 'border-red-500/40 bg-red-500/10 text-red-400' :
                       compliance.overallStatus === 'WARNING' ? 'border-amber-500/40 bg-amber-500/10 text-amber-400' :
@@ -11328,12 +11328,12 @@ function EngineeringPageInner() {
                     }`}>
                       <ClipboardCheck size={10} /> Compliance: {compliance.overallStatus || '—'}
                     </div>
-                  )}
-                  {bomPricing?.pricingApplied && (
+                  ) : null}
+                  {bomPricing?.pricingApplied ? (
                     <div className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 font-semibold">
                       <DollarSign size={10} /> ${bomPricing.totalBomCost.toLocaleString('en-US', { maximumFractionDigits: 0 })} BOM
                     </div>
-                  )}
+                  ) : null}
                   <div className="text-[10px] px-2 py-1 rounded-lg border border-slate-700/50 bg-slate-800/60 text-slate-500">
                     Print-ready schedule below ↓
                   </div>
@@ -11374,9 +11374,9 @@ function EngineeringPageInner() {
                       {pvwattsData.loading ? 'Loading…' : pvwattsData.annualKwh ? 'Refresh' : 'Fetch Estimate'}
                     </button>
                   </div>
-                  {pvwattsData.error && (
+                  {pvwattsData.error ? (
                     <div className="text-xs text-red-600">{pvwattsData.error}</div>
-                  )}
+                  ) : null}
                   {pvwattsData.annualKwh ? (
                     <div>
                       <div className="grid grid-cols-3 gap-3 mb-3">
@@ -11393,10 +11393,10 @@ function EngineeringPageInner() {
                           <div className="text-xs text-slate-500">kWh/kWp/yr</div>
                         </div>
                       </div>
-                      {pvwattsData.stationCity && (
+                      {pvwattsData.stationCity ? (
                         <div className="text-xs text-slate-500 mb-2">📍 TMY Station: {pvwattsData.stationCity}, {pvwattsData.stationState}</div>
-                      )}
-                      {pvwattsData.monthlyKwh && (
+                      ) : null}
+                      {pvwattsData.monthlyKwh ? (
                         <div>
                           <div className="text-xs text-slate-500 mb-1 font-semibold">Monthly Production (kWh)</div>
                           <div className="grid grid-cols-12 gap-0.5">
@@ -11416,7 +11416,7 @@ function EngineeringPageInner() {
                             })}
                           </div>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   ) : !pvwattsData.loading && !pvwattsData.error && (
                     <div className="text-xs text-slate-500">
@@ -11571,14 +11571,14 @@ function EngineeringPageInner() {
                             <td className="border border-slate-200 px-3 py-2 font-bold text-amber-700">{ac.disconnectAmps}A</td>
                             <td className="border border-slate-200 px-3 py-2 text-slate-500">NEC 690.14</td>
                           </tr>
-                          {ac.disconnectType === 'fused' && ac.fuseAmps && (
+                          {ac.disconnectType === 'fused' && ac.fuseAmps ? (
                             <tr className="bg-white">
                               <td className="border border-slate-200 px-3 py-2 font-semibold">AC Fuses (L1 / L2)</td>
                               <td className="border border-slate-200 px-3 py-2">{ac.fuseAmps}A, 250V, Class R Fuse × 2</td>
                               <td className="border border-slate-200 px-3 py-2 font-bold text-amber-700">{ac.fuseAmps}A × 2</td>
                               <td className="border border-slate-200 px-3 py-2 text-slate-500">NEC 690.9</td>
                             </tr>
-                          )}
+                          ) : null}
                           <tr className={ac.disconnectType === 'fused' ? 'bg-slate-50' : 'bg-white'}>
                             <td className="border border-slate-200 px-3 py-2 font-semibold">AC Conductors</td>
                             <td className="border border-slate-200 px-3 py-2">{ac.conductorGauge} THWN-2 Copper, 600V (3 conductors)</td>
@@ -11603,22 +11603,22 @@ function EngineeringPageInner() {
                             <td className="border border-slate-200 px-3 py-2 font-bold text-amber-700">{config.mainPanelAmps}A Panel</td>
                             <td className="border border-slate-200 px-3 py-2 text-slate-500">{config.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? 'NEC 705.11' : 'NEC 705.12(B)'}</td>
                           </tr>
-                          {config.utilityId && (
+                          {config.utilityId ? (
                             <tr className="bg-white">
                               <td className="border border-slate-200 px-3 py-2 font-semibold">Utility Provider</td>
                               <td className="border border-slate-200 px-3 py-2">{config.utilityId}</td>
                               <td className="border border-slate-200 px-3 py-2 text-slate-500">—</td>
                               <td className="border border-slate-200 px-3 py-2 text-slate-500">Utility Tariff</td>
                             </tr>
-                          )}
-                          {config.ahjId && (
+                          ) : null}
+                          {config.ahjId ? (
                             <tr className="bg-slate-50">
                               <td className="border border-slate-200 px-3 py-2 font-semibold">AHJ</td>
                               <td className="border border-slate-200 px-3 py-2">{getAhjsByState(config.state || '').find(a => a.id === config.ahjId)?.name || config.ahjId}</td>
                               <td className="border border-slate-200 px-3 py-2 text-slate-500">—</td>
                               <td className="border border-slate-200 px-3 py-2 text-slate-500">Local Jurisdiction</td>
                             </tr>
-                          )}
+                          ) : null}
                         </tbody>
                       </table>
                     </div>
@@ -11694,7 +11694,7 @@ function EngineeringPageInner() {
                 </div>
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* ── MOUNTING DETAILS TAB ── */}
           {activeTab === 'mounting' && (() => {
@@ -11896,12 +11896,12 @@ function EngineeringPageInner() {
                       <text x={68} y={7} fill="#64748b" fontSize="7" fontFamily="monospace">Rail</text>
                       <circle cx={106} cy={3} r={4} fill="#ef4444" stroke="#fca5a5" strokeWidth="1"/>
                       <text x={114} y={7} fill="#64748b" fontSize="7" fontFamily="monospace">{isRtMini?'Rail A Pad':'L-Foot'}</text>
-                      {isRtMini && (<>
+                      {isRtMini ? (<>
                         <circle cx={184} cy={3} r={4} fill="#f97316" stroke="#fdba74" strokeWidth="1"/>
                         <text x={192} y={7} fill="#64748b" fontSize="7" fontFamily="monospace">Rail B Pad</text>
                         <line x1={256} y1={3} x2={268} y2={3} stroke="#334155" strokeWidth="1.5" strokeDasharray="3,2"/>
                         <text x={272} y={7} fill="#64748b" fontSize="7" fontFamily="monospace">Rafter</text>
-                      </>)}
+                      </>) : null}
                     </g>
                   </svg>
                 );
@@ -11971,16 +11971,16 @@ function EngineeringPageInner() {
                     <text x={rafters[0]+8} y={railTop-3} fill="#f59e0b" fontSize="7" fontFamily="monospace">{railModel} RAIL</text>
                     <rect x={rafters[0]+16} y={pTop} width={arrayW-32} height={pBase-pTop} fill="url(#pnlG)" stroke="#3b82f6" strokeWidth="1.5" rx="2"/>
                     <text x={rafters[0]+arrayW/2} y={pTop+(pBase-pTop)/2+3} textAnchor="middle" fill="#93c5fd" fontSize="7.5" fontFamily="monospace" fontWeight="bold">PV MODULE</text>
-                    {upliftLbs>0&&(<g>
+                    {upliftLbs>0? (<g>
                       <line x1={rafters[0]+55} y1={pTop+14} x2={rafters[0]+55} y2={pTop-8} stroke="#ef4444" strokeWidth="2.5" markerEnd="url(#up-a)"/>
                       <rect x={rafters[0]+36} y={pTop-22} width={38} height={12} fill="#7f1d1d" rx="2"/>
                       <text x={rafters[0]+55} y={pTop-12} textAnchor="middle" fill="#fca5a5" fontSize="6.5" fontFamily="monospace">UP {upliftLbs.toFixed(0)}lbs</text>
-                    </g>)}
-                    {deadLbs>0&&(<g>
+                    </g>) : null}
+                    {deadLbs>0? (<g>
                       <line x1={rafters[0]+100} y1={pTop-8} x2={rafters[0]+100} y2={pTop+14} stroke="#3b82f6" strokeWidth="2.5" markerEnd="url(#dn-a)"/>
                       <rect x={rafters[0]+80} y={pTop-22} width={38} height={12} fill="#1e3a8a" rx="2"/>
                       <text x={rafters[0]+99} y={pTop-12} textAnchor="middle" fill="#93c5fd" fontSize="6.5" fontFamily="monospace">DL {deadLbs.toFixed(0)}lbs</text>
-                    </g>)}
+                    </g>) : null}
                     <rect x={W-84} y={18} width={76} height={38} rx="4" fill="#0f172a" stroke={sfColor} strokeWidth="1.5"/>
                     <text x={W-46} y={36} textAnchor="middle" fill={sfColor} fontSize="16" fontWeight="bold" fontFamily="monospace">{sfactor>0?sfactor.toFixed(2):'—'}</text>
                     <text x={W-46} y={48} textAnchor="middle" fill="#64748b" fontSize="7" fontFamily="monospace">SAFETY FACTOR</text>
@@ -12180,9 +12180,9 @@ function EngineeringPageInner() {
                         onChange={e => setMountingSearchQuery(e.target.value)}
                         className="eng-input text-xs"
                       />
-                      {mountingSearchQuery && (
+                      {mountingSearchQuery ? (
                         <button onClick={() => setMountingSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white text-xs">✕</button>
-                      )}
+                      ) : null}
                     </div>
                     <div className="flex items-center gap-2 text-xs">
                       <span className="text-slate-500">Roof:</span>
@@ -12192,7 +12192,7 @@ function EngineeringPageInner() {
                     </div>
                   </div>
                   {/* Active system indicator */}
-                  {config.mountingId && (
+                  {config.mountingId ? (
                     <div className="mb-3 flex items-center gap-2 text-xs bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
                       <span className="text-amber-400 font-bold">⚡ Active in project:</span>
                       <span className="text-white font-bold">{ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId)?.manufacturer} {ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId)?.model}</span>
@@ -12200,10 +12200,10 @@ function EngineeringPageInner() {
                         <button onClick={() => setSelectedMountingId(config.mountingId)} className="ml-auto text-amber-400 hover:text-amber-300 font-bold">View →</button>
                       )}
                     </div>
-                  )}
+                  ) : null}
 
                   {/* Roof Type Filter Chips (residential/commercial only) */}
-                  {roofTypeOptions.length > 0 && (
+                  {roofTypeOptions.length > 0 ? (
                     <div className="flex flex-wrap gap-1.5 mb-3">
                       {roofTypeOptions.map(opt => (
                         <button key={opt.value} onClick={() => { setMountingRoofTypeFilter(opt.value); setShowAllSystems(false); }}
@@ -12212,7 +12212,7 @@ function EngineeringPageInner() {
                         </button>
                       ))}
                     </div>
-                  )}
+                  ) : null}
 
                   {/* System Selector Grid */}
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -12228,38 +12228,38 @@ function EngineeringPageInner() {
                         </div>
                         <div className="text-xs text-amber-300 font-bold mb-0.5">{sys.model}</div>
                         <div className="text-xs text-slate-500 capitalize mb-1">{sys.systemType.replace(/_/g,' ')}</div>
-                        {selectedMountingId === sys.id && (
+                        {selectedMountingId === sys.id ? (
                           <div className="mt-1.5 flex items-center gap-2">
                             <span className="text-xs text-amber-400 font-bold">✓ Viewing</span>
-                            {config.mountingId !== sys.id && (
+                            {config.mountingId !== sys.id ? (
                               <button
                                 onClick={e => { e.stopPropagation(); updateConfig({ mountingId: sys.id }); }}
                                 className="text-xs bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold px-2 py-0.5 rounded-full transition-colors"
                               >Use This</button>
-                            )}
+                            ) : null}
                             {config.mountingId === sys.id && <span className="text-xs text-blue-400 font-bold">⚡ Active</span>}
                           </div>
-                        )}
+                        ) : null}
                       </button>
                     ))}
                   </div>
-                  {filteredSystems.length === 0 && (
+                  {filteredSystems.length === 0 ? (
                     <div className="text-center py-6 text-slate-500 text-xs">
                       No systems match your filters. <button onClick={() => { setMountingRoofTypeFilter('all'); setMountingSearchQuery(''); }} className="text-amber-400 hover:text-amber-300 font-bold">Clear filters</button>
                     </div>
-                  )}
+                  ) : null}
                   <div className="mt-3 flex items-center justify-between">
                     <span className="text-xs text-slate-500">{filteredSystems.length} system{filteredSystems.length !== 1 ? 's' : ''} shown</span>
-                    {filteredSystems.length > 9 && (
+                    {filteredSystems.length > 9 ? (
                       <button onClick={() => setShowAllSystems(!showAllSystems)} className="text-xs text-amber-400 hover:text-amber-300 font-bold">
                         {showAllSystems ? '▲ Show Less' : `▼ Show All ${filteredSystems.length} Systems`}
                       </button>
-                    )}
+                    ) : null}
                   </div>
                 </div>
 
                 {/* ── Selected System Spec Panel ── */}
-                {selectedSystem && (
+                {selectedSystem ? (
                   <div className="eng-panel">
                     <div className="flex items-start justify-between mb-4">
                       <div>
@@ -12288,7 +12288,7 @@ function EngineeringPageInner() {
                     </div>
 
                     {/* Rail Specs */}
-                    {selectedSystem.rail && (
+                    {selectedSystem.rail ? (
                       <div className="mb-4">
                         <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-2">
                           <Ruler size={12} className="text-amber-400"/> Rail Specifications
@@ -12304,15 +12304,15 @@ function EngineeringPageInner() {
                             <div><div className="text-slate-500 mb-0.5">Section Length</div><div className="text-white">{selectedSystem.rail.spliceIntervalIn}"</div></div>
                             <div><div className="text-slate-500 mb-0.5">Weight</div><div className="text-white">{selectedSystem.rail.weightLbsPerFt} lbs/ft</div></div>
                           </div>
-                          {selectedSystem.rail.iccEsReport && (
+                          {selectedSystem.rail.iccEsReport ? (
                             <div className="mt-2 text-xs text-emerald-400">Source: {selectedSystem.rail.iccEsReport}</div>
-                          )}
+                          ) : null}
                         </div>
                       </div>
-                    )}
+                    ) : null}
 
                     {/* Mount Specs */}
-                    {selectedSystem.mount && (
+                    {selectedSystem.mount ? (
                       <div className="mb-4">
                         <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-2">
                           <MapPin size={12} className="text-red-400"/> Mount / Attachment Specifications
@@ -12335,15 +12335,15 @@ function EngineeringPageInner() {
                               <span key={rt} className="text-xs bg-slate-700/60 text-slate-300 px-2 py-0.5 rounded-full capitalize">{rt.replace(/_/g,' ')}</span>
                             ))}
                           </div>
-                          {selectedSystem.mount.iccEsReport && (
+                          {selectedSystem.mount.iccEsReport ? (
                             <div className="mt-2 text-xs text-emerald-400">Source: {selectedSystem.mount.iccEsReport}</div>
-                          )}
+                          ) : null}
                         </div>
                       </div>
-                    )}
+                    ) : null}
 
                     {/* Ballast Specs (commercial) */}
-                    {selectedSystem.ballast && (
+                    {selectedSystem.ballast ? (
                       <div className="mb-4">
                         <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-2">
                           <Weight size={12} className="text-purple-400"/> Ballast Specifications
@@ -12361,10 +12361,10 @@ function EngineeringPageInner() {
                           </div>
                         </div>
                       </div>
-                    )}
+                    ) : null}
 
                     {/* Ground Mount Specs */}
-                    {selectedSystem.groundMount && (
+                    {selectedSystem.groundMount ? (
                       <div className="mb-4">
                         <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-2">
                           <MapPin size={12} className="text-green-400"/> Ground Mount Specifications
@@ -12382,10 +12382,10 @@ function EngineeringPageInner() {
                           </div>
                         </div>
                       </div>
-                    )}
+                    ) : null}
 
                     {/* Tracker Specs */}
-                    {selectedSystem.tracker && (
+                    {selectedSystem.tracker ? (
                       <div className="mb-4">
                         <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-2">
                           <Sun size={12} className="text-yellow-400"/> Tracker Specifications
@@ -12403,10 +12403,10 @@ function EngineeringPageInner() {
                           </div>
                         </div>
                       </div>
-                    )}
+                    ) : null}
 
                     {/* Hardware Kit */}
-                    {selectedSystem.hardware && (
+                    {selectedSystem.hardware ? (
                       <div className="mb-4">
                         <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-2">
                           <Package size={12} className="text-blue-400"/> Hardware Kit Components
@@ -12424,9 +12424,9 @@ function EngineeringPageInner() {
                           </div>
                         </div>
                       </div>
-                    )}
+                    ) : null}
                   </div>
-                )}
+                ) : null}
 
                 {/* ── Real-Time Layout Visualization ── */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -12554,69 +12554,69 @@ function EngineeringPageInner() {
                   </h4>
                   {compliance.structural?.rackingBOM ? (
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                      {compliance.structural.rackingBOM.mounts && (
+                      {compliance.structural.rackingBOM.mounts ? (
                         <div className="bg-slate-800/50 rounded-xl p-3">
                           <div className="text-xs text-slate-500 mb-1">Mounts / L-Feet</div>
                           <div className="text-lg font-black text-white">{compliance.structural.rackingBOM.mounts.qty}</div>
                           <div className="text-xs text-slate-400">{compliance.structural.rackingBOM.mounts.description}</div>
                         </div>
-                      )}
-                      {compliance.structural.rackingBOM.rails && (
+                      ) : null}
+                      {compliance.structural.rackingBOM.rails ? (
                         <div className="bg-slate-800/50 rounded-xl p-3">
                           <div className="text-xs text-slate-500 mb-1">Rails</div>
                           <div className="text-lg font-black text-white">{compliance.structural.rackingBOM.rails.qty} <span className="text-sm font-normal text-slate-400">{compliance.structural.rackingBOM.rails.unit}</span></div>
                           <div className="text-xs text-slate-400">{compliance.structural.rackingBOM.rails.description}</div>
                         </div>
-                      )}
-                      {compliance.structural.rackingBOM.lFeet && (
+                      ) : null}
+                      {compliance.structural.rackingBOM.lFeet ? (
                         <div className="bg-slate-800/50 rounded-xl p-3">
                           <div className="text-xs text-slate-500 mb-1">L-Feet</div>
                           <div className="text-lg font-black text-white">{compliance.structural.rackingBOM.lFeet.qty}</div>
                           <div className="text-xs text-slate-400">{compliance.structural.rackingBOM.lFeet.description}</div>
                         </div>
-                      )}
-                      {compliance.structural.rackingBOM.railSplices && (
+                      ) : null}
+                      {compliance.structural.rackingBOM.railSplices ? (
                         <div className="bg-slate-800/50 rounded-xl p-3">
                           <div className="text-xs text-slate-500 mb-1">Rail Splices</div>
                           <div className="text-lg font-black text-white">{compliance.structural.rackingBOM.railSplices.qty}</div>
                           <div className="text-xs text-slate-400">{compliance.structural.rackingBOM.railSplices.description}</div>
                         </div>
-                      )}
-                      {compliance.structural.rackingBOM.midClamps && (
+                      ) : null}
+                      {compliance.structural.rackingBOM.midClamps ? (
                         <div className="bg-slate-800/50 rounded-xl p-3">
                           <div className="text-xs text-slate-500 mb-1">Mid Clamps</div>
                           <div className="text-lg font-black text-white">{compliance.structural.rackingBOM.midClamps.qty}</div>
                           <div className="text-xs text-slate-400">{compliance.structural.rackingBOM.midClamps.description}</div>
                         </div>
-                      )}
-                      {compliance.structural.rackingBOM.endClamps && (
+                      ) : null}
+                      {compliance.structural.rackingBOM.endClamps ? (
                         <div className="bg-slate-800/50 rounded-xl p-3">
                           <div className="text-xs text-slate-500 mb-1">End Clamps</div>
                           <div className="text-lg font-black text-white">{compliance.structural.rackingBOM.endClamps.qty}</div>
                           <div className="text-xs text-slate-400">{compliance.structural.rackingBOM.endClamps.description}</div>
                         </div>
-                      )}
-                      {compliance.structural.rackingBOM.groundLugs && (
+                      ) : null}
+                      {compliance.structural.rackingBOM.groundLugs ? (
                         <div className="bg-slate-800/50 rounded-xl p-3">
                           <div className="text-xs text-slate-500 mb-1">Ground Lugs</div>
                           <div className="text-lg font-black text-white">{compliance.structural.rackingBOM.groundLugs.qty}</div>
                           <div className="text-xs text-slate-400">{compliance.structural.rackingBOM.groundLugs.description}</div>
                         </div>
-                      )}
-                      {(compliance.structural as any)?.rackingBOM?.ballastBlocks && (
+                      ) : null}
+                      {(compliance.structural as any)?.rackingBOM?.ballastBlocks ? (
                         <div className="bg-slate-800/50 rounded-xl p-3">
                           <div className="text-xs text-slate-500 mb-1">Ballast Blocks</div>
                           <div className="text-lg font-black text-purple-300">{(compliance.structural as any).rackingBOM.ballastBlocks.qty}</div>
                           <div className="text-xs text-slate-400">{(compliance.structural as any).rackingBOM.ballastBlocks.description}</div>
                         </div>
-                      )}
-                      {(compliance.structural as any)?.rackingBOM?.piles && (
+                      ) : null}
+                      {(compliance.structural as any)?.rackingBOM?.piles ? (
                         <div className="bg-slate-800/50 rounded-xl p-3">
                           <div className="text-xs text-slate-500 mb-1">Ground Piles</div>
                           <div className="text-lg font-black text-green-300">{(compliance.structural as any).rackingBOM.piles.qty}</div>
                           <div className="text-xs text-slate-400">{(compliance.structural as any).rackingBOM.piles.description}</div>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   ) : (
                     <div className="text-center py-6 text-slate-500">
@@ -12625,7 +12625,7 @@ function EngineeringPageInner() {
                     </div>
                   )}
                   {/* Estimated BOM from system specs when no compliance data */}
-                  {!compliance.structural?.rackingBOM && totalPanels > 0 && selectedSystem && (
+                  {!compliance.structural?.rackingBOM && totalPanels > 0 && selectedSystem ? (
                     <div className="mt-3 border-t border-slate-700/50 pt-3">
                       <div className="text-xs text-slate-500 mb-2">Estimated quantities (from system specs, {totalPanels} panels):</div>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
@@ -12637,7 +12637,7 @@ function EngineeringPageInner() {
                         {selectedSystem.groundMount && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Piles (est.)</div><div className="text-green-300 font-bold">{Math.ceil(totalPanels / 4)}</div></div>}
                       </div>
                     </div>
-                  )}
+                  ) : null}
                 </div>
 
                 {/* ── Code References ── */}
@@ -12771,16 +12771,16 @@ function EngineeringPageInner() {
                     </div>
 
                     <div className="flex flex-wrap gap-1.5">
-                      {compliance.jurisdiction && (
+                      {compliance.jurisdiction ? (
                         <div className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border border-slate-700/50 bg-slate-800/60 text-slate-300">
                           <MapPin size={10} className="text-amber-400" /> {compliance.jurisdiction.state}
                         </div>
-                      )}
-                      {compliance.jurisdiction && (
+                      ) : null}
+                      {compliance.jurisdiction ? (
                         <div className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border border-slate-700/50 bg-slate-800/60 text-slate-300">
                           <Book size={10} className="text-blue-400" /> NEC {compliance.jurisdiction.necVersion}
                         </div>
-                      )}
+                      ) : null}
                       <div className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border border-slate-700/50 bg-slate-800/60 text-slate-400">
                         CAD · SLD · NEC · Structural · Title Block
                       </div>
@@ -13023,11 +13023,11 @@ function EngineeringPageInner() {
                               </span>
                             )}
                           </div>
-                          {_icaProfile && (
+                          {_icaProfile ? (
                             <span className="text-[10px] text-slate-400">
                               Total ICA → PTO: <span className="text-amber-400 font-bold">{_totalTimeline}</span>
                             </span>
-                          )}
+                          ) : null}
                         </div>
 
                         <div className="p-5 space-y-4">
@@ -13086,17 +13086,17 @@ function EngineeringPageInner() {
                                   <span>🔗</span>
                                   <span className="truncate">{_icaProfile.utility_name} Portal ↗</span>
                                 </a>
-                                {_icaProfile.interconnection_phone && (
+                                {_icaProfile.interconnection_phone ? (
                                   <div className="mt-1.5 text-[10px] text-slate-500">
                                     📞 {_icaProfile.interconnection_phone}
                                   </div>
-                                )}
+                                ) : null}
                               </div>
 
                             </div>
 
                             {/* Common rejections */}
-                            {_icaProfile.common_rejections.length > 0 && (
+                            {_icaProfile.common_rejections.length > 0 ? (
                               <div className="rounded-xl bg-red-950/20 border border-red-900/30 p-4">
                                 <div className="text-[10px] font-bold text-red-400 uppercase tracking-wider mb-3">Common Rejection Reasons</div>
                                 <div className="space-y-2">
@@ -13108,15 +13108,15 @@ function EngineeringPageInner() {
                                   ))}
                                 </div>
                               </div>
-                            )}
+                            ) : null}
 
                             {/* Solar Pro Note */}
-                            {_icaProfile.solar_pro_note && (
+                            {_icaProfile.solar_pro_note ? (
                               <div className="rounded-xl bg-amber-950/20 border border-amber-800/30 p-4">
                                 <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider mb-1.5">⚡ Solar Pro Note</div>
                                 <div className="text-xs text-amber-100/80 leading-relaxed">{_icaProfile.solar_pro_note}</div>
                               </div>
-                            )}
+                            ) : null}
 
                           </>) : (
                             /* Generic fallback — no utility matched */
@@ -13194,7 +13194,7 @@ function EngineeringPageInner() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    {bom.length > 0 && (
+                    {bom.length > 0 ? (
                       <>
                         <button
                           onClick={() => {
@@ -13220,7 +13220,7 @@ function EngineeringPageInner() {
                           <Download size={13} /> Export CSV
                         </button>
                       </>
-                    )}
+                    ) : null}
                     <button onClick={fetchBOM} disabled={bomLoading} className="btn-primary btn-sm">
                       <RefreshCw size={13} className={bomLoading ? 'animate-spin' : ''} />
                       {bomLoading ? 'Generating…' : bom.length > 0 ? 'Regenerate' : 'Generate BOM'}
@@ -13228,14 +13228,14 @@ function EngineeringPageInner() {
                   </div>
                 </div>
 
-                {bomError && (
+                {bomError ? (
                   <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 flex items-center gap-2">
                     <XCircle size={14} /> {bomError}
                   </div>
-                )}
+                ) : null}
 
                 {/* ── EMPTY STATE ── */}
-                {!bom.length && !bomLoading && !bomError && (
+                {!bom.length && !bomLoading && !bomError ? (
                   <div className="card p-14 text-center border-dashed border-slate-700">
                     <div className="w-14 h-14 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center mx-auto mb-4">
                       <Grid size={26} className="text-violet-400" />
@@ -13248,14 +13248,14 @@ function EngineeringPageInner() {
                       <Grid size={13} /> Generate BOM
                     </button>
                   </div>
-                )}
+                ) : null}
 
-                {bomLoading && (
+                {bomLoading ? (
                   <div className="card p-12 text-center">
                     <RefreshCw size={28} className="mx-auto mb-3 text-violet-400 animate-spin" />
                     <div className="text-sm text-slate-400">Deriving materials · resolving distributor pricing…</div>
                   </div>
-                )}
+                ) : null}
 
                 {bom.length > 0 && !bomLoading && (() => {
                   // ── cost helpers ──
@@ -13337,32 +13337,32 @@ function EngineeringPageInner() {
                               <span className="text-xs text-slate-500">Stages</span>
                               <span className="text-lg font-bold text-white tabular-nums">{stages.length}</span>
                             </div>
-                            {bomPricing && (
+                            {bomPricing ? (
                               <>
                                 <div className="flex flex-col items-center bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2 min-w-[72px]">
                                   <span className="text-xs text-emerald-500">Catalog</span>
                                   <span className="text-lg font-bold text-emerald-400 tabular-nums">{bomPricing.catalogMatches}</span>
                                 </div>
-                                {bomPricing.overrideMatches > 0 && (
+                                {bomPricing.overrideMatches > 0 ? (
                                   <div className="flex flex-col items-center bg-blue-500/10 border border-blue-500/20 rounded-lg px-3 py-2 min-w-[72px]">
                                     <span className="text-xs text-blue-400">Override</span>
                                     <span className="text-lg font-bold text-blue-400 tabular-nums">{bomPricing.overrideMatches}</span>
                                   </div>
-                                )}
-                                {bomPricing.fallbackMatches > 0 && (
+                                ) : null}
+                                {bomPricing.fallbackMatches > 0 ? (
                                   <div className="flex flex-col items-center bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 min-w-[72px]">
                                     <span className="text-xs text-amber-400">Fallback</span>
                                     <span className="text-lg font-bold text-amber-400 tabular-nums">{bomPricing.fallbackMatches}</span>
                                   </div>
-                                )}
-                                {bomPricing.unpriced > 0 && (
+                                ) : null}
+                                {bomPricing.unpriced > 0 ? (
                                   <div className="flex flex-col items-center bg-slate-700/50 border border-slate-600/40 rounded-lg px-3 py-2 min-w-[72px]">
                                     <span className="text-xs text-slate-500">Unpriced</span>
                                     <span className="text-lg font-bold text-slate-400 tabular-nums">{bomPricing.unpriced}</span>
                                   </div>
-                                )}
+                                ) : null}
                               </>
-                            )}
+                            ) : null}
                           </div>
                         </div>
 
@@ -13532,9 +13532,9 @@ function EngineeringPageInner() {
                                   <span className="text-xs text-slate-500 tabular-nums">{items.length} item{items.length !== 1 ? 's' : ''}</span>
                                 </div>
                                 <div className="flex items-center gap-3">
-                                  {hasPrice && (
+                                  {hasPrice ? (
                                     <span className={`text-sm font-bold tabular-nums ${textCol}`}>{fmtK(stageTotalCost)}</span>
-                                  )}
+                                  ) : null}
                                 </div>
                               </div>
 
@@ -13579,13 +13579,13 @@ function EngineeringPageInner() {
                                       </tr>
                                     ))}
                                     {/* Stage subtotal row */}
-                                    {hasPrice && (
+                                    {hasPrice ? (
                                       <tr className={`${bgCol} border-t border-slate-700/40`}>
                                         <td colSpan={6} className={`px-4 py-2 text-xs font-bold text-right ${textCol} uppercase tracking-wide`}>Stage Subtotal</td>
                                         <td className={`px-4 py-2 text-right text-sm font-black tabular-nums ${textCol}`}>{fmtK(stageTotalCost)}</td>
                                         <td className="hidden xl:table-cell" />
                                       </tr>
-                                    )}
+                                    ) : null}
                                   </tbody>
                                 </table>
                               </div>
@@ -13617,7 +13617,7 @@ function EngineeringPageInner() {
             ))}
 
         {/* ── CLIENT FILES TAB ── */}
-          {activeTab === 'files' && (
+          {activeTab === 'files' ? (
             <div className="max-w-none space-y-4">
               {/* ══════════ CLIENT FILES HERO ══════════ */}
               <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5 mb-4">
@@ -13650,16 +13650,16 @@ function EngineeringPageInner() {
                   <div className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border border-slate-700/50 bg-slate-800/60 text-slate-400">
                     Bill Data · Estimate · Engineering · SLD · BOM
                   </div>
-                  {currentProjectId && (
+                  {currentProjectId ? (
                     <div className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border border-teal-500/30 bg-teal-500/10 text-teal-400 font-semibold">
                       <CheckCircle size={10} /> Project loaded
                     </div>
-                  )}
-                  {!currentProjectId && (
+                  ) : null}
+                  {!currentProjectId ? (
                     <div className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-400">
                       <AlertCircle size={10} /> No project selected
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </div>
               <div className="flex items-center justify-between">
@@ -13703,17 +13703,17 @@ function EngineeringPageInner() {
                 </div>
               </div>
 
-              {fileUploadError && (
+              {fileUploadError ? (
                 <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 flex items-center gap-2">
                   <XCircle size={13} /> {fileUploadError}
                 </div>
-              )}
+              ) : null}
 
-              {filesError && (
+              {filesError ? (
                 <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 flex items-center gap-2">
                   <XCircle size={13} /> {filesError}
                 </div>
-              )}
+              ) : null}
 
               {/* ── Pipeline Verification Panel (v47.56) ── */}
               <div className="border border-slate-700/60 rounded-xl bg-slate-800/40 overflow-hidden">
@@ -13732,7 +13732,7 @@ function EngineeringPageInner() {
                         Waiting for layout
                       </span>
                     )}
-                    {pipelineResult && (
+                    {pipelineResult ? (
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                         pipelineResult.success
                           ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
@@ -13740,20 +13740,20 @@ function EngineeringPageInner() {
                       }`}>
                         Sync: {pipelineResult.success ? 'PASS' : 'FAIL'}
                       </span>
-                    )}
-                    {pipelineResult?.runAt && (
+                    ) : null}
+                    {pipelineResult?.runAt ? (
                       <span className="text-xs text-slate-500">
                         {new Date(pipelineResult.runAt).toLocaleTimeString()}
                       </span>
-                    )}
+                    ) : null}
                   </div>
                   <div className="flex items-center gap-2">
-                    {totalPanels > 0 && (
+                    {totalPanels > 0 ? (
                       <span className="text-xs text-slate-400 hidden lg:flex items-center gap-1">
                         <Zap size={10} className="text-amber-400" />
                         Engineering auto-runs on every layout save
                       </span>
-                    )}
+                    ) : null}
                     <button
                       onClick={runPipeline}
                       disabled={pipelineRunning || !currentProjectId}
@@ -13769,14 +13769,14 @@ function EngineeringPageInner() {
                 </div>
 
                 {/* Pipeline error banner */}
-                {pipelineError && (
+                {pipelineError ? (
                   <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/20 text-xs text-red-400 flex items-center gap-2">
                     <XCircle size={12} /> {pipelineError}
                   </div>
-                )}
+                ) : null}
 
                 {/* Mismatch banners */}
-                {(pipelineResult?.mismatches?.length ?? 0) > 0 && (
+                {(pipelineResult?.mismatches?.length ?? 0) > 0 ? (
                   <div className="px-4 py-2 border-b border-slate-700/40 space-y-1.5">
                     {pipelineResult.mismatches.map((m: any, i: number) => (
                       <div key={i} className={`flex items-start gap-2 text-xs p-2 rounded-lg ${
@@ -13795,7 +13795,7 @@ function EngineeringPageInner() {
                       </div>
                     ))}
                   </div>
-                )}
+                ) : null}
 
                 {/* Subsystem status rows */}
                 {pipelineResult ? (
@@ -13831,11 +13831,11 @@ function EngineeringPageInner() {
                           </button>
                         </div>
                       </div>
-                      {pipelineRawExpanded.layout && (
+                      {pipelineRawExpanded.layout ? (
                         <pre className="mt-2 text-xs bg-slate-900/60 rounded-lg p-3 text-slate-400 overflow-x-auto max-h-48 font-mono">
                           {JSON.stringify(pipelineResult.layout, null, 2)}
                         </pre>
-                      )}
+                      ) : null}
                     </div>
 
                     {/* Engineering row */}
@@ -13870,11 +13870,11 @@ function EngineeringPageInner() {
                           </button>
                         </div>
                       </div>
-                      {pipelineRawExpanded.engineering && (
+                      {pipelineRawExpanded.engineering ? (
                         <pre className="mt-2 text-xs bg-slate-900/60 rounded-lg p-3 text-slate-400 overflow-x-auto max-h-48 font-mono">
                           {JSON.stringify(pipelineResult.engineering, null, 2)}
                         </pre>
-                      )}
+                      ) : null}
                     </div>
 
                     {/* Artifacts row */}
@@ -13914,11 +13914,11 @@ function EngineeringPageInner() {
                           </button>
                         </div>
                       </div>
-                      {pipelineRawExpanded.artifacts && (
+                      {pipelineRawExpanded.artifacts ? (
                         <pre className="mt-2 text-xs bg-slate-900/60 rounded-lg p-3 text-slate-400 overflow-x-auto max-h-48 font-mono">
                           {JSON.stringify(pipelineResult.artifacts, null, 2)}
                         </pre>
-                      )}
+                      ) : null}
                     </div>
 
                     {/* Permit row */}
@@ -13952,11 +13952,11 @@ function EngineeringPageInner() {
                           </button>
                         </div>
                       </div>
-                      {pipelineRawExpanded.permit && (
+                      {pipelineRawExpanded.permit ? (
                         <pre className="mt-2 text-xs bg-slate-900/60 rounded-lg p-3 text-slate-400 overflow-x-auto max-h-48 font-mono">
                           {JSON.stringify(pipelineResult.permit, null, 2)}
                         </pre>
-                      )}
+                      ) : null}
                     </div>
 
                     {/* Client Files row */}
@@ -13980,11 +13980,11 @@ function EngineeringPageInner() {
                           </button>
                         </div>
                       </div>
-                      {pipelineRawExpanded.clientFiles && (
+                      {pipelineRawExpanded.clientFiles ? (
                         <pre className="mt-2 text-xs bg-slate-900/60 rounded-lg p-3 text-slate-400 overflow-x-auto max-h-48 font-mono">
                           {JSON.stringify(pipelineResult.clientFiles, null, 2)}
                         </pre>
-                      )}
+                      ) : null}
                     </div>
 
                     {/* Workflow row */}
@@ -14021,11 +14021,11 @@ function EngineeringPageInner() {
                           </button>
                         </div>
                       </div>
-                      {pipelineRawExpanded.workflow && (
+                      {pipelineRawExpanded.workflow ? (
                         <pre className="mt-2 text-xs bg-slate-900/60 rounded-lg p-3 text-slate-400 overflow-x-auto max-h-48 font-mono">
                           {JSON.stringify(pipelineResult.workflow, null, 2)}
                         </pre>
-                      )}
+                      ) : null}
                     </div>
 
                     {/* Pipeline Steps row */}
@@ -14047,7 +14047,7 @@ function EngineeringPageInner() {
                           {pipelineRawExpanded.steps ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                         </button>
                       </div>
-                      {pipelineRawExpanded.steps && (
+                      {pipelineRawExpanded.steps ? (
                         <div className="mt-2 space-y-1">
                           {(pipelineResult.steps ?? []).map((st: any, i: number) => (
                             <div key={i} className={`flex items-start gap-2 text-xs px-2 py-1.5 rounded-lg ${
@@ -14068,7 +14068,7 @@ function EngineeringPageInner() {
                             </div>
                           ))}
                         </div>
-                      )}
+                      ) : null}
                     </div>
 
                   </div>
@@ -14255,7 +14255,7 @@ function EngineeringPageInner() {
                                   <span className="text-sm text-white truncate block">{file.file_name}</span>
                                   <div className="flex items-center gap-2 mt-0.5">
                                     <span className="text-xs text-slate-500">{[fileSizeKb, uploadDate].filter(Boolean).join(' · ')}</span>
-                                    {hasRun && (
+                                    {hasRun ? (
                                       <span className={`text-xs px-1.5 py-0.5 rounded-full border ${
                                         isCurrentRun
                                           ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
@@ -14263,12 +14263,12 @@ function EngineeringPageInner() {
                                       }`}>
                                         {isCurrentRun ? '✓ Active config' : '⚙ Has config'}
                                       </span>
-                                    )}
+                                    ) : null}
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-1 flex-shrink-0">
                                   {/* Open in Engineering — restore config from this file */}
-                                  {hasRun && !isCurrentRun && (
+                                  {hasRun && !isCurrentRun ? (
                                     <button
                                       onClick={() => {
                                         const url = `/engineering?projectId=${currentProjectId}&fileId=${file.id}`;
@@ -14280,7 +14280,7 @@ function EngineeringPageInner() {
                                       <RefreshCw size={11} />
                                       Restore Config
                                     </button>
-                                  )}
+                                  ) : null}
                                   {file.file_name === 'permit_planset.html' ? (
                                     // permit_planset.html — force regeneration via the permit button
                                     // instead of downloading the potentially-stale cached copy
@@ -14322,7 +14322,7 @@ function EngineeringPageInner() {
                 </div>
               )}
             </div>
-          )}
+          ) : null}
 
         </div>{/* end main tab content */}
 
@@ -14330,13 +14330,13 @@ function EngineeringPageInner() {
         <div className={`flex-shrink-0 border-l border-slate-700/50 bg-slate-900/70 flex flex-col transition-all duration-200 ${intelligencePanelOpen ? 'w-80' : 'w-10'}`}>
           {/* Panel toggle header */}
           <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-700/50 bg-slate-800/50 flex-shrink-0">
-            {intelligencePanelOpen && (
+            {intelligencePanelOpen ? (
               <div className="flex items-center gap-2">
                 <Cpu size={13} className="text-amber-400" />
                 <span className="text-xs font-bold text-white">Engineering Intelligence</span>
                 <span className="text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded-full">V4</span>
               </div>
-            )}
+            ) : null}
             <button
               onClick={() => setIntelligencePanelOpen(p => !p)}
               className="ml-auto text-slate-400 hover:text-white transition-colors p-1 rounded"
@@ -14346,7 +14346,7 @@ function EngineeringPageInner() {
             </button>
           </div>
 
-          {intelligencePanelOpen && (
+          {intelligencePanelOpen ? (
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
 
               {/* Topology Badge */}
@@ -14358,9 +14358,9 @@ function EngineeringPageInner() {
                     : `${config.inverters.length} inverter${config.inverters.length !== 1 ? 's' : ''} · ${totalPanels} modules · ${totalKw} kW DC`
                   }
                 </div>
-                {topologySwitching && (
+                {topologySwitching ? (
                   <div className="text-xs mt-1 animate-pulse">⚡ Propagating ecosystem…</div>
-                )}
+                ) : null}
               </div>
 
               {/* System Health */}
@@ -14379,12 +14379,12 @@ function EngineeringPageInner() {
                       <StatusBadge status={item.status as any} size="sm" />
                     </div>
                   ))}
-                  {compliance.jurisdiction && (
+                  {compliance.jurisdiction ? (
                     <div className="text-xs text-slate-500 pt-1 border-t border-slate-700/50 mt-1">
                       <MapPin size={9} className="inline mr-1 text-amber-400" />
                       {compliance.jurisdiction.state} · NEC {compliance.jurisdiction.necVersion}
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </div>
 
@@ -14412,11 +14412,11 @@ function EngineeringPageInner() {
                 >
                   <Wrench size={12} />
                   <span className="flex-1 text-left">Auto-Fix All Issues</span>
-                  {calculating && <RefreshCw size={10} className="animate-spin" />}
+                  {calculating ? <RefreshCw size={10} className="animate-spin" /> : null}
                 </button>
 
                 {/* Row 2b: Fix Engine — no solution banner */}
-                {fixNoSolution && (
+                {fixNoSolution ? (
                   <div className="flex items-start gap-2 px-3 py-2.5 bg-red-500/10 border border-red-500/30 rounded-lg">
                     <XCircle size={13} className="text-red-400 mt-0.5 shrink-0" />
                     <div className="flex-1 min-w-0">
@@ -14431,7 +14431,7 @@ function EngineeringPageInner() {
                       <XCircle size={11} />
                     </button>
                   </div>
-                )}
+                ) : null}
 
                 {/* Row 3: Explain Logic */}
                 <button
@@ -14441,11 +14441,11 @@ function EngineeringPageInner() {
                 >
                   <Info size={12} />
                   <span className="flex-1 text-left">Explain Logic</span>
-                  {explainLoading && <RefreshCw size={10} className="animate-spin" />}
+                  {explainLoading ? <RefreshCw size={10} className="animate-spin" /> : null}
                 </button>
 
                 {/* Explain Logic result */}
-                {explainResult && (
+                {explainResult ? (
                   <div className="bg-slate-900/60 rounded-lg p-2.5 border border-blue-500/20 max-h-40 overflow-y-auto">
                     {explainResult.split('\n').map((line, i) => (
                       <div key={i} className={`text-xs leading-relaxed ${line.startsWith('**') ? 'font-bold text-blue-300 mt-1' : 'text-slate-400'}`}>
@@ -14453,7 +14453,7 @@ function EngineeringPageInner() {
                       </div>
                     ))}
                   </div>
-                )}
+                ) : null}
 
                 {/* Row 4: Show Decision Log */}
                 <button
@@ -14462,14 +14462,14 @@ function EngineeringPageInner() {
                 >
                   <Book size={12} />
                   <span className="flex-1 text-left">Show Decision Log</span>
-                  {decisionLog.length > 0 && (
+                  {decisionLog.length > 0 ? (
                     <span className="bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full text-xs">{decisionLog.length}</span>
-                  )}
+                  ) : null}
                   {showDecisionLog ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
                 </button>
 
                 {/* Decision Log inline */}
-                {showDecisionLog && (
+                {showDecisionLog ? (
                   <div className="space-y-1 max-h-64 overflow-y-auto">
                     {decisionLog.length === 0 ? (
                       <div className="text-xs text-slate-500 px-2">No decisions logged yet.</div>
@@ -14491,7 +14491,7 @@ function EngineeringPageInner() {
                       ))
                     )}
                   </div>
-                )}
+                ) : null}
 
                 <div className="border-t border-slate-700/50 pt-1.5 mt-1">
                   <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Generate Outputs</div>
@@ -14516,7 +14516,7 @@ function EngineeringPageInner() {
                 >
                   <FileText size={12} className={sldLoading ? 'animate-spin' : ''} />
                   <span className="flex-1 text-left">{sldLoading ? 'Rendering SLD…' : 'Generate SLD'}</span>
-                  {sldSvg && !sldLoading && <span className="text-purple-600 text-xs">✓</span>}
+                  {sldSvg && !sldLoading ? <span className="text-purple-600 text-xs">✓</span> : null}
                 </button>
 
                 {/* Row 7: Generate Plan Set (v43.1) */}
@@ -14531,41 +14531,41 @@ function EngineeringPageInner() {
               </div>
 
               {/* Issues Summary */}
-              {(rulesResult || compliance.electrical || compliance.structural) && (
+              {(rulesResult || compliance.electrical || compliance.structural) ? (
                 <div className="bg-slate-800/60 rounded-xl border border-slate-700/50 p-3">
                   <div className="text-xs font-bold text-slate-300 mb-2 flex items-center gap-1.5">
                     <Shield size={11} className="text-amber-400" /> Issues
                   </div>
                   <div className="space-y-1">
-                    {(rulesResult?.errorCount > 0 || compliance.electrical?.errors?.length > 0) && (
+                    {(rulesResult?.errorCount > 0 || compliance.electrical?.errors?.length > 0) ? (
                       <div className="flex items-center gap-2 text-xs text-red-400">
                         <XCircle size={10} />
                         {(rulesResult?.errorCount || compliance.electrical?.errors?.length || 0)} error{(rulesResult?.errorCount || compliance.electrical?.errors?.length || 0) !== 1 ? 's' : ''}
                       </div>
-                    )}
-                    {(rulesResult?.warningCount > 0 || compliance.electrical?.warnings?.length > 0) && (
+                    ) : null}
+                    {(rulesResult?.warningCount > 0 || compliance.electrical?.warnings?.length > 0) ? (
                       <div className="flex items-center gap-2 text-xs text-amber-400">
                         <AlertTriangle size={10} />
                         {(rulesResult?.warningCount || compliance.electrical?.warnings?.length || 0)} warning{(rulesResult?.warningCount || compliance.electrical?.warnings?.length || 0) !== 1 ? 's' : ''}
                       </div>
-                    )}
-                    {rulesResult?.autoFixCount > 0 && (
+                    ) : null}
+                    {rulesResult?.autoFixCount > 0 ? (
                       <div className="flex items-center gap-2 text-xs text-emerald-400">
                         <CheckCircle size={10} />
                         {rulesResult.autoFixCount} auto-fixed
                       </div>
-                    )}
-                    {!rulesResult?.errorCount && !compliance.electrical?.errors?.length && compliance.overallStatus === 'PASS' && (
+                    ) : null}
+                    {!rulesResult?.errorCount && !compliance.electrical?.errors?.length && compliance.overallStatus === 'PASS' ? (
                       <div className="flex items-center gap-2 text-xs text-emerald-400">
                         <CheckCircle size={10} /> All checks passing
                       </div>
-                    )}
-                    {!compliance.overallStatus && (
+                    ) : null}
+                    {!compliance.overallStatus ? (
                       <div className="text-xs text-slate-500">Run compliance check to see issues</div>
-                    )}
+                    ) : null}
                   </div>
                 </div>
-              )}
+              ) : null}
 
               {/* ── Engineering Assistant (NEC Query) ── */}
               <div className="bg-slate-800/60 rounded-xl border border-slate-700/50 p-3">
@@ -14600,12 +14600,12 @@ function EngineeringPageInner() {
                     </button>
                   ))}
                 </div>
-                {aiLoading && (
+                {aiLoading ? (
                   <div className="flex items-center gap-2 text-xs text-slate-400 py-2">
                     <RefreshCw size={11} className="animate-spin text-amber-400" /> Analyzing system…
                   </div>
-                )}
-                {aiResponse && !aiLoading && (
+                ) : null}
+                {aiResponse && !aiLoading ? (
                   <div className="bg-slate-900/60 rounded-lg p-2.5 text-xs text-slate-300 leading-relaxed border border-slate-700/50 max-h-40 overflow-y-auto">
                     {aiResponse.split('\n').map((line, i) => (
                       <div key={i} className={line.startsWith('**') ? 'font-bold text-amber-400 mb-1' : 'mb-0.5'}>
@@ -14613,11 +14613,11 @@ function EngineeringPageInner() {
                       </div>
                     ))}
                   </div>
-                )}
+                ) : null}
               </div>
 
               {/* ── Ecosystem Components ── */}
-              {displayedEcosystemComponents.length > 0 && (
+              {displayedEcosystemComponents.length > 0 ? (
                 <div className="bg-slate-800/60 rounded-xl border border-emerald-500/20 p-3">
                   <div className="text-xs font-bold text-emerald-400 mb-2 flex items-center gap-1.5">
                     <Package size={11} /> Auto-Resolved Ecosystem ({displayedEcosystemComponents.length})
@@ -14629,15 +14629,15 @@ function EngineeringPageInner() {
                         <span className="text-emerald-400 font-bold flex-shrink-0">×{comp.quantity}</span>
                       </div>
                     ))}
-                    {displayedEcosystemComponents.length > 6 && (
+                    {displayedEcosystemComponents.length > 6 ? (
                       <div className="text-xs text-slate-500">+{displayedEcosystemComponents.length - 6} more…</div>
-                    )}
+                    ) : null}
                   </div>
                 </div>
-              )}
+              ) : null}
 
             </div>
-          )}
+          ) : null}
         </div>{/* end Intelligence Panel */}
 
         </div>{/* end content + panel row */}

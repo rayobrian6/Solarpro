@@ -313,7 +313,7 @@ export default function DistributorPricesPage() {
       ) : null}
 
       {/* ── Stats cards ── */}
-      {stats && (
+      {stats ? (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="rounded-xl border border-rose-500/20 bg-slate-800/60 px-4 py-3">
             <div className="text-2xl font-black text-rose-400 tabular-nums">{stats.overrides}</div>
@@ -334,7 +334,7 @@ export default function DistributorPricesPage() {
             <div className="text-xs text-slate-500 mt-0.5">Avg Catalog Cost</div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* ── Pricing resolution explanation ── */}
       <div className="rounded-xl border border-slate-700/50 bg-slate-800/40 px-4 py-3">
@@ -360,11 +360,11 @@ export default function DistributorPricesPage() {
           placeholder="Search by part number, category, or source…"
           className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/50"
         />
-        {search && (
+        {search ? (
           <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
             <X size={13} />
           </button>
-        )}
+        ) : null}
       </div>
 
       {/* ── Section tabs ── */}
@@ -385,28 +385,28 @@ export default function DistributorPricesPage() {
           >
             {tab.icon}
             {tab.label}
-            {tab.count !== undefined && (
+            {tab.count !== undefined ? (
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
                 activeSection === tab.id ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-500'
               }`}>
                 {tab.count}
               </span>
-            )}
+            ) : null}
           </button>
         ))}
       </div>
 
       {/* ── Loading / empty states ── */}
-      {loading && (
+      {loading ? (
         <div className="flex items-center justify-center py-16 text-slate-500">
           <RefreshCw size={18} className="animate-spin mr-2" /> Loading pricing data…
         </div>
-      )}
+      ) : null}
 
-      {!loading && data && (
+      {!loading && data ? (
         <>
           {/* ══════════ DB OVERRIDES ══════════ */}
-          {activeSection === 'overrides' && (
+          {activeSection === 'overrides' ? (
             <div className="space-y-2">
               {data.overrides.filter(filterFn).length === 0 ? (
                 <div className="text-center py-12 text-slate-500">
@@ -475,10 +475,10 @@ export default function DistributorPricesPage() {
                 </div>
               )}
             </div>
-          )}
+          ) : null}
 
           {/* ══════════ STATIC CATALOG ══════════ */}
-          {activeSection === 'catalog' && (
+          {activeSection === 'catalog' ? (
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs text-slate-500 mb-3">
                 <Info size={11} />
@@ -512,7 +512,7 @@ export default function DistributorPricesPage() {
                         </div>
                       </button>
 
-                      {isOpen && (
+                      {isOpen ? (
                         <div>
                           <div className="bg-slate-800/40 px-4 py-1.5 grid grid-cols-12 gap-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-700/40">
                             <div className="col-span-4">Part Number</div>
@@ -542,15 +542,15 @@ export default function DistributorPricesPage() {
                             </div>
                           ))}
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   );
                 })}
             </div>
-          )}
+          ) : null}
 
           {/* ══════════ FALLBACKS ══════════ */}
-          {activeSection === 'fallbacks' && (
+          {activeSection === 'fallbacks' ? (
             <div className="space-y-1">
               <div className="flex items-center gap-2 text-xs text-slate-500 mb-3">
                 <Info size={11} />
@@ -580,9 +580,9 @@ export default function DistributorPricesPage() {
                   ))}
               </div>
             </div>
-          )}
+          ) : null}
         </>
-      )}
+      ) : null}
 
       {/* ── Confirm Dialog ── */}
       {confirmDialog ? (
@@ -595,13 +595,13 @@ export default function DistributorPricesPage() {
       ) : null}
 
       {/* ── Modal ── */}
-      {showModal && (
+      {showModal ? (
         <OverrideModal
           entry={editEntry}
           onSave={handleSave}
           onClose={() => { setShowModal(false); setEditEntry(undefined); }}
         />
-      )}
+      ) : null}
     </div>
   );
 }

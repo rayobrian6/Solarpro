@@ -933,14 +933,14 @@ export default function SolarDog({ autoStartTour = false, onTourComplete }: Sola
       <style>{WIDGET_CSS}</style>
 
       {/* Subtitle bar */}
-      {subVisible && subtitle && (
+      {subVisible && subtitle ? (
         <div id="sd-subtitle" role="status" aria-live="polite">
           <span className="sd-sub-text">{subtitle}</span>
-          {isTour && (
+          {isTour ? (
             <button className="sd-sub-skip" onClick={stopTour}>Skip ✕</button>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       {/* Dog sprite */}
       <div
@@ -963,16 +963,16 @@ export default function SolarDog({ autoStartTour = false, onTourComplete }: Sola
       </div>
 
       {/* Chat panel */}
-      {chatOpen && (
+      {chatOpen ? (
         <div id="sd-chat" role="dialog" aria-label="SolarDog chat">
 
           {/* Header */}
           <div id="sd-header">
             <div id="sd-header-left">
               <span id="sd-title">🐾 SolarDog</span>
-              {modeBadge && (
+              {modeBadge ? (
                 <span className="sd-mode-badge">{modeBadge}</span>
-              )}
+              ) : null}
             </div>
             <div id="sd-header-right">
               <span id="sd-subtitle-sm">AI Agent • LLM-powered</span>
@@ -990,12 +990,12 @@ export default function SolarDog({ autoStartTour = false, onTourComplete }: Sola
           </div>
 
           {/* Project pill */}
-          {projectPill && (
+          {projectPill ? (
             <div id="sd-project-pill">{projectPill}</div>
-          )}
+          ) : null}
 
           {/* Voice panel */}
-          {showVoicePanel && (
+          {showVoicePanel ? (
             <div id="sd-voice-panel">
               <div className="sd-voice-row">
                 <span className="sd-vp-label">Volume</span>
@@ -1017,13 +1017,13 @@ export default function SolarDog({ autoStartTour = false, onTourComplete }: Sola
                 </button>
                 {voiceHint && <span className="sd-vp-hint">{voiceHint}</span>}
               </div>
-              {serverVoiceEnabled === false && (
+              {serverVoiceEnabled === false ? (
                 <div className="sd-vp-hint" style={{ color: '#f87171' }}>
                   ⚠️ Voice not configured on server (no ELEVENLABS_API_KEY)
                 </div>
-              )}
+              ) : null}
             </div>
-          )}
+          ) : null}
 
           {/* Messages */}
           <div id="sd-messages" role="log" aria-live="polite">
@@ -1071,25 +1071,25 @@ export default function SolarDog({ autoStartTour = false, onTourComplete }: Sola
                     className={`sd-msg sd-msg-${m.role}`}
                     style={{ borderLeft: m.role === 'assistant' ? `2px solid ${severityColor(m.severity)}` : undefined }}
                   >
-                    {badge && m.role === 'assistant' && (
+                    {badge && m.role === 'assistant' ? (
                       <span
                         className="sd-type-badge"
                         style={{ background: badge.bg, color: badge.color }}
                       >
                         {badge.label}
                       </span>
-                    )}
+                    ) : null}
                     <span className="sd-msg-text">{renderMarkdown(m.content)}</span>
-                    {m.highlight && (
+                    {m.highlight ? (
                       <button
                         className="sd-highlight-btn"
                         onClick={() => highlightElement(m.highlight!)}
                       >
                         🔍 Show me
                       </button>
-                    )}
+                    ) : null}
                     {/* v61.16: Suggested action buttons */}
-                    {m.role === 'assistant' && m.suggestedActions && m.suggestedActions.length > 0 && (
+                    {m.role === 'assistant' && m.suggestedActions && m.suggestedActions.length > 0 ? (
                       <div className="sd-suggested-actions">
                         <span className="sd-sugg-label">Suggested actions:</span>
                         {m.suggestedActions.map(sa => (
@@ -1106,20 +1106,20 @@ export default function SolarDog({ autoStartTour = false, onTourComplete }: Sola
                           </button>
                         ))}
                       </div>
-                    )}
+                    ) : null}
                     {/* v61.16: Next step pill */}
-                    {m.role === 'assistant' && m.nextStep && (
+                    {m.role === 'assistant' && m.nextStep ? (
                       <div className="sd-next-step-pill">
                         <span>Next: {m.nextStep}</span>
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 );
               })
             )}
 
             {/* Guided mode — next step button */}
-            {guidedState && (
+            {guidedState ? (
               <div className="sd-guided-bar">
                 <span className="sd-guided-label">
                   Step {guidedState.step + 1}/{guidedState.steps.length}
@@ -1131,26 +1131,26 @@ export default function SolarDog({ autoStartTour = false, onTourComplete }: Sola
                   Stop guide
                 </button>
               </div>
-            )}
+            ) : null}
 
             {/* Pending confirm (medium confidence nav) */}
-            {pendingConfirm && (
+            {pendingConfirm ? (
               <div className="sd-pending-nav">
                 <span>Navigating to <strong>{pendingConfirm.label}</strong>…</span>
                 <button onClick={() => { setPendingConfirm(null); }} className="sd-cancel-nav">Cancel</button>
               </div>
-            )}
+            ) : null}
 
-            {isLoading && (
+            {isLoading ? (
               <div className="sd-msg sd-msg-assistant">
                 <span className="sd-typing">●●●</span>
               </div>
-            )}
+            ) : null}
             <div ref={endRef} />
           </div>
 
           {/* Learned aliases panel (dev mode) */}
-          {(currentMode === 'developer' || currentMode === 'debug') && learnedAliases.length > 0 && (
+          {(currentMode === 'developer' || currentMode === 'debug') && learnedAliases.length > 0 ? (
             <div id="sd-aliases-panel">
               <button
                 className="sd-aliases-toggle"
@@ -1158,7 +1158,7 @@ export default function SolarDog({ autoStartTour = false, onTourComplete }: Sola
               >
                 🧠 {learnedAliases.length} learned alias{learnedAliases.length !== 1 ? 'es' : ''} {showAliases ? '▲' : '▼'}
               </button>
-              {showAliases && (
+              {showAliases ? (
                 <div className="sd-aliases-list">
                   {learnedAliases.map((a, i) => (
                     <div key={i} className="sd-alias-row">
@@ -1175,9 +1175,9 @@ export default function SolarDog({ autoStartTour = false, onTourComplete }: Sola
                     </div>
                   ))}
                 </div>
-              )}
+              ) : null}
             </div>
-          )}
+          ) : null}
 
           {/* Input bar */}
           <div id="sd-input-bar">
@@ -1235,10 +1235,10 @@ export default function SolarDog({ autoStartTour = false, onTourComplete }: Sola
           </div>
 
         </div>
-      )}
+      ) : null}
 
       {/* Tour overlay */}
-      {isTour && (
+      {isTour ? (
         <div id="sd-tour-overlay">
           <div id="sd-tour-card">
             <div id="sd-tour-progress">
@@ -1253,7 +1253,7 @@ export default function SolarDog({ autoStartTour = false, onTourComplete }: Sola
             <button id="sd-tour-skip" onClick={stopTour}>Skip tour</button>
           </div>
         </div>
-      )}
+      ) : null}
     </>
   );
 }

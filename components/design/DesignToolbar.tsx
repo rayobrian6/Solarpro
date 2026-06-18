@@ -74,7 +74,7 @@ export default function DesignToolbar({
       <div className="w-8 border-t border-slate-700/50 my-1" />
 
       {/* Finalize drawing */}
-      {drawnPoints >= 2 && (
+      {drawnPoints >= 2 ? (
         <button
           onClick={onFinalize}
           title="Finish Drawing (Double-click)"
@@ -85,10 +85,10 @@ export default function DesignToolbar({
             Finish Drawing
           </div>
         </button>
-      )}
+      ) : null}
 
       {/* Delete selected */}
-      {hasSelection && (
+      {hasSelection ? (
         <button
           onClick={onDeleteSelected}
           title="Delete Selected Panels"
@@ -99,14 +99,14 @@ export default function DesignToolbar({
             Delete Selected
           </div>
         </button>
-      )}
+      ) : null}
 
       {/* Drawing point counter */}
-      {drawnPoints > 0 && (
+      {drawnPoints > 0 ? (
         <div className="mt-auto mb-2 w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 text-xs font-bold">
           {drawnPoints}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

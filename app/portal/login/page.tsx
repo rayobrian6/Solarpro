@@ -321,12 +321,12 @@ function PortalLogin() {
                   </div>
                 </div>
 
-                {error && (
+                {error ? (
                   <div className="flex items-start gap-2.5 text-sm text-red-400 bg-red-500/[0.08] border border-red-500/[0.18] rounded-xl px-4 py-3">
                     <AlertCircle size={14} className="shrink-0 mt-0.5" />
                     <span>{error}</span>
                   </div>
-                )}
+                ) : null}
 
                 <button
                   type="submit"
@@ -365,7 +365,7 @@ function PortalLogin() {
           )}
 
           {/* ─── STEP 2: OTP ─── */}
-          {step === 'otp' && (
+          {step === 'otp' ? (
             <>
               <div className="mb-8">
                 {/* Icon */}
@@ -410,19 +410,19 @@ function PortalLogin() {
                 ))}
               </div>
 
-              {error && (
+              {error ? (
                 <div className="flex items-start gap-2.5 text-sm text-red-400 bg-red-500/[0.08] border border-red-500/[0.18] rounded-xl px-4 py-3 mb-4">
                   <AlertCircle size={14} className="shrink-0 mt-0.5" />
                   <span>{error}</span>
                 </div>
-              )}
+              ) : null}
 
-              {loading && (
+              {loading ? (
                 <div className="flex items-center justify-center gap-2 text-sm text-slate-400 mb-4">
                   <Loader2 size={14} className="animate-spin" />
                   Verifying…
                 </div>
-              )}
+              ) : null}
 
               {/* Resend + back */}
               <div className="flex items-center justify-between text-xs text-slate-500 mt-2">
@@ -460,7 +460,7 @@ function PortalLogin() {
                 </div>
               </div>
             </>
-          )}
+          ) : null}
 
           <p className="text-center text-xs text-slate-600 mt-6">
             Don't have a project yet?{' '}

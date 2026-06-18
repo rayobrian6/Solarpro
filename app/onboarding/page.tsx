@@ -282,7 +282,7 @@ export default function OnboardingPage() {
           <ProgressBar step={step} />
 
           {/* ── Step 1: Welcome ── */}
-          {step === 1 && (
+          {step === 1 ? (
             <div>
               <h1 className="text-2xl font-black text-white mb-2">
                 Welcome{userName ? `, ${userName.split(' ')[0]}` : ''}! 👋
@@ -325,11 +325,11 @@ export default function OnboardingPage() {
                         <span className="opacity-60">{w.step}</span>
                         {w.label}
                       </div>
-                      {i < arr.length - 1 && (
+                      {i < arr.length - 1 ? (
                         <svg className="text-slate-600 flex-shrink-0" width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
                           <path d="M4.5 2L9 6l-4.5 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
                         </svg>
-                      )}
+                      ) : null}
                     </React.Fragment>
                   ))}
                 </div>
@@ -349,10 +349,10 @@ export default function OnboardingPage() {
                 </button>
               </p>
             </div>
-          )}
+          ) : null}
 
           {/* ── Step 2: Company Info ── */}
-          {step === 2 && (
+          {step === 2 ? (
             <div>
               <h1 className="text-xl font-black text-white mb-1">Company info</h1>
               <p className="text-slate-400 text-sm mb-6">
@@ -360,26 +360,26 @@ export default function OnboardingPage() {
               </p>
 
               {/* Registry lookup loading banner */}
-              {bizLoading && (
+              {bizLoading ? (
                 <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs">
                   <Loader2 size={12} className="animate-spin" />
                   Looking up your business info from public registries…
                 </div>
-              )}
+              ) : null}
 
               {/* Registry suggestion banner (shown once when results arrive) */}
-              {bizResult && !bizLoading && Object.keys(registryFields).length > 0 && (
+              {bizResult && !bizLoading && Object.keys(registryFields).length > 0 ? (
                 <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400 text-xs">
                   <Sparkles size={12} />
                   Auto-filled some fields from {bizResult.method === 'opencorporates_api' ? 'OpenCorporates registry' : bizResult.method === 'email_domain' ? 'your email domain' : 'business lookup'}. Review and edit as needed.
                 </div>
-              )}
+              ) : null}
 
               <div className="space-y-4 mb-6">
                 <div>
                   <label className="block text-xs font-medium text-slate-400 mb-1.5">
                     Company name <span className="text-red-400">*</span>
-                    {registryFields.companyName && bizResult?.companyName && (
+                    {registryFields.companyName && bizResult?.companyName ? (
                       <ConfidenceBadge
                         confidence={mapConfidence(bizResult.companyName.confidence)}
                         source="registry"
@@ -387,7 +387,7 @@ export default function OnboardingPage() {
                         size="xs"
                         overridden={userOverrides.companyName}
                       />
-                    )}
+                    ) : null}
                   </label>
                   <div className="relative">
                     <Building2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -407,7 +407,7 @@ export default function OnboardingPage() {
                 <div>
                   <label className="block text-xs font-medium text-slate-400 mb-1.5">
                     Phone number
-                    {registryFields.companyPhone && bizResult?.companyPhone && (
+                    {registryFields.companyPhone && bizResult?.companyPhone ? (
                       <ConfidenceBadge
                         confidence={mapConfidence(bizResult.companyPhone.confidence)}
                         source="registry"
@@ -415,7 +415,7 @@ export default function OnboardingPage() {
                         size="xs"
                         overridden={userOverrides.companyPhone}
                       />
-                    )}
+                    ) : null}
                   </label>
                   <div className="relative">
                     <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -435,7 +435,7 @@ export default function OnboardingPage() {
                 <div>
                   <label className="block text-xs font-medium text-slate-400 mb-1.5">
                     Website
-                    {registryFields.companyWebsite && bizResult?.companyWebsite && (
+                    {registryFields.companyWebsite && bizResult?.companyWebsite ? (
                       <ConfidenceBadge
                         confidence={mapConfidence(bizResult.companyWebsite.confidence)}
                         source="registry"
@@ -443,7 +443,7 @@ export default function OnboardingPage() {
                         size="xs"
                         overridden={userOverrides.companyWebsite}
                       />
-                    )}
+                    ) : null}
                   </label>
                   <div className="relative">
                     <Globe size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -463,7 +463,7 @@ export default function OnboardingPage() {
                 <div>
                   <label className="block text-xs font-medium text-slate-400 mb-1.5">
                     Business address
-                    {registryFields.companyAddress && bizResult?.companyAddress && (
+                    {registryFields.companyAddress && bizResult?.companyAddress ? (
                       <ConfidenceBadge
                         confidence={mapConfidence(bizResult.companyAddress.confidence)}
                         source="registry"
@@ -471,7 +471,7 @@ export default function OnboardingPage() {
                         size="xs"
                         overridden={userOverrides.companyAddress}
                       />
-                    )}
+                    ) : null}
                   </label>
                   <div className="relative">
                     <MapPin size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -489,9 +489,9 @@ export default function OnboardingPage() {
                 </div>
               </div>
 
-              {error && (
+              {error ? (
                 <p className="text-red-400 text-xs mb-4 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>
-              )}
+              ) : null}
 
               <div className="flex gap-3">
                 <button onClick={back} className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-400 hover:text-white border border-slate-700 rounded-lg transition-colors">
@@ -507,10 +507,10 @@ export default function OnboardingPage() {
                 </button>
               </p>
             </div>
-          )}
+          ) : null}
 
           {/* ── Step 3: Branding ── */}
-          {step === 3 && (
+          {step === 3 ? (
             <div>
               <h1 className="text-xl font-black text-white mb-1">Brand your proposals</h1>
               <p className="text-slate-400 text-sm mb-6">
@@ -612,9 +612,9 @@ export default function OnboardingPage() {
                 </div>
               </div>
 
-              {error && (
+              {error ? (
                 <p className="text-red-400 text-xs mb-4 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>
-              )}
+              ) : null}
 
               <div className="flex gap-3">
                 <button onClick={back} className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-400 hover:text-white border border-slate-700 rounded-lg transition-colors">
@@ -630,10 +630,10 @@ export default function OnboardingPage() {
                 </button>
               </p>
             </div>
-          )}
+          ) : null}
 
           {/* ── Step 4: Done ── */}
-          {step === 4 && (
+          {step === 4 ? (
             <div className="text-center">
               <div className="w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-500 flex items-center justify-center mx-auto mb-6">
                 <CheckCircle size={40} className="text-emerald-400" />
@@ -662,12 +662,12 @@ export default function OnboardingPage() {
                   >
                     <span className={item.primary ? 'text-slate-900' : 'text-amber-400'}>{item.icon}</span>
                     {item.label}
-                    {item.primary && <ArrowRight size={14} />}
+                    {item.primary ? <ArrowRight size={14} /> : null}
                   </Link>
                 ))}
               </div>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

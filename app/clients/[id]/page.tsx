@@ -603,7 +603,7 @@ function ClientDetailContent() {
                     <div key={i} className="flex items-start gap-3 text-sm">
                       <span className="text-slate-500 mt-0.5 flex-shrink-0">{item.icon}</span>
                       <span className="text-slate-300 flex-1">{item.value}</span>
-                      {item.field && <ConfidenceBadge confidence={dataConfidence(item.field).confidence} source={dataConfidence(item.field).source} size="xs" detail={dataConfidence(item.field).detail} />}
+                      {item.field ? <ConfidenceBadge confidence={dataConfidence(item.field).confidence} source={dataConfidence(item.field).source} size="xs" detail={dataConfidence(item.field).detail} /> : null}
                     </div>
                   ))}
                 </div>
@@ -656,7 +656,7 @@ function ClientDetailContent() {
                   <div key={item.label} className="bg-slate-800/60 rounded-xl p-3">
                     <div className="flex items-center justify-between mb-1">
                       <div className={`flex items-center gap-1.5 ${item.color}`}>{item.icon}<span className="text-xs">{item.label}</span></div>
-                      {item.field && <ConfidenceBadge confidence={dataConfidence(item.field).confidence} source={dataConfidence(item.field).source} size="xs" detail={dataConfidence(item.field).detail} />}
+                      {item.field ? <ConfidenceBadge confidence={dataConfidence(item.field).confidence} source={dataConfidence(item.field).source} size="xs" detail={dataConfidence(item.field).detail} /> : null}
                     </div>
                     <div className="font-bold text-white text-sm">{item.value}</div>
                   </div>

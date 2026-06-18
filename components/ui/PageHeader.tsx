@@ -18,21 +18,21 @@ export function PageHeader({
   return (
     <div className={`flex items-start justify-between gap-4 ${className}`}>
       <div className="min-w-0 flex-1">
-        {breadcrumb && (
+        {breadcrumb ? (
           <div className="flex items-center gap-1 mb-1.5" style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
             {breadcrumb}
           </div>
-        )}
+        ) : null}
         <h1 className="page-title truncate">{title}</h1>
-        {subtitle && (
+        {subtitle ? (
           <p className="page-subtitle">{subtitle}</p>
-        )}
+        ) : null}
       </div>
-      {actions && (
+      {actions ? (
         <div className="flex items-center gap-3 flex-shrink-0 mt-1">
           {actions}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

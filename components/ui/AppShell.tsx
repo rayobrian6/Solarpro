@@ -112,7 +112,7 @@ function UserDropdown({ onLogout }: { onLogout: () => void }) {
         <ChevronDown size={13} className={`text-slate-500 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {open && (
+      {open ? (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute bottom-full left-0 right-0 mb-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-20 overflow-hidden">
@@ -125,22 +125,22 @@ function UserDropdown({ onLogout }: { onLogout: () => void }) {
 
             {/* Menu items */}
             <div className="py-1">
-              {showAdminPortal && (
+              {showAdminPortal ? (
                 <Link href="/admin" onClick={() => { logNavigation('/admin'); setOpen(false); }}
                   className="flex items-center gap-2.5 px-3 py-2 text-sm text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors">
                   <Shield size={14} /> Admin Portal
                 </Link>
-              )}
+              ) : null}
               <Link href="/account/billing" onClick={() => { logNavigation('/account/billing'); setOpen(false); }}
                 className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors">
                 <CreditCard size={14} className="text-slate-500" /> Billing
               </Link>
-              {showUpgrade && (
+              {showUpgrade ? (
                 <Link href="/subscribe" onClick={() => { logNavigation('/subscribe'); setOpen(false); }}
                   className="flex items-center gap-2.5 px-3 py-2 text-sm text-amber-400 hover:text-amber-300 hover:bg-slate-700/50 transition-colors">
                   <ArrowRight size={14} /> Upgrade Plan
                 </Link>
-              )}
+              ) : null}
               <Link href="/settings" onClick={() => { logNavigation('/settings'); setOpen(false); }}
                 className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors">
                 <Settings size={14} className="text-slate-500" /> Settings
@@ -163,7 +163,7 @@ function UserDropdown({ onLogout }: { onLogout: () => void }) {
             </div>
           </div>
         </>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -210,12 +210,12 @@ function HeaderUserDropdown({ initials, displayName, loading, onLogout }: {
           <div className={`text-xs font-medium mt-0.5 ${badge.color}`}>{badge.label}</div>
         </div>
         <div className="py-1">
-          {showAdminPortal && (
+          {showAdminPortal ? (
             <Link href="/admin" onClick={() => { logNavigation('/admin'); setOpen(false); }}
               className="flex items-center gap-2.5 px-3 py-2 text-sm text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors">
               <Shield size={14} /> Admin Portal
             </Link>
-          )}
+          ) : null}
           <Link href="/account/billing" onClick={() => { logNavigation('/account/billing'); setOpen(false); }}
             className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors">
             <CreditCard size={14} className="text-slate-500" /> Billing
@@ -386,7 +386,7 @@ function NotificationDropdown({ projects }: { projects: Project[] }) {
         )}
       </button>
 
-      {open && (
+      {open ? (
         <>
           <div className="fixed inset-0 z-[9990]" onClick={() => setOpen(false)} />
           <div className="fixed w-80 z-[9991] rounded-xl overflow-hidden shadow-2xl"
@@ -412,7 +412,7 @@ function NotificationDropdown({ projects }: { projects: Project[] }) {
             </div>
 
             {/* Feedback banner for admins */}
-            {fbCount > 0 && (
+            {fbCount > 0 ? (
               <Link href="/admin/feedback" onClick={() => setOpen(false)}
                 className="flex items-center gap-3 px-4 py-3 hover:bg-amber-500/10 transition-colors"
                 style={{ borderBottom: '1px solid var(--border-color)' }}>
@@ -424,7 +424,7 @@ function NotificationDropdown({ projects }: { projects: Project[] }) {
                   <div className="text-[11px] text-slate-500">Click to review in Admin Portal</div>
                 </div>
               </Link>
-            )}
+            ) : null}
 
             {/* Notification list */}
             {notifications.length === 0 && fbCount === 0 ? (
@@ -498,7 +498,7 @@ function NotificationDropdown({ projects }: { projects: Project[] }) {
             </div>
           </div>
         </>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -643,20 +643,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <div className="relative w-9 h-9 rounded-xl solar-gradient flex items-center justify-center flex-shrink-0 shadow-lg shadow-amber-500/30 group-hover:shadow-amber-500/50 transition-all duration-300 group-hover:scale-105"><div className="absolute inset-0 rounded-xl bg-amber-400/20 blur-md -z-10 group-hover:bg-amber-400/30 transition-all" />
             <Sun size={19} className="text-slate-900" />
           </div>
-          {!collapsed && (
+          {!collapsed ? (
             <div>
               <div className="font-black text-white text-sm leading-tight tracking-tight">SolarPro</div>
               <div className="text-xs text-amber-400/80 font-medium">Design Platform</div>
             </div>
-          )}
+          ) : null}
         </Link>
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
-        {!collapsed && (
+        {!collapsed ? (
           <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider px-3 mb-2">Main</div>
-        )}
+        ) : null}
         {navItems.map((item) => {
           const active = isActive(item.href);
           const href = navHref(item.href);
@@ -681,30 +681,30 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <span className={`flex-shrink-0 ${active ? 'text-amber-400' : item.color || ''}`}>
                 {item.icon}
               </span>
-              {!collapsed && (
+              {!collapsed ? (
                 <>
                   <span className="flex-1">{item.label}</span>
-                  {item.badge && (
+                  {item.badge ? (
                     <span className="bg-amber-500 text-slate-900 text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
                       {item.badge}
                     </span>
-                  )}
-                  {item.href === '/design' && !active && (
+                  ) : null}
+                  {item.href === '/design' && !active ? (
                     <span className="text-xs text-amber-500/60 font-normal">Studio</span>
-                  )}
+                  ) : null}
                 </>
-              )}
+              ) : null}
             </Link>
           );
         })}
 
         {/* Admin Portal link — only for admin/super_admin */}
-        {isAdmin && (
+        {isAdmin ? (
           <>
             <div className={`${collapsed ? 'border-t border-slate-700/50 my-3' : 'mt-3 mb-2'}`}>
-              {!collapsed && (
+              {!collapsed ? (
                 <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider px-3 mb-2">System</div>
-              )}
+              ) : null}
             </div>
             <Link
               href="/admin"
@@ -723,11 +723,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               {!collapsed && <span>Admin Portal</span>}
             </Link>
           </>
-        )}
+        ) : null}
       </nav>
 
       {/* Subscription CTA — hidden for admins and free pass users */}
-      {!collapsed && showSubscriptionCTA && user && (
+      {!collapsed && showSubscriptionCTA && user ? (
         <div className="px-3 pb-2">
           {user.subscriptionStatus === 'active' ? (
             <Link href="/account/billing" className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors">
@@ -755,10 +755,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
           )}
         </div>
-      )}
+      ) : null}
 
       {/* Free Pass badge */}
-      {!collapsed && isFreePassUser && !isAdmin && user && (
+      {!collapsed && isFreePassUser && !isAdmin && user ? (
         <div className="px-3 pb-2">
           <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
             <div className="w-6 h-6 rounded-lg bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
@@ -770,10 +770,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Admin badge */}
-      {!collapsed && isAdmin && user && (
+      {!collapsed && isAdmin && user ? (
         <div className="px-3 pb-2">
           <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-purple-500/10 border border-purple-500/20">
             <div className="w-6 h-6 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0">
@@ -787,7 +787,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* User Profile — sidebar bottom */}
       <div className={`px-3 py-3 border-t border-slate-700/50 flex-shrink-0 ${collapsed ? 'flex justify-center' : ''}`}>
@@ -830,7 +830,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Mobile Sidebar Overlay */}
-      {mobileOpen && (
+      {mobileOpen ? (
         <div className="lg:hidden fixed inset-0 z-50 flex">
           <div className="fixed inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
           <aside className="relative w-64 flex flex-col z-10" style={{ background: "rgba(9,18,32,0.98)", borderRight: "1px solid rgba(255,255,255,0.06)", boxShadow: "4px 0 32px rgba(0,0,0,0.6)" }}>
@@ -844,7 +844,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <SidebarContent />
           </aside>
         </div>
-      )}
+      ) : null}
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">

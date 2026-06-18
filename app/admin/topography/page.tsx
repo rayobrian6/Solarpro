@@ -152,15 +152,15 @@ function FlowNode({ icon, label, sublabel, status, isLast }: FlowNodeProps) {
         <span>{icon}</span>
         <div className="flex-1 min-w-0">
           <div className="truncate">{label}</div>
-          {sublabel && (
+          {sublabel ? (
             <div className="text-[10px] opacity-70 truncate">{sublabel}</div>
-          )}
+          ) : null}
         </div>
         <div className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot(status)}`} />
       </div>
-      {!isLast && (
+      {!isLast ? (
         <div className="w-px h-3 bg-slate-700" />
-      )}
+      ) : null}
     </div>
   );
 }
@@ -210,7 +210,7 @@ function FieldUtilizationTable({
         />
       </div>
 
-      {expanded && (
+      {expanded ? (
         <div className="space-y-0 border border-slate-800 rounded-lg overflow-hidden">
           {/* Header */}
           <div className="grid grid-cols-[1fr_auto_auto] gap-2 px-3 py-1.5 bg-slate-800/60">
@@ -245,7 +245,7 @@ function FieldUtilizationTable({
             </div>
           ))}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -393,11 +393,11 @@ function IntegrationPanel({
         <div className="flex items-center gap-2">
           <GitBranch size={13} className="text-cyan-400" />
           <span className="text-xs font-semibold text-white">System Integration</span>
-          {state.projectName && (
+          {state.projectName ? (
             <span className="text-[10px] text-slate-400 truncate max-w-[120px]" title={state.projectName}>
               — {state.projectName}
             </span>
-          )}
+          ) : null}
         </div>
         <button
           onClick={() => load(projectId)}
@@ -437,12 +437,12 @@ function IntegrationPanel({
               'green'
             }
           />
-          {state.layout.exists && (
+          {state.layout.exists ? (
             <StatusRow
               label={`Layout: ${state.layout.panelCount ?? '?'} panels · ${state.layout.systemType ?? 'unknown'}`}
               status="green"
             />
-          )}
+          ) : null}
         </div>
 
         <div>
@@ -601,14 +601,14 @@ function IntegrationPanel({
           <p className="text-[10px] text-slate-500 font-mono">
             Project: {state.projectId.slice(0, 8)}…
           </p>
-          {state.projectAddress && (
+          {state.projectAddress ? (
             <p className="text-[10px] text-slate-500 truncate">{state.projectAddress}</p>
-          )}
-          {state.projectLat != null && state.projectLng != null && (
+          ) : null}
+          {state.projectLat != null && state.projectLng != null ? (
             <p className="text-[10px] text-slate-500 font-mono">
               {state.projectLat.toFixed(5)}, {state.projectLng.toFixed(5)}
             </p>
-          )}
+          ) : null}
           <p className="text-[10px] text-slate-600 mt-1">
             Fetched: {fmtDate(state.fetchedAt)}
           </p>
@@ -740,7 +740,7 @@ function ArchitectureNodeCard({ node }: { node: ArchitectureNode }) {
         </div>
         {expanded ? <ChevronDown size={13} className="text-slate-500" /> : <ChevronRight size={13} className="text-slate-500" />}
       </button>
-      {expanded && (
+      {expanded ? (
         <div className="px-4 pb-4 border-t border-white/5 pt-3 space-y-3">
           <div>
             <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Evidence</p>
@@ -748,7 +748,7 @@ function ArchitectureNodeCard({ node }: { node: ArchitectureNode }) {
           </div>
           {node.tables && <div><p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1">DB Tables / Fields</p><p className="text-[10px] font-mono text-[#fbbf24]/90 leading-relaxed">{node.tables.join(' · ')}</p></div>}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -1012,7 +1012,7 @@ function LiveSurveyDataView() {
           </div>
         </div>
 
-        {ingestResult && (
+        {ingestResult ? (
           <div className={`mt-3 rounded-lg border px-3 py-2 text-[11px] ${
             ingestResult.success
               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
@@ -1021,28 +1021,28 @@ function LiveSurveyDataView() {
             {ingestResult.success ? (
               <span>
                 ✓ Ingested {ingestResult.surveysProcessed} surveys · {ingestResult.photosProcessed} photos
-                {ingestResult.results && (
+                {ingestResult.results ? (
                   <span className="ml-2 text-emerald-400/70">
                     ({ingestResult.results.filter(r => r.action === 'created').length} new,{' '}
                     {ingestResult.results.filter(r => r.action === 'updated').length} updated)
                   </span>
-                )}
+                ) : null}
               </span>
             ) : (
               <span className="space-y-1">
                 <span className="block">✗ {ingestResult.error}</span>
-                {ingestResult.code === 'PARTNER_DB_NOT_CONFIGURED' && (
+                {ingestResult.code === 'PARTNER_DB_NOT_CONFIGURED' ? (
                   <span className="block text-amber-400/80 text-[10px] mt-1">
                     Tip: The partner DB is not reachable from this environment.
                     Use <strong>"⟳ Fix All Defaults"</strong> or{' '}
                     <strong>"⟳ Fix from Webhook Log"</strong> below to reassign
                     existing misowned surveys without needing the partner DB.
                   </span>
-                )}
+                ) : null}
               </span>
             )}
           </div>
-        )}
+        ) : null}
 
         
       </div>
@@ -1142,11 +1142,11 @@ function LiveSurveyDataView() {
               >
                 {fixingAll === 'running' ? '⏳ Fixing…' : '⟳ Fix All Defaults'}
               </button>
-              {fixAllResult && (
+              {fixAllResult ? (
                 <span className={`text-[10px] font-medium ${fixingAll === 'done' ? 'text-emerald-400' : 'text-amber-400'}`}>
                   {fixAllResult}
                 </span>
-              )}
+              ) : null}
               {/* v58.20: backfill from webhook_deliveries.raw_body for pre-fix surveys */}
               <button
                 disabled={fixingWebhook === 'running'}
@@ -1186,11 +1186,11 @@ function LiveSurveyDataView() {
               >
                 {fixingWebhook === 'running' ? '⏳ Scanning…' : '⟳ Fix from Webhook Log'}
               </button>
-              {fixWebhookResult && (
+              {fixWebhookResult ? (
                 <span className={`text-[10px] font-medium ${fixingWebhook === 'done' ? 'text-emerald-400' : 'text-amber-400'}`}>
                   {fixWebhookResult}
                 </span>
-              )}
+              ) : null}
             </div>
 
             {projects.map((project) => {
@@ -1211,37 +1211,37 @@ function LiveSurveyDataView() {
                         <span className="text-sm font-semibold text-white truncate">
                           {project.name}
                         </span>
-                        {photoCount > 0 && (
+                        {photoCount > 0 ? (
                           <span className="flex items-center gap-1 text-[9px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-1.5 py-0.5 rounded-full flex-shrink-0">
                             <Camera size={8} />
                             {photoCount} photo{photoCount !== 1 ? 's' : ''}
                           </span>
-                        )}
+                        ) : null}
                       </div>
 
-                      {(project.site_address ?? project.address) && (
+                      {(project.site_address ?? project.address) ? (
                         <div className="flex items-center gap-1 text-[11px] text-slate-400 truncate">
                           <MapPin size={9} className="flex-shrink-0" />
                           {project.site_address ?? project.address}
                         </div>
-                      )}
+                      ) : null}
 
                       <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                        {project.ppd_lat != null && project.ppd_lng != null && (
+                        {project.ppd_lat != null && project.ppd_lng != null ? (
                           <span className="text-[10px] font-mono text-slate-500">
                             {Number(project.ppd_lat).toFixed(4)}, {Number(project.ppd_lng).toFixed(4)}
                           </span>
-                        )}
-                        {project.roof_material && (
+                        ) : null}
+                        {project.roof_material ? (
                           <span className="text-[10px] text-slate-500">
                             {project.roof_material}
                           </span>
-                        )}
-                        {project.mounting_notes && (
+                        ) : null}
+                        {project.mounting_notes ? (
                           <span className="text-[10px] text-slate-500 truncate max-w-[200px]">
                             {project.mounting_notes}
                           </span>
-                        )}
+                        ) : null}
                       </div>
                     </div>
 
@@ -1256,7 +1256,7 @@ function LiveSurveyDataView() {
                     </div>
                   </button>
 
-                  {isExpanded && (
+                  {isExpanded ? (
                     <div className="border-t border-slate-800/60 px-4 py-3 space-y-3">
 
                       {/* F-06: Ownership badge + Fix Owner button */}
@@ -1279,12 +1279,12 @@ function LiveSurveyDataView() {
                               ) : (
                                 <span>✓ Owner Resolved from Handoff JWT — solarpro_user_id: <span className="font-mono opacity-80">{(solarproUserId ?? '').slice(0, 8)}…</span></span>
                               )}
-                              {solarproProjectId && (
+                              {solarproProjectId ? (
                                 <span className="opacity-60 ml-1">project: <span className="font-mono">{solarproProjectId.slice(0, 8)}…</span></span>
-                              )}
+                              ) : null}
                             </div>
                             {/* v58.20: Fix Owner button — shown when survey_meta has a solarpro_user_id claim */}
-                            {isDefault && solarproUserId && (
+                            {isDefault && solarproUserId ? (
                               <button
                                 className="text-[10px] px-3 py-1 rounded-md bg-blue-600/20 border border-blue-500/30 text-blue-400 hover:bg-blue-600/30 transition-colors font-medium"
                                 onClick={() => {
@@ -1314,9 +1314,9 @@ function LiveSurveyDataView() {
                               >
                                 → Fix Owner (assign to solarpro_user_id claim)
                               </button>
-                            )}
+                            ) : null}
                             {/* v58.20: Manual reassign — always shown for default-owned surveys */}
-                            {isDefault && (
+                            {isDefault ? (
                               <button
                                 className="text-[10px] px-3 py-1 rounded-md bg-slate-700/60 border border-slate-600/40 text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition-colors font-medium"
                                 onClick={async () => {
@@ -1352,9 +1352,9 @@ function LiveSurveyDataView() {
                               >
                                 ✎ Reassign to Email…
                               </button>
-                            )}
+                            ) : null}
                             {/* Debug Claims - shows what claims are in the webhook log for this survey */}
-                            {isDefault && (
+                            {isDefault ? (
                               <button
                                 className="text-[10px] px-3 py-1 rounded-md bg-violet-600/20 border border-violet-500/30 text-violet-400 hover:bg-violet-600/30 transition-colors font-medium"
                                 onClick={async () => {
@@ -1412,7 +1412,7 @@ function LiveSurveyDataView() {
                               >
                                 ? Debug Claims
                               </button>
-                            )}
+                            ) : null}
                           </div>
                         );
                       })()}
@@ -1481,9 +1481,9 @@ function LiveSurveyDataView() {
                                     <Camera size={16} className="text-slate-600" />
                                   </div>
                                 </a>
-                                {photo.notes && (
+                                {photo.notes ? (
                                   <div className="mt-1 text-[9px] text-slate-500 truncate">{photo.notes}</div>
-                                )}
+                                ) : null}
                               </div>
                             ))}
                           </div>
@@ -1501,7 +1501,7 @@ function LiveSurveyDataView() {
                       )}
 
                     </div>
-                  )}
+                  ) : null}
                 </div>
               );
             })}
@@ -1631,48 +1631,48 @@ export default function AdminTopography() {
           </div>
 
           {/* Map status (only when map tab active) */}
-          {leftTab === 'map' && (
+          {leftTab === 'map' ? (
             <>
-              {iframeLoading && (
+              {iframeLoading ? (
                 <span className="flex items-center gap-1.5 text-[10px] text-slate-500">
                   <div className="w-3 h-3 border border-slate-600 border-t-amber-400 rounded-full animate-spin" />
                   Loading…
                 </span>
-              )}
-              {!iframeLoading && !iframeError && (
+              ) : null}
+              {!iframeLoading && !iframeError ? (
                 <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-medium">
                   Live
                 </span>
-              )}
-              {iframeError && (
+              ) : null}
+              {iframeError ? (
                 <span className="flex items-center gap-1 text-[10px] text-red-400">
                   <AlertTriangle size={10} /> Map failed
                 </span>
-              )}
+              ) : null}
             </>
-          )}
+          ) : null}
 
           {/* Pipeline badge */}
-          {leftTab === 'pipeline' && (
+          {leftTab === 'pipeline' ? (
             <span className="flex items-center gap-1 text-[10px] bg-[#f472b6]/10 text-[#f472b6] border border-[#f472b6]/20 px-2 py-0.5 rounded-full font-medium">
               <Network size={9} />
               {ARCHITECTURE_NODES.length} Nodes · {ARCHITECTURE_EDGES.length} Edges
             </span>
-          )}
+          ) : null}
           {/* Partner badge */}
-          {leftTab === 'partner' && (
+          {leftTab === 'partner' ? (
             <span className="flex items-center gap-1 text-[10px] bg-[#4fd1c5]/10 text-[#4fd1c5] border border-[#4fd1c5]/20 px-2 py-0.5 rounded-full font-medium">
               <Smartphone size={9} />
               Partner App — Unified Topology
             </span>
-          )}
+          ) : null}
           {/* Surveys badge */}
-          {leftTab === 'surveys' && (
+          {leftTab === 'surveys' ? (
             <span className="flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-medium">
               <Download size={9} />
               Live Survey Data — Force Ingest
             </span>
-          )}
+          ) : null}
 
           <span className="text-slate-700">|</span>
 
@@ -1689,13 +1689,13 @@ export default function AdminTopography() {
         </div>
 
         <div className="flex items-center gap-4">
-          {leftTab === 'map' && lastLoaded && !iframeError && (
+          {leftTab === 'map' && lastLoaded && !iframeError ? (
             <span className="flex items-center gap-1.5 text-[10px] text-slate-500">
               <Clock size={10} />
               {fmtTime(lastLoaded)}
             </span>
-          )}
-          {leftTab === 'map' && (
+          ) : null}
+          {leftTab === 'map' ? (
             <button
               onClick={handleRefresh}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs text-slate-300 hover:text-white transition-all"
@@ -1703,8 +1703,8 @@ export default function AdminTopography() {
               <RefreshCw size={12} className={iframeLoading ? 'animate-spin' : ''} />
               Refresh Map
             </button>
-          )}
-          {leftTab === 'partner' && (
+          ) : null}
+          {leftTab === 'partner' ? (
             <button
               onClick={() => setPartnerRefreshKey(k => k + 1)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs text-slate-300 hover:text-white transition-all"
@@ -1712,7 +1712,7 @@ export default function AdminTopography() {
               <RefreshCw size={12} />
               Refresh
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -1725,13 +1725,13 @@ export default function AdminTopography() {
           {/* MAP TAB */}
           <div className={`absolute inset-0 transition-opacity duration-200 ${leftTab === 'map' ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
             <div className="relative w-full h-full bg-[#0a0f1e]">
-              {iframeLoading && leftTab === 'map' && (
+              {iframeLoading && leftTab === 'map' ? (
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-[#0a0f1e]">
                   <div className="w-10 h-10 border-2 border-slate-700 border-t-amber-400 rounded-full animate-spin" />
                   <p className="text-slate-400 text-sm">Loading topography map…</p>
                 </div>
-              )}
-              {iframeError && leftTab === 'map' && (
+              ) : null}
+              {iframeError && leftTab === 'map' ? (
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-[#0a0f1e]">
                   <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
                     <AlertTriangle size={20} className="text-red-400" />
@@ -1749,7 +1749,7 @@ export default function AdminTopography() {
                     </button>
                   </div>
                 </div>
-              )}
+              ) : null}
               <iframe
                 key={refreshKey}
                 ref={iframeRef}

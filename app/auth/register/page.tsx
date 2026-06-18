@@ -240,7 +240,7 @@ export default function RegisterPage() {
                 <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 mt-0.5 transition-all ${
                   form.agreeTerms ? 'bg-amber-500 border-amber-500' : 'border-slate-600 group-hover:border-slate-500'
                 }`}>
-                  {form.agreeTerms && <CheckCircle size={12} className="text-slate-900" />}
+                  {form.agreeTerms ? <CheckCircle size={12} className="text-slate-900" /> : null}
                 </div>
                 <input name="agreeTerms" type="checkbox" checked={form.agreeTerms} onChange={handleChange} className="sr-only" />
                 <span className="text-sm text-slate-400">
@@ -251,11 +251,11 @@ export default function RegisterPage() {
               </label>
 
               {/* Error */}
-              {error && (
+              {error ? (
                 <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-red-400 text-sm">
                   {error}
                 </div>
-              )}
+              ) : null}
 
               {/* Submit */}
               <button

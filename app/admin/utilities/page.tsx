@@ -161,7 +161,7 @@ function StateSection({ state, utilities, defaultOpen, onEdit, onDelete }: {
       </button>
 
       {/* ── Table ── */}
-      {open && (
+      {open ? (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
@@ -226,7 +226,7 @@ function StateSection({ state, utilities, defaultOpen, onEdit, onDelete }: {
             </tbody>
           </table>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -330,14 +330,14 @@ export default function AdminUtilities() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-black text-white">Utility Intelligence Database</h1>
-          {!loading && items.length > 0 && (
+          {!loading && items.length > 0 ? (
             <div className="flex gap-3 mt-1 text-[11px]">
               <span className="text-slate-500">{items.length} utilities · {states.length} states</span>
               <span className="text-blue-400">{iouCount} IOU</span>
               <span className="text-green-400">{coopCount} Co-op</span>
               <span className="text-amber-400">{muniCount} Muni/PUD</span>
             </div>
-          )}
+          ) : null}
         </div>
         <button onClick={() => { setAdding(true); setEditing(null); }}
           className="flex items-center gap-1.5 text-xs bg-blue-500 text-white font-semibold rounded-lg px-3 py-2 hover:bg-blue-400 transition-all shrink-0">
@@ -347,7 +347,7 @@ export default function AdminUtilities() {
 
       {/* ── Add/Edit form ── */}
       {(adding && !editing) && <UtilityForm onSave={save} onCancel={() => setAdding(false)} />}
-      {editing && <UtilityForm initial={editing} onSave={save} onCancel={() => setEditing(null)} />}
+      {editing ? <UtilityForm initial={editing} onSave={save} onCancel={() => setEditing(null)} /> : null}
 
       {/* ── Filter bar ── */}
       <div className="flex flex-wrap gap-2 items-center p-3 rounded-xl bg-white/[0.03] border border-white/5">
@@ -396,12 +396,12 @@ export default function AdminUtilities() {
         </div>
 
         <div className="flex gap-1 ml-auto">
-          {hasFilter && (
+          {hasFilter ? (
             <button onClick={() => { setSearch(''); setTypeFilter('all'); setNemFilter('all'); setStateFilter(''); }}
               className="px-2 py-1 rounded-md text-[10px] text-slate-400 border border-white/5 hover:text-white transition-colors">
               Clear
             </button>
-          )}
+          ) : null}
           <button onClick={() => setExpandAll(v => !v)}
             className="px-2 py-1 rounded-md text-[10px] text-slate-400 border border-white/5 hover:text-white transition-colors flex items-center gap-1">
             {expandAll ? <><ChevronDown size={10}/>Collapse All</> : <><ChevronRight size={10}/>Expand All</>}
@@ -414,11 +414,11 @@ export default function AdminUtilities() {
       </div>
 
       {/* ── Results summary ── */}
-      {hasFilter && !loading && (
+      {hasFilter && !loading ? (
         <p className="text-[11px] text-slate-500 -mt-1">
           Showing {filtered.length} of {items.length} utilities across {grouped.length} states
         </p>
-      )}
+      ) : null}
 
       {/* ── Content ── */}
       {loading ? (

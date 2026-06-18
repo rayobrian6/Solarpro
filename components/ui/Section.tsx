@@ -32,23 +32,23 @@ export function Section({
       className={`${spacingClasses[spacing]} ${className}`}
       style={divider ? { borderTop: '1px solid var(--border-color)', paddingTop: '1.5rem' } : undefined}
     >
-      {(title || action) && (
+      {(title || action) ? (
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
-            {title && (
+            {title ? (
               <h2 className={`section-title ${titleClassName}`}>
                 {title}
               </h2>
-            )}
-            {subtitle && (
+            ) : null}
+            {subtitle ? (
               <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{subtitle}</p>
-            )}
+            ) : null}
           </div>
-          {action && (
+          {action ? (
             <div className="flex-shrink-0">{action}</div>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
       <div>{children}</div>
     </section>
   );

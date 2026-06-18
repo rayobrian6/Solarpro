@@ -69,7 +69,7 @@ export default function AdminFiles() {
       </div>
 
       {/* Storage Stats */}
-      {storage && (
+      {storage ? (
         <div className="grid grid-cols-3 gap-4">
           <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-5">
             <div className="text-xs text-blue-400 opacity-70 uppercase tracking-wider mb-2">Total Files</div>
@@ -84,7 +84,7 @@ export default function AdminFiles() {
             <div className="text-3xl font-black text-green-400">{(storage.projectsWithFiles ?? storage.projects_with_files ?? 0).toLocaleString()}</div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Filter */}
       <div className="flex items-center gap-3">
@@ -153,7 +153,7 @@ export default function AdminFiles() {
       </div>
 
       {/* Pagination */}
-      {pages > 1 && (
+      {pages > 1 ? (
         <div className="flex items-center justify-between text-xs text-slate-400">
           <span>Page {page} of {pages} · {total.toLocaleString()} files</span>
           <div className="flex gap-2">
@@ -161,7 +161,7 @@ export default function AdminFiles() {
             <button onClick={() => setPage(p => Math.min(pages, p + 1))} disabled={page === pages} className="px-3 py-1.5 rounded-lg border border-white/10 disabled:opacity-40">Next</button>
           </div>
         </div>
-      )}
+      ) : null}
 
       {confirmDialog ? (
         <ConfirmDialog

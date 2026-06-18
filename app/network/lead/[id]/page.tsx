@@ -154,7 +154,7 @@ function SavingsChart({
       <line x1={padL} y1={zeroY} x2={W - padL} y2={zeroY} stroke="#334155" strokeWidth="1" strokeDasharray="4 4" />
       <polygon points={area} fill="url(#sav)" />
       <polyline points={line} fill="none" stroke="#34d399" strokeWidth="2.5" />
-      {breakeven != null && breakeven <= 25 && (
+      {breakeven != null && breakeven <= 25 ? (
         <>
           <line x1={x(breakeven)} y1="4" x2={x(breakeven)} y2={H - padB} stroke="#fbbf24" strokeWidth="1.5" strokeDasharray="3 3" />
           <circle cx={x(breakeven)} cy={zeroY} r="4" fill="#fbbf24" />
@@ -162,7 +162,7 @@ function SavingsChart({
             Payback ~yr {Math.round(breakeven)}
           </text>
         </>
-      )}
+      ) : null}
       {[0, 5, 10, 15, 20, 25].map((yr) => (
         <text key={yr} x={x(yr)} y={H - 6} fontSize="10" fill="#64748b" textAnchor="middle">
           {yr}
@@ -415,11 +415,11 @@ export default function LeadProductPage() {
                         <span className="flex items-center gap-1 text-xs font-semibold uppercase tracking-widest text-emerald-400">
                           <MapPin size={13} /> Territory Intelligence
                         </span>
-                        {score >= 85 && (
+                        {score >= 85 ? (
                           <span className="flex items-center gap-1 rounded-full border border-orange-500/40 bg-orange-500/15 px-2 py-0.5 text-[10px] font-black uppercase text-orange-300">
                             <Flame size={11} /> Hot lead
                           </span>
-                        )}
+                        ) : null}
                       </div>
                       <h1 className="mt-1 text-3xl font-bold tracking-tight text-white">
                         {lead.county ? `${lead.county} County` : lead.stateCode} Solar Lead
@@ -430,21 +430,21 @@ export default function LeadProductPage() {
                         >
                           {lead.grade}
                         </span>
-                        {lead.battery && (
+                        {lead.battery ? (
                           <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-violet-300">
                             Battery upsell
                           </span>
-                        )}
-                        {/interest|ready|yes|true/i.test(lead.financing) && (
+                        ) : null}
+                        {/interest|ready|yes|true/i.test(lead.financing) ? (
                           <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-300">
                             Finance-ready
                           </span>
-                        )}
-                        {/asap|immediate|now/i.test(lead.timeline) && (
+                        ) : null}
+                        {/asap|immediate|now/i.test(lead.timeline) ? (
                           <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-300">
                             Ready now
                           </span>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                     <ScoreRing score={score} />

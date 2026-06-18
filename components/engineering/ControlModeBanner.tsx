@@ -67,11 +67,11 @@ export default function ControlModeBanner({
           <span className={`text-sm font-semibold ${styles.text}`}>
             {MODE_ICONS[mode]} {CONTROL_MODE_LABELS[mode]} Mode
           </span>
-          {lockedCount > 0 && (
+          {lockedCount > 0 ? (
             <span className="text-xs text-slate-400 ml-1">
               · {lockedCount} field{lockedCount !== 1 ? 's' : ''} locked
             </span>
-          )}
+          ) : null}
         </div>
 
         {/* Mode selector buttons */}
@@ -94,14 +94,14 @@ export default function ControlModeBanner({
       </div>
 
       {/* ── Description (hide in compact mode) ── */}
-      {!compact && (
+      {!compact ? (
         <p className="text-xs text-slate-400 mt-2 leading-relaxed">
           {CONTROL_MODE_DESCRIPTIONS[mode]}
         </p>
-      )}
+      ) : null}
 
       {/* ── Field lock toggles ── */}
-      {!compact && (
+      {!compact ? (
         <div className="flex items-center gap-2 mt-3 flex-wrap">
           <span className="text-xs text-slate-500">Field locks:</span>
           {(Object.keys(locks) as LockableField[]).map((field) => {
@@ -123,7 +123,7 @@ export default function ControlModeBanner({
             );
           })}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

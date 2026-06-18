@@ -147,18 +147,18 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
       {icons[toast.type]}
       <div className="flex-1 min-w-0">
         <div className="text-sm font-semibold text-white leading-tight">{toast.title}</div>
-        {toast.message && (
+        {toast.message ? (
           <div className="text-xs text-slate-400 mt-0.5 leading-relaxed">{toast.message}</div>
-        )}
+        ) : null}
       </div>
-      {toast.type !== 'loading' && (
+      {toast.type !== 'loading' ? (
         <button
           onClick={() => onDismiss(toast.id)}
           className="text-slate-500 hover:text-slate-300 transition-colors flex-shrink-0 mt-0.5"
         >
           <X size={13} />
         </button>
-      )}
+      ) : null}
     </div>
   );
 }

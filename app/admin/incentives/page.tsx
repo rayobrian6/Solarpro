@@ -125,11 +125,11 @@ export default function AdminIncentives() {
           <p className="text-sm text-slate-400 mt-1">Federal, state, and utility solar incentives — editable without redeployment</p>
         </div>
         <div className="flex gap-2">
-          {items.length === 0 && (
+          {items.length === 0 ? (
             <button onClick={seedDefaults} className="flex items-center gap-2 text-xs bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded-lg px-3 py-2 hover:bg-blue-500/30 transition-all">
               <Zap size={12} /> Seed Defaults
             </button>
-          )}
+          ) : null}
           <button onClick={() => { setAdding(true); setEditing(null); }} className="flex items-center gap-2 text-xs bg-amber-500 text-black font-semibold rounded-lg px-3 py-2 hover:bg-amber-400 transition-all">
             <Plus size={12} /> Add Incentive
           </button>
@@ -137,7 +137,7 @@ export default function AdminIncentives() {
       </div>
 
       {(adding && !editing) && <IncentiveForm onSave={save} onCancel={() => setAdding(false)} />}
-      {editing && <IncentiveForm initial={editing} onSave={save} onCancel={() => setEditing(null)} />}
+      {editing ? <IncentiveForm initial={editing} onSave={save} onCancel={() => setEditing(null)} /> : null}
 
       <div className="rounded-xl border border-white/5 overflow-hidden">
         <div className="overflow-x-auto">

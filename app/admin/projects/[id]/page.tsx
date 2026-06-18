@@ -258,12 +258,12 @@ export default function AdminProjectDetail() {
           <p className="text-sm font-semibold text-white">
             {project.system_size_kw ? `${project.system_size_kw} kW` : '—'}
           </p>
-          {project.address && (
+          {project.address ? (
             <div className="flex items-start gap-1 mt-1">
               <MapPin size={10} className="text-slate-500 mt-0.5 shrink-0" />
               <p className="text-xs text-slate-400 leading-tight">{project.address}</p>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -279,16 +279,16 @@ export default function AdminProjectDetail() {
               This is <span className="text-amber-400 font-medium">separate</span> from the internal ops pipeline.
             </p>
           </div>
-          {currentMeta && (
+          {currentMeta ? (
             <span className={`text-xs px-3 py-1 rounded-full font-semibold border ${currentMeta.color}`}>
               {currentMeta.label}
             </span>
-          )}
-          {!currentMeta && (
+          ) : null}
+          {!currentMeta ? (
             <span className="text-xs px-3 py-1 rounded-full font-semibold border border-slate-500/30 bg-slate-500/10 text-slate-400">
               Not set
             </span>
-          )}
+          ) : null}
         </div>
 
         {/* Stage progress bar */}
@@ -311,9 +311,9 @@ export default function AdminProjectDetail() {
                     {s.label}
                   </span>
                 </div>
-                {!isLast && (
+                {!isLast ? (
                   <div className={`h-0.5 flex-1 mx-1 rounded-full ${i < currentIndex ? 'bg-white/20' : 'bg-white/5'}`} />
-                )}
+                ) : null}
               </div>
             );
           })}
@@ -358,9 +358,9 @@ export default function AdminProjectDetail() {
               {saving ? <RefreshCw size={13} className="animate-spin" /> : <CheckCircle size={13} />}
               {saving ? 'Saving...' : 'Save Stage'}
             </button>
-            {selectedStage === project.homeowner_stage && selectedStage && (
+            {selectedStage === project.homeowner_stage && selectedStage ? (
               <span className="text-xs text-slate-500">Already set to this stage</span>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -447,16 +447,16 @@ export default function AdminProjectDetail() {
                       <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${meta?.color ?? 'text-slate-400 bg-slate-500/20 border-slate-500/30'}`}>
                         {meta?.label ?? entry.stage}
                       </span>
-                      {entry.changed_by_name && (
+                      {entry.changed_by_name ? (
                         <span className="text-xs text-slate-500">by {entry.changed_by_name}</span>
-                      )}
+                      ) : null}
                       <span className="text-xs text-slate-600">
                         {new Date(entry.created_at).toLocaleString()}
                       </span>
                     </div>
-                    {entry.note && (
+                    {entry.note ? (
                       <p className="text-xs text-slate-400 mt-1 italic">"{entry.note}"</p>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               );
@@ -466,7 +466,7 @@ export default function AdminProjectDetail() {
       </div>
 
       {/* ── Activity Feed ─────────────────────────────────────────────────────── */}
-      {activity.length > 0 && (
+      {activity.length > 0 ? (
         <div className="rounded-xl border border-white/5 bg-white/2 p-5">
           <div className="flex items-center gap-2 mb-4">
             <Activity size={14} className="text-slate-500" />
@@ -484,15 +484,15 @@ export default function AdminProjectDetail() {
                       {new Date(entry.created_at).toLocaleString()}
                     </span>
                   </div>
-                  {entry.details && (
+                  {entry.details ? (
                     <p className="text-xs text-slate-500 mt-0.5 truncate">{entry.details}</p>
-                  )}
+                  ) : null}
                 </div>
               </div>
             ))}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Meta row */}
       <div className="flex items-center gap-4 text-xs text-slate-600 pb-2">
@@ -504,9 +504,9 @@ export default function AdminProjectDetail() {
           <Clock size={10} />
           Updated {new Date(project.updated_at).toLocaleString()}
         </div>
-        {project.deleted_at && (
+        {project.deleted_at ? (
           <span className="text-red-400">Deleted {new Date(project.deleted_at).toLocaleString()}</span>
-        )}
+        ) : null}
       </div>
 
     </div>

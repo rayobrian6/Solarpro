@@ -131,12 +131,12 @@ export function ObstructionMap({ obstructions, onChange, disabled }: Obstruction
                 `}
               >
                 <span>{label}</span>
-                {count > 0 && (
+                {count > 0 ? (
                   <span className="bg-orange-400 text-white text-[10px] font-bold
                     w-4 h-4 rounded-full flex items-center justify-center">
                     {count}
                   </span>
-                )}
+                ) : null}
               </button>
             );
           })}
@@ -144,13 +144,13 @@ export function ObstructionMap({ obstructions, onChange, disabled }: Obstruction
       </div>
 
       {/* ---- Zone editor (appears when zone is tapped) ---- */}
-      {editorMode?.type === 'new' && (
+      {editorMode?.type === 'new' ? (
         <ZoneAdder
           location={editorMode.location}
           onAdd={handleAddObstruction}
           onCancel={() => setEditorMode(null)}
         />
-      )}
+      ) : null}
 
       {/* ---- Obstruction list ---- */}
       {obstructions.length > 0 && (
@@ -170,11 +170,11 @@ export function ObstructionMap({ obstructions, onChange, disabled }: Obstruction
         </div>
       )}
 
-      {obstructions.length === 0 && !editorMode && (
+      {obstructions.length === 0 && !editorMode ? (
         <p className="text-center text-xs text-gray-400 py-2">
           No obstructions logged. Tap a zone above to add one.
         </p>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -256,7 +256,7 @@ function ObstructionRow({ obstruction, onRemove, onNoteChange, disabled }: Obstr
           </span>
           <span className="text-xs font-semibold text-gray-700">{typeLabel}</span>
         </div>
-        {!disabled && (
+        {!disabled ? (
           <button
             type="button"
             onClick={onRemove}
@@ -264,9 +264,9 @@ function ObstructionRow({ obstruction, onRemove, onNoteChange, disabled }: Obstr
           >
             remove
           </button>
-        )}
+        ) : null}
       </div>
-      {!disabled && (
+      {!disabled ? (
         <input
           type="text"
           value={obstruction.notes}
@@ -275,10 +275,10 @@ function ObstructionRow({ obstruction, onRemove, onNoteChange, disabled }: Obstr
           className="w-full text-xs rounded border border-orange-200 bg-white px-2 py-1
             placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-orange-400"
         />
-      )}
-      {disabled && obstruction.notes && (
+      ) : null}
+      {disabled && obstruction.notes ? (
         <p className="text-xs text-gray-600">{obstruction.notes}</p>
-      )}
+      ) : null}
     </div>
   );
 }

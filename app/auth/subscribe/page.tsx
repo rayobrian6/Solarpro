@@ -181,13 +181,13 @@ export default function SubscribePage() {
               }`}
             >
               {/* Badge */}
-              {plan.badge && (
+              {plan.badge ? (
                 <div className={`absolute top-0 right-0 px-3 py-1 text-xs font-bold rounded-bl-xl ${
                   plan.id === 'contractor' ? 'bg-amber-500 text-slate-900' : 'bg-green-500/20 text-green-400'
                 }`}>
                   {plan.badge}
                 </div>
-              )}
+              ) : null}
 
               <div className={`p-6 ${plan.headerColor}`}>
                 <h3 className="text-xl font-black text-white mb-1">{plan.name}</h3>
@@ -202,16 +202,16 @@ export default function SubscribePage() {
                   <Users size={13} className="text-slate-400" />
                   <span className="text-slate-300 text-sm">{plan.seatLabel}</span>
                 </div>
-                {plan.extraSeatMsg && (
+                {plan.extraSeatMsg ? (
                   <p className="text-xs text-slate-500 pl-5 mb-1">{plan.extraSeatMsg}</p>
-                )}
+                ) : null}
 
                 {/* Contractor replacement message */}
-                {plan.id === 'contractor' && (
+                {plan.id === 'contractor' ? (
                   <p className="text-xs text-amber-400/80 mt-2 leading-snug">
                     Replace $300–$1,000/month in solar software tools with one platform
                   </p>
-                )}
+                ) : null}
               </div>
 
               <div className="p-6 pt-4">
@@ -291,9 +291,9 @@ export default function SubscribePage() {
                     : <ChevronDown size={16} className="text-slate-400 shrink-0" />
                   }
                 </button>
-                {openFaq === i && (
+                {openFaq === i ? (
                   <div className="px-4 pb-4 text-slate-400 text-sm">{faq.a}</div>
-                )}
+                ) : null}
               </div>
             ))}
           </div>

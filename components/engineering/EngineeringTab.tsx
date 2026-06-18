@@ -351,7 +351,7 @@ ${(pp?.specialConditions?.length) ? `
       <div>
         <div className="p-6 space-y-4">
         {/* Client Engineering Workspace — shown when no full design exists yet */}
-        {needsDesign && preliminaryFiles.length > 0 && (
+        {needsDesign && preliminaryFiles.length > 0 ? (
           <div className="space-y-3">
             {/* Workspace header */}
             <div className="bg-slate-800/60 border border-amber-500/30 rounded-xl p-4">
@@ -400,11 +400,11 @@ ${(pp?.specialConditions?.length) ? `
                       <div key={f.id} className="flex items-center justify-between px-4 py-2.5 hover:bg-slate-700/20">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-xs text-slate-300 truncate">{f.file_name}</span>
-                          {f.file_size && (
+                          {f.file_size ? (
                             <span className="text-xs text-slate-600 flex-shrink-0">
                               {f.file_size < 1024 ? `${f.file_size}B` : `${Math.round(f.file_size / 1024)}KB`}
                             </span>
-                          )}
+                          ) : null}
                         </div>
                         <a
                           href={`/api/project-files/download?id=${f.id}`}
@@ -435,22 +435,22 @@ ${(pp?.specialConditions?.length) ? `
               </a>
             </div>
           </div>
-        )}
+        ) : null}
 
         <div className="bg-slate-800/60 border border-red-500/30 rounded-xl p-6 text-center">
           <AlertTriangle className="w-10 h-10 text-red-400 mx-auto mb-3" />
           <p className="text-red-300 font-medium mb-2">Engineering Report Unavailable</p>
           <p className="text-slate-400 text-sm mb-4">{error}</p>
-          {!error.includes('Design Studio') && (
+          {!error.includes('Design Studio') ? (
             <button onClick={fetchReport} className="btn-secondary text-sm">
               <RefreshCw className="w-4 h-4 mr-2" /> Try Again
             </button>
-          )}
-          {error.includes('Design Studio') && (
+          ) : null}
+          {error.includes('Design Studio') ? (
             <a href={`/design?projectId=${projectId}`} className="btn-primary text-sm inline-flex items-center">
               <Layers className="w-4 h-4 mr-2" /> Open Design Studio
             </a>
-          )}
+          ) : null}
           </div>
         </div>
       </div>
@@ -493,14 +493,14 @@ ${(pp?.specialConditions?.length) ? `
       </div>
 
       {/* Status Banner */}
-      {isStale && (
+      {isStale ? (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 flex items-center gap-3">
           <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />
           <p className="text-amber-300 text-sm">
             Design has changed since this report was generated. Click <strong>Regenerate</strong> to update.
           </p>
         </div>
-      )}
+      ) : null}
 
       {/* System Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -614,7 +614,7 @@ ${(pp?.specialConditions?.length) ? `
           <DataRow label="Rail Spacing" value={`${st.railSpacingIn}" O.C.`} />
           <DataRow label="Code" value={`${st.ibc} / ${st.asce}`} />
         </div>
-        {st.complianceNotes.length > 0 && (
+        {st.complianceNotes.length > 0 ? (
           <div className="mt-3 space-y-1">
             {st.complianceNotes.map((note, i) => (
               <div key={i} className="flex items-start gap-2 text-xs text-slate-400">
@@ -623,7 +623,7 @@ ${(pp?.specialConditions?.length) ? `
               </div>
             ))}
           </div>
-        )}
+        ) : null}
       </Section>
 
       {/* Section: Equipment Schedule */}
@@ -692,7 +692,7 @@ ${(pp?.specialConditions?.length) ? `
             </div>
           </div>
 
-          {pp.specialConditions.length > 0 && (
+          {pp.specialConditions.length > 0 ? (
             <div>
               <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Special Conditions</h4>
               <div className="space-y-1">
@@ -704,7 +704,7 @@ ${(pp?.specialConditions?.length) ? `
                 ))}
               </div>
             </div>
-          )}
+          ) : null}
         </div>
       </Section>
 
@@ -768,11 +768,11 @@ function Section({
         </div>
         {expanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
       </button>
-      {expanded && (
+      {expanded ? (
         <div className="px-4 pb-4 border-t border-slate-700/50 pt-3">
           {children}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

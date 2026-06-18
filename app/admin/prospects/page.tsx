@@ -240,16 +240,16 @@ export default function ProspectsPage() {
       </div>
 
       {/* The sweatshop floor */}
-      {viewMode === 'floor' && (
+      {viewMode === 'floor' ? (
         <AcquisitionFloor
           byStage={stats?.byStage ?? {}}
           total={stats?.total ?? 0}
           onEnterRoom={(stage) => { setStageFilter(stage); setViewMode('list'); }}
           onDispatched={load}
         />
-      )}
+      ) : null}
 
-      {viewMode === 'list' && (
+      {viewMode === 'list' ? (
       <>
       {/* Stage pipeline tabs */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -347,22 +347,22 @@ export default function ProspectsPage() {
                 {/* Signals */}
                 <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
                   <span className={`text-[10px] px-2 py-0.5 rounded-full border font-semibold ${tierOf(p.quality_score).cls}`}>{tierOf(p.quality_score).label}</span>
-                  {p.rating != null && (
+                  {p.rating != null ? (
                     <span className="flex items-center gap-1">
                       <Star size={11} className="text-amber-400 fill-amber-400" />
                       {p.rating}{p.review_count != null && <span className="text-slate-600">({p.review_count})</span>}
                     </span>
-                  )}
-                  {p.license_number && (
+                  ) : null}
+                  {p.license_number ? (
                     <span className="flex items-center gap-1 text-emerald-400/80">
                       <BadgeCheck size={11} /> Licensed
                     </span>
-                  )}
-                  {p.employee_estimate && (
+                  ) : null}
+                  {p.employee_estimate ? (
                     <span className="flex items-center gap-1">
                       <Users size={11} /> {p.employee_estimate}
                     </span>
-                  )}
+                  ) : null}
                   <span className="text-slate-600 ml-auto">{p.source}</span>
                 </div>
 
@@ -377,31 +377,31 @@ export default function ProspectsPage() {
                       <Mail size={11} /> no email
                     </span>
                   )}
-                  {p.phone && (
+                  {p.phone ? (
                     <a href={`tel:${p.phone}`} className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-white/5 text-slate-300 hover:bg-white/10">
                       <Phone size={11} /> {p.phone}
                     </a>
-                  )}
-                  {p.website && (
+                  ) : null}
+                  {p.website ? (
                     <a href={p.website.startsWith('http') ? p.website : `https://${p.website}`} target="_blank" rel="noreferrer"
                       className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-white/5 text-slate-300 hover:bg-white/10">
                       <Globe size={11} /> site
                     </a>
-                  )}
+                  ) : null}
                 </div>
 
                 {p.notes && <p className="text-xs text-slate-500 line-clamp-2">{p.notes}</p>}
 
-                {p.metadata?.dossier && (
+                {p.metadata?.dossier ? (
                   <div className="rounded-md bg-violet-500/10 border border-violet-500/20 p-2 text-[11px] space-y-1">
                     {p.metadata.dossier.whyCall && <div className="text-violet-300 font-semibold">📖 {p.metadata.dossier.whyCall}</div>}
                     {p.metadata.dossier.opener && <div className="text-slate-400 italic">&ldquo;{p.metadata.dossier.opener}&rdquo;</div>}
                   </div>
-                )}
+                ) : null}
 
                 {/* Actions */}
                 <div className="flex items-center gap-2 mt-auto pt-1">
-                  {next && (
+                  {next ? (
                     <button
                       disabled={busyId === p.id}
                       onClick={() => setStage(p.id, next)}
@@ -409,13 +409,13 @@ export default function ProspectsPage() {
                     >
                       Move to {STAGE_META[next].label} <ArrowRight size={12} />
                     </button>
-                  )}
-                  {p.stage === 'signed_up' && (
+                  ) : null}
+                  {p.stage === 'signed_up' ? (
                     <span className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-300 text-xs font-medium">
                       <Check size={12} /> Closed
                     </span>
-                  )}
-                  {p.stage !== 'rejected' && p.stage !== 'signed_up' && (
+                  ) : null}
+                  {p.stage !== 'rejected' && p.stage !== 'signed_up' ? (
                     <button
                       disabled={busyId === p.id}
                       onClick={() => setStage(p.id, 'rejected')}
@@ -424,8 +424,8 @@ export default function ProspectsPage() {
                     >
                       <X size={14} />
                     </button>
-                  )}
-                  {p.stage === 'rejected' && (
+                  ) : null}
+                  {p.stage === 'rejected' ? (
                     <button
                       disabled={busyId === p.id}
                       onClick={() => setStage(p.id, 'discovered')}
@@ -433,7 +433,7 @@ export default function ProspectsPage() {
                     >
                       Restore
                     </button>
-                  )}
+                  ) : null}
                 </div>
               </div>
             );
@@ -441,7 +441,7 @@ export default function ProspectsPage() {
         </div>
       )}
       </>
-      )}
+      ) : null}
     </div>
   );
 }

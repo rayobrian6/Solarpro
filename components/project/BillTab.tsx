@@ -171,16 +171,16 @@ export default function BillTab({ project, onUploadBill, onBillUpdate }: BillTab
           >
             {editing ? <><X size={11} /> Cancel</> : <><Pencil size={11} /> Edit</>}
           </button>
-          {!editing && (
+          {!editing ? (
             <button onClick={onUploadBill} className="text-xs text-slate-400 hover:text-white flex items-center gap-1 transition-colors">
               <Upload size={11} /> Re-upload
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 
       {/* ── Inline Edit Form ── */}
-      {editing && (
+      {editing ? (
         <div className="card p-5 border border-amber-500/30 bg-amber-500/5">
           <h4 className="text-sm font-semibold text-amber-300 mb-4 flex items-center gap-2">
             <Pencil size={14} /> Correct Bill Data
@@ -229,7 +229,7 @@ export default function BillTab({ project, onUploadBill, onBillUpdate }: BillTab
           </div>
 
           {/* Live preview of computed values */}
-          {editAnnualKwh && editUtilityRate && !isNaN(parseFloat(editAnnualKwh)) && !isNaN(parseFloat(editUtilityRate)) && (
+          {editAnnualKwh && editUtilityRate && !isNaN(parseFloat(editAnnualKwh)) && !isNaN(parseFloat(editUtilityRate)) ? (
             <div className="grid grid-cols-3 gap-2 text-xs mb-4 p-3 bg-slate-800/60 rounded-xl">
               <div className="text-center">
                 <div className="text-slate-400">Monthly Avg</div>
@@ -244,13 +244,13 @@ export default function BillTab({ project, onUploadBill, onBillUpdate }: BillTab
                 <div className="text-emerald-400 font-bold">${Math.round((parseFloat(editAnnualKwh) * parseFloat(editUtilityRate)) / 12).toLocaleString()}/mo</div>
               </div>
             </div>
-          )}
+          ) : null}
 
-          {saveError && (
+          {saveError ? (
             <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs mb-3">
               <AlertTriangle size={13} /> {saveError}
             </div>
-          )}
+          ) : null}
 
           <div className="flex gap-2 justify-end">
             <button onClick={cancelEdit} disabled={saving} className="btn-secondary btn-sm flex items-center gap-1.5">
@@ -261,7 +261,7 @@ export default function BillTab({ project, onUploadBill, onBillUpdate }: BillTab
             </button>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Key metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -336,7 +336,7 @@ export default function BillTab({ project, onUploadBill, onBillUpdate }: BillTab
       </div>
 
       {/* Utility info */}
-      {project.utilityName && (
+      {project.utilityName ? (
         <div className="card p-4">
           <h4 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
             <FileText size={14} className="text-blue-400" /> Utility Provider
@@ -350,19 +350,19 @@ export default function BillTab({ project, onUploadBill, onBillUpdate }: BillTab
               <div className="text-xs text-slate-500 mb-0.5">Rate</div>
               <div className="text-white font-medium">${effectiveRate.toFixed(3)}/kWh</div>
             </div>
-            {project.stateCode && (
+            {project.stateCode ? (
               <div>
                 <div className="text-xs text-slate-500 mb-0.5">State</div>
                 <div className="text-white font-medium">{project.stateCode}</div>
               </div>
-            )}
+            ) : null}
             <div>
               <div className="text-xs text-slate-500 mb-0.5">Offset Target</div>
               <div className="text-white font-medium">{bill.offsetTarget || 100}%</div>
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Re-upload CTA */}
       <div className="flex justify-end">

@@ -248,12 +248,12 @@ export default function AdminUsers() {
                           <ChevronDown size={13} />
                         </button>
 
-                        {openMenu === u.id && (
+                        {openMenu === u.id ? (
                           <div className="absolute right-0 top-8 z-50 w-52 bg-[#0d1424] border border-white/10 rounded-xl shadow-2xl py-1 overflow-hidden">
                             <div className="px-3 py-1.5 text-[10px] text-slate-500 font-semibold uppercase tracking-wider border-b border-white/5">
                               Role
                             </div>
-                            {isSuperAdmin && (
+                            {isSuperAdmin ? (
                               <>
                                 <button
                                   onClick={() => { action(u.id, 'set_role', { role: 'user' }); }}
@@ -274,7 +274,7 @@ export default function AdminUsers() {
                                   <Star size={12} className="text-amber-400" /> Promote to Super Admin
                                 </button>
                               </>
-                            )}
+                            ) : null}
 
                             <div className="px-3 py-1.5 text-[10px] text-slate-500 font-semibold uppercase tracking-wider border-b border-white/5 border-t border-white/5 mt-1">
                               Access
@@ -307,14 +307,14 @@ export default function AdminUsers() {
                             >
                               <Key size={12} className="text-yellow-400" /> Reset Password
                             </button>
-                            {isSuperAdmin && (
+                            {isSuperAdmin ? (
                               <button
                                 onClick={() => setConfirmModal({ userId: u.id, action: 'impersonate', label: `Impersonate ${u.name} (${u.email})? You will be logged in as this user in a new tab.` })}
                                 className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
                               >
                                 <Eye size={12} className="text-purple-400" /> Impersonate User
                               </button>
-                            )}
+                            ) : null}
                             <button
                               onClick={() => deleteUser(u.id, u.email)}
                               className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
@@ -322,7 +322,7 @@ export default function AdminUsers() {
                               <Trash2 size={12} /> Delete User
                             </button>
                           </div>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                   </td>
@@ -334,7 +334,7 @@ export default function AdminUsers() {
       </div>
 
       {/* Pagination */}
-      {pages > 1 && (
+      {pages > 1 ? (
         <div className="flex items-center justify-between text-xs text-slate-400">
           <span>Page {page} of {pages} · {total} users</span>
           <div className="flex gap-2">
@@ -346,10 +346,10 @@ export default function AdminUsers() {
             </button>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Edit Modal */}
-      {editUser && (
+      {editUser ? (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#0d1424] border border-white/10 rounded-2xl p-6 w-full max-w-md space-y-4">
             <h2 className="text-lg font-bold text-white">Edit User</h2>
@@ -403,10 +403,10 @@ export default function AdminUsers() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Confirm Modal */}
-      {confirmModal && (
+      {confirmModal ? (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#0d1424] border border-white/10 rounded-2xl p-6 w-full max-w-sm space-y-4">
             <div className="flex items-center gap-3">
@@ -422,10 +422,10 @@ export default function AdminUsers() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Temp Password Modal */}
-      {tempPasswordModal && (
+      {tempPasswordModal ? (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#0d1424] border border-white/10 rounded-2xl p-6 w-full max-w-sm space-y-4">
             <div className="flex items-center gap-3">
@@ -447,7 +447,7 @@ export default function AdminUsers() {
             </button>
           </div>
         </div>
-      )}
+      ) : null}
 
       {confirmDialog ? (
         <ConfirmDialog

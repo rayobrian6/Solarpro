@@ -233,11 +233,11 @@ function ProgressBar({ currentStep, completedSteps, totalSteps }: ProgressBarPro
                 className={`h-1.5 w-full rounded-full transition-colors duration-300 ${pillClass}`}
               />
               {/* Short label (only on current) */}
-              {isCurrent && (
+              {isCurrent ? (
                 <span className="text-[9px] font-semibold text-cyan-600 uppercase tracking-wide">
                   {step.shortLabel}
                 </span>
-              )}
+              ) : null}
             </div>
           );
         })}

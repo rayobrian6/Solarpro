@@ -108,11 +108,11 @@ export default function EditClientPage() {
           <h1 className="text-xl font-bold text-white">Edit Client</h1>
         </div>
 
-        {error && (
+        {error ? (
           <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-red-400 text-sm">
             <AlertTriangle size={13} className="inline -mt-px mr-1" /> {error}
           </div>
-        )}
+        ) : null}
 
         <div className="card p-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">

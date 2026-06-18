@@ -43,30 +43,30 @@ export function SaveStatusBar({ status, lastSavedAt, errorMessage, className = '
       status === 'error'  ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
       'bg-gray-500/10 text-gray-400 border border-gray-500/20'
     } ${className}`}>
-      {status === 'saving' && (
+      {status === 'saving' ? (
         <>
           <Loader2 className="w-3 h-3 animate-spin" />
           <span>Saving...</span>
         </>
-      )}
-      {status === 'saved' && (
+      ) : null}
+      {status === 'saved' ? (
         <>
           <CheckCircle className="w-3 h-3" />
           <span>Saved {timeDisplay}</span>
         </>
-      )}
-      {status === 'error' && (
+      ) : null}
+      {status === 'error' ? (
         <>
           <AlertCircle className="w-3 h-3" />
           <span>{errorMessage || 'Save failed — retrying...'}</span>
         </>
-      )}
-      {status === 'idle' && lastSavedAt && (
+      ) : null}
+      {status === 'idle' && lastSavedAt ? (
         <>
           <Clock className="w-3 h-3" />
           <span>Last saved {timeDisplay}</span>
         </>
-      )}
+      ) : null}
     </div>
   );
 }

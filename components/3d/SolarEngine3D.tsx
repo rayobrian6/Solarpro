@@ -6743,7 +6743,7 @@ function SolarEngine3D({
       {/* Debug Panel removed — was QA-only overlay */}
 
       {/* Loading overlay */}
-      {stage !== 'done' && stage !== 'error' && (
+      {stage !== 'done' && stage !== 'error' ? (
         <div style={{
           position: 'absolute', inset: 0, background: 'rgba(8,8,20,0.96)',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 100,
@@ -6824,10 +6824,10 @@ function SolarEngine3D({
             Powered by Google Solar API + CesiumJS
           </div>
         </div>
-      )}
+      ) : null}
 
             {/* Error overlay */}
-      {stage === 'error' && (
+      {stage === 'error' ? (
         <div style={{
           position: 'absolute', inset: 0, background: 'rgba(10,10,26,0.95)',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 100,
@@ -6848,7 +6848,7 @@ function SolarEngine3D({
             🔄 Retry 3D Load
           </button>
         </div>
-      )}
+      ) : null}
 
       {/* ── Collapsible grouped toolbar ── */}
       {stage === 'done' && (() => {
@@ -7243,7 +7243,7 @@ function SolarEngine3D({
               )}
 
               {/* ── 3D Plane context controls ── */}
-              {placementMode === 'plane3d' && (
+              {placementMode === 'plane3d' ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(0,255,136,0.25)',
@@ -7254,46 +7254,46 @@ function SolarEngine3D({
                      pts3DCount < 3 ? `${pts3DCount} pt${pts3DCount > 1 ? 's' : ''} \u2014 need ${3 - pts3DCount} more` :
                      `${pts3DCount} pts \u2014 right-click or Finish`}
                   </span>
-                  {pts3DCount >= 3 && (
+                  {pts3DCount >= 3 ? (
                     <button onClick={() => { const v = viewerRef.current; const C = (window as any).Cesium; if (v && C) finalizePlane3D(v, C); }}
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
                         background: 'rgba(0,255,136,0.15)', color: '#00ff88',
                         border: '1px solid rgba(0,255,136,0.4)', cursor: 'pointer' }}>
                       \u2705 Create Roof Plane
                     </button>
-                  )}
-                  {pts3DCount > 0 && (
+                  ) : null}
+                  {pts3DCount > 0 ? (
                     <button onClick={() => { const v = viewerRef.current; if (v) clearPlane3DPreview(v); setStatusMsg('3D Plane cleared'); }}
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11,
                         background: 'rgba(255,60,60,0.12)', color: '#ff6666',
                         border: '1px solid rgba(255,60,60,0.3)', cursor: 'pointer' }}>
                       \u2715 Clear
                     </button>
-                  )}
+                  ) : null}
                 </div>
-              )}
+              ) : null}
 
               {/* ── Fence context controls ── */}
-              {placementMode === 'fence' && fencePtCount > 0 && (
+              {placementMode === 'fence' && fencePtCount > 0 ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(255,136,0,0.25)',
                   borderRadius: 10, padding: '6px 10px',
                 }}>
                   <span style={{ color: '#ff8800', fontSize: 12 }}>{fencePtCount} pts</span>
-                  {fencePtCount >= 2 && (
+                  {fencePtCount >= 2 ? (
                     <button onClick={() => { const v = viewerRef.current; const C = (window as any).Cesium; if (v && C) finalizeFence(v, C); }}
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
                         background: 'rgba(0,200,100,0.2)', color: '#00cc66',
                         border: '1px solid rgba(0,200,100,0.4)', cursor: 'pointer' }}>
                       \u2705 Finish Fence
                     </button>
-                  )}
+                  ) : null}
                 </div>
-              )}
+              ) : null}
 
               {/* ── Select context controls ── */}
-              {placementMode === 'select' && selectedPanelIds.size > 0 && (
+              {placementMode === 'select' && selectedPanelIds.size > 0 ? (
                 <div style={{
                   display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5,
                   background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(255,100,100,0.25)',
@@ -7316,9 +7316,9 @@ function SolarEngine3D({
                       \u2715
                     </button>
                   </div>
-                  {selectedPanelIds.size === 1 && (
+                  {selectedPanelIds.size === 1 ? (
                     <span style={{ color: '#666', fontSize: 10 }}>SHIFT+click to add</span>
-                  )}
+                  ) : null}
                   {/* Fence section conversion */}
                   {selectedPanelIds.size >= 1 && (() => {
                     const selId = [...selectedPanelIds][0];
@@ -7347,15 +7347,15 @@ function SolarEngine3D({
                       <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
                         <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.15)' }} />
                         <span style={{ color: '#888', fontSize: 10 }}>Section:</span>
-                        {sec.type !== 'solar' && (
+                        {sec.type !== 'solar' ? (
                           <button onClick={() => { const v = viewerRef.current; const C = (window as any).Cesium; if (v && C) convertFenceSection(v, C, sec.id, 'solar'); }}
                             style={{ padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
                               background: 'rgba(34,197,94,0.15)', color: '#4ade80',
                               border: '1px solid rgba(34,197,94,0.3)', cursor: 'pointer' }}>
                             Solar
                           </button>
-                        )}
-                        {sec.type !== 'gate' && (
+                        ) : null}
+                        {sec.type !== 'gate' ? (
                           <>
                             <button onClick={() => { const v = viewerRef.current; const C = (window as any).Cesium; if (v && C) convertFenceSection(v, C, sec.id, 'gate', '4ft', selId); }}
                               style={{ padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
@@ -7370,24 +7370,24 @@ function SolarEngine3D({
                               8ft Gate
                             </button>
                           </>
-                        )}
-                        {sec.type !== 'vinyl' && (
+                        ) : null}
+                        {sec.type !== 'vinyl' ? (
                           <button onClick={() => { const v = viewerRef.current; const C = (window as any).Cesium; if (v && C) convertFenceSection(v, C, sec.id, 'vinyl'); }}
                             style={{ padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
                               background: 'rgba(245,158,11,0.15)', color: '#fbbf24',
                               border: '1px solid rgba(245,158,11,0.3)', cursor: 'pointer' }}>
                             Vinyl
                           </button>
-                        )}
+                        ) : null}
                         <span style={{ color: '#666', fontSize: 9 }}>({sec.type})</span>
                       </div>
                     );
                   })()}
                 </div>
-              )}
+              ) : null}
 
               {/* ── Measure context ── */}
-              {placementMode === 'measure' && (
+              {placementMode === 'measure' ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(0,255,255,0.2)',
@@ -7396,29 +7396,29 @@ function SolarEngine3D({
                   <span style={{ color: '#00ffff', fontSize: 12 }}>
                     {measurePtCount === 0 ? 'Click point 1' : measurePtCount === 1 ? 'Click point 2' : `${measurePtCount} pts`}
                   </span>
-                  {measurePtCount > 0 && (
+                  {measurePtCount > 0 ? (
                     <button onClick={() => { measurePtsRef.current = []; setMeasurePtCount(0); clearMeasureOverlay(); }}
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
                         background: 'rgba(0,200,255,0.15)', color: '#00ffff',
                         border: '1px solid rgba(0,200,255,0.3)', cursor: 'pointer' }}>
                       Clear
                     </button>
-                  )}
+                  ) : null}
                 </div>
-              )}
+              ) : null}
 
               {/* ── Row context ── */}
-              {placementMode === 'row' && (
+              {placementMode === 'row' ? (
                 <div style={{
                   background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(0,255,204,0.2)',
                   borderRadius: 10, padding: '6px 10px', color: '#00ffcc', fontSize: 12,
                 }}>
                   {rowPtCount === 0 ? 'Click row start' : 'Click row end'}
                 </div>
-              )}
+              ) : null}
 
               {/* ── Set Direction context ── */}
-              {placementMode === 'set_direction' && (
+              {placementMode === 'set_direction' ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(255,215,0,0.2)',
@@ -7427,19 +7427,19 @@ function SolarEngine3D({
                   <span style={{ color: '#ffd700', fontSize: 12 }}>
                     {!layoutDirSet ? 'Click first point, then second along roof edge' : '\u2713 Direction locked'}
                   </span>
-                  {layoutDirSet && (
+                  {layoutDirSet ? (
                     <button onClick={() => { customLayoutDirRef.current = null; setLayoutDirSet(false); setStatusMsg('Layout direction reset'); }}
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11,
                         background: 'rgba(255,215,0,0.12)', color: '#ffd700',
                         border: '1px solid rgba(255,215,0,0.3)', cursor: 'pointer' }}>
                       \u2715 Reset
                     </button>
-                  )}
+                  ) : null}
                 </div>
-              )}
+              ) : null}
 
               {/* ── Set Origin context ── */}
-              {placementMode === 'set_origin' && (
+              {placementMode === 'set_origin' ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(0,255,136,0.2)',
@@ -7448,19 +7448,19 @@ function SolarEngine3D({
                   <span style={{ color: '#00ff88', fontSize: 12 }}>
                     {!layoutOriginSet ? 'Click to set grid origin' : '\u2713 Origin set'}
                   </span>
-                  {layoutOriginSet && (
+                  {layoutOriginSet ? (
                     <button onClick={() => { customLayoutOriginRef.current = null; setLayoutOriginSet(false); setStatusMsg('Layout origin reset'); }}
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11,
                         background: 'rgba(0,255,136,0.12)', color: '#00ff88',
                         border: '1px solid rgba(0,255,136,0.3)', cursor: 'pointer' }}>
                       \u2715 Reset
                     </button>
-                  )}
+                  ) : null}
                 </div>
-              )}
+              ) : null}
 
               {/* ── Plane (legacy) context ── */}
-              {placementMode === 'plane' && (
+              {placementMode === 'plane' ? (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(0,180,255,0.2)',
@@ -7469,16 +7469,16 @@ function SolarEngine3D({
                   <span style={{ color: '#00ccff', fontSize: 12 }}>
                     {planePtCount === 0 ? 'Click roof corners' : `${planePtCount} pts`}
                   </span>
-                  {planePtCount >= 3 && (
+                  {planePtCount >= 3 ? (
                     <button onClick={() => { const v = viewerRef.current; const C = (window as any).Cesium; if (v && C) finalizePlane(v, C); }}
                       style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
                         background: 'rgba(0,180,255,0.2)', color: '#00ccff',
                         border: '1px solid rgba(0,180,255,0.4)', cursor: 'pointer' }}>
                       \u2705 Fill Plane
                     </button>
-                  )}
+                  ) : null}
                 </div>
-              )}
+              ) : null}
             </div>
           </>
         );
@@ -7488,7 +7488,7 @@ function SolarEngine3D({
 
 
       {/* Overlay toggles (bottom-left, above status bar — clear of tool sidebar) */}
-      {stage === 'done' && (
+      {stage === 'done' ? (
         <div style={{
           position: 'absolute', left: 60, bottom: 16,
           display: 'flex', flexDirection: 'row', gap: 6,
@@ -7527,10 +7527,10 @@ function SolarEngine3D({
             </button>
           ))}
         </div>
-      )}
+      ) : null}
 
       {/* Sun simulator (bottom) */}
-      {stage === 'done' && (
+      {stage === 'done' ? (
         <div style={{
           position: 'absolute', bottom: 40, left: '50%', transform: 'translateX(-50%)',
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
@@ -7620,10 +7620,10 @@ function SolarEngine3D({
             })}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* v48.13: Rotating compass rose — needle always points to true North */}
-      {stage === 'done' && (
+      {stage === 'done' ? (
         <div style={{
           position: 'absolute', bottom: 120, right: 12, width: 72, height: 72, zIndex: 50,
           background: 'rgba(10,12,24,0.88)', borderRadius: '50%',
@@ -7671,9 +7671,9 @@ function SolarEngine3D({
           </div>
           {/* Fixed camera-direction indicator label below compass */}
         </div>
-      )}
+      ) : null}
       {/* Camera heading readout label under compass */}
-      {stage === 'done' && (
+      {stage === 'done' ? (
         <div style={{
           position: 'absolute', bottom: 100, right: 10, width: 76, textAlign: 'center',
           color: 'rgba(255,255,255,0.45)', fontSize: 9, zIndex: 50, fontFamily: 'monospace',
@@ -7689,10 +7689,10 @@ function SolarEngine3D({
             cameraHeadingDeg < 292.5 ? 'W' : 'NW'
           }
         </div>
-      )}
+      ) : null}
 
       {/* v48.12: Floating tooltip — shown on toolbar button hover */}
-      {tooltipInfo && (
+      {tooltipInfo ? (
         <div style={{
           position: 'fixed',
           left: tooltipInfo.x,
@@ -7715,10 +7715,10 @@ function SolarEngine3D({
         }}>
           {tooltipInfo.text}
         </div>
-      )}
+      ) : null}
 
       {/* Status bar */}
-      {stage === 'done' && statusMsg && (
+      {stage === 'done' && statusMsg ? (
         <div style={{
           position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)',
           background: 'rgba(15,15,30,0.88)', backdropFilter: 'blur(4px)',
@@ -7727,10 +7727,10 @@ function SolarEngine3D({
         }}>
           {statusMsg}
         </div>
-      )}
+      ) : null}
 
       {/* Coordinates bar */}
-      {stage === 'done' && (
+      {stage === 'done' ? (
         <div style={{
           position: 'absolute', bottom: 8, left: 8,
           background: 'rgba(0,0,0,0.6)', borderRadius: 6, padding: '3px 8px',
@@ -7738,10 +7738,10 @@ function SolarEngine3D({
         }}>
           {lat.toFixed(5)}, {lng.toFixed(5)} | h={ftStr(cesiumGroundElevRef.current)} ({cesiumGroundElevRef.current.toFixed(0)}m)
         </div>
-      )}
+      ) : null}
 
       {/* Tile status indicator */}
-      {stage === 'done' && (
+      {stage === 'done' ? (
         <div style={{
           position: 'absolute', top: 8, right: 60,
           background: 'rgba(0,0,0,0.5)', borderRadius: 5, padding: '2px 7px',
@@ -7750,10 +7750,10 @@ function SolarEngine3D({
         }}>
           {tileStatus === 'loaded' ? '🟢 3D' : tileStatus === 'failed' ? '🔴 3D' : '🟡 3D'}
         </div>
-      )}
+      ) : null}
 
       {/* FPS counter */}
-      {stage === 'done' && (
+      {stage === 'done' ? (
         <div style={{
           position: 'absolute', top: 8, right: 8,
           background: 'rgba(0,0,0,0.5)', borderRadius: 5, padding: '2px 7px',
@@ -7761,10 +7761,10 @@ function SolarEngine3D({
         }}>
           {fps} FPS
         </div>
-      )}
+      ) : null}
 
       {/* Last log */}
-      {stage === 'done' && lastLog && (
+      {stage === 'done' && lastLog ? (
         <div style={{
           position: 'absolute', bottom: 8, right: 8,
           background: 'rgba(0,0,0,0.5)', borderRadius: 5, padding: '2px 8px',
@@ -7773,7 +7773,7 @@ function SolarEngine3D({
         }}>
           {lastLog}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

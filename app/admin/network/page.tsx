@@ -436,11 +436,11 @@ function StatCard({
           <div className={`text-2xl font-bold ${color}`}>{value}</div>
           {sub && <div className="text-xs text-zinc-500 mt-0.5">{sub}</div>}
         </div>
-        {Icon && (
+        {Icon ? (
           <div className="w-8 h-8 rounded-lg bg-zinc-700/50 flex items-center justify-center">
             <Icon className="w-4 h-4 text-zinc-400" />
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -581,35 +581,35 @@ function LiveFeedSection({
                     <div className="text-zinc-200">
                       {opp.city}, {opp.state}
                     </div>
-                    {opp.monthly_bill && (
+                    {opp.monthly_bill ? (
                       <div className="text-xs text-zinc-500">
                         ${opp.monthly_bill}/mo bill
                       </div>
-                    )}
+                    ) : null}
                   </td>
                   <td className="px-4 py-3">
                     <div className="text-zinc-300 text-xs">
                       {opp.source_type?.replace(/_/g, " ")}
                     </div>
-                    {opp.platform && (
+                    {opp.platform ? (
                       <div className="text-xs text-zinc-500">
                         {opp.platform}
                       </div>
-                    )}
+                    ) : null}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <GradeBadge
                         grade={opp.overall_grade ?? opp.opportunity_grade}
                       />
-                      {(opp.overall_score ?? opp.opportunity_score) && (
+                      {(opp.overall_score ?? opp.opportunity_score) ? (
                         <span className="text-xs text-zinc-400">
                           {Math.round(
                             (opp.overall_score ??
                               opp.opportunity_score) as number,
                           )}
                         </span>
-                      )}
+                      ) : null}
                     </div>
                   </td>
                   <td className="px-4 py-3">
@@ -814,7 +814,7 @@ function ScreeningSection() {
             {triggering ? "Running…" : "Screen Now"}
           </button>
         </div>
-        {triggerResult && (
+        {triggerResult ? (
           <div
             className={`mt-3 p-3 rounded-lg text-sm font-mono ${
               triggerResult.error
@@ -824,7 +824,7 @@ function ScreeningSection() {
           >
             {JSON.stringify(triggerResult, null, 2)}
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Queue Table */}
@@ -950,7 +950,7 @@ function ScreeningSection() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      {row.auto_decision && (
+                      {row.auto_decision ? (
                         <span
                           className={`text-xs font-medium px-2 py-0.5 rounded ${
                             row.auto_decision === "pass"
@@ -962,12 +962,12 @@ function ScreeningSection() {
                         >
                           {row.auto_decision as string}
                         </span>
-                      )}
-                      {row.override_decision && (
+                      ) : null}
+                      {row.override_decision ? (
                         <span className="ml-1 text-xs text-violet-400">
                           → {row.override_decision as string}
                         </span>
-                      )}
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-zinc-300 text-xs">
                       {row.confidence_score
@@ -1192,19 +1192,19 @@ function AnalyticsSection({ data }: { data: AnalyticsData | null }) {
                   <div className="text-xs text-zinc-300 w-8 text-right">
                     {total}
                   </div>
-                  {src.avg_cpl && (
+                  {src.avg_cpl ? (
                     <div className="text-xs text-zinc-500 w-16 text-right">
                       ${parseFloat(src.avg_cpl as string).toFixed(0)} CPL
                     </div>
-                  )}
+                  ) : null}
                 </div>
               );
             })}
-            {sources.length === 0 && (
+            {sources.length === 0 ? (
               <div className="text-center py-4 text-zinc-500 text-sm">
                 No source data
               </div>
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -1233,19 +1233,19 @@ function AnalyticsSection({ data }: { data: AnalyticsData | null }) {
                   <div className="text-xs text-zinc-300 w-6 text-right">
                     {total}
                   </div>
-                  {!isNaN(avgScore) && (
+                  {!isNaN(avgScore) ? (
                     <div className="text-xs text-zinc-500 w-16 text-right">
                       avg {avgScore.toFixed(0)}/100
                     </div>
-                  )}
+                  ) : null}
                 </div>
               );
             })}
-            {geo.length === 0 && (
+            {geo.length === 0 ? (
               <div className="text-center py-4 text-zinc-500 text-sm">
                 No geographic data
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -1275,7 +1275,7 @@ function HealthSection({ health }: { health: HealthData | null }) {
             status={health.health.status}
           />
         </div>
-        {health.health.issues.length > 0 && (
+        {health.health.issues.length > 0 ? (
           <div className="space-y-1.5 mb-3">
             {health.health.issues.map((issue, i) => (
               <div
@@ -1286,8 +1286,8 @@ function HealthSection({ health }: { health: HealthData | null }) {
               </div>
             ))}
           </div>
-        )}
-        {health.health.warnings.length > 0 && (
+        ) : null}
+        {health.health.warnings.length > 0 ? (
           <div className="space-y-1.5">
             {health.health.warnings.map((w, i) => (
               <div
@@ -1298,14 +1298,14 @@ function HealthSection({ health }: { health: HealthData | null }) {
               </div>
             ))}
           </div>
-        )}
+        ) : null}
         {health.health.issues.length === 0 &&
-          health.health.warnings.length === 0 && (
+          health.health.warnings.length === 0 ? (
             <div className="flex items-center gap-2 text-sm text-emerald-400">
               <CheckCircle2 className="w-4 h-4" /> All systems operating
               normally
             </div>
-          )}
+          ) : null}
       </div>
 
       {/* Metrics Grid */}
@@ -1393,13 +1393,13 @@ function HealthSection({ health }: { health: HealthData | null }) {
                 <div className="text-xs text-zinc-300 truncate">
                   {evt.event_type as string}
                 </div>
-                {(evt.homeowner_first_name || evt.state) && (
+                {(evt.homeowner_first_name || evt.state) ? (
                   <div className="text-xs text-zinc-500">
                     {evt.homeowner_first_name as string} · {evt.state as string}
                     {evt.opportunity_grade &&
                       ` · Grade ${evt.opportunity_grade as string}`}
                   </div>
-                )}
+                ) : null}
               </div>
               <div className="text-xs text-zinc-600 flex-shrink-0">
                 {new Date(evt.occurred_at as string).toLocaleTimeString([], {
@@ -1409,11 +1409,11 @@ function HealthSection({ health }: { health: HealthData | null }) {
               </div>
             </div>
           ))}
-          {(!recent_events || recent_events.length === 0) && (
+          {(!recent_events || recent_events.length === 0) ? (
             <div className="text-center py-8 text-zinc-500 text-sm">
               No recent events
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </div>
@@ -1560,7 +1560,7 @@ export default function NetworkControlCenter() {
           </div>
 
           <div className="flex items-center gap-3">
-            {adminRole === "super_admin" && (
+            {adminRole === "super_admin" ? (
               <Link
                 href="/admin/network/intelligence"
                 className="hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900/70 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:border-blue-500/40 hover:text-blue-300"
@@ -1568,9 +1568,9 @@ export default function NetworkControlCenter() {
                 <ExternalLink className="h-3 w-3" />
                 Intelligence Runner
               </Link>
-            )}
+            ) : null}
 
-            {healthData && (
+            {healthData ? (
               <div className="flex items-center gap-2">
                 <div
                   className={`w-2 h-2 rounded-full ${
@@ -1590,7 +1590,7 @@ export default function NetworkControlCenter() {
                   · Score {healthData.health.score}
                 </span>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -1620,18 +1620,18 @@ export default function NetworkControlCenter() {
 
       {/* Content */}
       <div className="px-6 py-6 max-w-screen-2xl mx-auto">
-        {activeTab === "live" && (
+        {activeTab === "live" ? (
           <LiveFeedSection
             opportunities={opportunities}
             onRefresh={loadOpportunities}
             loading={loading}
           />
-        )}
+        ) : null}
         {activeTab === "marketplace" && <MarketplaceWorkbenchSection />}
         {activeTab === "simulator" && <SimulatorSection />}
         {activeTab === "screening" && <ScreeningSection />}
         {activeTab === "analytics" && <AnalyticsSection data={analytics} />}
-        {activeTab === "matching" && (
+        {activeTab === "matching" ? (
           <div className="space-y-4">
             <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl p-6">
               <div className="flex items-center gap-2 mb-4">
@@ -1643,7 +1643,7 @@ export default function NetworkControlCenter() {
               <ContractorMatchPanel />
             </div>
           </div>
-        )}
+        ) : null}
         {activeTab === "health" && <HealthSection health={healthData} />}
         {activeTab === "intake" && <IntakeFeedSection />}
         {activeTab === "enrichment" && <EnrichmentQueueSection />}
@@ -2976,12 +2976,12 @@ function IntakeFeedSection() {
           icon={TrendingUp}
         />
       </div>
-      {actionMessage && (
+      {actionMessage ? (
         <div className="rounded-xl border border-blue-800/50 bg-blue-950/30 p-3 text-xs text-blue-100">
           {actionMessage}
         </div>
-      )}
-      {error && (
+      ) : null}
+      {error ? (
         <div className="rounded-xl border border-red-800/50 bg-red-950/30 p-4 text-sm text-red-200">
           <div className="flex items-center gap-2 font-semibold">
             <AlertCircle className="h-4 w-4" /> Intake Feed API error
@@ -2993,7 +2993,7 @@ function IntakeFeedSection() {
             zero leads.
           </p>
         </div>
-      )}
+      ) : null}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[220px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
@@ -3117,7 +3117,7 @@ function IntakeFeedSection() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
-              {loading && (
+              {loading ? (
                 <tr>
                   <td
                     colSpan={7}
@@ -3127,8 +3127,8 @@ function IntakeFeedSection() {
                     Loading…
                   </td>
                 </tr>
-              )}
-              {!loading && !error && visibleLeads.length === 0 && (
+              ) : null}
+              {!loading && !error && visibleLeads.length === 0 ? (
                 <tr>
                   <td
                     colSpan={7}
@@ -3142,8 +3142,8 @@ function IntakeFeedSection() {
                     </p>
                   </td>
                 </tr>
-              )}
-              {!loading && error && (
+              ) : null}
+              {!loading && error ? (
                 <tr>
                   <td
                     colSpan={7}
@@ -3153,7 +3153,7 @@ function IntakeFeedSection() {
                     <p>Unable to load Intake Feed. See the API error above.</p>
                   </td>
                 </tr>
-              )}
+              ) : null}
               {!loading &&
                 visibleLeads.map((lead) => {
                   const details = formDetailsFor(lead);
@@ -3275,14 +3275,14 @@ function IntakeFeedSection() {
                               lead.intake_record_type ??
                               "intake"}
                           </div>
-                          {lead.is_duplicate && (
+                          {lead.is_duplicate ? (
                             <span className="text-xs text-amber-400">
                               ⚠ dup{" "}
                               {lead.duplicate_score
                                 ? `(${(lead.duplicate_score * 100).toFixed(0)}%)`
                                 : ""}
                             </span>
-                          )}
+                          ) : null}
                         </td>
                         <td className="px-4 py-3">
                           <div className="text-zinc-300 text-xs">
@@ -3432,7 +3432,7 @@ function IntakeFeedSection() {
                                 </div>
                               </div>
                             </div>
-                            {debugOpen && (
+                            {debugOpen ? (
                               <>
                                 <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                                   {eventDetails.map(([label, value]) => (
@@ -3465,8 +3465,8 @@ function IntakeFeedSection() {
                                   ))}
                                 </div>
                               </>
-                            )}
-                            {historyOpen && (
+                            ) : null}
+                            {historyOpen ? (
                               <div className="mb-3 rounded-lg border border-purple-900/50 bg-purple-950/20 p-3">
                                 <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-purple-300">
                                   Immutable Activity Timeline
@@ -3522,8 +3522,8 @@ function IntakeFeedSection() {
                                   </div>
                                 )}
                               </div>
-                            )}
-                            {expanded && billFile.filename && (
+                            ) : null}
+                            {expanded && billFile.filename ? (
                               <div className="mb-3 rounded-lg border border-amber-900/50 bg-amber-950/20 p-3">
                                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                                   <div>
@@ -3605,8 +3605,8 @@ function IntakeFeedSection() {
                                   </div>
                                 </div>
                               </div>
-                            )}
-                            {expanded && (billFile.filename || billIntelligence.hasData || billIntelligence.hasAttemptStatus) && (
+                            ) : null}
+                            {expanded && (billFile.filename || billIntelligence.hasData || billIntelligence.hasAttemptStatus) ? (
                               <div className="mb-3 rounded-lg border border-sky-900/50 bg-sky-950/20 p-3">
                                 <div className="mb-2 flex flex-wrap items-start justify-between gap-3">
                                   <div>
@@ -3837,7 +3837,7 @@ function IntakeFeedSection() {
                                   </div>
                                 )}
                               </div>
-                            )}
+                            ) : null}
                             {expanded &&
                               (details.length > 0 ? (
                                 <div className="mt-3 rounded-lg border border-zinc-800/80 bg-zinc-950/30 p-3">
@@ -3869,7 +3869,7 @@ function IntakeFeedSection() {
                                   intake row.
                                 </div>
                               ))}
-                            {expanded && qualificationDetails.length > 0 && (
+                            {expanded && qualificationDetails.length > 0 ? (
                               <div className="mt-3 rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-3">
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                   <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300">
@@ -3903,7 +3903,7 @@ function IntakeFeedSection() {
                                     ),
                                   )}
                                 </div>
-                                {contractorSummary && (
+                                {contractorSummary ? (
                                   <div className="mt-3 rounded-md border border-emerald-900/40 bg-zinc-950/70 px-3 py-2">
                                     <div className="text-[10px] uppercase tracking-wider text-zinc-500">
                                       Contractor Summary
@@ -3912,9 +3912,9 @@ function IntakeFeedSection() {
                                       {contractorSummary}
                                     </p>
                                   </div>
-                                )}
+                                ) : null}
                               </div>
-                            )}
+                            ) : null}
                             {lead.release_readiness &&
                               (() => {
                                 const missing =
@@ -3984,18 +3984,18 @@ function IntakeFeedSection() {
                                           >
                                             {it.label}
                                           </span>
-                                          {idx === firstBlocked && !ready && (
+                                          {idx === firstBlocked && !ready ? (
                                             <span className="ml-auto text-[10px] uppercase tracking-wider text-orange-300">
                                               next
                                             </span>
-                                          )}
+                                          ) : null}
                                         </div>
                                       ))}
                                     </div>
                                   </div>
                                 );
                               })()}
-                            {lead.intake_record_type === "intake_event" && (
+                            {lead.intake_record_type === "intake_event" ? (
                               <div className="mt-3 rounded-lg border border-purple-900/50 bg-purple-950/20 p-3">
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                   <div>
@@ -4008,21 +4008,21 @@ function IntakeFeedSection() {
                                       current intake projection.
                                     </div>
                                   </div>
-                                  {terminalLead && (
+                                  {terminalLead ? (
                                     <span className="rounded-full border border-zinc-700 px-2 py-1 text-[10px] uppercase tracking-wider text-zinc-400">
                                       Terminal
                                     </span>
-                                  )}
+                                  ) : null}
                                 </div>
                                 <div className="flex flex-col gap-3">
-                                  {nextStepItem && (
+                                  {nextStepItem ? (
                                     <div>
                                       <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
                                         Next step
                                       </div>
                                       {renderActionBtn(nextStepItem, "primary")}
                                     </div>
-                                  )}
+                                  ) : null}
                                   {ACTION_GROUPS.map((grp) => {
                                     const items = actionsByGroup(grp.key);
                                     if (items.length === 0) return null;
@@ -4039,7 +4039,7 @@ function IntakeFeedSection() {
                                       </div>
                                     );
                                   })}
-                                  {actionsByGroup("rare").length > 0 && (
+                                  {actionsByGroup("rare").length > 0 ? (
                                     <div>
                                       <button
                                         type="button"
@@ -4056,26 +4056,26 @@ function IntakeFeedSection() {
                                           ? "Hide extra actions"
                                           : "More — reopen, dormant, reactivate"}
                                       </button>
-                                      {moreActionsId === lead.id && (
+                                      {moreActionsId === lead.id ? (
                                         <div className="mt-2 flex flex-wrap gap-2">
                                           {actionsByGroup("rare").map((item) =>
                                             renderActionBtn(item),
                                           )}
                                         </div>
-                                      )}
+                                      ) : null}
                                     </div>
-                                  )}
-                                  {actionsByGroup("danger").length > 0 && (
+                                  ) : null}
+                                  {actionsByGroup("danger").length > 0 ? (
                                     <div className="flex flex-wrap gap-2 border-t border-zinc-800 pt-2.5">
                                       {actionsByGroup("danger").map((item) =>
                                         renderActionBtn(item),
                                       )}
                                     </div>
-                                  )}
+                                  ) : null}
                                 </div>
                               </div>
-                            )}
-                            {notes && (
+                            ) : null}
+                            {notes ? (
                               <div className="mt-3 rounded-md border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
                                 <div className="text-[10px] uppercase tracking-wider text-zinc-500">
                                   Operational Notes
@@ -4084,7 +4084,7 @@ function IntakeFeedSection() {
                                   {notes}
                                 </p>
                               </div>
-                            )}
+                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -4094,7 +4094,7 @@ function IntakeFeedSection() {
             </tbody>
           </table>
         </div>
-        {totalPages > 1 && (
+        {totalPages > 1 ? (
           <div className="flex items-center justify-between px-4 py-3 border-t border-zinc-800">
             <span className="text-xs text-zinc-500">
               Page {page} of {totalPages} · {total} total
@@ -4116,9 +4116,9 @@ function IntakeFeedSection() {
               </button>
             </div>
           </div>
-        )}
+        ) : null}
       </div>
-      {modalLead && modalAction && (
+      {modalLead && modalAction ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-950 p-5 shadow-2xl">
             <div className="mb-4 flex items-start justify-between gap-4">
@@ -4151,7 +4151,7 @@ function IntakeFeedSection() {
                 "mark_contacted",
                 "mark_no_answer",
                 "log_contact_attempt",
-              ].includes(modalAction.action) && (
+              ].includes(modalAction.action) ? (
                 <>
                   <label className="text-xs text-zinc-300">
                     Contact method
@@ -4178,10 +4178,10 @@ function IntakeFeedSection() {
                     Reached homeowner
                   </label>
                 </>
-              )}
+              ) : null}
               {["assign_operator", "transfer_operator"].includes(
                 modalAction.action,
-              ) && (
+              ) ? (
                 <>
                   <label className="text-xs text-zinc-300">
                     Operator ID
@@ -4204,8 +4204,8 @@ function IntakeFeedSection() {
                     />
                   </label>
                 </>
-              )}
-              {modalAction.action === "add_internal_note" && (
+              ) : null}
+              {modalAction.action === "add_internal_note" ? (
                 <label className="text-xs text-zinc-300 sm:col-span-2">
                   Note type
                   <select
@@ -4223,8 +4223,8 @@ function IntakeFeedSection() {
                     </option>
                   </select>
                 </label>
-              )}
-              {modalAction.action === "log_contact_attempt" && (
+              ) : null}
+              {modalAction.action === "log_contact_attempt" ? (
                 <>
                   <label className="text-xs text-zinc-300">
                     Contact result
@@ -4258,8 +4258,8 @@ function IntakeFeedSection() {
                     />
                   </label>
                 </>
-              )}
-              {modalAction.action === "create_follow_up_task" && (
+              ) : null}
+              {modalAction.action === "create_follow_up_task" ? (
                 <>
                   <label className="text-xs text-zinc-300">
                     Task title
@@ -4298,8 +4298,8 @@ function IntakeFeedSection() {
                     </select>
                   </label>
                 </>
-              )}
-              {modalAction.action === "complete_follow_up_task" && (
+              ) : null}
+              {modalAction.action === "complete_follow_up_task" ? (
                 <label className="text-xs text-zinc-300 sm:col-span-2">
                   Task ID
                   <input
@@ -4309,8 +4309,8 @@ function IntakeFeedSection() {
                     className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
                   />
                 </label>
-              )}
-              {modalAction.action === "update_financing_stage" && (
+              ) : null}
+              {modalAction.action === "update_financing_stage" ? (
                 <label className="text-xs text-zinc-300 sm:col-span-2">
                   Financing stage
                   <select
@@ -4332,8 +4332,8 @@ function IntakeFeedSection() {
                     <option value="financing_blocked">Financing blocked</option>
                   </select>
                 </label>
-              )}
-              {modalAction.action === "update_proposal_stage" && (
+              ) : null}
+              {modalAction.action === "update_proposal_stage" ? (
                 <label className="text-xs text-zinc-300 sm:col-span-2">
                   Proposal stage
                   <select
@@ -4353,8 +4353,8 @@ function IntakeFeedSection() {
                     <option value="proposal_stalled">Proposal stalled</option>
                   </select>
                 </label>
-              )}
-              {modalAction.action === "mark_no_answer" && (
+              ) : null}
+              {modalAction.action === "mark_no_answer" ? (
                 <>
                   <label className="flex items-center gap-2 text-xs text-zinc-300">
                     <input
@@ -4378,8 +4378,8 @@ function IntakeFeedSection() {
                     />
                   </label>
                 </>
-              )}
-              {modalAction.action === "mark_contacted" && (
+              ) : null}
+              {modalAction.action === "mark_contacted" ? (
                 <>
                   <label className="text-xs text-zinc-300">
                     Next step
@@ -4403,10 +4403,10 @@ function IntakeFeedSection() {
                     />
                   </label>
                 </>
-              )}
+              ) : null}
               {["mark_needs_follow_up", "create_follow_up_task"].includes(
                 modalAction.action,
-              ) && (
+              ) ? (
                 <>
                   <label className="text-xs text-zinc-300">
                     Follow-up priority
@@ -4438,8 +4438,8 @@ function IntakeFeedSection() {
                     </select>
                   </label>
                 </>
-              )}
-              {modalAction.action === "mark_needs_follow_up" && (
+              ) : null}
+              {modalAction.action === "mark_needs_follow_up" ? (
                 <>
                   <label className="text-xs text-zinc-300">
                     Requested callback date/time required
@@ -4464,13 +4464,13 @@ function IntakeFeedSection() {
                     />
                   </label>
                 </>
-              )}
+              ) : null}
               {[
                 "reopen_qualification",
                 "reopen_financing",
                 "reopen_documents",
                 "reactivate_lead",
-              ].includes(modalAction.action) && (
+              ].includes(modalAction.action) ? (
                 <label className="text-xs text-zinc-300 sm:col-span-2">
                   Workflow reason required
                   <textarea
@@ -4482,8 +4482,8 @@ function IntakeFeedSection() {
                     className="mt-1 min-h-20 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
                   />
                 </label>
-              )}
-              {modalAction.action === "reopen_callback" && (
+              ) : null}
+              {modalAction.action === "reopen_callback" ? (
                 <>
                   <label className="text-xs text-zinc-300">
                     Callback date/time required
@@ -4518,8 +4518,8 @@ function IntakeFeedSection() {
                     />
                   </label>
                 </>
-              )}
-              {modalAction.action === "mark_dormant" && (
+              ) : null}
+              {modalAction.action === "mark_dormant" ? (
                 <>
                   <label className="text-xs text-zinc-300">
                     Dormant until
@@ -4543,8 +4543,8 @@ function IntakeFeedSection() {
                     />
                   </label>
                 </>
-              )}
-              {modalAction.action === "mark_financing_ready" && (
+              ) : null}
+              {modalAction.action === "mark_financing_ready" ? (
                 <>
                   <label className="text-xs text-zinc-300">
                     Financing path
@@ -4587,8 +4587,8 @@ function IntakeFeedSection() {
                     />
                   </label>
                 </>
-              )}
-              {modalAction.action === "mark_qualified" && (
+              ) : null}
+              {modalAction.action === "mark_qualified" ? (
                 <>
                   <label className="text-xs text-zinc-300">
                     Qualification reason
@@ -4629,8 +4629,8 @@ function IntakeFeedSection() {
                     Missing items resolved?
                   </label>
                 </>
-              )}
-              {modalAction.action === "approve_for_marketplace" && (
+              ) : null}
+              {modalAction.action === "approve_for_marketplace" ? (
                 <>
                   <div className="rounded-lg border border-purple-900/50 bg-purple-950/20 p-3 text-xs text-purple-100 sm:col-span-2">
                     Marketplace release remains gated by centralized release
@@ -4682,8 +4682,8 @@ function IntakeFeedSection() {
                     />
                   </label>
                 </>
-              )}
-              {modalAction.action === "release_to_marketplace" && (
+              ) : null}
+              {modalAction.action === "release_to_marketplace" ? (
                 <>
                   <div className="rounded-lg border border-blue-900/50 bg-blue-950/20 p-3 text-xs text-blue-100 sm:col-span-2">
                     This uses the existing canonical marketplace gate. On success,
@@ -4750,8 +4750,8 @@ function IntakeFeedSection() {
                     />
                   </label>
                 </>
-              )}
-              {modalAction.action === "reject_lead" && (
+              ) : null}
+              {modalAction.action === "reject_lead" ? (
                 <label className="text-xs text-zinc-300 sm:col-span-2">
                   Rejection reason required
                   <input
@@ -4762,8 +4762,8 @@ function IntakeFeedSection() {
                     className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
                   />
                 </label>
-              )}
-              {modalAction.action === "archive_lead" && (
+              ) : null}
+              {modalAction.action === "archive_lead" ? (
                 <>
                   <label className="text-xs text-zinc-300 sm:col-span-2">
                     Archive reason required
@@ -4786,7 +4786,7 @@ function IntakeFeedSection() {
                     Mark as test lead
                   </label>
                 </>
-              )}
+              ) : null}
               <label className="text-xs text-zinc-300 sm:col-span-2">
                 Notes
                 <textarea
@@ -4820,9 +4820,9 @@ function IntakeFeedSection() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {(stats.top_sources ?? []).length > 0 && (
+      {(stats.top_sources ?? []).length > 0 ? (
         <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
           <div className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
             Top Sources
@@ -4841,7 +4841,7 @@ function IntakeFeedSection() {
             ))}
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -5053,7 +5053,7 @@ function EnrichmentQueueSection() {
               <option value="all_pending">All pending</option>
             </select>
           </div>
-          {triggerMode !== "all_pending" && (
+          {triggerMode !== "all_pending" ? (
             <div className="flex-1 min-w-[240px]">
               <label className="text-xs text-zinc-500 mb-1 block">
                 {triggerMode === "single"
@@ -5070,7 +5070,7 @@ function EnrichmentQueueSection() {
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-orange-500"
               />
             </div>
-          )}
+          ) : null}
           <label className="flex items-center gap-2 text-sm text-zinc-400 cursor-pointer">
             <input
               type="checkbox"
@@ -5096,13 +5096,13 @@ function EnrichmentQueueSection() {
             Run Enrichment
           </button>
         </div>
-        {triggerResult && (
+        {triggerResult ? (
           <div
             className={`mt-3 text-sm px-3 py-2 rounded-lg ${triggerResult.startsWith("✅") ? "bg-green-900/20 text-green-400" : "bg-red-900/20 text-red-400"}`}
           >
             {triggerResult}
           </div>
-        )}
+        ) : null}
       </div>
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
@@ -5146,7 +5146,7 @@ function EnrichmentQueueSection() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
-              {loading && (
+              {loading ? (
                 <tr>
                   <td
                     colSpan={7}
@@ -5156,8 +5156,8 @@ function EnrichmentQueueSection() {
                     Loading queue…
                   </td>
                 </tr>
-              )}
-              {!loading && jobs.length === 0 && (
+              ) : null}
+              {!loading && jobs.length === 0 ? (
                 <tr>
                   <td
                     colSpan={7}
@@ -5170,7 +5170,7 @@ function EnrichmentQueueSection() {
                     </p>
                   </td>
                 </tr>
-              )}
+              ) : null}
               {!loading &&
                 jobs.map((job) => (
                   <tr
@@ -5217,7 +5217,7 @@ function EnrichmentQueueSection() {
                       <div className="flex items-center gap-1">
                         {["pending", "failed", "retry"].includes(
                           job.status,
-                        ) && (
+                        ) ? (
                           <button
                             onClick={() =>
                               patchJob(job.opportunity_id, "retry")
@@ -5228,8 +5228,8 @@ function EnrichmentQueueSection() {
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
                           </button>
-                        )}
-                        {job.status === "processing" && (
+                        ) : null}
+                        {job.status === "processing" ? (
                           <button
                             onClick={() =>
                               patchJob(job.opportunity_id, "cancel")
@@ -5240,7 +5240,7 @@ function EnrichmentQueueSection() {
                           >
                             <StopCircle className="w-3.5 h-3.5" />
                           </button>
-                        )}
+                        ) : null}
                         <button
                           onClick={() => patchJob(job.opportunity_id, "reset")}
                           disabled={!!actionLoading}
@@ -5426,13 +5426,13 @@ function WebhookLogSection() {
             Replay
           </button>
         </div>
-        {replayResult && (
+        {replayResult ? (
           <div
             className={`mt-3 text-sm px-3 py-2 rounded-lg ${replayResult.startsWith("✅") ? "bg-green-900/20 text-green-400" : "bg-red-900/20 text-red-400"}`}
           >
             {replayResult}
           </div>
-        )}
+        ) : null}
       </div>
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
@@ -5469,7 +5469,7 @@ function WebhookLogSection() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
-              {loading && (
+              {loading ? (
                 <tr>
                   <td
                     colSpan={9}
@@ -5479,8 +5479,8 @@ function WebhookLogSection() {
                     Loading…
                   </td>
                 </tr>
-              )}
-              {!loading && logs.length === 0 && (
+              ) : null}
+              {!loading && logs.length === 0 ? (
                 <tr>
                   <td
                     colSpan={9}
@@ -5492,7 +5492,7 @@ function WebhookLogSection() {
                     </p>
                   </td>
                 </tr>
-              )}
+              ) : null}
               {!loading &&
                 logs.map((log) => (
                   <tr
@@ -5505,14 +5505,14 @@ function WebhookLogSection() {
                       >
                         {log.platform}
                       </span>
-                      {log.partner_id && (
+                      {log.partner_id ? (
                         <div className="text-zinc-600 text-xs">
                           {log.partner_id}
                         </div>
-                      )}
-                      {log.is_replay && (
+                      ) : null}
+                      {log.is_replay ? (
                         <div className="text-violet-400 text-xs">↩ replay</div>
-                      )}
+                      ) : null}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
@@ -5523,11 +5523,11 @@ function WebhookLogSection() {
                           {log.status}
                         </span>
                       </div>
-                      {!!log.retry_count && (
+                      {!!log.retry_count ? (
                         <div className="text-zinc-600 text-xs">
                           {log.retry_count}x retry
                         </div>
-                      )}
+                      ) : null}
                     </td>
                     <td className="px-4 py-3">
                       {log.signature_verified ? (
@@ -5543,16 +5543,16 @@ function WebhookLogSection() {
                       <div className="text-green-400">
                         {log.leads_created ?? 0} new
                       </div>
-                      {(log.leads_duplicate ?? 0) > 0 && (
+                      {(log.leads_duplicate ?? 0) > 0 ? (
                         <div className="text-amber-400">
                           {log.leads_duplicate} dup
                         </div>
-                      )}
-                      {(log.leads_errored ?? 0) > 0 && (
+                      ) : null}
+                      {(log.leads_errored ?? 0) > 0 ? (
                         <div className="text-red-400">
                           {log.leads_errored} err
                         </div>
-                      )}
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-zinc-400 text-xs">
                       {log.action ?? "—"}
@@ -5928,7 +5928,7 @@ function SimulatorSection() {
         </div>
       </div>
 
-      {result && (
+      {result ? (
         <div
           className={`rounded-xl border p-3 text-xs ${result.error || result.success === false ? "border-red-500/30 bg-red-500/10 text-red-200" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"}`}
         >
@@ -5937,25 +5937,25 @@ function SimulatorSection() {
               ? String(result.error)
               : `Action ${String(result.action ?? "complete")} · opportunity ${String(result.opportunity_id ?? "")}`}
           </div>
-          {marketplaceReadySummary(result.marketplace_ready) && (
+          {marketplaceReadySummary(result.marketplace_ready) ? (
             <div className="mt-1 font-mono text-[11px] text-zinc-200">
               marketplace_ready=
               {marketplaceReadySummary(result.marketplace_ready)}
             </div>
-          )}
+          ) : null}
           {(result.stage ||
             result.code ||
             result.message ||
-            result.http_status) && (
+            result.http_status) ? (
             <div className="mt-1 font-mono text-[11px] text-zinc-300">
               {result.http_status ? `http=${String(result.http_status)} ` : ""}
               {result.stage ? `stage=${String(result.stage)} ` : ""}
               {result.code ? `code=${String(result.code)} ` : ""}
               {result.message ? `message=${String(result.message)}` : ""}
             </div>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       <div className="overflow-x-auto rounded-xl border border-zinc-700/50">
         <table className="w-full text-sm">
@@ -6045,11 +6045,11 @@ function SimulatorSection() {
                           ? `${Math.round(Number(opp.confidence_score))}%`
                           : "—"}
                       </div>
-                      {decisionReason && (
+                      {decisionReason ? (
                         <div className="mt-1 max-w-xs text-[11px] leading-snug text-amber-300">
                           {decisionReason}
                         </div>
-                      )}
+                      ) : null}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
@@ -6250,7 +6250,7 @@ function MarketplaceWorkbenchSection() {
         </button>
       </div>
 
-      {result && (
+      {result ? (
         <div
           className={`rounded-xl border p-3 text-xs ${result.error || result.success === false ? "border-red-500/30 bg-red-500/10 text-red-200" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"}`}
         >
@@ -6263,7 +6263,7 @@ function MarketplaceWorkbenchSection() {
             {workbenchResultSummary(result)}
           </div>
         </div>
-      )}
+      ) : null}
 
       <div className="overflow-x-auto rounded-xl border border-zinc-700/50">
         <table className="w-full text-sm">
@@ -6365,7 +6365,7 @@ function MarketplaceWorkbenchSection() {
                         <Eye className="h-3 w-3" />{" "}
                         {expanded === opp.id ? "Hide details" : "View details"}
                       </button>
-                      {expanded === opp.id && (
+                      {expanded === opp.id ? (
                         <div className="mt-3 max-w-2xl rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400">
                           {opp.executive_summary ? (
                             <p>{opp.executive_summary}</p>
@@ -6387,7 +6387,7 @@ function MarketplaceWorkbenchSection() {
                             <EnrichmentDetailGroups row={opp} />
                           </div>
                         </div>
-                      )}
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-zinc-300">
                       <div>
@@ -6443,11 +6443,11 @@ function MarketplaceWorkbenchSection() {
                         Marketplace {formatDisplayValue(marketplacePriority)} ·
                         Assignment {formatDisplayValue(assignmentPriority)}
                       </div>
-                      {score == null && (
+                      {score == null ? (
                         <div className="mt-1 text-[11px] text-amber-300">
                           No score available
                         </div>
-                      )}
+                      ) : null}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap items-center gap-2">
@@ -6486,11 +6486,11 @@ function MarketplaceWorkbenchSection() {
                         Offers {activeOffers} · Total{" "}
                         {opp.assignment_count ?? 0}
                       </div>
-                      {assigned && (
+                      {assigned ? (
                         <div className="mt-1 text-[11px] text-amber-300">
                           Assignment offers already exist
                         </div>
-                      )}
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-xs text-zinc-500">
                       {opp.live_at
@@ -6606,7 +6606,7 @@ function ContractorMatchPanel() {
         </button>
       </div>
 
-      {result && !result.error && (
+      {result && !result.error ? (
         <div className="space-y-3">
           <div className="flex items-center gap-3 text-sm">
             <span className="text-zinc-400">Total Eligible:</span>
@@ -6614,14 +6614,14 @@ function ContractorMatchPanel() {
               {String(result.total_eligible ?? 0)}
             </span>
             {result.assignments_created &&
-              parseInt(String(result.assignments_created)) > 0 && (
+              parseInt(String(result.assignments_created)) > 0 ? (
                 <span className="text-emerald-400">
                   {String(result.assignments_created)} assignments created
                 </span>
-              )}
+              ) : null}
           </div>
 
-          {matches.length > 0 && (
+          {matches.length > 0 ? (
             <div className="overflow-x-auto rounded-xl border border-zinc-700/50">
               <table className="w-full text-sm">
                 <thead>
@@ -6706,15 +6706,15 @@ function ContractorMatchPanel() {
                 </tbody>
               </table>
             </div>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
-      {result?.error && (
+      {result?.error ? (
         <div className="p-3 bg-red-900/20 border border-red-800/30 rounded-lg text-sm text-red-400">
           {String(result.error)}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -6965,12 +6965,12 @@ function IntakeFunnelsSection() {
         </div>
       </div>
 
-      {error && (
+      {error ? (
         <div className="flex items-center gap-2 rounded-xl border border-red-800/40 bg-red-950/30 p-3 text-sm text-red-300">
           <AlertCircle className="h-4 w-4" />
           {error}
         </div>
-      )}
+      ) : null}
 
       {loading && !funnels.length ? (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-10 text-center text-sm text-zinc-400">
@@ -7009,11 +7009,11 @@ function IntakeFunnelsSection() {
                       </span>
                     </div>
                     <p className="mt-1 text-xs text-zinc-500">/{funnel.slug}</p>
-                    {funnel.description && (
+                    {funnel.description ? (
                       <p className="mt-2 text-sm text-zinc-400">
                         {funnel.description}
                       </p>
-                    )}
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <a
@@ -7066,12 +7066,12 @@ function IntakeFunnelsSection() {
                   </div>
                 </div>
 
-                {copied?.startsWith(funnel.slug) && (
+                {copied?.startsWith(funnel.slug) ? (
                   <div className="mt-3 inline-flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-300">
                     <CheckCircle2 className="h-3.5 w-3.5" />
                     Copied {copied.replace(`${funnel.slug} `, "")}
                   </div>
-                )}
+                ) : null}
 
                 <div className="mt-5 grid gap-4 md:grid-cols-3">
                   <FunnelInfoRow
@@ -7479,7 +7479,7 @@ function CampaignsSection() {
       </div>
 
       {/* Summary Cards */}
-      {summary && (
+      {summary ? (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {[
             {
@@ -7525,7 +7525,7 @@ function CampaignsSection() {
             </div>
           ))}
         </div>
-      )}
+      ) : null}
 
       {/* Filters */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -7556,11 +7556,11 @@ function CampaignsSection() {
       </div>
 
       {/* Error */}
-      {error && (
+      {error ? (
         <div className="p-3 bg-red-900/20 border border-red-800/30 rounded-lg text-sm text-red-400">
           {error}
         </div>
-      )}
+      ) : null}
 
       {/* Campaigns Table */}
       {loading ? (
@@ -7616,11 +7616,11 @@ function CampaignsSection() {
                     <div className="font-medium text-white text-xs truncate">
                       {c.name}
                     </div>
-                    {c.utm_campaign && (
+                    {c.utm_campaign ? (
                       <div className="text-zinc-600 text-[10px] truncate mt-0.5">
                         utm: {c.utm_campaign}
                       </div>
-                    )}
+                    ) : null}
                   </td>
                   {/* Platform */}
                   <td className="px-4 py-3 whitespace-nowrap">
@@ -7666,11 +7666,11 @@ function CampaignsSection() {
                     <span className="text-xs text-zinc-300">
                       {fmtCents(c.monthly_budget_cents)}
                     </span>
-                    {c.daily_budget_cents != null && (
+                    {c.daily_budget_cents != null ? (
                       <div className="text-[10px] text-zinc-600">
                         {fmtCents(c.daily_budget_cents)}/day
                       </div>
-                    )}
+                    ) : null}
                   </td>
                   {/* Leads */}
                   <td className="px-4 py-3 whitespace-nowrap">
@@ -7678,14 +7678,14 @@ function CampaignsSection() {
                       <span className="text-white font-medium">
                         {c.leads_received}
                       </span>
-                      {c.leads_target != null && (
+                      {c.leads_target != null ? (
                         <span className="text-zinc-600">
                           {" "}
                           / {c.leads_target}
                         </span>
-                      )}
+                      ) : null}
                     </div>
-                    {c.leads_target != null && c.leads_target > 0 && (
+                    {c.leads_target != null && c.leads_target > 0 ? (
                       <div className="mt-1 w-16 h-1 bg-zinc-800 rounded-full overflow-hidden">
                         <div
                           className="h-full bg-violet-500 rounded-full"
@@ -7694,7 +7694,7 @@ function CampaignsSection() {
                           }}
                         />
                       </div>
-                    )}
+                    ) : null}
                   </td>
                   {/* CPL */}
                   <td className="px-4 py-3 whitespace-nowrap">
@@ -7702,15 +7702,15 @@ function CampaignsSection() {
                       <span className="text-white font-medium">
                         {fmtCents(c.actual_cpl_cents)}
                       </span>
-                      {c.cost_per_lead_target_cents != null && (
+                      {c.cost_per_lead_target_cents != null ? (
                         <span className="text-zinc-600">
                           {" "}
                           / {fmtCents(c.cost_per_lead_target_cents)}
                         </span>
-                      )}
+                      ) : null}
                     </div>
                     {c.actual_cpl_cents != null &&
-                      c.cost_per_lead_target_cents != null && (
+                      c.cost_per_lead_target_cents != null ? (
                         <div
                           className={`text-[10px] mt-0.5 ${c.actual_cpl_cents <= c.cost_per_lead_target_cents ? "text-emerald-400" : "text-red-400"}`}
                         >
@@ -7718,7 +7718,7 @@ function CampaignsSection() {
                             ? "↓ under target"
                             : "↑ over target"}
                         </div>
-                      )}
+                      ) : null}
                   </td>
                   {/* Conv % */}
                   <td className="px-4 py-3 whitespace-nowrap">
@@ -7753,7 +7753,7 @@ function CampaignsSection() {
       )}
 
       {/* UTM Builder helper */}
-      {campaigns.some((c) => c.utm_campaign) && (
+      {campaigns.some((c) => c.utm_campaign) ? (
         <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
           <h3 className="text-xs font-semibold text-zinc-400 mb-2 flex items-center gap-1.5">
             <ExternalLink className="w-3.5 h-3.5" /> UTM Tracking Active
@@ -7768,10 +7768,10 @@ function CampaignsSection() {
             track CPL in real time.
           </p>
         </div>
-      )}
+      ) : null}
 
       {/* Create / Edit Modal */}
-      {showCreate && (
+      {showCreate ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl">
             <div className="flex items-center justify-between p-6 border-b border-zinc-800">
@@ -7994,11 +7994,11 @@ function CampaignsSection() {
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-500 resize-none"
                 />
               </div>
-              {saveError && (
+              {saveError ? (
                 <div className="p-2 bg-red-900/20 border border-red-800/30 rounded-lg text-xs text-red-400">
                   {saveError}
                 </div>
-              )}
+              ) : null}
             </div>
             <div className="flex items-center justify-end gap-2 p-6 border-t border-zinc-800">
               <button
@@ -8022,7 +8022,7 @@ function CampaignsSection() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

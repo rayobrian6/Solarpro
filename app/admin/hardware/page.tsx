@@ -87,47 +87,47 @@ function PanelForm({ panel, onSave, onCancel }: {
       <h3 className="font-semibold text-white mb-4">{panel?.id ? 'Edit Panel' : 'Add New Panel'}</h3>
 
       {/* Datasheet suggestion banner */}
-      {dsResult?.panelSpecs && !dsLoading && Object.keys(dsAutoFields).length > 0 && (
+      {dsResult?.panelSpecs && !dsLoading && Object.keys(dsAutoFields).length > 0 ? (
         <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400 text-xs">
           <Sparkles size={12} />
           Auto-filled specs from datasheet. Review and edit as needed.
         </div>
-      )}
+      ) : null}
 
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="input-label">
             Manufacturer
-            {dsAutoFields.manufacturer && dsResult?.manufacturer && (
+            {dsAutoFields.manufacturer && dsResult?.manufacturer ? (
               <ConfidenceBadge confidence={mapConfidence(dsResult.manufacturer.confidence)} source="datasheet" size="xs" overridden={dsOverrides.manufacturer} />
-            )}
+            ) : null}
           </label>
           <input className="input" value={form.manufacturer} onChange={e => { set('manufacturer', e.target.value); if (dsAutoFields.manufacturer) setDsOverrides(p => ({ ...p, manufacturer: true })); }} />
         </div>
         <div>
           <label className="input-label">
             Model
-            {dsAutoFields.model && dsResult?.model && (
+            {dsAutoFields.model && dsResult?.model ? (
               <ConfidenceBadge confidence={mapConfidence(dsResult.model.confidence)} source="datasheet" size="xs" overridden={dsOverrides.model} />
-            )}
+            ) : null}
           </label>
           <input className="input" value={form.model} onChange={e => { set('model', e.target.value); if (dsAutoFields.model) setDsOverrides(p => ({ ...p, model: true })); }} />
         </div>
         <div>
           <label className="input-label">
             Wattage (W)
-            {dsAutoFields.wattage && dsResult?.panelSpecs?.wattage && (
+            {dsAutoFields.wattage && dsResult?.panelSpecs?.wattage ? (
               <ConfidenceBadge confidence={mapConfidence(dsResult.panelSpecs.wattage.confidence)} source="datasheet" detail={dsResult.panelSpecs.wattage.derivation} size="xs" overridden={dsOverrides.wattage} />
-            )}
+            ) : null}
           </label>
           <input className="input" type="number" value={form.wattage} onChange={e => { set('wattage', +e.target.value); if (dsAutoFields.wattage) setDsOverrides(p => ({ ...p, wattage: true })); }} />
         </div>
         <div>
           <label className="input-label">
             Efficiency (%)
-            {dsAutoFields.efficiency && dsResult?.panelSpecs?.efficiency && (
+            {dsAutoFields.efficiency && dsResult?.panelSpecs?.efficiency ? (
               <ConfidenceBadge confidence={mapConfidence(dsResult.panelSpecs.efficiency.confidence)} source="datasheet" detail={dsResult.panelSpecs.efficiency.derivation} size="xs" overridden={dsOverrides.efficiency} />
-            )}
+            ) : null}
           </label>
           <input className="input" type="number" step="0.1" value={form.efficiency} onChange={e => { set('efficiency', +e.target.value); if (dsAutoFields.efficiency) setDsOverrides(p => ({ ...p, efficiency: true })); }} />
         </div>
@@ -137,27 +137,27 @@ function PanelForm({ panel, onSave, onCancel }: {
         <div>
           <label className="input-label">
             Temp Coeff (%/°C)
-            {dsAutoFields.temperatureCoeff && dsResult?.panelSpecs?.tempCoeffPmax && (
+            {dsAutoFields.temperatureCoeff && dsResult?.panelSpecs?.tempCoeffPmax ? (
               <ConfidenceBadge confidence={mapConfidence(dsResult.panelSpecs.tempCoeffPmax.confidence)} source="datasheet" size="xs" overridden={dsOverrides.temperatureCoeff} />
-            )}
+            ) : null}
           </label>
           <input className="input" type="number" step="0.01" value={form.temperatureCoeff} onChange={e => set('temperatureCoeff', +e.target.value)} />
         </div>
         <div>
           <label className="input-label">
             Warranty (yrs)
-            {dsAutoFields.warranty && dsResult?.panelSpecs?.warranty && (
+            {dsAutoFields.warranty && dsResult?.panelSpecs?.warranty ? (
               <ConfidenceBadge confidence={mapConfidence(dsResult.panelSpecs.warranty.confidence)} source="datasheet" size="xs" overridden={dsOverrides.warranty} />
-            )}
+            ) : null}
           </label>
           <input className="input" type="number" value={form.warranty} onChange={e => { set('warranty', +e.target.value); if (dsAutoFields.warranty) setDsOverrides(p => ({ ...p, warranty: true })); }} />
         </div>
         <div>
           <label className="input-label">
             Weight (kg)
-            {dsAutoFields.weight && dsResult?.panelSpecs?.weight && (
+            {dsAutoFields.weight && dsResult?.panelSpecs?.weight ? (
               <ConfidenceBadge confidence={mapConfidence(dsResult.panelSpecs.weight.confidence)} source="datasheet" size="xs" overridden={dsOverrides.weight} />
-            )}
+            ) : null}
           </label>
           <input className="input" type="number" step="0.1" value={form.weight} onChange={e => { set('weight', +e.target.value); if (dsAutoFields.weight) setDsOverrides(p => ({ ...p, weight: true })); }} />
         </div>
@@ -182,12 +182,12 @@ function PanelForm({ panel, onSave, onCancel }: {
           <button onClick={() => set('bifacial', !form.bifacial)} className={`w-10 h-5 rounded-full transition-colors relative ${form.bifacial ? 'bg-amber-500' : 'bg-slate-600'}`}>
             <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${form.bifacial ? 'translate-x-5' : 'translate-x-0.5'}`} />
           </button>
-          {form.bifacial && (
+          {form.bifacial ? (
             <div className="flex items-center gap-2">
               <label className="input-label mb-0">Bifacial Factor</label>
               <input className="input w-24" type="number" step="0.01" min="1.0" max="1.5" value={form.bifacialFactor} onChange={e => set('bifacialFactor', +e.target.value)} />
             </div>
-          )}
+          ) : null}
           {dsAutoFields.bifacial && dsResult?.panelSpecs?.bifacial && (
             <ConfidenceBadge confidence={mapConfidence(dsResult.panelSpecs.bifacial.confidence)} source="datasheet" size="xs" overridden={dsOverrides.bifacial} />
           )}
@@ -283,38 +283,38 @@ function InverterForm({ inverter, onSave, onCancel }: {
       <h3 className="font-semibold text-white mb-4">{inverter?.id ? 'Edit Inverter' : 'Add New Inverter'}</h3>
 
       {/* Datasheet suggestion banner */}
-      {dsResult?.inverterSpecs && !dsLoading && Object.keys(dsAutoFields).length > 0 && (
+      {dsResult?.inverterSpecs && !dsLoading && Object.keys(dsAutoFields).length > 0 ? (
         <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400 text-xs">
           <Sparkles size={12} />
           Auto-filled specs from datasheet. Review and edit as needed.
         </div>
-      )}
+      ) : null}
 
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="input-label">
             Manufacturer
-            {dsAutoFields.manufacturer && dsResult?.manufacturer && (
+            {dsAutoFields.manufacturer && dsResult?.manufacturer ? (
               <ConfidenceBadge confidence={mapConfidence(dsResult.manufacturer.confidence)} source="datasheet" size="xs" overridden={dsOverrides.manufacturer} />
-            )}
+            ) : null}
           </label>
           <input className="input" value={form.manufacturer} onChange={e => { set('manufacturer', e.target.value); if (dsAutoFields.manufacturer) setDsOverrides(p => ({ ...p, manufacturer: true })); }} />
         </div>
         <div>
           <label className="input-label">
             Model
-            {dsAutoFields.model && dsResult?.model && (
+            {dsAutoFields.model && dsResult?.model ? (
               <ConfidenceBadge confidence={mapConfidence(dsResult.model.confidence)} source="datasheet" size="xs" overridden={dsOverrides.model} />
-            )}
+            ) : null}
           </label>
           <input className="input" value={form.model} onChange={e => { set('model', e.target.value); if (dsAutoFields.model) setDsOverrides(p => ({ ...p, model: true })); }} />
         </div>
         <div>
           <label className="input-label">
             Type
-            {dsAutoFields.type && dsResult?.equipmentType && (
+            {dsAutoFields.type && dsResult?.equipmentType ? (
               <ConfidenceBadge confidence={mapConfidence(dsResult.equipmentType.confidence)} source="datasheet" size="xs" overridden={dsOverrides.type} />
-            )}
+            ) : null}
           </label>
           <select className="input" value={form.type} onChange={e => { set('type', e.target.value); if (dsAutoFields.type) setDsOverrides(p => ({ ...p, type: true })); }}>
             <option value="string">String Inverter</option>
@@ -326,18 +326,18 @@ function InverterForm({ inverter, onSave, onCancel }: {
         <div>
           <label className="input-label">
             Capacity (kW)
-            {dsAutoFields.capacity && dsResult?.inverterSpecs?.acOutputW && (
+            {dsAutoFields.capacity && dsResult?.inverterSpecs?.acOutputW ? (
               <ConfidenceBadge confidence={mapConfidence(dsResult.inverterSpecs.acOutputW.confidence)} source="datasheet" detail={dsResult.inverterSpecs.acOutputW.derivation} size="xs" overridden={dsOverrides.capacity} />
-            )}
+            ) : null}
           </label>
           <input className="input" type="number" step="0.1" value={form.capacity} onChange={e => { set('capacity', +e.target.value); if (dsAutoFields.capacity) setDsOverrides(p => ({ ...p, capacity: true })); }} />
         </div>
         <div>
           <label className="input-label">
             Efficiency (%)
-            {dsAutoFields.efficiency && dsResult?.inverterSpecs?.efficiency && (
+            {dsAutoFields.efficiency && dsResult?.inverterSpecs?.efficiency ? (
               <ConfidenceBadge confidence={mapConfidence(dsResult.inverterSpecs.efficiency.confidence)} source="datasheet" detail={dsResult.inverterSpecs.efficiency.derivation} size="xs" overridden={dsOverrides.efficiency} />
-            )}
+            ) : null}
           </label>
           <input className="input" type="number" step="0.1" value={form.efficiency} onChange={e => { set('efficiency', +e.target.value); if (dsAutoFields.efficiency) setDsOverrides(p => ({ ...p, efficiency: true })); }} />
         </div>
@@ -345,27 +345,27 @@ function InverterForm({ inverter, onSave, onCancel }: {
         <div>
           <label className="input-label">
             Warranty (yrs)
-            {dsAutoFields.warranty && dsResult?.inverterSpecs?.warranty && (
+            {dsAutoFields.warranty && dsResult?.inverterSpecs?.warranty ? (
               <ConfidenceBadge confidence={mapConfidence(dsResult.inverterSpecs.warranty.confidence)} source="datasheet" size="xs" overridden={dsOverrides.warranty} />
-            )}
+            ) : null}
           </label>
           <input className="input" type="number" value={form.warranty} onChange={e => { set('warranty', +e.target.value); if (dsAutoFields.warranty) setDsOverrides(p => ({ ...p, warranty: true })); }} />
         </div>
         <div>
           <label className="input-label">
             Max DC Voltage (V)
-            {dsAutoFields.maxDcVoltage && dsResult?.inverterSpecs?.maxDcVoltage && (
+            {dsAutoFields.maxDcVoltage && dsResult?.inverterSpecs?.maxDcVoltage ? (
               <ConfidenceBadge confidence={mapConfidence(dsResult.inverterSpecs.maxDcVoltage.confidence)} source="datasheet" detail={dsResult.inverterSpecs.maxDcVoltage.derivation} size="xs" overridden={dsOverrides.maxDcVoltage} />
-            )}
+            ) : null}
           </label>
           <input className="input" type="number" step="1" value={form.maxDcVoltage} onChange={e => { set('maxDcVoltage', +e.target.value); if (dsAutoFields.maxDcVoltage) setDsOverrides(p => ({ ...p, maxDcVoltage: true })); }} />
         </div>
         <div>
           <label className="input-label">
             MPPT Vmax (V)
-            {dsAutoFields.mpptVoltageMax && dsResult?.inverterSpecs?.mpptVoltageMax && (
+            {dsAutoFields.mpptVoltageMax && dsResult?.inverterSpecs?.mpptVoltageMax ? (
               <ConfidenceBadge confidence={mapConfidence(dsResult.inverterSpecs.mpptVoltageMax.confidence)} source="datasheet" detail={dsResult.inverterSpecs.mpptVoltageMax.derivation} size="xs" overridden={dsOverrides.mpptVoltageMax} />
-            )}
+            ) : null}
           </label>
           <input className="input" type="number" step="1" value={form.mpptVoltageMax} onChange={e => { set('mpptVoltageMax', +e.target.value); if (dsAutoFields.mpptVoltageMax) setDsOverrides(p => ({ ...p, mpptVoltageMax: true })); }} />
         </div>
@@ -420,7 +420,7 @@ function EquipmentCard(props: any) {
             </div>
           </div>
           
-          {type === 'panel' && (
+          {type === 'panel' ? (
             <div className="grid grid-cols-2 gap-2 text-xs">
               {[
                 { label: 'Wattage', value: `${item.wattage}W` },
@@ -434,9 +434,9 @@ function EquipmentCard(props: any) {
                 </div>
               ))}
             </div>
-          )}
+          ) : null}
           
-          {type === 'inverter' && (
+          {type === 'inverter' ? (
             <div className="grid grid-cols-2 gap-2 text-xs">
               {[
                 { label: 'Capacity', value: `${item.capacity} kW` },
@@ -450,9 +450,9 @@ function EquipmentCard(props: any) {
                 </div>
               ))}
             </div>
-          )}
+          ) : null}
           
-          {type === 'mounting' && (
+          {type === 'mounting' ? (
             <div className="grid grid-cols-2 gap-2 text-xs">
               {[
                 { label: 'Type', value: item.type || item.mountType || 'roof' },
@@ -466,9 +466,9 @@ function EquipmentCard(props: any) {
                 </div>
               ))}
             </div>
-          )}
+          ) : null}
           
-          {type === 'battery' && (
+          {type === 'battery' ? (
             <div className="grid grid-cols-2 gap-2 text-xs">
               {[
                 { label: 'Capacity', value: `${item.capacityKwh || item.capacity_kwh} kWh` },
@@ -482,40 +482,40 @@ function EquipmentCard(props: any) {
                 </div>
               ))}
             </div>
-          )}
+          ) : null}
           
           {/* Status badges */}
           <div className="flex flex-wrap gap-1.5 mt-2">
-            {item.bifacial && (
+            {item.bifacial ? (
               <div className="text-xs bg-purple-500/10 border border-purple-500/20 rounded-lg px-2 py-1 text-purple-300">
                 ⚡ Bifacial ×{item.bifacialFactor}
               </div>
-            )}
-            {item.datasheetUrl && (
+            ) : null}
+            {item.datasheetUrl ? (
               <a href={item.datasheetUrl} target="_blank" rel="noopener noreferrer" className="text-xs bg-blue-500/10 border border-blue-500/20 rounded-lg px-2 py-1 text-blue-300 hover:bg-blue-500/20 flex items-center gap-1">
                 <FileText size={10} />Datasheet
               </a>
-            )}
-            {item.source === 'engineering' && (
+            ) : null}
+            {item.source === 'engineering' ? (
               <div className="text-xs bg-teal-500/10 border border-teal-500/20 rounded-lg px-2 py-1 text-teal-300 flex items-center gap-1">
                 <Database size={9} />Eng DB
               </div>
-            )}
-            {item.source === 'merged' && (
+            ) : null}
+            {item.source === 'merged' ? (
               <div className="text-xs bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-1 text-amber-300 flex items-center gap-1">
                 <Database size={9} />Merged
               </div>
-            )}
-            {item.isCustom && (
+            ) : null}
+            {item.isCustom ? (
               <div className="text-xs bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-2 py-1 text-indigo-300 flex items-center gap-1">
                 <User size={9} />Custom
               </div>
-            )}
-            {!isActive && (
+            ) : null}
+            {!isActive ? (
               <div className="text-xs bg-red-500/10 border border-red-500/20 rounded-lg px-2 py-1 text-red-300">
                 Disabled
               </div>
-            )}
+            ) : null}
           </div>
         </>
       )}
@@ -736,12 +736,12 @@ export default function HardwarePage() {
               <p className="text-slate-400 text-sm">Your equipment catalog — engineering DB specs merged with your custom pricing &amp; models</p>
             </div>
           </div>
-          {saving && (
+          {saving ? (
             <div className="flex items-center gap-2 text-sm text-amber-400">
               <div className="spinner w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
               Saving...
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* Tabs */}
@@ -764,7 +764,7 @@ export default function HardwarePage() {
         </div>
 
         {/* Panels Tab */}
-        {activeTab === 'panels' && (
+        {activeTab === 'panels' ? (
           <div className="space-y-4">
             <div className="flex justify-between items-center">
               <h2 className="font-semibold text-white">Solar Panels ({panels.length})</h2>
@@ -772,9 +772,9 @@ export default function HardwarePage() {
                 <Plus size={14} /> Add Panel
               </button>
             </div>
-            {(showPanelForm && !editingPanel) && (
+            {(showPanelForm && !editingPanel) ? (
               <PanelForm onSave={handleSavePanel} onCancel={() => setShowPanelForm(false)} />
-            )}
+            ) : null}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {panels.map(panel => (
                 <EquipmentCard
@@ -797,10 +797,10 @@ export default function HardwarePage() {
               ))}
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Inverters Tab */}
-        {activeTab === 'inverters' && (
+        {activeTab === 'inverters' ? (
           <div className="space-y-4">
             <div className="flex justify-between items-center">
               <h2 className="font-semibold text-white">Inverters ({inverters.length})</h2>
@@ -808,9 +808,9 @@ export default function HardwarePage() {
                 <Plus size={14} /> Add Inverter
               </button>
             </div>
-            {(showInverterForm && !editingInverter) && (
+            {(showInverterForm && !editingInverter) ? (
               <InverterForm onSave={handleSaveInverter} onCancel={() => setShowInverterForm(false)} />
-            )}
+            ) : null}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {inverters.map(inv => (
                 <EquipmentCard
@@ -833,10 +833,10 @@ export default function HardwarePage() {
               ))}
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Mounting Tab */}
-        {activeTab === 'mounting' && (
+        {activeTab === 'mounting' ? (
           <div className="space-y-4">
             <div className="flex justify-between items-center">
               <h2 className="font-semibold text-white">Mounting Systems ({mountings.length})</h2>
@@ -859,10 +859,10 @@ export default function HardwarePage() {
               ))}
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Batteries Tab */}
-        {activeTab === 'batteries' && (
+        {activeTab === 'batteries' ? (
           <div className="space-y-4">
             <div className="flex justify-between items-center">
               <h2 className="font-semibold text-white">Batteries ({batteries.length})</h2>
@@ -885,7 +885,7 @@ export default function HardwarePage() {
               ))}
             </div>
           </div>
-        )}
+        ) : null}
       </div>
       {confirmDialog ? (
         <ConfirmDialog

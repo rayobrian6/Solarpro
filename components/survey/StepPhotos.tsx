@@ -170,11 +170,11 @@ export function StepPhotos({
             }}
           />
         </div>
-        {allRequiredDone && (
+        {allRequiredDone ? (
           <p className="mt-1.5 text-xs text-green-600 font-medium">
             All required photos captured. You can proceed.
           </p>
-        )}
+        ) : null}
       </div>
 
       {/* ---- Required slots ---- */}
@@ -230,14 +230,14 @@ export function StepPhotos({
       </div>
 
       {/* ---- All photos total ---- */}
-      {data.photos.length > 0 && (
+      {data.photos.length > 0 ? (
         <div className="rounded-xl bg-gray-50 border border-gray-200 px-4 py-3">
           <p className="text-xs text-gray-500">
             <span className="font-semibold text-gray-700">{data.photos.length}</span>{' '}
             photo{data.photos.length !== 1 ? 's' : ''} captured for this survey
           </p>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

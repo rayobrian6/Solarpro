@@ -163,7 +163,7 @@ export default function AdminCompanies() {
         </div>
 
         {/* Company Detail Panel */}
-        {selectedCompany && (
+        {selectedCompany ? (
           <div className="w-96 flex-shrink-0">
             <div className="bg-[#0d1424] border border-white/10 rounded-2xl overflow-hidden sticky top-4">
               {/* Panel Header */}
@@ -203,7 +203,7 @@ export default function AdminCompanies() {
                   </div>
 
                   {/* Owner */}
-                  {companyDetail.owner && (
+                  {companyDetail.owner ? (
                     <div className="bg-white/5 rounded-xl p-3">
                       <div className="text-[10px] text-slate-500 mb-2 font-semibold uppercase tracking-wider">Owner / Admin</div>
                       <div className="flex items-center gap-2">
@@ -219,7 +219,7 @@ export default function AdminCompanies() {
                         </span>
                       </div>
                     </div>
-                  )}
+                  ) : null}
 
                   {/* Users list */}
                   <div>
@@ -237,7 +237,7 @@ export default function AdminCompanies() {
                             <span className={`text-[9px] px-1.5 py-0.5 rounded ${STATUS_COLORS[u.subscription_status] || 'bg-slate-500/20 text-slate-400'}`}>
                               {u.subscription_status}
                             </span>
-                            {isSuperAdmin && u.role !== 'super_admin' && (
+                            {isSuperAdmin && u.role !== 'super_admin' ? (
                               <button
                                 onClick={() => companyAction('add_company_admin', { userId: u.id })}
                                 title="Make Company Admin"
@@ -245,7 +245,7 @@ export default function AdminCompanies() {
                               >
                                 <Shield size={10} />
                               </button>
-                            )}
+                            ) : null}
                           </div>
                         </div>
                       ))}
@@ -310,7 +310,7 @@ export default function AdminCompanies() {
                     )}
 
                     {/* Transfer Ownership */}
-                    {isSuperAdmin && companyDetail.userCount > 1 && (
+                    {isSuperAdmin && companyDetail.userCount > 1 ? (
                       <button
                         onClick={() => setTransferModal(true)}
                         className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white/5 hover:bg-white/8 text-sm text-slate-300 hover:text-white transition-colors text-left"
@@ -318,17 +318,17 @@ export default function AdminCompanies() {
                         <ArrowLeftRight size={14} className="text-purple-400" />
                         Transfer Ownership
                       </button>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               ) : null}
             </div>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Change Plan Modal */}
-      {planModal && selectedCompany && (
+      {planModal && selectedCompany ? (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#0d1424] border border-white/10 rounded-2xl p-6 w-full max-w-sm space-y-4">
             <h2 className="text-base font-bold text-white">Change Plan — {selectedCompany.company || selectedCompany.name}</h2>
@@ -353,10 +353,10 @@ export default function AdminCompanies() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Transfer Ownership Modal */}
-      {transferModal && companyDetail && (
+      {transferModal && companyDetail ? (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#0d1424] border border-white/10 rounded-2xl p-6 w-full max-w-sm space-y-4">
             <h2 className="text-base font-bold text-white">Transfer Ownership</h2>
@@ -383,10 +383,10 @@ export default function AdminCompanies() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Confirm Modal */}
-      {confirmModal && (
+      {confirmModal ? (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#0d1424] border border-white/10 rounded-2xl p-6 w-full max-w-sm space-y-4">
             <div className="flex items-center gap-3">
@@ -402,7 +402,7 @@ export default function AdminCompanies() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

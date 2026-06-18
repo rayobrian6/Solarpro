@@ -265,7 +265,7 @@ function ProposalViewInner() {
         copiedLink={copiedLink}
         onCopyLink={handleCopyLink}
       />
-      {showSignModal && (
+      {showSignModal ? (
         <SignatureModal
           proposalId={proposal.id}
           proposalTitle={proposal.title || 'Solar Proposal'}
@@ -274,7 +274,7 @@ function ProposalViewInner() {
           onSuccess={handleSignatureSuccess}
           onClose={() => setShowSignModal(false)}
         />
-      )}
+      ) : null}
     </>
   );
 }
@@ -704,7 +704,7 @@ function PublicProposalView({
             >
               <Printer size={12} /> Print
             </button>
-            {!accepted && (
+            {!accepted ? (
               <button
                 onClick={onAccept}
                 disabled={accepting}
@@ -718,18 +718,18 @@ function PublicProposalView({
                 )}
                 Sign &amp; Accept
               </button>
-            )}
-            {accepted && (
+            ) : null}
+            {accepted ? (
               <div className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs font-semibold">
                 <CheckCircle size={13} /> Signed!
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </header>
 
       {/* ── Accepted Banner ── */}
-      {accepted && (
+      {accepted ? (
         <div className="no-print" style={{ background: 'linear-gradient(90deg, #064e3b 0%, #065f46 50%, #064e3b 100%)', borderBottom: '1px solid rgba(16,185,129,0.3)' }}>
           <div className="max-w-5xl mx-auto px-4 py-4 flex items-center gap-4">
             {/* Animated pulse ring */}
@@ -748,7 +748,7 @@ function PublicProposalView({
             <Sparkles size={18} className="text-emerald-400/50 flex-shrink-0 hidden sm:block" />
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* ── Main Content ── */}
       <div id="proposal-document" className="max-w-5xl mx-auto px-4 py-4 space-y-4 print-content">
@@ -767,24 +767,24 @@ function PublicProposalView({
                   </span>
                 </div>
                 <h1 className="text-2xl font-black text-white mb-1">{proposal.title}</h1>
-                {client && (
+                {client ? (
                   <p className="text-slate-400 text-sm">
                     Prepared for <span className="text-white font-medium">{client.name}</span>
                     {client.address && <span> &middot; {client.address}, {client.city}, {client.state}</span>}
                   </p>
-                )}
+                ) : null}
                 <p className="text-slate-500 text-xs mt-1 flex items-center gap-1">
                   <Calendar size={11} />
                   {new Date(proposal.createdAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
                 </p>
               </div>
-              {systemSizeKw > 0 && (
+              {systemSizeKw > 0 ? (
                 <div className="text-right flex-shrink-0">
                   <div className="text-5xl font-black leading-none" style={{ color: primaryColor }}>{systemSizeKw.toFixed(1)}</div>
                   <div className="text-slate-300 text-sm font-bold tracking-wide mt-1">kW System</div>
                   {totalPanels > 0 && <div className="text-slate-500 text-xs mt-1">{totalPanels} panels</div>}
                 </div>
-              )}
+              ) : null}
             </div>
 
             {/* Section 3: Key metrics strip — accurate labels, no absolute "savings" language */}
@@ -815,14 +815,14 @@ function PublicProposalView({
             </div>
 
             {/* v47.217: System description — compressed for power page */}
-            {systemDescription && (
+            {systemDescription ? (
               <div className="mt-2 px-3 py-2 rounded-lg border border-slate-700/40 bg-slate-800/30">
                 <p className="text-slate-500 text-xs leading-snug">
                   <span className="font-semibold text-slate-400">System: </span>
                   {systemDescription}
                 </p>
               </div>
-            )}
+            ) : null}
 
             {/* ── Satellite property image ── */}
             {(() => {
@@ -849,7 +849,7 @@ function PublicProposalView({
             })()}
 
             {/* Section 7: Fence system production disclaimer */}
-            {isFenceSystem && (
+            {isFenceSystem ? (
               <div className="mt-2 p-2 rounded-lg border border-amber-500/30 bg-amber-500/5">
                 <div className="flex items-start gap-2">
                   <AlertTriangle size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
@@ -863,10 +863,10 @@ function PublicProposalView({
                   </p>
                 </div>
               </div>
-            )}
+            ) : null}
 
             {/* ═══ v47.333: POWER PAGE — Inline Financial Framing ═══ */}
-            {effectiveFinal > 0 && (
+            {effectiveFinal > 0 ? (
               <div className="mt-3 space-y-2">
                 {/* Utility Cost Reality — 2-column layout */}
                 <div className="grid grid-cols-2 gap-2">
@@ -889,7 +889,7 @@ function PublicProposalView({
                 </div>
 
                 {/* Payment Shift — compact single row */}
-                {purchaseMode === 'finance' && solar_payment_monthly > 0 && avgMonthlyBillBefore > 0 && (
+                {purchaseMode === 'finance' && solar_payment_monthly > 0 && avgMonthlyBillBefore > 0 ? (
                   <div className="rounded-lg p-3 border border-slate-600/30 bg-slate-800/40">
                     <div className="text-xs font-semibold text-slate-300 mb-2">What Changes Today</div>
                     <div className="flex items-center justify-between gap-2">
@@ -912,21 +912,21 @@ function PublicProposalView({
                         </div>
                       </div>
                     </div>
-                    {ownership_delta_monthly > 0 && (
+                    {ownership_delta_monthly > 0 ? (
                       <p className="text-xs text-slate-500 mt-1.5 text-center">
                         Your solar payment is fixed at ${solar_payment_monthly}/mo. As utility rates rise at {(cp.utility.escalationRate * 100).toFixed(0)}%/yr, this gap closes and reverses.
                       </p>
-                    )}
-                    {ownership_delta_monthly <= 0 && (
+                    ) : null}
+                    {ownership_delta_monthly <= 0 ? (
                       <p className="text-xs text-emerald-400/70 mt-1.5 text-center">
                         Immediate monthly savings of ${Math.abs(ownership_delta_monthly)}/mo — and it grows as utility rates increase.
                       </p>
-                    )}
+                    ) : null}
                   </div>
-                )}
+                ) : null}
 
                 {/* Cash mode — simple net advantage */}
-                {purchaseMode === 'cash' && effectiveFinal > 0 && net_financial_difference_25yr !== 0 && (
+                {purchaseMode === 'cash' && effectiveFinal > 0 && net_financial_difference_25yr !== 0 ? (
                   <div className="rounded-lg p-3 border border-emerald-500/20 bg-emerald-500/5">
                     <div className="flex items-center justify-between">
                       <div>
@@ -938,25 +938,25 @@ function PublicProposalView({
                       </div>
                     </div>
                   </div>
-                )}
+                ) : null}
               </div>
-            )}
+            ) : null}
 
           </div>
         </div>
 
         {/* Section 13: Failsafe message — shown when utility data is unavailable */}
-        {failsafeMessage && (
+        {failsafeMessage ? (
           <div className="proposal-sec rounded-xl p-4 border border-slate-600/30 bg-slate-800/20" data-block-id="failsafe">
             <div className="flex items-start gap-2">
               <Info size={14} className="text-slate-400 flex-shrink-0 mt-0.5" />
               <p className="text-slate-400 text-xs leading-relaxed">{failsafeMessage}</p>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Section 5: Energy Policy Outlook — shown only when policy_effect is at_risk or changing */}
-        {utilityProfile.policy_message && (
+        {utilityProfile.policy_message ? (
           <div className="proposal-sec rounded-xl p-4 border border-amber-500/20 bg-amber-500/5" data-block-id="energy-policy">
             <div className="flex items-start gap-2">
               <AlertTriangle size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
@@ -966,10 +966,10 @@ function PublicProposalView({
               </div>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Investment Section */}
-        {effectiveFinal > 0 && (
+        {effectiveFinal > 0 ? (
           <div className="proposal-sec card p-4" data-block-id="cost-vs-value">
             <h2 className="text-base font-black text-white mb-3 flex items-center gap-2">
               <DollarSign size={18} style={{ color: primaryColor }} /> Your Investment
@@ -1001,18 +1001,18 @@ function PublicProposalView({
                   <div className="text-xs text-slate-500 mt-1">{financeTermYears}-yr loan at {((pricingCfg?.loanApr ?? 7.99)).toFixed(2)}% APR</div>
 
                   {/* Section 2: Monthly cost breakdown — factual, not misleading */}
-                  {solar_payment_monthly > 0 && avgMonthlyBillBefore > 0 && (
+                  {solar_payment_monthly > 0 && avgMonthlyBillBefore > 0 ? (
                     <div className="mt-4 pt-3 border-t border-slate-700/40 space-y-1.5">
                       <div className="flex justify-between text-xs">
                         <span className="text-slate-400">Solar payment</span>
                         <span className="text-white font-medium">${solar_payment_monthly}/mo</span>
                       </div>
-                      {remaining_utility_monthly > 0 && (
+                      {remaining_utility_monthly > 0 ? (
                         <div className="flex justify-between text-xs">
                           <span className="text-slate-400">Est. remaining utility</span>
                           <span className="text-white font-medium">${remaining_utility_monthly}/mo</span>
                         </div>
-                      )}
+                      ) : null}
                       <div className="flex justify-between text-xs border-t border-slate-700/40 pt-1.5">
                         <span className="text-slate-300 font-medium">Total energy cost</span>
                         <span className="text-white font-bold">${total_energy_cost_monthly}/mo</span>
@@ -1026,13 +1026,13 @@ function PublicProposalView({
                             : `+$${ownership_delta_monthly}/mo initial`}
                         </span>
                       </div>
-                      {ownership_delta_monthly > 0 && (
+                      {ownership_delta_monthly > 0 ? (
                         <p className="text-xs text-slate-500 pt-0.5">
                           Your solar payment is fixed at ${solar_payment_monthly}/mo. As utility rates rise at {(cp.utility.escalationRate * 100).toFixed(0)}%/yr, this gap closes and reverses.
                         </p>
-                      )}
+                      ) : null}
                     </div>
-                  )}
+                  ) : null}
                 </div>
                 <div className="md:col-span-2 grid grid-cols-2 gap-2">
                   {[
@@ -1050,7 +1050,7 @@ function PublicProposalView({
                 </div>
               </div>
               {/* Loan term comparison table — shows 10/15/25-yr payments side by side */}
-              {effectiveFinal > 0 && purchaseMode === 'finance' && (
+              {effectiveFinal > 0 && purchaseMode === 'finance' ? (
                 <div className="mt-3 rounded-xl border border-slate-700/50 overflow-hidden">
                   <div className="px-3 py-2 bg-slate-800/60 border-b border-slate-700/40">
                     <span className="text-xs font-semibold text-slate-300">Loan Term Comparison</span>
@@ -1080,7 +1080,7 @@ function PublicProposalView({
                     })}
                   </div>
                 </div>
-              )}
+              ) : null}
               </>
             ) : (
               // ── Section 1 & 4: Cash mode — no ITC line, clean labels ─────
@@ -1100,10 +1100,10 @@ function PublicProposalView({
               </div>
             )}
           </div>
-        )}
+        ) : null}
 
         {/* Utility Rate Graph + 25-Year Cost Projection — v47.260 */}
-        {cp.truth25yr.yearlyFlow && cp.truth25yr.yearlyFlow.length > 0 && (
+        {cp.truth25yr.yearlyFlow && cp.truth25yr.yearlyFlow.length > 0 ? (
           <>
             <div className="proposal-sec card p-4" data-block-id="utility-rate-graph">
               <h3 className="font-semibold text-white text-sm mb-3 flex items-center gap-2">
@@ -1129,7 +1129,7 @@ function PublicProposalView({
               />
             </div>
           </>
-        )}
+        ) : null}
 
         {/* v47.251: Incentives compliance notice — content driven by GLOBAL_INCENTIVES_CONFIG */}
         <div className="proposal-sec card p-3 border border-slate-700/30" data-block-id="incentives-notice">
@@ -1139,17 +1139,17 @@ function PublicProposalView({
               <p className="text-slate-400 text-xs leading-relaxed">
                 {getIncentivesComplianceMessage()}
               </p>
-              {process.env.NODE_ENV === 'development' && (
+              {process.env.NODE_ENV === 'development' ? (
                 <p className="text-amber-500 text-xs mt-1 font-mono">
                   [{getIncentivesDebugLabel()}]
                 </p>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
 
         {/* State Incentives — gated by GLOBAL_INCENTIVES_CONFIG.allow_state_incentives (v47.251) */}
-        {GLOBAL_INCENTIVES_CONFIG.allow_state_incentives && stateIncentives && stateIncentives.stateIncentives.length > 0 && (
+        {GLOBAL_INCENTIVES_CONFIG.allow_state_incentives && stateIncentives && stateIncentives.stateIncentives.length > 0 ? (
           <div className="proposal-sec card p-4" data-block-id="incentives-srec">
             <h2 className="text-base font-black text-white mb-3 flex items-center gap-2">
               <Award size={18} style={{ color: primaryColor }} /> Available State Incentives
@@ -1169,17 +1169,17 @@ function PublicProposalView({
                 </div>
               ))}
             </div>
-            {stateIncentives.cashTotal > 0 && (
+            {stateIncentives.cashTotal > 0 ? (
               <div className="mt-3 pt-3 border-t border-slate-700/40 flex items-center justify-between">
                 <span className="text-xs text-slate-400 font-medium">Estimated Cash Incentives Total</span>
                 <span className="text-sm font-black text-emerald-400">${stateIncentives.cashTotal.toLocaleString()}</span>
               </div>
-            )}
+            ) : null}
           </div>
-        )}
+        ) : null}
 
         {/* Non-Cash State Benefits — property/sales tax exemptions, SRECs (v47.260) */}
-        {GLOBAL_INCENTIVES_CONFIG.allow_state_incentives && stateIncentives && stateIncentives.nonCashBenefits && stateIncentives.nonCashBenefits.length > 0 && (
+        {GLOBAL_INCENTIVES_CONFIG.allow_state_incentives && stateIncentives && stateIncentives.nonCashBenefits && stateIncentives.nonCashBenefits.length > 0 ? (
           <div className="proposal-sec card p-4" data-block-id="incentives-noncash">
             <h2 className="text-base font-black text-white mb-1 flex items-center gap-2">
               <Award size={18} style={{ color: primaryColor }} /> Additional State Benefits
@@ -1205,10 +1205,10 @@ function PublicProposalView({
               ))}
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* §48E Lease/PPA Banner — v47.260 */}
-        {isSection48eEnabled() && (
+        {isSection48eEnabled() ? (
           <div className="proposal-sec card p-5 border border-amber-500/30 bg-amber-500/5" data-block-id="section48e-banner">
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex-shrink-0">
@@ -1252,7 +1252,7 @@ function PublicProposalView({
               </div>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Section 4: How Your Utility Actually Works — SPEC §10 */}
         <div className="proposal-sec card p-3" data-block-id="utility-profile">
@@ -1288,7 +1288,7 @@ function PublicProposalView({
             </div>
 
             {/* Export value */}
-            {cp.utility.netMeteringType !== 'none' && cp.utility.export_rate_monthly !== null && (
+            {cp.utility.netMeteringType !== 'none' && cp.utility.export_rate_monthly !== null ? (
               <div className="flex items-start justify-between gap-3 py-2 border-b border-slate-700/40">
                 <div>
                   <span className="text-xs text-slate-400 font-medium">Energy Exported to Grid</span>
@@ -1306,10 +1306,10 @@ function PublicProposalView({
                   ${(cp.utility.export_rate_monthly ?? cp.utility.rate).toFixed(3)}/kWh
                 </span>
               </div>
-            )}
+            ) : null}
 
             {/* Annual true-up excess rate */}
-            {cp.utility.true_up_period === 'annual' && cp.utility.export_rate_annual_excess !== null && (
+            {cp.utility.true_up_period === 'annual' && cp.utility.export_rate_annual_excess !== null ? (
               <div className="flex items-start justify-between gap-3 py-2 border-b border-slate-700/40">
                 <div>
                   <span className="text-xs text-slate-400 font-medium">Annual True-Up Excess</span>
@@ -1319,7 +1319,7 @@ function PublicProposalView({
                   ${cp.utility.export_rate_annual_excess.toFixed(3)}/kWh
                 </span>
               </div>
-            )}
+            ) : null}
 
             {/* True-up period */}
             <div className="flex items-start justify-between gap-3 py-2 border-b border-slate-700/40">
@@ -1348,7 +1348,7 @@ function PublicProposalView({
           {/* SPEC §11: Export < retail messaging — shown when export rate is below retail */}
           {cp.utility.netMeteringType !== 'retail_1to1' &&
            cp.utility.export_rate_monthly !== null &&
-           cp.utility.export_rate_monthly < cp.utility.rate && (
+           cp.utility.export_rate_monthly < cp.utility.rate ? (
             <div className="mt-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
               <p className="text-xs text-amber-300 font-semibold mb-1">Not all energy is valued equally.</p>
               <p className="text-xs text-amber-200/80 leading-relaxed">
@@ -1358,27 +1358,27 @@ function PublicProposalView({
                 Maximizing self-consumption gives your solar system its best financial return.
               </p>
             </div>
-          )}
+          ) : null}
 
           {/* System design guidance for non-retail_1to1 */}
-          {cp.utility.netMeteringType !== 'retail_1to1' && (
+          {cp.utility.netMeteringType !== 'retail_1to1' ? (
             <div className="mt-3 p-3 rounded-lg bg-slate-800/40 border border-slate-700/30">
               <p className="text-xs text-slate-400 font-medium">System Design Guidance</p>
               <p className="text-xs text-slate-300 mt-1">{utilityProfile.system_design_guidance}</p>
             </div>
-          )}
+          ) : null}
 
-          {!utilityProfile.is_specific_match && (
+          {!utilityProfile.is_specific_match ? (
             <p className="text-xs text-slate-500 mt-2 italic">
               * Based on {utilityProfile.profile.state || 'state'}-level utility data.
               Verify specific net metering terms with your utility.
             </p>
-          )}
+          ) : null}
         </div>
 
         {/* v47.254: Energy Value Breakdown — Task 3+4+6 */}
         {/* Source: cp.financial.energyValueBreakdown (identity map from yearlyFlow[0]) */}
-        {energyValueBreakdown.total > 0 && (
+        {energyValueBreakdown.total > 0 ? (
           <div className="proposal-sec card p-3" data-block-id="what-this-means">
             <h3 className="font-semibold text-white text-sm mb-1 flex items-center gap-2">
               <DollarSign size={15} style={{ color: primaryColor }} /> How Your Energy Value Is Calculated
@@ -1401,7 +1401,7 @@ function PublicProposalView({
               </div>
 
               {/* Exported row — only shown when export value exists */}
-              {energyValueBreakdown.exported > 0 && (
+              {energyValueBreakdown.exported > 0 ? (
                 <div className="flex items-center justify-between gap-4 py-2.5 px-3 rounded-lg bg-blue-500/8 border border-blue-500/20">
                   <div>
                     <div className="text-xs font-semibold text-slate-200">Energy Exported to Grid</div>
@@ -1416,7 +1416,7 @@ function PublicProposalView({
                     <div className="text-xs text-slate-500">yr 1 value</div>
                   </div>
                 </div>
-              )}
+              ) : null}
 
               {/* Total row */}
               <div className="flex items-center justify-between gap-4 py-2.5 px-3 rounded-lg bg-slate-800/60 border border-slate-600/30">
@@ -1432,7 +1432,7 @@ function PublicProposalView({
             </div>
 
             {/* System payoff callout — from _meta.payoffYear (iterative model) */}
-            {payoffYear && (
+            {payoffYear ? (
               <div className="mt-4 pt-3 border-t border-slate-700/40 flex items-center justify-between gap-4">
                 <div>
                   <div className="text-xs font-semibold text-slate-300">System Payoff</div>
@@ -1440,12 +1440,12 @@ function PublicProposalView({
                 </div>
                 <div className="text-base font-black text-blue-400">Year {payoffYear}</div>
               </div>
-            )}
+            ) : null}
           </div>
-        )}
+        ) : null}
 
         {/* Section 4: SREC Program — shown only when srec_available */}
-        {utilityProfile.profile.srec_available && utilityProfile.srec_summary && (
+        {utilityProfile.profile.srec_available && utilityProfile.srec_summary ? (
           <div className="proposal-sec card p-5 border border-emerald-500/20" data-block-id="srec">
             <h3 className="font-semibold text-white text-sm mb-3 flex items-center gap-2">
               <Award size={15} className="text-emerald-400" /> Solar Performance Credits (SREC)
@@ -1454,10 +1454,10 @@ function PublicProposalView({
               {utilityProfile.srec_summary}
             </p>
           </div>
-        )}
+        ) : null}
 
         {/* Production + Monthly Bill Chart */}
-        {production && mounted && (
+        {production && mounted ? (
           <div className="proposal-sec grid grid-cols-1 lg:grid-cols-2 gap-3" data-block-id="system-summary" data-keep-together="true">
             {/* Monthly Production */}
             <div className="card p-5">
@@ -1484,7 +1484,7 @@ function PublicProposalView({
                 {annualProduction.toLocaleString()} kWh / year total
               </div>
               {/* v1.shade: TSRF badge — shown only when shade analysis has been run */}
-              {cp.production.tsrf !== undefined && (
+              {cp.production.tsrf !== undefined ? (
                 <div className="mt-2 flex items-center justify-center gap-1.5">
                   <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold border ${
                     cp.production.tsrf >= 0.95
@@ -1500,7 +1500,7 @@ function PublicProposalView({
                     shade analysis applied
                   </span>
                 </div>
-              )}
+              ) : null}
             </div>
 
             {/* Monthly Bill Before/After */}
@@ -1520,11 +1520,11 @@ function PublicProposalView({
                   <div className="text-[9px] uppercase tracking-wider text-slate-500">With solar</div>
                   <div className="text-xl font-black text-emerald-400">${avgMonthlyAfter}/mo</div>
                 </div>
-                {avgMonthlyBefore - avgMonthlyAfter > 0 && (
+                {avgMonthlyBefore - avgMonthlyAfter > 0 ? (
                   <span className="ml-auto rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-300">
                     −${avgMonthlyBefore - avgMonthlyAfter}/mo
                   </span>
-                )}
+                ) : null}
               </div>
               <ResponsiveContainer width="100%" height={130}>
                 <BarChart data={monthlyBillData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
@@ -1538,10 +1538,10 @@ function PublicProposalView({
               </ResponsiveContainer>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Section 8: Offset messaging — shown when offset < 100% */}
-        {energyOffset > 0 && energyOffset < 100 && (
+        {energyOffset > 0 && energyOffset < 100 ? (
           <div className="proposal-sec rounded-xl p-4 border border-blue-500/20 bg-blue-500/5" data-block-id="long-term-outcome">
             <div className="flex items-start gap-2">
               <Zap size={14} className="text-blue-400 flex-shrink-0 mt-0.5" />
@@ -1555,11 +1555,11 @@ function PublicProposalView({
               </div>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* v47.256: Your Savings Over Time — single green savings curve */}
         {/* Source: projectionData[i].cumulative = cumulative_without_solar - cumulative_with_solar (read-only) */}
-        {annualProduction > 0 && mounted && projectionData.length > 0 && (
+        {annualProduction > 0 && mounted && projectionData.length > 0 ? (
           <div className="proposal-sec card p-3" data-block-id="financial-timeline" data-keep-together="true">
             {/* Title */}
             <div className="flex items-start justify-between gap-4 mb-3">
@@ -1567,14 +1567,14 @@ function PublicProposalView({
                 <TrendingUp size={15} style={{ color: primaryColor }} /> Your Savings Over Time
               </h3>
               {/* Final savings callout — Task 3 */}
-              {netDifference_25yr > 0 && (
+              {netDifference_25yr > 0 ? (
                 <div className="text-right flex-shrink-0">
                   <div className="text-xl font-black text-emerald-400">
                     +${Math.round(netDifference_25yr).toLocaleString()}
                   </div>
                   <div className="text-xs text-slate-500">total est. savings</div>
                 </div>
-              )}
+              ) : null}
             </div>
 
             {/* Task 4: Explanation above graph */}
@@ -1614,7 +1614,7 @@ function PublicProposalView({
                   labelFormatter={(label: string) => `${label}`}
                 />
                 {/* Task 5: Break-even reference line at payoffYear */}
-                {payoffYear && (
+                {payoffYear ? (
                   <ReferenceLine
                     x={`Yr ${payoffYear}`}
                     stroke="#f59e0b"
@@ -1628,7 +1628,7 @@ function PublicProposalView({
                       fontWeight: 600,
                     }}
                   />
-                )}
+                ) : null}
                 {/* Single green savings line */}
                 <Area
                   type="monotone"
@@ -1650,10 +1650,10 @@ function PublicProposalView({
                 : 'After your one-time investment, solar avoids thousands in future utility costs as rates continue to increase.'}
             </p>
           </div>
-        )}
+        ) : null}
 
         {/* v47.255: 25-Year Financial Summary — Task 7: de-emphasized large numbers, reordered for clarity */}
-        {annualProduction > 0 && utility_cost_25yr > 0 && (
+        {annualProduction > 0 && utility_cost_25yr > 0 ? (
           <div className="proposal-sec card p-3" data-block-id="financial-summary" data-keep-together="true">
             <h3 className="font-semibold text-white text-sm mb-4 flex items-center gap-2">
               <BarChart2 size={15} style={{ color: primaryColor }} /> 25-Year Financial Summary
@@ -1700,33 +1700,33 @@ function PublicProposalView({
               and {(panelDegradation * 100).toFixed(1)}%/yr panel degradation. Not a guarantee of future results.
             </p>
           </div>
-        )}
+        ) : null}
 
         {/* v47.254: Task 2 — Financial Narrative section (from cp._meta.narrative) */}
-        {narrative && narrative.fullNarrative && (
+        {narrative && narrative.fullNarrative ? (
           <div className="proposal-sec card p-3" data-block-id="why-this-system" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0f172a 100%)' }}>
             <h3 className="font-semibold text-white text-sm mb-4 flex items-center gap-2">
               <TrendingUp size={15} style={{ color: primaryColor }} /> Your Financial Story
             </h3>
             <div className="space-y-2">
-              {narrative.primaryStory && (
+              {narrative.primaryStory ? (
                 <p className="text-slate-200 text-sm leading-relaxed">{narrative.primaryStory}</p>
-              )}
-              {narrative.monthlyImpact && (
+              ) : null}
+              {narrative.monthlyImpact ? (
                 <p className="text-slate-300 text-sm leading-relaxed">{narrative.monthlyImpact}</p>
-              )}
-              {narrative.payoffStatement && (
+              ) : null}
+              {narrative.payoffStatement ? (
                 <p className="text-slate-300 text-sm leading-relaxed">{narrative.payoffStatement}</p>
-              )}
-              {narrative.outcomeStatement && (
+              ) : null}
+              {narrative.outcomeStatement ? (
                 <p className="text-slate-200 text-sm leading-relaxed font-medium">{narrative.outcomeStatement}</p>
-              )}
+              ) : null}
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Section 6: Assumptions Block ── */}
-        {(annualProduction > 0 || effectiveFinal > 0) && (
+        {(annualProduction > 0 || effectiveFinal > 0) ? (
           <div className="proposal-sec card p-3 border border-slate-700/30" data-block-id="next-steps">
             <h3 className="font-semibold text-white text-sm mb-4 flex items-center gap-2">
               <Info size={15} className="text-slate-400" /> Proposal Assumptions
@@ -1794,7 +1794,7 @@ function PublicProposalView({
               {' '}{getIncentivesComplianceMessage()}
             </p>
           </div>
-        )}
+        ) : null}
 
         {/* Equipment */}
         <div className="proposal-sec card p-4" data-block-id="equipment">
@@ -1845,9 +1845,9 @@ function PublicProposalView({
                 {(proj as any)?.selectedPanel?.model || (proj as any)?.selectedPanel?.name || 'High-efficiency solar panels'}
               </div>
               {/* Section 2: Use resolvedPanelWattage from panelIntegrity — single source of truth */}
-              {resolvedPanelWattage > 0 && (
+              {resolvedPanelWattage > 0 ? (
                 <div className="text-xs text-slate-400 mt-1">{resolvedPanelWattage}W per panel</div>
-              )}
+              ) : null}
               <div className="text-xs text-emerald-400 mt-2 flex items-center gap-1">
                 <CheckCircle size={10} /> 25-yr product warranty
               </div>
@@ -1864,9 +1864,9 @@ function PublicProposalView({
               <div className="text-sm font-semibold text-white">
                 {(proj as any)?.selectedInverter?.model || (proj as any)?.selectedInverter?.name || 'Premium grid-tie inverter'}
               </div>
-              {(proj as any)?.selectedInverter?.efficiency && (
+              {(proj as any)?.selectedInverter?.efficiency ? (
                 <div className="text-xs text-slate-400 mt-1">{((proj as any).selectedInverter.efficiency * 100).toFixed(1)}% efficiency</div>
-              )}
+              ) : null}
               <div className="text-xs text-emerald-400 mt-2 flex items-center gap-1">
                 <CheckCircle size={10} /> 25-yr warranty
               </div>
@@ -1885,9 +1885,9 @@ function PublicProposalView({
                   ? `${equipment.racking.rackingBrand} ${equipment.racking.rackingModel}`
                   : 'Engineered mounting system'}
               </div>
-              {equipment.racking?.tiltRange && (
+              {equipment.racking?.tiltRange ? (
                 <div className="text-xs text-slate-400 mt-1">{equipment.racking.tiltRange}</div>
-              )}
+              ) : null}
               <div className="text-xs text-emerald-400 mt-2 flex items-center gap-1">
                 <CheckCircle size={10} /> {equipment.racking?.warranty || '25-yr structural warranty'}
               </div>
@@ -2031,9 +2031,9 @@ function PublicProposalView({
                   <div className={`w-7 h-7 rounded-full border-2 border-slate-700 flex items-center justify-center text-xs font-black ${s.color}`}>
                     {s.step}
                   </div>
-                  {idx < arr.length - 1 && (
+                  {idx < arr.length - 1 ? (
                     <div className="w-px flex-1 bg-slate-700/50 my-1" />
-                  )}
+                  ) : null}
                 </div>
                 {/* Content */}
                 <div className={`pb-${idx < arr.length - 1 ? '4' : '0'} flex-1 min-w-0`}>
@@ -2049,12 +2049,12 @@ function PublicProposalView({
         </div>
 
         {/* ── ICA / PTO Roadmap section (Tier 1 or Tier 2) ─────────────────── */}
-        {(icaSteps.length > 0 || icaTimeline || ptoTimeline) && (
+        {(icaSteps.length > 0 || icaTimeline || ptoTimeline) ? (
           <div className="proposal-sec card p-4" data-block-id="ica-pto-roadmap">
             <h3 className="font-semibold text-white text-sm mb-1 flex items-center gap-2">
               <Zap size={15} style={{ color: primaryColor }} /> Utility Interconnection &amp; Permission to Operate
             </h3>
-            {icaTierLabel && (
+            {icaTierLabel ? (
               <p className="text-xs text-slate-400 mb-3 flex items-center gap-1.5">
                 <Info size={11} className="text-slate-500 flex-shrink-0" />
                 <span>
@@ -2064,23 +2064,23 @@ function PublicProposalView({
                   }
                 </span>
               </p>
-            )}
+            ) : null}
             {/* Timeline badges */}
-            {(icaTimeline || ptoTimeline) && (
+            {(icaTimeline || ptoTimeline) ? (
               <div className="flex flex-wrap gap-2 mb-4">
-                {icaTimeline && (
+                {icaTimeline ? (
                   <div className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-violet-500/10 border border-violet-500/20">
                     <Clock size={11} className="text-violet-400" />
                     <span className="text-xs text-violet-300 font-medium">ICA approval: {icaTimeline}</span>
                   </div>
-                )}
-                {ptoTimeline && (
+                ) : null}
+                {ptoTimeline ? (
                   <div className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-emerald-500/10 border border-emerald-500/20">
                     <CheckCircle size={11} className="text-emerald-400" />
                     <span className="text-xs text-emerald-300 font-medium">PTO: {ptoTimeline}</span>
                   </div>
-                )}
-                {icaPortalUrl && (
+                ) : null}
+                {icaPortalUrl ? (
                   <a
                     href={icaPortalUrl}
                     target="_blank"
@@ -2090,8 +2090,8 @@ function PublicProposalView({
                     <ExternalLink size={11} className="text-sky-400" />
                     <span className="text-xs text-sky-300 font-medium">Utility portal</span>
                   </a>
-                )}
-                {!icaPortalUrl && icaRulesUrl && (
+                ) : null}
+                {!icaPortalUrl && icaRulesUrl ? (
                   <a
                     href={icaRulesUrl}
                     target="_blank"
@@ -2101,11 +2101,11 @@ function PublicProposalView({
                     <ExternalLink size={11} className="text-sky-400" />
                     <span className="text-xs text-sky-300 font-medium">State rules</span>
                   </a>
-                )}
+                ) : null}
               </div>
-            )}
+            ) : null}
             {/* Steps */}
-            {icaSteps.length > 0 && (
+            {icaSteps.length > 0 ? (
               <div className="space-y-0">
                 {icaSteps.map((step, idx) => (
                   <div key={idx} className="flex gap-3">
@@ -2116,9 +2116,9 @@ function PublicProposalView({
                       >
                         {idx + 1}
                       </div>
-                      {idx < icaSteps.length - 1 && (
+                      {idx < icaSteps.length - 1 ? (
                         <div className="w-px flex-1 bg-slate-700/50 my-1" />
-                      )}
+                      ) : null}
                     </div>
                     <div className={`pb-${idx < icaSteps.length - 1 ? '3' : '0'} flex-1 min-w-0`}>
                       <p className="text-xs text-slate-300 leading-relaxed">{step}</p>
@@ -2126,7 +2126,7 @@ function PublicProposalView({
                   </div>
                 ))}
               </div>
-            )}
+            ) : null}
             {/* Data source note */}
             <div className="mt-3 rounded-lg px-3 py-2 bg-slate-800/40 border border-slate-700/30">
               <p className="text-xs text-slate-500 leading-relaxed">
@@ -2139,7 +2139,7 @@ function PublicProposalView({
               </p>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Why Solar / Trust section */}
         <div className="proposal-sec grid grid-cols-1 md:grid-cols-3 gap-2" data-block-id="trust-performance">
@@ -2208,30 +2208,30 @@ function PublicProposalView({
           )}
 
           {/* Company details */}
-          {(branding.companyAddress || branding.companyPhone || branding.companyWebsite) && (
+          {(branding.companyAddress || branding.companyPhone || branding.companyWebsite) ? (
             <div className="flex flex-wrap items-center justify-center gap-4 mt-4 pt-3 border-t border-slate-700/40">
-              {branding.companyAddress && (
+              {branding.companyAddress ? (
                 <div className="flex items-center gap-1.5 text-xs text-slate-500">
                   <MapPin size={11} className="text-slate-600" />
                   {branding.companyAddress}
                 </div>
-              )}
-              {branding.companyPhone && (
+              ) : null}
+              {branding.companyPhone ? (
                 <div className="flex items-center gap-1.5 text-xs text-slate-500">
                   <Phone size={11} className="text-slate-600" />
                   {branding.companyPhone}
                 </div>
-              )}
-              {branding.companyWebsite && (
+              ) : null}
+              {branding.companyWebsite ? (
                 <a href={branding.companyWebsite} target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-1.5 text-xs hover:text-white transition-colors"
                   style={{ color: primaryColor }}>
                   <ExternalLink size={11} />
                   {branding.companyWebsite.replace(/^https?:\/\//, '')}
                 </a>
-              )}
+              ) : null}
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* CTA */}
@@ -2322,21 +2322,21 @@ function PublicProposalView({
             )}
           </div>
           <div className="flex items-center justify-center gap-4 text-xs text-slate-500 flex-wrap">
-            {branding.companyPhone && (
+            {branding.companyPhone ? (
               <span className="flex items-center gap-1"><Phone size={11} />{branding.companyPhone}</span>
-            )}
-            {branding.companyWebsite && (
+            ) : null}
+            {branding.companyWebsite ? (
               <a href={branding.companyWebsite} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:text-slate-300">
                 <ExternalLink size={11} />{branding.companyWebsite.replace(/^https?:\/\//, '')}
               </a>
-            )}
-            {branding.companyAddress && (
+            ) : null}
+            {branding.companyAddress ? (
               <span className="flex items-center gap-1"><MapPin size={11} />{branding.companyAddress}</span>
-            )}
+            ) : null}
           </div>
-          {branding.proposalFooterText && (
+          {branding.proposalFooterText ? (
             <p className="text-slate-600 text-xs mt-3 max-w-2xl mx-auto">{branding.proposalFooterText}</p>
-          )}
+          ) : null}
           <p className="text-slate-700 text-xs mt-4">
             Powered by SolarPro &middot; Proposal generated {new Date(proposal.createdAt).toLocaleDateString()}
           </p>

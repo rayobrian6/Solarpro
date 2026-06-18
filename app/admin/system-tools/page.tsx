@@ -169,9 +169,9 @@ export default function SystemToolsPage() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="font-semibold text-white text-sm">{tool.label}</span>
-                  {tool.dangerous && (
+                  {tool.dangerous ? (
                     <span className="text-[9px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider">Destructive</span>
-                  )}
+                  ) : null}
                 </div>
                 <p className="text-xs text-slate-400 mb-3">{tool.description}</p>
                 <button
@@ -240,7 +240,7 @@ export default function SystemToolsPage() {
       </div>
 
       {/* Last Result */}
-      {lastResult && (
+      {lastResult ? (
         <div className={`rounded-xl border p-4 ${lastResult.ok ? 'border-green-500/20 bg-green-500/5' : 'border-red-500/20 bg-red-500/5'}`}>
           <div className="flex items-center gap-2 mb-3">
             {lastResult.ok ? <CheckCircle size={14} className="text-green-400" /> : <AlertCircle size={14} className="text-red-400" />}
@@ -250,10 +250,10 @@ export default function SystemToolsPage() {
             {JSON.stringify(lastResult.result, null, 2)}
           </pre>
         </div>
-      )}
+      ) : null}
 
       {/* Confirm Modal */}
-      {confirmTool && (
+      {confirmTool ? (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#0d1424] border border-white/10 rounded-2xl p-6 w-full max-w-sm space-y-4">
             <div className="flex items-center gap-3">
@@ -285,7 +285,7 @@ export default function SystemToolsPage() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

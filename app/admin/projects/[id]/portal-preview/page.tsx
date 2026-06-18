@@ -166,11 +166,11 @@ function Roadmap({ stage }: { stage: HomeownerStage | null }) {
             const c = STAGE_CONTENT[s];
             return (
               <div key={s} className="flex-1 flex flex-col items-center relative z-10">
-                {i > 0 && (
+                {i > 0 ? (
                   <div className={`absolute top-[38px] right-1/2 left-[-50%] h-[2px] z-0 transition-all duration-700 ${
                     past || cur ? 'bg-gradient-to-r from-emerald-500/60 to-emerald-400/40' : 'bg-white/[0.05]'
                   }`} />
-                )}
+                ) : null}
                 <div className={`relative flex items-center justify-center rounded-full transition-all duration-500 z-10 ${
                   cur  ? 'w-[56px] h-[56px] bg-gradient-to-br from-amber-400 to-amber-600 border-2 border-amber-300/50 shadow-xl shadow-amber-500/30'
                   : past ? 'w-10 h-10 bg-emerald-500/15 border-2 border-emerald-500/40'
@@ -336,12 +336,12 @@ export default function AdminPortalPreview() {
               {greeting},{' '}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-amber-500">{firstName}</span>
             </h1>
-            {project.address && (
+            {project.address ? (
               <div className="flex items-center gap-2 mt-3">
                 <MapPin size={12} className="text-slate-600 flex-shrink-0" />
                 <span className="text-sm text-slate-400">{project.address}</span>
               </div>
-            )}
+            ) : null}
             <div className="flex items-center gap-2 mt-1.5">
               <Clock size={11} className="text-slate-700 flex-shrink-0" />
               <span className="text-xs text-slate-600">Last updated {lastUpdated}</span>
@@ -368,7 +368,7 @@ export default function AdminPortalPreview() {
           </div>
 
           {/* ── 3. CURRENT STAGE — single narrative block ── */}
-          {content && (
+          {content ? (
             <div className="rounded-2xl border border-amber-500/[0.12] bg-amber-500/[0.04] px-6 sm:px-10 py-8">
               <div className="flex items-center gap-2 mb-5">
                 <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
@@ -378,9 +378,9 @@ export default function AdminPortalPreview() {
                 {content.headline}
               </h2>
               <p className="text-sm text-slate-300 leading-relaxed max-w-2xl">{content.body}</p>
-              {content.next && (
+              {content.next ? (
                 <p className="text-sm text-slate-400 mt-4">{content.next}</p>
-              )}
+              ) : null}
               <div className={`mt-6 inline-flex items-center gap-2.5 rounded-xl px-4 py-2.5 border ${
                 content.actionIsRequired
                   ? 'bg-blue-500/[0.08] border-blue-500/[0.15] text-blue-300'
@@ -392,7 +392,7 @@ export default function AdminPortalPreview() {
                 <span className="text-sm font-medium">{content.action}</span>
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* ── 4. PROJECT DETAILS (small) ── */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">

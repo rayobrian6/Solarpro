@@ -555,9 +555,9 @@ function ProjectTeam({ owner }: { owner: Owner }) {
         </div>
       </div>
 
-      {hasContact && (
+      {hasContact ? (
         <div className="flex flex-col sm:flex-row gap-2.5 mt-5">
-          {owner.phone && (
+          {owner.phone ? (
             <a href={`tel:${owner.phone}`}
               className="flex items-center gap-2.5 bg-white/[0.03] hover:bg-white/[0.05] border border-white/[0.07] hover:border-amber-500/20 rounded-xl px-4 py-2.5 transition-all group flex-1">
               <div className="w-7 h-7 rounded-lg bg-amber-500/8 border border-amber-500/12 flex items-center justify-center flex-shrink-0">
@@ -568,8 +568,8 @@ function ProjectTeam({ owner }: { owner: Owner }) {
                 <p className="text-sm font-semibold text-white group-hover:text-amber-300 transition-colors truncate">{owner.phone}</p>
               </div>
             </a>
-          )}
-          {owner.email && (
+          ) : null}
+          {owner.email ? (
             <a href={`mailto:${owner.email}`}
               className="flex items-center gap-2.5 bg-white/[0.03] hover:bg-white/[0.05] border border-white/[0.07] hover:border-amber-500/20 rounded-xl px-4 py-2.5 transition-all group flex-1">
               <div className="w-7 h-7 rounded-lg bg-amber-500/8 border border-amber-500/12 flex items-center justify-center flex-shrink-0">
@@ -580,9 +580,9 @@ function ProjectTeam({ owner }: { owner: Owner }) {
                 <p className="text-sm font-semibold text-white group-hover:text-amber-300 transition-colors truncate">{owner.email}</p>
               </div>
             </a>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -977,7 +977,7 @@ export default function PortalDashboard() {
       <main className={`max-w-3xl mx-auto px-5 sm:px-8 py-10 relative z-10 transition-all duration-500 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
 
         {/* Project switcher */}
-        {projects.length > 1 && (
+        {projects.length > 1 ? (
           <div className="flex items-center gap-2 overflow-x-auto pb-1 mb-8">
             {projects.map(proj => (
               <button key={proj.id} onClick={() => setActiveProject(proj)}
@@ -990,7 +990,7 @@ export default function PortalDashboard() {
               </button>
             ))}
           </div>
-        )}
+        ) : null}
 
         {p ? (
           <div className="space-y-5">
@@ -1008,32 +1008,32 @@ export default function PortalDashboard() {
                       {greeting},{' '}
                       <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-amber-500">{firstName}</span>
                     </h1>
-                    {p.address && (
+                    {p.address ? (
                       <div className="flex items-center gap-1.5 mt-3">
                         <MapPin size={11} className="text-slate-600 flex-shrink-0" />
                         <span className="text-sm text-slate-400 truncate">{p.address}</span>
                       </div>
-                    )}
-                    {p.updated_at && (
+                    ) : null}
+                    {p.updated_at ? (
                       <div className="flex items-center gap-1.5 mt-1.5">
                         <Clock size={10} className="text-slate-700 flex-shrink-0" />
                         <span className="text-xs text-slate-600">Last updated {formatDate(p.updated_at)}</span>
                       </div>
-                    )}
+                    ) : null}
                     <div className="flex flex-wrap gap-2.5 mt-5">
-                      {p.system_size_kw && (
+                      {p.system_size_kw ? (
                         <div className="flex items-center gap-2 rounded-xl bg-amber-500/[0.07] border border-amber-500/[0.12] px-3.5 py-2">
                           <Zap size={12} className="text-amber-400 flex-shrink-0" />
                           <span className="text-sm font-black text-amber-300">{p.system_size_kw}</span>
                           <span className="text-xs text-amber-500/60">kW system</span>
                         </div>
-                      )}
-                      {content && (
+                      ) : null}
+                      {content ? (
                         <div className="flex items-center gap-2 rounded-xl bg-white/[0.03] border border-white/[0.07] px-3.5 py-2">
                           <Home size={12} className="text-slate-500 flex-shrink-0" />
                           <span className="text-sm font-medium text-slate-300">Step {content.stepNum} of 7</span>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                   <div className="hidden sm:block flex-shrink-0">
@@ -1072,12 +1072,12 @@ export default function PortalDashboard() {
                 <p className="text-sm text-slate-300 leading-relaxed max-w-xl">{content.body}</p>
                 <MilestoneChips stage={stage} microStages={projectMicros} />
                 <div className="mt-5 space-y-2.5">
-                  {content.next && (
+                  {content.next ? (
                     <div className="flex items-start gap-2.5">
                       <ChevronRight size={14} className="text-slate-600 mt-0.5 flex-shrink-0" />
                       <p className="text-sm text-slate-400">{content.next}</p>
                     </div>
-                  )}
+                  ) : null}
                   <div className={`inline-flex items-center gap-2.5 rounded-xl px-4 py-2.5 border ${
                     content.actionIsRequired ? 'bg-blue-500/[0.08] border-blue-500/[0.18] text-blue-300'
                     : isComplete            ? 'bg-emerald-500/[0.08] border-emerald-500/[0.18] text-emerald-300'
@@ -1216,34 +1216,34 @@ export default function PortalDashboard() {
                     <span className="text-[10px] font-black uppercase tracking-widest text-violet-500/60">Utility Approval</span>
                   </div>
                   <h3 className="text-lg font-black text-white mb-1">What happens next with your utility</h3>
-                  {lbl && (
+                  {lbl ? (
                     <p className="text-xs text-slate-400 mb-4 flex items-center gap-1.5">
                       <Info size={11} className="text-slate-500 flex-shrink-0" />
                       {t1 ? `Process specific to ${lbl}` : `Typical process — ${lbl}`}
                     </p>
-                  )}
+                  ) : null}
                   <div className="flex flex-wrap gap-2 mb-5">
-                    {icaTime && (
+                    {icaTime ? (
                       <div className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-violet-500/10 border border-violet-500/20">
                         <Clock size={11} className="text-violet-400" />
                         <span className="text-xs text-violet-300 font-medium">Grid approval: {icaTime}</span>
                       </div>
-                    )}
-                    {ptoTime && (
+                    ) : null}
+                    {ptoTime ? (
                       <div className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-emerald-500/10 border border-emerald-500/20">
                         <CheckCircle size={11} className="text-emerald-400" />
                         <span className="text-xs text-emerald-300 font-medium">System turn-on: {ptoTime}</span>
                       </div>
-                    )}
-                    {(uUrl || rUrl) && (
+                    ) : null}
+                    {(uUrl || rUrl) ? (
                       <a href={uUrl ?? rUrl ?? '#'} target="_blank" rel="noopener noreferrer"
                         className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500/20 transition-colors">
                         <ExternalLink size={11} className="text-sky-400" />
                         <span className="text-xs text-sky-300 font-medium">{uUrl ? 'Utility portal' : 'State guidelines'}</span>
                       </a>
-                    )}
+                    ) : null}
                   </div>
-                  {steps.length > 0 && (
+                  {steps.length > 0 ? (
                     <div className="space-y-0">
                       {steps.map((step, idx) => (
                         <div key={idx} className="flex gap-3">
@@ -1257,7 +1257,7 @@ export default function PortalDashboard() {
                         </div>
                       ))}
                     </div>
-                  )}
+                  ) : null}
                   <div className="mt-4 rounded-lg px-3 py-2 bg-slate-800/40 border border-slate-700/30">
                     <p className="text-xs text-slate-500 leading-relaxed">Your installer manages this entire process on your behalf — no action needed from you.</p>
                   </div>
@@ -1279,7 +1279,7 @@ export default function PortalDashboard() {
             <MonitoringFoundation stage={stage} project={activeProject} />
 
             {/* ══ PHASE 3: PROJECT TEAM ════════════════════════════════════ */}
-            {owner && <ProjectTeam owner={owner} />}
+            {owner ? <ProjectTeam owner={owner} /> : null}
 
           </div>
         ) : (

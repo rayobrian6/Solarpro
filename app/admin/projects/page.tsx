@@ -203,7 +203,7 @@ export default function AdminProjects() {
         </div>
       </div>
 
-      {Math.ceil(total / LIMIT) > 1 && (
+      {Math.ceil(total / LIMIT) > 1 ? (
         <div className="flex items-center justify-between text-xs text-slate-400">
           <span>Page {page} of {Math.ceil(total / LIMIT)}</span>
           <div className="flex gap-2">
@@ -211,7 +211,7 @@ export default function AdminProjects() {
             <button onClick={() => setPage(p => Math.min(Math.ceil(total / LIMIT), p + 1))} disabled={page === Math.ceil(total / LIMIT)} className="px-3 py-1.5 rounded-lg border border-white/10 disabled:opacity-40">Next</button>
           </div>
         </div>
-      )}
+      ) : null}
 
       {confirmDialog ? (
         <ConfirmDialog

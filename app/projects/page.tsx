@@ -576,7 +576,7 @@ export default function ProjectsPage() {
                     <FolderOpen size={12} className="text-blue-400" />
                   </div>
                   <span className="text-xs font-bold text-blue-400 uppercase tracking-widest">Project Pipeline</span>
-                  {loading && <RefreshCw size={11} className="text-slate-500 animate-spin" />}
+                  {loading ? <RefreshCw size={11} className="text-slate-500 animate-spin" /> : null}
                 </div>
                 <h1 className="text-2xl font-black text-white tracking-tight">Projects</h1>
                 <p className="text-sm text-slate-400 mt-0.5">

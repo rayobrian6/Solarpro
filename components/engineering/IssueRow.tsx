@@ -24,13 +24,13 @@ export function IssueRow({ issue, expanded: defaultExpanded = false }: { issue: 
           {issue.suggestion && <div className="text-xs text-amber-400/80 mt-0.5">\ud83d\udca1 {issue.suggestion}</div>}
         </div>
         {issue.code && <div className="text-xs text-slate-600 font-mono flex-shrink-0">{issue.code}</div>}
-        {explanation && (
+        {explanation ? (
           <div className="text-xs text-slate-600 flex-shrink-0 ml-1">
             {open ? '\u25b2' : '\u25bc'}
           </div>
-        )}
+        ) : null}
       </div>
-      {open && explanation && (
+      {open && explanation ? (
         <div className="px-3 pb-3 border-t border-slate-700/50 bg-slate-900/40">
           <div className="pt-2 space-y-2">
             <div className="text-xs font-semibold text-white">{explanation.title} \u2014 {explanation.ref}</div>
@@ -41,7 +41,7 @@ export function IssueRow({ issue, expanded: defaultExpanded = false }: { issue: 
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

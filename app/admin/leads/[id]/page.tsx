@@ -233,14 +233,14 @@ export default function AdminLeadDetail() {
             <span className="text-xs text-slate-500">
               Created {new Date(lead.created_at).toLocaleDateString()}
             </span>
-            {lead.owner_name && (
+            {lead.owner_name ? (
               <span className="text-xs text-slate-500">· Owner: {lead.owner_name}</span>
-            )}
+            ) : null}
           </div>
         </div>
 
         {/* Convert button */}
-        {!isConverted && (
+        {!isConverted ? (
           <button
             onClick={handleConvert}
             disabled={converting}
@@ -253,9 +253,9 @@ export default function AdminLeadDetail() {
             )}
             Convert to Project
           </button>
-        )}
+        ) : null}
 
-        {isConverted && lead.converted_project_id && (
+        {isConverted && lead.converted_project_id ? (
           <Link
             href={`/projects/${lead.converted_project_id}`}
             className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 text-green-400 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:bg-green-500/20"
@@ -263,10 +263,10 @@ export default function AdminLeadDetail() {
             <ExternalLink size={14} />
             View Project
           </Link>
-        )}
+        ) : null}
       </div>
       {/* Assign Owner Section */}
-      {!lead.user_id && (
+      {!lead.user_id ? (
         <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 text-sm">
           <p className="text-amber-400 font-medium flex items-center gap-2 mb-2">
             <AlertCircle size={14} />
@@ -301,21 +301,21 @@ export default function AdminLeadDetail() {
             </button>
           </div>
         </div>
-      )}
+      ) : null}
       {/* Converted notice */}
-      {isConverted && (
+      {isConverted ? (
         <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-4 text-sm">
           <p className="text-green-400 font-medium flex items-center gap-2">
             <CheckCircle size={14} /> Converted on {lead.converted_at ? new Date(lead.converted_at).toLocaleDateString() : '—'}
           </p>
-          {lead.project_name && (
+          {lead.project_name ? (
             <p className="text-slate-400 mt-1">Project: <span className="text-white">{lead.project_name}</span></p>
-          )}
-          {lead.client_name && (
+          ) : null}
+          {lead.client_name ? (
             <p className="text-slate-400 mt-0.5">Client: <span className="text-white">{lead.client_name}</span></p>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       {/* Edit form */}
       <div className="bg-white/3 border border-white/8 rounded-xl p-6 space-y-4">
@@ -411,14 +411,14 @@ export default function AdminLeadDetail() {
               Email on file:{' '}
               <span className="text-white font-medium">{lead.email || '—'}</span>
             </p>
-            {lead.converted_project_id && (
+            {lead.converted_project_id ? (
               <p className="text-xs text-slate-400">
                 Project ID:{' '}
                 <span className="text-white font-mono text-[10px]">
                   {lead.converted_project_id}
                 </span>
               </p>
-            )}
+            ) : null}
           </div>
 
           {isConverted && lead.converted_project_id ? (
@@ -431,13 +431,13 @@ export default function AdminLeadDetail() {
           )}
         </div>
 
-        {isConverted && lead.email && (
+        {isConverted && lead.email ? (
           <p className="text-xs text-slate-500">
             Homeowner can log in at{' '}
             <span className="font-mono text-slate-400">/portal/login</span>{' '}
             using <span className="text-slate-300">{lead.email}</span>.
           </p>
-        )}
+        ) : null}
       </div>
 
       {confirmDialog ? (

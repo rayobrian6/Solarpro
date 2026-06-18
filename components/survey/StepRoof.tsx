@@ -120,7 +120,7 @@ export function StepRoof({ data, onChange, disabled, siteOverview, photos = [] }
   return (
     <div className="space-y-4">
       {/* ---- Satellite + Photo detection banner ---- */}
-      {(satelliteLoading || photoLoading) && (
+      {(satelliteLoading || photoLoading) ? (
         <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3">
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
@@ -133,7 +133,7 @@ export function StepRoof({ data, onChange, disabled, siteOverview, photos = [] }
             </p>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* ---- Material ---- */}
       <StepCard
@@ -151,7 +151,7 @@ export function StepRoof({ data, onChange, disabled, siteOverview, photos = [] }
             disabled={disabled}
           />
           {/* Phase 4C: Satellite material suggestion */}
-          {satelliteMaterial && !satelliteLoading && (
+          {satelliteMaterial && !satelliteLoading ? (
             <div className="mt-1.5 flex items-center gap-2 text-xs">
               {materialMatchesSatellite ? (
                 <>
@@ -182,7 +182,7 @@ export function StepRoof({ data, onChange, disabled, siteOverview, photos = [] }
                 </>
               )}
             </div>
-          )}
+          ) : null}
         </StepField>
       </StepCard>
 
@@ -206,7 +206,7 @@ export function StepRoof({ data, onChange, disabled, siteOverview, photos = [] }
             disabled={disabled}
           />
           {/* Phase 4C: Satellite pitch suggestion */}
-          {satellitePitch && !satelliteLoading && (
+          {satellitePitch && !satelliteLoading ? (
             <div className="mt-1.5 flex items-center gap-2 text-xs">
               {pitchMatchesSatellite ? (
                 <>
@@ -237,9 +237,9 @@ export function StepRoof({ data, onChange, disabled, siteOverview, photos = [] }
                 </>
               )}
             </div>
-          )}
+          ) : null}
           {/* G1: Tilt angle prefill from roof pitch + latitude fallback */}
-          {tiltPrefill && (
+          {tiltPrefill ? (
             <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500">
               <span>Computed tilt:</span>
               <span className="font-semibold text-slate-700">{tiltPrefill.tilt}deg</span>
@@ -250,7 +250,7 @@ export function StepRoof({ data, onChange, disabled, siteOverview, photos = [] }
               />
               <span className="text-slate-400">-- {tiltPrefill.derivation}</span>
             </div>
-          )}
+          ) : null}
         </StepField>
 
         <StepField
@@ -286,7 +286,7 @@ export function StepRoof({ data, onChange, disabled, siteOverview, photos = [] }
             disabled={disabled}
           />
           {/* Phase 4E: Photo-extracted roof condition suggestion */}
-          {photoRoofCondition && !photoLoading && (
+          {photoRoofCondition && !photoLoading ? (
             <div className="mt-1.5 flex items-center gap-2 text-xs">
               {data.roofCondition === photoRoofCondition.condition ? (
                 <>
@@ -317,7 +317,7 @@ export function StepRoof({ data, onChange, disabled, siteOverview, photos = [] }
                 </>
               )}
             </div>
-          )}
+          ) : null}
         </StepField>
 
         <StepField
@@ -337,7 +337,7 @@ export function StepRoof({ data, onChange, disabled, siteOverview, photos = [] }
         </StepField>
 
         {/* Condition warning for poor roofs */}
-        {data.roofCondition === 'poor' && (
+        {data.roofCondition === 'poor' ? (
           <div className="mt-1 rounded-lg bg-red-50 border border-red-200 px-3 py-2">
             <p className="text-xs font-semibold text-red-700">
               Flagged: Poor condition
@@ -347,7 +347,7 @@ export function StepRoof({ data, onChange, disabled, siteOverview, photos = [] }
               Note details in Mounting Notes below.
             </p>
           </div>
-        )}
+        ) : null}
       </StepCard>
 
       {/* ---- Attic Access ---- */}

@@ -254,7 +254,7 @@ export default function OperationsTab({ projectId, onStatusChange }: OperationsT
 
   return (
     <div className="space-y-6">
-      {error && (
+      {error ? (
         <Card variant="danger" padding="sm">
           <div className="flex items-center gap-2 text-xs">
             <AlertTriangle size={12} />
@@ -264,7 +264,7 @@ export default function OperationsTab({ projectId, onStatusChange }: OperationsT
             </button>
           </div>
         </Card>
-      )}
+      ) : null}
 
       {/* ——— A. Status Dropdown ————————————————————————————————— */}
       <Section title="Pipeline Status" subtitle="Current stage in the project lifecycle">
@@ -287,11 +287,11 @@ export default function OperationsTab({ projectId, onStatusChange }: OperationsT
                   <option key={s} value={s}>{STAGE_LABELS[s] || s}</option>
                 ))}
               </select>
-              {statusUpdating && <Loader2 size={14} className="animate-spin" style={{ color: 'var(--text-muted)' }} />}
+              {statusUpdating ? <Loader2 size={14} className="animate-spin" style={{ color: 'var(--text-muted)' }} /> : null}
             </div>
 
             {/* Next stage suggestion */}
-            {currentStageComplete && suggested && (
+            {currentStageComplete && suggested ? (
               <button
                 onClick={() => handleStatusChange(suggested)}
                 className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
@@ -303,7 +303,7 @@ export default function OperationsTab({ projectId, onStatusChange }: OperationsT
                 <ChevronRight size={12} />
                 Advance to {STAGE_LABELS[suggested] || suggested}
               </button>
-            )}
+            ) : null}
           </div>
 
           {/* Pipeline progress bar */}
@@ -508,14 +508,14 @@ export default function OperationsTab({ projectId, onStatusChange }: OperationsT
                     >
                       {safeStr(ms.name, 'Untitled milestone')}
                     </span>
-                    {ms.due_date && (
+                    {ms.due_date ? (
                       <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
                         {(() => {
                           try { return new Date(ms.due_date).toLocaleDateString(); }
                           catch { return '—'; }
                         })()}
                       </span>
-                    )}
+                    ) : null}
                   </div>
                 </Card>
               );
@@ -592,7 +592,7 @@ export default function OperationsTab({ projectId, onStatusChange }: OperationsT
         </Grid>
 
         {/* Total */}
-        {(safeNum(ops.labor_cost) > 0 || safeNum(ops.material_cost) > 0) && (
+        {(safeNum(ops.labor_cost) > 0 || safeNum(ops.material_cost) > 0) ? (
           <Card variant="highlight" padding="sm" className="mt-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
@@ -603,7 +603,7 @@ export default function OperationsTab({ projectId, onStatusChange }: OperationsT
               </span>
             </div>
           </Card>
-        )}
+        ) : null}
       </Section>
 
       {/* ——— F. Install Photos ————————————————————————————————— */}
@@ -615,13 +615,13 @@ export default function OperationsTab({ projectId, onStatusChange }: OperationsT
       </Section>
 
       {/* ——— Save indicator ———————————————————————————————————— */}
-      {saving && (
+      {saving ? (
         <div className="fixed bottom-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs"
           style={{ background: 'var(--bg-secondary)', color: 'var(--text-muted)', border: '1px solid var(--border-color)' }}>
           <Loader2 size={12} className="animate-spin" />
           Saving...
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

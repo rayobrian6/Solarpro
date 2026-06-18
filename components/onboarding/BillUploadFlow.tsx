@@ -472,16 +472,16 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
               {i < 3 && <div className={`w-4 h-px ${['upload', 'review', 'sizing', 'complete'].indexOf(step) > i ? 'bg-emerald-500/50' : 'bg-slate-700'}`} />}
             </div>
           ))}
-          {onClose && (
+          {onClose ? (
             <button onClick={onClose} className="ml-2 text-slate-400 hover:text-white transition-colors">
               <X size={16} />
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 
       {/* ── Provisioning overlay ── */}
-      {provisioning && (
+      {provisioning ? (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-900/95 rounded-2xl gap-4">
           <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
             <Loader2 size={28} className="text-amber-400 animate-spin" />
@@ -491,7 +491,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
             <p className="text-slate-400 text-xs mt-1">Creating client profile &amp; activating hub</p>
           </div>
         </div>
-      )}
+      ) : null}
 
       <div className="p-6">
         {/* ── STEP 1: Upload ── */}
@@ -499,7 +499,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
           <div className="space-y-4">
 
             {/* ── PARSE FAILED MODE: manual entry is primary ── */}
-            {parseFailedMode && (
+            {parseFailedMode ? (
               <>
                 {/* Amber banner */}
                 <div className="flex items-start gap-3 rounded-xl bg-amber-500/10 border border-amber-500/30 p-4">
@@ -583,7 +583,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                   onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])}
                 />
               </>
-            )}
+            ) : null}
 
             {/* ── NORMAL MODE: upload drop zone + manual entry below ── */}
             {!parseFailedMode && (
@@ -658,22 +658,22 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                 </div>
 
                 {/* Error with retry */}
-                {error && !parseFailedMode && (
+                {error && !parseFailedMode ? (
                   <div className="flex items-start gap-3 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
                     <AlertCircle size={15} className="text-red-400 flex-shrink-0 mt-0.5" />
                     <div className="flex-1 min-w-0">
                       <p className="text-red-300 text-sm">{error}</p>
-                      {lastFile && (
+                      {lastFile ? (
                         <button
                           onClick={e => { e.stopPropagation(); handleRetry(); }}
                           className="mt-2 flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 transition-colors"
                         >
                           <RefreshCw size={11} /> Try again
                         </button>
-                      )}
+                      ) : null}
                     </div>
                   </div>
-                )}
+                ) : null}
 
                 {/* Divider */}
                 <div className="flex items-center gap-3">
@@ -734,16 +734,16 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
         )}
 
         {/* ── STEP 2: Review extracted data ── */}
-        {step === 'review' && result && (
+        {step === 'review' && result ? (
           <div className="space-y-4">
             {/* File info banner */}
-            {selectedFile && (
+            {selectedFile ? (
               <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-2 border border-slate-700/50">
                 <FileText size={13} className="text-slate-400 flex-shrink-0" />
                 <span className="text-slate-300 text-xs truncate flex-1">{selectedFile.name}</span>
                 <span className="text-slate-500 text-xs flex-shrink-0">{formatFileSize(selectedFile.size)}</span>
               </div>
-            )}
+            ) : null}
 
             {/* Confidence badge */}
             <div className={`flex items-center gap-2 rounded-lg px-3 py-2 border text-sm ${confidenceBg(result.billData.confidence)}`}>
@@ -751,14 +751,14 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
               <span className={confidenceColor(result.billData.confidence)}>
                 Extraction confidence: <strong>{result.billData.confidence}</strong>
                 {' '}— {result.billData.extractedFields.length} fields extracted
-                {result.billData.usedLlmFallback && (
+                {result.billData.usedLlmFallback ? (
                   <span className="ml-1 text-xs opacity-75">(AI-assisted)</span>
-                )}
+                ) : null}
               </span>
             </div>
 
             {/* Bill type badge */}
-            {result.billData.billType && result.billData.billType !== 'unknown' && (
+            {result.billData.billType && result.billData.billType !== 'unknown' ? (
               <div className="flex items-center gap-2">
                 {result.billData.billType === 'gas' || result.billData.billType === 'combined' ? (
                   <span className="flex items-center gap-1.5 bg-orange-500/10 border border-orange-500/20 rounded-full px-3 py-1 text-xs text-orange-300">
@@ -770,7 +770,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                   </span>
                 )}
               </div>
-            )}
+            ) : null}
 
             {/* Extracted data grid */}
             <div className="grid grid-cols-2 gap-3">
@@ -795,28 +795,28 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
             </div>
 
             {/* Tiered usage (if present) */}
-            {(result.billData.tier1Kwh || result.billData.tier2Kwh) && (
+            {(result.billData.tier1Kwh || result.billData.tier2Kwh) ? (
               <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
                 <p className="text-slate-400 text-xs mb-2 font-medium">Tiered Usage Breakdown</p>
                 <div className="grid grid-cols-2 gap-2">
-                  {result.billData.tier1Kwh && (
+                  {result.billData.tier1Kwh ? (
                     <div>
                       <p className="text-white text-sm font-medium">{result.billData.tier1Kwh.toLocaleString()} kWh</p>
                       <p className="text-slate-500 text-xs">Tier 1{result.billData.tier1Rate ? ` @ $${result.billData.tier1Rate.toFixed(4)}/kWh` : ''}</p>
                     </div>
-                  )}
-                  {result.billData.tier2Kwh && (
+                  ) : null}
+                  {result.billData.tier2Kwh ? (
                     <div>
                       <p className="text-white text-sm font-medium">{result.billData.tier2Kwh.toLocaleString()} kWh</p>
                       <p className="text-slate-500 text-xs">Tier 2{result.billData.tier2Rate ? ` @ $${result.billData.tier2Rate.toFixed(4)}/kWh` : ''}</p>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </div>
-            )}
+            ) : null}
 
             {/* Monthly usage history sparkline */}
-            {result.billData.monthlyUsageHistory && result.billData.monthlyUsageHistory.length >= 3 && (
+            {result.billData.monthlyUsageHistory && result.billData.monthlyUsageHistory.length >= 3 ? (
               <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
                 <p className="text-slate-400 text-xs mb-2 font-medium flex items-center gap-1.5">
                   <BarChart2 size={12} /> Monthly Usage History ({result.billData.monthlyUsageHistory.length} months)
@@ -840,10 +840,10 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                   <span>max: {Math.max(...result.billData.monthlyUsageHistory).toLocaleString()} kWh</span>
                 </div>
               </div>
-            )}
+            ) : null}
 
             {/* Location data */}
-            {result.locationData && (
+            {result.locationData ? (
               <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-3">
                 <div className="flex items-center gap-2 mb-2">
                   <MapPin size={13} className="text-blue-400" />
@@ -856,10 +856,10 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                   {result.locationData.lat.toFixed(4)}°N, {Math.abs(result.locationData.lng).toFixed(4)}°W
                 </p>
               </div>
-            )}
+            ) : null}
 
             {/* Warnings */}
-            {result.validation.warnings.length > 0 && (
+            {result.validation.warnings.length > 0 ? (
               <div className="space-y-1">
                 {result.validation.warnings.map((w, i) => (
                   <div key={i} className="flex items-start gap-2 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2">
@@ -868,10 +868,10 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                   </div>
                 ))}
               </div>
-            )}
+            ) : null}
 
             {/* Errors */}
-            {result.validation.errors.length > 0 && (
+            {result.validation.errors.length > 0 ? (
               <div className="space-y-1">
                 {result.validation.errors.map((e, i) => (
                   <div key={i} className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
@@ -880,7 +880,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                   </div>
                 ))}
               </div>
-            )}
+            ) : null}
 
             <div className="flex gap-3">
               <button
@@ -898,10 +898,10 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
               </button>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* ── STEP 3: System Sizing ── */}
-        {step === 'sizing' && result && (
+        {step === 'sizing' && result ? (
           <div className="space-y-4">
             <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
               <h3 className="text-white font-semibold text-sm mb-3 flex items-center gap-2">
@@ -1025,10 +1025,10 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
               </button>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* ── STEP 4: Complete ── */}
-        {step === 'complete' && (
+        {step === 'complete' ? (
           <div className="text-center py-6 space-y-4">
             <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto">
               <CheckCircle size={32} className="text-emerald-400" />
@@ -1052,7 +1052,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
               ))}
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

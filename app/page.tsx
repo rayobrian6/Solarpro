@@ -820,9 +820,9 @@ export default function LandingPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
             {WORKFLOW_STEPS.map((step, idx) => (
               <div key={step.step} className="relative flex flex-col items-center text-center">
-                {idx < WORKFLOW_STEPS.length - 1 && (
+                {idx < WORKFLOW_STEPS.length - 1 ? (
                   <div className="hidden lg:block absolute top-7 left-[calc(50%+28px)] right-[-8px] h-px bg-slate-700/60" />
-                )}
+                ) : null}
                 <div className={`w-14 h-14 rounded-2xl border-2 flex items-center justify-center mb-4 relative z-10 ${step.bg} ${step.color}`}>
                   {step.icon}
                   <div className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-slate-950 border border-slate-700 flex items-center justify-center">
@@ -1363,20 +1363,20 @@ export default function LandingPage() {
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-slate-500 shrink-0"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                     <span className="text-slate-500 text-xs">{plan.seatLabel}</span>
                   </div>
-                  {plan.extraSeatMsg && (
+                  {plan.extraSeatMsg ? (
                     <p className="text-xs text-slate-600 pl-3.5 mb-1">{plan.extraSeatMsg}</p>
-                  )}
-                  {plan.replacementMsg && (
+                  ) : null}
+                  {plan.replacementMsg ? (
                     <p className="text-xs text-amber-400/70 mb-2 leading-snug">{plan.replacementMsg}</p>
-                  )}
+                  ) : null}
 
-                  {plan.isTrial && (
+                  {plan.isTrial ? (
                     <div className="bg-emerald-500/8 border border-emerald-500/20 rounded-lg px-3 py-2 mb-4">
                       <p className="text-xs text-emerald-400 leading-relaxed">
                         No credit card required to start. After 3 days, an active subscription is required to continue.
                       </p>
                     </div>
-                  )}
+                  ) : null}
 
                   <ul className="space-y-1.5 mb-4 flex-1">
                     {plan.features.map((f, i) => (

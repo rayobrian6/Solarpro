@@ -101,9 +101,9 @@ function TitleBlock({ meta }: { meta: PermitSheetMeta }) {
 
       <div className="ptb-sheet-label" style={{ marginTop: '4px' }}>SHEET NO.</div>
       <div className="ptb-sheet-number">{meta.sheetNumber}</div>
-      {meta.totalSheets !== undefined && (
+      {meta.totalSheets !== undefined ? (
         <div className="ptb-sheet-total">OF {meta.totalSheets}</div>
-      )}
+      ) : null}
 
     </div>
   );

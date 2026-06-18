@@ -117,7 +117,7 @@ export function SizingRecommendation({
       </div>
 
       {/* Panel-count source of truth banner — surfaces stale config state */}
-      {panelCountSource && panelCountSource.mismatchedWithConfig && (
+      {panelCountSource && panelCountSource.mismatchedWithConfig ? (
         <div
           className="mb-3 px-3 py-2 rounded border border-rose-500/40 bg-rose-500/10 text-xs text-rose-200"
           data-testid="panel-count-source-warning"
@@ -132,15 +132,15 @@ export function SizingRecommendation({
           recommendations below use the authoritative value ({panelCountSource.value}). Click
           Apply to rebuild strings.
         </div>
-      )}
-      {panelCountSource && !panelCountSource.mismatchedWithConfig && panelCountSource.source !== 'config-fallback' && panelCountSource.source !== 'none' && (
+      ) : null}
+      {panelCountSource && !panelCountSource.mismatchedWithConfig && panelCountSource.source !== 'config-fallback' && panelCountSource.source !== 'none' ? (
         <div
           className="mb-3 px-3 py-1.5 rounded border border-slate-700/40 bg-slate-800/40 text-[11px] text-slate-400"
           data-testid="panel-count-source-ok"
         >
           Panel count: <span className="text-white font-semibold">{panelCountSource.value}</span> from {panelCountSource.source} ✓
         </div>
-      )}
+      ) : null}
 
       {/*
         v47.408 — Dedicated string-layout drift banner.
@@ -184,14 +184,14 @@ export function SizingRecommendation({
                 CURRENT layout — not the recommendation — so any MPPT /
                 current / DC-AC warnings may reflect the stale config rather
                 than a real design issue.
-                {sizing.topology === 'optimizer' && (
+                {sizing.topology === 'optimizer' ? (
                   <>
                     {' '}
                     This is especially important for optimizer systems where
                     string current is regulated by the optimizer output (not
                     panel Isc).
                   </>
-                )}
+                ) : null}
               </>
             )}
             {' '}
@@ -225,11 +225,11 @@ export function SizingRecommendation({
             {formatNormalizedInverterSummary(
               normalizeInverterState({ sizingResult: sizing }),
             )}
-            {sizing.topology !== 'micro' && sizing.strings.length > 0 && (
+            {sizing.topology !== 'micro' && sizing.strings.length > 0 ? (
               <span className="text-slate-400 font-normal">
                 {' '}× {sizing.strings.length} strings
               </span>
-            )}
+            ) : null}
           </div>
         </div>
         <div className="bg-slate-800/60 rounded p-2 flex items-center gap-1">
@@ -254,7 +254,7 @@ export function SizingRecommendation({
       </div>
 
       {/* Mismatch details */}
-      {hasMismatch && (
+      {hasMismatch ? (
         <div className="space-y-1 mb-3">
           <div className="text-xs text-slate-300 font-semibold mb-1">
             Differences from recommended:
@@ -272,13 +272,13 @@ export function SizingRecommendation({
             </div>
           ))}
         </div>
-      )}
+      ) : null}
 
       {/* Engine warnings — Phase 13.8.1: rendered with UI-mapped severity.
           Advisory codes (STRING_VOC_VOLTAGE_CLAMP, FEASIBILITY_*, etc.) are
           shown as info/blue rather than alarming yellow. Messages are
           rewritten to plain English explanations. */}
-      {(warningCount + errorCount + infoCount) > 0 && (
+      {(warningCount + errorCount + infoCount) > 0 ? (
         <div className="mb-3 space-y-1" data-testid="sizing-warnings">
           {mappedWarnings.map(({ mapped }, i) => (
             <div
@@ -298,10 +298,10 @@ export function SizingRecommendation({
             </div>
           ))}
         </div>
-      )}
+      ) : null}
 
       {/* Apply button */}
-      {hasMismatch && (
+      {hasMismatch ? (
         <button
           type="button"
           onClick={onApply}
@@ -311,7 +311,7 @@ export function SizingRecommendation({
           <Zap size={12} />
           Apply Recommended Configuration
         </button>
-      )}
+      ) : null}
     </div>
   );
 }

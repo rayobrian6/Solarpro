@@ -241,7 +241,7 @@ function ResetPasswordForm() {
             </div>
 
             {/* Password strength bar */}
-            {form.password.length > 0 && (
+            {form.password.length > 0 ? (
               <div className="mt-2">
                 <div className="flex gap-1 mb-1">
                   {[1,2,3,4,5].map(i => (
@@ -261,7 +261,7 @@ function ResetPasswordForm() {
                   }`}>{strength.label}</span>
                 </p>
               </div>
-            )}
+            ) : null}
           </div>
 
           {/* Confirm Password */}
@@ -290,19 +290,19 @@ function ResetPasswordForm() {
               </button>
             </div>
             {/* Match indicator */}
-            {form.confirm.length > 0 && (
+            {form.confirm.length > 0 ? (
               <p className={`text-xs mt-1.5 ${form.password === form.confirm ? 'text-green-400' : 'text-red-400'}`}>
                 {form.password === form.confirm ? 'Passwords match' : 'Passwords do not match'}
               </p>
-            )}
+            ) : null}
           </div>
 
           {/* Error banner */}
-          {error && (
+          {error ? (
             <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3">
               <p className="text-red-400 text-sm">{error}</p>
             </div>
-          )}
+          ) : null}
 
           {/* Submit */}
           <button

@@ -74,11 +74,11 @@ export function MetricPill({
 
   return (
     <div className={`inline-flex items-center gap-2 bg-slate-800/60 border border-slate-700/50 rounded-lg px-3 py-2 ${className}`}>
-      {icon && (
+      {icon ? (
         <div className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 ${cfg.iconBg}`}>
           {icon}
         </div>
-      )}
+      ) : null}
       <div className="flex flex-col">
         <span className="text-[10px] text-slate-500 uppercase tracking-wide font-semibold leading-tight">{label}</span>
         <div className="flex items-center gap-1.5">
@@ -86,7 +86,7 @@ export function MetricPill({
             {value}
             {unit && <span className="text-xs font-normal text-slate-400 ml-0.5">{unit}</span>}
           </span>
-          {hasConfidence && (
+          {hasConfidence ? (
             <ConfidenceBadge
               confidence={confidence}
               source={confidenceSource}
@@ -94,7 +94,7 @@ export function MetricPill({
               size="xs"
               overridden={overridden}
             />
-          )}
+          ) : null}
         </div>
       </div>
     </div>

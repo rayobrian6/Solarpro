@@ -159,12 +159,12 @@ function SurveyExistsCard({
 
       {/* Key metadata */}
       <div className="grid grid-cols-2 gap-2 mb-4">
-        {survey.addressSnapshot && (
+        {survey.addressSnapshot ? (
           <div className="col-span-2 flex items-start gap-2 p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/40">
             <MapPin size={12} className="text-slate-400 mt-0.5 flex-shrink-0" />
             <span className="text-xs text-slate-300 leading-relaxed">{survey.addressSnapshot}</span>
           </div>
-        )}
+        ) : null}
         <div className="flex items-center gap-2 p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/40">
           <Calendar size={12} className="text-slate-400 flex-shrink-0" />
           <div>
@@ -172,7 +172,7 @@ function SurveyExistsCard({
             <p className="text-xs text-slate-200 font-medium">{formatDate(survey.createdAt)}</p>
           </div>
         </div>
-        {survey.inspectorName && (
+        {survey.inspectorName ? (
           <div className="flex items-center gap-2 p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/40">
             <User size={12} className="text-slate-400 flex-shrink-0" />
             <div>
@@ -180,8 +180,8 @@ function SurveyExistsCard({
               <p className="text-xs text-slate-200 font-medium truncate max-w-[90px]">{survey.inspectorName}</p>
             </div>
           </div>
-        )}
-        {fileCount > 0 && (
+        ) : null}
+        {fileCount > 0 ? (
           <div className="flex items-center gap-2 p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/40">
             <ImageIcon size={12} className="text-slate-400 flex-shrink-0" />
             <div>
@@ -189,7 +189,7 @@ function SurveyExistsCard({
               <p className="text-xs text-slate-200 font-medium">{fileCount}</p>
             </div>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Actions */}

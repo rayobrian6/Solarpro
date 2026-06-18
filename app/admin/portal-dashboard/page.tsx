@@ -268,11 +268,11 @@ function Roadmap({ stage }: { stage: HomeownerStage | null }) {
             const c = STAGE_CONTENT[s];
             return (
               <div key={s} className="flex-1 flex flex-col items-center relative z-10">
-                {i > 0 && (
+                {i > 0 ? (
                   <div className={`absolute top-[38px] right-1/2 left-[-50%] h-[2px] z-0 transition-all duration-700 ${
                     past || cur ? 'bg-gradient-to-r from-emerald-500/60 to-emerald-400/40' : 'bg-white/[0.05]'
                   }`} />
-                )}
+                ) : null}
                 <div className={`relative flex items-center justify-center rounded-full transition-all duration-500 z-10 ${
                   cur  ? 'w-[56px] h-[56px] bg-gradient-to-br from-amber-400 to-amber-600 border-2 border-amber-300/50 shadow-xl shadow-amber-500/30'
                   : past ? 'w-10 h-10 bg-emerald-500/15 border-2 border-emerald-500/40'
@@ -405,9 +405,9 @@ function StageMilestoneFeed({
                     </div>
                   );
                 })}
-                {completedMicros.length === 0 && !isCurrent && (
+                {completedMicros.length === 0 && !isCurrent ? (
                   <p className="text-xs text-slate-700 ml-1">No events recorded</p>
-                )}
+                ) : null}
               </div>
             </div>
           );
@@ -454,7 +454,7 @@ function DocumentChecklist({
       </div>
 
       {/* Expected docs checklist */}
-      {allExpected.length > 0 && (
+      {allExpected.length > 0 ? (
         <div className="flex flex-col gap-1.5 mb-4">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-2">Required Documents</p>
           {allExpected.map(({ doc, stageLabel }) => {
@@ -470,14 +470,14 @@ function DocumentChecklist({
                   : <Circle size={12} className="text-slate-600 flex-shrink-0" />}
                 <span className={`text-xs font-medium flex-1 ${received ? 'text-white' : 'text-slate-500'}`}>{doc}</span>
                 <span className="text-[10px] text-slate-600">{stageLabel}</span>
-                {!received && (
+                {!received ? (
                   <span className="text-[9px] bg-amber-500/10 text-amber-500 px-1.5 py-0.5 rounded-md ml-1">Needed</span>
-                )}
+                ) : null}
               </div>
             );
           })}
         </div>
-      )}
+      ) : null}
 
       {/* All received documents */}
       {documents.length === 0 ? (
@@ -531,12 +531,12 @@ function HomeownerView({
           {greeting},{' '}
           <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-amber-500">{firstName}</span>
         </h1>
-        {project.address && (
+        {project.address ? (
           <div className="flex items-center gap-2 mt-3">
             <MapPin size={12} className="text-slate-600 flex-shrink-0" />
             <span className="text-sm text-slate-400">{project.address}</span>
           </div>
-        )}
+        ) : null}
         <div className="flex items-center gap-2 mt-1.5">
           <Clock size={11} className="text-slate-700 flex-shrink-0" />
           <span className="text-xs text-slate-600">Last updated {lastUpdated}</span>
@@ -563,7 +563,7 @@ function HomeownerView({
       </div>
 
       {/* ── 3. CURRENT STAGE ── */}
-      {content && (
+      {content ? (
         <div className="rounded-2xl border border-amber-500/[0.12] bg-amber-500/[0.04] px-6 sm:px-10 py-8">
           <div className="flex items-center gap-2 mb-5">
             <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
@@ -575,9 +575,9 @@ function HomeownerView({
           <p className="text-sm text-slate-300 leading-relaxed max-w-2xl">
             {content.body}
           </p>
-          {content.next && (
+          {content.next ? (
             <p className="text-sm text-slate-400 mt-4">{content.next}</p>
-          )}
+          ) : null}
           <div className={`mt-6 inline-flex items-center gap-2.5 rounded-xl px-4 py-2.5 border ${
             content.actionIsRequired
               ? 'bg-blue-500/[0.08] border-blue-500/[0.15] text-blue-300'
@@ -589,7 +589,7 @@ function HomeownerView({
             <span className="text-sm font-medium">{content.action}</span>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* ── 4. PROJECT MILESTONES (micro stage feed) ── */}
       <StageMilestoneFeed stage={stage} microStages={microStages} />
@@ -748,16 +748,16 @@ export default function AdminHomeownerDashboardPage() {
               className="w-full bg-white/4 border border-white/8 rounded-lg pl-8 pr-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/40"
             />
           </div>
-          {selected && (
+          {selected ? (
             <button onClick={() => setShowPicker(v => !v)}
               className="flex items-center gap-2 bg-white/4 border border-white/8 hover:border-white/15 rounded-lg px-3 py-2 text-sm text-slate-300 transition-all">
               <Sun size={13} className="text-amber-400" />
               {selected.client_name ?? selected.name}
               <ChevronDown size={13} className="text-slate-500" />
             </button>
-          )}
+          ) : null}
         </div>
-        {showPicker && filtered.length > 0 && (
+        {showPicker && filtered.length > 0 ? (
           <div className="absolute top-full mt-1 left-0 w-96 max-h-72 overflow-y-auto bg-[#0f1119] border border-white/10 rounded-xl shadow-2xl z-50"
             onMouseLeave={() => { if (!search) setShowPicker(false); }}>
             {filtered.slice(0, 20).map(p => {
@@ -768,20 +768,20 @@ export default function AdminHomeownerDashboardPage() {
                   className={`w-full text-left px-4 py-3 hover:bg-white/5 transition-all border-b border-white/4 last:border-0 ${selected?.id === p.id ? 'bg-amber-500/8' : ''}`}>
                   <p className="text-sm font-semibold text-white">{p.client_name ?? p.name}</p>
                   {p.address && <p className="text-xs text-slate-500 mt-0.5 truncate">{p.address}</p>}
-                  {c && (
+                  {c ? (
                     <div className="flex items-center gap-1.5 mt-1">
                       <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
                       <span className="text-[11px] text-amber-400 font-medium">{c.roadmapLabel}</span>
                     </div>
-                  )}
+                  ) : null}
                 </button>
               );
             })}
           </div>
-        )}
+        ) : null}
       </div>
 
-      {selected && (
+      {selected ? (
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 bg-blue-500/8 border border-blue-500/15 rounded-lg px-3 py-1.5">
             <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
@@ -793,7 +793,7 @@ export default function AdminHomeownerDashboardPage() {
             Edit Project →
           </a>
         </div>
-      )}
+      ) : null}
 
       {loading ? (
         <div className="flex items-center justify-center py-20 text-slate-500">

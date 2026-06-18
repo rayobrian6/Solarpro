@@ -138,13 +138,13 @@ export default function LeadDeskBoard({ name }: { name: string }) {
                   </div>
 
                   {/* Dossier — what to say */}
-                  {d && (d.whyCall || d.opener) && (
+                  {d && (d.whyCall || d.opener) ? (
                     <div className="mt-3 rounded-lg bg-violet-500/10 border border-violet-500/20 p-3 text-[12px] space-y-1">
                       {d.whyCall && <div className="text-violet-300 font-semibold flex items-center gap-1.5"><BookOpen size={13} /> {d.whyCall}</div>}
                       {d.opener && <div className="text-slate-300 italic">&ldquo;{d.opener}&rdquo;</div>}
                       {d.facts && d.facts.length > 0 && <ul className="text-slate-400 list-disc list-inside">{d.facts.map((f, i) => <li key={i}>{f}</li>)}</ul>}
                     </div>
-                  )}
+                  ) : null}
 
                   {lastCall && (
                     <div className="mt-2 text-[11px] text-slate-500 flex items-center gap-1.5">
@@ -154,7 +154,7 @@ export default function LeadDeskBoard({ name }: { name: string }) {
                   )}
 
                   {/* Disposition */}
-                  {view === 'active' && (
+                  {view === 'active' ? (
                     <div className="mt-3 flex items-center gap-2 flex-wrap">
                       <input value={notes[p.id] || ''} onChange={(e) => setNotes((n) => ({ ...n, [p.id]: e.target.value }))}
                         placeholder="call note…" className="flex-1 min-w-[140px] px-3 py-1.5 rounded-lg bg-[#0a0f1e] border border-white/10 text-xs focus:outline-none focus:border-amber-500/40" />
@@ -164,7 +164,7 @@ export default function LeadDeskBoard({ name }: { name: string }) {
                       <button disabled={busy === p.id} onClick={() => disposition(p.id, 'sold')} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-xs font-bold hover:bg-emerald-500/30 disabled:opacity-50"><DollarSign size={13} /> Sold</button>
                       <button disabled={busy === p.id} onClick={() => disposition(p.id, 'not_interested')} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 text-slate-500 text-xs hover:text-rose-400 hover:bg-rose-500/10 disabled:opacity-50"><X size={13} /> Dead</button>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               );
             })}

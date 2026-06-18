@@ -123,14 +123,14 @@ export default function DesignTab({ project, onEquipmentUpdate }: DesignTabProps
           <Link href={`/design?projectId=${project.id}`} className="btn-primary inline-flex items-center gap-2">
             <Map size={15} /> Open Design Studio <ArrowRight size={14} />
           </Link>
-          {!project.billAnalysis && (
+          {!project.billAnalysis ? (
             <div className="mt-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-left">
               <div className="flex items-start gap-2">
                 <AlertTriangle size={13} className="text-amber-400 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-amber-300">Upload a utility bill first to pre-populate the recommended system size in Design Studio.</p>
               </div>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     );
@@ -238,7 +238,7 @@ export default function DesignTab({ project, onEquipmentUpdate }: DesignTabProps
       </div>
 
       {/* Monthly production chart */}
-      {production && productionChartData.length > 0 && (
+      {production && productionChartData.length > 0 ? (
         <div className="card p-5">
           <h4 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
             <BarChart2 size={14} className="text-amber-400" /> Monthly Production vs Usage
@@ -256,7 +256,7 @@ export default function DesignTab({ project, onEquipmentUpdate }: DesignTabProps
             </BarChart>
           </ResponsiveContainer>
         </div>
-      )}
+      ) : null}
 
       {/* ── Equipment section ── */}
       <div className="card p-5">
@@ -273,7 +273,7 @@ export default function DesignTab({ project, onEquipmentUpdate }: DesignTabProps
         </div>
 
         {/* Current selections */}
-        {!pickerOpen && (
+        {!pickerOpen ? (
           <div className="space-y-2">
             {project.selectedPanel ? (
               <div className="flex items-center gap-3 p-3 bg-slate-800/60 rounded-xl">
@@ -296,7 +296,7 @@ export default function DesignTab({ project, onEquipmentUpdate }: DesignTabProps
                   </div>
                 </div>
                 {/* H1: Default panel recommendation from ecosystem catalog */}
-                {panelRecommendation && (
+                {panelRecommendation ? (
                   <div className="flex items-center gap-2 p-2.5 bg-blue-500/5 border border-blue-500/15 rounded-lg">
                     <Zap size={12} className="text-blue-400 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
@@ -322,7 +322,7 @@ export default function DesignTab({ project, onEquipmentUpdate }: DesignTabProps
                       Use This
                     </button>
                   </div>
-                )}
+                ) : null}
               </div>
             )}
             {project.selectedInverter ? (
@@ -350,17 +350,17 @@ export default function DesignTab({ project, onEquipmentUpdate }: DesignTabProps
               </div>
             )}
           </div>
-        )}
+        ) : null}
 
         {/* Inline picker */}
-        {pickerOpen && (
+        {pickerOpen ? (
           <div className="space-y-4">
-            {hwLoading && (
+            {hwLoading ? (
               <div className="flex items-center gap-2 text-slate-400 text-sm">
                 <RefreshCw size={14} className="animate-spin" /> Loading equipment library…
               </div>
-            )}
-            {!hwLoading && hwLoaded && (
+            ) : null}
+            {!hwLoading && hwLoaded ? (
               <>
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 mb-1.5">Solar Panel Model</label>
@@ -394,16 +394,16 @@ export default function DesignTab({ project, onEquipmentUpdate }: DesignTabProps
                   </select>
                 </div>
 
-                {eqSaveError && (
+                {eqSaveError ? (
                   <div className="text-xs text-red-400 flex items-center gap-1.5">
                     <AlertTriangle size={12} /> {eqSaveError}
                   </div>
-                )}
-                {eqSaveMsg && (
+                ) : null}
+                {eqSaveMsg ? (
                   <div className="text-xs text-emerald-400 flex items-center gap-1.5">
                     <CheckCircle size={12} /> {eqSaveMsg}
                   </div>
-                )}
+                ) : null}
 
                 <div className="flex gap-2 justify-end">
                   <button onClick={() => setPickerOpen(false)} className="btn-secondary btn-sm">
@@ -414,9 +414,9 @@ export default function DesignTab({ project, onEquipmentUpdate }: DesignTabProps
                   </button>
                 </div>
               </>
-            )}
+            ) : null}
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

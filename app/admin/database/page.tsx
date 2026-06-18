@@ -111,7 +111,7 @@ export default function AdminDatabase() {
       </div>
 
       {/* Table Sizes */}
-      {tables.length > 0 && (
+      {tables.length > 0 ? (
         <div className="rounded-xl border border-white/5 bg-white/2 p-6">
           <div className="text-sm font-semibold text-white mb-4">Table Sizes</div>
           <div className="space-y-2">
@@ -123,7 +123,7 @@ export default function AdminDatabase() {
             ))}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Run Migration */}
       <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-6 space-y-4">
@@ -146,7 +146,7 @@ export default function AdminDatabase() {
           </div>
         </div>
 
-        {migrateLog.length > 0 && (
+        {migrateLog.length > 0 ? (
           <div className="bg-black/40 rounded-lg p-4 font-mono text-xs space-y-1">
             {migrateLog.map((line, i) => (
               <div key={i} className={line.startsWith('✅') ? 'text-green-400' : line.startsWith('❌') ? 'text-red-400' : line.startsWith('⏳') ? 'text-amber-400' : 'text-slate-400'}>
@@ -154,7 +154,7 @@ export default function AdminDatabase() {
               </div>
             ))}
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

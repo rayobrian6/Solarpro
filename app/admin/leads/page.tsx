@@ -245,23 +245,23 @@ export default function AdminLeads() {
                       <Link href={`/admin/leads/${lead.id}`} className="font-medium text-white hover:text-blue-400 transition-colors">
                         {lead.name}
                       </Link>
-                      {lead.notes && (
+                      {lead.notes ? (
                         <p className="text-xs text-slate-500 mt-0.5 truncate max-w-[180px]">{lead.notes}</p>
-                      )}
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-slate-400">
-                      {lead.email && (
+                      {lead.email ? (
                         <div className="flex items-center gap-1 text-xs">
                           <Mail size={11} className="text-slate-500" />
                           {lead.email}
                         </div>
-                      )}
-                      {lead.phone && (
+                      ) : null}
+                      {lead.phone ? (
                         <div className="flex items-center gap-1 text-xs mt-0.5">
                           <Phone size={11} className="text-slate-500" />
                           {lead.phone}
                         </div>
-                      )}
+                      ) : null}
                     </td>
                     <td className="px-4 py-3">
                       {lead.address ? (
@@ -281,11 +281,11 @@ export default function AdminLeads() {
                         <Icon size={10} />
                         {cfg.label}
                       </span>
-                      {lead.status === 'converted' && lead.project_name && (
+                      {lead.status === 'converted' && lead.project_name ? (
                         <p className="text-xs text-slate-500 mt-0.5">
                           → {lead.project_name}
                         </p>
-                      )}
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-400">
                       {lead.owner_name || lead.owner_email || '—'}
@@ -310,7 +310,7 @@ export default function AdminLeads() {
       </div>
 
       {/* Pagination */}
-      {totalPages > 1 && (
+      {totalPages > 1 ? (
         <div className="flex items-center justify-between text-xs text-slate-400">
           <span>Page {page} of {totalPages}</span>
           <div className="flex gap-2">
@@ -330,10 +330,10 @@ export default function AdminLeads() {
             </button>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Create Lead Modal */}
-      {showModal && (
+      {showModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           {/* Backdrop */}
           <div
@@ -473,7 +473,7 @@ export default function AdminLeads() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

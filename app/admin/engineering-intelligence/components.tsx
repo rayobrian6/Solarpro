@@ -854,9 +854,9 @@ export function DependencyGraphViewer({ graph }: { graph: DependencyGraphViewerM
   const positioned = nodes.map((node, index) => ({ ...node, x: 80 + (index % 4) * 220, y: 60 + Math.floor(index / 4) * 92 }));
   return (
     <Panel title="Dependency Graph Viewer" eyebrow="Graph">
-      {graph.sourceGraph === null && (
+      {graph.sourceGraph === null ? (
         <div className="mb-4"><EmptyState state="no_graph">No persistent graph snapshot is loaded; graph preview is showing registry-visible requirement and decision nodes only.</EmptyState></div>
-      )}
+      ) : null}
       <div className="overflow-auto rounded-xl border border-white/10 bg-black/30 p-4">
         <svg width={width} height={height} role="img" aria-label="Deterministic engineering dependency graph preview">
           {safeArray(graph.edges).slice(0, 60).map(edge => {

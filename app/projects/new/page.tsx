@@ -272,11 +272,11 @@ function NewProjectContent() {
                       </li>
                     ))}
                   </ul>
-                  {selectedType === type && (
+                  {selectedType === type ? (
                     <div className={`mt-3 text-xs font-semibold text-${color}-400 flex items-center gap-1`}>
                       ✓ Selected
                     </div>
-                  )}
+                  ) : null}
                 </button>
               ))}
             </div>
@@ -300,18 +300,18 @@ function NewProjectContent() {
                 {showBillUpload ? 'Hide' : 'Upload Bill'}
               </button>
             </div>
-            {showBillUpload && (
+            {showBillUpload ? (
               <div className="mt-4">
                 <BillUploadFlow
                   onComplete={handleBillUploadComplete}
                   onClose={() => setShowBillUpload(false)}
                 />
               </div>
-            )}
+            ) : null}
           </div>
 
           {/* Project Name */}
-          {selectedClient && selectedType && (
+          {selectedClient && selectedType ? (
             <div className="card p-5 animate-fade-in">
               <div className="flex items-center gap-2 mb-4">
                 <FolderOpen size={16} className="text-amber-400" />
@@ -336,23 +336,23 @@ function NewProjectContent() {
                     placeholder="123 Main St, City, ST 12345"
                     loading={geocoding}
                   />
-                  {locationData && (
+                  {locationData ? (
                     <div className="mt-2 flex flex-wrap gap-2">
                       <span className="inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2 py-0.5 text-xs text-emerald-300">
                         <MapPin size={10} /> {locationData.city}, {locationData.stateCode} {locationData.zip}
                       </span>
-                      {utilityData && (
+                      {utilityData ? (
                         <span className="inline-flex items-center gap-1 bg-blue-500/10 border border-blue-500/20 rounded-full px-2 py-0.5 text-xs text-blue-300">
                           <Zap size={10} /> {utilityData.utilityName} · ${utilityData.avgRatePerKwh.toFixed(3)}/kWh
                         </span>
-                      )}
-                      {utilityData?.netMeteringEligible && (
+                      ) : null}
+                      {utilityData?.netMeteringEligible ? (
                         <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/20 rounded-full px-2 py-0.5 text-xs text-amber-300">
                           ✓ Net Metering Eligible
                         </span>
-                      )}
+                      ) : null}
                     </div>
-                  )}
+                  ) : null}
                 </div>
 
                 <div>
@@ -361,7 +361,7 @@ function NewProjectContent() {
                 </div>
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* Submit */}
           <div className="flex justify-end gap-3">

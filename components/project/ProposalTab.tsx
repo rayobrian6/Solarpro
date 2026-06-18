@@ -124,7 +124,7 @@ export default function ProposalTab({ project }: ProposalTabProps) {
     <div className="space-y-5">
 
       {/* Readiness check */}
-      {!canGenerate && (
+      {!canGenerate ? (
         <div className="card p-4 border border-amber-500/20 bg-amber-500/5">
           <div className="flex items-start gap-3">
             <AlertTriangle size={16} className="text-amber-400 flex-shrink-0 mt-0.5" />
@@ -137,22 +137,22 @@ export default function ProposalTab({ project }: ProposalTabProps) {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Financial summary — sourced from latest proposal snapshot (v47.225) */}
-      {cost && (
+      {cost ? (
         <div className="card p-5">
           <div className="flex items-center justify-between mb-4">
             <h4 className="text-sm font-semibold text-white flex items-center gap-2">
               <DollarSign size={14} className="text-emerald-400" /> Financial Summary
             </h4>
-            {latestProposal && (
+            {latestProposal ? (
               <span className="text-xs text-slate-500">
                 {latestProposal.snapshotAt
                   ? `From proposal \u00b7 ${new Date(latestProposal.snapshotAt).toLocaleDateString()}`
                   : 'From latest proposal'}
               </span>
-            )}
+            ) : null}
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
@@ -182,30 +182,30 @@ export default function ProposalTab({ project }: ProposalTabProps) {
             </div>
           </div>
           {/* System snapshot summary */}
-          {(snapshotLayout || snapshotProduction) && (
+          {(snapshotLayout || snapshotProduction) ? (
             <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-              {snapshotLayout?.systemSizeKw && snapshotLayout.systemSizeKw > 0 && (
+              {snapshotLayout?.systemSizeKw && snapshotLayout.systemSizeKw > 0 ? (
                 <div className="flex justify-between p-2 bg-slate-800/40 rounded-lg">
                   <span className="text-slate-400">System Size</span>
                   <span className="text-white">{snapshotLayout.systemSizeKw.toFixed(2)} kW</span>
                 </div>
-              )}
-              {snapshotLayout?.totalPanels && snapshotLayout.totalPanels > 0 && (
+              ) : null}
+              {snapshotLayout?.totalPanels && snapshotLayout.totalPanels > 0 ? (
                 <div className="flex justify-between p-2 bg-slate-800/40 rounded-lg">
                   <span className="text-slate-400">Panel Count</span>
                   <span className="text-white">{snapshotLayout.totalPanels} panels</span>
                 </div>
-              )}
-              {snapshotProduction?.annualProductionKwh && snapshotProduction.annualProductionKwh > 0 && (
+              ) : null}
+              {snapshotProduction?.annualProductionKwh && snapshotProduction.annualProductionKwh > 0 ? (
                 <div className="flex justify-between p-2 bg-slate-800/40 rounded-lg">
                   <span className="text-slate-400">Annual Production</span>
                   <span className="text-white">{snapshotProduction.annualProductionKwh.toLocaleString()} kWh</span>
                 </div>
-              )}
+              ) : null}
             </div>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       {/* v47.251: Incentives Status — controlled by global config, no per-project toggle */}
       <div className="card p-4 flex items-start gap-3">
@@ -218,11 +218,11 @@ export default function ProposalTab({ project }: ProposalTabProps) {
             Tax incentives are not included in this proposal. Consult a tax professional for eligibility.
           </p>
           {/* Dev mode: show global config label */}
-          {process.env.NODE_ENV === 'development' && (
+          {process.env.NODE_ENV === 'development' ? (
             <p className="text-xs text-amber-500 mt-1 font-mono">
               [{getIncentivesDebugLabel()}]
             </p>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -258,15 +258,15 @@ export default function ProposalTab({ project }: ProposalTabProps) {
         </div>
 
         {/* Error banner */}
-        {genError && (
+        {genError ? (
           <div className="mt-3 flex items-start gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
             <AlertTriangle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />
             <p className="text-xs text-red-300">{genError}</p>
           </div>
-        )}
+        ) : null}
 
         {/* Success banner */}
-        {newProposal && !genError && (
+        {newProposal && !genError ? (
           <div className="mt-3 flex items-center gap-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
             <CheckCircle size={16} className="text-emerald-400 flex-shrink-0" />
             <div className="flex-1 min-w-0">
@@ -274,7 +274,7 @@ export default function ProposalTab({ project }: ProposalTabProps) {
               <p className="text-xs text-slate-400 truncate mt-0.5">{newProposal.title}</p>
             </div>
             <div className="flex gap-2 flex-shrink-0">
-              {newProposal.shareToken && (
+              {newProposal.shareToken ? (
                 <a
                   href={`/proposals/view/${newProposal.id}?token=${newProposal.shareToken}`}
                   target="_blank"
@@ -283,7 +283,7 @@ export default function ProposalTab({ project }: ProposalTabProps) {
                 >
                   <Eye size={12} /> Preview <ExternalLink size={11} />
                 </a>
-              )}
+              ) : null}
               <Link
                 href={`/proposals`}
                 className="btn-sm btn-secondary flex items-center gap-1.5 text-xs"
@@ -292,7 +292,7 @@ export default function ProposalTab({ project }: ProposalTabProps) {
               </Link>
             </div>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Existing proposals */}
@@ -322,7 +322,7 @@ export default function ProposalTab({ project }: ProposalTabProps) {
                     {sc.label}
                   </div>
                   <div className="flex gap-1">
-                    {proposal.shareToken && (
+                    {proposal.shareToken ? (
                       <a
                         href={`/proposals/view/${proposal.id}?token=${proposal.shareToken}`}
                         target="_blank"
@@ -332,8 +332,8 @@ export default function ProposalTab({ project }: ProposalTabProps) {
                       >
                         <Eye size={13} />
                       </a>
-                    )}
-                    {proposal.pdfUrl && (
+                    ) : null}
+                    {proposal.pdfUrl ? (
                       <a
                         href={proposal.pdfUrl}
                         target="_blank"
@@ -343,7 +343,7 @@ export default function ProposalTab({ project }: ProposalTabProps) {
                       >
                         <Download size={13} />
                       </a>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               );
@@ -512,23 +512,23 @@ function PortalStageCard({ project }: PortalStageCardProps) {
       </div>
 
       {/* Loading skeleton */}
-      {!fetchDone && (
+      {!fetchDone ? (
         <div className="flex items-center gap-2 py-1">
           <div className="w-5 h-5 rounded-full bg-slate-700 animate-pulse" />
           <div className="h-4 w-28 rounded bg-slate-700 animate-pulse" />
         </div>
-      )}
+      ) : null}
 
       {/* Fetch error */}
-      {fetchDone && fetchError && (
+      {fetchDone && fetchError ? (
         <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
           <AlertTriangle size={13} className="text-red-400 flex-shrink-0 mt-0.5" />
           <p className="text-xs text-red-300">Could not load portal stage. Refresh and try again.</p>
         </div>
-      )}
+      ) : null}
 
       {/* Main UI — once loaded with no error */}
-      {fetchDone && !fetchError && (
+      {fetchDone && !fetchError ? (
         <>
           {/* Current stage badge */}
           <div className="mb-4">
@@ -543,9 +543,9 @@ function PortalStageCard({ project }: PortalStageCardProps) {
             ) : (
               <span className="text-xs text-slate-500 italic">Not set</span>
             )}
-            {currentMeta?.desc && (
+            {currentMeta?.desc ? (
               <p className="text-xs text-slate-500 mt-1">{currentMeta.desc}</p>
-            )}
+            ) : null}
           </div>
 
           {/* Stage pipeline — visual stepper */}
@@ -593,14 +593,14 @@ function PortalStageCard({ project }: PortalStageCardProps) {
                       {s.label.split(' ').join('\n')}
                     </span>
                   </button>
-                  {!isLast && (
+                  {!isLast ? (
                     <ChevronRight
                       size={10}
                       className={`flex-shrink-0 mx-0.5 ${
                         stageIdx >= 0 && idx < stageIdx ? 'text-slate-500' : 'text-slate-700'
                       }`}
                     />
-                  )}
+                  ) : null}
                 </React.Fragment>
               );
             })}
@@ -647,10 +647,10 @@ function PortalStageCard({ project }: PortalStageCardProps) {
             or the homeowner signs (→ Installation).
           </p>
         </>
-      )}
+      ) : null}
 
       {/* Toast */}
-      {toast && (
+      {toast ? (
         <div
           className={`mt-3 flex items-center gap-2 p-2.5 rounded-xl text-xs font-medium border
             ${toast.ok
@@ -664,7 +664,7 @@ function PortalStageCard({ project }: PortalStageCardProps) {
           }
           {toast.msg}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

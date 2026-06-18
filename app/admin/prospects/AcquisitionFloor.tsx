@@ -642,11 +642,11 @@ export default function AcquisitionFloor({
               </div>
             </div>
             <div ref={supRef} className="absolute bottom-0 left-0 will-change-transform" style={{ transform: 'translateX(20px)' }}>
-              {supLine && (
+              {supLine ? (
                 <div className={`absolute -top-3 left-16 whitespace-nowrap px-2.5 py-1 rounded-lg text-[12px] font-bold shadow-lg ${raging ? 'text-red-100 bg-red-950 border border-red-500/70' : 'text-amber-100 bg-amber-950 border border-amber-600/60'}`} style={{ animation: 'bubblePop 3s ease-in-out forwards' }}>
                   {supLine}
                 </div>
-              )}
+              ) : null}
               {raging && <div className="absolute top-3 left-[4.5rem] text-lg font-black text-amber-300 pointer-events-none z-50" style={{ animation: 'crackPop 0.8s ease-out forwards', textShadow: '0 0 10px #f59e0b, 0 0 4px #fff' }}>💥 CRACK!</div>}
               <div ref={supSpriteRef} style={{ transformOrigin: 'center bottom' }}><Overseer /></div>
             </div>
@@ -766,12 +766,12 @@ export default function AcquisitionFloor({
                     return (
                       <div key={i} className="absolute" style={{ left: `${d.left}%`, top: `${d.top}%`, transform: `scale(${sc})`, transformOrigin: 'center bottom', zIndex: Math.round(d.top) + 10 }}>
                         <Desk accent={room.accent} delay={i * 0.7} />
-                        {seatList.includes(i) && (
+                        {seatList.includes(i) ? (
                           <div className="absolute" style={{ left: 16, top: 2 }}>
                             {bubbles[`${room.stage}-seat-${i}`] && <div className={bubble} style={{ animation: 'bubblePop 2.2s ease-in-out forwards' }}>{bubbles[`${room.stage}-seat-${i}`]}</div>}
                             <div style={{ animation: whipTarget === `${room.stage}-seat-${i}` ? 'whipShake 0.4s ease-in-out infinite' : 'typeBob 0.5s ease-in-out infinite' }}><Clerk c={room.accent} variant={i % 3} seated gold={room.stage === 'signed_up' && i === 0} /></div>
                           </div>
-                        )}
+                        ) : null}
                       </div>
                     );
                   })}
@@ -789,13 +789,13 @@ export default function AcquisitionFloor({
                   ))}
 
                   {/* sold leads drop coins in the Counting House */}
-                  {room.stage === 'signed_up' && room.count > 0 && (
+                  {room.stage === 'signed_up' && room.count > 0 ? (
                     <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex gap-0.5 pointer-events-none" style={{ zIndex: 5 }}>
                       {Array.from({ length: Math.min(room.count, 8) }).map((_, i) => (
                         <span key={i} style={{ fontSize: 15, animation: `coinDrop 0.7s ease-out ${i * 0.12}s both` }}>🪙</span>
                       ))}
                     </div>
-                  )}
+                  ) : null}
 
                   {idle && <div className="absolute inset-0 flex items-center justify-center text-sm text-amber-700/70 italic pointer-events-none" style={{ fontFamily: 'Georgia, serif' }}>{IDLE_TEXT[room.stage] || 'this chamber lies vacant…'}</div>}
                 </div>
@@ -814,22 +814,22 @@ export default function AcquisitionFloor({
 
                 <div className="absolute bottom-2 left-3 z-40 text-[12px] font-semibold text-amber-200/80 group-hover:text-amber-300 transition-colors" style={{ fontFamily: 'Georgia, serif' }}>enter the chamber →</div>
 
-                {WORK_LABEL[room.stage] && (
+                {WORK_LABEL[room.stage] ? (
                   <div role="button" tabIndex={0}
                     onClick={(e) => { e.stopPropagation(); workRoom(room.stage); }}
                     className="absolute top-14 right-2 z-40 px-2.5 py-1 rounded-md text-[11px] font-bold text-amber-50 bg-amber-800/80 hover:bg-amber-700 border border-amber-500/50 shadow cursor-pointer transition-colors"
                     style={{ pointerEvents: dispatching ? 'none' : 'auto', opacity: dispatching ? 0.5 : 1 }}>
                     {WORK_LABEL[room.stage]}
                   </div>
-                )}
-                {room.stage === 'qualified' && (
+                ) : null}
+                {room.stage === 'qualified' ? (
                   <div role="button" tabIndex={0}
                     onClick={(e) => { e.stopPropagation(); runJob('/api/admin/prospects/work/dossier', 'To the READING ROOM, scribble!', (d) => `Drafted ${d.written} dossiers (${d.processed} read).`); }}
                     className="absolute top-[5.5rem] right-2 z-40 px-2.5 py-1 rounded-md text-[11px] font-bold text-violet-50 bg-violet-800/80 hover:bg-violet-700 border border-violet-400/50 shadow cursor-pointer transition-colors"
                     style={{ pointerEvents: dispatching ? 'none' : 'auto', opacity: dispatching ? 0.5 : 1 }}>
                     📖 Write dossiers (AI $)
                   </div>
-                )}
+                ) : null}
               </button>
             );
           })}

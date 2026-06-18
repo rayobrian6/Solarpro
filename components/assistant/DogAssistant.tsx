@@ -192,7 +192,7 @@ export default function DogAssistant({ context, onAction, defaultOpen = false }:
     <div className="fixed bottom-5 right-5 z-[9998] flex flex-col items-end gap-2 select-none">
 
       {/* ── chat panel ── */}
-      {open && (
+      {open ? (
         <div className={`w-80 rounded-2xl shadow-2xl border border-white/10 bg-[#0d1420] flex flex-col overflow-hidden transition-all duration-200 ${
           minimized ? 'h-10' : 'h-[440px]'
         }`}>
@@ -218,7 +218,7 @@ export default function DogAssistant({ context, onAction, defaultOpen = false }:
             </button>
           </div>
 
-          {!minimized && (
+          {!minimized ? (
             <>
               {/* messages */}
               <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2.5 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/5">
@@ -238,31 +238,31 @@ export default function DogAssistant({ context, onAction, defaultOpen = false }:
                         ? 'bg-blue-500/20 text-slate-200 rounded-tr-sm'
                         : 'bg-white/[0.05] text-slate-300 rounded-tl-sm'
                     }`}>
-                      {m.role === 'dog' && (
+                      {m.role === 'dog' ? (
                         <div className="flex items-start gap-1.5">
                           <SeverityIcon severity={m.severity}/>
                           <span>{renderText(m.text)}</span>
                         </div>
-                      )}
+                      ) : null}
                       {m.role === 'user' && <span>{m.text}</span>}
                     </div>
                   </div>
                 ))}
 
                 {/* typing indicator */}
-                {loading && (
+                {loading ? (
                   <div className="flex gap-2 items-start">
                     <div className="w-6 h-6 rounded-full bg-yellow-400/15 flex items-center justify-center text-[11px]">🐶</div>
                     <div className="bg-white/[0.05] rounded-xl rounded-tl-sm">
                       <TypingDots/>
                     </div>
                   </div>
-                )}
+                ) : null}
                 <div ref={bottomRef}/>
               </div>
 
               {/* quick prompts */}
-              {messages.length <= 2 && !loading && (
+              {messages.length <= 2 && !loading ? (
                 <div className="px-3 pb-2 flex flex-wrap gap-1">
                   {quickPrompts.map(q => (
                     <button key={q} onClick={() => send(q)}
@@ -271,7 +271,7 @@ export default function DogAssistant({ context, onAction, defaultOpen = false }:
                     </button>
                   ))}
                 </div>
-              )}
+              ) : null}
 
               {/* input bar */}
               <div className="px-3 py-2.5 border-t border-white/[0.06] bg-[#0a1018] shrink-0">
@@ -299,9 +299,9 @@ export default function DogAssistant({ context, onAction, defaultOpen = false }:
                 </div>
               </div>
             </>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       {/* ── launcher button ── */}
       <button
@@ -317,11 +317,11 @@ export default function DogAssistant({ context, onAction, defaultOpen = false }:
       </button>
 
       {/* ── unread badge (shows when closed and messages > 1) ── */}
-      {!open && messages.length > 1 && (
+      {!open && messages.length > 1 ? (
         <div className="absolute top-0 right-0 w-4 h-4 rounded-full bg-red-500 text-[9px] text-white font-bold flex items-center justify-center pointer-events-none">
           {messages.filter(m => m.role === 'dog').length - 1}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

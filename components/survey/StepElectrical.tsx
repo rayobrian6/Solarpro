@@ -180,7 +180,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
   return (
     <div className="space-y-4">
       {/* ---- Satellite + Photo detection banner ---- */}
-      {(satelliteLoading || photoLoading) && (
+      {(satelliteLoading || photoLoading) ? (
         <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3">
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
@@ -193,7 +193,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
             </p>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* ---- Main Panel ---- */}
       <StepCard
@@ -211,7 +211,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
             disabled={disabled}
           />
           {/* Phase 4E: Photo-extracted panel brand suggestion */}
-          {photoPanelBrand && !photoLoading && (
+          {photoPanelBrand && !photoLoading ? (
             <div className="mt-1.5 flex items-center gap-2 text-xs">
               {data.panelBrand === photoPanelBrand.brand ? (
                 <>
@@ -242,11 +242,11 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
                 </>
               )}
             </div>
-          )}
+          ) : null}
         </StepField>
 
         {/* Dangerous panel warning -- actionable guidance */}
-        {isDangerousPanel && (
+        {isDangerousPanel ? (
           <div className="mt-1 rounded-lg bg-red-50 border border-red-200 px-3 py-2">
             <p className="text-xs font-semibold text-red-700">
               Known hazard panel -- must be replaced before solar
@@ -258,7 +258,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
               {' '}This panel must be replaced before solar can be installed. Homes built before 1990: check for Federal Pacific or Zinsco label on your panel. Discuss replacement with the customer.
             </p>
           </div>
-        )}
+        ) : null}
 
         <StepField
           label="Panel Rating (Amps)"
@@ -275,7 +275,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
             disabled={disabled}
           />
           {/* G2: Default panel rating suggestion from ecosystem */}
-          {!data.panelRating && (
+          {!data.panelRating ? (
             <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500">
               <span>Estimated:</span>
               <span className="font-semibold text-slate-700">{panelRatingPrefill.rating}A</span>
@@ -286,7 +286,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
               />
               <span className="text-slate-400">-- {panelRatingPrefill.derivation}</span>
             </div>
-          )}
+          ) : null}
         </StepField>
 
         <StepField
@@ -307,7 +307,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
             disabled={disabled}
           />
           {/* Phase 4E: Photo-extracted breaker slot suggestion */}
-          {photoBreakerSlots && !photoLoading && (
+          {photoBreakerSlots && !photoLoading ? (
             <div className="mt-1.5 flex items-center gap-2 text-xs">
               {data.availableBreakerSlots === breakerCountToChipValue(photoBreakerSlots.availableSlots) ? (
                 <>
@@ -338,11 +338,11 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
                 </>
               )}
             </div>
-          )}
+          ) : null}
         </StepField>
 
         {/* 120% rule warning -- plain language */}
-        {needsUpgradeFlag && (
+        {needsUpgradeFlag ? (
           <div className="mt-1 rounded-lg bg-orange-50 border border-orange-200 px-3 py-2">
             <p className="text-xs font-semibold text-orange-700">
               Panel may need upgrade for solar
@@ -353,7 +353,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
               or upgrading to a 200A panel. Confirm with engineering.
             </p>
           </div>
-        )}
+        ) : null}
       </StepCard>
 
       {/* ---- Meter + Service ---- */}
@@ -390,7 +390,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
             disabled={disabled}
           />
           {/* Phase 4D: Satellite/street-view service entrance suggestion */}
-          {satelliteServiceEntrance && !satelliteLoading && (
+          {satelliteServiceEntrance && !satelliteLoading ? (
             <div className="mt-1.5 flex items-center gap-2 text-xs">
               {serviceEntranceMatchesSatellite ? (
                 <>
@@ -421,7 +421,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
                 </>
               )}
             </div>
-          )}
+          ) : null}
         </StepField>
 
         <StepField label="Planned Interconnection Point" required>
@@ -438,7 +438,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
             disabled={disabled}
           />
           {/* G3: NEC 705.12 interconnection auto-computation recommendation */}
-          {interconnectionRecommendation && (
+          {interconnectionRecommendation ? (
             <div className="mt-2">
               <RecommendationCard
                 title="NEC 705.12 Recommendation"
@@ -460,7 +460,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
                 variant="inline"
               />
             </div>
-          )}
+          ) : null}
         </StepField>
       </StepCard>
 
@@ -476,7 +476,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
           />
         </StepField>
 
-        {data.hasSubPanel === true && (
+        {data.hasSubPanel === true ? (
           <StepField
             label="Sub Panel Rating (Amps)"
             hint="Select the sub panel amperage if interconnection may use it"
@@ -494,7 +494,7 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
               disabled={disabled}
             />
           </StepField>
-        )}
+        ) : null}
       </StepCard>
 
       {/* ---- Notes ---- */}
