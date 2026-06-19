@@ -83,16 +83,17 @@ export async function GET(req: NextRequest) {
       const lat = Number(r?.Latitude) || 0;
       const lng = Number(r?.Longitude) || 0;
       const parsedFacets = parseEagleViewMeasurementJson(parsed, lat, lng);
+      const rnd = (n: number) => Math.round(n * 1e6) / 1e6;
       report.parsedRoof = {
         roofFacetCount: parsedFacets.roofFacetCount,
         calibrationRotationDeg: parsedFacets.calibrationRotationDeg,
         northOrientation: parsedFacets.northOrientation,
-        sampleFacets: parsedFacets.facets.slice(0, 3).map((fc) => ({
-          pitchDegrees: fc.pitchDegrees,
-          azimuthDegrees: fc.azimuthDegrees,
-          areaSqM: fc.areaSqM,
-          vertices: fc.polygon.length,
-          firstVertex: fc.polygon[0],
+        // Full facet outlines (compact) so the roof can be drawn from this paste.
+        allFacets: parsedFacets.facets.map((fc) => ({
+          p: fc.pitchDegrees,
+          a: fc.azimuthDegrees,
+          m2: fc.areaSqM,
+          poly: fc.polygon.map((v) => [rnd(v.lat), rnd(v.lng)]),
         })),
       };
     } catch {
