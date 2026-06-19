@@ -44,8 +44,12 @@ export interface RoofFacet {
 export interface AerialGeometryRequest {
   lat: number;
   lng: number;
-  /** Full street address — some providers key on address rather than lat/lng. */
+  /** Street address line — required by order-based providers (EagleView). */
   address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  country?: string;
 }
 
 /** What a provider returns: the facets plus light metadata. */

@@ -147,6 +147,73 @@ export function mapMeasurementToFacets(rawReportFile: unknown, originLat: number
   return parseEagleViewMeasurementJson(rawReportFile, originLat, originLng).facets;
 }
 
+// ─── Ordering (Phase 1) ──────────────────────────────────────────────────────
+
+// Roof report product IDs (env-overridable). Defaults from the sandbox sample +
+// the Postman PlaceOrder example: 110 = "Bid Perfect" roof report.
+const EV_PRODUCT = {
+  primary: Number(process.env.EAGLEVIEW_PRIMARY_PRODUCT_ID) || 110,
+  delivery: Number(process.env.EAGLEVIEW_DELIVERY_PRODUCT_ID) || 8,
+  instruction: Number(process.env.EAGLEVIEW_MEASUREMENT_INSTRUCTION) || 3,
+};
+
+async function eagleViewPost<T = unknown>(path: string, body: unknown): Promise<T> {
+  const token = await getEagleViewToken();
+  const url = `${MEASUREMENT_BASE[env()]}${path.startsWith('/') ? path : `/${path}`}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`EagleView POST ${path} failed: ${res.status} ${text.slice(0, 300)}`);
+  }
+  return (await res.json()) as T;
+}
+
+/** Place a roof Measurement Order for an address. Returns the new report id. */
+export async function placeRoofOrder(req: AerialGeometryRequest): Promise<number> {
+  if (!req.address || !req.state || !req.zip) {
+    throw new Error('EagleView order requires address, state, and zip.');
+  }
+  const body = {
+    OrderReports: [
+      {
+        ReportAddresses: [
+          {
+            Address: req.address, City: req.city ?? '', State: req.state, Zip: req.zip,
+            Country: req.country ?? 'US', Latitude: req.lat, Longitude: req.lng, AddressType: 1,
+          },
+        ],
+        PrimaryProductId: EV_PRODUCT.primary,
+        DeliveryProductId: EV_PRODUCT.delivery,
+        MeasurementInstructionType: EV_PRODUCT.instruction,
+        ChangesInLast4Years: false,
+      },
+    ],
+    PromoCode: null, PlaceOrderUser: null, CreditCardData: null,
+  };
+  const resp = await eagleViewPost<{ OrderId?: number; ReportIds?: number[] }>('/v2/Order/PlaceOrder', body);
+  const reportId = resp.ReportIds?.[0];
+  if (!reportId) throw new Error('EagleView PlaceOrder returned no report id.');
+  return reportId;
+}
+
+/** True once the report's measurement-JSON geometry file (type 107) is ready. */
+export async function isRoofReportReady(reportId: number | string): Promise<boolean> {
+  const r = (await getReport(reportId)) as { DeliveryFilesAvailable?: Array<{ DeliveryFileTypeId?: number }> };
+  return (r.DeliveryFilesAvailable ?? []).some((f) => f.DeliveryFileTypeId === EV_FILE_TYPE.MEASUREMENT_JSON);
+}
+
+/** Fetch + parse a COMPLETED report into facets (called by the webhook + poller). */
+export async function parseRoofFromReport(reportId: number | string): Promise<AerialRoofResult> {
+  const r = (await getReport(reportId)) as { Latitude?: number; Longitude?: number };
+  const file = await getReportFileText(reportId, EV_FILE_TYPE.MEASUREMENT_JSON);
+  const facets = parseEagleViewMeasurementJson(JSON.parse(file.body), Number(r.Latitude) || 0, Number(r.Longitude) || 0).facets;
+  return { source: 'eagleview', facets, reportId: String(reportId) };
+}
+
 export class EagleViewProvider implements AerialGeometryProvider {
   readonly name = 'eagleview' as const;
 
@@ -158,14 +225,18 @@ export class EagleViewProvider implements AerialGeometryProvider {
     return MEASUREMENT_BASE[env()];
   }
 
-  async getRoofFacets(_req: AerialGeometryRequest): Promise<AerialRoofResult | null> {
-    // ⏳ PENDING the full order flow: place a Measurement Order (PlaceOrder) →
-    // poll GetReport until complete → download the geometry file (file-links /
-    // GetReportFile) → mapMeasurementToFacets(file). Built incrementally after the
-    // connectivity test confirms auth + the report file format.
-    throw new Error(
-      '[eagleViewProvider] getRoofFacets not implemented — auth + product reads are wired; ' +
-        'the place-order → download-file → parse flow is pending a real sandbox report file.',
-    );
+  async getRoofFacets(req: AerialGeometryRequest): Promise<AerialRoofResult | null> {
+    const reportId = await placeRoofOrder(req);
+    // Bounded poll for completion. Real (multi-hour) reports should instead be
+    // finalised by the /api/eagleview/webhook listener calling parseRoofFromReport.
+    const maxAttempts = Number(process.env.EAGLEVIEW_POLL_ATTEMPTS) || 6;
+    const gapMs = Number(process.env.EAGLEVIEW_POLL_GAP_MS) || 3000;
+    for (let i = 0; i < maxAttempts; i++) {
+      if (await isRoofReportReady(reportId)) return parseRoofFromReport(reportId);
+      if (i < maxAttempts - 1) await new Promise((r) => setTimeout(r, gapMs));
+    }
+    // Not ready within the poll window — return the order id with no facets so
+    // the caller can finalise later via the webhook. Empty facets = "pending".
+    return { source: 'eagleview', facets: [], reportId: String(reportId) };
   }
 }
