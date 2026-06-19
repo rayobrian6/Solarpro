@@ -14,6 +14,7 @@ import {
   getReportFileText,
   EV_FILE_TYPE,
 } from '@/lib/siteSurveys/aerialGeometry/eagleViewProvider';
+import { parseEagleViewMeasurementJson } from '@/lib/siteSurveys/aerialGeometry/eagleViewMeasurementParser';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -75,22 +76,24 @@ export async function GET(req: NextRequest) {
   try {
     const f = await getReportFileText(SAMPLE_REPORT_ID, EV_FILE_TYPE.MEASUREMENT_JSON);
     report.geometryFile = { status: f.status, contentType: f.contentType, length: f.body.length };
-    const arr = (x: unknown) => (Array.isArray(x) ? x : x == null ? [] : [x]);
     try {
       const parsed = JSON.parse(f.body) as any;
-      const S = parsed?.EAGLEVIEW_EXPORT?.STRUCTURES;
-      const roof = S?.ROOF;
-      const faces = arr(roof?.FACES?.FACE);
-      const lines = arr(roof?.LINES?.LINE);
-      const points = arr(roof?.POINTS?.POINT);
-      report.geometry = {
-        northOrientation: S?.['@northorientation'],
-        counts: { faces: faces.length, lines: lines.length, points: points.length },
-        faceTypes: [...new Set(faces.map((x: any) => x?.['@type']))],
-        lineTypes: [...new Set(lines.map((x: any) => x?.['@type']))],
-        sampleFaces: faces.slice(0, 4),
-        sampleLines: lines.slice(0, 10),
-        samplePoints: points.slice(0, 8),
+      // Run the real parser on the full report.
+      const r: any = report.report;
+      const lat = Number(r?.Latitude) || 0;
+      const lng = Number(r?.Longitude) || 0;
+      const parsedFacets = parseEagleViewMeasurementJson(parsed, lat, lng);
+      report.parsedRoof = {
+        roofFacetCount: parsedFacets.roofFacetCount,
+        calibrationRotationDeg: parsedFacets.calibrationRotationDeg,
+        northOrientation: parsedFacets.northOrientation,
+        sampleFacets: parsedFacets.facets.slice(0, 3).map((fc) => ({
+          pitchDegrees: fc.pitchDegrees,
+          azimuthDegrees: fc.azimuthDegrees,
+          areaSqM: fc.areaSqM,
+          vertices: fc.polygon.length,
+          firstVertex: fc.polygon[0],
+        })),
       };
     } catch {
       report.geometryRawSnippet = f.body.slice(0, 1500); // not JSON (maybe a redirect/link)

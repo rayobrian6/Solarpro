@@ -26,6 +26,7 @@ import type {
   AerialRoofResult,
   RoofFacet,
 } from './types';
+import { parseEagleViewMeasurementJson } from './eagleViewMeasurementParser';
 
 // CONFIRMED from the EagleView "Authentication Methods → Auth endpoints" docs.
 // Same token endpoint for sandbox + production; tokens valid ~1h (cache + reuse).
@@ -138,16 +139,12 @@ export async function getReportFileText(
 }
 
 /**
- * ⏳ PENDING: map a downloaded EagleView roof report FILE (DXF/JSON) into
- * vendor-neutral RoofFacets. The per-facet polygons live in the report file,
- * not the API response — wire this once a real sandbox report file confirms the
- * geometry format.
+ * Map a downloaded EagleView "EV Measurement JSON" report file (fileType 107)
+ * into vendor-neutral RoofFacets, anchored at the report's lat/lng. The per-facet
+ * polygons live in the report file (POINTS/LINES/FACES), not the API response.
  */
-export function mapMeasurementToFacets(_rawReportFile: unknown): RoofFacet[] {
-  throw new Error(
-    '[eagleViewProvider] mapMeasurementToFacets not implemented — per-facet geometry ' +
-      'lives in the downloadable report file (DXF/JSON); format pending a real sandbox report.',
-  );
+export function mapMeasurementToFacets(rawReportFile: unknown, originLat: number, originLng: number): RoofFacet[] {
+  return parseEagleViewMeasurementJson(rawReportFile, originLat, originLng).facets;
 }
 
 export class EagleViewProvider implements AerialGeometryProvider {
