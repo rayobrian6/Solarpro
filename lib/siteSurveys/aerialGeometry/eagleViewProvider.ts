@@ -102,12 +102,39 @@ export async function eagleViewGet<T = unknown>(path: string): Promise<T> {
 
 /** The product catalog (primary/delivery/add-on product IDs needed to place an order). */
 export async function getAvailableProducts(): Promise<unknown> {
-  return eagleViewGet('/GetAvailableProducts');
+  return eagleViewGet('/v2/Product/GetAvailableProducts');
 }
 
-/** Account details — a lightweight authenticated call useful for connectivity checks. */
-export async function getAccountDetails(): Promise<unknown> {
-  return eagleViewGet('/v3/Order/GetAccountDetails');
+/** Fetch a completed report's summary measurements by id. */
+export async function getReport(reportId: number | string): Promise<unknown> {
+  return eagleViewGet(`/v3/Report/GetReport?reportId=${encodeURIComponent(String(reportId))}`);
+}
+
+// EagleView report file-type codes (from the Postman collection).
+export const EV_FILE_TYPE = {
+  MEASUREMENT_JSON: 107, // EV Measurement JSON — the per-facet roof geometry
+  DXF: 26,
+  XML: 18,
+  PDF: 206,
+} as const;
+
+/**
+ * Fetch a report file's raw text (e.g. the EV Measurement JSON, fileType 107).
+ * Returns the raw body so the caller can parse the geometry. Uses
+ * GetReportFileAnyFormat so EagleView picks the available format for the type.
+ */
+export async function getReportFileText(
+  reportId: number | string,
+  fileType: number = EV_FILE_TYPE.MEASUREMENT_JSON,
+): Promise<{ status: number; contentType: string | null; body: string }> {
+  const token = await getEagleViewToken();
+  const url = `${MEASUREMENT_BASE[env()]}/v1/File/GetReportFileAnyFormat?fileType=${fileType}&reportId=${encodeURIComponent(String(reportId))}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  return {
+    status: res.status,
+    contentType: res.headers.get('content-type'),
+    body: await res.text().catch(() => ''),
+  };
 }
 
 /**

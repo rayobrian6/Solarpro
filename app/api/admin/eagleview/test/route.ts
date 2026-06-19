@@ -1,21 +1,41 @@
 // GET /api/admin/eagleview/test
 //
-// Admin-only EagleView connectivity check. Proves the sandbox credentials work
-// end-to-end: (1) obtain an OAuth client-credentials token, (2) make an
-// authenticated read (GetAvailableProducts + GetAccountDetails). Returns a clean
-// JSON report — NEVER the token or secret itself. Open it in the browser while
-// logged in as an admin.
+// Admin-only EagleView sandbox probe. Confirms auth + pulls the sample report
+// (69110976) summary + the EV Measurement JSON geometry file, returning a
+// COMPACT SHAPE of the geometry (keys + array shapes, not the full data) so we
+// can see the facet schema and write the parser. Never returns the token/secret.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { getEagleViewToken } from '@/lib/siteSurveys/aerialGeometry/eagleViewProvider';
+import {
+  getEagleViewToken,
+  getAvailableProducts,
+  getReport,
+  getReportFileText,
+  EV_FILE_TYPE,
+} from '@/lib/siteSurveys/aerialGeometry/eagleViewProvider';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 
+const SAMPLE_REPORT_ID = 69110976; // Tiburon, CA — completed sandbox report (from Postman collection)
+
 function msg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/** Compact structural summary: keys + nested keys + array shapes, no bulk data. */
+function shape(v: unknown, depth = 0): unknown {
+  if (depth > 6) return '…';
+  if (Array.isArray(v)) return v.length === 0 ? [] : [`len=${v.length}`, shape(v[0], depth + 1)];
+  if (v && typeof v === 'object') {
+    const o: Record<string, unknown> = {};
+    for (const k of Object.keys(v as Record<string, unknown>)) o[k] = shape((v as Record<string, unknown>)[k], depth + 1);
+    return o;
+  }
+  if (typeof v === 'string') return v.length > 24 ? `str(${v.length})` : v;
+  return typeof v;
 }
 
 export async function GET(req: NextRequest) {
@@ -24,53 +44,45 @@ export async function GET(req: NextRequest) {
 
   const env = process.env.EAGLEVIEW_ENV === 'production' ? 'production' : 'sandbox';
   const configured = !!(process.env.EAGLEVIEW_CLIENT_ID && process.env.EAGLEVIEW_CLIENT_SECRET);
-
   const report: Record<string, unknown> = { env, configured };
-  if (!configured) {
-    report.hint = 'Set EAGLEVIEW_CLIENT_ID and EAGLEVIEW_CLIENT_SECRET in this environment, then redeploy.';
-    return NextResponse.json({ success: false, ...report });
-  }
+  if (!configured) return NextResponse.json({ success: false, ...report });
 
-  // Step 1: token
   try {
     await getEagleViewToken();
     report.tokenObtained = true;
   } catch (e) {
-    report.tokenObtained = false;
-    report.tokenError = msg(e);
-    return NextResponse.json({ success: false, ...report });
+    return NextResponse.json({ success: false, ...report, tokenError: msg(e) });
   }
 
-  // Step 2: probe candidate base+path combos to find the real routing.
-  // The token is valid (step 1), so 404 = wrong URL, 401/403 = right URL wrong
-  // auth-shape, 200/400 = right URL. We report status + a short body snippet.
-  let token = '';
-  try { token = await getEagleViewToken(); } catch { /* already reported */ }
+  // Products (corrected path)
+  try {
+    const p = await getAvailableProducts();
+    report.products = shape(p);
+  } catch (e) {
+    report.productsError = msg(e);
+  }
 
-  const candidates = [
-    'https://sandbox.apicenter.eagleview.com/GetAvailableProducts',
-    'https://sandbox.apicenter.eagleview.com/measurementorders/GetAvailableProducts',
-    'https://sandbox.apicenter.eagleview.com/v3/Order/GetAccountDetails',
-    'https://sandbox.apicenter.eagleview.com/measurementorders/v3/Order/GetAccountDetails',
-    'https://sandbox.apicenter.eagleview.com/v3/Report/GetReport?reportId=1',
-    'https://sandbox.apis.eagleview.com/GetAvailableProducts',
-    'https://sandbox.apis.eagleview.com/measurementorders/GetAvailableProducts',
-    'https://sandbox.apis.eagleview.com/measurementorders/v3/Order/GetAccountDetails',
-  ];
+  // Sample report summary
+  try {
+    report.report = await getReport(SAMPLE_REPORT_ID);
+  } catch (e) {
+    report.reportError = msg(e);
+  }
 
-  const probe: Array<{ url: string; status: number | string; body: string }> = [];
-  for (const url of candidates) {
+  // The geometry JSON file — return its SHAPE + a small raw snippet
+  try {
+    const f = await getReportFileText(SAMPLE_REPORT_ID, EV_FILE_TYPE.MEASUREMENT_JSON);
+    report.geometryFile = { status: f.status, contentType: f.contentType, length: f.body.length };
     try {
-      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
-      const body = (await r.text().catch(() => '')).slice(0, 120);
-      probe.push({ url, status: r.status, body });
-    } catch (e) {
-      probe.push({ url, status: 'ERR', body: msg(e).slice(0, 120) });
+      const parsed = JSON.parse(f.body);
+      report.geometryShape = shape(parsed);
+      report.geometryRawSnippet = f.body.slice(0, 1500);
+    } catch {
+      report.geometryRawSnippet = f.body.slice(0, 1500); // not JSON (maybe a redirect/link)
     }
+  } catch (e) {
+    report.geometryError = msg(e);
   }
-  report.probe = probe;
 
-  const hit = probe.find((p) => typeof p.status === 'number' && p.status < 400);
-  report.workingUrl = hit?.url ?? null;
-  return NextResponse.json({ success: !!hit, ...report });
+  return NextResponse.json({ success: report.tokenObtained === true, ...report });
 }
