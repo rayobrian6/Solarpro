@@ -31,9 +31,12 @@ const API_BASE = {
   production: 'https://apis.eagleview.com',
 } as const;
 
-// NOTE: the exact token path is the one piece not yet confirmed from the docs
-// screenshots (the Postman collection runs a "/Token" request). Override via
-// EAGLEVIEW_TOKEN_URL once confirmed from the downloaded Postman collection.
+// CONFIRMED from the EagleView "Authentication Methods → Auth endpoints" docs:
+//   Authorization: https://apicenter.eagleview.com/oauth2/v1/authorize
+//   Token:         https://apicenter.eagleview.com/oauth2/v1/token   (← used here)
+//   Revoke:        https://apicenter.eagleview.com/oauth2/v1/revoke
+// Same endpoints for sandbox + production. Tokens are valid 1 hour (cache + reuse).
+// Client Credentials is the correct grant for our backend (no end-user) app.
 const DEFAULT_TOKEN_PATH = '/oauth2/v1/token';
 
 function env(): 'sandbox' | 'production' {
