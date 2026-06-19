@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseEagleViewMeasurementJson } from '../eagleViewMeasurementParser';
+import { parseEagleViewMeasurementJson, wasteTable } from '../eagleViewMeasurementParser';
 
 // Real sample subset from EagleView sandbox report 69110976 (Tiburon, CA):
 // faces F1 + F2 with their lines L1–L9 and points C5–C12.
@@ -77,5 +77,30 @@ describe('parseEagleViewMeasurementJson', () => {
         expect(Math.abs(p.lng - ORIGIN_LNG)).toBeLessThan(0.001);
       }
     }
+  });
+
+  it('summarises area + predominant pitch', () => {
+    expect(res.summary.facetCount).toBe(2);
+    expect(res.summary.predominantPitch).toBe('5/12');
+    expect(res.summary.totalAreaSqFt).toBeGreaterThan(480);
+    expect(res.summary.totalAreaSqFt).toBeLessThan(500);
+    expect(res.summary.areasByPitch[0]).toMatchObject({ pitch: '5/12', pct: 100 });
+  });
+
+  it('totals edge lengths + counts by type (true 3D length)', () => {
+    const L = res.summary.lineLengthsFt, C = res.summary.lineCounts;
+    expect(C).toMatchObject({ ridge: 2, hip: 3, valley: 1, rake: 1, eave: 2 });
+    expect(L.ridge).toBeGreaterThan(26); expect(L.ridge).toBeLessThan(34);   // ~30
+    expect(L.eave).toBeGreaterThan(42); expect(L.eave).toBeLessThan(50);     // ~46
+    expect(L.valley).toBeGreaterThan(15); expect(L.valley).toBeLessThan(21); // ~18
+  });
+});
+
+describe('wasteTable', () => {
+  it('computes area + squares at each waste %', () => {
+    const t = wasteTable(6788);
+    expect(t[0]).toMatchObject({ wastePct: 0, areaSqFt: 6788 });
+    expect(t.find((r) => r.wastePct === 10)?.areaSqFt).toBe(7467);
+    expect(t[0].squares).toBeCloseTo(67.9, 1);
   });
 });

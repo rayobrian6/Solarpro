@@ -35,11 +35,39 @@ type Vec3 = { x: number; y: number; z: number };
 const asArr = <T>(x: T | T[] | undefined | null): T[] => (Array.isArray(x) ? x : x == null ? [] : [x]);
 const norm360 = (d: number) => ((d % 360) + 360) % 360;
 
+/** Roof measurement summary — the data behind a length/pitch/area report. */
+export interface RoofMeasurementSummary {
+  totalAreaSqFt: number;
+  facetCount: number;
+  predominantPitch: string | null; // e.g. "10/12"
+  areasByPitch: Array<{ pitch: string; areaSqFt: number; pct: number }>;
+  /** Total edge length per type, in feet (true 3D edge length). */
+  lineLengthsFt: Record<'ridge' | 'hip' | 'valley' | 'rake' | 'eave' | 'flashing' | 'stepFlashing' | 'parapet' | 'other', number>;
+  lineCounts: Record<'ridge' | 'hip' | 'valley' | 'rake' | 'eave' | 'flashing' | 'stepFlashing' | 'parapet' | 'other', number>;
+}
+
 export interface EvParseResult {
   facets: RoofFacet[];
   roofFacetCount: number;
   calibrationRotationDeg: number | null;
   northOrientation: number | null;
+  summary: RoofMeasurementSummary;
+}
+
+const LINE_TYPE_MAP: Record<string, keyof RoofMeasurementSummary['lineLengthsFt']> = {
+  RIDGE: 'ridge', HIP: 'hip', VALLEY: 'valley', RAKE: 'rake', EAVE: 'eave',
+  FLASHING: 'flashing', STEPFLASH: 'stepFlashing', PARAPET: 'parapet', OTHER: 'other',
+};
+
+/** Standard roofing waste table: total area + roofing squares at each waste %. */
+export function wasteTable(
+  totalAreaSqFt: number,
+  steps: number[] = [0, 10, 12, 15, 17, 20, 22],
+): Array<{ wastePct: number; areaSqFt: number; squares: number }> {
+  return steps.map((wastePct) => {
+    const areaSqFt = Math.round(totalAreaSqFt * (1 + wastePct / 100));
+    return { wastePct, areaSqFt, squares: Math.ceil((areaSqFt / 100) * 10) / 10 };
+  });
 }
 
 /** Least-squares fit z = a*x + b*y + c over vertices; returns gradient (a,b). */
@@ -76,6 +104,14 @@ function planeGradient(v: Vec3[]): { a: number; b: number } {
 /** Compass bearing (deg, CW from +Y/"north") of a local vector. */
 const localBearing = (dx: number, dy: number) => norm360((Math.atan2(dx, dy) * 180) / Math.PI);
 
+const emptyLineRec = (): RoofMeasurementSummary['lineLengthsFt'] => ({
+  ridge: 0, hip: 0, valley: 0, rake: 0, eave: 0, flashing: 0, stepFlashing: 0, parapet: 0, other: 0,
+});
+const emptySummary = (): RoofMeasurementSummary => ({
+  totalAreaSqFt: 0, facetCount: 0, predominantPitch: null, areasByPitch: [],
+  lineLengthsFt: emptyLineRec(), lineCounts: emptyLineRec(),
+});
+
 export function parseEagleViewMeasurementJson(
   raw: any,
   originLat: number,
@@ -84,7 +120,7 @@ export function parseEagleViewMeasurementJson(
   const S = raw?.EAGLEVIEW_EXPORT?.STRUCTURES;
   const roof = S?.ROOF;
   const northOrientation = S?.['@northorientation'] != null ? Number(S['@northorientation']) : null;
-  if (!roof) return { facets: [], roofFacetCount: 0, calibrationRotationDeg: null, northOrientation };
+  if (!roof) return { facets: [], roofFacetCount: 0, calibrationRotationDeg: null, northOrientation, summary: emptySummary() };
 
   const pts = new Map<string, Vec3>();
   for (const p of asArr<any>(roof.POINTS?.POINT)) {
@@ -123,6 +159,7 @@ export function parseEagleViewMeasurementJson(
   interface Raw {
     verts: Vec3[];
     pitchDeg: number;
+    pitchOver12: number;
     orientation: number;
     areaSqM: number;
     edgeTypes: WorldRoofEdgeType[];
@@ -148,11 +185,11 @@ export function parseEagleViewMeasurementJson(
     const downslopeBearing = localBearing(-a, -b); // steepest descent
 
     const edgeTypes = r.types.map((t) => EDGE_MAP[t]).filter(Boolean) as WorldRoofEdgeType[];
-    rawFacets.push({ verts, pitchDeg, orientation, areaSqM, edgeTypes, downslopeBearing });
+    rawFacets.push({ verts, pitchDeg, pitchOver12, orientation, areaSqM, edgeTypes, downslopeBearing });
     for (const v of verts) { cx += v.x; cy += v.y; cn++; }
   }
 
-  if (rawFacets.length === 0) return { facets: [], roofFacetCount: 0, calibrationRotationDeg: null, northOrientation };
+  if (rawFacets.length === 0) return { facets: [], roofFacetCount: 0, calibrationRotationDeg: null, northOrientation, summary: emptySummary() };
   cx /= cn; cy /= cn;
 
   // Pass 2: CALIBRATE rotation = circular-mean(orientation - downslopeBearing),
@@ -188,5 +225,44 @@ export function parseEagleViewMeasurementJson(
     edgeTypes: f.edgeTypes.length === f.verts.length ? f.edgeTypes : undefined,
   }));
 
-  return { facets, roofFacetCount: facets.length, calibrationRotationDeg: Math.round(rotationDeg * 10) / 10, northOrientation };
+  // ── Measurement summary (true 3D edge lengths by type + areas by pitch) ──────
+  const lineLengthsFt = emptyLineRec();
+  const lineCounts = emptyLineRec();
+  for (const { a, b, type } of lines.values()) {
+    const pa = pts.get(a), pb = pts.get(b);
+    if (!pa || !pb) continue;
+    const key = LINE_TYPE_MAP[type.toUpperCase()] ?? 'other';
+    lineLengthsFt[key] += Math.hypot(pa.x - pb.x, pa.y - pb.y, pa.z - pb.z);
+    lineCounts[key] += 1;
+  }
+  for (const k of Object.keys(lineLengthsFt) as Array<keyof typeof lineLengthsFt>) {
+    lineLengthsFt[k] = Math.round(lineLengthsFt[k]);
+  }
+
+  const SQM_TO_SQFT = 1 / SQFT_TO_SQM;
+  const pitchAreas = new Map<number, number>();
+  let totalSqFt = 0;
+  for (const f of rawFacets) {
+    const sqft = f.areaSqM * SQM_TO_SQFT;
+    totalSqFt += sqft;
+    pitchAreas.set(f.pitchOver12, (pitchAreas.get(f.pitchOver12) ?? 0) + sqft);
+  }
+  const areasByPitch = [...pitchAreas.entries()]
+    .sort((x, y) => y[1] - x[1])
+    .map(([p, area]) => ({
+      pitch: `${Math.round(p)}/12`,
+      areaSqFt: Math.round(area),
+      pct: totalSqFt > 0 ? Math.round((area / totalSqFt) * 1000) / 10 : 0,
+    }));
+
+  const summary: RoofMeasurementSummary = {
+    totalAreaSqFt: Math.round(totalSqFt),
+    facetCount: rawFacets.length,
+    predominantPitch: areasByPitch[0]?.pitch ?? null,
+    areasByPitch,
+    lineLengthsFt,
+    lineCounts,
+  };
+
+  return { facets, roofFacetCount: facets.length, calibrationRotationDeg: Math.round(rotationDeg * 10) / 10, northOrientation, summary };
 }
