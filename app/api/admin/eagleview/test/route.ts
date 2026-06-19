@@ -69,14 +69,29 @@ export async function GET(req: NextRequest) {
     report.reportError = msg(e);
   }
 
-  // The geometry JSON file — return its SHAPE + a small raw snippet
+  // The geometry JSON file — extract focused samples of the actual format
+  // (north orientation, POINTS coords, LINE paths/types, FACE polygons) so we
+  // can write the facet reconstruction parser.
   try {
     const f = await getReportFileText(SAMPLE_REPORT_ID, EV_FILE_TYPE.MEASUREMENT_JSON);
     report.geometryFile = { status: f.status, contentType: f.contentType, length: f.body.length };
+    const arr = (x: unknown) => (Array.isArray(x) ? x : x == null ? [] : [x]);
     try {
-      const parsed = JSON.parse(f.body);
-      report.geometryShape = shape(parsed);
-      report.geometryRawSnippet = f.body.slice(0, 1500);
+      const parsed = JSON.parse(f.body) as any;
+      const S = parsed?.EAGLEVIEW_EXPORT?.STRUCTURES;
+      const roof = S?.ROOF;
+      const faces = arr(roof?.FACES?.FACE);
+      const lines = arr(roof?.LINES?.LINE);
+      const points = arr(roof?.POINTS?.POINT);
+      report.geometry = {
+        northOrientation: S?.['@northorientation'],
+        counts: { faces: faces.length, lines: lines.length, points: points.length },
+        faceTypes: [...new Set(faces.map((x: any) => x?.['@type']))],
+        lineTypes: [...new Set(lines.map((x: any) => x?.['@type']))],
+        sampleFaces: faces.slice(0, 4),
+        sampleLines: lines.slice(0, 10),
+        samplePoints: points.slice(0, 8),
+      };
     } catch {
       report.geometryRawSnippet = f.body.slice(0, 1500); // not JSON (maybe a redirect/link)
     }
