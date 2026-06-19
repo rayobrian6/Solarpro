@@ -8,11 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import {
-  getEagleViewToken,
-  getAvailableProducts,
-  getAccountDetails,
-} from '@/lib/siteSurveys/aerialGeometry/eagleViewProvider';
+import { getEagleViewToken } from '@/lib/siteSurveys/aerialGeometry/eagleViewProvider';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -45,18 +41,36 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, ...report });
   }
 
-  // Step 2: authenticated reads (each independent so we see which works)
-  try {
-    report.products = await getAvailableProducts();
-  } catch (e) {
-    report.productsError = msg(e);
-  }
-  try {
-    report.account = await getAccountDetails();
-  } catch (e) {
-    report.accountError = msg(e);
-  }
+  // Step 2: probe candidate base+path combos to find the real routing.
+  // The token is valid (step 1), so 404 = wrong URL, 401/403 = right URL wrong
+  // auth-shape, 200/400 = right URL. We report status + a short body snippet.
+  let token = '';
+  try { token = await getEagleViewToken(); } catch { /* already reported */ }
 
-  const ok = report.tokenObtained === true && !report.productsError;
-  return NextResponse.json({ success: ok, ...report });
+  const candidates = [
+    'https://sandbox.apicenter.eagleview.com/GetAvailableProducts',
+    'https://sandbox.apicenter.eagleview.com/measurementorders/GetAvailableProducts',
+    'https://sandbox.apicenter.eagleview.com/v3/Order/GetAccountDetails',
+    'https://sandbox.apicenter.eagleview.com/measurementorders/v3/Order/GetAccountDetails',
+    'https://sandbox.apicenter.eagleview.com/v3/Report/GetReport?reportId=1',
+    'https://sandbox.apis.eagleview.com/GetAvailableProducts',
+    'https://sandbox.apis.eagleview.com/measurementorders/GetAvailableProducts',
+    'https://sandbox.apis.eagleview.com/measurementorders/v3/Order/GetAccountDetails',
+  ];
+
+  const probe: Array<{ url: string; status: number | string; body: string }> = [];
+  for (const url of candidates) {
+    try {
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+      const body = (await r.text().catch(() => '')).slice(0, 120);
+      probe.push({ url, status: r.status, body });
+    } catch (e) {
+      probe.push({ url, status: 'ERR', body: msg(e).slice(0, 120) });
+    }
+  }
+  report.probe = probe;
+
+  const hit = probe.find((p) => typeof p.status === 'number' && p.status < 400);
+  report.workingUrl = hit?.url ?? null;
+  return NextResponse.json({ success: !!hit, ...report });
 }
