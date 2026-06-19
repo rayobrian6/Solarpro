@@ -4,12 +4,15 @@
 // EagleView aerial geometry provider (pay-per-report, any address incl. rural).
 //
 // STATUS:
-//   ✅ Auth (OAuth2 client-credentials) is wired against the real EagleView base
-//      URLs taken from the developer docs.
-//   ⏳ getRoofFacets() is NOT YET COMPLETE — the Property Data / Measurement
-//      Orders endpoint paths and their response shapes still need to be mapped
-//      from the downloaded EagleView API doc / Postman collection. The mapping
-//      stub (mapMeasurementToFacets) is the single place that work lands.
+//   ✅ Auth (OAuth2 client-credentials) wired against the real token endpoint.
+//   ✅ Authenticated reads (GetAvailableProducts / GetAccountDetails) — used by
+//      the connectivity test to prove creds work and fetch the real product IDs.
+//   ⏳ Roof geometry: the Measurement Orders API returns summary numbers (area,
+//      pitch, facet COUNT, edge lengths, pitch table) but NOT the per-facet
+//      polygons we draw — those live in a downloadable report FILE (DXF/JSON)
+//      retrieved after a report completes. getRoofFacets() therefore needs the
+//      place-order → poll → download-file → parse-file flow, which is built
+//      incrementally once a real sandbox report file confirms the geometry format.
 //
 // Credentials come from env (NEVER hardcoded):
 //   EAGLEVIEW_CLIENT_ID, EAGLEVIEW_CLIENT_SECRET   (sandbox app creds on dev)
@@ -24,20 +27,17 @@ import type {
   RoofFacet,
 } from './types';
 
-// Base URLs from the EagleView developer docs (sandbox vs production).
+// CONFIRMED from the EagleView "Authentication Methods → Auth endpoints" docs.
+// Same token endpoint for sandbox + production; tokens valid ~1h (cache + reuse).
 const TOKEN_BASE_URL = 'https://apicenter.eagleview.com';
-const API_BASE = {
-  sandbox: 'https://sandbox.apis.eagleview.com',
-  production: 'https://apis.eagleview.com',
-} as const;
-
-// CONFIRMED from the EagleView "Authentication Methods → Auth endpoints" docs:
-//   Authorization: https://apicenter.eagleview.com/oauth2/v1/authorize
-//   Token:         https://apicenter.eagleview.com/oauth2/v1/token   (← used here)
-//   Revoke:        https://apicenter.eagleview.com/oauth2/v1/revoke
-// Same endpoints for sandbox + production. Tokens are valid 1 hour (cache + reuse).
-// Client Credentials is the correct grant for our backend (no end-user) app.
 const DEFAULT_TOKEN_PATH = '/oauth2/v1/token';
+
+// Measurement Orders API host (from the Measurement Orders OpenAPI `host`).
+// NOTE: this is apicenter.eagleview.com — different from the Imagery API host.
+const MEASUREMENT_BASE = {
+  sandbox: 'https://sandbox.apicenter.eagleview.com',
+  production: 'https://apicenter.eagleview.com',
+} as const;
 
 function env(): 'sandbox' | 'production' {
   return process.env.EAGLEVIEW_ENV === 'production' ? 'production' : 'sandbox';
@@ -88,16 +88,38 @@ export async function getEagleViewToken(): Promise<string> {
   return _token.value;
 }
 
+/** Authenticated GET against the Measurement Orders API, returning parsed JSON. */
+export async function eagleViewGet<T = unknown>(path: string): Promise<T> {
+  const token = await getEagleViewToken();
+  const url = `${MEASUREMENT_BASE[env()]}${path.startsWith('/') ? path : `/${path}`}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`EagleView GET ${path} failed: ${res.status} ${text.slice(0, 300)}`);
+  }
+  return (await res.json()) as T;
+}
+
+/** The product catalog (primary/delivery/add-on product IDs needed to place an order). */
+export async function getAvailableProducts(): Promise<unknown> {
+  return eagleViewGet('/GetAvailableProducts');
+}
+
+/** Account details — a lightweight authenticated call useful for connectivity checks. */
+export async function getAccountDetails(): Promise<unknown> {
+  return eagleViewGet('/v3/Order/GetAccountDetails');
+}
+
 /**
- * ⏳ PENDING API DOC: map an EagleView measurement/property response into
- * vendor-neutral RoofFacets. This is the ONLY piece left once we read the
- * downloaded API doc — EagleView returns per-facet roof geometry (pitch,
- * azimuth, area, outline); convert each to a RoofFacet (polygon in WGS84 lat/lng).
+ * ⏳ PENDING: map a downloaded EagleView roof report FILE (DXF/JSON) into
+ * vendor-neutral RoofFacets. The per-facet polygons live in the report file,
+ * not the API response — wire this once a real sandbox report file confirms the
+ * geometry format.
  */
-export function mapMeasurementToFacets(_raw: unknown): RoofFacet[] {
+export function mapMeasurementToFacets(_rawReportFile: unknown): RoofFacet[] {
   throw new Error(
-    '[eagleViewProvider] mapMeasurementToFacets not implemented — pending EagleView ' +
-      'Property Data / Measurement Orders response schema from the API doc.',
+    '[eagleViewProvider] mapMeasurementToFacets not implemented — per-facet geometry ' +
+      'lives in the downloadable report file (DXF/JSON); format pending a real sandbox report.',
   );
 }
 
@@ -109,19 +131,17 @@ export class EagleViewProvider implements AerialGeometryProvider {
   }
 
   apiBase(): string {
-    return API_BASE[env()];
+    return MEASUREMENT_BASE[env()];
   }
 
   async getRoofFacets(_req: AerialGeometryRequest): Promise<AerialRoofResult | null> {
-    // ⏳ PENDING: once the Property Data / Measurement Orders endpoint paths and
-    // response shapes are confirmed from the API doc:
-    //   1. const token = await getEagleViewToken();
-    //   2. fetch `${this.apiBase()}/<property-or-measurement-endpoint>` with the
-    //      address/lat-lng and Authorization: Bearer ${token};
-    //   3. return { source: 'eagleview', facets: mapMeasurementToFacets(json), ... }.
+    // ⏳ PENDING the full order flow: place a Measurement Order (PlaceOrder) →
+    // poll GetReport until complete → download the geometry file (file-links /
+    // GetReportFile) → mapMeasurementToFacets(file). Built incrementally after the
+    // connectivity test confirms auth + the report file format.
     throw new Error(
-      '[eagleViewProvider] getRoofFacets not implemented — auth is wired; the ' +
-        'Property Data / Measurement Orders fetch + mapping is pending the EagleView API doc.',
+      '[eagleViewProvider] getRoofFacets not implemented — auth + product reads are wired; ' +
+        'the place-order → download-file → parse flow is pending a real sandbox report file.',
     );
   }
 }
