@@ -43,7 +43,7 @@
 import { describe, it, expect } from 'vitest';
 import { BRAND_PROFILES } from './brandProfiles';
 import type { BrandProfile, BrandInverterModelRef } from './brandProfiles/types';
-import { STRING_INVERTERS } from '../equipment-db';
+import { STRING_INVERTERS, MICROINVERTERS } from '../equipment-db';
 
 // ---------------------------------------------------------------------------
 // Resolve an equipmentDbId to the canonical StringInverter row.
@@ -52,7 +52,30 @@ import { STRING_INVERTERS } from '../equipment-db';
 // integrity). This guard only compares when both sides exist.
 // ---------------------------------------------------------------------------
 function resolveCanonical(equipmentDbId: string) {
-  return STRING_INVERTERS.find(s => s.id === equipmentDbId) ?? null;
+  const s = STRING_INVERTERS.find(x => x.id === equipmentDbId) as any;
+  if (s) {
+    return {
+      acOutputKw: s.acOutputKw,
+      dcInputKwMax: s.dcInputKwMax,
+      mpptChannels: s.mpptChannels,
+      maxParallelStringsPerMppt: s.maxParallelStringsPerMppt,
+    };
+  }
+  // v62 — micros were previously skipped (string-only lookup), so brand-profile
+  // micro AC/DC ratings could drift from equipment-db silently. Normalize the
+  // micro row (equipment-db stores micros in WATTS: acOutputW / dcInputWMax) to
+  // kW so the same drift comparisons apply to Enphase / APsystems / Hoymiles.
+  const m = MICROINVERTERS.find(x => x.id === equipmentDbId) as any;
+  if (m) {
+    const wkw = (w: unknown) => (typeof w === 'number' ? Math.round(w) / 1000 : undefined);
+    return {
+      acOutputKw: m.acOutputKw ?? wkw(m.acOutputW),
+      dcInputKwMax: m.dcInputKwMax ?? wkw(m.dcInputWMax),
+      mpptChannels: m.mpptChannels ?? m.numberOfMPPT,  // undefined when the micro row omits it (one-sided check below)
+      maxParallelStringsPerMppt: m.maxParallelStringsPerMppt,
+    };
+  }
+  return null;
 }
 
 // Utility: flatten (brand, model) pairs so each (SKU, brand) becomes one test case.
@@ -116,7 +139,12 @@ describe('v47.432 Stage 8.2 — brand profile drift-guard', () => {
 
     it(`mpptCount matches equipment-db mpptChannels${suffix}`, () => {
       if (!canonical || opt) return;
-      expect(model.mpptCount).toBe(canonical.mpptChannels);
+      // One-sided presence allowed — equipment-db micro rows may omit
+      // mpptChannels (the dual-input count is implied by the profile's
+      // modulesPerDevice). Enforce equality only when the db declares it.
+      if (canonical.mpptChannels !== undefined) {
+        expect(model.mpptCount).toBe(canonical.mpptChannels);
+      }
     });
 
     it(`maxParallelStringsPerMppt matches equipment-db (when both sides define it)${suffix}`, () => {

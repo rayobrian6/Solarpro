@@ -1910,7 +1910,7 @@ export const MICROINVERTERS: Microinverter[] = [
     model: 'IQ8A',
     category: 'microinverter',
     // IQ8A: 349W AC output, 1.46A nominal — designed for high-power modules up to 460W DC
-    acOutputW: 349, dcInputWMax: 460,
+    acOutputW: 349, dcInputWMax: 500,  // IQ8A pairs to ~500W modules (was 460, copy-pasted from IQ8M)
     maxDcVoltage: 60, mpptVoltageMin: 16, mpptVoltageMax: 60,
     maxInputCurrent: 15.0,
     acOutputVoltage: 240, acOutputCurrentMax: 1.46,

@@ -22,7 +22,7 @@ export const ENPHASE_PROFILE: BrandProfile = {
     { equipmentDbId: 'enphase-iq8plus', acKw: 0.290, dcKwMax: 0.440, mpptCount: 1, modulesPerDevice: 1 }, // datasheet max continuous output 290 VA
     { equipmentDbId: 'enphase-iq8m',    acKw: 0.325, dcKwMax: 0.460, mpptCount: 1, modulesPerDevice: 1 }, // datasheet max continuous output 325 VA (was peak 330)
     { equipmentDbId: 'enphase-iq8h',    acKw: 0.380, dcKwMax: 0.540, mpptCount: 1, modulesPerDevice: 1 }, // datasheet max input DC = 540W (was stale 600)
-    { equipmentDbId: 'enphase-iq8a',    acKw: 0.349, dcKwMax: 0.530, mpptCount: 1, modulesPerDevice: 1 }, // datasheet max continuous output 349 VA (was peak 366)
+    { equipmentDbId: 'enphase-iq8a',    acKw: 0.349, dcKwMax: 0.500, mpptCount: 1, modulesPerDevice: 1 }, // datasheet max continuous output 349 VA (was peak 366); max module pairing ~500W (was 530)
     { equipmentDbId: 'enphase-iq8ac',   acKw: 0.384, dcKwMax: 0.530, mpptCount: 1, modulesPerDevice: 1 },
   ],
 
