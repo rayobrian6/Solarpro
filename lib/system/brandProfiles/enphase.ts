@@ -21,7 +21,7 @@ export const ENPHASE_PROFILE: BrandProfile = {
   supportedInverterModels: [
     { equipmentDbId: 'enphase-iq8plus', acKw: 0.295, dcKwMax: 0.440, mpptCount: 1, modulesPerDevice: 1 },
     { equipmentDbId: 'enphase-iq8m',    acKw: 0.330, dcKwMax: 0.460, mpptCount: 1, modulesPerDevice: 1 },
-    { equipmentDbId: 'enphase-iq8h',    acKw: 0.380, dcKwMax: 0.600, mpptCount: 1, modulesPerDevice: 1 },
+    { equipmentDbId: 'enphase-iq8h',    acKw: 0.380, dcKwMax: 0.540, mpptCount: 1, modulesPerDevice: 1 }, // datasheet max input DC = 540W (was stale 600)
     { equipmentDbId: 'enphase-iq8a',    acKw: 0.366, dcKwMax: 0.530, mpptCount: 1, modulesPerDevice: 1 },
     { equipmentDbId: 'enphase-iq8ac',   acKw: 0.384, dcKwMax: 0.530, mpptCount: 1, modulesPerDevice: 1 },
   ],
