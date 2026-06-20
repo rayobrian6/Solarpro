@@ -111,11 +111,24 @@ ASCE 7‑22 roof C&C zones (corner-governing, C2), Kz at mean roof height, rafte
 - **Underground:** 300.5 burial + PVC for the trench subset; **250.32** aux electrode at detached structure; direct-burial conductor allowance.
 - **Run lengths:** DC/AC from real array-to-service distance (`trenchRunLengthFt` + CAD), not roof 50/60 ft literals.
 
+### 4.5 HYBRID / MULTI-MOUNT — mount type is PER-SECTION, not per-project (REQUIRED)
+**Current limitation (must fix):** `config.systemType` is a single project scalar (`app/engineering/page.tsx` `ProjectConfig.systemType`). One property cannot today carry a roof array **and** a ground array **and** a fence simultaneously — every panel is stamped with the one chosen mount type; the other sections get wrong structural/NEC/BOM. The `MountContext` in §5.1 as first drafted is also singular and inherits this. A real property (e.g. roof + ground + fence) needs all three at once.
+
+**Target model — a project is N sub-arrays, each with its own `MountContext`:**
+- **Data model:** introduce a `sections: ArraySection[]`, each `{ id, mountContext: MountContext, panels/strings, geometry }`. `systemType` becomes a per-section field, not a project scalar. Inverters/strings reference the section they sit on. (Migration: a legacy single-`systemType` project = one section.)
+- **Structural:** run the engine **per section** — each gets the correct branch (roof zones / ground geotech / fence overturning). No single stamp for the whole property. Output is a per-section result list; the tab/permit show each section + an overall roll-up.
+- **BOM:** aggregate per-section hardware — roof rails+flashing for the roof section, piers+concrete for the ground section, posts+footings for the fence — then merge. (`bom-engine-v4` already takes `groundData`/`fenceData`; extend it to take **a list** keyed by section, not a single mount branch.)
+- **NEC:** RSD/300.5/run-length rules apply **per section** (roof section keeps RSD; ground/fence sections are exempt + get trench conduit), but the **interconnection (705.12), main panel, AC OCPD, and the single point of common coupling are SHARED** — that aggregation is the part that must NOT be split. One POI, summed backfeed across all sections.
+- **Sizing/layout:** per-section tilt/azimuth/rowSpacing/fenceLine; one system kW roll-up.
+
+**Why the engine-of-record work enables this:** once ONE structural engine and ONE NEC engine run per section and the views aggregate, hybrid falls out naturally — it's a loop over sections, not a fork in every consumer. Building per-section now (vs retrofitting) is the difference between a clean loop and re-touching every tab. **This is a larger data-model change (config schema + UI for adding sections + per-section structural display) — sequence it after the single-mount unification lands, but design the `MountContext`/engine signatures to take a section list from the start so it's not a rewrite.**
+
 ---
 
 ## 5. Interface contracts (the spec's core)
 
 ### 5.1 `MountContext` (new — the shared discriminator)
+> **One `MountContext` describes ONE section.** A project carries a `MountContext[]` (one per sub-array), not a single context — see §4.5. Single-mount projects are just a one-element list. Engine entry points take the section (or the list), never the project `systemType` scalar.
 ```ts
 type MountKind = 'roof' | 'ground' | 'fence';
 
