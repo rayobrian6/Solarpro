@@ -14661,7 +14661,11 @@ function EngineeringPageInner() {
       {confirmDialog ? (
         <ConfirmDialog
           message={confirmDialog.message}
-          onConfirm={confirmDialog.onConfirm}
+          // Always dismiss the modal on confirm, THEN run the action. ConfirmDialog
+          // doesn't self-close, and several onConfirm handlers (e.g. Change
+          // ecosystem) didn't call setConfirmDialog(null) — so clicking Confirm ran
+          // the action but the modal stayed up, reading as a dead button.
+          onConfirm={() => { const fn = confirmDialog.onConfirm; setConfirmDialog(null); fn(); }}
           onCancel={() => setConfirmDialog(null)}
           variant="warning"
         />
