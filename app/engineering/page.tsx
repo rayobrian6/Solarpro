@@ -5558,49 +5558,40 @@ function EngineeringPageInner() {
       await runCalc();
     }
 
-    // Call V2 structural API with truss/rafter distinction
+    // Structural framing-detect + spacing log from the engine of record (V4),
+    // via /calculate. Was a separate /structural-v2 (V3) call — retired in Step 5b
+    // so Auto-Fix reads the SAME structural engine as the tab and permit. This
+    // block only detects framing + logs; the actual fixes are below (IronRidge,
+    // wire, RSD, feasibility).
     try {
-      const structRes = await fetch('/api/engineering/structural-v2', {
+      const structRes = await fetch('/api/engineering/calculate', {
         method: 'POST',
         cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          windSpeed:         config.windSpeed,
-          windExposure:      config.windExposure,
-          groundSnowLoad:    config.groundSnowLoad,
-          roofType:          config.roofType,
-          roofPitch:         config.roofPitch,
-          rafterSpacing:     config.rafterSpacing,
-          rafterSpan:        config.rafterSpan,
-          rafterSize:        config.rafterSize,
-          rafterSpecies:     config.rafterSpecies,
-          framingType:       config.framingType,
-          panelCount:        totalPanels,
-          mountingId:        config.mountingId,
-          systemType:        config.systemType,
-        }),
+        body: JSON.stringify(buildCalcPayload()),
       });
       if (structRes.ok) {
         const structData = await structRes.json();
-        if (structData.success) {
+        const s = structData?.structural;   // raw StructuralResultV4 from /calculate
+        if (s?.status) {
+          const framingType = s.rafterAnalysis?.framingType;
           // Update framing type if auto-detected
-          if (structData.framing?.type && config.framingType === 'unknown') {
-            updateConfig({ framingType: structData.framing.type });
+          if (framingType && framingType !== 'unknown' && config.framingType === 'unknown') {
+            updateConfig({ framingType });
           }
           // Log mount spacing recommendation
-          if (structData.mountLayout?.mountSpacing) {
-            logDecision('Structural V2',
-              `${structData.framing?.type ?? config.framingType} — ` +
-              `mount spacing: ${structData.mountLayout.mountSpacing}", ` +
-              `${structData.mountLayout.mountCount} mounts, ` +
-              `SF=${structData.summary?.safetyFactor?.toFixed(2)} ` +
-              `${structData.status === 'PASS' ? '✓' : '⚠'}`,
-              structData.status === 'PASS' ? 'info' : 'auto'
+          if (s.mountLayout?.mountSpacingIn) {
+            logDecision('Structural',
+              `${framingType ?? config.framingType} — ` +
+              `mount spacing: ${s.mountLayout.mountSpacingIn}", ` +
+              `${s.mountLayout.mountCount} mounts, ` +
+              `SF=${s.mountLayout.safetyFactor?.toFixed(2)} ` +
+              `${s.status === 'PASS' ? '✓' : '⚠'}`,
+              s.status === 'PASS' ? 'info' : 'auto'
             );
           }
-          if (structData.status === 'FAIL') {
-            // V2 calculates optimal spacing automatically — no need to reduce
-            logDecision('Auto Fix', `Structural FAIL — check recommendations: ${structData.recommendations?.join('; ')}`, 'auto');
+          if (s.status === 'FAIL') {
+            logDecision('Auto Fix', `Structural FAIL — check recommendations: ${s.recommendations?.join('; ')}`, 'auto');
           }
         }
       }
