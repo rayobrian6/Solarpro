@@ -68,9 +68,20 @@ export async function POST(req: NextRequest) {
     if (!force) {
       const stale = await isEngineeringReportStale(projectId, snapshot.designVersionId);
       if (!stale) {
+        // Return the SAME sizing fields as the regenerated branch (engineering
+        // audit) — previously this path returned only {message, regenerated:false},
+        // so a caller reading data.systemSizeKw/panelCount got undefined and the
+        // display didn't refresh after Generate, looking like a no-op.
         return NextResponse.json({
           success: true,
-          data: { message: 'Engineering report is already up-to-date', regenerated: false },
+          data: {
+            message: 'Engineering report is already up-to-date',
+            regenerated: false,
+            projectId,
+            panelCount: layout.totalPanels ?? layout.panels.length,
+            systemSizeKw: (layout as { systemSizeKw?: number }).systemSizeKw,
+            designVersionId: snapshot.designVersionId,
+          },
         });
       }
     }

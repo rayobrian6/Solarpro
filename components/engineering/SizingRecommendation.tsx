@@ -300,8 +300,11 @@ export function SizingRecommendation({
         </div>
       ) : null}
 
-      {/* Apply button */}
-      {hasMismatch ? (
+      {/* Apply button — render whenever ANY drift the banners call out is present
+          (panel-count or string-layout), not only diff.matches. Previously it was
+          gated on hasMismatch alone, so it stayed hidden while the panel-count and
+          string-layout banners told users to "click Apply" (engineering audit). */}
+      {onApply && (hasMismatch || diff.stringLayoutMismatch || panelCountSource?.mismatchedWithConfig) ? (
         <button
           type="button"
           onClick={onApply}
