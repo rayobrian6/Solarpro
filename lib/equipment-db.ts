@@ -320,10 +320,10 @@ export const SOLAR_PANELS: SolarPanel[] = [
     // Electrical specs from SunPower Maxeon 3 datasheet (SPR-MAX3-400).
     // Low-Isc / high-Voc monocrystalline IBC design (Maxeon Gen III cells).
     voc: 75.6, vmp: 65.8, isc: 6.58, imp: 6.08,
-    tempCoeffVoc: -0.26, tempCoeffIsc: 0.048, tempCoeffPmax: -0.29,
+    tempCoeffVoc: -0.236, tempCoeffIsc: 0.048, tempCoeffPmax: -0.29,  // datasheet Voc coeff −0.236%/°C
     maxSystemVoltage: 1000, maxSeriesFuseRating: 20,
     nominalOperatingTemp: 44.5, parallelStringLimit: 3,
-    weight: 42.0, length: 61.3, width: 41.2, thickness: 1.57,
+    weight: 42.0, length: 66.5, width: 41.2, thickness: 1.57,  // datasheet 1690×1046mm = 66.5×41.2in (was 61.3)
     warranty: '25yr product / 25yr power',
     ulListing: 'UL 61730',
     bifacial: false,
@@ -435,7 +435,7 @@ export const SOLAR_PANELS: SolarPanel[] = [
     manufacturer: 'Q CELLS',
     model: 'Q.PEAK DUO BLK ML-G10+ 400W',
     category: 'solar_panel',
-    watts: 400, efficiency: 22.4,
+    watts: 400, efficiency: 20.6,  // datasheet: 20.4% (G10+ up to 21.1%); was a fabricated 22.4%
     voc: 41.60, vmp: 34.50, isc: 12.26, imp: 11.59,
     tempCoeffVoc: -0.26, tempCoeffIsc: 0.05, tempCoeffPmax: -0.35,
     maxSystemVoltage: 1000, maxSeriesFuseRating: 20,
@@ -2415,11 +2415,11 @@ export const BATTERIES: BatterySystem[] = [
     id: 'enphase-iq-battery-10t',
     manufacturer: 'Enphase', model: 'IQ Battery 10T',
     category: 'battery', subcategory: 'ac_coupled',
-    usableCapacityKwh: 10.08, peakPowerKw: 7.68, continuousPowerKw: 7.68,
+    usableCapacityKwh: 10.08, peakPowerKw: 5.76, continuousPowerKw: 3.84,  // datasheet: 3.84 kVA continuous (16A), ~5.7 kVA peak; was a fabricated 7.68
     roundTripEfficiencyPct: 96.0, chemistry: 'LFP', voltageNominalV: 48,
-    acOutputVoltageV: 240, maxContinuousOutputA: 32,
-    backfeedBreakerA: 40,        // NEC 705.12(B): 40A breaker adds to bus loading
-    minDedicatedBreakerA: 40,
+    acOutputVoltageV: 240, maxContinuousOutputA: 16,  // datasheet 16A continuous (was 32)
+    backfeedBreakerA: 20,        // NEC 705.12(B): 16A×1.25 → 20A OCPD (was 40, based on the wrong 32A)
+    minDedicatedBreakerA: 20,
     weightLbs: 225, outdoorRated: true, ipRating: 'IP55',
     gridFormingCapable: true, backupCapable: true, wholeHomeBackup: true,
     requiresGateway: true, gatewayModel: 'Enphase IQ System Controller 3',

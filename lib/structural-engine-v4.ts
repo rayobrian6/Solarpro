@@ -257,7 +257,7 @@ const NDS_FV: Record<string, number> = {
 const NDS_E: Record<string, number> = {
   'Douglas Fir-Larch': 1_600_000,
   'Southern Pine':     1_600_000,
-  'Hem-Fir':           1_500_000,
+  'Hem-Fir':           1_300_000,  // NDS 2018 Supp. Table 4A Hem-Fir No.2 E = 1.3M psi (was 1.5M)
   'Spruce-Pine-Fir':   1_400_000,
 };
 

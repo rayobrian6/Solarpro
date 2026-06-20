@@ -296,7 +296,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       wallThicknessIn: 0.125,
       momentCapacityInLbs: 21600,   // 1800 ft-lbs × 12
       shearCapacityLbs: 2200,
-      maxSpanIn: 72,
+      maxSpanIn: 96,        // IronRidge XR100 datasheet: 8 ft (96") spanning capability (was 72)
       maxCantileverIn: 24,
       spliceIntervalIn: 168,        // 14 ft standard section
       weightLbsPerFt: 0.95,
