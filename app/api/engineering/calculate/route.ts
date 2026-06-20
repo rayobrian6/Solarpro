@@ -316,9 +316,15 @@ export async function POST(req: NextRequest) {
         };
         structuralResult = runStructuralCalcV4(structuralInput);
       } catch (structErr: unknown) {
-        console.warn('[calculate] V4 structural engine warning:', structErr);
-        // Fallback: return PASS with warning rather than crashing
-        structuralResult = { status: 'WARNING', errors: [], warnings: [{ code: 'ENGINE_ERROR', message: String(structErr), severity: 'warning', suggestion: 'Check structural inputs' }] };
+        console.error('[calculate] V4 structural engine crashed:', structErr);
+        // FAIL CLOSED: a thrown engine must never read as a passing stamp.
+        // The overall-status aggregator (below) only escalates to FAIL on an
+        // errors[] entry with severity 'error' — so emit one, not a warning.
+        structuralResult = {
+          status: 'FAIL',
+          errors: [{ code: 'ENGINE_ERROR', message: `Structural engine error: ${String(structErr)}`, severity: 'error', suggestion: 'Structural analysis could not be completed — do not treat as engineered. Check inputs and retry.' }],
+          warnings: [],
+        };
       }
     }
 
