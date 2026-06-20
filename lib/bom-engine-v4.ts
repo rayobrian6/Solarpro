@@ -295,9 +295,13 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       'PANEL-TBD', 'Solar Panel', input.moduleCount, 'ea', 'NEC 690', 'moduleCount', 'modules', true));
   }
 
-  // Microinverters (if MICROINVERTER topology)
+  // Microinverters (if MICROINVERTER / AC_MODULE topology)
   // PHASE 1 FIX: use deviceCount (ceil(panels/modulesPerDevice)), NOT moduleCount
-  if (norm === 'MICROINVERTER' || norm === 'AC_COUPLED_BATTERY') {
+  // Engineering audit C5: this gated on AC_COUPLED_BATTERY (a string/hybrid
+  // inverter system — NOT micro) and omitted AC_MODULE (integrated micro). Now
+  // matches isMicroTopo (line ~259) so AC modules get their device line and
+  // AC-coupled-battery systems keep their real string inverter (Stage 3).
+  if (norm === 'MICROINVERTER' || norm === 'AC_MODULE') {
     const microQty = input.deviceCount ?? input.moduleCount;
     if (inverterEntry) {
       items.push(addItem('array', 'microinverter', inverterEntry.manufacturer, inverterEntry.model,
@@ -350,7 +354,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
 
   // ── STAGE 2: DC ─────────────────────────────────────────────────────────────
 
-  const isMicro = norm === 'MICROINVERTER' || norm === 'AC_COUPLED_BATTERY';
+  const isMicro = norm === 'MICROINVERTER' || norm === 'AC_MODULE'; // audit C5: was AC_COUPLED_BATTERY
 
   if (isMicro) {
     // ISSUE 4 FIX: AC Trunk Cable uses deviceCount (not moduleCount)
