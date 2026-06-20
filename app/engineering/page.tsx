@@ -228,6 +228,7 @@ interface ProjectConfig {
   batteryId: string;        // equipment-db battery ID — drives NEC 705.12(B) bus impact calc
   generatorId: string;      // equipment-db generator ID
   generatorWireLength: number;  // ft — distance from generator to ATS (user-configurable)
+  trenchRunLengthFt?: number;   // ft — ground/fence array → service trench distance (user-input; adds to DC run + underground conduit)
   atsId: string;            // equipment-db ATS ID
   backupInterfaceId: string; // equipment-db backup interface ID (Enphase IQ SC3, Tesla Gateway, etc.)
   mainPanelAmps: number;
@@ -476,7 +477,7 @@ const defaultProject: ProjectConfig = {
   date: new Date().toISOString().split('T')[0], systemType: 'roof',
   inverters: [newInverter('string')],
   batteryBrand: '', batteryModel: '', batteryCount: 0, batteryKwh: 0,
-  batteryId: '', generatorId: '', generatorWireLength: 50, atsId: '', backupInterfaceId: '',
+  batteryId: '', generatorId: '', generatorWireLength: 50, trenchRunLengthFt: 0, atsId: '', backupInterfaceId: '',
   mainPanelAmps: 200, mainPanelBrand: 'Square D', utilityMeter: 'Bidirectional Net Meter',
   acDisconnect: true, dcDisconnect: true, productionMeter: true, rapidShutdown: true,
   roofType: 'shingle', mountingId: 'ironridge-xr100',
@@ -5175,8 +5176,13 @@ function EngineeringPageInner() {
             return acRun?.wireGauge
               || (cs.isMicro ? '#6 AWG' : ((compliance.electrical as any)?.acSizing?.conductorGauge || config.wireGauge));
           })(),
-          dcWireLength:     firstStr?.wireLength || cs.runs.find(r => r.id === 'DC_STRING_RUN')?.onewayLengthFt || 50,
+          // Ground/fence arrays sit away from the house: add the user-input trench
+          // run length to the DC home run (drives wire footage + NEC 300.5 conduit).
+          dcWireLength:     (firstStr?.wireLength || cs.runs.find(r => r.id === 'DC_STRING_RUN')?.onewayLengthFt || 50)
+                              + ((config.systemType === 'ground' || config.systemType === 'fence') ? (config.trenchRunLengthFt || 0) : 0),
           acWireLength:     config.wireLength || cs.runs.find(r => r.id === 'DISCO_TO_METER_RUN')?.onewayLengthFt || 50,
+          // Trench length for the NEC 300.5 underground conduit line (ground/fence).
+          trenchRunLengthFt: (config.systemType === 'ground' || config.systemType === 'fence') ? (config.trenchRunLengthFt || 0) : 0,
           conduitType:      config.conduitType,
           // Use ComputedSystem conduit size
           conduitSizeInch:  (() => {
@@ -8283,6 +8289,14 @@ function EngineeringPageInner() {
                           <input type="number" min={1} value={config.wireLength} onChange={e => updateConfig({ wireLength: +e.target.value })}
                             className="eng-input" />
                         </div>
+                        {(config.systemType === 'ground' || config.systemType === 'fence') ? (
+                          <div className="col-span-2">
+                            <label className="eng-label">Array → Service Trench Run (ft)</label>
+                            <input type="number" min={0} value={config.trenchRunLengthFt ?? 0} onChange={e => updateConfig({ trenchRunLengthFt: Math.max(0, +e.target.value) })}
+                              className="eng-input" />
+                            <p className="text-[10px] text-slate-500 mt-1">Underground distance from the {config.systemType} array to the service — adds to the DC home run + NEC 300.5 buried conduit.</p>
+                          </div>
+                        ) : null}
                       </div>
 
                       {/* Disconnects & toggles */}

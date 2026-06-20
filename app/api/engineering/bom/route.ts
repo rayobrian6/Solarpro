@@ -264,6 +264,7 @@ export async function POST(req: NextRequest) {
         return '#2 AWG';
       })(),
       dcWireLength:       Number(body.dcWireLength)       || 50,
+      trenchRunLengthFt:  Number(body.trenchRunLengthFt)  || 0,  // buried ground/fence run → NEC 300.5 PVC conduit
       acWireLength:       Number(body.acWireLength)       || 60,
       conduitType:        body.conduitType        ?? 'EMT',
       conduitSizeInch:    body.conduitSizeInch    ?? '3/4',
