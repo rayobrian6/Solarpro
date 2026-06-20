@@ -554,7 +554,7 @@ function checkSystemTypeSupport(
 //
 // Correct physical model (residential default):
 //   maxPanelsPerUnit = mpptCount × parallelStringsPerMppt × maxPanelsPerString
-// with parallelStringsPerMppt = model.maxParallelStringsPerMppt ?? 2.
+// with parallelStringsPerMppt = model.maxParallelStringsPerMppt ?? 1.
 //
 // Notes:
 //   - maxPanelsPerString is still enforced in the downstream string-layout
@@ -563,8 +563,13 @@ function checkSystemTypeSupport(
 //   - DC capacity (dcKwMax) remains the primary constraint; this only
 //     corrects the secondary string-capacity constraint.
 
-/** Default residential parallel-strings-per-MPPT when not declared on the model. */
-export const DEFAULT_PARALLEL_STRINGS_PER_MPPT = 2;
+/** Default residential parallel-strings-per-MPPT when not declared on the model.
+ *  Set to 1 to match the MPPT allocator + string-generator defaults (conservative:
+ *  most residential wires 1 string/MPPT; combining needs explicit model support).
+ *  Previously 2, which over-estimated per-unit capacity vs the allocator and
+ *  produced spurious MPPT_PARALLEL_CAP_EXCEEDED for models omitting the field
+ *  (engineering audit finding 2). */
+export const DEFAULT_PARALLEL_STRINGS_PER_MPPT = 1;
 
 /**
  * Physical panel ceiling for ONE physical inverter unit.

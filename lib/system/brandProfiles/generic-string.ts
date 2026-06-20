@@ -23,8 +23,11 @@ export const GENERIC_STRING_PROFILE: BrandProfile = {
     // v47.433 Stage 8.4: drift fix — mpptCount aligned to registry (1 per HD-Wave single-MPPT topology).
     //   Was 2 (stale catch-all since legacy generic-string fallback); registry is the canonical source.
     //   The dedicated solaredge.ts profile already specifies mpptCount: 1 for these SKUs.
-    { equipmentDbId: 'se-7600h',  acKw: 7.6,  dcKwMax: 11.4, mpptCount: 1, minPanelsPerString: 8, maxPanelsPerString: 20 },
-    { equipmentDbId: 'se-10000h', acKw: 10.0, dcKwMax: 15.0, mpptCount: 1, minPanelsPerString: 8, maxPanelsPerString: 20 },
+    // maxPanelsPerString aligned to the registry recommendedStringRange.max (13)
+    // and maxParallelStringsPerMppt set explicitly (registry se-7600h = 2), so
+    // this fallback no longer relies on the engine default (audit finding 6 + 2).
+    { equipmentDbId: 'se-7600h',  acKw: 7.6,  dcKwMax: 11.4, mpptCount: 1, minPanelsPerString: 8, maxPanelsPerString: 13, maxParallelStringsPerMppt: 2 },
+    { equipmentDbId: 'se-10000h', acKw: 10.0, dcKwMax: 15.0, mpptCount: 1, minPanelsPerString: 8, maxPanelsPerString: 15, maxParallelStringsPerMppt: 3 },
   ],
 
   sizingTiers: [
