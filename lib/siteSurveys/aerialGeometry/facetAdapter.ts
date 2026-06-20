@@ -6,20 +6,29 @@
 // facet to the RoofSegmentStat shape and reusing the proven
 // adaptSolarRoofSegmentsToWorldArtifacts() adapter.
 //
-// This is deliberately a thin reuse layer (zero new artifact-construction code):
-// EagleView/Nearmap/mock facets ride the EXACT canonical-building-model path the
-// Google Solar geometry already uses (approve-aerial → canonical → permit), so
-// the planset draws a real multi-facet roof with no changes to that pipeline.
+// This is a thin reuse layer: EagleView/Nearmap/mock facets ride the EXACT
+// canonical-building-model path the Google Solar geometry already uses
+// (approve-aerial → canonical → permit), so the planset draws a real multi-facet
+// roof with no changes to that pipeline.
 //
-// NOTE (future enhancement): adaptSolarRoofSegmentsToWorldArtifacts reconstructs
-// each plane as a bbox-derived quad (same as the Google path). That is correct
-// for the common case (most facets are quads) and already fixes the single-
-// rectangle problem (many positioned, pitched facets = the real roof). Preserving
-// a provider's exact non-quad polygon outline is a later refinement.
+// POLYGON PRESERVATION: a provider facet already carries its REAL measured
+// outline (RoofFacet.polygon — an N-vertex lat/lng ring, e.g. a triangular hip
+// facet or an L-shaped plane). We map each facet STRAIGHT to a WorldRoofPlane,
+// keeping that outline verbatim as the plane's worldPolygon — we do NOT reduce
+// it to a bounding-box quad. (The Google SEGMENT path quad-reconstructs because
+// the Solar API only gives a bbox + azimuth, not a polygon; facet providers give
+// the polygon, so there is no reason to throw it away.) canonicalToPermit carries
+// any polygon with >= 3 vertices through to the planset drawing, so the permit
+// renders the true facet shapes — the whole point of using EagleView geometry.
 // ============================================================================
 
-import { adaptSolarRoofSegmentsToWorldArtifacts } from '@/lib/siteSurveys/googleSolarApi/adapter';
-import type { RoofSegmentStat, LatLng } from '@/lib/siteSurveys/googleSolarApi/worldRoofPlanes';
+import { adaptWorldRoofPlanesToArtifacts } from '@/lib/siteSurveys/googleSolarApi/adapter';
+import type {
+  RoofSegmentStat,
+  LatLng,
+  WorldRoofPlane,
+  WorldRoofEdgeType,
+} from '@/lib/siteSurveys/googleSolarApi/worldRoofPlanes';
 import type { UnifiedGeometryArtifact } from '@/lib/siteSurveys/unifiedGeometry/types';
 import type { RoofFacet, AerialGeometrySourceName } from './types';
 
@@ -42,8 +51,43 @@ function boundingBoxOf(polygon: LatLng[]): RoofSegmentStat['boundingBox'] {
 }
 
 /**
- * Reduce vendor-neutral RoofFacets to the Google-Solar RoofSegmentStat shape so
- * they can reuse the existing world-roof-plane reconstruction + artifact adapter.
+ * Map vendor-neutral RoofFacets STRAIGHT to WorldRoofPlanes, preserving each
+ * facet's real measured polygon outline verbatim (no bbox-quad reduction).
+ *
+ * Pitch/azimuth/area are rounded to match the Google world-plane path; the
+ * centroid is the polygon average; edge types are carried through if the
+ * provider supplied them (left undefined otherwise — we never fabricate edge
+ * labels for an N-gon, which would mis-colour ridges/eaves on the planset).
+ * `source` is google_solar_api so the planes ride the existing aerial pipeline.
+ */
+export function roofFacetsToWorldRoofPlanes(
+  facets: RoofFacet[],
+  idPrefix = 'aerial-facet',
+): WorldRoofPlane[] {
+  return facets
+    .filter((f) => Array.isArray(f.polygon) && f.polygon.length >= 3)
+    .map((f, i) => {
+      const c = centroidOf(f.polygon);
+      return {
+        id: `${idPrefix}-${i}`,
+        vertices: f.polygon, // REAL measured outline, preserved exactly
+        pitchDegrees: Math.round(f.pitchDegrees * 10) / 10,
+        azimuthDegrees: Math.round(f.azimuthDegrees * 10) / 10,
+        areaSqM: Math.round(f.areaSqM * 100) / 100,
+        centroidLat: c.lat,
+        centroidLng: c.lng,
+        edgeTypes: (f.edgeTypes ?? []) as WorldRoofEdgeType[],
+        planeHeightAtCenterMeters: f.heightAtCenterM,
+        source: 'google_solar_api' as const,
+      };
+    });
+}
+
+/**
+ * Reduce vendor-neutral RoofFacets to the Google-Solar RoofSegmentStat shape
+ * (bounding box + centroid). Retained for callers that want the segment-stat
+ * representation; the artifact path no longer uses it (it preserves the real
+ * polygon instead — see roofFacetsToWorldRoofPlanes).
  */
 export function roofFacetsToSegmentStats(facets: RoofFacet[]): RoofSegmentStat[] {
   return facets
@@ -78,14 +122,15 @@ export function adaptRoofFacetsToWorldArtifacts(
   source: AerialGeometrySourceName,
   imageryDate?: string,
 ): UnifiedGeometryArtifact[] {
-  const segments = roofFacetsToSegmentStats(facets);
-  if (segments.length === 0) return [];
-  // Reuse the proven Google-Solar world-artifact adapter. `buildingName` becomes
-  // a provenance breadcrumb so the source is traceable even though the artifacts
-  // ride the existing aerial (google_solar_api) sourcePipeline that approve-aerial
-  // already promotes.
-  return adaptSolarRoofSegmentsToWorldArtifacts(
-    segments,
+  const worldPlanes = roofFacetsToWorldRoofPlanes(facets);
+  if (worldPlanes.length === 0) return [];
+  // Reuse the shared world-plane → artifact mapper, but feed it planes that
+  // PRESERVE each facet's real polygon outline (not bbox quads). `buildingName`
+  // becomes a provenance breadcrumb so the source is traceable even though the
+  // artifacts ride the existing aerial (google_solar_api) sourcePipeline that
+  // approve-aerial already promotes.
+  return adaptWorldRoofPlanesToArtifacts(
+    worldPlanes,
     surveyId,
     `aerial:${source}`,
     imageryDate,
