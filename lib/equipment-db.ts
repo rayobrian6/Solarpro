@@ -1593,11 +1593,19 @@ export const STRING_INVERTERS: StringInverter[] = [
   {
     id: 'tesla-solar-inverter-3p8k',
     manufacturer: 'Tesla', model: 'Solar Inverter 3.8kW', category: 'string_inverter',
-    acOutputKw: 3.8, dcInputKwMax: 5.7,
+    acOutputKw: 3.8, dcInputKwMax: 6.46,
     maxDcVoltage: 600, mpptVoltageMin: 60, mpptVoltageMax: 480,
-    maxInputCurrentPerMppt: 13, maxShortCircuitCurrent: 17, mpptChannels: 2, numberOfMPPT: 2, maxParallelStringsPerMppt: 1,
+    // Datasheet 1538000: 4 MPPT (input connectors 1-2-1-2), 600 VDC max,
+    // allowable DC/AC 1.7. Per MPPT: 13A IMP (operating) / 17A ISC.
+    // maxInputCurrentPerMppt is set to the 17A ISC rating, NOT the 13A IMP: the
+    // sizing engine compares the NEC 690.8 design current (Isc×1.25) per MPPT
+    // against this field, and the MPPT input tolerates Isc up to 17A — so a
+    // TSP-420 string (Isc×1.25 = 16.3A) correctly fits. maxParallelStringsPerMppt
+    // kept at 1 (safe residential default = 4 string inputs; the two 2-connector
+    // MPPTs / jumpers allow more but the schema can't express the per-MPPT split).
+    maxInputCurrentPerMppt: 17, maxShortCircuitCurrent: 17, mpptChannels: 4, numberOfMPPT: 4, maxParallelStringsPerMppt: 1,
     recommendedStringRange: { min: 4, max: 12 },
-    acOutputVoltage: 240, acOutputCurrentMax: 15.8,
+    acOutputVoltage: 240, acOutputCurrentMax: 16,
     efficiency: 98.6, cec_efficiency: 98.0,
     weight: 52.0, dimensions: '26.4 x 16.1 x 6.0',
     warranty: '12.5yr standard', ulListing: 'UL 1741-SB',
@@ -1612,11 +1620,11 @@ export const STRING_INVERTERS: StringInverter[] = [
   {
     id: 'tesla-solar-inverter-5k',
     manufacturer: 'Tesla', model: 'Solar Inverter 5kW', category: 'string_inverter',
-    acOutputKw: 5.0, dcInputKwMax: 7.5,
+    acOutputKw: 5.0, dcInputKwMax: 8.5,
     maxDcVoltage: 600, mpptVoltageMin: 60, mpptVoltageMax: 480,
-    maxInputCurrentPerMppt: 13, maxShortCircuitCurrent: 17, mpptChannels: 2, numberOfMPPT: 2, maxParallelStringsPerMppt: 2,
+    maxInputCurrentPerMppt: 17, maxShortCircuitCurrent: 17, mpptChannels: 4, numberOfMPPT: 4, maxParallelStringsPerMppt: 1,
     recommendedStringRange: { min: 4, max: 12 },
-    acOutputVoltage: 240, acOutputCurrentMax: 20.8,
+    acOutputVoltage: 240, acOutputCurrentMax: 21,
     efficiency: 98.6, cec_efficiency: 98.0,
     weight: 52.0, dimensions: '26.4 x 16.1 x 6.0',
     warranty: '12.5yr standard', ulListing: 'UL 1741-SB',
@@ -1631,11 +1639,11 @@ export const STRING_INVERTERS: StringInverter[] = [
   {
     id: 'tesla-solar-inverter-5p7k',
     manufacturer: 'Tesla', model: 'Solar Inverter 5.7kW', category: 'string_inverter',
-    acOutputKw: 5.7, dcInputKwMax: 8.55,
+    acOutputKw: 5.7, dcInputKwMax: 9.69,
     maxDcVoltage: 600, mpptVoltageMin: 60, mpptVoltageMax: 480,
-    maxInputCurrentPerMppt: 13, maxShortCircuitCurrent: 17, mpptChannels: 2, numberOfMPPT: 2, maxParallelStringsPerMppt: 1,
+    maxInputCurrentPerMppt: 17, maxShortCircuitCurrent: 17, mpptChannels: 4, numberOfMPPT: 4, maxParallelStringsPerMppt: 1,
     recommendedStringRange: { min: 4, max: 12 },
-    acOutputVoltage: 240, acOutputCurrentMax: 23.8,
+    acOutputVoltage: 240, acOutputCurrentMax: 24,
     efficiency: 98.6, cec_efficiency: 98.0,
     weight: 52.0, dimensions: '26.4 x 16.1 x 6.0',
     warranty: '12.5yr standard', ulListing: 'UL 1741-SB',
@@ -1650,11 +1658,11 @@ export const STRING_INVERTERS: StringInverter[] = [
   {
     id: 'tesla-solar-inverter-7p6k',
     manufacturer: 'Tesla', model: 'Solar Inverter 7.6kW', category: 'string_inverter',
-    acOutputKw: 7.6, dcInputKwMax: 11.4,
+    acOutputKw: 7.6, dcInputKwMax: 12.92,
     maxDcVoltage: 600, mpptVoltageMin: 60, mpptVoltageMax: 480,
-    maxInputCurrentPerMppt: 13, maxShortCircuitCurrent: 17, mpptChannels: 2, numberOfMPPT: 2, maxParallelStringsPerMppt: 2,
+    maxInputCurrentPerMppt: 17, maxShortCircuitCurrent: 17, mpptChannels: 4, numberOfMPPT: 4, maxParallelStringsPerMppt: 1,
     recommendedStringRange: { min: 5, max: 12 },
-    acOutputVoltage: 240, acOutputCurrentMax: 31.7,
+    acOutputVoltage: 240, acOutputCurrentMax: 32,
     efficiency: 98.6, cec_efficiency: 98.0,
     weight: 52.0, dimensions: '26.4 x 16.1 x 6.0',
     warranty: '12.5yr standard', ulListing: 'UL 1741-SB',
