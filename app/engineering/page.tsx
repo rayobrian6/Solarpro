@@ -2732,10 +2732,12 @@ function EngineeringPageInner() {
     config.selectedBrand,
     batteryEnabled,
     config.batteryKwh,
-    // v62 — recompute when the user changes the battery UNITS count so the
-    // recommendation reflects the chosen quantity (was missing → rec stayed
-    // pinned at 1 unit regardless of the UNITS stepper).
-    config.batteryCount,
+    // NOTE: deliberately NOT depending on config.batteryCount. A battery UNITS
+    // edit must never recompute the recommendation, because that re-fires the
+    // auto-apply / runtime-guard chain and rebuilds the STRING layout — adding
+    // a battery would "touch the strings" (and could oscillate). batteryDesiredUnits
+    // is still read from the current config whenever the rec recomputes for a real
+    // reason; the user's count sticks via applySizingRecommendation's preserve path.
   ]);
 
 
@@ -3484,6 +3486,7 @@ function EngineeringPageInner() {
   // NOT treated as drifted vs a sizing result reporting 36 microinverters.
   // Before this fix, auto-apply for Enphase ran every render in a loop.
   useEffect(() => {
+    if (!sizingAutoApply) return;
     if (!sizingRecommendation) return;
     // Compute the mismatch FIRST so the user-intent locks below can tell a
     // STALE/broken layout (must re-sync) apart from a pure model preference.
@@ -3524,16 +3527,6 @@ function EngineeringPageInner() {
     // shouldAllowOverride below, so a locked model is never silently swapped —
     // guided/manual users get a suggestion/block instead of a silent change.
     const structurallyStale = topologyMismatch || countMismatch || stringLayoutMismatch;
-
-    // v62 — The `sizingAutoApply` opt-in governs OPTIONAL model/preference
-    // auto-sync only. A STRUCTURALLY-STALE layout (wrong inverter count, wrong
-    // string layout, or wrong topology for the current panels) is a BROKEN
-    // state, not a preference — per the v61.8 contract below it must re-sync
-    // regardless of the toggle. So we only bail here when there is nothing
-    // structurally wrong AND the user hasn't opted into preference auto-sync.
-    // (Auto mode then heals silently; guided mode queues an approvable
-    // suggestion via the shouldAllowOverride branch — never a silent overwrite.)
-    if (!structurallyStale && !sizingAutoApply) return;
 
     // Phase 13.1 — USER INTENT LOCK: a HARD STOP for a model/preference drift on a
     // user-edited or user-controlled config, but NOT for a structurally-stale layout.
