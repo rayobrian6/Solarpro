@@ -3487,20 +3487,8 @@ function EngineeringPageInner() {
   useEffect(() => {
     if (!sizingAutoApply) return;
     if (!sizingRecommendation) return;
-    // Phase 13.1 — USER INTENT LOCK. If the user has edited the inverter
-    // config, auto-apply is a HARD STOP. The recommendation stays visible
-    // (read-only), but we never mutate the user's config silently. The
-    // user can still click "Apply Recommendation" explicitly.
-    if (config.userHasEditedInverters) {
-      console.log('🔒 [AUTO-APPLY] blocked — userHasEditedInverters=true (user config is source of truth)');
-      return;
-    }
-    // v61.7 — CONFIG OVERWRITE KILL SWITCH: isUserControlled is the master lock.
-    if (config.isUserControlled) {
-      console.log('[CONFIG OVERWRITE BLOCKED] AUTO-APPLY blocked — isUserControlled=true. Config is final until explicit user action.');
-      return;
-    }
-    // Quick structural check: any mismatch triggers apply.
+    // Compute the mismatch FIRST so the user-intent locks below can tell a
+    // STALE/broken layout (must re-sync) apart from a pure model preference.
     const rec = sizingRecommendation;
     const snap = sizingCurrentSnapshot;
     const topologyMismatch = snap.topology !== rec.topology;
@@ -3526,6 +3514,33 @@ function EngineeringPageInner() {
     // String-layout mismatch catches cases where inverter/topology match
     // but the per-string panel distribution is wrong (AUTO STRING REBUILD).
     const stringLayoutMismatch = detectStringLayoutMismatch(snap, rec);
+
+    // v61.8 — A config whose inverter COUNT, string LAYOUT, or TOPOLOGY no longer
+    // matches the system (e.g. after a panel-count change) is structurally STALE —
+    // a broken layout for the current panels, NOT a deliberate user preference.
+    // It must re-sync, even under the user-intent locks, otherwise the UI shows
+    // an over-provisioned/stale array forever (e.g. 5 inverters of 7-panel strings
+    // for a system the engine correctly lays out as 2 inverters of 11). A pure
+    // inverter-MODEL drift IS a preference and stays protected. The user's EXPLICIT
+    // equipment lock (controlMode / configLocks.inverter) is still enforced by
+    // shouldAllowOverride below, so a locked model is never silently swapped —
+    // guided/manual users get a suggestion/block instead of a silent change.
+    const structurallyStale = topologyMismatch || countMismatch || stringLayoutMismatch;
+
+    // Phase 13.1 — USER INTENT LOCK: a HARD STOP for a model/preference drift on a
+    // user-edited or user-controlled config, but NOT for a structurally-stale layout.
+    if (!structurallyStale && config.userHasEditedInverters) {
+      console.log('🔒 [AUTO-APPLY] blocked — userHasEditedInverters=true (no structural staleness; model preference protected)');
+      return;
+    }
+    if (!structurallyStale && config.isUserControlled) {
+      console.log('[CONFIG OVERWRITE BLOCKED] AUTO-APPLY blocked — isUserControlled=true (no structural staleness)');
+      return;
+    }
+    if (structurallyStale && (config.userHasEditedInverters || config.isUserControlled)) {
+      console.log('🩹 [AUTO-APPLY] auto-healing STRUCTURALLY-STALE config despite user lock (count/layout/topology mismatch — broken layout for current panels, not a preference)');
+    }
+
     if (topologyMismatch || countMismatch || modelMismatch || stringLayoutMismatch) {
       console.log('🚨 [AUTO-APPLY] firing applySizingRecommendation (no user lock, mismatch detected)');
       // v61: Check control mode + field locks before auto-applying
