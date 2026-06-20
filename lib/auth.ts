@@ -15,6 +15,34 @@ function getJwtSecret(): string {
   return secret;
 }
 
+/**
+ * F-13 — admin override email (closes hardcoded `carpenterjames88@gmail.com`).
+ *
+ * Returns the admin override email from ADMIN_OVERRIDE_EMAIL env var, or throws
+ * if missing. Fail-closed: a missing env var is a configuration error, NOT an
+ * excuse to ship a hardcoded default. This is a security choice — a regression
+ * here would re-leak the email into source.
+ *
+ * Used by the /api/migrate route's free-pass grant. The email was previously
+ * hardcoded in app/api/migrate/route.ts (F-13 from AI-AGENT-README §11) —
+ * moving it to env makes rotation, team-member onboarding, and the audit trail
+ * real config actions instead of code changes.
+ *
+ * @throws if ADMIN_OVERRIDE_EMAIL is missing, empty, or whitespace-only.
+ * @returns the trimmed email value.
+ */
+export function getAdminOverrideEmail(): string {
+  const email = process.env.ADMIN_OVERRIDE_EMAIL;
+  if (!email || typeof email !== 'string' || email.trim() === '') {
+    throw new Error(
+      'ADMIN_OVERRIDE_EMAIL env var is required. ' +
+      'Set it in Vercel env vars (project solarpro-v31, all environments) and ' +
+      'in .env.local for dev. See AI-AGENT-README.md §6 for details.'
+    );
+  }
+  return email.trim();
+}
+
 export const COOKIE_NAME    = 'solarpro_session';
 export const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 

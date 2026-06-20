@@ -161,6 +161,7 @@ NEXT_PUBLIC_BASE_URL          = https://solarpro.solutions
 NEXT_PUBLIC_APP_URL           = https://solarpro.solutions
 MIGRATE_SECRET                = solarpro-migrate-2024
 CRON_SECRET                   = 38747a11def95fd6b497f254fb4425d9a7874744f7d5772869ffff162a804c10  (encrypted, all envs)
+ADMIN_OVERRIDE_EMAIL          = <team-member email — F-13, plain, all envs>
 ```
 
 **Changes made 2026-05-18 (this fixes the SSO "invalid signature" bug):**
@@ -407,7 +408,7 @@ curl -s https://solarpro.solutions/api/system/health | python3 -m json.tool
 
 | ID | Severity | Status | Description |
 |----|----------|--------|-------------|
-| F-13 | MEDIUM | OPEN | `carpenterjames88@gmail.com` hardcoded as admin override in `users.ts` |
+| F-13 | MEDIUM | **CLOSED** (2026-06-19) | `carpenterjames88@gmail.com` hardcoded as admin override in `app/api/migrate/route.ts` — moved to `ADMIN_OVERRIDE_EMAIL` env var with fail-closed behavior in `lib/auth.ts getAdminOverrideEmail()`. Tests in `tests/admin-override-env.test.ts`. |
 | G-04 | MEDIUM | OPEN | `fallbackSurvey.ts` HandoffClaims missing F-06 ownership fields |
 | F-07 | MEDIUM | OPEN | JWT in URL query string on fallback GET route |
 | F-18 | MEDIUM | OPEN | SQLite (auth) + PostgreSQL (surveys) dual storage identity split in app |
