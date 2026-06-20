@@ -1295,7 +1295,7 @@ function EngineeringPageInner() {
               try {
                 const panel = SOLAR_PANELS.find((pp: any) => pp.id === panelId) as any;
                 const sizingResult = sizeSystemFromBrand({
-                  systemType: 'roof',
+                  systemType: (p.systemType ?? seed?.system_type ?? 'roof') as any,  // honor roof/ground/fence
                   panelCount,
                   panelWattage: panel?.watts ?? engCfg?.panelWatts ?? seed.panel_watt ?? 400,
                   panelVoc: panel?.voc ?? engCfg?.panelVoc ?? 49.6,
@@ -1408,7 +1408,7 @@ function EngineeringPageInner() {
             if (invType !== 'micro' && _nsBrand) {
               try {
                 const _nsResult = sizeSystemFromBrand({
-                  systemType: 'roof', panelCount,
+                  systemType: (p.systemType ?? layout?.systemType ?? 'roof') as any, panelCount,  // honor roof/ground/fence
                   panelWattage: _nsPanel?.watts ?? 400,
                   panelVoc: _nsPanel?.voc ?? 49.6,
                   panelTempCoeffVoc: _nsPanel?.tempCoeffVoc ?? -0.27,
@@ -1744,7 +1744,7 @@ function EngineeringPageInner() {
                   : _allStrings.length;
                 try {
                   const _fixInput: Parameters<typeof sizeSystemFromBrand>[0] = {
-                    systemType: 'roof',
+                    systemType: (merged.systemType ?? 'roof') as any,  // honor roof/ground/fence
                     panelCount: _totalPanels,
                     panelWattage: _panelObj?.watts ?? 400,
                     panelVoc: _panelObj?.voc ?? 49.6,
@@ -2067,7 +2067,7 @@ function EngineeringPageInner() {
             try {
               const _rfPanel = SOLAR_PANELS.find((pp: any) => pp.id === panelId);
               const _rfResult = sizeSystemFromBrand({
-                systemType: 'roof',
+                systemType: (patches.systemType ?? 'roof') as any,  // honor roof/ground/fence
                 panelCount,
                 panelWattage: (_rfPanel as any)?.watts ?? run.panelWattage ?? 400,
                 panelVoc: (_rfPanel as any)?.voc ?? 49.6,
