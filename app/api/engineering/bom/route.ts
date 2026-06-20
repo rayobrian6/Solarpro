@@ -40,6 +40,12 @@ const V4_OWNED_CATEGORIES = new Set([
   'wire', 'trunk_cable', 'terminator', 'conduit',
   'disconnect', 'breaker', 'rapid_shutdown', 'combiner', 'junction_box',
   'meter', 'gateway', 'monitoring', 'label', 'racking',
+  // V4 Stage 5 always emits one grounding-electrode system (category 'grounding'
+  // for the rod/clamp, 'wire' for the GEC). The structural BOM profiles emit
+  // their own ground_rod/ground_wire/ground_clamp, which duplicated it for
+  // ground/fence systems. V4 is the single grounding authority — skip the
+  // structural-profile copies so exactly one electrode system survives.
+  'grounding', 'ground_rod', 'ground_wire', 'ground_clamp',
   // FIX: monitoring_gateway is the sizing-engine category for the same IQ Gateway
   // that V4 already emits via inverterEntry.requiredAccessories (category='gateway').
   // Without this, sizingToBom injects a second IQ Gateway into Stage 6.
