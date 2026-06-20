@@ -8614,29 +8614,42 @@ function EngineeringPageInner() {
                                 const _maxPanels = 25;
                                 const invColors = ['text-amber-400', 'text-sky-400', 'text-emerald-400', 'text-violet-400'];
                                 const invBg     = ['bg-amber-500/40 border-amber-500/20', 'bg-sky-500/40 border-sky-500/20', 'bg-emerald-500/40 border-emerald-500/20', 'bg-violet-500/40 border-violet-500/20'];
-                                return config.inverters.flatMap((inv, invIdx) => {
+                                const _multiInv = config.inverters.length > 1;
+                                // Group strings UNDER their inverter with a header + count, and
+                                // order each inverter's strings largest-first so the list reads
+                                // cleanly (was a flat, unordered "Inv N · Sm" list that looked jumbled).
+                                return config.inverters.map((inv, invIdx) => {
                                   const colorCls = invColors[invIdx % invColors.length];
                                   const bgCls    = invBg[invIdx % invBg.length];
-                                  const invLabel = config.inverters.length > 1
-                                    ? `Inv ${invIdx + 1}`
-                                    : null;
-                                  return inv.strings.map((str, si) => {
-                                    const panel = getPanelById(str.panelId);
-                                    const kw = (str.panelCount * (panel?.watts || 400) / 1000);
-                                    const label = invLabel ? `${invLabel} · S${si + 1}` : str.label;
-                                    return (
-                                      <div key={str.id} className="flex items-center gap-2">
-                                        <span className={`text-[10px] font-mono w-14 shrink-0 ${colorCls}`}>{label}</span>
-                                        <div className="flex gap-0.5 flex-1">
-                                          {Array.from({ length: Math.min(str.panelCount, _maxPanels) }, (_, pi) => (
-                                            <div key={pi} className={`h-3 flex-1 rounded-sm border min-w-[4px] max-w-[14px] ${bgCls}`} />
-                                          ))}
-                                          {str.panelCount > _maxPanels ? <span className={`text-[9px] ml-1 ${colorCls}`}>+{str.panelCount - _maxPanels}</span> : null}
+                                  const _sorted  = [...inv.strings].sort((a, b) => b.panelCount - a.panelCount);
+                                  const _invPanels = inv.strings.reduce((s, st) => s + st.panelCount, 0);
+                                  return (
+                                    <div key={inv.id} className={_multiInv ? 'pb-1.5 mb-1.5 border-b border-slate-800/60 last:border-0 last:mb-0 last:pb-0' : ''}>
+                                      {_multiInv ? (
+                                        <div className={`text-[10px] font-bold uppercase tracking-wide mb-1 ${colorCls}`}>
+                                          Inverter {invIdx + 1} · {inv.strings.length} string{inv.strings.length === 1 ? '' : 's'} · {_invPanels} panels
                                         </div>
-                                        <span className="text-[10px] text-slate-400 font-mono w-16 text-right shrink-0">{str.panelCount}p · {kw.toFixed(1)}kW</span>
+                                      ) : null}
+                                      <div className="space-y-1.5">
+                                        {_sorted.map((str, si) => {
+                                          const panel = getPanelById(str.panelId);
+                                          const kw = (str.panelCount * (panel?.watts || 400) / 1000);
+                                          return (
+                                            <div key={str.id} className="flex items-center gap-2">
+                                              <span className={`text-[10px] font-mono w-14 shrink-0 ${colorCls}`}>{_multiInv ? `S${si + 1}` : (str.label ?? `S${si + 1}`)}</span>
+                                              <div className="flex gap-0.5 flex-1">
+                                                {Array.from({ length: Math.min(str.panelCount, _maxPanels) }, (_, pi) => (
+                                                  <div key={pi} className={`h-3 flex-1 rounded-sm border min-w-[4px] max-w-[14px] ${bgCls}`} />
+                                                ))}
+                                                {str.panelCount > _maxPanels ? <span className={`text-[9px] ml-1 ${colorCls}`}>+{str.panelCount - _maxPanels}</span> : null}
+                                              </div>
+                                              <span className="text-[10px] text-slate-400 font-mono w-16 text-right shrink-0">{str.panelCount}p · {kw.toFixed(1)}kW</span>
+                                            </div>
+                                          );
+                                        })}
                                       </div>
-                                    );
-                                  });
+                                    </div>
+                                  );
                                 });
                               })()
                             )}
