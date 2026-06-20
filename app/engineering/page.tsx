@@ -6343,10 +6343,25 @@ function EngineeringPageInner() {
           }; })() : undefined,
       };
 
-      const res = await fetch('/api/engineering/permit?format=pdf', {
+      const _permitOpts = {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(permitInput),
-      });
+      };
+      let res = await fetch('/api/engineering/permit?format=pdf', _permitOpts);
+
+      // If submission-ready generation is blocked ONLY by missing cad-safe roof
+      // geometry, fall back to a clearly-labeled DRAFT package so the button still
+      // produces output. Projects that DO have a promoted CanonicalBuildingModel
+      // still get the submission-ready package on the first attempt.
+      let _draftFallback = false;
+      if (res.status === 422) {
+        const _peek = await res.clone().json().catch(() => ({} as any));
+        if (_peek.code === 'CANONICAL_ROOF_GEOMETRY_REQUIRED' || _peek.code === 'CANONICAL_ROOF_PLANES_MISSING') {
+          _draftFallback = true;
+          toast.info('No promoted CAD geometry yet — generating a DRAFT permit package (not submission-ready).');
+          res = await fetch('/api/engineering/permit?format=pdf&draft=true', _permitOpts);
+        }
+      }
 
       if (res.ok) {
         const contentType = res.headers.get('Content-Type') || '';
@@ -6355,11 +6370,12 @@ function EngineeringPageInner() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
+        const _suffix = _draftFallback ? '-DRAFT' : '';
         a.download = isHtmlFallback
-          ? `PermitPackage-${config.projectName || 'project'}.html`
-          : `PermitPackage-${config.projectName || 'project'}.pdf`;
+          ? `PermitPackage-${config.projectName || 'project'}${_suffix}.html`
+          : `PermitPackage-${config.projectName || 'project'}${_suffix}.pdf`;
         a.click(); URL.revokeObjectURL(url);
-        logDecision('Permit Package', `Downloaded as ${isHtmlFallback ? 'HTML' : 'PDF'}`, 'auto');
+        logDecision('Permit Package', `Downloaded ${_draftFallback ? 'DRAFT ' : ''}as ${isHtmlFallback ? 'HTML' : 'PDF'}`, 'auto');
       } else if (res.status === 422) {
         const errData = await res.json().catch(() => ({}));
         if (errData.code === 'ENGINEERING_MODEL_STALE') {
@@ -13106,7 +13122,10 @@ function EngineeringPageInner() {
                                   })),
                                 }; })() : undefined,
                             };
-                            const res = await fetch('/api/engineering/permit?format=html', {
+                            // Preview is a NON-SUBMISSION preview by definition, so request
+                            // draft mode — otherwise a roof project without a promoted cad-safe
+                            // CanonicalBuildingModel 422s ("submission-ready ... requires ...").
+                            const res = await fetch('/api/engineering/permit?format=html&draft=true', {
                               method: 'POST', headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify(permitInput),
                             });
