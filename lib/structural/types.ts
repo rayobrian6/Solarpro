@@ -51,6 +51,31 @@ export type InstallationType =
   | 'tracker'
   | 'carport';
 
+// ── Mount-type mapping (UNIFIED-ENGINE-DESIGN-SPEC.md, Step 2) ────────────────
+// Single source of truth: systemType ('roof' | 'ground' | 'fence' — the UI/config
+// vocabulary) → InstallationType (the structural-engine vocabulary). Before this,
+// the structural payload never carried installationType, so every ground/fence job
+// defaulted to 'roof_residential' in /calculate and silently ran the roof path.
+//
+// PE-GATED scope (do NOT mistake this for the ground/fence structural build):
+//   • 'ground' → 'ground_mount' here only flips OFF the meaningless roof
+//     mount-capacity check in V4 (skipMountCheck). It does NOT activate the
+//     ground-pile branch — that keys on the *mounting system's* type, and no
+//     ground mounting system is passed yet. The real exposed-wind + IBC 1807.3
+//     embedment math is Step 6; output stays "ESTIMATE — not engineered" behind
+//     the structural-tab guardrail banner.
+//   • 'fence' has no InstallationType member and no engine branch yet (Step 7
+//     adds analyzeFence). It maps to 'roof_residential' to preserve today's
+//     behavior — the ESTIMATE banner already labels the result a roof placeholder.
+export function systemTypeToInstallationType(systemType?: string): InstallationType {
+  switch (systemType) {
+    case 'ground': return 'ground_mount';
+    case 'fence':  return 'roof_residential'; // TODO Step 7: dedicated 'fence' branch
+    case 'roof':
+    default:       return 'roof_residential';
+  }
+}
+
 // ── Structural Issue (superset of all 4 engine definitions) ─────────────────
 // V1 had:   code, severity, message, value?, limit?, reference?, suggestion?
 // V2/V3 had: code, message, severity, suggestion?

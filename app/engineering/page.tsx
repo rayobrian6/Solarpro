@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { computeSystem, type ComputedSystem, type ComputedSystemInput } from '@/lib/computed-system';
+import { systemTypeToInstallationType } from '@/lib/structural/types';
 import AppShell from '@/components/ui/AppShell';
 import PlanGate from '@/components/ui/PlanGate';
 import { useSubscription } from '@/hooks/useSubscription';
@@ -4336,6 +4337,10 @@ function EngineeringPageInner() {
           railSpan: config.railSpacing,
           rowSpacing: 12, arrayTilt: config.roofPitch,
           systemType: config.systemType,
+          // Mount type now reaches V4 (was dropped → defaulted 'roof_residential').
+          // See systemTypeToInstallationType — ground flips off the roof mount-capacity
+          // check only; PE-gated ground/fence structural math is a later step.
+          installationType: systemTypeToInstallationType(config.systemType),
           mountSpecs,
         };
       })(),
