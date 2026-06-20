@@ -419,12 +419,12 @@ export const SOLAR_PANELS: SolarPanel[] = [
     manufacturer: 'Trina Solar',
     model: 'Vertex S+ 435W',
     category: 'solar_panel',
-    watts: 435, efficiency: 22.6,
+    watts: 435, efficiency: 21.77,  // datasheet (was copy-paste 22.6)
     voc: 37.80, vmp: 31.60, isc: 14.72, imp: 13.77,
     tempCoeffVoc: -0.24, tempCoeffIsc: 0.05, tempCoeffPmax: -0.29,
     maxSystemVoltage: 1000, maxSeriesFuseRating: 20,
     nominalOperatingTemp: 43, parallelStringLimit: 3,
-    weight: 44.1, length: 70.9, width: 41.7, thickness: 1.38,
+    weight: 46.5, length: 69.4, width: 44.6, thickness: 1.18,  // datasheet 1762×1134×30mm, 21.1kg (was copy-paste 44.1lb/70.9×41.7)
     warranty: '25yr product / 25yr power', ulListing: 'UL 61730',
     bifacial: false, cellType: 'N-type TOPCon',
     datasheetUrl: 'https://www.trinasolar.com/en-glb/product/vertex-s-plus',
