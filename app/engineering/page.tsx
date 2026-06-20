@@ -4526,7 +4526,15 @@ function EngineeringPageInner() {
               railAnalysis:    v4s.railAnalysis,
               rackingBOM:      v4s.rackingBOM,
               rafterAnalysis:  ra,
+              // Native V4 top-level fields — the "Structural Compliance" card
+              // (page.tsx ~9792) reads native names (totalSystemWeightLbs,
+              // addedDeadLoadPsf, wind.netUpliftPressurePsf, snow.roofSnowLoadPsf).
+              // Carrying them alongside the V1-compat shims lights up rows that were
+              // blank under the old V3 merge (which only produced V1-compat names).
+              totalSystemWeightLbs: v4s.totalSystemWeightLbs,
+              addedDeadLoadPsf:     v4s.addedDeadLoadPsf,
               wind:            {
+                ...wind,   // native: netUpliftPressurePsf, velocityPressurePsf, roofZone, gcp*, exposureCoeff
                 velocityPressure:    wind?.velocityPressurePsf,
                 netUpliftPressure:   wind?.netUpliftPressurePsf,
                 upliftPerAttachment: ml?.upliftPerMountLbs,
@@ -4540,6 +4548,7 @@ function EngineeringPageInner() {
                 totalAttachments:    ml?.mountCount,
               },
               snow:            {
+                ...snow,   // native: groundSnowLoadPsf, roofSnowLoadPsf, slopeFactor, thermalFactor, importanceFactor
                 groundSnowLoad:        snow?.groundSnowLoadPsf,
                 roofSnowLoad:          snow?.roofSnowLoadPsf,
                 snowLoadPerAttachment: ml?.downwardPerMountLbs,
