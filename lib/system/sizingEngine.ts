@@ -150,6 +150,16 @@ export interface SizingInput {
 
   /** Pro-stack flag for EcoFlow (80 kWh vs 45 kWh std cap). */
   batteryUsePro?: boolean;
+
+  /**
+   * Explicit user-chosen battery UNIT count (the engineering UI "UNITS"
+   * stepper). When > 0 this is AUTHORITATIVE — the engine installs exactly
+   * this many packs/modules (capped by the brand's max kWh) instead of
+   * auto-sizing from a target kWh. Omit / 0 → fall back to auto sizing.
+   * Without this, 'auto' mode pinned moduleCount to 1 and overwrote the
+   * user's count back to 1 on every apply.
+   */
+  batteryDesiredUnits?: number;
 }
 
 // ─── Output types ──────────────────────────────────────────────────
@@ -1850,7 +1860,32 @@ function sizeBattery(
     });
   }
 
-  const moduleCount = Math.max(1, Math.ceil(effectiveTarget / unitKwh));
+  // v62 — When the user explicitly chose a UNIT count (engineering "UNITS"
+  // stepper), honor it exactly; only the brand's max-kWh ceiling can clamp it.
+  // Otherwise auto-size from the (possibly target-derived) effectiveTarget.
+  // This is the channel the user's battery quantity travels through; without
+  // it 'auto' mode always returned 1 and applySizingRecommendation reverted
+  // the user's count back to 1.
+  const userUnits =
+    typeof input.batteryDesiredUnits === 'number' && input.batteryDesiredUnits > 0
+      ? Math.floor(input.batteryDesiredUnits)
+      : undefined;
+  let moduleCount: number;
+  if (userUnits) {
+    const maxUnits = Number.isFinite(maxAllowed)
+      ? Math.max(1, Math.floor(maxAllowed / unitKwh))
+      : userUnits;
+    moduleCount = Math.min(userUnits, maxUnits);
+    if (userUnits > maxUnits) {
+      warnings.push({
+        severity: 'warning',
+        code: 'BATTERY_UNITS_CAPPED',
+        message: `${userUnits} units (${Math.round(userUnits * unitKwh * 10) / 10} kWh) exceeds ${brand.displayName} max ${maxAllowed} kWh — capped to ${maxUnits} units.`,
+      });
+    }
+  } else {
+    moduleCount = Math.max(1, Math.ceil(effectiveTarget / unitKwh));
+  }
   const installed = Math.round(moduleCount * unitKwh * 10) / 10;
 
   return {

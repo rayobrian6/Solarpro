@@ -2707,6 +2707,11 @@ function EngineeringPageInner() {
         batteryMode: 'auto',
         batteryGoal: 'backup',
         batteryTargetKwh: config.batteryKwh || undefined,
+        // v62 — thread the user's explicit UNITS count so the recommendation
+        // installs exactly what the user picked instead of auto-pinning to 1.
+        // Keeps rec.battery.moduleCount in agreement with config.batteryCount,
+        // so the diff panel shows "matches" and apply never reverts the count.
+        batteryDesiredUnits: config.batteryCount || undefined,
       });
       return result;
     } catch (err) {
@@ -2727,6 +2732,10 @@ function EngineeringPageInner() {
     config.selectedBrand,
     batteryEnabled,
     config.batteryKwh,
+    // v62 — recompute when the user changes the battery UNITS count so the
+    // recommendation reflects the chosen quantity (was missing → rec stayed
+    // pinned at 1 unit regardless of the UNITS stepper).
+    config.batteryCount,
   ]);
 
 
@@ -3294,61 +3303,51 @@ function EngineeringPageInner() {
         userHasEditedInverters: false,
         selectedBrand: rec.brand.id,
       };
-      if (rec.battery && rec.battery.equipmentDbId) {
+      // v62 — USER BATTERY IS AUTHORITATIVE.
+      //
+      // applySizingRecommendation re-syncs the INVERTER / STRING layout. It must
+      // NEVER destroy a battery the user has explicitly configured. The previous
+      // code overwrote batteryCount with rec.battery.moduleCount, which 'auto'
+      // sizing pins to 1 (sizingEngine sizes to one unit's default kWh) — so
+      // selecting N batteries reverted to 1 on every apply/auto-heal. This also
+      // generalizes the old v58.13 ecosystem-battery guard: any user-selected
+      // battery (ecosystem OR manual) is now preserved wholesale.
+      const hasUserBattery =
+        !!prev.batteryId && (prev.batteryCount ?? 0) > 0;
+      if (hasUserBattery) {
+        console.log('[SIZING APPLY v62] preserving user battery (authoritative):', {
+          batteryId: prev.batteryId,
+          batteryCount: prev.batteryCount,
+          batteryKwh: prev.batteryKwh,
+        });
+        // Intentionally leave batteryId/batteryCount/batteryKwh/Brand/Model off
+        // the patch so the user's selection survives the inverter re-sync.
+      } else if (rec.battery && rec.battery.equipmentDbId) {
+        // No user battery yet — adopt the engine's sized battery as the seed.
         patch.batteryId = rec.battery.equipmentDbId;
         patch.batteryCount = rec.battery.moduleCount;
         patch.batteryKwh = rec.battery.installedKwh;
         patch.batteryBrand = rec.brand.manufacturer;
         patch.batteryModel = rec.battery.equipmentDbId;
       } else {
-        // v58.13 — ECOSYSTEM BATTERY GUARD.
-        //
-        // The sizing engine only emits `rec.battery` when `batteryEnabled === true`.
-        // Prior behaviour: when `batteryEnabled` was false at the moment Apply
-        // was clicked, we wiped batteryId/Count/Kwh — which destroyed the
-        // battery the ecosystem picker had just applied.
-        //
-        // New rule: if the user has an ecosystem applied AND that ecosystem
-        // brought in a battery (prev.batteryId is truthy), PRESERVE it. The
-        // ecosystem is the source of truth for battery selection in that case.
-        //
-        // This also covers the refresh-hydration race where `batteryEnabled`
-        // is momentarily false on first render before the v58.12 hydration
-        // effect flips it to true.
-        const hasEcosystemBattery =
-          !!(prev as any).ecosystemBrand &&
-          !!prev.batteryId &&
-          (prev.batteryCount ?? 0) > 0;
-        if (hasEcosystemBattery) {
-          console.log('[SIZING APPLY v58.13] preserving ecosystem battery:', {
-            ecosystem: (prev as any).ecosystemBrand,
-            batteryId: prev.batteryId,
-            batteryCount: prev.batteryCount,
-          });
-          // Intentionally do NOT set batteryId/batteryCount/batteryKwh on patch.
-        } else {
-          // No ecosystem battery to protect — clear battery fields cleanly
-          // (preserves original behaviour for non-ecosystem flows).
-          patch.batteryId = '';
-          patch.batteryCount = 0;
-          patch.batteryKwh = 0;
-        }
+        // No user battery and the engine sized none — leave cleared.
+        patch.batteryId = '';
+        patch.batteryCount = 0;
+        patch.batteryKwh = 0;
       }
 
       return { ...prev, ...patch };
     });
 
-    // v58.13 — Also re-assert batteryEnabled if we just preserved an ecosystem
-    // battery. This is safe: it's a no-op if the toggle is already on, and if
-    // the toggle was momentarily off (e.g. refresh-hydration race), flipping
-    // it true makes the next sizing run emit `rec.battery` properly so the
-    // SLD + BOM + permit all stay consistent.
+    // v62 (was v58.13) — Re-assert batteryEnabled whenever we just preserved a
+    // user battery (ecosystem OR manual). Safe: a no-op if the toggle is already
+    // on, and if it was momentarily off (e.g. refresh-hydration race) flipping
+    // it true keeps the next sizing run + SLD + BOM + permit consistent.
     setConfig(prev => {
-      const hasEcosystemBattery =
-        !!(prev as any).ecosystemBrand &&
+      const hasUserBattery =
         !!prev.batteryId &&
         (prev.batteryCount ?? 0) > 0;
-      if (hasEcosystemBattery) setBatteryEnabled(true);
+      if (hasUserBattery) setBatteryEnabled(true);
       return prev;
     });
 
