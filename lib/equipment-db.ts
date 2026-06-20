@@ -354,7 +354,7 @@ export const SOLAR_PANELS: SolarPanel[] = [
     model: 'EverVolt HK Black 410W',
     category: 'solar_panel',
     watts: 410, efficiency: 22.2,
-    voc: 51.9, vmp: 43.7, isc: 10.06, imp: 9.39,
+    voc: 49.0, vmp: 42.7, isc: 10.35, imp: 9.61,  // datasheet EVPV410H (132 half-cell HJT): Voc 49.0 (was 51.9), Vmp 42.7, Isc 10.35, Imp 9.61
     tempCoeffVoc: -0.25, tempCoeffIsc: 0.04, tempCoeffPmax: -0.26,
     maxSystemVoltage: 1000, maxSeriesFuseRating: 20,
     nominalOperatingTemp: 44, parallelStringLimit: 3,

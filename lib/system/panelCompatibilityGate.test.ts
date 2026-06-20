@@ -149,12 +149,12 @@ describe('v47.423 — evaluatePanelBrandCompatibility() core classification', ()
 
 describe('v47.423 — marginal threshold boundary', () => {
   it('respects a custom marginalThreshold override (20%)', () => {
-    // EverVolt on Growatt: ~6.85% headroom. With default 15% it's marginal.
-    // Crank threshold down to 5% and it should flip to compatible.
+    // EverVolt on Growatt: ~4.1% headroom (datasheet-corrected Isc 10.35A). With default 15% it's marginal.
+    // Crank threshold down to 3% and it should flip to compatible.
     const r = evaluatePanelBrandCompatibility(
       evervolt410(),
       growatt(),
-      { marginalThreshold: 0.05 },
+      { marginalThreshold: 0.03 },
     );
     expect(r.status).toBe('compatible');
   });
