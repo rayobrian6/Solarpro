@@ -3410,6 +3410,39 @@ export function getBatteryById(id: string): BatterySystem | undefined {
   return BATTERIES.find(b => b.id === id);
 }
 
+/**
+ * Resolve the representative battery SKU for a battery-brand token (e.g. 'tesla',
+ * 'enphase', 'solaredge', 'eg4', 'byd', 'pylontech', 'tigo', 'homegrid',
+ * 'ecoflow'). Matches active batteries by ecosystemBrand, manufacturer slug, or
+ * id prefix. For `single_pack` strategies returns the largest-capacity match
+ * (the whole pack, e.g. Powerwall 3); otherwise the smallest-capacity match (the
+ * granular stacking module). Used by the sizing engine so EVERY brand's battery
+ * resolves to a real SKU + capacity (previously only EcoFlow did).
+ */
+export function resolveBatteryForBrand(
+  brandToken: string | undefined,
+  strategy: 'modular_stack' | 'single_pack' | 'per_module' | 'custom' = 'modular_stack',
+): BatterySystem | undefined {
+  const t = (brandToken ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!t) return undefined;
+  const matches = BATTERIES.filter(b => {
+    if (b.active === false) return false;
+    const eco = (b.ecosystemBrand ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const mfr = b.manufacturer.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return eco === t || mfr === t || b.id.toLowerCase().startsWith(t + '-');
+  });
+  if (matches.length === 0) return undefined;
+  // single_pack → whole pack (largest); modular → granular module (smallest).
+  // Tiebreak: prefer isNew, then higher continuous power, then id (deterministic).
+  matches.sort((a, b) => {
+    if (a.usableCapacityKwh !== b.usableCapacityKwh) return a.usableCapacityKwh - b.usableCapacityKwh;
+    if ((a.isNew ? 1 : 0) !== (b.isNew ? 1 : 0)) return (b.isNew ? 1 : 0) - (a.isNew ? 1 : 0);
+    if (a.continuousPowerKw !== b.continuousPowerKw) return b.continuousPowerKw - a.continuousPowerKw;
+    return a.id.localeCompare(b.id);
+  });
+  return strategy === 'single_pack' ? matches[matches.length - 1] : matches[0];
+}
+
 export function getGeneratorById(id: string): GeneratorSystem | undefined {
   return GENERATORS.find(g => g.id === id);
 }
