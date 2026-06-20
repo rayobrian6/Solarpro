@@ -763,7 +763,10 @@ export function runStructuralCalcV3(input: StructuralInputV3): StructuralResultV
   const qz = calcVelocityPressure(input.windSpeed, input.windExposure, heightFt);
 
   // Use interior zone for most of array (conservative for residential)
-  const roofZone: RoofZone = 'interior';
+  // C2 fix: design for the GOVERNING (corner) wind zone, not the lowest. Computing only
+  // 'interior' under-sized every edge/corner attachment and could stamp PASS on a
+  // field-failing design. Corner is the conservative basis (passes there → passes everywhere).
+  const roofZone: RoofZone = 'corner';
   const gcp = getGCp(roofZone, input.roofPitch);
 
   // Net pressures: p = qz × GCp

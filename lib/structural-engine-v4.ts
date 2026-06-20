@@ -967,7 +967,12 @@ export function runStructuralCalcV4(input: StructuralInputV4): StructuralResultV
   // ── 3. Wind analysis (ASCE 7-22) ────────────────────────────────────────
   const heightFt = input.meanRoofHeight ?? 15;
   const qz = calcVelocityPressure(input.windSpeed, input.windExposure, heightFt);
-  const roofZone: RoofZone = 'interior';
+  // C2 fix: design for the GOVERNING wind zone, not the lowest. ASCE 7-22 Fig 29.4-7
+  // corner (Zone 3) uplift is ~1.7× interior; computing only 'interior' under-sized
+  // every edge/corner attachment — where arrays actually fail first — and could stamp
+  // PASS on a field-failing design. Without a per-attachment zone map, the safe,
+  // conservative basis is the corner zone (a design that passes there passes everywhere).
+  const roofZone: RoofZone = 'corner';
   const gcp = getGCp(roofZone, input.roofPitch);
   const netUpliftPsf = Math.abs(qz * gcp.uplift);
   const netDownwardPsf = qz * gcp.downward;
