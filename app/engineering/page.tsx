@@ -4478,12 +4478,10 @@ function EngineeringPageInner() {
     try {
       const payload = buildCalcPayload();
 
-      // Get panel data for V2 structural calc
-      const firstStrV2 = config.inverters[0]?.strings[0];
-      const panelDataV2 = firstStrV2?.panelId ? (SOLAR_PANELS as any[]).find((p: any) => p.id === firstStrV2.panelId) : null;
-
-      // Run legacy calculate + new rules engine + V2 structural in parallel
-      const [calcRes, rulesRes, structV2Res] = await Promise.all([
+      // Run legacy calculate + new rules engine in parallel.
+      // (V3 /structural-v2 retired — the Structural tab now reads the single
+      // structural engine of record, V4, from /calculate. Spec Step 5.)
+      const [calcRes, rulesRes] = await Promise.all([
         fetch('/api/engineering/calculate', {
           method: 'POST',
         cache: 'no-store',
@@ -4502,132 +4500,102 @@ function EngineeringPageInner() {
             overrides,
           }),
         }),
-        fetch('/api/engineering/structural-v2', {
-          method: 'POST',
-          cache: 'no-store',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            // Site
-            windSpeed:        config.windSpeed,
-            windExposure:     config.windExposure,
-            groundSnowLoad:   config.groundSnowLoad,
-            roofPitch:        config.roofPitch,
-            meanRoofHeight:   config.meanRoofHeight ?? 15,  // ft — ASCE 7 Kz (1-story≈15, 2-story≈25)
-            // Framing
-            framingType:      config.framingType,
-            rafterSpacing:    config.rafterSpacing,
-            rafterSpan:       config.rafterSpan,
-            rafterSize:       config.rafterSize,
-            rafterSpecies:    config.rafterSpecies,
-            // Array geometry — derived from panel specs
-            panelCount:       totalPanels,
-            panelLength:      panelDataV2?.length ?? 73.0,
-            panelWidth:       panelDataV2?.width  ?? 41.0,
-            panelWeight:      panelDataV2?.weight ?? 45.0,
-            panelOrientation: (config.panelOrientation ?? 'portrait') as 'portrait' | 'landscape',
-            rowCount:         config.rowCount ?? undefined,
-            // Racking
-            mountingSystem:   config.systemType === 'roof' ? (config.mountingId ?? 'ironridge-xr100') : undefined,
-            rackingWeight:    4.0,
-          }),
-        }).catch(() => null),  // V3 structural is best-effort
       ]);
       const calcData = await calcRes.json();
       if (calcData.success) {
-        // Merge V3 structural results into compliance data
+        // Map the single structural engine of record (V4, already returned by
+        // /calculate in calcData.structural) into the V1-compatible display shape
+        // the Structural tab reads. This previously OVERWROTE calcData.structural
+        // with a parallel V3 (/structural-v2) call, so the tab showed V3 while the
+        // permit/BOM/SLD path showed V4 — the live C3 divergence (status could even
+        // disagree: WARNING on the tab vs PASS on the permit for the same project).
+        // V3 and V4 share identical output field names, so the same transform works
+        // sourced from V4. (UNIFIED-ENGINE-DESIGN-SPEC.md Step 5.)
         try {
-          if (structV2Res && structV2Res.ok) {
-            const structV2Data = await structV2Res.json();
-            // V3 API returns status directly (no .success wrapper)
-            if (structV2Data?.status) {
-              const ra = structV2Data.rafterAnalysis;
-              const ml = structV2Data.mountLayout;
-              const wind = structV2Data.wind;
-              const snow = structV2Data.snow;
-              calcData.structural = {
-                // V3 fields
-                status:          structV2Data.status,
-                framing:         structV2Data.framing,
-                arrayGeometry:   structV2Data.arrayGeometry,
-                mountLayout:     ml,
-                railAnalysis:    structV2Data.railAnalysis,
-                rackingBOM:      structV2Data.rackingBOM,
-                rafterAnalysis:  ra,
-                wind:            {
-                  velocityPressure:    wind?.velocityPressurePsf,
-                  netUpliftPressure:   wind?.netUpliftPressurePsf,
-                  upliftPerAttachment: ml?.upliftPerMountLbs,
-                  designWindSpeed:     config.windSpeed,
-                  exposureCategory:    config.windExposure,
-                  Kz:                  wind?.exposureCoeff,
-                  Kzt: 1.0, Kd: 0.85,
-                  GCp:                 wind?.gcpUplift,
-                  GCpi:                0.18,
-                  tributaryArea:       ml?.tributaryAreaPerMountFt2,
-                  totalAttachments:    ml?.mountCount,
-                },
-                snow:            {
-                  groundSnowLoad:        snow?.groundSnowLoadPsf,
-                  roofSnowLoad:          snow?.roofSnowLoadPsf,
-                  snowLoadPerAttachment: ml?.downwardPerMountLbs,
-                },
-                // V1 compatibility shims
-                rafter: {
-                  rafterSize:             ra?.size,
-                  rafterSpacing:          ra?.spacingIn,
-                  rafterSpan:             ra?.spanFt,
-                  bendingMoment:          ra?.bendingMomentDemandFtLbs,
-                  allowableBendingMoment: ra?.bendingMomentCapacityFtLbs,
-                  utilizationRatio:       ra?.overallUtilization,
-                  deflection:             ra?.deflectionIn,
-                  allowableDeflection:    ra?.allowableDeflectionIn,
-                  Fb_base:                1150,
-                  Cd: 1.15, Cr: 1.15,
-                  Fb_prime:               1150 * 1.15 * 1.15,
-                  totalLoadPsf:           ra?.totalLoadPsf,
-                  lineLoad:               ra ? ra.totalLoadPsf * (ra.spacingIn / 12) : 0,
-                },
-                attachment: {
-                  safetyFactor:             ml?.safetyFactor,
-                  lagBoltCapacity:          ml?.mountCapacityLbs,
-                  totalUpliftPerAttachment: ml?.upliftPerMountLbs,
-                  upliftPerAttachment:      ml?.upliftPerMountLbs,
-                  attachmentSpacing:        ml?.mountSpacingIn,
-                  railSpacing:              structV2Data.arrayGeometry?.railSpacingIn,
-                  tributaryArea:            ml?.tributaryAreaPerMountFt2,
-                  maxAllowedSpacing:        ml?.mountSpacingIn,
-                  spacingMarginPct:         100,
-                },
-                deadLoad: {
-                  panelWeightPsf:        structV2Data.addedDeadLoadPsf,
-                  rackingWeightPsf:      1.5,
-                  totalDeadLoadPsf:      structV2Data.addedDeadLoadPsf,
-                  deadLoadPerAttachment: ml?.downwardPerMountLbs,
-                  existingRoofDeadLoad:  15,
-                  totalRoofDeadLoad:     (structV2Data.addedDeadLoadPsf ?? 0) + 15,
-                },
-                errors:          structV2Data.errors,
-                warnings:        structV2Data.warnings,
-                recommendations: structV2Data.recommendations,
-              };
-              // Auto-update framing type if detected
-              if (structV2Data.framing?.type && config.framingType === 'unknown') {
-                updateConfig({ framingType: structV2Data.framing.type });
-              }
+          const v4s = calcData.structural;
+          if (v4s?.status) {
+            const ra = v4s.rafterAnalysis;
+            const ml = v4s.mountLayout;
+            const wind = v4s.wind;
+            const snow = v4s.snow;
+            calcData.structural = {
+              status:          v4s.status,
+              framing:         { type: ra?.framingType, autoDetected: v4s.debugInfo?.autoDetectedFraming },
+              arrayGeometry:   v4s.arrayGeometry,
+              mountLayout:     ml,
+              railAnalysis:    v4s.railAnalysis,
+              rackingBOM:      v4s.rackingBOM,
+              rafterAnalysis:  ra,
+              wind:            {
+                velocityPressure:    wind?.velocityPressurePsf,
+                netUpliftPressure:   wind?.netUpliftPressurePsf,
+                upliftPerAttachment: ml?.upliftPerMountLbs,
+                designWindSpeed:     config.windSpeed,
+                exposureCategory:    config.windExposure,
+                Kz:                  wind?.exposureCoeff,
+                Kzt: 1.0, Kd: 0.85,
+                GCp:                 wind?.gcpUplift,
+                GCpi:                0.18,
+                tributaryArea:       ml?.tributaryAreaPerMountFt2,
+                totalAttachments:    ml?.mountCount,
+              },
+              snow:            {
+                groundSnowLoad:        snow?.groundSnowLoadPsf,
+                roofSnowLoad:          snow?.roofSnowLoadPsf,
+                snowLoadPerAttachment: ml?.downwardPerMountLbs,
+              },
+              // V1 compatibility shims
+              rafter: {
+                rafterSize:             ra?.size,
+                rafterSpacing:          ra?.spacingIn,
+                rafterSpan:             ra?.spanFt,
+                bendingMoment:          ra?.bendingMomentDemandFtLbs,
+                allowableBendingMoment: ra?.bendingMomentCapacityFtLbs,
+                utilizationRatio:       ra?.overallUtilization,
+                deflection:             ra?.deflectionIn,
+                allowableDeflection:    ra?.allowableDeflectionIn,
+                Fb_base:                1150,
+                Cd: 1.15, Cr: 1.15,
+                Fb_prime:               1150 * 1.15 * 1.15,
+                totalLoadPsf:           ra?.totalLoadPsf,
+                lineLoad:               ra ? ra.totalLoadPsf * (ra.spacingIn / 12) : 0,
+              },
+              attachment: {
+                safetyFactor:             ml?.safetyFactor,
+                lagBoltCapacity:          ml?.mountCapacityLbs,
+                totalUpliftPerAttachment: ml?.upliftPerMountLbs,
+                upliftPerAttachment:      ml?.upliftPerMountLbs,
+                attachmentSpacing:        ml?.mountSpacingIn,
+                railSpacing:              v4s.arrayGeometry?.railSpacingIn,
+                tributaryArea:            ml?.tributaryAreaPerMountFt2,
+                maxAllowedSpacing:        ml?.maxAllowedSpacingIn ?? ml?.mountSpacingIn,
+                spacingMarginPct:         100,
+              },
+              deadLoad: {
+                panelWeightPsf:        v4s.addedDeadLoadPsf,
+                rackingWeightPsf:      1.5,
+                totalDeadLoadPsf:      v4s.addedDeadLoadPsf,
+                deadLoadPerAttachment: ml?.downwardPerMountLbs,
+                existingRoofDeadLoad:  15,
+                totalRoofDeadLoad:     (v4s.addedDeadLoadPsf ?? 0) + 15,
+              },
+              errors:          v4s.errors,
+              warnings:        v4s.warnings,
+              recommendations: v4s.recommendations,
+            };
+            // Auto-update framing type if detected
+            if (ra?.framingType && ra.framingType !== 'unknown' && config.framingType === 'unknown') {
+              updateConfig({ framingType: ra.framingType });
             }
           }
-        } catch (_) { /* V3 structural merge is best-effort */ }
+        } catch (_) { /* structural display map is best-effort */ }
 
-        // v47.417 — Recompute overallStatus AFTER V3 structural merge.
-        // Bug: /api/engineering/calculate computes overallStatus from the V1/V4
-        // structural engine BEFORE the client replaces calcData.structural with
-        // V3 results. V4 and V3 can disagree on what counts as an error (e.g.
-        // V4 flags MOUNT_INSUFFICIENT_CAPACITY as error, V3 auto-reduces spacing
-        // and demotes it to a MOUNT_SPACING_REDUCED warning). The result was
-        // Overall=FAIL despite Electrical=PASS and Structural=WARNING, with no
-        // errors visible in the compliance UI. Fix: after the V3 merge lands
-        // on calcData.structural, recompute overallStatus from the final
-        // electrical + structural status the user actually sees.
+        // v47.417 — Recompute overallStatus from the FINAL structural status the
+        // user sees. Historically the client replaced calcData.structural with a
+        // separate V3 result that could disagree with the server's V4-computed
+        // overallStatus; V3 is now retired (Step 5) so the structural source is V4
+        // throughout, but keeping this recompute is harmless and keeps overallStatus
+        // consistent with the structural errors actually rendered in the UI.
         try {
           const elecErrors = (calcData.electrical?.errors ?? []).filter((e: any) => !e.autoFixed && e.severity !== 'info');
           const structErrors = (calcData.structural?.errors ?? []).filter((e: any) => e?.severity === 'error');
