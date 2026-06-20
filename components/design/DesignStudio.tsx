@@ -3092,6 +3092,10 @@ export default function DesignStudio({ project, onSave }: Props) {
       const location = buildLocationInput();
       const body: Record<string, unknown> = { systemDefinition, location };
       if (project.id) body.projectId = project.id;
+      // Carry the equipment selection so the production route persists it and the
+      // project hydrates it back (engineering audit C2 — was local-only/dropped).
+      if (selectedInverter) body.selectedInverter = selectedInverter;
+      if (selectedPanel) body.selectedPanel = selectedPanel;
       const res = await fetch('/api/production', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3160,7 +3164,16 @@ export default function DesignStudio({ project, onSave }: Props) {
       const res = await fetch('/api/production', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: project.id, layout }),
+        // Persist the inverter/panel selection with the layout. upsertProduction
+        // saves them and getProjectById hydrates them back onto the project, so
+        // engineering/permit see the choice. Without this the picks were
+        // local-only and silently discarded (engineering audit C2).
+        body: JSON.stringify({
+          projectId: project.id,
+          layout,
+          selectedInverter: selectedInverter ?? undefined,
+          selectedPanel: selectedPanel ?? undefined,
+        }),
       });
       const data = await res.json();
       if (data.success) {
