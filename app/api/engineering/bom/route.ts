@@ -171,6 +171,7 @@ export async function POST(req: NextRequest) {
         optimizerId:        resolvedOptimizerId,
       rackingId:          body.rackingId,
       batteryId:          body.batteryId,
+      batteryCount:       Number(body.batteryCount) || undefined,  // C6 fix: was dropped → bom-engine forced battery qty to 1
       panelId:            body.panelId,
       moduleCount:        Number(body.moduleCount)        || Number(body.totalPanels) || 0,  // FIX: was defaulting to 20; now reads totalPanels as fallback
       deviceCount:        body.deviceCount !== undefined ? Number(body.deviceCount) : undefined,
