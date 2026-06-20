@@ -10287,6 +10287,31 @@ function EngineeringPageInner() {
           {/* ── STRUCTURAL TAB ── */}
           {activeTab === 'structural' ? (
             <div className="max-w-none space-y-5">
+              {/* ══════════ MOUNT-TYPE GUARDRAIL ══════════ */}
+              {/* The structural engine currently models ROOF-mounted arrays only (ASCE 7-22 roof
+                  wind zones, rafter/lag attachment). Ground mounts (footing/pier embedment, exposed
+                  wind, frame overturning) and fences (post embedment, full-face wind) need a
+                  different analysis not yet implemented — so for those mount types the numbers below
+                  are roof-based PLACEHOLDERS. Surface that clearly so no one submits them as
+                  engineered for permit. */}
+              {config.systemType && config.systemType !== 'roof' ? (
+                <div className="rounded-xl border border-red-500/50 bg-red-500/10 p-4 flex items-start gap-3">
+                  <AlertTriangle size={18} className="text-red-400 shrink-0 mt-0.5" />
+                  <div className="text-xs text-red-200 leading-relaxed">
+                    <div className="font-bold text-red-300 mb-1 uppercase tracking-wide">
+                      {config.systemType === 'fence' ? 'Fence' : 'Ground-mount'} structural is an ESTIMATE — not engineered
+                    </div>
+                    The structural analysis below models <span className="font-semibold text-red-100">roof-mounted</span> arrays
+                    only (ASCE 7-22 roof wind zones, rafter / lag attachment). A{' '}
+                    {config.systemType === 'fence'
+                      ? 'fence requires vertical post embedment, full-face (freestanding-wall) wind, and panel-as-infill load analysis'
+                      : 'ground mount requires footing / driven-pier embedment, exposed-terrain wind, frame overturning, and soil/frost-depth geotech'}
+                    {' '}— which is not yet implemented. Any PASS / FAIL, load, or fastener value shown here is a
+                    roof-based placeholder. <span className="font-semibold text-red-100">Do not submit it as engineered for permit
+                    until a licensed structural PE reviews the {config.systemType} design.</span>
+                  </div>
+                </div>
+              ) : null}
               {/* ══════════ STRUCTURAL INTEGRITY HERO ══════════ */}
               <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5 mb-5">
 <div className="flex items-center gap-2 mb-4">
