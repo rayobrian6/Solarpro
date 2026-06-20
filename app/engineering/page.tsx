@@ -2453,6 +2453,8 @@ function EngineeringPageInner() {
       inverterManufacturer: invData?.manufacturer ?? (topology === 'micro' ? 'Enphase' : 'SolarEdge'),
       inverterModel: invData?.model ?? (topology === 'micro' ? 'IQ8+' : 'SE7600H'),
       inverterAcKw: invData?.acOutputKw ?? (invData?.acOutputW ? invData.acOutputW / 1000 : topology === 'micro' ? 0.290 : 7.6), // v58.4: fallback 0.295->0.290 (IQ8+ datasheet max continuous = 290VA)
+      // C7 fix: physical inverter count so multi-inverter AC current / OCPD / schedule qty are sized for ALL units, not just the primary.
+      inverterCount: topology === 'micro' ? 1 : Math.max(1, config.inverters.length),
       inverterMaxDcV: invData?.maxDcVoltage ?? (topology === 'micro' ? 60 : 600),
       inverterMpptVmin: invData?.mpptVoltageMin ?? (topology === 'micro' ? 16 : 100),
       inverterMpptVmax: invData?.mpptVoltageMax ?? (topology === 'micro' ? 60 : 480),
