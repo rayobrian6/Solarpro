@@ -1542,6 +1542,97 @@ function EngineeringPageInner() {
           }
         }
 
+        // v62 — STRING-DISTRIBUTION STALENESS HEAL (single source of truth).
+        // The two gates above catch a wrong panel TOTAL and an inactive inverter,
+        // but NOT a stale per-string DISTRIBUTION: a config can have the right
+        // total and an active inverter yet still carry an OLD layout the current
+        // allocator would never produce (e.g. 11 strings of 7 where the engine
+        // now packs ~7 strings of ~11). In AUTO mode the sizing engine OWNS the
+        // layout, so we rebuild the committed strings from the allocator whenever
+        // the saved distribution diverges from it — preserving the inverter
+        // models, the panel selection, and wire/mount fields. This makes the
+        // committed config ALWAYS equal the single-source-of-truth allocator
+        // output, for any brand and panel count. Guided/manual modes are left
+        // untouched (the user curates those via the recommendation panel / edits).
+        if (
+          p.controlMode === 'auto' &&
+          savedConfig &&
+          Array.isArray((savedConfig as any).inverters) &&
+          (savedConfig as any).inverters.length > 0 &&
+          (((savedConfig as any).inverters[0]?.type ?? 'string') !== 'micro')
+        ) {
+          try {
+            const _hInvs    = (savedConfig as any).inverters as any[];
+            const _hStrings = _hInvs.flatMap((inv: any) => (inv.strings ?? []) as any[]);
+            const _hTotal   = _hStrings.reduce((s: number, str: any) => s + (str.panelCount ?? 0), 0);
+            const _hPanelId = _hStrings[0]?.panelId ?? '';
+            const _hPanel   = (SOLAR_PANELS as any[]).find((pp: any) => pp.id === _hPanelId);
+            const _hInvId   = _hInvs[0]?.inverterId ?? '';
+            const _hBrand   = (savedConfig as any).selectedBrand;
+            const _hCount   = expectedHydrationPanelCount > 0 ? expectedHydrationPanelCount : _hTotal;
+            if (_hPanel && _hCount > 0 && (_hInvId || _hBrand)) {
+              const _hInput: Parameters<typeof sizeSystemFromBrand>[0] = {
+                systemType:        'roof',
+                panelCount:        _hCount,
+                panelWattage:      _hPanel.watts ?? 400,
+                panelVoc:          _hPanel.voc,
+                panelVmp:          _hPanel.vmp,
+                panelIsc:          _hPanel.isc,
+                panelTempCoeffVoc: _hPanel.tempCoeffVoc,
+                designTempMin:     -10,
+                batteryEnabled:    false,
+              };
+              if (_hInvId) _hInput.selectedInverterId = _hInvId;
+              else         _hInput.selectedBrand      = _hBrand;
+              const _hEng = sizeSystemFromBrand(_hInput);
+              if (_hEng.topology !== 'micro' && _hEng.strings.length > 0) {
+                const _savedSorted = [..._hStrings.map((s: any) => s.panelCount ?? 0)].sort((a, b) => a - b);
+                const _engSorted   = [..._hEng.strings.map((s: any) => s.panelCount)].sort((a, b) => a - b);
+                const _diverges =
+                  _savedSorted.length !== _engSorted.length ||
+                  _savedSorted.some((c, i) => c !== _engSorted[i]);
+                if (_diverges) {
+                  // Rebuild strings from the engine layout, grouped by inverterIndex,
+                  // preserving the panel id + wire/mount fields from the saved strings.
+                  const _byInv = new Map<number, any[]>();
+                  for (const s of _hEng.strings) {
+                    const idx = (s as any).inverterIndex ?? 0;
+                    if (!_byInv.has(idx)) _byInv.set(idx, []);
+                    _byInv.get(idx)!.push(s);
+                  }
+                  const _tmpl = _hStrings[0] ?? {};
+                  const _newInvs = Array.from({ length: _hEng.inverterCount }, (_: any, idx: number) => {
+                    const _shell    = _hInvs[idx] ?? _hInvs[0];
+                    const _assigned = _byInv.get(idx) ?? [];
+                    const _strs = (_assigned.length > 0 ? _assigned : [{ panelCount: 0 }]).map((s: any, si: number) => ({
+                      ..._tmpl,
+                      id:         `str-heal-${idx}-${si}`,
+                      panelCount: s.panelCount,
+                      panelId:    _hPanelId,
+                    }));
+                    return {
+                      ..._shell,
+                      strings:            _strs,
+                      stringsPerInverter: _strs.length,
+                      modulesPerString:   _strs[0]?.panelCount ?? 0,
+                    };
+                  });
+                  console.warn(
+                    '[HYDRATION STRING-DISTRIBUTION HEAL]',
+                    '\n  projectId:', projectId,
+                    '\n  saved layout:', _savedSorted.join('+'),
+                    '\n  engine layout:', _engSorted.join('+'),
+                    '\n  action: AUTO mode — rebuilt committed strings from the allocator (single source of truth)'
+                  );
+                  (savedConfig as any).inverters = _newInvs;
+                }
+              }
+            }
+          } catch (err) {
+            console.warn('[HYDRATION STRING-DISTRIBUTION HEAL] skipped (error):', err);
+          }
+        }
+
         if (savedConfig && Object.keys(savedConfig).length > 0) {
           console.log('[EngineeringPage] Restoring from engineering_config (auto-saved workspace)');
           // Merge: project-level fields from patches, all engineering fields from savedConfig
