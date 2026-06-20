@@ -3,10 +3,23 @@
 // Full audit & correction — Phase 1-10
 // ============================================================
 //
-// @deprecated  V1 — Superseded by structural-engine-v4.ts
-//              Used by: /api/engineering/structural, siteSurvey/engineeringIntegration, rules-engine
-//              Migration: update callers to use calculateStructuralV4() from structural-engine-v4.ts
-//              Retained for backward compatibility — do not add new features here
+// @deprecated  V1 — QUARANTINED (UNIFIED-ENGINE-DESIGN-SPEC.md, Step 4).
+//              NO LIVE CALLERS: the /api/engineering/structural route was deleted
+//              (it was the only app caller, and nothing fetched it — the live tab
+//              uses V3 via /structural-v2, /calculate uses V4). This module is now
+//              a library exercised only by lib/engineering-core.test.ts.
+//              The stale "Used by: siteSurvey/engineeringIntegration, rules-engine"
+//              note was wrong — grep confirms neither imports this.
+//              DO NOT WIRE THIS BACK IN. Do not add features.
+//
+//              ASSET TO PORT INTO V5: this engine's load-model-aware ATTACHMENT
+//              math (discrete ICC-ES `capacity × fastenersPerAttachment` @ SF>=1.0
+//              vs distributed NDS withdrawal `246 × embed × 1.6`) is a real
+//              capability V4 lacks (V4 uses a flat mountLayout SF<1.5 gate). The
+//              deleted route used yet a THIRD threshold (SF>=2.0). Reconciling
+//              which SF governs per load model is a PE-reviewed decision — fold it
+//              into the unified V5 attachment analysis (spec Step 6 territory),
+//              not by reviving this engine. Until then it stays test-only.
 //
 //
 // AUDIT CORRECTIONS APPLIED:
