@@ -554,6 +554,7 @@ export async function POST(req: NextRequest) {
       // ──────────────────────────────────────────────────────────────────
 
       mainPanelAmps:           Number(body.mainPanelAmps)          || 200,
+      panelBusRating:          Number(body.panelBusRating ?? body.mainPanelAmps) || 200,  // C1: busbar rating for the 120% rule
       utilityName:             String(body.utilityName ?? body.utilityCompany ?? body.utility ?? 'Local Utility'),
       interconnection:         (() => {
         const raw = String(body.interconnection ?? body.interconnectionType ?? 'LOAD_SIDE');
@@ -571,7 +572,7 @@ export async function POST(req: NextRequest) {
       batteryKwh:              Number(body.batteryKwh)             || 0,
       batteryBrand:            body.batteryBrand   ? String(body.batteryBrand)   : undefined,
       batteryCount:            body.batteryCount   ? Number(body.batteryCount)   : undefined,
-      batteryBackfeedA:        Number(body.batteryBackfeedA)       || undefined,
+      batteryBackfeedA:        _batBackfeedA,  // C9: datasheet-derived backfeed (same value the model uses), not the raw body field
       generatorBrand:          body.generatorBrand  ? String(body.generatorBrand)  : undefined,
       generatorModel:          body.generatorModel  ? String(body.generatorModel)  : undefined,
       generatorKw:             body.generatorKw     ? Number(body.generatorKw)     : undefined,
