@@ -1572,7 +1572,8 @@ function EngineeringPageInner() {
             const _hCount   = expectedHydrationPanelCount > 0 ? expectedHydrationPanelCount : _hTotal;
             if (_hPanel && _hCount > 0 && (_hInvId || _hBrand)) {
               const _hInput: Parameters<typeof sizeSystemFromBrand>[0] = {
-                systemType:        'roof',
+                // Honor the project's real mount type (roof / ground / fence) — never assume roof.
+                systemType:        ((savedConfig as any).systemType ?? 'roof'),
                 panelCount:        _hCount,
                 panelWattage:      _hPanel.watts ?? 400,
                 panelVoc:          _hPanel.voc,
@@ -6065,7 +6066,7 @@ function EngineeringPageInner() {
               let _pcEngStrings: { panelCount: number; inverterIndex?: number }[] | null = null;
               try {
                 const _pcSizingInput: Parameters<typeof sizeSystemFromBrand>[0] = {
-                  systemType: 'roof',
+                  systemType: (config.systemType ?? 'roof') as any,  // honor roof/ground/fence, not hardcoded roof
                   panelCount: _pcPc,
                   panelWattage: _pcPanel?.watts ?? 400,
                   panelVoc: _pcPanel?.voc ?? 49.6,
