@@ -228,6 +228,50 @@ export interface Conduit {
 // ============================================================
 
 export const SOLAR_PANELS: SolarPanel[] = [
+  // Tesla — Tesla Solar Panel (TSP-415 / TSP-420)
+  // Source: Tesla Solar Panel Datasheet (energylibrary.tesla.com). All-black
+  // Tesla-frame module, pairs natively with Tesla Panel Mount + Tesla Solar
+  // Inverter / Powerwall 3. 1000V max, 25A max series fuse, 18 power zones.
+  // NOCT not published on the datasheet — 45°C assumed (industry-typical).
+  // Cell chemistry not stated on the datasheet — mono-PERC assumed pending the
+  // detailed cutsheet. parallelStringLimit 2: (2-1)×1.25×Isc = 16.3A < 25A fuse;
+  // a 3rd parallel string would exceed the 25A series-fuse cap (needs OCPD).
+  {
+    id: 'tesla-tsp-420',
+    manufacturer: 'Tesla',
+    model: 'Solar Panel TSP-420',
+    category: 'solar_panel',
+    watts: 420, efficiency: 20.5,
+    voc: 40.95, vmp: 34.29, isc: 13.03, imp: 12.25,
+    tempCoeffVoc: -0.27, tempCoeffIsc: 0.04, tempCoeffPmax: -0.34,
+    maxSystemVoltage: 1000, maxSeriesFuseRating: 25,
+    nominalOperatingTemp: 45, parallelStringLimit: 2,
+    weight: 49, length: 71.1, width: 44.7, thickness: 1.57,
+    warranty: '25yr product / 25yr power', ulListing: 'UL 61730',
+    bifacial: false, cellType: 'mono-PERC',
+    datasheetUrl: 'https://energylibrary.tesla.com/docs/Public/Solar/Retrofit/Datasheet/TeslaSolarPanel/DatasheetTeslaSolarPanel.pdf',
+    ecosystemBrand: 'tesla', ecosystemFamily: 'Tesla Solar Panel',
+    compatibleWith: ['tesla-solar-inverter-3p8k', 'tesla-solar-inverter-5k', 'tesla-solar-inverter-5p7k', 'tesla-solar-inverter-7p6k'],
+    isNew: true,
+  },
+  {
+    id: 'tesla-tsp-415',
+    manufacturer: 'Tesla',
+    model: 'Solar Panel TSP-415',
+    category: 'solar_panel',
+    watts: 415, efficiency: 20.3,
+    voc: 40.92, vmp: 34.24, isc: 12.93, imp: 12.12,
+    tempCoeffVoc: -0.27, tempCoeffIsc: 0.04, tempCoeffPmax: -0.34,
+    maxSystemVoltage: 1000, maxSeriesFuseRating: 25,
+    nominalOperatingTemp: 45, parallelStringLimit: 2,
+    weight: 49, length: 71.1, width: 44.7, thickness: 1.57,
+    warranty: '25yr product / 25yr power', ulListing: 'UL 61730',
+    bifacial: false, cellType: 'mono-PERC',
+    datasheetUrl: 'https://energylibrary.tesla.com/docs/Public/Solar/Retrofit/Datasheet/TeslaSolarPanel/DatasheetTeslaSolarPanel.pdf',
+    ecosystemBrand: 'tesla', ecosystemFamily: 'Tesla Solar Panel',
+    compatibleWith: ['tesla-solar-inverter-3p8k', 'tesla-solar-inverter-5k', 'tesla-solar-inverter-5p7k', 'tesla-solar-inverter-7p6k'],
+    isNew: true,
+  },
   // SunPower
   {
     id: 'sp-maxeon7-440',

@@ -184,6 +184,99 @@ export interface MountingSystemSpec {
 const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
 
   // ══════════════════════════════════════════════════════════════════════════
+  // TESLA — Panel Mount (RAIL-LESS: Comp Rafter Base / Tile Hook + Leveling
+  // Feet + Interlocks + Front Skirt). UL 2703 listed, System Fire Class A.
+  // Component allowable loads (Comp Rafter): Uplift 569 lb (SF 2.0), Downforce
+  // 965 lb (SF 1.67), Shear 242 lb. Lag 5/16" → 2½" threaded embedment. Max
+  // attachment span 72", max cantilever 24". Min pitch 2:12 (9.46°). Allowable
+  // system PSF is span/zone-dependent — see Appendix C tables in the structural
+  // engine. Source: Tesla Panel Mount install manuals + Appendix C.
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    id: 'tesla-panel-mount-comp-rafter',
+    manufacturer: 'Tesla',
+    productLine: 'Tesla Panel Mount',
+    model: 'Comp Rafter',
+    category: 'roof_residential',
+    systemType: 'rail_less',
+    compatibleRoofTypes: ['asphalt_shingle'],
+    description: 'Tesla Panel Mount rail-less system for composition shingle roofs. Comp Rafter Base (2023000) lags into the rafter; Leveling Feet (2032169) + Interlocks (1576999) bond and secure modules; Front Skirt for a flush, rail-less aesthetic. UL 2703, Fire Class A. Pairs with Tesla Solar Panel + Tesla Solar Inverter / Powerwall 3.',
+    mount: {
+      model: 'Tesla Comp Rafter Base (2023000)',
+      attachmentMethod: 'l_foot_lag',
+      upliftCapacityLbs: 569,        // UL 2703 component allowable, SF 2.0
+      downwardCapacityLbs: 965,      // SF 1.67
+      shearCapacityLbs: 242,
+      fastenersPerMount: 1,
+      fastenerDiameterIn: 0.3125,    // 5/16" lag (2044245 4¾" / 2044244 5½")
+      fastenerEmbedmentIn: 2.5,      // 2½" threaded embedment into rafter
+      fastenerPulloutLbs: 569,       // governed by component allowable uplift (UL 2703)
+      maxSpacingIn: 72,              // max allowable span between attachments
+      minRafterDepthIn: 3.5,
+      ul2703Listed: true,
+      compatibleRoofTypes: ['asphalt_shingle'],
+    },
+    hardware: {
+      midClamp: 'Tesla Interlock (1576999)',
+      endClamp: 'Tesla Comp Rafter Leveling Foot (2032169)',
+      railSplice: 'N/A — rail-less',
+      groundLug: 'Tesla Ground Lockit (1578119) — grounds up to 72 modules',
+      lagBolt: 'Tesla Lag Screw 5/16 × 4.75" Hex T40 (2044245) / 5.5" (2044244)',
+      flashingKit: 'Comp Rafter Base injected sealant (Tonsan MS-1937, 1679265) + card flashing',
+      bondingHardware: 'Tesla Interlock + Ground Lockit (integrated UL 2703 bonding)',
+    },
+    maxWindSpeedMph: 160,            // screening cap; true rating is span/zone-dependent per Appendix C
+    maxSnowLoadPsf: 60,              // Tesla Solar Panel design load 60 psf (Appendix C governs by span)
+    maxRoofPitchDeg: 45,
+    minRoofPitchDeg: 9,              // 2:12 = 9.46°
+    ul2703Listed: true,
+    engineeringDataSource: 'Tesla Panel Mount - Comp Rafter Installation Manual + Appendix C (Allowable Mounting System Loading), energylibrary.tesla.com',
+    lastUpdated: '2026-04',
+  },
+  {
+    id: 'tesla-panel-mount-tile',
+    manufacturer: 'Tesla',
+    productLine: 'Tesla Panel Mount',
+    model: 'Tile',
+    category: 'roof_residential',
+    systemType: 'rail_less',
+    compatibleRoofTypes: ['tile_concrete', 'tile_clay'],
+    description: 'Tesla Panel Mount rail-less system for tile roofs. Tile Hooks (2262305) replace/relieve tiles and lag into the rafter; Spanner Bars (2129978) span above the tile surface; Flat/Round Leveling Feet (2177129/2133094) + Interlocks bond and secure modules. UL 2703, Fire Class A. Includes replacement flashing for waterproofing.',
+    mount: {
+      model: 'Tesla Tile Hook Assembly (2262305)',
+      attachmentMethod: 'tile_hook',
+      upliftCapacityLbs: 569,        // shared UL 2703 component allowables (Tile Appendix C not yet captured)
+      downwardCapacityLbs: 965,
+      shearCapacityLbs: 242,
+      fastenersPerMount: 1,
+      fastenerDiameterIn: 0.3125,    // 5/16" lag to rafter (2131805) + #15 deck screw (2049471) in offsets
+      fastenerEmbedmentIn: 2.5,
+      fastenerPulloutLbs: 569,
+      maxSpacingIn: 72,
+      minRafterDepthIn: 3.5,
+      ul2703Listed: true,
+      compatibleRoofTypes: ['tile_concrete', 'tile_clay'],
+    },
+    hardware: {
+      midClamp: 'Tesla Interlock (1576999) / Hybrid Interlock (1578969)',
+      endClamp: 'Tesla Round/Flat Leveling Foot (2133094 / 2177129)',
+      railSplice: 'Tesla Spanner Bar Splice Plate (2129977)',
+      groundLug: 'Tesla Ground Lockit (1578119)',
+      lagBolt: 'Tesla Lag Screw 5/16 × 4" Hex T40 (2131805)',
+      flashingKit: 'Tesla Replacement Flashing + Securing Bolt (2127987)',
+      tileHook: 'Tesla Tile Hook Assembly (2262305) + Spanner Bar (2129978)',
+      bondingHardware: 'Tesla Interlock + Ground Lockit (integrated UL 2703 bonding)',
+    },
+    maxWindSpeedMph: 160,
+    maxSnowLoadPsf: 60,
+    maxRoofPitchDeg: 45,
+    minRoofPitchDeg: 9,
+    ul2703Listed: true,
+    engineeringDataSource: 'Tesla Panel Mount - Tile Installation Manual, energylibrary.tesla.com (Tile Appendix C pending)',
+    lastUpdated: '2026-04',
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
   // IRONRIDGE — Rail-Based Residential
   // ══════════════════════════════════════════════════════════════════════════
   {
