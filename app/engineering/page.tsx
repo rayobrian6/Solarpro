@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation';
 import { computeSystem, type ComputedSystem, type ComputedSystemInput } from '@/lib/computed-system';
 import { systemTypeToInstallationType } from '@/lib/structural/types';
+import { resolveEquipment } from '@/lib/systemEquipmentResolver';
 import AppShell from '@/components/ui/AppShell';
 import PlanGate from '@/components/ui/PlanGate';
 import { useSubscription } from '@/hooks/useSubscription';
@@ -12435,6 +12436,48 @@ function EngineeringPageInner() {
                       ))}
                     </div>
                   </div>
+                  {/* ══════════ SOL FENCE MOUNTING (real SolFence system, not a roof picker) ══════════ */}
+                  {config.systemType === 'fence' ? (() => {
+                    const eq = resolveEquipment('fence');
+                    const rk = eq.racking;
+                    const spec = (label: string, value: string) => (
+                      <div className="rounded-lg border border-emerald-500/25 bg-slate-900/40 p-2.5">
+                        <div className="text-[10px] uppercase tracking-wide text-emerald-300/80">{label}</div>
+                        <div className="text-xs font-semibold text-white leading-snug">{value}</div>
+                      </div>
+                    );
+                    return (
+                      <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-4 mb-4">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-base">🚧</span>
+                          <span className="text-sm font-bold text-emerald-100">{rk.rackingBrand} — {rk.rackingModel}</span>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono ml-auto">{rk.certifications}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mb-3">{eq.sectionTitle} · panels mounted 90° vertical (bifacial). Power electronics (Enphase IQ8 micro or Tigo TS4-A-O optimizer) + wiring are installer-supplied — not in the SolFence kit.</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
+                          {spec('Material', rk.railMaterial)}
+                          {spec('Sections', "8 ft wide (incl. side channels + rails) — 6' = 2 panels, 4' = 1 panel")}
+                          {spec('Foundation', '2-3/8" steel pipe driven 4 ft min (post pounder); concrete-set 3 ft alt')}
+                          {spec('Attachment', rk.attachmentType)}
+                          {spec('Tilt', rk.tiltRange)}
+                          {spec('Warranty', rk.warranty)}
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {eq.attachmentCards.map((c, i) => (
+                            <div key={i} className="flex items-start gap-2 rounded-lg border border-slate-700/50 bg-slate-900/30 p-2.5">
+                              <span className="text-sm shrink-0">{c.icon}</span>
+                              <div>
+                                <div className="text-xs font-bold text-white">{c.label}</div>
+                                <div className="text-[11px] text-emerald-300/90">{c.hardware}</div>
+                                <div className="text-[10px] text-slate-400 leading-snug">{c.note}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-3">Real SolFence section/post/cap/donut/RCP SKUs + driven-steel foundation appear on the Bill of Materials. The roof/ground mounting picker below does not apply to a fence.</p>
+                      </div>
+                    );
+                  })() : null}
                   {/* Search bar + roof type indicator */}
                   <div className="flex items-center gap-3 mb-3">
                     <div className="flex-1 relative">
