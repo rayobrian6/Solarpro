@@ -80,6 +80,12 @@ export interface StructuralInputV4 {
   // Tracker
   trackerRowSpacingFt?: number;
   gcoverageRatio?: number;
+
+  // Fence (SolFence vertical bifacial solar fence — analyzeFence)
+  fenceHeightFt?: number;        // vertical panel height (5'10" metal-to-metal, 6' max)
+  fenceLengthFt?: number;        // total fence run
+  postSpacingFt?: number;        // section width (SolFence ~8 ft)
+  groundClearanceFt?: number;    // bottom of panels above grade (~2")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -192,6 +198,33 @@ export interface TrackerAnalysis {
   notes: string[];
 }
 
+// ── Fence (SolFence vertical bifacial solar fence) ──────────────────────────
+// A freestanding wall of vertical panels — governing load is WIND on the full
+// face (ASCE 7-22 Ch.29 freestanding wall), carried as a cantilever to each post
+// → overturning at the base → resisted by post embedment. Snow does NOT govern a
+// vertical face. SolFence specifies the embedment directly (GOLD datasheet), so
+// the "required embedment" is their engineered minimum, deepened only by frost or
+// an extreme-wind IBC 1807.3.3 check. See docs/FENCE-STRUCTURAL-ENGINE-SPEC.md.
+export interface FenceMountAnalysis {
+  postCount: number;
+  postSpacingFt: number;
+  fenceHeightFt: number;
+  sectionCount: number;
+  // wind (ASCE 7-22 §29.3 freestanding wall / solid sign)
+  velocityPressurePsf: number;     // qz
+  forceCoefficientCf: number;      // Cf (solid sign), governing (end) section
+  windForcePerPostLbs: number;     // lateral wind force carried by one post
+  overturningMomentFtLbs: number;  // per-post moment at grade
+  // embedment (SolFence-specified basis + frost + IBC site check)
+  requiredEmbedmentFt: number;     // max(SolFence min, frost+6in, IBC calc)
+  embedmentGovernedBy: 'solfence_min' | 'frost' | 'wind_ibc';
+  footingType: 'concrete_set' | 'driven_steel';
+  exceedsRatedWind: boolean;       // site design wind > SolFence 115 mph rating
+  ratedWindMph: number;
+  passes: boolean;
+  notes: string[];
+}
+
 export interface RackingBOM {
   rails: { qty: number; lengthFt: number; unit: string; description: string; partNumber: string };
   railSplices: { qty: number; unit: string; description: string; partNumber: string };
@@ -221,10 +254,15 @@ export interface StructuralResultV4 {
   ballastAnalysis?: BallastAnalysis;
   groundMountAnalysis?: GroundMountAnalysis;
   trackerAnalysis?: TrackerAnalysis;
+  fenceMountAnalysis?: FenceMountAnalysis;
   rackingBOM: RackingBOM;
   totalSystemWeightLbs: number;
   addedDeadLoadPsf: number;
   mountingSystem: MountingSystemSpec;
+  // true only when the output is genuinely engineered. Roof = true (validated).
+  // ground/fence stay false (ESTIMATE) until the PE-gated math is signed off —
+  // the Structural tab keys its "ESTIMATE — not engineered" banner off this.
+  engineered?: boolean;
   errors: StructuralIssue[];
   warnings: StructuralIssue[];
   recommendations: string[];
@@ -924,10 +962,149 @@ function calcRackingBOM(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// FENCE ENGINE (SolFence) — analyzeFence
+// Freestanding-wall wind (ASCE 7-22 §29.3) → per-post cantilever overturning →
+// embedment matched to SolFence's published spec. ESTIMATE (engineered:false)
+// until PE sign-off. Step 1: surfaces SolFence's real foundation requirement +
+// the >115 mph wind flag in place of the roof rafter stamp.
+// See docs/FENCE-STRUCTURAL-ENGINE-SPEC.md.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function naRackingBOM(): RackingBOM {
+  const z = (description: string) => ({ qty: 0, unit: 'ea', description, partNumber: 'N/A' });
+  return {
+    rails: { qty: 0, lengthFt: 0, unit: 'ea', description: 'N/A — SolFence sections (see fence BOM)', partNumber: 'N/A' },
+    railSplices: z('N/A — fence'), mounts: z('N/A — fence'), lFeet: z('N/A — fence'),
+    midClamps: z('N/A — fence'), endClamps: z('N/A — fence'), groundLugs: z('N/A — fence'),
+    lagBolts: z('N/A — fence'), flashingKits: z('N/A — fence'), bondingClips: z('N/A — fence'),
+  };
+}
+
+function analyzeFenceSystem(input: StructuralInputV4): StructuralResultV4 {
+  const errors: StructuralIssue[] = [];
+  const warnings: StructuralIssue[] = [];
+  const recommendations: string[] = [];
+
+  // ── Fence geometry (SolFence GOLD datasheet defaults) ──
+  const fenceHeightFt = input.fenceHeightFt ?? 6;            // 6' max (5'10" metal-to-metal)
+  const groundClearanceFt = input.groundClearanceFt ?? 0.17; // ~2"
+  const postSpacingFt = input.postSpacingFt ?? 8;            // ~8' (7'11") section width
+  const fenceLengthFt = input.fenceLengthFt ?? Math.max(postSpacingFt, input.panelCount * 4);
+  const RATED_WIND_MPH = 115;                                // SolFence rated wind
+
+  const sectionCount = Math.max(1, Math.ceil(fenceLengthFt / postSpacingFt));
+  const postCount = sectionCount + 1;
+
+  // ── Freestanding-wall wind — ASCE 7-22 §29.3 (solid sign / freestanding wall) ──
+  const centroidHeightFt = groundClearanceFt + fenceHeightFt / 2;
+  const qz = calcVelocityPressure(input.windSpeed, input.windExposure, Math.max(fenceHeightFt, 15));
+  const G = 0.85;
+  // Cf for a solid freestanding wall on grade (ASCE 7-22 Fig 29.3-1). End sections
+  // govern (mirrors the roof corner-zone lesson); a precise B/s + clearance-ratio
+  // lookup is a Phase-2 refinement. Conservative end value:
+  const Cf = 1.8;
+  const tribAreaFt2 = postSpacingFt * fenceHeightFt;
+  const windForcePerPostLbs = qz * G * Cf * tribAreaFt2;
+  const overturningMomentFtLbs = windForcePerPostLbs * centroidHeightFt;
+
+  // ── Embedment — match SolFence's published spec, deepen for frost ──
+  // GOLD datasheet: concrete-set posts min 3 ft deep, concrete within 6" of surface,
+  // extends 6" below frost line. (Driven 2-3/8" steel alt: 4 ft min.)
+  const frostDepthFt = (input.frostDepthIn ?? 0) / 12;
+  const SOLFENCE_MIN_CONCRETE_FT = 3.0;
+  const frostGovernedFt = frostDepthFt + 0.5;               // 6" below the frost line
+  const requiredEmbedmentFt = Math.max(SOLFENCE_MIN_CONCRETE_FT, frostGovernedFt);
+  const embedmentGovernedBy: FenceMountAnalysis['embedmentGovernedBy'] =
+    frostGovernedFt > SOLFENCE_MIN_CONCRETE_FT ? 'frost' : 'solfence_min';
+  // Phase-2: an IBC 1807.3.3 site-wind check can deepen this for extreme wind / poor soil.
+
+  const exceedsRatedWind = input.windSpeed > RATED_WIND_MPH;
+  if (exceedsRatedWind) {
+    warnings.push({
+      code: 'FENCE_WIND_EXCEEDS_RATING',
+      message: `Site design wind ${input.windSpeed} mph exceeds the SolFence rated ${RATED_WIND_MPH} mph`,
+      severity: 'warning',
+      suggestion: 'Confirm a high-wind SolFence configuration with the manufacturer (Sarah @ SolFence)',
+      reference: 'SolFence rated 115 mph',
+    });
+  }
+
+  recommendations.push(
+    `SolFence foundation: posts buried min ${SOLFENCE_MIN_CONCRETE_FT.toFixed(0)} ft, concrete within 6" of surface, 6" below frost line (frost ${frostDepthFt.toFixed(1)} ft) → required embedment ${requiredEmbedmentFt.toFixed(1)} ft. Alt: driven 2-3/8" steel posts, 4 ft min.`,
+    `ESTIMATE — not engineered: grounded in SolFence's published spec (6061-T6, 115 mph, GOLD datasheet) but the section-to-post connection allowable + a stamped PE letter are not yet validated. Do not submit as engineered until a licensed PE reviews.`,
+  );
+
+  const fenceMountAnalysis: FenceMountAnalysis = {
+    postCount, postSpacingFt, fenceHeightFt, sectionCount,
+    velocityPressurePsf: qz, forceCoefficientCf: Cf, windForcePerPostLbs, overturningMomentFtLbs,
+    requiredEmbedmentFt, embedmentGovernedBy, footingType: 'concrete_set',
+    exceedsRatedWind, ratedWindMph: RATED_WIND_MPH,
+    passes: !exceedsRatedWind,
+    notes: [
+      `Wind: qz ${qz.toFixed(1)} psf × G ${G} × Cf ${Cf} × ${tribAreaFt2.toFixed(0)} ft² = ${windForcePerPostLbs.toFixed(0)} lb/post`,
+      `Overturning ${overturningMomentFtLbs.toFixed(0)} ft-lb at grade (load centroid ${centroidHeightFt.toFixed(2)} ft)`,
+    ],
+  };
+
+  // Panel geometry is still computed (panels exist) but the roof rafter/rail/mount
+  // model does not apply to a vertical fence — those fields are stubbed N/A.
+  const geometry = computeArrayGeometry({
+    panelCount: input.panelCount,
+    panel: { lengthIn: input.panelLengthIn, widthIn: input.panelWidthIn, weightLbs: input.panelWeightLbs },
+    orientation: input.panelOrientation, rowCount: input.rowCount ?? 1, colCount: input.colCount ?? input.panelCount,
+    moduleGapIn: input.moduleGapIn ?? 0.5, rowGapIn: input.rowGapIn ?? 6, railOverhangIn: 6, railsPerRow: 2,
+  });
+  // mountingSystem is required by the result type; fence resolves no roof mount —
+  // mirror the main engine's default so the shape is valid (the real fence hardware
+  // lives in the fence BOM, not this field).
+  const system = getMountingSystemById(resolveMountingSystemId(input.mountingSystemId)) ?? getMountingSystemById('ironridge-xr100')!;
+
+  return {
+    status: 'WARNING',                  // always ESTIMATE until PE sign-off
+    installationType: 'fence',
+    engineered: false,
+    arrayGeometry: geometry,
+    wind: {
+      velocityPressurePsf: qz, netUpliftPressurePsf: 0, netDownwardPressurePsf: 0,
+      roofZone: 'corner', gcpUplift: 0, gcpDownward: 0,
+      exposureCoeff: getKz(Math.max(fenceHeightFt, 15), input.windExposure), designWindSpeedMph: input.windSpeed,
+    },
+    snow: { groundSnowLoadPsf: input.groundSnowLoad, roofSnowLoadPsf: 0, slopeFactor: 0, thermalFactor: 0, importanceFactor: 1 },
+    mountLayout: {
+      mountSpacingIn: postSpacingFt * 12, mountCount: postCount, mountsPerRail: 0,
+      safetyFactor: 0, upliftPerMountLbs: 0, downwardPerMountLbs: 0, mountCapacityLbs: 0,
+      tributaryAreaPerMountFt2: tribAreaFt2, spacingWasReduced: false, maxAllowedSpacingIn: postSpacingFt * 12,
+    },
+    rafterAnalysis: {
+      framingType: 'unknown', size: 'N/A', spacingIn: 0, spanFt: 0, species: 'N/A',
+      totalLoadPsf: 0, pvDeadLoadPsf: 0, roofDeadLoadPsf: 0, snowLoadPsf: 0,
+      bendingMomentDemandFtLbs: 0, bendingMomentCapacityFtLbs: 0, bendingUtilization: 0,
+      shearDemandLbs: 0, shearCapacityLbs: 0, shearUtilization: 0,
+      deflectionIn: 0, allowableDeflectionIn: 0, deflectionUtilization: 0,
+      overallUtilization: 0, passes: true, notes: ['N/A — a fence has no rafters'],
+    },
+    fenceMountAnalysis,
+    rackingBOM: naRackingBOM(),
+    totalSystemWeightLbs: geometry.totalPanelWeightLbs,
+    addedDeadLoadPsf: 0,
+    mountingSystem: system,
+    errors, warnings, recommendations,
+    debugInfo: { framingTypeResolved: 'unknown', autoDetectedFraming: false, mountSpacingIterations: 0, pvDeadLoadPsf: 0 },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MAIN ENGINE V4
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function runStructuralCalcV4(input: StructuralInputV4): StructuralResultV4 {
+  // Fence is a freestanding wall — a fundamentally different load case (wind on the
+  // full face → post overturning, no rafters/roof zones). Route it to its own
+  // engine BEFORE the roof flow so it never gets a rafter/mount stamp.
+  if (input.installationType === 'fence') {
+    return analyzeFenceSystem(input);
+  }
+
   const errors: StructuralIssue[] = [];
   const warnings: StructuralIssue[] = [];
   const recommendations: string[] = [];

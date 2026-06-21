@@ -49,7 +49,8 @@ export type InstallationType =
   | 'commercial_ballasted'
   | 'ground_mount'
   | 'tracker'
-  | 'carport';
+  | 'carport'
+  | 'fence';            // SolFence vertical bifacial solar fence (analyzeFence)
 
 // ── Mount-type mapping (UNIFIED-ENGINE-DESIGN-SPEC.md, Step 2) ────────────────
 // Single source of truth: systemType ('roof' | 'ground' | 'fence' — the UI/config
@@ -64,13 +65,13 @@ export type InstallationType =
 //     ground mounting system is passed yet. The real exposed-wind + IBC 1807.3
 //     embedment math is Step 6; output stays "ESTIMATE — not engineered" behind
 //     the structural-tab guardrail banner.
-//   • 'fence' has no InstallationType member and no engine branch yet (Step 7
-//     adds analyzeFence). It maps to 'roof_residential' to preserve today's
-//     behavior — the ESTIMATE banner already labels the result a roof placeholder.
+//   • 'fence' → 'fence' routes to the dedicated analyzeFence path in V4
+//     (freestanding-wall wind + SolFence post embedment). Output stays
+//     "ESTIMATE — not engineered" (engineered:false) until PE sign-off.
 export function systemTypeToInstallationType(systemType?: string): InstallationType {
   switch (systemType) {
     case 'ground': return 'ground_mount';
-    case 'fence':  return 'roof_residential'; // TODO Step 7: dedicated 'fence' branch
+    case 'fence':  return 'fence';
     case 'roof':
     default:       return 'roof_residential';
   }

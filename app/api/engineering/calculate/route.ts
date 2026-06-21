@@ -313,6 +313,12 @@ export async function POST(req: NextRequest) {
           roofDeadLoadPsf:  structural.roofDeadLoadPsf ?? 15,
           soilType:         structural.soilType,
           frostDepthIn:     structural.frostDepthIn,
+          // Fence (SolFence) — forwarded to analyzeFence; falls back to SolFence
+          // defaults (6ft height, 8ft section) when the client omits them.
+          fenceHeightFt:    structural.fenceHeightFt,
+          fenceLengthFt:    structural.fenceLengthFt,
+          postSpacingFt:    structural.postSpacingFt,
+          groundClearanceFt: structural.groundClearanceFt,
         };
         structuralResult = runStructuralCalcV4(structuralInput);
       } catch (structErr: unknown) {
