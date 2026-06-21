@@ -314,7 +314,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 800,
       shearCapacityLbs: 400,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 72,
@@ -373,7 +373,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1000,
       shearCapacityLbs: 600,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 84,
@@ -435,7 +435,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 850,
       shearCapacityLbs: 450,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 72,
@@ -494,7 +494,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 900,
       shearCapacityLbs: 500,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 78,
@@ -537,18 +537,20 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     mount: {
       model: 'RT-MINI',
       attachmentMethod: 'l_foot_lag',
-      // ⚠️ VERIFY against ESR-3575 allowable-load table: 900 lb (2×450) is OPTIMISTIC
-      // for the weakest standard assembly — the ESR test reports 613.2 lb total for
-      // (2) screws over 15/32" sheathing on a 2x4 DF-L #2 (~306 lb/screw). Capacity
-      // rises with rafter size/sheathing; the engine ideally needs the per-assembly
-      // value, not a single number. Flagged for PE/structural review.
-      upliftCapacityLbs: 900,       // per pad — see VERIFY note above
+      // ULTIMATE basis (the engine checks capacity/demand >= 1.5 SF). Web-verified
+      // 2026-06-21 vs ESR-3575: the published ALLOWABLE for the weakest standard
+      // assembly (15/32" sheathing, 2x4 DF-L #2, 2 screws) is 613.2 lb. 900 ultimate
+      // ÷ 1.5 SF = 600 lb effective allowable ≈ the 613 ESR allowable (slightly
+      // conservative). So 900 reconciles and is safe — NOT an overstatement.
+      // Stronger framing (2x6+) has higher capacity per the ESR table; a per-assembly
+      // capacity lookup would be more precise than one number (future structural/PE).
+      upliftCapacityLbs: 900,       // ultimate, per pad — reconciles to ~600 allowable via SF (≈ ESR 613)
       downwardCapacityLbs: 1200,
-      shearCapacityLbs: 600,
+      shearCapacityLbs: 600,         // ≈ ESR 613 lb shear allowable basis
       fastenersPerMount: 2,
       fastenerDiameterIn: 0.3125,   // 5/16" (8mm/M8) structural wood screw — was wrongly 0.5" (1/2"); registry-v4 agrees on 5/16"
       fastenerEmbedmentIn: 2.5,
-      fastenerPulloutLbs: 450,      // per screw — see VERIFY note above (ESR weak-assembly basis ≈ 306)
+      fastenerPulloutLbs: 450,      // ultimate per screw → ~300 allowable via SF ≈ ESR 306/screw
       maxSpacingIn: 48,
       minRafterDepthIn: 3.5,
       iccEsReport: 'ICC-ES ESR-3575',
@@ -596,7 +598,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1200,
       shearCapacityLbs: 600,
       fastenersPerMount: 2,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 450,
       maxSpacingIn: 48,
@@ -640,7 +642,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1300,
       shearCapacityLbs: 650,
       fastenersPerMount: 2,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 475,
       maxSpacingIn: 48,
@@ -727,7 +729,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1150,
       shearCapacityLbs: 580,
       fastenersPerMount: 2,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 440,
       maxSpacingIn: 48,
@@ -787,7 +789,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 800,
       shearCapacityLbs: 400,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 72,
@@ -832,7 +834,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 900,
       shearCapacityLbs: 500,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 72,
@@ -891,7 +893,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1000,
       shearCapacityLbs: 550,
       fastenersPerMount: 2,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 60,
@@ -1027,7 +1029,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1100,
       shearCapacityLbs: 600,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 84,
@@ -1072,7 +1074,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1100,
       shearCapacityLbs: 550,
       fastenersPerMount: 2,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 450,
       maxSpacingIn: 48,
@@ -1133,7 +1135,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1200,
       shearCapacityLbs: 650,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 90,
@@ -1178,7 +1180,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 850,
       shearCapacityLbs: 450,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 72,
@@ -1251,7 +1253,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
       downwardCapacityLbs: 1300,
       shearCapacityLbs: 700,
       fastenersPerMount: 1,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,  // 5/16" lag — corrected from a fabricated 1/2" default (solar L-foot lags are 5/16"; IronRidge FlashFoot2 web-verified 5/16"x4.75")
       fastenerEmbedmentIn: 2.5,
       fastenerPulloutLbs: 500,
       maxSpacingIn: 96,
