@@ -4476,6 +4476,35 @@ function EngineeringPageInner() {
     setCalcError(null);
     setConfigDirty(false);
     try {
+      // RC-1: fail loud on a DANGLING equipment reference instead of silently
+      // computing on placeholder specs. The equipment DB is complete (verified —
+      // no entry is missing critical specs), so a lookup miss can only mean the
+      // config points at an id that isn't in the DB (a removed/renamed SKU or a
+      // stale saved project). Per "don't fake missing specs — go find them",
+      // surface it so the user re-selects, rather than quietly substituting a
+      // generic 41.6V / 7.6kW number and presenting it as engineered.
+      const _unresolved: string[] = [];
+      config.inverters.forEach((inv, ii) => {
+        if (inv.inverterId && !getInvById(inv.inverterId, inv.type)) {
+          _unresolved.push(`Inverter ${ii + 1} (${inv.inverterId})`);
+        }
+        inv.strings.forEach((str, si) => {
+          if (str.panelId && !getPanelById(str.panelId)) {
+            _unresolved.push(`Inverter ${ii + 1} · String ${si + 1} panel (${str.panelId})`);
+          }
+        });
+      });
+      if (config.batteryId && !getBatteryById(config.batteryId)) {
+        _unresolved.push(`Battery (${config.batteryId})`);
+      }
+      if (_unresolved.length > 0) {
+        setCalcError(
+          `Unresolved equipment — not found in the equipment database, so engineering will not compute on placeholder specs. ` +
+          `Re-select in System Config: ${_unresolved.join('; ')}.`,
+        );
+        return;  // finally{} resets setCalculating
+      }
+
       const payload = buildCalcPayload();
 
       // Run legacy calculate + new rules engine in parallel.
