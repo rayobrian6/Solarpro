@@ -482,6 +482,7 @@ export async function POST(req: NextRequest) {
         backupInterfaceMaxA:           _buiMaxA,
         hasEnphaseIQSC3:               _hasEnphaseIQSC3 || undefined,
         runLengthsBatteryGen:          body.runLengthsBatteryGen ?? undefined,
+        systemType:                    _systemType,   // fence → SolFence mounting row in the equipment schedule
       };
 
       // Phase 4: Battery pipeline stage 1 diagnostic

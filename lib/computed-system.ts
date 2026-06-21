@@ -429,6 +429,7 @@ export interface ComputedSystemInput {
   atsModel?: string;
   backupInterfaceBrand?: string;
   backupInterfaceModel?: string;
+  systemType?: string;              // 'roof' | 'ground' | 'fence' — adds the mounting/racking row to the equipment schedule
 }
 
 // ─── NEC Tables ──────────────────────────────────────────────────────────────
@@ -2105,6 +2106,20 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       { tag: 'METER-1', description: 'Production Meter', manufacturer: 'Utility', model: 'Revenue Grade Meter', qty: 1, rating: '240V AC', necReference: 'NEC 705.12' },
       { tag: 'MSP-1', description: 'Main Service Panel', manufacturer: input.mainPanelBrand, model: `${input.mainPanelAmps}A Panel`, qty: 1, rating: `${input.mainPanelAmps}A / 120/240V`, necReference: 'NEC 705.12(B)' },
     );
+  }
+
+  // Mounting / racking — SolFence fence systems get their real mounting row
+  // (the roof/ground racking row is a separate, broader follow-up).
+  if (input.systemType === 'fence') {
+    equipmentSchedule.push({
+      tag: 'RACK-1',
+      description: 'Mounting — SOL Fence Vertical Section System',
+      manufacturer: 'SolFence',
+      model: 'Vertical Section System (6061-T6 aluminum, 8 ft sections)',
+      qty: 1,
+      rating: '90° vertical bifacial · 2-3/8" steel posts driven 4 ft min · UL 2703 · 115 mph / 113 PSF',
+      necReference: 'UL 2703 / IBC 1807.3 — see BOM for section/post counts',
+    });
   }
 
   // Battery / Generator / ATS — add to equipment schedule if configured

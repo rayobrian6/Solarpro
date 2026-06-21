@@ -2590,6 +2590,8 @@ function EngineeringPageInner() {
       mainPanelBrand: config.mainPanelBrand ?? 'Square D',
       panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
       interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
+      systemType: config.systemType,   // adds the SolFence mounting row to the equipment schedule for fence
+
       branchCount: topology === 'micro' ? Math.ceil(totalPanels / (modulesPerDevice * branchLimit)) : undefined,
       // B1 FIX: Pass the actual string count from config.inverters so computeSystem()
       // uses the user's layout rather than auto-calculating from NEC 690.7 physics.
