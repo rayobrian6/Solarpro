@@ -210,11 +210,12 @@ function deriveFenceStructural(input: StructuralBOMInput, log: string[]): Struct
     true));
 
   // Local-sourcing advisory — NOT in the SolFence kit, so no SolFence price.
-  // Per the SolFence price sheet, the structural foundation (steel post + concrete)
-  // is sourced locally, and optimizers + wiring are supplied by the electrician.
-  items.push(mkItem('structural', 'foundation', 'Local Supply', 'Steel Post + Concrete Footing (source locally)',
-    'LOCAL-STEEL-POST-CONCRETE',
-    `Foundation steel post + concrete footing — sourced locally per SolFence (1 per post)`,
+  // SolFence standard foundation = a 2-3/8" steel pipe DRIVEN 4 ft min with a post
+  // pounder (no concrete; concrete-set is the alt). Steel + the driving are sourced
+  // locally; optimizers + wiring are supplied by the electrician.
+  items.push(mkItem('structural', 'foundation', 'Local Supply', '2-3/8" Driven Steel Post (source locally)',
+    'LOCAL-DRIVEN-STEEL-POST',
+    `Foundation: 2-3/8" steel pipe driven 4 ft min with a post pounder (no concrete) — sourced locally per SolFence (1 per post)`,
     postCount, 'ea',
     `1 per post × ${postCount} — LOCAL SOURCING, not in SolFence kit`,
     true));

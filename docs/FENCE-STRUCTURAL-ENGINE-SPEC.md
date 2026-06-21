@@ -26,7 +26,7 @@ From the Sol Fence LLC GOLD datasheet + sheets (see `[[solfence-equipment-data]]
 - **Section:** **7'11" long**, 2 panels/section, up to 860 W. Heights: 6 ft (2 panels) or 4 ft (1 panel). Fence height 5'10" metal-to-metal, 6' max, 2" ground clearance.
 - **Posts:** 4x4, **6061-T6 aluminum, 121-mil (0.121") wall**; hot-dip galvanized steel foundation posts. Lengths 6.5 / 4.5 / 9 ft.
 - **System wind rating:** **115 mph.** Snow: 113 PSF (capacity claim — does not govern a vertical face).
-- **Foundation (SolFence-specified, §3.3):** concrete-set posts **min 3 ft deep, 6" below frost line** — or **driven steel 2⅜" posts, 4 ft min**. Steel post + concrete sourced locally; the engine OUTPUTS the required Ø × depth.
+- **Foundation (SolFence-specified, §3.3):** standard install = **2⅜" steel pipe DRIVEN 4 ft min with a post pounder** (no concrete; "faster install, various soil"). Concrete-set (min 3 ft, 6" below frost) is the alt "max stability" option. Steel sourced locally; the engine OUTPUTS the required driven depth.
 - **Power electronics:** Tigo TS4-A-O optimizer (per datasheet) or Enphase IQ8 micro, installer-supplied — irrelevant to structural.
 
 The engine must **flag when the site design wind exceeds the 115 mph product rating** (a hard limit regardless of the embedment calc).
@@ -55,11 +55,11 @@ M_ot       = F_post · h_c                            (overturning moment at gra
 ```
 
 ### 3.3 Required embedment — match SolFence's spec, validate with IBC 1807.3.3
-> **★ SolFence specifies the embedment directly (GOLD datasheet) — this IS their engineered basis, so the engine MATCHES it rather than free-deriving.** Two foundation options:
-> - **Concrete-set:** posts buried **min 3 ft deep**, concrete within 6" of surface, **extends 6" below the frost line**.
-> - **Driven steel:** 2⅜" steel posts **driven 4 ft minimum**.
+> **★ SolFence specifies the embedment directly (GOLD datasheet) — this IS their engineered basis, so the engine MATCHES it rather than free-deriving.** Standard method + alt:
+> - **Driven steel (STANDARD):** 2⅜" steel pipe **driven 4 ft minimum** with a post pounder (no concrete) — "faster install, ideal for various soil".
+> - **Concrete-set (alt, max stability):** posts buried min 3 ft, concrete within 6" of surface, 6" below frost line.
 >
-> The engine's required embedment = **max( SolFence minimum [3 ft concrete / 4 ft driven], frostDepth + 6", IBC 1807.3.3 calc for site wind+soil )**. For typical sites the SolFence minimum + frost-line rule governs and **matches their stamp**; the IBC calc only deepens it for extreme wind/poor soil (and flags if it exceeds what SolFence rates). Below is the IBC check used for that site-specific validation:
+> The engine's required embedment (driven default) = **max( 4 ft driven minimum, frostDepth + 6", IBC 1807.3.3 calc for site wind+soil )**. For typical sites the 4 ft driven minimum + frost-line rule governs and **matches their datasheet**; the IBC calc only deepens it for extreme wind/poor soil (and flags if it exceeds what SolFence rates). Below is the IBC check used for that site-specific validation:
 
 **IBC 1807.3.3** (non-constrained embedded post, no surface constraint):
 ```

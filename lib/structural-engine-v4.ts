@@ -1007,15 +1007,18 @@ function analyzeFenceSystem(input: StructuralInputV4): StructuralResultV4 {
   const windForcePerPostLbs = qz * G * Cf * tribAreaFt2;
   const overturningMomentFtLbs = windForcePerPostLbs * centroidHeightFt;
 
-  // ── Embedment — match SolFence's published spec, deepen for frost ──
-  // GOLD datasheet: concrete-set posts min 3 ft deep, concrete within 6" of surface,
-  // extends 6" below frost line. (Driven 2-3/8" steel alt: 4 ft min.)
+  // ── Embedment — match SolFence's standard install: DRIVEN 2-3/8" steel pipe ──
+  // GOLD datasheet, confirmed by Ray: the standard SolFence foundation is a 2-3/8"
+  // steel pipe DRIVEN 4 ft minimum with a post pounder (no concrete) — "faster
+  // install, ideal for various soil conditions". (Concrete-set min 3 ft / 6" below
+  // frost is the alt "maximum stability" option.) Driven embedment must also clear
+  // the frost line.
   const frostDepthFt = (input.frostDepthIn ?? 0) / 12;
-  const SOLFENCE_MIN_CONCRETE_FT = 3.0;
+  const SOLFENCE_MIN_DRIVEN_FT = 4.0;                        // 2-3/8" pipe driven 4 ft min
   const frostGovernedFt = frostDepthFt + 0.5;               // 6" below the frost line
-  const requiredEmbedmentFt = Math.max(SOLFENCE_MIN_CONCRETE_FT, frostGovernedFt);
+  const requiredEmbedmentFt = Math.max(SOLFENCE_MIN_DRIVEN_FT, frostGovernedFt);
   const embedmentGovernedBy: FenceMountAnalysis['embedmentGovernedBy'] =
-    frostGovernedFt > SOLFENCE_MIN_CONCRETE_FT ? 'frost' : 'solfence_min';
+    frostGovernedFt > SOLFENCE_MIN_DRIVEN_FT ? 'frost' : 'solfence_min';
   // Phase-2: an IBC 1807.3.3 site-wind check can deepen this for extreme wind / poor soil.
 
   const exceedsRatedWind = input.windSpeed > RATED_WIND_MPH;
@@ -1030,14 +1033,14 @@ function analyzeFenceSystem(input: StructuralInputV4): StructuralResultV4 {
   }
 
   recommendations.push(
-    `SolFence foundation: posts buried min ${SOLFENCE_MIN_CONCRETE_FT.toFixed(0)} ft, concrete within 6" of surface, 6" below frost line (frost ${frostDepthFt.toFixed(1)} ft) → required embedment ${requiredEmbedmentFt.toFixed(1)} ft. Alt: driven 2-3/8" steel posts, 4 ft min.`,
+    `SolFence foundation: 2-3/8" steel pipe DRIVEN ${SOLFENCE_MIN_DRIVEN_FT.toFixed(0)} ft min with a post pounder (no concrete), clearing 6" below frost (frost ${frostDepthFt.toFixed(1)} ft) → required embedment ${requiredEmbedmentFt.toFixed(1)} ft. Alt: concrete-set 3 ft min for max stability.`,
     `ESTIMATE — not engineered: grounded in SolFence's published spec (6061-T6, 115 mph, GOLD datasheet) but the section-to-post connection allowable + a stamped PE letter are not yet validated. Do not submit as engineered until a licensed PE reviews.`,
   );
 
   const fenceMountAnalysis: FenceMountAnalysis = {
     postCount, postSpacingFt, fenceHeightFt, sectionCount,
     velocityPressurePsf: qz, forceCoefficientCf: Cf, windForcePerPostLbs, overturningMomentFtLbs,
-    requiredEmbedmentFt, embedmentGovernedBy, footingType: 'concrete_set',
+    requiredEmbedmentFt, embedmentGovernedBy, footingType: 'driven_steel',
     exceedsRatedWind, ratedWindMph: RATED_WIND_MPH,
     passes: !exceedsRatedWind,
     notes: [

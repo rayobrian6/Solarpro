@@ -10413,7 +10413,7 @@ function EngineeringPageInner() {
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
                       {cell('Posts', `${fm.postCount}`, `${fm.sectionCount} sections @ ${fm.postSpacingFt} ft`)}
-                      {cell('Required Embedment', `${fm.requiredEmbedmentFt.toFixed(1)} ft`, fm.embedmentGovernedBy === 'frost' ? 'frost-governed (6" below)' : 'SolFence 3 ft min')}
+                      {cell('Driven Embedment', `${fm.requiredEmbedmentFt.toFixed(1)} ft`, fm.embedmentGovernedBy === 'frost' ? 'frost-governed (6" below)' : 'SolFence 4 ft driven min')}
                       {cell('Wind / Post', `${Math.round(fm.windForcePerPostLbs)} lb`, `qz ${fm.velocityPressurePsf.toFixed(1)} psf · Cf ${fm.forceCoefficientCf}`)}
                       {cell('Overturning', `${Math.round(fm.overturningMomentFtLbs).toLocaleString()} ft-lb`, `${fm.fenceHeightFt.toFixed(1)} ft tall`)}
                     </div>
@@ -10421,7 +10421,7 @@ function EngineeringPageInner() {
                       <div className="text-xs text-amber-300 mb-2">⚠ Site design wind exceeds SolFence's {fm.ratedWindMph} mph rating — confirm a high-wind configuration with the manufacturer (Sarah @ SolFence).</div>
                     ) : null}
                     <div className="text-[11px] text-slate-400 leading-relaxed">
-                      Foundation: 4x4 posts (6061-T6) buried min 3 ft, concrete within 6" of surface, 6" below frost line — or driven 2-3/8" steel 4 ft min. ESTIMATE — not engineered until PE-validated.
+                      Foundation: 2-3/8" steel pipe driven 4 ft min with a post pounder (no concrete; clears 6" below frost) — concrete-set 3 ft is the alt for max stability. 4x4 posts are 6061-T6. ESTIMATE — not engineered until PE-validated.
                     </div>
                   </div>
                 );
