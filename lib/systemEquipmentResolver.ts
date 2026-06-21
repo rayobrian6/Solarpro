@@ -144,7 +144,7 @@ const equipmentMap: Record<SystemTypeKey, EquipmentSpec> = {
     racking: {
       rackingBrand:   'SolFence',                       // Sol Fence LLC (solfence.solar), Newburgh IN
       rackingModel:   'SOL Fence Vertical Section System',
-      railMaterial:   'Aircraft-grade aluminum',        // per SolFence sales sheet (was wrongly '6063-T6')
+      railMaterial:   '6061-T6 aluminum (121-mil), galvanized steel foundation posts', // per SolFence GOLD datasheet (was wrongly '6063-T6')
       hardware:       'Pre-built sections (side channels + rails) on 4x4 posts',
       attachmentType: 'Vertical Fence Post Mount (8 ft wide sections)',
       attachmentNote: 'Panels mounted vertically on 4x4 posts, bifacial; steel post + concrete sourced locally',
@@ -179,8 +179,8 @@ const equipmentMap: Record<SystemTypeKey, EquipmentSpec> = {
       },
       {
         label:    'Power Electronics (installer-supplied)',
-        hardware: 'Enphase IQ8 microinverter (racking-compatible) or optimizers',
-        note:     'Per SolFence (Sarah): the racking channel is sized for the Enphase IQ8 microinverter — APsystems micros do NOT fit (larger form factor). Optimizers are also supported. Power electronics + all wiring are NOT in the SolFence kit — supplied by the installer. Per-panel electronics suit vertical bifacial (eliminates string mismatch).',
+        hardware: 'Tigo TS4-A-O optimizer (per datasheet) or Enphase IQ8 microinverter',
+        note:     'Per SolFence GOLD datasheet: Tigo TS4-A-O optimizer (panel monitoring + rapid shutdown) when needed. Enphase IQ8 micro also fits the racking (APsystems micros do NOT — larger form factor). Power electronics + all wiring are NOT in the SolFence kit — supplied by the installer.',
         icon:     '⚡',
       },
     ],

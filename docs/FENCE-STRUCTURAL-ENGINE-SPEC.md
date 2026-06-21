@@ -22,12 +22,12 @@ So `analyzeFence` is its own load case: **freestanding-wall wind → per-post ca
 
 ## 2. Real SolFence parameters (the engine's defaults)
 
-From the Sol Fence LLC sheets (see `[[solfence-equipment-data]]`):
-- **Section width:** 8 ft (post spacing). **Heights:** 6 ft (2 panels/section) or 4 ft (1 panel/section).
-- **Posts:** 4x4, lengths 6.5 ft (6' config) / 4.5 ft (4' config) / 9 ft (tall option). **Material:** aircraft-grade aluminum.
-- **System wind rating:** **115 mph.** Snow: 113 PSF (capacity claim).
-- **Foundation:** steel post + concrete — **sourced locally** (so embedment + footing are a designed *requirement output*, not a SolFence SKU).
-- **Power electronics:** Enphase IQ8 micro (racking-compatible) or optimizers, installer-supplied — irrelevant to structural.
+From the Sol Fence LLC GOLD datasheet + sheets (see `[[solfence-equipment-data]]`):
+- **Section:** **7'11" long**, 2 panels/section, up to 860 W. Heights: 6 ft (2 panels) or 4 ft (1 panel). Fence height 5'10" metal-to-metal, 6' max, 2" ground clearance.
+- **Posts:** 4x4, **6061-T6 aluminum, 121-mil (0.121") wall**; hot-dip galvanized steel foundation posts. Lengths 6.5 / 4.5 / 9 ft.
+- **System wind rating:** **115 mph.** Snow: 113 PSF (capacity claim — does not govern a vertical face).
+- **Foundation (SolFence-specified, §3.3):** concrete-set posts **min 3 ft deep, 6" below frost line** — or **driven steel 2⅜" posts, 4 ft min**. Steel post + concrete sourced locally; the engine OUTPUTS the required Ø × depth.
+- **Power electronics:** Tigo TS4-A-O optimizer (per datasheet) or Enphase IQ8 micro, installer-supplied — irrelevant to structural.
 
 The engine must **flag when the site design wind exceeds the 115 mph product rating** (a hard limit regardless of the embedment calc).
 
@@ -54,7 +54,14 @@ h_c        = fenceHeightFt / 2 + groundClearanceFt  (centroid height above grade
 M_ot       = F_post · h_c                            (overturning moment at grade)
 ```
 
-### 3.3 Required embedment — IBC 1807.3.3 (non-constrained embedded post, no surface constraint)
+### 3.3 Required embedment — match SolFence's spec, validate with IBC 1807.3.3
+> **★ SolFence specifies the embedment directly (GOLD datasheet) — this IS their engineered basis, so the engine MATCHES it rather than free-deriving.** Two foundation options:
+> - **Concrete-set:** posts buried **min 3 ft deep**, concrete within 6" of surface, **extends 6" below the frost line**.
+> - **Driven steel:** 2⅜" steel posts **driven 4 ft minimum**.
+>
+> The engine's required embedment = **max( SolFence minimum [3 ft concrete / 4 ft driven], frostDepth + 6", IBC 1807.3.3 calc for site wind+soil )**. For typical sites the SolFence minimum + frost-line rule governs and **matches their stamp**; the IBC calc only deepens it for extreme wind/poor soil (and flags if it exceeds what SolFence rates). Below is the IBC check used for that site-specific validation:
+
+**IBC 1807.3.3** (non-constrained embedded post, no surface constraint):
 ```
 d  = 0.5 · A · ( 1 + sqrt( 1 + (4.36 · h_c) / A ) )
 A  = 2.34 · P / (S1 · b)
@@ -136,10 +143,11 @@ Steps 2–4 each verified by running the engine on real numbers (a known SolFenc
 
 ---
 
-## 7. Open items to get from SolFence (Sarah) — would make this PE-grade fast
-- The **SolFence PE stamp / structural load tables** (their rated 115 mph basis — exposure, section size, embedment assumed). If they have a stamped letter, our engine should *match* it, not re-derive from scratch.
-- **Post alloy/temper** (aircraft-grade vs the card's 6063-T6) → allowable bending stress.
-- **Section-to-post connection** allowable (the rail/channel detail).
-- Recommended **embedment + footing** (Ø, depth, concrete) per height/wind zone — if they publish it, that's the validation target.
+## 7. Open items — mostly RESOLVED by the GOLD + panel datasheets (2026-06-21)
+- ✅ **Post alloy/temper:** 6061-T6 aluminum, 121-mil wall → use 6061-T6 allowable bending stress (~21 ksi, confirm with the structural-properties table).
+- ✅ **Embedment/footing basis:** SolFence specifies min 3 ft (concrete, 6" below frost) / 4 ft (driven 2⅜" steel) — §3.3 matches this.
+- ✅ **Optimizer:** Tigo TS4-A-O (specific).
+- ⏳ **Section-to-post connection allowable** (the 4-screw middle-rail detail) — still need the vendor number; until then flag the connection check as unverified.
+- ⏳ **The full SolFence stamped PE letter / load tables** — would be the ideal end-to-end validation (the engine should reproduce their 115 mph rating). Ask Sarah if a stamped letter exists; if so it *is* the PE sign-off for `engineered: true`.
 
 See `[[solfence-equipment-data]]`, `[[tesla-integration]]` (fence recognition + equipment done), and `UNIFIED-ENGINE-DESIGN-SPEC.md` §4.5 (the mount-type slot this fills).
