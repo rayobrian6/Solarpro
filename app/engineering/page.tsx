@@ -1650,9 +1650,21 @@ function EngineeringPageInner() {
               city:        patches.city        ?? prev.city,
               county:      patches.county      ?? prev.county,
               zip:         patches.zip         ?? prev.zip,
-              systemType:  patches.systemType  ?? prev.systemType,
               // All engineering config fields from saved workspace (user's last state)
               ...savedConfig,
+              // Re-assert mount type AFTER the savedConfig spread. A stale or
+              // auto-defaulted saved workspace can carry systemType:'roof' and
+              // silently DOWNGRADE a fence/ground project (Ray: "loaded a fence,
+              // engineering didn't recognize it as a fence"). Precedence:
+              //   1. an explicit NON-roof choice in savedConfig (user's intent), then
+              //   2. the project record (patches.systemType, authoritative) when it
+              //      is non-roof — a fence/ground project must never load as roof, then
+              //   3. fall back to savedConfig / patches / prev.
+              systemType: ((savedConfig as any).systemType && (savedConfig as any).systemType !== 'roof')
+                ? (savedConfig as any).systemType
+                : (patches.systemType && patches.systemType !== 'roof')
+                  ? patches.systemType
+                  : ((savedConfig as any).systemType ?? patches.systemType ?? prev.systemType),
             };
             // v61.2/v61.3 reconciliation: if a saved config has stringsPerInverter metadata
             // that disagrees with the actual inv.strings array length, trust
@@ -5860,14 +5872,19 @@ function EngineeringPageInner() {
   // ─────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const layoutType = (projectLayout?.type ?? projectLayout?.systemType ?? '').toString().toLowerCase();
-    const layoutIsFence = layoutType === 'solar_fence' || layoutType === 'fence';
+    // Reliable persisted fence signal: a drawn fence line (layouts.fence_line).
+    // NOTE: projectLayout.type === 'solar_fence' is a runtime-only value and is
+    // NEVER written to the DB, so on a fresh load it's undefined — relying on it
+    // alone misses fence projects. The fence-line geometry IS persisted, so use it.
+    const hasFenceGeometry = Array.isArray(projectLayout?.fenceLine) && projectLayout!.fenceLine!.length > 1;
+    const layoutIsFence = layoutType === 'solar_fence' || layoutType === 'fence' || hasFenceGeometry;
     const configIsFence = config.systemType === 'fence';
 
-    // Job 1 (kept): auto-heal systemType when layout says fence but config says roof.
-    // This is a DATA-INTEGRITY fix (stale DB bug), NOT a config mutation — the
+    // Job 1 (kept): auto-heal systemType when the layout says fence (by type OR by
+    // persisted fence geometry) but config says roof. DATA-INTEGRITY fix — the
     // user's intent (system is a fence) is already expressed by the layout.
     if (layoutIsFence && !configIsFence) {
-      console.log(`[FENCE WATCHER] Auto-healing systemType: layout says '${layoutType}' but config.systemType='${config.systemType}' → promoting to 'fence'`);
+      console.log(`[FENCE WATCHER] Auto-healing systemType → 'fence' (layoutType='${layoutType}', fenceGeometry=${hasFenceGeometry}, was '${config.systemType}')`);
       setConfig(prev => ({ ...prev, systemType: 'fence' }));
     }
     // Job 2 REMOVED (Phase 11): auto-promotion of hardcoded defaults to
@@ -5878,6 +5895,7 @@ function EngineeringPageInner() {
     config.systemType,
     projectLayout?.type,
     projectLayout?.systemType,
+    projectLayout?.fenceLine,
   ]);
   const [planSetResult, setPlanSetResult] = useState<{ fileName: string; fileId?: string; sheets: number; structuralStatus: string; message: string } | null>(null);
   const [planSetError, setPlanSetError] = useState<string | null>(null);

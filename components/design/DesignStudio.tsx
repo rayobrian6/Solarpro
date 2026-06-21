@@ -724,6 +724,8 @@ export default function DesignStudio({ project, onSave }: Props) {
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const panelsRef2 = useRef<PlacedPanel[]>(panels);
   const roofPlanesRef = useRef<RoofPlane[]>([]); // keeps roofPlanes accessible in saveLayoutToDB
+  const fenceLineRef = useRef<{ lat: number; lng: number }[]>([]); // keeps fence geometry accessible in saveLayoutToDB autosave
+  const fenceHeightRef = useRef<number>(2.0);
   // v50.22: tracks the address from an explicit user pick (address search or Pick House).
   // onTwinLoaded must not overwrite solarDataAddress/solarDataCityOnly when a pick is in flight.
   const explicitPickAddressRef = useRef<string | null>(null);
@@ -791,6 +793,8 @@ export default function DesignStudio({ project, onSave }: Props) {
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { panelsRef2.current = panels; }, [panels]);
   useEffect(() => { roofPlanesRef.current = roofPlanes; }, [roofPlanes]);
+  useEffect(() => { fenceLineRef.current = fenceLine; }, [fenceLine]);
+  useEffect(() => { fenceHeightRef.current = fenceHeight; }, [fenceHeight]);
 
   // QW-10: Reactive production calculation — auto-compute with 3s debounce
   // whenever panels change significantly. Replaces the manual button click.
@@ -821,6 +825,12 @@ export default function DesignStudio({ project, onSave }: Props) {
       systemType: project.systemType,
       // Include roofPlanes so permit generator can use exact roof geometry
       roofPlanes: roofPlanesRef.current.length > 0 ? roofPlanesRef.current : undefined,
+      // Persist fence geometry on autosave too — previously only the manual
+      // buildLayout()→/api/production path saved these, so an auto-saved fence
+      // design lost its line/height on reload (and engineering had no geometry
+      // to recognize it by). Mirrors the roofPlanes treatment.
+      fenceLine:  fenceLineRef.current.length > 1 ? fenceLineRef.current : undefined,
+      fenceHeight: project.systemType === 'fence' ? fenceHeightRef.current : undefined,
     };
     // STEP 1 -- LAYOUT SAVE LOGGING
     console.log('[LAYOUT SAVE PAYLOAD]', {
