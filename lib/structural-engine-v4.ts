@@ -822,8 +822,11 @@ function calcRackingBOM(
   const lagBoltQty = mountQty * lagBoltsPerMount;
 
   // ── Flashing Kits ─────────────────────────────────────────────────────
-  const needsFlashing = ['l_foot_lag', 'standoff_lag', 'direct_attach',
-    'tile_hook', 'tile_replacement', 'rail_less_lag'].includes(system.mount.attachmentMethod);
+  // Self-flashing pad standoffs (RT-MINI) carry integrated EPDM/butyl on the base
+  // and take NO separate flashing kit — adding one double-bills the same seal.
+  const needsFlashing = !system.mount.selfFlashing &&
+    ['l_foot_lag', 'standoff_lag', 'direct_attach',
+     'tile_hook', 'tile_replacement', 'rail_less_lag'].includes(system.mount.attachmentMethod);
   const flashingQty = needsFlashing ? mountQty : 0;
 
   // ── Bonding Clips (UL 2703) ───────────────────────────────────────────

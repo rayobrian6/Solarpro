@@ -87,6 +87,10 @@ export interface MountSpec {
   iccEsReport?: string;
   ul2703Listed: boolean;
   compatibleRoofTypes: RoofType[];
+  // Self-flashing pad standoffs (e.g. Roof Tech RT-MINI) carry integrated EPDM/butyl
+  // on the base that seals the fastener penetration — they do NOT take a separate
+  // flashing kit. When true, the racking BOM must NOT add a flashing line.
+  selfFlashing?: boolean;
 }
 
 export interface BallastSpec {
@@ -529,34 +533,40 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     category: 'roof_residential',
     systemType: 'rail_based',
     compatibleRoofTypes: ['asphalt_shingle', 'wood_shake'],
-    description: 'Roof Tech RT-MINI — flashed pad standoff, rail-based system. 2 lag bolts per pad, L-foot, compatible rail. ICC-ES ESR-3575',
+    description: 'Roof Tech RT-MINI — SELF-FLASHING pad standoff (AlphaSeal / RT Butyl seals the screw penetration; no separate flashing kit). Fastened with 2 structural wood screws into the rafter (no pilot hole). L-foot + conventional rail are separate add-ons. ICC-ES ESR-3575.',
     mount: {
       model: 'RT-MINI',
       attachmentMethod: 'l_foot_lag',
-      upliftCapacityLbs: 900,       // 2 × 450 lbs/lag (ICC-ES ESR-3575)
+      // ⚠️ VERIFY against ESR-3575 allowable-load table: 900 lb (2×450) is OPTIMISTIC
+      // for the weakest standard assembly — the ESR test reports 613.2 lb total for
+      // (2) screws over 15/32" sheathing on a 2x4 DF-L #2 (~306 lb/screw). Capacity
+      // rises with rafter size/sheathing; the engine ideally needs the per-assembly
+      // value, not a single number. Flagged for PE/structural review.
+      upliftCapacityLbs: 900,       // per pad — see VERIFY note above
       downwardCapacityLbs: 1200,
       shearCapacityLbs: 600,
       fastenersPerMount: 2,
-      fastenerDiameterIn: 0.5,
+      fastenerDiameterIn: 0.3125,   // 5/16" (8mm/M8) structural wood screw — was wrongly 0.5" (1/2"); registry-v4 agrees on 5/16"
       fastenerEmbedmentIn: 2.5,
-      fastenerPulloutLbs: 450,      // per lag bolt (ICC-ES ESR-3575)
+      fastenerPulloutLbs: 450,      // per screw — see VERIFY note above (ESR weak-assembly basis ≈ 306)
       maxSpacingIn: 48,
       minRafterDepthIn: 3.5,
       iccEsReport: 'ICC-ES ESR-3575',
       ul2703Listed: true,
       compatibleRoofTypes: ['asphalt_shingle', 'wood_shake'],
+      selfFlashing: true,           // AlphaSeal/RT Butyl integrated — NO separate flashing kit
     },
     hardware: {
       midClamp: 'RT-MINI Mid Clamp',
       endClamp: 'RT-MINI End Clamp',
       railSplice: 'Compatible with IronRidge XR100/XR1000, Pegasus, UniRac SFM, or equivalent rail',
       groundLug: 'RT-MINI Ground Lug',
-      lagBolt: '1/2" × 3" Lag Bolt SS (2 per mount)',
-      flashingKit: 'RT-MINI Flashing Kit',
+      lagBolt: '5/16" (8mm/M8) structural wood screw, ~3.5" (90mm) — 2 per pad, no pilot hole',
+      // No flashingKit — RT-MINI is self-flashing (integrated AlphaSeal/RT Butyl).
       bondingHardware: 'RT-MINI Bond Clip',
     },
-    maxWindSpeedMph: 150,
-    maxSnowLoadPsf: 40,
+    maxWindSpeedMph: 180,           // manufacturer-rated max (was understated 150)
+    maxSnowLoadPsf: 90,             // manufacturer-rated max (was understated 40)
     maxRoofPitchDeg: 40,
     minRoofPitchDeg: 5,
     ul2703Listed: true,
