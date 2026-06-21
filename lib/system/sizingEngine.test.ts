@@ -186,12 +186,12 @@ describe('Sizing Engine — Brand-driven equipment derivation', () => {
   });
 
   // ─── Bonus — Recommended default when no brand selected ──────────
-  it('Fence with no brand selected uses EcoFlow (recommended default)', () => {
+  it('Fence with no brand selected uses Enphase (recommended default — SolFence is "just solar", battery-agnostic → IQ8 micro)', () => {
     const result = sizeSystemFromBrand({
       systemType: 'fence',
       panelCount: 15,
     });
-    expect(result.brand.id).toBe('ecoflow');
+    expect(result.brand.id).toBe('enphase');
     expect(result.warnings.some(w => w.code === 'BRAND_RECOMMENDED_DEFAULT')).toBe(true);
   });
 

@@ -63,7 +63,7 @@ export const ENPHASE_PROFILE: BrandProfile = {
     dcAcRatioRange: { min: 1.0, max: 1.55 },
   },
 
-  recommendedFor: ['roof'],
+  recommendedFor: ['roof', 'fence'],   // fence: SolFence is "just solar" + battery-agnostic → IQ8 micro (per-panel, AC out, racking-compatible per datasheet; any battery AC-couples later)
 
   // v47.429 — Stage 6: Enphase IQ8 Installer Toolkit references IronRidge XR,
   // Unirac SolarMount, and SnapNrack Series 100 as the standard pairings for

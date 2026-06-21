@@ -152,7 +152,7 @@ describe('Phase 9 BOM pipeline integration', () => {
     it('Fence + EcoFlow → final items include zero microinverters', () => {
       const result = runBomPipeline(
         {
-          inverterId: 'ecoflow-power-ocean-10kw',
+          inverterId: 'ecoflow-ocean-pro-11kw',  // recognized EcoFlow model → pins EcoFlow via inference (fence now defaults to Enphase; this test explicitly exercises the EcoFlow path)
           panelId: 'philadelphia-solar-nexus-440',
           moduleCount: 14,
           stringCount: 2,
@@ -223,7 +223,7 @@ describe('Phase 9 BOM pipeline integration', () => {
     it('EcoFlow + batteryEnabled=false → sizing.battery is null and no battery items', () => {
       const result = runBomPipeline(
         {
-          inverterId: 'ecoflow-power-ocean-10kw',
+          inverterId: 'ecoflow-ocean-pro-11kw',  // recognized EcoFlow model → pins EcoFlow via inference (fence now defaults to Enphase; this test explicitly exercises the EcoFlow path)
           panelId: 'philadelphia-solar-nexus-440',
           moduleCount: 14,
           stringCount: 2,
@@ -256,7 +256,7 @@ describe('Phase 9 BOM pipeline integration', () => {
     it('EcoFlow + batteryEnabled=true + 10 kWh → sizing.battery has 2 modules', () => {
       const result = runBomPipeline(
         {
-          inverterId: 'ecoflow-power-ocean-10kw',
+          inverterId: 'ecoflow-ocean-pro-11kw',  // recognized EcoFlow model → pins EcoFlow via inference (fence now defaults to Enphase; this test explicitly exercises the EcoFlow path)
           panelId: 'philadelphia-solar-nexus-440',
           moduleCount: 14,
           stringCount: 2,
@@ -322,7 +322,7 @@ describe('Phase 9 BOM pipeline integration', () => {
     it('adapter does NOT emit string_inverter / hybrid_inverter / solar_panel', () => {
       const result = runBomPipeline(
         {
-          inverterId: 'ecoflow-power-ocean-10kw',
+          inverterId: 'ecoflow-ocean-pro-11kw',  // recognized EcoFlow model → pins EcoFlow via inference (fence now defaults to Enphase; this test explicitly exercises the EcoFlow path)
           panelId: 'philadelphia-solar-nexus-440',
           moduleCount: 14,
           stringCount: 2,

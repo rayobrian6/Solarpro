@@ -95,8 +95,8 @@ describe('getDefaultBrand', () => {
     expect(getDefaultBrand('roof')).toBe('enphase');
   });
 
-  it('returns ecoflow for fence (recommended)', () => {
-    expect(getDefaultBrand('fence')).toBe('ecoflow');
+  it('returns enphase for fence (recommended — SolFence is "just solar", battery-agnostic → IQ8 micro)', () => {
+    expect(getDefaultBrand('fence')).toBe('enphase');
   });
 
   it('returns a supported brand for ground (no explicit recommendation)', () => {
