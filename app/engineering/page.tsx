@@ -4258,6 +4258,9 @@ function EngineeringPageInner() {
         inverters: electricalInverters,
         mainPanelAmps: config.mainPanelAmps,
         systemVoltage: 240,
+        // Rooftop temp adder only for roof arrays (cells run hotter on a hot roof).
+        // Ground/fence panels are in free air → 0 (else over-derates the conductor).
+        rooftopTempAdder: config.systemType === 'roof' ? 30 : 0,
         wireGauge: config.wireGauge,
         wireLength: config.wireLength,
         conduitType: config.conduitType,
@@ -4554,7 +4557,7 @@ function EngineeringPageInner() {
         cache: 'no-store',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            electrical: { ...payload.electrical, designTempMin: -10, designTempMax: 40, rooftopTempAdder: 30, necVersion: '2023',
+            electrical: { ...payload.electrical, designTempMin: -10, designTempMax: 40, rooftopTempAdder: config.systemType === 'roof' ? 30 : 0, necVersion: '2023',
               topologyType: payload.topologyType },  // v57.5 — topology guard for NEC 690.7 optimizer bypass in rules engine
             structural: payload.structural,
             engineeringMode,
