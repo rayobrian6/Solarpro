@@ -179,8 +179,8 @@ const equipmentMap: Record<SystemTypeKey, EquipmentSpec> = {
       },
       {
         label:    'Power Electronics (installer-supplied)',
-        hardware: 'Optimizers + wiring by the electrician / solar company',
-        note:     'Per SolFence: optimizers and all wiring are NOT in the SolFence kit — sourced by the installer. Per-panel electronics (optimizer or microinverter) suit vertical bifacial (eliminates string mismatch).',
+        hardware: 'Enphase IQ8 microinverter (racking-compatible) or optimizers',
+        note:     'Per SolFence (Sarah): the racking channel is sized for the Enphase IQ8 microinverter — APsystems micros do NOT fit (larger form factor). Optimizers are also supported. Power electronics + all wiring are NOT in the SolFence kit — supplied by the installer. Per-panel electronics suit vertical bifacial (eliminates string mismatch).',
         icon:     '⚡',
       },
     ],
