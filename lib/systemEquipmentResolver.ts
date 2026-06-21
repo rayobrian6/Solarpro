@@ -142,15 +142,15 @@ const equipmentMap: Record<SystemTypeKey, EquipmentSpec> = {
     // Philadelphia Solar Nexus has -0.4%/yr degradation (better than standard 0.5%)
     panelDegradationRate: 0.004,
     racking: {
-      rackingBrand:   'SolFence',
-      rackingModel:   'Vertical Fence Rail System',
-      railMaterial:   'Extruded Aluminum 6063-T6',
-      hardware:       'Stainless Steel Grade 316 fasteners',
-      attachmentType: 'Vertical Fence Post Mount',
-      attachmentNote: 'Panels mounted vertically on fence posts, bifacial optimized',
+      rackingBrand:   'SolFence',                       // Sol Fence LLC (solfence.solar), Newburgh IN
+      rackingModel:   'SOL Fence Vertical Section System',
+      railMaterial:   'Aircraft-grade aluminum',        // per SolFence sales sheet (was wrongly '6063-T6')
+      hardware:       'Pre-built sections (side channels + rails) on 4x4 posts',
+      attachmentType: 'Vertical Fence Post Mount (8 ft wide sections)',
+      attachmentNote: 'Panels mounted vertically on 4x4 posts, bifacial; steel post + concrete sourced locally',
       tiltRange:      '90° vertical (bifacial)',
-      warranty:       '15-year product warranty',
-      certifications: 'UL 2703, IEC 61215, Wind Zone D',
+      warranty:       'Lifetime fence-system warranty / 30-yr panel warranty',
+      certifications: 'UL 2703 · wind rated 115 mph · snow load 113 PSF',
     },
     attachmentCards: [
       {
@@ -178,9 +178,9 @@ const equipmentMap: Record<SystemTypeKey, EquipmentSpec> = {
         icon:     '🛡️',
       },
       {
-        label:    'Microinverter Ready',
-        hardware: 'Enphase IQ8 microinverter per panel',
-        note:     'Recommended for vertical bifacial — eliminates string mismatch',
+        label:    'Power Electronics (installer-supplied)',
+        hardware: 'Optimizers + wiring by the electrician / solar company',
+        note:     'Per SolFence: optimizers and all wiring are NOT in the SolFence kit — sourced by the installer. Per-panel electronics (optimizer or microinverter) suit vertical bifacial (eliminates string mismatch).',
         icon:     '⚡',
       },
     ],

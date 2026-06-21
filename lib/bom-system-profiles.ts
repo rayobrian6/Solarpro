@@ -156,88 +156,67 @@ function deriveFenceStructural(input: StructuralBOMInput, log: string[]): Struct
   // rack.attachmentType = 'Vertical Fence Post Mount'
   // rack.attachmentNote = 'Panels mounted vertically on fence posts, bifacial optimized'
 
-  // —— Posts ——————————————————————————————————————————————————
-  // Source: CADFenceModel.segments[].posts[] (counted by fenceCAD solver)
-  // v47.432: totalSegmentPosts from CAD segments
-  // (legacy pattern from deleted bom-unified.ts deriveFenceBOM() line 480)
-  const totalPosts = f.totalPosts;
-  log.push(`Posts: ${totalPosts} from CAD segments (${f.segmentCount} segments, ${f.postSpacingFt.toFixed(1)}ft spacing)`);
+  // —— SOL Fence section-based system (REAL Sol Fence LLC SKUs + distributor prices) ——
+  // SolFence builds from 8-ft-wide pre-built SECTIONS that already INCLUDE the side
+  // channels + rails — so there are no separate rail / clamp / rail-bracket lines.
+  // Posts are 4x4 SolFence posts (sections + 1), an apex cap per post, 2 donuts per
+  // section, and 1 RCP per section. The 6' config carries 2 panels/section, the 4'
+  // config 1/section. Steel post + concrete foundation is sourced LOCALLY and the
+  // optimizers + wiring are supplied by the electrician — neither is in the SolFence
+  // kit. Source: Sol Fence LLC distributor price sheet, 2026-06-21 (Ray-supplied).
+  const SECTION_WIDTH_FT = 8;
+  const sectionCount = Math.max(1, Math.ceil(f.totalFenceLengthFt / SECTION_WIDTH_FT));
+  const postCount = sectionCount + 1;
+  const isTall = (f.postHeightFt ?? 6) >= 5;   // 6' config (2 panels/section) vs 4' (1/section)
+  const sectionSku = isTall ? 'SOLFENCE-SECTION-6' : 'SOLFENCE-SECTION-4';
+  const sectionLabel = isTall ? "6' Tall × 8' Wide Section" : "4' Tall × 8' Wide Section";
+  const postSku = isTall ? 'SOLFENCE-POST-6.5' : 'SOLFENCE-POST-4.5';
+  const postLabel = isTall ? '4x4x6.5 Post' : '4x4x4.5 Post';
+  log.push(`SolFence: ${sectionCount} × ${SECTION_WIDTH_FT}ft sections + ${postCount} posts (${isTall ? '6ft' : '4ft'} config) for ${f.totalFenceLengthFt.toFixed(0)}ft fence`);
 
-  items.push(mkItem('structural', 'fence_post', rack.rackingBrand, 'Fence Post (existing or new)',
-    'SOLFENCE-POST',
-    `Fence post — ${f.postHeightFt.toFixed(1)}ft height, ${f.postSpacingFt.toFixed(1)}ft O.C. — SolFence clamp-mount (no drilling)`,
-    totalPosts, 'ea',
-    `CAD: ${f.segmentCount} segments × posts at ${f.postSpacingFt.toFixed(1)}ft spacing`,
+  items.push(mkItem('structural', 'fence_section', rack.rackingBrand, `SOL Fence ${sectionLabel}`,
+    sectionSku,
+    `Pre-built SolFence section — includes side channels + rails (${rack.railMaterial}); ${isTall ? '2' : '1'} panel slot(s) per section`,
+    sectionCount, 'ea',
+    `ceil(${f.totalFenceLengthFt.toFixed(0)}ft fence / ${SECTION_WIDTH_FT}ft section)`,
     true));
 
-  // NOTE: SolFence system uses clamp-to-post attachment — NO concrete footings.
-  // systemEquipmentResolver.ts SOL_FENCE attachment card:
-  //   "Clamps to existing or new fence posts, no drilling"
-  // Posts are existing infrastructure or provided separately — not part of SolFence racking BOM.
-
-  // —— Rails ——————————————————————————————————————————————————
-  // Source: CADFenceModel.railCount (from fenceCAD.ts, default: 2)
-  // Length: total fence length × railCount
-  // v47.432: totalRailLengthFt = seg.lengthM * METERS_TO_FT * railCount
-  // (legacy pattern from deleted bom-unified.ts deriveFenceBOM() line 493)
-  // Material: systemEquipmentResolver.ts SOL_FENCE.racking.railMaterial = 'Extruded Aluminum 6063-T6'
-  const totalRailLengthFt = f.totalFenceLengthFt * f.railCount;
-  // Standard rail sections: 10ft lengths (industry standard)
-  const railSectionsFt = 10;
-  const totalRailSections = Math.ceil(totalRailLengthFt / railSectionsFt);
-  log.push(`Rails: ${f.railCount} rails × ${f.totalFenceLengthFt.toFixed(1)}ft = ${totalRailLengthFt.toFixed(1)} lf total (${totalRailSections} × ${railSectionsFt}ft sections)`);
-
-  items.push(mkItem('structural', 'fence_rail', rack.rackingBrand, `${rack.rackingModel} Rail (${railSectionsFt}ft)`,
-    'SOLFENCE-RAIL-10FT',
-    `Horizontal fence rail — ${rack.railMaterial}, ${f.railCount} rails × ${f.totalFenceLengthFt.toFixed(1)}ft fence length`,
-    totalRailSections, 'ea',
-    `CAD: ${f.railCount} railCount × ${f.totalFenceLengthFt.toFixed(1)}ft ÷ ${railSectionsFt}ft sections`,
+  items.push(mkItem('structural', 'fence_post', rack.rackingBrand, `SOL Fence ${postLabel}`,
+    postSku,
+    `4x4 SolFence post (${isTall ? '6' : '4'}ft section) — sets into a local steel post + concrete footing`,
+    postCount, 'ea',
+    `${sectionCount} sections + 1`,
     true));
 
-  // —— Panel Mounting Clamps ——————————————————————————————————
-  // Source: systemEquipmentResolver.ts SOL_FENCE attachment card:
-  //   'SolFence vertical rail clamp system' — 'Clamps to existing or new fence posts, no drilling'
-  // v47.432: same clamp pattern as roof arrays
-  // (legacy pattern from deleted bom-unified.ts deriveFenceBOM())
-  //   mid clamps between adjacent panels, end clamps at row edges
-  // Standard: 4 clamps per panel (2 top + 2 bottom on 2-rail system)
-  const clampsPerPanel = 4;
-  const totalClamps = input.moduleCount * clampsPerPanel;
-  log.push(`Panel clamps: ${clampsPerPanel} per panel × ${input.moduleCount} panels = ${totalClamps}`);
-
-  items.push(mkItem('structural', 'panel_clamp', rack.rackingBrand, `${rack.rackingModel} Panel Clamp`,
-    'SOLFENCE-CLAMP',
-    `Panel-to-rail clamp — ${rack.hardware}, ${rack.attachmentNote}`,
-    totalClamps, 'ea',
-    `${clampsPerPanel} clamps/panel × ${input.moduleCount} modules`,
+  items.push(mkItem('structural', 'post_cap', rack.rackingBrand, 'SOL Fence 4x4 Apex Cap',
+    'SOLFENCE-APEX-CAP',
+    `4x4 apex cap — 1 per post`,
+    postCount, 'ea',
+    `1 per post × ${postCount}`,
     true));
 
-  // —— Rail Brackets (rail-to-post connections) ————————————————
-  // v47.432: bracket count = 2 x posts x railCount
-  // (legacy pattern from deleted bom-unified.ts deriveFenceBOM() line 519-521)
-  // 2 brackets per rail-to-post junction
-  const railToPostConnections = totalPosts * f.railCount;
-  const railBrackets = railToPostConnections * 2;
-  log.push(`Rail brackets: 2 per connection × ${totalPosts} posts × ${f.railCount} rails = ${railBrackets}`);
-
-  items.push(mkItem('structural', 'rail_bracket', rack.rackingBrand, `${rack.rackingModel} Rail Bracket`,
-    'SOLFENCE-RAIL-BRACKET',
-    `Rail-to-post connection bracket — ${rack.hardware}, 2 per junction × ${f.railCount} rails × ${totalPosts} posts`,
-    railBrackets, 'ea',
-    `v47.432-bsp: 2 x ${totalPosts} posts x ${f.railCount} rails`,
+  items.push(mkItem('structural', 'fence_donut', rack.rackingBrand, 'SOL Fence 4x4 Donut (2-3/8" Hole)',
+    'SOLFENCE-DONUT',
+    `4x4 donut w/ 2-3/8" hole — 2 per section`,
+    sectionCount * 2, 'ea',
+    `2 per section × ${sectionCount}`,
     true));
 
-  // —— Post Caps ——————————————————————————————————————————————
-  // v47.432: 1 cap per post
-  // (legacy pattern from deleted bom-unified.ts deriveFenceBOM() line 513-514)
-  const postCaps = totalPosts;
-  log.push(`Post caps: ${postCaps} (1 per post)`);
+  items.push(mkItem('structural', 'fence_rcp', rack.rackingBrand, 'SOL Fence RCP',
+    'SOLFENCE-RCP',
+    `SolFence RCP — 1 per section`,
+    sectionCount, 'ea',
+    `1 per section × ${sectionCount}`,
+    true));
 
-  items.push(mkItem('structural', 'post_cap', rack.rackingBrand, `${rack.rackingModel} Post Cap`,
-    'SOLFENCE-POST-CAP',
-    `Post cap — 1 per post (weather protection, ${rack.railMaterial})`,
-    postCaps, 'ea',
-    `v47.432-bsp: 1 per post x ${totalPosts} posts`,
+  // Local-sourcing advisory — NOT in the SolFence kit, so no SolFence price.
+  // Per the SolFence price sheet, the structural foundation (steel post + concrete)
+  // is sourced locally, and optimizers + wiring are supplied by the electrician.
+  items.push(mkItem('structural', 'foundation', 'Local Supply', 'Steel Post + Concrete Footing (source locally)',
+    'LOCAL-STEEL-POST-CONCRETE',
+    `Foundation steel post + concrete footing — sourced locally per SolFence (1 per post)`,
+    postCount, 'ea',
+    `1 per post × ${postCount} — LOCAL SOURCING, not in SolFence kit`,
     true));
 
   // —— Gate Hardware ———————————————————————————————————————————

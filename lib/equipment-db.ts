@@ -480,8 +480,8 @@ export const SOLAR_PANELS: SolarPanel[] = [
     weight: 46.0, length: 67.8, width: 44.6, thickness: 1.38,
     warranty: '30yr product / 30yr power', ulListing: 'UL 61730, IEC 61215',
     bifacial: true, cellType: 'N-type TOPCon',
-    datasheetUrl: '',
-    active: false, // v47.406: Philadelphia Solar website (philadelphiasolar.com) is unreachable as of v47.406; no distributor mirror found. Following Sungrow/EcoFlow/HM-800 deactivation policy.
+    datasheetUrl: 'https://ussolarsupplier.com/products/philadelphia-solar-440w-solar-panels-108-cell-bifacial-mnb108hcbf-440w',
+    active: true, // REACTIVATED 2026-06-21: the v47.406 "out of business / unreachable" premise was WRONG — Philadelphia Solar (Jordan, est. 2007) is actively manufacturing and the exact Nexus MNB108(HCBF)-440W is in stock at US distributors (US Solar Supplier, A1 SolarStore, RockSolar). This is the SolFence default fence panel (SolFence distributor price $262.50).
   },
 ];
 
