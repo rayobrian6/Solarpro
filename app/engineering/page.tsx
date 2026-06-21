@@ -4354,10 +4354,30 @@ function EngineeringPageInner() {
           // check only; PE-gated ground/fence structural math is a later step.
           installationType: systemTypeToInstallationType(config.systemType),
           mountSpecs,
+          // Real fence geometry → analyzeFence (else the engine uses SolFence
+          // defaults). fenceHeight/fenceLine come from the saved layout (meters).
+          ...(config.systemType === 'fence' ? (() => {
+            const M2FT = 3.28084;
+            const fenceHeightFt = (projectLayout?.fenceHeight ?? 1.8288) * M2FT;
+            const fenceLengthFt = (() => {
+              const line = projectLayout?.fenceLine;
+              if (!Array.isArray(line) || line.length < 2) return totalPanels * 3.28;
+              const DEG2RAD = Math.PI / 180, EARTH_R = 6_371_000;
+              let m = 0;
+              for (let i = 0; i < line.length - 1; i++) {
+                const a = line[i], b = line[i + 1];
+                const dx = (b.lng - a.lng) * DEG2RAD * Math.cos(a.lat * DEG2RAD) * EARTH_R;
+                const dy = (b.lat - a.lat) * DEG2RAD * EARTH_R;
+                m += Math.sqrt(dx * dx + dy * dy);
+              }
+              return m * M2FT;
+            })();
+            return { fenceHeightFt, fenceLengthFt, postSpacingFt: 8, groundClearanceFt: 2 / 12 };
+          })() : {}),
         };
       })(),
     };
-  }, [config, totalPanels, sizingRecommendation]);
+  }, [config, totalPanels, sizingRecommendation, projectLayout]);
 
   // ── saveEngineeringOutputs: persist live engine state to project_files ──────
   const saveEngineeringOutputs = useCallback(async (calcData: any) => {
@@ -4567,6 +4587,11 @@ function EngineeringPageInner() {
               railAnalysis:    v4s.railAnalysis,
               rackingBOM:      v4s.rackingBOM,
               rafterAnalysis:  ra,
+              // Fence (SolFence) structural — carries the real post embedment /
+              // overturning / wind from analyzeFence so the Structural tab can show
+              // it instead of the stubbed roof rafter rows.
+              fenceMountAnalysis: v4s.fenceMountAnalysis,
+              engineered:         v4s.engineered,
               // Native V4 top-level fields — the "Structural Compliance" card
               // (page.tsx ~9792) reads native names (totalSystemWeightLbs,
               // addedDeadLoadPsf, wind.netUpliftPressurePsf, snow.roofSnowLoadPsf).
@@ -10351,17 +10376,56 @@ function EngineeringPageInner() {
                     <div className="font-bold text-red-300 mb-1 uppercase tracking-wide">
                       {config.systemType === 'fence' ? 'Fence' : 'Ground-mount'} structural is an ESTIMATE — not engineered
                     </div>
-                    The structural analysis below models <span className="font-semibold text-red-100">roof-mounted</span> arrays
-                    only (ASCE 7-22 roof wind zones, rafter / lag attachment). A{' '}
-                    {config.systemType === 'fence'
-                      ? 'fence requires vertical post embedment, full-face (freestanding-wall) wind, and panel-as-infill load analysis'
-                      : 'ground mount requires footing / driven-pier embedment, exposed-terrain wind, frame overturning, and soil/frost-depth geotech'}
-                    {' '}— which is not yet implemented. Any PASS / FAIL, load, or fastener value shown here is a
-                    roof-based placeholder. <span className="font-semibold text-red-100">Do not submit it as engineered for permit
-                    until a licensed structural PE reviews the {config.systemType} design.</span>
+                    {config.systemType === 'fence' ? (
+                      <>The SOL Fence analysis below is computed from SolFence's published spec
+                      (freestanding-wall wind per ASCE 7-22 §29 → post overturning → embedment matched
+                      to the SolFence datasheet). It is still an <span className="font-semibold text-red-100">ESTIMATE</span> —
+                      the section-to-post connection allowable and a stamped SolFence PE letter are not yet
+                      validated. <span className="font-semibold text-red-100">Do not submit as engineered until a
+                      licensed structural PE reviews the design.</span> (The roof rafter/lag rows below do not apply to a fence.)</>
+                    ) : (
+                      <>The structural analysis below models <span className="font-semibold text-red-100">roof-mounted</span> arrays
+                      only (ASCE 7-22 roof wind zones, rafter / lag attachment). A ground mount requires
+                      footing / driven-pier embedment, exposed-terrain wind, frame overturning, and soil/frost-depth
+                      geotech — which is not yet implemented. Any PASS / FAIL, load, or fastener value shown here is a
+                      roof-based placeholder. <span className="font-semibold text-red-100">Do not submit it as engineered for permit
+                      until a licensed structural PE reviews the ground design.</span></>
+                    )}
                   </div>
                 </div>
               ) : null}
+              {/* ══════════ SOL FENCE STRUCTURAL (analyzeFence) ══════════ */}
+              {config.systemType === 'fence' && (compliance.structural as any)?.fenceMountAnalysis ? (() => {
+                const fm = (compliance.structural as any).fenceMountAnalysis;
+                const cell = (label: string, value: string, sub: string) => (
+                  <div className="rounded-lg border border-purple-500/30 bg-slate-900/40 p-2.5">
+                    <div className="text-[10px] uppercase tracking-wide text-purple-300/80">{label}</div>
+                    <div className="text-sm font-bold text-white">{value}</div>
+                    <div className="text-[10px] text-slate-400">{sub}</div>
+                  </div>
+                );
+                return (
+                  <div className="rounded-xl border border-purple-500/40 bg-purple-500/5 p-4 mb-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Wind size={14} className="text-purple-300" />
+                      <span className="text-sm font-bold text-purple-100">SOL Fence Structural — freestanding-wall wind → post embedment</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30 font-mono ml-auto">ASCE 7-22 §29 · IBC 1807.3</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                      {cell('Posts', `${fm.postCount}`, `${fm.sectionCount} sections @ ${fm.postSpacingFt} ft`)}
+                      {cell('Required Embedment', `${fm.requiredEmbedmentFt.toFixed(1)} ft`, fm.embedmentGovernedBy === 'frost' ? 'frost-governed (6" below)' : 'SolFence 3 ft min')}
+                      {cell('Wind / Post', `${Math.round(fm.windForcePerPostLbs)} lb`, `qz ${fm.velocityPressurePsf.toFixed(1)} psf · Cf ${fm.forceCoefficientCf}`)}
+                      {cell('Overturning', `${Math.round(fm.overturningMomentFtLbs).toLocaleString()} ft-lb`, `${fm.fenceHeightFt.toFixed(1)} ft tall`)}
+                    </div>
+                    {fm.exceedsRatedWind ? (
+                      <div className="text-xs text-amber-300 mb-2">⚠ Site design wind exceeds SolFence's {fm.ratedWindMph} mph rating — confirm a high-wind configuration with the manufacturer (Sarah @ SolFence).</div>
+                    ) : null}
+                    <div className="text-[11px] text-slate-400 leading-relaxed">
+                      Foundation: 4x4 posts (6061-T6) buried min 3 ft, concrete within 6" of surface, 6" below frost line — or driven 2-3/8" steel 4 ft min. ESTIMATE — not engineered until PE-validated.
+                    </div>
+                  </div>
+                );
+              })() : null}
               {/* ══════════ STRUCTURAL INTEGRITY HERO ══════════ */}
               <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5 mb-5">
 <div className="flex items-center gap-2 mb-4">
