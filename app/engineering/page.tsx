@@ -12446,6 +12446,7 @@ function EngineeringPageInner() {
                       <h3 className="text-lg font-black text-white">Mounting Details</h3>
                       <p className="text-slate-400 text-xs mt-0.5">Full engineering specifications · ASCE 7-22 · ICC-ES rated hardware</p>
                     </div>
+                    {config.systemType !== 'fence' ? (
                     <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1">
                       {(['residential', 'commercial', 'ground'] as const).map(t => (
                         <button key={t} onClick={() => { setMountingInstallType(t); setShowAllSystems(false); setMountingSearchQuery(''); }}
@@ -12454,6 +12455,7 @@ function EngineeringPageInner() {
                         </button>
                       ))}
                     </div>
+                    ) : null}
                   </div>
                   {/* ══════════ SOL FENCE MOUNTING (real SolFence system, not a roof picker) ══════════ */}
                   {config.systemType === 'fence' ? (() => {
@@ -12497,6 +12499,8 @@ function EngineeringPageInner() {
                       </div>
                     );
                   })() : null}
+                  {/* Roof/ground mounting picker — not applicable to a fence (the SOL Fence panel above covers it) */}
+                  {config.systemType !== 'fence' ? (<>
                   {/* Search bar + roof type indicator */}
                   <div className="flex items-center gap-3 mb-3">
                     <div className="flex-1 relative">
@@ -12583,10 +12587,11 @@ function EngineeringPageInner() {
                       </button>
                     ) : null}
                   </div>
+                  </>) : null}
                 </div>
 
                 {/* ── Selected System Spec Panel ── */}
-                {selectedSystem ? (
+                {selectedSystem && config.systemType !== 'fence' ? (
                   <div className="eng-panel">
                     <div className="flex items-start justify-between mb-4">
                       <div>
@@ -12755,6 +12760,8 @@ function EngineeringPageInner() {
                   </div>
                 ) : null}
 
+                {/* Layout diagrams + load analysis + BOM preview + code refs — roof/ground/commercial only, not a fence */}
+                {config.systemType !== 'fence' ? (<>
                 {/* ── Real-Time Layout Visualization ── */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   {/* Mount Spacing Diagram */}
@@ -12988,6 +12995,7 @@ function EngineeringPageInner() {
                     ))}
                   </div>
                 </div>
+                </>) : null}
               </div>
             );
           })()) : null}
