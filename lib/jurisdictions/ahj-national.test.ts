@@ -12,6 +12,7 @@ import {
   getStatesSummary,
   type AhjRecord,
 } from './ahj-national';
+import { JURISDICTION_DATA } from './necVersions';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -821,6 +822,35 @@ describe('AHJ_NATIONAL — physical consistency checks', () => {
         a.groundSnowLoadPsf,
         `${id}: low-desert metro should have minimal snow load`,
       ).toBeLessThanOrEqual(15);
+    }
+  });
+});
+
+// ── Setbacks use real code logic (not fabricated per-AHJ defaults) ──────────────
+
+describe('AHJ_NATIONAL — setbacks derive from real adopted-code logic', () => {
+  it('every record is provenance-tagged (curated | expanded)', () => {
+    for (const a of AHJ_NATIONAL) {
+      expect(['curated', 'expanded'], `${a.id}`).toContain(a.dataProvenance);
+    }
+  });
+
+  it('roof/ridge setbacks match the adopted-code table (JURISDICTION_DATA) for every covered state', () => {
+    for (const a of AHJ_NATIONAL) {
+      const code = JURISDICTION_DATA[a.stateCode];
+      if (!code) continue; // territories (PR etc.) have no code-table entry — exempt
+      expect(a.roofSetbackInches, `${a.id}: roof setback must follow adopted code`).toBe(code.roofSetbackInches);
+      expect(a.ridgeSetbackInches, `${a.id}: ridge setback must follow adopted code`).toBe(code.ridgeSetbackInches);
+    }
+  });
+
+  it('relaxed-setback states (AZ, NV, NM, TX, UT) use an 18" perimeter — not the 36" bulk default', () => {
+    for (const code of ['AZ', 'NV', 'NM', 'TX', 'UT']) {
+      const entries = AHJ_NATIONAL.filter(a => a.stateCode === code);
+      expect(entries.length).toBeGreaterThan(0);
+      for (const a of entries) {
+        expect(a.roofSetbackInches, `${a.id}: should follow the state's 18" access-pathway code`).toBe(18);
+      }
     }
   });
 });

@@ -5,6 +5,8 @@
 // Data: NEC version, permit fees, turnaround times, special requirements
 // ============================================================
 
+import { JURISDICTION_DATA } from './necVersions';
+
 export interface AhjRecord {
   id: string;                    // unique slug: state-county-city
   stateCode: string;
@@ -57,6 +59,10 @@ export interface AhjRecord {
   rapidShutdownStandard: string;
   // Notes
   notes: string;
+  // Provenance — 'curated' = hand-verified record; 'expanded' = bulk national
+  // coverage (generic contact/fee defaults). Setbacks, CA NEC cycle and FL wind
+  // are normalized to real code logic for BOTH at merge (see applyCodeBasis).
+  dataProvenance?: 'curated' | 'expanded';
 }
 
 // ── Helper to build a standard record ────────────────────────────────────────
@@ -4569,14 +4575,26 @@ const AHJ_EXPANDED: AhjRecord[] = [
   ahj({id:'wy-weston-weston-county', stateCode:'WY', stateName:'Wyoming', county:'Weston', city:'Unincorporated', ahjName:'Weston County Building Department', necVersion:'2017', utilityName:'Rocky Mountain Power', typicalPermitFee:'$100-$300', feeStructure:'Flat fee', groundSnowLoadPsf:25, specialRequirements:['WY net metering limited']}),
 ];
 
-// ── Normalization for expanded (generic) records — idempotent on curated ──────
-function normalizeExpandedAhj(r: AhjRecord): AhjRecord {
-  // California adopts the NEC statewide on the 2023 cycle.
-  const necVersion: AhjRecord['necVersion'] = r.stateCode === 'CA' ? '2023' : r.necVersion;
-  // Florida is hurricane-exposed statewide — floor design wind at ASCE 7 minimum.
-  const windSpeedMph = r.stateCode === 'FL' ? Math.max(r.windSpeedMph, 130) : r.windSpeedMph;
-  if (necVersion === r.necVersion && windSpeedMph === r.windSpeedMph) return r;
-  return { ...r, necVersion, windSpeedMph };
+// ── Code-basis normalization — applied to EVERY record (curated + expanded) ───
+// Fire setbacks are CODE-driven, not a per-AHJ opinion: they come from the
+// adopted-code table (JURISDICTION_DATA, per-state IFC/IRC posture — e.g.
+// AZ/NV/NM/TX/UT use an 18" perimeter, most states 36"/18" ridge), never a
+// bulk-onboarding default. This guarantees setbacks use real logic everywhere.
+// CA (NEC 2023 statewide) and FL (ASCE 7 wind floor) invariants are also enforced;
+// both are idempotent on the curated set. Per-AHJ specifics that ARE genuinely
+// local (contact, fees, utility, special requirements, local NEC) are preserved.
+function applyCodeBasis(r: AhjRecord, provenance: 'curated' | 'expanded'): AhjRecord {
+  const code = JURISDICTION_DATA[r.stateCode];
+  return {
+    ...r,
+    necVersion: r.stateCode === 'CA' ? '2023' : r.necVersion,
+    windSpeedMph: r.stateCode === 'FL' ? Math.max(r.windSpeedMph, 130) : r.windSpeedMph,
+    // Real code logic — fall back to the record only where the table has no entry
+    // (e.g. Puerto Rico / territories, which JURISDICTION_DATA doesn't cover).
+    roofSetbackInches: code ? code.roofSetbackInches : r.roofSetbackInches,
+    ridgeSetbackInches: code ? code.ridgeSetbackInches : r.ridgeSetbackInches,
+    dataProvenance: provenance,
+  };
 }
 
 const ahjPlaceKey = (r: AhjRecord) =>
@@ -4585,11 +4603,11 @@ const ahjPlaceKey = (r: AhjRecord) =>
 // Curated authoritative; an expanded record is dropped when it duplicates a
 // curated (or already-added) record by id OR by (state, county, city).
 function mergeAhj(curated: AhjRecord[], expanded: AhjRecord[]): AhjRecord[] {
-  const out: AhjRecord[] = [...curated];
-  const seenId = new Set(curated.map(r => r.id));
-  const seenPlace = new Set(curated.map(ahjPlaceKey));
+  const out: AhjRecord[] = curated.map(r => applyCodeBasis(r, 'curated'));
+  const seenId = new Set(out.map(r => r.id));
+  const seenPlace = new Set(out.map(ahjPlaceKey));
   for (const raw of expanded) {
-    const r = normalizeExpandedAhj(raw);
+    const r = applyCodeBasis(raw, 'expanded');
     if (seenId.has(r.id) || seenPlace.has(ahjPlaceKey(r))) continue;
     seenId.add(r.id);
     seenPlace.add(ahjPlaceKey(r));
