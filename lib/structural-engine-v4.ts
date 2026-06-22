@@ -351,6 +351,26 @@ function calcVelocityPressure(windSpeedMph: number, exposure: WindExposure, heig
   return 0.00256 * Kz * Kzt * Kd * windSpeedMph * windSpeedMph;
 }
 
+// ASCE 7-22 Fig 29.3-1 — overall (Case A/B) force coefficient Cf for a SOLID
+// freestanding wall / sign sitting ON grade (clearance ratio s/h = 1.0), as a
+// function of the aspect ratio B/s = length/height. A SolFence run is long
+// relative to its ~6' height, so it lands at the low (~1.30) end. The 1.30 value
+// for a long wall on grade is web-verified (MECA Enterprises, ASCE 7-22 §29.3).
+// Linear interpolation in B/s is permitted by the figure note.
+function freestandingWallCf(aspectRatioBs: number): number {
+  const table: Array<[number, number]> = [
+    [0.05, 1.80], [0.10, 1.70], [0.20, 1.65], [0.50, 1.55], [1.0, 1.45],
+    [2.0, 1.40], [4.0, 1.35], [5.0, 1.35], [10, 1.30], [20, 1.30], [45, 1.30],
+  ];
+  const bs = Math.max(table[0][0], Math.min(aspectRatioBs, table[table.length - 1][0]));
+  for (let i = 1; i < table.length; i++) {
+    const [b0, c0] = table[i - 1];
+    const [b1, c1] = table[i];
+    if (bs <= b1) return c0 + (c1 - c0) * ((bs - b0) / (b1 - b0));
+  }
+  return table[table.length - 1][1];
+}
+
 function getGCp(zone: RoofZone, pitchDeg: number): { uplift: number; downward: number } {
   // ASCE 7-22 Figure 29.4-7 — Roof-Mounted Solar Panels
   // Net pressure coefficients for solar panels on roofs
@@ -999,10 +1019,17 @@ function analyzeFenceSystem(input: StructuralInputV4): StructuralResultV4 {
   const centroidHeightFt = groundClearanceFt + fenceHeightFt / 2;
   const qz = calcVelocityPressure(input.windSpeed, input.windExposure, Math.max(fenceHeightFt, 15));
   const G = 0.85;
-  // Cf for a solid freestanding wall on grade (ASCE 7-22 Fig 29.3-1). End sections
-  // govern (mirrors the roof corner-zone lesson); a precise B/s + clearance-ratio
-  // lookup is a Phase-2 refinement. Conservative end value:
-  const Cf = 1.8;
+  // Cf — ASCE 7-22 Fig 29.3-1, solid freestanding wall on grade (clearance ratio
+  // s/h = 1.0). A SolFence run is long relative to its ~6' height, so the OVERALL
+  // (Case A/B) coefficient is ~1.3 (web-verified). This replaces the old flat 1.8
+  // placeholder with the code-correct overall value. ⚠ The WINDWARD-END post sees a
+  // higher ASCE Case C *local* pressure (the leading region near a free edge runs
+  // several times the overall) — that end post + its section-to-post connection are
+  // the governing elements, to be confirmed against SolFence's stamped load tables
+  // (recommendation pushed below). Pass/fail still defers to the SolFence 115-mph
+  // rating, so this changes the reported demand, not the ESTIMATE verdict.
+  const aspectRatioBs = fenceLengthFt / fenceHeightFt;
+  const Cf = freestandingWallCf(aspectRatioBs);
   const tribAreaFt2 = postSpacingFt * fenceHeightFt;
   const windForcePerPostLbs = qz * G * Cf * tribAreaFt2;
   const overturningMomentFtLbs = windForcePerPostLbs * centroidHeightFt;
@@ -1034,6 +1061,7 @@ function analyzeFenceSystem(input: StructuralInputV4): StructuralResultV4 {
 
   recommendations.push(
     `SolFence foundation: 2-3/8" steel pipe DRIVEN ${SOLFENCE_MIN_DRIVEN_FT.toFixed(0)} ft min with a post pounder (no concrete), clearing 6" below frost (frost ${frostDepthFt.toFixed(1)} ft) → required embedment ${requiredEmbedmentFt.toFixed(1)} ft. Alt: concrete-set 3 ft min for max stability.`,
+    `Governing element = the WINDWARD-END post and its section-to-post connection: per ASCE 7-22 Fig 29.3-1 Case C the wind pressure on the leading region near a free edge is several times the overall Cf ${Cf.toFixed(2)} used here. Confirm the end-post overturning + connection against SolFence's stamped load tables.`,
     `ESTIMATE — not engineered: grounded in SolFence's published spec (6061-T6, 115 mph, GOLD datasheet) but the section-to-post connection allowable + a stamped PE letter are not yet validated. Do not submit as engineered until a licensed PE reviews.`,
   );
 
@@ -1044,8 +1072,9 @@ function analyzeFenceSystem(input: StructuralInputV4): StructuralResultV4 {
     exceedsRatedWind, ratedWindMph: RATED_WIND_MPH,
     passes: !exceedsRatedWind,
     notes: [
-      `Wind: qz ${qz.toFixed(1)} psf × G ${G} × Cf ${Cf} × ${tribAreaFt2.toFixed(0)} ft² = ${windForcePerPostLbs.toFixed(0)} lb/post`,
+      `Wind: qz ${qz.toFixed(1)} psf × G ${G} × Cf ${Cf.toFixed(2)} (ASCE 7-22 Fig 29.3-1, freestanding wall on grade, B/s ${aspectRatioBs.toFixed(1)}) × ${tribAreaFt2.toFixed(0)} ft² = ${windForcePerPostLbs.toFixed(0)} lb/post (typical/interior post)`,
       `Overturning ${overturningMomentFtLbs.toFixed(0)} ft-lb at grade (load centroid ${centroidHeightFt.toFixed(2)} ft)`,
+      `Windward-END post governs (ASCE Case C local pressure > overall Cf) — confirm against SolFence's stamped tables`,
     ],
   };
 
