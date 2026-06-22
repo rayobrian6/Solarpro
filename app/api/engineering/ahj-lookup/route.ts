@@ -17,6 +17,7 @@ import {
   type AhjRecord,
 } from '@/lib/jurisdictions/ahj-national';
 import { lookupAhjFromRegistry } from '@/lib/jurisdictions/ahjRegistry';
+import { enrichWithSolarTrace } from '@/lib/jurisdictions/solartraceOverlay';
 import { requireAuth } from '@/lib/security';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
@@ -67,7 +68,7 @@ export async function GET(req: NextRequest) {
       if (!ahj) {
         return NextResponse.json({ success: false, error: `AHJ not found: ${id}` }, { status: 404 });
       }
-      return NextResponse.json({ success: true, ahj, count: 1 });
+      return NextResponse.json({ success: true, ahj: enrichWithSolarTrace(ahj), count: 1 });
     }
 
     // Lookup by address or lat/lng (most common use case).
@@ -82,12 +83,12 @@ export async function GET(req: NextRequest) {
         stateCode: stateCode || undefined,
       });
       if (live) {
-        return NextResponse.json({ success: true, ahj: live, count: 1, source: 'registry_live' });
+        return NextResponse.json({ success: true, ahj: enrichWithSolarTrace(live), count: 1, source: 'registry_live' });
       }
       if (address) {
         const ahj = getAhjByAddress(address);
         if (ahj) {
-          return NextResponse.json({ success: true, ahj, count: 1, source: 'address' });
+          return NextResponse.json({ success: true, ahj: enrichWithSolarTrace(ahj), count: 1, source: 'address' });
         }
       }
       // Fall through to state-level search
@@ -95,7 +96,7 @@ export async function GET(req: NextRequest) {
 
     // Search by state/city/county/text
     if (stateCode || city || county || text) {
-      const results = searchAhj({ stateCode: stateCode || undefined, city: city || undefined, county: county || undefined, text: text || undefined });
+      const results = searchAhj({ stateCode: stateCode || undefined, city: city || undefined, county: county || undefined, text: text || undefined }).map(enrichWithSolarTrace);
       return NextResponse.json({
         success: true,
         ahjs: results,
@@ -107,7 +108,7 @@ export async function GET(req: NextRequest) {
 
     // Return all AHJs for a state
     if (stateCode) {
-      const results = getAhjsByState(stateCode);
+      const results = getAhjsByState(stateCode).map(enrichWithSolarTrace);
       return NextResponse.json({
         success: true,
         ahjs: results,
