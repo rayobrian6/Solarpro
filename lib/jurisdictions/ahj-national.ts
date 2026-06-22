@@ -60,9 +60,10 @@ export interface AhjRecord {
   // Notes
   notes: string;
   // Provenance — 'curated' = hand-verified record; 'expanded' = bulk national
-  // coverage (generic contact/fee defaults). Setbacks, CA NEC cycle and FL wind
-  // are normalized to real code logic for BOTH at merge (see applyCodeBasis).
-  dataProvenance?: 'curated' | 'expanded';
+  // coverage (generic contact/fee defaults); 'registry_live' = fetched live from
+  // the SunSpec/Orange Button AHJ Registry (real, maintained source). Setbacks,
+  // CA NEC cycle and FL wind are normalized to real code logic (see applyCodeBasis).
+  dataProvenance?: 'curated' | 'expanded' | 'registry_live';
 }
 
 // ── Helper to build a standard record ────────────────────────────────────────
