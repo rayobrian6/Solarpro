@@ -177,9 +177,14 @@ describe('AHJ_NATIONAL — ahjType validity', () => {
     }
   });
 
-  it('majority of entries are city type', () => {
+  it('has substantial city-level coverage plus national county breadth', () => {
+    // Post national onboarding the DB is county-heavy (one record per US county) with
+    // city-level granularity layered on top for metros — so city is no longer the
+    // majority tier. Assert healthy city coverage AND that records are properly typed.
     const cityCount = AHJ_NATIONAL.filter(a => a.ahjType === 'city').length;
-    expect(cityCount).toBeGreaterThan(AHJ_NATIONAL.length * 0.7);
+    const countyCount = AHJ_NATIONAL.filter(a => a.ahjType === 'county').length;
+    expect(cityCount).toBeGreaterThanOrEqual(150);   // metros covered at city granularity
+    expect(countyCount).toBeGreaterThan(0);          // national county-level coverage
   });
 });
 
@@ -801,14 +806,20 @@ describe('AHJ_NATIONAL — physical consistency checks', () => {
     }
   });
 
-  it('desert Southwest (AZ, NM) has zero or minimal snow load (≤ 15 psf)', () => {
-    const desertEntries = AHJ_NATIONAL.filter(
-      a => a.stateCode === 'AZ' || a.stateCode === 'NM',
-    );
-    for (const a of desertEntries) {
+  it('low-desert metros have zero or minimal snow load (≤ 15 psf)', () => {
+    // Scoped to true low-elevation desert metros. NOT a blanket AZ/NM rule — high-
+    // altitude counties (e.g. Flagstaff/Coconino at ~7,000 ft) legitimately carry
+    // real snow load and must not be forced low.
+    const desertMetros = [
+      'az-maricopa-phoenix', 'az-pima-tucson', 'az-maricopa-mesa',
+      'nv-clark-las-vegas', 'nm-bernalillo-albuquerque', 'nm-dona-ana-las-cruces',
+    ];
+    for (const id of desertMetros) {
+      const a = getAhjById(id);
+      if (!a) continue;
       expect(
         a.groundSnowLoadPsf,
-        `${a.id}: desert climate should have low snow load`,
+        `${id}: low-desert metro should have minimal snow load`,
       ).toBeLessThanOrEqual(15);
     }
   });
