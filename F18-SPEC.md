@@ -199,12 +199,24 @@ denormalized columns. Document the contract.
 - Refresh tokens stay on the app's Render Postgres (they're app-side
   session bookkeeping, not user records).
 
-**(g) Reconcile the vestigial Render `users` table**
-- Drop or rename it. If dropped: migration
-  `004_drop_app_users_table.sql` (verify no prod writes first).
-- If rename (safer): `ALTER TABLE users RENAME TO _deprecated_app_users;`
-  and add a comment that nothing should read or write it.
-- Decision deferred to JAMES — see §"Questions for JAMES" below.
+**(g) Drop the vestigial Render `users` table** (per JAMES sign-off, Q1)
+
+JAMES overrode Quinn's rename proposal — the table gets a hard **drop**
+in Step 7, not a rename-to-deprecated. Implementation MUST verify zero
+prod writes to `users` from the app's Render Postgres since the May 2026
+`HANDOFF_SOLARPRO_ONLY_AUTH.md` rollout before Step 7 executes:
+
+- Search `C:\Users\carpe\source\repos\site_survey-app\` for any
+  `INSERT INTO users`, `UPDATE users`, `users (email, password_hash`
+  call paths.
+- If zero matches: drop proceeds.
+- If any match: STOP and surface to JAMES; switch to the rename
+  fallback (`ALTER TABLE users RENAME TO _deprecated_app_users;`) or
+  block on the matching code path until it's removed.
+
+Migration: `004_drop_app_users_table.sql` —
+`DROP TABLE IF EXISTS users;` plus dependent-index cleanup if anything
+remains. No rename-to-deprecated step (JAMES rejected the safe default).
 
 ### 3. Migration path
 
@@ -248,8 +260,18 @@ Phase it so each step is independently revertible:
 - Coordinate with anyone consuming `projects.inspector_name` (search
   the codebase before drafting).
 
-**Step 7 — Drop / rename the vestigial Render `users` table**
-- Per JAMES's call in §"Questions for JAMES" below.
+**Step 7 — Drop the vestigial Render `users` table** (per JAMES sign-off, Q1)
+
+Pre-condition verification (MUST be done before the migration runs):
+- Search `C:\Users\carpe\source\repos\site_survey-app\` for
+  `INSERT INTO users`, `UPDATE users`, `users (email, password_hash`
+  call paths. If zero matches: drop proceeds. If any match: STOP and
+  surface to JAMES.
+- Migration `004_drop_app_users_table.sql`:
+  `DROP TABLE IF EXISTS users;` plus dependent-index cleanup.
+
+This is a hard drop (not the safer rename) per JAMES's override of
+Quinn's proposed answer. See §2(g) for context.
 
 ### 4. Tests
 
@@ -367,21 +389,37 @@ If FAIL: surface failure with reviewer citation, hold for direction.
 
 ## Branch strategy
 
-Per AGENTS.md R4 (working branch is JAMES's call), propose:
+Locked per JAMES sign-off (2026-06-22 15:49 CT) — see §"JAMES sign-off"
+below for the canonical record.
 
 | Repo | Branch | Why |
 |------|--------|-----|
-| website | `chore/f18-identity-model` (or JAMES's preferred name) | single-branch per F-18; merges to master on JAMES's call |
-| app | `feature/f18-identity-model` (or JAMES's preferred name) | mirrors the website branch name for traceability |
+| website | `chore/agent-rules` (as-is, no fork) | F-13 + this F-18 spec already live here; all F-18 commits coherent on one branch |
+| app | `james-dev` | JAMES's preferred app-repo working branch (override of Quinn's `chore/agent-rules`-everywhere proposal) |
 
-The current website branch is `chore/agent-rules`. Either continue on
-that or fork to `chore/f18-identity-model`. **Ask JAMES** before
-branching (AGENTS.md R4 explicit).
+The website repo is currently on `chore/agent-rules` — implementer
+continues there. The app repo is currently on `main` (head `c81cda36`);
+the implementer creates or checks out `james-dev` for F-18 work.
 
-Cross-repo commits must be coordinated — jarvis tracks both repos
-on the same CycleReport to prevent one side landing without the other.
+**Cross-repo disambiguation (per jarvis flag 2026-06-22 15:52 CT):**
+the website repo *also* has a `james-dev` branch at commit `31157be8`,
+but that branch is an unrelated scaffold (old merged work from before
+the agent-team era). F-18 work in the website repo stays on
+`chore/agent-rules`. The `james-dev` referenced in the table above is
+exclusively the **app repo's** working branch in
+`C:\Users\carpe\source\repos\site_survey-app\` — a separate repo with
+its own branches. Don't touch the website repo's `james-dev`.
 
-## Questions for JAMES (blockers — call before Step 2 lands)
+Cross-repo commits must be coordinated — jarvis tracks both repos on
+the same CycleReport to prevent one side landing without the other.
+
+## Questions for JAMES (blockers — **RESOLVED 2026-06-22 15:49 CT**)
+
+All six blockers locked by JAMES at 15:49 CT. See §"JAMES sign-off"
+below for the canonical table with locked answers, overrides, and
+the source-of-truth chain. The original questions are preserved here
+as the proposal trail so future agents understand the trade-offs that
+were considered.
 
 1. **Render `users` table disposition** — drop, rename to
    `_deprecated_app_users`, or leave (vestigial)?
@@ -390,9 +428,12 @@ on the same CycleReport to prevent one side landing without the other.
      `HANDOFF_SOLARPRO_ONLY_AUTH.md`). If any code path still writes
      here, dropping breaks it.
    - If rename: keep one release as a safety net.
+   - **Locked: DROP** (JAMES override of Quinn's rename proposal).
+     Verification gate stays — see §2(g) and Step 7.
 2. **Working branch name** for both repos — keep
    `chore/agent-rules`, fork to `chore/f18-identity-model`, or
    something else?
+   - **Locked: website = `chore/agent-rules` (as-is); app = `james-dev`.**
 3. **Inspect-or-derive the website's `projects.inspector_name`?**
    - The website likely has `inspector_name` columns on
      `projects` / `project_physical_data` / maybe `users`. Step 6
@@ -402,19 +443,27 @@ on the same CycleReport to prevent one side landing without the other.
    - If yes, the snapshot-on-ingest pattern is still needed for
      those surfaces — we just narrow the columns from
      "everywhere" to "wherever a snapshot is intentionally captured".
+   - **Locked: defer to Step 6 research.** Implementer searches for
+     consumers (proposal PDFs, customer emails) before deciding.
 4. **Mobile rollout vehicle** — `eas update --branch preview`
    (over-the-air, no app store review) for Step 2 + 3, then a full
    EAS build for the SQLite migration if any schema change needs
    native rebuild. Confirm that's acceptable.
+   - **Locked: yes.** EAS OTA for additive Steps 2 + 3. Full EAS
+     build only if native schema change requires it.
 5. **Cut-over strategy** — dual-write window for the snapshot
    columns (send both old and new in webhook payloads for one
    release) or hard cut-over at Step 5? Recommend hard cut-over
    because the website-side ingestion is single-tenant controlled.
+   - **Locked: hard cut-over at Step 5.** Single-tenant controlled,
+     low risk. No dual-write window.
 6. **Idempotency for the Neon lookup at ingest time** — if Neon
    is briefly unavailable, what does `resolveSurveyOwner` return?
    Null + `SURVEY_INGEST_DEFAULT_USER_ID` fallback, or fail the
    ingest (which the queue retries)? Recommend null + fallback —
    ingest must not be blocked by a Neon hiccup.
+   - **Locked: null + `SURVEY_INGEST_DEFAULT_USER_ID` fallback.**
+     A10 R11 compliant. Ingest must not be blocked by a Neon hiccup.
 
 ## Reference docs
 
@@ -459,6 +508,26 @@ on the same CycleReport to prevent one side landing without the other.
 - `C:\Users\carpe\source\repos\site_survey-app\docs\user-credential-reconciliation.md`
   — legacy Neon↔Render user reconciliation script (superseded
   by `sqliteAuthStore.ts` reads from Neon).
+
+## JAMES sign-off (2026-06-22 15:49 CT)
+
+Sign-off authority: JAMES (per standing delegation 2026-06-22 15:30 CT —
+"make decisions that don't require me unless I state otherwise").
+
+| # | Question | Locked answer |
+|---|----------|---------------|
+| 1 | Render `users` table disposition | **DROP** (JAMES override on Quinn's rename proposal). Implementer MUST verify zero prod writes since May 2026 auth-only-via-SolarPro rollout before Step 7 executes. |
+| 2 | Working branch name | Website: keep `chore/agent-rules` (where F-13 + this spec live). App repo: use `james-dev` (JAMES override). |
+| 3 | Website `projects.inspector_name` — drop or derive? | Defer to Step 6 research. Implementer searches for current consumers (proposal PDFs, customer emails) before deciding. |
+| 4 | Mobile rollout vehicle | `eas update --branch preview` (over-the-air) for Steps 2+3. Full EAS build only if native schema change requires it. |
+| 5 | Cut-over strategy | Hard cut-over at Step 5. Single-tenant controlled ingest. No dual-write window. |
+| 6 | Idempotency for Neon lookup at ingest | Null + `SURVEY_INGEST_DEFAULT_USER_ID` fallback (A10 R11 compliant). Ingest must not be blocked by Neon hiccup. |
+
+Quinn proposed answers that were locked: Q5, Q6. JAMES overrode: Q1, Q2.
+Canonical record: `~/.mavis/agents/jarvis/workspace/inbox/james-f18-answers-2026-06-22.md`.
+Review packet: `~/.mavis/agents/quinn/workspace/f18-review-2026-06-22.md`.
+
+---
 
 ## What I (blake) will do
 
