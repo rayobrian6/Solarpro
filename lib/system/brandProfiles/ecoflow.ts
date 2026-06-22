@@ -165,7 +165,7 @@ export const ECOFLOW_PROFILE: BrandProfile = {
     maxDcKwPerInverter: 40,                   // datasheet: 40 kW max STC input
   },
 
-  recommendedFor: ['fence'],    // SolFence factory baseline
+  recommendedFor: [],    // SolFence is "just solar" + battery-agnostic — fence now defaults to Enphase IQ8 micro (per the SolFence datasheet); EcoFlow stays selectable as an ESS option but is no longer the auto-default.
 
   // v47.429 — Stage 6: EcoFlow residential most commonly pairs with IronRidge XR
   // for roof installs; ground-mount uses MT / Unirac Solarmount. SolFence is

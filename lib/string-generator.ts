@@ -202,6 +202,15 @@ export function generateStringConfig(input: StringGeneratorInput): StringGenerat
   // Vmp correction (use same coefficient if tempCoeffVmp not provided)
   const tempCoeffVmp = moduleSpecs.tempCoeffVmp ?? moduleSpecs.tempCoeffVoc;
   const vmpCorrected = moduleSpecs.vmp * (1 + (tempCoeffVmp / 100) * deltaT);
+  // Hot-temperature Vmp — the worst case for the MPPT LOWER bound. Vmp falls as
+  // the cell heats up, so the minimum string length (and any check against
+  // mpptVoltageMin) must use a HOT cell temp, not the cold design temp. Using
+  // cold Vmp here understated the minimum and let strings drop out of the MPPT
+  // window on hot afternoons (production collapse). 75°C matches the hot point
+  // used by layoutCandidateGenerator so the two sizers agree.
+  // (Engineering audit 2026-06-19, finding C1.)
+  const HOT_CELL_TEMP_C = 75;
+  const vmpHot = moduleSpecs.vmp * (1 + (tempCoeffVmp / 100) * (HOT_CELL_TEMP_C - 25));
 
   // Isc correction (slight increase at cold temps — conservative, use STC value)
   const iscCorrected = moduleSpecs.isc; // conservative: use STC Isc
@@ -238,11 +247,11 @@ export function generateStringConfig(input: StringGeneratorInput): StringGenerat
     ? 200  // high numeric ceiling; brand profile enforces real cap downstream
     : Math.floor(inverterSpecs.maxDcVoltage / vocCorrected);
 
-  // Min panels: MPPT minimum voltage / corrected Vmp
+  // Min panels: MPPT minimum voltage / HOT Vmp (worst case — see vmpHot above)
   //   — bypassed for optimizer topology (bus is actively regulated)
   const minPanelsPerString = isOptimizer
     ? 1
-    : Math.ceil(inverterSpecs.mpptVoltageMin / vmpCorrected);
+    : Math.ceil(inverterSpecs.mpptVoltageMin / vmpHot);
 
   // Recommended: target MPPT center voltage
   const mpptCenter = (inverterSpecs.mpptVoltageMin + inverterSpecs.mpptVoltageMax) / 2;
@@ -603,8 +612,9 @@ export function generateStringConfig(input: StringGeneratorInput): StringGenerat
     // default to channel 0 for display; the errors[] list already
     // contains the structured MPPT failure so isValid=false downstream.
     const mpptChannel = assignedMppt.get(String(idx)) ?? 0;
-    const stringVoc = vocCorrected * panelCount;
-    const stringVmp = vmpCorrected * panelCount;
+    const stringVoc = vocCorrected * panelCount;       // cold — drives the max-voltage check
+    const stringVmp = vmpCorrected * panelCount;        // cold — drives the MPPT-max check
+    const stringVmpHot = vmpHot * panelCount;           // hot — drives the MPPT-min check (C1)
     const stringPower = moduleSpecs.watts * panelCount;
 
     // v47.412 — Topology-aware per-string voltage validation.
@@ -621,9 +631,10 @@ export function generateStringConfig(input: StringGeneratorInput): StringGenerat
           `Reduce panels per string.`
         );
       }
-      if (stringVmp < inverterSpecs.mpptVoltageMin) {
+      if (stringVmpHot < inverterSpecs.mpptVoltageMin) {
         warnings.push(
-          `String ${idx + 1}: Vmp=${stringVmp.toFixed(1)}V is below MPPT minimum ${inverterSpecs.mpptVoltageMin}V.`
+          `String ${idx + 1}: hot Vmp=${stringVmpHot.toFixed(1)}V is below MPPT minimum ${inverterSpecs.mpptVoltageMin}V ` +
+          `(falls out of the MPPT window on hot days).`
         );
       }
       if (stringVmp > inverterSpecs.mpptVoltageMax) {

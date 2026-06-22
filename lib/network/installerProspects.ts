@@ -103,6 +103,17 @@ export function scoreProspect(p: InstallerProspectInput): number {
   return Math.min(100, s);
 }
 
+
+/** Stage progression order — later = further along. Used to prevent regression. */
+const STAGE_RANK: Record<ProspectStage, number> = {
+  rejected: 0, discovered: 1, enriched: 2, qualified: 3, contacted: 4, signed_up: 5,
+};
+
+/** Prevent stage regression — a signed_up lead should never be demoted to rejected. */
+export function canAdvanceTo(from: ProspectStage, to: ProspectStage): boolean {
+  if (from === 'rejected' && to === 'discovered') return true;
+  return STAGE_RANK[to] >= STAGE_RANK[from];
+}
 /** Initial pipeline stage from what we already know about the prospect. */
 function initialStage(p: InstallerProspectInput): ProspectStage {
   if (p.email || p.phone) return "enriched";
@@ -124,54 +135,73 @@ export async function upsertProspects(
   inputs: InstallerProspectInput[],
 ): Promise<UpsertResult> {
   const sql = await getDbReady();
-  let inserted = 0;
-  let updated = 0;
 
-  for (const p of inputs) {
-    if (!p.companyName?.trim()) continue;
-    const key = dedupeKeyFor(p.companyName, p.state);
-    const score = scoreProspect(p);
-    const stage = initialStage(p);
-    const serviceStates = p.serviceStates ?? [];
-    const metadata = p.metadata ?? {};
+  // Batch upsert via unnest — one query for all rows instead of N round-trips.
+  const valid = inputs.filter((p) => p.companyName?.trim());
+  if (valid.length === 0) return { inserted: 0, updated: 0, total: inputs.length };
 
-    const rows = await sql`
-      INSERT INTO installer_prospects (
-        company_name, dedupe_key, contact_name, email, phone, website,
-        address, city, state, zip, service_states,
-        license_number, license_status, rating, review_count, employee_estimate,
-        source, source_url, stage, quality_score, notes, metadata
-      ) VALUES (
-        ${p.companyName.trim()}, ${key}, ${p.contactName ?? null}, ${p.email ?? null},
-        ${p.phone ?? null}, ${p.website ?? null}, ${p.address ?? null}, ${p.city ?? null},
-        ${p.state ?? null}, ${p.zip ?? null}, ${serviceStates},
-        ${p.licenseNumber ?? null}, ${p.licenseStatus ?? null}, ${p.rating ?? null},
-        ${p.reviewCount ?? null}, ${p.employeeEstimate ?? null},
-        ${p.source ?? "agent_research"}, ${p.sourceUrl ?? null}, ${stage}, ${score},
-        ${p.notes ?? null}, ${JSON.stringify(metadata)}
-      )
-      ON CONFLICT (dedupe_key) DO UPDATE SET
-        contact_name      = COALESCE(installer_prospects.contact_name, EXCLUDED.contact_name),
-        email             = COALESCE(installer_prospects.email, EXCLUDED.email),
-        phone             = COALESCE(installer_prospects.phone, EXCLUDED.phone),
-        website           = COALESCE(installer_prospects.website, EXCLUDED.website),
-        address           = COALESCE(installer_prospects.address, EXCLUDED.address),
-        city              = COALESCE(installer_prospects.city, EXCLUDED.city),
-        zip               = COALESCE(installer_prospects.zip, EXCLUDED.zip),
-        license_number    = COALESCE(installer_prospects.license_number, EXCLUDED.license_number),
-        license_status    = COALESCE(installer_prospects.license_status, EXCLUDED.license_status),
-        rating            = COALESCE(EXCLUDED.rating, installer_prospects.rating),
-        review_count      = COALESCE(EXCLUDED.review_count, installer_prospects.review_count),
-        employee_estimate = COALESCE(installer_prospects.employee_estimate, EXCLUDED.employee_estimate),
-        source_url        = COALESCE(installer_prospects.source_url, EXCLUDED.source_url),
-        quality_score     = GREATEST(COALESCE(installer_prospects.quality_score, 0), EXCLUDED.quality_score),
-        updated_at        = NOW()
-      RETURNING (xmax = 0) AS inserted
-    `;
-    if (rows[0]?.inserted) inserted++;
-    else updated++;
-  }
+  const keys            = valid.map((p) => dedupeKeyFor(p.companyName, p.state));
+  const scores          = valid.map((p) => scoreProspect(p));
+  const stages          = valid.map((p) => initialStage(p));
+  const names           = valid.map((p) => p.companyName.trim());
+  const contactNames    = valid.map((p) => p.contactName ?? null);
+  const emails          = valid.map((p) => p.email ?? null);
+  const phones          = valid.map((p) => p.phone ?? null);
+  const websites        = valid.map((p) => p.website ?? null);
+  const addresses       = valid.map((p) => p.address ?? null);
+  const cities          = valid.map((p) => p.city ?? null);
+  const states          = valid.map((p) => p.state ?? null);
+  const zips            = valid.map((p) => p.zip ?? null);
+  const serviceStates   = valid.map((p) => p.serviceStates ?? []);
+  const licenseNumbers  = valid.map((p) => p.licenseNumber ?? null);
+  const licenseStatuses = valid.map((p) => p.licenseStatus ?? null);
+  const ratings         = valid.map((p) => p.rating ?? null);
+  const reviewCounts    = valid.map((p) => p.reviewCount ?? null);
+  const employeeEsts    = valid.map((p) => p.employeeEstimate ?? null);
+  const sources         = valid.map((p) => p.source ?? "agent_research");
+  const sourceUrls      = valid.map((p) => p.sourceUrl ?? null);
+  const notesList       = valid.map((p) => p.notes ?? null);
+  const metas           = valid.map((p) => JSON.stringify(p.metadata ?? {}));
 
+  const rows = await sql`
+    INSERT INTO installer_prospects (
+      company_name, dedupe_key, contact_name, email, phone, website,
+      address, city, state, zip, service_states,
+      license_number, license_status, rating, review_count, employee_estimate,
+      source, source_url, stage, quality_score, notes, metadata
+    )
+    SELECT * FROM unnest(
+      ${names}::text[], ${keys}::text[], ${contactNames}::text[],
+      ${emails}::text[], ${phones}::text[], ${websites}::text[],
+      ${addresses}::text[], ${cities}::text[], ${states}::text[],
+      ${zips}::text[], ${serviceStates}::text[][],
+      ${licenseNumbers}::text[], ${licenseStatuses}::text[],
+      ${ratings}::numeric[], ${reviewCounts}::int[], ${employeeEsts}::text[],
+      ${sources}::text[], ${sourceUrls}::text[],
+      ${stages}::text[], ${scores}::int[], ${notesList}::text[],
+      ${metas}::jsonb[]
+    )
+    ON CONFLICT (dedupe_key) DO UPDATE SET
+      contact_name      = COALESCE(installer_prospects.contact_name, EXCLUDED.contact_name),
+      email             = COALESCE(installer_prospects.email, EXCLUDED.email),
+      phone             = COALESCE(installer_prospects.phone, EXCLUDED.phone),
+      website           = COALESCE(installer_prospects.website, EXCLUDED.website),
+      address           = COALESCE(installer_prospects.address, EXCLUDED.address),
+      city              = COALESCE(installer_prospects.city, EXCLUDED.city),
+      zip               = COALESCE(installer_prospects.zip, EXCLUDED.zip),
+      license_number    = COALESCE(installer_prospects.license_number, EXCLUDED.license_number),
+      license_status    = COALESCE(installer_prospects.license_status, EXCLUDED.license_status),
+      rating            = COALESCE(EXCLUDED.rating, installer_prospects.rating),
+      review_count      = COALESCE(EXCLUDED.review_count, installer_prospects.review_count),
+      employee_estimate = COALESCE(installer_prospects.employee_estimate, EXCLUDED.employee_estimate),
+      source_url        = COALESCE(installer_prospects.source_url, EXCLUDED.source_url),
+      quality_score     = GREATEST(COALESCE(installer_prospects.quality_score, 0), EXCLUDED.quality_score),
+      updated_at        = NOW()
+    RETURNING (xmax = 0) AS inserted
+  `;
+
+  const inserted = rows.filter((r) => r.inserted).length;
+  const updated = rows.length - inserted;
   return { inserted, updated, total: inputs.length };
 }
 
@@ -319,7 +349,13 @@ export async function applyWorkUpdate(id: string, p: WorkUpdate): Promise<void> 
       license_number = COALESCE(${p.licenseNumber ?? null}, license_number),
       rating         = COALESCE(${p.rating ?? null}, rating),
       review_count   = COALESCE(${p.reviewCount ?? null}, review_count),
-      stage          = COALESCE(${p.stage ?? null}, stage),
+      stage          = CASE
+        WHEN ${p.stage ?? null} IS NULL THEN stage
+        WHEN installer_prospects.stage = 'signed_up' THEN stage
+        WHEN installer_prospects.stage = 'contacted' AND ${p.stage ?? null} IN ('rejected','discovered','enriched') THEN stage
+        WHEN installer_prospects.stage = 'qualified' AND ${p.stage ?? null} IN ('rejected','discovered','enriched') THEN stage
+        ELSE COALESCE(${p.stage ?? null}, stage)
+      END,
       quality_score  = COALESCE(${p.qualityScore ?? null}, quality_score),
       notes          = COALESCE(${p.notes ?? null}, notes),
       updated_at     = NOW()
@@ -366,7 +402,13 @@ export async function updateProspect(
 
   const rows = await sql`
     UPDATE installer_prospects SET
-      stage        = COALESCE(${patch.stage ?? null}, stage),
+      stage        = CASE
+        WHEN ${patch.stage ?? null} IS NULL THEN stage
+        WHEN installer_prospects.stage = 'signed_up' THEN stage
+        WHEN installer_prospects.stage = 'contacted' AND ${patch.stage ?? null} IN ('rejected','discovered','enriched','qualified') THEN stage
+        WHEN installer_prospects.stage = 'qualified' AND ${patch.stage ?? null} IN ('rejected','discovered','enriched') THEN stage
+        ELSE COALESCE(${patch.stage ?? null}, stage)
+      END,
       notes        = COALESCE(${patch.notes ?? null}, notes),
       email        = COALESCE(${patch.email ?? null}, email),
       phone        = COALESCE(${patch.phone ?? null}, phone),

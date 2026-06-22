@@ -72,6 +72,7 @@ export async function POST(req: NextRequest) {
     // ONLY for string/optimizer topologies — microinverters convert DC→AC at each panel,
     // so there are no DC strings. Micro systems use AC trunk cable sizing instead.
     let stringConfig: StringGeneratorResult | null = null;
+    let stringConfigError: string | null = null; // audit: surface a thrown string-gen error instead of silently returning null
     if (electrical) {
       try {
         const firstInv = (electrical.inverters || [])[0];
@@ -229,7 +230,10 @@ export async function POST(req: NextRequest) {
         }
         // Microinverter: stringConfig stays null — AC trunk cable sizing handled by electrical-calc
       } catch (strErr: unknown) {
-        console.warn('[calculate] String generation warning:', strErr);
+        // Don't swallow: record so the client can show "string sizing failed"
+        // instead of treating a null stringConfig as "not applicable" (audit).
+        stringConfigError = strErr instanceof Error ? strErr.message : String(strErr);
+        console.warn('[calculate] String generation error:', strErr);
       }
     }
 
@@ -309,12 +313,24 @@ export async function POST(req: NextRequest) {
           roofDeadLoadPsf:  structural.roofDeadLoadPsf ?? 15,
           soilType:         structural.soilType,
           frostDepthIn:     structural.frostDepthIn,
+          // Fence (SolFence) — forwarded to analyzeFence; falls back to SolFence
+          // defaults (6ft height, 8ft section) when the client omits them.
+          fenceHeightFt:    structural.fenceHeightFt,
+          fenceLengthFt:    structural.fenceLengthFt,
+          postSpacingFt:    structural.postSpacingFt,
+          groundClearanceFt: structural.groundClearanceFt,
         };
         structuralResult = runStructuralCalcV4(structuralInput);
       } catch (structErr: unknown) {
-        console.warn('[calculate] V4 structural engine warning:', structErr);
-        // Fallback: return PASS with warning rather than crashing
-        structuralResult = { status: 'WARNING', errors: [], warnings: [{ code: 'ENGINE_ERROR', message: String(structErr), severity: 'warning', suggestion: 'Check structural inputs' }] };
+        console.error('[calculate] V4 structural engine crashed:', structErr);
+        // FAIL CLOSED: a thrown engine must never read as a passing stamp.
+        // The overall-status aggregator (below) only escalates to FAIL on an
+        // errors[] entry with severity 'error' — so emit one, not a warning.
+        structuralResult = {
+          status: 'FAIL',
+          errors: [{ code: 'ENGINE_ERROR', message: `Structural engine error: ${String(structErr)}`, severity: 'error', suggestion: 'Structural analysis could not be completed — do not treat as engineered. Check inputs and retry.' }],
+          warnings: [],
+        };
       }
     }
 
@@ -379,6 +395,7 @@ export async function POST(req: NextRequest) {
         errors:                 stringConfig.errors,
         isValid:                stringConfig.isValid,
       } : null,
+      stringConfigError,
       autoDetected: {
         stateCode,
         necVersion: jurisdiction.necVersion,

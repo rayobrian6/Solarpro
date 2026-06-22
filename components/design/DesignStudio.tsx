@@ -118,11 +118,11 @@ function Section({ title, icon, children, defaultOpen = true, badge }: {
       >
         <div className="flex items-center gap-2 text-xs font-semibold text-slate-300 uppercase tracking-wide">
           {icon}{title}
-          {badge && <span className="ml-1 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded text-xs normal-case font-normal">{badge}</span>}
+          {badge ? <span className="ml-1 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded text-xs normal-case font-normal">{badge}</span> : null}
         </div>
         {open ? <ChevronUp size={12} className="text-slate-500" /> : <ChevronDown size={12} className="text-slate-500" />}
       </button>
-      {open && <div className="px-4 pb-4 space-y-3">{children}</div>}
+      {open ? <div className="px-4 pb-4 space-y-3">{children}</div> : null}
     </div>
   );
 }
@@ -724,6 +724,8 @@ export default function DesignStudio({ project, onSave }: Props) {
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const panelsRef2 = useRef<PlacedPanel[]>(panels);
   const roofPlanesRef = useRef<RoofPlane[]>([]); // keeps roofPlanes accessible in saveLayoutToDB
+  const fenceLineRef = useRef<{ lat: number; lng: number }[]>([]); // keeps fence geometry accessible in saveLayoutToDB autosave
+  const fenceHeightRef = useRef<number>(2.0);
   // v50.22: tracks the address from an explicit user pick (address search or Pick House).
   // onTwinLoaded must not overwrite solarDataAddress/solarDataCityOnly when a pick is in flight.
   const explicitPickAddressRef = useRef<string | null>(null);
@@ -791,6 +793,8 @@ export default function DesignStudio({ project, onSave }: Props) {
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { panelsRef2.current = panels; }, [panels]);
   useEffect(() => { roofPlanesRef.current = roofPlanes; }, [roofPlanes]);
+  useEffect(() => { fenceLineRef.current = fenceLine; }, [fenceLine]);
+  useEffect(() => { fenceHeightRef.current = fenceHeight; }, [fenceHeight]);
 
   // QW-10: Reactive production calculation — auto-compute with 3s debounce
   // whenever panels change significantly. Replaces the manual button click.
@@ -821,6 +825,12 @@ export default function DesignStudio({ project, onSave }: Props) {
       systemType: project.systemType,
       // Include roofPlanes so permit generator can use exact roof geometry
       roofPlanes: roofPlanesRef.current.length > 0 ? roofPlanesRef.current : undefined,
+      // Persist fence geometry on autosave too — previously only the manual
+      // buildLayout()→/api/production path saved these, so an auto-saved fence
+      // design lost its line/height on reload (and engineering had no geometry
+      // to recognize it by). Mirrors the roofPlanes treatment.
+      fenceLine:  fenceLineRef.current.length > 1 ? fenceLineRef.current : undefined,
+      fenceHeight: project.systemType === 'fence' ? fenceHeightRef.current : undefined,
     };
     // STEP 1 -- LAYOUT SAVE LOGGING
     console.log('[LAYOUT SAVE PAYLOAD]', {
@@ -3092,6 +3102,10 @@ export default function DesignStudio({ project, onSave }: Props) {
       const location = buildLocationInput();
       const body: Record<string, unknown> = { systemDefinition, location };
       if (project.id) body.projectId = project.id;
+      // Carry the equipment selection so the production route persists it and the
+      // project hydrates it back (engineering audit C2 — was local-only/dropped).
+      if (selectedInverter) body.selectedInverter = selectedInverter;
+      if (selectedPanel) body.selectedPanel = selectedPanel;
       const res = await fetch('/api/production', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3160,7 +3174,16 @@ export default function DesignStudio({ project, onSave }: Props) {
       const res = await fetch('/api/production', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: project.id, layout }),
+        // Persist the inverter/panel selection with the layout. upsertProduction
+        // saves them and getProjectById hydrates them back onto the project, so
+        // engineering/permit see the choice. Without this the picks were
+        // local-only and silently discarded (engineering audit C2).
+        body: JSON.stringify({
+          projectId: project.id,
+          layout,
+          selectedInverter: selectedInverter ?? undefined,
+          selectedPanel: selectedPanel ?? undefined,
+        }),
       });
       const data = await res.json();
       if (data.success) {
@@ -3786,13 +3809,13 @@ export default function DesignStudio({ project, onSave }: Props) {
                     {drawingMode === 'draw_fence' && '🔲 Click to draw fence line'}
                   </span>
                   <span className="text-slate-400">• Double-click to finish</span>
-                  {drawnPoints.length > 0 && <span className="text-amber-400 font-semibold">{drawnPoints.length} pts</span>}
+                  {drawnPoints.length > 0 ? <span className="text-amber-400 font-semibold">{drawnPoints.length} pts</span> : null}
                 </div>
               ) : null}
               {drawingMode === 'measure' ? (
                 <div className="absolute top-4 left-1/2 -translate-x-1/2 glass rounded-xl px-4 py-2 text-sm text-cyan-300 pointer-events-none">
                   📏 Click to measure distance • Double-click to clear
-                  {measureDistance !== null && <span className="ml-2 font-bold">{measureDistance.toFixed(1)}m</span>}
+                  {measureDistance !== null ? <span className="ml-2 font-bold">{measureDistance.toFixed(1)}m</span> : null}
                 </div>
               ) : null}
 
@@ -3896,7 +3919,7 @@ export default function DesignStudio({ project, onSave }: Props) {
           <div className="flex-1 overflow-y-auto">
 
             {/* ── DESIGN TAB ── */}
-            {activeTab === 'design' && (
+            {activeTab === 'design' ? (
               <>
                 {/* System Summary — always visible so Calculate Production is always accessible */}
                 <Section title="System Summary" icon={<Zap size={12} />}>
@@ -4194,9 +4217,9 @@ export default function DesignStudio({ project, onSave }: Props) {
                   {activeZoneType === 'roof' ? (
                     <SliderRow label="Roof Setback" value={setback} min={0} max={2.0} step={0.05} unit="m" onChange={v => { clearGridCache(); setSetback(v); }} />
                   ) : null}
-                  {(activeZoneType === 'roof' || activeZoneType === 'ground') && (
+                  {(activeZoneType === 'roof' || activeZoneType === 'ground') ? (
                     <SliderRow label="Row Spacing" value={rowSpacing} min={0.01} max={3.0} step={0.01} unit="m" onChange={v => { clearGridCache(); setRowSpacing(v); }} />
-                  )}
+                  ) : null}
                   <SliderRow label="Panel Spacing" value={panelSpacing} min={0.001} max={0.05} step={0.001} unit="m" onChange={v => { clearGridCache(); setPanelSpacing(v); }} />
 
                   {/* v30.9 / v50.23: Panel Orientation Toggle — portrait | landscape | hybrid */}
@@ -4228,7 +4251,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                   </div>
 
                   {/* v30.9: Fire Setback Controls (roof only) */}
-                  {activeZoneType === 'roof' && (
+                  {activeZoneType === 'roof' ? (
                     <div className="mt-2 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium text-red-400">🔥 Fire Setbacks</span>
@@ -4276,11 +4299,11 @@ export default function DesignStudio({ project, onSave }: Props) {
                         min={0} max={24} step={1} unit="in"
                         onChange={v => setFireSetbacks(prev => ({ ...prev, eaveSetbackM: v / 39.37 }))}
                       />
-                      {(fireSetbacks.eaveSetbackM ?? 0) === 0 && (
+                      {(fireSetbacks.eaveSetbackM ?? 0) === 0 ? (
                         <div className="text-xs text-emerald-400/80 bg-emerald-500/10 rounded-lg p-2">
                           0″ eave — panels extend to gutter line (max coverage)
                         </div>
-                      )}
+                      ) : null}
                       <div className="flex items-center justify-between">
                         <label className="text-xs text-slate-400">Pathway (36″)</label>
                         <button
@@ -4296,7 +4319,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                         </div>
                       ) : null}
                     </div>
-                  )}
+                  ) : null}
 
                   {/* v30.9: Multi-Row Placement Tool */}
                   <div className="mt-2 pt-2 border-t border-slate-700/50">
@@ -4370,7 +4393,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                   }
                   return null;
                 })()}
-                {roofSegments.length > 0 && (() => {
+                {roofSegments.length > 0 ? ((() => {
                   // Pre-compute summary stats
                   const totalAreaFt2 = roofSegments.reduce((s: number, seg: any) => s + (seg.areaM2 ?? seg.stats?.areaMeters2 ?? 0) * 10.7639, 0);
                   const bestSeg = roofSegments.reduce((best: any, seg: any) => {
@@ -4507,7 +4530,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                       </div>
                     </Section>
                   );
-                })()}
+                })()) : null}
 
                 {/* ── Roof Planes Section ─────────────────────────────────────────── */}
                 <Section
@@ -4735,7 +4758,7 @@ export default function DesignStudio({ project, onSave }: Props) {
 
 
               </>
-            )}
+            ) : null}
 
             {/* ── BILL ANALYSIS TAB ── */}
             {activeTab === 'bill' ? (
@@ -4882,8 +4905,8 @@ export default function DesignStudio({ project, onSave }: Props) {
                         </div>
                         <div className="flex items-center gap-2 mt-1.5">
                           <span className="text-xs text-slate-500">{(p.width * FEET_PER_METER).toFixed(2)}×{(p.height * FEET_PER_METER).toFixed(2)}ft</span>
-                          {p.bifacial && <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">Bifacial</span>}
-                          {p.cellType && <span className="text-xs text-slate-600">{p.cellType}</span>}
+                          {p.bifacial ? <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">Bifacial</span> : null}
+                          {p.cellType ? <span className="text-xs text-slate-600">{p.cellType}</span> : null}
                         </div>
                       </button>
                     ))}
@@ -4944,7 +4967,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                             inv.type === 'optimizer' ? 'bg-blue-500/20 text-blue-400' :
                             'bg-slate-700 text-slate-400'
                           }`}>{inv.type}</span>
-                          {inv.batteryCompatible && <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">Battery Ready</span>}
+                          {inv.batteryCompatible ? <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">Battery Ready</span> : null}
                           <span className="text-xs text-slate-600">${inv.pricePerUnit.toLocaleString()}</span>
                         </div>
                       </button>
@@ -4988,7 +5011,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                             bat.chemistry === 'LFP' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-blue-500/20 text-blue-400'
                           }`}>{bat.chemistry}</span>
                           <span className="text-xs text-slate-500">{bat.roundTripEfficiency}% RTE</span>
-                          {bat.cycles && <span className="text-xs text-slate-600">{bat.cycles.toLocaleString()} cycles</span>}
+                          {bat.cycles ? <span className="text-xs text-slate-600">{bat.cycles.toLocaleString()} cycles</span> : null}
                           <span className="text-xs text-slate-500">${bat.pricePerUnit.toLocaleString()}</span>
                         </div>
                       </button>
@@ -5005,8 +5028,8 @@ export default function DesignStudio({ project, onSave }: Props) {
                         <div><span className="text-slate-500">Power:</span> <span className="text-white">{selectedBattery.powerKw} kW</span></div>
                         <div><span className="text-slate-500">Chemistry:</span> <span className="text-white">{selectedBattery.chemistry}</span></div>
                         <div><span className="text-slate-500">Warranty:</span> <span className="text-white">{selectedBattery.warranty}yr</span></div>
-                        {selectedBattery.dimensions && <div className="col-span-2"><span className="text-slate-500">Dimensions:</span> <span className="text-white">{selectedBattery.dimensions}</span></div>}
-                        {selectedBattery.weight && <div><span className="text-slate-500">Weight:</span> <span className="text-white">{selectedBattery.weight}kg</span></div>}
+                        {selectedBattery.dimensions ? <div className="col-span-2"><span className="text-slate-500">Dimensions:</span> <span className="text-white">{selectedBattery.dimensions}</span></div> : null}
+                        {selectedBattery.weight ? <div><span className="text-slate-500">Weight:</span> <span className="text-white">{selectedBattery.weight}kg</span></div> : null}
                       </div>
                     </div>
 

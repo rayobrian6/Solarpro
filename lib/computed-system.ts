@@ -360,7 +360,8 @@ export interface ComputedSystemInput {
   // Inverter
   inverterManufacturer: string;
   inverterModel: string;
-  inverterAcKw: number;
+  inverterAcKw: number;          // PER-UNIT AC nameplate (kW)
+  inverterCount?: number;        // physical inverter units (string/optimizer/hybrid). Micro uses microDeviceCount. Default 1.
   inverterMaxDcV: number;
   inverterMpptVmin: number;
   inverterMpptVmax: number;
@@ -428,6 +429,7 @@ export interface ComputedSystemInput {
   atsModel?: string;
   backupInterfaceBrand?: string;
   backupInterfaceModel?: string;
+  systemType?: string;              // 'roof' | 'ground' | 'fence' — adds the mounting/racking row to the equipment schedule
 }
 
 // ─── NEC Tables ──────────────────────────────────────────────────────────────
@@ -1153,9 +1155,12 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
 
   // ── AC Electrical ──────────────────────────────────────────────────────────
   const systemVoltageAC = 240;
+  // C7 fix: AC output is the sum of ALL inverter units, not just the primary.
+  // Micro quantity is carried by microDeviceCount; string/optimizer/hybrid by inverterCount.
+  const physicalInverterUnits = Math.max(1, input.inverterCount ?? 1);
   const acOutputCurrentA = isMicro
     ? microDeviceCount * perMicroCurrentA
-    : (input.inverterAcKw * 1000) / systemVoltageAC;
+    : (input.inverterAcKw * physicalInverterUnits * 1000) / systemVoltageAC;
   const acContinuousCurrentA = acOutputCurrentA * 1.25; // NEC 690.8
   const acOcpdAmps = nextStandardOCPD(acContinuousCurrentA);
   const backfeedBreakerAmps = acOcpdAmps;
@@ -2095,12 +2100,26 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   } else {
     equipmentSchedule.push(
       { tag: 'PV-1', description: 'PV Modules', manufacturer: input.panelManufacturer, model: input.panelModel, qty: input.totalPanels, rating: `${input.panelWatts}W`, necReference: 'NEC 690.4' },
-      { tag: 'INV-1', description: 'String Inverter', manufacturer: input.inverterManufacturer, model: input.inverterModel, qty: 1, rating: `${input.inverterAcKw}kW AC`, necReference: 'NEC 690.4' },
+      { tag: 'INV-1', description: 'String Inverter', manufacturer: input.inverterManufacturer, model: input.inverterModel, qty: physicalInverterUnits, rating: `${input.inverterAcKw}kW AC`, necReference: 'NEC 690.4' },
       { tag: 'DC-DISC-1', description: 'DC Disconnect', manufacturer: '', model: 'DC Disconnect Switch', qty: 1, rating: `${strings[0]?.ocpdAmps ?? 20}A / ${Math.round(strings[0]?.stringVoc ?? 600)}V DC`, necReference: 'NEC 690.15' },
       { tag: 'AC-DISC-1', description: 'AC Disconnect', manufacturer: '', model: 'Non-Fused AC Disconnect', qty: 1, rating: `${acOcpdAmps}A / 240V`, necReference: 'NEC 690.14' },
       { tag: 'METER-1', description: 'Production Meter', manufacturer: 'Utility', model: 'Revenue Grade Meter', qty: 1, rating: '240V AC', necReference: 'NEC 705.12' },
       { tag: 'MSP-1', description: 'Main Service Panel', manufacturer: input.mainPanelBrand, model: `${input.mainPanelAmps}A Panel`, qty: 1, rating: `${input.mainPanelAmps}A / 120/240V`, necReference: 'NEC 705.12(B)' },
     );
+  }
+
+  // Mounting / racking — SolFence fence systems get their real mounting row
+  // (the roof/ground racking row is a separate, broader follow-up).
+  if (input.systemType === 'fence') {
+    equipmentSchedule.push({
+      tag: 'RACK-1',
+      description: 'Mounting — SOL Fence Vertical Section System',
+      manufacturer: 'SolFence',
+      model: 'Vertical Section System (6061-T6 aluminum, 8 ft sections)',
+      qty: 1,
+      rating: '90° vertical bifacial · 2-3/8" steel posts driven 4 ft min · UL 2703 · 115 mph / 113 PSF',
+      necReference: 'UL 2703 / IBC 1807.3 — see BOM for section/post counts',
+    });
   }
 
   // Battery / Generator / ATS — add to equipment schedule if configured
@@ -2395,8 +2414,8 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       inverterAcOutputA: isMicro
         ? (input.inverterAcCurrentMax || acOutputCurrentA / Math.max(acBranchCount, 1))
         : acOutputCurrentA,
-      inverterAcOutputW: input.inverterAcKw * 1000,
-      inverterCount: input.totalPanels,
+      inverterAcOutputW: input.inverterAcKw * (isMicro ? microDeviceCount : physicalInverterUnits) * 1000,
+      inverterCount: isMicro ? microDeviceCount : physicalInverterUnits,
       branchCount: isMicro ? acBranchCount : 1,
       maxMicrosPerBranch: input.inverterBranchLimit || 16,
       ambientTempC: input.ambientTempC,

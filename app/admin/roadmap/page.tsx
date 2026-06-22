@@ -77,7 +77,7 @@ function Countdown() {
             </div>
             <div className="text-[10px] sm:text-xs uppercase tracking-[0.2em] text-amber-400/80 mt-1 font-semibold">{b.l}</div>
           </div>
-          {i < 3 && <div className="text-3xl sm:text-4xl text-amber-500/30 font-thin">·</div>}
+          {i < 3 ? <div className="text-3xl sm:text-4xl text-amber-500/30 font-thin">·</div> : null}
         </React.Fragment>
       ))}
     </div>
@@ -115,11 +115,11 @@ function TrackProgress({ track }: { track: RoadmapTrack }) {
         />
       </div>
       <div className="flex gap-3 mt-3 text-[10px] text-zinc-500 font-medium">
-        {done       > 0 && <span className="text-emerald-400">✓ {done} done</span>}
-        {inProgress > 0 && <span className="text-amber-400">⚡ {inProgress} active</span>}
-        {planned    > 0 && <span className="text-blue-400">◯ {planned} planned</span>}
-        {blocked    > 0 && <span className="text-rose-400">⚠ {blocked} blocked</span>}
-        {ideas      > 0 && <span className="text-zinc-500">💡 {ideas} ideas</span>}
+        {done       > 0 ? <span className="text-emerald-400">✓ {done} done</span> : null}
+        {inProgress > 0 ? <span className="text-amber-400">⚡ {inProgress} active</span> : null}
+        {planned    > 0 ? <span className="text-blue-400">◯ {planned} planned</span> : null}
+        {blocked    > 0 ? <span className="text-rose-400">⚠ {blocked} blocked</span> : null}
+        {ideas      > 0 ? <span className="text-zinc-500">💡 {ideas} ideas</span> : null}
       </div>
     </div>
   );
@@ -166,7 +166,7 @@ function RoadmapCard({ item }: { item: RoadmapItem }) {
         <div className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border ${status.badge}`}>
           <StatusIcon className="h-3 w-3" />
           {status.label}
-          {item.shippedIn && <span className="font-mono text-[10px] opacity-80 ml-1">· {item.shippedIn}</span>}
+          {item.shippedIn ? <span className="font-mono text-[10px] opacity-80 ml-1">· {item.shippedIn}</span> : null}
         </div>
         <div className="flex items-center gap-2 text-[10px] text-zinc-600 font-mono">
           {item.commits && item.commits.length > 0 ? (

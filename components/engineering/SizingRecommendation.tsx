@@ -152,7 +152,7 @@ export function SizingRecommendation({
         This banner gives the user a loud, actionable signal independent
         of the smaller "Differences from recommended" table below.
       */}
-      {diff.stringLayoutMismatch && (
+      {diff.stringLayoutMismatch ? (
         <div
           className="mb-3 px-3 py-2 rounded border border-rose-500/40 bg-rose-500/10 text-xs text-rose-200"
           data-testid="string-layout-drift-warning"
@@ -200,7 +200,7 @@ export function SizingRecommendation({
             </span>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Brand / topology summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3 text-xs">
@@ -300,8 +300,11 @@ export function SizingRecommendation({
         </div>
       ) : null}
 
-      {/* Apply button */}
-      {hasMismatch ? (
+      {/* Apply button — render whenever ANY drift the banners call out is present
+          (panel-count or string-layout), not only diff.matches. Previously it was
+          gated on hasMismatch alone, so it stayed hidden while the panel-count and
+          string-layout banners told users to "click Apply" (engineering audit). */}
+      {onApply && (hasMismatch || diff.stringLayoutMismatch || panelCountSource?.mismatchedWithConfig) ? (
         <button
           type="button"
           onClick={onApply}

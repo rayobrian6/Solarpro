@@ -620,7 +620,7 @@ export default function ProjectsPage() {
                           : 'border-slate-700/50 bg-slate-800/40 hover:border-slate-600/70 hover:bg-slate-800/70'}
                       `}
                     >
-                      {isActive && <div className={`absolute top-0 left-0 right-0 h-0.5 ${cfg.barColor} rounded-t-xl`} />}
+                      {isActive ? <div className={`absolute top-0 left-0 right-0 h-0.5 ${cfg.barColor} rounded-t-xl`} /> : null}
                       <div className="text-xl font-black text-white tabular-nums">{count}</div>
                       <div className={`text-[10px] font-bold capitalize mt-0.5 ${isActive ? cfg.iconColor : 'text-slate-500'}`}>
                         {cfg.label}
@@ -821,7 +821,7 @@ export default function ProjectsPage() {
               <span className="text-xs text-slate-500">
                 {filtered.length} project{filtered.length !== 1 ? 's' : ''}{search || filterType !== 'all' || filterStatus !== 'all' ? ' matching filters' : ''}
               </span>
-              {selectedIds.size > 0 && <span className="text-xs text-amber-400 font-semibold">{selectedIds.size} selected</span>}
+              {selectedIds.size > 0 ? <span className="text-xs text-amber-400 font-semibold">{selectedIds.size} selected</span> : null}
             </div>
           </div>
         )}

@@ -63,7 +63,7 @@ import {
   RAW_EVIDENCE_AUTHORITY,
 } from '@/lib/siteSurveys/unifiedGeometry/authority';
 import type { UnifiedGeometryAuthority } from '@/lib/siteSurveys/unifiedGeometry/authority';
-import { buildWorldRoofPlanes, type RoofSegmentStat } from './worldRoofPlanes';
+import { buildWorldRoofPlanes, type RoofSegmentStat, type WorldRoofPlane } from './worldRoofPlanes';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -409,6 +409,31 @@ export function adaptSolarRoofSegmentsToWorldArtifacts(
   if (!Array.isArray(roofSegmentStats) || roofSegmentStats.length === 0) return [];
 
   const worldPlanes = buildWorldRoofPlanes(roofSegmentStats);
+  return adaptWorldRoofPlanesToArtifacts(worldPlanes, surveyId, buildingName, imageryDate);
+}
+
+/**
+ * Map already-reconstructed WorldRoofPlanes → world-space roof_plane artifacts.
+ *
+ * Shared by both aerial geometry sources:
+ *   - the Google-Solar SEGMENT path (adaptSolarRoofSegmentsToWorldArtifacts),
+ *     which reconstructs a 4-vertex quad from each segment's bounding box, and
+ *   - the provider FACET path (aerialGeometry/facetAdapter), which preserves the
+ *     real measured polygon outline (EagleView/Nearmap) verbatim.
+ *
+ * Either way each plane carries its `worldPolygon` (lat/lng outline + edge
+ * types) — the authoritative geometry the CanonicalBuildingModel promotes and
+ * the permit planset draws. RAW_EVIDENCE authority, non-synthetic, and tagged
+ * with the google_solar_api sourcePipeline so approve-aerial promotes it.
+ */
+export function adaptWorldRoofPlanesToArtifacts(
+  worldPlanes: WorldRoofPlane[],
+  surveyId: string,
+  buildingName?: string,
+  imageryDate?: string,
+): UnifiedGeometryArtifact[] {
+  if (!Array.isArray(worldPlanes) || worldPlanes.length === 0) return [];
+
   const provenance = makeSolarApiProvenance(buildingName, imageryDate);
   const authority: UnifiedGeometryAuthority = { ...RAW_EVIDENCE_AUTHORITY };
 

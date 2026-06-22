@@ -136,7 +136,7 @@ export default function AdminIncentives() {
         </div>
       </div>
 
-      {(adding && !editing) && <IncentiveForm onSave={save} onCancel={() => setAdding(false)} />}
+      {(adding && !editing) ? <IncentiveForm onSave={save} onCancel={() => setAdding(false)} /> : null}
       {editing ? <IncentiveForm initial={editing} onSave={save} onCancel={() => setEditing(null)} /> : null}
 
       <div className="rounded-xl border border-white/5 overflow-hidden">

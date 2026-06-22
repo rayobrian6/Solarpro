@@ -50,7 +50,13 @@ const _mobileSessionLimiter  = makeLimiter(10, '60 s');  // SSO token minting
 
 // AI / compute — expensive operations
 const _billUploadLimiter     = makeLimiter(5,  '30 s');  // Claude + OCR calls
-const _engineeringLimiter    = makeLimiter(10, '30 s');  // heavy compute + external APIs
+// Raised 10→30/30s (engineering audit 2026-06-19): a single user action in the
+// engineering page fans out to several of the ~24 routes sharing this bucket,
+// and the debounced auto-save/recalc loops add more — 10/30s drained mid-action
+// and surfaced as "dead buttons" (429 read as a generic client failure). These
+// are deterministic compute routes (Claude calls use their own limiters), so a
+// higher per-IP ceiling is safe. Fuller fix = per-endpoint/per-user buckets.
+const _engineeringLimiter    = makeLimiter(30, '30 s');  // heavy compute + external APIs
 const _ocrLimiter            = makeLimiter(10, '60 s');  // CPU-intensive Tesseract
 const _autoDesignLimiter     = makeLimiter(10, '60 s');  // AI layout generation
 const _pipelineLimiter       = makeLimiter(5,  '60 s');  // full engineering pipeline

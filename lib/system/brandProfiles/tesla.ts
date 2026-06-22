@@ -26,21 +26,25 @@ export const TESLA_PROFILE: BrandProfile = {
   inverterType: 'string',
 
   supportedInverterModels: [
-    // 3.8K / 5.7K have 1 input connector per MPPT (maxParallelStringsPerMppt: 1).
-    // 5K / 7.6K have 2 input connectors per MPPT (maxParallelStringsPerMppt: 2).
-    // maxInputCurrentPerMppt: 13A IMP. Design current for a 400W panel
-    // (Isc ~10A × 1.25 = 12.5A/string) is within 13A for 1 string / MPPT.
-    { equipmentDbId: 'tesla-solar-inverter-3p8k',  acKw: 3.8, dcKwMax: 5.7,  mpptCount: 2, minPanelsPerString: 4, maxPanelsPerString: 12, maxParallelStringsPerMppt: 1 },
-    { equipmentDbId: 'tesla-solar-inverter-5k',    acKw: 5.0, dcKwMax: 7.5,  mpptCount: 2, minPanelsPerString: 4, maxPanelsPerString: 12, maxParallelStringsPerMppt: 2 },
-    { equipmentDbId: 'tesla-solar-inverter-5p7k',  acKw: 5.7, dcKwMax: 8.55, mpptCount: 2, minPanelsPerString: 4, maxPanelsPerString: 12, maxParallelStringsPerMppt: 1 },
-    { equipmentDbId: 'tesla-solar-inverter-7p6k',  acKw: 7.6, dcKwMax: 11.4, mpptCount: 2, minPanelsPerString: 5, maxPanelsPerString: 12, maxParallelStringsPerMppt: 2 },
+    // All four are the SAME hardware (Tesla Solar Inverter 1538000): 4 MPPT,
+    // input connectors 1-2-1-2, 13A IMP / 17A ISC per MPPT, 600 VDC max,
+    // allowable DC/AC 1.7 (datasheet). Models differ only by AC power class.
+    // equipment-db sets maxInputCurrentPerMppt to the 17A ISC rating so the
+    // engine's per-MPPT design-current check (Isc×1.25) accepts a TSP-420 string
+    // (16.3A < 17A). dcKwMax = acKw × 1.7. maxParallelStringsPerMppt kept at 1.
+    { equipmentDbId: 'tesla-solar-inverter-3p8k',  acKw: 3.8, dcKwMax: 6.46,  mpptCount: 4, minPanelsPerString: 4, maxPanelsPerString: 12, maxParallelStringsPerMppt: 1 },
+    { equipmentDbId: 'tesla-solar-inverter-5k',    acKw: 5.0, dcKwMax: 8.5,   mpptCount: 4, minPanelsPerString: 4, maxPanelsPerString: 12, maxParallelStringsPerMppt: 1 },
+    { equipmentDbId: 'tesla-solar-inverter-5p7k',  acKw: 5.7, dcKwMax: 9.69,  mpptCount: 4, minPanelsPerString: 4, maxPanelsPerString: 12, maxParallelStringsPerMppt: 1 },
+    { equipmentDbId: 'tesla-solar-inverter-7p6k',  acKw: 7.6, dcKwMax: 12.92, mpptCount: 4, minPanelsPerString: 5, maxPanelsPerString: 12, maxParallelStringsPerMppt: 1 },
   ],
 
+  // Tier maxDcKw = each model's dcKwMax (acKw × 1.7), so the fallback picker
+  // never selects a DC-overloaded or out-of-ratio inverter (audit finding 4).
   sizingTiers: [
-    { minDcKw: 0,   maxDcKw: 6.5,      equipmentDbId: 'tesla-solar-inverter-3p8k' },
-    { minDcKw: 6.5, maxDcKw: 8,        equipmentDbId: 'tesla-solar-inverter-5k'   },
-    { minDcKw: 8,   maxDcKw: 9.5,      equipmentDbId: 'tesla-solar-inverter-5p7k' },
-    { minDcKw: 9.5, maxDcKw: Infinity, equipmentDbId: 'tesla-solar-inverter-7p6k' },
+    { minDcKw: 0,    maxDcKw: 6.46,     equipmentDbId: 'tesla-solar-inverter-3p8k' },
+    { minDcKw: 6.46, maxDcKw: 8.5,      equipmentDbId: 'tesla-solar-inverter-5k'   },
+    { minDcKw: 8.5,  maxDcKw: 9.69,     equipmentDbId: 'tesla-solar-inverter-5p7k' },
+    { minDcKw: 9.69, maxDcKw: Infinity, equipmentDbId: 'tesla-solar-inverter-7p6k' },
   ],
 
   battery: {
@@ -67,15 +71,17 @@ export const TESLA_PROFILE: BrandProfile = {
   compatibility: {
     incompatibleTopologies: ['micro'],
     incompatibleBrands: ['enphase', 'apsystems', 'hoymiles'],
-    dcAcRatioRange: { min: 1.0, max: 1.5 },
-    maxDcKwPerInverter: 11.4,
+    dcAcRatioRange: { min: 1.0, max: 1.7 },  // datasheet allowable DC/AC = 1.7
+    maxDcKwPerInverter: 12.92,               // 7.6kW × 1.7
   },
 
   recommendedFor: [],
 
   // v47.429 — Stage 6: Tesla installers most commonly pair with IronRidge XR
   // (UL 2703 listed, Tesla-approved in field installations) and Unirac SolarMount.
-  recommendedRackingBrands: ['ironridge', 'unirac'],
+  // Tesla Certified installs default to Tesla Panel Mount (Comp Rafter / Tile,
+  // UL 2703); IronRidge/Unirac retained as field-proven alternatives.
+  recommendedRackingBrands: ['tesla', 'ironridge', 'unirac'],
 
   notes:
     'Tesla Solar Inverter is a 240V single-phase pure string inverter ' +

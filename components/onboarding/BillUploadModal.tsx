@@ -637,7 +637,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                     ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                     : 'bg-slate-700 text-slate-500'
                 }`}>{i + 1}</div>
-                {i < 3 && <div className={`w-4 h-px ${['upload', 'review', 'creating', 'done'].indexOf(step) > i ? 'bg-emerald-500/50' : 'bg-slate-700'}`} />}
+                {i < 3 ? <div className={`w-4 h-px ${['upload', 'review', 'creating', 'done'].indexOf(step) > i ? 'bg-emerald-500/50' : 'bg-slate-700'}`} /> : null}
               </div>
             ))}
             <button onClick={onClose} className="ml-2 text-slate-400 hover:text-white transition-colors">
@@ -649,7 +649,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
         <div className="p-6">
 
           {/* ── STEP 1: Upload ── */}
-          {step === 'upload' && (
+          {step === 'upload' ? (
             <div className="space-y-4">
               <div
                 onDragOver={e => { e.preventDefault(); setDragging(true); }}
@@ -751,10 +751,10 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                 </button>
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* ── STEP 2: Review ── */}
-          {step === 'review' && result && (
+          {step === 'review' && result ? (
             <div className="space-y-4">
               {selectedFile ? (
                 <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-2 border border-slate-700/50">
@@ -769,7 +769,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                 <span className={confidenceColor(result.billData.confidence)}>
                   Extraction confidence: <strong>{result.billData.confidence}</strong>
                   {' '}— {result.billData.extractedFields.length} fields extracted
-                  {result.billData.usedLlmFallback && <span className="ml-1 text-xs opacity-75">(AI-assisted)</span>}
+                  {result.billData.usedLlmFallback ? <span className="ml-1 text-xs opacity-75">(AI-assisted)</span> : null}
                 </span>
               </div>
 
@@ -928,7 +928,12 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                     <span className="text-amber-400 font-bold text-lg">{systemKw.toFixed(1)} kW</span>
                   </div>
                   <input type="range" min={1} max={50} step={0.1} value={systemKw}
-                    onChange={e => setSystemKw(parseFloat(e.target.value))}
+                    onChange={e => {
+                      const kw = parseFloat(e.target.value);
+                      setSystemKw(kw);
+                      // Keep the offset % in sync so the two sliders never disagree.
+                      if (baselineKw > 0) setOffsetPercent(Math.round(kw / baselineKw * 100));
+                    }}
                     className="w-full accent-amber-500" />
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400 text-xs">Offset Target</span>
@@ -970,7 +975,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                 </button>
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* ── STEP 3: Creating ── */}
           {step === 'creating' ? (

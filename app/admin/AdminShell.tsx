@@ -154,8 +154,8 @@ export default function AdminShell({
                           {newFeedbackCount > 99 ? '99+' : newFeedbackCount}
                         </span>
                       ) : null}
-                      {active && !isFeedback && <ChevronRight size={12} className="ml-auto opacity-60" />}
-                      {active && isFeedback && newFeedbackCount === 0 && <ChevronRight size={12} className="ml-auto opacity-60" />}
+                      {active && !isFeedback ? <ChevronRight size={12} className="ml-auto opacity-60" /> : null}
+                      {active && isFeedback && newFeedbackCount === 0 ? <ChevronRight size={12} className="ml-auto opacity-60" /> : null}
                     </Link>
                   );
                 })}

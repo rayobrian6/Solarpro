@@ -23,7 +23,7 @@ export const APSYSTEMS_PROFILE: BrandProfile = {
     // DS3-S: 640W AC, dual-module (2 panels per device), 2 MPPT
     { equipmentDbId: 'apsystems-ds3s', acKw: 0.640, dcKwMax: 0.960, mpptCount: 2, modulesPerDevice: 2 },
     // DS3-L: 730W AC, dual-module (2 panels per device), 2 MPPT (larger version)
-    { equipmentDbId: 'apsystems-ds3l', acKw: 0.730, dcKwMax: 1.100, mpptCount: 2, modulesPerDevice: 2 },
+    { equipmentDbId: 'apsystems-ds3l', acKw: 0.768, dcKwMax: 1.140, mpptCount: 2, modulesPerDevice: 2 }, // datasheet DS3-L-NA-768VA rated output (was 730)
     // DS3: 880W AC, dual-module (2 panels per device), 2 MPPT (highest power DS3 variant)
     { equipmentDbId: 'apsystems-ds3',  acKw: 0.880, dcKwMax: 1.320, mpptCount: 2, modulesPerDevice: 2 },
     // EZ1-M: 800W AC, dual-module (2 panels per device), plug-and-play balcony / small systems

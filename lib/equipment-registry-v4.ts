@@ -2588,18 +2588,16 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
         required: true, quantityRule: 'perAttachment',
         defaultManufacturer: 'Roof Tech', defaultModel: 'RT-MINI Pad Assembly',
         defaultPartNumber: 'RT-MINI-ASSY', necReference: 'ASCE 7-22 / ICC-ES ESR-3575',
-        notes: 'Flashed pad with integrated EPDM seal. 2 lag bolts per pad into rafter.',
+        notes: 'Flashed pad with integrated EPDM butyl seal — the pad IS the flashing '
+          + '(seals the lag penetration on contact). No separate flashing kit; do NOT '
+          + 'add a flashing accessory for RT-MINI (it would double-bill the same EPDM seal).',
       },
-      {
-        category: 'flashing',
-        description: 'RT-MINI integrated EPDM flashing — 1 per pad (shingle/tile roofs)',
-        required: true,
-        conditional: 'roofType === shingle || roofType === tile',
-        quantityRule: 'perAttachment',
-        defaultManufacturer: 'Roof Tech', defaultModel: 'RT-MINI Flashing Kit',
-        defaultPartNumber: 'RT-MINI-FLASH', necReference: 'IBC 2021',
-        notes: 'Integrated EPDM flashing included with RT-MINI pad for shingle/tile roofs',
-      },
+      // NOTE: RT-MINI has NO separate flashing accessory. The flashed pad above is
+      // self-flashing (integrated EPDM butyl on the underside seals the screw hole at
+      // the rafter). A previous 'RT-MINI Flashing Kit' (RT-MINI-FLASH) line here
+      // double-billed the same seal (~$7.3k on a 730-pad job). For traditional L-foot
+      // systems (IronRidge/Unirac) the separate flashing accessory is correct; for a
+      // self-flashing pad it is not.
       {
         category: 'lag_bolt',
         description: '5/16" × 3" lag bolt — 2 per RT-MINI pad into rafter',

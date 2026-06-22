@@ -246,7 +246,7 @@ function CoverSheetInner({ data }: { data: PermitCoverData }) {
               <tbody>
                 <tr><td className="E-k">CLIENT</td><td className="E-v">{clientName}</td></tr>
                 <tr><td className="E-k">PROJECT ADDRESS</td><td className="E-v">{fullAddress}</td></tr>
-                {apn && <tr><td className="E-k">APN</td><td className="E-v">{apn}</td></tr>}
+                {apn ? <tr><td className="E-k">APN</td><td className="E-v">{apn}</td></tr> : null}
                 <tr><td className="E-k">AHJ</td><td className="E-v">{ahj}</td></tr>
                 <tr><td className="E-k">UTILITY</td><td className="E-v">{utility}</td></tr>
                 <tr><td className="E-k">DESIGNED BY</td><td className="E-v">{designer}</td></tr>

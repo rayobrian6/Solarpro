@@ -46,7 +46,7 @@ function renderText(text: string) {
       return <strong key={i} className="font-semibold text-white">{part.slice(2, -2)}</strong>;
     }
     return part.split('\n').map((line, j) => (
-      <span key={`${i}-${j}`}>{line}{j < part.split('\n').length - 1 && <br />}</span>
+      <span key={`${i}-${j}`}>{line}{j < part.split('\n').length - 1 ? <br /> : null}</span>
     ));
   });
 }
@@ -244,7 +244,7 @@ export default function DogAssistant({ context, onAction, defaultOpen = false }:
                           <span>{renderText(m.text)}</span>
                         </div>
                       ) : null}
-                      {m.role === 'user' && <span>{m.text}</span>}
+                      {m.role === 'user' ? <span>{m.text}</span> : null}
                     </div>
                   </div>
                 ))}

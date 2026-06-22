@@ -462,7 +462,7 @@ function SectionCard({
       <div className="flex items-center gap-2 px-5 py-3.5 border-b border-slate-700/50">
         <span className={iconColor}>{icon}</span>
         <h2 className="text-sm font-bold text-white">{title}</h2>
-        {badge && <span className="ml-auto">{badge}</span>}
+        {badge ? <span className="ml-auto">{badge}</span> : null}
       </div>
       <div className="px-5 py-3">{children}</div>
     </div>

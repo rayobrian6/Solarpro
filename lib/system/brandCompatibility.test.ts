@@ -198,17 +198,19 @@ describe('evaluateCompatibility — corrective suggestions', () => {
   });
 
   it('suggestion battery brand follows the recommended inverter', () => {
-    // Fence system → recommended brand is EcoFlow → battery should be EcoFlow.
+    // Fence system → recommended brand is now ENPHASE (SolFence is "just solar" +
+    // battery-agnostic; IQ8 micro per the datasheet). An incompatible EcoFlow battery
+    // on an Enphase fence resolves to Enphase + Enphase battery.
     const r = evaluateCompatibility({
-      inverterBrandId: 'enphase', // micro — but the user says fence (allowed but unusual)
+      inverterBrandId: 'enphase', // micro — matches the SolFence recommendation
       batteryBrandId: 'ecoflow',  // HARD INCOMPATIBLE with Enphase
       batteryEnabled: true,
       systemType: 'fence',
       topology: 'micro',
     });
     expect(r.ok).toBe(false);
-    expect(r.suggestion?.inverterBrandId).toBe('ecoflow');
-    expect(r.suggestion?.batteryBrandId).toBe('ecoflow');
+    expect(r.suggestion?.inverterBrandId).toBe('enphase');
+    expect(r.suggestion?.batteryBrandId).toBe('enphase');
   });
 });
 

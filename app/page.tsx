@@ -399,7 +399,7 @@ function HomeownerPortalMock() {
         <div className="flex items-center justify-between mb-3">
           {['Request', 'Review', 'Survey', 'Design', 'Proposal', 'Install', 'Done'].map((step, i) => (
             <div key={step} className="flex flex-col items-center flex-1">
-              {i > 0 && <div className={`absolute h-px w-full ${i <= 3 ? 'bg-emerald-500/40' : 'bg-white/[0.06]'}`} />}
+              {i > 0 ? <div className={`absolute h-px w-full ${i <= 3 ? 'bg-emerald-500/40' : 'bg-white/[0.06]'}`} /> : null}
               <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold z-10 ${
                 i < 3 ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-400'
                 : i === 3 ? 'bg-amber-500 text-slate-900'
@@ -891,12 +891,12 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
             <div className={`rounded-2xl border shadow-2xl overflow-hidden ${accentMap[currentScreen.accent]}`}
               style={{ aspectRatio: '4/3' }}>
-              {currentScreen.mockType === 'design'  && <DesignStudioMock />}
-              {currentScreen.mockType === 'portal'  && <HomeownerPortalMock />}
-              {currentScreen.mockType === 'survey'  && <SiteSurveyMock />}
-              {currentScreen.mockType === 'sld'     && <SLDMock />}
-              {currentScreen.mockType === 'solfence'&& <SolFenceMock />}
-              {currentScreen.mockType === 'bom'     && <BOMMock />}
+              {currentScreen.mockType === 'design' ? <DesignStudioMock /> : null}
+              {currentScreen.mockType === 'portal' ? <HomeownerPortalMock /> : null}
+              {currentScreen.mockType === 'survey' ? <SiteSurveyMock /> : null}
+              {currentScreen.mockType === 'sld' ? <SLDMock /> : null}
+              {currentScreen.mockType === 'solfence' ? <SolFenceMock /> : null}
+              {currentScreen.mockType === 'bom' ? <BOMMock /> : null}
             </div>
 
             <div>
@@ -1385,14 +1385,14 @@ export default function LandingPage() {
                         {f}
                       </li>
                     ))}
-                    {plan.notIncluded && plan.notIncluded.length > 0 && (
+                    {plan.notIncluded && plan.notIncluded.length > 0 ? (
                       plan.notIncluded.map((f, i) => (
                         <li key={`no-${i}`} className="flex items-start gap-2 text-xs text-slate-600">
                           <span className="text-slate-700 flex-shrink-0 mt-0.5 text-[11px] leading-[13px]">✕</span>
                           {f}
                         </li>
                       ))
-                    )}
+                    ) : null}
                   </ul>
 
                   {plan.id === 'enterprise' ? (

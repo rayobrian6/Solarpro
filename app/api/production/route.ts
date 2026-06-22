@@ -380,8 +380,11 @@ export async function POST(req: NextRequest) {
       await updateProject(projectId, user.id, { status: 'design', systemSizeKw: savedLayout.systemSizeKw });
       await upsertProduction({
         projectId, userId: user.id, production, costEstimate,
-        selectedPanel:    body.selectedPanel   ?? null,
-        selectedInverter: body.selectedInverter ?? null,
+        // Coalesce with the already-persisted (hydrated) project values so a save
+        // that omits the selection doesn't wipe it — upsertProduction overwrites
+        // data_json wholesale (engineering audit: null-overwrite regression).
+        selectedPanel:    body.selectedPanel    ?? project.selectedPanel    ?? null,
+        selectedInverter: body.selectedInverter ?? project.selectedInverter ?? null,
         systemSizeKw:     savedLayout.systemSizeKw,
         panelCount:       savedLayout.totalPanels,
       });
@@ -439,8 +442,10 @@ export async function POST(req: NextRequest) {
     await updateProject(projectId, user.id, { status: 'design', systemSizeKw: savedLayout.systemSizeKw });
     await upsertProduction({
       projectId, userId: user.id, production, costEstimate,
-      selectedPanel:    body.selectedPanel   ?? null,
-      selectedInverter: body.selectedInverter ?? null,
+      // Coalesce with the persisted project values so a save without a re-selection
+      // can't null out the saved equipment (engineering audit: null-overwrite).
+      selectedPanel:    body.selectedPanel    ?? project.selectedPanel    ?? null,
+      selectedInverter: body.selectedInverter ?? project.selectedInverter ?? null,
       systemSizeKw:     savedLayout.systemSizeKw,
       panelCount:       savedLayout.totalPanels,
     });

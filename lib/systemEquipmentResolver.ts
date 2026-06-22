@@ -142,15 +142,15 @@ const equipmentMap: Record<SystemTypeKey, EquipmentSpec> = {
     // Philadelphia Solar Nexus has -0.4%/yr degradation (better than standard 0.5%)
     panelDegradationRate: 0.004,
     racking: {
-      rackingBrand:   'SolFence',
-      rackingModel:   'Vertical Fence Rail System',
-      railMaterial:   'Extruded Aluminum 6063-T6',
-      hardware:       'Stainless Steel Grade 316 fasteners',
-      attachmentType: 'Vertical Fence Post Mount',
-      attachmentNote: 'Panels mounted vertically on fence posts, bifacial optimized',
+      rackingBrand:   'SolFence',                       // Sol Fence LLC (solfence.solar), Newburgh IN
+      rackingModel:   'SOL Fence Vertical Section System',
+      railMaterial:   '6061-T6 aluminum (121-mil), galvanized steel foundation posts', // per SolFence GOLD datasheet (was wrongly '6063-T6')
+      hardware:       'Pre-built sections (side channels + rails) on 4x4 posts',
+      attachmentType: 'Vertical Fence Post Mount (8 ft wide sections)',
+      attachmentNote: 'Panels mounted vertically on 4x4 posts, bifacial; steel post + concrete sourced locally',
       tiltRange:      '90° vertical (bifacial)',
-      warranty:       '15-year product warranty',
-      certifications: 'UL 2703, IEC 61215, Wind Zone D',
+      warranty:       'Lifetime fence-system warranty / 30-yr panel warranty',
+      certifications: 'UL 2703 · wind rated 115 mph · snow load 113 PSF',
     },
     attachmentCards: [
       {
@@ -178,9 +178,9 @@ const equipmentMap: Record<SystemTypeKey, EquipmentSpec> = {
         icon:     '🛡️',
       },
       {
-        label:    'Microinverter Ready',
-        hardware: 'Enphase IQ8 microinverter per panel',
-        note:     'Recommended for vertical bifacial — eliminates string mismatch',
+        label:    'Power Electronics (installer-supplied)',
+        hardware: 'Tigo TS4-A-O optimizer (per datasheet) or Enphase IQ8 microinverter',
+        note:     'Per SolFence GOLD datasheet: Tigo TS4-A-O optimizer (panel monitoring + rapid shutdown) when needed. Enphase IQ8 micro also fits the racking (APsystems micros do NOT — larger form factor). Power electronics + all wiring are NOT in the SolFence kit — supplied by the installer.',
         icon:     '⚡',
       },
     ],

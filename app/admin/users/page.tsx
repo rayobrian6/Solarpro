@@ -4,7 +4,7 @@ import {
   Search, RefreshCw, Shield, Zap, Ban, RotateCcw,
   ChevronLeft, ChevronRight, Edit2, Trash2, CheckCircle,
   AlertCircle, Crown, UserX, Key, Eye, ChevronDown,
-  UserCheck, Star, XCircle,
+  UserCheck, Star, XCircle, Headset,
 } from 'lucide-react';
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -26,6 +26,7 @@ const STATUS_COLORS: Record<string, string> = {
 const ROLE_COLORS: Record<string, string> = {
   super_admin: 'bg-amber-500/20 text-amber-400',
   admin:       'bg-blue-500/20 text-blue-400',
+  sales:       'bg-emerald-500/20 text-emerald-400',
   user:        'bg-slate-500/20 text-slate-400',
 };
 
@@ -119,9 +120,22 @@ export default function AdminUsers() {
     });
   };
 
+  // Grant Lead Desk access AND a free pass in one go — they're independent
+  // columns (role vs is_free_pass), so a rep can have both. Run sequentially
+  // like the Edit modal does; refresh once at the end.
+  const grantDeskAndPass = async (userId: string) => {
+    await action(userId, 'set_role', { role: 'sales' });
+    await action(userId, 'grant_free_pass');
+    setTimeout(() => refreshUser(), 200);
+  };
+
   const handleConfirm = () => {
     if (!confirmModal) return;
-    action(confirmModal.userId, confirmModal.action, confirmModal.extra || {});
+    if (confirmModal.action === 'grant_desk_and_pass') {
+      grantDeskAndPass(confirmModal.userId);
+    } else {
+      action(confirmModal.userId, confirmModal.action, confirmModal.extra || {});
+    }
     setConfirmModal(null);
   };
 
@@ -197,7 +211,7 @@ export default function AdminUsers() {
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[u.subscription_status] || 'bg-slate-500/20 text-slate-400'}`}>
                       {u.subscription_status || 'unknown'}
                     </span>
-                    {u.is_free_pass && <span className="ml-1 text-[10px] text-amber-400">⚡</span>}
+                    {u.is_free_pass ? <span className="ml-1 text-[10px] text-amber-400">⚡</span> : null}
                   </td>
                   <td className="px-4 py-3">
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${ROLE_COLORS[u.role] || 'bg-slate-500/20 text-slate-400'}`}>
@@ -272,6 +286,27 @@ export default function AdminUsers() {
                                   className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
                                 >
                                   <Star size={12} className="text-amber-400" /> Promote to Super Admin
+                                </button>
+                                {u.role === 'sales' ? (
+                                  <button
+                                    onClick={() => { action(u.id, 'set_role', { role: 'user' }); }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                                  >
+                                    <Headset size={12} className="text-emerald-400" /> Revoke Lead Desk access
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => setConfirmModal({ userId: u.id, action: 'set_role', label: `Give ${u.name} Lead Desk access? They'll be able to use /desk (call & work leads) but NOT the rest of the admin portal.`, extra: { role: 'sales' } })}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                                  >
+                                    <Headset size={12} className="text-emerald-400" /> Grant Lead Desk access
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => setConfirmModal({ userId: u.id, action: 'grant_desk_and_pass', label: `Give ${u.name} BOTH Lead Desk access (/desk) AND a free pass (free contractor account)? These are independent — they'll have both.` })}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                                >
+                                  <Headset size={12} className="text-emerald-400" /><Zap size={12} className="text-amber-400" /> Grant Lead Desk + Free Pass
                                 </button>
                               </>
                             ) : null}
@@ -370,10 +405,11 @@ export default function AdminUsers() {
                   disabled={!isSuperAdmin}
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50 disabled:opacity-50">
                   <option value="user">user</option>
+                  <option value="sales">sales (Lead Desk)</option>
                   <option value="admin">admin</option>
                   <option value="super_admin">super_admin</option>
                 </select>
-                {!isSuperAdmin && <p className="text-[10px] text-slate-500 mt-1">Only super_admin can change roles</p>}
+                {!isSuperAdmin ? <p className="text-[10px] text-slate-500 mt-1">Only super_admin can change roles</p> : null}
               </div>
               <div>
                 <label className="text-xs text-slate-400 mb-1 block">Plan</label>

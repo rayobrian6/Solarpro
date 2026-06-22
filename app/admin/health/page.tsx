@@ -170,7 +170,7 @@ export default function SystemHealthPage() {
         </div>
       </div>
 
-      {error && <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-red-400 text-sm flex items-center gap-2"><XCircle className="w-4 h-4 flex-shrink-0" />Failed to fetch health data: {error}</div>}
+      {error ? <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-red-400 text-sm flex items-center gap-2"><XCircle className="w-4 h-4 flex-shrink-0" />Failed to fetch health data: {error}</div> : null}
 
       <div>
         <h2 className="text-white font-semibold mb-3 flex items-center gap-2"><Globe className="w-4 h-4 text-amber-400" />Service Status</h2>
@@ -186,8 +186,8 @@ export default function SystemHealthPage() {
                   </div>
                   <StatusBadge status={svc.status} />
                 </div>
-                {svc.latencyMs !== undefined && <LatencyBar ms={svc.latencyMs} max={svc.name === 'API Server' ? 2000 : 500} />}
-                {svc.detail && <p className="text-slate-500 text-xs mt-2">{svc.detail}</p>}
+                {svc.latencyMs !== undefined ? <LatencyBar ms={svc.latencyMs} max={svc.name === 'API Server' ? 2000 : 500} /> : null}
+                {svc.detail ? <p className="text-slate-500 text-xs mt-2">{svc.detail}</p> : null}
               </div>
             );
           })}
@@ -303,7 +303,7 @@ export default function SystemHealthPage() {
         </div>
       </div>
 
-      {lastRefresh && <div className="text-center text-slate-600 text-xs pt-2">Health data collected at {lastRefresh.toLocaleString()}{autoRefresh && ' - Auto-refreshing every 60 seconds'}</div>}
+      {lastRefresh ? <div className="text-center text-slate-600 text-xs pt-2">Health data collected at {lastRefresh.toLocaleString()}{autoRefresh && ' - Auto-refreshing every 60 seconds'}</div> : null}
     </div>
   );
 }

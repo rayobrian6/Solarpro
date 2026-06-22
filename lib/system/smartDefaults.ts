@@ -126,7 +126,7 @@ export function isSystemUninitialized(config: SmartDefaultsConfigShape): boolean
  *   3. Hardcoded fallback per prompt:
  *        roof   → 'enphase'
  *        ground → 'fronius'
- *        fence  → 'ecoflow'
+ *        fence  → 'enphase'  (SolFence is "just solar", battery-agnostic — IQ8 micro)
  *
  * The hardcoded fallback is a safety net for the (impossible) case where
  * the brand registry is empty. Under normal operation, rule #1 always
@@ -145,7 +145,7 @@ export function getDefaultBrand(systemType: SystemType): string {
   // least one systemType. Keep a defensive fallback to satisfy the prompt.
   if (systemType === 'roof')   return 'enphase';
   if (systemType === 'ground') return 'fronius';
-  if (systemType === 'fence')  return 'ecoflow';
+  if (systemType === 'fence')  return 'enphase';  // SolFence = just solar + battery-agnostic → Enphase IQ8 micro (AC out, any battery AC-couples later)
   return 'generic-string';
 }
 

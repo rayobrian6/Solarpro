@@ -17,6 +17,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdminApi } from "@/lib/adminAuth";
 import { upsertProspects, type InstallerProspectInput } from "@/lib/network/installerProspects";
 
+// In-memory rate limit: one blitz per 60s per server instance.
+// Prevents accidental credit-burning from rapid repeated requests.
+let lastBlitzAt = 0;
+const BLITZ_COOLDOWN_MS = 60_000;
+
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
   CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia",
@@ -53,6 +58,14 @@ export async function POST(req: NextRequest) {
   try { state = (((await req.json()) as { state?: string }).state || "").toUpperCase(); } catch { /* */ }
   const stateName = STATE_NAMES[state];
   if (!stateName) return NextResponse.json({ success: false, error: "Provide a valid 2-letter state" }, { status: 400 });
+
+  // Rate limit: prevent blitzing faster than once per minute
+  const now = Date.now();
+  if (now - lastBlitzAt < BLITZ_COOLDOWN_MS) {
+    const wait = Math.ceil((BLITZ_COOLDOWN_MS - (now - lastBlitzAt)) / 1000);
+    return NextResponse.json({ success: false, error: `Blitz on cooldown — ${wait}s remaining`, cooldown: wait }, { status: 429 });
+  }
+  lastBlitzAt = now;
 
   const system = SYSTEM(stateName);
   let messages: { role: string; content: unknown }[] = [

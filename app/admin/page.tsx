@@ -28,7 +28,7 @@ function StatCard({
         <Icon size={16} className="opacity-60" />
       </div>
       <div className="text-3xl font-black">{typeof value === 'number' ? value.toLocaleString() : value}</div>
-      {sub && <div className="text-xs mt-1 opacity-60">{sub}</div>}
+      {sub ? <div className="text-xs mt-1 opacity-60">{sub}</div> : null}
     </div>
   );
 }

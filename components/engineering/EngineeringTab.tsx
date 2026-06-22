@@ -474,7 +474,7 @@ ${(pp?.specialConditions?.length) ? `
           </h2>
           <p className="text-slate-400 text-xs mt-0.5">
             Auto-generated from Design Engine · {new Date(report.generatedAt).toLocaleDateString()}
-            {isStale && <span className="ml-2 text-amber-400">⚠ Design changed — regenerate</span>}
+            {isStale ? <span className="ml-2 text-amber-400">⚠ Design changed — regenerate</span> : null}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -529,8 +529,8 @@ ${(pp?.specialConditions?.length) ? `
           <DataRow label="CO₂ Offset" value={`${ss.co2OffsetTons} tons/year`} />
           <DataRow label="Utility Provider" value={ss.utilityName} />
           <DataRow label="AHJ" value={ss.ahj} />
-          {ss.roofSegmentCount > 0 && <DataRow label="Roof Segments" value={`${ss.roofSegmentCount}`} />}
-          {ss.groundArrayCount > 0 && <DataRow label="Ground Arrays" value={`${ss.groundArrayCount}`} />}
+          {ss.roofSegmentCount > 0 ? <DataRow label="Roof Segments" value={`${ss.roofSegmentCount}`} /> : null}
+          {ss.groundArrayCount > 0 ? <DataRow label="Ground Arrays" value={`${ss.groundArrayCount}`} /> : null}
         </div>
       </Section>
 
@@ -721,7 +721,7 @@ ${(pp?.specialConditions?.length) ? `
               }`}>
                 {step}
               </span>
-              {i < arr.length - 1 && <span className="text-slate-600">→</span>}
+              {i < arr.length - 1 ? <span className="text-slate-600">→</span> : null}
             </React.Fragment>
           ))}
         </div>

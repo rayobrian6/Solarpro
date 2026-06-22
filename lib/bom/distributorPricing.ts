@@ -107,10 +107,10 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
   },
   {
     partNumber: 'PS-MNB108-HCBF-440W',
-    description: 'Panasonic EverVolt 440W Black Frame',
+    description: 'Philadelphia Solar Nexus PS-MNB108(HCBF)-440W Bifacial N-Type (SolFence panel)',
     category: 'solar_panel', unit: 'ea',
-    listPrice: 0.55, netPrice: 0.44,
-    source: 'Soligent', asOf: '2025-01-15',
+    listPrice: 0.597, netPrice: 0.52,   // $/W → SolFence distributor price $262.50 / 440W = $0.597/W (was mislabeled 'Panasonic EverVolt')
+    source: 'Internal', asOf: '2026-06-21',
   },
 
   // ─── String Inverters ──────────────────────────────────────────────────────
@@ -248,6 +248,17 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
   },
 
   // ─── Racking / Mounting ────────────────────────────────────────────────────
+  // SolFence (Sol Fence LLC) — REAL distributor price sheet, 2026-06-21 (Ray-supplied).
+  // Sections include side channels + rails. Steel post + concrete sourced locally;
+  // optimizers + wiring supplied by the electrician (NOT in the SolFence kit).
+  { partNumber: 'SOLFENCE-SECTION-6', description: "SOL Fence 6' Tall x 8' Wide Section (incl. side channels + rails, 2 panels)", category: 'racking', unit: 'ea', listPrice: 253.35, netPrice: 253.35, source: 'Internal', asOf: '2026-06-21' },
+  { partNumber: 'SOLFENCE-SECTION-4', description: "SOL Fence 4' Tall x 8' Wide Section (incl. side channels + rails, 1 panel)", category: 'racking', unit: 'ea', listPrice: 231.00, netPrice: 231.00, source: 'Internal', asOf: '2026-06-21' },
+  { partNumber: 'SOLFENCE-POST-6.5', description: 'SOL Fence 4x4x6.5 Post (6 ft section)', category: 'racking', unit: 'ea', listPrice: 197.88, netPrice: 197.88, source: 'Internal', asOf: '2026-06-21' },
+  { partNumber: 'SOLFENCE-POST-4.5', description: 'SOL Fence 4x4x4.5 Post (4 ft section)', category: 'racking', unit: 'ea', listPrice: 129.14, netPrice: 129.14, source: 'Internal', asOf: '2026-06-21' },
+  { partNumber: 'SOLFENCE-POST-9', description: 'SOL Fence 4x4x9 Post (tall option)', category: 'racking', unit: 'ea', listPrice: 250.77, netPrice: 250.77, source: 'Internal', asOf: '2026-06-21' },
+  { partNumber: 'SOLFENCE-APEX-CAP', description: 'SOL Fence 4x4 Apex Cap', category: 'racking', unit: 'ea', listPrice: 6.30, netPrice: 6.30, source: 'Internal', asOf: '2026-06-21' },
+  { partNumber: 'SOLFENCE-DONUT', description: 'SOL Fence 4x4 Donut w/ 2-3/8" Hole', category: 'racking', unit: 'ea', listPrice: 4.64, netPrice: 4.64, source: 'Internal', asOf: '2026-06-21' },
+  { partNumber: 'SOLFENCE-RCP', description: 'SOL Fence RCP', category: 'racking', unit: 'ea', listPrice: 187.50, netPrice: 187.50, source: 'Internal', asOf: '2026-06-21' },
   {
     partNumber: 'RT-MINI-01',
     description: 'RoofTech RT Mini Rail-Free Mount',

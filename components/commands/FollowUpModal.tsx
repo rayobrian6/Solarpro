@@ -140,7 +140,7 @@ export default function FollowUpModal({
         </div>
       ) : null}
 
-      {error && <div className="text-xs text-red-400 font-medium mb-3">{error}</div>}
+      {error ? <div className="text-xs text-red-400 font-medium mb-3">{error}</div> : null}
 
       {/* Actions */}
       <div className="flex items-center gap-2 pt-2">

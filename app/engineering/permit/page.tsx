@@ -45,7 +45,7 @@ function SheetNavItem({
       <span className="sheet-nav-id">{id}</span>
       <div className="sheet-nav-info">
         <div className="sheet-nav-title">{title}</div>
-        {description && <div className="sheet-nav-desc">{description}</div>}
+        {description ? <div className="sheet-nav-desc">{description}</div> : null}
       </div>
     </button>
   );

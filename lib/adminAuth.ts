@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
-import { verifyToken } from '@/lib/auth';
+import { verifyTokenWithMeta, isSessionStale } from '@/lib/auth';
 // Import directly from db-ready (not db-neon) to avoid pulling the entire 2244-line
 // db-neon.ts + utility-rules.ts (1341 lines) into auth-related route bundles.
 // db-ready.ts exports only the connection/retry primitives needed here.
@@ -21,23 +21,51 @@ export type AdminUser = {
 // This cache is per-Vercel-function-instance (module scope) — not shared globally.
 interface RoleCacheEntry {
   user: AdminUser;
+  passwordChangedAt: string | null; // for session-invalidation check on cache hits
   expiresAt: number;
 }
 const _roleCache = new Map<string, RoleCacheEntry>();
 const ROLE_CACHE_TTL_MS = 60_000; // 60 seconds
 
-function getRoleCached(userId: string): AdminUser | null {
+function getRoleCached(userId: string): RoleCacheEntry | null {
   const entry = _roleCache.get(userId);
   if (!entry) return null;
   if (Date.now() > entry.expiresAt) {
     _roleCache.delete(userId);
     return null;
   }
-  return entry.user;
+  return entry;
 }
 
-function setRoleCached(user: AdminUser): void {
-  _roleCache.set(user.id, { user, expiresAt: Date.now() + ROLE_CACHE_TTL_MS });
+function setRoleCached(user: AdminUser, passwordChangedAt: string | null): void {
+  _roleCache.set(user.id, { user, passwordChangedAt, expiresAt: Date.now() + ROLE_CACHE_TTL_MS });
+}
+
+/**
+ * Best-effort fetch of role + password_changed_at. Falls back to a query
+ * without password_changed_at if migration 094 isn't applied yet (so admins
+ * are never locked out pre-migration). Returns null on user-not-found; rethrows
+ * connection errors to the caller's existing handling.
+ */
+async function fetchAdminRow(
+  sql: Awaited<ReturnType<typeof getDbWithRetry>>,
+  userId: string,
+): Promise<{ id: string; name: string; email: string; role: string; password_changed_at: string | null } | null> {
+  try {
+    const rows = await sql`
+      SELECT id, name, email, role, password_changed_at
+      FROM users WHERE id = ${userId} LIMIT 1
+    `;
+    return (rows[0] as any) ?? null;
+  } catch (e: unknown) {
+    const msg = ((e as Error)?.message || '').toLowerCase();
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      const rows = await sql`SELECT id, name, email, role FROM users WHERE id = ${userId} LIMIT 1`;
+      const r = rows[0] as any;
+      return r ? { ...r, password_changed_at: null } : null;
+    }
+    throw e;
+  }
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -60,31 +88,23 @@ export async function requireAdmin(): Promise<AdminUser> {
     redirect('/auth/login');
   }
 
-  const jwtUser = verifyToken(token);
-  if (!jwtUser?.id) {
+  const jwtMeta = verifyTokenWithMeta(token);
+  if (!jwtMeta?.user?.id) {
     console.log('[requireAdmin] Invalid/expired JWT — redirecting to login');
     redirect('/auth/login');
   }
+  const jwtUser = jwtMeta.user;
 
   console.debug('[requireAdmin] JWT identity verified:', { id: jwtUser.id });
 
   // Fetch role from DB — this is the ONLY source of truth for role
-  let dbUser: { id: string; name: string; email: string; role: string } | null = null;
+  let dbUser: { id: string; name: string; email: string; role: string; password_changed_at: string | null } | null = null;
   let dbError: string | null = null;
 
   try {
     const sql = await getDbWithRetry();
-    const rows = await sql`
-      SELECT id, name, email, role
-      FROM users
-      WHERE id = ${jwtUser.id}
-      LIMIT 1
-    `;
-    if (rows.length > 0) {
-      dbUser = rows[0] as { id: string; name: string; email: string; role: string };
-    } else {
-      dbError = 'User not found in DB';
-    }
+    dbUser = await fetchAdminRow(sql, jwtUser.id);
+    if (!dbUser) dbError = 'User not found in DB';
   } catch (e: unknown) {
     dbError = `DB error: ${(e as Error).message}`;
   }
@@ -93,6 +113,13 @@ export async function requireAdmin(): Promise<AdminUser> {
 
   if (!dbUser) {
     console.log('[requireAdmin] DB user not found — redirecting to login. Error:', dbError);
+    redirect('/auth/login');
+  }
+
+  // Session invalidation (migration 094): reject a token issued before the
+  // user's last password change so a reset logs out other devices.
+  if (isSessionStale(jwtMeta.iat, dbUser.password_changed_at)) {
+    console.log('[requireAdmin] Token predates password change — redirecting to login');
     redirect('/auth/login');
   }
 
@@ -127,24 +154,25 @@ export async function requireAdminApi(req: NextRequest): Promise<AdminUser | nul
   const match = cookieHeader.match(/solarpro_session=([^;]+)/);
   if (!match) return null;
 
-  const jwtUser = verifyToken(match[1]);
-  if (!jwtUser?.id) return null;
+  const jwtMeta = verifyTokenWithMeta(match[1]);
+  if (!jwtMeta?.user?.id) return null;
+  const jwtUser = jwtMeta.user;
 
-  // Check in-memory cache first — avoids DB hit on warm instances
+  // Check in-memory cache first — avoids DB hit on warm instances. Still enforce
+  // session invalidation (migration 094) using the cached password_changed_at.
   const cached = getRoleCached(jwtUser.id);
-  if (cached) return cached;
+  if (cached) {
+    if (isSessionStale(jwtMeta.iat, cached.passwordChangedAt)) return null;
+    return cached.user;
+  }
 
   try {
     const sql = await getDbWithRetry();
-    const rows = await sql`
-      SELECT id, name, email, role
-      FROM users
-      WHERE id = ${jwtUser.id}
-      LIMIT 1
-    `;
-    if (rows.length === 0) return null;
+    const dbUser = await fetchAdminRow(sql, jwtUser.id);
+    if (!dbUser) return null;
 
-    const dbUser = rows[0] as { id: string; name: string; email: string; role: string };
+    // Reject a token issued before the user's last password change.
+    if (isSessionStale(jwtMeta.iat, dbUser.password_changed_at)) return null;
     if (!isAdminRole(dbUser.role)) return null;
 
     const adminUser: AdminUser = {
@@ -155,7 +183,7 @@ export async function requireAdminApi(req: NextRequest): Promise<AdminUser | nul
     };
 
     // Cache the result for 60 seconds
-    setRoleCached(adminUser);
+    setRoleCached(adminUser, dbUser.password_changed_at);
     return adminUser;
   } catch {
     return null;

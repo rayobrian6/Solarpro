@@ -55,7 +55,7 @@ import {
   type FeasibilityResult,
   type PanelElectricalSpecs,
 } from './feasibilityEvaluator';
-import { STRING_INVERTERS, SOLAR_PANELS } from '../equipment-db';
+import { STRING_INVERTERS, SOLAR_PANELS, resolveBatteryForBrand } from '../equipment-db';
 import type { StringInverter, SolarPanel } from '../equipment-db';
 import {
   evaluatePanelBrandCompatibility,
@@ -150,6 +150,16 @@ export interface SizingInput {
 
   /** Pro-stack flag for EcoFlow (80 kWh vs 45 kWh std cap). */
   batteryUsePro?: boolean;
+
+  /**
+   * Explicit user-chosen battery UNIT count (the engineering UI "UNITS"
+   * stepper). When > 0 this is AUTHORITATIVE — the engine installs exactly
+   * this many packs/modules (capped by the brand's max kWh) instead of
+   * auto-sizing from a target kWh. Omit / 0 → fall back to auto sizing.
+   * Without this, 'auto' mode pinned moduleCount to 1 and overwrote the
+   * user's count back to 1 on every apply.
+   */
+  batteryDesiredUnits?: number;
 }
 
 // ─── Output types ──────────────────────────────────────────────────
@@ -554,7 +564,7 @@ function checkSystemTypeSupport(
 //
 // Correct physical model (residential default):
 //   maxPanelsPerUnit = mpptCount × parallelStringsPerMppt × maxPanelsPerString
-// with parallelStringsPerMppt = model.maxParallelStringsPerMppt ?? 2.
+// with parallelStringsPerMppt = model.maxParallelStringsPerMppt ?? 1.
 //
 // Notes:
 //   - maxPanelsPerString is still enforced in the downstream string-layout
@@ -563,8 +573,13 @@ function checkSystemTypeSupport(
 //   - DC capacity (dcKwMax) remains the primary constraint; this only
 //     corrects the secondary string-capacity constraint.
 
-/** Default residential parallel-strings-per-MPPT when not declared on the model. */
-export const DEFAULT_PARALLEL_STRINGS_PER_MPPT = 2;
+/** Default residential parallel-strings-per-MPPT when not declared on the model.
+ *  Set to 1 to match the MPPT allocator + string-generator defaults (conservative:
+ *  most residential wires 1 string/MPPT; combining needs explicit model support).
+ *  Previously 2, which over-estimated per-unit capacity vs the allocator and
+ *  produced spurious MPPT_PARALLEL_CAP_EXCEEDED for models omitting the field
+ *  (engineering audit finding 2). */
+export const DEFAULT_PARALLEL_STRINGS_PER_MPPT = 1;
 
 /**
  * Physical panel ceiling for ONE physical inverter unit.
@@ -1761,10 +1776,8 @@ function distributeStrings(
 }
 
 // ─── Battery sizing (Phases 6 + 7) ─────────────────────────────────
-
-const ECOFLOW_MODULE_KWH = 5;
-const ECOFLOW_STD_CAP_KWH = 45;
-const ECOFLOW_PRO_CAP_KWH = 80;
+// Brand-aware: the battery SKU + unit capacity are resolved from the equipment
+// DB per brand (see resolveBatteryForBrand), not hardcoded EcoFlow constants.
 
 function sizeBattery(
   brand: BrandProfile,
@@ -1814,50 +1827,76 @@ function sizeBattery(
     }
   }
 
-  // Phase 7 — EcoFlow modular stack logic (generalizable)
-  if (strategy === 'modular_stack') {
-    // Use user target if manual, else default
-    const target = input.batteryMode === 'manual' && input.batteryTargetKwh
-      ? input.batteryTargetKwh
-      : brand.battery.defaultTargetKwh ?? 10;
+  // Brand-aware battery sizing (generalized from the old EcoFlow-only path).
+  // Resolve the battery brand's real SKU + capacity from the equipment DB and
+  // stack whole units to the target. Works for EVERY strategy: single_pack =
+  // whole packs (e.g. Powerwall 13.5 kWh), modular_stack = granular modules.
+  // Previously only EcoFlow resolved a SKU and single_pack (Tesla) returned null
+  // — so every other brand's battery had no equipmentDbId or no battery at all.
+  const target = input.batteryMode === 'manual' && input.batteryTargetKwh
+    ? input.batteryTargetKwh
+    : brand.battery.defaultTargetKwh ?? 10;
 
-    // Cap at pro/standard stack ceiling
-    const cap = input.batteryUsePro ? ECOFLOW_PRO_CAP_KWH : ECOFLOW_STD_CAP_KWH;
-    const maxAllowed = Math.min(brand.battery.maxKwh ?? cap, cap);
-    const effectiveTarget = Math.min(Math.max(target, brand.battery.minKwh ?? 0), maxAllowed);
-
-    if (target > maxAllowed) {
-      warnings.push({
-        severity: 'warning',
-        code: 'BATTERY_TARGET_CAPPED',
-        message: `Target ${target} kWh exceeds ${batteryBrandId} ${input.batteryUsePro ? 'pro' : 'std'} stack cap ${maxAllowed} kWh — capped.`,
-      });
-    }
-
-    const moduleCount = Math.ceil(effectiveTarget / ECOFLOW_MODULE_KWH);
-    const installed = moduleCount * ECOFLOW_MODULE_KWH;
-
-    // Equipment-db id for EcoFlow battery module
-    const equipmentDbId = batteryBrandId === 'ecoflow' ? 'ecoflow-battery-5kwh' : undefined;
-
-    return {
-      brandId: batteryBrandId,
-      equipmentDbId,
-      targetKwh: target,
-      installedKwh: installed,
-      moduleCount,
-      strategy,
-      proStack: Boolean(input.batteryUsePro),
-    };
+  const sku = resolveBatteryForBrand(batteryBrandId, strategy);
+  if (!sku) {
+    warnings.push({
+      severity: 'warning',
+      code: 'BATTERY_SKU_UNRESOLVED',
+      message: `No battery SKU found for brand '${batteryBrandId}' (${brand.displayName}); cannot size storage.`,
+    });
+    return null;
   }
 
-  // Other strategies (single_pack, per_module, custom) — not yet implemented
-  warnings.push({
-    severity: 'info',
-    code: 'BATTERY_STRATEGY_NOT_IMPLEMENTED',
-    message: `Battery sizing strategy '${strategy}' is not yet implemented for ${brand.displayName}.`,
-  });
-  return null;
+  const unitKwh = sku.usableCapacityKwh > 0 ? sku.usableCapacityKwh : 10;
+  const maxAllowed = brand.battery.maxKwh ?? Number.POSITIVE_INFINITY;
+  const minKwh = brand.battery.minKwh ?? 0;
+  const effectiveTarget = Math.min(Math.max(target, minKwh), maxAllowed);
+
+  if (target > maxAllowed) {
+    warnings.push({
+      severity: 'warning',
+      code: 'BATTERY_TARGET_CAPPED',
+      message: `Target ${target} kWh exceeds ${brand.displayName} max ${maxAllowed} kWh — capped.`,
+    });
+  }
+
+  // v62 — When the user explicitly chose a UNIT count (engineering "UNITS"
+  // stepper), honor it exactly; only the brand's max-kWh ceiling can clamp it.
+  // Otherwise auto-size from the (possibly target-derived) effectiveTarget.
+  // This is the channel the user's battery quantity travels through; without
+  // it 'auto' mode always returned 1 and applySizingRecommendation reverted
+  // the user's count back to 1.
+  const userUnits =
+    typeof input.batteryDesiredUnits === 'number' && input.batteryDesiredUnits > 0
+      ? Math.floor(input.batteryDesiredUnits)
+      : undefined;
+  let moduleCount: number;
+  if (userUnits) {
+    const maxUnits = Number.isFinite(maxAllowed)
+      ? Math.max(1, Math.floor(maxAllowed / unitKwh))
+      : userUnits;
+    moduleCount = Math.min(userUnits, maxUnits);
+    if (userUnits > maxUnits) {
+      warnings.push({
+        severity: 'warning',
+        code: 'BATTERY_UNITS_CAPPED',
+        message: `${userUnits} units (${Math.round(userUnits * unitKwh * 10) / 10} kWh) exceeds ${brand.displayName} max ${maxAllowed} kWh — capped to ${maxUnits} units.`,
+      });
+    }
+  } else {
+    moduleCount = Math.max(1, Math.ceil(effectiveTarget / unitKwh));
+  }
+  const installed = Math.round(moduleCount * unitKwh * 10) / 10;
+
+  return {
+    brandId: batteryBrandId,
+    equipmentDbId: sku.id,
+    targetKwh: target,
+    installedKwh: installed,
+    moduleCount,
+    strategy,
+    proStack: Boolean(input.batteryUsePro),
+  };
 }
 
 // ─── Required components (Phase 8) ─────────────────────────────────

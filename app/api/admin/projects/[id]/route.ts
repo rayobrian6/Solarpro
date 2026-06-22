@@ -291,6 +291,10 @@ export async function PATCH(
         project: updated[0],
       });
     }
+
+    // BUGFIX: any action other than 'set-stage' previously fell through and the
+    // handler resolved to undefined (no HTTP response). Return an explicit 400.
+    return NextResponse.json({ success: false, error: `Unknown action: ${action}` }, { status: 400 });
   } catch (e: unknown) {
     return handleRouteDbError('[api/admin/projects/[id]] PATCH', e);
   }

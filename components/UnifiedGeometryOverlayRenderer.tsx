@@ -1156,7 +1156,7 @@ function PhotoWithUnifiedOverlays({
               ) : null}
 
               {/* Line segment - thick colored lines for roof edges */}
-              {entry.lineSvg && (() => {
+              {entry.lineSvg ? ((() => {
                 const isRL = entry.artifact.geometryClass === 'roof_line';
                 const lSub = entry.artifact.lineSubtype ?? null;
                 const ls = isRL && lSub
@@ -1200,14 +1200,14 @@ function PhotoWithUnifiedOverlays({
                     />
                   </g>
                 );
-              })()}
+              })()) : null}
             </g>
           );
         })}
       </svg>
 
       {/* Hover tooltip — rich details for plane and line artifacts */}
-      {hoveredIdx !== null && overlayElements[hoveredIdx] && (() => {
+      {hoveredIdx !== null && overlayElements[hoveredIdx] ? ((() => {
         const entry = overlayElements[hoveredIdx];
         const a = entry.artifact;
         const isRoofPlane = a.geometryClass === 'roof_plane' || a.geometryClass === 'wall_plane' || a.geometryClass === 'consensus_plane';
@@ -1383,7 +1383,7 @@ function PhotoWithUnifiedOverlays({
             </p>
           </div>
         );
-      })()}
+      })()) : null}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest } from '@/lib/auth';
+import { verifyTokenWithMeta, isSessionStale, clearSessionCookie, COOKIE_NAME } from '@/lib/auth';
 import { getDbReady } from '@/lib/db-neon';
 import { DbConfigError, isTransientDbError } from '@/lib/db-ready';
 
@@ -59,7 +59,9 @@ export async function GET(req: NextRequest) {
   const cookieCount = req.cookies.size;
   console.log(`[REQUEST_COOKIES] hasSolarproCookie=${hasCookie} totalCookies=${cookieCount}`);
 
-  const session = getUserFromRequest(req);
+  const tokenMatch = cookieHeader.match(new RegExp(`${COOKIE_NAME}=([^;]+)`));
+  const tokenMeta = tokenMatch ? verifyTokenWithMeta(tokenMatch[1]) : null;
+  const session = tokenMeta?.user ?? null;
   const sessionValid = !!(session?.id);
   // SECURITY FIX: Removed email from log — PII must not appear in server logs
   console.log(`[SESSION_VALIDATION] valid=${sessionValid} userId=${session?.id ?? 'none'}`);
@@ -110,7 +112,8 @@ export async function GET(req: NextRequest) {
         company_address, company_phone,
         brand_primary_color, brand_secondary_color,
         proposal_footer_text,
-        has_seen_tour, tour_completed_at
+        has_seen_tour, tour_completed_at,
+        password_changed_at
       FROM users WHERE id = ${userId} LIMIT 1
     `;
   } catch (fullErr: unknown) {
@@ -153,6 +156,19 @@ export async function GET(req: NextRequest) {
   }
 
   const db = rows[0];
+
+  // ── Step 4.5: Session invalidation (migration 094) ────────────────────────
+  // If this token was issued before the user's password was last changed, it
+  // belongs to a session that should have been logged out by a password reset.
+  // Reject it (401) and clear the cookie. Skipped when useFallback (column not
+  // present yet) so nobody is locked out before migration 094 runs.
+  if (!useFallback && isSessionStale(tokenMeta?.iat, db.password_changed_at)) {
+    console.log(`[SESSION_INVALIDATED] userId=${userId} — token predates password change`);
+    return NextResponse.json(
+      { success: false, error: 'Session expired — please sign in again.' },
+      { status: 401, headers: { 'Set-Cookie': clearSessionCookie() } }
+    );
+  }
 
   // ── Step 5: Compute hasAccess ─────────────────────────────────────────────
   const now = new Date();

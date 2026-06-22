@@ -50,7 +50,8 @@ export interface BOMGenerationInputV4 {
   // Wiring
   dcWireGauge: string;
   acWireGauge: string;
-  dcWireLength: number;       // feet (DC home run)
+  dcWireLength: number;       // feet (DC home run, INCLUDES trenchRunLengthFt for ground/fence)
+  trenchRunLengthFt?: number; // feet — buried ground/fence array→service portion (NEC 300.5 PVC); subset of dcWireLength
   acWireLength: number;       // feet (AC home run)
   conduitType: 'EMT' | 'PVC' | 'RMC' | 'LFMC';
   conduitSizeInch: string;    // e.g. "3/4"
@@ -386,12 +387,26 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     log.push({ stageId: 'dc', category: 'wire', item: `${resolvedDcWireGauge} USE-2`,
       quantity: dcWireQty, derivedFrom: 'dcWireLength × 2 conductors × 1.15 fitting', formula: 'dcWireLength * 2 * 1.15', necReference: 'NEC 690.31' });
 
-    // DC Conduit
-    const dcConduitQty = conduitLength(resolvedDcWireLength);
-    items.push(addItem('dc', 'conduit', 'Generic', `${resolvedDcConduitSize}" ${resolvedConduitType} Conduit`,
-      `${resolvedConduitType}-${resolvedDcConduitSize.replace('/', '-')}`,
-      `${resolvedDcConduitSize}" ${resolvedConduitType} conduit — DC home run`,
-      dcConduitQty, 'ft', 'NEC 690.31', 'dcWireLength × 1.15', `${resolvedDcWireLength} × 1.15`, true));
+    // DC Conduit. For ground/fence the buried array→service portion (trench) uses
+    // underground-rated PVC Sch 40 (NEC 300.5, min 18" burial); the above-ground
+    // portion uses the standard conduit type. trenchRunLengthFt is a subset of
+    // resolvedDcWireLength (the page already folded it into the DC home run).
+    const _trenchFt      = Math.max(0, Math.min(input.trenchRunLengthFt ?? 0, resolvedDcWireLength));
+    const _aboveGroundDc = Math.max(0, resolvedDcWireLength - _trenchFt);
+    if (_aboveGroundDc > 0) {
+      const dcConduitQty = conduitLength(_aboveGroundDc);
+      items.push(addItem('dc', 'conduit', 'Generic', `${resolvedDcConduitSize}" ${resolvedConduitType} Conduit`,
+        `${resolvedConduitType}-${resolvedDcConduitSize.replace('/', '-')}`,
+        `${resolvedDcConduitSize}" ${resolvedConduitType} conduit — DC home run`,
+        dcConduitQty, 'ft', 'NEC 690.31', 'dcWireLength × 1.15', `${_aboveGroundDc} × 1.15`, true));
+    }
+    if (_trenchFt > 0) {
+      const pvcQty = conduitLength(_trenchFt);
+      items.push(addItem('dc', 'conduit', 'Cantex', `${resolvedDcConduitSize}" PVC Sch 40 — Underground`,
+        `PVC40-${resolvedDcConduitSize.replace('/', '-')}`,
+        `${resolvedDcConduitSize}" PVC Sch 40 underground conduit — buried DC trench run (NEC 300.5, min 18" burial)`,
+        pvcQty, 'ft', 'NEC 300.5', 'trenchRunLengthFt × 1.15', `${_trenchFt} × 1.15`, true));
+    }
 
     // DC Disconnect
     if (input.requiresDCDisconnect !== false) {
@@ -406,15 +421,21 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     }
 
     // Rapid Shutdown (string inverter without integrated RSD)
+    // NEC 690.12 applies to PV circuits ON or IN buildings. A free-standing
+    // ground-mount or fence array is not on a building, so module-level rapid
+    // shutdown is NOT required (NEC 690.12(B)(2)). Don't force per-module RSD there.
     const rsdIntegrated = inverterEntry?.electricalSpecs?.rapidShutdownCompliant ?? false;
     const isOptimizer = norm === 'STRING_WITH_OPTIMIZER';
-    if (input.requiresRapidShutdown !== false && !rsdIntegrated && !isOptimizer) {
+    const _rsdExemptMount = input.systemType === 'ground' || input.systemType === 'fence';
+    if (input.requiresRapidShutdown !== false && !rsdIntegrated && !isOptimizer && !_rsdExemptMount) {
       items.push(addItem('dc', 'rapid_shutdown', 'Tigo', 'TS4-A-F Rapid Shutdown',
         'TS4-A-F', 'Rapid shutdown device per NEC 690.12 — 1 per module',
         input.moduleCount, 'ea', 'NEC 690.12', 'moduleCount', 'modules', true));
       log.push({ stageId: 'dc', category: 'rapid_shutdown', item: 'TS4-A-F',
         quantity: input.moduleCount, derivedFrom: 'moduleCount', formula: 'modules', necReference: 'NEC 690.12' });
       complianceNotes.push('NEC 690.12: Rapid shutdown devices added — 1 per module (Tigo TS4-A-F)');
+    } else if (_rsdExemptMount) {
+      complianceNotes.push(`NEC 690.12(B)(2): module-level rapid shutdown not required — ${input.systemType} array is not on/in a building`);
     } else if (rsdIntegrated || isOptimizer) {
       complianceNotes.push(`NEC 690.12: Rapid shutdown integrated in ${isOptimizer ? 'optimizers' : inverterEntry?.model ?? 'inverter'}`);
     }

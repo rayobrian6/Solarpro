@@ -19,10 +19,10 @@ export const ENPHASE_PROFILE: BrandProfile = {
   inverterType: 'micro',
 
   supportedInverterModels: [
-    { equipmentDbId: 'enphase-iq8plus', acKw: 0.295, dcKwMax: 0.440, mpptCount: 1, modulesPerDevice: 1 },
-    { equipmentDbId: 'enphase-iq8m',    acKw: 0.330, dcKwMax: 0.460, mpptCount: 1, modulesPerDevice: 1 },
-    { equipmentDbId: 'enphase-iq8h',    acKw: 0.380, dcKwMax: 0.600, mpptCount: 1, modulesPerDevice: 1 },
-    { equipmentDbId: 'enphase-iq8a',    acKw: 0.366, dcKwMax: 0.530, mpptCount: 1, modulesPerDevice: 1 },
+    { equipmentDbId: 'enphase-iq8plus', acKw: 0.290, dcKwMax: 0.440, mpptCount: 1, modulesPerDevice: 1 }, // datasheet max continuous output 290 VA
+    { equipmentDbId: 'enphase-iq8m',    acKw: 0.325, dcKwMax: 0.460, mpptCount: 1, modulesPerDevice: 1 }, // datasheet max continuous output 325 VA (was peak 330)
+    { equipmentDbId: 'enphase-iq8h',    acKw: 0.380, dcKwMax: 0.540, mpptCount: 1, modulesPerDevice: 1 }, // datasheet max input DC = 540W (was stale 600)
+    { equipmentDbId: 'enphase-iq8a',    acKw: 0.349, dcKwMax: 0.500, mpptCount: 1, modulesPerDevice: 1 }, // datasheet max continuous output 349 VA (was peak 366); max module pairing ~500W (was 530)
     { equipmentDbId: 'enphase-iq8ac',   acKw: 0.384, dcKwMax: 0.530, mpptCount: 1, modulesPerDevice: 1 },
   ],
 
@@ -63,7 +63,7 @@ export const ENPHASE_PROFILE: BrandProfile = {
     dcAcRatioRange: { min: 1.0, max: 1.55 },
   },
 
-  recommendedFor: ['roof'],
+  recommendedFor: ['roof', 'fence'],   // fence: SolFence is "just solar" + battery-agnostic → IQ8 micro (per-panel, AC out, racking-compatible per datasheet; any battery AC-couples later)
 
   // v47.429 — Stage 6: Enphase IQ8 Installer Toolkit references IronRidge XR,
   // Unirac SolarMount, and SnapNrack Series 100 as the standard pairings for

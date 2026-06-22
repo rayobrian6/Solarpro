@@ -119,6 +119,9 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
   const [result, setResult] = useState<UploadResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [systemKw, setSystemKw] = useState<number>(0);
+  // Recommended size at 100% offset — the offset slider scales systemKw from this
+  // so dragging the offset live-updates the kW (mirrors BillUploadModal).
+  const [baselineKw, setBaselineKw] = useState<number>(0);
   const [offsetPercent, setOffsetPercent] = useState(100);
   const [manualKwh, setManualKwh] = useState('');
   const [manualRate, setManualRate] = useState('');
@@ -206,6 +209,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
         const resolvedKw = (apiKw && apiKw > 0) ? apiKw : computeSystemKwFallback(merged.billData);
         if (!apiKw || apiKw <= 0) console.warn('[BillUploadFlow] system-size returned no sizing — using fallback');
         setSystemKw(resolvedKw);
+        setBaselineKw(resolvedKw); // sized at 100% offset → this is the baseline
 
         // Auto-provision: create client + project + activate hub
         setProvisioning(true);
@@ -236,12 +240,12 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
       } else {
         console.warn('[BillUploadFlow] /api/system-size failed:', sizingData.error, '— using client-side fallback');
         setResult(uploadResult);
-        setSystemKw(computeSystemKwFallback(uploadResult.billData));
+        { const k = computeSystemKwFallback(uploadResult.billData); setSystemKw(k); setBaselineKw(k); }
       }
     } catch (sizingErr: unknown) {
       console.warn('[BillUploadFlow] /api/system-size threw:', sizingErr instanceof Error ? (sizingErr as Error).message : sizingErr, '— using client-side fallback');
       setResult(uploadResult);
-      setSystemKw(computeSystemKwFallback(uploadResult.billData));
+      { const k = computeSystemKwFallback(uploadResult.billData); setSystemKw(k); setBaselineKw(k); }
     }
     setProcessingStage('done');
     setTimeout(() => setStep('review'), 400);
@@ -394,7 +398,12 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
         }),
       });
       const data = await res.json();
-      if (data.success) setSystemKw(data.recommendedKw);
+      if (data.success) {
+        setSystemKw(data.recommendedKw);
+        // recommendedKw already reflects the current offset — normalize back to a
+        // 100% baseline so further offset-slider drags scale from the refined size.
+        if (offsetPercent > 0) setBaselineKw(Math.round((data.recommendedKw / (offsetPercent / 100)) * 10) / 10);
+      }
     } catch {}
     setUploading(false);
   }, [result, offsetPercent]);
@@ -469,7 +478,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                   ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                   : 'bg-slate-700 text-slate-500'
               }`}>{i + 1}</div>
-              {i < 3 && <div className={`w-4 h-px ${['upload', 'review', 'sizing', 'complete'].indexOf(step) > i ? 'bg-emerald-500/50' : 'bg-slate-700'}`} />}
+              {i < 3 ? <div className={`w-4 h-px ${['upload', 'review', 'sizing', 'complete'].indexOf(step) > i ? 'bg-emerald-500/50' : 'bg-slate-700'}`} /> : null}
             </div>
           ))}
           {onClose ? (
@@ -495,7 +504,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
 
       <div className="p-6">
         {/* ── STEP 1: Upload ── */}
-        {step === 'upload' && (
+        {step === 'upload' ? (
           <div className="space-y-4">
 
             {/* ── PARSE FAILED MODE: manual entry is primary ── */}
@@ -586,7 +595,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
             ) : null}
 
             {/* ── NORMAL MODE: upload drop zone + manual entry below ── */}
-            {!parseFailedMode && (
+            {!parseFailedMode ? (
               <>
                 {/* Drop zone */}
                 <div
@@ -729,9 +738,9 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                   </button>
                 </div>
               </>
-            )}
+            ) : null}
           </div>
-        )}
+        ) : null}
 
         {/* ── STEP 2: Review extracted data ── */}
         {step === 'review' && result ? (
@@ -920,7 +929,12 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                   max={50}
                   step={0.1}
                   value={systemKw}
-                  onChange={e => setSystemKw(parseFloat(e.target.value))}
+                  onChange={e => {
+                    const kw = parseFloat(e.target.value);
+                    setSystemKw(kw);
+                    // Keep the offset % in sync so the two sliders never disagree.
+                    if (baselineKw > 0) setOffsetPercent(Math.round(kw / baselineKw * 100));
+                  }}
                   className="w-full accent-amber-500"
                 />
                 <div className="flex justify-between text-xs text-slate-500">
@@ -941,7 +955,13 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                   max={120}
                   step={5}
                   value={offsetPercent}
-                  onChange={e => setOffsetPercent(parseInt(e.target.value))}
+                  onChange={e => {
+                    const pct = parseInt(e.target.value);
+                    setOffsetPercent(pct);
+                    // Live-scale the actual system size off the offset target — this is
+                    // what gets saved/provisioned, so the slider isn't cosmetic.
+                    if (baselineKw > 0) setSystemKw(Math.round(baselineKw * pct / 100 * 10) / 10);
+                  }}
                   className="w-full accent-emerald-500"
                 />
                 <div className="flex justify-between text-xs text-slate-500">
