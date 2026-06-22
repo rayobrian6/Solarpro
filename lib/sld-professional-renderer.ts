@@ -118,6 +118,7 @@ export interface SLDProfessionalInput {
   drawingNumber:           string;
   revision:                string;
   topologyType:            string;
+  systemType?:             'roof' | 'ground' | 'fence';  // mount type — drives the PV-array glyph/labels (fence → SolFence vertical array)
   totalModules:            number;
   totalStrings:            number;
   panelModel:              string;
@@ -1657,16 +1658,18 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // full WIRE_GAP (120px) clearance on each side. Otherwise unused.
   const xBUI = _hasBUI ? nextCX(xMSP, 160, W_BUI) : (xMSP + 130);
 
-  // ── NODE 1: PV ARRAY ──────────────────────────────────────────────────────
+  // ── NODE 1: PV ARRAY (or SOLAR FENCE for a SolFence vertical array) ─────────
+  const isFence = input.systemType === 'fence';
+  const pvSymbolId = isFence ? 'pv-fence' : 'pv-array';
   // PV array symbol size — use grid engine constants (W_PV already defined)
   const pvW = W_PV;  // 200 — from grid engine
-  const pvH = SLD_SYMBOL_MAP['pv-array'].height;  // 160
-  console.log(`[SLD SYMBOL SIZE USED] pv-array: ${pvW}×${pvH}`);
+  const pvH = SLD_SYMBOL_MAP[pvSymbolId].height;  // 160
+  console.log(`[SLD SYMBOL SIZE USED] ${pvSymbolId}: ${pvW}×${pvH}`);
   const pvCX = xPV, pvCY = BUS_Y;
 
-  // PV array: embed sld-symbols.ts hybrid realism emblem
-  parts.push(embedSymbol('pv-array', pvCX, pvCY, pvW, pvH));
-  parts.push(txt(pvCX, pvCY-pvH/2-18, 'PV ARRAY', {sz:F.hdr, bold:true, anc:'middle'}));
+  // PV array: embed sld-symbols.ts hybrid realism emblem (fence → vertical bifacial glyph)
+  parts.push(embedSymbol(pvSymbolId, pvCX, pvCY, pvW, pvH));
+  parts.push(txt(pvCX, pvCY-pvH/2-18, isFence ? 'SOLAR FENCE ARRAY' : 'PV ARRAY', {sz:F.hdr, bold:true, anc:'middle'}));
   parts.push(txt(pvCX, pvCY-pvH/2-8, `${input.totalModules} × ${input.panelWatts}W`, {sz:F.sub, anc:'middle'}));
   parts.push(txt(pvCX, pvCY+pvH/2+9, esc(input.panelModel), {sz:F.tiny, anc:'middle', italic:true}));
   // Phase 4: PV Array callout — complete engineering truth
@@ -1698,7 +1701,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   }
   parts.push(callout(pvCX+pvW/2+14, pvCY-pvH/2-5, 1));
   // SOT: pvOutX via anchor 'dc_pos' (native x=200, right side)
-  const _pvPt = getAnchorPoint('pv-array', 'dc_pos', pvCX, pvCY, pvW, pvH);
+  const _pvPt = getAnchorPoint(pvSymbolId, 'dc_pos', pvCX, pvCY, pvW, pvH);
   const pvOutX = _pvPt.x;
   const pvOutY = _pvPt.y;
   console.log(`[SLD ANCHOR CONNECTED] pv-array.dc_pos → pvOut (${pvOutX.toFixed(1)},${pvOutY.toFixed(1)})`);
@@ -1720,7 +1723,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   console.log(`[SLD ANCHOR CONNECTED] junction-box.left/right → (${_jbInPt.x.toFixed(1)},${_jbInPt.y.toFixed(1)})/(${_jbOutPt.x.toFixed(1)},${_jbOutPt.y.toFixed(1)})`);
   console.log(`[SLD WIRE TYPE: DC] pv-array → junction-box.left`);
   console.log(`[SLD WIRE TYPE: DC] junction-box.right → dc-disconnect`);
-  parts.push(txt(jbCX, jbCY-jbH/2-15, 'ROOF J-BOX', {sz:F.sub, bold:true, anc:'middle'}));
+  parts.push(txt(jbCX, jbCY-jbH/2-15, isFence ? 'FENCE J-BOX' : 'ROOF J-BOX', {sz:F.sub, bold:true, anc:'middle'}));
   parts.push(txt(jbCX, jbCY-jbH/2-7, isMicro?'AC JUNCTION':'DC JUNCTION', {sz:F.tiny, anc:'middle'}));
   if (isMicro) {
     const md = input.deviceCount ?? input.totalModules;
