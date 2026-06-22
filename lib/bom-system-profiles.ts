@@ -165,25 +165,33 @@ function deriveFenceStructural(input: StructuralBOMInput, log: string[]): Struct
   // optimizers + wiring are supplied by the electrician — neither is in the SolFence
   // kit. Source: Sol Fence LLC distributor price sheet, 2026-06-21 (Ray-supplied).
   const SECTION_WIDTH_FT = 8;
-  const sectionCount = Math.max(1, Math.ceil(f.totalFenceLengthFt / SECTION_WIDTH_FT));
+  // Real-world: order one SolFence section per SOLAR section. Prefer the CAD's
+  // actual solar-section count; only fall back to a length estimate when the CAD
+  // didn't classify sections. (The old code used ceil(totalLength/8), which treats
+  // the ENTIRE run as solar — over-ordering sections + their posts/caps/donuts/RCP/
+  // foundations whenever the fence also has gate openings or vinyl privacy sections,
+  // which are billed separately below.)
+  const lengthEstimateSections = Math.max(1, Math.ceil(f.totalFenceLengthFt / SECTION_WIDTH_FT));
+  const sectionFromCad = f.solarSectionCount > 0;
+  const sectionCount = sectionFromCad ? f.solarSectionCount : lengthEstimateSections;
   const postCount = sectionCount + 1;
   const isTall = (f.postHeightFt ?? 6) >= 5;   // 6' config (2 panels/section) vs 4' (1/section)
   const sectionSku = isTall ? 'SOLFENCE-SECTION-6' : 'SOLFENCE-SECTION-4';
   const sectionLabel = isTall ? "6' Tall × 8' Wide Section" : "4' Tall × 8' Wide Section";
   const postSku = isTall ? 'SOLFENCE-POST-6.5' : 'SOLFENCE-POST-4.5';
   const postLabel = isTall ? '4x4x6.5 Post' : '4x4x4.5 Post';
-  log.push(`SolFence: ${sectionCount} × ${SECTION_WIDTH_FT}ft sections + ${postCount} posts (${isTall ? '6ft' : '4ft'} config) for ${f.totalFenceLengthFt.toFixed(0)}ft fence`);
+  log.push(`SolFence: ${sectionCount} × ${SECTION_WIDTH_FT}ft solar sections + ${postCount} posts (${isTall ? '6ft' : '4ft'} config)${sectionFromCad ? ' [CAD solar-section count]' : ` [estimated from ${f.totalFenceLengthFt.toFixed(0)}ft length — no CAD section types]`}`);
 
   items.push(mkItem('structural', 'fence_section', rack.rackingBrand, `SOL Fence ${sectionLabel}`,
     sectionSku,
     `Pre-built SolFence section — includes side channels + rails (${rack.railMaterial}); ${isTall ? '2' : '1'} panel slot(s) per section`,
     sectionCount, 'ea',
-    `ceil(${f.totalFenceLengthFt.toFixed(0)}ft fence / ${SECTION_WIDTH_FT}ft section)`,
+    sectionFromCad ? `CAD solar sections: ${sectionCount}` : `est. ceil(${f.totalFenceLengthFt.toFixed(0)}ft / ${SECTION_WIDTH_FT}ft)`,
     true));
 
   items.push(mkItem('structural', 'fence_post', rack.rackingBrand, `SOL Fence ${postLabel}`,
     postSku,
-    `4x4 SolFence post (${isTall ? '6' : '4'}ft section) — sets into a local steel post + concrete footing`,
+    `4x4 SolFence post (${isTall ? '6' : '4'}ft section) — sleeves onto a 2-3/8" driven steel post (no concrete; see foundation line)`,
     postCount, 'ea',
     `${sectionCount} sections + 1`,
     true));
