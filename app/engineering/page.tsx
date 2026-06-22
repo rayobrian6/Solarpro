@@ -10426,13 +10426,24 @@ function EngineeringPageInner() {
                     {fm.exceedsRatedWind ? (
                       <div className="text-xs text-amber-300 mb-2">⚠ Site design wind exceeds SolFence's {fm.ratedWindMph} mph rating — confirm a high-wind configuration with the manufacturer (Sarah @ SolFence).</div>
                     ) : null}
-                    <div className="text-[11px] text-slate-400 leading-relaxed">
-                      Foundation: 2-3/8" steel pipe driven 4 ft min with a post pounder (no concrete; clears 6" below frost) — concrete-set 3 ft is the alt for max stability. 4x4 posts are 6061-T6. ESTIMATE — not engineered until PE-validated.
-                    </div>
+                    {(compliance.structural as any)?.recommendations?.length ? (
+                      <div className="space-y-1">
+                        {(compliance.structural as any).recommendations.map((rec: string, i: number) => (
+                          <div key={i} className="text-[11px] text-slate-400 leading-relaxed flex items-start gap-1.5">
+                            <span className="text-purple-300 mt-0.5 shrink-0">→</span><span>{rec}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-slate-400 leading-relaxed">
+                        Foundation: 2-3/8" steel pipe driven 4 ft min with a post pounder (no concrete; clears 6" below frost) — concrete-set 3 ft is the alt for max stability. 4x4 posts are 6061-T6. ESTIMATE — not engineered until PE-validated.
+                      </div>
+                    )}
                   </div>
                 );
               })() : null}
-              {/* ══════════ STRUCTURAL INTEGRITY HERO ══════════ */}
+              {/* ══════════ STRUCTURAL INTEGRITY HERO (roof/ground only — a fence uses the SOL Fence panel above) ══════════ */}
+              {config.systemType !== 'fence' ? (
               <div className="rounded-xl border border-slate-700/60 bg-slate-800/60 p-5 mb-5">
 <div className="flex items-center gap-2 mb-4">
                   <Wind size={14} className="text-amber-400" />
@@ -10470,6 +10481,7 @@ function EngineeringPageInner() {
                   ) : null}
                 </div>
               </div>
+              ) : null}
               <div className="eng-panel">
                 <h3 className="text-sm font-extrabold text-slate-100 mb-4 flex items-center gap-2 tracking-tight"><Wind size={14} className="text-amber-400" /> Site & Wind Parameters</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -10492,6 +10504,7 @@ function EngineeringPageInner() {
                     <input type="number" value={config.groundSnowLoad} onChange={e => updateConfig({ groundSnowLoad: +e.target.value })}
                       className="eng-input" />
                   </div>
+                  {config.systemType !== 'fence' ? (<>
                   <div>
                     <label className="eng-label">Roof Pitch (degrees)</label>
                     <input type="number" min={0} max={60} value={config.roofPitch} onChange={e => updateConfig({ roofPitch: +e.target.value })}
@@ -10518,6 +10531,7 @@ function EngineeringPageInner() {
                     </div>
                     <div className="text-xs text-slate-500 mt-0.5">ASCE 7-22 Kz &mdash; eave-to-ridge midpoint</div>
                   </div>
+                  </>) : null}
                   <div>
                     <label className="eng-label">Panel Orientation</label>
                     <select value={config.panelOrientation ?? 'portrait'} onChange={e => updateConfig({ panelOrientation: e.target.value as 'portrait' | 'landscape' })}
@@ -10529,6 +10543,8 @@ function EngineeringPageInner() {
                   </div>
                 </div>
               </div>
+              {/* Roof framing / roof racking / roof structural results — not applicable to a fence (SOL Fence panel above covers it) */}
+              {config.systemType !== 'fence' ? (<>
               <div className="eng-panel">
                 <h3 className="text-sm font-extrabold text-slate-100 mb-4 flex items-center gap-2 tracking-tight"><Ruler size={14} className="text-amber-400" /> Roof Framing</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -10831,6 +10847,7 @@ function EngineeringPageInner() {
                   ) : null}
                 </div>
               ) : null}
+              </>) : null}
 
               {/* ── STRUCTURAL DEBUG PANEL ── */}
               {compliance.structural ? (
