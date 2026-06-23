@@ -2971,11 +2971,13 @@ function SolarEngine3D({
     handler.setInputAction((event: any) => {
       try {
         if (modeRef.current === 'select') return;
-        const ray = viewer.camera.getPickRay(event.endPosition);
-        if (!ray) return;
-        const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
-        if (cartesian) {
-          const carto = C.Cartographic.fromCartesian(cartesian);
+        // Use the same pick chain as placement (3D tiles → ellipsoid), NOT raw
+        // globe.pick — the globe is hidden once tiles load, so globe.pick returns
+        // a garbage underground height. This keeps the readout truthful and
+        // matching where panels actually land.
+        const hit = getWorldPosition(viewer, C, event.endPosition);
+        if (hit) {
+          const carto = C.Cartographic.fromCartesian(hit.cartesian);
           if (carto) {
             const pLat = C.Math.toDegrees(carto.latitude);
             const pLng = C.Math.toDegrees(carto.longitude);
@@ -3032,8 +3034,13 @@ function SolarEngine3D({
       }
     } catch (e) { handleCesiumError('3D tiles pick', e, true); }
 
-    // Fallback: globe terrain pick
-    if (!cartesian) {
+    // Fallback: globe terrain pick.
+    // Only when the globe is SHOWN — we hide it once 3D Tiles load (coastal
+    // bleed-through fix), and globe.pick on a hidden globe returns a garbage
+    // point (far underground) that still passes the magnitude check, poisoning
+    // plane/fence/roof placement. Skip straight to the deterministic ellipsoid
+    // pick when the globe is hidden.
+    if (!cartesian && viewer.scene.globe.show) {
       try {
         const ray = viewer.camera.getPickRay(screenPos);
         if (ray) {
