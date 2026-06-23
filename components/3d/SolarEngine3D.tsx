@@ -516,6 +516,11 @@ function SolarEngine3D({
   const simHourRef          = useRef<number>(12);
   const showShadeRef        = useRef<boolean>(showShade);
   const cesiumGroundElevRef = useRef<number>(0); // true ellipsoidal ground elevation from Cesium terrain
+  // Whether cesiumGroundElevRef has been resolved (boot/fly). Used instead of a
+  // `> 0` test so legitimately NEGATIVE ellipsoidal ground elevations (coastal /
+  // low-lying sites, where elevation + geoid undulation < 0, e.g. Waterford CT)
+  // are kept rather than discarded → points no longer float above true ground.
+  const cesiumGroundElevResolvedRef = useRef<boolean>(false);
 
   const [stage, setStage]         = useState<LoadStage>('idle');
   const [stageMsg, setStageMsg]   = useState('Initializing...');
@@ -946,7 +951,7 @@ function SolarEngine3D({
     if (Math.abs(lat - prevLatRef.current) < 0.0001 && Math.abs(lng - prevLngRef.current) < 0.0001) return;
     prevLatRef.current = lat;
     prevLngRef.current = lng;
-    const elev = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+    const elev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
     // Update orbit state for new address — snap camera to site at default pose
     const o = orbitRef.current;
     o.targetLat = lat;
@@ -990,6 +995,7 @@ function SolarEngine3D({
       const latRad = lat * Math.PI / 180;
       const geoidApprox = -29 - 5 * Math.sin(latRad);
       cesiumGroundElevRef.current = googleGroundElev + geoidApprox;
+      cesiumGroundElevResolvedRef.current = true;
       addLog('FLY', `cesiumGroundElev updated: ${cesiumGroundElevRef.current.toFixed(1)}m (geoidApprox: ${geoidApprox.toFixed(1)}m) [no terrain sample]`);
       terrainReadyRef.current = true;
       setTerrainReady(true);
@@ -1554,6 +1560,7 @@ function SolarEngine3D({
       const geoidApproxBoot = -29 - 5 * Math.sin(latRadBoot);
       const cesiumGroundElev = googleGroundElev + geoidApproxBoot;
       cesiumGroundElevRef.current = cesiumGroundElev;
+      cesiumGroundElevResolvedRef.current = true;
       terrainReadyRef.current = true;
       setTerrainReady(true);
       addLog('BOOT', `cesiumGroundElev: ${cesiumGroundElev.toFixed(1)}m (Google: ${googleGroundElev.toFixed(1)}m, geoidApprox: ${geoidApproxBoot.toFixed(1)}m) [skipped sampleTerrainMostDetailed for speed]`);
@@ -1794,7 +1801,7 @@ function SolarEngine3D({
     if (!panels || panels.length === 0) {
       // No panels — reset to site at default pose
       o.targetLat = lat; o.targetLng = lng;
-      o.targetAlt = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+      o.targetAlt = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
       o.heading = Math.PI; o.pitch = -1.134; o.radius = 150;  // look NORTH
     } else {
       const lats = panels.map((p: PlacedPanel) => p.lat);
@@ -1806,7 +1813,7 @@ function SolarEngine3D({
       const spanM    = Math.max(latSpanM, lngSpanM, 15);
       const radius   = Math.max(50, spanM * 1.4);
       o.targetLat = centLat; o.targetLng = centLng;
-      o.targetAlt = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+      o.targetAlt = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
       o.heading = Math.PI; o.pitch = -1.222;  // -70°, look NORTH
       o.radius  = radius;
       addLog('FIT', `Fit view: ${panels.length} panels, span=${spanM.toFixed(0)}m, radius=${radius.toFixed(0)}m`);
@@ -1826,7 +1833,7 @@ function SolarEngine3D({
     const geoidUndulationOverlay = -29 - 5 * Math.sin(
       (twinData.roofSegments[0]?.center?.lat ?? 38) * Math.PI / 180
     );
-    const cesiumElev = cesiumGroundElevRef.current > 0
+    const cesiumElev = cesiumGroundElevResolvedRef.current
       ? cesiumGroundElevRef.current
       : googleElev + geoidUndulationOverlay;
     const elev = cesiumElev;
@@ -3081,7 +3088,7 @@ function SolarEngine3D({
     // Height trust: 3dtiles gives real mesh height; terrain+ellipsoid return h≈0.
     const rawH = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
     const trustedH = (hit.pickMethod === '3dtiles' && rawH !== null) ? rawH : null;
-    const fallbackH = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+    const fallbackH = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
     const groundElevM = trustedH ?? fallbackH;
 
     addLog('GROUND', `[GROUND-PICK v50.5] method=${hit.pickMethod} lat=${pLat.toFixed(6)} lng=${pLng.toFixed(6)} rawH=${rawH?.toFixed(2) ?? 'null'} groundElevM=${groundElevM.toFixed(2)}`);
@@ -3148,7 +3155,7 @@ function SolarEngine3D({
       // Only 3dtiles gives real mesh height; terrain+ellipsoid both return h≈0.
       const rawHeightGnd = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
       const trustedHeightGnd = (hit.pickMethod === '3dtiles' && rawHeightGnd !== null && rawHeightGnd > -500) ? rawHeightGnd : null;
-      const cesiumFallbackGnd = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+      const cesiumFallbackGnd = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
       const baseZ = trustedHeightGnd ?? cesiumFallbackGnd;
       const mountPlaneZ = baseZ + MOUNT_HEIGHT_M;
       if (!isValidCoord(pLat, pLng, mountPlaneZ)) return;
@@ -3704,8 +3711,17 @@ function SolarEngine3D({
       if (!carto) return;
       const pLat = C.Math.toDegrees(carto.latitude);
       const pLng = C.Math.toDegrees(carto.longitude);
-      const pHeight = carto.height;
+      // Height trust (same 3-tier rule as ground placement): only a 3D-tiles pick
+      // gives a real mesh height. terrain/ellipsoid picks return ellipsoidal h≈0,
+      // which sits ABOVE true ground at coastal/low-lying sites (negative
+      // ellipsoidal ground) — the cause of fence points clicking high in CT.
+      // Fall back to the resolved ground elevation (now kept even when negative).
+      const rawH = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
+      const trustedH = (hit.pickMethod === '3dtiles' && rawH !== null) ? rawH : null;
+      const fallbackH = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+      const pHeight = trustedH ?? fallbackH;
       if (!isValidCoord(pLat, pLng, pHeight)) return;
+      addLog('FENCE', `[FENCE-PICK] method=${hit.pickMethod} rawH=${rawH?.toFixed(2) ?? 'null'} usedH=${pHeight.toFixed(2)}`);
 
       fencePtsRef.current.push({ lat: pLat, lng: pLng, height: pHeight });
       const count = fencePtsRef.current.length;
@@ -5117,7 +5133,7 @@ function SolarEngine3D({
       try {
         renderFrameAxes(
           viewer, C, plane,
-          cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0,
+          cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0,
           `plane3d-${plane.id.slice(0, 6)}`
         );
       } catch (e: unknown) {
@@ -5135,7 +5151,7 @@ function SolarEngine3D({
       onRoofPlaneCreated?.(plane);
 
       // v48.7: Immediately auto-fill via control layer (plane3d mode)
-      const groundElev    = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+      const groundElev    = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
       const orient        = panelOrientationRef.current ?? 'portrait';
       const edgeSetbackM  = fireSetbacks?.edgeSetbackM  ?? 0.457;
       const ridgeSetbackM = fireSetbacks?.ridgeSetbackM ?? 0.457;
@@ -5307,7 +5323,7 @@ function SolarEngine3D({
         }
       selectedPlaneRef.current = plane as any;
 
-      const groundElev    = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+      const groundElev    = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
       // v48.7: orientation is now resolved once here and passed explicitly — no ref fallback chain
       const orient        = panelOrientationRef.current ?? 'portrait';
       const edgeSetbackM  = fireSetbacks?.edgeSetbackM  ?? 0.457;
@@ -5394,7 +5410,7 @@ function SolarEngine3D({
       const plane = assignRoofPlane(clickLat, clickLng, planes as any, 60);
       if (!plane) { setStatusMsg('Click on a roof plane to extend a row'); return; }
 
-      const groundElev = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+      const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
       // v48.7: orientation resolved once, passed explicitly — no ref fallback chain
       const orient  = panelOrientationRef.current ?? 'portrait';
       const layoutId = panelsRef.current.find(p => p.planeId === plane.id)?.layoutId ?? `surface-${plane.id}`;
@@ -5460,7 +5476,7 @@ function SolarEngine3D({
       const plane = assignRoofPlane(clickLat, clickLng, planes as any, 60);
       if (!plane) { setStatusMsg('Click on a roof plane to add a row'); return; }
 
-      const groundElev = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+      const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
       const orient = panelOrientationRef.current ?? 'portrait'; // single source — no surfaceOrientationRef fallback
       const layoutId = panelsRef.current.find(p => p.planeId === plane.id)?.layoutId ?? `surface-${plane.id}`;
 
@@ -6066,7 +6082,7 @@ function SolarEngine3D({
     // The control layer's 'mixed' strategy fills portrait rows then sweeps landscape in remainder.
     const orient      = (orientRaw === 'hybrid' ? 'portrait' : orientRaw) as 'portrait' | 'landscape';
     const isHybrid    = orientRaw === 'hybrid';
-    const groundElev  = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+    const groundElev  = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
     const edgeSetback  = fireSetbacks?.edgeSetbackM  ?? 0.457;
     const ridgeSetback = fireSetbacks?.ridgeSetbackM ?? 0.457;
     const eaveSetback  = fireSetbacks?.eaveSetbackM  ?? 0;      // v50.26: wire eave setback
@@ -6177,7 +6193,7 @@ function SolarEngine3D({
         const radius   = Math.max(60, spanM * 1.4);
         const o = orbitRef.current;
         o.targetLat = centLat; o.targetLng = centLng;
-        o.targetAlt = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+        o.targetAlt = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
         o.heading = Math.PI; o.pitch = -1.222; o.radius = radius;  // -70° pitch, look NORTH
         applyOrbitRef.current?.();
       } catch {}
@@ -6237,7 +6253,7 @@ function SolarEngine3D({
     // v47.216: lat-based EGM96 geoid approximation for CONUS (fallback when terrain not sampled)
     const segLatRad = seg.center.lat * Math.PI / 180;
     const geoidApproxFill = -29 - 5 * Math.sin(segLatRad);
-    const groundElev = cesiumGroundElevRef.current > 0
+    const groundElev = cesiumGroundElevResolvedRef.current
       ? cesiumGroundElevRef.current
       : (isFinite(seg.elevation) ? seg.elevation : 0) + geoidApproxFill;
     const segElev = groundElev + heightAboveGround;
@@ -6700,7 +6716,7 @@ function SolarEngine3D({
   }
 
   function flyToProperty() {
-    const elev = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : (twinRef.current?.elevation ?? 0);
+    const elev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : (twinRef.current?.elevation ?? 0);
     const o = orbitRef.current;
     o.targetLat = lat; o.targetLng = lng; o.targetAlt = elev;
     o.heading = Math.PI; o.pitch = -0.785; o.radius = 200;  // -45° pitch, look NORTH
