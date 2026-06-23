@@ -500,6 +500,12 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [addressSuggestions, setAddressSuggestions] = useState<Array<{ short_name: string; display_name: string; lat: number; lng: number }>>([]);
   const [showAddressSuggestions, setShowAddressSuggestions] = useState(false);
   const [addressSuggestionsLoading, setAddressSuggestionsLoading] = useState(false);
+  // The address input lives inside the overflow-x-auto header, which clips the
+  // dropdown AND sits below the 3D canvas. Render the dropdown as position:fixed
+  // (escapes both, like the floating Report-a-Bug button), positioned from the
+  // input's live rect.
+  const addrInputRef = useRef<HTMLInputElement>(null);
+  const [addrDropdownPos, setAddrDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const addressDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // Drawing state
@@ -1059,6 +1065,25 @@ export default function DesignStudio({ project, onSave }: Props) {
       setSearchLoading(false);
     }
   };
+
+  // Keep the fixed-positioned address dropdown anchored to the input's live rect
+  // (recompute on open, and while open on scroll/resize).
+  useEffect(() => {
+    if (!showAddressSuggestions || addressSuggestions.length === 0) return;
+    const update = () => {
+      const el = addrInputRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setAddrDropdownPos({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [showAddressSuggestions, addressSuggestions.length]);
 
   // ── Address autocomplete ──────────────────────────────────
   const handleAddressSearchInput = useCallback((value: string) => {
@@ -3304,6 +3329,7 @@ export default function DesignStudio({ project, onSave }: Props) {
           <div className="relative flex-1">
             <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 z-10" />
             <input
+              ref={addrInputRef}
               type="text"
               value={addressSearch}
               onChange={e => handleAddressSearchInput(e.target.value)}
@@ -3330,9 +3356,13 @@ export default function DesignStudio({ project, onSave }: Props) {
               ) : null}
             </div>
 
-            {/* Autocomplete dropdown */}
-            {showAddressSuggestions && addressSuggestions.length > 0 ? (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-600 rounded-xl shadow-2xl z-50 overflow-hidden">
+            {/* Autocomplete dropdown — position:fixed so it escapes the header's
+                overflow clipping and renders above the 3D canvas (z-[100]). */}
+            {showAddressSuggestions && addressSuggestions.length > 0 && addrDropdownPos ? (
+              <div
+                className="fixed bg-slate-800 border border-slate-600 rounded-xl shadow-2xl z-[100] overflow-hidden"
+                style={{ top: addrDropdownPos.top, left: addrDropdownPos.left, width: addrDropdownPos.width }}
+              >
                 {addressSuggestions.map((s, i) => (
                   <button
                     key={i}
