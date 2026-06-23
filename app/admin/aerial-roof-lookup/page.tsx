@@ -1,5 +1,6 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import 'leaflet/dist/leaflet.css';
 import { Satellite, Search, Loader2, MapPin, AlertCircle, CheckCircle2, Ruler, Home } from 'lucide-react';
 
 interface RoofPlane {
@@ -25,39 +26,12 @@ interface LookupResult {
 
 const COLORS = ['#38bdf8', '#f59e0b', '#34d399', '#f472b6', '#a78bfa', '#fb7185', '#22d3ee', '#facc15'];
 
-function RoofFootprint({ planes }: { planes: RoofPlane[] }) {
-  const pts = planes.flatMap(p => p.worldPolygon);
-  if (pts.length === 0) return null;
-  const lats = pts.map(p => p.lat), lngs = pts.map(p => p.lng);
-  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
-  const W = 640, H = 440, pad = 24;
-  const sx = (lng: number) => pad + ((lng - minLng) / ((maxLng - minLng) || 1)) * (W - 2 * pad);
-  const sy = (lat: number) => pad + ((maxLat - lat) / ((maxLat - minLat) || 1)) * (H - 2 * pad);
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto rounded-xl border border-slate-700/60 bg-slate-950/40">
-      {planes.map((p, i) => {
-        const c = COLORS[i % COLORS.length];
-        const d = p.worldPolygon.map((pt, j) => `${j ? 'L' : 'M'}${sx(pt.lng).toFixed(1)},${sy(pt.lat).toFixed(1)}`).join(' ') + ' Z';
-        const cx = p.worldPolygon.reduce((s, pt) => s + sx(pt.lng), 0) / p.worldPolygon.length;
-        const cy = p.worldPolygon.reduce((s, pt) => s + sy(pt.lat), 0) / p.worldPolygon.length;
-        return (
-          <g key={i}>
-            <path d={d} fill={`${c}30`} stroke={c} strokeWidth={2} />
-            <text x={cx} y={cy} fill={c} fontSize="12" fontWeight="600" textAnchor="middle">
-              {p.pitchDeg != null ? `${p.pitchDeg}°` : ''}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
 export default function AerialRoofLookupPage() {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<LookupResult | null>(null);
+  const mapEl = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<{ remove: () => void } | null>(null);
 
   const lookup = async () => {
     if (!query.trim()) return;
@@ -73,6 +47,36 @@ export default function AerialRoofLookupPage() {
   };
 
   const planes = data?.planes ?? [];
+  const showMap = !!(data?.success && data.covered && data.resolved);
+
+  // Build the Leaflet map (real Nearmap aerial tiles + AI roof overlay) when results arrive.
+  useEffect(() => {
+    if (!showMap || !mapEl.current || !data?.resolved) return;
+    let cancelled = false;
+    (async () => {
+      const L = (await import('leaflet')).default;
+      if (cancelled || !mapEl.current) return;
+      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+      const { lat, lng } = data.resolved!;
+      const map = L.map(mapEl.current, { center: [lat, lng], zoom: 20, scrollWheelZoom: true });
+      mapRef.current = map as unknown as { remove: () => void };
+      L.tileLayer('/api/admin/nearmap-tile/{z}/{x}/{y}', {
+        maxZoom: 22, maxNativeZoom: 21, minZoom: 16, tileSize: 256,
+        attribution: 'Imagery © Nearmap',
+      }).addTo(map);
+      const bounds: Array<[number, number]> = [];
+      planes.forEach((p, i) => {
+        const latlngs = p.worldPolygon.map(pt => [pt.lat, pt.lng] as [number, number]);
+        latlngs.forEach(ll => bounds.push(ll));
+        const c = COLORS[i % COLORS.length];
+        L.polygon(latlngs, { color: c, weight: 2.5, fillColor: c, fillOpacity: 0.18 })
+          .bindTooltip(`Roof ${i + 1} · ${p.pitchDeg != null ? p.pitchDeg + '°' : '—'}${p.areaSqft ? ' · ' + p.areaSqft.toLocaleString() + ' ft²' : ''}`, { sticky: true })
+          .addTo(map);
+      });
+      if (bounds.length) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 21 });
+    })();
+    return () => { cancelled = true; if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
+  }, [data, showMap]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="max-w-4xl mx-auto p-6">
@@ -81,7 +85,7 @@ export default function AerialRoofLookupPage() {
         <h1 className="text-2xl font-bold text-slate-100">Aerial Roof Lookup</h1>
         <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30">Nearmap AI · eval</span>
       </div>
-      <p className="text-sm text-slate-400 mb-5">Type an address — pulls real roof geometry (footprint, pitch, area, material) from licensed aerial imagery where covered.</p>
+      <p className="text-sm text-slate-400 mb-5">Type an address — real roof geometry (pitch, area, material) detected from Nearmap aerial imagery, drawn on the actual photo.</p>
 
       <div className="flex gap-2 mb-6">
         <div className="flex-1 relative">
@@ -90,7 +94,7 @@ export default function AerialRoofLookupPage() {
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') lookup(); }}
-            placeholder="123 Main St, Edwardsville IL 62025"
+            placeholder="3 Melvin Dr, Granite City IL 62040"
             className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-slate-800/70 border border-slate-700 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500"
           />
         </div>
@@ -122,18 +126,18 @@ export default function AerialRoofLookupPage() {
         </div>
       )}
 
-      {data?.success && data.covered && (
-        <div className="space-y-5">
+      {showMap && (
+        <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
               <CheckCircle2 size={14} /> Covered
             </span>
-            <span className="text-slate-400">{planes.length} roof{planes.length !== 1 ? 's' : ''} found</span>
-            {data.coverage?.latestCaptureDate && <span className="text-slate-500">· latest capture {data.coverage.latestCaptureDate}</span>}
-            {data.resolved && <span className="text-slate-500">· {data.resolved.lat.toFixed(4)}, {data.resolved.lng.toFixed(4)}</span>}
+            <span className="text-slate-400">{planes.length} roof{planes.length !== 1 ? 's' : ''} detected</span>
+            {data?.coverage?.latestCaptureDate && <span className="text-slate-500">· imagery {data.coverage.latestCaptureDate}</span>}
           </div>
 
-          {planes.length > 0 && <RoofFootprint planes={planes} />}
+          <div ref={mapEl} className="w-full rounded-xl border border-slate-700/60 overflow-hidden" style={{ height: 460 }} />
+          <p className="text-xs text-slate-500">Hover a roof for its pitch + area. Outlines are Nearmap AI; pitch/area/material are measured. (Box catches a few neighbors — parcel crop is the next refinement.)</p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {planes.map((p, i) => (
@@ -148,8 +152,6 @@ export default function AerialRoofLookupPage() {
                   <span className="text-slate-200 text-right">{p.areaSqft != null ? `${p.areaSqft.toLocaleString()} ft²` : '—'}</span>
                   <span className="text-slate-400 flex items-center gap-1"><Ruler size={13} /> Pitch</span>
                   <span className="text-slate-200 text-right">{p.pitchDeg != null ? `${p.pitchDeg}°` : '—'}</span>
-                  <span className="text-slate-400">Azimuth</span>
-                  <span className="text-slate-500 text-right text-xs">derive (follow-up)</span>
                   <span className="text-slate-400">Type</span>
                   <span className="text-slate-200 text-right">{p.roofType ?? '—'}</span>
                   <span className="text-slate-400">Material</span>
