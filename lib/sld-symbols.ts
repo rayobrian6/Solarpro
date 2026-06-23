@@ -269,6 +269,60 @@ const symPVArray: SLDSymbol = {
   },
 };
 
+// ─── 1b. Solar Fence Array (SolFence — vertical bifacial modules on posts) ──────
+// Same box size + connection anchors as symPVArray so the renderer's wiring,
+// anchor lookups and callouts are unaffected — only the glyph changes.
+const symPVFence: SLDSymbol = {
+  id: 'pv-fence', label: 'Solar Fence', sub: 'Vertical Bifacial Modules', domain: 'DC',
+  badge: 'DC', badgeColor: 'red', width: 200, height: 160,
+  connections: [
+    { id: 'dc_pos', x: 200, y: 60,  dir: 'right', domain: 'DC', label: 'DC+' },
+    { id: 'dc_neg', x: 200, y: 100, dir: 'right', domain: 'DC', label: 'DC−' },
+    { id: 'gnd',    x: 100, y: 160, dir: 'bottom', domain: 'GND', label: 'GND' },
+  ],
+  labelAnchor: { x: 100, y: 172, anchor: 'middle', baseline: 'hanging' },
+  svg: () => {
+    const parts: string[] = [];
+    // Two portrait (vertical) bifacial modules side by side, mounted on fence posts.
+    const mw = 46; const mh = 86; const gap = 12;
+    const totalW = 2 * mw + gap;
+    const startX = (200 - totalW) / 2;
+    const startY = 8;
+    const groundY = 134;
+    // Fence posts (two ends + one center) from the top rail down to grade.
+    const postXs = [startX - 6, startX + mw + gap / 2, startX + totalW + 6];
+    for (const px of postXs) {
+      parts.push(p_line(px, startY + 4, px, groundY, { stroke: '#7A7A7A', sw: 3 }));
+    }
+    // The two vertical modules.
+    for (let i = 0; i < 2; i++) {
+      parts.push(pvModule(startX + i * (mw + gap), startY, mw, mh));
+    }
+    // Top rail tying the modules together (string wiring).
+    const railY = startY - 4;
+    parts.push(p_line(startX, railY, startX + totalW, railY, { stroke: T.DC_CLR, sw: 1.5 }));
+    // Grade line + hatch ticks.
+    parts.push(p_line(20, groundY, 180, groundY, { stroke: '#8D6E63', sw: 1.5 }));
+    for (let x = 26; x <= 176; x += 13) {
+      parts.push(p_line(x, groundY, x - 5, groundY + 5, { stroke: '#8D6E63', sw: 1 }));
+    }
+    // DC leads out to the right (same anchor points as pv-array).
+    const rightEdge = startX + totalW;
+    const midY = startY + mh / 2;
+    parts.push(p_line(rightEdge, midY - 16, 200, 60, { stroke: T.DC_CLR, sw: 2 }));
+    parts.push(p_text(192, 55, '+', { sz: 11, fill: T.DC_CLR, bold: true }));
+    parts.push(p_line(rightEdge, midY + 16, 200, 100, { stroke: T.DC_CLR, sw: 2 }));
+    parts.push(p_text(192, 106, '−', { sz: 11, fill: T.DC_CLR, bold: true }));
+    // GND lead from the center post to the bottom anchor.
+    parts.push(p_line(100, groundY, 100, 160, { stroke: T.GND, sw: 1.5, dash: '4,3' }));
+    // Connection dots.
+    parts.push(cpDot(200, 60, 'DC'));
+    parts.push(cpDot(200, 100, 'DC'));
+    parts.push(cpDot(100, 160, 'GND'));
+    return wrapSVG(200, 160, parts.join(''));
+  },
+};
+
 // ─── 2. String Inverter ───────────────────────────────────────────────────────
 const symInverter: SLDSymbol = {
   id: 'inverter', label: 'String Inverter', sub: 'DC→AC Conversion', domain: 'BOTH',
@@ -1032,6 +1086,7 @@ const symATS: SLDSymbol = {
 
 export const SLD_SYMBOLS: SLDSymbol[] = [
   symPVArray,
+  symPVFence,
   symInverter,
   symBatteryDC,
   symBatteryAC,

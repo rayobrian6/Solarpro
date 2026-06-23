@@ -16,6 +16,8 @@ import {
   getTotalAhjCount,
   type AhjRecord,
 } from '@/lib/jurisdictions/ahj-national';
+import { lookupAhjFromRegistry } from '@/lib/jurisdictions/ahjRegistry';
+import { enrichWithSolarTrace } from '@/lib/jurisdictions/solartraceOverlay';
 import { requireAuth } from '@/lib/security';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
@@ -44,6 +46,10 @@ export async function GET(req: NextRequest) {
     const city      = searchParams.get('city');
     const county    = searchParams.get('county');
     const address   = searchParams.get('address');
+    const latRaw    = searchParams.get('lat');
+    const lngRaw    = searchParams.get('lng');
+    const lat       = latRaw != null ? Number(latRaw) : undefined;
+    const lng       = lngRaw != null ? Number(lngRaw) : undefined;
     const text      = searchParams.get('q') || searchParams.get('text');
     const summary   = searchParams.get('summary') === 'true';
 
@@ -62,21 +68,35 @@ export async function GET(req: NextRequest) {
       if (!ahj) {
         return NextResponse.json({ success: false, error: `AHJ not found: ${id}` }, { status: 404 });
       }
-      return NextResponse.json({ success: true, ahj, count: 1 });
+      return NextResponse.json({ success: true, ahj: enrichWithSolarTrace(ahj), count: 1 });
     }
 
-    // Lookup by address (most common use case)
-    if (address) {
-      const ahj = getAhjByAddress(address);
-      if (ahj) {
-        return NextResponse.json({ success: true, ahj, count: 1, source: 'address' });
+    // Lookup by address or lat/lng (most common use case).
+    // Try the live SunSpec/Orange Button AHJ Registry first (real, maintained data);
+    // it returns null when no token is configured or on any error, so we fall back
+    // to the static curated + code-logic database.
+    if (address || (lat != null && !Number.isNaN(lat) && lng != null && !Number.isNaN(lng))) {
+      const live = await lookupAhjFromRegistry({
+        address: address || undefined,
+        lat: Number.isNaN(lat as number) ? undefined : lat,
+        lng: Number.isNaN(lng as number) ? undefined : lng,
+        stateCode: stateCode || undefined,
+      });
+      if (live) {
+        return NextResponse.json({ success: true, ahj: enrichWithSolarTrace(live), count: 1, source: 'registry_live' });
+      }
+      if (address) {
+        const ahj = getAhjByAddress(address);
+        if (ahj) {
+          return NextResponse.json({ success: true, ahj: enrichWithSolarTrace(ahj), count: 1, source: 'address' });
+        }
       }
       // Fall through to state-level search
     }
 
     // Search by state/city/county/text
     if (stateCode || city || county || text) {
-      const results = searchAhj({ stateCode: stateCode || undefined, city: city || undefined, county: county || undefined, text: text || undefined });
+      const results = searchAhj({ stateCode: stateCode || undefined, city: city || undefined, county: county || undefined, text: text || undefined }).map(enrichWithSolarTrace);
       return NextResponse.json({
         success: true,
         ahjs: results,
@@ -88,7 +108,7 @@ export async function GET(req: NextRequest) {
 
     // Return all AHJs for a state
     if (stateCode) {
-      const results = getAhjsByState(stateCode);
+      const results = getAhjsByState(stateCode).map(enrichWithSolarTrace);
       return NextResponse.json({
         success: true,
         ahjs: results,

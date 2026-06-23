@@ -406,7 +406,7 @@ export interface RoofPlane {
   adjacentPlaneIds?: string[];
 
   // v47.81 -- Solar API provenance
-  source?: 'solar_api' | 'manual' | 'imported';
+  source?: 'solar_api' | 'manual' | 'imported' | 'aerial_nearmap';
   solarSegmentIndex?: number;
   planeHeightAtCenterMeters?: number;
   confirmed?: boolean;

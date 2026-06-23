@@ -448,7 +448,10 @@ export async function POST(req: NextRequest) {
           if (typeof searchAhjFn === 'function') {
             const ahjResults = searchAhjFn({ stateCode: sc, city: ct, county: cn });
             if (Array.isArray(ahjResults) && ahjResults.length > 0) {
-              const ar = ahjResults[0];
+              // Enrich with real NREL SolarTRACE permit-process data (online/instant
+              // permitting, median permit cost, median permit days) where available.
+              const overlayMod = await import('@/lib/jurisdictions/solartraceOverlay').catch(() => null);
+              const ar = overlayMod?.enrichWithSolarTrace ? overlayMod.enrichWithSolarTrace(ahjResults[0]) : ahjResults[0];
               console.log('[permit/AHJ] Found:', ar.ahjName, '| wind:', ar.windSpeedMph, 'mph | snow:', ar.groundSnowLoadPsf, 'psf');
               if (!body.project.ahjName) body.project.ahjName = ar.ahjName;
               if (!body.project.ahjWindSpeedMph) body.project.ahjWindSpeedMph = ar.windSpeedMph;

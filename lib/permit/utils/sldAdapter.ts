@@ -23,6 +23,13 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   const topology = topologyToLegacy(getInverterTopology(input, cad));
   const isMicro = topology === 'MICRO';
 
+  // ── Mount type — drives the PV-array glyph/labels in the renderer ──
+  // (cad.systemType is canonical, e.g. 'solar_fence'; project.systemType is the
+  // legacy fallback.) Normalize to roof | ground | fence.
+  const rawSysType = (cad?.systemType || project.systemType || '').toLowerCase();
+  const systemType: 'roof' | 'ground' | 'fence' =
+    rawSysType.includes('fence') ? 'fence' : rawSysType.includes('ground') ? 'ground' : 'roof';
+
   // ── Core system values ──
   const totalPanels  = system?.totalPanels ?? 0;
   const totalDcKw    = system?.totalDcKw ?? 0;
@@ -88,6 +95,7 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     drawingNumber:           'SLD-001',
     revision:                'A',
     topologyType,
+    systemType,
     totalModules:            totalPanels,
     totalStrings:            isMicro ? 0 : totalStrings,
     panelModel,
