@@ -20,7 +20,15 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!key) return new NextResponse('Nearmap not configured', { status: 503 });
 
   const { z, x, y } = params;
-  if (![z, x, y].every(v => /^\d{1,3}$/.test(v))) {
+  // Tile coords at z20–21 are 5–7 digit numbers (x/y up to 2^z-1), so the old
+  // 1–3 digit guard rejected EVERY real tile → gray map. Validate by range instead.
+  const zi = Number(z), xi = Number(x), yi = Number(y);
+  const valid =
+    [z, x, y].every(v => /^\d{1,8}$/.test(v)) &&
+    zi >= 0 && zi <= 24 &&
+    xi >= 0 && xi < 2 ** zi &&
+    yi >= 0 && yi < 2 ** zi;
+  if (!valid) {
     return new NextResponse('Bad tile coordinate', { status: 400 });
   }
 
