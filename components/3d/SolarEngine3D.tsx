@@ -997,6 +997,11 @@ function SolarEngine3D({
       cesiumGroundElevRef.current = googleGroundElev + geoidApprox;
       cesiumGroundElevResolvedRef.current = true;
       addLog('FLY', `cesiumGroundElev updated: ${cesiumGroundElevRef.current.toFixed(1)}m (geoidApprox: ${geoidApprox.toFixed(1)}m) [no terrain sample]`);
+      // Defensive: keep the redundant ellipsoid globe hidden after navigation so
+      // the flat base-imagery plane (rendered at height 0) can't bleed up through
+      // the real terrain at low-lying/coastal sites. Only when 3D tiles exist, so
+      // a tile-less location still falls back to the Esri base map.
+      try { if (tilesetRef.current) viewer.scene.globe.show = false; } catch {}
       terrainReadyRef.current = true;
       setTerrainReady(true);
       // Sync orbit target altitude now that ground elevation is known
