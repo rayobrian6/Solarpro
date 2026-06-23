@@ -526,6 +526,8 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [solarDataError, setSolarDataError] = useState<string | null>(null);
   // Solar API roof plane auto-detection status
   const [solarApiStatus, setSolarApiStatus] = useState<'idle' | 'loading' | 'loaded' | 'unavailable'>('idle');
+  // Nearmap aerial roof detection (licensed HD aerial → real planes, on demand)
+  const [aerialDetecting, setAerialDetecting] = useState(false);
   // Pending plane: drawn vertices awaiting azimuth/pitch tagging before panels are placed
   const [pendingPlane, setPendingPlane] = useState<{ vertices: {lat:number;lng:number}[]; area: number } | null>(null);
   const [pendingPlaneAzimuth, setPendingPlaneAzimuth] = useState<number>(180);
@@ -1143,6 +1145,43 @@ export default function DesignStudio({ project, onSave }: Props) {
       setSolarDataLoading(false);
     }
   }, []);
+
+  // ── Nearmap aerial roof detection (on-demand, licensed HD aerial) ──────
+  // Pulls real roof planes (outline + pitch + material) for the building under
+  // the current map center and drops them into the roofPlanes slot as
+  // confirmed:false, so they render in the 3D scene and route through the
+  // existing operator review/confirm step. Costs Nearmap credits → user-action
+  // only, never auto. Falls back gracefully (toast) when there's no coverage.
+  const detectRoofFromAerial = useCallback(async () => {
+    setAerialDetecting(true);
+    setSolarApiStatus('loading');
+    try {
+      const res = await fetch(
+        `/api/aerial-roof-detect?lat=${mapCenter.lat}&lng=${mapCenter.lng}`
+      );
+      const data = await res.json();
+      if (!data.success) {
+        setSolarApiStatus('unavailable');
+        toast.error('Aerial detect failed', data.error || 'Could not reach Nearmap.');
+        return;
+      }
+      if (!data.covered || !Array.isArray(data.planes) || data.planes.length === 0) {
+        setSolarApiStatus('unavailable');
+        toast.info('No aerial coverage here', data.message || 'Use Solar API or draw the roof manually.');
+        return;
+      }
+      const planes = data.planes as RoofPlane[];
+      setRoofPlanes(planes);
+      setSolarApiStatus('loaded');
+      if (data.resolved?.address) setSolarDataAddress(data.resolved.address);
+      toast.success('🛰️ Roof detected from aerial', `${planes.length} plane${planes.length !== 1 ? 's' : ''} from Nearmap · review pitch & azimuth, then confirm`);
+    } catch (e) {
+      setSolarApiStatus('unavailable');
+      toast.error('Aerial detect failed', (e as Error).message);
+    } finally {
+      setAerialDetecting(false);
+    }
+  }, [mapCenter.lat, mapCenter.lng, toast]);
 
   // ── Handle house pick from 3D view ──────────────────────────────────
   // Called when user clicks a house in Pick House mode.
@@ -4540,6 +4579,19 @@ export default function DesignStudio({ project, onSave }: Props) {
                     defaultOpen={false}
                   >
                     <div className="space-y-2">
+
+                      {/* Nearmap aerial detect — real planes from licensed HD aerial, on demand */}
+                      <button
+                        onClick={detectRoofFromAerial}
+                        disabled={aerialDetecting}
+                        className="w-full py-2 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white"
+                      >
+                        {aerialDetecting ? (
+                          <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Detecting from aerial…</>
+                        ) : (
+                          <>🛰️ Detect roof from aerial</>
+                        )}
+                      </button>
 
                       {/* Idle state */}                      {/* Idle state */}
                       {solarApiStatus === 'idle' && roofPlanes.length === 0 ? (
