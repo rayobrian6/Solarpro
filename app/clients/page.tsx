@@ -236,17 +236,23 @@ export default function ClientsPage() {
           <div className="flex items-center gap-1 bg-slate-800/60 border border-slate-700/60 rounded-xl p-1 flex-shrink-0">
             <button
               onClick={() => { setViewMode('grid'); try { localStorage.setItem('solarpro:clientsViewMode', 'grid'); } catch {} }}
-              className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${viewMode === 'grid' ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}
               title="Card Grid"
+              aria-label="Switch to card grid view"
+              aria-pressed={viewMode === 'grid'}
             >
               <Grid3x3 size={14} />
+              <span>Cards</span>
             </button>
             <button
               onClick={() => { setViewMode('list'); try { localStorage.setItem('solarpro:clientsViewMode', 'list'); } catch {} }}
-              className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${viewMode === 'list' ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}
               title="List View"
+              aria-label="Switch to list view"
+              aria-pressed={viewMode === 'list'}
             >
               <List size={14} />
+              <span>List</span>
             </button>
           </div>
         </div>
