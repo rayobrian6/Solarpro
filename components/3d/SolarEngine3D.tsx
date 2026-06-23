@@ -1517,6 +1517,13 @@ function SolarEngine3D({
         addLog('BOOT', '✅ Google 3D Tiles loaded OK');
         setTileStatus('loaded');
         setRenderMode('TILES');
+        // The Google 3D Tiles ARE the terrain + imagery, so hide the flat ellipsoid
+        // globe (rendered at ellipsoidal height 0). At low-lying/coastal sites the
+        // real tile ground sits BELOW height 0 (negative ellipsoidal), so the globe
+        // pokes UP through the terrain and "bleeds through" at oblique angles
+        // (Waterford CT). Only hide once tiles are confirmed loaded — the failure
+        // branch keeps globe.show=true so the Esri base map remains as a fallback.
+        try { viewer.scene.globe.show = false; } catch (e) { handleCesiumError('hide globe', e, true); }
         try {
           tileset.allTilesLoaded.addEventListener(() => {
             addLog('BOOT', '✅ All 3D tiles loaded');
