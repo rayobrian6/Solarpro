@@ -496,6 +496,46 @@ SOURCE_DATABASE_URL=<Neon connection string>
 - Triggered on: user login, registration, credential mismatch detection
 - Direction: **website → app only** (never app → website)
 
+### IdentityLink contract — surveys (F-18, 2026-06-23)
+
+Beyond credential authority, the app's `surveys` rows reference users
+via a **point-in-time link**, not a live foreign key. The contract:
+
+- **`solarpro_user_id`** (TEXT on both `mobile.surveys` and
+  `app_db.surveys`) is the **only authoritative identity reference**
+  between the website Neon `users.id` and the app side. Stable for
+  the lifetime of the user. Set at submission time from the SSO
+  handoff JWT claim.
+  - `mobile.surveys.solarpro_user_id` — see
+    `mobile/src/database/schema.ts:28` (mobile SQLite).
+  - `app_db.surveys.solarpro_user_id` — see `database/schema.sql:69`
+    + `database/migrations/001_add_solarpro_ownership.sql:5`.
+- **`solarpro_email`, `solarpro_project_id`, `solarpro_org_id`** are
+  **SNAPSHOTS captured at submission time**. They are NOT refreshed
+  from Neon. If a Neon user's email changes, every previously
+  submitted survey keeps the old email — by design (historical record).
+  These columns are **deprecated as of F-18 Step 4** (migration
+  `003_drop_inspector_name_and_snapshot_columns.sql`).
+- **`inspector_name`** is a free-text field that is being replaced by
+  a derivation: `inspector_name = users_cache.full_name ?? "Unknown"`.
+  The mobile `users_cache` table is added in F-18 Step 2; the
+  derivation is wired in Step 3; the columns are dropped in Steps 4
+  (app) and 6 (website).
+- **Ingest owner resolution**: the website's `lib/survey/ingest/*`
+  pipeline resolves the survey owner by **looking up Neon directly
+  by `solarpro_user_id`** at ingest time (F-18 Step 5). On Neon
+  failure, fall back to `SURVEY_INGEST_DEFAULT_USER_ID` per A10 R11.
+  Do NOT rely on the snapshot columns for current display data.
+
+**Orphan reference failure mode:** the contract accepts that if a
+Neon user is hard-deleted, app-side `surveys.solarpro_user_id`
+references become orphans (no FK across separate databases). Future
+agents must surface orphan references before any hard Neon delete.
+
+**Full contract doc** (including scope exceptions and future-agent
+checklist): see `C:\Users\carpe\source\repos\site_survey-app\docs\IDENTITY_LINK.md`
+(additive, F-18 Step 1 deliverable).
+
 ---
 
 ## 14. HOW AI AGENTS SHOULD PICK UP COMMIT CONTEXT
