@@ -959,7 +959,10 @@ function SolarEngine3D({
     o.targetAlt = elev;
     o.heading   = Math.PI;  // π → fly-in looks NORTH (look dir = heading + π)
     o.pitch     = -1.134;  // -65° — top-down-ish view
-    o.radius    = Math.max(150, elev > 0 ? 150 : 300);
+    // 150m default framing; only fall back to a wider 300m when the ground
+    // elevation is genuinely UNRESOLVED. (Was `elev > 0`, which wrongly treated
+    // legitimately-negative coastal elevations as "unknown" and zoomed out.)
+    o.radius    = cesiumGroundElevResolvedRef.current ? 150 : 300;
     o.dragging  = false;
     if (applyOrbitRef.current) {
       applyOrbitRef.current();
