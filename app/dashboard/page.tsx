@@ -750,7 +750,7 @@ export default function CommandCenter() {
     } catch { /* ignore */ }
   };
   // ── Priority Surface: Miller's Law compliant dashboard view ──
-  // Default 'priority' shows only Command Header + Today's Commands + Work Queue
+  // Default 'priority' shows only Command Header + To-Do-List + Work Queue
   // 'full' shows all sections — toggled by user
   const [viewMode, setViewMode] = useState<'priority' | 'full'>('priority');
 
@@ -1219,16 +1219,16 @@ export default function CommandCenter() {
           ) : null}
 
         </>) : null}
-          {/* ═══ TODAY'S COMMANDS ═══ */}
+          {/* ═══ TO-DO-LIST ═══ */}
         {!dashLoading ? (
           <div className="rounded-2xl overflow-hidden"
             style={{ background: 'var(--bg-card)', border: '1px solid rgba(245,158,11,0.2)' }}>
             <div className="px-5 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border-color)' }}>
               <div className="flex items-center gap-2">
                 <Zap size={15} className="text-amber-400" />
-                <span className="text-sm font-bold" style={{ color: '#FBBF24' }}>TODAY'S COMMANDS</span>
-                {commands.length > 0 ? (<span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                  style={{ background: 'rgba(245,158,11,0.15)', color: '#F59E0B' }}>{commands.length}</span>) : null}
+                <span className="text-sm font-bold" style={{ color: '#FBBF24' }}>To-Do-List</span>
+                {commands.length > 0 && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                  style={{ background: 'rgba(245,158,11,0.15)', color: '#F59E0B' }}>{commands.length}</span>}
               </div>
             </div>
             {commands.length > 0 ? (
