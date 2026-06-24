@@ -3059,7 +3059,7 @@ function SolarEngine3D({
         const hit = ray ? C.IntersectionTests.rayPlane(ray, plane) : null;
         let ang = 0;
         if (hit) { const r = C.Cartesian3.subtract(hit, cen, new C.Cartesian3()); ang = Math.atan2(C.Cartesian3.dot(r, V), C.Cartesian3.dot(r, U)); }
-        dragRef.current = { mode: 'rotate', cen, N, U, V, lastAngle: ang, moved: false };
+        dragRef.current = { mode: 'rotate', cen, N, U, V, lastAngle: ang, moved: false, armed: false, downX: screen.x, downY: screen.y };
         arrayManipRef.current = true; // freeze the custom camera handler for this drag
         return;
       }
@@ -3069,7 +3069,7 @@ function SolarEngine3D({
       if (foundId && ids.has(foundId)) {
         const ray = viewer.camera.getPickRay(screen);
         const hit = ray ? C.IntersectionTests.rayPlane(ray, plane) : null;
-        dragRef.current = { mode: 'move', plane, lastCart: hit, moved: false };
+        dragRef.current = { mode: 'move', plane, lastCart: hit, moved: false, armed: false, downX: screen.x, downY: screen.y };
         arrayManipRef.current = true; // freeze the custom camera handler for this drag
       }
     }, C.ScreenSpaceEventType.LEFT_DOWN);
@@ -3079,6 +3079,21 @@ function SolarEngine3D({
       if (!drag) return;
       const ray = viewer.camera.getPickRay(event.endPosition);
       if (!ray) return;
+      // v62: drag threshold — a click/double-click (cursor barely moves) must NOT move
+      // or rotate the array, so single-panel select (double-click) + Delete stays reliable.
+      if (!drag.armed) {
+        const ddx = event.endPosition.x - drag.downX, ddy = event.endPosition.y - drag.downY;
+        if (Math.hypot(ddx, ddy) < 6) return;
+        drag.armed = true; // re-baseline at the current cursor so there's no jump
+        if (drag.mode === 'move') {
+          const h = C.IntersectionTests.rayPlane(ray, drag.plane); if (h) drag.lastCart = h;
+        } else {
+          const pl = C.Plane.fromPointNormal(drag.cen, drag.N);
+          const h = C.IntersectionTests.rayPlane(ray, pl);
+          if (h) { const r = C.Cartesian3.subtract(h, drag.cen, new C.Cartesian3()); drag.lastAngle = Math.atan2(C.Cartesian3.dot(r, drag.V), C.Cartesian3.dot(r, drag.U)); }
+        }
+        return;
+      }
       if (drag.mode === 'move') {
         const hit = C.IntersectionTests.rayPlane(ray, drag.plane);
         if (!hit) return;
