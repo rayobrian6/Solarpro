@@ -4349,6 +4349,64 @@ export default function DesignStudio({ project, onSave }: Props) {
                           </button>
                         </div>
                       </div>
+                      {/* v62: AHJ fire-code requirements — what THIS jurisdiction requires
+                          for ridge / valley / hip / eave / edge / pathway, with one-click apply. */}
+                      {(() => {
+                        const r = ahjRecord;
+                        const M = 0.0254;
+                        const cells: Array<[string, number]> = r ? [
+                          ['Ridge',  r.ridgeSetbackInches],
+                          ['Valley', r.valleySetbackInches],
+                          ['Hip',    r.hipRoofSetbackInches],
+                          ['Eave',   r.eaveSetbackInches],
+                          ['Edge',   r.roofSetbackInches],
+                          ['Pathway', r.pathwayWidthInches],
+                        ] : [];
+                        return (
+                          <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-2 space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-semibold text-red-300">
+                                {r ? `📍 ${r.city || r.county}, ${r.stateCode} requires` : '📋 IRC R324 defaults'}
+                              </span>
+                              {r ? <span className="text-[10px] text-slate-400">NEC {r.necVersion}</span> : null}
+                            </div>
+                            {r ? (
+                              <>
+                                <div className="grid grid-cols-3 gap-1">
+                                  {cells.map(([label, inches]) => (
+                                    <div key={label} className="rounded bg-slate-800/60 px-1.5 py-1 text-center">
+                                      <div className="text-[9px] uppercase tracking-wide text-slate-500">{label}</div>
+                                      <div className="text-xs font-semibold text-slate-200">{inches}″</div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="text-[10px] text-slate-500 leading-tight truncate" title={r.ahjName}>{r.ahjName}</div>
+                                <button
+                                  onClick={() => {
+                                    setFireSetbacks(prev => ({
+                                      ...prev,
+                                      ridgeSetbackM: r.ridgeSetbackInches * M,
+                                      // edge/side covers rake + hip + valley in the layout engine — use the strictest
+                                      edgeSetbackM:  Math.max(r.valleySetbackInches, r.hipRoofSetbackInches, r.ridgeSetbackInches) * M,
+                                      eaveSetbackM:  r.eaveSetbackInches * M,
+                                      pathwayWidthM: r.pathwayWidthInches * M,
+                                      enforcePathway: true,
+                                    }));
+                                    setSetback(r.roofSetbackInches * M);
+                                  }}
+                                  className="w-full text-[11px] py-1 rounded border border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors"
+                                >
+                                  Apply {r.city || r.county} fire setbacks
+                                </button>
+                              </>
+                            ) : (
+                              <div className="text-[10px] text-slate-400 leading-snug">
+                                18″ ridge · 18″ valley · 18″ hip · 36″ pathway (IRC R324). Set a project address to load the local jurisdiction&apos;s exact requirements.
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                       <SliderRow
                         label="Edge Setback"
                         value={Math.round(fireSetbacks.edgeSetbackM * 39.37)}
