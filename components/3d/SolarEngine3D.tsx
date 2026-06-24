@@ -2343,10 +2343,23 @@ function SolarEngine3D({
 
             try {
               const pos = new C.Cartesian3(railX, railY, railZ);
-              const ori = C.Transforms.headingPitchRollQuaternion(
-                pos,
-                new C.HeadingPitchRoll(headingRad, pitchRad, 0),
-              );
+              // v62: if this array was in-plane-rotated, orient the rail from the
+              // ROTATED ECEF frame (box: X=width→−v, Y=length→u, Z=height→n) so it
+              // tracks the panels. Non-rotated rails keep the exact HPR path.
+              let ori: any;
+              if ((rep as any).frameQuat) {
+                const m = new C.Matrix3(
+                  -vx, ux, nx,
+                  -vy, uy, ny,
+                  -vz, uz, nz,
+                );
+                ori = C.Quaternion.fromRotationMatrix(m);
+              } else {
+                ori = C.Transforms.headingPitchRollQuaternion(
+                  pos,
+                  new C.HeadingPitchRoll(headingRad, pitchRad, 0),
+                );
+              }
               if (!ori) continue;
 
               const railEntity = viewer.entities.add({
@@ -4736,7 +4749,7 @@ function SolarEngine3D({
   // commit=false during a live drag (skip onPanelsChange spam — commit once on drop).
   function applyArrayTransform(
     viewer: any, C: any, ids: Set<string>,
-    xform: (posCart: any, panel: PlacedPanel) => { pos: any; frameQuat?: { x: number; y: number; z: number; w: number } },
+    xform: (posCart: any, panel: PlacedPanel) => { pos: any; frameQuat?: { x: number; y: number; z: number; w: number }; u?: { x: number; y: number; z: number } },
     commit = true,
   ) {
     const updated = panelsRef.current.map(p => {
@@ -4754,6 +4767,8 @@ function SolarEngine3D({
       // azimuth (face direction → energy) are unchanged by in-plane rotation, so we
       // don't touch them — only the footprint yaw spins.
       if (r.frameQuat) next.frameQuat = r.frameQuat;
+      // Rotated eave axis → keeps rails (which derive u/v from ecefU) aligned.
+      if (r.u) { next.ecefUx = r.u.x; next.ecefUy = r.u.y; next.ecefUz = r.u.z; }
       return next;
     });
     const skipGrid = updated.length > 12;
@@ -4805,7 +4820,13 @@ function SolarEngine3D({
         : baseQuatFromHPR(C, pos, panel);
       const nq = C.Quaternion.multiply(Rq, baseQ, new C.Quaternion());
       C.Quaternion.normalize(nq, nq);
-      return { pos: newPos, frameQuat: { x: nq.x, y: nq.y, z: nq.z, w: nq.w } };
+      // Rotate the stored eave axis too (n is the rotation axis, so it's unchanged).
+      let uOut: { x: number; y: number; z: number } | undefined;
+      if (isFinite((panel as any).ecefUx)) {
+        const u = C.Matrix3.multiplyByVector(rotM, new C.Cartesian3((panel as any).ecefUx, (panel as any).ecefUy, (panel as any).ecefUz), new C.Cartesian3());
+        uOut = { x: u.x, y: u.y, z: u.z };
+      }
+      return { pos: newPos, frameQuat: { x: nq.x, y: nq.y, z: nq.z, w: nq.w }, u: uOut };
     }, commit);
   }
 
