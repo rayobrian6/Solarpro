@@ -19,7 +19,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { buildDigitalTwin, enrichDigitalTwinWithDsm, type DigitalTwinData, type RoofSegment } from '@/lib/digitalTwin';
 import { getSunPosition } from '@/lib/solarMath';
-import type { PlacedPanel } from '@/types';
+import type { PlacedPanel, RoofPlane } from '@/types';
 import {
   polygonCentroid,
   latLngToLocal,
@@ -6066,6 +6066,38 @@ function SolarEngine3D({
     }
   }
 
+  // v62: Convert a Google Solar roof segment → a clean tilted 3D RoofPlane so the
+  // standard flush grid engine (placePanelsControlled) can fill it like a hand-drawn
+  // plane. Builds the segment's convexHull as a 3D polygon at the correct heights for
+  // its pitch+azimuth (downslope = lower), then buildRoofPlane3D computes the frame.
+  function segmentToRoofPlane3D(seg: any, groundElevM: number): RoofPlane | null {
+    try {
+      const hull = (seg?.convexHull && seg.convexHull.length >= 3) ? seg.convexHull : null;
+      if (!hull || !seg.center || !isValidCoord(seg.center.lat, seg.center.lng)) return null;
+      const DEG = Math.PI / 180;
+      const pitch = isFinite(seg.pitchDegrees) ? Math.max(0, Math.min(60, seg.pitchDegrees)) : 20;
+      const az    = isFinite(seg.azimuthDegrees) ? seg.azimuthDegrees : 180;
+      const hAG   = isFinite(seg.heightAboveGround) ? seg.heightAboveGround : 3.0;
+      const baseH = groundElevM + hAG;
+      const tanP  = Math.tan(pitch * DEG);
+      const cosLat = Math.cos(seg.center.lat * DEG);
+      const mLat = 111320, mLng = 111320 * (cosLat > 0.01 ? cosLat : 1);
+      const dsE = Math.sin(az * DEG), dsN = Math.cos(az * DEG); // downslope horizontal unit (E,N)
+      const pts3D = hull.map((v: any) => {
+        const dE = (v.lng - seg.center.lng) * mLng;
+        const dN = (v.lat - seg.center.lat) * mLat;
+        const along = dE * dsE + dN * dsN;   // metres downslope from centre (+ = lower)
+        const h = baseH - along * tanP;       // downslope is lower
+        return engLatLngToECEF(v.lat, v.lng, h);
+      });
+      if (pts3D.length < 3) return null;
+      return buildRoofPlane3D(pts3D);
+    } catch (e) {
+      addLog('AUTO', `segmentToRoofPlane3D: ${(e as Error).message}`);
+      return null;
+    }
+  }
+
   function handleAutoRoof(viewer: any, C: any) {
     if (autoFillRunningRef.current) {
       addLog('AUTO', 'handleAutoRoof: already running - skipped duplicate call');
@@ -6080,49 +6112,28 @@ function SolarEngine3D({
 
     const planes = roofPlanesRef.current ?? [];
     const confirmedPlanes = planes.filter(rp => rp.vertices && rp.vertices.length >= 3 && rp.confirmed !== false);
-    const eligiblePlanes  = confirmedPlanes.length > 0 ? confirmedPlanes : planes.filter(rp => rp.vertices && rp.vertices.length >= 3);
+    let eligiblePlanes = confirmedPlanes.length > 0 ? confirmedPlanes : planes.filter(rp => rp.vertices && rp.vertices.length >= 3);
+
+    // ── v62: AUTO-DETECT — no hand-drawn planes → build CLEAN planes from Google
+    // Solar's detected roof segments and run them through the SAME flush grid engine
+    // (placePanelsControlled below) the hand-drawn tool uses. Accurate per-face
+    // geometry + the proven 0-gap aligned grid → tight rectangular layout on every
+    // covered address, no tracing. (Previous attempt used the gappy/staggered
+    // fillRoofSegmentWithPanels engine — wrong engine.)
+    if (eligiblePlanes.length === 0) {
+      const gElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+      const segPlanes = (twinRef.current?.roofSegments ?? [])
+        .map((s: any) => segmentToRoofPlane3D(s, gElev))
+        .filter((p: RoofPlane | null): p is RoofPlane => !!p);
+      if (segPlanes.length > 0) {
+        eligiblePlanes = segPlanes;
+        addLog('AUTO', `handleAutoRoof: no drawn planes → built ${segPlanes.length} clean planes from Google roof segments`);
+      }
+    }
 
     if (eligiblePlanes.length === 0) {
-      // ── v62: AUTO-DETECT FALLBACK ───────────────────────────────────────────
-      // No hand-drawn planes → fill Google Solar's detected roof segments directly.
-      // These are ACCURATE per-face polygons (center+pitch+azimuth+convexHull), so
-      // the layout is clean on every covered address with zero hand-tracing — which
-      // is exactly the consistency problem hand-drawing on a lumpy mesh couldn't
-      // solve. Reuses fillRoofSegmentWithPanels (the original Solar-segment fill
-      // engine), which clips each grid to the segment's real boundary.
-      const segs: any[] = twinRef.current?.roofSegments ?? [];
-      const usableSegs = segs.filter(s => s?.center && isValidCoord(s.center.lat, s.center.lng));
-      if (usableSegs.length === 0) {
-        setStatusMsg('No roof detected here — use "Pick House" to select the building, then Auto Fill');
-        addLog('AUTO', 'handleAutoRoof: no drawn planes AND no Solar segments');
-        autoFillRunningRef.current = false;
-        onPlacementModeChange('select');
-        return;
-      }
-      addLog('AUTO', `handleAutoRoof: no drawn planes → auto-detecting ${usableSegs.length} Google roof segments`);
-      // Clear existing panels + rails for a fresh auto layout.
-      panelMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
-      panelMapRef.current.clear();
-      lastRenderedPanelsRef.current = [];
-      try { clearRoofRails(viewer); } catch {}
-
-      const segPanels: PlacedPanel[] = [];
-      let filledSegs = 0;
-      for (const seg of usableSegs) {
-        try {
-          const fp = fillRoofSegmentWithPanels(viewer, C, seg);
-          if (fp.length > 0) { segPanels.push(...fp); filledSegs++; }
-        } catch (e) { addLog('AUTO', `segment fill error: ${(e as Error).message}`); }
-      }
-
-      panelsRef.current = segPanels;
-      lastRenderedPanelsRef.current = segPanels;
-      renderAllPanels(viewer, C, segPanels, true);
-      try { renderRoofRails(viewer, C, segPanels); } catch {}
-      onPanelsChange(segPanels);
-      setPanelCount(segPanels.length);
-      setStatusMsg(`✅ Auto-detected ${filledSegs} roof face${filledSegs !== 1 ? 's' : ''} — ${segPanels.length} panels (no drawing needed)`);
-      addLog('AUTO', `handleAutoRoof segment-fill: ${filledSegs}/${usableSegs.length} faces → ${segPanels.length} panels`);
+      setStatusMsg('No roof detected — use "Pick House" to select the building, then Auto Fill');
+      addLog('AUTO', 'handleAutoRoof: no drawn planes AND no Solar segments');
       autoFillRunningRef.current = false;
       onPlacementModeChange('select');
       return;
