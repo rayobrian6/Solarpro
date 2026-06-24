@@ -2537,7 +2537,11 @@ function SolarEngine3D({
       // from the ECEF normal. planeHPR() does exactly this derivation.
 
       const pn = panel as any;
-      {
+      if (pn.frameQuat && isFinite(pn.frameQuat.x) && isFinite(pn.frameQuat.w)) {
+        // v62: panel was in-plane-rotated by the grab tool — render its explicit
+        // world orientation verbatim (HPR can't express in-plane yaw about the normal).
+        orientation = new C.Quaternion(pn.frameQuat.x, pn.frameQuat.y, pn.frameQuat.z, pn.frameQuat.w);
+      } else {
         // Use stored heading/pitch from planeHPR() (derived from ECEF frame, per-plane)
         let heading: number;
         let pitchRad: number;
@@ -4732,7 +4736,7 @@ function SolarEngine3D({
   // commit=false during a live drag (skip onPanelsChange spam — commit once on drop).
   function applyArrayTransform(
     viewer: any, C: any, ids: Set<string>,
-    xform: (posCart: any, panel: PlacedPanel) => { pos: any; headingDelta?: number; u?: any },
+    xform: (posCart: any, panel: PlacedPanel) => { pos: any; frameQuat?: { x: number; y: number; z: number; w: number } },
     commit = true,
   ) {
     const updated = panelsRef.current.map(p => {
@@ -4746,11 +4750,10 @@ function SolarEngine3D({
         lat:    C.Math.toDegrees(carto.latitude),
         lng:    C.Math.toDegrees(carto.longitude),
         height: carto.height };
-      if (typeof r.headingDelta === 'number') {
-        next.heading = (p.heading ?? 0) + r.headingDelta;
-        next.azimuth = ((((p.azimuth ?? 0) + r.headingDelta * 180 / Math.PI) % 360) + 360) % 360;
-      }
-      if (r.u) { next.ecefUx = r.u.x; next.ecefUy = r.u.y; next.ecefUz = r.u.z; }
+      // frameQuat = explicit world orientation for in-plane-rotated panels. tilt/
+      // azimuth (face direction → energy) are unchanged by in-plane rotation, so we
+      // don't touch them — only the footprint yaw spins.
+      if (r.frameQuat) next.frameQuat = r.frameQuat;
       return next;
     });
     const skipGrid = updated.length > 12;
@@ -4773,20 +4776,36 @@ function SolarEngine3D({
     }), commit);
   }
 
-  // Rigid-rotate the selected array by `rad` about axis N, pivoting on centroid `cen`.
-  // Rotates each panel's position, facing (heading/azimuth), and stored eave axis.
+  // The body→world orientation quaternion a panel renders with TODAY (same HPR math
+  // as addPanelEntity). Used as the base we spin from on the first rotation.
+  function baseQuatFromHPR(C: any, pos: any, panel: PlacedPanel): any {
+    let heading: number, pitchRad: number;
+    if (isFinite(panel.heading ?? NaN) && isFinite(panel.pitch ?? NaN) && Math.abs(panel.pitch ?? 0) < Math.PI / 2 + 0.1) {
+      heading = panel.heading!; pitchRad = panel.pitch!;
+    } else {
+      heading = headingFromAzimuth(panel.azimuth ?? 180); pitchRad = -(panel.tilt ?? 0) * Math.PI / 180;
+    }
+    return C.Transforms.headingPitchRollQuaternion(pos, new C.HeadingPitchRoll(heading, pitchRad, 0));
+  }
+
+  // Rigid IN-PLANE rotation of the selected array by `rad` about axis N (the roof
+  // normal), pivoting on centroid `cen`. Positions rotate about N; each panel's world
+  // orientation is pre-multiplied by the same rotation so the rectangle spins WITHIN
+  // the plane (face normal stays = N, so tilt/azimuth/energy are unchanged). The result
+  // is stored as an explicit frameQuat that addPanelEntity renders verbatim.
   function rotateArrayBy(viewer: any, C: any, ids: Set<string>, rad: number, cen: any, N: any, commit = true) {
-    const rotM = C.Matrix3.fromQuaternion(C.Quaternion.fromAxisAngle(N, rad));
+    const Rq   = C.Quaternion.fromAxisAngle(N, rad);
+    const rotM = C.Matrix3.fromQuaternion(Rq);
     applyArrayTransform(viewer, C, ids, (pos, panel) => {
       const r  = C.Cartesian3.subtract(pos, cen, new C.Cartesian3());
       const rr = C.Matrix3.multiplyByVector(rotM, r, new C.Cartesian3());
       const newPos = C.Cartesian3.add(cen, rr, new C.Cartesian3());
-      let uOut: any;
-      if (isFinite((panel as any).ecefUx)) {
-        const u = new C.Cartesian3((panel as any).ecefUx, (panel as any).ecefUy, (panel as any).ecefUz);
-        uOut = C.Matrix3.multiplyByVector(rotM, u, new C.Cartesian3());
-      }
-      return { pos: newPos, headingDelta: rad, u: uOut };
+      const baseQ = (panel as any).frameQuat
+        ? new C.Quaternion((panel as any).frameQuat.x, (panel as any).frameQuat.y, (panel as any).frameQuat.z, (panel as any).frameQuat.w)
+        : baseQuatFromHPR(C, pos, panel);
+      const nq = C.Quaternion.multiply(Rq, baseQ, new C.Quaternion());
+      C.Quaternion.normalize(nq, nq);
+      return { pos: newPos, frameQuat: { x: nq.x, y: nq.y, z: nq.z, w: nq.w } };
     }, commit);
   }
 
