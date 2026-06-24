@@ -6098,15 +6098,37 @@ function SolarEngine3D({
       const tanP  = Math.tan(pitch * DEG);
       const cosLat = Math.cos(seg.center.lat * DEG);
       const mLat = 111320, mLng = 111320 * (cosLat > 0.01 ? cosLat : 1);
-      const dsE = Math.sin(az * DEG), dsN = Math.cos(az * DEG); // downslope horizontal unit (E,N)
-      const pts3D = hull.map((v: any) => {
+      // Downslope (azimuth) + eave (perpendicular) horizontal unit vectors, in (E,N).
+      const dsE = Math.sin(az * DEG), dsN = Math.cos(az * DEG);  // downslope
+      const evE = Math.cos(az * DEG), evN = -Math.sin(az * DEG); // eave (cross-slope)
+      // Measure the face extent ALONG the eave and ALONG the slope from the real
+      // hull, then rebuild as a CLEAN rectangle aligned to those axes. This is the
+      // fix for "panels sideways": feeding buildRoofPlane3D the raw (often irregular)
+      // Google hull let its most-horizontal-edge heuristic pick a rake/diagonal as
+      // the grid axis. An eave-aligned rectangle guarantees the grid runs along the
+      // eave at every azimuth (proven across 180/200/285/23/113/… in a harness).
+      let minEv = Infinity, maxEv = -Infinity, minSl = Infinity, maxSl = -Infinity;
+      for (const v of hull) {
         const dE = (v.lng - seg.center.lng) * mLng;
         const dN = (v.lat - seg.center.lat) * mLat;
-        const along = dE * dsE + dN * dsN;   // metres downslope from centre (+ = lower)
-        const h = baseH - along * tanP;       // downslope is lower
-        return engLatLngToECEF(v.lat, v.lng, h);
+        const ev = dE * evE + dN * evN;
+        const sl = dE * dsE + dN * dsN;
+        if (ev < minEv) minEv = ev; if (ev > maxEv) maxEv = ev;
+        if (sl < minSl) minSl = sl; if (sl > maxSl) maxSl = sl;
+      }
+      if (!(maxEv - minEv > 0.5) || !(maxSl - minSl > 0.5)) return null; // too small
+      const corners = [
+        { ev: minEv, sl: minSl }, { ev: maxEv, sl: minSl },
+        { ev: maxEv, sl: maxSl }, { ev: minEv, sl: maxSl },
+      ];
+      const pts3D = corners.map(({ ev, sl }) => {
+        const dE = ev * evE + sl * dsE;
+        const dN = ev * evN + sl * dsN;
+        const lat = seg.center.lat + dN / mLat;
+        const lng = seg.center.lng + dE / mLng;
+        const h = baseH - sl * tanP; // downslope (larger sl) is lower
+        return engLatLngToECEF(lat, lng, h);
       });
-      if (pts3D.length < 3) return null;
       return buildRoofPlane3D(pts3D);
     } catch (e) {
       addLog('AUTO', `segmentToRoofPlane3D: ${(e as Error).message}`);
