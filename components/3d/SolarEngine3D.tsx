@@ -2602,13 +2602,11 @@ function SolarEngine3D({
         position: pos,
         orientation,
         box: {
-          // v62: oversize the dark cell body (backing) by 2cm so adjacent panels
-          // overlap slightly in the inter-panel seam. The grid is positionally flush
-          // (proven), but the lat/lng round-trip leaves ~1cm seams through which the
-          // lumpy COASTAL mesh shows — making the array look gappy/rough. The overlap
-          // hides those seams (dark-on-dark, invisible) → smooth continuous array.
-          // The blue glass on top stays inset, so panel divisions are still visible.
-          dimensions:               new C.Cartesian3(ph + 0.02, pw + 0.02, PANEL_THICKNESS),
+          // NOTE: do NOT oversize to overlap neighbors — overlapping coplanar boxes
+          // z-fight and flicker (badly visible once highlighted). Seam-sealing on
+          // rough coastal mesh will be done with a single continuous backing surface
+          // per array instead (no overlap), as a follow-up.
+          dimensions:               new C.Cartesian3(ph, pw, PANEL_THICKNESS),
           material:                 cellMaterial,
           outline:                  true,
           outlineColor:             frameOutlineCol,
