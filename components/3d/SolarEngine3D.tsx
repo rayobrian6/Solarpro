@@ -6101,12 +6101,7 @@ function SolarEngine3D({
       // Downslope (azimuth) + eave (perpendicular) horizontal unit vectors, in (E,N).
       const dsE = Math.sin(az * DEG), dsN = Math.cos(az * DEG);  // downslope
       const evE = Math.cos(az * DEG), evN = -Math.sin(az * DEG); // eave (cross-slope)
-      // Measure the face extent ALONG the eave and ALONG the slope from the real
-      // hull, then rebuild as a CLEAN rectangle aligned to those axes. This is the
-      // fix for "panels sideways": feeding buildRoofPlane3D the raw (often irregular)
-      // Google hull let its most-horizontal-edge heuristic pick a rake/diagonal as
-      // the grid axis. An eave-aligned rectangle guarantees the grid runs along the
-      // eave at every azimuth (proven across 180/200/285/23/113/… in a harness).
+      // Size guard from the face extent along eave + slope.
       let minEv = Infinity, maxEv = -Infinity, minSl = Infinity, maxSl = -Infinity;
       for (const v of hull) {
         const dE = (v.lng - seg.center.lng) * mLng;
@@ -6117,19 +6112,23 @@ function SolarEngine3D({
         if (sl < minSl) minSl = sl; if (sl > maxSl) maxSl = sl;
       }
       if (!(maxEv - minEv > 0.5) || !(maxSl - minSl > 0.5)) return null; // too small
-      const corners = [
-        { ev: minEv, sl: minSl }, { ev: maxEv, sl: minSl },
-        { ev: maxEv, sl: maxSl }, { ev: minEv, sl: maxSl },
-      ];
-      const pts3D = corners.map(({ ev, sl }) => {
-        const dE = ev * evE + sl * dsE;
-        const dN = ev * evN + sl * dsN;
-        const lat = seg.center.lat + dN / mLat;
-        const lng = seg.center.lng + dE / mLng;
-        const h = baseH - sl * tanP; // downslope (larger sl) is lower
-        return engLatLngToECEF(lat, lng, h);
+
+      // Build the plane from the REAL hull (tilted to pitch/azimuth) so the grid
+      // CLIPS to the actual roof face — no overshoot onto the ground. Then attach
+      // the EAVE direction as an ENU unit vector: handleAutoRoof passes it to the
+      // grid as customDir, forcing the columns along the eave regardless of the
+      // hull's most-horizontal edge. Real shape (clipping) + forced eave (no
+      // sideways) = correct on irregular CT hulls. (Proven in a harness.)
+      const hullPts3D = hull.map((v: any) => {
+        const dE = (v.lng - seg.center.lng) * mLng;
+        const dN = (v.lat - seg.center.lat) * mLat;
+        const along = dE * dsE + dN * dsN; // metres downslope (+ = lower)
+        return engLatLngToECEF(v.lat, v.lng, baseH - along * tanP);
       });
-      return buildRoofPlane3D(pts3D);
+      if (hullPts3D.length < 3) return null;
+      const plane = buildRoofPlane3D(hullPts3D);
+      (plane as any).__eaveDirENU = { x: evE, y: evN };
+      return plane;
     } catch (e) {
       addLog('AUTO', `segmentToRoofPlane3D: ${(e as Error).message}`);
       return null;
@@ -6226,8 +6225,10 @@ function SolarEngine3D({
         layoutId,
         customOriginLat: customLayoutOriginRef.current?.lat,
         customOriginLng: customLayoutOriginRef.current?.lng,
-        customDirX:      customLayoutDirRef.current?.x,
-        customDirY:      customLayoutDirRef.current?.y,
+        // v62: Auto-detected Google-segment planes carry an eave direction so the
+        // grid columns lock to the eave (no "sideways"). User Set-Direction wins.
+        customDirX:      customLayoutDirRef.current?.x ?? (plane as any).__eaveDirENU?.x,
+        customDirY:      customLayoutDirRef.current?.y ?? (plane as any).__eaveDirENU?.y,
       });
       const planePanels = clAutoResult.panels;
 
