@@ -5146,6 +5146,16 @@ function SolarEngine3D({
       // Step 2: Build complete RoofPlane using projected points (guaranteed coplanar)
       const plane = buildRoofPlane3D(cartPts);
 
+      // v62: Lock the grid columns to the EAVE (horizontal, perpendicular to the
+      // plane's downslope azimuth) so a hand-traced face can't run the array
+      // sideways when the most-horizontal traced edge happens to be a rake/diagonal.
+      // handleAutoRoof / the fill below pass this as customDir; clipping still uses
+      // the real traced polygon. (Same proven fix as the Auto Fill path.)
+      {
+        const azR = (plane.azimuth ?? 180) * Math.PI / 180;
+        (plane as any).__eaveDirENU = { x: Math.cos(azR), y: -Math.sin(azR) };
+      }
+
       addLog('PLANE3D', `Plane: id=${plane.id.slice(0,8)} az=${plane.azimuth.toFixed(1)} tilt=${plane.pitch.toFixed(1)} area=${plane.area.toFixed(1)}m²`);
 
       // Step 3: Convert PROJECTED points to Cesium Cartesian3 for rendering
@@ -5206,8 +5216,9 @@ function SolarEngine3D({
         layoutId,
         customOriginLat: customLayoutOriginRef.current?.lat,
         customOriginLng: customLayoutOriginRef.current?.lng,
-        customDirX:      customLayoutDirRef.current?.x,
-        customDirY:      customLayoutDirRef.current?.y,
+        // v62: eave-lock (no sideways); explicit Set-Direction still wins.
+        customDirX:      customLayoutDirRef.current?.x ?? (plane as any).__eaveDirENU?.x,
+        customDirY:      customLayoutDirRef.current?.y ?? (plane as any).__eaveDirENU?.y,
       });
       const newPanels = clResult.panels;
 
