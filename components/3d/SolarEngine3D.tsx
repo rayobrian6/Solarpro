@@ -544,6 +544,10 @@ function SolarEngine3D({
   // v48.12: Multi-select — Set of panel IDs currently highlighted
   const [selectedPanelIds, setSelectedPanelIds] = useState<Set<string>>(new Set());
   const selectedPanelIdsRef = useRef<Set<string>>(new Set());
+  // v62: Array group-selection. null = top level → a click selects the WHOLE array
+  // (all panels sharing a planeId). When set to a planeId, we've double-clicked
+  // INTO that array → clicks select single panels (micro-edit). Click empty → exit.
+  const drilledPlaneIdRef = useRef<string | null>(null);
   // v48.12: Toolbar tooltip state
   const [tooltipInfo, setTooltipInfo] = useState<{ text: string; x: number; y: number } | null>(null);
   // Which toolbar group is currently expanded (null = all collapsed)
@@ -2964,6 +2968,21 @@ function SolarEngine3D({
       }
     }, C.ScreenSpaceEventType.LEFT_CLICK, C.KeyboardEventModifier.SHIFT);
 
+    // v62: DOUBLE-click in select mode → drill INTO the clicked panel's array, so
+    // subsequent single clicks select individual panels (micro-edit). Click empty
+    // space (handled in handleSelectClick) exits back to whole-array selection.
+    handler.setInputAction((event: any) => {
+      if (modeRef.current !== 'select') return;
+      const { foundId } = pickPanelAtScreen(viewer, event.position);
+      if (!foundId) return;
+      const panel = panelsRef.current.find(p => p.id === foundId);
+      if (panel?.planeId) {
+        drilledPlaneIdRef.current = panel.planeId;
+        handleSelectClick(viewer, C, event.position); // now selects the single panel
+        setStatusMsg('🔎 Editing single panels — click panels to select · empty space to exit the array');
+      }
+    }, C.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+
     handler.setInputAction(() => {
       if (modeRef.current === 'plane' && planePtsRef.current.length >= 3) {
         finalizePlane(viewer, C);
@@ -4506,26 +4525,57 @@ function SolarEngine3D({
 
   function handleSelectClick(viewer: any, C: any, screenPos: any) {
     try {
-      // v31.1: Use drillPick to find panel entities even when occluded by terrain/3D tiles
-      // v48.12: Plain click = replace selection (SHIFT+click handled by handleShiftSelectClick)
-      let foundId: string | null = null;
-      let foundEntity: any = null;
-
+      // v31.1: drillPick finds panel entities even when occluded by terrain/3D tiles.
+      // v62: GROUP SELECTION. A plain click selects the WHOLE array (all panels on the
+      // same roof plane) — the common case (move/rotate the array). Double-click drills
+      // INTO an array; while drilled in, a click selects a single panel (micro-edit).
       const picked = pickPanelAtScreen(viewer, screenPos);
-      foundId = picked.foundId;
-      foundEntity = picked.foundEntity;
+      const foundId = picked.foundId;
+      const foundEntity = picked.foundEntity;
 
-      if (!foundId || !foundEntity) { clearPanelSelection(); return; }
-      // Replace entire selection with this single panel
+      // Empty space → clear selection AND exit any drilled-in array (back to top level).
+      if (!foundId || !foundEntity) {
+        clearPanelSelection();
+        drilledPlaneIdRef.current = null;
+        setStatusMsg('Selection cleared');
+        try { viewer.scene.requestRender(); } catch {}
+        return;
+      }
+
+      const panel   = panelsRef.current.find(p => p.id === foundId);
+      const planeId  = panel?.planeId;
+      const RED = new C.ColorMaterialProperty(C.Color.fromCssColorString('#ff3333').withAlpha(0.92));
+
+      // Drilled INTO this array → select just the one clicked panel.
+      if (drilledPlaneIdRef.current && drilledPlaneIdRef.current === planeId) {
+        clearPanelSelection();
+        if (foundEntity.box) foundEntity.box.material = RED;
+        selectedPanelIdRef.current = foundId;
+        setSelectedPanelId(foundId);
+        selectedPanelIdsRef.current = new Set([foundId]);
+        setSelectedPanelIds(new Set([foundId]));
+        setStatusMsg(`📌 1 panel selected — Delete to remove · click empty space to exit the array`);
+        try { viewer.scene.requestRender(); } catch {}
+        return;
+      }
+
+      // DEFAULT → select the WHOLE array (all panels sharing this planeId).
+      drilledPlaneIdRef.current = null;
       clearPanelSelection();
-      foundEntity.box.material = new C.ColorMaterialProperty(C.Color.fromCssColorString('#ff3333').withAlpha(0.92));
+      const arrayPanels = (planeId
+        ? panelsRef.current.filter(p => p.planeId === planeId)
+        : [panel]).filter(Boolean) as typeof panelsRef.current;
+      const ids = new Set<string>();
+      for (const p of arrayPanels) {
+        const ent = panelMapRef.current.get(p.id);
+        if (ent?.box) ent.box.material = RED;
+        ids.add(p.id);
+      }
+      selectedPanelIdsRef.current = ids;
+      setSelectedPanelIds(ids);
       selectedPanelIdRef.current = foundId;
       setSelectedPanelId(foundId);
-      // v48.12: Also add to Set so multi-delete works uniformly
-      selectedPanelIdsRef.current = new Set([foundId]);
-      setSelectedPanelIds(new Set([foundId]));
-      const panel = panelsRef.current.find(p => p.id === foundId);
-      if (panel) setStatusMsg(`📌 Panel selected — ${panel.tilt?.toFixed(0) ?? '?'}° tilt, ${panel.azimuth?.toFixed(0) ?? '?'}° az | Press Delete or click 🗑️ to remove`);
+      setStatusMsg(`📐 Array selected — ${ids.size} panel${ids.size !== 1 ? 's' : ''} · double-click a panel to edit just it`);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleSelectClick: ${(err as Error).message}`); }
   }
