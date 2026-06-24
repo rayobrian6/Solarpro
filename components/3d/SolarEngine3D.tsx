@@ -4590,18 +4590,56 @@ function SolarEngine3D({
       selectedPanelIdRef.current = foundId;
       setSelectedPanelId(foundId);
       addLog('SELECT', `array groupKey=${String(groupKey).slice(0,12)} selected ${ids.size} panels red`);
-      setStatusMsg(`📐 Array selected — ${ids.size} panel${ids.size !== 1 ? 's' : ''} · arrow keys move it · double-click a panel to edit just one`);
+      setStatusMsg(`📐 Array selected — ${ids.size} panel${ids.size !== 1 ? 's' : ''} · arrows move · , . rotate · double-click to edit one panel`);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleSelectClick: ${(err as Error).message}`); }
   }
 
-  // v62: Move the selected array along its OWN roof plane (arrow keys in select mode).
-  // Each panel carries its plane's ECEF eave axis (ecefU) and normal (ecefN); the rake
-  // axis V = cross(N, U). Shifting every selected panel in ECEF along U or V keeps the
-  // whole array coplanar with the roof. We re-add the moved entities DIRECTLY (selection
-  // colour survives via addPanelEntity) and pre-sync lastRenderedPanelsRef so the
-  // resulting onPanelsChange → [panels] diff is a visual no-op — no re-fill, no blink.
-  function nudgeSelectedArray(axis: 'u' | 'v', sign: number) {
+  // v62: Apply a per-panel transform to every selected panel (move and/or rotate),
+  // re-add the moved entities DIRECTLY (selection colour survives via addPanelEntity),
+  // RE-RENDER RAILS so they follow, and pre-sync lastRenderedPanelsRef so the resulting
+  // onPanelsChange → [panels] diff is a visual no-op — no re-fill, no blink.
+  function applyArrayTransform(
+    viewer: any, C: any, ids: Set<string>,
+    xform: (posCart: any, panel: PlacedPanel) => { pos: any; headingDelta?: number; u?: any },
+  ) {
+    const updated = panelsRef.current.map(p => {
+      if (!ids.has(p.id)) return p;
+      const pos = safeCartesian3(C, p.lng, p.lat, p.height ?? 0);
+      if (!pos) return p;
+      const r = xform(pos, p);
+      if (!r.pos) return p;
+      const carto = C.Cartographic.fromCartesian(r.pos);
+      const next: any = { ...p,
+        lat:    C.Math.toDegrees(carto.latitude),
+        lng:    C.Math.toDegrees(carto.longitude),
+        height: carto.height };
+      if (typeof r.headingDelta === 'number') {
+        next.heading = (p.heading ?? 0) + r.headingDelta;
+        next.azimuth = ((((p.azimuth ?? 0) + r.headingDelta * 180 / Math.PI) % 360) + 360) % 360;
+      }
+      if (r.u) { next.ecefUx = r.u.x; next.ecefUy = r.u.y; next.ecefUz = r.u.z; }
+      return next;
+    });
+    const skipGrid = updated.length > 12;
+    ids.forEach(id => {
+      removePanelEntities(viewer, id);          // removes frame+glass+grid for this panel
+      const p = updated.find(q => q.id === id);
+      if (p) addPanelEntity(viewer, C, p, skipGrid);
+    });
+    panelsRef.current = updated;
+    lastRenderedPanelsRef.current = updated;     // pre-sync → [panels] diff is a no-op (no blink)
+    try { renderRoofRails(viewer, C, updated); } catch (e) { handleCesiumError('renderRoofRails move', e, true); }
+    onPanelsChange(updated);
+    try { viewer.scene.requestRender(); } catch {}
+  }
+
+  // v62: Move the selected array in the SCREEN direction the user pressed (arrow keys).
+  // We project the array centre to the screen, step a few px in the requested screen
+  // direction, then ray-cast back onto the array's plane → a world-space on-plane
+  // direction that always matches what the user sees (no per-plane axis guessing, no
+  // inversion). Falls back to plane eave/rake axes if the screen projection fails.
+  function moveSelectedArrayScreen(screenDx: number, screenDy: number) {
     const viewer = viewerRef.current;
     const C = (window as any).Cesium;
     if (!viewer || !C) return;
@@ -4609,38 +4647,83 @@ function SolarEngine3D({
     if (ids.size === 0) return;
     const STEP_M = 0.3; // metres per key press
 
-    // Reference frame from the first selected panel that carries an ECEF frame
-    // (every panel in one array shares the same plane frame).
-    const ref = panelsRef.current.find(p => ids.has(p.id) && isFinite((p as any).ecefUx) && isFinite((p as any).ecefNx));
+    const ref = panelsRef.current.find(p => ids.has(p.id) && isFinite((p as any).ecefNx));
     if (!ref) { setStatusMsg('Move needs a 3D-plane array (no ECEF frame on these panels)'); return; }
-    const u = { x: (ref as any).ecefUx, y: (ref as any).ecefUy, z: (ref as any).ecefUz };
-    const n = { x: (ref as any).ecefNx, y: (ref as any).ecefNy, z: (ref as any).ecefNz };
-    const v = { x: n.y*u.z - n.z*u.y, y: n.z*u.x - n.x*u.z, z: n.x*u.y - n.y*u.x }; // rake = N × U
-    const a = axis === 'u' ? u : v;
-    const mag = Math.hypot(a.x, a.y, a.z) || 1;
-    const d = { x: a.x/mag*STEP_M*sign, y: a.y/mag*STEP_M*sign, z: a.z/mag*STEP_M*sign };
+    const pos0 = safeCartesian3(C, ref.lng, ref.lat, ref.height ?? 0);
+    if (!pos0) return;
+    const N = new C.Cartesian3((ref as any).ecefNx, (ref as any).ecefNy, (ref as any).ecefNz);
+    C.Cartesian3.normalize(N, N);
 
-    const updated = panelsRef.current.map(p => {
-      if (!ids.has(p.id)) return p;
-      const pos = safeCartesian3(C, p.lng, p.lat, p.height ?? 0);
-      if (!pos) return p;
-      const np = new C.Cartesian3((pos as any).x + d.x, (pos as any).y + d.y, (pos as any).z + d.z);
-      const carto = C.Cartographic.fromCartesian(np);
-      return { ...p, lat: C.Math.toDegrees(carto.latitude), lng: C.Math.toDegrees(carto.longitude), height: carto.height };
-    });
+    let dir: any = null;
+    try {
+      const toWin = C.SceneTransforms.wgs84ToWindowCoordinates ?? C.SceneTransforms.worldToWindowCoordinates;
+      const s0 = toWin ? toWin(viewer.scene, pos0) : null;
+      if (s0) {
+        const plane = C.Plane.fromPointNormal(pos0, N);
+        const s1 = new C.Cartesian2(s0.x + screenDx * 16, s0.y + screenDy * 16);
+        const ray = viewer.camera.getPickRay(s1);
+        const hit = ray ? C.IntersectionTests.rayPlane(ray, plane) : null;
+        if (hit) {
+          const d = C.Cartesian3.subtract(hit, pos0, new C.Cartesian3());
+          if (C.Cartesian3.magnitude(d) > 1e-6) dir = C.Cartesian3.normalize(d, d);
+        }
+      }
+    } catch { dir = null; }
 
-    // Re-add only the moved entities (selection colour preserved by addPanelEntity).
-    const skipGrid = updated.length > 12;
-    ids.forEach(id => {
-      removePanelEntities(viewer, id);
-      const p = updated.find(q => q.id === id);
-      if (p) addPanelEntity(viewer, C, p, skipGrid);
+    // Fallback: plane axes (U = eave, V = N × U). screenDx → ±U, screenDy → ∓V.
+    if (!dir && isFinite((ref as any).ecefUx)) {
+      const u = C.Cartesian3.normalize(new C.Cartesian3((ref as any).ecefUx, (ref as any).ecefUy, (ref as any).ecefUz), new C.Cartesian3());
+      const v = C.Cartesian3.normalize(C.Cartesian3.cross(N, u, new C.Cartesian3()), new C.Cartesian3());
+      dir = C.Cartesian3.add(
+        C.Cartesian3.multiplyByScalar(u, screenDx, new C.Cartesian3()),
+        C.Cartesian3.multiplyByScalar(v, -screenDy, new C.Cartesian3()),
+        new C.Cartesian3());
+      if (C.Cartesian3.magnitude(dir) > 1e-6) C.Cartesian3.normalize(dir, dir); else return;
+    }
+    if (!dir) return;
+
+    const delta = C.Cartesian3.multiplyByScalar(dir, STEP_M, new C.Cartesian3());
+    applyArrayTransform(viewer, C, ids, (pos) => ({
+      pos: new C.Cartesian3(pos.x + delta.x, pos.y + delta.y, pos.z + delta.z),
+    }));
+    setStatusMsg(`Array moved ${Math.round(STEP_M * 100)}cm — arrows move · , . rotate · Esc deselect`);
+  }
+
+  // v62: Rotate the selected array about its plane normal, around its own centroid
+  // (fixes "cockeyed" azimuth on lumpy meshes). , = CCW, . = CW.
+  function rotateSelectedArray(deg: number) {
+    const viewer = viewerRef.current;
+    const C = (window as any).Cesium;
+    if (!viewer || !C) return;
+    const ids = selectedPanelIdsRef.current;
+    if (ids.size === 0) return;
+    const sel = panelsRef.current.filter(p => ids.has(p.id));
+    const ref = sel.find(p => isFinite((p as any).ecefNx));
+    if (!ref) { setStatusMsg('Rotate needs a 3D-plane array'); return; }
+
+    // Centroid of the array in ECEF.
+    const cen = new C.Cartesian3(0, 0, 0);
+    let cnt = 0;
+    sel.forEach(p => { const c = safeCartesian3(C, p.lng, p.lat, p.height ?? 0); if (c) { C.Cartesian3.add(cen, c, cen); cnt++; } });
+    if (cnt === 0) return;
+    C.Cartesian3.divideByScalar(cen, cnt, cen);
+
+    const N = C.Cartesian3.normalize(new C.Cartesian3((ref as any).ecefNx, (ref as any).ecefNy, (ref as any).ecefNz), new C.Cartesian3());
+    const theta = deg * Math.PI / 180;
+    const rotM  = C.Matrix3.fromQuaternion(C.Quaternion.fromAxisAngle(N, theta));
+
+    applyArrayTransform(viewer, C, ids, (pos, panel) => {
+      const r   = C.Cartesian3.subtract(pos, cen, new C.Cartesian3());
+      const rr  = C.Matrix3.multiplyByVector(rotM, r, new C.Cartesian3());
+      const newPos = C.Cartesian3.add(cen, rr, new C.Cartesian3());
+      let uOut: any;
+      if (isFinite((panel as any).ecefUx)) {
+        const u = new C.Cartesian3((panel as any).ecefUx, (panel as any).ecefUy, (panel as any).ecefUz);
+        uOut = C.Matrix3.multiplyByVector(rotM, u, new C.Cartesian3());
+      }
+      return { pos: newPos, headingDelta: theta, u: uOut };
     });
-    panelsRef.current = updated;
-    lastRenderedPanelsRef.current = updated; // pre-sync → [panels] diff is a no-op (no blink)
-    onPanelsChange(updated);
-    try { viewer.scene.requestRender(); } catch {}
-    setStatusMsg(`Array moved ${Math.round(STEP_M*100)}cm — arrows to nudge · Esc to deselect`);
+    setStatusMsg(`Array rotated ${deg > 0 ? '+' : ''}${deg}° — , . rotate · arrows move`);
   }
 
   // v48.12: SHIFT+click — toggle panel in/out of multi-select Set
@@ -4865,15 +4948,22 @@ function SolarEngine3D({
         e.preventDefault();
         deleteSelectedPanels(); // v48.12: deletes all in Set
       }
-      // v62: arrow keys move the selected array along its own roof plane.
-      // Left/Right = along the eave (U); Up/Down = up/down the rake (V).
+      // v62: with an array selected, arrow keys MOVE it (screen-relative) and
+      // , / . ROTATE it about its plane normal.
       if (modeRef.current === 'select' && selectedPanelIdsRef.current.size > 0) {
-        const nudge: Record<string, ['u' | 'v', number]> = {
-          ArrowLeft:  ['u', -1], ArrowRight: ['u',  1],
-          ArrowUp:    ['v',  1], ArrowDown:  ['v', -1],
+        // screenDx/screenDy: window coords (+x right, +y DOWN) → up arrow = -y.
+        const moves: Record<string, [number, number]> = {
+          ArrowRight: [ 1,  0], ArrowLeft: [-1,  0],
+          ArrowUp:    [ 0, -1], ArrowDown: [ 0,  1],
         };
-        const mv = nudge[e.key];
-        if (mv) { e.preventDefault(); nudgeSelectedArray(mv[0], mv[1]); }
+        if (moves[e.key]) {
+          e.preventDefault();
+          moveSelectedArrayScreen(moves[e.key][0], moves[e.key][1]);
+        } else if (e.key === ',' || e.key === '<') {
+          e.preventDefault(); rotateSelectedArray(-2);   // CCW
+        } else if (e.key === '.' || e.key === '>') {
+          e.preventDefault(); rotateSelectedArray(2);    // CW
+        }
       }
       if (e.key === 'Enter') {
         // Finalize ground array on Enter
