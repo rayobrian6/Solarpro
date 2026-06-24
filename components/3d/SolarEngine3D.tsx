@@ -5193,7 +5193,50 @@ function SolarEngine3D({
         customDirX:      customLayoutDirRef.current?.x,
         customDirY:      customLayoutDirRef.current?.y,
       });
-      const newPanels = clResult.panels;
+      let newPanels = clResult.panels;
+
+      // ── Surface-clearance pass (v62) ────────────────────────────────────────
+      // On ROUGH photogrammetry (coastal / low-quality tiles) the mesh bumps poke
+      // up through the flat panel plane and occlude panels — even top-down. The
+      // grid math is correct (Newell-normal plane); the only issue is the fixed
+      // 0.17m standoff not clearing a rough mesh. Sample the rendered roof under
+      // each panel and lift the WHOLE array along the plane normal just enough that
+      // the roughest bump still sits below the panels. Clean/flat meshes give
+      // maxBump≈0 → ~no lift (Edwardsville unchanged); rough faces clear. Sampled
+      // BEFORE panels are added so we read the roof, not the panels.
+      // FAIL-SAFE: any error or unsupported → panels render exactly as before.
+      try {
+        const sc = viewer.scene;
+        if (newPanels.length > 0 && sc.sampleHeightSupported) {
+          let maxBump = 0, sampled = 0;
+          for (const p of newPanels) {
+            const meshH = sc.sampleHeight(C.Cartographic.fromDegrees(p.lng, p.lat));
+            if (typeof meshH === 'number' && isFinite(meshH)) {
+              sampled++;
+              const d = meshH - (p.height ?? 0);
+              if (d > maxBump) maxBump = d;
+            }
+          }
+          // Ignore absurd samples (>3m = likely a wall/tree/old panel, not roof noise).
+          if (sampled > 0 && maxBump > 0.03 && maxBump < 3.0) {
+            const n = frame.normal;
+            const cosTilt = Math.max(0.2, Math.cos((frame.tiltDeg ?? 0) * Math.PI / 180));
+            const lift = (maxBump + 0.10) / cosTilt; // clear worst bump + 10cm, along normal
+            newPanels = newPanels.map(p => {
+              const e = engLatLngToECEF(p.lat, p.lng, p.height ?? 0);
+              const carto = C.Cartographic.fromCartesian(
+                new C.Cartesian3(e.x + n.x * lift, e.y + n.y * lift, e.z + n.z * lift),
+              );
+              return carto
+                ? { ...p, lat: C.Math.toDegrees(carto.latitude), lng: C.Math.toDegrees(carto.longitude), height: carto.height }
+                : p;
+            });
+            addLog('PLANE3D', `[SURFACE-CLEAR] maxBump=${maxBump.toFixed(2)}m → lift=${lift.toFixed(2)}m (${sampled}/${clResult.panels.length} sampled)`);
+          } else {
+            addLog('PLANE3D', `[SURFACE-CLEAR] no lift (maxBump=${maxBump.toFixed(2)}m, sampled=${sampled})`);
+          }
+        }
+      } catch (e) { addLog('PLANE3D', `[SURFACE-CLEAR] skipped: ${(e as Error).message}`); }
 
       addLog('PLANE3D', `[CL] placePanelsControlled(plane3d) → ${newPanels.length} panels (engine=${clResult.engineUsed})`);
 
