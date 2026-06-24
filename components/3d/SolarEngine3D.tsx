@@ -544,6 +544,10 @@ function SolarEngine3D({
   // v48.12: Multi-select — Set of panel IDs currently highlighted
   const [selectedPanelIds, setSelectedPanelIds] = useState<Set<string>>(new Set());
   const selectedPanelIdsRef = useRef<Set<string>>(new Set());
+  // v62: Array group-selection drill state. null = top level → a click selects the
+  // WHOLE array (all panels sharing a group key). When set to a group key, we've
+  // double-clicked INTO that array → clicks select single panels. Empty click exits.
+  const drilledGroupKeyRef = useRef<string | null>(null);
   // v48.12: Toolbar tooltip state
   const [tooltipInfo, setTooltipInfo] = useState<{ text: string; x: number; y: number } | null>(null);
   // Which toolbar group is currently expanded (null = all collapsed)
@@ -937,6 +941,7 @@ function SolarEngine3D({
       const v = viewerRef.current;
       const Cs = (window as any).Cesium;
       if (!v || !Cs || !renderAllPanelsRef.current) return;
+      addLog('RENDER', `[panels] effect → renderAllPanels(${snapshot.length}) prevRendered=${lastRenderedPanelsRef.current.length}`);
       renderAllPanelsRef.current(v, Cs, snapshot);
     }, debounceMs);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2579,7 +2584,14 @@ function SolarEngine3D({
         glassColor      = shadeToColor(C, shade).withAlpha(0.18);
         frameOutlineCol = C.Color.fromCssColorString('#aaaaaa').withAlpha(0.70);
       } else {
-        cellMaterial    = new C.ColorMaterialProperty(systemTypeColor(C, sType));
+        // v62: selection survives re-renders. If this panel is in the current selection,
+        // a freshly (re)added entity keeps its red highlight instead of flashing back to
+        // its system color. This kills the "array disappears / blinks" symptom regardless
+        // of what triggered the re-render (a stray [panels] diff, a nudge re-add, etc).
+        const isSel = selectedPanelIdsRef.current.has(panel.id);
+        cellMaterial    = isSel
+          ? new C.ColorMaterialProperty(C.Color.fromCssColorString('#ff3333').withAlpha(0.92))
+          : new C.ColorMaterialProperty(systemTypeColor(C, sType));
         // Glass sheen: pale blue-silver, very translucent — simulates tempered glass
         glassColor      = sType === 'roof'
           ? C.Color.fromCssColorString('#7ab8d4').withAlpha(0.22)   // pale blue glass sheen
@@ -2961,6 +2973,22 @@ function SolarEngine3D({
         handleShiftSelectClick(viewer, C, event.position);
       }
     }, C.ScreenSpaceEventType.LEFT_CLICK, C.KeyboardEventModifier.SHIFT);
+
+    // v62: DOUBLE-click in select mode → drill INTO the clicked panel's array so the
+    // following single clicks select individual panels (micro-edit). Click empty space
+    // exits back to whole-array selection (handled in handleSelectClick).
+    handler.setInputAction((event: any) => {
+      if (modeRef.current !== 'select') return;
+      const { foundId } = pickPanelAtScreen(viewer, event.position);
+      if (!foundId) return;
+      const panel = panelsRef.current.find(p => p.id === foundId);
+      const gk = groupKeyOf(panel);
+      if (gk) {
+        drilledGroupKeyRef.current = gk;
+        handleSelectClick(viewer, C, event.position); // now selects the single panel
+        setStatusMsg('🔎 Editing single panels — click panels to select · empty space to exit the array');
+      }
+    }, C.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
 
     handler.setInputAction(() => {
       if (modeRef.current === 'plane' && planePtsRef.current.length >= 3) {
@@ -4502,30 +4530,117 @@ function SolarEngine3D({
     return { foundId, foundEntity };
   }
 
+  // v62: a panel's "array" key. Roof arrays group by planeId; fence/ground arrays
+  // group by layoutId (those have no planeId). Falls back to the panel's own id so a
+  // lone panel is still a (1-panel) group. Used for whole-array group selection.
+  const groupKeyOf = (p?: PlacedPanel | null): string | null =>
+    p ? (((p as any).planeId ?? (p as any).layoutId ?? p.id) || null) : null;
+
   function handleSelectClick(viewer: any, C: any, screenPos: any) {
     try {
-      // v31.1: Use drillPick to find panel entities even when occluded by terrain/3D tiles
-      // v48.12: Plain click = replace selection (SHIFT+click handled by handleShiftSelectClick)
-      let foundId: string | null = null;
-      let foundEntity: any = null;
-
+      // v31.1: drillPick finds panel entities even when occluded by terrain/3D tiles.
+      // v62: GROUP SELECTION (Figma/PowerPoint model — no modes, no new buttons).
+      //   • plain click            → select the WHOLE array (move/rotate the array)
+      //   • double-click (drill)   → then a click selects a single panel (micro-edit)
+      //   • click empty space      → clear selection AND exit any drilled-in array
       const picked = pickPanelAtScreen(viewer, screenPos);
-      foundId = picked.foundId;
-      foundEntity = picked.foundEntity;
+      const foundId = picked.foundId;
+      const foundEntity = picked.foundEntity;
+      addLog('SELECT', `click mode=${modeRef.current} foundId=${foundId ? foundId.slice(0,8) : 'NONE'} panelsInMap=${panelMapRef.current.size} totalPanels=${panelsRef.current.length}`);
 
-      if (!foundId || !foundEntity) { clearPanelSelection(); return; }
-      // Replace entire selection with this single panel
+      if (!foundId || !foundEntity) {
+        clearPanelSelection();
+        drilledGroupKeyRef.current = null;
+        setStatusMsg('Selection cleared');
+        try { viewer.scene.requestRender(); } catch {}
+        return;
+      }
+
+      const panel    = panelsRef.current.find(p => p.id === foundId);
+      const groupKey = groupKeyOf(panel);
+      const RED = new C.ColorMaterialProperty(C.Color.fromCssColorString('#ff3333').withAlpha(0.92));
+
+      // Drilled INTO this array → a click selects just the one clicked panel.
+      if (drilledGroupKeyRef.current && drilledGroupKeyRef.current === groupKey) {
+        clearPanelSelection();
+        if (foundEntity.box) foundEntity.box.material = RED;
+        selectedPanelIdRef.current = foundId;
+        setSelectedPanelId(foundId);
+        selectedPanelIdsRef.current = new Set([foundId]);
+        setSelectedPanelIds(new Set([foundId]));
+        setStatusMsg('📌 1 panel — Delete to remove · click empty space to exit the array');
+        try { viewer.scene.requestRender(); } catch {}
+        return;
+      }
+
+      // DEFAULT → select the WHOLE array (all panels sharing this group key).
+      drilledGroupKeyRef.current = null;
       clearPanelSelection();
-      foundEntity.box.material = new C.ColorMaterialProperty(C.Color.fromCssColorString('#ff3333').withAlpha(0.92));
+      const arrayPanels = (groupKey
+        ? panelsRef.current.filter(p => groupKeyOf(p) === groupKey)
+        : [panel]).filter(Boolean) as PlacedPanel[];
+      const ids = new Set<string>();
+      for (const p of arrayPanels) {
+        const ent = panelMapRef.current.get(p.id);
+        if (ent?.box) ent.box.material = RED;
+        ids.add(p.id);
+      }
+      selectedPanelIdsRef.current = ids;
+      setSelectedPanelIds(ids);
       selectedPanelIdRef.current = foundId;
       setSelectedPanelId(foundId);
-      // v48.12: Also add to Set so multi-delete works uniformly
-      selectedPanelIdsRef.current = new Set([foundId]);
-      setSelectedPanelIds(new Set([foundId]));
-      const panel = panelsRef.current.find(p => p.id === foundId);
-      if (panel) setStatusMsg(`📌 Panel selected — ${panel.tilt?.toFixed(0) ?? '?'}° tilt, ${panel.azimuth?.toFixed(0) ?? '?'}° az | Press Delete or click 🗑️ to remove`);
+      addLog('SELECT', `array groupKey=${String(groupKey).slice(0,12)} selected ${ids.size} panels red`);
+      setStatusMsg(`📐 Array selected — ${ids.size} panel${ids.size !== 1 ? 's' : ''} · arrow keys move it · double-click a panel to edit just one`);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleSelectClick: ${(err as Error).message}`); }
+  }
+
+  // v62: Move the selected array along its OWN roof plane (arrow keys in select mode).
+  // Each panel carries its plane's ECEF eave axis (ecefU) and normal (ecefN); the rake
+  // axis V = cross(N, U). Shifting every selected panel in ECEF along U or V keeps the
+  // whole array coplanar with the roof. We re-add the moved entities DIRECTLY (selection
+  // colour survives via addPanelEntity) and pre-sync lastRenderedPanelsRef so the
+  // resulting onPanelsChange → [panels] diff is a visual no-op — no re-fill, no blink.
+  function nudgeSelectedArray(axis: 'u' | 'v', sign: number) {
+    const viewer = viewerRef.current;
+    const C = (window as any).Cesium;
+    if (!viewer || !C) return;
+    const ids = selectedPanelIdsRef.current;
+    if (ids.size === 0) return;
+    const STEP_M = 0.3; // metres per key press
+
+    // Reference frame from the first selected panel that carries an ECEF frame
+    // (every panel in one array shares the same plane frame).
+    const ref = panelsRef.current.find(p => ids.has(p.id) && isFinite((p as any).ecefUx) && isFinite((p as any).ecefNx));
+    if (!ref) { setStatusMsg('Move needs a 3D-plane array (no ECEF frame on these panels)'); return; }
+    const u = { x: (ref as any).ecefUx, y: (ref as any).ecefUy, z: (ref as any).ecefUz };
+    const n = { x: (ref as any).ecefNx, y: (ref as any).ecefNy, z: (ref as any).ecefNz };
+    const v = { x: n.y*u.z - n.z*u.y, y: n.z*u.x - n.x*u.z, z: n.x*u.y - n.y*u.x }; // rake = N × U
+    const a = axis === 'u' ? u : v;
+    const mag = Math.hypot(a.x, a.y, a.z) || 1;
+    const d = { x: a.x/mag*STEP_M*sign, y: a.y/mag*STEP_M*sign, z: a.z/mag*STEP_M*sign };
+
+    const updated = panelsRef.current.map(p => {
+      if (!ids.has(p.id)) return p;
+      const pos = safeCartesian3(C, p.lng, p.lat, p.height ?? 0);
+      if (!pos) return p;
+      const np = new C.Cartesian3((pos as any).x + d.x, (pos as any).y + d.y, (pos as any).z + d.z);
+      const carto = C.Cartographic.fromCartesian(np);
+      return { ...p, lat: C.Math.toDegrees(carto.latitude), lng: C.Math.toDegrees(carto.longitude), height: carto.height };
+    });
+
+    // Re-add only the moved entities (selection colour preserved by addPanelEntity).
+    const skipGrid = updated.length > 12;
+    ids.forEach(id => {
+      removePanelEntities(viewer, id);
+      const p = updated.find(q => q.id === id);
+      if (p) addPanelEntity(viewer, C, p, skipGrid);
+    });
+    panelsRef.current = updated;
+    lastRenderedPanelsRef.current = updated; // pre-sync → [panels] diff is a no-op (no blink)
+    onPanelsChange(updated);
+    try { viewer.scene.requestRender(); } catch {}
+    setStatusMsg(`Array moved ${Math.round(STEP_M*100)}cm — arrows to nudge · Esc to deselect`);
   }
 
   // v48.12: SHIFT+click — toggle panel in/out of multi-select Set
@@ -4749,6 +4864,16 @@ function SolarEngine3D({
           && (selectedPanelIdRef.current || selectedPanelIdsRef.current.size > 0)) {
         e.preventDefault();
         deleteSelectedPanels(); // v48.12: deletes all in Set
+      }
+      // v62: arrow keys move the selected array along its own roof plane.
+      // Left/Right = along the eave (U); Up/Down = up/down the rake (V).
+      if (modeRef.current === 'select' && selectedPanelIdsRef.current.size > 0) {
+        const nudge: Record<string, ['u' | 'v', number]> = {
+          ArrowLeft:  ['u', -1], ArrowRight: ['u',  1],
+          ArrowUp:    ['v',  1], ArrowDown:  ['v', -1],
+        };
+        const mv = nudge[e.key];
+        if (mv) { e.preventDefault(); nudgeSelectedArray(mv[0], mv[1]); }
       }
       if (e.key === 'Enter') {
         // Finalize ground array on Enter
