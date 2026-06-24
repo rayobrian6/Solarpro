@@ -5208,20 +5208,29 @@ function SolarEngine3D({
       try {
         const sc = viewer.scene;
         if (newPanels.length > 0 && sc.sampleHeightSupported) {
-          let maxBump = 0, sampled = 0;
+          // Collect positive bumps (mesh poking above the panel plane) per panel.
+          const bumps: number[] = [];
+          let sampled = 0;
           for (const p of newPanels) {
             const meshH = sc.sampleHeight(C.Cartographic.fromDegrees(p.lng, p.lat));
             if (typeof meshH === 'number' && isFinite(meshH)) {
               sampled++;
               const d = meshH - (p.height ?? 0);
-              if (d > maxBump) maxBump = d;
+              if (d > 0 && d < 3.0) bumps.push(d); // ignore absurd (>3m = wall/tree/panel)
             }
           }
-          // Ignore absurd samples (>3m = likely a wall/tree/old panel, not roof noise).
-          if (sampled > 0 && maxBump > 0.03 && maxBump < 3.0) {
-            const n = frame.normal;
+          // ROBUST bump (75th percentile) so a single spiky mesh vertex can't launch
+          // the whole array; CAP the lift at 0.35m so panels never visibly float.
+          // Clean meshes → no bumps → no lift (inland unchanged).
+          let lift = 0;
+          if (bumps.length > 0) {
+            bumps.sort((a, b) => a - b);
+            const robustBump = bumps[Math.min(Math.floor(bumps.length * 0.75), bumps.length - 1)];
             const cosTilt = Math.max(0.2, Math.cos((frame.tiltDeg ?? 0) * Math.PI / 180));
-            const lift = (maxBump + 0.10) / cosTilt; // clear worst bump + 10cm, along normal
+            lift = Math.min((robustBump + 0.05) / cosTilt, 0.35);
+          }
+          if (lift > 0.03) {
+            const n = frame.normal;
             newPanels = newPanels.map(p => {
               const e = engLatLngToECEF(p.lat, p.lng, p.height ?? 0);
               const carto = C.Cartographic.fromCartesian(
@@ -5231,9 +5240,9 @@ function SolarEngine3D({
                 ? { ...p, lat: C.Math.toDegrees(carto.latitude), lng: C.Math.toDegrees(carto.longitude), height: carto.height }
                 : p;
             });
-            addLog('PLANE3D', `[SURFACE-CLEAR] maxBump=${maxBump.toFixed(2)}m → lift=${lift.toFixed(2)}m (${sampled}/${clResult.panels.length} sampled)`);
+            addLog('PLANE3D', `[SURFACE-CLEAR] robustBump=${(bumps[Math.min(Math.floor(bumps.length*0.75),bumps.length-1)]).toFixed(2)}m → lift=${lift.toFixed(2)}m (capped 0.35; ${sampled} sampled, ${bumps.length} bumps)`);
           } else {
-            addLog('PLANE3D', `[SURFACE-CLEAR] no lift (maxBump=${maxBump.toFixed(2)}m, sampled=${sampled})`);
+            addLog('PLANE3D', `[SURFACE-CLEAR] no lift (${sampled} sampled, ${bumps.length} bumps)`);
           }
         }
       } catch (e) { addLog('PLANE3D', `[SURFACE-CLEAR] skipped: ${(e as Error).message}`); }
