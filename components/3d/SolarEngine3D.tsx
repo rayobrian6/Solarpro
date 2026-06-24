@@ -555,6 +555,12 @@ function SolarEngine3D({
   const dragRef = useRef<any>(null);
   const suppressClickRef = useRef<boolean>(false);
   const rotateHandleRef = useRef<any>(null);
+  const rotateHandleLineRef = useRef<any>(null);
+  // v62: true while a grab-to-move/rotate is in progress. The CUSTOM camera handler
+  // (DOM pointermove orbit/pan, set up in boot) checks this and bails, so dragging an
+  // array doesn't also pan/orbit the camera. (Cesium's built-in controller is fully
+  // disabled here, so toggling its enable flags does nothing — this is the real gate.)
+  const arrayManipRef = useRef<boolean>(false);
   // v48.12: Toolbar tooltip state
   const [tooltipInfo, setTooltipInfo] = useState<{ text: string; x: number; y: number } | null>(null);
   // Which toolbar group is currently expanded (null = all collapsed)
@@ -629,7 +635,7 @@ function SolarEngine3D({
       hideRotateHandle();
       if (dragRef.current) dragRef.current = null;
       suppressClickRef.current = false;
-      { const vw = viewerRef.current; if (vw) setCameraDrag(vw, true); }
+      arrayManipRef.current = false; // never leave the camera frozen on tool change
       // v47.131 Issue 2: Reset plane frame state on every tool change.
       // This prevents extend_row / add_row from using the previous plane's
       // ECEF frame when the user switches to a different plane.
@@ -1354,6 +1360,10 @@ function SolarEngine3D({
         // browsers that don’t support pointer capture on canvas.
         const handleDragMove = (ev: PointerEvent | MouseEvent) => {
           if (!orbit.dragging) return;
+          // v62: an array grab is active → don't move the camera (let the array
+          // manipulation own the drag). Without this the left-drag PANS the camera
+          // while the array also rotates/moves — the cause of the "shear".
+          if (arrayManipRef.current) return;
 
           const dx = ev.clientX - orbit.dragStartX;
           const dy = ev.clientY - orbit.dragStartY;
@@ -3032,7 +3042,7 @@ function SolarEngine3D({
         let ang = 0;
         if (hit) { const r = C.Cartesian3.subtract(hit, cen, new C.Cartesian3()); ang = Math.atan2(C.Cartesian3.dot(r, V), C.Cartesian3.dot(r, U)); }
         dragRef.current = { mode: 'rotate', cen, N, U, V, lastAngle: ang, moved: false };
-        setCameraDrag(viewer, false);
+        arrayManipRef.current = true; // freeze the custom camera handler for this drag
         return;
       }
 
@@ -3042,7 +3052,7 @@ function SolarEngine3D({
         const ray = viewer.camera.getPickRay(screen);
         const hit = ray ? C.IntersectionTests.rayPlane(ray, plane) : null;
         dragRef.current = { mode: 'move', plane, lastCart: hit, moved: false };
-        setCameraDrag(viewer, false);
+        arrayManipRef.current = true; // freeze the custom camera handler for this drag
       }
     }, C.ScreenSpaceEventType.LEFT_DOWN);
 
@@ -3076,7 +3086,7 @@ function SolarEngine3D({
       const drag = dragRef.current;
       if (!drag) return;
       dragRef.current = null;
-      setCameraDrag(viewer, true);
+      arrayManipRef.current = false; // hand the camera back to the custom handler
       if (drag.moved) {
         suppressClickRef.current = true;      // ignore the trailing LEFT_CLICK
         onPanelsChange(panelsRef.current);    // commit once
@@ -4697,16 +4707,6 @@ function SolarEngine3D({
   //  v62 — Array manipulation: grab-to-move + grab-to-rotate (mouse), shared core
   // ════════════════════════════════════════════════════════════════════════════
 
-  // Enable/disable Cesium's left-drag camera controls (so a drag moves the array
-  // instead of orbiting the globe). Zoom stays on.
-  function setCameraDrag(viewer: any, enabled: boolean) {
-    try {
-      const c = viewer.scene.screenSpaceCameraController;
-      c.enableRotate = enabled; c.enableTranslate = enabled;
-      c.enableTilt = enabled;   c.enableLook = enabled;
-    } catch {}
-  }
-
   // Centroid / normal / eave axis of the current selection, all in ECEF.
   function arrayCentroidECEF(C: any, ids: Set<string>): any | null {
     const cen = new C.Cartesian3(0, 0, 0); let cnt = 0;
@@ -4807,11 +4807,22 @@ function SolarEngine3D({
       const c = safeCartesian3(C, p.lng, p.lat, p.height ?? 0);
       if (c) { const r = C.Cartesian3.subtract(c, cen, new C.Cartesian3()); maxV = Math.max(maxV, C.Cartesian3.dot(r, V)); }
     });
-    const off = maxV + 2.0;
+    const off = maxV + 1.5;
+    const anchor = new C.Cartesian3(cen.x + N.x * 0.5, cen.y + N.y * 0.5, cen.z + N.z * 0.5);
     const hp = new C.Cartesian3(
       cen.x + V.x * off + N.x * 0.5,
       cen.y + V.y * off + N.y * 0.5,
       cen.z + V.z * off + N.z * 0.5);
+    // Connector line from the array centre to the knob, so it reads as a handle.
+    rotateHandleLineRef.current = viewer.entities.add({
+      name: '[ROTATE-HANDLE-LINE]',
+      polyline: {
+        positions: [anchor, hp],
+        width: 2,
+        material: new C.PolylineDashMaterialProperty({ color: C.Color.fromCssColorString('#00e5ff').withAlpha(0.8), dashLength: 8 }),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
     rotateHandleRef.current = viewer.entities.add({
       name: '[ROTATE-HANDLE]',
       position: hp,
@@ -4825,8 +4836,12 @@ function SolarEngine3D({
   }
   function hideRotateHandle() {
     const viewer = viewerRef.current;
-    if (viewer && rotateHandleRef.current) { try { viewer.entities.remove(rotateHandleRef.current); } catch {} }
+    if (viewer) {
+      if (rotateHandleRef.current)     { try { viewer.entities.remove(rotateHandleRef.current); } catch {} }
+      if (rotateHandleLineRef.current) { try { viewer.entities.remove(rotateHandleLineRef.current); } catch {} }
+    }
     rotateHandleRef.current = null;
+    rotateHandleLineRef.current = null;
   }
 
   // ── Keyboard fallbacks (mouse drag is primary) ───────────────────────────────
