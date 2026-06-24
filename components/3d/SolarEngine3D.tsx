@@ -164,7 +164,7 @@ function panelDims(orientation: PanelOrientation): { pw: number; ph: number } {
     : { pw: PW_PORTRAIT,  ph: PH_PORTRAIT  };
 }
 
-export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'obstruction' | 'plane3d' | 'set_direction' | 'set_origin';
+export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'snap_panel' | 'obstruction' | 'plane3d' | 'set_direction' | 'set_origin';
 export type PanelOrientation = 'portrait' | 'landscape';
 export type SystemType = 'roof' | 'ground' | 'fence';
 export type LoadStage = 'idle' | 'cesium' | 'viewer' | 'tiles' | 'solar' | 'done' | 'error';
@@ -2971,6 +2971,7 @@ function SolarEngine3D({
         else if (mode === 'surface_select') handleSurfaceSelectClick(viewer, C, screenPos);
         else if (mode === 'extend_row')     handleExtendRowClick(viewer, C, screenPos);
         else if (mode === 'add_row')        handleAddRowClick(viewer, C, screenPos);
+        else if (mode === 'snap_panel')     handleSnapPanelClick(viewer, C, screenPos);
         else if (mode === 'obstruction')    handleObstructionClick(viewer, C, screenPos);
         else if (mode === 'plane3d')        handlePlane3DClick(viewer, C, screenPos);
         else if (mode === 'set_direction')  handleSetDirectionClick(viewer, C, screenPos);
@@ -5865,6 +5866,98 @@ function SolarEngine3D({
    * handleExtendRowClick — in 'extend_row' mode, clicking on a plane
    * adds one more column to the highest row on that plane.
    */
+  // v62: SNAP PANEL — manually place ONE panel flush against the nearest existing panel,
+  // on the side the user clicked. Inherits the array's plane frame + facing (and rotation
+  // if the array was rotated), and uses the current orientation toggle — so you can start a
+  // landscape row below a portrait array. Click again next to the new panel to keep going.
+  function handleSnapPanelClick(viewer: any, C: any, screenPos: any) {
+    try {
+      const pickedPos = viewer.scene.pickPosition(screenPos);
+      if (!pickedPos || !isFinite(pickedPos.x)) { setStatusMsg('Snap Panel — click on the roof near the array'); return; }
+
+      // Nearest existing roof panel that carries an ECEF frame.
+      let ref: PlacedPanel | null = null; let bestD = Infinity;
+      for (const p of panelsRef.current) {
+        if ((p.systemType ?? 'roof') !== 'roof') continue;
+        if (!isFinite((p as any).ecefUx) || !isFinite((p as any).ecefNx)) continue;
+        const c = safeCartesian3(C, p.lng, p.lat, p.height ?? 0);
+        if (!c) continue;
+        const dx = c.x - pickedPos.x, dy = c.y - pickedPos.y, dz = c.z - pickedPos.z;
+        const d = dx * dx + dy * dy + dz * dz;
+        if (d < bestD) { bestD = d; ref = p; }
+      }
+      if (!ref) { setStatusMsg('No array yet — fill or place an array first, then snap panels to it'); return; }
+
+      const refPos = safeCartesian3(C, ref.lng, ref.lat, ref.height ?? 0);
+      const U = C.Cartesian3.normalize(new C.Cartesian3((ref as any).ecefUx, (ref as any).ecefUy, (ref as any).ecefUz), new C.Cartesian3());
+      const N = C.Cartesian3.normalize(new C.Cartesian3((ref as any).ecefNx, (ref as any).ecefNy, (ref as any).ecefNz), new C.Cartesian3());
+      const V = C.Cartesian3.normalize(C.Cartesian3.cross(N, U, new C.Cartesian3()), new C.Cartesian3());
+
+      // Click offset from ref, in the plane's U (eave) / V (slope) coordinates.
+      const off = C.Cartesian3.subtract(pickedPos, refPos, new C.Cartesian3());
+      const du = C.Cartesian3.dot(off, U);
+      const dv = C.Cartesian3.dot(off, V);
+
+      const newOrient: PanelOrientation = panelOrientationRef.current ?? 'portrait';
+      const refDims = panelDims(((ref as any).orientation ?? 'portrait') as PanelOrientation);
+      const newDims = panelDims(newOrient);
+
+      // Pick the adjacent slot on the side clicked (normalised by panel size so the
+      // choice between "next column" and "next row" feels right).
+      let offU = 0, offV = 0;
+      if (Math.abs(du) / refDims.pw >= Math.abs(dv) / refDims.ph) {
+        offU = (du >= 0 ? 1 : -1) * (refDims.pw / 2 + newDims.pw / 2);
+      } else {
+        offV = (dv >= 0 ? 1 : -1) * (refDims.ph / 2 + newDims.ph / 2);
+      }
+
+      const center = new C.Cartesian3(
+        refPos.x + U.x * offU + V.x * offV,
+        refPos.y + U.y * offU + V.y * offV,
+        refPos.z + U.z * offU + V.z * offV,
+      );
+
+      // Reject if that slot is already filled.
+      const occ = Math.min(newDims.pw, newDims.ph) * 0.5;
+      for (const p of panelsRef.current) {
+        const c = safeCartesian3(C, p.lng, p.lat, p.height ?? 0);
+        if (!c) continue;
+        const ddx = c.x - center.x, ddy = c.y - center.y, ddz = c.z - center.z;
+        if (ddx * ddx + ddy * ddy + ddz * ddz < occ * occ) {
+          setStatusMsg('A panel is already there — click an open edge of the array');
+          return;
+        }
+      }
+
+      const carto = C.Cartographic.fromCartesian(center);
+      const FT = 3.280839895;
+      const newId = (typeof crypto !== 'undefined' && (crypto as any).randomUUID)
+        ? (crypto as any).randomUUID()
+        : `snap-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+      const newPanel: any = {
+        ...ref,                              // inherit frame, facing, rotation, plane/layout, wattage
+        id:           newId,
+        lat:          Math.round(C.Math.toDegrees(carto.latitude) * 1e7) / 1e7,
+        lng:          Math.round(C.Math.toDegrees(carto.longitude) * 1e7) / 1e7,
+        height:       carto.height,
+        orientation:  newOrient,
+        widthFeet:    newDims.pw * FT,
+        heightFeet:   newDims.ph * FT,
+        layoutSource: 'MANUAL',
+      };
+
+      const updated = [...panelsRef.current, newPanel as PlacedPanel];
+      addPanelEntity(viewer, C, newPanel, updated.length > 12);
+      panelsRef.current = updated;
+      lastRenderedPanelsRef.current = updated;
+      try { renderRoofRails(viewer, C, updated); } catch {}
+      onPanelsChange(updated);
+      setPanelCount(updated.length);
+      setStatusMsg(`➕ Panel snapped (${newOrient}) — ${updated.length} total · click again to add more`);
+      try { viewer.scene.requestRender(); } catch {}
+    } catch (err: unknown) { addLog('ERROR', `handleSnapPanelClick: ${(err as Error).message}`); }
+  }
+
   function handleExtendRowClick(viewer: any, C: any, screenPos: any) {
     try {
       const pickedPos = viewer.scene.pickPosition(screenPos);
@@ -7455,6 +7548,7 @@ function SolarEngine3D({
               { mode: 'surface_select' as PlacementMode, icon: '\u{1F3AF}',    label: 'Surface',    tip: 'Click a roof plane to fill it with a panel grid' },
               { mode: 'extend_row'     as PlacementMode, icon: '\u2192+',      label: 'Ext Row',    tip: 'Add one more panel column to the right of each row' },
               { mode: 'add_row'        as PlacementMode, icon: '\u2191+',      label: 'Add Row',    tip: 'Add a new panel row above the highest existing row' },
+              { mode: 'snap_panel'     as PlacementMode, icon: '\u2b1b+',      label: 'Snap',       tip: 'Click beside the array to snap ONE panel flush. Use the orientation toggle first to drop a landscape row.' },
             ],
           },
           {
