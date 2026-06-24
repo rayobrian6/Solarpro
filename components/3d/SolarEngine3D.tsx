@@ -951,6 +951,22 @@ function SolarEngine3D({
     if (Math.abs(lat - prevLatRef.current) < 0.0001 && Math.abs(lng - prevLngRef.current) < 0.0001) return;
     prevLatRef.current = lat;
     prevLngRef.current = lng;
+
+    // ── v62: RESET per-location state on EVERY address change ────────────────
+    // Ray's repro: first fly-in works, the SECOND fly-in corrupts the plane.
+    // Cause: state from the previous address leaked into the next plane build.
+    //   • cesiumGroundElevResolvedRef → false: the new address must NOT build
+    //     planes at the OLD address's ground elevation during the async twin
+    //     reload (it gets re-resolved below once the new twin loads).
+    //   • customLayoutDir/Origin → null: a stale grid axis/origin from a prior
+    //     Set-Direction/Origin would skew the next address's grid.
+    //   • clearPlane3DPreview: drop any in-progress 3D-plane click points.
+    cesiumGroundElevResolvedRef.current = false;
+    customLayoutDirRef.current   = null;
+    customLayoutOriginRef.current = null;
+    try { clearPlane3DPreview(viewer); } catch {}
+    addLog('FLY', 'reset per-location state (elevResolved/customDir/customOrigin/plane3d) on address change');
+
     const elev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
     // Update orbit state for new address — snap camera to site at default pose
     const o = orbitRef.current;
