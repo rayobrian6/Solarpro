@@ -6083,8 +6083,46 @@ function SolarEngine3D({
     const eligiblePlanes  = confirmedPlanes.length > 0 ? confirmedPlanes : planes.filter(rp => rp.vertices && rp.vertices.length >= 3);
 
     if (eligiblePlanes.length === 0) {
-      setStatusMsg('No roof planes drawn — draw roof planes in 2D mode first, then use Auto Fill');
-      addLog('AUTO', 'handleAutoRoof: no roofPlanes available');
+      // ── v62: AUTO-DETECT FALLBACK ───────────────────────────────────────────
+      // No hand-drawn planes → fill Google Solar's detected roof segments directly.
+      // These are ACCURATE per-face polygons (center+pitch+azimuth+convexHull), so
+      // the layout is clean on every covered address with zero hand-tracing — which
+      // is exactly the consistency problem hand-drawing on a lumpy mesh couldn't
+      // solve. Reuses fillRoofSegmentWithPanels (the original Solar-segment fill
+      // engine), which clips each grid to the segment's real boundary.
+      const segs: any[] = twinRef.current?.roofSegments ?? [];
+      const usableSegs = segs.filter(s => s?.center && isValidCoord(s.center.lat, s.center.lng));
+      if (usableSegs.length === 0) {
+        setStatusMsg('No roof detected here — use "Pick House" to select the building, then Auto Fill');
+        addLog('AUTO', 'handleAutoRoof: no drawn planes AND no Solar segments');
+        autoFillRunningRef.current = false;
+        onPlacementModeChange('select');
+        return;
+      }
+      addLog('AUTO', `handleAutoRoof: no drawn planes → auto-detecting ${usableSegs.length} Google roof segments`);
+      // Clear existing panels + rails for a fresh auto layout.
+      panelMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
+      panelMapRef.current.clear();
+      lastRenderedPanelsRef.current = [];
+      try { clearRoofRails(viewer); } catch {}
+
+      const segPanels: PlacedPanel[] = [];
+      let filledSegs = 0;
+      for (const seg of usableSegs) {
+        try {
+          const fp = fillRoofSegmentWithPanels(viewer, C, seg);
+          if (fp.length > 0) { segPanels.push(...fp); filledSegs++; }
+        } catch (e) { addLog('AUTO', `segment fill error: ${(e as Error).message}`); }
+      }
+
+      panelsRef.current = segPanels;
+      lastRenderedPanelsRef.current = segPanels;
+      renderAllPanels(viewer, C, segPanels, true);
+      try { renderRoofRails(viewer, C, segPanels); } catch {}
+      onPanelsChange(segPanels);
+      setPanelCount(segPanels.length);
+      setStatusMsg(`✅ Auto-detected ${filledSegs} roof face${filledSegs !== 1 ? 's' : ''} — ${segPanels.length} panels (no drawing needed)`);
+      addLog('AUTO', `handleAutoRoof segment-fill: ${filledSegs}/${usableSegs.length} faces → ${segPanels.length} panels`);
       autoFillRunningRef.current = false;
       onPlacementModeChange('select');
       return;
