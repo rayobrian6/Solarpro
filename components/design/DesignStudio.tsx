@@ -3665,6 +3665,7 @@ export default function DesignStudio({ project, onSave }: Props) {
               showShade={showShade3D}
               showIrradiance={showIrradiance}
               fireSetbacks={fireSetbacks}
+              showSetbackZones={showSetbackZones}
               orientation={(orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape'}
               onOrientationChange={(o) => setOrientation(o)}
               onTwinLoaded={(twin) => {

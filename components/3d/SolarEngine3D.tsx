@@ -33,6 +33,7 @@ import {
   removeObstructedPanels,
   extendRow as extendRowOnSurface,
   addRow as addRowOnSurface,
+  computeEcefFrameForLegacyPlane,
 } from '@/lib/surfaceGeometry3D';
 import type { PlacedObstruction } from '@/types';
 import {
@@ -203,6 +204,9 @@ interface Props {
     enforcePathway: boolean;
     pathwayWidthM?: number;
   };
+  /** v62: render the fire setback keep-out zones on the 3D roof (driven by the
+   *  Design Studio "Zones On/Off" toggle). */
+  showSetbackZones?: boolean;
   onTwinLoaded?: (twin: DigitalTwinData) => void;
   onError?: (msg: string) => void;
   onLocationPick?: (lat: number, lng: number, address: string) => void;
@@ -362,6 +366,7 @@ function SolarEngine3D({
   systemType, tilt, azimuth, fenceHeight,
   showShade, selectedPanel,
   fireSetbacks,
+  showSetbackZones = false,
   mountingSystemId = 'ironridge-xr100',
   onTwinLoaded, onError, onLocationPick,
   onRoofPlaneCreated,
@@ -377,6 +382,7 @@ function SolarEngine3D({
   const panelMapRef = useRef<Map<string, any>>(new Map());
   // primitiveRendererRef and lodManagerRef removed — entity-based rendering via panelMapRef
   const overlayRef  = useRef<any[]>([]);
+  const setbackZoneEntitiesRef = useRef<any[]>([]); // v62: fire setback keep-out zone entities
   const measureOverlayRef = useRef<any[]>([]);
   const handlerRef  = useRef<any>(null);
   const initDone    = useRef(false);
@@ -730,6 +736,17 @@ function SolarEngine3D({
   }, [panels]);
 
   useEffect(() => { roofPlanesRef.current = roofPlanes ?? []; }, [roofPlanes]);
+
+  // v62: render/refresh fire setback keep-out zones on the 3D roof when the
+  // Design Studio "Zones On/Off" toggle, the planes, panels, or setback values change.
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    const C = (window as any).Cesium;
+    if (!viewer || !C) return;
+    if (showSetbackZones) { try { renderFireSetbackZones(viewer, C); } catch (e) { addLog('WARN', `renderFireSetbackZones: ${(e as Error).message}`); } }
+    else clearFireSetbackZones(viewer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSetbackZones, roofPlanes, panels, fireSetbacks, stage]);
   useEffect(() => { mountingSystemIdRef.current = mountingSystemId; }, [mountingSystemId]);
 
   // v47.122: Re-render all tracked planes when selection changes
@@ -2387,6 +2404,135 @@ function SolarEngine3D({
         roofRailMapRef.current.set(planeId, planeEntities);
       }
     });
+  }
+
+  // ── v62: Fire setback keep-out zones rendered ON the 3D roof ───────────────
+  // For each roof plane: classify edges (ridge / eave / rake-side, + flag hips &
+  // valleys = edges shared with another plane), inset each edge inward by its
+  // required setback, and draw the keep-out band as a translucent strip on the
+  // plane surface. This makes the firewalk clearances visible in 3D and is the
+  // groundwork for owning the roof model (→ in-house CAD).
+  function clearFireSetbackZones(viewer: any) {
+    setbackZoneEntitiesRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
+    setbackZoneEntitiesRef.current = [];
+  }
+
+  function renderFireSetbackZones(viewer: any, C: any) {
+    clearFireSetbackZones(viewer);
+    const planes = roofPlanesRef.current ?? [];
+    if (planes.length === 0) return;
+    const ridgeSB = fireSetbacks?.ridgeSetbackM ?? 0.457;
+    const eaveSB  = fireSetbacks?.eaveSetbackM  ?? 0;
+    const edgeSB  = fireSetbacks?.edgeSetbackM  ?? 0.457;
+    const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+
+    // Collect every plane edge (lat/lng) so we can flag hips/valleys = shared edges.
+    const cosLat0 = Math.cos(((planes[0] as any).vertices?.[0]?.lat ?? 0) * Math.PI / 180);
+    const allEdges: Array<{ mLat: number; mLng: number; pid: string }> = [];
+    planes.forEach(pl => {
+      const vs = (pl as any).vertices ?? [];
+      for (let i = 0; i < vs.length; i++) {
+        const a = vs[i], b = vs[(i + 1) % vs.length];
+        allEdges.push({ mLat: (a.lat + b.lat) / 2, mLng: (a.lng + b.lng) / 2, pid: pl.id });
+      }
+    });
+    const isSharedEdge = (pid: string, aLat: number, aLng: number, bLat: number, bLng: number) => {
+      const mLat = (aLat + bLat) / 2, mLng = (aLng + bLng) / 2;
+      return allEdges.some(e => {
+        if (e.pid === pid) return false;
+        const dy = (e.mLat - mLat) * 111320, dx = (e.mLng - mLng) * 111320 * cosLat0;
+        return Math.hypot(dx, dy) < 1.2; // metres
+      });
+    };
+
+    planes.forEach(plane => {
+      const vs = (plane as any).vertices ?? [];
+      if (vs.length < 3) return;
+
+      // Frame: prefer the placed panels' frame (bands align exactly to panels), else
+      // derive a legacy frame from the plane's azimuth/pitch/centroid.
+      const planePanels = panelsRef.current.filter(p => p.planeId === plane.id && isFinite((p as any).ecefUx) && isFinite((p as any).ecefNx));
+      let u: any, n: any, originPt: any;
+      if (planePanels.length) {
+        const rp: any = planePanels[0];
+        u = C.Cartesian3.normalize(new C.Cartesian3(rp.ecefUx, rp.ecefUy, rp.ecefUz), new C.Cartesian3());
+        n = C.Cartesian3.normalize(new C.Cartesian3(rp.ecefNx, rp.ecefNy, rp.ecefNz), new C.Cartesian3());
+        originPt = safeCartesian3(C, rp.lng, rp.lat, rp.height ?? 0);
+      } else {
+        try {
+          const lg = computeEcefFrameForLegacyPlane(plane as any, groundElev);
+          u = C.Cartesian3.normalize(new C.Cartesian3(lg.ecefFrame3D.u.x, lg.ecefFrame3D.u.y, lg.ecefFrame3D.u.z), new C.Cartesian3());
+          n = C.Cartesian3.normalize(new C.Cartesian3(lg.ecefFrame3D.n.x, lg.ecefFrame3D.n.y, lg.ecefFrame3D.n.z), new C.Cartesian3());
+          originPt = new C.Cartesian3(lg.origin3D.x, lg.origin3D.y, lg.origin3D.z);
+        } catch { return; }
+      }
+      if (!originPt) return;
+      const v = C.Cartesian3.normalize(C.Cartesian3.cross(n, u, new C.Cartesian3()), new C.Cartesian3());
+      const baseH = C.Cartographic.fromCartesian(originPt).height;
+
+      // Project each polygon vertex onto the plane → plane-local (u,v) metres.
+      const uv = vs.map((vert: any) => {
+        const Pv = safeCartesian3(C, vert.lng, vert.lat, baseH);
+        const diff = C.Cartesian3.subtract(Pv, originPt, new C.Cartesian3());
+        const dn = C.Cartesian3.dot(diff, n);
+        const Pon = C.Cartesian3.subtract(Pv, C.Cartesian3.multiplyByScalar(n, dn, new C.Cartesian3()), new C.Cartesian3());
+        const rel = C.Cartesian3.subtract(Pon, originPt, new C.Cartesian3());
+        return { uu: C.Cartesian3.dot(rel, u), vv: C.Cartesian3.dot(rel, v), lat: vert.lat, lng: vert.lng };
+      });
+      if (uv.some((p: any) => !isFinite(p.uu) || !isFinite(p.vv))) return;
+      const vMin = Math.min(...uv.map((p: any) => p.vv)), vMax = Math.max(...uv.map((p: any) => p.vv));
+      const cu = uv.reduce((s: number, p: any) => s + p.uu, 0) / uv.length;
+      const cv = uv.reduce((s: number, p: any) => s + p.vv, 0) / uv.length;
+      const tol = Math.max(0.4, (vMax - vMin) * 0.12);
+
+      const toEcef = (uu: number, vv: number, off: number) =>
+        C.Cartesian3.add(originPt,
+          C.Cartesian3.add(C.Cartesian3.multiplyByScalar(u, uu, new C.Cartesian3()),
+            C.Cartesian3.add(C.Cartesian3.multiplyByScalar(v, vv, new C.Cartesian3()),
+              C.Cartesian3.multiplyByScalar(n, off, new C.Cartesian3()), new C.Cartesian3()), new C.Cartesian3()), new C.Cartesian3());
+
+      for (let i = 0; i < uv.length; i++) {
+        const a = uv[i], b = uv[(i + 1) % uv.length];
+        const shared = isSharedEdge(plane.id, a.lat, a.lng, b.lat, b.lng);
+        let sb = edgeSB, kind = 'rake';
+        if (a.vv > vMax - tol && b.vv > vMax - tol)      { sb = ridgeSB; kind = 'ridge'; }
+        else if (a.vv < vMin + tol && b.vv < vMin + tol) { sb = eaveSB;  kind = 'eave'; }
+        if (shared) { kind = 'hip/valley'; sb = Math.max(sb, edgeSB); }
+        if (sb <= 0.001) continue;
+
+        // Inward (toward centroid) unit normal in UV.
+        let dx = b.uu - a.uu, dy = b.vv - a.vv;
+        const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
+        let inx = -dy, iny = dx;
+        const mx = (a.uu + b.uu) / 2, my = (a.vv + b.vv) / 2;
+        if (inx * (cu - mx) + iny * (cv - my) < 0) { inx = -inx; iny = -iny; }
+
+        const off = 0.12;
+        const positions = [
+          toEcef(a.uu, a.vv, off),
+          toEcef(b.uu, b.vv, off),
+          toEcef(b.uu + inx * sb, b.vv + iny * sb, off),
+          toEcef(a.uu + inx * sb, a.vv + iny * sb, off),
+        ];
+        const col = shared
+          ? C.Color.fromCssColorString('#ff9500')               // hip/valley → orange
+          : kind === 'ridge' ? C.Color.fromCssColorString('#ff2d2d')   // ridge → red
+          : C.Color.fromCssColorString('#ff6464');              // eave/rake → light red
+        const ent = viewer.entities.add({
+          name: `[SETBACK ${kind} ${plane.id.slice(0, 6)}]`,
+          polygon: {
+            hierarchy: new C.PolygonHierarchy(positions),
+            perPositionHeight: true,
+            material: col.withAlpha(0.34),
+            outline: true,
+            outlineColor: col.withAlpha(0.95),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        });
+        setbackZoneEntitiesRef.current.push(ent);
+      }
+    });
+    try { viewer.scene.requestRender(); } catch {}
   }
 
   function renderAllPanels(viewer: any, C: any, panelList: PlacedPanel[], forceFullRebuild = false) {
