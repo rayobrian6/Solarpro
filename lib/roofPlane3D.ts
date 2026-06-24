@@ -374,10 +374,19 @@ export function computePlaneFromPoints3D(pts: Cart3[]): Plane3DFrame {
   // from peak to corner was longer than the eave edge, giving a wrong u-axis.
   // mostHorizontalEdgeAxis scores edges by len*(1-|dot(dir,upslope)|) so the
   // ridge/eave edge always wins regardless of click order or roof aspect ratio.
-  const mostHorizEdge = mostHorizontalEdgeAxis(projectedPts, normal);
-  // Remove any residual normal component from the edge direction.
-  // u0 = normalize(mostHorizEdge - dot(mostHorizEdge, n)*n)
-  const u0 = projectAxisOntoPlane(mostHorizEdge, normal);
+  // v62: Default the grid u-axis to the EAVE — the horizontal in-plane direction,
+  // = cross(normal, up). The eave is geometric (derived from the slope), so it can
+  // never be a rake/diagonal the way the most-horizontal-EDGE heuristic could be on
+  // an irregular polygon (the cause of "panels sideways"). Baking it into the frame
+  // means EVERY fill path (placement AND any re-layout) is eave-aligned with no
+  // per-call override to lose. Flat roofs (no slope → degenerate eave) fall back to
+  // the original most-horizontal-edge heuristic.
+  const eaveAxis = cross3(normal, radialUp); // ⊥ up (horizontal) AND ⊥ normal (in-plane)
+  const uAxisSource = mag3(eaveAxis) > 0.05
+    ? eaveAxis
+    : mostHorizontalEdgeAxis(projectedPts, normal); // flat roof fallback
+  // Remove any residual normal component from the axis (project into the plane).
+  const u0 = projectAxisOntoPlane(uAxisSource, normal);
 
   // ── Step 6: Strict orthonormal frame — two-pass enforcement ──────────────
   // Pass 1: v = cross(n, u0)  — guaranteed ⊥ to both n and u0
