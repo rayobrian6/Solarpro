@@ -2419,65 +2419,86 @@ function SolarEngine3D({
 
   function renderFireSetbackZones(viewer: any, C: any) {
     clearFireSetbackZones(viewer);
-    const planes = roofPlanesRef.current ?? [];
-    if (planes.length === 0) return;
     const ridgeSB = fireSetbacks?.ridgeSetbackM ?? 0.457;
     const eaveSB  = fireSetbacks?.eaveSetbackM  ?? 0;
     const edgeSB  = fireSetbacks?.edgeSetbackM  ?? 0.457;
     const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
 
-    // Collect every plane edge (lat/lng) so we can flag hips/valleys = shared edges.
-    const cosLat0 = Math.cos(((planes[0] as any).vertices?.[0]?.lat ?? 0) * Math.PI / 180);
-    const allEdges: Array<{ mLat: number; mLng: number; pid: string }> = [];
-    planes.forEach(pl => {
-      const vs = (pl as any).vertices ?? [];
-      for (let i = 0; i < vs.length; i++) {
-        const a = vs[i], b = vs[(i + 1) % vs.length];
-        allEdges.push({ mLat: (a.lat + b.lat) / 2, mLng: (a.lng + b.lng) / 2, pid: pl.id });
-      }
-    });
-    const isSharedEdge = (pid: string, aLat: number, aLng: number, bLat: number, bLng: number) => {
-      const mLat = (aLat + bLat) / 2, mLng = (aLng + bLng) / 2;
-      return allEdges.some(e => {
-        if (e.pid === pid) return false;
-        const dy = (e.mLat - mLat) * 111320, dx = (e.mLng - mLng) * 111320 * cosLat0;
-        return Math.hypot(dx, dy) < 1.2; // metres
-      });
-    };
+    // ── Collect renderable planes from BOTH sources, with ECEF corners + frame ──
+    //   1. 3D Plane tool planes (plane3DCesiumPtsMap + plane3DFrameMap) — exact ECEF.
+    //   2. roofPlanes prop (lat/lng vertices) — projected onto a panel/legacy frame.
+    type RP = { id: string; corners: any[]; u: any; v: any; n: any; origin: any };
+    const renderables: RP[] = [];
+    const seen = new Set<string>();
 
-    planes.forEach(plane => {
+    plane3DCesiumPtsMap.current.forEach((pts: any[], pid: string) => {
+      const fr = plane3DFrameMap.current.get(pid);
+      if (!fr || !pts || pts.length < 3) return;
+      const u = C.Cartesian3.normalize(new C.Cartesian3(fr.u.x, fr.u.y, fr.u.z), new C.Cartesian3());
+      const n = C.Cartesian3.normalize(new C.Cartesian3(fr.normal.x, fr.normal.y, fr.normal.z), new C.Cartesian3());
+      const v = C.Cartesian3.normalize(C.Cartesian3.cross(n, u, new C.Cartesian3()), new C.Cartesian3());
+      const origin = new C.Cartesian3(fr.origin.x, fr.origin.y, fr.origin.z);
+      const corners = pts.map((p: any) => new C.Cartesian3(p.x, p.y, p.z));
+      renderables.push({ id: pid, corners, u, v, n, origin });
+      seen.add(pid);
+    });
+
+    (roofPlanesRef.current ?? []).forEach(plane => {
+      if (seen.has(plane.id)) return;
       const vs = (plane as any).vertices ?? [];
       if (vs.length < 3) return;
-
-      // Frame: prefer the placed panels' frame (bands align exactly to panels), else
-      // derive a legacy frame from the plane's azimuth/pitch/centroid.
       const planePanels = panelsRef.current.filter(p => p.planeId === plane.id && isFinite((p as any).ecefUx) && isFinite((p as any).ecefNx));
-      let u: any, n: any, originPt: any;
+      let u: any, n: any, origin: any;
       if (planePanels.length) {
         const rp: any = planePanels[0];
         u = C.Cartesian3.normalize(new C.Cartesian3(rp.ecefUx, rp.ecefUy, rp.ecefUz), new C.Cartesian3());
         n = C.Cartesian3.normalize(new C.Cartesian3(rp.ecefNx, rp.ecefNy, rp.ecefNz), new C.Cartesian3());
-        originPt = safeCartesian3(C, rp.lng, rp.lat, rp.height ?? 0);
+        origin = safeCartesian3(C, rp.lng, rp.lat, rp.height ?? 0);
       } else {
         try {
           const lg = computeEcefFrameForLegacyPlane(plane as any, groundElev);
           u = C.Cartesian3.normalize(new C.Cartesian3(lg.ecefFrame3D.u.x, lg.ecefFrame3D.u.y, lg.ecefFrame3D.u.z), new C.Cartesian3());
           n = C.Cartesian3.normalize(new C.Cartesian3(lg.ecefFrame3D.n.x, lg.ecefFrame3D.n.y, lg.ecefFrame3D.n.z), new C.Cartesian3());
-          originPt = new C.Cartesian3(lg.origin3D.x, lg.origin3D.y, lg.origin3D.z);
+          origin = new C.Cartesian3(lg.origin3D.x, lg.origin3D.y, lg.origin3D.z);
         } catch { return; }
       }
-      if (!originPt) return;
+      if (!origin) return;
       const v = C.Cartesian3.normalize(C.Cartesian3.cross(n, u, new C.Cartesian3()), new C.Cartesian3());
-      const baseH = C.Cartographic.fromCartesian(originPt).height;
-
-      // Project each polygon vertex onto the plane → plane-local (u,v) metres.
-      const uv = vs.map((vert: any) => {
+      const baseH = C.Cartographic.fromCartesian(origin).height;
+      // Project each lat/lng vertex onto the plane → ECEF corner.
+      const corners = vs.map((vert: any) => {
         const Pv = safeCartesian3(C, vert.lng, vert.lat, baseH);
-        const diff = C.Cartesian3.subtract(Pv, originPt, new C.Cartesian3());
+        if (!Pv) return null;
+        const diff = C.Cartesian3.subtract(Pv, origin, new C.Cartesian3());
         const dn = C.Cartesian3.dot(diff, n);
-        const Pon = C.Cartesian3.subtract(Pv, C.Cartesian3.multiplyByScalar(n, dn, new C.Cartesian3()), new C.Cartesian3());
-        const rel = C.Cartesian3.subtract(Pon, originPt, new C.Cartesian3());
-        return { uu: C.Cartesian3.dot(rel, u), vv: C.Cartesian3.dot(rel, v), lat: vert.lat, lng: vert.lng };
+        return C.Cartesian3.subtract(Pv, C.Cartesian3.multiplyByScalar(n, dn, new C.Cartesian3()), new C.Cartesian3());
+      }).filter(Boolean);
+      if (corners.length < 3) return;
+      renderables.push({ id: plane.id, corners, u, v, n, origin });
+    });
+
+    addLog('SETBACK', `zones: ${renderables.length} planes (3D=${plane3DCesiumPtsMap.current.size}, prop=${(roofPlanesRef.current ?? []).length}) ridge=${(ridgeSB*39.37).toFixed(0)}" edge=${(edgeSB*39.37).toFixed(0)}"`);
+    if (renderables.length === 0) {
+      setStatusMsg('No roof planes to draw setbacks on — trace a 3D plane or fill a roof first');
+      return;
+    }
+
+    // Edge midpoints (ECEF) across all planes → hips/valleys = edges shared with another plane.
+    const allMids: Array<{ mid: any; pid: string }> = [];
+    renderables.forEach(rp => {
+      for (let i = 0; i < rp.corners.length; i++) {
+        const a = rp.corners[i], b = rp.corners[(i + 1) % rp.corners.length];
+        allMids.push({ mid: C.Cartesian3.midpoint(a, b, new C.Cartesian3()), pid: rp.id });
+      }
+    });
+    const isShared = (pid: string, mid: any) =>
+      allMids.some(e => e.pid !== pid && C.Cartesian3.distance(e.mid, mid) < 1.2);
+
+    renderables.forEach(rp => {
+      const { u, v, n, origin, corners } = rp;
+      const uv = corners.map((P: any) => {
+        const rel = C.Cartesian3.subtract(P, origin, new C.Cartesian3());
+        return { uu: C.Cartesian3.dot(rel, u), vv: C.Cartesian3.dot(rel, v) };
       });
       if (uv.some((p: any) => !isFinite(p.uu) || !isFinite(p.vv))) return;
       const vMin = Math.min(...uv.map((p: any) => p.vv)), vMax = Math.max(...uv.map((p: any) => p.vv));
@@ -2486,28 +2507,28 @@ function SolarEngine3D({
       const tol = Math.max(0.4, (vMax - vMin) * 0.12);
 
       const toEcef = (uu: number, vv: number, off: number) =>
-        C.Cartesian3.add(originPt,
+        C.Cartesian3.add(origin,
           C.Cartesian3.add(C.Cartesian3.multiplyByScalar(u, uu, new C.Cartesian3()),
             C.Cartesian3.add(C.Cartesian3.multiplyByScalar(v, vv, new C.Cartesian3()),
               C.Cartesian3.multiplyByScalar(n, off, new C.Cartesian3()), new C.Cartesian3()), new C.Cartesian3()), new C.Cartesian3());
 
       for (let i = 0; i < uv.length; i++) {
         const a = uv[i], b = uv[(i + 1) % uv.length];
-        const shared = isSharedEdge(plane.id, a.lat, a.lng, b.lat, b.lng);
+        const mid = C.Cartesian3.midpoint(corners[i], corners[(i + 1) % corners.length], new C.Cartesian3());
+        const shared = isShared(rp.id, mid);
         let sb = edgeSB, kind = 'rake';
         if (a.vv > vMax - tol && b.vv > vMax - tol)      { sb = ridgeSB; kind = 'ridge'; }
         else if (a.vv < vMin + tol && b.vv < vMin + tol) { sb = eaveSB;  kind = 'eave'; }
         if (shared) { kind = 'hip/valley'; sb = Math.max(sb, edgeSB); }
         if (sb <= 0.001) continue;
 
-        // Inward (toward centroid) unit normal in UV.
         let dx = b.uu - a.uu, dy = b.vv - a.vv;
         const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
         let inx = -dy, iny = dx;
         const mx = (a.uu + b.uu) / 2, my = (a.vv + b.vv) / 2;
         if (inx * (cu - mx) + iny * (cv - my) < 0) { inx = -inx; iny = -iny; }
 
-        const off = 0.12;
+        const off = 0.15;
         const positions = [
           toEcef(a.uu, a.vv, off),
           toEcef(b.uu, b.vv, off),
@@ -2519,11 +2540,11 @@ function SolarEngine3D({
           : kind === 'ridge' ? C.Color.fromCssColorString('#ff2d2d')   // ridge → red
           : C.Color.fromCssColorString('#ff6464');              // eave/rake → light red
         const ent = viewer.entities.add({
-          name: `[SETBACK ${kind} ${plane.id.slice(0, 6)}]`,
+          name: `[SETBACK ${kind} ${rp.id.slice(0, 6)}]`,
           polygon: {
             hierarchy: new C.PolygonHierarchy(positions),
             perPositionHeight: true,
-            material: col.withAlpha(0.34),
+            material: col.withAlpha(0.4),
             outline: true,
             outlineColor: col.withAlpha(0.95),
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -2532,6 +2553,7 @@ function SolarEngine3D({
         setbackZoneEntitiesRef.current.push(ent);
       }
     });
+    addLog('SETBACK', `drew ${setbackZoneEntitiesRef.current.length} setback strips`);
     try { viewer.scene.requestRender(); } catch {}
   }
 
