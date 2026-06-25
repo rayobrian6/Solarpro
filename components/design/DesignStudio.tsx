@@ -3775,6 +3775,9 @@ export default function DesignStudio({ project, onSave }: Props) {
               <span className="text-amber-400 font-bold">{systemSizeKw.toFixed(2)} kW</span>
             </div>
           ) : null}
+          <span className="text-xs text-slate-400 ml-2 hidden md:inline">
+            Left click drag and scroll wheel rotates
+          </span>
           <button
             onClick={() => setShowPanels(!showPanels)}
             className={`btn-sm ${showPanels ? 'btn-secondary' : 'btn-ghost'}`}
