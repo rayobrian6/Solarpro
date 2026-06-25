@@ -91,3 +91,8 @@ __pycache__/
 # Worker build output
 worker/dist/
 .env*
+
+# Agent team secrets (never commit JAMES's git identity)
+.harness/secrets/james-git.env
+.harness/secrets/*.env
+!.harness/secrets/*.env.template

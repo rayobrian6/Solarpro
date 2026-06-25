@@ -6,6 +6,7 @@ export const maxDuration = 30;
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady, handleRouteDbError, solardogSeedKnowledge } from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { getAdminOverrideEmail } from '@/lib/auth';
 
 export async function GET(_req: NextRequest) {
   // SECURITY FIX: GET handler removed — secrets must never appear in URLs
@@ -41,6 +42,19 @@ export async function POST(req: NextRequest) {
 
     const sql = await getDbReady();
     const results: string[] = [];
+
+    // F-13 — read admin override email from env. Fail-closed: a missing
+    // ADMIN_OVERRIDE_EMAIL is a configuration error, NOT a reason to fall back
+    // to a hardcoded email (that was the bug F-13 closes).
+    let adminOverrideEmail: string;
+    try {
+      adminOverrideEmail = getAdminOverrideEmail();
+    } catch (e: unknown) {
+      return NextResponse.json(
+        { success: false, error: (e as Error).message },
+        { status: 500 }
+      );
+    }
 
     // Migration 003: unique constraint on productions.project_id
     try {
@@ -203,9 +217,14 @@ export async function POST(req: NextRequest) {
 
     // Grant free pass to specified users (upsert by email)
     // IMPORTANT: updated_at column is added above in colMigrations — safe to use here
+    //
+    // F-13 — James's email is env-driven (ADMIN_OVERRIDE_EMAIL). The other
+    // entries remain hardcoded by design — they're partners, not a single
+    // rotating admin. Partners live in their own daily (see F-18 / GAP-*
+    // items in AI-AGENT-README §11) and are out of scope for F-13.
     const freePassUsers = [
       { name: "Raymond O'Brian", email: 'raymond.obrian@yahoo.com',      company: 'SolarPro',            role: 'super_admin',  note: 'Owner / Founder' },
-      { name: 'James Carpenter',  email: 'carpenterjames88@gmail.com',    company: 'SolarPro',            role: 'admin',  note: 'Team member — free pass granted by owner' },
+      { name: 'James Carpenter',  email: adminOverrideEmail,              company: 'SolarPro',            role: 'admin',  note: 'Team member — free pass granted by owner' },
       { name: 'Cody',             email: 'cody@underthesun.solutions',    company: 'Under The Sun',       role: 'admin',  note: 'Team member — free pass granted by owner' },
       { name: 'Angelique',        email: 'angelique@lmdsolarllc.com',     company: 'LMD Solar LLC',       role: 'user',  note: 'LMD Solar partner — free pass granted by owner' },
       { name: 'UTS Marketing',    email: 'utsmarketing25@gmail.com',      company: 'UTS Marketing',       role: 'user',  note: 'Marketing partner — free pass granted by owner' },
