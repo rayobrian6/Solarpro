@@ -9598,29 +9598,6 @@ function SolarEngine3D({
         </div>
       ) : null}
 
-      {/* Tile status indicator */}
-      {stage === 'done' ? (
-        <div style={{
-          position: 'absolute', top: 8, right: 60,
-          background: 'rgba(0,0,0,0.5)', borderRadius: 5, padding: '2px 7px',
-          color: tileStatus === 'loaded' ? '#44ff88' : tileStatus === 'failed' ? '#ff6644' : '#ffaa44',
-          fontSize: 10, zIndex: 50, fontFamily: 'monospace',
-        }}>
-          {tileStatus === 'loaded' ? '🟢 3D' : tileStatus === 'failed' ? '🔴 3D' : '🟡 3D'}
-        </div>
-      ) : null}
-
-      {/* FPS counter */}
-      {stage === 'done' ? (
-        <div style={{
-          position: 'absolute', top: 8, right: 8,
-          background: 'rgba(0,0,0,0.5)', borderRadius: 5, padding: '2px 7px',
-          color: fps < 30 ? '#ff4444' : '#44ff88', fontSize: 10, zIndex: 50, fontFamily: 'monospace',
-        }}>
-          {fps} FPS
-        </div>
-      ) : null}
-
       {/* Last log */}
       {stage === 'done' && lastLog ? (
         <div style={{
