@@ -3434,9 +3434,17 @@ function SolarEngine3D({
       arrayManipRef.current = false; // hand the camera back to the custom handler
       if (drag.moved) {
         suppressClickRef.current = true;      // ignore the trailing LEFT_CLICK
+        // v62: a single moved panel snaps into the nearest array's grid on release
+        // (adopts the destination plane's frame → rails/facing correct across planes).
+        if (drag.mode === 'move' && selectedPanelIdsRef.current.size === 1) {
+          const id = [...selectedPanelIdsRef.current][0];
+          try { snapMovedPanel(viewer, C, id); } catch (e) { addLog('WARN', `snapMovedPanel: ${(e as Error).message}`); }
+        }
         onPanelsChange(panelsRef.current);    // commit once
         showRotateHandle(viewer, C);          // handle re-floats above the new position
-        setStatusMsg(drag.mode === 'rotate' ? '↻ Array rotated — drag ⟳ again, or drag the array to move' : '✥ Array moved — drag again, or drag ⟳ to rotate');
+        if (!(drag.mode === 'move' && selectedPanelIdsRef.current.size === 1)) {
+          setStatusMsg(drag.mode === 'rotate' ? '↻ Array rotated — drag ⟳ again, or drag the array to move' : '✥ Array moved — drag again, or drag ⟳ to rotate');
+        }
       }
     }, C.ScreenSpaceEventType.LEFT_UP);
 
@@ -5252,6 +5260,76 @@ function SolarEngine3D({
     if (!cen || !N) { setStatusMsg('Rotate needs a 3D-plane array'); return; }
     rotateArrayBy(viewer, C, ids, deg * Math.PI / 180, cen, N, true);
     setStatusMsg(`Array rotated ${deg > 0 ? '+' : ''}${deg}° — or drag the ⟳ handle`);
+  }
+
+  // v62: SNAP a just-moved single panel into the nearest array's grid — forgiving.
+  // Finds the nearest other roof panel, ADOPTS its plane frame (so a panel dragged
+  // onto a different plane lies flat with rails the right way), and rounds the drop
+  // to that plane's grid (step = average of the two panel sizes, so a landscape panel
+  // dropped by a portrait array "splits the difference" to fit). Keeps its own
+  // orientation; bumps to a free cell if the target is occupied.
+  function snapMovedPanel(viewer: any, C: any, panelId: string) {
+    const panel: any = panelsRef.current.find(p => p.id === panelId);
+    if (!panel) return;
+    const pPos = safeCartesian3(C, panel.lng, panel.lat, panel.height ?? 0);
+    if (!pPos) return;
+    let ref: any = null, best = Infinity;
+    for (const q of panelsRef.current as any[]) {
+      if (q.id === panelId || (q.systemType ?? 'roof') !== 'roof') continue;
+      if (!isFinite(q.ecefUx) || !isFinite(q.ecefNx)) continue;
+      const qp = safeCartesian3(C, q.lng, q.lat, q.height ?? 0);
+      if (!qp) continue;
+      const d = C.Cartesian3.distanceSquared(pPos, qp);
+      if (d < best) { best = d; ref = q; }
+    }
+    if (!ref) return; // nothing to snap to (lone panel) — leave where dropped
+
+    const refPos = safeCartesian3(C, ref.lng, ref.lat, ref.height ?? 0);
+    const u = C.Cartesian3.normalize(new C.Cartesian3(ref.ecefUx, ref.ecefUy, ref.ecefUz), new C.Cartesian3());
+    const n = C.Cartesian3.normalize(new C.Cartesian3(ref.ecefNx, ref.ecefNy, ref.ecefNz), new C.Cartesian3());
+    const v = C.Cartesian3.normalize(C.Cartesian3.cross(n, u, new C.Cartesian3()), new C.Cartesian3());
+    const diff = C.Cartesian3.subtract(pPos, refPos, new C.Cartesian3());
+    const du = C.Cartesian3.dot(diff, u), dv = C.Cartesian3.dot(diff, v);
+    const dd = panelDims((panel.orientation ?? 'portrait') as PanelOrientation);
+    const rd = panelDims((ref.orientation   ?? 'portrait') as PanelOrientation);
+    const stepU = (dd.pw + rd.pw) / 2, stepV = (dd.ph + rd.ph) / 2;
+    let su = Math.round(du / stepU) * stepU;
+    let sv = Math.round(dv / stepV) * stepV;
+    if (Math.abs(su) < 1e-3 && Math.abs(sv) < 1e-3) {
+      // landed on the ref cell — step one cell along the drag direction
+      if (Math.abs(du) >= Math.abs(dv)) su = stepU * (du >= 0 ? 1 : -1);
+      else                              sv = stepV * (dv >= 0 ? 1 : -1);
+    }
+    const cellAt = (uu: number, vv: number) =>
+      C.Cartesian3.add(refPos,
+        C.Cartesian3.add(C.Cartesian3.multiplyByScalar(u, uu, new C.Cartesian3()),
+          C.Cartesian3.multiplyByScalar(v, vv, new C.Cartesian3()), new C.Cartesian3()), new C.Cartesian3());
+    const occupied = (uu: number, vv: number) => {
+      const c = cellAt(uu, vv);
+      return (panelsRef.current as any[]).some(q => {
+        if (q.id === panelId) return false;
+        const qp = safeCartesian3(C, q.lng, q.lat, q.height ?? 0);
+        return qp && C.Cartesian3.distance(qp, c) < Math.min(stepU, stepV) * 0.5;
+      });
+    };
+    let tries = 0;
+    while (occupied(su, sv) && tries < 8) { su += stepU * (du >= 0 ? 1 : -1); tries++; }
+
+    const carto = C.Cartographic.fromCartesian(cellAt(su, sv));
+    const newPanel: any = { ...panel,
+      lat: C.Math.toDegrees(carto.latitude), lng: C.Math.toDegrees(carto.longitude), height: carto.height,
+      planeId: ref.planeId, heading: ref.heading, pitch: ref.pitch, tilt: ref.tilt, azimuth: ref.azimuth, roll: ref.roll,
+      ecefUx: ref.ecefUx, ecefUy: ref.ecefUy, ecefUz: ref.ecefUz,
+      ecefNx: ref.ecefNx, ecefNy: ref.ecefNy, ecefNz: ref.ecefNz,
+    };
+    delete newPanel.frameQuat; // adopt the destination plane's HPR facing
+    const updated = panelsRef.current.map(p => p.id === panelId ? newPanel : p);
+    removePanelEntities(viewer, panelId);
+    addPanelEntity(viewer, C, newPanel, updated.length > 12);
+    panelsRef.current = updated;
+    lastRenderedPanelsRef.current = updated;
+    try { renderRoofRails(viewer, C, updated); } catch {}
+    setStatusMsg(ref.planeId === panel.planeId ? 'Panel snapped to the array grid' : '↳ Panel moved to a new plane & snapped to its grid');
   }
 
   // v48.12: SHIFT+click — toggle panel in/out of multi-select Set
