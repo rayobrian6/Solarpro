@@ -5226,11 +5226,21 @@ function SolarEngine3D({
   }
   function arrayNormalECEF(C: any, ids: Set<string>): any | null {
     const ref = panelsRef.current.find(p => ids.has(p.id) && isFinite((p as any).ecefNx));
-    return ref ? C.Cartesian3.normalize(new C.Cartesian3((ref as any).ecefNx, (ref as any).ecefNy, (ref as any).ecefNz), new C.Cartesian3()) : null;
+    if (ref) return C.Cartesian3.normalize(new C.Cartesian3((ref as any).ecefNx, (ref as any).ecefNy, (ref as any).ecefNz), new C.Cartesian3());
+    // Fallback: radial-up at the array centroid, so a frameless panel can still rotate.
+    const cen = arrayCentroidECEF(C, ids);
+    return cen ? C.Cartesian3.normalize(C.Cartesian3.clone(cen), new C.Cartesian3()) : null;
   }
   function arrayEaveECEF(C: any, ids: Set<string>): any | null {
     const ref = panelsRef.current.find(p => ids.has(p.id) && isFinite((p as any).ecefUx));
-    return ref ? C.Cartesian3.normalize(new C.Cartesian3((ref as any).ecefUx, (ref as any).ecefUy, (ref as any).ecefUz), new C.Cartesian3()) : null;
+    if (ref) return C.Cartesian3.normalize(new C.Cartesian3((ref as any).ecefUx, (ref as any).ecefUy, (ref as any).ecefUz), new C.Cartesian3());
+    // Fallback: a horizontal axis perpendicular to up (so the handle/grid still has a U).
+    const cen = arrayCentroidECEF(C, ids);
+    if (!cen) return null;
+    const up = C.Cartesian3.normalize(C.Cartesian3.clone(cen), new C.Cartesian3());
+    const east = C.Cartesian3.normalize(new C.Cartesian3(-cen.y, cen.x, 0), new C.Cartesian3());
+    const u = C.Cartesian3.cross(up, east, new C.Cartesian3());
+    return (isFinite(u.x) && C.Cartesian3.magnitude(u) > 1e-6) ? C.Cartesian3.normalize(u, u) : east;
   }
 
   // Apply a per-panel transform to every selected panel, re-add entities directly
