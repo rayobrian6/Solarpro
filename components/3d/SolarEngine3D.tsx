@@ -109,6 +109,10 @@ const DEBUG_PLANE_OVERLAYS = false;
 // off the roof (+ eave jerk). Rebuild with point-in-polygon plane assignment and an
 // on-plane clamp before re-enabling. Free move stays on.
 const ENABLE_PANEL_SNAP = false;
+// v62: per-click trace snap (snap a corner onto an existing plane's point while marking)
+// is OFF — it was "linear": it inherited the first polygon's imprecise click instead of
+// reconciling both faces. The Stitch action averages clusters of corners instead.
+const ENABLE_TRACE_SNAP = false;
 
 // ── Mounting-system-aware roof panel offset ─────────────────────────────────
 // Physical stack height from roof deck to panel bottom face:
@@ -2762,6 +2766,61 @@ function SolarEngine3D({
     });
     setStatusMsg(`🔗 Roof model — ${renderables.length} face${renderables.length !== 1 ? 's' : ''} · ${counts.ridge} ridge · ${counts.hip} hip · ${counts.valley} valley · ${counts.eave} eave · ${counts.rake} rake`);
     try { viewer.scene.requestRender(); } catch {}
+  }
+
+  // ── v62: STITCH — average shared corners to meet polygons in the middle ──────
+  // Humans drop pins roughly where a hip/ridge/corner is; two faces drawn at
+  // different angles never quite meet. This clusters corners across planes (each
+  // plane contributes ≤1 corner per cluster) and moves every corner in a shared
+  // cluster to the cluster AVERAGE — so faces meet at one natural point. Then it
+  // re-fits each plane's frame and re-renders. Free marking → Stitch → clean roof.
+  function stitchRoofVertices(viewer: any, C: any) {
+    const entries = Array.from(plane3DCesiumPtsMap.current.entries()) as [string, any[]][];
+    if (entries.length < 2) { setStatusMsg('Stitch needs 2+ marked planes'); return; }
+    const TOL = 1.2; // metres — corners within this of each other are the same point
+    type Cl = { members: { pid: string; idx: number }[]; cx: number; cy: number; cz: number };
+    const clusters: Cl[] = [];
+    for (const [pid, pts] of entries) {
+      pts.forEach((p: any, idx: number) => {
+        let target: Cl | null = null;
+        for (const cl of clusters) {
+          const n = cl.members.length;
+          const dx = p.x - cl.cx / n, dy = p.y - cl.cy / n, dz = p.z - cl.cz / n;
+          if (dx * dx + dy * dy + dz * dz < TOL * TOL && !cl.members.some(m => m.pid === pid)) { target = cl; break; }
+        }
+        if (target) { target.members.push({ pid, idx }); target.cx += p.x; target.cy += p.y; target.cz += p.z; }
+        else clusters.push({ members: [{ pid, idx }], cx: p.x, cy: p.y, cz: p.z });
+      });
+    }
+    const newPts = new Map<string, any[]>();
+    for (const [pid, pts] of entries) newPts.set(pid, pts.map((p: any) => new C.Cartesian3(p.x, p.y, p.z)));
+    let shared = 0, moved = 0;
+    for (const cl of clusters) {
+      const n = cl.members.length;
+      if (n < 2) continue; // only shared corners
+      shared++;
+      const avg = new C.Cartesian3(cl.cx / n, cl.cy / n, cl.cz / n);
+      for (const m of cl.members) { newPts.get(m.pid)![m.idx] = avg; moved++; }
+    }
+    if (moved === 0) { setStatusMsg('Stitch — no shared corners found within ~1.2m'); return; }
+
+    for (const [pid, pts] of newPts) {
+      const cartPts: Cart3[] = pts.map((p: any) => ({ x: p.x, y: p.y, z: p.z }));
+      let frame; try { frame = computePlaneFromPoints3D(cartPts); } catch { continue; }
+      const projected = frame.projectedPts.map((p: Cart3) => new C.Cartesian3(p.x, p.y, p.z));
+      const oldIds = plane3DEntityMap.current.get(pid) || [];
+      oldIds.forEach(id => { try { const e = viewer.entities.getById(id); if (e) viewer.entities.remove(e); } catch {} });
+      const isSel = selectedRoofPlaneId === pid;
+      const newIds = renderPlane3DEntity(viewer, C, projected, pid, frame, isSel, markOnlyPlaneIdsRef.current.has(pid));
+      plane3DEntityMap.current.set(pid, newIds);
+      plane3DFrameMap.current.set(pid, frame);
+      plane3DCesiumPtsMap.current.set(pid, projected);
+    }
+    setShowRoofModel(true);
+    try { renderRoofWireframe(viewer, C); } catch {}
+    if (showSetbackZones) { try { renderFireSetbackZones(viewer, C); } catch {} }
+    try { viewer.scene.requestRender(); } catch {}
+    setStatusMsg(`🔗 Stitched — ${shared} shared point${shared !== 1 ? 's' : ''} averaged (${moved} corners pulled together)`);
   }
 
   function renderAllPanels(viewer: any, C: any, panelList: PlacedPanel[], forceFullRebuild = false) {
@@ -6014,7 +6073,7 @@ function SolarEngine3D({
       // or edge, or a point in the current trace) so adjacent planes meet at EXACT
       // common points. This is how the roof connects (ridge/hip/valley/dormer all
       // share vertices) → a watertight, CAD-accurate structure built as you mark.
-      const snapHit = snapTracedPoint(C, hit.cartesian);
+      const snapHit = ENABLE_TRACE_SNAP ? snapTracedPoint(C, hit.cartesian) : null;
       const pickedPos = snapHit ?? hit.cartesian;
       addLog('PLANE3D', `pick method: ${hit.pickMethod}${snapHit ? ' (snapped to shared point)' : ''}`);
 
@@ -8903,6 +8962,22 @@ function SolarEngine3D({
           }}
         >
           🔗 Roof Model{showRoofModel ? ' ✓' : ''}
+        </button>
+      ) : null}
+
+      {/* v62: Stitch — average shared corners so marked faces meet at natural points */}
+      {stage === 'done' ? (
+        <button
+          onClick={() => { const v = viewerRef.current; const Cz = (window as any).Cesium; if (v && Cz) stitchRoofVertices(v, Cz); }}
+          title="Stitch: pull marked planes together — averages corners that should be shared (hips/ridges/valleys) into one natural point"
+          style={{
+            position: 'absolute', top: 12, left: 132, zIndex: 51,
+            background: 'rgba(15,15,30,0.9)', border: '1px solid rgba(255,255,255,0.12)',
+            color: '#bbb', borderRadius: 8, padding: '5px 10px',
+            fontSize: 11, fontWeight: 700, cursor: 'pointer', backdropFilter: 'blur(6px)',
+          }}
+        >
+          ✂ Stitch
         </button>
       ) : null}
 
