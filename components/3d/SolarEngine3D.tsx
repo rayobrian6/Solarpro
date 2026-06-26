@@ -2520,15 +2520,19 @@ function SolarEngine3D({
     const kinds: string[] = [];
     for (let i = 0; i < N; i++) {
       const ha = heights[i], hb = heights[(i + 1) % N];
-      const mid = C.Cartesian3.midpoint(corners[i], corners[(i + 1) % N], new C.Cartesian3());
+      const a3 = corners[i], b3 = corners[(i + 1) % N];
+      const horiz = Math.abs(ha - hb) < Math.max(0.3, C.Cartesian3.distance(a3, b3) * 0.12); // ~level edge
+      const mid = C.Cartesian3.midpoint(a3, b3, new C.Cartesian3());
       const partner = partnerOf(rp.id, mid);
       let kind = 'rake';
       if (sloped && ha > hMax - htol && hb > hMax - htol)      kind = 'ridge';
       else if (sloped && ha < hMin + htol && hb < hMin + htol) kind = 'eave';
       if (partner) {
+        // Shared edge: convex fold = ridge (if level) or hip (if sloped); concave = valley.
         const dN = C.Cartesian3.subtract(rp.n, partner.n, new C.Cartesian3());
         const dC = C.Cartesian3.subtract(rp.centroid, partner.centroid, new C.Cartesian3());
-        kind = C.Cartesian3.dot(dN, dC) > 0 ? 'hip' : 'valley';
+        const convex = C.Cartesian3.dot(dN, dC) > 0;
+        kind = convex ? (horiz ? 'ridge' : 'hip') : 'valley';
       }
       kinds.push(kind);
     }
@@ -2557,13 +2561,7 @@ function SolarEngine3D({
         return { uu: C.Cartesian3.dot(rel, u), vv: C.Cartesian3.dot(rel, v) };
       });
       if (uv.some((p: any) => !isFinite(p.uu) || !isFinite(p.vv))) return;
-      // Ridge vs eave by ACTUAL altitude (sign-independent): the ridge sits higher than
-      // the eave. Plane-local v can point either way, which mislabeled the low eave as
-      // the ridge → a wrong setback band at a 0" eave.
-      const heights = corners.map((P: any) => { const c = C.Cartographic.fromCartesian(P); return c ? c.height : 0; });
-      const hMax = Math.max(...heights), hMin = Math.min(...heights);
-      const htol = Math.max(0.25, (hMax - hMin) * 0.18);
-      const sloped = (hMax - hMin) > 0.3; // flat roofs have no ridge/eave distinction
+      const kinds = classifyPlaneEdges(C, rp, partnerOf); // ridge/eave/hip/valley/rake per edge — one source of truth
       const cu = uv.reduce((s: number, p: any) => s + p.uu, 0) / uv.length;
       const cv = uv.reduce((s: number, p: any) => s + p.vv, 0) / uv.length;
 
@@ -2578,20 +2576,8 @@ function SolarEngine3D({
       const E: Array<{ sb: number; kind: string; inx: number; iny: number; ex: number; ey: number; col: any }> = [];
       for (let i = 0; i < N; i++) {
         const a = uv[i], b = uv[(i + 1) % N];
-        const mid = C.Cartesian3.midpoint(corners[i], corners[(i + 1) % N], new C.Cartesian3());
-        const partner = partnerOf(rp.id, mid);
-        const ha = heights[i], hb = heights[(i + 1) % N];
-        let sb = edgeSB, kind = 'rake';
-        if (sloped && ha > hMax - htol && hb > hMax - htol)      { sb = ridgeSB; kind = 'ridge'; }
-        else if (sloped && ha < hMin + htol && hb < hMin + htol) { sb = eaveSB;  kind = 'eave'; }
-        if (partner) {
-          // Hip (convex fold, roof tents up) vs valley (concave, water collects):
-          // (nA − nB)·(cA − cB) > 0 → normals splay outward → HIP; < 0 → VALLEY.
-          const dN = C.Cartesian3.subtract(rp.n, partner.n, new C.Cartesian3());
-          const dC = C.Cartesian3.subtract((rp as any).centroid, partner.centroid, new C.Cartesian3());
-          kind = C.Cartesian3.dot(dN, dC) > 0 ? 'hip' : 'valley';
-          sb = Math.max(sb, edgeSB);
-        }
+        const kind = kinds[i];
+        const sb = kind === 'ridge' ? ridgeSB : kind === 'eave' ? eaveSB : edgeSB; // hip/valley/rake → edge setback
         let ex = b.uu - a.uu, ey = b.vv - a.vv;
         const L = Math.hypot(ex, ey) || 1; ex /= L; ey /= L;
         let inx = -ey, iny = ex;
@@ -5025,13 +5011,13 @@ function SolarEngine3D({
       // Drilled INTO this array → a click selects just the one clicked panel.
       if (drilledGroupKeyRef.current && drilledGroupKeyRef.current === groupKey) {
         clearPanelSelection();
-        hideRotateHandle(); // single-panel edit — no array rotate knob
         if (foundEntity.box) foundEntity.box.material = RED;
         selectedPanelIdRef.current = foundId;
         setSelectedPanelId(foundId);
         selectedPanelIdsRef.current = new Set([foundId]);
         setSelectedPanelIds(new Set([foundId]));
-        setStatusMsg('📌 1 panel — Delete to remove · click empty space to exit the array');
+        showRotateHandle(viewer, C); // single panel can move AND rotate
+        setStatusMsg('📌 1 panel — drag to move · drag ⟳ to rotate · Delete to remove · empty space to exit');
         try { viewer.scene.requestRender(); } catch {}
         return;
       }
@@ -5173,7 +5159,7 @@ function SolarEngine3D({
   function showRotateHandle(viewer: any, C: any) {
     hideRotateHandle();
     const ids = selectedPanelIdsRef.current;
-    if (ids.size < 2) return; // only worth showing for a multi-panel array
+    if (ids.size < 1) return; // show for a single panel too (it can rotate in place)
     const cen = arrayCentroidECEF(C, ids);
     const N   = arrayNormalECEF(C, ids);
     const U   = arrayEaveECEF(C, ids);
