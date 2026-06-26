@@ -383,6 +383,7 @@ function SolarEngine3D({
   // primitiveRendererRef and lodManagerRef removed — entity-based rendering via panelMapRef
   const overlayRef  = useRef<any[]>([]);
   const setbackZoneEntitiesRef = useRef<any[]>([]); // v62: fire setback keep-out zone entities
+  const roofWireframeEntitiesRef = useRef<any[]>([]); // v62: stitched roof-model edge polylines
   const measureOverlayRef = useRef<any[]>([]);
   const handlerRef  = useRef<any>(null);
   const initDone    = useRef(false);
@@ -560,6 +561,8 @@ function SolarEngine3D({
   //   rotateHandleRef  — the floating rotate-knob entity shown above a selected array
   const dragRef = useRef<any>(null);
   const suppressClickRef = useRef<boolean>(false);
+  // v62: stitched roof-model wireframe toggle (classified edges across all planes)
+  const [showRoofModel, setShowRoofModel] = useState(false);
   const rotateHandleRef = useRef<any>(null);
   const rotateHandleLineRef = useRef<any>(null);
   // v62: true while a grab-to-move/rotate is in progress. The CUSTOM camera handler
@@ -747,6 +750,16 @@ function SolarEngine3D({
     else clearFireSetbackZones(viewer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSetbackZones, roofPlanes, panels, fireSetbacks, stage]);
+
+  // v62: render/refresh the stitched roof-model wireframe on toggle / plane / panel change.
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    const C = (window as any).Cesium;
+    if (!viewer || !C) return;
+    if (showRoofModel) { try { renderRoofWireframe(viewer, C); } catch (e) { addLog('WARN', `renderRoofWireframe: ${(e as Error).message}`); } }
+    else clearRoofWireframe(viewer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showRoofModel, roofPlanes, panels, stage]);
   useEffect(() => { mountingSystemIdRef.current = mountingSystemId; }, [mountingSystemId]);
 
   // v47.122: Re-render all tracked planes when selection changes
@@ -2417,20 +2430,16 @@ function SolarEngine3D({
     setbackZoneEntitiesRef.current = [];
   }
 
-  function renderFireSetbackZones(viewer: any, C: any) {
-    clearFireSetbackZones(viewer);
-    const ridgeSB = fireSetbacks?.ridgeSetbackM ?? 0.457;
-    const eaveSB  = fireSetbacks?.eaveSetbackM  ?? 0;
-    const edgeSB  = fireSetbacks?.edgeSetbackM  ?? 0.457;
-    const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-
-    // ── Collect renderable planes from BOTH sources, with ECEF corners + frame ──
-    //   1. 3D Plane tool planes (plane3DCesiumPtsMap + plane3DFrameMap) — exact ECEF.
-    //   2. roofPlanes prop (lat/lng vertices) — projected onto a panel/legacy frame.
-    type RP = { id: string; corners: any[]; u: any; v: any; n: any; origin: any };
-    const renderables: RP[] = [];
+  // ── v62: Shared roof-model primitives (used by setback zones AND the stitched
+  //         roof-model wireframe — single source of truth for plane geometry +
+  //         edge classification). ───────────────────────────────────────────────
+  //
+  // Collect renderable planes from BOTH sources with ECEF corners + frame + centroid:
+  //   1. 3D Plane tool planes (plane3DCesiumPtsMap + plane3DFrameMap) — exact ECEF.
+  //   2. roofPlanes prop (lat/lng vertices) — projected onto a panel/legacy frame.
+  function collectRoofRenderables(C: any, groundElev: number): any[] {
+    const renderables: any[] = [];
     const seen = new Set<string>();
-
     plane3DCesiumPtsMap.current.forEach((pts: any[], pid: string) => {
       const fr = plane3DFrameMap.current.get(pid);
       if (!fr || !pts || pts.length < 3) return;
@@ -2442,7 +2451,6 @@ function SolarEngine3D({
       renderables.push({ id: pid, corners, u, v, n, origin });
       seen.add(pid);
     });
-
     (roofPlanesRef.current ?? []).forEach(plane => {
       if (seen.has(plane.id)) return;
       const vs = (plane as any).vertices ?? [];
@@ -2465,7 +2473,6 @@ function SolarEngine3D({
       if (!origin) return;
       const v = C.Cartesian3.normalize(C.Cartesian3.cross(n, u, new C.Cartesian3()), new C.Cartesian3());
       const baseH = C.Cartographic.fromCartesian(origin).height;
-      // Project each lat/lng vertex onto the plane → ECEF corner.
       const corners = vs.map((vert: any) => {
         const Pv = safeCartesian3(C, vert.lng, vert.lat, baseH);
         if (!Pv) return null;
@@ -2476,36 +2483,74 @@ function SolarEngine3D({
       if (corners.length < 3) return;
       renderables.push({ id: plane.id, corners, u, v, n, origin });
     });
-
-    addLog('SETBACK', `zones: ${renderables.length} planes (3D=${plane3DCesiumPtsMap.current.size}, prop=${(roofPlanesRef.current ?? []).length}) ridge=${(ridgeSB*39.37).toFixed(0)}" edge=${(edgeSB*39.37).toFixed(0)}"`);
-    if (renderables.length === 0) {
-      setStatusMsg('No roof planes to draw setbacks on — trace a 3D plane or fill a roof first');
-      return;
-    }
-
-    // Per-plane centroid (ECEF) + id lookup for hip/valley convexity classification.
-    renderables.forEach(rp => {
+    renderables.forEach((rp: any) => {
       const c = new C.Cartesian3(0, 0, 0);
       rp.corners.forEach((p: any) => C.Cartesian3.add(c, p, c));
-      (rp as any).centroid = C.Cartesian3.divideByScalar(c, rp.corners.length, c);
+      rp.centroid = C.Cartesian3.divideByScalar(c, rp.corners.length, c);
     });
-    const byId = new Map(renderables.map(rp => [rp.id, rp]));
+    return renderables;
+  }
 
-    // Edge midpoints (ECEF) across all planes → an edge shared with another plane is a
-    // hip or a valley; partnerOf returns the OTHER plane meeting at that edge.
+  // partnerOf(planeId, edgeMidpointEcef) → the OTHER plane meeting at that edge (or
+  // null). A shared edge = a hip or a valley; the stitch's adjacency lives here.
+  function buildPartnerOf(C: any, renderables: any[]): (pid: string, mid: any) => any {
+    const byId = new Map(renderables.map((rp: any) => [rp.id, rp]));
     const allMids: Array<{ mid: any; pid: string }> = [];
-    renderables.forEach(rp => {
+    renderables.forEach((rp: any) => {
       for (let i = 0; i < rp.corners.length; i++) {
         const a = rp.corners[i], b = rp.corners[(i + 1) % rp.corners.length];
         allMids.push({ mid: C.Cartesian3.midpoint(a, b, new C.Cartesian3()), pid: rp.id });
       }
     });
-    const partnerOf = (pid: string, mid: any): any => {
+    return (pid: string, mid: any) => {
       const m = allMids.find(e => e.pid !== pid && C.Cartesian3.distance(e.mid, mid) < 1.2);
       return m ? byId.get(m.pid) : null;
     };
+  }
 
-    renderables.forEach(rp => {
+  // Classify every edge of a plane → 'ridge' | 'eave' | 'hip' | 'valley' | 'rake'.
+  // ridge=highest edge, eave=lowest (by altitude, sign-independent); a shared edge is a
+  // hip (convex fold) or valley (concave) by (nA−nB)·(cA−cB); otherwise a rake.
+  function classifyPlaneEdges(C: any, rp: any, partnerOf: (pid: string, mid: any) => any): string[] {
+    const corners = rp.corners; const N = corners.length;
+    const heights = corners.map((P: any) => { const c = C.Cartographic.fromCartesian(P); return c ? c.height : 0; });
+    const hMax = Math.max(...heights), hMin = Math.min(...heights);
+    const htol = Math.max(0.25, (hMax - hMin) * 0.18);
+    const sloped = (hMax - hMin) > 0.3;
+    const kinds: string[] = [];
+    for (let i = 0; i < N; i++) {
+      const ha = heights[i], hb = heights[(i + 1) % N];
+      const mid = C.Cartesian3.midpoint(corners[i], corners[(i + 1) % N], new C.Cartesian3());
+      const partner = partnerOf(rp.id, mid);
+      let kind = 'rake';
+      if (sloped && ha > hMax - htol && hb > hMax - htol)      kind = 'ridge';
+      else if (sloped && ha < hMin + htol && hb < hMin + htol) kind = 'eave';
+      if (partner) {
+        const dN = C.Cartesian3.subtract(rp.n, partner.n, new C.Cartesian3());
+        const dC = C.Cartesian3.subtract(rp.centroid, partner.centroid, new C.Cartesian3());
+        kind = C.Cartesian3.dot(dN, dC) > 0 ? 'hip' : 'valley';
+      }
+      kinds.push(kind);
+    }
+    return kinds;
+  }
+
+  function renderFireSetbackZones(viewer: any, C: any) {
+    clearFireSetbackZones(viewer);
+    const ridgeSB = fireSetbacks?.ridgeSetbackM ?? 0.457;
+    const eaveSB  = fireSetbacks?.eaveSetbackM  ?? 0;
+    const edgeSB  = fireSetbacks?.edgeSetbackM  ?? 0.457;
+    const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+
+    const renderables = collectRoofRenderables(C, groundElev);
+    addLog('SETBACK', `zones: ${renderables.length} planes (3D=${plane3DCesiumPtsMap.current.size}, prop=${(roofPlanesRef.current ?? []).length}) ridge=${(ridgeSB*39.37).toFixed(0)}" edge=${(edgeSB*39.37).toFixed(0)}"`);
+    if (renderables.length === 0) {
+      setStatusMsg('No roof planes to draw setbacks on — trace a 3D plane or fill a roof first');
+      return;
+    }
+    const partnerOf = buildPartnerOf(C, renderables);
+
+    renderables.forEach((rp: any) => {
       const { u, v, n, origin, corners } = rp;
       const uv = corners.map((P: any) => {
         const rel = C.Cartesian3.subtract(P, origin, new C.Cartesian3());
@@ -2606,6 +2651,60 @@ function SolarEngine3D({
       }
     });
     addLog('SETBACK', `drew ${setbackZoneEntitiesRef.current.length} setback strips`);
+    try { viewer.scene.requestRender(); } catch {}
+  }
+
+  // ── v62: STITCHED ROOF MODEL wireframe ─────────────────────────────────────
+  // Draw every classified edge across ALL planes as a colour-coded polyline so the
+  // connected roof reads as one model: ridge(red) hip(orange) valley(cyan) eave(green)
+  // rake(amber). Reuses the same collect+classify pipeline as the setback zones.
+  // Foundation for the permit roof-plan sheet + in-house CAD.
+  function clearRoofWireframe(viewer: any) {
+    roofWireframeEntitiesRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
+    roofWireframeEntitiesRef.current = [];
+  }
+
+  function renderRoofWireframe(viewer: any, C: any) {
+    clearRoofWireframe(viewer);
+    const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+    const renderables = collectRoofRenderables(C, groundElev);
+    if (renderables.length === 0) {
+      setStatusMsg('No roof planes yet — trace a 3D plane or fill a roof to build the model');
+      return;
+    }
+    const partnerOf = buildPartnerOf(C, renderables);
+    const colorOf = (kind: string) =>
+        kind === 'hip'    ? C.Color.fromCssColorString('#ff9500')
+      : kind === 'valley' ? C.Color.fromCssColorString('#22b8ff')
+      : kind === 'ridge'  ? C.Color.fromCssColorString('#ff2d2d')
+      : kind === 'eave'   ? C.Color.fromCssColorString('#34d399')
+      :                     C.Color.fromCssColorString('#facc15'); // rake → amber
+    const counts: Record<string, number> = { eave: 0, ridge: 0, hip: 0, valley: 0, rake: 0 };
+
+    renderables.forEach((rp: any) => {
+      const kinds = classifyPlaneEdges(C, rp, partnerOf);
+      const N = rp.corners.length;
+      for (let i = 0; i < N; i++) {
+        const kind = kinds[i];
+        counts[kind] = (counts[kind] ?? 0) + 1;
+        // lift slightly along the plane normal so the line sits on the roof surface
+        const a = C.Cartesian3.add(rp.corners[i], C.Cartesian3.multiplyByScalar(rp.n, 0.08, new C.Cartesian3()), new C.Cartesian3());
+        const b = C.Cartesian3.add(rp.corners[(i + 1) % N], C.Cartesian3.multiplyByScalar(rp.n, 0.08, new C.Cartesian3()), new C.Cartesian3());
+        const ent = viewer.entities.add({
+          name: `[ROOF-EDGE ${kind} ${rp.id.slice(0, 6)}]`,
+          polyline: {
+            positions: [a, b],
+            width: (kind === 'eave' || kind === 'rake') ? 4 : 6,
+            material: new C.PolylineGlowMaterialProperty({ glowPower: 0.25, color: colorOf(kind) }),
+            clampToGround: false,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        });
+        roofWireframeEntitiesRef.current.push(ent);
+      }
+    });
+    addLog('ROOFMODEL', `${renderables.length} faces · ridge=${counts.ridge} hip=${counts.hip} valley=${counts.valley} eave=${counts.eave} rake=${counts.rake}`);
+    setStatusMsg(`🔗 Roof model — ${renderables.length} face${renderables.length !== 1 ? 's' : ''} · ${counts.ridge} ridge · ${counts.hip} hip · ${counts.valley} valley · ${counts.eave} eave · ${counts.rake} rake`);
     try { viewer.scene.requestRender(); } catch {}
   }
 
@@ -8613,8 +8712,43 @@ function SolarEngine3D({
         </div>
       ) : null}
 
+      {/* v62: Stitched roof-model toggle — classify + draw every edge across all planes */}
+      {stage === 'done' ? (
+        <button
+          onClick={() => setShowRoofModel(v => !v)}
+          title="Roof Model: classify & stitch every plane's edges (ridge/hip/valley/eave/rake)"
+          style={{
+            position: 'absolute', top: 12, left: 12, zIndex: 51,
+            background: showRoofModel ? 'rgba(34,184,255,0.18)' : 'rgba(15,15,30,0.9)',
+            border: `1px solid ${showRoofModel ? 'rgba(34,184,255,0.6)' : 'rgba(255,255,255,0.12)'}`,
+            color: showRoofModel ? '#22b8ff' : '#bbb', borderRadius: 8, padding: '5px 10px',
+            fontSize: 11, fontWeight: 700, cursor: 'pointer', backdropFilter: 'blur(6px)',
+          }}
+        >
+          🔗 Roof Model{showRoofModel ? ' ✓' : ''}
+        </button>
+      ) : null}
+
+      {/* v62: Roof-model edge legend */}
+      {stage === 'done' && showRoofModel ? (
+        <div style={{
+          position: 'absolute', top: 46, left: 12, zIndex: 50,
+          background: 'rgba(15,15,30,0.9)', backdropFilter: 'blur(6px)',
+          border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '6px 9px',
+          color: '#ddd', fontSize: 10, lineHeight: '15px',
+        }}>
+          <div style={{ fontWeight: 700, color: '#22b8ff', marginBottom: 3 }}>🔗 Roof edges</div>
+          {([['#ff2d2d', 'Ridge'], ['#ff9500', 'Hip'], ['#22b8ff', 'Valley'], ['#34d399', 'Eave'], ['#facc15', 'Rake']] as const).map(([c, label]) => (
+            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 2, background: c, display: 'inline-block' }} />
+              {label}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {/* v62: Fire setback legend — explains the keep-out zone colours */}
-      {stage === 'done' && showSetbackZones ? (
+      {stage === 'done' && showSetbackZones && !showRoofModel ? (
         <div style={{
           position: 'absolute', top: 54, left: 12, zIndex: 50,
           background: 'rgba(15,15,30,0.9)', backdropFilter: 'blur(6px)',
