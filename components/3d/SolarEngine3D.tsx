@@ -2554,6 +2554,32 @@ function SolarEngine3D({
     return kinds;
   }
 
+  // v62: which roof plane (renderable, with frame) is a 3D click on? Projects the click
+  // onto each plane and tests polygon containment in plane-UV; requires the click to be
+  // within 3m of the plane along its normal so a far plane can't capture it.
+  function planeRenderableAtClick(C: any, clickCart: any, groundElev: number): any | null {
+    const renderables = collectRoofRenderables(C, groundElev);
+    for (const rp of renderables) {
+      const diff = C.Cartesian3.subtract(clickCart, rp.origin, new C.Cartesian3());
+      const dn = C.Cartesian3.dot(diff, rp.n);
+      if (Math.abs(dn) > 3.0) continue;
+      const Pon = C.Cartesian3.subtract(clickCart, C.Cartesian3.multiplyByScalar(rp.n, dn, new C.Cartesian3()), new C.Cartesian3());
+      const rel = C.Cartesian3.subtract(Pon, rp.origin, new C.Cartesian3());
+      const pu = C.Cartesian3.dot(rel, rp.u), pv = C.Cartesian3.dot(rel, rp.v);
+      const poly: number[][] = rp.corners.map((c: any) => {
+        const r = C.Cartesian3.subtract(c, rp.origin, new C.Cartesian3());
+        return [C.Cartesian3.dot(r, rp.u), C.Cartesian3.dot(r, rp.v)];
+      });
+      let inside = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+        if (((yi > pv) !== (yj > pv)) && (pu < (xj - xi) * (pv - yi) / (yj - yi) + xi)) inside = !inside;
+      }
+      if (inside) return rp;
+    }
+    return null;
+  }
+
   function renderFireSetbackZones(viewer: any, C: any) {
     clearFireSetbackZones(viewer);
     const ridgeSB = fireSetbacks?.ridgeSetbackM ?? 0.457;
@@ -3650,12 +3676,42 @@ function SolarEngine3D({
       const pHeight = carto.height;
       if (!isValidCoord(pLat, pLng, pHeight)) return;
 
-      const { tiltDeg, azimuthDeg } = computeSurfaceNormal(viewer, C, screenPos, cartesian, pickMethod);
-      const panel = createPanel({
-        lat: pLat, lng: pLng, height: pHeight + getRoofPanelOffset(mountingSystemIdRef.current),
-        tilt: tiltDeg, azimuth: azimuthDeg, systemType: 'roof',
-        heading: headingFromAzimuth(azimuthDeg), pitch: -(tiltDeg * Math.PI / 180), roll: 0,
-      });
+      const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+      const offM = getRoofPanelOffset(mountingSystemIdRef.current);
+      // v62: if the click lands on a marked/CAD plane, make the panel FIRST-CLASS —
+      // stamp that plane's ECEF frame + planeId so it rotates and renders rails (the
+      // bare Roof tool used to place "stale" panels with no frame). Falls back to the
+      // per-click surface normal when the click isn't on a known plane.
+      const rp = planeRenderableAtClick(C, cartesian, groundElev);
+      let panel;
+      if (rp) {
+        // project the click onto the plane, then lift along the normal by the mount offset
+        const d0 = C.Cartesian3.dot(C.Cartesian3.subtract(cartesian, rp.origin, new C.Cartesian3()), rp.n);
+        const onPlane = C.Cartesian3.subtract(cartesian, C.Cartesian3.multiplyByScalar(rp.n, d0, new C.Cartesian3()), new C.Cartesian3());
+        const pos = C.Cartesian3.add(onPlane, C.Cartesian3.multiplyByScalar(rp.n, offM, new C.Cartesian3()), new C.Cartesian3());
+        const pc = C.Cartographic.fromCartesian(pos);
+        const existing: any = panelsRef.current.find(p => (p as any).planeId === rp.id && isFinite((p as any).ecefNx));
+        const prop: any = (roofPlanesRef.current ?? []).find(p => p.id === rp.id);
+        const heading  = existing ? existing.heading : headingFromAzimuth(prop?.azimuth ?? azimuthRef.current);
+        const pitchRad = existing ? existing.pitch   : -((prop?.pitch ?? 0) * Math.PI / 180);
+        const tiltP    = existing ? (existing.tilt ?? 0)    : (prop?.pitch ?? 0);
+        const azP      = existing ? (existing.azimuth ?? 180) : (prop?.azimuth ?? 180);
+        panel = createPanel({
+          lat: C.Math.toDegrees(pc.latitude), lng: C.Math.toDegrees(pc.longitude), height: pc.height,
+          tilt: tiltP, azimuth: azP, systemType: 'roof', heading, pitch: pitchRad, roll: 0,
+          orientation: panelOrientationRef.current ?? 'portrait',
+        });
+        (panel as any).planeId = rp.id;
+        (panel as any).ecefUx = rp.u.x; (panel as any).ecefUy = rp.u.y; (panel as any).ecefUz = rp.u.z;
+        (panel as any).ecefNx = rp.n.x; (panel as any).ecefNy = rp.n.y; (panel as any).ecefNz = rp.n.z;
+      } else {
+        const { tiltDeg, azimuthDeg } = computeSurfaceNormal(viewer, C, screenPos, cartesian, pickMethod);
+        panel = createPanel({
+          lat: pLat, lng: pLng, height: pHeight + offM,
+          tilt: tiltDeg, azimuth: azimuthDeg, systemType: 'roof',
+          heading: headingFromAzimuth(azimuthDeg), pitch: -(tiltDeg * Math.PI / 180), roll: 0,
+        });
+      }
 
       addPanelEntity(viewer, C, panel);
       const newPanels = [...panelsRef.current, panel];
@@ -3665,8 +3721,8 @@ function SolarEngine3D({
       setPanelCount(newPanels.length);
       // Phase 2: rebuild rails after single-click roof placement
       try { renderRoofRails(viewer, C, newPanels); } catch {}
-      setStatusMsg(`✅ Roof panel placed (${tiltDeg.toFixed(0)}° pitch, ${azimuthDeg.toFixed(0)}° az) — click to continue, right-click to stop`);
-      showGhostPanel(viewer, C, pLat, pLng, pHeight, tiltDeg, azimuthDeg);
+      setStatusMsg(`✅ Roof panel placed (${(panel.tilt ?? 0).toFixed(0)}° pitch, ${(panel.azimuth ?? 0).toFixed(0)}° az)${rp ? ' · on plane' : ''} — click to continue, right-click to stop`);
+      showGhostPanel(viewer, C, pLat, pLng, pHeight, panel.tilt ?? 0, panel.azimuth ?? 0);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) {
       addLog('ERROR', `handleRoofClick: ${(err as Error).message}`);
