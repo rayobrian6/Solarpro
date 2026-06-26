@@ -165,7 +165,7 @@ function panelDims(orientation: PanelOrientation): { pw: number; ph: number } {
     : { pw: PW_PORTRAIT,  ph: PH_PORTRAIT  };
 }
 
-export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'snap_panel' | 'obstruction' | 'plane3d' | 'set_direction' | 'set_origin';
+export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house' | 'surface_select' | 'extend_row' | 'add_row' | 'snap_panel' | 'obstruction' | 'plane3d' | 'mark_plane' | 'set_direction' | 'set_origin';
 export type PanelOrientation = 'portrait' | 'landscape';
 export type SystemType = 'roof' | 'ground' | 'fence';
 export type LoadStage = 'idle' | 'cesium' | 'viewer' | 'tiles' | 'solar' | 'done' | 'error';
@@ -3293,6 +3293,7 @@ function SolarEngine3D({
         else if (mode === 'snap_panel')     handleSnapPanelClick(viewer, C, screenPos);
         else if (mode === 'obstruction')    handleObstructionClick(viewer, C, screenPos);
         else if (mode === 'plane3d')        handlePlane3DClick(viewer, C, screenPos);
+        else if (mode === 'mark_plane')     handlePlane3DClick(viewer, C, screenPos); // same point-trace, no panel fill on finish
         else if (mode === 'set_direction')  handleSetDirectionClick(viewer, C, screenPos);
         else if (mode === 'set_origin')     handleSetOriginClick(viewer, C, screenPos);
         // auto_roof: fires once via placementMode useEffect — NOT on canvas click
@@ -3453,10 +3454,13 @@ function SolarEngine3D({
       } else if (modeRef.current === 'plane3d' && pts3DCesiumRef.current.length >= 3) {
         // v47.121: Right-click finalizes 3D plane creation
         finalizePlane3D(viewer, C);
-      } else if (modeRef.current === 'plane3d' && pts3DCesiumRef.current.length > 0) {
+      } else if (modeRef.current === 'mark_plane' && pts3DCesiumRef.current.length >= 3) {
+        // v62: Right-click finalizes a MARK-ONLY face (no panels)
+        finalizePlane3D(viewer, C, false);
+      } else if ((modeRef.current === 'plane3d' || modeRef.current === 'mark_plane') && pts3DCesiumRef.current.length > 0) {
         // Right-click with < 3 points: cancel and clear
         clearPlane3DPreview(viewer);
-        setStatusMsg('3D Plane cancelled — need at least 3 points. Click again to start.');
+        setStatusMsg(`${modeRef.current === 'mark_plane' ? 'Mark Plane' : '3D Plane'} cancelled — need at least 3 points. Click again to start.`);
       } else if (modeRef.current === 'fence' && fencePtsRef.current.length >= 2) {
         finalizeFence(viewer, C);
       } else if (modeRef.current === 'roof') {
@@ -5881,7 +5885,7 @@ function SolarEngine3D({
    * finalizePlane3D — build RoofPlane from pts3D, render surface,
    * auto-fill with panels, notify DesignStudio via onRoofPlaneCreated.
    */
-  function finalizePlane3D(viewer: any, C: any) {
+  function finalizePlane3D(viewer: any, C: any, fillPanels = true) {
     const cesiumPts = pts3DCesiumRef.current;
     const cartPts   = pts3DCartRef.current;
 
@@ -5950,6 +5954,19 @@ function SolarEngine3D({
 
       // Notify DesignStudio (adds plane to roofPlanes state)
       onRoofPlaneCreated?.(plane);
+
+      // v62: MARK-ONLY — outline the face for the roof model / permit WITHOUT placing
+      // panels. The plane is already stored (plane3DCesiumPtsMap/FrameMap) so the Roof
+      // Model + setback zones pick it up; stay in mark mode so the next face can be traced.
+      if (!fillPanels) {
+        pts3DCesiumRef.current = []; pts3DCartRef.current = []; setPts3DCount(0);
+        activePlane3DIdRef.current = plane.id; setActivePlane3DId(plane.id);
+        if (showRoofModel)    { try { renderRoofWireframe(viewer, C); } catch {} }
+        if (showSetbackZones) { try { renderFireSetbackZones(viewer, C); } catch {} }
+        setStatusMsg(`⬡ Plane marked — Az ${plane.azimuth.toFixed(0)}° Tilt ${plane.pitch.toFixed(0)}° · trace the next face (right-click to finish) · 🔗 Roof Model to see edges`);
+        try { viewer.scene.requestRender(); } catch {}
+        return;
+      }
 
       // v48.7: Immediately auto-fill via control layer (plane3d mode)
       const groundElev    = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
@@ -7871,6 +7888,7 @@ function SolarEngine3D({
               { mode: 'ground'  as PlacementMode, icon: '\u{1F331}', label: 'Ground',   tip: 'Ground mount: click start \u2192 end to place a row' },
               { mode: 'fence'   as PlacementMode, icon: '\u26A1',    label: 'Fence',    tip: 'SOL Fence: click points, right-click to finish' },
               { mode: 'plane3d' as PlacementMode, icon: '\u{1F4D0}', label: '3D Plane', tip: '3D Plane: click 3+ roof points to define a custom grid' },
+              { mode: 'mark_plane' as PlacementMode, icon: '⬡', label: 'Mark Plane', tip: 'Outline a roof face for the model/permit WITHOUT panels (3+ corners, right-click to finish). Use 🔗 Roof Model to see all edges.' },
               { mode: 'row'     as PlacementMode, icon: '\u27A1',    label: 'Row',      tip: 'Row Tool: click two points to place a panel row' },
             ],
           },
