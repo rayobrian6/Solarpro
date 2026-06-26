@@ -2529,18 +2529,19 @@ function SolarEngine3D({
     const corners = rp.corners; const N = corners.length;
     const heights = corners.map((P: any) => { const c = C.Cartographic.fromCartesian(P); return c ? c.height : 0; });
     const hMax = Math.max(...heights), hMin = Math.min(...heights);
-    const htol = Math.max(0.25, (hMax - hMin) * 0.18);
+    const band = Math.max(0.3, (hMax - hMin) * 0.25); // height band that counts as ridge/eave
     const sloped = (hMax - hMin) > 0.3;
     const kinds: string[] = [];
     for (let i = 0; i < N; i++) {
       const ha = heights[i], hb = heights[(i + 1) % N];
+      const am = (ha + hb) / 2; // edge's average altitude — robust vs a slightly-uneven eave
       const a3 = corners[i], b3 = corners[(i + 1) % N];
       const horiz = Math.abs(ha - hb) < Math.max(0.3, C.Cartesian3.distance(a3, b3) * 0.12); // ~level edge
       const mid = C.Cartesian3.midpoint(a3, b3, new C.Cartesian3());
       const partner = partnerOf(rp.id, mid);
       let kind = 'rake';
-      if (sloped && ha > hMax - htol && hb > hMax - htol)      kind = 'ridge';
-      else if (sloped && ha < hMin + htol && hb < hMin + htol) kind = 'eave';
+      if (sloped && am > hMax - band)      kind = 'ridge';
+      else if (sloped && am < hMin + band) kind = 'eave';
       if (partner) {
         // Shared edge: convex fold = ridge (if level) or hip (if sloped); concave = valley.
         const dN = C.Cartesian3.subtract(rp.n, partner.n, new C.Cartesian3());
@@ -3264,6 +3265,10 @@ function SolarEngine3D({
   // ── Setup click handler ────────────────────────────────────────────────────
   function setupClickHandler(viewer: any, C: any) {
     if (handlerRef.current) { try { handlerRef.current.destroy(); } catch {} }
+    // v62: kill Cesium's built-in double-click → track/zoom-to-entity. Our double-click
+    // drills into a single panel; the default was also flying the camera in.
+    try { viewer.screenSpaceEventHandler.removeInputAction(C.ScreenSpaceEventType.LEFT_DOUBLE_CLICK); } catch {}
+    try { viewer.trackedEntity = undefined; } catch {}
     const handler = new C.ScreenSpaceEventHandler(viewer.scene.canvas);
     handlerRef.current = handler;
 
