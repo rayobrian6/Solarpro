@@ -2777,34 +2777,47 @@ function SolarEngine3D({
   function stitchRoofVertices(viewer: any, C: any) {
     const entries = Array.from(plane3DCesiumPtsMap.current.entries()) as [string, any[]][];
     if (entries.length < 2) { setStatusMsg('Stitch needs 2+ marked planes'); return; }
-    const TOL = 1.2; // metres — corners within this of each other are the same point
-    type Cl = { members: { pid: string; idx: number }[]; cx: number; cy: number; cz: number };
-    const clusters: Cl[] = [];
-    for (const [pid, pts] of entries) {
-      pts.forEach((p: any, idx: number) => {
-        let target: Cl | null = null;
-        for (const cl of clusters) {
-          const n = cl.members.length;
-          const dx = p.x - cl.cx / n, dy = p.y - cl.cy / n, dz = p.z - cl.cz / n;
-          if (dx * dx + dy * dy + dz * dz < TOL * TOL && !cl.members.some(m => m.pid === pid)) { target = cl; break; }
-        }
-        if (target) { target.members.push({ pid, idx }); target.cx += p.x; target.cy += p.y; target.cz += p.z; }
-        else clusters.push({ members: [{ pid, idx }], cx: p.x, cy: p.y, cz: p.z });
-      });
-    }
-    const newPts = new Map<string, any[]>();
-    for (const [pid, pts] of entries) newPts.set(pid, pts.map((p: any) => new C.Cartesian3(p.x, p.y, p.z)));
-    let shared = 0, moved = 0;
-    for (const cl of clusters) {
-      const n = cl.members.length;
-      if (n < 2) continue; // only shared corners
-      shared++;
-      const avg = new C.Cartesian3(cl.cx / n, cl.cy / n, cl.cz / n);
-      for (const m of cl.members) { newPts.get(m.pid)![m.idx] = avg; moved++; }
-    }
-    if (moved === 0) { setStatusMsg('Stitch — no shared corners found within ~1.2m'); return; }
+    const TOL = 1.6; // metres — corners within this are treated as the same point
+    // Working copy of every plane's corners, mutated across passes.
+    const work = new Map<string, any[]>();
+    for (const [pid, pts] of entries) work.set(pid, pts.map((p: any) => new C.Cartesian3(p.x, p.y, p.z)));
 
-    for (const [pid, pts] of newPts) {
+    type Cl = { members: { pid: string; idx: number }[]; cx: number; cy: number; cz: number };
+    let lastShared = 0;
+    // Multi-pass: pass 1 pulls most corners together; later passes catch stragglers
+    // (e.g. a hip→multi-valley junction) that only fall within tolerance once their
+    // neighbours have already moved to the averaged point.
+    for (let pass = 0; pass < 4; pass++) {
+      const clusters: Cl[] = [];
+      for (const [pid, pts] of work) {
+        pts.forEach((p: any, idx: number) => {
+          let target: Cl | null = null;
+          for (const cl of clusters) {
+            const n = cl.members.length;
+            const dx = p.x - cl.cx / n, dy = p.y - cl.cy / n, dz = p.z - cl.cz / n;
+            if (dx * dx + dy * dy + dz * dz < TOL * TOL && !cl.members.some(m => m.pid === pid)) { target = cl; break; }
+          }
+          if (target) { target.members.push({ pid, idx }); target.cx += p.x; target.cy += p.y; target.cz += p.z; }
+          else clusters.push({ members: [{ pid, idx }], cx: p.x, cy: p.y, cz: p.z });
+        });
+      }
+      let movedThisPass = 0; lastShared = 0;
+      for (const cl of clusters) {
+        const n = cl.members.length;
+        if (n < 2) continue;
+        lastShared++;
+        const ax = cl.cx / n, ay = cl.cy / n, az = cl.cz / n;
+        for (const m of cl.members) {
+          const cur = work.get(m.pid)![m.idx];
+          if (Math.abs(cur.x - ax) > 1e-4 || Math.abs(cur.y - ay) > 1e-4 || Math.abs(cur.z - az) > 1e-4) movedThisPass++;
+          work.get(m.pid)![m.idx] = new C.Cartesian3(ax, ay, az);
+        }
+      }
+      if (movedThisPass === 0) break; // converged
+    }
+    if (lastShared === 0) { setStatusMsg(`Stitch — no shared corners found within ~${TOL}m`); return; }
+
+    for (const [pid, pts] of work) {
       const cartPts: Cart3[] = pts.map((p: any) => ({ x: p.x, y: p.y, z: p.z }));
       let frame; try { frame = computePlaneFromPoints3D(cartPts); } catch { continue; }
       const projected = frame.projectedPts.map((p: Cart3) => new C.Cartesian3(p.x, p.y, p.z));
@@ -2820,7 +2833,7 @@ function SolarEngine3D({
     try { renderRoofWireframe(viewer, C); } catch {}
     if (showSetbackZones) { try { renderFireSetbackZones(viewer, C); } catch {} }
     try { viewer.scene.requestRender(); } catch {}
-    setStatusMsg(`🔗 Stitched — ${shared} shared point${shared !== 1 ? 's' : ''} averaged (${moved} corners pulled together)`);
+    setStatusMsg(`🔗 Stitched — ${lastShared} shared point${lastShared !== 1 ? 's' : ''} averaged (multi-pass)`);
   }
 
   function renderAllPanels(viewer: any, C: any, panelList: PlacedPanel[], forceFullRebuild = false) {
