@@ -2528,11 +2528,14 @@ function SolarEngine3D({
             C.Cartesian3.add(C.Cartesian3.multiplyByScalar(v, vv, new C.Cartesian3()),
               C.Cartesian3.multiplyByScalar(n, off, new C.Cartesian3()), new C.Cartesian3()), new C.Cartesian3()), new C.Cartesian3());
 
-      for (let i = 0; i < uv.length; i++) {
-        const a = uv[i], b = uv[(i + 1) % uv.length];
-        const mid = C.Cartesian3.midpoint(corners[i], corners[(i + 1) % corners.length], new C.Cartesian3());
+      const N = uv.length;
+      // Pass 1 — classify each edge + its inward unit normal (in UV) + colour.
+      const E: Array<{ sb: number; kind: string; inx: number; iny: number; ex: number; ey: number; col: any }> = [];
+      for (let i = 0; i < N; i++) {
+        const a = uv[i], b = uv[(i + 1) % N];
+        const mid = C.Cartesian3.midpoint(corners[i], corners[(i + 1) % N], new C.Cartesian3());
         const partner = partnerOf(rp.id, mid);
-        const ha = heights[i], hb = heights[(i + 1) % heights.length];
+        const ha = heights[i], hb = heights[(i + 1) % N];
         let sb = edgeSB, kind = 'rake';
         if (sloped && ha > hMax - htol && hb > hMax - htol)      { sb = ridgeSB; kind = 'ridge'; }
         else if (sloped && ha < hMin + htol && hb < hMin + htol) { sb = eaveSB;  kind = 'eave'; }
@@ -2544,36 +2547,58 @@ function SolarEngine3D({
           kind = C.Cartesian3.dot(dN, dC) > 0 ? 'hip' : 'valley';
           sb = Math.max(sb, edgeSB);
         }
-        if (sb <= 0.001) continue;
-
-        let dx = b.uu - a.uu, dy = b.vv - a.vv;
-        const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
-        let inx = -dy, iny = dx;
+        let ex = b.uu - a.uu, ey = b.vv - a.vv;
+        const L = Math.hypot(ex, ey) || 1; ex /= L; ey /= L;
+        let inx = -ey, iny = ex;
         const mx = (a.uu + b.uu) / 2, my = (a.vv + b.vv) / 2;
         if (inx * (cu - mx) + iny * (cv - my) < 0) { inx = -inx; iny = -iny; }
-
-        // Hug the surface — a larger lift makes the strip silhouette overhang the roof
-        // edge at oblique angles ("escaping the box"). 4cm is enough to clear the mesh.
-        const off = 0.04;
-        const positions = [
-          toEcef(a.uu, a.vv, off),
-          toEcef(b.uu, b.vv, off),
-          toEcef(b.uu + inx * sb, b.vv + iny * sb, off),
-          toEcef(a.uu + inx * sb, a.vv + iny * sb, off),
-        ];
         const col =
             kind === 'hip'    ? C.Color.fromCssColorString('#ff9500')   // hip → orange
           : kind === 'valley' ? C.Color.fromCssColorString('#22b8ff')   // valley → cyan
           : kind === 'ridge'  ? C.Color.fromCssColorString('#ff2d2d')   // ridge → red
           :                     C.Color.fromCssColorString('#ff6464');  // eave/rake → light red
+        E.push({ sb, kind, inx, iny, ex, ey, col });
+      }
+
+      // Pass 2 — mitered inset corner per vertex = intersection of the two adjacent
+      // edges' inward-offset lines. Bands then SHARE corners → no overlap, no overhang.
+      const lineX = (p1x: number, p1y: number, d1x: number, d1y: number, p2x: number, p2y: number, d2x: number, d2y: number) => {
+        const denom = d1x * d2y - d1y * d2x;
+        if (Math.abs(denom) < 1e-9) return null; // parallel (collinear edges)
+        const t = ((p2x - p1x) * d2y - (p2y - p1y) * d2x) / denom;
+        return { uu: p1x + t * d1x, vv: p1y + t * d1y };
+      };
+      const inset: Array<{ uu: number; vv: number }> = [];
+      for (let j = 0; j < N; j++) {
+        const ep = E[(j - 1 + N) % N], ec = E[j], vj = uv[j];
+        const hit = lineX(
+          vj.uu + ep.inx * ep.sb, vj.vv + ep.iny * ep.sb, ep.ex, ep.ey,
+          vj.uu + ec.inx * ec.sb, vj.vv + ec.iny * ec.sb, ec.ex, ec.ey);
+        inset.push(hit ?? { uu: vj.uu + ec.inx * ec.sb, vv: vj.vv + ec.iny * ec.sb });
+      }
+
+      // Pass 3 — render one band per edge: outer = exact polygon edge, inner = mitered
+      // corners. Hug the surface (4cm) so it doesn't overhang at oblique angles.
+      const off = 0.04;
+      for (let i = 0; i < N; i++) {
+        const e = E[i];
+        if (e.sb <= 0.001) continue;
+        const a = uv[i], b = uv[(i + 1) % N];
+        const ia = inset[i], ib = inset[(i + 1) % N];
+        const positions = [
+          toEcef(a.uu, a.vv, off),
+          toEcef(b.uu, b.vv, off),
+          toEcef(ib.uu, ib.vv, off),
+          toEcef(ia.uu, ia.vv, off),
+        ];
         const ent = viewer.entities.add({
-          name: `[SETBACK ${kind} ${rp.id.slice(0, 6)}]`,
+          name: `[SETBACK ${e.kind} ${rp.id.slice(0, 6)}]`,
           polygon: {
             hierarchy: new C.PolygonHierarchy(positions),
             perPositionHeight: true,
-            material: col.withAlpha(0.4),
+            material: e.col.withAlpha(0.4),
             outline: true,
-            outlineColor: col.withAlpha(0.95),
+            outlineColor: e.col.withAlpha(0.95),
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
         });
