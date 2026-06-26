@@ -104,6 +104,11 @@ const PANEL_OFFSET = 0.08; // meters above surface (ground / fence / fallback)
 // v62: debug-only plane overlays (frame axis arrows, geometry audit, layout bbox).
 // Off in production — they clutter the scene once several faces are placed/marked.
 const DEBUG_PLANE_OVERLAYS = false;
+// v62: auto-snap on single-panel move — DISABLED. First cut snapped to the nearest
+// panel across ALL planes, which jumped panels onto the wrong plane and floated them
+// off the roof (+ eave jerk). Rebuild with point-in-polygon plane assignment and an
+// on-plane clamp before re-enabling. Free move stays on.
+const ENABLE_PANEL_SNAP = false;
 
 // ── Mounting-system-aware roof panel offset ─────────────────────────────────
 // Physical stack height from roof deck to panel bottom face:
@@ -3434,17 +3439,13 @@ function SolarEngine3D({
       arrayManipRef.current = false; // hand the camera back to the custom handler
       if (drag.moved) {
         suppressClickRef.current = true;      // ignore the trailing LEFT_CLICK
-        // v62: a single moved panel snaps into the nearest array's grid on release
-        // (adopts the destination plane's frame → rails/facing correct across planes).
-        if (drag.mode === 'move' && selectedPanelIdsRef.current.size === 1) {
+        if (ENABLE_PANEL_SNAP && drag.mode === 'move' && selectedPanelIdsRef.current.size === 1) {
           const id = [...selectedPanelIdsRef.current][0];
           try { snapMovedPanel(viewer, C, id); } catch (e) { addLog('WARN', `snapMovedPanel: ${(e as Error).message}`); }
         }
         onPanelsChange(panelsRef.current);    // commit once
         showRotateHandle(viewer, C);          // handle re-floats above the new position
-        if (!(drag.mode === 'move' && selectedPanelIdsRef.current.size === 1)) {
-          setStatusMsg(drag.mode === 'rotate' ? '↻ Array rotated — drag ⟳ again, or drag the array to move' : '✥ Array moved — drag again, or drag ⟳ to rotate');
-        }
+        setStatusMsg(drag.mode === 'rotate' ? '↻ Array rotated — drag ⟳ again, or drag the array to move' : '✥ Moved — drag again, or drag ⟳ to rotate');
       }
     }, C.ScreenSpaceEventType.LEFT_UP);
 
@@ -5379,6 +5380,11 @@ function SolarEngine3D({
     const idSet = new Set(ids);
     const newPanels = panelsRef.current.filter(p => !idSet.has(p.id));
     panelsRef.current = newPanels;
+    lastRenderedPanelsRef.current = newPanels;
+    // v62: rebuild rails from the remaining panels — otherwise the deleted panel's
+    // rail run stays under empty roof (rails are separate entities, not removed above).
+    const C = (window as any).Cesium;
+    if (C) { try { renderRoofRails(viewer, C, newPanels); } catch {} }
     onPanelsChange(newPanels);
     setPanelCount(newPanels.length);
     selectedPanelIdsRef.current = new Set();
