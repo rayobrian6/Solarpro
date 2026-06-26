@@ -2554,6 +2554,38 @@ function SolarEngine3D({
     return kinds;
   }
 
+  // v62: STITCH — snap a just-picked corner to the nearest SHARED roof point so planes
+  // connect at exact common vertices/edges. Considers: every existing plane's corners
+  // (vertices) and edges (projected point), plus the corners already in the current
+  // trace. Returns the snapped Cartesian3, or null if nothing is within tolerance.
+  function snapTracedPoint(C: any, cart: any): any | null {
+    const TOL = 0.9; // metres — how close a click must be to grab a shared point
+    let best: any = null; let bestD = TOL * TOL;
+    const consider = (p: any) => {
+      if (!p) return;
+      const d = C.Cartesian3.distanceSquared(cart, p);
+      if (d < bestD) { bestD = d; best = p; }
+    };
+    const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+    const renderables = collectRoofRenderables(C, groundElev);
+    for (const rp of renderables) {
+      const cs = rp.corners;
+      for (let i = 0; i < cs.length; i++) {
+        consider(cs[i]); // existing vertex
+        const a = cs[i], b = cs[(i + 1) % cs.length]; // nearest point on the edge
+        const ab = C.Cartesian3.subtract(b, a, new C.Cartesian3());
+        const denom = C.Cartesian3.dot(ab, ab);
+        if (denom > 1e-9) {
+          let t = C.Cartesian3.dot(C.Cartesian3.subtract(cart, a, new C.Cartesian3()), ab) / denom;
+          t = Math.max(0, Math.min(1, t));
+          consider(C.Cartesian3.add(a, C.Cartesian3.multiplyByScalar(ab, t, new C.Cartesian3()), new C.Cartesian3()));
+        }
+      }
+    }
+    for (const p of pts3DCesiumRef.current) consider(p); // corners of the in-progress trace
+    return best ? new C.Cartesian3(best.x, best.y, best.z) : null;
+  }
+
   // v62: which roof plane (renderable, with frame) is a 3D click on? Projects the click
   // onto each plane and tests polygon containment in plane-UV; requires the click to be
   // within 3m of the plane along its normal so a far plane can't capture it.
@@ -5978,8 +6010,13 @@ function SolarEngine3D({
         addLog('PLANE3D', 'getWorldPosition failed — no valid 3D position from any picking method');
         return;
       }
-      const pickedPos = hit.cartesian;
-      addLog('PLANE3D', `pick method: ${hit.pickMethod}`);
+      // v62: STITCH — snap this corner to a shared roof point (existing plane vertex
+      // or edge, or a point in the current trace) so adjacent planes meet at EXACT
+      // common points. This is how the roof connects (ridge/hip/valley/dormer all
+      // share vertices) → a watertight, CAD-accurate structure built as you mark.
+      const snapHit = snapTracedPoint(C, hit.cartesian);
+      const pickedPos = snapHit ?? hit.cartesian;
+      addLog('PLANE3D', `pick method: ${hit.pickMethod}${snapHit ? ' (snapped to shared point)' : ''}`);
 
       // Store Cesium Cartesian3 (for rendering)
       pts3DCesiumRef.current = [...pts3DCesiumRef.current, pickedPos];
@@ -5987,6 +6024,7 @@ function SolarEngine3D({
       // Store plain Cart3 (for geometry math, no Cesium dep)
       const cart: Cart3 = { x: pickedPos.x, y: pickedPos.y, z: pickedPos.z };
       pts3DCartRef.current = [...pts3DCartRef.current, cart];
+      if (snapHit) setStatusMsg('🔗 Snapped to a shared roof point');
 
       const count = pts3DCesiumRef.current.length;
       setPts3DCount(count);
