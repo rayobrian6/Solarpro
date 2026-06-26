@@ -12,6 +12,7 @@ import {
   getStatesSummary,
   type AhjRecord,
 } from './ahj-national';
+import { JURISDICTION_DATA } from './necVersions';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -177,9 +178,14 @@ describe('AHJ_NATIONAL — ahjType validity', () => {
     }
   });
 
-  it('majority of entries are city type', () => {
+  it('has substantial city-level coverage plus national county breadth', () => {
+    // Post national onboarding the DB is county-heavy (one record per US county) with
+    // city-level granularity layered on top for metros — so city is no longer the
+    // majority tier. Assert healthy city coverage AND that records are properly typed.
     const cityCount = AHJ_NATIONAL.filter(a => a.ahjType === 'city').length;
-    expect(cityCount).toBeGreaterThan(AHJ_NATIONAL.length * 0.7);
+    const countyCount = AHJ_NATIONAL.filter(a => a.ahjType === 'county').length;
+    expect(cityCount).toBeGreaterThanOrEqual(150);   // metros covered at city granularity
+    expect(countyCount).toBeGreaterThan(0);          // national county-level coverage
   });
 });
 
@@ -801,15 +807,50 @@ describe('AHJ_NATIONAL — physical consistency checks', () => {
     }
   });
 
-  it('desert Southwest (AZ, NM) has zero or minimal snow load (≤ 15 psf)', () => {
-    const desertEntries = AHJ_NATIONAL.filter(
-      a => a.stateCode === 'AZ' || a.stateCode === 'NM',
-    );
-    for (const a of desertEntries) {
+  it('low-desert metros have zero or minimal snow load (≤ 15 psf)', () => {
+    // Scoped to true low-elevation desert metros. NOT a blanket AZ/NM rule — high-
+    // altitude counties (e.g. Flagstaff/Coconino at ~7,000 ft) legitimately carry
+    // real snow load and must not be forced low.
+    const desertMetros = [
+      'az-maricopa-phoenix', 'az-pima-tucson', 'az-maricopa-mesa',
+      'nv-clark-las-vegas', 'nm-bernalillo-albuquerque', 'nm-dona-ana-las-cruces',
+    ];
+    for (const id of desertMetros) {
+      const a = getAhjById(id);
+      if (!a) continue;
       expect(
         a.groundSnowLoadPsf,
-        `${a.id}: desert climate should have low snow load`,
+        `${id}: low-desert metro should have minimal snow load`,
       ).toBeLessThanOrEqual(15);
+    }
+  });
+});
+
+// ── Setbacks use real code logic (not fabricated per-AHJ defaults) ──────────────
+
+describe('AHJ_NATIONAL — setbacks derive from real adopted-code logic', () => {
+  it('every record is provenance-tagged (curated | expanded)', () => {
+    for (const a of AHJ_NATIONAL) {
+      expect(['curated', 'expanded'], `${a.id}`).toContain(a.dataProvenance);
+    }
+  });
+
+  it('roof/ridge setbacks match the adopted-code table (JURISDICTION_DATA) for every covered state', () => {
+    for (const a of AHJ_NATIONAL) {
+      const code = JURISDICTION_DATA[a.stateCode];
+      if (!code) continue; // territories (PR etc.) have no code-table entry — exempt
+      expect(a.roofSetbackInches, `${a.id}: roof setback must follow adopted code`).toBe(code.roofSetbackInches);
+      expect(a.ridgeSetbackInches, `${a.id}: ridge setback must follow adopted code`).toBe(code.ridgeSetbackInches);
+    }
+  });
+
+  it('relaxed-setback states (AZ, NV, NM, TX, UT) use an 18" perimeter — not the 36" bulk default', () => {
+    for (const code of ['AZ', 'NV', 'NM', 'TX', 'UT']) {
+      const entries = AHJ_NATIONAL.filter(a => a.stateCode === code);
+      expect(entries.length).toBeGreaterThan(0);
+      for (const a of entries) {
+        expect(a.roofSetbackInches, `${a.id}: should follow the state's 18" access-pathway code`).toBe(18);
+      }
     }
   });
 });

@@ -155,9 +155,9 @@ describe('P0-8.3: Canny fallback background fix', () => {
 describe('P0-8.4: Background overlay color', () => {
   it('SEGMENTATION_CLASS_COLORS has background entry', async () => {
     // Dynamic import to avoid loading the entire component module at test time
-    const module = await import('@/components/UnifiedGeometryOverlayRenderer');
+    const mod = await import('@/components/UnifiedGeometryOverlayRenderer');
     // The colors constant should be exported or accessible
     // Check if the component module can be imported without error
-    expect(module).toBeDefined();
+    expect(mod).toBeDefined();
   });
 });

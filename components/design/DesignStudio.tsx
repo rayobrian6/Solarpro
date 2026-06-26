@@ -500,6 +500,12 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [addressSuggestions, setAddressSuggestions] = useState<Array<{ short_name: string; display_name: string; lat: number; lng: number }>>([]);
   const [showAddressSuggestions, setShowAddressSuggestions] = useState(false);
   const [addressSuggestionsLoading, setAddressSuggestionsLoading] = useState(false);
+  // The address input lives inside the overflow-x-auto header, which clips the
+  // dropdown AND sits below the 3D canvas. Render the dropdown as position:fixed
+  // (escapes both, like the floating Report-a-Bug button), positioned from the
+  // input's live rect.
+  const addrInputRef = useRef<HTMLInputElement>(null);
+  const [addrDropdownPos, setAddrDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const addressDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // Drawing state
@@ -526,6 +532,8 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [solarDataError, setSolarDataError] = useState<string | null>(null);
   // Solar API roof plane auto-detection status
   const [solarApiStatus, setSolarApiStatus] = useState<'idle' | 'loading' | 'loaded' | 'unavailable'>('idle');
+  // Nearmap aerial roof detection (licensed HD aerial → real planes, on demand)
+  const [aerialDetecting, setAerialDetecting] = useState(false);
   // Pending plane: drawn vertices awaiting azimuth/pitch tagging before panels are placed
   const [pendingPlane, setPendingPlane] = useState<{ vertices: {lat:number;lng:number}[]; area: number } | null>(null);
   const [pendingPlaneAzimuth, setPendingPlaneAzimuth] = useState<number>(180);
@@ -1058,6 +1066,25 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
   };
 
+  // Keep the fixed-positioned address dropdown anchored to the input's live rect
+  // (recompute on open, and while open on scroll/resize).
+  useEffect(() => {
+    if (!showAddressSuggestions || addressSuggestions.length === 0) return;
+    const update = () => {
+      const el = addrInputRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setAddrDropdownPos({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [showAddressSuggestions, addressSuggestions.length]);
+
   // ── Address autocomplete ──────────────────────────────────
   const handleAddressSearchInput = useCallback((value: string) => {
     setAddressSearch(value);
@@ -1143,6 +1170,43 @@ export default function DesignStudio({ project, onSave }: Props) {
       setSolarDataLoading(false);
     }
   }, []);
+
+  // ── Nearmap aerial roof detection (on-demand, licensed HD aerial) ──────
+  // Pulls real roof planes (outline + pitch + material) for the building under
+  // the current map center and drops them into the roofPlanes slot as
+  // confirmed:false, so they render in the 3D scene and route through the
+  // existing operator review/confirm step. Costs Nearmap credits → user-action
+  // only, never auto. Falls back gracefully (toast) when there's no coverage.
+  const detectRoofFromAerial = useCallback(async () => {
+    setAerialDetecting(true);
+    setSolarApiStatus('loading');
+    try {
+      const res = await fetch(
+        `/api/aerial-roof-detect?lat=${mapCenter.lat}&lng=${mapCenter.lng}`
+      );
+      const data = await res.json();
+      if (!data.success) {
+        setSolarApiStatus('unavailable');
+        toast.error('Aerial detect failed', data.error || 'Could not reach Nearmap.');
+        return;
+      }
+      if (!data.covered || !Array.isArray(data.planes) || data.planes.length === 0) {
+        setSolarApiStatus('unavailable');
+        toast.info('No aerial coverage here', data.message || 'Use Solar API or draw the roof manually.');
+        return;
+      }
+      const planes = data.planes as RoofPlane[];
+      setRoofPlanes(planes);
+      setSolarApiStatus('loaded');
+      if (data.resolved?.address) setSolarDataAddress(data.resolved.address);
+      toast.success('🛰️ Roof detected from aerial', `${planes.length} plane${planes.length !== 1 ? 's' : ''} from Nearmap · review pitch & azimuth, then confirm`);
+    } catch (e) {
+      setSolarApiStatus('unavailable');
+      toast.error('Aerial detect failed', (e as Error).message);
+    } finally {
+      setAerialDetecting(false);
+    }
+  }, [mapCenter.lat, mapCenter.lng, toast]);
 
   // ── Handle house pick from 3D view ──────────────────────────────────
   // Called when user clicks a house in Pick House mode.
@@ -3265,6 +3329,7 @@ export default function DesignStudio({ project, onSave }: Props) {
           <div className="relative flex-1">
             <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 z-10" />
             <input
+              ref={addrInputRef}
               type="text"
               value={addressSearch}
               onChange={e => handleAddressSearchInput(e.target.value)}
@@ -3291,9 +3356,13 @@ export default function DesignStudio({ project, onSave }: Props) {
               ) : null}
             </div>
 
-            {/* Autocomplete dropdown */}
-            {showAddressSuggestions && addressSuggestions.length > 0 ? (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-600 rounded-xl shadow-2xl z-50 overflow-hidden">
+            {/* Autocomplete dropdown — position:fixed so it escapes the header's
+                overflow clipping and renders above the 3D canvas (z-[100]). */}
+            {showAddressSuggestions && addressSuggestions.length > 0 && addrDropdownPos ? (
+              <div
+                className="fixed bg-slate-800 border border-slate-600 rounded-xl shadow-2xl z-[100] overflow-hidden"
+                style={{ top: addrDropdownPos.top, left: addrDropdownPos.left, width: addrDropdownPos.width }}
+              >
                 {addressSuggestions.map((s, i) => (
                   <button
                     key={i}
@@ -3599,6 +3668,7 @@ export default function DesignStudio({ project, onSave }: Props) {
               showShade={showShade3D}
               showIrradiance={showIrradiance}
               fireSetbacks={fireSetbacks}
+              showSetbackZones={showSetbackZones}
               orientation={(orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape'}
               onOrientationChange={(o) => setOrientation(o)}
               onTwinLoaded={(twin) => {
@@ -4283,6 +4353,64 @@ export default function DesignStudio({ project, onSave }: Props) {
                           </button>
                         </div>
                       </div>
+                      {/* v62: AHJ fire-code requirements — what THIS jurisdiction requires
+                          for ridge / valley / hip / eave / edge / pathway, with one-click apply. */}
+                      {(() => {
+                        const r = ahjRecord;
+                        const M = 0.0254;
+                        const cells: Array<[string, number]> = r ? [
+                          ['Ridge',  r.ridgeSetbackInches],
+                          ['Valley', r.valleySetbackInches],
+                          ['Hip',    r.hipRoofSetbackInches],
+                          ['Eave',   r.eaveSetbackInches],
+                          ['Perim',  r.roofSetbackInches],
+                          ['Pathway', r.pathwayWidthInches],
+                        ] : [];
+                        return (
+                          <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-2 space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-semibold text-red-300">
+                                {r ? `📍 ${r.city || r.county}, ${r.stateCode} requires` : '📋 IRC R324 defaults'}
+                              </span>
+                              {r ? <span className="text-[10px] text-slate-400">NEC {r.necVersion}</span> : null}
+                            </div>
+                            {r ? (
+                              <>
+                                <div className="grid grid-cols-3 gap-1">
+                                  {cells.map(([label, inches]) => (
+                                    <div key={label} className="rounded bg-slate-800/60 px-1.5 py-1 text-center">
+                                      <div className="text-[9px] uppercase tracking-wide text-slate-500">{label}</div>
+                                      <div className="text-xs font-semibold text-slate-200">{inches}″</div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="text-[10px] text-slate-500 leading-tight truncate" title={r.ahjName}>{r.ahjName}</div>
+                                <button
+                                  onClick={() => {
+                                    setFireSetbacks(prev => ({
+                                      ...prev,
+                                      ridgeSetbackM: r.ridgeSetbackInches * M,
+                                      // edge/side covers rake + hip + valley in the layout engine — use the strictest
+                                      edgeSetbackM:  Math.max(r.valleySetbackInches, r.hipRoofSetbackInches, r.ridgeSetbackInches) * M,
+                                      eaveSetbackM:  r.eaveSetbackInches * M,
+                                      pathwayWidthM: r.pathwayWidthInches * M,
+                                      enforcePathway: true,
+                                    }));
+                                    setSetback(r.roofSetbackInches * M);
+                                  }}
+                                  className="w-full text-[11px] py-1 rounded border border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors"
+                                >
+                                  Apply {r.city || r.county} fire setbacks
+                                </button>
+                              </>
+                            ) : (
+                              <div className="text-[10px] text-slate-400 leading-snug">
+                                18″ ridge · 18″ valley · 18″ hip · 36″ pathway (IRC R324). Set a project address to load the local jurisdiction&apos;s exact requirements.
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                       <SliderRow
                         label="Edge Setback"
                         value={Math.round(fireSetbacks.edgeSetbackM * 39.37)}
@@ -4543,6 +4671,19 @@ export default function DesignStudio({ project, onSave }: Props) {
                     defaultOpen={false}
                   >
                     <div className="space-y-2">
+
+                      {/* Nearmap aerial detect — real planes from licensed HD aerial, on demand */}
+                      <button
+                        onClick={detectRoofFromAerial}
+                        disabled={aerialDetecting}
+                        className="w-full py-2 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white"
+                      >
+                        {aerialDetecting ? (
+                          <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Detecting from aerial…</>
+                        ) : (
+                          <>🛰️ Detect roof from aerial</>
+                        )}
+                      </button>
 
                       {/* Idle state */}                      {/* Idle state */}
                       {solarApiStatus === 'idle' && roofPlanes.length === 0 ? (

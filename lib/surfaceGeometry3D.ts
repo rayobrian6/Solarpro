@@ -306,7 +306,10 @@ export function computeEcefFrameForLegacyPlane(plane: RoofPlane, groundElevM = 0
   // groundElevM is the Cesium ellipsoidal height at the site (e.g. ~80m for Alexandria VA).
   // Previously groundElevM was ignored here, placing panels at sea level for any site above sea level.
   const roofAboveGround = (plane.planeHeightAtCenterMeters ?? LEGACY_PLANE_HEIGHT_M);
-  const heightM = groundElevM > 0 ? (groundElevM + roofAboveGround) : roofAboveGround;
+  // groundElevM === 0 is the "unresolved" sentinel; any other value (incl.
+  // NEGATIVE ellipsoidal elevations at coastal/low-lying sites) is real and must
+  // be added — the old `> 0` guard dropped it and floated roofs ~25m high there.
+  const heightM = groundElevM !== 0 ? (groundElevM + roofAboveGround) : roofAboveGround;
 
   // ── Step 1: ECEF centroid at roof height (ellipsoidal) ──
   const centECEF = latLngToECEF(lat, lng, heightM);

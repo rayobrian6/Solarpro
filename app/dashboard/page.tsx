@@ -1227,8 +1227,8 @@ export default function CommandCenter() {
               <div className="flex items-center gap-2">
                 <Zap size={15} className="text-amber-400" />
                 <span className="text-sm font-bold" style={{ color: '#FBBF24' }}>To-Do-List</span>
-                {commands.length > 0 && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                  style={{ background: 'rgba(245,158,11,0.15)', color: '#F59E0B' }}>{commands.length}</span>}
+                {commands.length > 0 ? (<span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                  style={{ background: 'rgba(245,158,11,0.15)', color: '#F59E0B' }}>{commands.length}</span>) : null}
               </div>
             </div>
             {commands.length > 0 ? (
