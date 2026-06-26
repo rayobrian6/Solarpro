@@ -2552,7 +2552,9 @@ function SolarEngine3D({
         const mx = (a.uu + b.uu) / 2, my = (a.vv + b.vv) / 2;
         if (inx * (cu - mx) + iny * (cv - my) < 0) { inx = -inx; iny = -iny; }
 
-        const off = 0.15;
+        // Hug the surface — a larger lift makes the strip silhouette overhang the roof
+        // edge at oblique angles ("escaping the box"). 4cm is enough to clear the mesh.
+        const off = 0.04;
         const positions = [
           toEcef(a.uu, a.vv, off),
           toEcef(b.uu, b.vv, off),
