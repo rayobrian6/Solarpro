@@ -2512,10 +2512,15 @@ function SolarEngine3D({
         return { uu: C.Cartesian3.dot(rel, u), vv: C.Cartesian3.dot(rel, v) };
       });
       if (uv.some((p: any) => !isFinite(p.uu) || !isFinite(p.vv))) return;
-      const vMin = Math.min(...uv.map((p: any) => p.vv)), vMax = Math.max(...uv.map((p: any) => p.vv));
+      // Ridge vs eave by ACTUAL altitude (sign-independent): the ridge sits higher than
+      // the eave. Plane-local v can point either way, which mislabeled the low eave as
+      // the ridge → a wrong setback band at a 0" eave.
+      const heights = corners.map((P: any) => { const c = C.Cartographic.fromCartesian(P); return c ? c.height : 0; });
+      const hMax = Math.max(...heights), hMin = Math.min(...heights);
+      const htol = Math.max(0.25, (hMax - hMin) * 0.18);
+      const sloped = (hMax - hMin) > 0.3; // flat roofs have no ridge/eave distinction
       const cu = uv.reduce((s: number, p: any) => s + p.uu, 0) / uv.length;
       const cv = uv.reduce((s: number, p: any) => s + p.vv, 0) / uv.length;
-      const tol = Math.max(0.4, (vMax - vMin) * 0.12);
 
       const toEcef = (uu: number, vv: number, off: number) =>
         C.Cartesian3.add(origin,
@@ -2527,9 +2532,10 @@ function SolarEngine3D({
         const a = uv[i], b = uv[(i + 1) % uv.length];
         const mid = C.Cartesian3.midpoint(corners[i], corners[(i + 1) % corners.length], new C.Cartesian3());
         const partner = partnerOf(rp.id, mid);
+        const ha = heights[i], hb = heights[(i + 1) % heights.length];
         let sb = edgeSB, kind = 'rake';
-        if (a.vv > vMax - tol && b.vv > vMax - tol)      { sb = ridgeSB; kind = 'ridge'; }
-        else if (a.vv < vMin + tol && b.vv < vMin + tol) { sb = eaveSB;  kind = 'eave'; }
+        if (sloped && ha > hMax - htol && hb > hMax - htol)      { sb = ridgeSB; kind = 'ridge'; }
+        else if (sloped && ha < hMin + htol && hb < hMin + htol) { sb = eaveSB;  kind = 'eave'; }
         if (partner) {
           // Hip (convex fold, roof tents up) vs valley (concave, water collects):
           // (nA − nB)·(cA − cB) > 0 → normals splay outward → HIP; < 0 → VALLEY.
