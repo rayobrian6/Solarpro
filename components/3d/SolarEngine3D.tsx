@@ -101,6 +101,9 @@ const PT = 0.040;  // thickness meters
 // PANEL_OFFSET: vertical gap for ground / fence / fallback contexts.
 // Ground mount and fence panels use this directly (their height math is separate).
 const PANEL_OFFSET = 0.08; // meters above surface (ground / fence / fallback)
+// v62: debug-only plane overlays (frame axis arrows, geometry audit, layout bbox).
+// Off in production — they clutter the scene once several faces are placed/marked.
+const DEBUG_PLANE_OVERLAYS = false;
 
 // ── Mounting-system-aware roof panel offset ─────────────────────────────────
 // Physical stack height from roof deck to panel bottom face:
@@ -486,6 +489,8 @@ function SolarEngine3D({
   const plane3DFrameMap    = useRef<Map<string, Plane3DFrame>>(new Map());
   // plane3DCesiumPtsMap: planeId → Cesium Cartesian3[] (projected polygon corners)
   const plane3DCesiumPtsMap = useRef<Map<string, any[]>>(new Map());
+  // v62: planes traced with "Mark Plane" (outline only, no panels) — render clean.
+  const markOnlyPlaneIdsRef = useRef<Set<string>>(new Set());
   // Count of placed points (for status message)
   const [pts3DCount, setPts3DCount] = useState(0);
 
@@ -663,6 +668,11 @@ function SolarEngine3D({
     if (placementMode === 'pick_house' && prevMode !== 'pick_house') {
       setStatusMsg('🏡 Click any house on the map to select it as the target property');
     }
+    // v62: marking faces → auto-show the stitched Roof Model so edges classify live.
+    if (placementMode === 'mark_plane' && prevMode !== 'mark_plane') {
+      setShowRoofModel(true);
+      setStatusMsg('⬡ Mark Plane — click a roof face\'s corners (3+), right-click to finish · edges classify live');
+    }
     if (placementMode === 'auto_roof' && prevMode !== 'auto_roof') {
       const viewer = viewerRef.current;
       const C = (window as any).Cesium;
@@ -782,7 +792,7 @@ function SolarEngine3D({
 
       // Re-render with new selection state
       const isSelected = selectedRoofPlaneId === planeId;
-      const newIds = renderPlane3DEntity(viewer, C, cesiumPts, planeId, frame, isSelected);
+      const newIds = renderPlane3DEntity(viewer, C, cesiumPts, planeId, frame, isSelected, markOnlyPlaneIdsRef.current.has(planeId));
       plane3DEntityMap.current.set(planeId, newIds);
 
       // Also update the flat list
@@ -990,7 +1000,6 @@ function SolarEngine3D({
       const v = viewerRef.current;
       const Cs = (window as any).Cesium;
       if (!v || !Cs || !renderAllPanelsRef.current) return;
-      addLog('RENDER', `[panels] effect → renderAllPanels(${snapshot.length}) prevRendered=${lastRenderedPanelsRef.current.length}`);
       renderAllPanelsRef.current(v, Cs, snapshot);
     }, debounceMs);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2547,7 +2556,6 @@ function SolarEngine3D({
     const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
 
     const renderables = collectRoofRenderables(C, groundElev);
-    addLog('SETBACK', `zones: ${renderables.length} planes (3D=${plane3DCesiumPtsMap.current.size}, prop=${(roofPlanesRef.current ?? []).length}) ridge=${(ridgeSB*39.37).toFixed(0)}" edge=${(edgeSB*39.37).toFixed(0)}"`);
     if (renderables.length === 0) {
       setStatusMsg('No roof planes to draw setbacks on — trace a 3D plane or fill a roof first');
       return;
@@ -2636,7 +2644,6 @@ function SolarEngine3D({
         setbackZoneEntitiesRef.current.push(ent);
       }
     });
-    addLog('SETBACK', `drew ${setbackZoneEntitiesRef.current.length} setback strips`);
     try { viewer.scene.requestRender(); } catch {}
   }
 
@@ -2689,7 +2696,6 @@ function SolarEngine3D({
         roofWireframeEntitiesRef.current.push(ent);
       }
     });
-    addLog('ROOFMODEL', `${renderables.length} faces · ridge=${counts.ridge} hip=${counts.hip} valley=${counts.valley} eave=${counts.eave} rake=${counts.rake}`);
     setStatusMsg(`🔗 Roof model — ${renderables.length} face${renderables.length !== 1 ? 's' : ''} · ${counts.ridge} ridge · ${counts.hip} hip · ${counts.valley} valley · ${counts.eave} eave · ${counts.rake} rake`);
     try { viewer.scene.requestRender(); } catch {}
   }
@@ -4994,7 +5000,6 @@ function SolarEngine3D({
       const picked = pickPanelAtScreen(viewer, screenPos);
       const foundId = picked.foundId;
       const foundEntity = picked.foundEntity;
-      addLog('SELECT', `click mode=${modeRef.current} foundId=${foundId ? foundId.slice(0,8) : 'NONE'} panelsInMap=${panelMapRef.current.size} totalPanels=${panelsRef.current.length}`);
 
       if (!foundId || !foundEntity) {
         clearPanelSelection();
@@ -5039,7 +5044,6 @@ function SolarEngine3D({
       selectedPanelIdRef.current = foundId;
       setSelectedPanelId(foundId);
       showRotateHandle(viewer, C); // floating ⟳ knob to grab-rotate the array
-      addLog('SELECT', `array groupKey=${String(groupKey).slice(0,12)} selected ${ids.size} panels red`);
       setStatusMsg(`📐 Array selected — ${ids.size} panel${ids.size !== 1 ? 's' : ''} · DRAG to move · drag the ⟳ knob to rotate · double-click to edit one panel`);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleSelectClick: ${(err as Error).message}`); }
@@ -5907,9 +5911,12 @@ function SolarEngine3D({
         new C.Cartesian3(p.x, p.y, p.z)
       );
 
-      // Render professional plane visualization (fill + grid + glow + arrows + normal + label)
+      // v62: mark-only faces render as a clean outline (no fill/grid/label/arrows).
+      if (!fillPanels) markOnlyPlaneIdsRef.current.add(plane.id);
+
+      // Render plane visualization (full for panel planes; outline-only for marked).
       const isSelected = selectedRoofPlaneId === plane.id;
-      const entityIds  = renderPlane3DEntity(viewer, C, projectedCesiumPts, plane.id, frame, isSelected);
+      const entityIds  = renderPlane3DEntity(viewer, C, projectedCesiumPts, plane.id, frame, isSelected, !fillPanels);
       plane3DEntitiesRef.current = [...plane3DEntitiesRef.current, ...entityIds];
 
       // Store per-plane data for re-rendering on selection change
@@ -5920,22 +5927,11 @@ function SolarEngine3D({
       // Clear in-progress preview
       clearPlane3DPreview(viewer);
 
-      // v47.124: Render frame axis debug arrows (red=u, green=v, blue=n)
-      try {
-        renderFrameAxes(
-          viewer, C, plane,
-          cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0,
-          `plane3d-${plane.id.slice(0, 6)}`
-        );
-      } catch (e: unknown) {
-        console.warn('[finalizePlane3D] renderFrameAxes failed:', (e as Error).message);
-      }
-
-      // v47.141: Full geometry audit — polygon vertices, ECEF frame axes, UV bbox
-      try {
-        renderPlaneDebugAudit(viewer, C, plane, `plane3d-${plane.id.slice(0, 6)}`);
-      } catch (e: unknown) {
-        console.warn('[finalizePlane3D] renderPlaneDebugAudit failed:', (e as Error).message);
+      // v62: frame-axis arrows + geometry audit are DEBUG overlays — off by default
+      // (they cluttered the scene once multiple faces were marked).
+      if (DEBUG_PLANE_OVERLAYS) {
+        try { renderFrameAxes(viewer, C, plane, cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0, `plane3d-${plane.id.slice(0, 6)}`); } catch (e) { console.warn('[finalizePlane3D] renderFrameAxes failed:', (e as Error).message); }
+        try { renderPlaneDebugAudit(viewer, C, plane, `plane3d-${plane.id.slice(0, 6)}`); } catch (e) { console.warn('[finalizePlane3D] renderPlaneDebugAudit failed:', (e as Error).message); }
       }
 
       // Notify DesignStudio (adds plane to roofPlanes state)
@@ -6011,11 +6007,9 @@ function SolarEngine3D({
         // Phase 2: render roof rails after plane3d fill
         try { renderRoofRails(viewer, C, merged); } catch (e) { handleCesiumError('renderRoofRails plane3d', e, true); }
 
-        // v47.126: Show bounding box overlay + panel count feedback
-        try {
-          renderLayoutBBox(viewer, C, filtered, plane.id);
-        } catch (e: unknown) {
-          console.warn('[PLANE3D] renderLayoutBBox failed:', (e as Error).message);
+        // v47.126: bounding-box overlay — debug only
+        if (DEBUG_PLANE_OVERLAYS) {
+          try { renderLayoutBBox(viewer, C, filtered, plane.id); } catch (e) { console.warn('[PLANE3D] renderLayoutBBox failed:', (e as Error).message); }
         }
 
         setStatusMsg(
@@ -7093,11 +7087,9 @@ function SolarEngine3D({
 
       addLog('AUTO', `[CL] plane[${planeIdx}] id=${plane.id.slice(0,8)} -> ${planePanels.length} panels (engine=${clAutoResult.engineUsed}, frame: ${(plane as any).localFrame3D ? 'stable' : 'fallback'})`);
 
-      // ── Debug frame axes: red=u, green=v, blue=n ─────────────────────────
-      try {
-        renderFrameAxes(viewer, C, plane as any, groundElev, `auto-${planeIdx}`);
-      } catch (e: unknown) {
-        console.warn('[AUTO] renderFrameAxes failed:', (e as Error).message);
+      // ── Debug frame axes (red=u, green=v, blue=n) — off by default ──────────
+      if (DEBUG_PLANE_OVERLAYS) {
+        try { renderFrameAxes(viewer, C, plane as any, groundElev, `auto-${planeIdx}`); } catch (e) { console.warn('[AUTO] renderFrameAxes failed:', (e as Error).message); }
       }
 
       newPanels.push(...planePanels);
@@ -7137,11 +7129,9 @@ function SolarEngine3D({
     try { renderRoofRails(viewer, C, newPanels); } catch (e) { handleCesiumError('renderRoofRails auto', e, true); }
     setStatusMsg(`Auto-roof: ${newPanels.length} panels on ${eligiblePlanes.length} roof planes (frame-locked)`);
 
-    // v47.126: Show bounding box for all auto-filled panels
-    try {
-      renderLayoutBBox(viewer, C, newPanels, 'auto');
-    } catch (e: unknown) {
-      console.warn('[AUTO] renderLayoutBBox failed:', (e as Error).message);
+    // v47.126: bounding box for auto-filled panels — debug only
+    if (DEBUG_PLANE_OVERLAYS) {
+      try { renderLayoutBBox(viewer, C, newPanels, 'auto'); } catch (e) { console.warn('[AUTO] renderLayoutBBox failed:', (e as Error).message); }
     }
 
     try { viewer.scene.requestRender(); } catch {}

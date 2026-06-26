@@ -611,10 +611,31 @@ export function renderPlane3DEntity(
   planeId: string,
   frame?: Plane3DFrame,
   selected = false,
+  outlineOnly = false, // marked faces (no panels) → clean outline, no fill/grid/label/arrows
 ): string[] {
   const entityIds: string[] = [];
 
   try {
+    // ── OUTLINE-ONLY (Mark Plane) ────────────────────────────────────────────
+    // A face marked for the roof model but not paneled: just a crisp edge, so the
+    // roof reads clean and the Roof Model edge colours stand out (no dark fill,
+    // no grid, no label, no slope arrows).
+    if (outlineOnly) {
+      const ring = [...pts3D, pts3D[0]];
+      const outline = viewer.entities.add({
+        name: `[PLANE3D-OUTLINE] ${planeId}`,
+        polyline: {
+          positions:     ring,
+          width:         selected ? 3 : 2,
+          material:      selected ? C.Color.fromCssColorString('#00e5ff').withAlpha(0.95) : C.Color.WHITE.withAlpha(0.55),
+          clampToGround: false,
+          arcType:       C.ArcType.NONE,
+        },
+      });
+      entityIds.push(outline.id);
+      return entityIds;
+    }
+
     // ── 1. FLAT ROOF OVERLAY ─────────────────────────────────────────────
     // v47.140: Section 1 — Flat roof overlay rendered from PROJECTED polygon pts.
     // pts3D are MATHEMATICALLY PLANAR (computed by computePlaneFromPoints3D),
