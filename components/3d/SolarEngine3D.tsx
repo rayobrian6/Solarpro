@@ -2483,7 +2483,16 @@ function SolarEngine3D({
       return;
     }
 
-    // Edge midpoints (ECEF) across all planes → hips/valleys = edges shared with another plane.
+    // Per-plane centroid (ECEF) + id lookup for hip/valley convexity classification.
+    renderables.forEach(rp => {
+      const c = new C.Cartesian3(0, 0, 0);
+      rp.corners.forEach((p: any) => C.Cartesian3.add(c, p, c));
+      (rp as any).centroid = C.Cartesian3.divideByScalar(c, rp.corners.length, c);
+    });
+    const byId = new Map(renderables.map(rp => [rp.id, rp]));
+
+    // Edge midpoints (ECEF) across all planes → an edge shared with another plane is a
+    // hip or a valley; partnerOf returns the OTHER plane meeting at that edge.
     const allMids: Array<{ mid: any; pid: string }> = [];
     renderables.forEach(rp => {
       for (let i = 0; i < rp.corners.length; i++) {
@@ -2491,8 +2500,10 @@ function SolarEngine3D({
         allMids.push({ mid: C.Cartesian3.midpoint(a, b, new C.Cartesian3()), pid: rp.id });
       }
     });
-    const isShared = (pid: string, mid: any) =>
-      allMids.some(e => e.pid !== pid && C.Cartesian3.distance(e.mid, mid) < 1.2);
+    const partnerOf = (pid: string, mid: any): any => {
+      const m = allMids.find(e => e.pid !== pid && C.Cartesian3.distance(e.mid, mid) < 1.2);
+      return m ? byId.get(m.pid) : null;
+    };
 
     renderables.forEach(rp => {
       const { u, v, n, origin, corners } = rp;
@@ -2515,11 +2526,18 @@ function SolarEngine3D({
       for (let i = 0; i < uv.length; i++) {
         const a = uv[i], b = uv[(i + 1) % uv.length];
         const mid = C.Cartesian3.midpoint(corners[i], corners[(i + 1) % corners.length], new C.Cartesian3());
-        const shared = isShared(rp.id, mid);
+        const partner = partnerOf(rp.id, mid);
         let sb = edgeSB, kind = 'rake';
         if (a.vv > vMax - tol && b.vv > vMax - tol)      { sb = ridgeSB; kind = 'ridge'; }
         else if (a.vv < vMin + tol && b.vv < vMin + tol) { sb = eaveSB;  kind = 'eave'; }
-        if (shared) { kind = 'hip/valley'; sb = Math.max(sb, edgeSB); }
+        if (partner) {
+          // Hip (convex fold, roof tents up) vs valley (concave, water collects):
+          // (nA − nB)·(cA − cB) > 0 → normals splay outward → HIP; < 0 → VALLEY.
+          const dN = C.Cartesian3.subtract(rp.n, partner.n, new C.Cartesian3());
+          const dC = C.Cartesian3.subtract((rp as any).centroid, partner.centroid, new C.Cartesian3());
+          kind = C.Cartesian3.dot(dN, dC) > 0 ? 'hip' : 'valley';
+          sb = Math.max(sb, edgeSB);
+        }
         if (sb <= 0.001) continue;
 
         let dx = b.uu - a.uu, dy = b.vv - a.vv;
@@ -2535,10 +2553,11 @@ function SolarEngine3D({
           toEcef(b.uu + inx * sb, b.vv + iny * sb, off),
           toEcef(a.uu + inx * sb, a.vv + iny * sb, off),
         ];
-        const col = shared
-          ? C.Color.fromCssColorString('#ff9500')               // hip/valley → orange
-          : kind === 'ridge' ? C.Color.fromCssColorString('#ff2d2d')   // ridge → red
-          : C.Color.fromCssColorString('#ff6464');              // eave/rake → light red
+        const col =
+            kind === 'hip'    ? C.Color.fromCssColorString('#ff9500')   // hip → orange
+          : kind === 'valley' ? C.Color.fromCssColorString('#22b8ff')   // valley → cyan
+          : kind === 'ridge'  ? C.Color.fromCssColorString('#ff2d2d')   // ridge → red
+          :                     C.Color.fromCssColorString('#ff6464');  // eave/rake → light red
         const ent = viewer.entities.add({
           name: `[SETBACK ${kind} ${rp.id.slice(0, 6)}]`,
           polygon: {
@@ -8558,6 +8577,24 @@ function SolarEngine3D({
           color: '#ccc', fontSize: 12, zIndex: 50, maxWidth: '80%', textAlign: 'center',
         }}>
           {statusMsg}
+        </div>
+      ) : null}
+
+      {/* v62: Fire setback legend — explains the keep-out zone colours */}
+      {stage === 'done' && showSetbackZones ? (
+        <div style={{
+          position: 'absolute', top: 54, left: 12, zIndex: 50,
+          background: 'rgba(15,15,30,0.9)', backdropFilter: 'blur(6px)',
+          border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '6px 9px',
+          color: '#ddd', fontSize: 10, lineHeight: '15px',
+        }}>
+          <div style={{ fontWeight: 700, color: '#ff6464', marginBottom: 3 }}>🔥 Fire setbacks</div>
+          {([['#ff2d2d', 'Ridge'], ['#ff9500', 'Hip'], ['#22b8ff', 'Valley'], ['#ff6464', 'Rake / eave']] as const).map(([c, label]) => (
+            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 2, background: c, display: 'inline-block' }} />
+              {label}
+            </div>
+          ))}
         </div>
       ) : null}
 

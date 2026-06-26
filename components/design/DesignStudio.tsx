@@ -4360,7 +4360,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                           ['Valley', r.valleySetbackInches],
                           ['Hip',    r.hipRoofSetbackInches],
                           ['Eave',   r.eaveSetbackInches],
-                          ['Edge',   r.roofSetbackInches],
+                          ['Perim',  r.roofSetbackInches],
                           ['Pathway', r.pathwayWidthInches],
                         ] : [];
                         return (
