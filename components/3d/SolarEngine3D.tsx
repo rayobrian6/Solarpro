@@ -2231,9 +2231,14 @@ function SolarEngine3D({
     );
     if (roofPanels.length === 0) return;
 
+    // v62: panels rotated out of the plane grid (frameQuat) don't fit the row-spanning
+    // rail logic — they get their own per-panel rails below. Grid rails use the rest.
+    const rotatedPanels = roofPanels.filter(p => (p as any).frameQuat);
+    const gridPanels    = roofPanels.filter(p => !(p as any).frameQuat);
+
     // Group by planeId
     const byPlane = new Map<string, PlacedPanel[]>();
-    for (const panel of roofPanels) {
+    for (const panel of gridPanels) {
       const pid = panel.planeId!;
       if (!byPlane.has(pid)) byPlane.set(pid, []);
       byPlane.get(pid)!.push(panel);
@@ -2434,6 +2439,39 @@ function SolarEngine3D({
       if (planeEntities.length > 0) {
         roofRailMapRef.current.set(planeId, planeEntities);
       }
+    });
+
+    // v62: per-panel rails for ROTATED panels — oriented to the panel's own frame
+    // (frameQuat), so a panel spun to landscape gets rails that follow it instead of
+    // the plane's grid direction. Two rails per panel, at ±25% along its slope axis.
+    const rotByPlane = new Map<string, PlacedPanel[]>();
+    for (const p of rotatedPanels) { const k = p.planeId!; if (!rotByPlane.has(k)) rotByPlane.set(k, []); rotByPlane.get(k)!.push(p); }
+    rotByPlane.forEach((ps, pid) => {
+      const ents: any[] = [];
+      for (const p of ps) {
+        const fq = (p as any).frameQuat;
+        const q = new C.Quaternion(fq.x, fq.y, fq.z, fq.w);
+        const M = C.Matrix3.fromQuaternion(q, new C.Matrix3());
+        const lx = C.Matrix3.getColumn(M, 0, new C.Cartesian3()); // box X (panel-height/slope axis)
+        const lz = C.Matrix3.getColumn(M, 2, new C.Cartesian3()); // box Z (face normal)
+        const pos = safeCartesian3(C, p.lng, p.lat, p.height ?? 0);
+        if (!pos) continue;
+        const dims = panelDims(((p as any).orientation ?? 'portrait') as PanelOrientation);
+        for (const sgn of [0.25, -0.25]) {
+          const cx = pos.x + lx.x * (dims.ph * sgn) - lz.x * inwardM;
+          const cy = pos.y + lx.y * (dims.ph * sgn) - lz.y * inwardM;
+          const cz = pos.z + lx.z * (dims.ph * sgn) - lz.z * inwardM;
+          try {
+            ents.push(viewer.entities.add({
+              name: `roof-rail-rot-${p.id.slice(0, 6)}-${sgn > 0 ? 'lo' : 'hi'}`,
+              position: new C.Cartesian3(cx, cy, cz),
+              orientation: q,
+              box: { dimensions: new C.Cartesian3(railW * 3, dims.pw, railH * 3), material: new C.ColorMaterialProperty(railColor), outline: false, shadows: C.ShadowMode.DISABLED },
+            }));
+          } catch (e) { handleCesiumError('renderRoofRails rotated', e, true); }
+        }
+      }
+      if (ents.length > 0) roofRailMapRef.current.set(`${pid}-rot`, ents);
     });
   }
 
