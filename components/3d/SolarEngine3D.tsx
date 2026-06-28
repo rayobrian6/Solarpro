@@ -2453,35 +2453,38 @@ function SolarEngine3D({
       for (const p of ps) {
         const pos = safeCartesian3(C, p.lng, p.lat, p.height ?? 0);
         if (!pos) continue;
-        const n = C.Cartesian3.normalize(new C.Cartesian3(p.ecefNx!, p.ecefNy!, p.ecefNz!), new C.Cartesian3());
-        const up = C.Cartesian3.normalize(C.Cartesian3.clone(pos), new C.Cartesian3());
-        let u = C.Cartesian3.cross(up, n, new C.Cartesian3());          // horizontal eave
-        if (C.Cartesian3.magnitude(u) < 1e-6) u = new C.Cartesian3(p.ecefUx!, p.ecefUy!, p.ecefUz!);
-        C.Cartesian3.normalize(u, u);
-        const v = C.Cartesian3.normalize(C.Cartesian3.cross(n, u, new C.Cartesian3()), new C.Cartesian3()); // slope
-        // Panel footprint extents along the horizontal eave (u) and the slope (v),
-        // from its box axes (ph along local X, pw along local Y) under its frameQuat.
+        // Panel's own box axes under its rotation: lX along ph, lY along pw, lZ = normal.
         const fq = (p as any).frameQuat;
         const M = C.Matrix3.fromQuaternion(new C.Quaternion(fq.x, fq.y, fq.z, fq.w), new C.Matrix3());
         const lX = C.Matrix3.getColumn(M, 0, new C.Cartesian3());
         const lY = C.Matrix3.getColumn(M, 1, new C.Cartesian3());
+        const n  = C.Matrix3.getColumn(M, 2, new C.Cartesian3());
+        const up = C.Cartesian3.normalize(C.Cartesian3.clone(pos), new C.Cartesian3());
+        const eave = C.Cartesian3.cross(up, n, new C.Cartesian3()); // horizontal reference
         const dims = panelDims(((p as any).orientation ?? 'portrait') as PanelOrientation);
-        const extU = Math.abs(C.Cartesian3.dot(lX, u)) * dims.ph + Math.abs(C.Cartesian3.dot(lY, u)) * dims.pw;
-        const extV = Math.abs(C.Cartesian3.dot(lX, v)) * dims.ph + Math.abs(C.Cartesian3.dot(lY, v)) * dims.pw;
-        // rail orientation: box Y along eave u, Z along normal n, X along −v
-        const m2 = new C.Matrix3(-v.x, u.x, n.x, -v.y, u.y, n.y, -v.z, u.z, n.z);
+        // Rails run along whichever PANEL edge is closest to horizontal → square with
+        // the panel AND horizontal when its long edge is. The other edge spaces the rows.
+        const alignX = Math.abs(C.Cartesian3.dot(lX, eave)); // ph edge vs horizontal
+        const alignY = Math.abs(C.Cartesian3.dot(lY, eave)); // pw edge vs horizontal
+        const railAxis = alignX >= alignY ? lX : lY;
+        const railLen  = alignX >= alignY ? dims.ph : dims.pw;
+        const offAxis  = alignX >= alignY ? lY : lX;
+        const offDim   = alignX >= alignY ? dims.pw : dims.ph;
+        // orientation: rail box Y = railAxis (length), Z = n, X = railAxis × n.
+        const Xax = C.Cartesian3.normalize(C.Cartesian3.cross(railAxis, n, new C.Cartesian3()), new C.Cartesian3());
+        const m2 = new C.Matrix3(Xax.x, railAxis.x, n.x, Xax.y, railAxis.y, n.y, Xax.z, railAxis.z, n.z);
         const oq = C.Quaternion.fromRotationMatrix(m2, new C.Quaternion());
         for (const sgn of [0.25, -0.25]) {
           const c = new C.Cartesian3(
-            pos.x + v.x * (extV * sgn) - n.x * inwardM,
-            pos.y + v.y * (extV * sgn) - n.y * inwardM,
-            pos.z + v.z * (extV * sgn) - n.z * inwardM);
+            pos.x + offAxis.x * (offDim * sgn) - n.x * inwardM,
+            pos.y + offAxis.y * (offDim * sgn) - n.y * inwardM,
+            pos.z + offAxis.z * (offDim * sgn) - n.z * inwardM);
           try {
             ents.push(viewer.entities.add({
               name: `roof-rail-rot-${p.id.slice(0, 6)}-${sgn > 0 ? 'lo' : 'hi'}`,
               position: c,
               orientation: oq,
-              box: { dimensions: new C.Cartesian3(railW * 3, extU, railH * 3), material: new C.ColorMaterialProperty(railColor), outline: false, shadows: C.ShadowMode.DISABLED },
+              box: { dimensions: new C.Cartesian3(railW * 3, railLen, railH * 3), material: new C.ColorMaterialProperty(railColor), outline: false, shadows: C.ShadowMode.DISABLED },
             }));
           } catch (e) { handleCesiumError('renderRoofRails rotated', e, true); }
         }
