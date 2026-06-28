@@ -2441,32 +2441,47 @@ function SolarEngine3D({
       }
     });
 
-    // v62: per-panel rails for ROTATED panels — oriented to the panel's own frame
-    // (frameQuat), so a panel spun to landscape gets rails that follow it instead of
-    // the plane's grid direction. Two rails per panel, at ±25% along its slope axis.
+    // v62: per-panel rails for ROTATED panels. Rails are physically HORIZONTAL (run
+    // along the eave), regardless of how the panel is spun — a landscape panel just
+    // clamps onto horizontal rails. So we rebuild the plane's true horizontal eave
+    // (cross(up, normal)) and size each rail to the panel's footprint projected onto
+    // that eave (length) and the slope axis (row spacing).
     const rotByPlane = new Map<string, PlacedPanel[]>();
     for (const p of rotatedPanels) { const k = p.planeId!; if (!rotByPlane.has(k)) rotByPlane.set(k, []); rotByPlane.get(k)!.push(p); }
     rotByPlane.forEach((ps, pid) => {
       const ents: any[] = [];
       for (const p of ps) {
-        const fq = (p as any).frameQuat;
-        const q = new C.Quaternion(fq.x, fq.y, fq.z, fq.w);
-        const M = C.Matrix3.fromQuaternion(q, new C.Matrix3());
-        const lx = C.Matrix3.getColumn(M, 0, new C.Cartesian3()); // box X (panel-height/slope axis)
-        const lz = C.Matrix3.getColumn(M, 2, new C.Cartesian3()); // box Z (face normal)
         const pos = safeCartesian3(C, p.lng, p.lat, p.height ?? 0);
         if (!pos) continue;
+        const n = C.Cartesian3.normalize(new C.Cartesian3(p.ecefNx!, p.ecefNy!, p.ecefNz!), new C.Cartesian3());
+        const up = C.Cartesian3.normalize(C.Cartesian3.clone(pos), new C.Cartesian3());
+        let u = C.Cartesian3.cross(up, n, new C.Cartesian3());          // horizontal eave
+        if (C.Cartesian3.magnitude(u) < 1e-6) u = new C.Cartesian3(p.ecefUx!, p.ecefUy!, p.ecefUz!);
+        C.Cartesian3.normalize(u, u);
+        const v = C.Cartesian3.normalize(C.Cartesian3.cross(n, u, new C.Cartesian3()), new C.Cartesian3()); // slope
+        // Panel footprint extents along the horizontal eave (u) and the slope (v),
+        // from its box axes (ph along local X, pw along local Y) under its frameQuat.
+        const fq = (p as any).frameQuat;
+        const M = C.Matrix3.fromQuaternion(new C.Quaternion(fq.x, fq.y, fq.z, fq.w), new C.Matrix3());
+        const lX = C.Matrix3.getColumn(M, 0, new C.Cartesian3());
+        const lY = C.Matrix3.getColumn(M, 1, new C.Cartesian3());
         const dims = panelDims(((p as any).orientation ?? 'portrait') as PanelOrientation);
+        const extU = Math.abs(C.Cartesian3.dot(lX, u)) * dims.ph + Math.abs(C.Cartesian3.dot(lY, u)) * dims.pw;
+        const extV = Math.abs(C.Cartesian3.dot(lX, v)) * dims.ph + Math.abs(C.Cartesian3.dot(lY, v)) * dims.pw;
+        // rail orientation: box Y along eave u, Z along normal n, X along −v
+        const m2 = new C.Matrix3(-v.x, u.x, n.x, -v.y, u.y, n.y, -v.z, u.z, n.z);
+        const oq = C.Quaternion.fromRotationMatrix(m2, new C.Quaternion());
         for (const sgn of [0.25, -0.25]) {
-          const cx = pos.x + lx.x * (dims.ph * sgn) - lz.x * inwardM;
-          const cy = pos.y + lx.y * (dims.ph * sgn) - lz.y * inwardM;
-          const cz = pos.z + lx.z * (dims.ph * sgn) - lz.z * inwardM;
+          const c = new C.Cartesian3(
+            pos.x + v.x * (extV * sgn) - n.x * inwardM,
+            pos.y + v.y * (extV * sgn) - n.y * inwardM,
+            pos.z + v.z * (extV * sgn) - n.z * inwardM);
           try {
             ents.push(viewer.entities.add({
               name: `roof-rail-rot-${p.id.slice(0, 6)}-${sgn > 0 ? 'lo' : 'hi'}`,
-              position: new C.Cartesian3(cx, cy, cz),
-              orientation: q,
-              box: { dimensions: new C.Cartesian3(railW * 3, dims.pw, railH * 3), material: new C.ColorMaterialProperty(railColor), outline: false, shadows: C.ShadowMode.DISABLED },
+              position: c,
+              orientation: oq,
+              box: { dimensions: new C.Cartesian3(railW * 3, extU, railH * 3), material: new C.ColorMaterialProperty(railColor), outline: false, shadows: C.ShadowMode.DISABLED },
             }));
           } catch (e) { handleCesiumError('renderRoofRails rotated', e, true); }
         }
