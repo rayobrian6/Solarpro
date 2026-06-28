@@ -2,10 +2,16 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import type {
   Project, Layout, PlacedPanel, SolarPanel, Inverter, Battery,
-  SystemType, DrawingMode, RoofPlane, BillAnalysis, BatteryRecommendation
+  SystemType, DrawingMode, RoofPlane, BillAnalysis, BatteryRecommendation,
+  DesignElectrical
 } from '@/types';
 import { generateFenceLayout, calculateSystemSize, polygonAreaM2 } from '@/lib/panelLayout';
 import { generateRoofLayoutOptimized, generateGroundLayoutOptimized, clearGridCache } from '@/lib/panelLayoutOptimized';
+import { assignStrings, type Topology } from '@/lib/stringAssignment';
+import {
+  RACKING_SYSTEMS, OPTIMIZERS, MICROINVERTERS,
+  getMidClampGapMeters, getMidClampGapInches,
+} from '@/lib/equipment-db';
 import { enrichRoofPlaneWithLECS, longestEdgeBearing } from '@/lib/roofGeometry';
 import { enrichRoofPlaneWith3DFrame } from '@/lib/surfaceGeometry3D';
 // v50.11: POA calculation + segment labels
@@ -611,6 +617,110 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [setback, setSetback] = useState(initialSetbackM);
   const [bifacialOptimized, setBifacialOptimized] = useState(true);
 
+  // v63: Strings & equipment visualization + mid-clamp-driven spacing
+  const [rackingId, setRackingId] = useState('ironridge-xr100');
+  const [topology, setTopology] = useState<Topology>('string');
+  const [modulesPerString, setModulesPerString] = useState(10);
+  const [colorByString, setColorByString] = useState(false);
+  const [showEquipment, setShowEquipment] = useState(false);
+  const [panelOpacity, setPanelOpacity] = useState(1);
+  // v63: manual string painting — paint mode, active target string, per-panel overrides
+  const [paintMode, setPaintMode] = useState(false);
+  const [paintStringIndex, setPaintStringIndex] = useState(0);
+  const [stringOverrides, setStringOverrides] = useState<Record<string, number>>({});
+  // Mid-clamp module gap (meters) for the selected racking — drives panel spacing.
+  const midClampGapM = useMemo(() => getMidClampGapMeters(rackingId), [rackingId]);
+  // Apply the hardware mid-clamp gap to the panel spacing whenever the racking changes.
+  const applyRacking = useCallback((id: string) => {
+    setRackingId(id);
+    clearGridCache();
+    setPanelSpacing(getMidClampGapMeters(id));
+  }, []);
+
+  // v63: derive per-panel string + equipment assignment from the placed panels.
+  const stringAssignment = useMemo(
+    () => assignStrings(panels as any, {
+      modulesPerString,
+      topology,
+      modulesPerDevice: 1,
+      optimizerModelId: OPTIMIZERS[0]?.id,
+      microModelId: MICROINVERTERS[0]?.id,
+      overrides: stringOverrides,
+    }),
+    [panels, modulesPerString, topology, stringOverrides],
+  );
+  const panelMeta = useMemo(() => {
+    const m: Record<string, { color?: string; deviceType?: 'optimizer' | 'micro' | 'none'; stringLabel?: string }> = {};
+    for (const id in stringAssignment.byPanelId) {
+      const a = stringAssignment.byPanelId[id];
+      m[id] = { color: a.color, deviceType: a.deviceType, stringLabel: a.stringLabel };
+    }
+    return m;
+  }, [stringAssignment]);
+  const stringLegend = useMemo(
+    () => stringAssignment.strings.map(s => ({ label: s.label, color: s.color, panelCount: s.panelCount })),
+    [stringAssignment],
+  );
+  // Turning equipment view on dims the panels so devices are visible underneath.
+  const toggleEquipment = useCallback(() => {
+    setShowEquipment(prev => {
+      const next = !prev;
+      setPanelOpacity(next ? 0.35 : 1);
+      return next;
+    });
+  }, []);
+
+  // v63: paint mode — clicking a panel in 3D assigns it to the active string.
+  const togglePaintMode = useCallback(() => {
+    setPaintMode(prev => {
+      const next = !prev;
+      if (next) { setColorByString(true); setPlacementMode3D('select'); } // colors must be visible + clicks route to select handler
+      return next;
+    });
+  }, []);
+  const handlePanelPaint = useCallback((panelId: string) => {
+    setStringOverrides(prev => ({ ...prev, [panelId]: paintStringIndex }));
+  }, [paintStringIndex]);
+  const resetStringOverrides = useCallback(() => setStringOverrides({}), []);
+
+  // v63: serialize the current electrical design for the Engineering handoff.
+  // Logged into the saved Layout (only happens when a real project is active —
+  // scratch/testing designs never persist), read by the Engineering page to seed
+  // its inverter/string/topology config with no re-entry.
+  const buildDesignElectrical = useCallback((): DesignElectrical => {
+    const byPanelId: Record<string, number> = {};
+    const stringMap = new Map<number, string[]>();
+    for (const pid in stringAssignment.byPanelId) {
+      const idx = stringAssignment.byPanelId[pid].stringIndex;
+      byPanelId[pid] = idx;
+      const arr = stringMap.get(idx);
+      if (arr) arr.push(pid); else stringMap.set(idx, [pid]);
+    }
+    const strings = [...stringMap.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([stringIndex, panelIds]) => ({ stringIndex, panelCount: panelIds.length, panelIds }));
+    return {
+      topology,
+      inverterBrand: topology === 'micro' ? 'Enphase' : 'SolarEdge',
+      modulesPerString,
+      rackingId,
+      panelId: (selectedPanel as any)?.id,
+      optimizerModelId: topology === 'optimizer' ? OPTIMIZERS[0]?.id : undefined,
+      microModelId: topology === 'micro' ? MICROINVERTERS[0]?.id : undefined,
+      byPanelId,
+      overrides: Object.keys(stringOverrides).length > 0 ? stringOverrides : undefined,
+      strings,
+      deviceCount: stringAssignment.deviceCount,
+      generatedAt: new Date().toISOString(),
+    };
+  }, [stringAssignment, topology, modulesPerString, rackingId, selectedPanel, stringOverrides]);
+
+  // Keep the latest electrical design in a ref for the beforeunload save path.
+  const designElectricalRef = useRef<DesignElectrical | null>(null);
+  useEffect(() => {
+    designElectricalRef.current = panels.length > 0 ? buildDesignElectrical() : null;
+  }, [panels.length, buildDesignElectrical]);
+
   // Phase 2D: ComputedField descriptors for tilt and azimuth with provenance
   const tiltComputed: ComputedFieldValue = useMemo(() => ({
     value: initialTilt,
@@ -823,14 +933,19 @@ export default function DesignStudio({ project, onSave }: Props) {
 
   // ── Auto-save layout to DB (3-second debounce after panel changes) ──────────
   const saveLayoutToDB = useCallback(async (panelList: PlacedPanel[]) => {
-    const panelsJson = JSON.stringify(panelList);
-    if (panelsJson === lastSavedPanelsRef.current) return; // nothing changed
-    lastSavedPanelsRef.current = panelsJson;
+    // v63: fold the electrical design into the dedup signature so topology /
+    // modules-per-string / string-paint changes persist even when panels are unchanged.
+    const designElectrical = panelList.length > 0 ? buildDesignElectrical() : undefined;
+    const sig = JSON.stringify(panelList) + '|' + JSON.stringify(designElectrical ?? null);
+    if (sig === lastSavedPanelsRef.current) return; // nothing changed
+    lastSavedPanelsRef.current = sig;
     const payload = {
       panels: panelList,
       mapCenter: mapCenterRef.current,
       mapZoom: zoomRef.current,
       systemType: project.systemType,
+      // v63: electrical design handoff for Engineering (string/topology/brand/equipment)
+      designElectrical,
       // Include roofPlanes so permit generator can use exact roof geometry
       roofPlanes: roofPlanesRef.current.length > 0 ? roofPlanesRef.current : undefined,
       // Persist fence geometry on autosave too — previously only the manual
@@ -871,7 +986,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       setSaveStatus('error');
       setTimeout(() => setSaveStatus(s => s === 'error' ? 'idle' : s), 5000);
     }
-  }, [project.id, project.systemType]);
+  }, [project.id, project.systemType, buildDesignElectrical]);
 
   // Trigger auto-save 3 seconds after panels change
   useEffect(() => {
@@ -888,12 +1003,15 @@ export default function DesignStudio({ project, onSave }: Props) {
   useEffect(() => {
     const handleBeforeUnload = () => {
       const panelList = panelsRef2.current;
-      if (JSON.stringify(panelList) === lastSavedPanelsRef.current) return;
+      const designElectrical = designElectricalRef.current ?? undefined;
+      const sig = JSON.stringify(panelList) + '|' + JSON.stringify(designElectrical ?? null);
+      if (sig === lastSavedPanelsRef.current) return;
       const payload = JSON.stringify({
         panels: panelList,
         mapCenter: mapCenterRef.current,
         mapZoom: zoomRef.current,
         systemType: project.systemType,
+        designElectrical,
         roofPlanes: roofPlanesRef.current.length > 0 ? roofPlanesRef.current : undefined,
       });
       navigator.sendBeacon(
@@ -920,10 +1038,20 @@ export default function DesignStudio({ project, onSave }: Props) {
         });
         if (data.success && data.data?.panels && data.data.panels.length > 0) {
           setPanels(data.data.panels);
-          lastSavedPanelsRef.current = JSON.stringify(data.data.panels);
+          lastSavedPanelsRef.current = JSON.stringify(data.data.panels) + '|' + JSON.stringify(data.data?.designElectrical ?? null);
           setRestoredPanelCount(data.data.panels.length);
           setLayoutLoadedFromDB(true);
           console.log(`[DesignStudio] Restored ${data.data.panels.length} panels from DB`);
+        }
+        // v63: restore the electrical design (topology / brand / modules-per-string /
+        // racking / manual string-paint overrides) so the UI reflects what was saved.
+        const de = data.data?.designElectrical as DesignElectrical | undefined;
+        if (de) {
+          if (de.topology) setTopology(de.topology);
+          if (typeof de.modulesPerString === 'number') setModulesPerString(de.modulesPerString);
+          if (de.rackingId) setRackingId(de.rackingId);
+          if (de.overrides && Object.keys(de.overrides).length > 0) setStringOverrides(de.overrides);
+          console.log('[DesignStudio] Restored design electrical:', { topology: de.topology, overrides: Object.keys(de.overrides ?? {}).length });
         }
         // CRITICAL FIX: Also restore roofPlanes so roofPlanesRef stays populated
         // Without this, auto-save fires with roofPlanesRef.current = [] and roof planes are lost
@@ -3011,7 +3139,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
     setAutoLayoutRunning(true);
     const minSetback = 0;    // v47.95: no minimum -- AHJ fire setbacks handle clearances
-    const tightSpacing = 0.006; // v47.98: ¼" clamp gap
+    const tightSpacing = midClampGapM; // v63: mid-clamp gap from selected racking (was hardcoded ¼")
     let allNew: PlacedPanel[] = [];
 
     roofPlanes.forEach(plane => {
@@ -3053,7 +3181,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       'Fill Roof complete',
       `${allNew.length} panels · ${(calculateSystemSize(allNew)).toFixed(2)} kW (max density)`
     );
-  }, [roofPlanes, groundArea, selectedPanel, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation]);
+  }, [roofPlanes, groundArea, selectedPanel, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM]);
 
   // ── Optimize Layout: best production/cost ratio (wider row spacing) ──────────
   const optimizeLayout = useCallback(() => {
@@ -3076,7 +3204,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       const fireSetbackM = calcEffectiveSetback(fireSetbacks);
       const newPanels = generateRoofLayoutOptimized({
         layoutId, roofPlane: plane, panel: selectedPanel,
-        setback: optSetback, panelSpacing: 0.006, rowSpacing: optRowSpacingRoof, // v47.98: ¼" clamp gap
+        setback: optSetback, panelSpacing: midClampGapM, rowSpacing: optRowSpacingRoof, // v63: mid-clamp gap from racking
         tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
         orientation: (plane.orientation as 'portrait' | 'landscape' | 'hybrid' | undefined) ?? orientation, // v50.23: per-plane override
         fireSetbackM,
@@ -3092,7 +3220,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       const layoutId = uuidv4();
       const newPanels = generateGroundLayoutOptimized({
         layoutId, area: groundArea, panel: selectedPanel,
-        tilt, azimuth, rowSpacing: optRowSpacingGround, panelSpacing: 0.006, // v47.98: ¼" clamp gap
+        tilt, azimuth, rowSpacing: optRowSpacingGround, panelSpacing: midClampGapM, // v63: mid-clamp gap from racking
         panelsPerRow, groundHeight,
         orientation: (orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape',
       });
@@ -3106,7 +3234,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       'Optimized Layout complete',
       `${allNew.length} panels · ${(calculateSystemSize(allNew)).toFixed(2)} kW · min shading`
     );
-  }, [roofPlanes, groundArea, selectedPanel, setback, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation]);
+  }, [roofPlanes, groundArea, selectedPanel, setback, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM]);
 
   // ── Calculate production ───────────────────────────────────
   const buildSystemDefinition = () => {
@@ -3666,6 +3794,14 @@ export default function DesignStudio({ project, onSave }: Props) {
               showIrradiance={showIrradiance}
               fireSetbacks={fireSetbacks}
               showSetbackZones={showSetbackZones}
+              mountingSystemId={rackingId}
+              colorByString={colorByString}
+              showEquipment={showEquipment}
+              panelOpacity={panelOpacity}
+              panelMeta={panelMeta}
+              stringLegend={stringLegend}
+              paintMode={paintMode}
+              onPanelPaint={handlePanelPaint}
               orientation={(orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape'}
               onOrientationChange={(o) => setOrientation(o)}
               onTwinLoaded={(twin) => {
@@ -4291,6 +4427,137 @@ export default function DesignStudio({ project, onSave }: Props) {
                     <SliderRow label="Row Spacing" value={rowSpacing} min={0.01} max={3.0} step={0.01} unit="m" onChange={v => { clearGridCache(); setRowSpacing(v); }} />
                   ) : null}
                   <SliderRow label="Panel Spacing" value={panelSpacing} min={0.001} max={0.05} step={0.001} unit="m" onChange={v => { clearGridCache(); setPanelSpacing(v); }} />
+
+                  {/* v63: Racking → mid-clamp gap drives panel spacing & the firewalk filter */}
+                  {(activeZoneType === 'roof' || activeZoneType === 'fence') ? (
+                    <div className="py-1">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-slate-400">Racking (mid-clamp)</span>
+                        <span className="text-xs text-cyan-400 font-mono">{getMidClampGapInches(rackingId).toFixed(2)}&quot; gap</span>
+                      </div>
+                      <select
+                        value={rackingId}
+                        onChange={e => applyRacking(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-600 rounded text-xs text-slate-200 px-2 py-1"
+                      >
+                        {RACKING_SYSTEMS.filter(r => activeZoneType === 'fence'
+                          ? r.systemType === 'fence'
+                          : (r.systemType === 'roof' || r.systemType === 'flat_roof')
+                        ).map(r => (
+                          <option key={r.id} value={r.id}>{r.manufacturer} {r.model}</option>
+                        ))}
+                      </select>
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        Mid-clamp gaps accumulate across each row — applied to panel spacing and the firewalk filter.
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {/* v63: Strings & Equipment visualization */}
+                  <div className="py-1 mt-1 border-t border-slate-700/60 pt-2">
+                    <div className="flex items-center gap-1 mb-1.5">
+                      <Zap size={11} className="text-amber-400" />
+                      <span className="text-xs font-medium text-amber-400">Strings &amp; Equipment</span>
+                    </div>
+                    <label className="text-[10px] text-slate-400">Topology</label>
+                    <select
+                      value={topology}
+                      onChange={e => setTopology(e.target.value as Topology)}
+                      className="w-full bg-slate-800 border border-slate-600 rounded text-xs text-slate-200 px-2 py-1 mb-1.5"
+                    >
+                      <option value="string">String (no module electronics)</option>
+                      <option value="optimizer">String + Optimizers</option>
+                      <option value="micro">Microinverters</option>
+                    </select>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] text-slate-400">Modules / string</span>
+                      <input
+                        type="number" min={1} max={30} value={modulesPerString}
+                        onChange={e => setModulesPerString(Math.max(1, Math.min(30, parseInt(e.target.value) || 1)))}
+                        className="w-16 bg-slate-800 border border-slate-600 rounded text-xs text-slate-200 px-2 py-1 text-right"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setColorByString(v => !v)}
+                        className={`flex-1 flex items-center justify-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${colorByString ? 'border-blue-500/50 bg-blue-500/10 text-blue-400' : 'border-slate-600 text-slate-500 hover:text-slate-300'}`}
+                      >
+                        🎨 {colorByString ? 'Strings ✓' : 'Color strings'}
+                      </button>
+                      <button
+                        onClick={toggleEquipment}
+                        className={`flex-1 flex items-center justify-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${showEquipment ? 'border-green-500/50 bg-green-500/10 text-green-400' : 'border-slate-600 text-slate-500 hover:text-slate-300'}`}
+                      >
+                        ⚡ {showEquipment ? 'Equip ✓' : 'Show equip'}
+                      </button>
+                    </div>
+                    {showEquipment ? (
+                      <div className="mt-1.5">
+                        <SliderRow label="Panel Opacity" value={panelOpacity} min={0.1} max={1} step={0.05} unit="" onChange={setPanelOpacity} />
+                      </div>
+                    ) : null}
+                    {(colorByString || showEquipment) ? (
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        {stringAssignment.strings.length} string{stringAssignment.strings.length !== 1 ? 's' : ''}
+                        {stringAssignment.deviceType !== 'none'
+                          ? ` · ${stringAssignment.deviceCount} ${stringAssignment.deviceType === 'micro' ? 'micros' : 'optimizers'}`
+                          : ''}
+                      </p>
+                    ) : null}
+
+                    {/* v63: Manual string painting — click panels in 3D to assign them */}
+                    {panels.length > 0 ? (
+                      <div className="mt-2 pt-2 border-t border-slate-700/40">
+                        <button
+                          onClick={togglePaintMode}
+                          className={`w-full flex items-center justify-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${paintMode ? 'border-fuchsia-500/60 bg-fuchsia-500/10 text-fuchsia-300' : 'border-slate-600 text-slate-500 hover:text-slate-300'}`}
+                        >
+                          🖌 {paintMode ? 'Painting — click panels' : 'Paint strings'}
+                        </button>
+                        {paintMode ? (
+                          <div className="mt-1.5">
+                            <div className="text-[10px] text-slate-400 mb-1">Active string (click panels in 3D to assign):</div>
+                            <div className="flex flex-wrap gap-1">
+                              {stringAssignment.strings.map(s => (
+                                <button
+                                  key={s.stringIndex}
+                                  onClick={() => setPaintStringIndex(s.stringIndex)}
+                                  className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${paintStringIndex === s.stringIndex ? 'border-white text-white' : 'border-transparent text-slate-900'}`}
+                                  style={{ background: s.color }}
+                                  title={`${s.label} · ${s.panelCount} panels`}
+                                >
+                                  S{s.stringIndex + 1}
+                                </button>
+                              ))}
+                              {(() => {
+                                const nextIdx = stringAssignment.strings.length > 0
+                                  ? Math.max(...stringAssignment.strings.map(s => s.stringIndex)) + 1
+                                  : 0;
+                                return (
+                                  <button
+                                    onClick={() => setPaintStringIndex(nextIdx)}
+                                    className={`text-[10px] px-1.5 py-0.5 rounded border ${paintStringIndex === nextIdx ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300' : 'border-slate-600 text-slate-400 hover:text-slate-200'}`}
+                                  >
+                                    + New
+                                  </button>
+                                );
+                              })()}
+                            </div>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className="text-[10px] text-slate-500">
+                                → String {paintStringIndex + 1} · {Object.keys(stringOverrides).length} override{Object.keys(stringOverrides).length !== 1 ? 's' : ''}
+                              </span>
+                              {Object.keys(stringOverrides).length > 0 ? (
+                                <button onClick={resetStringOverrides} className="text-[10px] text-slate-400 hover:text-red-400 underline">
+                                  Reset to auto
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
 
                   {/* v30.9 / v50.23: Panel Orientation Toggle — portrait | landscape | hybrid */}
                   <div className="py-1">

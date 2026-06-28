@@ -479,6 +479,7 @@ export interface UpsertLayoutData {
   systemSizeKw?: number;
   mapCenter?: Layout['mapCenter'];
   mapZoom?: number;
+  designElectrical?: Layout['designElectrical'];
 }
 
 export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
@@ -522,7 +523,7 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
         AND user_id = ${data.userId}
       RETURNING *
     `;
-    return rowToLayout(rows[0]);
+    return await applyDesignElectrical(sql, data, rowToLayout(rows[0]));
   } else {
     // INSERT new layout
     const rows = await sql`
@@ -553,8 +554,32 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
       )
       RETURNING *
     `;
-    return rowToLayout(rows[0]);
+    return await applyDesignElectrical(sql, data, rowToLayout(rows[0]));
   }
+}
+
+// v63: Persist the Design Studio electrical handoff in a SEPARATE conditional
+// write so the main layout save never depends on the design_electrical column
+// existing. If migration 096 hasn't been run yet, the UPDATE throws "column does
+// not exist" and we swallow it — the layout still saves, the handoff just isn't
+// stored until the migration runs.
+async function applyDesignElectrical(
+  sql: any,
+  data: UpsertLayoutData,
+  saved: Layout,
+): Promise<Layout> {
+  if (!data.designElectrical) return saved;
+  try {
+    await sql`
+      UPDATE layouts
+      SET design_electrical = ${JSON.stringify(data.designElectrical)}::jsonb
+      WHERE project_id = ${data.projectId} AND user_id = ${data.userId}
+    `;
+    saved.designElectrical = data.designElectrical;
+  } catch (e) {
+    console.warn('[upsertLayout] design_electrical not persisted (run migration 096):', (e as Error)?.message);
+  }
+  return saved;
 }
 
 // ============================================================

@@ -297,6 +297,7 @@ export function rowToLayout(row: Record<string, unknown>): Layout {
     systemSizeKw: (row.system_size_kw as number) || 0,
     mapCenter: (row.map_center as Layout['mapCenter']) || { lat: 0, lng: 0 },
     mapZoom: (row.map_zoom as number) || 18,
+    designElectrical: (row.design_electrical as Layout['designElectrical']) ?? undefined,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };

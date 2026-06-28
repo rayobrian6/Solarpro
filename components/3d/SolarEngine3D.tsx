@@ -254,6 +254,20 @@ interface Props {
   }>;
   /** v50.11: Show irradiance heatmap overlay on the 3D roof */
   showIrradiance?: boolean;
+  /** v63: Color each panel by its string assignment instead of system-type color. */
+  colorByString?: boolean;
+  /** v63: Render optimizer / microinverter device boxes mounted under each panel. */
+  showEquipment?: boolean;
+  /** v63: Panel face opacity (0.1–1). Lower it to reveal equipment under the panels. */
+  panelOpacity?: number;
+  /** v63: Per-panel string color + device type, keyed by panel id (from stringAssignment.ts). */
+  panelMeta?: Record<string, { color?: string; deviceType?: 'optimizer' | 'micro' | 'none'; stringLabel?: string }>;
+  /** v63: Legend rows for the string / equipment overlay shown in the 3D view. */
+  stringLegend?: Array<{ label: string; color: string; panelCount?: number }>;
+  /** v63: Manual string-painting mode. When true, a panel click reports the panel
+   *  id via onPanelPaint instead of running the normal select/array behavior. */
+  paintMode?: boolean;
+  onPanelPaint?: (panelId: string) => void;
 }
 
 function log(tag: string, msg: string, data?: any) {
@@ -387,6 +401,13 @@ function SolarEngine3D({
   onOrientationChange,
   orientation: orientationProp,
   showIrradiance = false,
+  colorByString = false,
+  showEquipment = false,
+  panelOpacity = 1,
+  panelMeta,
+  stringLegend,
+  paintMode = false,
+  onPanelPaint,
 }: Props) {
   const cesiumRef   = useRef<HTMLDivElement>(null);
   const viewerRef   = useRef<any>(null);
@@ -411,6 +432,15 @@ function SolarEngine3D({
   const selectedPanelRef = useRef<Props['selectedPanel']>(selectedPanel);
   // mountingSystemIdRef: always current mounting system ID — read inside closures without stale prop
   const mountingSystemIdRef = useRef<string>(mountingSystemId);
+  // v63: string-coloring + equipment-overlay state, read inside render closures.
+  const colorByStringRef = useRef<boolean>(colorByString);
+  const showEquipmentRef = useRef<boolean>(showEquipment);
+  const panelOpacityRef  = useRef<number>(panelOpacity);
+  const panelMetaRef      = useRef<Props['panelMeta']>(panelMeta);
+  const paintModeRef      = useRef<boolean>(paintMode);
+  const onPanelPaintRef   = useRef<Props['onPanelPaint']>(onPanelPaint);
+  // equipmentMapRef: Cesium device-box entities (optimizer/micro) keyed by panel id.
+  const equipmentMapRef   = useRef<Map<string, any>>(new Map());
   // roofRailMapRef: Cesium entities keyed by planeId for roof rail visualization (Phase 2).
   // Cleared and rebuilt whenever renderAllPanels rebuilds the panel set.
   const roofRailMapRef = useRef<Map<string, any[]>>(new Map());
@@ -422,7 +452,7 @@ function SolarEngine3D({
   // boot() checks this ref at completion and renders them if panels prop is still [].
   const pendingPanelsRef    = useRef<PlacedPanel[]>([]);
   // renderAllPanelsRef: exposes renderAllPanels to the panels useEffect below.
-  const renderAllPanelsRef  = useRef<((viewer: any, C: any, list: PlacedPanel[]) => void) | null>(null);
+  const renderAllPanelsRef  = useRef<((viewer: any, C: any, list: PlacedPanel[], forceFullRebuild?: boolean) => void) | null>(null);
 
   // orbitRef: mutable orbit state for the custom turntable camera controller.
   // Updated inside mousedown/mousemove/wheel handlers inside boot().
@@ -780,6 +810,32 @@ function SolarEngine3D({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showRoofModel, roofPlanes, panels, stage]);
   useEffect(() => { mountingSystemIdRef.current = mountingSystemId; }, [mountingSystemId]);
+  useEffect(() => { paintModeRef.current = paintMode; }, [paintMode]);
+  useEffect(() => { onPanelPaintRef.current = onPanelPaint; }, [onPanelPaint]);
+
+  // v63: keep string-coloring / equipment refs current, then force a full panel
+  // rebuild so colors, opacity and device boxes refresh. Only rebuild when the
+  // overlay is active (or was just turned off, to revert colors / clear devices);
+  // when both toggles are off, panelMeta churn from panel edits is ignored so we
+  // don't trigger a wasteful full rebuild (and the panel "blink") on every click.
+  const prevVizRef = useRef({ colorByString: false, showEquipment: false });
+  useEffect(() => {
+    colorByStringRef.current = colorByString;
+    showEquipmentRef.current = showEquipment;
+    panelOpacityRef.current  = panelOpacity;
+    panelMetaRef.current      = panelMeta;
+    const viewer = viewerRef.current;
+    const C = (window as any).Cesium;
+    const prev = prevVizRef.current;
+    prevVizRef.current = { colorByString, showEquipment };
+    if (!viewer || !C || !renderAllPanelsRef.current) return;
+    const active    = colorByString || showEquipment;
+    const turnedOff = (prev.colorByString && !colorByString) || (prev.showEquipment && !showEquipment);
+    if (active || turnedOff) {
+      renderAllPanelsRef.current(viewer, C, panelsRef.current, true /* forceFullRebuild */);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [colorByString, showEquipment, panelOpacity, panelMeta]);
 
   // v47.122: Re-render all tracked planes when selection changes
   // Selected plane → bright highlight; all others → dimmed
@@ -2892,6 +2948,76 @@ function SolarEngine3D({
     setStatusMsg(`🔗 Stitched — ${lastShared} shared point${lastShared !== 1 ? 's' : ''} averaged (multi-pass)`);
   }
 
+  // ── v63: Equipment overlay (optimizers / microinverters) ────────────────────
+  function clearEquipment(viewer: any) {
+    equipmentMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
+    equipmentMapRef.current.clear();
+  }
+
+  /**
+   * Render a small device box mounted just under each panel that carries an
+   * optimizer or microinverter (per panelMeta). Reads the panel entity's own
+   * world pose so the device inherits the panel's exact position + orientation,
+   * then offsets it along -normal to sit between the panel and the roof. The
+   * device is revealed when the user lowers panel opacity.
+   */
+  function renderEquipment(viewer: any, C: any, panelList: PlacedPanel[]) {
+    clearEquipment(viewer);
+    const meta = panelMetaRef.current;
+    if (!meta) return;
+    for (const panel of panelList) {
+      const m = meta[panel.id];
+      if (!m || !m.deviceType || m.deviceType === 'none') continue;
+      const frameEntity = panelMapRef.current.get(panel.id);
+      if (!frameEntity) continue;
+      let pos: any, orientation: any;
+      try {
+        pos = frameEntity.position?.getValue?.(C.JulianDate.now()) ?? frameEntity.position?._value;
+        orientation = frameEntity.orientation?.getValue?.(C.JulianDate.now()) ?? frameEntity.orientation?._value;
+      } catch { continue; }
+      if (!pos || !orientation) continue;
+      // Face normal = Z column of the orientation rotation matrix (ECEF).
+      const rotM = C.Matrix3.fromQuaternion(orientation);
+      const n = C.Matrix3.getColumn(rotM, 2, new C.Cartesian3());
+      // Mount the device ~7cm under the panel face (between panel and roof).
+      const UNDER = 0.07;
+      const dpos = new C.Cartesian3(pos.x - n.x * UNDER, pos.y - n.y * UNDER, pos.z - n.z * UNDER);
+      const isMicro = m.deviceType === 'micro';
+      // Device footprints (m): micro ~212×175×32, optimizer ~155×110×32.
+      const dim = isMicro
+        ? new C.Cartesian3(0.212, 0.175, 0.032)
+        : new C.Cartesian3(0.155, 0.110, 0.032);
+      const col = isMicro
+        ? C.Color.fromCssColorString('#16a34a')   // micro → green
+        : C.Color.fromCssColorString('#f59e0b');  // optimizer → amber
+      const ent = viewer.entities.add({
+        name: `[EQUIP] ${m.deviceType} ${panel.id}`,
+        position: dpos,
+        orientation,
+        box: {
+          dimensions:               dim,
+          material:                 new C.ColorMaterialProperty(col),
+          outline:                  true,
+          outlineColor:             C.Color.fromCssColorString('#0b0f17').withAlpha(0.9),
+          outlineWidth:             1,
+          shadows:                  C.ShadowMode.DISABLED,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
+      equipmentMapRef.current.set(panel.id, ent);
+    }
+    try { viewer.scene.requestRender(); } catch {}
+  }
+
+  // Refresh equipment boxes to match current panels + meta (or clear them off).
+  function refreshEquipment(viewer: any, C: any, panelList: PlacedPanel[]) {
+    if (showEquipmentRef.current) {
+      try { renderEquipment(viewer, C, panelList); } catch (e) { handleCesiumError('renderEquipment', e, true); }
+    } else {
+      clearEquipment(viewer);
+    }
+  }
+
   function renderAllPanels(viewer: any, C: any, panelList: PlacedPanel[], forceFullRebuild = false) {
     const prev = lastRenderedPanelsRef.current;
 
@@ -2905,6 +3031,7 @@ function SolarEngine3D({
       lastRenderedPanelsRef.current = panelList;
       // Phase 2: rebuild roof rails after full panel rebuild
       try { renderRoofRails(viewer, C, panelList); } catch (e) { handleCesiumError('renderRoofRails full', e, true); }
+      refreshEquipment(viewer, C, panelList); // v63
       try { viewer.scene.requestRender(); } catch {}
       return;
     }
@@ -2961,6 +3088,7 @@ function SolarEngine3D({
     if (changed) {
       // Phase 2: rebuild roof rails whenever panel set changes
       try { renderRoofRails(viewer, C, panelList); } catch (e) { handleCesiumError('renderRoofRails incr', e, true); }
+      refreshEquipment(viewer, C, panelList); // v63
       try { viewer.scene.requestRender(); } catch {}
     }
   }
@@ -3132,17 +3260,22 @@ function SolarEngine3D({
         // its system color. This kills the "array disappears / blinks" symptom regardless
         // of what triggered the re-render (a stray [panels] diff, a nudge re-add, etc).
         const isSel = selectedPanelIdsRef.current.has(panel.id);
+        const meta  = panelMetaRef.current?.[panel.id];
+        // v63: panel face opacity — lower it to reveal equipment under the panels.
+        const effOpacity = Math.max(0.1, Math.min(1, panelOpacityRef.current ?? 1));
+        // v63: color-by-string overrides the system-type color when enabled.
+        const baseCol = (colorByStringRef.current && meta?.color)
+          ? C.Color.fromCssColorString(meta.color)
+          : systemTypeColor(C, sType);
         cellMaterial    = isSel
           ? new C.ColorMaterialProperty(C.Color.fromCssColorString('#ff3333').withAlpha(0.92))
-          : new C.ColorMaterialProperty(systemTypeColor(C, sType));
+          : new C.ColorMaterialProperty(effOpacity < 1 ? baseCol.withAlpha(effOpacity) : baseCol);
         // Glass sheen: pale blue-silver, very translucent — simulates tempered glass
-        glassColor      = sType === 'roof'
-          ? C.Color.fromCssColorString('#7ab8d4').withAlpha(0.22)   // pale blue glass sheen
-          : sType === 'ground'
-            ? C.Color.fromCssColorString('#7ab8a0').withAlpha(0.22) // pale green glass sheen
-            : C.Color.fromCssColorString('#1a2030').withAlpha(0.35); // dark blue-black bifacial glass (SOL Fence)
+        const glassRgb   = sType === 'roof' ? '#7ab8d4' : sType === 'ground' ? '#7ab8a0' : '#1a2030';
+        const glassAlpha = (sType === 'fence' ? 0.35 : 0.22) * effOpacity;
+        glassColor      = C.Color.fromCssColorString(glassRgb).withAlpha(glassAlpha);
         // Aluminum frame: bright silver-white outline
-        frameOutlineCol = C.Color.fromCssColorString('#c8d0d8').withAlpha(0.88);
+        frameOutlineCol = C.Color.fromCssColorString('#c8d0d8').withAlpha(0.88 * (isSel ? 1 : effOpacity));
       }
 
       addLog('DEBUG', `addPanelEntity ${panel.id} pos=(${panel.lat.toFixed(6)},${panel.lng.toFixed(6)},${h.toFixed(2)}) mag=${mag.toFixed(0)} ecefFrame=${isFinite((panel as any).ecefNx) ? 'yes' : 'HPR'} dims=${pw.toFixed(2)}x${ph.toFixed(2)}`);
@@ -5222,6 +5355,19 @@ function SolarEngine3D({
 
   function handleSelectClick(viewer: any, C: any, screenPos: any) {
     try {
+      // v63: paint mode — a click assigns the hit panel to the active string
+      // (reported to DesignStudio) instead of selecting/moving the array.
+      if (paintModeRef.current) {
+        const hit = pickPanelAtScreen(viewer, screenPos);
+        if (hit.foundId && onPanelPaintRef.current) {
+          onPanelPaintRef.current(hit.foundId);
+          setStatusMsg('🎨 Panel painted to active string');
+          try { viewer.scene.requestRender(); } catch {}
+        } else {
+          setStatusMsg('🎨 Paint mode — click a panel to assign it to the active string');
+        }
+        return;
+      }
       // v31.1: drillPick finds panel entities even when occluded by terrain/3D tiles.
       // v62: GROUP SELECTION (Figma/PowerPoint model — no modes, no new buttons).
       //   • plain click            → select the WHOLE array (move/rotate the array)
@@ -8035,6 +8181,47 @@ function SolarEngine3D({
 
       {/* Cesium container */}
       <div ref={cesiumRef} style={{ width: '100%', height: '100%' }} />
+
+      {/* v63: String / equipment legend overlay */}
+      {(colorByString || showEquipment) && ((stringLegend && stringLegend.length > 0) || showEquipment) ? (
+        <div style={{
+          position: 'absolute', top: 12, right: 12, zIndex: 20,
+          maxHeight: '46%', overflowY: 'auto',
+          background: 'rgba(10,14,24,0.82)', border: '1px solid rgba(148,163,184,0.25)',
+          borderRadius: 8, padding: '8px 10px', backdropFilter: 'blur(4px)',
+          fontSize: 11, color: '#e2e8f0', minWidth: 132,
+        }}>
+          {colorByString && stringLegend && stringLegend.length > 0 ? (
+            <>
+              <div style={{ fontWeight: 600, marginBottom: 5, color: '#94a3b8', letterSpacing: 0.3 }}>
+                STRINGS ({stringLegend.length})
+              </div>
+              {stringLegend.map(s => (
+                <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                  <span style={{ width: 11, height: 11, borderRadius: 2, background: s.color, flex: '0 0 auto', border: '1px solid rgba(255,255,255,0.25)' }} />
+                  <span style={{ flex: 1 }}>{s.label}</span>
+                  {typeof s.panelCount === 'number' ? (
+                    <span style={{ color: '#94a3b8' }}>{s.panelCount}</span>
+                  ) : null}
+                </div>
+              ))}
+            </>
+          ) : null}
+          {showEquipment ? (
+            <div style={{ marginTop: colorByString && stringLegend?.length ? 7 : 0, paddingTop: colorByString && stringLegend?.length ? 6 : 0, borderTop: colorByString && stringLegend?.length ? '1px solid rgba(148,163,184,0.18)' : 'none' }}>
+              <div style={{ fontWeight: 600, marginBottom: 5, color: '#94a3b8', letterSpacing: 0.3 }}>EQUIPMENT</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                <span style={{ width: 11, height: 11, borderRadius: 2, background: '#f59e0b', flex: '0 0 auto' }} />
+                <span>Optimizer</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 11, height: 11, borderRadius: 2, background: '#16a34a', flex: '0 0 auto' }} />
+                <span>Microinverter</span>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Debug Panel removed — was QA-only overlay */}
 
