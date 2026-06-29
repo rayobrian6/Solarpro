@@ -40,6 +40,35 @@ import { v4 as uuidv4 } from 'uuid';
  */
 export const SURFACE_OFFSET_M = 0.12; // v47.143: increased to prevent Z-fighting with mesh
 
+/**
+ * v62: Single source of truth for "was this click on the real 3D mesh?".
+ *
+ * On a bare 2D map (no Google Photorealistic 3D Tiles loaded — fallback to
+ * satellite imagery + WGS84 ellipsoid), every pick in plane3d/mark_plane mode
+ * falls through getWorldPosition's chain (3D tiles → terrain globe → ellipsoid)
+ * and lands on the WGS84 ellipsoid at h=0. The trace looks like 3+ points on a
+ * flat horizontal plane: computePlaneFromPoints3D's Newell normal points straight
+ * up, the eave axis falls through to the most-horizontal-edge heuristic, and the
+ * resulting frame is essentially (n=up, u=arbitrary horizontal, v=arbitrary
+ * horizontal). buildSurfaceGrid then places panels on this horizontal frame,
+ * aligned to whatever arbitrary direction — not to the user's traced polygon.
+ * That's the "wonky panels on bare maps" bug.
+ *
+ * The fix is to refuse plane3d/mark_plane input that didn't actually hit the 3D
+ * mesh. Two layers (A + C):
+ *   A. Mode-entry guard in SolarEngine3D.tsx (block the tools when renderMode
+ *      !== 'TILES' — surfaces "use Auto Fill instead").
+ *   C. Click-time defense here: this helper gates each pick. Centralizing the
+ *      check in roofPlane3D.ts keeps the contract testable and prevents drift
+ *      between the two layers if a future change ever drops one.
+ *
+ * Only '3dtiles' is the real-roof pick. 'terrain' and 'ellipsoid' are the
+ * fallback chain that this guard rejects.
+ */
+export function is3DTilesPickMethod(pickMethod: string | undefined | null): boolean {
+  return pickMethod === '3dtiles';
+}
+
 // v47.153: PANEL_STEP_U/V removed.
 // computeGridAlignedOrigin was using these stale step sizes (width+0.02, height+0.05)
 // but buildSurfaceGridECEF is always called with panelSpacingM=0, rowSpacingM=0
