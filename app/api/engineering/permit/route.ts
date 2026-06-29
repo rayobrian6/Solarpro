@@ -17,6 +17,7 @@ import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
 import { generatePermitHTML, PLANSET_ENGINE_VERSION, PDF_PAGE_CONFIG } from '@/lib/permit';
 import type { PermitInput } from '@/lib/permit';
 import { fetchAerialRoofData, type AerialRoofData } from '@/lib/permit/sections/sitePlan';
+import { normalizeToPermitInverters, designToPermitInverters } from '@/lib/system/designToEngineering';
 
 // Site Survey pipeline imports — survey data enriches the permit plan set
 import { fromPhysicalData, type ProjectPhysicalDataRow } from '@/lib/siteSurvey/fromPhysicalData';
@@ -432,6 +433,63 @@ export async function POST(req: NextRequest) {
       };
     } else if (!body.system.inverters) {
       body.system.inverters = [];
+    }
+
+    // ── Backfill inverters/strings from the PERSISTED design when the POSTed
+    // payload is empty or a single-string placeholder ────────────────────────
+    // The planset is built from the Engineering page's live React state at click
+    // time; when that's empty/stale it renders the default "1 string of N + micro"
+    // and discards the real structure (e.g. 11/11/4) + equipment. We pull the
+    // authoritative structure from the DB and run it through normalizeToPermitInverters,
+    // which GUARANTEES a complete shape (every field the renderer reads), so a
+    // partial/stale record can never feed malformed data into generation. Any
+    // failure → keep the original payload (never breaks the permit).
+    try {
+      const invs = (body.system.inverters as any[]) || [];
+      const postedStrings = invs.reduce((s, inv) => s + ((inv?.strings?.length) ?? 0), 0);
+      const placeholder = invs.length === 0 || (invs.length === 1 && ((invs[0]?.strings?.length ?? 0) <= 1));
+      if (placeholder && projectId && isValidUUID(projectId)) {
+        const sql = await getDbReady();
+        let derived: ReturnType<typeof normalizeToPermitInverters> = null;
+
+        // 1) Saved engineering_config (authoritative engineered state), normalized.
+        try {
+          const ecRows = await sql`SELECT engineering_config FROM projects WHERE id = ${projectId} LIMIT 1`;
+          const ec = ecRows[0]?.engineering_config as any;
+          if (Array.isArray(ec?.inverters)) derived = normalizeToPermitInverters(ec.inverters);
+        } catch (ecErr) {
+          console.log('[permit/POST] engineering_config read skipped:', (ecErr as Error)?.message);
+        }
+
+        // 2) Fall back to the 3D design (layout.design_electrical).
+        if (!derived) {
+          try {
+            const loRows = await sql`SELECT design_electrical FROM layouts WHERE project_id = ${projectId} ORDER BY updated_at DESC LIMIT 1`;
+            const de = loRows[0]?.design_electrical as any;
+            if (de && Array.isArray(de.strings) && de.strings.length > 0) {
+              derived = designToPermitInverters(de, { selectedInverterId: (project as any).selectedInverter?.id });
+            }
+          } catch (deErr) {
+            // design_electrical column may not exist yet (migration 096) — non-fatal
+            console.log('[permit/POST] design_electrical read skipped:', (deErr as Error)?.message);
+          }
+        }
+
+        // Only override when the derived structure is richer than the placeholder
+        // (more strings), or when the POSTed payload was empty.
+        if (derived && derived.length > 0) {
+          const derivedStrings = derived.reduce((s, inv) => s + inv.strings.length, 0);
+          if (invs.length === 0 || derivedStrings > postedStrings) {
+            body.system.inverters = derived as any;
+            const t = derived[0].type;
+            body.system.topology = t === 'micro' ? 'microinverter' : t === 'optimizer' ? 'optimizer' : 'string';
+            console.log('[permit/POST] Backfilled inverters from persisted design:',
+              derived.length, 'inverter(s),', derivedStrings, 'strings, topology', body.system.topology);
+          }
+        }
+      }
+    } catch (backfillErr) {
+      console.log('[permit/POST] inverter backfill failed (non-fatal):', (backfillErr as Error)?.message);
     }
 
     // ─── Auto-populate AHJ data from national database ──────────────────────

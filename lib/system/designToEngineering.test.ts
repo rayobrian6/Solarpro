@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { assignStrings } from '@/lib/stringAssignment';
-import { designElectricalToEngineering } from '@/lib/system/designToEngineering';
+import {
+  designElectricalToEngineering,
+  normalizeToPermitInverters,
+  designToPermitInverters,
+} from '@/lib/system/designToEngineering';
 import type { DesignElectrical } from '@/types';
 
 // Build N panels on one plane in a simple row/col grid (7 cols).
@@ -88,5 +92,67 @@ describe('designElectricalToEngineering', () => {
   it('honors a project-pinned inverter id over the topology default', () => {
     const h = designElectricalToEngineering(baseDE, { selectedInverterId: 'enphase-iq8h' });
     expect(h.inverterId).toBe('enphase-iq8h');
+  });
+});
+
+// Guards the server-side planset backfill — the thing that broke generation before.
+describe('normalizeToPermitInverters — guaranteed-complete shape', () => {
+  it('returns null for empty / non-array input (caller keeps original payload)', () => {
+    expect(normalizeToPermitInverters(null)).toBeNull();
+    expect(normalizeToPermitInverters([])).toBeNull();
+    expect(normalizeToPermitInverters('nope')).toBeNull();
+  });
+
+  it('fills every field the planset reads from a partial 11/11/4 config', () => {
+    const raw = [{
+      type: 'string',
+      inverterId: 'se-7600h',
+      strings: [{ panelCount: 11 }, { panelCount: 11 }, { panelCount: 4 }], // missing wireGauge/panelId/etc.
+    }];
+    const out = normalizeToPermitInverters(raw)!;
+    expect(out).toHaveLength(1);
+    expect(out[0].strings.map(s => s.panelCount)).toEqual([11, 11, 4]);
+    expect(out[0].stringsPerInverter).toBe(3);
+    // every field the renderers read is present + typed
+    for (const s of out[0].strings) {
+      expect(typeof s.wireGauge).toBe('string');
+      expect(typeof s.panelId).toBe('string');
+      expect(typeof s.label).toBe('string');
+      expect(s.panelCount).toBeGreaterThan(0);
+    }
+    expect(typeof out[0].model).toBe('string');
+    expect(['string', 'micro', 'optimizer']).toContain(out[0].type);
+  });
+
+  it('drops zero-panel strings and returns null if nothing usable remains', () => {
+    expect(normalizeToPermitInverters([{ type: 'string', strings: [{ panelCount: 0 }] }])).toBeNull();
+  });
+
+  it('coerces an unknown topology to string', () => {
+    const out = normalizeToPermitInverters([{ type: 'weird', strings: [{ panelCount: 10 }] }])!;
+    expect(out[0].type).toBe('string');
+  });
+});
+
+describe('designToPermitInverters', () => {
+  it('builds one valid permit inverter from a design (per-string counts preserved)', () => {
+    const de: DesignElectrical = {
+      topology: 'optimizer', modulesPerString: 11, rackingId: 'ironridge-xr100',
+      panelId: 'rec-alpha-400w', optimizerModelId: 'se-p401',
+      byPanelId: {}, strings: [
+        { stringIndex: 0, panelCount: 11, panelIds: [] },
+        { stringIndex: 1, panelCount: 11, panelIds: [] },
+        { stringIndex: 2, panelCount: 4, panelIds: [] },
+      ], deviceCount: 26, generatedAt: '2026-06-28T00:00:00.000Z',
+    };
+    const out = designToPermitInverters(de)!;
+    expect(out).toHaveLength(1);
+    expect(out[0].type).toBe('optimizer');
+    expect(out[0].strings.map(s => s.panelCount)).toEqual([11, 11, 4]);
+    expect(out[0].optimizerPeripheralId).toBe('se-p401');
+  });
+
+  it('returns null for an empty design', () => {
+    expect(designToPermitInverters({ topology: 'string', modulesPerString: 10, byPanelId: {}, strings: [], deviceCount: 0, generatedAt: '' } as DesignElectrical)).toBeNull();
   });
 });
