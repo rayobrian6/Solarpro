@@ -120,13 +120,22 @@ export function drawRoofPlan(
   const latSpan = maxLat - minLat || 0.001;
   const lngSpan = maxLng - minLng || 0.001;
 
-  const margin  = 40;
+  // Margin leaves room for the dimension lines + callout row outside the roof.
+  const margin  = 52;
   const scaleX  = (dz.width  - 2 * margin) / lngSpan;
   const scaleY  = (dz.height - 2 * margin) / latSpan;
-  const scale   = Math.min(scaleX, scaleY) * 1.35;
+  // Fit-to-frame (was *1.35, which overzoomed and clipped the top hip + the
+  // setback dimension off the page for frame-filling roofs — caught via harness).
+  const scale   = Math.min(scaleX, scaleY);
 
-  const toX = (lng: number) => dz.x  + margin + (lng - minLng) * scale;
-  const toY = (lat: number) => dz.y  + (dz.height - margin) - (lat - minLat) * scale;
+  // Center the roof in the draw zone (was left/bottom-justified, leaving dead
+  // space on the side when fit-to-frame is limited by the other dimension).
+  const roofWpx = lngSpan * scale;
+  const roofHpx = latSpan * scale;
+  const offX = Math.max(0, (dz.width  - 2 * margin - roofWpx) / 2);
+  const offY = Math.max(0, (dz.height - 2 * margin - roofHpx) / 2);
+  const toX = (lng: number) => dz.x  + margin + offX + (lng - minLng) * scale;
+  const toY = (lat: number) => dz.y  + (dz.height - margin) - offY - (lat - minLat) * scale;
 
   // ── Draw roof planes ──
   // Plane labels are collected here and rendered AFTER the panels so the modules
@@ -249,9 +258,11 @@ export function drawRoofPlan(
   // Callout bubbles spread across the TOP of the roof, each pointing straight down
   // to the nearest panel below it — short, near-vertical leaders instead of long
   // diagonals fanning across the whole array (the old crossing "spider-web").
+  // Clamp the row just below the title bar so bubbles never render off-screen when
+  // the roof reaches the top edge (verified via the render harness).
   const cbN      = 5;
   const cbSpanX  = roofMaxX - roofMinX;
-  const cbRowY   = roofMinY - 16;
+  const cbRowY   = Math.max(roofMinY - 16, zones.dims.top + 10);
   for (let i = 0; i < cbN; i++) {
     const frac = (i + 0.5) / cbN;
     const bx   = roofMinX + cbSpanX * frac;
