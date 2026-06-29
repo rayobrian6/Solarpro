@@ -29,6 +29,7 @@ const MOUNTING_BRANDS: string[] = Array.from(new Set(ALL_MOUNTING_SYSTEMS.map(s 
 import { BUILD_VERSION, BUILD_DATE, BUILD_FEATURES } from '@/lib/version';
 // Phase 11 — brand-driven sizing recommendation UI
 import { sizeSystemFromBrand, type SystemSizingResult } from '@/lib/system/sizingEngine';
+import { designElectricalToEngineering } from '@/lib/system/designToEngineering';
 import {
   SizingRecommendation,
   type CurrentConfigSnapshot,
@@ -1450,6 +1451,42 @@ function EngineeringPageInner() {
           patches.utilityId = p.utilityId || patches.utilityId;
           if (panelCount > 0) {
             setAutoLoadBanner(`Loaded from project: ${p.name}${panelCount ? ` (${panelCount} panels, ${systemKw.toFixed(1)} kW)` : ''}`);
+          }
+        }
+
+        // ── v63: Design Studio electrical handoff ───────────────────────────
+        // If the saved layout carries an electrical design (string + topology +
+        // brand + equipment logged in Design Studio when this project was worked
+        // on), seed the engineering inverter config from it — string count, sizes,
+        // topology, brand, panel and racking carry over with NO re-entry. Runs
+        // for both the seed and no-seed branches above. The saved engineering_config
+        // restore below still wins once the engineer customizes in the workspace.
+        const designElec = (layout as any)?.designElectrical as import('@/types').DesignElectrical | undefined;
+        if (designElec && Array.isArray(designElec.strings) && designElec.strings.length > 0) {
+          try {
+            const handoff = designElectricalToEngineering(designElec, {
+              selectedInverterId: p.selectedInverter?.id,
+              tilt:    (patches.roofPitch as number) ?? seed?.tilt ?? 20,
+              azimuth: seed?.azimuth ?? 180,
+            });
+            patches.inverters = [_buildInvCfg({
+              existingId: 'inv-design-0',
+              inverterId: handoff.inverterId,
+              type:       handoff.inverterType,
+              strings:    handoff.strings as unknown as StringConfig[],
+              ...(handoff.optimizerPeripheralId ? { optimizerPeripheralId: handoff.optimizerPeripheralId } : {}),
+            })];
+            if (handoff.mountingId) patches.mountingId = handoff.mountingId;
+            console.log('[EngineeringPage] Seeded inverters from Design Studio electrical handoff:', {
+              topology: designElec.topology,
+              strings:  handoff.strings.length,
+              brand:    handoff.inverterBrand,
+              racking:  handoff.mountingId,
+            });
+            setAutoLoadBanner(prev =>
+              prev ? `${prev} · strings from design` : `✅ Strings loaded from design (${handoff.strings.length} string${handoff.strings.length !== 1 ? 's' : ''})`);
+          } catch (deErr) {
+            console.error('[EngineeringPage] design electrical handoff failed (non-fatal):', deErr);
           }
         }
 
