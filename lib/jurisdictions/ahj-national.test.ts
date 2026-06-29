@@ -8,6 +8,7 @@ import {
   getAhjById,
   getAhjsByState,
   getAhjByAddress,
+  getAhjByCounty,
   getTotalAhjCount,
   getStatesSummary,
   type AhjRecord,
@@ -703,10 +704,12 @@ describe('getAhjByAddress', () => {
     expect(result!.stateCode).toBe('AZ');
   });
 
-  it('falls back to state when city not matched', () => {
+  it('returns null when city is not matched in a multi-AHJ state (no silent wrong guess)', () => {
+    // Old behavior returned the FIRST record in the state — that is exactly the
+    // Wood River → Cook/Chicago bug generalized. Corrected: return null so the
+    // caller uses neutral code-minimum defaults instead of a wrong jurisdiction.
     const result = getAhjByAddress('123 Rural Rd, AZ 85999');
-    expect(result).not.toBeNull();
-    expect(result!.stateCode).toBe('AZ');
+    expect(result).toBeNull();
   });
 
   it('returns null for empty address', () => {
@@ -728,6 +731,53 @@ describe('getAhjByAddress', () => {
     const result = getAhjByAddress('789 Congress Ave, Austin, TX 78701');
     expect(result).not.toBeNull();
     expect(result!.stateCode).toBe('TX');
+  });
+});
+
+// ── getAhjByCounty + Wood River regression ─────────────────────────────────────
+// Wood River, IL is in Madison County (St. Louis metro), ~250mi from Chicago.
+// The old getAhjByAddress fell back to the FIRST IL record (Cook County / Chicago)
+// for any unmatched address, poisoning the planset's wind/snow/utility/permit data.
+
+describe('getAhjByCounty', () => {
+  it('resolves Madison County, IL (Wood River) — not Cook/Chicago', () => {
+    const r = getAhjByCounty('IL', 'Madison');
+    expect(r).not.toBeNull();
+    expect(r!.stateCode).toBe('IL');
+    expect(r!.county).toBe('Madison');
+    expect(r!.county).not.toBe('Cook');
+  });
+
+  it('still resolves Cook County when that IS the county', () => {
+    const r = getAhjByCounty('IL', 'Cook');
+    expect(r).not.toBeNull();
+    expect(r!.county).toBe('Cook');
+  });
+
+  it('returns null for an unknown county', () => {
+    expect(getAhjByCounty('IL', 'Nonexistentcounty')).toBeNull();
+  });
+});
+
+describe('getAhjByAddress — Wood River regression', () => {
+  const woodRiver = '100 Ferguson Ave, Wood River, IL 62095, USA';
+
+  it('uses the county hint to resolve Wood River to Madison County (not Cook)', () => {
+    const r = getAhjByAddress(woodRiver, { stateCode: 'IL', county: 'Madison', city: 'Wood River' });
+    expect(r).not.toBeNull();
+    expect(r!.county).toBe('Madison');
+    expect(r!.county).not.toBe('Cook');
+  });
+
+  it('NEVER silently defaults an unmatched IL address to Cook/Chicago', () => {
+    const r = getAhjByAddress(woodRiver); // no hint, no exact city record
+    expect(r?.county).not.toBe('Cook');
+  });
+
+  it('resolves a county named in the address text', () => {
+    const r = getAhjByAddress('Edwardsville, Madison County, IL');
+    expect(r).not.toBeNull();
+    expect(r!.county).toBe('Madison');
   });
 });
 

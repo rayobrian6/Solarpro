@@ -581,7 +581,16 @@ export default function DesignStudio({ project, onSave }: Props) {
   // ── AHJ-derived initial values (Phase 1 QW-1a/QW-1b) ──────────────────
   // Look up AHJ jurisdiction from project address to get fire setback defaults
   // instead of dangerous zero values. Falls back to national defaults if no match.
-  const ahjRecord = project.address ? getAhjByAddress(project.address) : null;
+  // v63: pass structured county/city/state hints so downstate addresses resolve to
+  // the correct AHJ (e.g. Wood River → Madison County) instead of the old bug that
+  // defaulted every unmatched Illinois address to Cook County / Chicago.
+  const ahjRecord = (project.address || (project as any).county || (project as any).stateCode)
+    ? getAhjByAddress(project.address || '', {
+        stateCode: (project as any).stateCode,
+        county:    (project as any).county,
+        city:      (project as any).city,
+      })
+    : null;
   const INCHES_TO_METERS = 0.0254;
 
   // QW-1a: Compute initial fire setbacks from AHJ jurisdiction data
