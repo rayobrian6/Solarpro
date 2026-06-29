@@ -109,17 +109,12 @@ const DEBUG_PLANE_OVERLAYS = false;
 // off the roof (+ eave jerk). Rebuild with point-in-polygon plane assignment and an
 // on-plane clamp before re-enabling. Free move stays on.
 const ENABLE_PANEL_SNAP = false;
-// v62: per-click trace snap (snap a corner onto an existing plane's point while marking).
-// RE-ENABLED (was false in 0e318b58). 0e318b58 turned this off in favour of a post-hoc
-// "Stitch" button, but that button only averages the RENDER-side corner maps
-// (plane3DCesiumPtsMap) — it never writes back to plane.vertices, the geometry every
-// panel-placement engine reads. So after stitching, adding panels placed them on the
-// OLD un-stitched corners and the roof visibly came apart ("add panels → unstitch").
-// Snapping corners AT TRACE TIME bakes the shared/connected corners straight into
-// plane.vertices, so panels sit on connected geometry and stay stitched. Trade-off:
-// the documented "linear inherits-first-click" imprecision returns (sub-metre); the
-// durable fix is to make Stitch write averaged corners back into plane.vertices.
-const ENABLE_TRACE_SNAP = true;
+// v62: per-click trace snap (snap a corner onto an existing plane's point while marking)
+// stays OFF — it "snaps to the next point" mid-trace, which is exactly the behaviour
+// that defeats free marking. Connection is instead handled by the Stitch button, which
+// now writes the averaged corners BACK into plane.vertices (see stitchRoofVertices →
+// onRoofPlaneStitched) so the geometry panels are placed on follows the stitch.
+const ENABLE_TRACE_SNAP = false;
 
 // ── Mounting-system-aware roof panel offset ─────────────────────────────────
 // Physical stack height from roof deck to panel bottom face:
@@ -231,6 +226,10 @@ interface Props {
   onLocationPick?: (lat: number, lng: number, address: string) => void;
   /** v47.121: Called when user finishes drawing a 3D roof plane (≥3 points picked on 3D tiles) */
   onRoofPlaneCreated?: (plane: import('@/types').RoofPlane) => void;
+  /** v64: Stitch button — push the averaged/connected corners back into roofPlanes
+   *  state so panel placement + persistence use the stitched geometry (not the
+   *  pre-stitch traced corners). One call per Stitch, all updated planes at once. */
+  onRoofPlanesStitched?: (updates: Array<{ id: string; vertices: Array<{ lat: number; lng: number }> }>) => void;
   /** v47.122: ID of the currently selected roof plane (highlights it, dims others) */
   selectedRoofPlaneId?: string;
   /** v47.122: Called when user clicks a roof plane in the 3D view */
@@ -403,6 +402,7 @@ function SolarEngine3D({
   mountingSystemId = 'ironridge-xr100',
   onTwinLoaded, onError, onLocationPick,
   onRoofPlaneCreated,
+  onRoofPlanesStitched,
   selectedRoofPlaneId,
   onRoofPlaneSelect,
   onOrientationChange,
@@ -2959,6 +2959,9 @@ function SolarEngine3D({
     }
     if (lastShared === 0) { setStatusMsg(`Stitch — no shared corners found within ~${TOL}m`); return; }
 
+    // v64: collect the stitched corners (lat/lng) per plane so they can be written
+    // back into roofPlanes state — the geometry every panel-placement engine reads.
+    const stitchUpdates: Array<{ id: string; vertices: Array<{ lat: number; lng: number }> }> = [];
     for (const [pid, pts] of work) {
       const cartPts: Cart3[] = pts.map((p: any) => ({ x: p.x, y: p.y, z: p.z }));
       let frame; try { frame = computePlaneFromPoints3D(cartPts); } catch { continue; }
@@ -2970,11 +2973,25 @@ function SolarEngine3D({
       plane3DEntityMap.current.set(pid, newIds);
       plane3DFrameMap.current.set(pid, frame);
       plane3DCesiumPtsMap.current.set(pid, projected);
+      // projected[i] is the same planarized corner buildRoofPlane3D used to make
+      // plane.vertices[i] — convert back to lat/lng to update the source geometry.
+      const verts: Array<{ lat: number; lng: number }> = [];
+      for (const p of projected) {
+        const carto = C.Cartographic.fromCartesian(p);
+        if (!carto) continue;
+        verts.push({ lat: C.Math.toDegrees(carto.latitude), lng: C.Math.toDegrees(carto.longitude) });
+      }
+      if (verts.length >= 3) stitchUpdates.push({ id: pid, vertices: verts });
     }
     setShowRoofModel(true);
     try { renderRoofWireframe(viewer, C); } catch {}
     if (showSetbackZones) { try { renderFireSetbackZones(viewer, C); } catch {} }
     try { viewer.scene.requestRender(); } catch {}
+    // Sync the stitched geometry into roofPlanes state. The roofPlanes-change
+    // effects only re-render setback/wireframe (no surface rebuild, no panel
+    // refill), so this stays consistent with what we just drew while making panel
+    // placement + persistence use the stitched corners.
+    if (stitchUpdates.length > 0) onRoofPlanesStitched?.(stitchUpdates);
     setStatusMsg(`🔗 Stitched — ${lastShared} shared point${lastShared !== 1 ? 's' : ''} averaged (multi-pass)`);
   }
 

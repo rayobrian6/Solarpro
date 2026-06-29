@@ -3849,6 +3849,19 @@ export default function DesignStudio({ project, onSave }: Props) {
                 console.log('[DesignStudio] 3D plane added:', enrichedPlane.id,
                   `az=${enrichedPlane.azimuth.toFixed(1)}° tilt=${enrichedPlane.pitch.toFixed(1)}°`);
               }}
+              onRoofPlanesStitched={(updates) => {
+                // v64: Stitch wrote averaged/connected corners back. Replace each
+                // plane's vertices with the stitched geometry and re-enrich (LECS +
+                // 3D frame recompute az/tilt/area from the new outline) so panel
+                // placement + persistence follow the stitch instead of the old
+                // un-stitched traced corners.
+                setRoofPlanes(prev => prev.map(p => {
+                  const u = updates.find(x => x.id === p.id);
+                  if (!u || u.vertices.length < 3) return p;
+                  return enrichRoofPlaneWith3DFrame(enrichRoofPlaneWithLECS({ ...p, vertices: u.vertices }));
+                }));
+                console.log('[DesignStudio] Stitch synced', updates.length, 'plane(s) into roofPlanes');
+              }}
             />
           ) : (
             <>
