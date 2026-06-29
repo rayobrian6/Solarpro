@@ -844,14 +844,14 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     --border-hvy: 2px solid #000;
     --border-med: 1.5px solid #000;
 
-    --f-xs:  6.2px;
-    --f-sm:  6.6px;
-    --f-md:  7px;
-    --f-lg:  8px;
-    --f-xl:  9px;
-    --f-2xl:10px;
-    --f-3xl:12px;
-    --f-4xl:16px;
+    --f-xs:  7px;
+    --f-sm:  7.4px;
+    --f-md:  7.9px;
+    --f-lg:  9px;
+    --f-xl:  10px;
+    --f-2xl:11.5px;
+    --f-3xl:13.5px;
+    --f-4xl:18px;
 
     --mono: 'Courier New', Courier, monospace;
     --sans: Arial, 'Helvetica Neue', sans-serif;

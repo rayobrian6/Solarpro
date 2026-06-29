@@ -298,7 +298,8 @@ export interface AerialRoofData {
 export async function fetchAerialRoofData(
   lat: number,
   lng: number,
-  address: string
+  address: string,
+  arrayCenter?: { lat: number; lng: number }
 ): Promise<AerialRoofData> {
   const GKEY = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '';
   if (!GKEY) {
@@ -347,6 +348,30 @@ export async function fetchAerialRoofData(
       console.log('[permit/aerial] Solar API EXCEPTION:', (solarErr as Error)?.message);
     }
 
+    // ── Step 2b: Center the image on the ARRAY, not the parcel pin ────────────
+    // The geocode pin is often the street/parcel centroid; when the roof (and so
+    // the panels) sit off it, the array renders off-frame (the reported bug).
+    // Prefer an explicit array centroid from the caller, else the best (largest,
+    // south-facing) Solar API roof segment center, else the geocode pin.
+    let centerLat = finalLat, centerLng = finalLng;
+    if (arrayCenter && isFinite(arrayCenter.lat) && isFinite(arrayCenter.lng) && Math.abs(arrayCenter.lat) > 0.001) {
+      centerLat = arrayCenter.lat;
+      centerLng = arrayCenter.lng;
+      console.log('[permit/aerial] Centering on caller array centroid');
+    } else if (roofSegments.length > 0) {
+      const wc = roofSegments.filter(s => s.center);
+      if (wc.length > 0) {
+        const best = wc
+          .map(s => ({ s, score: ((s.azimuthDegrees >= 135 && s.azimuthDegrees <= 225) ? 2 : 1) * (s.areaM2 || 1) }))
+          .sort((a, b) => b.score - a.score)[0];
+        if (best?.s.center) {
+          centerLat = best.s.center.lat;
+          centerLng = best.s.center.lng;
+          console.log('[permit/aerial] Centering on best roof segment');
+        }
+      }
+    }
+
     // ── Step 3: Google Maps Static API — satellite image (multi-zoom rural fallback) ──
     const imgSize = '640x640';
     let imageBase64: string | undefined;
@@ -358,7 +383,7 @@ export async function fetchAerialRoofData(
     for (const tryZoom of zoomLevels) {
       const tryUrl =
         `https://maps.googleapis.com/maps/api/staticmap` +
-        `?center=${finalLat},${finalLng}` +
+        `?center=${centerLat},${centerLng}` +
         `&zoom=${tryZoom}` +
         `&size=${imgSize}` +
         `&maptype=satellite` +
@@ -396,7 +421,7 @@ export async function fetchAerialRoofData(
       console.log('[permit/aerial] Satellite failed — trying hybrid maptype fallback...');
       const hybridUrl =
         `https://maps.googleapis.com/maps/api/staticmap` +
-        `?center=${finalLat},${finalLng}` +
+        `?center=${centerLat},${centerLng}` +
         `&zoom=18` +
         `&size=${imgSize}` +
         `&maptype=hybrid` +
@@ -425,8 +450,8 @@ export async function fetchAerialRoofData(
       imageBase64,
       imageWidth,
       imageHeight,
-      lat: finalLat,
-      lng: finalLng,
+      lat: centerLat,   // image is centered here → overlay projects relative to it
+      lng: centerLng,
       zoom: usedZoom,
       roofSegments,
     };

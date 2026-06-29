@@ -490,10 +490,24 @@ export async function POST(req: NextRequest) {
     console.log('[permit/POST] Starting aerial fetch for project address [redacted]');
     console.log('[permit/POST] lat/lng: [redacted]');
     const aerialStart = Date.now();
+    // Center the aerial on the actual array centroid (most accurate framing);
+    // fetchAerialRoofData falls back to the best roof segment, then the geocode pin.
+    const _pp = (body.project as any)?.panelPositions as Array<{ lat: number; lng: number }> | undefined;
+    let _arrayCenter: { lat: number; lng: number } | undefined;
+    if (Array.isArray(_pp)) {
+      const _valid = _pp.filter(p => p && isFinite(p.lat) && isFinite(p.lng) && Math.abs(p.lat) > 0.001);
+      if (_valid.length > 0) {
+        _arrayCenter = {
+          lat: _valid.reduce((s, p) => s + p.lat, 0) / _valid.length,
+          lng: _valid.reduce((s, p) => s + p.lng, 0) / _valid.length,
+        };
+      }
+    }
     const aerialData = await fetchAerialRoofData(
       body.project.lat,
       body.project.lng,
-      body.project?.address || ''
+      body.project?.address || '',
+      _arrayCenter
     ).catch((aerialErr: any) => {
       console.log('[permit/POST] fetchAerialRoofData THREW:', aerialErr?.message);
       return { error: 'Aerial fetch threw: ' + aerialErr?.message } as AerialRoofData;

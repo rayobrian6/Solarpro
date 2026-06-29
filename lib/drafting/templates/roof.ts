@@ -129,6 +129,9 @@ export function drawRoofPlan(
   const toY = (lat: number) => dz.y  + (dz.height - margin) - (lat - minLat) * scale;
 
   // ── Draw roof planes ──
+  // Plane labels are collected here and rendered AFTER the panels so the modules
+  // never paint over them (the old "ANE 2 / E FAC" clipping).
+  const planeLabels: Array<{ cx: number; cy: number; ri: number; pitch: any; azimuth: any }> = [];
   validPlanes.forEach((rp: any, ri: number) => {
     const pts = rp.vertices!.map(
       (v: any) => toX(v.lng).toFixed(1) + ',' + toY(v.lat).toFixed(1)
@@ -153,67 +156,55 @@ export function drawRoofPlan(
     // Fire setback inset (dashed red outline)
     els.push(`<polygon points="${pts}" fill="none" class="line-setbk"/>`);
 
-    // Plane label badge
+    // Plane label — collected, rendered after panels (see planeLabels render below)
     const cx = rp.vertices!.reduce((s: number, v: any) => s + toX(v.lng), 0) / rp.vertices!.length;
     const cy = rp.vertices!.reduce((s: number, v: any) => s + toY(v.lat), 0) / rp.vertices!.length;
-
-    // White background pill for legibility
-    els.push(`<rect x="${(cx - 28).toFixed(1)}" y="${(cy - 20).toFixed(1)}" width="56" height="32" rx="3" fill="rgba(255,255,255,0.80)" stroke="rgba(100,100,100,0.4)" stroke-width="0.6"/>`);
-    els.push(drawText(cx, cy - 8, 'PLANE ' + (ri + 1), {
-      anchor: 'middle', fontSize: 7.5, fill: '#222', fontWeight: 'bold',
-    }));
-    if (rp.pitch !== undefined) {
-      const rise12 = typeof rp.pitch === 'number'
-        ? Math.round(Math.tan(rp.pitch * Math.PI / 180) * 12)
-        : rp.pitch;
-      els.push(drawText(cx, cy + 2, rise12 + ':12 PITCH', {
-        anchor: 'middle', fontSize: 7, fill: '#444',
-      }));
-    }
-    if (rp.azimuth !== undefined) {
-      els.push(drawText(cx, cy + 12, compassDir(rp.azimuth) + ' FACING', {
-        anchor: 'middle', fontSize: 6.5, fill: '#666',
-      }));
-    }
+    planeLabels.push({ cx, cy, ri, pitch: rp.pitch, azimuth: rp.azimuth });
   });
 
   // ── Draw panels (from CAD fake-degree positions) ──
   const panLenPx = Math.max((panelLenIn / 12) * scale * 0.8, 6);
   const panWidPx = Math.max((panelWidIn / 12) * scale * 0.8, 4);
 
+  // Flat, crisp PV modules — uniform fill + thin frame (no gradient/reflection/
+  // busbar clip-art, which muddied to a blue smear at plan scale).
   validPanels.forEach((p: any) => {
     const px = toX(p.lng), py = toY(p.lat);
     const isLandscape = (p.orientation || 'landscape') === 'landscape';
     const pw = isLandscape ? panLenPx : panWidPx;
     const ph = isLandscape ? panWidPx : panLenPx;
+    const x0 = px - pw / 2, y0 = py - ph / 2;
 
-    // Panel body — dark blue PV module with glass gradient
-    els.push(`<rect x="${(px - pw/2).toFixed(1)}" y="${(py - ph/2).toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="url(#panel-glass)" stroke="#0a1e4a" stroke-width="1.0" opacity="0.92" rx="0.5"/>`);
+    // Module body — single flat navy fill + thin dark frame
+    els.push(`<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#1b3f74" stroke="#0a1e4a" stroke-width="0.7" rx="0.4"/>`);
+    // Thin aluminum frame inset
+    els.push(`<rect x="${(x0 + 0.7).toFixed(1)}" y="${(y0 + 0.7).toFixed(1)}" width="${Math.max(pw - 1.4, 0).toFixed(1)}" height="${Math.max(ph - 1.4, 0).toFixed(1)}" fill="none" stroke="rgba(190,210,235,0.5)" stroke-width="0.35"/>`);
+    // One subtle mid seam for the half-cell read (only when large enough)
+    if (ph > 12) {
+      els.push(`<line x1="${(x0 + 1).toFixed(1)}" y1="${py.toFixed(1)}" x2="${(x0 + pw - 1).toFixed(1)}" y2="${py.toFixed(1)}" stroke="rgba(150,180,220,0.4)" stroke-width="0.4"/>`);
+    }
+  });
 
-    // Aluminum frame border (light silver)
-    els.push(`<rect x="${(px - pw/2 + 0.8).toFixed(1)}" y="${(py - ph/2 + 0.8).toFixed(1)}" width="${(pw - 1.6).toFixed(1)}" height="${(ph - 1.6).toFixed(1)}" fill="none" stroke="rgba(180,200,220,0.7)" stroke-width="0.6"/>`);
-
-    // Glass reflection highlight (upper-left diagonal)
-    if (pw > 12 && ph > 8) {
-      const rw2 = pw * 0.45, rh2 = ph * 0.45;
-      els.push(`<rect x="${(px - pw/2 + 1.5).toFixed(1)}" y="${(py - ph/2 + 1.5).toFixed(1)}" width="${rw2.toFixed(1)}" height="${rh2.toFixed(1)}" fill="url(#panel-reflect)" rx="0.5"/>`);
+  // ── Plane labels (rendered last, on top of panels — opaque pill, sized to text) ──
+  planeLabels.forEach(L => {
+    const lines: string[] = ['PLANE ' + (L.ri + 1)];
+    if (L.pitch !== undefined) {
+      const rise12 = typeof L.pitch === 'number'
+        ? Math.round(Math.tan(L.pitch * Math.PI / 180) * 12)
+        : L.pitch;
+      lines.push(rise12 + ':12 PITCH');
     }
-    // Cell grid — horizontal busbars (if panels large enough)
-    if (ph > 10) {
-      const nRows = 6;
-      const cellH = (ph - 1.6) / nRows;
-      for (let c = 1; c < nRows; c++) {
-        els.push(`<line x1="${(px - pw/2 + 1).toFixed(1)}" y1="${(py - ph/2 + 0.8 + c * cellH).toFixed(1)}" x2="${(px + pw/2 - 1).toFixed(1)}" y2="${(py - ph/2 + 0.8 + c * cellH).toFixed(1)}" stroke="rgba(147,197,253,0.45)" stroke-width="0.5"/>`);
-      }
-    }
-    // Cell grid — vertical (3 columns)
-    if (pw > 8) {
-      const nCols = 3;
-      const cellW = (pw - 1.6) / nCols;
-      for (let c = 1; c < nCols; c++) {
-        els.push(`<line x1="${(px - pw/2 + 0.8 + c * cellW).toFixed(1)}" y1="${(py - ph/2 + 1).toFixed(1)}" x2="${(px - pw/2 + 0.8 + c * cellW).toFixed(1)}" y2="${(py + ph/2 - 1).toFixed(1)}" stroke="rgba(147,197,253,0.35)" stroke-width="0.4"/>`);
-      }
-    }
+    if (L.azimuth !== undefined) lines.push(compassDir(L.azimuth) + ' FACING');
+    const bw = 52, bh = 6 + lines.length * 8.5;
+    els.push(`<rect x="${(L.cx - bw / 2).toFixed(1)}" y="${(L.cy - bh / 2).toFixed(1)}" width="${bw}" height="${bh.toFixed(1)}" rx="2" fill="rgba(255,255,255,0.93)" stroke="#555" stroke-width="0.6"/>`);
+    lines.forEach((t, i) => {
+      els.push(drawText(L.cx, L.cy - bh / 2 + 7.5 + i * 8.5, t, {
+        anchor: 'middle',
+        fontSize: i === 0 ? 7 : 6.3,
+        fill: i === 0 ? '#1a1a1a' : '#555',
+        fontWeight: i === 0 ? 'bold' : 'normal',
+      }));
+    });
   });
 
   // ── DIMENSION HIERARCHY ──
@@ -268,10 +259,12 @@ export function drawRoofPlan(
     { bx: cbBase + 128, by: cbY },
   ];
 
-  // Find good attachment point targets (spread across array)
-  const panTargets = validPanels.slice(0, 5);
+  // Spread callout targets EVENLY across the array so the leaders fan out cleanly
+  // instead of all converging on the first few panels (the old "spider-web").
+  const tStep = Math.max(1, Math.floor(validPanels.length / callouts.length));
+  const panTargets = callouts.map((_, i) => validPanels[Math.min(i * tStep, validPanels.length - 1)]);
   callouts.forEach((c, ci) => {
-    const target = panTargets[ci] ?? panTargets[0];
+    const target = panTargets[ci];
     if (target) {
       els.push(drawCalloutWithLeader(c.bx, c.by, toX(target.lng), toY(target.lat), ci + 1, 10));
     }
