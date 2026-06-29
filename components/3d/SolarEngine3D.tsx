@@ -8166,7 +8166,7 @@ function SolarEngine3D({
               { mode: 'roof'    as PlacementMode, icon: '\u{1F3E0}', label: 'Roof',     tip: 'Place panels on a roof surface' },
               { mode: 'ground'  as PlacementMode, icon: '\u{1F331}', label: 'Ground',   tip: 'Ground mount: click start \u2192 end to place a row' },
               { mode: 'fence'   as PlacementMode, icon: '\u26A1',    label: 'Fence',    tip: 'SOL Fence: click points, right-click to finish' },
-              { mode: 'plane3d' as PlacementMode, icon: '\u{1F4D0}', label: '3D Plane', tip: '3D Plane: click 3+ roof points to define a custom grid' },
+              { mode: 'plane3d' as PlacementMode, icon: '\u{1F4D0}', label: 'Custom Array', tip: 'Outline the panel area: click 3+ roof corners, right-click to place an array' },
               { mode: 'mark_plane' as PlacementMode, icon: '⬡', label: 'Mark Plane', tip: 'Outline a roof face for the model/permit WITHOUT panels (3+ corners, right-click to finish). Use 🔗 Roof Model to see all edges.' },
               { mode: 'row'     as PlacementMode, icon: '\u27A1',    label: 'Row',      tip: 'Row Tool: click two points to place a panel row' },
             ],
@@ -8404,7 +8404,7 @@ function SolarEngine3D({
                  placementMode === 'roof' ? '\u{1F3E0} Place Roof' :
                  placementMode === 'ground' || placementMode === 'ground_array' ? '\u{1F331} Ground Array' :
                  placementMode === 'fence' ? '\u26A1 Fence' :
-                 placementMode === 'plane3d' ? '\u{1F4D0} 3D Plane' :
+                 placementMode === 'plane3d' ? '\u{1F4D0} Custom Array' :
                  placementMode === 'row' ? '\u27A1 Row' :
                  placementMode === 'auto_roof' ? '\u2728 Auto Fill' :
                  placementMode === 'pick_house' ? '\u{1F3E1} Pick House' :
