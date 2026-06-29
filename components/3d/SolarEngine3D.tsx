@@ -226,10 +226,19 @@ interface Props {
   onLocationPick?: (lat: number, lng: number, address: string) => void;
   /** v47.121: Called when user finishes drawing a 3D roof plane (≥3 points picked on 3D tiles) */
   onRoofPlaneCreated?: (plane: import('@/types').RoofPlane) => void;
-  /** v64: Stitch button — push the averaged/connected corners back into roofPlanes
-   *  state so panel placement + persistence use the stitched geometry (not the
-   *  pre-stitch traced corners). One call per Stitch, all updated planes at once. */
-  onRoofPlanesStitched?: (updates: Array<{ id: string; vertices: Array<{ lat: number; lng: number }> }>) => void;
+  /** v64: Stitch button — push the averaged/connected corners AND the recomputed
+   *  plane frame back into roofPlanes state so panel placement (Auto Layout) +
+   *  persistence use the stitched geometry, not the pre-stitch traced corners or a
+   *  stale frame. One call per Stitch, all updated planes at once. */
+  onRoofPlanesStitched?: (updates: Array<{
+    id: string;
+    vertices: Array<{ lat: number; lng: number }>;
+    localFrame3D: {
+      u: { x: number; y: number; z: number };
+      v: { x: number; y: number; z: number };
+      n: { x: number; y: number; z: number };
+    };
+  }>) => void;
   /** v47.122: ID of the currently selected roof plane (highlights it, dims others) */
   selectedRoofPlaneId?: string;
   /** v47.122: Called when user clicks a roof plane in the 3D view */
@@ -2961,7 +2970,15 @@ function SolarEngine3D({
 
     // v64: collect the stitched corners (lat/lng) per plane so they can be written
     // back into roofPlanes state — the geometry every panel-placement engine reads.
-    const stitchUpdates: Array<{ id: string; vertices: Array<{ lat: number; lng: number }> }> = [];
+    const stitchUpdates: Array<{
+      id: string;
+      vertices: Array<{ lat: number; lng: number }>;
+      localFrame3D: {
+        u: { x: number; y: number; z: number };
+        v: { x: number; y: number; z: number };
+        n: { x: number; y: number; z: number };
+      };
+    }> = [];
     for (const [pid, pts] of work) {
       const cartPts: Cart3[] = pts.map((p: any) => ({ x: p.x, y: p.y, z: p.z }));
       let frame; try { frame = computePlaneFromPoints3D(cartPts); } catch { continue; }
@@ -2981,7 +2998,22 @@ function SolarEngine3D({
         if (!carto) continue;
         verts.push({ lat: C.Math.toDegrees(carto.latitude), lng: C.Math.toDegrees(carto.longitude) });
       }
-      if (verts.length >= 3) stitchUpdates.push({ id: pid, vertices: verts });
+      if (verts.length >= 3) {
+        stitchUpdates.push({
+          id: pid,
+          vertices: verts,
+          // Hand back the STITCHED plane frame too. Without this, Auto Layout
+          // (handleAutoRoof) clipped panels to the new stitched outline but laid
+          // the grid on the plane's STALE pre-stitch frame, so panels landed off
+          // the stitched roof ("auto layout fucks the stitch up"). frame.u/v are
+          // the ECEF ridge/cross-slope axes; n = frame.normal.
+          localFrame3D: {
+            u: { x: frame.u.x, y: frame.u.y, z: frame.u.z },
+            v: { x: frame.v.x, y: frame.v.y, z: frame.v.z },
+            n: { x: frame.normal.x, y: frame.normal.y, z: frame.normal.z },
+          },
+        });
+      }
     }
     setShowRoofModel(true);
     try { renderRoofWireframe(viewer, C); } catch {}
