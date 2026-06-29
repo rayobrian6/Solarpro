@@ -239,6 +239,8 @@ interface Props {
       n: { x: number; y: number; z: number };
     };
   }>) => void;
+  /** E2E-only diagnostics bridge. Passed only when NEXT_PUBLIC_E2E=1. */
+  onE2EDiagnostics?: (diagnostics: { fullRebuildCount: number; setbackInsets: number }) => void;
   /** v47.122: ID of the currently selected roof plane (highlights it, dims others) */
   selectedRoofPlaneId?: string;
   /** v47.122: Called when user clicks a roof plane in the 3D view */
@@ -412,6 +414,7 @@ function SolarEngine3D({
   onTwinLoaded, onError, onLocationPick,
   onRoofPlaneCreated,
   onRoofPlanesStitched,
+  onE2EDiagnostics,
   selectedRoofPlaneId,
   onRoofPlaneSelect,
   onOrientationChange,
@@ -488,6 +491,13 @@ function SolarEngine3D({
   const renderDebounceRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Performance: snapshot of last rendered panel list for incremental diff
   const lastRenderedPanelsRef = useRef<PlacedPanel[]>([]);
+  const fullRebuildCountRef = useRef(0);
+  const publishE2EDiagnostics = useCallback(() => {
+    onE2EDiagnostics?.({
+      fullRebuildCount: fullRebuildCountRef.current,
+      setbackInsets: setbackZoneEntitiesRef.current.length,
+    });
+  }, [onE2EDiagnostics]);
   // Row tool context: tracks which systemType to use for row-placed panels
   // (row mode is a placement style, not a system type — inherits from last active mode)
   const rowSystemTypeRef = useRef<SystemType>('roof');
@@ -804,6 +814,10 @@ function SolarEngine3D({
   }, [panels]);
 
   useEffect(() => { roofPlanesRef.current = roofPlanes ?? []; }, [roofPlanes]);
+
+  useEffect(() => {
+    publishE2EDiagnostics();
+  }, [panels.length, roofPlanes?.length, showSetbackZones, publishE2EDiagnostics]);
 
   // v62: render/refresh fire setback keep-out zones on the 3D roof when the
   // Design Studio "Zones On/Off" toggle, the planes, panels, or setback values change.
@@ -2863,6 +2877,7 @@ function SolarEngine3D({
         setbackZoneEntitiesRef.current.push(ent);
       }
     });
+    publishE2EDiagnostics();
     try { viewer.scene.requestRender(); } catch {}
   }
 
@@ -3102,6 +3117,7 @@ function SolarEngine3D({
 
     // Full rebuild path: shade mode changed, or first render, or forced
     if (forceFullRebuild || (prev.length === 0 && panelList.length > 0)) {
+      fullRebuildCountRef.current += 1;
       panelMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
       panelMapRef.current.clear();
       // v48.7: pre-compute skipGrid for entire batch — consistent rendering across all panels
@@ -3111,6 +3127,7 @@ function SolarEngine3D({
       // Phase 2: rebuild roof rails after full panel rebuild
       try { renderRoofRails(viewer, C, panelList); } catch (e) { handleCesiumError('renderRoofRails full', e, true); }
       refreshEquipment(viewer, C, panelList); // v63
+      publishE2EDiagnostics();
       try { viewer.scene.requestRender(); } catch {}
       return;
     }
@@ -3168,6 +3185,7 @@ function SolarEngine3D({
       // Phase 2: rebuild roof rails whenever panel set changes
       try { renderRoofRails(viewer, C, panelList); } catch (e) { handleCesiumError('renderRoofRails incr', e, true); }
       refreshEquipment(viewer, C, panelList); // v63
+      publishE2EDiagnostics();
       try { viewer.scene.requestRender(); } catch {}
     }
   }

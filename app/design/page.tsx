@@ -311,7 +311,13 @@ function DesignContent({ onQuickLaunch }: { onQuickLaunch?: (p: Project) => void
 function DesignPageInner() {
   const searchParams = useSearchParams();
   const projectId = searchParams.get('projectId');
+  const e2eQuickDesign = process.env.NEXT_PUBLIC_E2E === '1' && searchParams.get('e2eQuickDesign') === '1';
   const [activeProject, setActiveProject] = useState<Project | null>(null);
+
+  useEffect(() => {
+    if (!e2eQuickDesign || activeProject) return;
+    setActiveProject(makeDemoProject('1010 Franklin Ave, St Louis, MO', 38.6657, -90.2266));
+  }, [activeProject, e2eQuickDesign]);
 
   // When a quick-launch project is set, show full-screen design studio
   if (activeProject) {

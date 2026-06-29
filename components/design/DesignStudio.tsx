@@ -60,6 +60,22 @@ interface Props {
   onSave?: (layout: Layout) => void;
 }
 
+type SolarE2EState = {
+  roofPlanes: RoofPlane[];
+  panels: PlacedPanel[];
+  stitchedCorners: Array<{ id: string; vertices: Array<{ lat: number; lng: number }> }>;
+  setbackInsets: number;
+  fullRebuildCount: number;
+};
+
+declare global {
+  interface Window {
+    __solarE2E?: SolarE2EState;
+  }
+}
+
+const E2E_ENABLED = process.env.NEXT_PUBLIC_E2E === '1';
+
 const TILE_SIZE = 256;
 
 // ─── Module-level tile cache (survives re-renders, cleared on location/provider change) ─
@@ -526,6 +542,8 @@ export default function DesignStudio({ project, onSave }: Props) {
   // Layout state
   const [panels, setPanels] = useState<PlacedPanel[]>([]);
   const [roofPlanes, setRoofPlanes] = useState<RoofPlane[]>([]);
+  const [e2eStitchedCorners, setE2EStitchedCorners] = useState<Array<{ id: string; vertices: Array<{ lat: number; lng: number }> }>>([]);
+  const [e2eDiagnostics, setE2EDiagnostics] = useState({ fullRebuildCount: 0, setbackInsets: 0 });
   const [expandedPlaneId, setExpandedPlaneId] = useState<string | null>(null);
   const [groundArea, setGroundArea] = useState<{ lat: number; lng: number }[]>([]);
   
@@ -545,6 +563,17 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [pendingPlaneAzimuth, setPendingPlaneAzimuth] = useState<number>(180);
   const [pendingPlanePitch, setPendingPlanePitch] = useState<number>(20);
   const [fenceLine, setFenceLine] = useState<{ lat: number; lng: number }[]>([]);
+
+  useEffect(() => {
+    if (!E2E_ENABLED || typeof window === 'undefined') return;
+    window.__solarE2E = {
+      roofPlanes,
+      panels,
+      stitchedCorners: e2eStitchedCorners,
+      setbackInsets: e2eDiagnostics.setbackInsets,
+      fullRebuildCount: e2eDiagnostics.fullRebuildCount,
+    };
+  }, [roofPlanes, panels, e2eStitchedCorners, e2eDiagnostics]);
 
   // Mixed system support - active drawing zone type
   const [activeZoneType, setActiveZoneType] = useState<SystemType>(project.systemType);
@@ -3849,7 +3878,9 @@ export default function DesignStudio({ project, onSave }: Props) {
                 console.log('[DesignStudio] 3D plane added:', enrichedPlane.id,
                   `az=${enrichedPlane.azimuth.toFixed(1)}° tilt=${enrichedPlane.pitch.toFixed(1)}°`);
               }}
+              onE2EDiagnostics={E2E_ENABLED ? setE2EDiagnostics : undefined}
               onRoofPlanesStitched={(updates) => {
+                if (E2E_ENABLED) setE2EStitchedCorners(updates);
                 // v64: Stitch wrote averaged/connected corners + the stitched plane
                 // frame back. Replace each plane's vertices AND localFrame3D with the
                 // stitched geometry so panel placement (Auto Layout) lays its grid on
