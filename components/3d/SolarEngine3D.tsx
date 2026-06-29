@@ -8818,7 +8818,7 @@ function SolarEngine3D({
                         onMouseLeave={() => setTooltipInfo(null)}
                         onClick={() => activateTool(mode)}
                         style={{
-                          width: 86, height: 34, borderRadius: 8, fontSize: 12,
+                          width: 'max-content', minWidth: 86, maxWidth: 130, height: 34, borderRadius: 8, fontSize: 12,
                           display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px',
                           cursor: 'pointer', border: 'none', transition: 'all 0.12s',
                           background: placementMode === mode
