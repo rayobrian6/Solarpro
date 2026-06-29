@@ -347,6 +347,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         rafterSize:             ra.size,
         rafterSpacing:          ra.spacingIn,
         rafterSpan:             ra.spanFt,
+        framingType:            ra.framingType,
         bendingMoment:          ra.bendingMomentDemandFtLbs,
         allowableBendingMoment: ra.bendingMomentCapacityFtLbs,
         utilizationRatio:       ra.overallUtilization,

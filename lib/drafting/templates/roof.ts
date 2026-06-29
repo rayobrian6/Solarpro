@@ -66,8 +66,8 @@ export function drawRoofPlan(
   const pitchStr    = pitchNum + ':12';
   const rafterSp    = project.rafterSpacing   || 24;
   const attachSp    = project.attachmentSpacing || 48;
-  const setbackIn   = project.ahjRoofSetbackIn  || 36;
-  const ridgeSetIn  = project.ahjRidgeSetbackIn || 36;
+  const setbackIn   = project.ahjRoofSetbackIn  || 18;  // IFC 605.11 access pathway (was hardcoded 36")
+  const ridgeSetIn  = project.ahjRidgeSetbackIn || 18;
   const setbackFt   = setbackIn / 12;
   const ridgeSetFt  = ridgeSetIn / 12;
 
@@ -294,7 +294,12 @@ export function drawRoofStructural(
 ): string {
   const { project, engineering } = input;
 
-  const pitchNum   = project.roofPitch          || 5;
+  // project.roofPitch is in DEGREES (e.g. 20). Convert to rise-per-12 for the
+  // slope label + section geometry — was rendering "20:12" for a 4:12 roof.
+  const _rawPitch  = project.roofPitch          || 5;
+  const pitchNum   = (_rawPitch > 12 && _rawPitch <= 90)
+    ? Math.round(Math.tan(_rawPitch * Math.PI / 180) * 12)
+    : _rawPitch;
   const pitchStr   = pitchNum + ':12';
   const rafterSz   = project.rafterSize         || '2x6';
   const rafterSp   = project.rafterSpacing      || 24;

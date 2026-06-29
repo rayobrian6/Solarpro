@@ -142,7 +142,16 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   }> || [];
 
   const totalPanels = cadTotalPanels || system.totalPanels || panels.length || 0;
-  const totalStrings = system.inverters?.reduce((sum, inv) => sum + (inv.strings?.length || 0), 0) || 1;
+  // Topology-aware circuit count: microinverters are AC BRANCH CIRCUITS (NEC 690.8
+  // ~16 micros/branch), NOT one DC string. A 52-micro system is ~4 branches, not
+  // "1 string of 52" (which is the default-fallback signature of an empty config).
+  const _isMicro = (system.inverters?.[0]?.type === 'micro')
+    || String((system as any).topology || '').toLowerCase().includes('micro');
+  const totalStrings = _isMicro
+    ? (Math.ceil(totalPanels / 16) || 1)
+    : (system.inverters?.reduce((sum, inv) => sum + (inv.strings?.length || 0), 0) || 1);
+  const circuitWord   = _isMicro ? 'BRANCH' : 'STRING';
+  const circuitWordLc = _isMicro ? 'branch circuit' : 'string';
 
   // Group panels by row for grid visualization
   const rows: Map<number, typeof panels> = new Map();
@@ -300,7 +309,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     });
   } else {
     agCells = `<text x="${AG_VB_W/2}" y="${AG_VB_H/2 - 20}" text-anchor="middle" font-size="18" fill="#333" font-weight="700">${totalPanels} MODULES</text>`;
-    agCells += `<text x="${AG_VB_W/2}" y="${AG_VB_H/2 + 10}" text-anchor="middle" font-size="12" fill="#555">${totalStrings} strings — see string schedule</text>`;
+    agCells += `<text x="${AG_VB_W/2}" y="${AG_VB_H/2 + 10}" text-anchor="middle" font-size="12" fill="#555">${totalStrings} ${circuitWordLc}${totalStrings !== 1 ? 's' : ''} — see schedule</text>`;
   }
 
   const schematicGridSvg = `<svg viewBox="0 0 ${AG_VB_W} ${AG_VB_H}" width="100%" height="100%"
@@ -309,7 +318,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     xmlns="http://www.w3.org/2000/svg">
     <rect width="${AG_VB_W}" height="${AG_VB_H}" fill="#fafbfc"/>
     <rect width="${AG_VB_W}" height="26" fill="#000"/>
-    <text x="10" y="17" font-size="11" fill="#fff" font-weight="700" font-family="Arial,sans-serif">ARRAY GRID — ${totalPanels} MODULES / ${totalStrings} STRING${totalStrings !== 1 ? 'S' : ''} — ${displaySystemType(cadSystemType)}</text>
+    <text x="10" y="17" font-size="11" fill="#fff" font-weight="700" font-family="Arial,sans-serif">ARRAY GRID — ${totalPanels} MODULES / ${totalStrings} ${circuitWord}${totalStrings !== 1 ? 'S' : ''} — ${displaySystemType(cadSystemType)}</text>
     <text x="${AG_VB_W - 20}" y="18" text-anchor="end" font-size="12" fill="#fff" font-weight="700" font-family="Arial,sans-serif">N↑</text>
     <g font-family="Arial,sans-serif">
       ${agCells || `<text x="${AG_VB_W/2}" y="${AG_VB_H/2}" text-anchor="middle" font-size="16" fill="#999">No panel position data — schematic only</text>`}
@@ -376,7 +385,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     <div style="display:flex;flex-direction:row;gap:0;flex:1 1 0%;min-height:0;overflow:hidden;margin-top:var(--md);">
       <!-- Draw zone 78%: full-height array grid SVG -->
       <div class="draw-zone" style="flex:0 0 78%;max-width:78%;min-height:0;">
-        <div class="draw-zone-hdr">PROFESSIONAL CAD ARRAY DIAGRAM \u2014 ${totalPanels} MODULES / ${totalStrings} STRING${totalStrings !== 1 ? 'S' : ''}</div>
+        <div class="draw-zone-hdr">PROFESSIONAL CAD ARRAY DIAGRAM \u2014 ${totalPanels} MODULES / ${totalStrings} ${circuitWord}${totalStrings !== 1 ? 'S' : ''}</div>
         <div class="draw-zone-body" style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:10px;background:#fff;min-height:0;">
           ${agDrawSvg}
         </div>
@@ -387,7 +396,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
           <div class="draw-zone-hdr">ARRAY PARAMETERS</div>
           <table class="comp-data-table">
             <tr><td>Total Modules</td><td>${totalPanels}</td></tr>
-            <tr><td>Strings</td><td>${totalStrings}</td></tr>
+            <tr><td>${_isMicro ? 'AC Branches' : 'Strings'}</td><td>${totalStrings}</td></tr>
             <tr><td>Tilt</td><td>${avgTilt}\xb0</td></tr>
             <tr><td>Azimuth</td><td>${avgAz}\xb0 (${compassDir})</td></tr>
             <tr><td>Rows</td><td>${rowNums.length > 0 ? rowNums.length : Math.ceil(Math.sqrt(totalPanels))}</td></tr>

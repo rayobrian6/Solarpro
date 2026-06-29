@@ -119,6 +119,7 @@ export interface StructuralCompliance {
     rafterSize?: string;
     rafterSpacing?: number;
     rafterSpan?: number;
+    framingType?: string;   // 'rafter' | 'truss' — drives load-vs-bending display
     bendingMoment?: number;
     allowableBendingMoment?: number;
     utilizationRatio?: number;
