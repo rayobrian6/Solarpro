@@ -37,8 +37,8 @@ for (let band = 0; band < 2; band++) {
     for (let c = 0; c < cols && id < 44; c++) {
       panelPos.push({
         id: `pan-${id++}`,
-        lat: bandLat + ftToLat(r * 6 - 3),
-        lng: cLng - halfW * 0.62 + ftToLng(c * 5.6),
+        lat: bandLat + ftToLat(r * 5.8 - 2.9),   // tight portrait rows (5.5ft panel)
+        lng: cLng - halfW * 0.58 + ftToLng(c * 3.45),  // tight cols (3.3ft panel)
         orientation: 'portrait', row: band * 2 + r, col: c,
       });
     }

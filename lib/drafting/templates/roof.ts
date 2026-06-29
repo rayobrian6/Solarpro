@@ -168,8 +168,10 @@ export function drawRoofPlan(
   });
 
   // ── Draw panels (from CAD fake-degree positions) ──
-  const panLenPx = Math.max((panelLenIn / 12) * scale * 0.8, 6);
-  const panWidPx = Math.max((panelWidIn / 12) * scale * 0.8, 4);
+  // Render modules at near-true footprint (was 0.8 → a sparse, scattered array).
+  // 0.97 leaves only a hairline gap so adjacent panels read as a tight, real array.
+  const panLenPx = Math.max((panelLenIn / 12) * scale * 0.97, 6);
+  const panWidPx = Math.max((panelWidIn / 12) * scale * 0.97, 4);
 
   // Flat, crisp PV modules — uniform fill + thin frame (no gradient/reflection/
   // busbar clip-art, which muddied to a blue smear at plan scale).
