@@ -3462,16 +3462,22 @@ function EngineeringPageInner() {
       // selecting N batteries reverted to 1 on every apply/auto-heal. This also
       // generalizes the old v58.13 ecosystem-battery guard: any user-selected
       // battery (ecosystem OR manual) is now preserved wholesale.
-      const hasUserBattery =
-        !!prev.batteryId && (prev.batteryCount ?? 0) > 0;
+      // A user-selected battery (batteryId present) is authoritative — preserve it
+      // wholesale. Previously this also required batteryCount > 0, so a freshly
+      // picked battery whose count was still 0 fell through to the else-branch and
+      // had its count overwritten with the engine default (1) — the "units snaps
+      // back to 1" bug. Key off batteryId alone; backfill a sane count if 0.
+      const hasUserBattery = !!prev.batteryId;
       if (hasUserBattery) {
         console.log('[SIZING APPLY v62] preserving user battery (authoritative):', {
           batteryId: prev.batteryId,
           batteryCount: prev.batteryCount,
           batteryKwh: prev.batteryKwh,
         });
-        // Intentionally leave batteryId/batteryCount/batteryKwh/Brand/Model off
-        // the patch so the user's selection survives the inverter re-sync.
+        // Intentionally leave batteryId/batteryKwh/Brand/Model off the patch so the
+        // user's selection survives the inverter re-sync. Only force a count when it
+        // is missing/zero, so a preserved battery never persists as "0 units".
+        if (!prev.batteryCount || prev.batteryCount < 1) patch.batteryCount = 1;
       } else if (rec.battery && rec.battery.equipmentDbId) {
         // No user battery yet — adopt the engine's sized battery as the seed.
         patch.batteryId = rec.battery.equipmentDbId;
@@ -9285,7 +9291,19 @@ function EngineeringPageInner() {
                               <label className="eng-label">Battery Model</label>
                               <select value={config.batteryId} onChange={e => {
                                 const bat = getBatteryById(e.target.value);
-                                updateConfig({ batteryId: e.target.value, batteryBrand: bat?.manufacturer ?? '', batteryModel: bat?.model ?? '', batteryKwh: bat?.usableCapacityKwh ?? 0 });
+                                const _picked = !!e.target.value;
+                                updateConfig({
+                                  batteryId: e.target.value,
+                                  batteryBrand: bat?.manufacturer ?? '',
+                                  batteryModel: bat?.model ?? '',
+                                  batteryKwh: bat?.usableCapacityKwh ?? 0,
+                                  // Seed a unit count so the battery is "user-owned" and the sizing
+                                  // apply path preserves it instead of reverting to the engine's
+                                  // default of 1. Picking "None" clears the count. (Fixes the
+                                  // "battery units snaps back to 1" bug — the preserve guard in
+                                  // applySizingRecommendation requires a non-zero count.)
+                                  batteryCount: _picked ? (config.batteryCount && config.batteryCount > 0 ? config.batteryCount : 1) : 0,
+                                });
                               }} className="eng-select">
                                 <option value="">None</option>
                                 {BATTERIES.map(b => (
