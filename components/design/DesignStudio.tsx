@@ -3429,7 +3429,8 @@ export default function DesignStudio({ project, onSave }: Props) {
               <span className="text-amber-400 font-bold">{systemSizeKw.toFixed(2)} kW</span>
             </div>
           ) : null}
-          <span className="text-xs text-slate-400 ml-2 hidden md:inline">
+          <span className="ml-2 hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+            <span aria-hidden>🖱️</span>
             Left click drag and scroll wheel rotates
           </span>
           <button
