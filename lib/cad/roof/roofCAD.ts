@@ -155,6 +155,9 @@ export function roofCAD(input: PermitInputShape): CADModel {
         cadPlanes,
         sysDefObstructions,
         canonicalCADObstructions,
+        // Real design panel positions (shared local-meter frame via canonical
+        // origin) — used when they fall inside this plane; grid is the fallback.
+        gpsPanels,
       });
     }
   } else if (rawPlanes.length > 0) {
@@ -310,8 +313,61 @@ export function roofCAD(input: PermitInputShape): CADModel {
         },
       });
     }
+  } else if (gpsPanels.length > 0) {
+    // No roof-plane polygons, but we DO have the user's real array. Draw the
+    // ACTUAL panel positions and derive a tight roof footprint from them, rather
+    // than fabricating a generic box + regenerated grid (the old behavior threw
+    // away the real layout — the "drops modules onto a generic box" complaint).
+    warnings.push('roofCAD: no roofPlanes — drawing real panel positions, footprint derived from array');
+    const panels: CADPanel[] = gpsPanels.map(gp => {
+      const isPortrait = gp.orientation !== 'landscape';
+      const pw = isPortrait ? panelPortraitW : panelPortraitH;
+      const ph = isPortrait ? panelPortraitH : panelPortraitW;
+      return {
+        id:          gp.id,
+        x:           gp.x - pw / 2,
+        y:           gp.y - ph / 2,
+        widthM:      pw,
+        heightM:     ph,
+        orientation: isPortrait ? 'portrait' : 'landscape',
+        row:         gp.row ?? 0,
+        col:         gp.col ?? 0,
+        planeId:     'array',
+      };
+    });
+
+    const pbb = bbox(panels.flatMap(p => [
+      { x: p.x, y: p.y },
+      { x: p.x + p.widthM, y: p.y + p.heightM },
+    ]));
+    const mX = panelPortraitW * 0.5, mY = panelPortraitH * 0.5;  // half-panel margin
+    const footprint: Point2D[] = [
+      { x: pbb.minX - mX, y: pbb.minY - mY },
+      { x: pbb.maxX + mX, y: pbb.minY - mY },
+      { x: pbb.maxX + mX, y: pbb.maxY + mY },
+      { x: pbb.minX - mX, y: pbb.maxY + mY },
+    ];
+
+    console.log(`[PANEL GRID GENERATED] roofCAD plane=array source=GPS-NOPLANE count=${panels.length}`);
+
+    cadPlanes.push({
+      id:            'array',
+      polygon:       footprint,
+      usablePolygon: footprint,
+      pitch:         input.project?.roofPitch ?? 5,
+      azimuth:       180,
+      areaSqM:       pbb.width * pbb.height,
+      setbacks:      { eaveM, ridgeM, rakeM },
+      panels,
+      dimensions: {
+        widthM:      pbb.width,
+        heightM:     pbb.height,
+        panelCountX: new Set(panels.map(p => p.col)).size,
+        panelCountY: new Set(panels.map(p => p.row)).size,
+      },
+    });
   } else {
-    // No roof plane data — generate schematic single-plane layout
+    // No roof plane data AND no panels — generate schematic single-plane layout
     warnings.push('roofCAD: no roofPlanes with GPS — generating schematic layout');
     const totalPanels = input.system?.totalPanels || 10;
 
@@ -448,6 +504,10 @@ function appendCADRoofPlaneFromLocal(args: {
   cadPlanes: CADRoofPlane[];
   sysDefObstructions: SysDefObstruction[];
   canonicalCADObstructions: CADObstruction[];
+  gpsPanels: Array<{
+    id: string; x: number; y: number;
+    orientation: string; row?: number; col?: number; planeId?: string;
+  }>;
 }): void {
   const {
     rp,
@@ -459,6 +519,7 @@ function appendCADRoofPlaneFromLocal(args: {
     cadPlanes,
     sysDefObstructions,
     canonicalCADObstructions,
+    gpsPanels,
   } = args;
 
   const conservativeInset = Math.min(setbacks.eaveM, setbacks.ridgeM, setbacks.rakeM);
@@ -467,38 +528,68 @@ function appendCADRoofPlaneFromLocal(args: {
   const gridPoly = usablePolygon.length >= 3 ? usablePolygon : polyXY;
   const gridBB = bbox(gridPoly);
 
-  const cells = gridInsidePolygon(
-    gridPoly,
-    panelPortraitW,
-    panelPortraitH,
-    DEFAULT_GAP_M,
-    DEFAULT_GAP_M,
-    gridBB,
+  // Prefer the real design panel positions that fall inside this plane polygon.
+  // Only grid-generate when the design carries no panels for this plane — this
+  // mirrors the legacy rawPlanes branch and stops the planset from tiling a
+  // synthetic grid over the canonical roof instead of the user's actual layout.
+  const planeGpsPanels = gpsPanels.filter(p =>
+    pointInPolygonLocal({ x: p.x, y: p.y }, polyXY)
   );
 
-  const useCells = cells.length > 0 ? cells : (() => {
-    warnings.push(`plane ${rp.id}: canonical portrait grid=0, trying landscape`);
-    return gridInsidePolygon(
+  let planePanels: CADPanel[];
+  if (planeGpsPanels.length > 0) {
+    planePanels = planeGpsPanels.map(gp => {
+      const isPortrait = gp.orientation !== 'landscape';
+      const pw = isPortrait ? panelPortraitW : panelPortraitH;
+      const ph = isPortrait ? panelPortraitH : panelPortraitW;
+      return {
+        id:          gp.id,
+        x:           gp.x - pw / 2,   // store as top-left
+        y:           gp.y - ph / 2,
+        widthM:      pw,
+        heightM:     ph,
+        orientation: isPortrait ? 'portrait' : 'landscape',
+        row:         gp.row ?? 0,
+        col:         gp.col ?? 0,
+        planeId:     rp.id,
+      };
+    });
+    console.log(`[PANEL GRID GENERATED] roofCAD canonical plane=${rp.id} source=GPS count=${planePanels.length}`);
+  } else {
+    const cells = gridInsidePolygon(
       gridPoly,
-      panelPortraitH,
       panelPortraitW,
+      panelPortraitH,
       DEFAULT_GAP_M,
       DEFAULT_GAP_M,
       gridBB,
     );
-  })();
 
-  const planePanels: CADPanel[] = useCells.map(cell => ({
-    id:          `${rp.id}-r${cell.row}-c${cell.col}`,
-    x:           cell.x,
-    y:           cell.y,
-    widthM:      panelPortraitW,
-    heightM:     panelPortraitH,
-    orientation: 'portrait',
-    row:         cell.row,
-    col:         cell.col,
-    planeId:     rp.id,
-  }));
+    const useCells = cells.length > 0 ? cells : (() => {
+      warnings.push(`plane ${rp.id}: canonical portrait grid=0, trying landscape`);
+      return gridInsidePolygon(
+        gridPoly,
+        panelPortraitH,
+        panelPortraitW,
+        DEFAULT_GAP_M,
+        DEFAULT_GAP_M,
+        gridBB,
+      );
+    })();
+
+    planePanels = useCells.map(cell => ({
+      id:          `${rp.id}-r${cell.row}-c${cell.col}`,
+      x:           cell.x,
+      y:           cell.y,
+      widthM:      panelPortraitW,
+      heightM:     panelPortraitH,
+      orientation: 'portrait',
+      row:         cell.row,
+      col:         cell.col,
+      planeId:     rp.id,
+    }));
+    console.log(`[PANEL GRID GENERATED] roofCAD canonical plane=${rp.id} source=GRID count=${planePanels.length}`);
+  }
 
   const planeObstructions = [
     ...buildCADObstructions(sysDefObstructions, rp.id),

@@ -13,7 +13,6 @@ import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, pv2Title, compassDir } from '../utils/helpers';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import { isFence, isGround, isRoof, displaySystemType } from '@/lib/system';
-import { drawingEngine } from '@/lib/drafting';
 
 export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
   // ── CAD validation ────────────────────────────────────────────────────────
@@ -113,23 +112,11 @@ export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number
 // Detailed schematic showing array groupings, string assignments, row/col grid
 
 
-function buildProfessionalCadArrayVisual(
-  input: PermitInput,
-  cad: CADModel,
-  fallbackSvg: string,
-): string {
-  try {
-    const cadSvg = drawingEngine.getArrayPlanFromCAD(cad, input, undefined);
-    if (!cadSvg || cadSvg.length < 500) return fallbackSvg;
-    return cadSvg.replace(
-      /<svg([^>]*)>/,
-      '<svg$1 class="professional-cad-array-visual" style="display:block;width:100%;height:100%;max-width:100%;max-height:100%;" preserveAspectRatio="xMidYMid meet">',
-    );
-  } catch (error) {
-    console.warn('[pageArrayGeometry] Professional CAD visual fallback:', error instanceof Error ? error.message : String(error));
-    return fallbackSvg;
-  }
-}
+// PV-2B must show the STRING LAYOUT (a string-colored grouping schematic) -- a
+// DIFFERENT drawing from PV-2 s to-scale roof plan. A prior "professional CAD"
+// override here called drawingEngine.getArrayPlanFromCAD, the very renderer PV-2
+// uses via getPrimaryView(roof_plan), so PV-2 and PV-2B came out as literal
+// duplicates. Removed: PV-2B now renders its own schematicGridSvg below.
 
 export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { project, system } = input;
@@ -329,7 +316,10 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     <text x="80" y="${AG_VB_H - 5}" font-size="8" fill="#777" font-family="Arial,sans-serif">SCHEMATIC (NOT TO SCALE — NTS)</text>
   </svg>`;
 
-  const agDrawSvg = buildProfessionalCadArrayVisual(input, cad, schematicGridSvg);
+  // PV-2B renders the string-layout schematic (string-colored grouping grid).
+  // It must NOT reuse PV-2's roof-plan renderer (getArrayPlanFromCAD) or the two
+  // sheets become identical — see the PV-2B note above pageArrayGeometry.
+  const agDrawSvg = schematicGridSvg;
 
   // Callout notes for data zone
   const agCalloutRows = [

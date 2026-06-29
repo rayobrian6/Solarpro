@@ -295,6 +295,56 @@ export interface AerialRoofData {
   error?: string;
 }
 
+// ── chooseAerialCenter ────────────────────────────────────────────────────────
+// Decides where to center the aerial image. Pure + exported so it can be unit
+// tested without the Google network calls.
+//
+// Priority:
+//   1. The design's array centroid (caller-supplied) — most accurate; the panels
+//      sit exactly here.
+//   2. A roof segment — but NEVER a neighbor's. Google Solar can surface segments
+//      whose centers sit off the address parcel; selecting the largest south-
+//      facing one globally is how the image lands on the neighbor's bigger roof.
+//      So: among segments within ~25 m of the address pin, frame on the largest
+//      south-facing one; if none are on-parcel, take the segment NEAREST the pin
+//      (closest is far safer than largest).
+//   3. The geocode pin.
+type AerialSegment = { center?: { lat: number; lng: number }; azimuthDegrees: number; areaM2: number };
+export function chooseAerialCenter(
+  pinLat: number,
+  pinLng: number,
+  arrayCenter: { lat: number; lng: number } | undefined,
+  roofSegments: AerialSegment[] | undefined,
+): { lat: number; lng: number; source: 'array' | 'segment' | 'pin' } {
+  if (arrayCenter && isFinite(arrayCenter.lat) && isFinite(arrayCenter.lng) && Math.abs(arrayCenter.lat) > 0.001) {
+    return { lat: arrayCenter.lat, lng: arrayCenter.lng, source: 'array' };
+  }
+
+  const withCenter = (roofSegments ?? []).filter(
+    s => s.center && isFinite(s.center.lat) && isFinite(s.center.lng),
+  );
+  if (withCenter.length > 0) {
+    const cosLat = Math.cos(pinLat * Math.PI / 180);
+    const distM = (s: AerialSegment) => {
+      const dLat = (s.center!.lat - pinLat) * 111320;
+      const dLng = (s.center!.lng - pinLng) * 111320 * cosLat;
+      return Math.hypot(dLat, dLng);
+    };
+    const NEAR_M = 25; // a single-family roof sits within ~25 m of its address pin
+    const near = withCenter.filter(s => distM(s) <= NEAR_M);
+    if (near.length > 0) {
+      const best = near
+        .map(s => ({ s, score: ((s.azimuthDegrees >= 135 && s.azimuthDegrees <= 225) ? 2 : 1) * (s.areaM2 || 1) }))
+        .sort((a, b) => b.score - a.score)[0];
+      return { lat: best.s.center!.lat, lng: best.s.center!.lng, source: 'segment' };
+    }
+    const nearest = withCenter.map(s => ({ s, d: distM(s) })).sort((a, b) => a.d - b.d)[0];
+    return { lat: nearest.s.center!.lat, lng: nearest.s.center!.lng, source: 'segment' };
+  }
+
+  return { lat: pinLat, lng: pinLng, source: 'pin' };
+}
+
 export async function fetchAerialRoofData(
   lat: number,
   lng: number,
@@ -353,24 +403,10 @@ export async function fetchAerialRoofData(
     // the panels) sit off it, the array renders off-frame (the reported bug).
     // Prefer an explicit array centroid from the caller, else the best (largest,
     // south-facing) Solar API roof segment center, else the geocode pin.
-    let centerLat = finalLat, centerLng = finalLng;
-    if (arrayCenter && isFinite(arrayCenter.lat) && isFinite(arrayCenter.lng) && Math.abs(arrayCenter.lat) > 0.001) {
-      centerLat = arrayCenter.lat;
-      centerLng = arrayCenter.lng;
-      console.log('[permit/aerial] Centering on caller array centroid');
-    } else if (roofSegments.length > 0) {
-      const wc = roofSegments.filter(s => s.center);
-      if (wc.length > 0) {
-        const best = wc
-          .map(s => ({ s, score: ((s.azimuthDegrees >= 135 && s.azimuthDegrees <= 225) ? 2 : 1) * (s.areaM2 || 1) }))
-          .sort((a, b) => b.score - a.score)[0];
-        if (best?.s.center) {
-          centerLat = best.s.center.lat;
-          centerLng = best.s.center.lng;
-          console.log('[permit/aerial] Centering on best roof segment');
-        }
-      }
-    }
+    const _center = chooseAerialCenter(finalLat, finalLng, arrayCenter, roofSegments);
+    const centerLat = _center.lat, centerLng = _center.lng;
+    console.log('[permit/aerial] Centering on', _center.source,
+      _center.source === 'segment' ? '(nearest on-parcel roof segment)' : '');
 
     // ── Step 3: Google Maps Static API — satellite image (multi-zoom rural fallback) ──
     const imgSize = '640x640';

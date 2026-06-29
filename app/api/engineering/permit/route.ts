@@ -841,19 +841,38 @@ export async function POST(req: NextRequest) {
     const allowDraftLegacyRoofGeometry = isExplicitDraftOrLegacyPermit(req, enrichedBody);
     const canonicalBuildingModel = extractCanonicalBuildingModel(enrichedBody);
 
+    // A promoted CanonicalBuildingModel is required for SUBMISSION-READY plansets,
+    // but a project with real design roof geometry (Google-Solar / aerial roofPlanes
+    // + GPS panel positions) should still GENERATE — as a draft — rather than hard-
+    // 422. Hard-blocking here meant any project without a promoted canonical model
+    // (i.e. most studio designs) could not produce a planset at all. Treat real
+    // design geometry as sufficient for a draft generation.
+    const _designRoofPlanes = (enrichedBody.project?.roofPlanes ?? []) as Array<{ vertices?: Array<{ lat?: number; lng?: number }> }>;
+    const _designPanels = (enrichedBody.project?.panelPositions ?? []) as Array<{ lat?: number; lng?: number }>;
+    const hasRealDesignRoofGeometry =
+      _designRoofPlanes.some(p =>
+        Array.isArray(p?.vertices) && p.vertices.length >= 3 &&
+        p.vertices.every(v => isFinite(Number(v?.lat)) && isFinite(Number(v?.lng)) && Math.abs(Number(v?.lat)) > 0.001),
+      ) &&
+      _designPanels.some(p => isFinite(Number(p?.lat)) && isFinite(Number(p?.lng)) && Math.abs(Number(p?.lat)) > 0.001);
+
     if (isRoofPermit) {
       if (!canonicalBuildingModel) {
-        if (!allowDraftLegacyRoofGeometry) {
-          console.error('[PERMIT BLOCKED] CANONICAL_ROOF_GEOMETRY_REQUIRED', { projectId });
+        if (!allowDraftLegacyRoofGeometry && !hasRealDesignRoofGeometry) {
+          console.error('[PERMIT BLOCKED] CANONICAL_ROOF_GEOMETRY_REQUIRED', { projectId, designRoofPlanes: _designRoofPlanes.length, designPanels: _designPanels.length });
           return NextResponse.json({
             success: false,
             error: 'CANONICAL_ROOF_GEOMETRY_REQUIRED',
             code: 'CANONICAL_ROOF_GEOMETRY_REQUIRED',
-            message: 'Submission-ready roof permit generation requires a cad-safe CanonicalBuildingModel with local-meter roof plane polygons. Regenerate/promote the site-survey geometry, or explicitly request draft/legacy mode for a non-submission preview.',
+            message: 'Roof permit generation needs roof geometry: either a promoted CanonicalBuildingModel (for a submission-ready set) or real design roof planes + panel positions from the Design Studio. This project has neither — open the design, detect/draw the roof and place panels, then regenerate.',
             projectId,
           }, { status: 422 });
         }
-        console.warn('[PERMIT DRAFT/LEGACY] Proceeding without CanonicalBuildingModel roof geometry by explicit request', { projectId });
+        if (!allowDraftLegacyRoofGeometry && hasRealDesignRoofGeometry) {
+          console.warn('[PERMIT DRAFT] No promoted CanonicalBuildingModel — generating a DRAFT planset from real design roof geometry (not submission-ready)', { projectId, designRoofPlanes: _designRoofPlanes.length, designPanels: _designPanels.length });
+        } else {
+          console.warn('[PERMIT DRAFT/LEGACY] Proceeding without CanonicalBuildingModel roof geometry by explicit request', { projectId });
+        }
       } else {
         try {
           const bridge = canonicalToCADInputs(canonicalBuildingModel, {
