@@ -109,10 +109,17 @@ const DEBUG_PLANE_OVERLAYS = false;
 // off the roof (+ eave jerk). Rebuild with point-in-polygon plane assignment and an
 // on-plane clamp before re-enabling. Free move stays on.
 const ENABLE_PANEL_SNAP = false;
-// v62: per-click trace snap (snap a corner onto an existing plane's point while marking)
-// is OFF — it was "linear": it inherited the first polygon's imprecise click instead of
-// reconciling both faces. The Stitch action averages clusters of corners instead.
-const ENABLE_TRACE_SNAP = false;
+// v62: per-click trace snap (snap a corner onto an existing plane's point while marking).
+// RE-ENABLED (was false in 0e318b58). 0e318b58 turned this off in favour of a post-hoc
+// "Stitch" button, but that button only averages the RENDER-side corner maps
+// (plane3DCesiumPtsMap) — it never writes back to plane.vertices, the geometry every
+// panel-placement engine reads. So after stitching, adding panels placed them on the
+// OLD un-stitched corners and the roof visibly came apart ("add panels → unstitch").
+// Snapping corners AT TRACE TIME bakes the shared/connected corners straight into
+// plane.vertices, so panels sit on connected geometry and stay stitched. Trade-off:
+// the documented "linear inherits-first-click" imprecision returns (sub-metre); the
+// durable fix is to make Stitch write averaged corners back into plane.vertices.
+const ENABLE_TRACE_SNAP = true;
 
 // ── Mounting-system-aware roof panel offset ─────────────────────────────────
 // Physical stack height from roof deck to panel bottom face:
@@ -818,20 +825,30 @@ function SolarEngine3D({
   // overlay is active (or was just turned off, to revert colors / clear devices);
   // when both toggles are off, panelMeta churn from panel edits is ignored so we
   // don't trigger a wasteful full rebuild (and the panel "blink") on every click.
-  const prevVizRef = useRef({ colorByString: false, showEquipment: false });
+  const prevVizRef = useRef({ colorByString: false, showEquipment: false, panelOpacity: 1 });
   useEffect(() => {
     colorByStringRef.current = colorByString;
     showEquipmentRef.current = showEquipment;
     panelOpacityRef.current  = panelOpacity;
-    panelMetaRef.current      = panelMeta;
+    panelMetaRef.current      = panelMeta;   // keep current so incremental renders color correctly
     const viewer = viewerRef.current;
     const C = (window as any).Cesium;
     const prev = prevVizRef.current;
-    prevVizRef.current = { colorByString, showEquipment };
+    prevVizRef.current = { colorByString, showEquipment, panelOpacity };
     if (!viewer || !C || !renderAllPanelsRef.current) return;
-    const active    = colorByString || showEquipment;
+    // Only an actual viz CHANGE (toggle flip or opacity change) warrants the
+    // expensive full panel rebuild. panelMeta is in this effect's deps too, but
+    // panelMeta churn from moving/adding a panel must NOT force a rebuild — doing
+    // so tore down + re-added EVERY panel entity on every drag-release while a
+    // mode was active (the "jerky / snaps to everything" regression, 2176e4d3).
+    // A moved/added panel is recolored by the normal incremental render path,
+    // which already reads panelMetaRef/colorByStringRef in addPanelEntity.
+    const vizChanged =
+      prev.colorByString !== colorByString ||
+      prev.showEquipment !== showEquipment ||
+      prev.panelOpacity  !== panelOpacity;
     const turnedOff = (prev.colorByString && !colorByString) || (prev.showEquipment && !showEquipment);
-    if (active || turnedOff) {
+    if (vizChanged && (colorByString || showEquipment || turnedOff)) {
       renderAllPanelsRef.current(viewer, C, panelsRef.current, true /* forceFullRebuild */);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2793,7 +2810,20 @@ function SolarEngine3D({
         const hit = lineX(
           vj.uu + ep.inx * ep.sb, vj.vv + ep.iny * ep.sb, ep.ex, ep.ey,
           vj.uu + ec.inx * ec.sb, vj.vv + ec.iny * ec.sb, ec.ex, ec.ey);
-        inset.push(hit ?? { uu: vj.uu + ec.inx * ec.sb, vv: vj.vv + ec.iny * ec.sb });
+        // Plain per-edge inward offset for this corner (the safe fallback).
+        const fallback = { uu: vj.uu + ec.inx * ec.sb, vv: vj.vv + ec.iny * ec.sb };
+        // Guard (fix cf0dd96b regression): the miter is the intersection of two
+        // inward-offset edge lines. At a CONCAVE/reflex vertex (notched outline),
+        // or where a 0"-eave meets an 18" rake at a shallow angle, that intersection
+        // shoots far across the roof INTERIOR — drawing the red setback band through
+        // the middle of the roof / along the eave line. A legitimate miter never
+        // sits much farther from the vertex than the edge's own setback, so reject
+        // any blown-up intersection and fall back to the per-edge offset.
+        let pt = hit ?? fallback;
+        const reach = Math.hypot(pt.uu - vj.uu, pt.vv - vj.vv);
+        const maxReach = 2.5 * Math.max(ep.sb, ec.sb) + 0.02;
+        if (!isFinite(reach) || reach > maxReach) pt = fallback;
+        inset.push(pt);
       }
 
       // Pass 3 — render one band per edge: outer = exact polygon edge, inner = mitered
