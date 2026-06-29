@@ -137,21 +137,17 @@ export function drawRoofPlan(
       (v: any) => toX(v.lng).toFixed(1) + ',' + toY(v.lat).toFixed(1)
     ).join(' ');
 
-    // Roof plane fill — alternating tile hatch for multi-plane legibility
-    const roofFill = ri % 2 === 0 ? '#ddd8cc' : '#d0cfc8';
+    // Roof plane fill — clean light cool-gray (was a busy beige + double hatch).
+    const roofFill = ri % 2 === 0 ? '#eceef1' : '#e3e6ea';
     els.push(`<polygon points="${pts}" fill="${roofFill}" stroke="none"/>`);
-    // Apply asphalt shingle tile hatch overlay
+    // Subtle shingle texture only — dropped to a whisper (was opaque 0.92) and the
+    // second diagonal wood hatch removed entirely, which was the main "busy" look.
     const tileClipId = `rtc${ri}`;
     els.push(`<defs><clipPath id="${tileClipId}"><polygon points="${pts}"/></clipPath></defs>`);
-    els.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="url(#hatch-roof-tile)" opacity="0.92" clip-path="url(#${tileClipId})"/>`);
+    els.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="url(#hatch-roof-tile)" opacity="0.22" clip-path="url(#${tileClipId})"/>`);
 
-    // Diagonal roof-surface hatch (architectural convention)
-    const clipId = `rcp${ri}`;
-    els.push(`<defs><clipPath id="${clipId}"><polygon points="${pts}"/></clipPath></defs>`);
-    els.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="url(#hatch-wood)" opacity="0.18" clip-path="url(#${clipId})"/>`);
-
-    // Heavy structural outline — 2.5px solid per architectural conventions
-    els.push(`<polygon points="${pts}" fill="none" stroke="#333" stroke-width="2.5" stroke-linejoin="miter"/>`);
+    // Clean structural outline
+    els.push(`<polygon points="${pts}" fill="none" stroke="#2b2f36" stroke-width="2" stroke-linejoin="miter"/>`);
 
     // Fire setback inset (dashed red outline)
     els.push(`<polygon points="${pts}" fill="none" class="line-setbk"/>`);
@@ -250,25 +246,25 @@ export function drawRoofPlan(
 
   // ── Callout bubbles ──
   const cbY    = zones.dims.top + 12;
-  const cbBase = zones.dims.left + 18;
-  const callouts = [
-    { bx: cbBase,       by: cbY },
-    { bx: cbBase + 32,  by: cbY },
-    { bx: cbBase + 64,  by: cbY },
-    { bx: cbBase + 96,  by: cbY },
-    { bx: cbBase + 128, by: cbY },
-  ];
-
-  // Spread callout targets EVENLY across the array so the leaders fan out cleanly
-  // instead of all converging on the first few panels (the old "spider-web").
-  const tStep = Math.max(1, Math.floor(validPanels.length / callouts.length));
-  const panTargets = callouts.map((_, i) => validPanels[Math.min(i * tStep, validPanels.length - 1)]);
-  callouts.forEach((c, ci) => {
-    const target = panTargets[ci];
-    if (target) {
-      els.push(drawCalloutWithLeader(c.bx, c.by, toX(target.lng), toY(target.lat), ci + 1, 10));
+  // Callout bubbles spread across the TOP of the roof, each pointing straight down
+  // to the nearest panel below it — short, near-vertical leaders instead of long
+  // diagonals fanning across the whole array (the old crossing "spider-web").
+  const cbN      = 5;
+  const cbSpanX  = roofMaxX - roofMinX;
+  const cbRowY   = roofMinY - 16;
+  for (let i = 0; i < cbN; i++) {
+    const frac = (i + 0.5) / cbN;
+    const bx   = roofMinX + cbSpanX * frac;
+    // nearest panel to this bubble's x
+    let best: any = null, bestD = Infinity;
+    for (const p of validPanels) {
+      const d = Math.abs(toX(p.lng) - bx);
+      if (d < bestD) { bestD = d; best = p; }
     }
-  });
+    if (best) {
+      els.push(drawCalloutWithLeader(bx, cbRowY, toX(best.lng), toY(best.lat), i + 1, 8));
+    }
+  }
 
   // ── System summary line ──
   els.push(drawText(zones.dims.left, H - 8,
