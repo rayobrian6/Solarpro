@@ -548,73 +548,42 @@ export async function POST(req: NextRequest) {
     console.log('[permit/POST] Starting aerial fetch for project address [redacted]');
     console.log('[permit/POST] lat/lng: [redacted]');
     const aerialStart = Date.now();
-    // Center the aerial on the actual array centroid (most accurate framing);
-    // fetchAerialRoofData falls back to the best roof segment, then the geocode pin.
-    const _pp = (body.project as any)?.panelPositions as Array<{ lat: number; lng: number }> | undefined;
-    let _arrayCenter: { lat: number; lng: number } | undefined;
-    if (Array.isArray(_pp)) {
-      const _valid = _pp.filter(p => p && isFinite(p.lat) && isFinite(p.lng) && Math.abs(p.lat) > 0.001);
-      if (_valid.length > 0) {
-        _arrayCenter = {
-          lat: _valid.reduce((s, p) => s + p.lat, 0) / _valid.length,
-          lng: _valid.reduce((s, p) => s + p.lng, 0) / _valid.length,
-        };
-      }
-    }
-    // Robust array-center load (Ray, 2026-06-30). body.project.panelPositions is usually
-    // EMPTY here — for roof projects CAD/canonical fills it later; for fence/ground it
-    // never matches the request shape — so the aerial was centering on the geocode pin or
-    // a Google roof segment (often a NEIGHBOR), pushing the subject building to the edge of
-    // PV-1/PV-2. The design's ACTUAL placed panels live in the layouts table for EVERY
-    // system type (roof, ground, fence) — load them straight from the DB and center there.
-    if (!_arrayCenter && projectId && isValidUUID(projectId)) {
+    // ── Authoritative aerial center (Ray, 2026-06-30) ───────────────────────────
+    // The aerial MUST frame the CUSTOMER'S house. We cannot trust the design's panel
+    // centroid OR the stored project.lat/lng for "which house": when this project was
+    // created the address geocoded ~1 house off, so the roof was traced on the NEIGHBOR
+    // and the stored coord points there too — both are on the wrong building (confirmed:
+    // 3 Melvin Dr design sits ~17 m NORTH of the real house). The address geocode is the
+    // only authority for which building is the subject, so re-geocode it FRESH here. US
+    // Census is parcel-accurate for US street addresses, needs no key, and returns the
+    // same correct house the Design Studio fly-in lands on. Fall back to the stored coord
+    // only if the geocode fails.
+    let _centerLat = body.project.lat, _centerLng = body.project.lng;
+    const _addr = body.project?.address || '';
+    if (_addr) {
       try {
-        const _lsql = await getDbReady();
-        const _lrows = await _lsql`SELECT panels FROM layouts WHERE project_id = ${projectId} ORDER BY updated_at DESC LIMIT 1`;
-        const _lp = (_lrows[0]?.panels ?? []) as Array<{ lat?: number; lng?: number }>;
-        const _lv = _lp.filter(p => p && isFinite(Number(p.lat)) && isFinite(Number(p.lng)) && Math.abs(Number(p.lat)) > 0.001);
-        if (_lv.length > 0) {
-          const _ctr = {
-            lat: _lv.reduce((s, p) => s + Number(p.lat), 0) / _lv.length,
-            lng: _lv.reduce((s, p) => s + Number(p.lng), 0) / _lv.length,
-          };
-          // Sanity guard: some projects carry stale/cross-contaminated panel coords (e.g.
-          // a placeholder center, or another project's geometry hundreds of km away). If the
-          // centroid is implausibly far from the address geocode, reject it and let
-          // fetchAerialRoofData fall back to geocode/segment instead of flying to Phoenix.
-          const _gd = (isFinite(body.project.lat) && isFinite(body.project.lng))
-            ? Math.hypot((_ctr.lat - body.project.lat) * 111320, (_ctr.lng - body.project.lng) * 111320 * Math.cos(_ctr.lat * Math.PI / 180))
-            : 0;
-          if (_gd < 600) {
-            _arrayCenter = _ctr;
-            console.log(`[permit/aerial] center from layout panel centroid (${_lv.length} panels, ${_gd.toFixed(0)}m from geocode)`);
-          } else {
-            console.warn(`[permit/aerial] layout panel centroid ${_gd.toFixed(0)}m from geocode — rejected as stale; using geocode/segment`);
-          }
+        const _cu = `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encodeURIComponent(_addr)}&benchmark=Public_AR_Current&format=json`;
+        const _cr = await fetch(_cu, { signal: AbortSignal.timeout(6000) });
+        const _cj = await _cr.json() as { result?: { addressMatches?: Array<{ coordinates?: { x?: number; y?: number } }> } };
+        const _m = _cj?.result?.addressMatches?.[0]?.coordinates;
+        if (_m && isFinite(Number(_m.y)) && isFinite(Number(_m.x)) && Math.abs(Number(_m.y)) > 0.001) {
+          _centerLat = Number(_m.y);
+          _centerLng = Number(_m.x);
+          console.log('[permit/aerial] authoritative center from Census geocode', _centerLat, _centerLng);
+        } else {
+          console.warn('[permit/aerial] Census returned no match — using stored project coords');
         }
-      } catch (_e) {
-        console.warn('[permit/aerial] layout panel-center load failed (non-critical):', (_e as Error)?.message);
+      } catch (_ge) {
+        console.warn('[permit/aerial] Census geocode failed (non-fatal), using stored coords:', (_ge as Error)?.message);
       }
     }
-    // Secondary fallback: roof-plane vertex centroid from the request body, if present.
-    if (!_arrayCenter) {
-      const _rp = (body.project as any)?.roofPlanes as Array<{ vertices?: Array<{ lat: number; lng: number }> }> | undefined;
-      if (Array.isArray(_rp)) {
-        const _vs = _rp.flatMap(p => p?.vertices || []).filter(v => v && isFinite(v.lat) && isFinite(v.lng) && Math.abs(v.lat) > 0.001);
-        if (_vs.length > 0) {
-          _arrayCenter = {
-            lat: _vs.reduce((s, v) => s + v.lat, 0) / _vs.length,
-            lng: _vs.reduce((s, v) => s + v.lng, 0) / _vs.length,
-          };
-          console.log('[permit/POST] _arrayCenter from roofPlanes centroid (panelPositions empty at fetch)');
-        }
-      }
-    }
+    // Center the aerial on the authoritative geocode (passed as the pin; no design-derived
+    // arrayCenter — chooseAerialCenter then frames exactly this point, the real house).
     const aerialData = await fetchAerialRoofData(
-      body.project.lat,
-      body.project.lng,
-      body.project?.address || '',
-      _arrayCenter
+      _centerLat,
+      _centerLng,
+      _addr,
+      undefined,
     ).catch((aerialErr: any) => {
       console.log('[permit/POST] fetchAerialRoofData THREW:', aerialErr?.message);
       return { error: 'Aerial fetch threw: ' + aerialErr?.message } as AerialRoofData;
@@ -1025,50 +994,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── PV-1 aerial re-centering (Ray, 2026-06-30) ──────────────────────────
-    // The aerial is fetched early (above), but the real roof/panel geometry only
-    // lands on enrichedBody.project AFTER canonical/survey enrichment — so the first
-    // fetch often had no array center and the static map centered on the nearest
-    // Google roof segment, i.e. a NEIGHBOR's roof, putting the subject house at the
-    // edge of PV-1. Now that geometry is final, compute the true array centroid and,
-    // if the current aerial is materially off, re-fetch centered on the real array.
-    try {
-      const _ad = enrichedBody.aerialData as { imageBase64?: string; lat?: number; lng?: number } | undefined;
-      if (_ad?.imageBase64 && isFinite(Number(_ad.lat)) && isFinite(Number(_ad.lng))) {
-        let _ctr: { lat: number; lng: number } | undefined;
-        const _ep = _designPanels.filter(p => isFinite(Number(p?.lat)) && isFinite(Number(p?.lng)) && Math.abs(Number(p?.lat)) > 0.001);
-        if (_ep.length > 0) {
-          _ctr = {
-            lat: _ep.reduce((s, p) => s + Number(p.lat), 0) / _ep.length,
-            lng: _ep.reduce((s, p) => s + Number(p.lng), 0) / _ep.length,
-          };
-        } else {
-          const _vs = _designRoofPlanes
-            .flatMap(p => (Array.isArray(p?.vertices) ? p.vertices : []))
-            .filter(v => isFinite(Number(v?.lat)) && isFinite(Number(v?.lng)) && Math.abs(Number(v?.lat)) > 0.001);
-          if (_vs.length > 0) {
-            _ctr = {
-              lat: _vs.reduce((s, v) => s + Number(v.lat), 0) / _vs.length,
-              lng: _vs.reduce((s, v) => s + Number(v.lng), 0) / _vs.length,
-            };
-          }
-        }
-        if (_ctr) {
-          const dLat = Math.abs(_ctr.lat - Number(_ad.lat)) * 111320;
-          const dLng = Math.abs(_ctr.lng - Number(_ad.lng)) * 111320 * Math.cos(_ctr.lat * Math.PI / 180);
-          const offM = Math.hypot(dLat, dLng);
-          if (offM > 20) {
-            const reAerial = await fetchAerialRoofData(body.project.lat, body.project.lng, body.project?.address || '', _ctr).catch(() => null);
-            if (reAerial && (reAerial as AerialRoofData).imageBase64) {
-              enrichedBody.aerialData = reAerial;
-              console.log(`[permit/aerial] PV-1 re-centered on real array geometry (was ~${offM.toFixed(0)}m off)`, _ctr);
-            }
-          }
-        }
-      }
-    } catch (recenterErr) {
-      console.warn('[permit/aerial] PV-1 re-center skipped (non-critical):', (recenterErr as Error)?.message);
-    }
+    // NOTE: a previous post-enrichment "re-center on the design geometry" step was REMOVED
+    // here (Ray, 2026-06-30). It re-centered the aerial on the panel/roof centroid, which is
+    // exactly the wrong-house bug — the design can be anchored on the neighbor. The aerial is
+    // now centered authoritatively on the fresh address geocode (see the aerial fetch above),
+    // so re-centering on the design would defeat that.
 
     const html = generatePermitHTML(enrichedBody, storedSldSvg);
     console.log('[PLANSET GENERATED]', { systemType: enrichedBody.project?.systemType, panels: enrichedBody.system?.totalPanels, version: PLANSET_ENGINE_VERSION });
