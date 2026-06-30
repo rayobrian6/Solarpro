@@ -561,11 +561,42 @@ export async function POST(req: NextRequest) {
         };
       }
     }
-    // Fallback (Ray, 2026-06-30): panelPositions can still be empty HERE (CAD/canonical
-    // processing populates them later), which left _arrayCenter undefined and made
-    // fetchAerialRoofData center on a Google roof segment — often the NEIGHBOR's roof,
-    // putting the subject building at the edge of the site plan. Center on the real
-    // roof-plane centroid instead so PV-1 frames the correct house.
+    // Robust array-center load (Ray, 2026-06-30). body.project.panelPositions is usually
+    // EMPTY here — for roof projects CAD/canonical fills it later; for fence/ground it
+    // never matches the request shape — so the aerial was centering on the geocode pin or
+    // a Google roof segment (often a NEIGHBOR), pushing the subject building to the edge of
+    // PV-1/PV-2. The design's ACTUAL placed panels live in the layouts table for EVERY
+    // system type (roof, ground, fence) — load them straight from the DB and center there.
+    if (!_arrayCenter && projectId && isValidUUID(projectId)) {
+      try {
+        const _lsql = await getDbReady();
+        const _lrows = await _lsql`SELECT panels FROM layouts WHERE project_id = ${projectId} ORDER BY updated_at DESC LIMIT 1`;
+        const _lp = (_lrows[0]?.panels ?? []) as Array<{ lat?: number; lng?: number }>;
+        const _lv = _lp.filter(p => p && isFinite(Number(p.lat)) && isFinite(Number(p.lng)) && Math.abs(Number(p.lat)) > 0.001);
+        if (_lv.length > 0) {
+          const _ctr = {
+            lat: _lv.reduce((s, p) => s + Number(p.lat), 0) / _lv.length,
+            lng: _lv.reduce((s, p) => s + Number(p.lng), 0) / _lv.length,
+          };
+          // Sanity guard: some projects carry stale/cross-contaminated panel coords (e.g.
+          // a placeholder center, or another project's geometry hundreds of km away). If the
+          // centroid is implausibly far from the address geocode, reject it and let
+          // fetchAerialRoofData fall back to geocode/segment instead of flying to Phoenix.
+          const _gd = (isFinite(body.project.lat) && isFinite(body.project.lng))
+            ? Math.hypot((_ctr.lat - body.project.lat) * 111320, (_ctr.lng - body.project.lng) * 111320 * Math.cos(_ctr.lat * Math.PI / 180))
+            : 0;
+          if (_gd < 600) {
+            _arrayCenter = _ctr;
+            console.log(`[permit/aerial] center from layout panel centroid (${_lv.length} panels, ${_gd.toFixed(0)}m from geocode)`);
+          } else {
+            console.warn(`[permit/aerial] layout panel centroid ${_gd.toFixed(0)}m from geocode — rejected as stale; using geocode/segment`);
+          }
+        }
+      } catch (_e) {
+        console.warn('[permit/aerial] layout panel-center load failed (non-critical):', (_e as Error)?.message);
+      }
+    }
+    // Secondary fallback: roof-plane vertex centroid from the request body, if present.
     if (!_arrayCenter) {
       const _rp = (body.project as any)?.roofPlanes as Array<{ vertices?: Array<{ lat: number; lng: number }> }> | undefined;
       if (Array.isArray(_rp)) {
