@@ -150,9 +150,9 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
   const reqEmbedDisp = reqEmbedFt.toFixed(2);
   const safetyFactor = safetyRatio.toFixed(2);
 
-  const totalDL  = structural?.totalDeadLoadPsf?.toFixed(1) || '3.2';
-  const moduleDL = structural?.moduleLoadPsf?.toFixed(1) || '2.5';
-  const rackDL   = structural?.rackingLoadPsf?.toFixed(1) || '0.5';
+  const totalDL  = structural?.totalDeadLoadPsf?.toFixed(1) || '—';
+  const moduleDL = structural?.moduleLoadPsf?.toFixed(1) || '—';
+  const rackDL   = structural?.rackingLoadPsf?.toFixed(1) || '—';
   const upliftPsf = structural?.wind?.netUpliftPressure?.toFixed(2) || windPresDisp;
   const upliftPost = windLoadPost;
 
@@ -359,11 +359,13 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
         <strong>PAGE CONCLUSION — FENCE STRUCTURAL ANALYSIS:</strong>
         The proposed solar fence photovoltaic array and post foundation system have been analyzed for wind
         overturning, dead load, and post embedment capacity per ASCE 7-22 §29.4 and ${ibcVer} IBC.
-        ${structural && (structural.attachment?.safetyFactor || 0) >= 1.5
+        ${structural && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= 1.5
           ? `All structural parameters are within acceptable limits. The fence post foundation system is adequate
              to support the proposed solar fence PV array without modification. Post embedment and footing
              dimensions confirmed per ASCE 7-22 §29.4 wind overturning analysis.`
-          : 'Review flagged structural items before proceeding with installation. Foundation sizing may require revision.'}
+          : structural && structural.attachment?.safetyFactor == null
+            ? 'Structural analysis data incomplete — verify all parameters per engineering analysis before installation.'
+            : 'Review flagged structural items before proceeding with installation. Foundation sizing may require revision.'}
       </div>
 
       ${structuralRules.length > 0 ? `
@@ -401,9 +403,9 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
   const upliftPile  = structural?.wind?.upliftPerAttachment?.toFixed(0) || '—';
   const groundSnow  = structural?.snow?.groundSnowLoad || '—';
   const snowPile    = structural?.snow?.snowLoadPerAttachment?.toFixed(0) || '—';
-  const totalDL     = structural?.totalDeadLoadPsf?.toFixed(1) || '3.2';
-  const moduleDL    = structural?.moduleLoadPsf?.toFixed(1) || '2.5';
-  const rackDL      = structural?.rackingLoadPsf?.toFixed(1) || '0.5';
+  const totalDL     = structural?.totalDeadLoadPsf?.toFixed(1) || '—';
+  const moduleDL    = structural?.moduleLoadPsf?.toFixed(1) || '—';
+  const rackDL      = structural?.rackingLoadPsf?.toFixed(1) || '—';
   const safetyFact  = structural?.attachment?.safetyFactor?.toFixed(2) || '—';
 
   // CAD ground data
@@ -453,7 +455,7 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
             <tr><td>Foundation Type</td><td class="cv">${structType}</td></tr>
             <tr><td>Pile Embedment Depth</td><td class="cv">${pileDepth} ft min. (below frost)</td></tr>
             <tr><td>Pile Spacing</td><td class="cv">${pileSp} ft O.C.</td></tr>
-            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) < 2 ? '#cc0000' : '#000'};">${safetyFact} (min. 2.0)</td></tr>
+            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < 2 ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ' (min. 2.0)' : ''}</td></tr>
             <tr><td>Wind Code Reference</td><td class="cv">ASCE 7-22 §27</td></tr>
           </table>
         </div>
@@ -567,16 +569,18 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
         ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowPile} lbs per pile at the ${groundSnow} PSF ground snow load per ASCE 7-22 §7.` : 'Snow loading is not a controlling factor at this location.'}
         Roof slope reduction factors do not apply to ground-mounted arrays — ground snow load governs per ASCE 7-22 §7.
         Ground mount pile/pier capacity confirmed adequate for the imposed wind uplift and dead loads per ASCE 7-22 §27.
-        Safety factor of ${safetyFact} confirmed ${Number(safetyFact) >= 2.0 ? 'above' : 'BELOW'} the required minimum of 2.0.
+        ${Number(safetyFact) > 0 ? `Safety factor of ${safetyFact} confirmed ${Number(safetyFact) >= 2.0 ? 'above' : 'BELOW'} the required minimum of 2.0.` : 'Safety factor data not available — verify attachment capacity per engineering analysis.'}
       </div>` : ''}
       <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — GROUND MOUNT STRUCTURAL ANALYSIS:</strong>
         The proposed ground-mounted photovoltaic array and pile/pier foundation system have been analyzed for
         wind uplift, snow, dead load, and pile capacity per ASCE 7-22 §27 and ${ibcVer} IBC.
-        ${structural && (structural.attachment?.safetyFactor || 0) >= 2.0
+        ${structural && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= 2.0
           ? `All structural parameters are within acceptable limits. The proposed ground mount pile/pier foundation
              system is adequate to support the proposed PV array without modification.`
-          : 'Review flagged structural items before proceeding with installation. Pile sizing may require revision.'}
+          : structural && structural.attachment?.safetyFactor == null
+            ? 'Structural analysis data incomplete — verify all parameters per engineering analysis before installation.'
+            : 'Review flagged structural items before proceeding with installation. Pile sizing may require revision.'}
       </div>
 
       ${structuralRules.length > 0 ? `
@@ -615,14 +619,15 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
   const groundSnow  = structural?.snow?.groundSnowLoad || '—';
   const roofSnow    = structural?.snow?.roofSnowLoad?.toFixed(1) || '—';
   const snowAtt     = structural?.snow?.snowLoadPerAttachment?.toFixed(0) || '—';
-  const totalDL     = structural?.totalDeadLoadPsf?.toFixed(1) || '3.2';
-  const moduleDL    = structural?.moduleLoadPsf?.toFixed(1) || '2.5';
-  const rackDL      = structural?.rackingLoadPsf?.toFixed(1) || '0.5';
+  const totalDL     = structural?.totalDeadLoadPsf?.toFixed(1) || '—';
+  const moduleDL    = structural?.moduleLoadPsf?.toFixed(1) || '—';
+  const rackDL      = structural?.rackingLoadPsf?.toFixed(1) || '—';
 
   const lagCap      = structural?.attachment?.lagBoltCapacity?.toFixed(0) || '—';
   const safetyFact  = structural?.attachment?.safetyFactor?.toFixed(2) || '—';
   const maxSpacing  = structural?.attachment?.maxAllowedSpacing || '—';
-  const utilization = ((structural?.rafter?.utilizationRatio || 0) * 100).toFixed(0);
+  const _utilRatio = structural?.rafter?.utilizationRatio;
+  const utilization = _utilRatio != null ? (_utilRatio * 100).toFixed(0) : '—';
   const rafterBM    = structural?.rafter?.bendingMoment?.toFixed(0) || '—';
   const rafterABM   = structural?.rafter?.allowableBendingMoment?.toFixed(0) || '—';
   const rafterDefl  = structural?.rafter?.deflection?.toFixed(3) || '—';
@@ -675,12 +680,12 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
             ${_isTruss ? `
             <tr><td>Truss Load Capacity</td><td class="cv">${trussCapPsf} PSF</td></tr>
             <tr><td>Total Roof Load</td><td class="cv">${trussLoadPsf} PSF</td></tr>
-            <tr><td>Utilization Ratio</td><td class="cv" style="font-weight:bold;color:${Number(utilization) > 100 ? '#cc0000' : '#000'};">${utilization}%</td></tr>
+            <tr><td>Utilization Ratio</td><td class="cv" style="font-weight:bold;color:${_utilRatio != null && _utilRatio > 1.0 ? '#cc0000' : '#000'};">${utilization}${_utilRatio != null ? '%' : ''}</td></tr>
             <tr><td>Basis</td><td class="cv">BCSI pre-eng. truss capacity</td></tr>
             ` : `
             <tr><td>Bending Moment</td><td class="cv">${rafterBM} ft-lbs</td></tr>
             <tr><td>Allowable Moment</td><td class="cv">${rafterABM} ft-lbs</td></tr>
-            <tr><td>Utilization Ratio</td><td class="cv" style="font-weight:bold;color:${Number(utilization) > 100 ? '#cc0000' : '#000'};">${utilization}%</td></tr>
+            <tr><td>Utilization Ratio</td><td class="cv" style="font-weight:bold;color:${_utilRatio != null && _utilRatio > 1.0 ? '#cc0000' : '#000'};">${utilization}${_utilRatio != null ? '%' : ''}</td></tr>
             <tr><td>Deflection / Allowed</td><td class="cv">${rafterDefl}" / ${rafterAD}"</td></tr>
             `}
           </table>
@@ -692,7 +697,7 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
           <table class="calc-table">
             <tr><td>Lag Bolt Capacity</td><td class="cv">${lagCap} lbs</td></tr>
             <tr><td>Total Uplift / Attachment</td><td class="cv">${totalUplift} lbs</td></tr>
-            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) < 2 ? '#cc0000' : '#000'};">${safetyFact} (min. 2.0)</td></tr>
+            <tr><td>Safety Factor</td><td class="cv" style="font-weight:bold;color:${Number(safetyFact) > 0 && Number(safetyFact) < 2 ? '#cc0000' : '#000'};">${safetyFact}${Number(safetyFact) > 0 ? ' (min. 2.0)' : ''}</td></tr>
             <tr><td>Max Allowed Spacing</td><td class="cv">${maxSpacing}"</td></tr>
           </table>
         </div>
@@ -797,17 +802,19 @@ export function pageStructuralRoof(input: PermitInput, cad: CADModel, pageNum: n
         Wind analysis per ASCE 7-22 §26/27 indicates a net uplift of ${upliftAtt} lbs per attachment point at the
         design wind speed of ${windSpeed} mph (Exposure Category ${exposure}).
         ${Number(groundSnow) > 0 ? `Snow loading contributes ${snowAtt} lbs per attachment at the ${groundSnow} PSF ground snow load (roof snow load ${roofSnow} PSF after slope reduction per ASCE 7-22 §7).` : 'Snow loading is not a controlling factor at this location.'}
-        The rafter utilization ratio of ${utilization}% confirms the existing framing ${Number(utilization) <= 100 ? 'has adequate capacity' : 'REQUIRES REINFORCEMENT'} for the additional PV loading per IBC Section 1607.
-        Lag bolt attachment safety factor of ${safetyFact} ${Number(safetyFact) >= 2.0 ? 'exceeds' : 'DOES NOT MEET'} the required minimum of 2.0.
+        ${_utilRatio != null ? `The rafter utilization ratio of ${utilization}% confirms the existing framing ${_utilRatio <= 1.0 ? 'has adequate capacity' : 'REQUIRES REINFORCEMENT'} for the additional PV loading per IBC Section 1607.` : 'Rafter utilization data not available — verify framing capacity per engineering analysis.'}
+        ${Number(safetyFact) > 0 ? `Lag bolt attachment safety factor of ${safetyFact} ${Number(safetyFact) >= 2.0 ? 'exceeds' : 'DOES NOT MEET'} the required minimum of 2.0.` : 'Lag bolt safety factor data not available — verify attachment capacity per engineering analysis.'}
       </div>` : ''}
       <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — ROOF STRUCTURAL ANALYSIS:</strong>
         The proposed roof-mounted photovoltaic array and lag bolt attachment system have been analyzed for
         wind uplift, snow, dead load, rafter capacity, and attachment withdrawal per ASCE 7-22 §26/27 and ${ibcVer} IBC/IRC.
-        ${structural && (structural.rafter?.utilizationRatio || 0) <= 1.0 && (structural.attachment?.safetyFactor || 0) >= 2.0
+        ${structural && structural.rafter?.utilizationRatio != null && structural.rafter.utilizationRatio <= 1.0 && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= 2.0
           ? `All structural parameters are within acceptable limits. The existing roof structure and lag bolt attachment
              system are adequate to support the proposed PV array without modification.`
-          : 'Review flagged structural items before proceeding with installation. Reinforcement or attachment revision may be required.'}
+          : structural && structural.rafter?.utilizationRatio == null && structural.attachment?.safetyFactor == null
+            ? 'Structural analysis data incomplete — verify all parameters per engineering analysis before installation.'
+            : 'Review flagged structural items before proceeding with installation. Reinforcement or attachment revision may be required.'}
       </div>
 
       ${structuralRules.length > 0 ? `
@@ -1152,7 +1159,7 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       <!-- Wire Sizing Justification -->
       <div class="section-title">Wire Sizing Justification — NEC 690.8 & 310.15</div>
       <table class="equip-table">
-        <thead><tr><th>Circuit</th><th>Isc (A)</th><th>×1.25 (A)</th><th>×1.25 OCPD (A)</th><th>Wire</th><th>Ampacity (90°C)</th><th>Derated</th><th>Status</th></tr></thead>
+        <thead><tr><th>Circuit</th><th>Isc (A)</th><th>Isc×1.25 (A)</th><th>OCPD ≥ Isc×1.56 (A)</th><th>Wire</th><th>Ampacity (90°C)</th><th>Derated</th><th>Status</th></tr></thead>
         <tbody>
           ${system.inverters?.flatMap((inv, invIdx) =>
             inv.strings?.map((str, strIdx) => {
@@ -1175,13 +1182,13 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
       </table>
       <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
         <strong>WIRE SIZING INTERPRETATION:</strong>
-        All DC source circuit conductors are sized per NEC 690.8(A)(1) using Isc × 1.25 for continuous duty, with OCPD rated at Isc × 1.25 × 1.25 per NEC 690.8(B)(1).
+        All DC source circuit conductors are sized per NEC 690.8(A)(1) using Isc × 1.25 for continuous duty, with OCPD rated at Isc × 1.56 (1.25 × 1.25 per NEC 690.8(A)(1)×(B)(1)).
         USE-2 rated conductors (90\u00b0C) are specified for all PV source circuits to maximize ampacity margin under ${isRoof(cad.systemType) ? 'rooftop temperature' : isFence(cad.systemType) ? 'outdoor fence-mounted' : 'outdoor ground-mounted'} conditions.
         Conductor ampacity after derating exceeds the maximum circuit current for all circuits. No conductor upsizing is required.
       </div>
       <div style="padding:var(--xs);font-size:var(--f-sm);line-height:1.6;border:var(--border);border-top:none;background:#f0f4f8;">
         <strong>FORMULA REFERENCE — WIRE SIZING (NEC 690.8):</strong><br/>
-        <span style="font-family:var(--mono);font-size:10px;">Max Circuit Current = Isc × 1.25 &nbsp; | &nbsp; OCPD ≥ Isc × 1.25 × 1.25 &nbsp; | &nbsp; Conductor Ampacity ≥ Max Circuit Current (after derating)</span><br/>
+        <span style="font-family:var(--mono);font-size:10px;">Max Circuit Current = Isc × 1.25 [690.8(A)(1)] &nbsp; | &nbsp; OCPD ≥ Isc × 1.56 [690.8(A)(1)×(B)(1)] &nbsp; | &nbsp; Conductor Ampacity ≥ Max Circuit Current (after derating)</span><br/>
         <span style="font-size:9px;color:#333;">
           The wire sizing chain ensures: (1) continuous duty factor accounts for sustained PV output under peak insolation,
           (2) OCPD rating provides 125% margin above continuous current for fuse/breaker coordination,
