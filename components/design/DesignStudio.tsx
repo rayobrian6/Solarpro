@@ -1576,9 +1576,13 @@ export default function DesignStudio({ project, onSave }: Props) {
     const forceEsri   = tileProvider === 'esri';
     const forceGoogle = tileProvider === 'google';
 
-    // Determine fetch zoom based on provider capabilities
+    // Determine fetch zoom based on provider capabilities. Tile z MUST be an integer —
+    // `zoom` is fractional (smooth wheel zoom, e.g. 19.75), and a fractional z goes into the
+    // tile URL as ".../tile/19.75/..." which every provider rejects → grey tiles. Floor it;
+    // the fractional remainder is handled by `scale` (overzoom). (Previously the cap of 19
+    // accidentally clamped fractional zooms to an integer; raising the cap exposed this.)
     const MAX_ZOOM  = (!forceEsri && hasGoogle) ? GOOGLE_MAX_ZOOM : ARCGIS_MAX_ZOOM;
-    const fetchZoom = Math.min(zoom, MAX_ZOOM);
+    const fetchZoom = Math.min(Math.floor(zoom), MAX_ZOOM);
     const scale     = Math.pow(2, zoom - fetchZoom);
 
     const center = latLngToWorld(mapCenter.lat, mapCenter.lng, fetchZoom);
@@ -1732,8 +1736,8 @@ export default function DesignStudio({ project, onSave }: Props) {
     // Tiles are stored at fetchZoom — clamped to GOOGLE_MAX_ZOOM=21 (or ARCGIS_MAX_ZOOM=19 fallback)
     // If display zoom > max, tiles are scaled up on canvas
     const _tileMaxZoom = googleSessionRef.current ? GOOGLE_MAX_ZOOM : ARCGIS_MAX_ZOOM;
-    const fetchZoom = Math.min(zoom, _tileMaxZoom);
-    const tileScale = Math.pow(2, zoom - fetchZoom); // 1 at zoom<=max, 2 at +1, 4 at +2
+    const fetchZoom = Math.min(Math.floor(zoom), _tileMaxZoom); // integer tile z (matches loadTiles)
+    const tileScale = Math.pow(2, zoom - fetchZoom); // 1 at integer native zoom, >1 when overzoomed
     const displayTileSize = TILE_SIZE * tileScale;
 
     // Center position in fetch-zoom world coords
