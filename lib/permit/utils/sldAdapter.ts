@@ -34,7 +34,9 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   const totalPanels  = system?.totalPanels ?? 0;
   const totalDcKw    = system?.totalDcKw ?? 0;
   const totalAcKw    = system?.totalAcKw ?? 0;
-  const acOutputKw   = eq.inverterAcOutputKw || totalAcKw;
+  // Use system total AC kW when available (correct for microinverters: panels × per-micro AcKw).
+  // Fall back to eq.inverterAcOutputKw (per-inverter for string systems) only when totalAcKw is 0.
+  const acOutputKw   = totalAcKw || eq.inverterAcOutputKw;
   const acOutputAmps = acOutputKw > 0 ? Math.round(acOutputKw * 1000 / 240) : 0;
 
   // ── Panel specs ──
@@ -76,7 +78,15 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
 
   // ── Battery / Generator / ATS ──
   const hasBattery = !!(project.batteryCount && project.batteryCount > 0) || !!(project.batteryModel);
-  const batteryKwh = hasBattery ? ((project.batteryCount || 1) * (project.batteryKwh ?? 5.0)) : 0;
+  // Total battery kWh (system total). For multi-unit systems the per-unit kWh
+  // appears in the PV-1 equipment legend; the SLD label includes the breakdown
+  // for clarity: e.g. "15 kWh (3 × 5.0)" instead of just "15 kWh".
+  const batteryUnits    = project.batteryCount || 1;
+  const batteryKwhPer   = project.batteryKwh ?? 5.0;
+  const batteryKwhTotal = hasBattery ? batteryUnits * batteryKwhPer : 0;
+  const batteryKwhLabel = hasBattery && batteryUnits > 1
+    ? `${batteryKwhTotal} kWh (${batteryUnits} × ${batteryKwhPer})`
+    : `${batteryKwhTotal} kWh`;
 
   // ── Micro-specific ──
   const deviceCount = isMicro ? totalPanels : undefined;
@@ -120,7 +130,8 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     hasProductionMeter:      project.productionMeter !== false,
     hasBattery,
     batteryModel:            project.batteryModel ?? '',
-    batteryKwh,
+    batteryKwh:              batteryKwhTotal,
+    batteryKwhLabel,
     // Error 5ba fix: compute battery backfeed fallback (20A per unit typical residential)
     batteryBackfeedA:        project.batteryBackfeedA ?? (hasBattery ? (project.batteryCount ?? 1) * 20 : undefined),
     generatorBrand:          project.generatorBrand ?? undefined,
