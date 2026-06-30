@@ -1492,11 +1492,16 @@ export default function DesignStudio({ project, onSave }: Props) {
   // Provider priority (v47.87):
   //   'auto'   — Google primary (zoom 21), ESRI fallback on error or blank tile
   //   'google' — Google only (forced)
-  //   'esri'   — ESRI only, capped at zoom 19
+  //   'esri'   — ESRI only, capped at ARCGIS_MAX_ZOOM
   // Smart quality detection: ESRI tiles with pixel variance <80 are flagged as blank
-  // (ESRI stops real imagery above zoom 19 for rural areas, returns solid grey tile)
+  // (ESRI stops real imagery above its native max for an area, returns solid grey tile)
   const GOOGLE_MAX_ZOOM = 21;
-  const ARCGIS_MAX_ZOOM = 19;
+  // ESRI World Imagery serves native z20 in most developed US areas (verified real z20
+  // imagery for the test address; z21 is grey there). Was hardcoded to 19, which forced
+  // an upscaled/blurry z19 above zoom 19 instead of the sharper native z20 that exists.
+  // Raised to 20; the variance-based blank-tile detection still falls back gracefully in
+  // rural areas that genuinely lack z20. (Ray, 2026-06-30 — sharper ESRI imagery.)
+  const ARCGIS_MAX_ZOOM = 20;
 
   // Cache Google Maps session token at component scope
   const googleSessionRef = React.useRef<{ token: string; key: string } | null>(null);
@@ -2449,7 +2454,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   ) {
     const label = source === 'google'
       ? `📷 Google z${currentZoom}`
-      : `🌍 ESRI z${Math.min(currentZoom, 19)}`;
+      : `🌍 ESRI z${Math.min(currentZoom, ARCGIS_MAX_ZOOM)}`;
     const color = source === 'google' ? '#60a5fa' : '#fbbf24';
     ctx.save();
     ctx.font = 'bold 9px Inter, sans-serif';
