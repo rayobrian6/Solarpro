@@ -145,6 +145,8 @@ export interface SLDProfessionalInput {
   hasBattery:              boolean;
   batteryModel:            string;
   batteryKwh:              number;
+  /** Human-readable kWh label with unit breakdown, e.g. "15 kWh (3 × 5.0)". Falls back to "N kWh" for single-unit. */
+  batteryKwhLabel?:        string;
   batteryBrand?:           string;
   batteryCount?:           number;
   batteryBackfeedA?:       number;
@@ -421,7 +423,8 @@ function getAnchorPoint(
 function renderBattery(
   cx: number, cy: number,
   model: string, kwh: number, backfeedA: number, calloutN: number,
-  manufacturer: string = ''
+  manufacturer: string = '',
+  kwhLabel: string = ''
 ): {svg: string; lx: number; rx: number; ty: number; by: number;
     acOutX: number; acOutY: number} {
   // SOT: symbol size from SLD_SYMBOL_MAP['battery-ac'] = 180×170
@@ -478,7 +481,7 @@ function renderBattery(
 
   // Labels below
   p.push(txt(cx, by2 + H2 + 16, model ? model.substring(0, 22) : 'BATTERY STORAGE', {sz: F.tiny, anc: 'middle', italic: true}));
-  p.push(txt(cx, by2 + H2 + 25, kwh > 0 ? `${kwh} kWh` : '', {sz: F.tiny, anc: 'middle', bold: true, fill: BAT_HDR}));
+  p.push(txt(cx, by2 + H2 + 25, kwh > 0 ? (kwhLabel || `${kwh} kWh`) : '', {sz: F.tiny, anc: 'middle', bold: true, fill: BAT_HDR}));
   if (backfeedA > 0) {
     p.push(txt(cx, by2 + H2 + 34, `${backfeedA}A BACKFEED — NEC 705.12(B)`, {sz: F.tiny, anc: 'middle', fill: BAT_HDR}));
   }
@@ -2056,14 +2059,15 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const batCX = buiCX;
     const batCY = BUS_Y - 200;
     // Phase 4: Use _batDisplayModel (never empty)
-    console.log(`[SLD BATTERY MISSING AT STAGE RENDERER] hasBattery=true, model='${_batDisplayModel}', kwh=${input.batteryKwh ?? 0}`);
+    console.log(`[SLD BATTERY RENDERED] hasBattery=true, model='${_batDisplayModel}', kwh=${input.batteryKwh ?? 0}`);
     const batResult = renderBattery(
       batCX, batCY,
       _batDisplayModel,
       input.batteryKwh ?? 0,
       input.batteryBackfeedA ?? 0,
       isMicro ? 8 : 9,
-      input.batteryBrand ?? ''
+      input.batteryBrand ?? '',
+      input.batteryKwhLabel ?? ''
     );
     parts.push(batResult.svg);
 
@@ -2464,7 +2468,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ['Interconnection',esc(input.interconnection)],
     ['Rapid Shutdown',input.rapidShutdownIntegrated?'INTEGRATED':'EXTERNAL'],
     ['Battery Storage',input.hasBattery?esc(input.batteryModel):'NONE'],
-    ...(input.hasBattery && input.batteryKwh ? [['Battery Capacity',`${input.batteryKwh} kWh`] as [string,string]] : []),
+    ...(input.hasBattery && input.batteryKwh ? [['Battery Capacity', input.batteryKwhLabel || `${input.batteryKwh} kWh`] as [string,string]] : []),
     ...(input.batteryBackfeedA ? [['Batt. Backfeed',`${input.batteryBackfeedA}A — NEC 705.12(B)`] as [string,string]] : []),
     ...((input.generatorKw ?? 0) > 0 ? [['Generator',`${input.generatorBrand??''} ${input.generatorKw}kW`] as [string,string]] : []),
     ...(input.atsAmpRating ? [['ATS',`${input.atsBrand??''} ${input.atsAmpRating}A`] as [string,string]] : []),
@@ -2485,7 +2489,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ['Interconnection',esc(input.interconnection)],
     ['Rapid Shutdown',input.rapidShutdownIntegrated?'INTEGRATED':'EXTERNAL'],
     ['Battery Storage',input.hasBattery?esc(input.batteryModel):'NONE'],
-    ...(input.hasBattery && input.batteryKwh ? [['Battery Capacity',`${input.batteryKwh} kWh`] as [string,string]] : []),
+    ...(input.hasBattery && input.batteryKwh ? [['Battery Capacity', input.batteryKwhLabel || `${input.batteryKwh} kWh`] as [string,string]] : []),
     ...(input.batteryBackfeedA ? [['Batt. Backfeed',`${input.batteryBackfeedA}A — NEC 705.12(B)`] as [string,string]] : []),
     ...((input.generatorKw ?? 0) > 0 ? [['Generator',`${input.generatorBrand??''} ${input.generatorKw}kW`] as [string,string]] : []),
     ...(input.atsAmpRating ? [['ATS',`${input.atsBrand??''} ${input.atsAmpRating}A`] as [string,string]] : []),
