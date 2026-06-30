@@ -141,6 +141,8 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   const circuitWordPl = _isMicro ? 'BRANCHES' : 'STRINGS';  // proper plural (not "BRANCHS")
   const circuitLabel  = totalStrings !== 1 ? circuitWordPl : circuitWord;
   const circuitWordLc = _isMicro ? 'branch circuit' : 'string';
+  // Per-module label prefix: 'B' for AC branch circuits (micro), 'S' for DC strings.
+  const cPrefix = _isMicro ? 'B' : 'S';
 
   // Group panels by row for grid visualization
   const rows: Map<number, typeof panels> = new Map();
@@ -203,7 +205,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
         svgCells += `<rect x="${x}" y="${y}" width="${cellW}" height="${cellH}" fill="${color}" fill-opacity="0.18" stroke="${color}" stroke-width="1.2" rx="2"/>`;
         svgCells += `<text x="${x + cellW/2}" y="${y + cellH/2 - 4}" text-anchor="middle" font-size="6" fill="#000" font-weight="600">R${rn+1}</text>`;
         svgCells += `<text x="${x + cellW/2}" y="${y + cellH/2 + 5}" text-anchor="middle" font-size="5.5" fill="#555">C${(p.col??ci)+1}</text>`;
-        svgCells += `<text x="${x + cellW/2}" y="${y + cellH/2 + 14}" text-anchor="middle" font-size="5" fill="${color}" font-weight="700">S${si+1}</text>`;
+        svgCells += `<text x="${x + cellW/2}" y="${y + cellH/2 + 14}" text-anchor="middle" font-size="5" fill="${color}" font-weight="700">${cPrefix}${si+1}</text>`;
       });
     });
   } else if (panels.length === 0) {
@@ -217,7 +219,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
           const y = 30 + (ii * (invs[0].strings?.length || 1) + si) * (cellH + gapY);
           const color = stringColors[si % stringColors.length];
           svgCells += `<rect x="${x}" y="${y}" width="${cellW}" height="${cellH}" fill="${color}" fill-opacity="0.18" stroke="${color}" stroke-width="1.2" rx="2"/>`;
-          svgCells += `<text x="${x + cellW/2}" y="${y + cellH/2 + 4}" text-anchor="middle" font-size="5.5" fill="${color}" font-weight="700">S${si+1}</text>`;
+          svgCells += `<text x="${x + cellW/2}" y="${y + cellH/2 + 4}" text-anchor="middle" font-size="5.5" fill="${color}" font-weight="700">${cPrefix}${si+1}</text>`;
         }
         if (ppc > 20) {
           const x = 40 + 20 * (cellW + gapX);
@@ -228,18 +230,33 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     });
   }
 
-  // String legend
-  const legendItems = system.inverters?.flatMap((inv, ii) =>
-    (inv.strings || []).map((str, si) => ({
-      si: ii * (system.inverters[0]?.strings?.length || 1) + si,
-      label: str.label || `String ${si+1}`,
-      count: str.panelCount,
-      model: str.panelModel || '—',
-      watts: str.panelWatts || 400,
-      voc: str.panelVoc || 41.6,
-      isc: str.panelIsc || 12.26,
-    }))
-  ) || [];
+  // Circuit legend. For microinverters the system has AC branch circuits (not DC
+  // strings); inverters[].strings is the phantom "1 string of N" fallback, so derive
+  // the legend from the same per-panel branch grouping the grid uses (panelStringMap)
+  // — otherwise the legend ("String 1, Qty 52") contradicts the B1..Bn grid cells.
+  const _legendWatts = panels[0]?.wattage
+    || system.inverters?.[0]?.strings?.[0]?.panelWatts || 400;
+  const legendItems = _isMicro
+    ? Array.from({ length: totalStrings }, (_, bi) => ({
+        si: bi,
+        label: `Branch ${bi + 1}`,
+        count: sortedPanels.filter(p => panelStringMap.get(p.id) === bi).length,
+        model: '—',
+        watts: _legendWatts,
+        voc: 0,
+        isc: 0,
+      }))
+    : (system.inverters?.flatMap((inv, ii) =>
+        (inv.strings || []).map((str, si) => ({
+          si: ii * (system.inverters[0]?.strings?.length || 1) + si,
+          label: str.label || `String ${si+1}`,
+          count: str.panelCount,
+          model: str.panelModel || '—',
+          watts: str.panelWatts || 400,
+          voc: str.panelVoc || 41.6,
+          isc: str.panelIsc || 12.26,
+        }))
+      ) || []);
 
   // ── PIPELINE v47.343: Build array grid SVG scaled to fill draw-zone ──────
   const AG_VB_W = 1200;
@@ -263,7 +280,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
         agCells += `<rect x="${x}" y="${y}" width="${agCellW}" height="${agCellH}" fill="${color}" fill-opacity="0.18" stroke="${color}" stroke-width="1.5" rx="3"/>`;
         agCells += `<text x="${x + agCellW/2}" y="${y + agCellH/2 - 6}" text-anchor="middle" font-size="${Math.max(7, agCellH * 0.13)}" fill="#000" font-weight="700">R${rn+1}</text>`;
         agCells += `<text x="${x + agCellW/2}" y="${y + agCellH/2 + 6}" text-anchor="middle" font-size="${Math.max(6, agCellH * 0.11)}" fill="#555">C${(p.col??ci)+1}</text>`;
-        agCells += `<text x="${x + agCellW/2}" y="${y + agCellH/2 + 19}" text-anchor="middle" font-size="${Math.max(6, agCellH * 0.11)}" fill="${color}" font-weight="700">S${si+1}</text>`;
+        agCells += `<text x="${x + agCellW/2}" y="${y + agCellH/2 + 19}" text-anchor="middle" font-size="${Math.max(6, agCellH * 0.11)}" fill="${color}" font-weight="700">${cPrefix}${si+1}</text>`;
       });
       const rowLabelY = 42 + ri * (agCellH + agGapY) + agCellH/2 + 4;
       agCells += `<text x="74" y="${rowLabelY}" text-anchor="end" font-size="${Math.max(7, agCellH * 0.12)}" fill="#333" font-weight="600">R${rn+1}</text>`;
@@ -287,12 +304,12 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
         for (let pi = 0; pi < ppc; pi++) {
           const x = 80 + pi * (schCellW + 3);
           agCells += `<rect x="${x}" y="${y}" width="${schCellW}" height="${schCellH}" fill="${color}" fill-opacity="0.18" stroke="${color}" stroke-width="1.5" rx="3"/>`;
-          agCells += `<text x="${x + schCellW/2}" y="${y + schCellH/2 + 5}" text-anchor="middle" font-size="${Math.max(6, schCellH * 0.11)}" fill="${color}" font-weight="700">S${si+1}</text>`;
+          agCells += `<text x="${x + schCellW/2}" y="${y + schCellH/2 + 5}" text-anchor="middle" font-size="${Math.max(6, schCellH * 0.11)}" fill="${color}" font-weight="700">${cPrefix}${si+1}</text>`;
         }
         if (str.panelCount > 20) {
           agCells += `<text x="${80 + ppc * (schCellW + 3) + 4}" y="${y + schCellH/2 + 5}" font-size="9" fill="#555">+${str.panelCount - 20} more</text>`;
         }
-        agCells += `<text x="74" y="${y + schCellH/2 + 4}" text-anchor="end" font-size="9" fill="#333" font-weight="600">Str ${si+1}</text>`;
+        agCells += `<text x="74" y="${y + schCellH/2 + 4}" text-anchor="end" font-size="9" fill="#333" font-weight="600">${_isMicro ? 'Br' : 'Str'} ${si+1}</text>`;
         rowIdx++;
       });
     });
@@ -323,7 +340,9 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
 
   // Callout notes for data zone
   const agCalloutRows = [
-    { n: 1, label: 'NEC 690.8', sub: `String Isc \xd7 1.25 \xd7 1.25 = conductor sizing basis` },
+    { n: 1, label: 'NEC 690.8', sub: _isMicro
+        ? `AC branch \xd7 1.25 continuous = conductor sizing basis`
+        : `String Isc \xd7 1.25 \xd7 1.25 = conductor sizing basis` },
     { n: 2, label: 'Tilt / Azimuth', sub: `${avgTilt}\xb0 tilt / ${avgAz}\xb0 (${compassDir})` },
     { n: 3, label: isRoof(cadSystemType) ? 'IFC \xa7605.11 Setbacks' : isFence(cadSystemType) ? 'NEC 250.169 Bonding' : 'NEC 690.51 Labeling',
        sub: isRoof(cadSystemType) ? 'Min 18" eave/ridge setback required' : isFence(cadSystemType) ? 'All metalwork bonded to EGC \u2014 min #6 AWG Cu' : 'Equipment labeling at all access points' },
@@ -398,11 +417,11 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
           </table>
         </div>
         <div style="flex-shrink:0;border-bottom:var(--border);">
-          <div class="draw-zone-hdr">STRING LEGEND</div>
+          <div class="draw-zone-hdr">${circuitWord} LEGEND</div>
           <table style="width:100%;border-collapse:collapse;">
             <thead><tr style="background:#000;color:#fff;">
               <th style="padding:1px 2px;width:12px;font-size:6px;"></th>
-              <th style="padding:1px 2px;text-align:left;font-size:6px;">String</th>
+              <th style="padding:1px 2px;text-align:left;font-size:6px;">${_isMicro ? 'Branch' : 'String'}</th>
               <th style="padding:1px 2px;font-size:6px;">Qty</th>
               <th style="padding:1px 2px;font-size:6px;">Wp</th>
             </tr></thead>

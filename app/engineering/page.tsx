@@ -9272,7 +9272,18 @@ function EngineeringPageInner() {
                           <span className="ml-1 px-1.5 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase tracking-wide">+5 Models</span>
                         </h3>
                         <label className="relative inline-flex items-center cursor-pointer">
-                          <input type="checkbox" checked={batteryEnabled} onChange={e => setBatteryEnabled(e.target.checked)}
+                          <input type="checkbox" checked={batteryEnabled} onChange={e => {
+                              const on = e.target.checked;
+                              setBatteryEnabled(on);
+                              // v63: toggling OFF must CLEAR the battery from config, not just
+                              // hide the panel. An ecosystem/auto-adopted battery sets
+                              // config.batteryCount>0 (see applySizingRecommendation v62 ~3501);
+                              // without clearing it here, the battery stays in the persisted
+                              // design and the permit/SLD/BOM still render it (phantom 15 kWh)
+                              // even though the toggle reads OFF. Clearing keeps engineering and
+                              // the planset in agreement.
+                              if (!on) updateConfig({ batteryId: '', batteryCount: 0, batteryKwh: 0, batteryBrand: '', batteryModel: '' });
+                            }}
                             className="sr-only peer" data-testid="battery-enabled-toggle" />
                           <div className="w-11 h-6 bg-slate-700 rounded-full peer peer-checked:bg-emerald-500 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5"></div>
                         </label>
