@@ -40,6 +40,17 @@ function defaultInverterId(topology: DesignElectrical['topology']): string {
   return STRING_INVERTERS[0]?.id ?? 'se-7600h';
 }
 
+/**
+ * The inverter model the design ACTUALLY recorded (e.g. IQ8A for a micro design),
+ * if any. This must win over the industry-standard topology default — defaulting a
+ * micro to IQ8+ (290W) when the design specified IQ8A (349W) makes AC output ~17%
+ * low. Only the optimizer peripheral id stays separate (it's not the inverter).
+ */
+function designRecordedInverterId(de: DesignElectrical): string | undefined {
+  if (de.topology === 'micro') return de.microModelId;
+  return undefined;
+}
+
 function inferBrand(de: DesignElectrical): string {
   if (de.inverterBrand) return de.inverterBrand;
   if (de.topology === 'micro') return 'Enphase';
@@ -81,7 +92,8 @@ export function designElectricalToEngineering(
 
   return {
     inverterType: de.topology,
-    inverterId: opts.selectedInverterId || defaultInverterId(de.topology),
+    // Precedence: project-pinned inverter > the model the DESIGN recorded > topology default.
+    inverterId: opts.selectedInverterId || designRecordedInverterId(de) || defaultInverterId(de.topology),
     inverterBrand: inferBrand(de),
     mountingId: de.rackingId,
     optimizerPeripheralId: de.topology === 'optimizer' ? de.optimizerModelId : undefined,

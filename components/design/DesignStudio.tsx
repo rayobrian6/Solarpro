@@ -744,7 +744,11 @@ export default function DesignStudio({ project, onSave }: Props) {
       rackingId,
       panelId: (selectedPanel as any)?.id,
       optimizerModelId: topology === 'optimizer' ? OPTIMIZERS[0]?.id : undefined,
-      microModelId: topology === 'micro' ? MICROINVERTERS[0]?.id : undefined,
+      // Record the ACTUALLY-selected micro (e.g. IQ8A), not a hardcoded IQ8+. The
+      // engineering handoff reads this id; defaulting to IQ8+ (290W) when the design
+      // uses IQ8A (349W) makes the AC output ~17% low. Fall back to the catalog
+      // default only when nothing is selected.
+      microModelId: topology === 'micro' ? ((selectedInverter as any)?.id ?? MICROINVERTERS[0]?.id) : undefined,
       byPanelId,
       overrides: Object.keys(stringOverrides).length > 0 ? stringOverrides : undefined,
       strings,

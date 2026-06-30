@@ -93,6 +93,27 @@ describe('designElectricalToEngineering', () => {
     const h = designElectricalToEngineering(baseDE, { selectedInverterId: 'enphase-iq8h' });
     expect(h.inverterId).toBe('enphase-iq8h');
   });
+
+  // ── BUG 2: the design's actual micro model must win over the topology default ──
+  it("uses the design's recorded micro model (microModelId) when no project inverter is pinned", () => {
+    // Braidon Pilla project: design selected IQ8A (349W AC). With no project-pinned
+    // inverter, the handoff must NOT silently fall back to IQ8+ (MICROINVERTERS[0], 290W).
+    const h = designElectricalToEngineering({ ...baseDE, microModelId: 'enphase-iq8a' });
+    expect(h.inverterId).toBe('enphase-iq8a');
+  });
+
+  it('still honors a project-pinned inverter id even when microModelId is set', () => {
+    const h = designElectricalToEngineering(
+      { ...baseDE, microModelId: 'enphase-iq8a' },
+      { selectedInverterId: 'enphase-iq8h' },
+    );
+    expect(h.inverterId).toBe('enphase-iq8h'); // pinned wins over recorded design model
+  });
+
+  it('falls back to the topology default only when neither pinned nor recorded model exists', () => {
+    const h = designElectricalToEngineering({ ...baseDE, microModelId: undefined });
+    expect(h.inverterId).toBe('enphase-iq8plus'); // MICROINVERTERS[0]
+  });
 });
 
 // Guards the server-side planset backfill — the thing that broke generation before.

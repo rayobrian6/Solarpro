@@ -1383,8 +1383,16 @@ function EngineeringPageInner() {
             ? ` · $${Math.round(seed.cost_low / 1000)}k–$${Math.round(seed.cost_high / 1000)}k estimate`
             : '';
           const displayPanels = layoutPanelCount > 0 ? layoutPanelCount : seed.panel_count;
+          // DC kW must match the header (panelCount × resolved SKU watts, page.tsx
+          // ~2432). The design's persisted layout.systemSizeKw is computed from the
+          // placed-panel .wattage (stale 440W Studio default), which diverged from
+          // the selected Maxeon 3 400W SKU → banner showed 22.88 vs header 20.80.
+          const _bannerPanelW =
+            (getPanelById((layout as any)?.designElectrical?.panelId ?? '') as any)?.watts
+            ?? ((p as any)?.selectedPanel?.watts)
+            ?? 400;
           const displayKw = layoutPanelCount > 0
-            ? (layout!.systemSizeKw || (layoutPanelCount * 0.4)).toFixed(2)
+            ? ((layoutPanelCount * _bannerPanelW) / 1000).toFixed(2)
             : seed.system_kw;
           const layoutNote = layoutPanelCount > 0 ? ` [layout: ${layoutPanelCount} panels]` : '';
           setAutoLoadBanner(
@@ -1483,8 +1491,16 @@ function EngineeringPageInner() {
               brand:    handoff.inverterBrand,
               racking:  handoff.mountingId,
             });
+            // Micro = AC branches/devices, not DC strings — don't print a phantom
+            // "1 string" for a microinverter design.
+            const _isMicroDesign = designElec.topology === 'micro';
+            const _designDevices = handoff.strings.reduce((s, str) => s + (str.panelCount || 0), 0);
             setAutoLoadBanner(prev =>
-              prev ? `${prev} · strings from design` : `✅ Strings loaded from design (${handoff.strings.length} string${handoff.strings.length !== 1 ? 's' : ''})`);
+              prev
+                ? `${prev} · ${_isMicroDesign ? 'micros' : 'strings'} from design`
+                : (_isMicroDesign
+                    ? `✅ Loaded from design (${_designDevices} microinverters)`
+                    : `✅ Strings loaded from design (${handoff.strings.length} string${handoff.strings.length !== 1 ? 's' : ''})`));
           } catch (deErr) {
             console.error('[EngineeringPage] design electrical handoff failed (non-fatal):', deErr);
           }
@@ -3124,7 +3140,11 @@ function EngineeringPageInner() {
   //   [!!] NEVER mix current in one component + recommended in another
   // ──────────────────────────────────────────────────────────────────────────
   const currentDisplayConfig = {
-    totalStrings: config.inverters.reduce((s, inv) => s + inv.strings.length, 0),
+    // A microinverter system has 0 DC strings (panels are grouped into AC branches,
+    // shown via acBranchCount). The inverter's `strings` array is only a panel-count
+    // carrier for micro — counting its length showed a phantom "1 string" and the
+    // bogus "1→0 strings" diff vs the recommendation (which already forces micro→0).
+    totalStrings: config.inverters.reduce((s, inv) => s + (inv.type === 'micro' ? 0 : inv.strings.length), 0),
     stringPanelCounts: config.inverters.flatMap(inv => inv.strings.map(st => st.panelCount)),
     inverterModel: (() => {
       const _i = config.inverters[0];
