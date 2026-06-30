@@ -2776,8 +2776,12 @@ export default function DesignStudio({ project, onSave }: Props) {
     const mpp = metersPerPixel(mapCenter.lat, zoom);
     const degPerPixelLat = mpp / 111320;
     const degPerPixelLng = mpp / (111320 * Math.cos(mapCenter.lat * Math.PI / 180));
+    // "Grab the map" on BOTH axes, to match the 3D (Cesium) camera: the point under the
+    // cursor follows the cursor. Horizontal was already grab (lng - dx). The vertical was
+    // inverted (lat - dy = camera-pan) because screen-Y increases downward while latitude
+    // increases upward — so dragging down moved the map the wrong way. Flip it to lat + dy.
     setMapCenter({
-      lat: dragStartCenter.lat - dy * degPerPixelLat,
+      lat: dragStartCenter.lat + dy * degPerPixelLat,
       lng: dragStartCenter.lng - dx * degPerPixelLng,
     });
   };
