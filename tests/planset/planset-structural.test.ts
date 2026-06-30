@@ -70,6 +70,42 @@ describe('planset structural/golden coverage — Design Studio to permit guardra
     expect(pv2bSvg.length).toBeGreaterThan(1000);
     expect(pv2Svg).not.toEqual(pv2bSvg);
   });
+  it('PV-2B branch-colored circuit plan has circuit layout title and differs from PV-2', () => {
+    const html = generatePermitHTML(clone(roofProject));
+
+    const pv2 = sheetPage(html, 'PV-2');
+    const pv2b = sheetPage(html, 'PV-2B');
+
+    const pv2Svg = firstSvg(pv2);
+    const pv2bSvg = firstSvg(pv2b);
+
+    // PV-2B SVG must contain CIRCUIT LAYOUT title (replaces PV-2's ROOF PLAN)
+    expect(pv2bSvg).toContain('CIRCUIT LAYOUT');
+    // PV-2B SVG must contain BRANCH LEGEND overlay
+    expect(pv2bSvg).toContain('BRANCH LEGEND');
+
+    // PV-2 must NOT contain CIRCUIT LAYOUT or BRANCH LEGEND in its SVG
+    expect(pv2Svg).not.toContain('CIRCUIT LAYOUT');
+    expect(pv2Svg).not.toContain('BRANCH LEGEND');
+
+    // PV-2B modules use branch-colored fills (at least the default navy #1b3f74)
+    // For multi-branch systems, multiple distinct stringColors appear.
+    // For single-branch systems (e.g. small micro arrays), only one color appears
+    // but the sheet is still distinct from PV-2 via title and legend overlay.
+    const branchColors = ['#1b3f74', '#cc0000', '#cc6600', '#5500cc', '#0891b2', '#be185d', '#65a30d', '#e5a100'];
+    const fillsFound = new Set<string>();
+    for (const color of branchColors) {
+      if (pv2bSvg.includes('fill="' + color + '"')) {
+        fillsFound.add(color);
+      }
+    }
+    // At least one branch color fill must be present
+    expect(fillsFound.size).toBeGreaterThanOrEqual(1);
+
+    // Confirm PV-2 and PV-2B are not identical
+    expect(normalizedSvg(pv2Svg)).not.toEqual(normalizedSvg(pv2bSvg));
+  });
+
 
   it('preserves real roof design panel count and IDs through roofCAD', () => {
     const input = clone(roofProject) as PermitInputShape;

@@ -236,6 +236,7 @@ export function getArrayPlanFromCAD(
   cad: CADModel,
   input: PermitInputShape,
   ctx?: RenderContext | null,
+  panelColorById?: Map<string, string> | null,
 ): string {
   console.log('[CAD COMPOSER] getArrayPlanFromCAD — using pre-resolved cad', {
     systemType:  cad.systemType,
@@ -261,7 +262,7 @@ export function getArrayPlanFromCAD(
       break;
     case 'roof':
     default:
-      svg = drawRoofPlan(dInput, intent, cad, ctx);
+      svg = drawRoofPlan(dInput, intent, cad, ctx, panelColorById);
       break;
   }
 

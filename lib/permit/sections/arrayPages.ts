@@ -12,6 +12,7 @@ import {
 import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, pv2Title, compassDir } from '../utils/helpers';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
+import * as drawingEngine from '@/lib/drafting/composers';
 import { isFence, isGround, isRoof, displaySystemType } from '@/lib/system';
 
 export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
@@ -185,7 +186,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   const svgH = Math.max(gridH + 60, 200);
 
   // Color per string (up to 8 strings)
-  const stringColors = ['#000','#000','#cc0000','#cc6600','#5500cc','#0891b2','#be185d','#65a30d'];
+  const stringColors = ['#1b3f74','#cc0000','#cc6600','#5500cc','#0891b2','#be185d','#65a30d','#e5a100'];
 
   // Assign string index to each panel (distribute evenly)
   const panelStringMap: Map<string, number> = new Map();
@@ -333,10 +334,31 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     <text x="80" y="${AG_VB_H - 5}" font-size="8" fill="#777" font-family="Arial,sans-serif">SCHEMATIC (NOT TO SCALE — NTS)</text>
   </svg>`;
 
-  // PV-2B renders the string-layout schematic (string-colored grouping grid).
-  // It must NOT reuse PV-2's roof-plan renderer (getArrayPlanFromCAD) or the two
-  // sheets become identical — see the PV-2B note above pageArrayGeometry.
-  const agDrawSvg = schematicGridSvg;
+  // ── v65: PV-2B now renders the REAL ROOF with modules colored by AC branch ──
+  // Falls back to the schematic grid when no roof geometry is available.
+  // Branch coloring + dropping PV-2's dimension callouts keeps the sheets distinct.
+  let agDrawSvg: string;
+  try {
+    // Build per-panel branch color map from panelStringMap + stringColors
+    const panelColorById: Map<string, string> = new Map();
+    sortedPanels.forEach(p => {
+      const si = panelStringMap.get(p.id) ?? 0;
+      panelColorById.set(p.id, stringColors[si % stringColors.length]);
+    });
+
+    // Use the same roof renderer as PV-2, but WITH branch colors
+    // (drawRoofPlan switches to "circuit layout" mode when panelColorById is present)
+    const roofSvg = drawingEngine.getArrayPlanFromCAD(cad, input, null, panelColorById);
+    if (roofSvg && roofSvg.length > 500) {
+      agDrawSvg = roofSvg;
+    } else {
+      agDrawSvg = schematicGridSvg;
+    }
+  } catch (_e) {
+    // No usable roof model — fall back to the schematic grid
+    console.warn('[PV-2B] Roof renderer failed, using schematic grid:', (_e as Error).message);
+    agDrawSvg = schematicGridSvg;
+  }
 
   // Callout notes for data zone
   const agCalloutRows = [
@@ -396,7 +418,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     <div style="display:flex;flex-direction:row;gap:0;flex:1 1 0%;min-height:0;overflow:hidden;margin-top:var(--md);">
       <!-- Draw zone 78%: full-height array grid SVG -->
       <div class="draw-zone" style="flex:0 0 78%;max-width:78%;min-height:0;">
-        <div class="draw-zone-hdr">PROFESSIONAL CAD ARRAY DIAGRAM \u2014 ${totalPanels} MODULES / ${totalStrings} ${circuitLabel}</div>
+        <div class="draw-zone-hdr">CIRCUIT LAYOUT \u2014 ${totalPanels} MODULES / ${totalStrings} ${circuitLabel} \u2014 ${displaySystemType(cadSystemType)}</div>
         <div class="draw-zone-body" style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:10px;background:#fff;min-height:0;">
           ${agDrawSvg}
         </div>
@@ -417,7 +439,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
           </table>
         </div>
         <div style="flex-shrink:0;border-bottom:var(--border);">
-          <div class="draw-zone-hdr">${circuitWord} LEGEND</div>
+          <div class="draw-zone-hdr">${_isMicro ? 'BRANCH LEGEND' : 'STRING LEGEND'}</div>
           <table style="width:100%;border-collapse:collapse;">
             <thead><tr style="background:#000;color:#fff;">
               <th style="padding:1px 2px;width:12px;font-size:6px;"></th>

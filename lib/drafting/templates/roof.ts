@@ -53,6 +53,7 @@ export function drawRoofPlan(
   intent?: DesignIntent | null,
   cad?: CADModel | null,
   ctx?: RenderContext | null,
+  panelColorById?: Map<string, string> | null,
 ): string {
   const { project, layout, engineering } = input;
 
@@ -108,9 +109,16 @@ export function drawRoofPlan(
   const dz = zones.draw;
 
   const els: string[] = [];
+  // v65: pre-compute branch-color mode flag (needed for title bar)
+  const isBranchColorMode = !!(panelColorById && panelColorById.size > 0);
+
   els.push(drawSVGOpen(W, H));
   els.push(drawBackground(W, H, '#f5f7f0'));
-  els.push(drawTitleBar(W, 'ROOF PLAN — PHOTOVOLTAIC ARRAY LAYOUT', 'SCALE: 3/32"=1\'-0"'));
+  // v65: PV-2B branch-color mode gets a distinct title bar
+  const svgTitle = isBranchColorMode
+    ? 'CIRCUIT LAYOUT — AC BRANCH COLOR MAP'
+    : 'ROOF PLAN — PHOTOVOLTAIC ARRAY LAYOUT';
+  els.push(drawTitleBar(W, svgTitle, 'SCALE: 3/32"=1\'-0"'));
 
   // ── GPS coordinate → SVG mapping ──
   const allLats = validPlanes.flatMap((rp: any) => rp.vertices!.map((v: any) => v.lat));
@@ -182,8 +190,9 @@ export function drawRoofPlan(
     const ph = isLandscape ? panWidPx : panLenPx;
     const x0 = px - pw / 2, y0 = py - ph / 2;
 
-    // Module body — single flat navy fill + thin dark frame
-    els.push(`<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#1b3f74" stroke="#0a1e4a" stroke-width="0.7" rx="0.4"/>`);
+    // Module body — branch-colored fill (PV-2B) or default navy (PV-2)
+    const branchFill = panelColorById?.get(p.id) ?? '#1b3f74';
+    els.push(`<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="${branchFill}" stroke="#0a1e4a" stroke-width="0.7" rx="0.4"/>`);
     // Thin aluminum frame inset
     els.push(`<rect x="${(x0 + 0.7).toFixed(1)}" y="${(y0 + 0.7).toFixed(1)}" width="${Math.max(pw - 1.4, 0).toFixed(1)}" height="${Math.max(ph - 1.4, 0).toFixed(1)}" fill="none" stroke="rgba(190,210,235,0.5)" stroke-width="0.35"/>`);
     // One subtle mid seam for the half-cell read (only when large enough)
@@ -214,7 +223,7 @@ export function drawRoofPlan(
     });
   });
 
-  // ── DIMENSION HIERARCHY ──
+  // ── DIMENSION HIERARCHY ── (PV-2 only — skipped for PV-2B branch-color mode)
   const roofMinX = toX(minLng);
   const roofMaxX = toX(maxLng);
   const roofMinY = toY(maxLat);
@@ -222,15 +231,17 @@ export function drawRoofPlan(
   const roofWFt  = lngSpan;   // because 1° == 1ft in fake-degree encoding
   const roofHFt  = latSpan;
 
-  // L1 — Overall width (bottom)
+  // L1 — Overall width (bottom) — PV-2 only
+  if (!isBranchColorMode) {
   els.push(drawOverallDimension(
     roofMinX, roofMaxX,
     roofMaxY + 18, 20,
     ftToFtIn(roofWFt) + ' — VERIFY IN FIELD'
   ));
+  }
 
-  // L1 — Overall height (left, vertical)
-  if (roofHFt > 3) {
+  // L1 — Overall height (left, vertical) — PV-2 only
+  if (!isBranchColorMode && roofHFt > 3) {
     els.push(drawVerticalDimension(
       dz.x - 14,
       roofMinY, roofMaxY,
@@ -239,7 +250,8 @@ export function drawRoofPlan(
     ));
   }
 
-  // L2 — Fire setback (top of draw zone, if space)
+  // L2 — Fire setback (top of draw zone, if space) — PV-2 only
+  if (!isBranchColorMode) {
   const sbPixels = setbackFt * scale;
   if (sbPixels > 10 && roofMinX + sbPixels < roofMaxX) {
     els.push(drawLinearDimension(
@@ -248,6 +260,7 @@ export function drawRoofPlan(
       ftToFtIn(setbackFt) + ' SETBACK'
     ));
   }
+  }
 
   // ── North arrow + scale bar ──
   els.push(drawNorthArrow(W - zones.dims.right - 18, H - zones.dims.bottom + 26, 22));
@@ -255,7 +268,8 @@ export function drawRoofPlan(
   els.push(drawScaleBar(zones.dims.left + 4, H - zones.dims.bottom + 28,
     Math.max(scaleBarPx, 30), '0    10 FT'));
 
-  // ── Callout bubbles ──
+  // ── Callout bubbles ── (PV-2 only — PV-2B shows branch legend instead)
+  if (!isBranchColorMode) {
   const cbY    = zones.dims.top + 12;
   // Callout bubbles spread across the TOP of the roof, each pointing straight down
   // to the nearest panel below it — short, near-vertical leaders instead of long
@@ -279,9 +293,37 @@ export function drawRoofPlan(
     }
   }
 
+  } // end PV-2 callout bubbles
+
+  // ── v65: Branch legend overlay (PV-2B only) ──
+  if (isBranchColorMode && panelColorById) {
+    // Collect unique branch colors and their labels
+    const branchColorSet = new Set(panelColorById.values());
+    const branchEntries = Array.from(branchColorSet).sort();
+    const legendX = dz.x + 8;
+    const legendY = zones.dims.top + 8;
+    const legendLineH = 12;
+    const legendW = 82;
+    const legendH = 14 + branchEntries.length * legendLineH;
+    // Semi-transparent background
+    els.push(`<rect x="${legendX}" y="${legendY}" width="${legendW}" height="${legendH}" rx="3" fill="rgba(255,255,255,0.92)" stroke="#555" stroke-width="0.8"/>`);
+    els.push(drawText(legendX + legendW / 2, legendY + 9, 'BRANCH LEGEND', {
+      anchor: 'middle', fontSize: 6.5, fill: '#000', fontWeight: 'bold',
+    }));
+    branchEntries.forEach((color, i) => {
+      const ly = legendY + 15 + i * legendLineH;
+      els.push(`<rect x="${legendX + 5}" y="${ly}" width="8" height="8" fill="${color}" stroke="#333" stroke-width="0.5" rx="1"/>`);
+      els.push(drawText(legendX + 17, ly + 7, 'B' + (i + 1), {
+        anchor: 'start', fontSize: 6, fill: '#000', fontWeight: 'bold',
+      }));
+    });
+  }
+
   // ── System summary line ──
   els.push(drawText(zones.dims.left, H - 8,
-    'ROOF ARRAY PLAN — FIELD VERIFY ALL DIMENSIONS — SUBJECT TO RAFTER LOCATION + AHJ APPROVAL', {
+    isBranchColorMode
+      ? 'CIRCUIT LAYOUT — AC BRANCH COLOR MAP — SEE DATA ZONE FOR BRANCH SCHEDULE'
+      : 'ROOF ARRAY PLAN — FIELD VERIFY ALL DIMENSIONS — SUBJECT TO RAFTER LOCATION + AHJ APPROVAL', {
       anchor: 'start', fontSize: 6.5, fill: '#888', italic: true,
     }));
 
