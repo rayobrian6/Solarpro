@@ -238,9 +238,22 @@ interface Props {
       v: { x: number; y: number; z: number };
       n: { x: number; y: number; z: number };
     };
+    /** Stitched ECEF corners — the exact polygon3D that the stitch produced.
+     *  Persisted so the roof-plane restore-on-load effect can rebuild the
+     *  STITCHED 3D outline without re-sampling terrain. */
+    polygon3D?: Array<{ x: number; y: number; z: number }>;
+    /** Stitched plane origin in ECEF (min-UV corner of the stitched polygon). */
+    origin3D?: { x: number; y: number; z: number };
+    /** Stitched plane outward normal in ECEF. */
+    normal3D?: { x: number; y: number; z: number };
   }>) => void;
   /** E2E-only diagnostics bridge. Passed only when NEXT_PUBLIC_E2E=1. */
-  onE2EDiagnostics?: (diagnostics: { fullRebuildCount: number; setbackInsets: number }) => void;
+  onE2EDiagnostics?: (diagnostics: {
+    fullRebuildCount: number;
+    setbackInsets: number;
+    /** Number of roof-plane entities in the 3D map (after reload, should match roofPlanes count). */
+    roofPlaneEntityCount: number;
+  }) => void;
   /** v47.122: ID of the currently selected roof plane (highlights it, dims others) */
   selectedRoofPlaneId?: string;
   /** v47.122: Called when user clicks a roof plane in the 3D view */
@@ -267,6 +280,8 @@ interface Props {
     origin3D?:  { x: number; y: number; z: number };
     normal3D?:  { x: number; y: number; z: number };
     polygon3D?: Array<{ x: number; y: number; z: number }>;
+    createdFrom3D?: boolean;
+    ecefFrame3D?: { u: { x: number; y: number; z: number }; v: { x: number; y: number; z: number }; n: { x: number; y: number; z: number } };
     localFrame3D?: { u: { x: number; y: number; z: number }; v: { x: number; y: number; z: number }; n: { x: number; y: number; z: number } };
   }>;
   /** v50.11: Show irradiance heatmap overlay on the 3D roof */
@@ -496,6 +511,7 @@ function SolarEngine3D({
     onE2EDiagnostics?.({
       fullRebuildCount: fullRebuildCountRef.current,
       setbackInsets: setbackZoneEntitiesRef.current.length,
+      roofPlaneEntityCount: plane3DEntityMap.current.size,
     });
   }, [onE2EDiagnostics]);
   // Row tool context: tracks which systemType to use for row-placed panels
@@ -814,6 +830,110 @@ function SolarEngine3D({
   }, [panels]);
 
   useEffect(() => { roofPlanesRef.current = roofPlanes ?? []; }, [roofPlanes]);
+
+  // ── v64: Restore 3D roof-plane outlines + wireframe on project load ──────
+  // After reload the panels are still there (they have their own restore effect),
+  // but the roof-plane outline entities (plane3DEntityMap) and stitched wireframe
+  // are GONE because they were only ever built from user actions this session.
+  // This effect rebuilds them from the persisted roofPlanes prop (which carries
+  // polygon3D / origin3D / normal3D / localFrame3D from the stitch write-back).
+  //
+  // Idempotent: skips planes already in plane3DEntityMap (traced/stitched this
+  // session). Does NOT touch panels or fences — those have their own restore paths.
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    const C = (window as any).Cesium;
+    if (!viewer || !C || stage !== 'done') return;
+    const planes = roofPlanes ?? [];
+    if (planes.length === 0) return;
+
+    // Find planes that are NOT already rendered (not in the entity map)
+    const planesToRestore = planes.filter(p => !plane3DEntityMap.current.has(p.id));
+    if (planesToRestore.length === 0) return;
+
+    const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+    let restored = 0;
+
+    for (const plane of planesToRestore) {
+      try {
+        // ── Step 1: Get ECEF corners ──────────────────────────────────
+        // Prefer polygon3D (stitched geometry — exact ECEF corners from the
+        // stitch write-back, Part A). Fallback for 2D-only legacy planes:
+        // project vertices (lat/lng) to ECEF via computeEcefFrameForLegacyPlane.
+        let cartPts: Cart3[];
+        let frame: Plane3DFrame;
+
+        if (plane.polygon3D && plane.polygon3D.length >= 3) {
+          // polygon3D carries the exact stitched (or traced) ECEF corners.
+          cartPts = plane.polygon3D.map(p => ({ x: p.x, y: p.y, z: p.z }));
+          frame = computePlaneFromPoints3D(cartPts);
+        } else if (plane.createdFrom3D && plane.origin3D && plane.ecefFrame3D) {
+          // 3D plane with ECEF frame but no polygon3D (pre-stitch or older save).
+          // Reconstruct polygon3D from the 2D vertices + stored ECEF frame.
+          const legacy = computeEcefFrameForLegacyPlane(plane, groundElev);
+          if (!legacy.polygon3D || legacy.polygon3D.length < 3) {
+            addLog('RESTORE', `Skipped plane ${plane.id.slice(0,8)}: legacy projection yielded <3 corners`);
+            continue;
+          }
+          cartPts = legacy.polygon3D.map(p => ({ x: p.x, y: p.y, z: p.z }));
+          frame = computePlaneFromPoints3D(cartPts);
+        } else {
+          // 2D-only legacy plane (no polygon3D, no ecefFrame3D). Project from
+          // vertices via azimuth/pitch → ECEF. This is a lossy approximation but
+          // at least shows the outline on reload.
+          try {
+            const legacy = computeEcefFrameForLegacyPlane(plane, groundElev);
+            if (!legacy.polygon3D || legacy.polygon3D.length < 3) {
+              addLog('RESTORE', `Skipped 2D plane ${plane.id.slice(0,8)}: <3 corners`);
+              continue;
+            }
+            cartPts = legacy.polygon3D.map(p => ({ x: p.x, y: p.y, z: p.z }));
+            frame = computePlaneFromPoints3D(cartPts);
+          } catch (e) {
+            addLog('RESTORE', `Skipped 2D plane ${plane.id.slice(0,8)}: ${(e as Error).message}`);
+            continue;
+          }
+        }
+
+        // ── Step 2: Convert projected points to Cesium Cartesian3 ──────
+        const projectedCesiumPts = frame.projectedPts.map((p: Cart3) =>
+          new C.Cartesian3(p.x, p.y, p.z)
+        );
+
+        // ── Step 3: Determine mark-only (no panels assigned) ──────────
+        const planeHasPanels = panelsRef.current.some(p => p.planeId === plane.id);
+        const isMarkOnly = !planeHasPanels;
+        if (isMarkOnly) markOnlyPlaneIdsRef.current.add(plane.id);
+
+        // ── Step 4: Render plane entity (mirrors finalizePlane3D) ──────
+        const isSelected = selectedRoofPlaneId === plane.id;
+        const entityIds = renderPlane3DEntity(
+          viewer, C, projectedCesiumPts, plane.id, frame, isSelected, isMarkOnly,
+        );
+
+        // ── Step 5: Populate all three maps ───────────────────────────
+        plane3DEntityMap.current.set(plane.id, entityIds);
+        plane3DFrameMap.current.set(plane.id, frame);
+        plane3DCesiumPtsMap.current.set(plane.id, projectedCesiumPts);
+        plane3DEntitiesRef.current = Array.from(plane3DEntityMap.current.values()).flat();
+
+        restored++;
+        addLog('RESTORE', `Rebuilt 3D outline for plane ${plane.id.slice(0,8)} (${isMarkOnly ? 'mark-only' : 'panel plane'})`);
+      } catch (e) {
+        addLog('RESTORE', `Failed plane ${plane.id.slice(0,8)}: ${(e as Error).message}`);
+      }
+    }
+
+    // ── Step 6: Show roof model + wireframe + setbacks ────────────────
+    if (restored > 0) {
+      setShowRoofModel(true);
+      try { renderRoofWireframe(viewer, C); } catch {}
+      if (showSetbackZones) { try { renderFireSetbackZones(viewer, C); } catch {} }
+      try { viewer.scene.requestRender(); } catch {}
+      addLog('RESTORE', `Restored ${restored} roof-plane outline(s) on load`);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, roofPlanes, panels]);
 
   useEffect(() => {
     publishE2EDiagnostics();
@@ -2993,6 +3113,9 @@ function SolarEngine3D({
         v: { x: number; y: number; z: number };
         n: { x: number; y: number; z: number };
       };
+      polygon3D?: Array<{ x: number; y: number; z: number }>;
+      origin3D?:  { x: number; y: number; z: number };
+      normal3D?:  { x: number; y: number; z: number };
     }> = [];
     for (const [pid, pts] of work) {
       const cartPts: Cart3[] = pts.map((p: any) => ({ x: p.x, y: p.y, z: p.z }));
@@ -3027,6 +3150,13 @@ function SolarEngine3D({
             v: { x: frame.v.x, y: frame.v.y, z: frame.v.z },
             n: { x: frame.normal.x, y: frame.normal.y, z: frame.normal.z },
           },
+          // v64: Persist the stitched ECEF corners so the reload-restore effect
+          // rebuilds the STITCHED roof outline, not the pre-stitch traced outline.
+          // Without this, polygon3D stays as the pre-stitch geometry and the roof
+          // reloads un-stitched (corners don't meet at hips/ridges/valleys).
+          polygon3D: projected.map((p: any) => ({ x: p.x, y: p.y, z: p.z })),
+          origin3D:  { x: frame.origin.x, y: frame.origin.y, z: frame.origin.z },
+          normal3D:  { x: frame.normal.x, y: frame.normal.y, z: frame.normal.z },
         });
       }
     }

@@ -66,6 +66,8 @@ type SolarE2EState = {
   stitchedCorners: Array<{ id: string; vertices: Array<{ lat: number; lng: number }> }>;
   setbackInsets: number;
   fullRebuildCount: number;
+  /** Number of roof-plane entities in the 3D map (after reload, should match roofPlanes count). */
+  roofPlaneEntityCount: number;
 };
 
 declare global {
@@ -543,7 +545,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [panels, setPanels] = useState<PlacedPanel[]>([]);
   const [roofPlanes, setRoofPlanes] = useState<RoofPlane[]>([]);
   const [e2eStitchedCorners, setE2EStitchedCorners] = useState<Array<{ id: string; vertices: Array<{ lat: number; lng: number }> }>>([]);
-  const [e2eDiagnostics, setE2EDiagnostics] = useState({ fullRebuildCount: 0, setbackInsets: 0 });
+  const [e2eDiagnostics, setE2EDiagnostics] = useState({ fullRebuildCount: 0, setbackInsets: 0, roofPlaneEntityCount: 0 });
   const [expandedPlaneId, setExpandedPlaneId] = useState<string | null>(null);
   const [groundArea, setGroundArea] = useState<{ lat: number; lng: number }[]>([]);
   
@@ -572,6 +574,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       stitchedCorners: e2eStitchedCorners,
       setbackInsets: e2eDiagnostics.setbackInsets,
       fullRebuildCount: e2eDiagnostics.fullRebuildCount,
+      roofPlaneEntityCount: e2eDiagnostics.roofPlaneEntityCount,
     };
   }, [roofPlanes, panels, e2eStitchedCorners, e2eDiagnostics]);
 
@@ -3891,10 +3894,21 @@ export default function DesignStudio({ project, onSave }: Props) {
                 // the new outline — not the stale pre-stitch frame — and re-enrich the
                 // 2D LECS fields. enrichRoofPlaneWith3DFrame is a no-op once
                 // localFrame3D is set, so the stitched frame we pass is preserved.
+                //
+                // Also persist polygon3D / origin3D / normal3D from the stitch so the
+                // reload-restore effect rebuilds the STITCHED 3D outline (not the
+                // pre-stitch traced outline). Without this, the roof reloads un-stitched.
                 setRoofPlanes(prev => prev.map(p => {
                   const u = updates.find(x => x.id === p.id);
                   if (!u || u.vertices.length < 3) return p;
-                  return enrichRoofPlaneWithLECS({ ...p, vertices: u.vertices, localFrame3D: u.localFrame3D });
+                  return enrichRoofPlaneWithLECS({
+                    ...p,
+                    vertices: u.vertices,
+                    localFrame3D: u.localFrame3D,
+                    ...(u.polygon3D ? { polygon3D: u.polygon3D } : {}),
+                    ...(u.origin3D  ? { origin3D: u.origin3D }   : {}),
+                    ...(u.normal3D  ? { normal3D: u.normal3D }   : {}),
+                  });
                 }));
                 console.log('[DesignStudio] Stitch synced', updates.length, 'plane(s) into roofPlanes');
               }}
