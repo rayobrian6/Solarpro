@@ -65,7 +65,7 @@ import {
   FileText, ArrowRight, MousePointer2, Home, Square, Minus, Ruler,
   Trash2, CheckSquare, Fence, Plus, Minus as MinusIcon, Search,
   TrendingUp, Leaf, BarChart2, AlertCircle, X, Upload, Calculator,
-  Info, ChevronRight, Eye, EyeOff, Bug
+  Info, ChevronRight, Eye, EyeOff, Bug, Download
 } from 'lucide-react';
 import FeedbackModal from '@/components/ui/FeedbackModal';
 import Link from 'next/link';
@@ -3647,6 +3647,55 @@ export default function DesignStudio({ project, onSave }: Props) {
 
   const MONTHS = ['J','F','M','A','M','J','J','A','S','O','N','D'];
 
+  // v50.x: BOM CSV export — pure client-side, no backend.
+  // Builds a single-row-per-unique-model CSV with header
+  //   Category,Manufacturer,Model,Quantity,Unit
+  // inspired by OpenSolar Pro's multi-supplier cart, but shipped as the
+  // lighter CSV-export version per JAMES / Quinn 2026-06-29 22:27 CT.
+  const handleBomExport = useCallback(() => {
+    if (panels.length === 0) return;
+
+    // RFC 4180: wrap fields containing comma/quote/newline in double-quotes.
+    const csvField = (val: string | number): string => {
+      const s = String(val);
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    const panelMfr   = selectedPanel?.manufacturer ?? 'Unknown';
+    const panelModel = selectedPanel?.model ?? 'Unknown';
+
+    // One row per unique panel model (the whole design uses selectedPanel).
+    const rows: Array<[string, string, string, number, string]> = [
+      ['Panel', panelMfr, panelModel, panels.length, 'ea'],
+    ];
+    if (selectedInverter) {
+      rows.push(['Inverter', selectedInverter.manufacturer, selectedInverter.model, 1, 'ea']);
+    }
+    // Racking + BOS stubs — replace with real selector values when
+    // DesignSidebar surfaces a racking picker. rowCount derived from
+    // panelsPerRow so ground/fence systems stay sensible.
+    const rowCount = Math.max(1, Math.ceil(panels.length / Math.max(1, panelsPerRow)));
+    rows.push(['Racking', 'Generic', 'XR-Series', rowCount, 'ea']);
+    rows.push(['BOS', 'Generic', 'Misc', 1, 'ea']);
+
+    const header = ['Category', 'Manufacturer', 'Model', 'Quantity', 'Unit'];
+    const csvLines = [header, ...rows].map(r => r.map(csvField).join(','));
+    const csv = csvLines.join('\n') + '\n';
+
+    // Trigger browser download via Blob + temporary anchor.
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const date = new Date().toISOString().slice(0, 10);
+    const projectName = (project?.name ?? 'design').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${projectName}-BOM-${date}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [panels, selectedPanel, selectedInverter, panelsPerRow, project]);
+
   return (
     <div className="flex flex-col h-full bg-slate-950">
       {/* Report a Bug — floating (Design Studio runs without the app header) */}
@@ -3881,13 +3930,24 @@ export default function DesignStudio({ project, onSave }: Props) {
           ) : null}
           {/* Proceed to Engineering CTA — shown once panels are placed */}
           {panels.length > 0 ? (
-            <button
-              onClick={() => router.push(`/engineering?projectId=${project.id}`)}
-              className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 hover:text-blue-300 transition-all text-xs font-semibold flex-shrink-0"
-              title="Open Engineering with this project"
-            >
-              Engineering <ArrowRight size={11} />
-            </button>
+            <>
+              {/* v50.x: BOM CSV export — pure client-side Blob download, no backend.
+                  Sibling to the Engineering CTA, identical styling for visual coherence. */}
+              <button
+                onClick={handleBomExport}
+                className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 hover:text-blue-300 transition-all text-xs font-semibold flex-shrink-0"
+                title="Download Bill of Materials (CSV)"
+              >
+                <Download size={11} /> BOM
+              </button>
+              <button
+                onClick={() => router.push(`/engineering?projectId=${project.id}`)}
+                className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 hover:text-blue-300 transition-all text-xs font-semibold flex-shrink-0"
+                title="Open Engineering with this project"
+              >
+                Engineering <ArrowRight size={11} />
+              </button>
+            </>
           ) : null}
         </div>
       </div>
