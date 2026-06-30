@@ -235,7 +235,7 @@ export function drawRoofPlan(
   if (!isBranchColorMode) {
   els.push(drawOverallDimension(
     roofMinX, roofMaxX,
-    roofMaxY + 18, 20,
+    roofMaxY + 36, 24,
     ftToFtIn(roofWFt) + ' — VERIFY IN FIELD'
   ));
   }
@@ -320,7 +320,7 @@ export function drawRoofPlan(
   }
 
   // ── System summary line ──
-  els.push(drawText(zones.dims.left, H - 8,
+  els.push(drawText(zones.dims.left, H - zones.dims.bottom + 12,
     isBranchColorMode
       ? 'CIRCUIT LAYOUT — AC BRANCH COLOR MAP — SEE DATA ZONE FOR BRANCH SCHEDULE'
       : 'ROOF ARRAY PLAN — FIELD VERIFY ALL DIMENSIONS — SUBJECT TO RAFTER LOCATION + AHJ APPROVAL', {

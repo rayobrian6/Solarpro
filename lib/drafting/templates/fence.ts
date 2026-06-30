@@ -309,7 +309,7 @@ export function drawFencePlan(
   }
 
   // Bottom note
-  els.push(drawText(zones.dims.left, H - 8,
+  els.push(drawText(zones.dims.left, H - zones.dims.bottom + 12,
     'SITE PLAN — FIELD VERIFY ALL SEGMENT LENGTHS AND AZIMUTH — SEE PV-3 FOR STRUCTURAL', {
       anchor: 'start', fontSize: 6.5, fill: '#888', italic: true,
     }));
@@ -687,7 +687,7 @@ export function drawFenceElevation(
   }
 
   // Bottom note
-  els.push(drawText(zones.dims.left, H - 8,
+  els.push(drawText(zones.dims.left, H - zones.dims.bottom + 12,
     'STRUCTURAL ELEVATION — VERIFY POST SIZE, SPACING + EMBEDMENT IN FIELD — ALL DIMS NTS', {
       anchor: 'start', fontSize: 6.5, fill: '#888', italic: true,
     }));
