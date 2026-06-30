@@ -326,8 +326,8 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       };
       const structResult = runStructuralCalcV4(structInput);
       const ra = structResult.rafterAnalysis;
-      const wa = structResult.windAnalysis;
-      const sa = structResult.snowAnalysis;
+      const wa = structResult.wind;
+      const sa = structResult.snow;
       const ml = structResult.mountLayout;
       // Map V4 result → compliance.structural (same shape as frontend mapping in page.tsx)
       if (!input.compliance) input.compliance = { overallStatus: '' } as PermitInput['compliance'];
