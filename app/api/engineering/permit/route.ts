@@ -561,6 +561,24 @@ export async function POST(req: NextRequest) {
         };
       }
     }
+    // Fallback (Ray, 2026-06-30): panelPositions can still be empty HERE (CAD/canonical
+    // processing populates them later), which left _arrayCenter undefined and made
+    // fetchAerialRoofData center on a Google roof segment — often the NEIGHBOR's roof,
+    // putting the subject building at the edge of the site plan. Center on the real
+    // roof-plane centroid instead so PV-1 frames the correct house.
+    if (!_arrayCenter) {
+      const _rp = (body.project as any)?.roofPlanes as Array<{ vertices?: Array<{ lat: number; lng: number }> }> | undefined;
+      if (Array.isArray(_rp)) {
+        const _vs = _rp.flatMap(p => p?.vertices || []).filter(v => v && isFinite(v.lat) && isFinite(v.lng) && Math.abs(v.lat) > 0.001);
+        if (_vs.length > 0) {
+          _arrayCenter = {
+            lat: _vs.reduce((s, v) => s + v.lat, 0) / _vs.length,
+            lng: _vs.reduce((s, v) => s + v.lng, 0) / _vs.length,
+          };
+          console.log('[permit/POST] _arrayCenter from roofPlanes centroid (panelPositions empty at fetch)');
+        }
+      }
+    }
     const aerialData = await fetchAerialRoofData(
       body.project.lat,
       body.project.lng,

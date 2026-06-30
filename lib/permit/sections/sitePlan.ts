@@ -59,64 +59,16 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     const imgW = aerial.imageWidth  || 640;
     const imgH = aerial.imageHeight || 640;
     const cLat = aerial.lat!;
-    const cLng = aerial.lng!;
     const z    = aerial.zoom || 20;
     const mppEq = 156543.03392 / Math.pow(2, z);
     const mpp   = mppEq * Math.cos(cLat * Math.PI / 180);
-    const ppm   = 1 / mpp;
-    const MPD_LAT2 = 111320;
-    const mpd_lng2  = 111320 * Math.cos(cLat * Math.PI / 180);
+    const ppm   = 1 / mpp;  // pixels per meter — drives the scale bar
 
-    function latLngAerial(lat: number, lng: number): { x: number; y: number } {
-      return {
-        x: imgW/2 + (lng - cLng) * mpd_lng2 * ppm,
-        y: imgH/2 - (lat - cLat) * MPD_LAT2 * ppm,
-      };
-    }
-
-    const pHpxA = Math.max(6, panelLenIn * 0.0254 * ppm);
-    const pWpxA = Math.max(4, panelWidIn * 0.0254 * ppm);
-
-    const rawValid = panelPos?.filter(pp =>
-      pp.lat && pp.lng && Math.abs(pp.lat) > 0.001 && Math.abs(pp.lng) > 0.001 &&
-      isFinite(pp.lat) && isFinite(pp.lng) && Math.abs(pp.lat) <= 90 && Math.abs(pp.lng) <= 180
-    );
-    let hasExact = false, validPP: typeof rawValid = undefined;
-    if (rawValid && rawValid.length > 0) {
-      const cLa2 = rawValid.reduce((s,p)=>s+p.lat,0)/rawValid.length;
-      const cLo2 = rawValid.reduce((s,p)=>s+p.lng,0)/rawValid.length;
-      if (Math.abs(cLa2-cLat)<0.15 && Math.abs(cLo2-cLng)<0.15) { validPP = rawValid; hasExact = true; }
-    }
-
-    let pSvg = '';
-    if (hasExact && validPP) {
-      validPP.slice(0,800).forEach(pp => {
-        const {x,y} = latLngAerial(pp.lat, pp.lng);
-        const isL = pp.orientation === 'landscape';
-        const pw = isL ? pHpxA : pWpxA, ph = isL ? pWpxA : pHpxA;
-        pSvg += `<rect x="${(x-pw/2).toFixed(1)}" y="${(y-ph/2).toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="rgba(30,80,200,0.80)" stroke="#2060b0" stroke-width="0.8" rx="0.5"/>`;
-      });
-    } else {
-      let gCx=imgW/2, gCy=imgH*0.38, gW=Math.round(imgW*0.38), gH=Math.round(imgH*0.28);
-      const segs = aerial.roofSegments;
-      if (segs && segs.length > 0) {
-        const best = segs.filter(s=>s.center).map(s=>({seg:s,score:((s.azimuthDegrees>=135&&s.azimuthDegrees<=225)?3:1.5)*(s.areaM2||1)})).sort((a,b)=>b.score-a.score)[0];
-        if (best?.seg?.center) {
-          const sp = latLngAerial(best.seg.center.lat, best.seg.center.lng);
-          gCx=sp.x; gCy=sp.y;
-          const side=Math.sqrt((best.seg.areaM2||60)*0.7)*ppm;
-          gW=Math.min(Math.max(Math.round(side*1.5),50),imgW*0.5);
-          gH=Math.min(Math.max(Math.round(side),35),imgH*0.38);
-        }
-      }
-      const aX=Math.max(8,Math.round(gCx-gW/2)), aY=Math.max(8,Math.round(gCy-gH/2));
-      const aW=Math.min(gW,imgW-aX-8), aH=Math.min(gH,imgH-aY-8);
-      const cols=Math.ceil(Math.sqrt(totalPanels*1.6)), rows=Math.ceil(totalPanels/cols);
-      const mw=Math.max(4,Math.floor((aW-4)/cols)-2), mh=Math.max(3,Math.floor((aH-4)/rows)-2);
-      let c2=0;
-      for (let r=0;r<rows&&c2<totalPanels;r++) for (let c=0;c<cols&&c2<totalPanels;c++,c2++)
-        pSvg+=`<rect x="${aX+2+c*(mw+2)}" y="${aY+2+r*(mh+2)}" width="${mw}" height="${mh}" fill="rgba(30,80,200,0.80)" stroke="#2060b0" stroke-width="0.8" rx="1"/>`;
-    }
+    // PV-1 SITE PLAN: PV modules are intentionally NOT drawn on the aerial (Ray,
+    // 2026-06-30). The site plan shows property context + equipment locations; the
+    // module layout lives on PV-2 (real roof plan) and PV-2B (circuit plan). We keep
+    // the satellite framing, north arrow, scale bar, and the system-size badge.
+    const pSvg = '';
 
     const scalePx = Math.round(10*ppm);
     const scaleBar = scalePx>0&&scalePx<250 ? `
