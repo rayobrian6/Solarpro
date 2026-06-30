@@ -494,7 +494,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   // Tile provider: 'auto' tries Google first, falls back to ESRI on error.
   // 'google' forces Google only. 'esri' forces ESRI only (caps at zoom 19).
   // 'auto' is the default — Google primary for zoom 20+, ESRI for zoom <=19 if Google fails.
-  const [tileProvider, setTileProvider] = useState<'auto' | 'google' | 'esri'>('auto');
+  const [tileProvider, setTileProvider] = useState<'auto' | 'google' | 'esri' | 'nearmap'>('auto');
   // High-res Google Solar RGB backdrop (~10 cm, covered addresses) — sharp enough to tag vents/obstructions
   const [hdImagery, setHdImagery] = useState(false);
   const [hdStatus, setHdStatus]   = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
@@ -502,7 +502,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   // Track which zoom levels ESRI has run out of imagery (variance too low)
   const esriBlankZoomsRef = React.useRef<Set<number>>(new Set());
   // Current active provider per tile batch (for the badge)
-  const [activeTileSource, setActiveTileSource] = useState<'google' | 'esri'>('google');
+  const [activeTileSource, setActiveTileSource] = useState<'google' | 'esri' | 'nearmap'>('google');
   const [mapTiles, setMapTiles] = useState<Map<string, HTMLImageElement>>(new Map());
   // Ref mirrors TILE_CACHE so drawCanvas can read tiles without stale closure issues.
   // We use a simple counter to trigger redraws instead of putting the full Map in deps.
@@ -1502,6 +1502,11 @@ export default function DesignStudio({ project, onSave }: Props) {
   // Raised to 20; the variance-based blank-tile detection still falls back gracefully in
   // rural areas that genuinely lack z20. (Ray, 2026-06-30 — sharper ESRI imagery.)
   const ARCGIS_MAX_ZOOM = 20;
+  // Nearmap "Vert" imagery (~7.5 cm/px at z21) — far sharper than ESRI z20 (~15 cm) or
+  // Google z21. Licensed (NEARMAP_API_KEY); proxied through /api/admin/nearmap-tile to keep
+  // the key server-side. Opt-in only (costs Nearmap credits per tile). z21 is reliably
+  // native wherever Nearmap has coverage. (Ray, 2026-06-30 — the high-detail roof imagery.)
+  const NEARMAP_MAX_ZOOM = 21;
 
   // Cache Google Maps session token at component scope
   const googleSessionRef = React.useRef<{ token: string; key: string } | null>(null);
@@ -1573,15 +1578,18 @@ export default function DesignStudio({ project, onSave }: Props) {
     if (!canvas) return;
 
     const hasGoogle = !!googleSessionRef.current;
-    const forceEsri   = tileProvider === 'esri';
-    const forceGoogle = tileProvider === 'google';
+    const forceEsri    = tileProvider === 'esri';
+    const forceGoogle  = tileProvider === 'google';
+    const forceNearmap = tileProvider === 'nearmap';
 
     // Determine fetch zoom based on provider capabilities. Tile z MUST be an integer —
     // `zoom` is fractional (smooth wheel zoom, e.g. 19.75), and a fractional z goes into the
     // tile URL as ".../tile/19.75/..." which every provider rejects → grey tiles. Floor it;
     // the fractional remainder is handled by `scale` (overzoom). (Previously the cap of 19
     // accidentally clamped fractional zooms to an integer; raising the cap exposed this.)
-    const MAX_ZOOM  = (!forceEsri && hasGoogle) ? GOOGLE_MAX_ZOOM : ARCGIS_MAX_ZOOM;
+    const MAX_ZOOM  = forceNearmap ? NEARMAP_MAX_ZOOM
+                    : (!forceEsri && hasGoogle) ? GOOGLE_MAX_ZOOM
+                    : ARCGIS_MAX_ZOOM;
     const fetchZoom = Math.min(Math.floor(zoom), MAX_ZOOM);
     const scale     = Math.pow(2, zoom - fetchZoom);
 
@@ -1626,7 +1634,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       img.crossOrigin = 'anonymous';
       TILE_INFLIGHT.add(key);
 
-      const commitTile = (source: 'google' | 'esri') => {
+      const commitTile = (source: 'google' | 'esri' | 'nearmap') => {
         (img as any)._loaded  = true;
         (img as any)._source  = source;
         TILE_INFLIGHT.delete(key);
@@ -1658,7 +1666,14 @@ export default function DesignStudio({ project, onSave }: Props) {
         img.src = esriUrl(fz, ftx, fty);
       };
 
-      if (forceEsri) {
+      if (forceNearmap) {
+        // Nearmap Vert tiles via the server proxy (key stays server-side). Path is z/x/y
+        // (standard XYZ). On any failure (no coverage / 502 / 403) fall back to ESRI so the
+        // map never goes blank.
+        img.onload  = () => commitTile('nearmap');
+        img.onerror = () => { img.onerror = null; tryEsri(); };
+        img.src = `/api/admin/nearmap-tile/${Math.min(fz, NEARMAP_MAX_ZOOM)}/${ftx}/${fty}`;
+      } else if (forceEsri) {
         img.onload  = () => commitTile('esri');
         img.onerror = () => { TILE_INFLIGHT.delete(key); };
         img.src = esriUrl(Math.min(fz, ARCGIS_MAX_ZOOM), ftx, fty);
@@ -1735,7 +1750,9 @@ export default function DesignStudio({ project, onSave }: Props) {
     // Draw map tiles
     // Tiles are stored at fetchZoom — clamped to GOOGLE_MAX_ZOOM=21 (or ARCGIS_MAX_ZOOM=19 fallback)
     // If display zoom > max, tiles are scaled up on canvas
-    const _tileMaxZoom = googleSessionRef.current ? GOOGLE_MAX_ZOOM : ARCGIS_MAX_ZOOM;
+    const _tileMaxZoom = tileProvider === 'nearmap' ? NEARMAP_MAX_ZOOM
+                       : googleSessionRef.current ? GOOGLE_MAX_ZOOM
+                       : ARCGIS_MAX_ZOOM;
     const fetchZoom = Math.min(Math.floor(zoom), _tileMaxZoom); // integer tile z (matches loadTiles)
     const tileScale = Math.pow(2, zoom - fetchZoom); // 1 at integer native zoom, >1 when overzoomed
     const displayTileSize = TILE_SIZE * tileScale;
@@ -2421,7 +2438,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   }, [mapCenter, zoom, tileRedrawTick, panels, roofPlanes, groundArea, fenceLine,
       drawnPoints, selectedPanelIds, selectedPanel, drawingMode, showPanels,
       measurePoints, measureDistance, showSetbackZones, setbackZones, showCADDebug,
-      multiRowMode, multiRowStart, hoverPos, multiRowCount, activeTileSource, orientation]);
+      multiRowMode, multiRowStart, hoverPos, multiRowCount, activeTileSource, tileProvider, orientation]);
 
   function drawCompass(ctx: CanvasRenderingContext2D, x: number, y: number) {
     ctx.save();
@@ -2453,13 +2470,15 @@ export default function DesignStudio({ project, onSave }: Props) {
   function drawTileSourceBadge(
     ctx: CanvasRenderingContext2D,
     W: number, H: number,
-    source: 'google' | 'esri',
+    source: 'google' | 'esri' | 'nearmap',
     currentZoom: number
   ) {
     const label = source === 'google'
       ? `📷 Google z${currentZoom}`
-      : `🌍 ESRI z${Math.min(currentZoom, ARCGIS_MAX_ZOOM)}`;
-    const color = source === 'google' ? '#60a5fa' : '#fbbf24';
+      : source === 'nearmap'
+        ? `🛰️ Nearmap z${Math.min(currentZoom, NEARMAP_MAX_ZOOM)}`
+        : `🌍 ESRI z${Math.min(currentZoom, ARCGIS_MAX_ZOOM)}`;
+    const color = source === 'google' ? '#60a5fa' : source === 'nearmap' ? '#34d399' : '#fbbf24';
     ctx.save();
     ctx.font = 'bold 9px Inter, sans-serif';
     const tw = ctx.measureText(label).width;
@@ -3635,7 +3654,7 @@ export default function DesignStudio({ project, onSave }: Props) {
           {/* Tile provider toggle — only shown in 2D mode */}
           {!show3D ? (
             <div className="flex items-center gap-0.5 bg-slate-800 border border-slate-600 rounded-lg overflow-hidden">
-              {(['auto', 'google', 'esri'] as const).map(p => (
+              {(['auto', 'google', 'esri', 'nearmap'] as const).map(p => (
                 <button
                   key={p}
                   onClick={() => {
@@ -3648,12 +3667,13 @@ export default function DesignStudio({ project, onSave }: Props) {
                       : 'text-slate-400 hover:bg-slate-700 hover:text-white'
                   }`}
                   title={
-                    p === 'auto'   ? 'Auto: Google primary, ESRI fallback on blank tile' :
-                    p === 'google' ? 'Force Google Maps satellite (zoom 21)' :
-                                     'Force ESRI World Imagery (zoom 19 max)'
+                    p === 'auto'    ? 'Auto: Google primary, ESRI fallback on blank tile' :
+                    p === 'google'  ? 'Force Google Maps satellite (zoom 21)' :
+                    p === 'nearmap' ? 'Nearmap HD imagery (~7.5 cm, sharpest — uses Nearmap credits)' :
+                                      'Force ESRI World Imagery (native zoom 20)'
                   }
                 >
-                  {p === 'auto' ? '🔍 Auto' : p === 'google' ? 'Google' : 'ESRI'}
+                  {p === 'auto' ? '🔍 Auto' : p === 'google' ? 'Google' : p === 'nearmap' ? '🛰️ Nearmap HD' : 'ESRI'}
                 </button>
               ))}
               <span className={`px-1.5 py-1 text-[9px] font-bold border-l border-slate-600 ${
