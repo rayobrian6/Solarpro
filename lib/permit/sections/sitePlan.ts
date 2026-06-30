@@ -251,16 +251,17 @@ export interface AerialRoofData {
 // Decides where to center the aerial image. Pure + exported so it can be unit
 // tested without the Google network calls.
 //
-// Priority:
+// Priority (Ray, 2026-06-30 — "the map fly-in flies to the correct house"):
 //   1. The design's array centroid (caller-supplied) — most accurate; the panels
 //      sit exactly here.
-//   2. A roof segment — but NEVER a neighbor's. Google Solar can surface segments
-//      whose centers sit off the address parcel; selecting the largest south-
-//      facing one globally is how the image lands on the neighbor's bigger roof.
-//      So: among segments within ~25 m of the address pin, frame on the largest
-//      south-facing one; if none are on-parcel, take the segment NEAREST the pin
-//      (closest is far safer than largest).
-//   3. The geocode pin.
+//   2. The geocoded address pin. The Design Studio address fly-in geocodes to this
+//      exact point (/api/geocode) and lands on the CORRECT house, and persists it back
+//      to project.lat/lng. So for a real street address the pin IS the building. A
+//      Google Solar roof SEGMENT must NEVER override a valid pin: buildingInsights
+//      :findClosest routinely returns a NEIGHBOR's building, and centering on its
+//      segment is exactly the "wrong house" bug we kept hitting.
+//   3. A roof segment — ONLY as a last resort when the pin is missing/invalid (e.g.
+//      a city-level geocode with no building), where any nearby roof beats (0,0).
 type AerialSegment = { center?: { lat: number; lng: number }; azimuthDegrees: number; areaM2: number };
 export function chooseAerialCenter(
   pinLat: number,
@@ -268,28 +269,27 @@ export function chooseAerialCenter(
   arrayCenter: { lat: number; lng: number } | undefined,
   roofSegments: AerialSegment[] | undefined,
 ): { lat: number; lng: number; source: 'array' | 'segment' | 'pin' } {
+  // 1) Placed-array centroid — most precise.
   if (arrayCenter && isFinite(arrayCenter.lat) && isFinite(arrayCenter.lng) && Math.abs(arrayCenter.lat) > 0.001) {
     return { lat: arrayCenter.lat, lng: arrayCenter.lng, source: 'array' };
   }
 
+  // 2) The geocoded address pin — authoritative for a real street address. Never let a
+  //    Google roof segment override it (that grabs the neighbor's roof).
+  if (isFinite(pinLat) && isFinite(pinLng) && Math.abs(pinLat) > 0.001) {
+    return { lat: pinLat, lng: pinLng, source: 'pin' };
+  }
+
+  // 3) Last resort only when the pin is unusable: the roof segment nearest to it.
   const withCenter = (roofSegments ?? []).filter(
     s => s.center && isFinite(s.center.lat) && isFinite(s.center.lng),
   );
   if (withCenter.length > 0) {
     const cosLat = Math.cos(pinLat * Math.PI / 180);
-    const distM = (s: AerialSegment) => {
-      const dLat = (s.center!.lat - pinLat) * 111320;
-      const dLng = (s.center!.lng - pinLng) * 111320 * cosLat;
-      return Math.hypot(dLat, dLng);
-    };
-    const NEAR_M = 25; // a single-family roof sits within ~25 m of its address pin
-    const near = withCenter.filter(s => distM(s) <= NEAR_M);
-    if (near.length > 0) {
-      const best = near
-        .map(s => ({ s, score: ((s.azimuthDegrees >= 135 && s.azimuthDegrees <= 225) ? 2 : 1) * (s.areaM2 || 1) }))
-        .sort((a, b) => b.score - a.score)[0];
-      return { lat: best.s.center!.lat, lng: best.s.center!.lng, source: 'segment' };
-    }
+    const distM = (s: AerialSegment) => Math.hypot(
+      (s.center!.lat - pinLat) * 111320,
+      (s.center!.lng - pinLng) * 111320 * cosLat,
+    );
     const nearest = withCenter.map(s => ({ s, d: distM(s) })).sort((a, b) => a.d - b.d)[0];
     return { lat: nearest.s.center!.lat, lng: nearest.s.center!.lng, source: 'segment' };
   }
