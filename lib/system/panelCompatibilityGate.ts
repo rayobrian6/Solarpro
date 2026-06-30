@@ -31,6 +31,13 @@
 //   STRING_INVERTERS registry, and takes the minimum maxInputCurrentPerMppt
 //   as the brand's "effective" cap. Zero per-brand special-casing.
 //
+//   MICRO TOPOLOGY SHORT-CIRCUIT
+//   When brand.topology === 'micro', the per-MPPT current gate does not apply:
+//   microinverters serve individual panels (1–2 modules per device) and have
+//   no shared MPPT bus. The gate returns 'compatible' with a reason explaining
+//   the gate is not applicable. This prevents a false "unknown" banner for
+//   Enphase IQ8, APsystems, Hoymiles, and any future micro brand.
+//
 // USAGE (sizingEngine.ts):
 //   const gate = evaluatePanelBrandCompatibility(panel, brand);
 //   if (gate.status === 'incompatible' && gate.suggestions.length > 0) {
@@ -123,6 +130,11 @@ const DEFAULT_MAX_SUGGESTIONS    = 3;
  *   - none of the equipmentDbIds resolve (all misses)
  *
  * BRAND-AGNOSTIC: no per-brand logic. Works for every current/future brand.
+ *
+ * NOTE: For micro topology brands, this function is NOT called —
+ * evaluatePanelBrandCompatibility() short-circuits to 'compatible' before
+ * reaching the MPPT current gate, since per-MPPT input current is a
+ * string-inverter concept that doesn't apply to per-panel microinverters.
  */
 export function getBrandMinMpptCurrent(brand: BrandProfile | null | undefined): number | null {
   if (!brand) return null;
@@ -230,11 +242,20 @@ function buildReason(
         `${headroomPct.toFixed(1)}% current headroom. Layout will succeed, but ` +
         `consider a lower-Isc panel for a more robust design.`
       );
-    case 'compatible':
+    case 'compatible': {
+      // When cap is null the MPPT current gate doesn't apply (micro topology).
+      if (cap === null) {
+        return (
+          `${panelName} is compatible with ${brand.displayName} — ` +
+          `per-MPPT current gating does not apply to microinverters ` +
+          `(each panel is served by its own device).`
+        );
+      }
       return (
         `${panelName} is fully compatible with ${brand.displayName} ` +
         `(${headroomPct.toFixed(1)}% MPPT current headroom).`
       );
+    }
     case 'unknown':
     default:
       return (
@@ -284,6 +305,34 @@ export function evaluatePanelBrandCompatibility(
       headroomPct: 0,
       suggestions: [],
       reason:      'Insufficient data to evaluate panel/brand compatibility.',
+    };
+  }
+
+  // ── Micro topology short-circuit ──────────────────────────────────────
+  // Per-MPPT input current is a string-inverter concept. Microinverters
+  // serve individual panels (1–2 modules per device) with no shared MPPT
+  // bus, so the current-gate concept doesn't apply. Return 'compatible'
+  // with a reason explaining the gate is not applicable. This prevents a
+  // false "unknown" / "no resolvable inverter models" banner for Enphase
+  // IQ8, APsystems, Hoymiles, and any future micro brand.
+  if (brand.topology === 'micro') {
+    return {
+      status: 'compatible',
+      panel: {
+        id:            panel.id,
+        manufacturer:  panel.manufacturer,
+        model:         panel.model,
+        isc:           panel.isc,
+        designCurrent: roundA(panel.isc * necMultiplier),
+      },
+      brand: {
+        id:                              brand.id,
+        displayName:                     brand.displayName,
+        effectiveMaxInputCurrentPerMppt: null,
+      },
+      headroomPct: 100,   // not applicable — report full headroom
+      suggestions: [],
+      reason:      buildReason('compatible', panel, brand, null, roundA(panel.isc * necMultiplier), 100, []),
     };
   }
 
