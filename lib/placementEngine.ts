@@ -827,3 +827,113 @@ export function panelCountForKw(targetKw: number, panelWattage: number): number 
 export function calcSystemSizeKw(panels: PlacedPanel[]): number {
   return panels.reduce((sum, p) => sum + p.wattage, 0) / 1000;
 }
+// ── Obstruction Keep-Out Zones ─────────────────────────────────────────
+// Obstructions (vents, chimneys, A/C units, etc.) become keep-out zones
+// that the panel layout must avoid, exactly like fire setbacks.
+// The obstruction polygon is expanded by a per-type clearance buffer
+// (OBSTRUCTION_CLEARANCE_M from nearmap.ts) before being used as an exclusion zone.
+
+import { OBSTRUCTION_CLEARANCE_M, type NearmapObstruction, type NearmapObstructionType } from './aerial/nearmap';
+
+export interface ObstructionKeepOut {
+  /** Obstruction type for rendering label + colour coding */
+  type: NearmapObstructionType;
+  /** Original Nearmap description */
+  description: string;
+  /** Expanded polygon (obstruction + clearance buffer) in lat/lng */
+  polygon: Array<{ lat: number; lng: number }>;
+  /** Original unexpanded polygon for debug rendering */
+  originalPolygon: Array<{ lat: number; lng: number }>;
+  /** Clearance buffer applied (meters) */
+  clearanceM: number;
+}
+
+/** Expand a polygon by a clearance buffer (outward offset).
+ *  Uses centroid-based expansion: each vertex is pushed outward
+ *  from the centroid by the clearance distance. Works well for
+ *  small convex polygons (vents, chimneys, A/C pads).
+ *  For larger/more complex shapes, a proper Minkowski sum would be
+ *  needed, but roof obstructions are typically small and convex. */
+export function expandPolygon(
+  vertices: Array<{ lat: number; lng: number }>,
+  clearanceM: number,
+): Array<{ lat: number; lng: number }> {
+  if (vertices.length < 3 || clearanceM <= 0) return vertices;
+
+  const n = vertices.length;
+  const centLat = vertices.reduce((s, v) => s + v.lat, 0) / n;
+  const centLng = vertices.reduce((s, v) => s + v.lng, 0) / n;
+  const mPerDegLng = 111_320 * Math.cos((centLat * Math.PI) / 180);
+  const mPerDegLat = 111_320;
+
+  return vertices.map(v => {
+    const dx = (v.lng - centLng) * mPerDegLng;
+    const dy = (v.lat - centLat) * mPerDegLat;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 0.001) return v;
+
+    const scale = (dist + clearanceM) / dist;
+    return {
+      lat: centLat + (v.lat - centLat) * scale,
+      lng: centLng + (v.lng - centLng) * scale,
+    };
+  });
+}
+
+/** Convert a Nearmap obstruction into a keep-out zone with clearance buffer. */
+export function obstructionToKeepOutZone(obs: NearmapObstruction): ObstructionKeepOut {
+  const clearanceM = OBSTRUCTION_CLEARANCE_M[obs.type];
+  return {
+    type: obs.type,
+    description: obs.description,
+    polygon: expandPolygon(obs.polygon, clearanceM),
+    originalPolygon: obs.polygon,
+    clearanceM,
+  };
+}
+
+/** Point-in-polygon test (ray casting algorithm, lat/lng). */
+export function pointInPolygonLatLng(
+  lat: number,
+  lng: number,
+  poly: Array<{ lat: number; lng: number }>,
+): boolean {
+  const n = poly.length;
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = poly[i].lng, yi = poly[i].lat;
+    const xj = poly[j].lng, yj = poly[j].lat;
+    const intersect =
+      (yi > lat) !== (yj > lat) &&
+      lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/** Check if a panel (by its center lat/lng) overlaps any keep-out zone.
+ *  A panel is considered overlapping if its center point is inside the
+ *  expanded (buffered) keep-out polygon. This is conservative but fast. */
+export function panelOverlapsKeepOut(
+  panelLat: number,
+  panelLng: number,
+  keepOutZones: ObstructionKeepOut[],
+): boolean {
+  for (const zone of keepOutZones) {
+    if (pointInPolygonLatLng(panelLat, panelLng, zone.polygon)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Filter out panels that overlap any obstruction keep-out zone.
+ *  Returns a new array with only panels that don't overlap any keep-out.
+ *  Used as a post-filter after auto-layout generates the panel grid. */
+export function filterPanelsByObstructions<T extends { lat: number; lng: number }>(
+  panels: T[],
+  keepOutZones: ObstructionKeepOut[],
+): T[] {
+  if (keepOutZones.length === 0) return panels;
+  return panels.filter(p => !panelOverlapsKeepOut(p.lat, p.lng, keepOutZones));
+}

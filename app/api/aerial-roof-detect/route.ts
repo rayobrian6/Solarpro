@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/security';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { geocodeAddress } from '@/lib/geocode';
-import { nearmapConfigured, checkNearmapCoverage, fetchNearmapRoofPlanes } from '@/lib/aerial/nearmap';
+import { nearmapConfigured, checkNearmapCoverage, fetchNearmapAIResult, type NearmapObstruction } from '@/lib/aerial/nearmap';
 import { nearmapPlanesToRoofPlanes } from '@/lib/aerial/nearmapToRoofPlane';
 
 export const dynamic = 'force-dynamic';
@@ -60,11 +60,11 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const raw = await fetchNearmapRoofPlanes(lat, lng, { radiusM: 45, skipCoverageCheck: true });
+    const { roofPlanes: raw, obstructions } = await fetchNearmapAIResult(lat, lng, { radiusM: 45, skipCoverageCheck: true });
     const planes = nearmapPlanesToRoofPlanes(raw, () => crypto.randomUUID());
     return NextResponse.json({
       success: true, covered: true, coverage,
-      resolved: { lat, lng, address: resolvedAddress }, planes,
+      resolved: { lat, lng, address: resolvedAddress }, planes, obstructions,
     });
   } catch (err) {
     return NextResponse.json({ success: false, covered: false, planes: [],

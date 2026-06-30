@@ -46,6 +46,85 @@ export interface NearmapRoofPlane {
   source: 'nearmap_ai';
 }
 
+// ── Nearmap AI obstruction types (roof clutter that panel layout must avoid) ──
+// These are AI-detected features like vents, chimneys, A/C units, satellite dishes,
+// skylights, etc. Each type has a default clearance buffer (meters) that expands
+// the polygon when creating keep-out zones. Buffers are configurable constants.
+
+export type NearmapObstructionType =
+  | 'vent' | 'chimney' | 'ac_unit' | 'satellite' | 'skylight' | 'other';
+
+export interface NearmapObstruction {
+  type: NearmapObstructionType;
+  /** Nearmap AI class description (e.g. "Vent", "Residential Chimney") */
+  description: string;
+  /** Polygon in true lat/lng (same CRS as Nearmap roof planes) */
+  polygon: Array<{ lat: number; lng: number }>;
+  confidence: number | null;
+  captureDate: string | null;
+}
+
+/** Per-type clearance buffer in meters — panels are excluded from the obstruction
+ *  polygon expanded by this margin. Easy to tune per AHJ / racking spec. */
+export const OBSTRUCTION_CLEARANCE_M: Record<NearmapObstructionType, number> = {
+  vent:      0.15,   // ~6" — plumbing vent / pipe boot
+  chimney:   0.6,    // ~24" — IRC fire clearance + working space
+  ac_unit:   0.3,    // ~12" — HVAC service clearance
+  satellite: 0.3,    // ~12" — dish swing radius
+  skylight:  0.3,    // ~12" — glass + flashing edge
+  other:     0.15,   // default conservative buffer
+};
+
+/** Map Nearmap AI `description` → our obstruction type enum.
+ *  Nearmap class names are like "Vent", "Residential Chimney",
+ *  "A/C Condenser Unit", "Residential Satellite Dish", etc.
+ *  Any unrecognised obstruction description maps to 'other'. */
+export function mapObstructionDescription(desc: string): NearmapObstructionType {
+  const d = desc.toLowerCase();
+  if (d.includes('vent') || d.includes('pipe')) return 'vent';
+  if (d.includes('chimney')) return 'chimney';
+  if (d.includes('a/c') || d.includes('condenser') || d.includes('hvac')) return 'ac_unit';
+  if (d.includes('satellite') || d.includes('dish')) return 'satellite';
+  if (d.includes('skylight') || d.includes('solar tube')) return 'skylight';
+  return 'other';
+}
+
+/** Known Nearmap AI obstruction class descriptions — used to filter features.
+ *  We include common classes but also accept any feature that isn't a Roof,
+ *  Car, Tree, etc. (non-roof non-scenery = likely obstruction on roof). */
+const OBSTRUCTION_DESCRIPTIONS = new Set([
+  'vent', 'residential chimney', 'a/c condenser unit', 'residential satellite dish',
+  'skylight', 'solar tube', 'pipe boot', 'exhaust vent', 'ridge vent',
+  'roof hvac', 'antenna', 'flashing', 'dormer', 'roof jack',
+]);
+
+/** Non-obstruction classes to explicitly skip (scenery / ground clutter). */
+const SKIP_DESCRIPTIONS = new Set([
+  'roof', 'car', 'tree', 'vegetation', 'shed', 'fence', 'wall', 'pool',
+  'deck', 'patio', 'driveway', 'sidewalk', 'road', 'building', 'structure',
+  'swimming_pool', 'trampoline', 'solar_panel',
+]);
+
+function isObstructionFeature(desc: string): boolean {
+  const d = desc.toLowerCase().trim();
+  if (SKIP_DESCRIPTIONS.has(d)) return false;
+  // Exact match on known obstruction classes
+  if (OBSTRUCTION_DESCRIPTIONS.has(d)) return true;
+  // Heuristic: if it contains obstruction keywords but isn't in the skip list
+  if (d.includes('vent') || d.includes('chimney') || d.includes('condenser') ||
+      d.includes('hvac') || d.includes('satellite') || d.includes('dish') ||
+      d.includes('skylight') || d.includes('pipe') || d.includes('exhaust') ||
+      d.includes('antenna') || d.includes('dormer') || d.includes('flashing')) {
+    return true;
+  }
+  return false;
+}
+
+/** Obstruction result cache keyed by `${lat},${lng},${surveyDate}`.
+ *  Prevents re-charging Nearmap credits for the same location + survey. */
+const obstructionCache = new Map<string, { result: NearmapObstruction[]; ts: number }>();
+const OBSTRUCTION_CACHE_TTL_MS = 30 * 60 * 1000; // 30 min
+
 export const nearmapConfigured = (): boolean => !!process.env.NEARMAP_API_KEY;
 
 /** Small lon,lat AOI ring (closed) around a point. radiusM ~ half-box edge. */
@@ -183,5 +262,131 @@ export async function fetchNearmapRoofPlanes(
     return mapNearmapRoofPlanes(await res.json());
   } catch {
     return [];
+  }
+}
+
+// ── Nearmap obstruction detection ─────────────────────────────────────────
+// Pulls AI-detected roof obstructions (vents, chimneys, A/C units, etc.)
+// from the same AI Feature API call that returns roof planes.
+// Obstructions are filtered by description and mapped to typed objects.
+
+/**
+ * Pure mapper: Nearmap AI Feature response JSON → obstructions.
+ * Exported for testing without a network call. Returns [] for anything unusable.
+ * Uses the SAME response JSON as mapNearmapRoofPlanes (one AI Feature call
+//  returns both roofs and obstructions — no extra credit charge).
+ */
+export function mapNearmapObstructions(responseJson: unknown): NearmapObstruction[] {
+  const d = responseJson as any;
+  const feats: any[] = Array.isArray(d?.features) ? d.features : [];
+  const obstructions: NearmapObstruction[] = [];
+  for (const f of feats) {
+    const desc = typeof f?.description === 'string' ? f.description : '';
+    if (!isObstructionFeature(desc)) continue;
+    const ring = outerRing(f.geometry);
+    if (!ring || ring.length < 4) continue;
+    const polygon = ring
+      .filter((pt: number[]) => Array.isArray(pt) && pt.length >= 2)
+      .map((pt: number[]) => ({ lat: pt[1], lng: pt[0] }));
+    if (polygon.length < 4) continue;
+    obstructions.push({
+      type: mapObstructionDescription(desc),
+      description: desc,
+      polygon,
+      confidence: typeof f.confidence === 'number' ? f.confidence : null,
+      captureDate: f.surveyDate ?? d.surveyDate ?? null,
+    });
+  }
+  return obstructions;
+}
+
+/**
+ * Fetch obstructions for a location. Coverage-gated (free check first),
+//  cached per (lat,lng,survey) to avoid re-charging credits.
+ * Uses the SAME AI Feature API call — one request returns both roof planes
+ * AND obstructions. Fails safe to [] on no key / no coverage / error.
+ */
+export async function fetchNearmapObstructions(
+  lat: number,
+  lng: number,
+  opts: { radiusM?: number; skipCoverageCheck?: boolean } = {},
+): Promise<NearmapObstruction[]> {
+  const key = process.env.NEARMAP_API_KEY;
+  if (!key) return [];
+
+  // Check cache first
+  const cacheKey = `${lat.toFixed(7)},${lng.toFixed(7)}`;
+  const cached = obstructionCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < OBSTRUCTION_CACHE_TTL_MS) {
+    return cached.result;
+  }
+
+  try {
+    if (!opts.skipCoverageCheck) {
+      const cov = await checkNearmapCoverage(lat, lng);
+      if (!cov?.covered || !cov.hasAiFeatures) return [];
+    }
+
+    const polygon = aoiPolygonAround(lat, lng, opts.radiusM ?? 40);
+    const res = await fetch(`${AI_FEATURE_URL}?polygon=${polygon}&apikey=${key}`, {
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) return [];
+
+    const result = mapNearmapObstructions(await res.json());
+
+    // Cache the result
+    obstructionCache.set(cacheKey, { result, ts: Date.now() });
+
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+/** Combined result from a single Nearmap AI Feature API call. */
+export interface NearmapAIResult {
+  roofPlanes: NearmapRoofPlane[];
+  obstructions: NearmapObstruction[];
+}
+
+/**
+ * Fetch both roof planes AND obstructions in a single AI Feature API call
+ * (one credit charge). This is the preferred entry point for the API route,
+ * which needs both results. Individual fetch functions are kept for
+ * backward compat but each makes its own call (separate credit charge).
+ */
+export async function fetchNearmapAIResult(
+  lat: number,
+  lng: number,
+  opts: { radiusM?: number; skipCoverageCheck?: boolean } = {},
+): Promise<NearmapAIResult> {
+  const key = process.env.NEARMAP_API_KEY;
+  const empty: NearmapAIResult = { roofPlanes: [], obstructions: [] };
+  if (!key) return empty;
+
+  try {
+    if (!opts.skipCoverageCheck) {
+      const cov = await checkNearmapCoverage(lat, lng);
+      if (!cov?.covered || !cov.hasAiFeatures) return empty;
+    }
+
+    const polygon = aoiPolygonAround(lat, lng, opts.radiusM ?? 40);
+    const res = await fetch(`${AI_FEATURE_URL}?polygon=${polygon}&apikey=${key}`, {
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) return empty;
+
+    const json = await res.json();
+    const roofPlanes = mapNearmapRoofPlanes(json);
+    const obstructions = mapNearmapObstructions(json);
+
+    // Cache obstructions for the combined fetch too
+    const cacheKey = `${lat.toFixed(7)},${lng.toFixed(7)}`;
+    obstructionCache.set(cacheKey, { result: obstructions, ts: Date.now() });
+
+    return { roofPlanes, obstructions };
+  } catch {
+    return empty;
   }
 }

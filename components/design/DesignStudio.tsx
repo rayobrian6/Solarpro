@@ -30,7 +30,11 @@ import {
   getPerEdgeSetbacks,
   generateMultipleRows,
   calcMinRowSpacing,
+  obstructionToKeepOutZone,
+  filterPanelsByObstructions,
+  type ObstructionKeepOut,
 } from '@/lib/placementEngine';
+import { type NearmapObstruction, OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/nearmap';
 import { getAhjByAddress } from '@/lib/jurisdictions/ahj-national';
 // Phase 2: Compute & Recommend — provenance-aware form fields
 import { ComputedField, type ComputedFieldValue } from '@/components/recommend/ComputedField';
@@ -800,6 +804,11 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [alignToEdge, setAlignToEdge] = useState(true);  // default ON for best visual alignment
   const [setbackZones, setSetbackZones] = useState<SetbackZone[]>([]);
 
+  // Nearmap AI obstruction keep-out zones (vents, chimneys, A/C units, etc.)
+  const [obstructions, setObstructions] = useState<NearmapObstruction[]>([]);
+  const [keepOutZones, setKeepOutZones] = useState<ObstructionKeepOut[]>([]);
+  const [showObstructionZones, setShowObstructionZones] = useState(true);
+
   // v30.9: Multi-row placement tool
   const [multiRowMode, setMultiRowMode] = useState(false);
   const [multiRowCount, setMultiRowCount] = useState(3);
@@ -1372,7 +1381,20 @@ export default function DesignStudio({ project, onSave }: Props) {
       setRoofPlanes(planes);
       setSolarApiStatus('loaded');
       if (data.resolved?.address) setSolarDataAddress(data.resolved.address);
-      toast.success('🛰️ Roof detected from aerial', `${planes.length} plane${planes.length !== 1 ? 's' : ''} from Nearmap · review pitch & azimuth, then confirm`);
+
+      // ── Obstruction keep-out zones from Nearmap AI ──
+      const fetchedObs: NearmapObstruction[] = Array.isArray(data.obstructions) ? data.obstructions : [];
+      setObstructions(fetchedObs);
+      if (fetchedObs.length > 0) {
+        const zones = fetchedObs.map(obstructionToKeepOutZone);
+        setKeepOutZones(zones);
+        const typeCounts: Record<string, number> = {};
+        for (const o of fetchedObs) typeCounts[o.type] = (typeCounts[o.type] || 0) + 1;
+        const summary = Object.entries(typeCounts).map(([t, c]) => `${c} ${t}${c !== 1 ? 's' : ''}`).join(', ');
+        toast.success('🛰️ Roof detected from aerial', `${planes.length} plane${planes.length !== 1 ? 's' : ''}, ${fetchedObs.length} obstruction${fetchedObs.length !== 1 ? 's' : ''} (${summary}) · review & confirm`);
+      } else {
+        toast.success('🛰️ Roof detected from aerial', `${planes.length} plane${planes.length !== 1 ? 's' : ''} from Nearmap · review pitch & azimuth, then confirm`);
+      }
     } catch (e) {
       setSolarApiStatus('unavailable');
       toast.error('Aerial detect failed', (e as Error).message);
@@ -2101,6 +2123,37 @@ export default function DesignStudio({ project, onSave }: Props) {
         ctx.fill();
         ctx.stroke();
         ctx.setLineDash([]);
+      });
+    }
+
+    // Nearmap AI obstruction keep-out zones (orange/amber, distinct from fire setbacks)
+    if (showObstructionZones && keepOutZones.length > 0) {
+      keepOutZones.forEach(zone => {
+        if (zone.polygon.length < 3) return;
+        ctx.beginPath();
+        zone.polygon.forEach((v, i) => {
+          const p = latLngToCanvas(v.lat, v.lng, mapCenter, zoom, W, H);
+          i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+        });
+        ctx.closePath();
+        // Amber/orange fill and stroke — visually distinct from red (fire) and green (buildable)
+        ctx.fillStyle = 'rgba(245, 158, 11, 0.22)';
+        ctx.strokeStyle = 'rgba(245, 158, 11, 0.85)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 3]);
+        ctx.fill();
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Label the obstruction type
+        if (zone.polygon.length >= 3) {
+          const centLat = zone.polygon.reduce((s: number, v: {lat: number}) => s + v.lat, 0) / zone.polygon.length;
+          const centLng = zone.polygon.reduce((s: number, v: {lng: number}) => s + v.lng, 0) / zone.polygon.length;
+          const labelPos = latLngToCanvas(centLat, centLng, mapCenter, zoom, W, H);
+          ctx.fillStyle = 'rgba(245, 158, 11, 0.95)';
+          ctx.font = 'bold 8px sans-serif';
+          ctx.fillText(`${zone.description} (${(zone.clearanceM * 39.37).toFixed(0)}" clr)`, labelPos.x + 3, labelPos.y - 3);
+        }
       });
     }
 
@@ -3199,14 +3252,18 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
 
     // Combine: manual panels first (preserved), then new auto panels
-    setPanels([...manualPanels, ...allNew]);
+    // Filter out auto panels that overlap obstruction keep-out zones
+    const filteredNew = keepOutZones.length > 0 ? filterPanelsByObstructions(allNew, keepOutZones) : allNew;
+    setPanels([...manualPanels, ...filteredNew]);
     setAutoLayoutRunning(false);
+    const removedCount = allNew.length - filteredNew.length;
     toast.success(
       'Auto Layout complete',
-      `${allNew.length} panels placed · ${(calculateSystemSize(allNew)).toFixed(2)} kW`
+      `${filteredNew.length} panels placed · ${(calculateSystemSize(filteredNew)).toFixed(2)} kW` +
+      (removedCount > 0 ? ` · ${removedCount} excluded by obstructions` : '')
     );
   }, [panels, roofPlanes, groundArea, fenceLine, selectedPanel, setback, panelSpacing, rowSpacing,
-      tilt, azimuth, panelsPerRow, groundHeight, fenceHeight, bifacialOptimized, orientation, show3D, setPlacementMode3D]);
+      tilt, azimuth, panelsPerRow, groundHeight, fenceHeight, bifacialOptimized, orientation, show3D, setPlacementMode3D, keepOutZones]);
 
   // ── Fill Roof: maximize panels with minimal setback (0.3 m) ─────────────────
   const fillRoof = useCallback(() => {
@@ -3252,13 +3309,16 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
 
     const manualPanels = panels.filter(p => p.layoutSource === 'MANUAL');
-    setPanels([...manualPanels, ...allNew]);
+    const filteredNew = keepOutZones.length > 0 ? filterPanelsByObstructions(allNew, keepOutZones) : allNew;
+    setPanels([...manualPanels, ...filteredNew]);
     setAutoLayoutRunning(false);
+    const removedCount = allNew.length - filteredNew.length;
     toast.success(
       'Fill Roof complete',
-      `${allNew.length} panels · ${(calculateSystemSize(allNew)).toFixed(2)} kW (max density)`
+      `${filteredNew.length} panels · ${(calculateSystemSize(filteredNew)).toFixed(2)} kW (max density)` +
+      (removedCount > 0 ? ` · ${removedCount} excluded by obstructions` : '')
     );
-  }, [roofPlanes, groundArea, selectedPanel, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM]);
+  }, [roofPlanes, groundArea, selectedPanel, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM, keepOutZones, fireSetbacks, alignToEdge]);
 
   // ── Optimize Layout: best production/cost ratio (wider row spacing) ──────────
   const optimizeLayout = useCallback(() => {
@@ -3305,13 +3365,16 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
 
     const manualPanels2 = panels.filter(p => p.layoutSource === 'MANUAL');
-    setPanels([...manualPanels2, ...allNew]);
+    const filteredNew = keepOutZones.length > 0 ? filterPanelsByObstructions(allNew, keepOutZones) : allNew;
+    setPanels([...manualPanels2, ...filteredNew]);
     setAutoLayoutRunning(false);
+    const removedCount = allNew.length - filteredNew.length;
     toast.success(
       'Optimized Layout complete',
-      `${allNew.length} panels · ${(calculateSystemSize(allNew)).toFixed(2)} kW · min shading`
+      `${filteredNew.length} panels · ${(calculateSystemSize(filteredNew)).toFixed(2)} kW · min shading` +
+      (removedCount > 0 ? ` · ${removedCount} excluded by obstructions` : '')
     );
-  }, [roofPlanes, groundArea, selectedPanel, setback, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM]);
+  }, [roofPlanes, groundArea, selectedPanel, setback, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation, midClampGapM, keepOutZones, fireSetbacks, alignToEdge]);
 
   // ── Calculate production ───────────────────────────────────
   const buildSystemDefinition = () => {
@@ -3491,6 +3554,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     setPanels([]); setRoofPlanes([]); setGroundArea([]); setFenceLine([]);
     setDrawnPoints([]); setProduction(null); setCostEstimate(null);
     setSelectedPanelIds(new Set()); setMeasurePoints([]); setMeasureDistance(null);
+    setObstructions([]); setKeepOutZones([]);
   };
 
   const systemTypeLabel = { roof: 'Roof Mount', ground: 'Ground Mount', fence: 'Sol Fence' }[project.systemType];
@@ -4712,6 +4776,17 @@ export default function DesignStudio({ project, onSave }: Props) {
                             {showSetbackZones ? <Eye size={10} /> : <EyeOff size={10} />}
                             {showSetbackZones ? 'Zones On' : 'Zones Off'}
                           </button>
+                          {/* Obstruction keep-out zones toggle (vents, chimneys, etc.) */}
+                          {keepOutZones.length > 0 && (
+                            <button
+                              onClick={() => setShowObstructionZones(v => !v)}
+                              className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${showObstructionZones ? 'border-amber-500/50 bg-amber-500/10 text-amber-400' : 'border-slate-600 text-slate-500 hover:text-slate-300'}`}
+                              title="Toggle obstruction keep-out zone visibility (vents, chimneys, A/C units, etc.)"
+                            >
+                              {showObstructionZones ? <Eye size={10} /> : <EyeOff size={10} />}
+                              {showObstructionZones ? `${keepOutZones.length} Obs.` : 'Obs. Off'}
+                            </button>
+                          )}
                           {/* v47.118: Align panels to longest roof edge */}
                           <button
                             onClick={() => setAlignToEdge(v => !v)}
