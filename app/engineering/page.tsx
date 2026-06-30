@@ -6368,9 +6368,16 @@ function EngineeringPageInner() {
           attachmentSpacing: config.attachmentSpacing,
           interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
           panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
-          batteryBrand: config.batteryBrand, batteryModel: config.batteryModel,
-          batteryCount: config.batteryCount, batteryKwh: config.batteryKwh,
-          batteryBackfeedA: calcBatteryBackfeedAmps(config.batteryId, config.batteryCount),
+          // BATTERY GATE (Ray, 2026-06-30): the planset shows a battery ONLY when one is
+          // explicitly enabled (added in engineering, or selected in 3D design → hydrates
+          // batteryEnabled). The permit's equipment legend keys off batteryCount>0, so a
+          // stale config.batteryCount (e.g. an old ecosystem auto-add) must be zeroed here
+          // when the toggle is off — otherwise a phantom battery renders across the planset.
+          batteryBrand: batteryEnabled ? config.batteryBrand : undefined,
+          batteryModel: batteryEnabled ? config.batteryModel : undefined,
+          batteryCount: batteryEnabled ? config.batteryCount : 0,
+          batteryKwh:   batteryEnabled ? config.batteryKwh : 0,
+          batteryBackfeedA: batteryEnabled ? calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) : undefined,
           generatorBrand: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? ''; })() : undefined,
           generatorKw: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? 0; })() : undefined,
           atsBrand: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.manufacturer ?? ''; })() : undefined,

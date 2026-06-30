@@ -994,6 +994,51 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── PV-1 aerial re-centering (Ray, 2026-06-30) ──────────────────────────
+    // The aerial is fetched early (above), but the real roof/panel geometry only
+    // lands on enrichedBody.project AFTER canonical/survey enrichment — so the first
+    // fetch often had no array center and the static map centered on the nearest
+    // Google roof segment, i.e. a NEIGHBOR's roof, putting the subject house at the
+    // edge of PV-1. Now that geometry is final, compute the true array centroid and,
+    // if the current aerial is materially off, re-fetch centered on the real array.
+    try {
+      const _ad = enrichedBody.aerialData as { imageBase64?: string; lat?: number; lng?: number } | undefined;
+      if (_ad?.imageBase64 && isFinite(Number(_ad.lat)) && isFinite(Number(_ad.lng))) {
+        let _ctr: { lat: number; lng: number } | undefined;
+        const _ep = _designPanels.filter(p => isFinite(Number(p?.lat)) && isFinite(Number(p?.lng)) && Math.abs(Number(p?.lat)) > 0.001);
+        if (_ep.length > 0) {
+          _ctr = {
+            lat: _ep.reduce((s, p) => s + Number(p.lat), 0) / _ep.length,
+            lng: _ep.reduce((s, p) => s + Number(p.lng), 0) / _ep.length,
+          };
+        } else {
+          const _vs = _designRoofPlanes
+            .flatMap(p => (Array.isArray(p?.vertices) ? p.vertices : []))
+            .filter(v => isFinite(Number(v?.lat)) && isFinite(Number(v?.lng)) && Math.abs(Number(v?.lat)) > 0.001);
+          if (_vs.length > 0) {
+            _ctr = {
+              lat: _vs.reduce((s, v) => s + Number(v.lat), 0) / _vs.length,
+              lng: _vs.reduce((s, v) => s + Number(v.lng), 0) / _vs.length,
+            };
+          }
+        }
+        if (_ctr) {
+          const dLat = Math.abs(_ctr.lat - Number(_ad.lat)) * 111320;
+          const dLng = Math.abs(_ctr.lng - Number(_ad.lng)) * 111320 * Math.cos(_ctr.lat * Math.PI / 180);
+          const offM = Math.hypot(dLat, dLng);
+          if (offM > 20) {
+            const reAerial = await fetchAerialRoofData(body.project.lat, body.project.lng, body.project?.address || '', _ctr).catch(() => null);
+            if (reAerial && (reAerial as AerialRoofData).imageBase64) {
+              enrichedBody.aerialData = reAerial;
+              console.log(`[permit/aerial] PV-1 re-centered on real array geometry (was ~${offM.toFixed(0)}m off)`, _ctr);
+            }
+          }
+        }
+      }
+    } catch (recenterErr) {
+      console.warn('[permit/aerial] PV-1 re-center skipped (non-critical):', (recenterErr as Error)?.message);
+    }
+
     const html = generatePermitHTML(enrichedBody, storedSldSvg);
     console.log('[PLANSET GENERATED]', { systemType: enrichedBody.project?.systemType, panels: enrichedBody.system?.totalPanels, version: PLANSET_ENGINE_VERSION });
 
