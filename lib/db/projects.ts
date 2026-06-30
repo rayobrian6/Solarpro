@@ -482,10 +482,54 @@ export interface UpsertLayoutData {
   designElectrical?: Layout['designElectrical'];
 }
 
+// ── Coordinate-integrity guard (Ray, 2026-06-30) ────────────────────────────
+// System-wide fix for corrupted layouts. A DB audit found many projects whose saved
+// panel/roof geometry sits in a DIFFERENT CITY OR STATE than the project's address
+// (e.g. an Illinois project carrying Connecticut panel coordinates) — geometry from
+// another project getting persisted under the wrong project_id (stale design state on
+// project-switch, copied templates, etc.). upsertLayout is the single chokepoint for
+// every save path, so we validate here: if the incoming geometry's centroid is
+// implausibly far from the project's geocoded address, refuse the write rather than
+// corrupt the project. Threshold is deliberately large (5 km) so it ONLY catches
+// cross-location contamination — a legitimately-placed array is always within ~200 m of
+// its address, and even a poor geocode is rarely off by kilometers.
+const _PHX = { lat: 33.4484, lng: -112.0740 };
+function _isPhoenix(lat: number, lng: number): boolean {
+  return Math.abs(lat - _PHX.lat) < 0.01 && Math.abs(lng - _PHX.lng) < 0.01;
+}
+function _coordCentroid(pts: Array<{ lat?: number; lng?: number }> | undefined): { lat: number; lng: number } | null {
+  const v = (pts || []).filter(p => p && isFinite(Number(p.lat)) && isFinite(Number(p.lng)) && Math.abs(Number(p.lat)) > 0.001);
+  if (!v.length) return null;
+  return { lat: v.reduce((s, p) => s + Number(p.lat), 0) / v.length, lng: v.reduce((s, p) => s + Number(p.lng), 0) / v.length };
+}
+async function assertLayoutCoordsMatchProject(sql: any, data: UpsertLayoutData): Promise<void> {
+  // Centroid of the incoming geometry — panels first, then roof-plane vertices.
+  let ctr = _coordCentroid(data.panels as Array<{ lat?: number; lng?: number }>);
+  if (!ctr && Array.isArray(data.roofPlanes)) {
+    ctr = _coordCentroid((data.roofPlanes as Array<{ vertices?: Array<{ lat?: number; lng?: number }> }>).flatMap(rp => rp?.vertices || []));
+  }
+  if (!ctr || _isPhoenix(ctr.lat, ctr.lng)) return; // nothing to validate against
+  const prows = await sql`SELECT lat, lng FROM projects WHERE id = ${data.projectId} LIMIT 1`;
+  const plat = Number(prows[0]?.lat), plng = Number(prows[0]?.lng);
+  // No trustworthy project geocode → can't validate; don't block.
+  if (!isFinite(plat) || !isFinite(plng) || Math.abs(plat) < 0.001 || _isPhoenix(plat, plng)) return;
+  const distKm = Math.hypot((ctr.lat - plat) * 111320, (ctr.lng - plng) * 111320 * Math.cos(ctr.lat * Math.PI / 180)) / 1000;
+  if (distKm > 5) {
+    console.error('[LAYOUT_COORDS_MISMATCH]', { projectId: data.projectId, distKm: distKm.toFixed(1), geometryCentroid: ctr, projectGeocode: { lat: plat, lng: plng } });
+    throw new Error(
+      `LAYOUT_COORDS_MISMATCH: design geometry is ${distKm.toFixed(1)} km from the project address — ` +
+      `it appears to belong to a different project. Refusing to save to avoid corrupting this project. ` +
+      `Re-locate the design on the correct address, then save.`,
+    );
+  }
+}
+
 export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
   assertUUID(data.projectId, 'projectId');
   assertUUID(data.userId, 'userId');
   const sql = await getDbReady();
+  // Block cross-project coordinate contamination before any write (see helper above).
+  await assertLayoutCoordsMatchProject(sql, data);
   const panelsJson = JSON.stringify(data.panels || []);
   const roofPlanesJson = data.roofPlanes ? JSON.stringify(data.roofPlanes) : null;
   const fenceLineJson = data.fenceLine ? JSON.stringify(data.fenceLine) : null;
