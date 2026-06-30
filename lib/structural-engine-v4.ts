@@ -562,13 +562,14 @@ function calcMountLayout(
   let iterations = 0;
   let spacingWasReduced = false;
 
-  // Iterative: reduce spacing until SF ≥ 1.5
+  // Iterative: tighten spacing until SF ≥ 2.0 (the permit's required minimum —
+  // was 1.5, which left attachments shipping a red "1.59 (min 2.0)" FAIL).
   while (spacingIn >= 12) {
     iterations++;
     const tribAreaFt2 = (spacingIn * railSpanIn) / 144;
     const upliftPerMount = netUpliftPsf * tribAreaFt2;
     const sf = mountCapacityLbs / upliftPerMount;
-    if (sf >= 1.5) break;
+    if (sf >= 2.0) break;
     spacingIn -= 6;
     spacingWasReduced = true;
   }

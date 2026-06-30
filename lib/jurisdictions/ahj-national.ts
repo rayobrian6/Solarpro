@@ -4674,27 +4674,76 @@ export function getAhjsByState(stateCode: string): AhjRecord[] {
   return AHJ_NATIONAL.filter(a => a.stateCode.toUpperCase() === stateCode.toUpperCase());
 }
 
-export function getAhjByAddress(address: string): AhjRecord | null {
-  if (!address) return null;
+/**
+ * Resolve the county-wide AHJ for a state + county (prefers the county /
+ * unincorporated record over a specific city in that county).
+ */
+export function getAhjByCounty(stateCode: string, county: string): AhjRecord | null {
+  if (!stateCode || !county) return null;
+  // Exact normalized county match — do NOT use searchAhj here: its county filter
+  // widens to the whole state when nothing matches, which would silently return
+  // the first record (Cook/Chicago) for an unknown county.
+  const target = county.trim().toLowerCase().replace(/\s+county$/, '');
+  if (!target) return null;
+  const matches = getAhjsByState(stateCode).filter(
+    a => a.county.toLowerCase().replace(/\s+county$/, '') === target,
+  );
+  if (matches.length === 0) return null;
+  return matches.find(a => a.ahjType === 'county' || a.city.toLowerCase() === 'unincorporated')
+    ?? matches[0];
+}
 
-  // Parse state from address
-  const stateMatch = address.match(/,\s*([A-Z]{2})(?:\s+\d{5})?(?:\s*,|\s*$)/);
-  const stateCode = stateMatch?.[1];
+/**
+ * Resolve an AHJ from an address, optionally helped by structured hints
+ * (county/city/stateCode the caller already has from geocoding).
+ *
+ * Resolution order: county hint → city → county parsed from text → single-AHJ
+ * state. Critically, it NO LONGER falls back to "the first AHJ in the state":
+ * that silently returned Cook County / Chicago for EVERY unmatched Illinois
+ * address (e.g. Wood River, which is Madison County), poisoning the planset's
+ * wind/snow/utility/permit data. When it can't localize, it returns null and
+ * the caller uses neutral code-minimum defaults instead of a wrong jurisdiction.
+ */
+export function getAhjByAddress(
+  address: string,
+  hint?: { stateCode?: string; county?: string; city?: string },
+): AhjRecord | null {
+  const stateMatch = address?.match(/,\s*([A-Z]{2})(?:\s+\d{5})?(?:\s*,|\s*$)/);
+  const stateCode = (hint?.stateCode || stateMatch?.[1] || '').toUpperCase();
   if (!stateCode) return null;
 
-  // Parse city from address
-  const parts = address.split(',').map(p => p.trim());
-  const cityPart = parts.length >= 2 ? parts[parts.length - 2] : null;
-
-  // Try city match first
-  if (cityPart) {
-    const cityResults = searchAhj({ stateCode, city: cityPart });
-    if (cityResults.length > 0) return cityResults[0];
+  // 1) County hint — the most reliable geographic key (Wood River → Madison).
+  if (hint?.county) {
+    const byCounty = getAhjByCounty(stateCode, hint.county);
+    if (byCounty) return byCounty;
   }
 
-  // Fall back to first AHJ in state
+  // 2) City — hint, else parsed from the address (strip trailing country + "ST 12345").
+  let city = hint?.city ?? null;
+  if (!city && address) {
+    const parts = address.split(',').map(p => p.trim()).filter(Boolean)
+      .filter(p => !/^(usa|united states)$/i.test(p) && !/^[A-Z]{2}\s+\d{5}/.test(p));
+    city = parts.length >= 1 ? parts[parts.length - 1] : null;
+    if (city && /^[A-Z]{2}$/.test(city) && parts.length >= 2) city = parts[parts.length - 2];
+  }
+  if (city) {
+    // searchAhj returns ALL state records when the city doesn't match, so re-filter
+    // to an actual city-name hit before accepting it (never accept a non-match).
+    const cityLower = city.toLowerCase();
+    const exact = searchAhj({ stateCode, city }).filter(a => a.city.toLowerCase().includes(cityLower));
+    if (exact.length > 0) return exact[0];
+  }
+
+  // 3) County parsed from the address text ("... Madison County, IL ...").
+  const countyTextMatch = address?.match(/([A-Za-z][A-Za-z .'-]*?)\s+County/i);
+  if (countyTextMatch) {
+    const byCounty = getAhjByCounty(stateCode, countyTextMatch[1].trim());
+    if (byCounty) return byCounty;
+  }
+
+  // 4) Only auto-pick when the state has exactly one AHJ; otherwise null (no guess).
   const stateResults = getAhjsByState(stateCode);
-  return stateResults.length > 0 ? stateResults[0] : null;
+  return stateResults.length === 1 ? stateResults[0] : null;
 }
 
 export function getTotalAhjCount(): number {

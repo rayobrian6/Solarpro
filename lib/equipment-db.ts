@@ -179,6 +179,12 @@ export interface RackingSystem {
   maxSnowLoad: number; // psf
   railSpanMax: number; // inches
   attachmentSpacingMax: number; // inches
+  /** Module-to-module gap created by this system's mid-clamps (inches).
+   *  Drives panel spacing in the roof layout, which the firewalk/pathway math
+   *  reads through the post-generation edge filter — so the accumulated gap
+   *  correctly narrows the usable field. TYPICAL values; verify vs the clamp
+   *  datasheet. Falls back to 0.25" (mid-clamp physical minimum) when absent. */
+  midClampGapIn?: number;
   weight: number; // lbs per linear foot
   material: string;
   warranty: string;
@@ -2145,6 +2151,7 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     roofTypes: ['shingle', 'tile', 'metal_corrugated'],
     maxWindSpeed: 160, maxSnowLoad: 50,
     railSpanMax: 72, attachmentSpacingMax: 72,
+    midClampGapIn: 0.4,   // UFO/bonded mid-clamp — typical, verify vs datasheet
     weight: 1.2, material: '6005-T5 Aluminum',
     warranty: '20yr', ulListing: 'UL 2703',
     attachmentMethod: 'L-foot with lag bolt into rafter',
@@ -2161,6 +2168,7 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     roofTypes: ['shingle', 'tile', 'metal_corrugated', 'metal_standing_seam'],
     maxWindSpeed: 150, maxSnowLoad: 50,
     railSpanMax: 72, attachmentSpacingMax: 72,
+    midClampGapIn: 0.4,   // typical, verify vs datasheet
     weight: 1.1, material: '6005-T5 Aluminum',
     warranty: '20yr', ulListing: 'UL 2703',
     attachmentMethod: 'L-foot or standoff with lag bolt',
@@ -2178,6 +2186,7 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     roofTypes: ['shingle', 'tile'],
     maxWindSpeed: 150, maxSnowLoad: 50,
     railSpanMax: 72, attachmentSpacingMax: 72,
+    midClampGapIn: 0.4,   // typical, verify vs datasheet
     weight: 1.0, material: '6005-T5 Aluminum',
     warranty: '20yr', ulListing: 'UL 2703',
     attachmentMethod: 'Snap-in L-foot with lag bolt',
@@ -2195,6 +2204,7 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     roofTypes: ['shingle', 'tile'],
     maxWindSpeed: 150, maxSnowLoad: 50,
     railSpanMax: 72, attachmentSpacingMax: 72,
+    midClampGapIn: 0.4,   // typical, verify vs datasheet
     weight: 0.9, material: 'Aluminum / Stainless',
     warranty: '10yr', ulListing: 'UL 2703',
     attachmentMethod: 'Flashed mount with lag bolt',
@@ -2212,6 +2222,7 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     roofTypes: ['flat_tpo', 'flat_epdm', 'flat_gravel'],
     maxWindSpeed: 130, maxSnowLoad: 30,
     railSpanMax: 84, attachmentSpacingMax: 84,
+    midClampGapIn: 0.79,  // flat-roof tray (~20mm) — typical, verify vs datasheet
     weight: 2.5, material: 'Aluminum / HDPE',
     warranty: '20yr', ulListing: 'UL 2703',
     attachmentMethod: 'Ballasted tray (no penetrations)',
@@ -2228,6 +2239,7 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     roofTypes: ['metal_standing_seam'],
     maxWindSpeed: 160, maxSnowLoad: 50,
     railSpanMax: 72, attachmentSpacingMax: 72,
+    midClampGapIn: 0.4,   // typical, verify vs datasheet
     weight: 0.5, material: 'Stainless Steel / Aluminum',
     warranty: '25yr', ulListing: 'UL 2703',
     attachmentMethod: 'S-5! clamp on standing seam (no penetrations)',
@@ -2246,6 +2258,7 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     roofTypes: ['shingle', 'tile'],
     maxWindSpeed: 150, maxSnowLoad: 45,
     railSpanMax: 72, attachmentSpacingMax: 48,
+    midClampGapIn: 0.4,   // compatible-rail mid-clamp — typical, verify vs datasheet
     weight: 0.6, material: 'Aluminum / EPDM',
     warranty: '20yr', ulListing: 'ICC-ES ESR-3575 / UL 2703',
     attachmentMethod: 'Flashed pad with 2 lag bolts into rafter → L-foot bolt → compatible rail (IronRidge XR100/XR1000, Pegasus, or equivalent)',
@@ -2258,6 +2271,29 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     fastenersPerAttachment: 2,   // 2 lag bolts per RT-MINI pad
     upliftCapacity: 450,         // lbf per lag bolt (ICC-ES ESR-3575)
     tributaryArea: 8.5,          // ft² per attachment point
+  },
+  // SolFence (Sol Fence LLC) — vertical 90° bifacial solar-fence system.
+  // Real specs from Ray's distributor/datasheet PDFs (2026-06-21): pre-built
+  // 8'-wide sections (2 panels per 6' section), 4x4 6061-T6 aircraft-grade
+  // aluminum posts on 8' spacing, 115 mph / 113 psf rated, driven 2-3/8" steel
+  // pipe foundation (post pounder) standard. Power electronics (Enphase IQ8
+  // micro or Tigo TS4-A-O optimizer) + wiring are installer-supplied.
+  {
+    id: 'solfence-8ft',
+    manufacturer: 'SolFence',
+    model: "8' Wide Bifacial Fence Section",
+    category: 'racking',
+    systemType: 'fence',
+    roofTypes: [],
+    maxWindSpeed: 115, maxSnowLoad: 113,
+    railSpanMax: 96, attachmentSpacingMax: 96,   // 8' section / 8' post spacing
+    midClampGapIn: 0.4,   // gap between the 2 panels in a section (channel) — typical
+    weight: 3.0, material: '6061-T6 Aircraft-Grade Aluminum',
+    warranty: 'Lifetime (frame) / 30yr (panels)', ulListing: 'Patent-pending (Sol Fence LLC)',
+    attachmentMethod: 'Driven 2-3/8" steel pipe (4\' min, post pounder) or concrete-set 4x4 posts',
+    hardware: "8'-wide pre-built section (incl. side channels & rails), 4x4 aluminum posts (6.5'/9'/4.5'), apex caps, donuts, RCP",
+    installNotes: 'Vertical 90° bifacial fence. Post spacing 8 ft. Driven-pile foundation standard; concrete-set optional. Power electronics (Enphase IQ8 micro or Tigo TS4-A-O optimizer) + all wiring installer-supplied (not in kit).',
+    datasheetUrl: 'https://solfence.solar',
   },
 ];
 
@@ -2304,6 +2340,18 @@ export function getMicroinverterById(id: string): Microinverter | undefined {
 
 export function getRackingById(id: string): RackingSystem | undefined {
   return RACKING_SYSTEMS.find(r => r.id === id);
+}
+
+/** Mid-clamp module gap (inches) for a racking system. Falls back to the
+ *  0.25" mid-clamp physical minimum when the system is unknown or unspecified. */
+export function getMidClampGapInches(rackingId?: string): number {
+  const r = rackingId ? getRackingById(rackingId) : undefined;
+  return r?.midClampGapIn ?? 0.25;
+}
+
+/** Mid-clamp module gap in meters (for layout spacing). */
+export function getMidClampGapMeters(rackingId?: string): number {
+  return getMidClampGapInches(rackingId) * 0.0254;
 }
 
 export function getConductorByGauge(gauge: string): Conductor | undefined {

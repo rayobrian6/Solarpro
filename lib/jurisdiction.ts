@@ -435,7 +435,14 @@ export function getDesignTemperatures(stateCode: string): { minTemp: number; max
     // Fallback
     DEFAULT: { minTemp: -10, maxTemp: 95 },
   };
-  return temps[stateCode] || temps.DEFAULT;
+  const entry = temps[stateCode] || temps.DEFAULT;
+  // BUG FIX: the maxTemp values above are ASHRAE 0.4% cooling dry-bulb in °F
+  // (e.g. IL 95°F), but every downstream consumer treats designTempMax as °C
+  // (NEC 310.15 conductor derating, 690.8 Isc correction). Treating 95°F as 95°C
+  // pushed the temp-derating factor to its worst-case (~0.41) and false-failed AC
+  // feeder sizing (#2/0 reading 71.8A). Convert °F → °C here so the ambient is
+  // correct. minTemp is already stored in °C (see header comment) — left as-is.
+  return { minTemp: entry.minTemp, maxTemp: Math.round((entry.maxTemp - 32) * 5 / 9) };
 }
 
 // Get ground snow load for a state (simplified — actual values from ASCE 7 maps)

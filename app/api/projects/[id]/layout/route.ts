@@ -34,6 +34,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       panels, mapCenter, mapZoom, systemType,
       roofPlanes, groundTilt, groundAzimuth, rowSpacing, groundHeight,
       fenceAzimuth, fenceHeight, fenceLine, bifacialOptimized,
+      designElectrical,
       changeSummary
     } = body;
 
@@ -93,6 +94,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       systemSizeKw,
       mapCenter:  mapCenter  ?? existingLayout?.mapCenter,
       mapZoom:    mapZoom    ?? existingLayout?.mapZoom,
+      designElectrical: designElectrical ?? (existingLayout as any)?.designElectrical,
     });
 
     // STEP 3 -- DB WRITE CONFIRMATION LOGGING

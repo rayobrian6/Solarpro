@@ -29,6 +29,7 @@ const MOUNTING_BRANDS: string[] = Array.from(new Set(ALL_MOUNTING_SYSTEMS.map(s 
 import { BUILD_VERSION, BUILD_DATE, BUILD_FEATURES } from '@/lib/version';
 // Phase 11 — brand-driven sizing recommendation UI
 import { sizeSystemFromBrand, type SystemSizingResult } from '@/lib/system/sizingEngine';
+import { designElectricalToEngineering } from '@/lib/system/designToEngineering';
 import {
   SizingRecommendation,
   type CurrentConfigSnapshot,
@@ -1382,8 +1383,16 @@ function EngineeringPageInner() {
             ? ` · $${Math.round(seed.cost_low / 1000)}k–$${Math.round(seed.cost_high / 1000)}k estimate`
             : '';
           const displayPanels = layoutPanelCount > 0 ? layoutPanelCount : seed.panel_count;
+          // DC kW must match the header (panelCount × resolved SKU watts, page.tsx
+          // ~2432). The design's persisted layout.systemSizeKw is computed from the
+          // placed-panel .wattage (stale 440W Studio default), which diverged from
+          // the selected Maxeon 3 400W SKU → banner showed 22.88 vs header 20.80.
+          const _bannerPanelW =
+            (getPanelById((layout as any)?.designElectrical?.panelId ?? '') as any)?.watts
+            ?? ((p as any)?.selectedPanel?.watts)
+            ?? 400;
           const displayKw = layoutPanelCount > 0
-            ? (layout!.systemSizeKw || (layoutPanelCount * 0.4)).toFixed(2)
+            ? ((layoutPanelCount * _bannerPanelW) / 1000).toFixed(2)
             : seed.system_kw;
           const layoutNote = layoutPanelCount > 0 ? ` [layout: ${layoutPanelCount} panels]` : '';
           setAutoLoadBanner(
@@ -1450,6 +1459,50 @@ function EngineeringPageInner() {
           patches.utilityId = p.utilityId || patches.utilityId;
           if (panelCount > 0) {
             setAutoLoadBanner(`Loaded from project: ${p.name}${panelCount ? ` (${panelCount} panels, ${systemKw.toFixed(1)} kW)` : ''}`);
+          }
+        }
+
+        // ── v63: Design Studio electrical handoff ───────────────────────────
+        // If the saved layout carries an electrical design (string + topology +
+        // brand + equipment logged in Design Studio when this project was worked
+        // on), seed the engineering inverter config from it — string count, sizes,
+        // topology, brand, panel and racking carry over with NO re-entry. Runs
+        // for both the seed and no-seed branches above. The saved engineering_config
+        // restore below still wins once the engineer customizes in the workspace.
+        const designElec = (layout as any)?.designElectrical as import('@/types').DesignElectrical | undefined;
+        if (designElec && Array.isArray(designElec.strings) && designElec.strings.length > 0) {
+          try {
+            const handoff = designElectricalToEngineering(designElec, {
+              selectedInverterId: p.selectedInverter?.id,
+              tilt:    (patches.roofPitch as number) ?? seed?.tilt ?? 20,
+              azimuth: seed?.azimuth ?? 180,
+            });
+            patches.inverters = [_buildInvCfg({
+              existingId: 'inv-design-0',
+              inverterId: handoff.inverterId,
+              type:       handoff.inverterType,
+              strings:    handoff.strings as unknown as StringConfig[],
+              ...(handoff.optimizerPeripheralId ? { optimizerPeripheralId: handoff.optimizerPeripheralId } : {}),
+            })];
+            if (handoff.mountingId) patches.mountingId = handoff.mountingId;
+            console.log('[EngineeringPage] Seeded inverters from Design Studio electrical handoff:', {
+              topology: designElec.topology,
+              strings:  handoff.strings.length,
+              brand:    handoff.inverterBrand,
+              racking:  handoff.mountingId,
+            });
+            // Micro = AC branches/devices, not DC strings — don't print a phantom
+            // "1 string" for a microinverter design.
+            const _isMicroDesign = designElec.topology === 'micro';
+            const _designDevices = handoff.strings.reduce((s, str) => s + (str.panelCount || 0), 0);
+            setAutoLoadBanner(prev =>
+              prev
+                ? `${prev} · ${_isMicroDesign ? 'micros' : 'strings'} from design`
+                : (_isMicroDesign
+                    ? `✅ Loaded from design (${_designDevices} microinverters)`
+                    : `✅ Strings loaded from design (${handoff.strings.length} string${handoff.strings.length !== 1 ? 's' : ''})`));
+          } catch (deErr) {
+            console.error('[EngineeringPage] design electrical handoff failed (non-fatal):', deErr);
           }
         }
 
@@ -3087,7 +3140,11 @@ function EngineeringPageInner() {
   //   [!!] NEVER mix current in one component + recommended in another
   // ──────────────────────────────────────────────────────────────────────────
   const currentDisplayConfig = {
-    totalStrings: config.inverters.reduce((s, inv) => s + inv.strings.length, 0),
+    // A microinverter system has 0 DC strings (panels are grouped into AC branches,
+    // shown via acBranchCount). The inverter's `strings` array is only a panel-count
+    // carrier for micro — counting its length showed a phantom "1 string" and the
+    // bogus "1→0 strings" diff vs the recommendation (which already forces micro→0).
+    totalStrings: config.inverters.reduce((s, inv) => s + (inv.type === 'micro' ? 0 : inv.strings.length), 0),
     stringPanelCounts: config.inverters.flatMap(inv => inv.strings.map(st => st.panelCount)),
     inverterModel: (() => {
       const _i = config.inverters[0];
@@ -3425,16 +3482,22 @@ function EngineeringPageInner() {
       // selecting N batteries reverted to 1 on every apply/auto-heal. This also
       // generalizes the old v58.13 ecosystem-battery guard: any user-selected
       // battery (ecosystem OR manual) is now preserved wholesale.
-      const hasUserBattery =
-        !!prev.batteryId && (prev.batteryCount ?? 0) > 0;
+      // A user-selected battery (batteryId present) is authoritative — preserve it
+      // wholesale. Previously this also required batteryCount > 0, so a freshly
+      // picked battery whose count was still 0 fell through to the else-branch and
+      // had its count overwritten with the engine default (1) — the "units snaps
+      // back to 1" bug. Key off batteryId alone; backfill a sane count if 0.
+      const hasUserBattery = !!prev.batteryId;
       if (hasUserBattery) {
         console.log('[SIZING APPLY v62] preserving user battery (authoritative):', {
           batteryId: prev.batteryId,
           batteryCount: prev.batteryCount,
           batteryKwh: prev.batteryKwh,
         });
-        // Intentionally leave batteryId/batteryCount/batteryKwh/Brand/Model off
-        // the patch so the user's selection survives the inverter re-sync.
+        // Intentionally leave batteryId/batteryKwh/Brand/Model off the patch so the
+        // user's selection survives the inverter re-sync. Only force a count when it
+        // is missing/zero, so a preserved battery never persists as "0 units".
+        if (!prev.batteryCount || prev.batteryCount < 1) patch.batteryCount = 1;
       } else if (rec.battery && rec.battery.equipmentDbId) {
         // No user battery yet — adopt the engine's sized battery as the seed.
         patch.batteryId = rec.battery.equipmentDbId;
@@ -9209,7 +9272,18 @@ function EngineeringPageInner() {
                           <span className="ml-1 px-1.5 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase tracking-wide">+5 Models</span>
                         </h3>
                         <label className="relative inline-flex items-center cursor-pointer">
-                          <input type="checkbox" checked={batteryEnabled} onChange={e => setBatteryEnabled(e.target.checked)}
+                          <input type="checkbox" checked={batteryEnabled} onChange={e => {
+                              const on = e.target.checked;
+                              setBatteryEnabled(on);
+                              // v63: toggling OFF must CLEAR the battery from config, not just
+                              // hide the panel. An ecosystem/auto-adopted battery sets
+                              // config.batteryCount>0 (see applySizingRecommendation v62 ~3501);
+                              // without clearing it here, the battery stays in the persisted
+                              // design and the permit/SLD/BOM still render it (phantom 15 kWh)
+                              // even though the toggle reads OFF. Clearing keeps engineering and
+                              // the planset in agreement.
+                              if (!on) updateConfig({ batteryId: '', batteryCount: 0, batteryKwh: 0, batteryBrand: '', batteryModel: '' });
+                            }}
                             className="sr-only peer" data-testid="battery-enabled-toggle" />
                           <div className="w-11 h-6 bg-slate-700 rounded-full peer peer-checked:bg-emerald-500 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5"></div>
                         </label>
@@ -9248,7 +9322,19 @@ function EngineeringPageInner() {
                               <label className="eng-label">Battery Model</label>
                               <select value={config.batteryId} onChange={e => {
                                 const bat = getBatteryById(e.target.value);
-                                updateConfig({ batteryId: e.target.value, batteryBrand: bat?.manufacturer ?? '', batteryModel: bat?.model ?? '', batteryKwh: bat?.usableCapacityKwh ?? 0 });
+                                const _picked = !!e.target.value;
+                                updateConfig({
+                                  batteryId: e.target.value,
+                                  batteryBrand: bat?.manufacturer ?? '',
+                                  batteryModel: bat?.model ?? '',
+                                  batteryKwh: bat?.usableCapacityKwh ?? 0,
+                                  // Seed a unit count so the battery is "user-owned" and the sizing
+                                  // apply path preserves it instead of reverting to the engine's
+                                  // default of 1. Picking "None" clears the count. (Fixes the
+                                  // "battery units snaps back to 1" bug — the preserve guard in
+                                  // applySizingRecommendation requires a non-zero count.)
+                                  batteryCount: _picked ? (config.batteryCount && config.batteryCount > 0 ? config.batteryCount : 1) : 0,
+                                });
                               }} className="eng-select">
                                 <option value="">None</option>
                                 {BATTERIES.map(b => (

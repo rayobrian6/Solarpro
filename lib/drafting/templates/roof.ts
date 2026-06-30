@@ -66,8 +66,8 @@ export function drawRoofPlan(
   const pitchStr    = pitchNum + ':12';
   const rafterSp    = project.rafterSpacing   || 24;
   const attachSp    = project.attachmentSpacing || 48;
-  const setbackIn   = project.ahjRoofSetbackIn  || 36;
-  const ridgeSetIn  = project.ahjRidgeSetbackIn || 36;
+  const setbackIn   = project.ahjRoofSetbackIn  || 18;  // IFC 605.11 access pathway (was hardcoded 36")
+  const ridgeSetIn  = project.ahjRidgeSetbackIn || 18;
   const setbackFt   = setbackIn / 12;
   const ridgeSetFt  = ridgeSetIn / 12;
 
@@ -120,100 +120,98 @@ export function drawRoofPlan(
   const latSpan = maxLat - minLat || 0.001;
   const lngSpan = maxLng - minLng || 0.001;
 
-  const margin  = 40;
+  // Margin leaves room for the dimension lines + callout row outside the roof.
+  const margin  = 52;
   const scaleX  = (dz.width  - 2 * margin) / lngSpan;
   const scaleY  = (dz.height - 2 * margin) / latSpan;
-  const scale   = Math.min(scaleX, scaleY) * 1.35;
+  // Fit-to-frame (was *1.35, which overzoomed and clipped the top hip + the
+  // setback dimension off the page for frame-filling roofs — caught via harness).
+  const scale   = Math.min(scaleX, scaleY);
 
-  const toX = (lng: number) => dz.x  + margin + (lng - minLng) * scale;
-  const toY = (lat: number) => dz.y  + (dz.height - margin) - (lat - minLat) * scale;
+  // Center the roof in the draw zone (was left/bottom-justified, leaving dead
+  // space on the side when fit-to-frame is limited by the other dimension).
+  const roofWpx = lngSpan * scale;
+  const roofHpx = latSpan * scale;
+  const offX = Math.max(0, (dz.width  - 2 * margin - roofWpx) / 2);
+  const offY = Math.max(0, (dz.height - 2 * margin - roofHpx) / 2);
+  const toX = (lng: number) => dz.x  + margin + offX + (lng - minLng) * scale;
+  const toY = (lat: number) => dz.y  + (dz.height - margin) - offY - (lat - minLat) * scale;
 
   // ── Draw roof planes ──
+  // Plane labels are collected here and rendered AFTER the panels so the modules
+  // never paint over them (the old "ANE 2 / E FAC" clipping).
+  const planeLabels: Array<{ cx: number; cy: number; ri: number; pitch: any; azimuth: any }> = [];
   validPlanes.forEach((rp: any, ri: number) => {
     const pts = rp.vertices!.map(
       (v: any) => toX(v.lng).toFixed(1) + ',' + toY(v.lat).toFixed(1)
     ).join(' ');
 
-    // Roof plane fill — alternating tile hatch for multi-plane legibility
-    const roofFill = ri % 2 === 0 ? '#ddd8cc' : '#d0cfc8';
+    // Roof plane fill — clean light cool-gray (was a busy beige + double hatch).
+    const roofFill = ri % 2 === 0 ? '#eceef1' : '#e3e6ea';
     els.push(`<polygon points="${pts}" fill="${roofFill}" stroke="none"/>`);
-    // Apply asphalt shingle tile hatch overlay
+    // Subtle shingle texture only — dropped to a whisper (was opaque 0.92) and the
+    // second diagonal wood hatch removed entirely, which was the main "busy" look.
     const tileClipId = `rtc${ri}`;
     els.push(`<defs><clipPath id="${tileClipId}"><polygon points="${pts}"/></clipPath></defs>`);
-    els.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="url(#hatch-roof-tile)" opacity="0.92" clip-path="url(#${tileClipId})"/>`);
+    els.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="url(#hatch-roof-tile)" opacity="0.22" clip-path="url(#${tileClipId})"/>`);
 
-    // Diagonal roof-surface hatch (architectural convention)
-    const clipId = `rcp${ri}`;
-    els.push(`<defs><clipPath id="${clipId}"><polygon points="${pts}"/></clipPath></defs>`);
-    els.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="url(#hatch-wood)" opacity="0.18" clip-path="url(#${clipId})"/>`);
-
-    // Heavy structural outline — 2.5px solid per architectural conventions
-    els.push(`<polygon points="${pts}" fill="none" stroke="#333" stroke-width="2.5" stroke-linejoin="miter"/>`);
+    // Clean structural outline
+    els.push(`<polygon points="${pts}" fill="none" stroke="#2b2f36" stroke-width="2" stroke-linejoin="miter"/>`);
 
     // Fire setback inset (dashed red outline)
     els.push(`<polygon points="${pts}" fill="none" class="line-setbk"/>`);
 
-    // Plane label badge
+    // Plane label — collected, rendered after panels (see planeLabels render below)
     const cx = rp.vertices!.reduce((s: number, v: any) => s + toX(v.lng), 0) / rp.vertices!.length;
     const cy = rp.vertices!.reduce((s: number, v: any) => s + toY(v.lat), 0) / rp.vertices!.length;
-
-    // White background pill for legibility
-    els.push(`<rect x="${(cx - 28).toFixed(1)}" y="${(cy - 20).toFixed(1)}" width="56" height="32" rx="3" fill="rgba(255,255,255,0.80)" stroke="rgba(100,100,100,0.4)" stroke-width="0.6"/>`);
-    els.push(drawText(cx, cy - 8, 'PLANE ' + (ri + 1), {
-      anchor: 'middle', fontSize: 7.5, fill: '#222', fontWeight: 'bold',
-    }));
-    if (rp.pitch !== undefined) {
-      const rise12 = typeof rp.pitch === 'number'
-        ? Math.round(Math.tan(rp.pitch * Math.PI / 180) * 12)
-        : rp.pitch;
-      els.push(drawText(cx, cy + 2, rise12 + ':12 PITCH', {
-        anchor: 'middle', fontSize: 7, fill: '#444',
-      }));
-    }
-    if (rp.azimuth !== undefined) {
-      els.push(drawText(cx, cy + 12, compassDir(rp.azimuth) + ' FACING', {
-        anchor: 'middle', fontSize: 6.5, fill: '#666',
-      }));
-    }
+    planeLabels.push({ cx, cy, ri, pitch: rp.pitch, azimuth: rp.azimuth });
   });
 
   // ── Draw panels (from CAD fake-degree positions) ──
-  const panLenPx = Math.max((panelLenIn / 12) * scale * 0.8, 6);
-  const panWidPx = Math.max((panelWidIn / 12) * scale * 0.8, 4);
+  // Render modules at near-true footprint (was 0.8 → a sparse, scattered array).
+  // 0.97 leaves only a hairline gap so adjacent panels read as a tight, real array.
+  const panLenPx = Math.max((panelLenIn / 12) * scale * 0.97, 6);
+  const panWidPx = Math.max((panelWidIn / 12) * scale * 0.97, 4);
 
+  // Flat, crisp PV modules — uniform fill + thin frame (no gradient/reflection/
+  // busbar clip-art, which muddied to a blue smear at plan scale).
   validPanels.forEach((p: any) => {
     const px = toX(p.lng), py = toY(p.lat);
     const isLandscape = (p.orientation || 'landscape') === 'landscape';
     const pw = isLandscape ? panLenPx : panWidPx;
     const ph = isLandscape ? panWidPx : panLenPx;
+    const x0 = px - pw / 2, y0 = py - ph / 2;
 
-    // Panel body — dark blue PV module with glass gradient
-    els.push(`<rect x="${(px - pw/2).toFixed(1)}" y="${(py - ph/2).toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="url(#panel-glass)" stroke="#0a1e4a" stroke-width="1.0" opacity="0.92" rx="0.5"/>`);
+    // Module body — single flat navy fill + thin dark frame
+    els.push(`<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="#1b3f74" stroke="#0a1e4a" stroke-width="0.7" rx="0.4"/>`);
+    // Thin aluminum frame inset
+    els.push(`<rect x="${(x0 + 0.7).toFixed(1)}" y="${(y0 + 0.7).toFixed(1)}" width="${Math.max(pw - 1.4, 0).toFixed(1)}" height="${Math.max(ph - 1.4, 0).toFixed(1)}" fill="none" stroke="rgba(190,210,235,0.5)" stroke-width="0.35"/>`);
+    // One subtle mid seam for the half-cell read (only when large enough)
+    if (ph > 12) {
+      els.push(`<line x1="${(x0 + 1).toFixed(1)}" y1="${py.toFixed(1)}" x2="${(x0 + pw - 1).toFixed(1)}" y2="${py.toFixed(1)}" stroke="rgba(150,180,220,0.4)" stroke-width="0.4"/>`);
+    }
+  });
 
-    // Aluminum frame border (light silver)
-    els.push(`<rect x="${(px - pw/2 + 0.8).toFixed(1)}" y="${(py - ph/2 + 0.8).toFixed(1)}" width="${(pw - 1.6).toFixed(1)}" height="${(ph - 1.6).toFixed(1)}" fill="none" stroke="rgba(180,200,220,0.7)" stroke-width="0.6"/>`);
-
-    // Glass reflection highlight (upper-left diagonal)
-    if (pw > 12 && ph > 8) {
-      const rw2 = pw * 0.45, rh2 = ph * 0.45;
-      els.push(`<rect x="${(px - pw/2 + 1.5).toFixed(1)}" y="${(py - ph/2 + 1.5).toFixed(1)}" width="${rw2.toFixed(1)}" height="${rh2.toFixed(1)}" fill="url(#panel-reflect)" rx="0.5"/>`);
+  // ── Plane labels (rendered last, on top of panels — opaque pill, sized to text) ──
+  planeLabels.forEach(L => {
+    const lines: string[] = ['PLANE ' + (L.ri + 1)];
+    if (L.pitch !== undefined) {
+      const rise12 = typeof L.pitch === 'number'
+        ? Math.round(Math.tan(L.pitch * Math.PI / 180) * 12)
+        : L.pitch;
+      lines.push(rise12 + ':12 PITCH');
     }
-    // Cell grid — horizontal busbars (if panels large enough)
-    if (ph > 10) {
-      const nRows = 6;
-      const cellH = (ph - 1.6) / nRows;
-      for (let c = 1; c < nRows; c++) {
-        els.push(`<line x1="${(px - pw/2 + 1).toFixed(1)}" y1="${(py - ph/2 + 0.8 + c * cellH).toFixed(1)}" x2="${(px + pw/2 - 1).toFixed(1)}" y2="${(py - ph/2 + 0.8 + c * cellH).toFixed(1)}" stroke="rgba(147,197,253,0.45)" stroke-width="0.5"/>`);
-      }
-    }
-    // Cell grid — vertical (3 columns)
-    if (pw > 8) {
-      const nCols = 3;
-      const cellW = (pw - 1.6) / nCols;
-      for (let c = 1; c < nCols; c++) {
-        els.push(`<line x1="${(px - pw/2 + 0.8 + c * cellW).toFixed(1)}" y1="${(py - ph/2 + 1).toFixed(1)}" x2="${(px - pw/2 + 0.8 + c * cellW).toFixed(1)}" y2="${(py + ph/2 - 1).toFixed(1)}" stroke="rgba(147,197,253,0.35)" stroke-width="0.4"/>`);
-      }
-    }
+    if (L.azimuth !== undefined) lines.push(compassDir(L.azimuth) + ' FACING');
+    const bw = 52, bh = 6 + lines.length * 8.5;
+    els.push(`<rect x="${(L.cx - bw / 2).toFixed(1)}" y="${(L.cy - bh / 2).toFixed(1)}" width="${bw}" height="${bh.toFixed(1)}" rx="2" fill="rgba(255,255,255,0.93)" stroke="#555" stroke-width="0.6"/>`);
+    lines.forEach((t, i) => {
+      els.push(drawText(L.cx, L.cy - bh / 2 + 7.5 + i * 8.5, t, {
+        anchor: 'middle',
+        fontSize: i === 0 ? 7 : 6.3,
+        fill: i === 0 ? '#1a1a1a' : '#555',
+        fontWeight: i === 0 ? 'bold' : 'normal',
+      }));
+    });
   });
 
   // ── DIMENSION HIERARCHY ──
@@ -259,23 +257,27 @@ export function drawRoofPlan(
 
   // ── Callout bubbles ──
   const cbY    = zones.dims.top + 12;
-  const cbBase = zones.dims.left + 18;
-  const callouts = [
-    { bx: cbBase,       by: cbY },
-    { bx: cbBase + 32,  by: cbY },
-    { bx: cbBase + 64,  by: cbY },
-    { bx: cbBase + 96,  by: cbY },
-    { bx: cbBase + 128, by: cbY },
-  ];
-
-  // Find good attachment point targets (spread across array)
-  const panTargets = validPanels.slice(0, 5);
-  callouts.forEach((c, ci) => {
-    const target = panTargets[ci] ?? panTargets[0];
-    if (target) {
-      els.push(drawCalloutWithLeader(c.bx, c.by, toX(target.lng), toY(target.lat), ci + 1, 10));
+  // Callout bubbles spread across the TOP of the roof, each pointing straight down
+  // to the nearest panel below it — short, near-vertical leaders instead of long
+  // diagonals fanning across the whole array (the old crossing "spider-web").
+  // Clamp the row just below the title bar so bubbles never render off-screen when
+  // the roof reaches the top edge (verified via the render harness).
+  const cbN      = 5;
+  const cbSpanX  = roofMaxX - roofMinX;
+  const cbRowY   = Math.max(roofMinY - 16, zones.dims.top + 10);
+  for (let i = 0; i < cbN; i++) {
+    const frac = (i + 0.5) / cbN;
+    const bx   = roofMinX + cbSpanX * frac;
+    // nearest panel to this bubble's x
+    let best: any = null, bestD = Infinity;
+    for (const p of validPanels) {
+      const d = Math.abs(toX(p.lng) - bx);
+      if (d < bestD) { bestD = d; best = p; }
     }
-  });
+    if (best) {
+      els.push(drawCalloutWithLeader(bx, cbRowY, toX(best.lng), toY(best.lat), i + 1, 8));
+    }
+  }
 
   // ── System summary line ──
   els.push(drawText(zones.dims.left, H - 8,
@@ -301,7 +303,12 @@ export function drawRoofStructural(
 ): string {
   const { project, engineering } = input;
 
-  const pitchNum   = project.roofPitch          || 5;
+  // project.roofPitch is in DEGREES (e.g. 20). Convert to rise-per-12 for the
+  // slope label + section geometry — was rendering "20:12" for a 4:12 roof.
+  const _rawPitch  = project.roofPitch          || 5;
+  const pitchNum   = (_rawPitch > 12 && _rawPitch <= 90)
+    ? Math.round(Math.tan(_rawPitch * Math.PI / 180) * 12)
+    : _rawPitch;
   const pitchStr   = pitchNum + ':12';
   const rafterSz   = project.rafterSize         || '2x6';
   const rafterSp   = project.rafterSpacing      || 24;

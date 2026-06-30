@@ -84,7 +84,10 @@ describe('v47.423 — getBrandMinMpptCurrent()', () => {
   it('is brand-agnostic — every active brand resolves to a finite cap or null (no crashes)', () => {
     for (const brand of BRAND_PROFILES) {
       const cap = getBrandMinMpptCurrent(brand);
-      // Either a finite positive number or null is acceptable.
+      // Micro topology brands return null (models live in MICROINVERTERS,
+      // not STRING_INVERTERS) — this is expected and handled by the
+      // micro topology short-circuit in evaluatePanelBrandCompatibility().
+      // String/optimizer/hybrid brands should resolve to a finite positive cap.
       if (cap !== null) {
         expect(cap).toBeGreaterThan(0);
         expect(Number.isFinite(cap)).toBe(true);
@@ -205,6 +208,70 @@ describe('v47.423 — unknown status (fail-open)', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Micro topology short-circuit — Enphase, APsystems, Hoymiles
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('v47.423 — micro topology short-circuit', () => {
+  function enphase() {
+    const b = getBrandProfile('enphase');
+    if (!b) throw new Error('fixture missing: enphase brand profile');
+    return b;
+  }
+  function apsystems() {
+    const b = getBrandProfile('apsystems');
+    if (!b) throw new Error('fixture missing: apsystems brand profile');
+    return b;
+  }
+  function hoymiles() {
+    const b = getBrandProfile('hoymiles');
+    if (!b) throw new Error('fixture missing: hoymiles brand profile');
+    return b;
+  }
+
+  it('Enphase IQ8 with any panel returns compatible — never unknown', () => {
+    const r = evaluatePanelBrandCompatibility(qcells400(), enphase());
+    expect(r.status).toBe('compatible');
+    expect(r.status).not.toBe('unknown');
+    expect(r.status).not.toBe('incompatible');
+  });
+
+  it('Enphase reason mentions microinverters are not subject to MPPT gating', () => {
+    const r = evaluatePanelBrandCompatibility(qcells400(), enphase());
+    expect(r.reason).toContain('microinverter');
+    expect(r.reason).toContain('does not apply');
+  });
+
+  it('Enphase result has effectiveMaxInputCurrentPerMppt = null (cap not applicable)', () => {
+    const r = evaluatePanelBrandCompatibility(qcells400(), enphase());
+    expect(r.brand.effectiveMaxInputCurrentPerMppt).toBeNull();
+  });
+
+  it('Enphase result has no auto-swap suggestions', () => {
+    const r = evaluatePanelBrandCompatibility(qcells400(), enphase());
+    expect(r.suggestions).toEqual([]);
+  });
+
+  it('APsystems micro brand also returns compatible (not unknown)', () => {
+    const r = evaluatePanelBrandCompatibility(qcells400(), apsystems());
+    expect(r.status).toBe('compatible');
+    expect(r.status).not.toBe('unknown');
+  });
+
+  it('Hoymiles micro brand also returns compatible (not unknown)', () => {
+    const r = evaluatePanelBrandCompatibility(qcells400(), hoymiles());
+    expect(r.status).toBe('compatible');
+    expect(r.status).not.toBe('unknown');
+  });
+
+  it('all three micro brands with Silfab SIL-430 (high Isc) return compatible', () => {
+    for (const brand of [enphase(), apsystems(), hoymiles()]) {
+      const r = evaluatePanelBrandCompatibility(silfab430(), brand);
+      expect(r.status).toBe('compatible');
+      expect(r.status).not.toBe('unknown');
+    }
+  });
+});
+// ═══════════════════════════════════════════════════════════════════════════
 // Payload shape
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -275,6 +342,11 @@ describe('v47.423 — brand-agnostic sweep', () => {
         expect([
           'compatible', 'marginal', 'incompatible', 'unknown',
         ]).toContain(r.status);
+        // Micro topology brands MUST resolve to 'compatible', never 'unknown'.
+        // Per-MPPT current gating does not apply to per-panel microinverters.
+        if (brand.topology === 'micro') {
+          expect(r.status).toBe('compatible');
+        }
         // incompatible results MUST produce either suggestions or an explanatory reason
         if (r.status === 'incompatible') {
           expect(r.reason.length).toBeGreaterThan(0);

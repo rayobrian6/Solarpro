@@ -13,7 +13,6 @@ import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, pv2Title, compassDir } from '../utils/helpers';
 import { composeDrawPage, getPrimaryView, getSecondaryView, drawDimension, escapeH } from '../utils/drawing';
 import { isFence, isGround, isRoof, displaySystemType } from '@/lib/system';
-import { drawingEngine } from '@/lib/drafting';
 
 export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
   // ── CAD validation ────────────────────────────────────────────────────────
@@ -113,23 +112,11 @@ export function pageFencePlan(input: PermitInput, cad: CADModel, pageNum: number
 // Detailed schematic showing array groupings, string assignments, row/col grid
 
 
-function buildProfessionalCadArrayVisual(
-  input: PermitInput,
-  cad: CADModel,
-  fallbackSvg: string,
-): string {
-  try {
-    const cadSvg = drawingEngine.getArrayPlanFromCAD(cad, input, undefined);
-    if (!cadSvg || cadSvg.length < 500) return fallbackSvg;
-    return cadSvg.replace(
-      /<svg([^>]*)>/,
-      '<svg$1 class="professional-cad-array-visual" style="display:block;width:100%;height:100%;max-width:100%;max-height:100%;" preserveAspectRatio="xMidYMid meet">',
-    );
-  } catch (error) {
-    console.warn('[pageArrayGeometry] Professional CAD visual fallback:', error instanceof Error ? error.message : String(error));
-    return fallbackSvg;
-  }
-}
+// PV-2B must show the STRING LAYOUT (a string-colored grouping schematic) -- a
+// DIFFERENT drawing from PV-2 s to-scale roof plan. A prior "professional CAD"
+// override here called drawingEngine.getArrayPlanFromCAD, the very renderer PV-2
+// uses via getPrimaryView(roof_plan), so PV-2 and PV-2B came out as literal
+// duplicates. Removed: PV-2B now renders its own schematicGridSvg below.
 
 export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { project, system } = input;
@@ -142,7 +129,20 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
   }> || [];
 
   const totalPanels = cadTotalPanels || system.totalPanels || panels.length || 0;
-  const totalStrings = system.inverters?.reduce((sum, inv) => sum + (inv.strings?.length || 0), 0) || 1;
+  // Topology-aware circuit count: microinverters are AC BRANCH CIRCUITS (NEC 690.8
+  // ~16 micros/branch), NOT one DC string. A 52-micro system is ~4 branches, not
+  // "1 string of 52" (which is the default-fallback signature of an empty config).
+  const _isMicro = (system.inverters?.[0]?.type === 'micro')
+    || String((system as any).topology || '').toLowerCase().includes('micro');
+  const totalStrings = _isMicro
+    ? (Math.ceil(totalPanels / 16) || 1)
+    : (system.inverters?.reduce((sum, inv) => sum + (inv.strings?.length || 0), 0) || 1);
+  const circuitWord   = _isMicro ? 'BRANCH' : 'STRING';
+  const circuitWordPl = _isMicro ? 'BRANCHES' : 'STRINGS';  // proper plural (not "BRANCHS")
+  const circuitLabel  = totalStrings !== 1 ? circuitWordPl : circuitWord;
+  const circuitWordLc = _isMicro ? 'branch circuit' : 'string';
+  // Per-module label prefix: 'B' for AC branch circuits (micro), 'S' for DC strings.
+  const cPrefix = _isMicro ? 'B' : 'S';
 
   // Group panels by row for grid visualization
   const rows: Map<number, typeof panels> = new Map();
@@ -205,7 +205,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
         svgCells += `<rect x="${x}" y="${y}" width="${cellW}" height="${cellH}" fill="${color}" fill-opacity="0.18" stroke="${color}" stroke-width="1.2" rx="2"/>`;
         svgCells += `<text x="${x + cellW/2}" y="${y + cellH/2 - 4}" text-anchor="middle" font-size="6" fill="#000" font-weight="600">R${rn+1}</text>`;
         svgCells += `<text x="${x + cellW/2}" y="${y + cellH/2 + 5}" text-anchor="middle" font-size="5.5" fill="#555">C${(p.col??ci)+1}</text>`;
-        svgCells += `<text x="${x + cellW/2}" y="${y + cellH/2 + 14}" text-anchor="middle" font-size="5" fill="${color}" font-weight="700">S${si+1}</text>`;
+        svgCells += `<text x="${x + cellW/2}" y="${y + cellH/2 + 14}" text-anchor="middle" font-size="5" fill="${color}" font-weight="700">${cPrefix}${si+1}</text>`;
       });
     });
   } else if (panels.length === 0) {
@@ -219,7 +219,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
           const y = 30 + (ii * (invs[0].strings?.length || 1) + si) * (cellH + gapY);
           const color = stringColors[si % stringColors.length];
           svgCells += `<rect x="${x}" y="${y}" width="${cellW}" height="${cellH}" fill="${color}" fill-opacity="0.18" stroke="${color}" stroke-width="1.2" rx="2"/>`;
-          svgCells += `<text x="${x + cellW/2}" y="${y + cellH/2 + 4}" text-anchor="middle" font-size="5.5" fill="${color}" font-weight="700">S${si+1}</text>`;
+          svgCells += `<text x="${x + cellW/2}" y="${y + cellH/2 + 4}" text-anchor="middle" font-size="5.5" fill="${color}" font-weight="700">${cPrefix}${si+1}</text>`;
         }
         if (ppc > 20) {
           const x = 40 + 20 * (cellW + gapX);
@@ -230,18 +230,33 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     });
   }
 
-  // String legend
-  const legendItems = system.inverters?.flatMap((inv, ii) =>
-    (inv.strings || []).map((str, si) => ({
-      si: ii * (system.inverters[0]?.strings?.length || 1) + si,
-      label: str.label || `String ${si+1}`,
-      count: str.panelCount,
-      model: str.panelModel || '—',
-      watts: str.panelWatts || 400,
-      voc: str.panelVoc || 41.6,
-      isc: str.panelIsc || 12.26,
-    }))
-  ) || [];
+  // Circuit legend. For microinverters the system has AC branch circuits (not DC
+  // strings); inverters[].strings is the phantom "1 string of N" fallback, so derive
+  // the legend from the same per-panel branch grouping the grid uses (panelStringMap)
+  // — otherwise the legend ("String 1, Qty 52") contradicts the B1..Bn grid cells.
+  const _legendWatts = panels[0]?.wattage
+    || system.inverters?.[0]?.strings?.[0]?.panelWatts || 400;
+  const legendItems = _isMicro
+    ? Array.from({ length: totalStrings }, (_, bi) => ({
+        si: bi,
+        label: `Branch ${bi + 1}`,
+        count: sortedPanels.filter(p => panelStringMap.get(p.id) === bi).length,
+        model: '—',
+        watts: _legendWatts,
+        voc: 0,
+        isc: 0,
+      }))
+    : (system.inverters?.flatMap((inv, ii) =>
+        (inv.strings || []).map((str, si) => ({
+          si: ii * (system.inverters[0]?.strings?.length || 1) + si,
+          label: str.label || `String ${si+1}`,
+          count: str.panelCount,
+          model: str.panelModel || '—',
+          watts: str.panelWatts || 400,
+          voc: str.panelVoc || 41.6,
+          isc: str.panelIsc || 12.26,
+        }))
+      ) || []);
 
   // ── PIPELINE v47.343: Build array grid SVG scaled to fill draw-zone ──────
   const AG_VB_W = 1200;
@@ -265,7 +280,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
         agCells += `<rect x="${x}" y="${y}" width="${agCellW}" height="${agCellH}" fill="${color}" fill-opacity="0.18" stroke="${color}" stroke-width="1.5" rx="3"/>`;
         agCells += `<text x="${x + agCellW/2}" y="${y + agCellH/2 - 6}" text-anchor="middle" font-size="${Math.max(7, agCellH * 0.13)}" fill="#000" font-weight="700">R${rn+1}</text>`;
         agCells += `<text x="${x + agCellW/2}" y="${y + agCellH/2 + 6}" text-anchor="middle" font-size="${Math.max(6, agCellH * 0.11)}" fill="#555">C${(p.col??ci)+1}</text>`;
-        agCells += `<text x="${x + agCellW/2}" y="${y + agCellH/2 + 19}" text-anchor="middle" font-size="${Math.max(6, agCellH * 0.11)}" fill="${color}" font-weight="700">S${si+1}</text>`;
+        agCells += `<text x="${x + agCellW/2}" y="${y + agCellH/2 + 19}" text-anchor="middle" font-size="${Math.max(6, agCellH * 0.11)}" fill="${color}" font-weight="700">${cPrefix}${si+1}</text>`;
       });
       const rowLabelY = 42 + ri * (agCellH + agGapY) + agCellH/2 + 4;
       agCells += `<text x="74" y="${rowLabelY}" text-anchor="end" font-size="${Math.max(7, agCellH * 0.12)}" fill="#333" font-weight="600">R${rn+1}</text>`;
@@ -289,18 +304,18 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
         for (let pi = 0; pi < ppc; pi++) {
           const x = 80 + pi * (schCellW + 3);
           agCells += `<rect x="${x}" y="${y}" width="${schCellW}" height="${schCellH}" fill="${color}" fill-opacity="0.18" stroke="${color}" stroke-width="1.5" rx="3"/>`;
-          agCells += `<text x="${x + schCellW/2}" y="${y + schCellH/2 + 5}" text-anchor="middle" font-size="${Math.max(6, schCellH * 0.11)}" fill="${color}" font-weight="700">S${si+1}</text>`;
+          agCells += `<text x="${x + schCellW/2}" y="${y + schCellH/2 + 5}" text-anchor="middle" font-size="${Math.max(6, schCellH * 0.11)}" fill="${color}" font-weight="700">${cPrefix}${si+1}</text>`;
         }
         if (str.panelCount > 20) {
           agCells += `<text x="${80 + ppc * (schCellW + 3) + 4}" y="${y + schCellH/2 + 5}" font-size="9" fill="#555">+${str.panelCount - 20} more</text>`;
         }
-        agCells += `<text x="74" y="${y + schCellH/2 + 4}" text-anchor="end" font-size="9" fill="#333" font-weight="600">Str ${si+1}</text>`;
+        agCells += `<text x="74" y="${y + schCellH/2 + 4}" text-anchor="end" font-size="9" fill="#333" font-weight="600">${_isMicro ? 'Br' : 'Str'} ${si+1}</text>`;
         rowIdx++;
       });
     });
   } else {
     agCells = `<text x="${AG_VB_W/2}" y="${AG_VB_H/2 - 20}" text-anchor="middle" font-size="18" fill="#333" font-weight="700">${totalPanels} MODULES</text>`;
-    agCells += `<text x="${AG_VB_W/2}" y="${AG_VB_H/2 + 10}" text-anchor="middle" font-size="12" fill="#555">${totalStrings} strings — see string schedule</text>`;
+    agCells += `<text x="${AG_VB_W/2}" y="${AG_VB_H/2 + 10}" text-anchor="middle" font-size="12" fill="#555">${totalStrings} ${circuitWordLc}${totalStrings !== 1 ? 's' : ''} — see schedule</text>`;
   }
 
   const schematicGridSvg = `<svg viewBox="0 0 ${AG_VB_W} ${AG_VB_H}" width="100%" height="100%"
@@ -309,7 +324,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     xmlns="http://www.w3.org/2000/svg">
     <rect width="${AG_VB_W}" height="${AG_VB_H}" fill="#fafbfc"/>
     <rect width="${AG_VB_W}" height="26" fill="#000"/>
-    <text x="10" y="17" font-size="11" fill="#fff" font-weight="700" font-family="Arial,sans-serif">ARRAY GRID — ${totalPanels} MODULES / ${totalStrings} STRING${totalStrings !== 1 ? 'S' : ''} — ${displaySystemType(cadSystemType)}</text>
+    <text x="10" y="17" font-size="11" fill="#fff" font-weight="700" font-family="Arial,sans-serif">ARRAY GRID — ${totalPanels} MODULES / ${totalStrings} ${circuitLabel} — ${displaySystemType(cadSystemType)}</text>
     <text x="${AG_VB_W - 20}" y="18" text-anchor="end" font-size="12" fill="#fff" font-weight="700" font-family="Arial,sans-serif">N↑</text>
     <g font-family="Arial,sans-serif">
       ${agCells || `<text x="${AG_VB_W/2}" y="${AG_VB_H/2}" text-anchor="middle" font-size="16" fill="#999">No panel position data — schematic only</text>`}
@@ -318,11 +333,16 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     <text x="80" y="${AG_VB_H - 5}" font-size="8" fill="#777" font-family="Arial,sans-serif">SCHEMATIC (NOT TO SCALE — NTS)</text>
   </svg>`;
 
-  const agDrawSvg = buildProfessionalCadArrayVisual(input, cad, schematicGridSvg);
+  // PV-2B renders the string-layout schematic (string-colored grouping grid).
+  // It must NOT reuse PV-2's roof-plan renderer (getArrayPlanFromCAD) or the two
+  // sheets become identical — see the PV-2B note above pageArrayGeometry.
+  const agDrawSvg = schematicGridSvg;
 
   // Callout notes for data zone
   const agCalloutRows = [
-    { n: 1, label: 'NEC 690.8', sub: `String Isc \xd7 1.25 \xd7 1.25 = conductor sizing basis` },
+    { n: 1, label: 'NEC 690.8', sub: _isMicro
+        ? `AC branch \xd7 1.25 continuous = conductor sizing basis`
+        : `String Isc \xd7 1.25 \xd7 1.25 = conductor sizing basis` },
     { n: 2, label: 'Tilt / Azimuth', sub: `${avgTilt}\xb0 tilt / ${avgAz}\xb0 (${compassDir})` },
     { n: 3, label: isRoof(cadSystemType) ? 'IFC \xa7605.11 Setbacks' : isFence(cadSystemType) ? 'NEC 250.169 Bonding' : 'NEC 690.51 Labeling',
        sub: isRoof(cadSystemType) ? 'Min 18" eave/ridge setback required' : isFence(cadSystemType) ? 'All metalwork bonded to EGC \u2014 min #6 AWG Cu' : 'Equipment labeling at all access points' },
@@ -376,7 +396,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
     <div style="display:flex;flex-direction:row;gap:0;flex:1 1 0%;min-height:0;overflow:hidden;margin-top:var(--md);">
       <!-- Draw zone 78%: full-height array grid SVG -->
       <div class="draw-zone" style="flex:0 0 78%;max-width:78%;min-height:0;">
-        <div class="draw-zone-hdr">PROFESSIONAL CAD ARRAY DIAGRAM \u2014 ${totalPanels} MODULES / ${totalStrings} STRING${totalStrings !== 1 ? 'S' : ''}</div>
+        <div class="draw-zone-hdr">PROFESSIONAL CAD ARRAY DIAGRAM \u2014 ${totalPanels} MODULES / ${totalStrings} ${circuitLabel}</div>
         <div class="draw-zone-body" style="flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:10px;background:#fff;min-height:0;">
           ${agDrawSvg}
         </div>
@@ -387,7 +407,7 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
           <div class="draw-zone-hdr">ARRAY PARAMETERS</div>
           <table class="comp-data-table">
             <tr><td>Total Modules</td><td>${totalPanels}</td></tr>
-            <tr><td>Strings</td><td>${totalStrings}</td></tr>
+            <tr><td>${_isMicro ? 'AC Branches' : 'Strings'}</td><td>${totalStrings}</td></tr>
             <tr><td>Tilt</td><td>${avgTilt}\xb0</td></tr>
             <tr><td>Azimuth</td><td>${avgAz}\xb0 (${compassDir})</td></tr>
             <tr><td>Rows</td><td>${rowNums.length > 0 ? rowNums.length : Math.ceil(Math.sqrt(totalPanels))}</td></tr>
@@ -397,11 +417,11 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
           </table>
         </div>
         <div style="flex-shrink:0;border-bottom:var(--border);">
-          <div class="draw-zone-hdr">STRING LEGEND</div>
+          <div class="draw-zone-hdr">${circuitWord} LEGEND</div>
           <table style="width:100%;border-collapse:collapse;">
             <thead><tr style="background:#000;color:#fff;">
               <th style="padding:1px 2px;width:12px;font-size:6px;"></th>
-              <th style="padding:1px 2px;text-align:left;font-size:6px;">String</th>
+              <th style="padding:1px 2px;text-align:left;font-size:6px;">${_isMicro ? 'Branch' : 'String'}</th>
               <th style="padding:1px 2px;font-size:6px;">Qty</th>
               <th style="padding:1px 2px;font-size:6px;">Wp</th>
             </tr></thead>

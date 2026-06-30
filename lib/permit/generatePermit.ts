@@ -326,8 +326,8 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
       };
       const structResult = runStructuralCalcV4(structInput);
       const ra = structResult.rafterAnalysis;
-      const wa = structResult.windAnalysis;
-      const sa = structResult.snowAnalysis;
+      const wa = structResult.wind;
+      const sa = structResult.snow;
       const ml = structResult.mountLayout;
       // Map V4 result → compliance.structural (same shape as frontend mapping in page.tsx)
       if (!input.compliance) input.compliance = { overallStatus: '' } as PermitInput['compliance'];
@@ -347,6 +347,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
         rafterSize:             ra.size,
         rafterSpacing:          ra.spacingIn,
         rafterSpan:             ra.spanFt,
+        framingType:            ra.framingType,
         bendingMoment:          ra.bendingMomentDemandFtLbs,
         allowableBendingMoment: ra.bendingMomentCapacityFtLbs,
         utilizationRatio:       ra.overallUtilization,
@@ -844,14 +845,14 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     --border-hvy: 2px solid #000;
     --border-med: 1.5px solid #000;
 
-    --f-xs:  6.2px;
-    --f-sm:  6.6px;
-    --f-md:  7px;
-    --f-lg:  8px;
-    --f-xl:  9px;
-    --f-2xl:10px;
-    --f-3xl:12px;
-    --f-4xl:16px;
+    --f-xs:  7px;
+    --f-sm:  7.4px;
+    --f-md:  7.9px;
+    --f-lg:  9px;
+    --f-xl:  10px;
+    --f-2xl:11.5px;
+    --f-3xl:13.5px;
+    --f-4xl:18px;
 
     --mono: 'Courier New', Courier, monospace;
     --sans: Arial, 'Helvetica Neue', sans-serif;
